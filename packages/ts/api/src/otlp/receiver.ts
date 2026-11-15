@@ -34,7 +34,7 @@ import {
   StoreError,
   Unauthorized,
 } from "@seshi/model";
-import { decodeExportRequest, encodeExportResponse, encodeStatus, ProtobufError } from "./protobuf";
+import { decodeExportRequest, encodeExportResponse, encodeStatus } from "./protobuf";
 
 /** The message a metadata-only batch is rejected with (F4.5). */
 export const METADATA_ONLY_MESSAGE =
@@ -189,7 +189,8 @@ export function otlpTraces(instance: Instance, deps: ReceiverDeps) {
       if (typeof http.status === "number" && typeof http.code === "string") {
         return failure(encoding, http.status, GRPC.INVALID_ARGUMENT, http.message ?? http.code);
       }
-      if (err instanceof ProtobufError || err instanceof SyntaxError || err instanceof Error) {
+      // A ProtobufError, a JSON SyntaxError, or a value that is not a request at all.
+      if (err instanceof Error) {
         return failure(
           encoding,
           400,

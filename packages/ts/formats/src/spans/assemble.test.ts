@@ -250,6 +250,16 @@ describe("assembleSpanParts", () => {
     expect(llm_calls.find((c) => c.id === "m2")?.ended_at).toBe(at(16));
   });
 
+  it("survives parent chains that loop", () => {
+    const { records, llm_calls } = assemble([
+      part("a", 0, 5, { parent_span_id: "b", input: [user("q")], output: [said("x", 5)] }),
+      part("b", 1, 4, { parent_span_id: "a", content: false, llm_call: { ...usage(1), id: "b" } }),
+      part("c", 2, 3, { parent_span_id: "c", content: false, llm_call: { ...usage(2), id: "c" } }),
+    ]);
+    expect(records.map((r) => r.role)).toEqual(["meta", "user", "assistant"]);
+    expect(llm_calls.map((c) => c.id)).toEqual(["b"]);
+  });
+
   it("makes LLM call ids unique across traces", () => {
     const { llm_calls, records } = assemble([
       part("same", 0, 1, {

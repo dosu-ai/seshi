@@ -60,7 +60,13 @@ export function newInput(
   history: readonly NormalizedRecord[],
   input: readonly NormalizedRecord[],
 ): NormalizedRecord[] {
-  const h = history.filter(compared).map(keyOf);
+  return freshInput(history.filter(compared).map(keyOf), input);
+}
+
+/** `newInput` over the history's keys (`keyOf` of its compared records, in order), which the
+ * assembler keeps as it goes so no record's key is computed twice. The usual input repeats the
+ * whole history, so the longest candidate is tried first and matches at once. */
+function freshInput(h: readonly string[], input: readonly NormalizedRecord[]): NormalizedRecord[] {
   const positions: number[] = [];
   input.forEach((record, i) => {
     if (compared(record)) positions.push(i);
@@ -81,6 +87,11 @@ export function newInput(
     }
   }
   return [...input];
+}
+
+/** A thread's history as keys of its compared records. */
+function remember(history: string[], records: readonly NormalizedRecord[]): void {
+  for (const record of records) if (compared(record)) history.push(keyOf(record));
 }
 
 /** The parts that count: one per span, one per response. */
@@ -127,6 +138,17 @@ export function assembleSpanParts(
   const byId = new Map(parts.map((p) => [`${p.trace_id}-${p.span_id}`, p]));
   const parentOf = (part: SpanPart) =>
     part.parent_span_id ? byId.get(`${part.trace_id}-${part.parent_span_id}`) : undefined;
+  /** A part's ancestors, nearest first. Spans come from senders, so a parent chain that loops
+   * stops where it would repeat. */
+  const ancestors = (part: SpanPart): SpanPart[] => {
+    const out: SpanPart[] = [];
+    const seen = new Set<SpanPart>([part]);
+    for (let p = parentOf(part); p && !seen.has(p); p = parentOf(p)) {
+      seen.add(p);
+      out.push(p);
+    }
+    return out;
+  };
 
   // Tool calls some message already holds: a tool span for one adds no records.
   const covered = new Set<string>();
@@ -143,19 +165,11 @@ export function assembleSpanParts(
   const calls = new Map<SpanPart, LlmCall>();
   for (const part of parts) {
     if (!part.llm_call) continue;
-    let above = parentOf(part);
-    let nested = false;
-    while (above) {
-      if (above.llm_call?.usage) {
-        nested = true;
-        break;
-      }
-      above = parentOf(above);
-    }
+    const nested = ancestors(part).some((above) => above.llm_call?.usage !== undefined);
     if (!nested) calls.set(part, part.llm_call);
   }
 
-  const histories = new Map<string, NormalizedRecord[]>();
+  const histories = new Map<string, string[]>();
   const systems = new Map<string, string>();
   const segments: Segment[] = [];
   let seq = 0;
@@ -179,15 +193,15 @@ export function assembleSpanParts(
           messages.push(record);
         }
       }
-      const fresh = newInput(history, messages);
-      history.push(...fresh);
+      const fresh = freshInput(history, messages);
+      remember(history, fresh);
       kept.push(...fresh);
       if (kept.length > 0)
         segments.push({ at: startOf(part), phase: 0, seq: seq++, records: kept });
     }
     if (part.output) {
       const records = part.output.map((r) => ({ ...r }));
-      history.push(...records);
+      remember(history, records);
       outputs.set(part, records);
       segments.push({ at: endOf(part), phase: 1, seq: seq++, records });
     }
@@ -303,12 +317,7 @@ export function assembleSpanParts(
 
   /** The nearest ancestor of `child` that has output: the turn a model request belongs to. */
   function ownerOf(child: SpanPart): SpanPart | undefined {
-    let p = parentOf(child);
-    while (p) {
-      if (outputs.has(p)) return p;
-      p = parentOf(p);
-    }
-    return undefined;
+    return ancestors(child).find((p) => outputs.has(p));
   }
 
   segments.sort((a, b) => compareNanos(a.at, b.at) || a.phase - b.phase || a.seq - b.seq);
