@@ -137,19 +137,23 @@ export interface UploadEnvelopeOptions {
   owner_basis: OwnerBasis;
   /** `upload` (the CLI) or `hook` (capture); `upload` by default. */
   source?: "upload" | "hook";
+  /** The source id the upload is filed under: `upload` (X6.4) by default. A service token
+   * uploads under its own source (`svc:<id>` → `<id>`), so that source's visibility, filter
+   * and health apply. */
+  source_id?: string;
   /** Identity the data asserts (X5.5). */
   claims?: Claims;
   now?: () => Date;
 }
 
 /** The envelope an upload stands for: what the HTTP route and local mode submit. Uploads use the
- * source id `upload` (X6.4). */
+ * source id `upload` (X6.4), or a service token's own source. */
 export function uploadEnvelope(upload: SessionUpload, options: UploadEnvelopeOptions): LogEnvelope {
   const offset = upload.offset ?? 0;
   const envelope: LogEnvelope = {
     schema: ENVELOPE_SCHEMA,
     source: options.source ?? "upload",
-    source_id: UPLOAD_SOURCE,
+    source_id: options.source_id ?? UPLOAD_SOURCE,
     format: upload.agent,
     session_key: upload.session_id,
     payload: { kind: "log", encoding: upload.format, text: upload.transcript, offset },

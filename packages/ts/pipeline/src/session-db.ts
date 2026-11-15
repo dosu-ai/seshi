@@ -100,7 +100,7 @@ export class StoreSessionDB implements SessionDB {
     this.visibility = options.visibility;
   }
 
-  /** The upload as an envelope (source id `upload`, this client's writer as the caller),
+  /** The upload as an envelope (this client's writer as the caller, under its source id),
    * through the pipeline. */
   async ingest(upload: Upload): Promise<StoreSessionResult> {
     const visibility = upload.visibility ?? this.visibility;
@@ -120,6 +120,8 @@ export class StoreSessionDB implements SessionDB {
         },
         owner_basis: this.ownerBasis,
         claims,
+        // The writer's source: `upload`, or a service token's own source (X5.4).
+        source_id: this.writer.source_id,
         now: this.now,
       },
     );

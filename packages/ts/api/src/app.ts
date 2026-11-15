@@ -26,6 +26,7 @@ import {
   requireScope,
   requireVisibilityChange,
   type Scope,
+  serviceSourceId,
   type TokenRequest,
   tokenInfo,
   USER_HEADER,
@@ -211,13 +212,15 @@ function visibilityField(value: unknown, where = "visibility"): Visibility | und
   return value;
 }
 
-/** The writer a principal's writes record (X5.5): through the upload route. */
+/** The writer a principal's writes record (X5.5): through the upload route, filed under
+ * `upload`, or for a service token under its own source, so the source's visibility, filter and
+ * health apply to what it writes (X5.4, X5.10). */
 function writerFor(principal: Principal): Writer {
   return {
     kind: principal.kind,
     principal: principal.owner,
     credential_id: principal.credential_id,
-    source_id: UPLOAD_SOURCE,
+    source_id: (principal.kind === "service" && serviceSourceId(principal.owner)) || UPLOAD_SOURCE,
   };
 }
 

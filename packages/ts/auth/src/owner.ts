@@ -35,6 +35,13 @@ export function isServiceOwner(owner: string): boolean {
   return owner.startsWith(SERVICE_PREFIX);
 }
 
+/** The source a service account belongs to (`svc:otlp-prod` → `otlp-prod`), or undefined for
+ * any other owner. What a service token writes is filed under that source: its visibility,
+ * filter and health are the source's (X5.4, X5.10). */
+export function serviceSourceId(owner: string): string | undefined {
+  return isServiceOwner(owner) ? owner.slice(SERVICE_PREFIX.length) : undefined;
+}
+
 /** The owner id for an identity value: the value itself when it is a valid person id, else
  * `h-` and the first 20 hex digits of its SHA-256. Never a service account: a person cannot
  * name themselves `svc:…`. */

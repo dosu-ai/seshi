@@ -50,6 +50,7 @@ export {
   SERVICE_PREFIX,
   serviceIdentity,
   serviceOwner,
+  serviceSourceId,
   usernameOwner,
 } from "./owner";
 export { type CredentialType, hasScope, type Principal } from "./principal";
