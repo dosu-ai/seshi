@@ -308,3 +308,12 @@ what changed.
   is contiguous, and a whole resend after a 409, a moved transcript or a replace would send
   them anyway), or keep "defer". Left for that decision; the CLI and docs now describe what
   a pause does.
+- **client, low** (split vote, judged the agreed behaviour): the uploader counts a pass whose
+  uploads or retractions all failed (or wait in backoff) as idle, so after 5 minutes of an
+  outage it exits with work queued, and the last turns or a pending retraction wait for the
+  next hook on the machine. F9.1 agrees an uploader that "exits after a few idle minutes" with
+  `capture install --service` as the opt-in for uploads between agent sessions, F9.7 says "if
+  the uploader is not running, the retraction waits in the spool", and 14 records the idle stop
+  and backoff; nothing is lost (offsets, the pending retraction and the secret stay in the
+  state) and the status line keeps saying "N queued". Lingering while retries are pending needs
+  a cap value and changes that choice. Left for a decision.
