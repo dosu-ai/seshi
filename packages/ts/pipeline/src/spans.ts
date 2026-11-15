@@ -190,11 +190,16 @@ export class SpanStore implements SpanAssembler {
       })),
       { concurrency: this.concurrency },
     );
-    // Last, so the quiet period counts from the last span written.
+    // Last, so the quiet period counts from the last span written. A final span seen by an
+    // earlier batch stays seen until the session is published (the marker is then removed); two
+    // batches racing can lose it, which only means waiting the whole quiet period.
+    const final =
+      batch.parts.some(({ part }) => endsSession(part, envelope.session_key)) ||
+      (await readPending(this.store, archive_id))?.value.final === true;
     await touchPending(this.store, owner, archive_id, this.now, {
       source_id: envelope.source_id,
       envelope: { ...envelope, owner },
-      final: batch.parts.some(({ part }) => endsSession(part, envelope.session_key)),
+      final,
     });
     return {
       status: "accepted",
