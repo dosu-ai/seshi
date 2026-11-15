@@ -1,0 +1,14 @@
+{
+  "name": "@seshi/kit",
+  "private": true,
+  "description": "Layer 1: the interfaces integrations implement (FormatAdapter, HookHandler, Connector, Installer) and the Integration object each one exports.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "bun": "./src/index.ts"
+    }
+  },
+  "dependencies": {
+    "@seshi/model": "workspace:*"
+  }
+}

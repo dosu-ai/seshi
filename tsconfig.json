@@ -12,9 +12,11 @@
     "customConditions": ["bun"]
   },
   "include": [
-    "sdks/typescript/src/**/*",
-    "sdks/typescript/scripts/**/*",
-    "server/src/**/*",
+    "apps/*/src/**/*",
+    "packages/ts/*/src/**/*",
+    "integrations/*/src/**/*",
+    "tests/**/*",
+    "scripts/**/*",
     "vitest.config.ts"
   ],
   "exclude": ["node_modules", "dist"]

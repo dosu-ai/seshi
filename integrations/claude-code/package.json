@@ -1,0 +1,16 @@
+{
+  "name": "@seshi/integration-claude-code",
+  "private": true,
+  "description": "Claude Code: the transcript adapter (later: hooks, status line, plugin manifest, installer).",
+  "type": "module",
+  "exports": {
+    ".": {
+      "bun": "./src/index.ts"
+    }
+  },
+  "dependencies": {
+    "@seshi/formats": "workspace:*",
+    "@seshi/kit": "workspace:*",
+    "@seshi/model": "workspace:*"
+  }
+}

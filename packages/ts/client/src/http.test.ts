@@ -1,0 +1,95 @@
+import { gunzipSync } from "node:zlib";
+import { OffsetMismatch, SessionRejected, StoreError, VERSION } from "@seshi/model";
+import { describe, expect, it } from "vitest";
+import { HttpSessionDB, ServerError } from "./http";
+
+interface Seen {
+  url: string;
+  method: string;
+  headers: Record<string, string>;
+  body: Uint8Array | undefined;
+}
+
+/** A client over a fake server that answers every request with `status` and `body`. */
+function client(status: number, body: unknown, options: { gzipFrom?: number } = {}) {
+  const seen: Seen[] = [];
+  const db = new HttpSessionDB({
+    server: "https://seshi.example.com/",
+    token: "tok",
+    gzipFrom: options.gzipFrom,
+    fetch: async (url, init) => {
+      seen.push({
+        url,
+        method: init?.method ?? "GET",
+        headers: init?.headers as Record<string, string>,
+        body: init?.body as Uint8Array | undefined,
+      });
+      const text = typeof body === "string" ? body : JSON.stringify(body);
+      return new Response(text, { status });
+    },
+  });
+  return { db, seen };
+}
+
+describe("HttpSessionDB", () => {
+  it("sends the token and its user agent, and reads the answer", async () => {
+    const { db, seen } = client(200, { owner: "acme", storage: { url: "s3://b" } });
+    expect(await db.me()).toEqual({ owner: "acme", storage: { url: "s3://b" } });
+    expect(seen[0]?.url).toBe("https://seshi.example.com/v1/me");
+    expect(seen[0]?.headers.authorization).toBe("Bearer tok");
+    expect(seen[0]?.headers["user-agent"]).toBe(`@dosu/sessiondb/${VERSION}`);
+  });
+
+  it("gzips a body past gzipFrom", async () => {
+    const { db, seen } = client(201, { status: "trivial" }, { gzipFrom: 10 });
+    await db.ingest({ agent: "claude-code", session_id: "s", transcript: "x".repeat(100) });
+    const sent = seen[0] as Seen;
+    expect(sent.headers["content-encoding"]).toBe("gzip");
+    const body = JSON.parse(new TextDecoder().decode(gunzipSync(sent.body as Uint8Array)));
+    expect(body).toMatchObject({ agent: "claude-code", session_id: "s" });
+  });
+
+  it("encodes the session path and leaves out absent query values", async () => {
+    const { db, seen } = client(200, { content_hash: "h" });
+    await db.getTrace("claude-code", "a/b c");
+    expect(seen[0]?.url).toBe("https://seshi.example.com/v1/sessions/claude-code/a%2Fb%20c/trace");
+  });
+
+  it("turns the server's refusals back into the pipeline's errors", async () => {
+    const mismatch = client(409, { error: { code: "offset_mismatch", expected: 12 } }).db;
+    const err = await mismatch
+      .ingest({ agent: "claude-code", session_id: "s", transcript: "x\n", offset: 30 })
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(OffsetMismatch);
+    expect(err).toMatchObject({ offset: 30, expected: 12 });
+
+    const rejected = client(422, { error: { code: "empty", message: "transcript is empty" } }).db;
+    await expect(rejected.listSessions()).rejects.toBeInstanceOf(SessionRejected);
+    await expect(client(502, { error: { message: "down" } }).db.me()).rejects.toBeInstanceOf(
+      StoreError,
+    );
+    await expect(client(401, { error: { code: "unauthorized" } }).db.me()).rejects.toMatchObject({
+      status: 401,
+      code: "unauthorized",
+    });
+    await expect(client(500, "<html>proxy</html>").db.me()).rejects.toBeInstanceOf(ServerError);
+  });
+
+  it("is null for a session that is not there", async () => {
+    expect(await client(404, { error: { code: "not_found" } }).db.getSession("a", "b")).toBeNull();
+    expect(await client(410, { error: { code: "gone" } }).db.getTrace("a", "b")).toBeNull();
+    expect(await client(404, { error: { code: "not_found" } }).db.tombstone("a", "b")).toBeNull();
+  });
+
+  it("refuses a 2xx that is not JSON, and reports an unreachable server as StoreError", async () => {
+    await expect(client(200, "not json").db.me()).rejects.toMatchObject({ code: "bad_response" });
+    const down = new HttpSessionDB({
+      server: "https://seshi.example.com",
+      token: "tok",
+      fetch: async () => {
+        throw new Error("connection refused");
+      },
+    });
+    await expect(down.me()).rejects.toThrow(/cannot reach https:\/\/seshi.example.com/);
+  });
+});

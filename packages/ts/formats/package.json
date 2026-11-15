@@ -1,0 +1,15 @@
+{
+  "name": "@seshi/formats",
+  "private": true,
+  "description": "Layer 1: vendor-neutral formats (ATIF, trajectory-v1), the OTLP renderer, the @letta-ai/trajectory adapter builder and the format registry.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "bun": "./src/index.ts"
+    }
+  },
+  "dependencies": {
+    "@letta-ai/trajectory": "^0.3.0",
+    "@seshi/model": "workspace:*"
+  }
+}

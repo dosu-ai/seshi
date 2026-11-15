@@ -1,0 +1,11 @@
+{
+  "name": "@seshi/search",
+  "private": true,
+  "description": "Layer 3: The search indexer and query layer (F10).",
+  "type": "module",
+  "exports": {
+    ".": {
+      "bun": "./src/index.ts"
+    }
+  }
+}

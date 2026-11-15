@@ -1,0 +1,14 @@
+{
+  "name": "@seshi/auth",
+  "private": true,
+  "description": "Layer 2: credential verifiers (today the legacy HS256 signed token).",
+  "type": "module",
+  "exports": {
+    ".": {
+      "bun": "./src/index.ts"
+    }
+  },
+  "dependencies": {
+    "@seshi/store": "workspace:*"
+  }
+}

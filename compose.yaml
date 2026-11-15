@@ -4,7 +4,7 @@ services:
   sessiondb:
     build:
       context: .
-      dockerfile: server/Dockerfile
+      dockerfile: apps/seshi/Dockerfile
     env_file: .env
     ports:
       - "${SESSIONDB_PORT:-7200}:7200"

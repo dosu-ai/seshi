@@ -9,26 +9,176 @@
         "@semantic-release/changelog": "^7.0.0",
         "@semantic-release/exec": "^7.1.0",
         "@semantic-release/git": "^11.0.1",
+        "@seshi/api": "workspace:*",
+        "@seshi/auth": "workspace:*",
+        "@seshi/client": "workspace:*",
+        "@seshi/formats": "workspace:*",
+        "@seshi/kit": "workspace:*",
+        "@seshi/model": "workspace:*",
+        "@seshi/pipeline": "workspace:*",
+        "@seshi/redact": "workspace:*",
+        "@seshi/store": "workspace:*",
         "@types/bun": "1.4.2",
         "ajv": "^8.20.0",
         "ajv-formats": "^3.0.1",
         "semantic-release": "^25.0.9",
+        "seshi": "workspace:*",
         "typescript": "^6.0.3",
         "vitest": "^4.1.9",
       },
     },
-    "sdks/typescript": {
-      "name": "@dosu/sessiondb",
+    "apps/seshi": {
+      "name": "seshi",
+      "bin": {
+        "seshi": "./src/main.ts",
+      },
+      "dependencies": {
+        "@seshi/api": "workspace:*",
+        "@seshi/auth": "workspace:*",
+        "@seshi/formats": "workspace:*",
+        "@seshi/integration-claude-code": "workspace:*",
+        "@seshi/integration-codex": "workspace:*",
+        "@seshi/integration-cursor": "workspace:*",
+        "@seshi/integration-datadog-trajectory": "workspace:*",
+        "@seshi/integration-gemini-cli": "workspace:*",
+        "@seshi/integration-opencode": "workspace:*",
+        "@seshi/integration-pi": "workspace:*",
+        "@seshi/kit": "workspace:*",
+        "@seshi/model": "workspace:*",
+        "@seshi/redact": "workspace:*",
+        "@seshi/store": "workspace:*",
+      },
+    },
+    "integrations/claude-code": {
+      "name": "@seshi/integration-claude-code",
+      "dependencies": {
+        "@seshi/formats": "workspace:*",
+        "@seshi/kit": "workspace:*",
+        "@seshi/model": "workspace:*",
+      },
+    },
+    "integrations/codex": {
+      "name": "@seshi/integration-codex",
+      "dependencies": {
+        "@seshi/formats": "workspace:*",
+        "@seshi/kit": "workspace:*",
+        "@seshi/model": "workspace:*",
+      },
+    },
+    "integrations/cursor": {
+      "name": "@seshi/integration-cursor",
+      "dependencies": {
+        "@seshi/formats": "workspace:*",
+        "@seshi/kit": "workspace:*",
+      },
+    },
+    "integrations/datadog-trajectory": {
+      "name": "@seshi/integration-datadog-trajectory",
+      "dependencies": {
+        "@seshi/formats": "workspace:*",
+        "@seshi/kit": "workspace:*",
+        "@seshi/model": "workspace:*",
+      },
+    },
+    "integrations/gemini-cli": {
+      "name": "@seshi/integration-gemini-cli",
+      "dependencies": {
+        "@seshi/formats": "workspace:*",
+        "@seshi/kit": "workspace:*",
+      },
+    },
+    "integrations/opencode": {
+      "name": "@seshi/integration-opencode",
+      "dependencies": {
+        "@seshi/formats": "workspace:*",
+        "@seshi/kit": "workspace:*",
+      },
+    },
+    "integrations/pi": {
+      "name": "@seshi/integration-pi",
+      "dependencies": {
+        "@seshi/formats": "workspace:*",
+        "@seshi/kit": "workspace:*",
+      },
+    },
+    "packages/ts/api": {
+      "name": "@seshi/api",
+      "dependencies": {
+        "@seshi/auth": "workspace:*",
+        "@seshi/formats": "workspace:*",
+        "@seshi/model": "workspace:*",
+        "@seshi/pipeline": "workspace:*",
+        "@seshi/redact": "workspace:*",
+        "@seshi/store": "workspace:*",
+      },
+    },
+    "packages/ts/auth": {
+      "name": "@seshi/auth",
+      "dependencies": {
+        "@seshi/store": "workspace:*",
+      },
+    },
+    "packages/ts/capture": {
+      "name": "@seshi/capture",
+    },
+    "packages/ts/client": {
+      "name": "@seshi/client",
+      "dependencies": {
+        "@seshi/model": "workspace:*",
+      },
+    },
+    "packages/ts/config": {
+      "name": "@seshi/config",
+    },
+    "packages/ts/formats": {
+      "name": "@seshi/formats",
+      "dependencies": {
+        "@letta-ai/trajectory": "^0.3.0",
+        "@seshi/model": "workspace:*",
+      },
+    },
+    "packages/ts/instance": {
+      "name": "@seshi/instance",
+    },
+    "packages/ts/kit": {
+      "name": "@seshi/kit",
+      "dependencies": {
+        "@seshi/model": "workspace:*",
+      },
+    },
+    "packages/ts/model": {
+      "name": "@seshi/model",
       "version": "0.9.0",
       "dependencies": {
         "@letta-ai/trajectory": "^0.3.0",
       },
     },
-    "server": {
-      "name": "sessiondb-server",
-      "version": "0.9.0",
+    "packages/ts/pipeline": {
+      "name": "@seshi/pipeline",
       "dependencies": {
-        "@dosu/sessiondb": "workspace:*",
+        "@seshi/client": "workspace:*",
+        "@seshi/formats": "workspace:*",
+        "@seshi/model": "workspace:*",
+        "@seshi/redact": "workspace:*",
+        "@seshi/store": "workspace:*",
+      },
+    },
+    "packages/ts/redact": {
+      "name": "@seshi/redact",
+      "dependencies": {
+        "@seshi/model": "workspace:*",
+      },
+    },
+    "packages/ts/search": {
+      "name": "@seshi/search",
+    },
+    "packages/ts/sources": {
+      "name": "@seshi/sources",
+    },
+    "packages/ts/store": {
+      "name": "@seshi/store",
+      "dependencies": {
+        "@seshi/model": "workspace:*",
       },
     },
   },
@@ -68,8 +218,6 @@
     "@biomejs/cli-win32-x64": ["@biomejs/cli-win32-x64@2.6.2", "", { "os": "win32", "cpu": "x64" }, "sha512-FVlWD+mDDz8nN5LWKRWUhhb7wKIK0VE3oXQvQBX7Fwwj00CvqMVhMyiz1iz8O5aZGmnkhFlKSwJPrUvMh5prQw=="],
 
     "@colors/colors": ["@colors/colors@1.5.0", "", {}, "sha512-ooWCrlZP11i8GImSjTHYHLkvFDP48nS4+204nGb1RiX/WXYHmJA2III9/e2DWVabCESdW7hBAEzHRqUn9OUVvQ=="],
-
-    "@dosu/sessiondb": ["@dosu/sessiondb@workspace:sdks/typescript"],
 
     "@jridgewell/sourcemap-codec": ["@jridgewell/sourcemap-codec@1.6.0", "", {}, "sha512-T7jf+5zgsZHwNJ4lvQ7/aezbyk0nNX+zJVWpmHA7VYsEx7a7qr5Rg5IbtJFqkgze5Y2sruq1RUY8Q837Od7iFw=="],
 
@@ -154,6 +302,48 @@
     "@semantic-release/npm": ["@semantic-release/npm@13.2.0", "", { "dependencies": { "@actions/core": "^3.0.0", "@semantic-release/error": "^4.0.0", "aggregate-error": "^5.0.0", "env-ci": "^11.2.0", "execa": "^9.0.0", "fs-extra": "^11.0.0", "lodash-es": "^4.17.21", "nerf-dart": "^1.0.0", "normalize-url": "^9.0.0", "npm": "^11.6.2", "rc": "^1.2.8", "read-pkg": "^10.0.0", "registry-auth-token": "^5.0.0", "semver": "^7.1.2", "tempy": "^3.0.0" }, "peerDependencies": { "semantic-release": ">=20.1.0" } }, "sha512-Uz4JGafLoEGiheLKEs1orockCWP6liY9D2YnvKHYbqo9hCHAw9fuAHcU53q29SXVCtkvDhs/QVUg7Vvuyfp4Jg=="],
 
     "@semantic-release/release-notes-generator": ["@semantic-release/release-notes-generator@14.1.1", "", { "dependencies": { "conventional-changelog-angular": "^8.0.0", "conventional-changelog-writer": "^8.0.0", "conventional-commits-filter": "^5.0.0", "conventional-commits-parser": "^6.0.0", "debug": "^4.0.0", "import-from-esm": "^2.0.0", "lodash-es": "^4.17.21", "read-package-up": "^11.0.0" }, "peerDependencies": { "semantic-release": ">=20.1.0" } }, "sha512-Pbd2e2XRMUD0OxehHpgd5/YghsE76cddkRHSoDvKLK+OCy4Ewxn49rWR631MEUU01lgwF/uyVXvbnVuu6+Z6VA=="],
+
+    "@seshi/api": ["@seshi/api@workspace:packages/ts/api"],
+
+    "@seshi/auth": ["@seshi/auth@workspace:packages/ts/auth"],
+
+    "@seshi/capture": ["@seshi/capture@workspace:packages/ts/capture"],
+
+    "@seshi/client": ["@seshi/client@workspace:packages/ts/client"],
+
+    "@seshi/config": ["@seshi/config@workspace:packages/ts/config"],
+
+    "@seshi/formats": ["@seshi/formats@workspace:packages/ts/formats"],
+
+    "@seshi/instance": ["@seshi/instance@workspace:packages/ts/instance"],
+
+    "@seshi/integration-claude-code": ["@seshi/integration-claude-code@workspace:integrations/claude-code"],
+
+    "@seshi/integration-codex": ["@seshi/integration-codex@workspace:integrations/codex"],
+
+    "@seshi/integration-cursor": ["@seshi/integration-cursor@workspace:integrations/cursor"],
+
+    "@seshi/integration-datadog-trajectory": ["@seshi/integration-datadog-trajectory@workspace:integrations/datadog-trajectory"],
+
+    "@seshi/integration-gemini-cli": ["@seshi/integration-gemini-cli@workspace:integrations/gemini-cli"],
+
+    "@seshi/integration-opencode": ["@seshi/integration-opencode@workspace:integrations/opencode"],
+
+    "@seshi/integration-pi": ["@seshi/integration-pi@workspace:integrations/pi"],
+
+    "@seshi/kit": ["@seshi/kit@workspace:packages/ts/kit"],
+
+    "@seshi/model": ["@seshi/model@workspace:packages/ts/model"],
+
+    "@seshi/pipeline": ["@seshi/pipeline@workspace:packages/ts/pipeline"],
+
+    "@seshi/redact": ["@seshi/redact@workspace:packages/ts/redact"],
+
+    "@seshi/search": ["@seshi/search@workspace:packages/ts/search"],
+
+    "@seshi/sources": ["@seshi/sources@workspace:packages/ts/sources"],
+
+    "@seshi/store": ["@seshi/store@workspace:packages/ts/store"],
 
     "@simple-libs/stream-utils": ["@simple-libs/stream-utils@1.2.0", "", {}, "sha512-KxXvfapcixpz6rVEB6HPjOUZT22yN6v0vI0urQSk1L8MlEWPDFCZkhw2xmkyoTGYeFw7tWTZd7e3lVzRZRN/EA=="],
 
@@ -571,7 +761,7 @@
 
     "semver-regex": ["semver-regex@4.0.5", "", {}, "sha512-hunMQrEy1T6Jr2uEVjrAIqjwWcQTgOAcIM52C8MY1EZSD3DDNft04XzvYKPqjED65bNVVko0YI38nYeEHCX3yw=="],
 
-    "sessiondb-server": ["sessiondb-server@workspace:server"],
+    "seshi": ["seshi@workspace:apps/seshi"],
 
     "shebang-command": ["shebang-command@2.0.0", "", { "dependencies": { "shebang-regex": "^3.0.0" } }, "sha512-kHxr2zZpYtdmrN1qDjrrX/Z1rR1kG8Dx+gkpK1G4eXmvXswmcE1hTWBWYUzlraYw1/yZp6YuDY77YtvbN0dmDA=="],
 

@@ -1,0 +1,14 @@
+{
+  "name": "@seshi/redact",
+  "private": true,
+  "description": "Layer 1: the redaction rule engine over raw transcripts and trajectory-v1 records.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "bun": "./src/index.ts"
+    }
+  },
+  "dependencies": {
+    "@seshi/model": "workspace:*"
+  }
+}

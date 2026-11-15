@@ -1,0 +1,11 @@
+{
+  "name": "@seshi/config",
+  "private": true,
+  "description": "Layer 1: TOML and env config loader, schema, value provenance (branch 02, F1).",
+  "type": "module",
+  "exports": {
+    ".": {
+      "bun": "./src/index.ts"
+    }
+  }
+}

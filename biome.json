@@ -15,12 +15,15 @@
   },
   "files": {
     "includes": [
-      "sdks/typescript/**",
-      "server/**",
+      "apps/**",
+      "packages/**",
+      "integrations/**",
+      "tests/**",
       "scripts/**",
       "*.ts",
       "*.json",
       "!spec/testdata",
+      "!**/testdata",
       "!**/*.md"
     ]
   },

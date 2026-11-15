@@ -1,0 +1,11 @@
+{
+  "name": "@seshi/instance",
+  "private": true,
+  "description": "Layer 4: Builds an Instance from one config; runs worker jobs (X1.2, X7; branch 06).",
+  "type": "module",
+  "exports": {
+    ".": {
+      "bun": "./src/index.ts"
+    }
+  }
+}

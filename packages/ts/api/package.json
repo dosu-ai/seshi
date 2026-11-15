@@ -1,0 +1,19 @@
+{
+  "name": "@seshi/api",
+  "private": true,
+  "description": "Layer 5: the HTTP routes.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "bun": "./src/index.ts"
+    }
+  },
+  "dependencies": {
+    "@seshi/auth": "workspace:*",
+    "@seshi/formats": "workspace:*",
+    "@seshi/model": "workspace:*",
+    "@seshi/pipeline": "workspace:*",
+    "@seshi/redact": "workspace:*",
+    "@seshi/store": "workspace:*"
+  }
+}

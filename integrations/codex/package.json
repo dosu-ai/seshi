@@ -1,0 +1,16 @@
+{
+  "name": "@seshi/integration-codex",
+  "private": true,
+  "description": "Codex: the rollout adapter (later: notify hook, sweep paths, installer).",
+  "type": "module",
+  "exports": {
+    ".": {
+      "bun": "./src/index.ts"
+    }
+  },
+  "dependencies": {
+    "@seshi/formats": "workspace:*",
+    "@seshi/kit": "workspace:*",
+    "@seshi/model": "workspace:*"
+  }
+}

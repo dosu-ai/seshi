@@ -1,0 +1,70 @@
+/** `seshi`: the one binary (X2.2). The router reads the command name and imports that command's
+ * module only then (X3.3); everything else stays unevaluated.
+ *
+ *   seshi serve          run the server
+ *   seshi --version      print the version
+ *   seshi --help         list the commands */
+
+import { VERSION } from "@seshi/model";
+import { COMMANDS, type CommandContext, type CommandSpec } from "./commands/index";
+
+export interface MainOptions {
+  env?: Record<string, string | undefined>;
+  stdout?: (line: string) => void;
+  stderr?: (line: string) => void;
+  /** The command registry; the built-in one by default. */
+  commands?: Readonly<Record<string, CommandSpec>>;
+  integrations?: CommandContext["integrations"];
+}
+
+function usage(commands: Readonly<Record<string, CommandSpec>>): string {
+  const names = Object.keys(commands).sort();
+  const width = Math.max(...names.map((name) => name.length), "--version".length);
+  const lines = names.map((name) => `  ${name.padEnd(width)}  ${commands[name].summary}`);
+  return [
+    "usage: seshi <command> [options]",
+    "",
+    "commands:",
+    ...lines,
+    "",
+    `  ${"--version".padEnd(width)}  print the version`,
+    `  ${"--help".padEnd(width)}  show this help`,
+  ].join("\n");
+}
+
+/** Runs `argv` (the arguments after the program name). The exit code, or `undefined` when the
+ * command keeps the process running. */
+export async function main(argv: string[], options: MainOptions = {}): Promise<number | undefined> {
+  const commands = options.commands ?? COMMANDS;
+  const stdout = options.stdout ?? ((line: string) => console.log(line));
+  const stderr = options.stderr ?? ((line: string) => console.error(line));
+  const [name, ...rest] = argv;
+
+  if (name === "--version" || name === "-v" || name === "version") {
+    stdout(`seshi ${VERSION}`);
+    return 0;
+  }
+  if (name === undefined || name === "--help" || name === "-h" || name === "help") {
+    (name === undefined ? stderr : stdout)(usage(commands));
+    return name === undefined ? 2 : 0;
+  }
+  const spec = Object.hasOwn(commands, name) ? commands[name] : undefined;
+  if (!spec) {
+    stderr(`seshi: unknown command '${name}'\n\n${usage(commands)}`);
+    return 2;
+  }
+  const command = await spec.load();
+  return command.run({
+    argv: rest,
+    env: options.env ?? process.env,
+    stdout,
+    stderr,
+    integrations:
+      options.integrations ?? (() => import("./integrations").then((m) => m.INTEGRATIONS)),
+  });
+}
+
+if (import.meta.main) {
+  const code = await main(process.argv.slice(2));
+  if (code !== undefined) process.exit(code);
+}
