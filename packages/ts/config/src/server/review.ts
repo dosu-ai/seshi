@@ -44,7 +44,7 @@ export const EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 /** How long one model call may take, when a step does not say. */
 export const DEFAULT_REVIEW_TIMEOUT_MS = 60_000;
 /** The output cap of a decision call: a one-word label, with room for the model's thinking. */
-export const DEFAULT_DECISION_MAX_TOKENS = 2_048;
+export const DEFAULT_DECISION_MAX_TOKENS = 4_096;
 /** The output cap of a redactor call: a list of findings. */
 export const DEFAULT_REDACTOR_MAX_TOKENS = 16_000;
 /** How much record text one model call is given before an envelope is split by turn (F3.7). */

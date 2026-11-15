@@ -689,7 +689,7 @@
                     "format": "uri"
                   },
                   "max_tokens": {
-                    "description": "The output cap of one call; 2048 for the decision model, 16000 for the redactor.",
+                    "description": "The output cap of one call; 4096 for the decision model, 16000 for the redactor.",
                     "type": "integer",
                     "exclusiveMinimum": 0,
                     "maximum": 9007199254740991
@@ -797,7 +797,7 @@
                     "format": "uri"
                   },
                   "max_tokens": {
-                    "description": "The output cap of one call; 2048 for the decision model, 16000 for the redactor.",
+                    "description": "The output cap of one call; 4096 for the decision model, 16000 for the redactor.",
                     "type": "integer",
                     "exclusiveMinimum": 0,
                     "maximum": 9007199254740991
