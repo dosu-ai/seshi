@@ -4,6 +4,16 @@
  * object X6.4 adds. Layer 1: it imports only `@seshi/model` (X3.2). */
 
 export { type ChangesPage, type ReadChangesOptions, readChanges } from "./changes";
+export {
+  type CheckCounts,
+  type CheckOptions,
+  type CheckReport,
+  checkStore,
+  FINDINGS,
+  type Finding,
+  type FindingCode,
+  type Severity,
+} from "./check";
 export { FsStore, STALE_LOCK_MS } from "./fs";
 export {
   addHealth,
