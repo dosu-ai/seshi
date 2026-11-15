@@ -149,6 +149,11 @@ export class S3Store implements Store {
           options.ifNoneMatch ? "an object already exists" : "the object changed since it was read",
         );
       }
+      // S3 answers If-Match on a key with no object with 404 NoSuchKey (R2 with 412): either
+      // way the version read is gone, which is a failed condition, as the folder store says.
+      if (options.ifMatch !== undefined && err instanceof S3HttpError && err.status === 404) {
+        throw new PreconditionFailed(key, "no object to replace");
+      }
       throw new StoreError(`write ${key}`, err);
     }
   }

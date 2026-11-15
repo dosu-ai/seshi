@@ -171,6 +171,21 @@ describe("S3Store conditional writes", () => {
     expect(other).not.toBeInstanceOf(PreconditionFailed);
   });
 
+  it("reads S3's 404 NoSuchKey on an If-Match PUT as a failed condition, and only then", async () => {
+    const answers = [
+      new Response("<Error><Code>NoSuchKey</Code></Error>", { status: 404 }),
+      new Response("<Error><Code>NoSuchBucket</Code></Error>", { status: 404 }),
+    ];
+    const { fetch } = fakeFetch(() => answers.shift() as Response);
+    const store = S3Store.fromUrl("s3://b", { credentials, fetch });
+    await expect(store.put("k", new Uint8Array(), { ifMatch: "x" })).rejects.toBeInstanceOf(
+      PreconditionFailed,
+    );
+    const plain = await store.put("k", new Uint8Array()).catch((e: unknown) => e);
+    expect(plain).toBeInstanceOf(StoreError);
+    expect(plain).not.toBeInstanceOf(PreconditionFailed);
+  });
+
   it("runs read-modify-write against a bucket that honours the conditions", async () => {
     const bucket = new Map<string, Uint8Array>();
     const md5 = (b: Uint8Array) => createHash("md5").update(b).digest("hex");
