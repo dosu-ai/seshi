@@ -7,7 +7,7 @@ writes the trace beside it, in the [layout](../spec/layout.md). Storage first, t
 trace can always be remade from the bucket. Anything that reads the layout reads the bucket
 directly: the server is a writer and no reader's dependency.
 
-The server is the `@dosu/sessiondb` SDK (`sdks/typescript/`) behind HTTP and a token list:
+The server (`seshi serve`, `apps/seshi/`) is the pipeline (`packages/ts/pipeline/`) behind HTTP and a token list:
 each route is a call on the SDK's client, scoped to the owner the token names, and the SDK's
 own HTTP backend (`connect({ server, token })`) speaks this API from the other side. A client
 that holds a bucket credential can run the same SDK against the bucket directly and skip the
@@ -97,7 +97,7 @@ already in the bucket is not rewritten.
 ### Deploying
 
 Every release is published as a container image, `ghcr.io/dosu-ai/sessiondb:<version>`, built
-from `server/Dockerfile` in this repository (`docker build -f server/Dockerfile .` from the
+from `apps/seshi/Dockerfile` in this repository (`docker build -f apps/seshi/Dockerfile .` from the
 root). It listens on `PORT` (default `7200`), reports
 `/healthz` for liveness, and needs only the environment variables above: there is no database,
 no volume (unless the store is `file://`), no background work, and no state outside the bucket,
@@ -139,7 +139,7 @@ A reader never talks to the server. Give it a read-only credential on the bucket
 ## API
 
 The contract is [`spec/openapi.yaml`](../spec/openapi.yaml): every route, body and response,
-with the schemas of the objects they carry. `server/src/openapi.test.ts` holds the server to it
+with the schemas of the objects they carry. `tests/api/openapi.test.ts` holds the server to it
 (every response validated, every documented status observed), so the document and the code
 cannot drift apart. What follows is the same API in prose.
 

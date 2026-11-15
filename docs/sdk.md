@@ -1,3 +1,9 @@
+> **Pre-seshi.** This describes the `@dosu/sessiondb` SDK as it was published from `sdks/typescript/`
+> before the seshi restructure. Its code now lives in `packages/ts/` (`connect()` and
+> `StoreSessionDB` in `@seshi/pipeline`, which now also take the format registry; `HttpSessionDB`
+> in `@seshi/client`), and nothing is published to npm until branch 15 (X3.8). Branch 16 rewrites
+> the docs.
+
 # @dosu/sessiondb
 
 The sessiondb SDK: coding-agent sessions as a durable, redacted, content-addressed archive in a

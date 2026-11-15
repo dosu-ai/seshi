@@ -19,8 +19,8 @@ info:
     The TypeScript SDK's `HttpSessionDB` maps the error responses back to the errors its store
     backend throws: `409 offset_mismatch` to `OffsetMismatch`, `422` to `SessionRejected`,
     `502` to `StoreError`; everything else is a `ServerError`. A server implementing this
-    document and the SDK over a store must agree on every result; `server/src/http-backend.test.ts`
-    holds them to it, and `server/src/openapi.test.ts` holds the server to this document.
+    document and the SDK over a store must agree on every result; `tests/api/http-backend.test.ts`
+    holds them to it, and `tests/api/openapi.test.ts` holds the server to this document.
   license:
     name: MIT
     identifier: MIT

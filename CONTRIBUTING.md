@@ -12,17 +12,24 @@ bun run typecheck
 bun run check
 ```
 
-The repository is a Bun workspace:
+The repository is a Bun workspace, laid out as in the design decisions (X3,
+`docs/seshi/design-decisions.html`):
 
 | Path | What |
 |---|---|
-| `spec/` | The contract: `layout.md` (the object layout), `openapi.yaml` (the HTTP API), and `testdata/` (fixtures and goldens) |
-| `sdks/typescript/` | `@dosu/sessiondb`: redact, normalize, store, read. Everything that is not HTTP |
-| `server/` | `sessiondb-server`: the HTTP routes and `main.ts`, over the SDK. The `Dockerfile` is here, built from the repository root |
+| `apps/seshi/` | The one binary: `src/main.ts` (the command router; each command's module loads only when it runs), the command registry (`src/commands/`), the integration registry (`src/integrations.ts`). The `Dockerfile` is here, built from the repository root |
+| `packages/ts/` | One package per domain, `@seshi/<name>`, private and source-only: `model`, `kit`, `formats`, `redact`, `config`, `store`, `pipeline`, `auth`, `sources`, `search`, `instance`, `api`, `capture`, `client` |
+| `integrations/` | Everything specific to one agent or vendor (`claude-code`, `codex`, `cursor`, `datadog-trajectory`, `opencode`, `pi`, `gemini-cli`), each exporting one `Integration` from `@seshi/kit`, with its fixtures in `testdata/` |
+| `spec/` | The cross-language contract: `layout.md` (the object layout), `openapi.yaml` (the HTTP API), and `testdata/` (the record sets and goldens every language must pass) |
+| `tests/` | TypeScript tests that cross packages, and the fixture and golden tooling (`tests/tooling/`) |
+| `scripts/` | Repository scripts: the layer check, the release version |
 | `docs/` | `server.md`, the API and configuration reference |
 
-Every root script (`test`, `typecheck`, `check`, `start`, `goldens`, `fixtures`) runs across
-the workspace.
+Packages are layered, and `bun run check` runs the layer check (`scripts/check-layers.ts`)
+after Biome: a package imports only from lower layers, integrations import only `@seshi/model`,
+`@seshi/kit` and `@seshi/formats`, and only `apps/seshi` imports integrations. Every root
+script (`test`, `typecheck`, `check`, `start`, `goldens`, `fixtures`) runs across the
+workspace; `bun run seshi -- <command>` runs the binary from source.
 
 CI runs those three plus the S3 store test against a live S3-compatible endpoint
 ([RustFS](https://github.com/rustfs/rustfs)). To run it locally, point
@@ -37,27 +44,29 @@ service; without them the test skips.
 - Documentation in the same change. `docs/server.md` is the API and configuration reference;
   `spec/layout.md` is the object layout; `.env.example` lists every variable. A change to any
   of those is incomplete without the matching doc edit.
-- A route change is a `spec/openapi.yaml` change. `server/src/openapi.test.ts` validates every
+- A route change is a `spec/openapi.yaml` change. `tests/api/openapi.test.ts` validates every
   response the server gives against the document and fails on a documented status it never
   observed, so a new status, field or route needs the document and a request in that test.
 
 ## The goldens
 
-`spec/testdata/goldens/` pins what every fixture transcript normalizes to and what each record
-set parses to: `content_hash`, events, and the trace fields. `content_hash` is part of the
-layout contract, so the goldens test (`sdks/typescript/src/trace/goldens.test.ts`) fails on any
-change to the hash or event derivation.
+The goldens pin what every fixture transcript normalizes to and what each record set parses
+to: `content_hash`, events, and the trace fields. Each integration keeps its transcripts and
+their goldens in its `testdata/`; ATIF's are in `packages/ts/formats/testdata/`; the hand-written
+record sets every language must pass are in `spec/testdata/`. `content_hash` is part of the
+layout contract, so the goldens test (`tests/goldens.test.ts`) fails on any change to the hash
+or event derivation.
 
 If a change is meant to alter them, run `bun run goldens` and commit the regenerated files; the
 diff is the review. If it is not, the failure is a bug in the change.
 
-Fixture transcripts are produced by `bun run fixtures` (`sdks/typescript/scripts/fixtures.ts`)
-and contain nothing real. Do not add a transcript from an actual session to `spec/testdata/`,
+Fixture transcripts are produced by `bun run fixtures` (`tests/tooling/fixtures.ts`) and
+contain nothing real. Do not add a transcript from an actual session to any `testdata/`,
 redacted or not.
 
 ## Redaction rules
 
-A new pattern in `sdks/typescript/src/redact/secrets.ts` needs a test for what it catches and a test for the
+A new pattern in `packages/ts/redact/src/secrets.ts` needs a test for what it catches and a test for the
 ordinary text it must leave alone. Over-redaction is the preferred failure, but a rule that
 eats common prose (`password is wrong`, a UUID, a git SHA) makes the archive useless, and the
 existing tests encode those cases for a reason.
@@ -72,5 +81,5 @@ from the commits that land on `main` (`release.config.js`), so the subject line 
 [Conventional Commits](https://www.conventionalcommits.org/): `fix(redact): …` releases a patch,
 `feat(sdk): …` a minor, a `BREAKING CHANGE:` footer a major. A commit with another shape is not
 seen by the release pipeline at all; it ships with the next one that is. Each release publishes
-`@dosu/sessiondb` to npm and `ghcr.io/dosu-ai/sessiondb` to GHCR at one version, writes
-`CHANGELOG.md`, and tags `vX.Y.Z`; nobody edits a version field by hand.
+`ghcr.io/dosu-ai/sessiondb` to GHCR, writes the version into `packages/ts/model/package.json`
+and `CHANGELOG.md`, and tags `vX.Y.Z`; nobody edits a version field by hand.
