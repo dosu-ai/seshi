@@ -187,3 +187,23 @@ what changed.
   nothing; moving past it needs session state for a session with no trace (which would also
   record that the dropped session exists), a choice between the two the decisions do not make.
   Left for that decision.
+- **background, medium** (split vote, confirmed, not fixed): span records keep every chat
+  span's whole input history and the assembler loads all of a session's records on each
+  publish, so storage and worker memory grow with the square of the calls (400 calls: 341 MB
+  of records, 355 MB of heap, for a 1.7 MB session), with no bound before the load. F4.4 and
+  X6.3 store each span normalized on arrival and rebuild the whole trace each time; storing
+  history once changes that model, and a per-session cap needs a value and refuses long
+  sessions. 09's "Cost at scale" item holds it, with the measurement.
+- **background, medium** (split vote, confirmed, not fixed): `/otlp/v1/traces` takes the
+  upload's body cap, about 513 MiB raw and again after gunzip, and decodes it synchronously
+  at about 47x the wire size, so a holder of an otlp source's token can stall or exhaust an
+  API instance. 09 records the cap as open. An OTLP cap (raw, inflated, span count) needs a
+  value and likely a `[limits]` key; Console batches of full-content spans (0.75 MB each) are
+  unmeasured, so a small cap could refuse real exports. Left for that decision.
+- **background, low** (split vote, judged a documented deviation): an S3 chunk at a stale
+  manifest offset writes an `offset_mismatch` failure record before the poller resends the
+  object whole, and `workers status` / `sync status` then warn about it. 11's deviation 10
+  records exactly this ("harmless beyond the record"); X6.4 writes a record for every
+  permanent failure. The stale manifest is somewhat less rare than the deviation says (the
+  checkpoint is saved every 25 objects and not after a transient error), but no data is lost
+  or processed twice; not recording it would carve an exception into X6.4.

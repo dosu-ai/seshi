@@ -234,7 +234,12 @@ service account. User docs: [docs/otlp.md](../../otlp.md).
   - span sizes with large contexts.
 - **Cost at scale.** Each pass lists all markers and reads each one (every 30 s). Each publish
   reads every span record of the session. A long Managed Agents session (thousands of spans)
-  pays that on every republish.
+  pays that on every republish. (17-review measured it: each chat span keeps the whole input
+  history, so span records grow with the square of the calls; 400 calls of about 2 KB per
+  message made 341 MB of span records for a 1.7 MB session, all loaded on each publish. Nothing
+  bounds the load, so a worker under a tight memory limit could crash on one session and retry
+  it after each restart. Storing history once, or a per-session span cap with a permanent
+  failure, changes F4.4's storage model or refuses long sessions: left for this item.)
 - **Span records are never pruned** while their session lives: they duplicate the trace's
   content at rest (regex-redacted, not model-reviewed: X6.3 says so). A retention for published
   sessions' spans may be wanted. The same holds for a session the filter refused or model
@@ -246,7 +251,10 @@ service account. User docs: [docs/otlp.md](../../otlp.md).
 - **Size limits.** `limits.max_records_bytes` (32 MiB) can refuse a long session with
   full-content spans (0.75 MB each by default); the refusal is a failure record and the spans
   stay. The OTLP body cap is the upload's (`maxBodyBytes(max_upload_bytes)`, about 513 MiB);
-  an OTLP-specific cap may be better.
+  an OTLP-specific cap may be better. (17-review: the cap applies after gunzip too, and the
+  protobuf is decoded on the event loop at about 47x its size in memory, so a holder of an
+  otlp source's token can stall or exhaust an API instance with a few MB of gzip. The cap's
+  value waits on the Console's real batch sizes above.)
 - **`anthropic.content.truncated`** is not recorded anywhere; truncated inputs are handled by
   the history matching.
 - **S3 behaviour**, not run against a live bucket: listing `spans/` in pages, unconditional
