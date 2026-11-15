@@ -105,25 +105,39 @@ describe("SqliteIndex: sessions and events", () => {
     expect(index.counts().events).toBe(1);
   });
 
-  it("refuses an update older than what it holds, and a continuation of other traces", () => {
+  it("refuses an update read before what it holds, and a continuation of other traces", () => {
     const index = memory();
     index.apply({
-      session: session(1, { updated_at: "2026-11-14T10:00:00.000Z" }),
+      session: session(1),
       events: [event("newer text")],
       replace: true,
+      read_at: 2000,
     });
     const older = index.apply({
-      session: session(1, { updated_at: "2026-11-14T09:00:00.000Z" }),
+      session: session(1),
       events: [event("older text")],
       replace: true,
+      read_at: 1000,
     });
     expect(older).toBe(false);
     expect(query(index, "older").total).toBe(0);
+    // The metadata's updated_at does not order updates: writers' clocks disagree, so a
+    // continuation stamped behind what it extends is still applied.
+    const behind = index.apply({
+      session: session(1, { traces: [H(101), H(2)], updated_at: "2026-11-14T08:00:00.000Z" }),
+      events: [event("continued text", { content_hash: H(2) })],
+      replace: false,
+      base: [H(101)],
+      read_at: 3000,
+    });
+    expect(behind).toBe(true);
+    expect(query(index, "continued").total).toBe(1);
     const wrongBase = index.apply({
-      session: session(1, { traces: [H(9), H(10)], updated_at: "2026-11-14T10:00:00.000Z" }),
+      session: session(1, { traces: [H(9), H(10)] }),
       events: [event("duplicate")],
       replace: false,
       base: [H(9)],
+      read_at: 4000,
     });
     expect(wrongBase).toBe(false);
     expect(query(index, "duplicate").total).toBe(0);
@@ -131,23 +145,33 @@ describe("SqliteIndex: sessions and events", () => {
 
   it("removes a session, remembering the removal against late updates", () => {
     const index = memory();
-    index.apply({ session: session(1), events: [event("secret plan")], replace: true });
-    index.remove("alice", H(1), "2026-11-14T12:00:00.000Z");
+    index.apply({ session: session(1), events: [event("secret plan")], replace: true, read_at: 1 });
+    expect(index.remove("alice", H(1), 5000)).toBe(true);
     expect(query(index, "secret").total).toBe(0);
     expect(index.session("alice", H(1))).toBeNull();
     expect(index.counts()).toEqual({ sessions: 0, events: 0 });
     // A slower process indexing the session as it was before the tombstone is refused.
-    expect(
-      index.apply({ session: session(1), events: [event("secret plan")], replace: true }),
-    ).toBe(false);
+    const late = { session: session(1), events: [event("secret plan")], replace: true };
+    expect(index.apply({ ...late, read_at: 4000 })).toBe(false);
     expect(query(index, "secret").total).toBe(0);
-    // Without a time (no metadata at all), the row goes.
-    index.apply({ session: session(2), events: [event("other")], replace: true });
-    index.remove("alice", H(2));
-    expect(index.apply({ session: session(2), events: [event("other")], replace: true })).toBe(
-      true,
-    );
-    index.remove("nobody", H(7));
+    // A removal read before what the index holds changes nothing.
+    index.apply({ session: session(2), events: [event("other")], replace: true, read_at: 9000 });
+    expect(index.remove("alice", H(2), 8000)).toBe(false);
+    expect(query(index, "other").total).toBe(1);
+    // A session never held is remembered as removed too, against a late update.
+    expect(index.remove("nobody", H(7), 5000)).toBe(true);
+    expect(index.session("nobody", H(7))).toBeNull();
+    expect(
+      index.apply({
+        session: session(7, { owner: "nobody" }),
+        events: [event("ghost")],
+        replace: true,
+        read_at: 4000,
+      }),
+    ).toBe(false);
+    expect(query(index, "ghost").total).toBe(0);
+    // A session read again after its removal (it came back) is indexed.
+    expect(index.apply({ ...late, read_at: 6000 })).toBe(true);
   });
 
   it("skips empty text and caps what it stores", () => {
@@ -341,7 +365,7 @@ describe("SqliteIndex: the file", () => {
     const two = new SqliteIndex({ path, deployment: "d1", events: EVENTS });
     one.apply({ session: session(1), events: [event("from one")], replace: true });
     expect(query(two, "one").total).toBe(1);
-    two.remove("alice", H(1), "2026-11-15T00:00:00.000Z");
+    two.remove("alice", H(1), 1);
     expect(query(one, "one").total).toBe(0);
     one.close();
     two.close();

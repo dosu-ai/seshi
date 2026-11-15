@@ -15,6 +15,16 @@
  * the session as it is. Sessions dropped by model review never reach the feed, so they are
  * never indexed.
  *
+ * Every update carries when its metadata was read (`SessionUpdate.read_at`), and the index
+ * refuses one read before what it holds, so processes sharing one index file never undo each
+ * other. The metadata's own `updated_at` is not used to order updates: several writers stamp it
+ * with clocks that disagree, and a continuation written by a machine whose clock is behind
+ * would look older than what it extends.
+ *
+ * An object that cannot be decoded (a corrupt or foreign metadata or trace object) is skipped
+ * with a warning rather than failing the run: one bad object must not stop an owner's feed, or
+ * keep a new index from ever becoming ready. Store errors still fail the run, which is retried.
+ *
  * Change keys are stamped by the writer's clock (a laptop in local mode), so the indexer re-reads
  * a lag window behind its cursor and skips the keys it already processed (`spec/layout.md`).
  * Owners have no list of their own (X5.8): the indexer lists `owners/` and refreshes that list
@@ -27,14 +37,13 @@ import {
   type SessionMetadata,
   type Trace,
 } from "@seshi/model";
-import { getTrace } from "@seshi/pipeline";
 import {
   changeStamp,
   decodeJson,
   getBytes,
+  gunzipJson,
   keys,
   listOwners,
-  readMetadata,
   type Store,
   stampTime,
 } from "@seshi/store";
@@ -176,9 +185,15 @@ function startsWith(list: readonly string[], prefix: readonly string[]): boolean
   return prefix.length <= list.length && prefix.every((h, i) => list[i] === h);
 }
 
+/** A trace read for indexing, with its index documents. */
+interface ReadTrace {
+  trace: Trace;
+  events: IndexedEvent[];
+}
+
 /** What to do to one session, decided from its metadata before anything is written. */
 type Plan =
-  | { kind: "remove"; owner: string; archive: string; updated_at?: string }
+  | { kind: "remove"; owner: string; archive: string; read_at: number }
   | { kind: "apply"; update: SessionUpdate }
   | { kind: "none" };
 
@@ -274,19 +289,26 @@ export class Indexer {
       indexed: 0,
       removed: 0,
     };
+    const generation = this.index.generation();
     const owners = await this.ownerList();
     run.owners = owners.length;
     for (const owner of owners) {
       if (signal.aborted) return run;
-      const more = await this.drain(owner, run, signal);
+      const more = await this.drain(owner, run, signal, generation);
       if (more) {
         run.more = true;
         return run;
       }
     }
     if (signal.aborted) return run;
-    this.index.caughtUp(this.now().toISOString());
-    run.caught_up = true;
+    // Not when the index was reset during the pass: the pass did not read the rebuilt feed.
+    const caughtUp = this.index.transaction(() => {
+      if (this.index.generation() !== generation) return false;
+      this.index.caughtUp(this.now().toISOString());
+      return true;
+    });
+    run.more = !caughtUp;
+    run.caught_up = caughtUp;
     return run;
   }
 
@@ -298,8 +320,13 @@ export class Indexer {
   }
 
   /** Read `owner`'s feed from its cursor, a page at a time. True when the run's budget ran
-   * out with more to read. */
-  private async drain(owner: string, run: IndexerRun, signal: AbortSignal): Promise<boolean> {
+   * out with more to read, or the index was reset under it (`generation`). */
+  private async drain(
+    owner: string,
+    run: IndexerRun,
+    signal: AbortSignal,
+    generation: string,
+  ): Promise<boolean> {
     const prefix = keys.changes(owner);
     const cursor = this.index.cursor(owner);
     let startAfter = cursor === undefined ? undefined : this.windowStart(prefix, cursor);
@@ -325,7 +352,8 @@ export class Indexer {
       const next = held === undefined || (last !== undefined && last > held) ? last : held;
       const nextAt = next === undefined ? undefined : stampTime(next.slice(prefix.length));
       const refused: string[] = [];
-      this.index.transaction(() => {
+      const reset = this.index.transaction(() => {
+        if (this.index.generation() !== generation) return true;
         for (const plan of plans) {
           if (!this.applyPlan(plan, run) && plan.kind === "apply") {
             refused.push(plan.update.session.archive_id);
@@ -337,7 +365,10 @@ export class Indexer {
           fresh.map((key) => ({ key, at: stampTime(key.slice(prefix.length)) ?? 0 })),
           nextAt === null || nextAt === undefined ? 0 : nextAt - this.lagMs,
         );
+        return false;
       });
+      // Reset (rebuilt) since this run started: write nothing, and let the next run start over.
+      if (reset) return true;
       // An update refused because another process changed the session in between: plan it
       // again from what the index holds now.
       for (const archive of refused) this.applyPlan(await this.plan(owner, archive), run);
@@ -363,8 +394,9 @@ export class Indexer {
   private applyPlan(plan: Plan, run: IndexerRun): boolean {
     if (plan.kind === "none") return true;
     if (plan.kind === "remove") {
-      if (this.index.session(plan.owner, plan.archive) !== null) run.removed++;
-      this.index.remove(plan.owner, plan.archive, plan.updated_at);
+      const held = this.index.session(plan.owner, plan.archive) !== null;
+      // Refused only when another process read the session later; its view stands.
+      if (this.index.remove(plan.owner, plan.archive, plan.read_at) && held) run.removed++;
       return true;
     }
     const applied = this.index.apply(plan.update);
@@ -375,29 +407,26 @@ export class Indexer {
   /** What the index should do about one session, from its metadata and the traces the index
    * does not hold yet. */
   private async plan(owner: string, archive: string, attempt = 0): Promise<Plan> {
-    const metadata = await readMetadata(this.store, owner, archive);
+    // Taken before the read: a read that starts later sees this state or a newer one.
+    const readAt = this.now().getTime();
+    const metadata = await this.metadataOf(owner, archive);
     if (metadata === null || metadata.status === "redacted" || metadata.head === undefined) {
-      return {
-        kind: "remove",
-        owner,
-        archive,
-        ...(metadata ? { updated_at: metadata.updated_at } : {}),
-      };
+      return { kind: "remove", owner, archive, read_at: readAt };
     }
     const held = this.index.session(owner, archive);
-    if (held !== null && held.updated_at > metadata.updated_at) return { kind: "none" };
     const wanted = currentTraces(metadata);
     const extends_ = held !== null && startsWith(wanted, held.traces);
     const toRead = extends_ ? wanted.slice((held as IndexedSession).traces.length) : wanted;
-    const traces = await mapLimit(toRead, 4, (hash) => getTrace(this.store, owner, archive, hash));
+    const traces = await mapLimit(toRead, 4, (hash) => this.traceOf(owner, archive, hash));
     if (traces.some((t) => t === null) && attempt === 0) {
       // The session moved on (a replace deleted a trace) between the two reads: start over
       // from its metadata as it is now.
       return this.plan(owner, archive, 1);
     }
     const read = toRead
-      .map((hash, i) => ({ hash, trace: traces[i] as Trace | null }))
-      .filter((t): t is { hash: string; trace: Trace } => t.trace !== null);
+      .map((hash, i) => ({ hash, read: traces[i] ?? null }))
+      .filter((t): t is { hash: string; read: ReadTrace } => t.read !== null)
+      .map(({ hash, read }) => ({ hash, ...read }));
     if (read.length < toRead.length) {
       this.log?.warn(
         `search: ${toRead.length - read.length} trace(s) of a session of ${owner} could not be read; it is indexed without them`,
@@ -406,11 +435,56 @@ export class Indexer {
     const base = extends_ ? (held as IndexedSession).traces : [];
     const session = this.sessionFields(owner, metadata, read, extends_ ? held : null);
     session.traces = [...base, ...read.map((t) => t.hash)];
-    const events = read.flatMap(({ hash, trace }) => searchableEvents(hash, trace, this.roles));
+    const events = read.flatMap((t) => t.events);
     return {
       kind: "apply",
-      update: { session, events, replace: !extends_, ...(extends_ ? { base } : {}) },
+      update: {
+        session,
+        events,
+        replace: !extends_,
+        ...(extends_ ? { base } : {}),
+        read_at: readAt,
+      },
     };
+  }
+
+  /** A session's metadata; null when it is gone, or cannot be decoded (warned): a session the
+   * index cannot read is one it cannot serve, so it is dropped. */
+  private async metadataOf(owner: string, archive: string): Promise<SessionMetadata | null> {
+    const bytes = await getBytes(this.store, keys.metadata(owner, archive));
+    if (bytes === null) return null;
+    try {
+      const metadata = decodeJson<SessionMetadata>(bytes);
+      if (
+        typeof metadata !== "object" ||
+        metadata === null ||
+        !Array.isArray(metadata.traces) ||
+        typeof metadata.agent !== "string" ||
+        typeof metadata.session_id !== "string"
+      ) {
+        throw new Error("not session metadata");
+      }
+      return metadata;
+    } catch {
+      this.log?.warn(`search: skipped a session of ${owner} whose metadata cannot be read`);
+      return null;
+    }
+  }
+
+  /** A trace and its index documents; null when it is gone, or cannot be decoded (warned by
+   * the caller). */
+  private async traceOf(owner: string, archive: string, hash: string): Promise<ReadTrace | null> {
+    const bytes = await getBytes(this.store, keys.trace(owner, archive, hash));
+    if (bytes === null) return null;
+    try {
+      const trace = gunzipJson<Trace>(bytes);
+      if (!Array.isArray(trace?.events) || !Array.isArray(trace.records)) {
+        throw new Error("not a trace");
+      }
+      return { trace, events: searchableEvents(hash, trace, this.roles) };
+    } catch {
+      return null;
+    }
   }
 
   /** The session's index row: from its metadata, the traces read now, and (for a

@@ -16,8 +16,9 @@ import {
   type SearchResult,
   type SearchResults,
   type SearchSort,
+  type SessionMetadata,
 } from "@seshi/model";
-import { isOwner, readMetadata, type Store } from "@seshi/store";
+import { decodeJson, getBytes, isOwner, keys, type Store } from "@seshi/store";
 import type { BackendHit, BackendQuery, IndexStore } from "./backend";
 import { Indexer, type IndexerLogger, type IndexerRun } from "./indexer";
 import { defaultIndexPath } from "./paths";
@@ -161,6 +162,22 @@ export function checkRequest(request: SearchRequest, aliases = new OwnerAliases(
   };
 }
 
+/** A session's metadata as it is now; null when it is gone or cannot be decoded (it cannot be
+ * shown, and must not fail the whole search). Store errors are thrown. */
+async function liveMetadata(
+  store: Store,
+  owner: string,
+  archive: string,
+): Promise<SessionMetadata | null> {
+  const bytes = await getBytes(store, keys.metadata(owner, archive));
+  if (bytes === null) return null;
+  try {
+    return decodeJson<SessionMetadata>(bytes);
+  } catch {
+    return null;
+  }
+}
+
 /** A hit as the API answers it. */
 function resultOf(hit: BackendHit): SearchResult {
   const s = hit.session;
@@ -286,7 +303,7 @@ export class SearchService {
         : (
             await Promise.all(
               found.hits.map(async (hit) => {
-                const live = await readMetadata(
+                const live = await liveMetadata(
                   this.options.store,
                   hit.session.owner,
                   hit.session.archive_id,

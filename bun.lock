@@ -223,11 +223,11 @@
       "dependencies": {
         "@seshi/auth": "workspace:*",
         "@seshi/model": "workspace:*",
-        "@seshi/pipeline": "workspace:*",
         "@seshi/store": "workspace:*",
       },
       "devDependencies": {
         "@seshi/formats": "workspace:*",
+        "@seshi/pipeline": "workspace:*",
       },
     },
     "packages/ts/sources": {

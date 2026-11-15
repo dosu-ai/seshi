@@ -275,6 +275,87 @@ describe("the indexer (F10.2)", () => {
     expect(index.counts().sessions).toBe(7);
   });
 
+  it("adds a continuation written by a clock behind the one that wrote the session", async () => {
+    // Two API instances (or a laptop in local mode) stamp updated_at with clocks that
+    // disagree: the continuation's metadata says it is older than what it extends.
+    const first = await db().ingest({
+      agent: "trajectory",
+      session_id: "s1",
+      transcript: log("start the migration"),
+    });
+    const { indexer, find } = setup();
+    await indexer.run();
+    const behind = new Date(clock.getTime() - 400);
+    await db("alice", () => behind).ingest({
+      agent: "trajectory",
+      session_id: "s1",
+      transcript: line({ role: "user", content: "skewed continuation", timestamp: ts }),
+      offset: first.bytes_total,
+    });
+    const archive = archiveId("alice", "trajectory", "s1");
+    const metadata = await readMetadata(store, "alice", archive);
+    expect(metadata?.traces).toHaveLength(2);
+    expect(await indexer.run()).toMatchObject({ indexed: 1 });
+    expect(find("skewed")).toEqual(["alice/s1"]);
+  });
+
+  it("skips objects it cannot decode, warns, and still catches up", async () => {
+    await db().ingest({ agent: "trajectory", session_id: "s1", transcript: log("alpha") });
+    await db().ingest({ agent: "trajectory", session_id: "s2", transcript: log("beta") });
+    await db("bob").ingest({ agent: "trajectory", session_id: "s3", transcript: log("gamma") });
+    const garbage = new TextEncoder().encode("{not json");
+    // s1's trace and s3's metadata are corrupt.
+    const a1 = archiveId("alice", "trajectory", "s1");
+    const m1 = await readMetadata(store, "alice", a1);
+    await store.put(keys.trace("alice", a1, m1?.head as string), garbage);
+    await store.put(keys.metadata("bob", archiveId("bob", "trajectory", "s3")), garbage);
+    const { index, indexer, find, warnings } = setup();
+    const run = await indexer.run();
+    expect(run.caught_up).toBe(true);
+    expect(index.readyAt()).toBeDefined();
+    expect(find("beta")).toEqual(["alice/s2"]);
+    expect(find("alpha OR gamma")).toEqual([]);
+    expect(warnings.some((w) => w.includes("could not be read"))).toBe(true);
+    expect(warnings.some((w) => w.includes("metadata cannot be read"))).toBe(true);
+  });
+
+  it("writes nothing from a run the index was reset under, and starts over", async () => {
+    await db().ingest({ agent: "trajectory", session_id: "s1", transcript: log("alpha") });
+    await db("bob").ingest({ agent: "trajectory", session_id: "s2", transcript: log("beta") });
+    const index = new SqliteIndex({ path: MEMORY_INDEX, deployment: "d", events: EVENTS });
+    let resetDuringList = true;
+    // Another process sharing the file rebuilds it while this run is reading a feed.
+    const racing: Store = {
+      ...store,
+      url: store.url,
+      get: (key) => store.get(key),
+      put: (key, body, options) => store.put(key, body, options),
+      stat: (key) => store.stat(key),
+      delete: (key, options) => store.delete(key, options),
+      list: async (prefix, options) => {
+        const page = await store.list(prefix, options);
+        if (resetDuringList && prefix === keys.changes("alice")) {
+          resetDuringList = false;
+          index.reset();
+        }
+        return page;
+      },
+    };
+    const indexer = new Indexer({
+      store: racing,
+      index,
+      events: EVENTS,
+      now: () => clock,
+      ownerRefreshMs: 0,
+    });
+    const first = await indexer.run();
+    expect(first).toMatchObject({ more: true, caught_up: false, indexed: 0 });
+    expect(index.cursor("alice")).toBeUndefined();
+    expect(index.readyAt()).toBeUndefined();
+    const second = await indexer.run();
+    expect(second).toMatchObject({ caught_up: true, indexed: 2 });
+  });
+
   it("skips entries it cannot read or that name no session", async () => {
     await db().ingest({ agent: "trajectory", session_id: "s1", transcript: log("alpha") });
     await store.put(

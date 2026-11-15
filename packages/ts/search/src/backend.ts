@@ -22,7 +22,8 @@ export interface IndexedSession {
   /** Epoch ms of the earliest and latest event, when the traces say. */
   started_at?: number;
   ended_at?: number;
-  /** The metadata's `updated_at`: an update older than what the index holds is stale. */
+  /** The metadata's `updated_at`, shown and sorted on. It is stamped by whichever machine wrote
+   * the session, so it does not order updates (see `SessionUpdate.read_at`). */
   updated_at: string;
   /** The traces indexed, in the session's order. */
   traces: string[];
@@ -48,6 +49,13 @@ export interface SessionUpdate {
   /** For a continuation: the traces the index must hold for `events` to extend them. When it
    * holds others (another process got there first), the update is refused. */
   base?: readonly string[];
+  /** When the indexer started reading the session's metadata (epoch ms, this host's clock).
+   * An update read before the one the index holds is stale and refused, so a slow process
+   * sharing the file never puts back what a faster one replaced. Processes that share a file
+   * share a host, and so a clock; the metadata's `updated_at` cannot order updates, because
+   * several writers (API instances, a laptop in local mode) stamp it with clocks that
+   * disagree. Omitted: 0, before any stamped read. */
+  read_at?: number;
 }
 
 /** A query as the backend runs it: the match expression already parsed, filters already
@@ -95,12 +103,14 @@ export interface SearchBackend {
   /** What the index holds of a session, or null. */
   session(owner: string, archive: string): IndexedSession | null;
   /** Index a session's new head (F10.2). Returns false, changing nothing, when the index
-   * already holds a newer version of the session (by `updated_at`), or a continuation's
-   * `base` is not what it holds. */
+   * holds the session as read later (by `read_at`), or a continuation's `base` is not what it
+   * holds. */
   apply(update: SessionUpdate): boolean;
-  /** Drop a session (a tombstone, F10.2). With the tombstoned metadata's `updated_at`, the
-   * index remembers the removal, so an older update that arrives late is refused. */
-  remove(owner: string, archive: string, updatedAt?: string): void;
+  /** Drop a session (a tombstone, F10.2). The index remembers the removal with its read stamp
+   * (`SessionUpdate.read_at`), even for a session it never held, so an update read earlier
+   * that arrives late is refused. Returns false, changing nothing, when the index holds the
+   * session as read later. */
+  remove(owner: string, archive: string, readAt?: number): boolean;
   query(query: BackendQuery): BackendResults;
   /** Sessions and events held. */
   counts(): { sessions: number; events: number };
@@ -127,6 +137,10 @@ export interface FeedState {
   caughtUpAt(): string | undefined;
   /** A full pass over every owner finished at `at`; the first one makes the index ready. */
   caughtUp(at: string): void;
+  /** Changes on every `reset`. A run that started before a reset (in this process or another
+   * sharing the file) writes nothing once it sees it change, so a page it read earlier never
+   * moves the rebuilt index's cursors past entries the rebuild has not read. */
+  generation(): string;
   /** Run `fn` as one transaction: it all applies, or none of it. */
   transaction<T>(fn: () => T): T;
   /** Forget everything: sessions, events, cursors and readiness (a rebuild). */

@@ -5,9 +5,9 @@
  * (or `reset`) forgets them too and the index is rebuilt from the change feed.
  *
  * Several processes may share one file (a server and a local `seshi search` on the same host):
- * the file is in WAL mode with a busy timeout, every write is a transaction, and an update
- * older than what the index holds (by the metadata's `updated_at`) is refused, so a slow
- * writer never puts back what a faster one replaced. */
+ * the file is in WAL mode with a busy timeout, every write is a transaction, and an update read
+ * before what the index holds (by its read stamp, `SessionUpdate.read_at`) is refused, so a
+ * slow writer never puts back what a faster one replaced. */
 
 import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { chmodSync, mkdirSync } from "node:fs";
@@ -26,7 +26,7 @@ import { MEMORY_INDEX } from "./paths";
 import { indexText, MATCH_END, MATCH_START } from "./snippet";
 
 /** The index file's own format: a file of another format is wiped and rebuilt. */
-export const INDEX_SCHEMA = "seshi/search-index/1";
+export const INDEX_SCHEMA = "seshi/search-index/2";
 
 /** Words of context `snippet()` keeps around a match. */
 const SNIPPET_TOKENS = 24;
@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   updated_at TEXT NOT NULL,
   updated_ms INTEGER NOT NULL,
   traces TEXT NOT NULL,
+  read_ms INTEGER NOT NULL DEFAULT 0,
   removed INTEGER NOT NULL DEFAULT 0,
   UNIQUE (owner, archive_id)
 );
@@ -102,6 +103,7 @@ interface SessionRow {
   updated_at: string;
   updated_ms: number;
   traces: string;
+  read_ms: number;
   removed: number;
 }
 
@@ -237,7 +239,8 @@ export class SqliteIndex implements IndexStore {
     const { session, events } = update;
     return this.transaction(() => {
       const existing = this.row(session.owner, session.archive_id);
-      if (existing !== null && existing.updated_at > session.updated_at) return false;
+      const readAt = update.read_at ?? 0;
+      if (existing !== null && existing.read_ms > readAt) return false;
       if (!update.replace) {
         const holds = existing === null || existing.removed === 1 ? "[]" : existing.traces;
         if (holds !== JSON.stringify(update.base ?? [])) return false;
@@ -256,6 +259,7 @@ export class SqliteIndex implements IndexStore {
         session.updated_at,
         Date.parse(session.updated_at) || 0,
         JSON.stringify(session.traces),
+        readAt,
       ];
       let id: number;
       if (existing === null) {
@@ -263,8 +267,8 @@ export class SqliteIndex implements IndexStore {
           .query(
             `INSERT INTO sessions (owner, archive_id, agent, session_id, origin_agent,
                native_session_id, project, branch, source_id, visibility, started_at, ended_at,
-               updated_at, updated_ms, traces)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+               updated_at, updated_ms, traces, read_ms)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
           )
           .get(session.owner, session.archive_id, ...values) as { id: number };
         id = row.id;
@@ -276,7 +280,7 @@ export class SqliteIndex implements IndexStore {
             `UPDATE sessions SET agent = ?, session_id = ?, origin_agent = ?,
                native_session_id = ?, project = ?, branch = ?, source_id = ?, visibility = ?,
                started_at = ?, ended_at = ?, updated_at = ?, updated_ms = ?, traces = ?,
-               removed = 0
+               read_ms = ?, removed = 0
              WHERE id = ?`,
           )
           .run(...values, id);
@@ -303,21 +307,27 @@ export class SqliteIndex implements IndexStore {
     });
   }
 
-  remove(owner: string, archive: string, updatedAt?: string): void {
-    this.transaction(() => {
+  remove(owner: string, archive: string, readAt = 0): boolean {
+    return this.transaction(() => {
       const existing = this.row(owner, archive);
-      if (existing === null) return;
-      this.dropEvents(existing.id);
-      if (updatedAt === undefined) {
-        this.db.query("DELETE FROM sessions WHERE id = ?").run(existing.id);
-        return;
+      if (existing !== null && existing.read_ms > readAt) return false;
+      // Kept (or added) as a removed row, so an update read earlier that arrives late is
+      // refused. A session never held gets one too: another process may index it late.
+      if (existing === null) {
+        this.db
+          .query(
+            `INSERT INTO sessions (owner, archive_id, agent, session_id, visibility, updated_at,
+               updated_ms, traces, read_ms, removed)
+             VALUES (?, ?, '', '', 'owner', '', 0, '[]', ?, 1)`,
+          )
+          .run(owner, archive, readAt);
+        return true;
       }
-      // Kept as a removed row, so an older update that arrives late is refused.
+      this.dropEvents(existing.id);
       this.db
-        .query(
-          "UPDATE sessions SET removed = 1, traces = '[]', updated_at = max(updated_at, ?) WHERE id = ?",
-        )
-        .run(updatedAt, existing.id);
+        .query("UPDATE sessions SET removed = 1, traces = '[]', read_ms = ? WHERE id = ?")
+        .run(readAt, existing.id);
+      return true;
     });
   }
 
@@ -532,8 +542,13 @@ export class SqliteIndex implements IndexStore {
     });
   }
 
+  generation(): string {
+    return this.meta("generation") ?? "0";
+  }
+
   reset(): void {
     this.transaction(() => {
+      this.setMeta("generation", crypto.randomUUID());
       this.db.run("DELETE FROM events_text");
       this.db.run("DELETE FROM events");
       this.db.run("DELETE FROM sessions");
