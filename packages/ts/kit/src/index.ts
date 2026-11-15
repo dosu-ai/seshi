@@ -8,13 +8,22 @@
 
 import type { Envelope, FormatAdapter, StoreSessionResult } from "@seshi/model";
 
+/** Span sets (X4.2): what a connector that submits spans builds, and the adapter a span format
+ * implements. */
 export type {
+  AssembledSpans,
   Chunk,
   DocumentHead,
   FormatAdapter,
   FormatDetection,
   HeadValue,
   JsonObject,
+  ReceivedSpan,
+  SpanAdapter,
+  SpanAttribute,
+  SpanPart,
+  SpanResource,
+  SpanValue,
 } from "@seshi/model";
 
 /** Handles one kind of agent hook payload (F9): parses what the agent sends on stdin and says

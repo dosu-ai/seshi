@@ -7,6 +7,7 @@
  * the same layer and may not import each other (X3.2). */
 
 import type { NormalizedRecord } from "./schemas/trajectory";
+import type { SpanAdapter } from "./spans";
 
 /** Where a chunk sits in its log. */
 export interface Chunk {
@@ -54,4 +55,7 @@ export interface FormatAdapter {
   readonly chunkable: boolean;
   readonly detect?: FormatDetection;
   normalize(transcript: string, chunk?: Chunk): NormalizedRecord[];
+  /** For a format that also arrives as span sets (OTLP, Datadog): how its spans are grouped,
+   * normalized and assembled (X4.2). A format without it takes logs only. */
+  readonly spans?: SpanAdapter;
 }

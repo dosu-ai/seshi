@@ -137,4 +137,17 @@ export {
   validateRecords,
   validateTraceRecords,
 } from "./schemas/trajectory";
+export type {
+  AssembledSpans,
+  ReceivedSpan,
+  SpanAdapter,
+  SpanAttribute,
+  SpanEvent,
+  SpanLink,
+  SpanPart,
+  SpanResource,
+  SpanStatus,
+  SpanTool,
+  SpanValue,
+} from "./spans";
 export { VERSION } from "./version";
