@@ -51,6 +51,7 @@ import {
   type SessionState,
   StateUnreadable,
   sessionKey,
+  sessionToggle,
   sessionWord,
   spoolCount,
   stateFacts,

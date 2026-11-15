@@ -31,7 +31,6 @@ import { DEFAULT_RULES } from "./rules";
 import type { RulesSnapshot } from "./rules-cache";
 import { type RetractOutcome, RetractRefused, type SessionSink, SignInNeeded } from "./sink";
 import { appendSpool } from "./spool";
-import { sessionWord } from "./status";
 import {
   endPause,
   freeze,
@@ -40,6 +39,7 @@ import {
   updateState,
   uploadedOffset,
 } from "./state";
+import { sessionWord } from "./status";
 import { type PreRedactor, retractHash, Uploader, type UploaderOptions } from "./uploader";
 import { acquireUploaderLock, type HeldUploaderLock } from "./uploader-lock";
 
@@ -1361,5 +1361,24 @@ describe("resending stale sessions (X4.9)", () => {
     expect(rebuilds()[0]).toMatchObject({ offset: 0, idempotency_key: "k1" });
     expect(session().rebuild).toBeUndefined();
     expect(session().rebuilt_for).toBeUndefined();
+  });
+
+  it("rebuilds a session a pause stopped only up to where it stopped (F9.5 with X4.9)", async () => {
+    writeFileSync(transcript(), line("one") + line("two"));
+    hooked();
+    await uploader().pass();
+    const stoppedAt = Buffer.byteLength(line("one") + line("two"));
+    await updateState(paths, (s) => {
+      freeze(s.sessions["fake:s1"] as SessionState, clock.toISOString(), stoppedAt);
+    });
+    appendFileSync(transcript(), line("three"));
+    await updateState(paths, (s) => {
+      (s.sessions["fake:s1"] as SessionState).rebuild = { at: clock.toISOString(), key: "k2" };
+    });
+    await uploader().pass();
+    expect(rebuilds()).toHaveLength(1);
+    expect(rebuilds()[0]?.transcript).toBe(line("one") + line("two"));
+    expect(server.uploads.map((u) => u.transcript).join("")).not.toContain("three");
+    expect(session().rebuild).toBeUndefined();
   });
 });
