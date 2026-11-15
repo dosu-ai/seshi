@@ -311,6 +311,34 @@ what changed.
   test's 1 s step timeout are the "ops, medium" flaky-suite entry; transcripts dropping token
   usage and the per-turn model, with no fixture to notice, is the "coverage, high" entry
   (`claude-usage` and `codex-usage` goldens).
+- **docs, low**: `seshi.example.toml`'s Datadog source filtered on `ml_app = "trajectory"`,
+  which matches none of Trajectory's spans (`coding-agents`, as docs/datadog.md and the
+  fixtures say), so a copied block polled "successfully" and imported nothing. It now says
+  `coding-agents`.
+- **docs, low**: docs/config.md said `config check` exits 1 on an unusable config; it exits 3
+  (`config`), as docs/cli.md's table says. The text says 3.
+- **docs, low**: the CLI and the capture uploader sent `User-Agent: @dosu/sessiondb/<version>`
+  (no call site set `userAgent`), so seshi traffic looked like the old SDK. They now send
+  `seshi/<version>` (`apps/seshi/src/user-agent.ts`), and `@seshi/client`'s default is
+  `@seshi/client/<version>` (docs/client.md). Tests: `seshi login` and `sessions ls` requests,
+  and the uploader's upload and rules fetch, carry `seshi/<version>`. The normalizer name
+  `@dosu/sessiondb` is unchanged (16's note: pinned in goldens, a decision).
+- **docs, low**: spec/openapi.yaml's Agent enum said `atif` takes ATIF-v1.0 to v1.7; the server
+  reads v1.8 (renders stay v1.7). It says v1.8.
+- **docs, low**: spec/openapi.yaml's 413 for `POST /otlp/v1/traces` named
+  `limits.max_upload_bytes`; the receiver refuses only past twice that plus 1 MiB (decoded), the
+  bound `POST /v1/sessions` documents. It now says so.
+- **docs, low**: docs/config.md still marked `server.public_url` *later* (sign-in), but sign-in
+  is built and nothing reads the field (the CLI goes to the IdP itself, X5.7). `config check`
+  and `serve` now warn that it has no effect, the schema and docs say it is accepted but
+  unused, and the "*later*" note is gone (no field carries it). Test: `checkServerConfig`.
+- **docs, low**: spec/schemas/metadata.schema.json and spec/layout.md still called
+  `retract_hash` "reserved for F9.7", though retraction is built and checks it. They describe
+  it as live; generated types regenerated.
+- **docs, low**: SECURITY.md said only admin and fresh session tokens can delete; a static
+  token from config deletes its own owner's sessions with no freshness rule. It says so.
+- **docs, low**: spec/openapi.yaml was titled `sessiondb` and described "a sessiondb server".
+  It names seshi; the legacy Letta render's `sessionstorage/trace/1` mentions stay.
 
 ## Not fixed
 
