@@ -138,3 +138,18 @@ again: sessions already redacted with the current rules are skipped. Each stored
 the rule set it was written under, so a session that got a chunk under the new rules before the
 backfill ran is still redone as a whole. Restart the server with the new packs first, or it
 keeps writing with the old rules. Exit 8 when a session changed while it ran (run it again).
+Each session it looks at is then swept (below), and the summary says how many trace objects
+the sweep deleted (`sweep` in `--json`).
+
+A backfill or a replace that stops partway (a crash, a failed delete) can leave trace objects
+the session's metadata no longer names, holding what the new rules or the replacing write took
+out. No reader is served them, and a sweep deletes them (F2.5): any trace object that no
+metadata names (not the head, nor any continuation of a chunked session) and that is over an
+hour old by the store's listing (S3's `LastModified`, a file's mtime). The age guard keeps it
+off the object of a publish still in flight, which is written before the pointer names it.
+Only trace objects are deleted. It runs on each session a backfill looks at, after every
+replace on the replaced session, and once a day across the whole bucket on the worker (the
+`sweep` job, whose last run `seshi workers status` shows). `seshi redact sweep [--owner
+<id>]… [--dry-run] [--json]` runs it now, where the server config is: from cron on a
+deployment with no worker, or to clear the bucket at once. It lists what it deletes; exit 1 when
+a session could not be swept (the next sweep tries again).

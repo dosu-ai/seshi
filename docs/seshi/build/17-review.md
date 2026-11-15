@@ -129,7 +129,8 @@ what changed.
   or null, otherwise), which also covers objects a stopped replace leaves. openapi.yaml,
   server.md and 07 say so. Tests: a backfill whose delete fails, then `getTrace` of the old hash
   is null though the object is there; the API serves the head by hash and 404s an unnamed
-  object on both routes. Deleting the leftovers is in the list below.
+  object on both routes. Deleting the leftovers was left for a decision (F2.5, decided in
+  [18](18-decisions.md)) and is built in [23](23-orphan-sweep.md).
 
 - **background, medium**: X7.1's "each job is also a one-shot command" did not hold for the
   span assembler, and docs/server.md offered cron `seshi sync run` in place of a worker. With
@@ -379,12 +380,6 @@ Run at `seshi-17-review` after the fixes above:
   either sign-off on the narrowed reading or work to make the suite pass there (shell-script
   fixtures, POSIX paths, file modes), which cannot be checked without a Windows host. Left for
   a decision.
-- **dataflow, medium** (split vote, confirmed): deleting the trace objects a stopped backfill
-  (or replace) leaves behind. Since this review no reader is served them (above), but they stay
-  in the bucket against F2.5's "deleted, not kept". A sweep of objects the metadata does not
-  name races a concurrent publish (its object is written before the pointer names it), so it
-  needs an age guard from the store's listing or a recorded list of pending deletions written
-  before the pointer moves (a metadata schema change). Left for that decision.
 - **background, low** (split vote, judged a documented deviation): an S3 chunk at a stale
   manifest offset writes an `offset_mismatch` failure record before the poller resends the
   object whole, and `workers status` / `sync status` then warn about it. 11's deviation 10

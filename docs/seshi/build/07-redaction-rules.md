@@ -257,10 +257,10 @@ Reference for operators: [docs/redaction.md](../../redaction.md).
   session moved plans again instead of writing a continuation with no meta record.
 - **Backfill order and `updated_at`.** The change entry is appended before the old trace objects
   are deleted, so a stopped run leaves orphans at worst, never a rewritten session no reader was
-  told of (the next run would find it current). Those orphans hold what the new rules take out
-  and no later run deletes them; since 17 the trace routes and `getTrace` serve only a hash the
-  session's `traces` name, so no reader gets them (deleting them is in 17's not-fixed list). A
-  session with nothing new to take out keeps
+  told of (the next run would find it current). Those orphans hold what the new rules take out;
+  since 17 the trace routes and `getTrace` serve only a hash the session's `traces` name, so no
+  reader gets them, and since [23](23-orphan-sweep.md) the sweep deletes them (the next run's,
+  or the worker's daily one). A session with nothing new to take out keeps
   its `updated_at`: only the rule set is recorded.
 - **Pre-redaction left fewer keys alone than the server.** `gitBranch`, `git_branch` and
   `source` are now structural in `redactTranscript`, as in the record redaction. Since 17 the

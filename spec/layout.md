@@ -455,6 +455,12 @@ with an entry of its own. Each envelope is planned against the session as it rea
 racing on one session one lands and the other is planned again (a whole log) or told where the
 log now ends (a chunk).
 
+A trace object that no `metadata.json` names (in `traces` or as `head`) and that is over an hour
+old by the store's listing is deleted by the server's sweep (F2.5): daily, after a redaction
+backfill and after a replace. So a writer names its object within the hour of writing it, or
+writes it again; a publish that finds its object already there writes it again with its own
+bytes, and the sweep checks an object's age once more just before it deletes it.
+
 ## Reading
 
 - One session: `metadata.json`, then `trace.<head>.json.gz`; no `head` means nothing to read
@@ -473,4 +479,4 @@ log now ends (a chunk).
   disk, never in the bucket, derived and rebuildable (X6.1).
 
 A reader needs `s3:ListBucket` on the prefix and `s3:GetObject` under it. A writer
-additionally needs `s3:PutObject`; tombstoning and pruning need `s3:DeleteObject`.
+additionally needs `s3:PutObject`; tombstoning, pruning and the sweep need `s3:DeleteObject`.

@@ -94,8 +94,9 @@ repository's code.
 | `search <words…> [filters] [--json]`, `search --status\|--rebuild` | Search what you may read (F10); see [search.md](search.md) |
 | `redact test [<file> \| -] [--pack <file>]… [--config]` | Check rule packs' test strings, and show how often each rule fires on a transcript or text and where, never what matched ([redaction.md](redaction.md#trying-and-applying-rules)) |
 | `redact backfill (--since <30d> \| --all) [--dry-run]` | Apply the server's current rules to stored sessions (F2.5, [redaction.md](redaction.md#trying-and-applying-rules)). Exit 8 when a session changed while it ran |
+| `redact sweep [--owner <id>]… [--dry-run]` | Delete the trace objects no session names that are over an hour old, as the worker does daily (F2.5, [redaction.md](redaction.md#trying-and-applying-rules)). Exit 1 when a session could not be swept |
 
-`serve`, `admin`, `workers`, `sync`, `reprocess`, `redact backfill` and `review` run where the
+`serve`, `admin`, `workers`, `sync`, `reprocess`, `redact backfill`, `redact sweep` and `review` run where the
 server's config and bucket keys are: they load the server config the way `serve` does
 (`--config`, `SESHI_CONFIG`, `./seshi.toml`, `/etc/seshi/seshi.toml`, then `SESHI_*` env and
 `--set`). `workers status` and `sync status|failed|dropped` also run from an admin's laptop

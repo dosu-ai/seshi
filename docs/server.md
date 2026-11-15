@@ -92,6 +92,7 @@ The worker's jobs:
 | `retention` | 6h | Prunes drop and failure records and source health days past `[records]` retention |
 | `source:<id>` | the source's `interval` | Polls a source through its connector (X3.11), from its checkpoint (X7.4): Datadog LLM Observability for `type = "datadog"` ([datadog.md](datadog.md)), a bucket for `type = "s3"` ([s3-sync.md](s3-sync.md)) |
 | `assembler` | `worker.assembly_interval` (30s) | Publishes sessions whose spans (OTLP, F4; Datadog, F5) have been quiet for their source's `quiet_period`, from the pending markers (X7.4); its backlog is the sessions waiting |
+| `sweep` | 1d, and when the worker starts | Deletes trace objects no session's metadata names that are over an hour old: what a redaction backfill, replace or publish that stopped partway left behind (F2.5, [redaction.md](redaction.md#trying-and-applying-rules)) |
 
 One job runs on every instance with the `api` role instead, worker or not:
 
@@ -104,14 +105,16 @@ interval. A poll whose envelope failed transiently (the bucket) never saves its 
 past it, so the retry reads it again. A session the assembler could not publish (the bucket
 failed) keeps its marker and is tried again. Each worker job is also a one-shot command for
 cron: `seshi sync run <id>` polls a source, `seshi sync assemble` runs the span assembler,
-`seshi sync prune` runs retention. A deployment with no worker needs all three: polling alone
-stores OTLP and Datadog spans but never publishes their sessions, and without `prune` drop and
-failure records are never removed.
+`seshi sync prune` runs retention, `seshi redact sweep` runs the sweep. A deployment with no
+worker needs all four: polling alone stores OTLP and Datadog spans but never publishes their
+sessions, without `prune` drop and failure records are never removed, and without `sweep` the
+trace objects a stopped write left stay in the bucket (no reader is served them).
 
 Where the config and bucket keys are:
 
 - `seshi workers status [--json]`: the worker (`running`, `stopped`, `never`, or `several`),
-  each job's last run, last error and backlog, and each source's drop and failure counts.
+  each job's last run (and what it did, such as the sweep's `deleted`), last error and backlog,
+  and each source's drop and failure counts.
   Exit 8 when something needs a look. `GET /v1/admin/jobs` answers the same for admins.
 - `seshi sync run <id>`, `sync assemble`, `sync prune`, `sync status [<id>]`,
   `sync failed <id>`, `sync dropped <id>`: poll once; publish the span sessions that went
