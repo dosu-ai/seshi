@@ -153,13 +153,12 @@ store and on an `S3Store` over the writable `FakeS3`.
    session's span objects, span records that do not parse, the sessiondb marker. The age guard
    also applies to unnamed span messages (written before the record that names them) and to a
    tombstoned session's span objects.
-9. **`format_version_missing` is a warning, and the healthy bucket has one.** A stub continued by
-   a chunk records no `normalizer.format_version`: the chunk path keeps the session's version
-   (21's `session_normalizer`) and a stub has none (20), so the session counts as stale for ever
-   and its uploader resends it whole once per format version. Found by this checker, where 20
-   and 21 meet; not fixed here (the brief is read-only). The tests set that one finding aside
-   by name (`STALE_STUB`). Fix: let a chunk to a stub take the current normalizer, since nothing
-   of the session was stored by an older one.
+9. **`format_version_missing` is a warning; it found a real gap, fixed here.** A stub continued
+   by a chunk recorded no format version: the chunk kept the session's version (21) and a stub
+   has none (20), so the session counted as stale for ever and its uploader resent it whole at
+   every format bump. A chunk to a stub now takes the current normalizer (`pipeline.ts`, the
+   chunk path), since review dropped everything before it. The healthy bucket in
+   `tests/store/check.test.ts` checks with no findings at all, which guards the fix.
 10. **`readTraces`** (default true) is an option the brief did not ask for: re-hashing every
     trace is the most expensive part, and a quick check of presence only is useful on a large
     bucket or between scenario steps. The CLI always reads them.
@@ -191,7 +190,6 @@ store and on an `S3Store` over the writable `FakeS3`.
   against the config (the server refuses to start on a mismatch, so the CLI does not compare).
 - **Clock skew.** Ages come from the store's clock and are compared with the checker's, as for
   the sweep: a checker clock far ahead turns young objects into old ones.
-- **The stale-stub gap** in deviation 9.
 - CI has not run (no PR).
 
 ## Tests

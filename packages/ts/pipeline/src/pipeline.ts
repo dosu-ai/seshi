@@ -748,16 +748,19 @@ export class Pipeline {
     // and its meta record was in what review dropped: the stub's own stands in.
     const meta = session.head ? await this.headMeta(run, session.head) : stubMeta(envelope);
     // The tail is this normalizer's, the prefix still whatever built it: a session an older one
-    // built stays stale until it is rebuilt whole (X4.9).
+    // built stays stale until it is rebuilt whole (X4.9). A stub has no stored prefix (review
+    // dropped it), so its first trace is all this normalizer's: it takes the current version, or
+    // it would count as stale forever and be resent whole at every format bump.
     const current = this.formats.normalizerFor(envelope.format);
     const builtWith = session.normalizer?.format_version;
-    const sessionNormalizer: Normalizer = this.formats.isStale(envelope.format, builtWith)
-      ? {
-          name: current.name,
-          version: current.version,
-          ...(builtWith ? { format_version: builtWith } : {}),
-        }
-      : current;
+    const sessionNormalizer: Normalizer =
+      session.head !== undefined && this.formats.isStale(envelope.format, builtWith)
+        ? {
+            name: current.name,
+            version: current.version,
+            ...(builtWith ? { format_version: builtWith } : {}),
+          }
+        : current;
     return this.commit(run, {
       sessionNormalizer,
       write: [...(meta ? [meta] : []), ...redacted.records],

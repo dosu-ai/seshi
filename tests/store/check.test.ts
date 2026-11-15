@@ -132,17 +132,8 @@ function watched(store: Store): { store: Store; writes: string[] } {
   };
 }
 
-/** A stub continued by a chunk records no normalizer `format_version`: the chunk keeps the
- * session's version (21), and a stub has none (20), so the session counts as stale and its
- * uploader resends it whole. A gap where 20 and 21 meet, which this checker found; it is not
- * fixed here (see 31's note). Every healthy bucket below has it, on bob's `s5`. */
-const STALE_STUB = archiveId("bob", "trajectory", "s5");
-
-/** The findings, without the known one on `STALE_STUB`. */
-const unexpected = (report: CheckReport) =>
-  report.findings.filter(
-    (f) => !(f.code === "format_version_missing" && f.archive_id === STALE_STUB),
-  );
+/** Every finding of a report. A healthy bucket below has none. */
+const unexpected = (report: CheckReport) => report.findings;
 const codes = (report: CheckReport) =>
   unexpected(report)
     .map((f) => f.code)
@@ -304,15 +295,9 @@ describe.each([
     await healthy();
     const { store: readOnly, writes } = watched(store);
     const report = await checkStore(readOnly);
-    // No errors. The one warning is the stub continued by a chunk (see STALE_STUB).
-    expect(report.findings).toEqual([
-      expect.objectContaining({
-        severity: "warn",
-        code: "format_version_missing",
-        owner: "bob",
-        archive_id: STALE_STUB,
-      }),
-    ]);
+    // Nothing at all: no errors and no warnings. A stub continued by a chunk (bob's s5) records
+    // the current format version, so it is not stale.
+    expect(report.findings).toEqual([]);
     expect(report.counts).toMatchObject({
       owners: 3,
       sessions: 6,
@@ -322,7 +307,7 @@ describe.each([
       span_records: 2,
       tokens: 1,
       errors: 0,
-      warns: 1,
+      warns: 0,
     });
     expect(report.counts.span_messages).toBe(
       (await listSpanMessages(store, SVC, archive(OTLP_SESSION, SVC, "otlp-genai"))).size,
@@ -431,7 +416,7 @@ describe.each([
     expect(unexpected(report)).toEqual([
       expect.objectContaining({ severity: "warn", code: "orphan_trace", key }),
     ]);
-    expect(report.counts).toMatchObject({ errors: 0, warns: 2 });
+    expect(report.counts).toMatchObject({ errors: 0, warns: 1 });
     // The age guard is the caller's to set.
     expect(unexpected(await checkStore(store, { minAgeMs: 3 * HOUR }))).toEqual([]);
     // And an old unnamed object where there is no metadata at all.
