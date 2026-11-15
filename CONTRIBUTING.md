@@ -59,6 +59,15 @@ S3-compatible endpoint ([RustFS](https://github.com/rustfs/rustfs)); to run it l
 `SESSIONDB_TEST_S3_ENDPOINT`, `_BUCKET`, `_ACCESS_KEY` and `_SECRET_KEY` at any S3-compatible
 service. Without them it skips.
 
+## Verifying a change end to end
+
+Unit and integration tests run seshi in-process. To show a change working the way a user meets
+it (hooks, the uploader, the CLI, a served instance, the explore page), use the agent skill in
+[.claude/skills/verify-seshi](.claude/skills/verify-seshi/SKILL.md). Its `control-seshi` helper
+starts a throwaway, isolated seshi (`up`, or `up --server`), drives it, and keeps the evidence in
+`.verify/seshi/<run-id>/` (gitignored). The feature map in its `features/` folder has the recipe
+for each user-facing feature; keep it up to date when a feature's behaviour changes.
+
 ## What a change needs
 
 - Tests. Behaviour that readers of the bucket depend on (`spec/layout.md`) needs a test that
