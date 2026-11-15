@@ -368,6 +368,16 @@ describe("install scripts and release targets agree", () => {
     expect(sh).not.toMatch(/\$\{?SESHI_/);
     expect(ps1).not.toMatch(/\$env:SESHI_/i);
   });
+
+  it("install.ps1 sets nothing in the caller's scope (`irm … | iex` runs it there)", () => {
+    // After the param block, everything is inside one `& { … }` child scope.
+    const after = ps1.slice(ps1.indexOf("\n)\n") + 3);
+    const code = after.split("\n").filter((l) => l.trim() !== "" && !l.startsWith("#"));
+    expect(code[0]).toBe("& {");
+    expect(code.at(-1)).toBe("}");
+    expect(code.slice(1, -1).every((l) => l.startsWith("  "))).toBe(true);
+    expect(code.slice(1, -1).join("\n")).toContain("$ErrorActionPreference = 'Stop'");
+  });
 });
 
 describe.skipIf(!Bun.which("pwsh"))("install.ps1 (pwsh)", () => {
@@ -383,4 +393,37 @@ describe.skipIf(!Bun.which("pwsh"))("install.ps1 (pwsh)", () => {
     );
     expect(await proc.exited).toBe(0);
   });
+
+  // Off Windows the script stops at once ("this script is for Windows"), so nothing downloads.
+  it.skipIf(process.platform === "win32")(
+    "leaves the caller's session as it was when run through iex",
+    async () => {
+      const proc = Bun.spawn(
+        [
+          "pwsh",
+          "-NoProfile",
+          "-Command",
+          [
+            `try { Get-Content -Raw '${PS1}' | Invoke-Expression } catch { }`,
+            "$ErrorActionPreference",
+            "$ProgressPreference",
+            "[bool](Get-Command Install-Seshi -ErrorAction SilentlyContinue)",
+            "[bool](Get-Variable Repository -ErrorAction SilentlyContinue)",
+            // Strict mode would make reading an unset variable throw.
+            "try { $null = $notSetAnywhere; 'not strict' } catch { 'strict' }",
+          ].join("; "),
+        ],
+        { stdout: "pipe", stderr: "pipe" },
+      );
+      const out = await new Response(proc.stdout).text();
+      expect(await proc.exited).toBe(0);
+      expect(out.trim().split(/\r?\n/)).toEqual([
+        "Continue",
+        "Continue",
+        "False",
+        "False",
+        "not strict",
+      ]);
+    },
+  );
 });

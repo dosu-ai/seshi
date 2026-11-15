@@ -68,7 +68,9 @@ and `@seshi/client` libraries), and install scripts for macOS/Linux (`install.sh
   - It installs to `%LOCALAPPDATA%\Programs\seshi`, renaming a running `seshi.exe` aside first.
   - It adds the folder to the user `PATH` through the registry as `REG_EXPAND_SZ`, so
     `%USERPROFILE%` entries survive, broadcasts the change, and updates the current session.
-  - It throws rather than calling `exit`, so `irm | iex` never closes the user's window.
+  - It throws rather than calling `exit`, so `irm | iex` never closes the user's window, and
+    (17-review) its body runs in an `& { }` child scope, so `iex` leaves no strict mode,
+    preferences, variables or functions in the user's session.
 - **Smoke test** (`smoke.ts`, `bun run release:smoke <binary> [--keychain required|allowed|off]`):
   1. `--version`.
   2. `admin init` and `serve` on a temporary folder store on 127.0.0.1.
