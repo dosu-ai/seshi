@@ -133,11 +133,21 @@ export {
 export {
   deleteSpans,
   listSpanKeys,
+  listSpanMessages,
   listSpans,
+  MissingSpanMessage,
+  type PutSpansOptions,
   putSpan,
   putSpans,
   SPAN_SCHEMA,
+  SpanMessages,
   type SpanRecord,
+  type StoredInput,
+  type StoredMessageRef,
+  spanRecords,
+  storedHashes,
+  storedInputOf,
+  withInput,
 } from "./spans";
 export {
   type DeleteOptions,

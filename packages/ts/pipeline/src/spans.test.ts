@@ -276,6 +276,46 @@ describe("span batches through the pipeline", () => {
     expect(await listSpans(store, OWNER, ARCHIVE)).toEqual([]);
   });
 
+  it("removes a session's stored input messages when it is deleted or retracted (22)", async () => {
+    const { pipeline, assemble } = setup();
+    const messageKeys = async (archive: string) =>
+      (await store.list(keys.spanMessages(OWNER, archive))).keys;
+    // Published, then retracted (F9.7 goes through the same tombstone).
+    await pipeline.submit(envelope([chat("first question", "first answer")]));
+    await pipeline.submit(envelope([chat("second question", "second answer")]));
+    later(QUIET);
+    await assemble();
+    expect(await readMetadata(store, OWNER, ARCHIVE)).not.toBeNull();
+    expect(await messageKeys(ARCHIVE)).toHaveLength(2);
+    await tombstone({
+      store,
+      owner: OWNER,
+      agent: "otlp-genai",
+      session_id: SESSION,
+      now,
+      reason: "retracted",
+    });
+    expect(await messageKeys(ARCHIVE)).toEqual([]);
+    expect((await store.list(keys.spans(OWNER, ARCHIVE))).keys).toEqual([]);
+
+    // Never published (still pending): deleted all the same.
+    const pending = archiveId(OWNER, "otlp-genai", "sesn_pending");
+    await pipeline.submit(
+      envelope([chat("a pending question", "an answer")], { session_key: "sesn_pending" }),
+    );
+    expect(await messageKeys(pending)).toHaveLength(1);
+    expect(
+      await tombstone({
+        store,
+        owner: OWNER,
+        agent: "otlp-genai",
+        session_id: "sesn_pending",
+        now,
+      }),
+    ).toEqual({ removed: 1 });
+    expect((await store.list(keys.spans(OWNER, pending))).keys).toEqual([]);
+  });
+
   it("deletes the span records of a session the filter refused, which has no metadata", async () => {
     // Review finding: tombstone returned before deleting spans when there was no metadata, so
     // a never-published session's span records could not be deleted at all.

@@ -289,15 +289,33 @@ describe("POST /otlp/v1/traces", () => {
         );
       }
     }
+    // And in a user message, which is stored once as one of the session's messages (22).
+    for (const span of spans) {
+      for (const kv of span.attributes ?? []) {
+        if (kv.key === "gen_ai.input.messages") {
+          kv.value.stringValue = kv.value.stringValue.replace(
+            "Please fix it.",
+            `Please fix it. token ${GITHUB_TOKEN}`,
+          );
+        }
+      }
+    }
     expect((await send(request)).status).toBe(200);
     const atRest = JSON.stringify(await listSpans(booted.store, OWNER, ARCHIVE));
     expect(atRest).not.toContain(GITHUB_TOKEN);
     expect(atRest).toContain("[redacted:github-token]");
+    // Nothing under the session's spans/ holds it, the stored messages included.
+    const objects = (await booted.store.list(keys.spans(OWNER, ARCHIVE), { limit: 1000 })).keys;
+    expect(objects.some((k) => k.startsWith(keys.spanMessages(OWNER, ARCHIVE)))).toBe(true);
+    for (const key of objects) {
+      const text = new TextDecoder().decode((await booted.store.get(key))?.body);
+      expect(text).not.toContain(GITHUB_TOKEN);
+    }
     later(20_000);
     await assemble();
     expect(JSON.stringify(await trace())).not.toContain(GITHUB_TOKEN);
     const metadata = await readMetadata(booted.store, OWNER, ARCHIVE);
-    expect(metadata?.redaction?.counts["github-token"]).toBe(2);
+    expect(metadata?.redaction?.counts["github-token"]).toBe(3);
   });
 
   it("republishes a session when late spans arrive, extending it", async () => {
@@ -363,6 +381,9 @@ describe("POST /otlp/v1/traces", () => {
     expect((await send(fixture("managed-agents-session"))).status).toBe(200);
     later(20_000);
     await assemble();
+    // The inputs' messages, stored once each (22), go with the records.
+    const messages = keys.spanMessages(OWNER, ARCHIVE);
+    expect((await booted.store.list(messages)).keys.length).toBeGreaterThan(0);
     const response = await app.fetch(
       new Request(`http://seshi.test/v1/sessions/otlp-genai/${SESSION}?owner=svc%3Aconsole`, {
         method: "DELETE",
@@ -371,6 +392,7 @@ describe("POST /otlp/v1/traces", () => {
     );
     expect(response.status).toBe(200);
     expect(await listSpans(booted.store, OWNER, ARCHIVE)).toEqual([]);
+    expect((await booted.store.list(messages)).keys).toEqual([]);
     // A late batch for a deleted session is refused, and nothing of it is kept.
     const again = await send(fixture("managed-agents-session"), { encoding: "json" });
     expect(await again.json()).toMatchObject({ partialSuccess: { rejectedSpans: "10" } });

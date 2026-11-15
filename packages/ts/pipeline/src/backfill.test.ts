@@ -390,45 +390,6 @@ describe("backfillRedaction (F2.5)", () => {
     expect(JSON.stringify(await db.getTrace("trajectory", "s1"))).not.toContain("ACME-1234");
   });
 
-  it("writes its change entry before the pointer: a run stopped between leaves the session as it was (decision 7 of 18)", async () => {
-    await store1("s1", meta() + user(`key ACME-1234 ${LONG}`) + reply("ok"));
-    const archive = archiveId("alice", "trajectory", "s1");
-    const before = await metadata("s1");
-    // The pointer update fails once, after the change entry landed.
-    let armed = true;
-    const failing: Store = new Proxy(store, {
-      get(target, prop, receiver) {
-        if (prop === "put") {
-          return async (key: string, body: Uint8Array, options?: Parameters<Store["put"]>[2]) => {
-            if (armed && key === keys.metadata("alice", archive)) {
-              armed = false;
-              throw new Error("stopped");
-            }
-            return target.put(key, body, options);
-          };
-        }
-        return Reflect.get(target, prop, receiver);
-      },
-    }) as Store;
-    await expect(run({ store: failing })).rejects.toThrow("stopped");
-    const since = { since: "2030-01-01T00:00:00Z" };
-    const { entries } = await readChanges(store, "alice", since);
-    expect(entries.map(({ entry: e }) => [e.kind, e.replace, e.reason])).toEqual([
-      ["published", true, "redacted"],
-    ]);
-    // The session is as it was: its pointer, and its old trace, which the entry's does not
-    // replace (the new object went again).
-    expect(await metadata("s1")).toEqual(before);
-    const old = await getTrace(store, "alice", archive, before?.head as string);
-    expect(JSON.stringify(old)).toContain("ACME-1234");
-    const named = entries[0]?.entry.content_hash as string;
-    expect(await getTrace(store, "alice", archive, named)).toBeNull();
-    // The next run rewrites it, with an entry of its own.
-    expect((await run()).outcomes).toMatchObject({ rewritten: 1 });
-    expect((await readChanges(store, "alice", since)).entries).toHaveLength(2);
-    expect((await metadata("s1"))?.head).toBe(named);
-  });
-
   it("reports a session whose trace is missing as a conflict", async () => {
     const stored = await store1("s1", meta() + user(`ACME-1234 ${LONG}`) + reply("ok"));
     const archive = archiveId("alice", "trajectory", "s1");
@@ -669,6 +630,45 @@ describe("backfillRedaction (F2.5)", () => {
     expect((await run({ owners: ["bob"] })).spans).toBe(1);
   });
 
+  it("writes its change entry before the pointer: a run stopped between leaves the session as it was (decision 7 of 18)", async () => {
+    await store1("s1", meta() + user(`key ACME-1234 ${LONG}`) + reply("ok"));
+    const archive = archiveId("alice", "trajectory", "s1");
+    const before = await metadata("s1");
+    // The pointer update fails once, after the change entry landed.
+    let armed = true;
+    const failing: Store = new Proxy(store, {
+      get(target, prop, receiver) {
+        if (prop === "put") {
+          return async (key: string, body: Uint8Array, options?: Parameters<Store["put"]>[2]) => {
+            if (armed && key === keys.metadata("alice", archive)) {
+              armed = false;
+              throw new Error("stopped");
+            }
+            return target.put(key, body, options);
+          };
+        }
+        return Reflect.get(target, prop, receiver);
+      },
+    }) as Store;
+    await expect(run({ store: failing })).rejects.toThrow("stopped");
+    const since = { since: "2030-01-01T00:00:00Z" };
+    const { entries } = await readChanges(store, "alice", since);
+    expect(entries.map(({ entry: e }) => [e.kind, e.replace, e.reason])).toEqual([
+      ["published", true, "redacted"],
+    ]);
+    // The session is as it was: its pointer, and its old trace, which the entry's does not
+    // replace (the new object went again).
+    expect(await metadata("s1")).toEqual(before);
+    const old = await getTrace(store, "alice", archive, before?.head as string);
+    expect(JSON.stringify(old)).toContain("ACME-1234");
+    const named = entries[0]?.entry.content_hash as string;
+    expect(await getTrace(store, "alice", archive, named)).toBeNull();
+    // The next run rewrites it, with an entry of its own.
+    expect((await run()).outcomes).toMatchObject({ rewritten: 1 });
+    expect((await readChanges(store, "alice", since)).entries).toHaveLength(2);
+    expect((await metadata("s1"))?.head).toBe(named);
+  });
+
   it("redacts the span records beside a stub (F3.4), which has no trace to redact", async () => {
     const oldRules = compileRuleSet();
     // A session whose first envelope review dropped: a stub, no trace.
@@ -719,6 +719,70 @@ describe("backfillRedaction (F2.5)", () => {
     expect(report.outcomes.skipped).toBe(1);
     expect(report.spans).toBe(1);
     expect(JSON.stringify(await listSpans(store, "alice", stub))).not.toContain("ACME-9999");
+  });
+
+  it("redacts the input messages span records share, and deletes the ones it replaced (22)", async () => {
+    const oldRules = compileRuleSet();
+    const archive = archiveId("alice", "otlp-genai", "sesn_history");
+    const said = (role: "user" | "assistant", content: string) => ({
+      role,
+      content,
+      timestamp: ts,
+    });
+    const history = [
+      said("user", "hello there"),
+      said("assistant", "the key is ACME-1234"),
+      said("user", "thanks, and ACME-5678?"),
+      said("assistant", "no"),
+    ];
+    const span = (n: number, input: unknown[], rules = oldRules) => ({
+      received_at: ts,
+      source_id: "console",
+      format: "otlp-genai",
+      part: {
+        trace_id: "ef".repeat(16),
+        span_id: n.toString(16).padStart(16, "0"),
+        name: "chat m",
+        started_at: ts,
+        content: true,
+        input,
+        output: [said("assistant", `answer ${n}`)],
+      } as never,
+      redaction: { rule_set: rules.hash, counts: {} },
+    });
+    // Each call repeats the history so far: the messages are stored once each.
+    await putSpan(store, "alice", archive, span(1, history.slice(0, 1)));
+    await putSpan(store, "alice", archive, span(2, history.slice(0, 3)));
+    // A record the new rules already wrote, sharing the first message.
+    await putSpan(store, "alice", archive, span(3, [history[0], history[3]], NEW_RULES));
+    const messages = async () => {
+      const page = await store.list(keys.spanMessages("alice", archive));
+      return Promise.all(
+        page.keys.map(async (key) => new TextDecoder().decode((await store.get(key))?.body)),
+      );
+    };
+    expect(await messages()).toHaveLength(4);
+    expect((await messages()).filter((m) => m.includes("ACME-"))).toHaveLength(2);
+
+    expect((await run({ dryRun: true })).spans).toBe(2);
+    expect((await messages()).filter((m) => m.includes("ACME-"))).toHaveLength(2);
+
+    expect((await run()).spans).toBe(2);
+    // No message holds what the new rules take out: the two that did were replaced by their
+    // redacted forms and deleted; the ones the rules leave alone are kept, once.
+    const after = await messages();
+    expect(after.join("\n")).not.toContain("ACME-");
+    expect(after).toHaveLength(4);
+    const records = await listSpans(store, "alice", archive);
+    expect(
+      records.map((r) => r.part.input?.map((m) => (m as { content?: unknown }).content)),
+    ).toEqual([
+      ["hello there"],
+      ["hello there", "the key is [redacted:acme-key]", "thanks, and [redacted:acme-key]?"],
+      ["hello there", "no"],
+    ]);
+    expect(records[1]?.redaction).toEqual({ rule_set: NEW_RULES.hash, counts: { "acme-key": 2 } });
+    expect((await run()).spans).toBe(0);
   });
 
   it("tells each session as it is done", async () => {

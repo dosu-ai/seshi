@@ -25,6 +25,7 @@ any other writer must follow the rules below.
       metadata.json                                       the session's pointer (mutable)
       trace.<content_hash>.json.gz                        seshi/trace/1, one per distinct content
       spans/<trace_id>-<span_id>.json                     normalized, redacted span records (F4)
+      spans/messages/<sha256>.json                        span inputs' messages, once each (F4.4)
       review/<n>.json                                     model review decisions (F3)
     changes/
       <stamp>-<archive_id>-<suffix>-<content_hash>.json   a publish
@@ -341,6 +342,15 @@ Read and written by the binary only, so their types are code-first in `@seshi/st
   set and counts of this span's matches). A span sent twice lands on the same key. Records stay
   after the session is published, so a late span can rebuild it; never readable through the
   API; deleted with the session (F4.4, X6.3).
+- `owners/<o>/sessions/<a>/spans/messages/<sha256>.json`: one record of a span's input (a chat
+  request repeats the conversation so far), stored once per session however many spans repeat
+  it (F4.4): the record as redaction left it, with `timestamp` emptied (`""`), under the
+  SHA-256 of these bytes. A span record then holds no `part.input` but `input`: `at` (the
+  input's time) and `messages`, the hashes in order, an entry `[hash, timestamp]` for a record
+  whose time is not `at`; a reader puts each record's time back. Written before the span record
+  that names them. They sort after every span record, so they are deleted with the session's
+  `spans/`; a redaction backfill writes a message the new rules change under its new hash and
+  deletes the old one once no record names it.
 - `owners/<o>/sessions/<a>/review/<n>.json` (`seshi/review/1`): for the `n`th stored write,
   the policy and its hash, the decision (`allow`, `redact`, `skipped`), both models
   (`<provider>/<model>`), and the findings by record (the index in the trace that write

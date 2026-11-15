@@ -8,7 +8,9 @@
  *
  * Assembly (`assemblePending`, the worker's `assembler` job). It lists the markers; for each
  * session quiet for its source's quiet period (or shortly after a final span) it reads the
- * span records, assembles them with the format's adapter, and hands the whole session to
+ * span records (`listSpans`: streamed a page at a time, each stored input message read once and
+ * each part's input rebuilt from them as the adapter reads it, so memory stays linear in the
+ * calls), assembles them with the format's adapter, and hands the whole session to
  * `Pipeline.publishAssembled`, which runs the session filter, model review and the write. The
  * marker is then deleted with If-Match, so a batch that arrived meanwhile keeps it for the next
  * pass (X7.4). A permanent failure is recorded by the pipeline (X4.8) and the marker cleared; a

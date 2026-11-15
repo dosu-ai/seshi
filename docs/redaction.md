@@ -130,7 +130,9 @@ true` and `reason: "redacted"`, written as `--as <owner>` (default `admin`, sour
 its rule set recorded. An OTLP or poller session's span records (`spans/`) that an earlier
 rule set redacted are redacted again in place, and the summary says how many; that includes
 the span records of sessions not published (still waiting for quiet, or refused by the session
-filter or model review), which have no session to list. Redaction cannot
+filter or model review), which have no session to list. The input messages those records share
+(`spans/messages/`, stored once each) are redacted with them: a message the new rules change
+is stored again redacted, and the old one deleted once no span record names it. Redaction cannot
 be undone; `--dry-run` writes nothing and lists what would change. It is safe to stop and run
 again: sessions already redacted with the current rules are skipped. Each stored trace records
 the rule set it was written under, so a session that got a chunk under the new rules before the

@@ -13,6 +13,7 @@
  * owners/<owner>/sessions/<archive_id>/metadata.json           the session's pointer
  * owners/<owner>/sessions/<archive_id>/trace.<content_hash>.json.gz   seshi/trace/1
  * owners/<owner>/sessions/<archive_id>/spans/<trace_id>-<span_id>.json   span records (F4)
+ * owners/<owner>/sessions/<archive_id>/spans/messages/<sha256>.json      input history, once (F4.4)
  * owners/<owner>/sessions/<archive_id>/review/<n>.json         model review decisions (F3)
  * owners/<owner>/changes/<stamp>-<archive_id>-<suffix>-<content_hash|tombstone|visibility>.json
  *                                                              change feed
@@ -141,6 +142,11 @@ export const keys = {
   spans: (owner: string, archive: string) => `${keys.session(owner, archive)}/spans/`,
   span: (owner: string, archive: string, traceId: string, spanId: string) =>
     `${keys.spans(owner, archive)}${assertSpanKey(traceId, spanId)}.json`,
+  /** A session's stored input messages (F4.4): under `spans/`, after every span record (`m`
+   * sorts after hex), so what steps over or deletes `spans/` covers them too. */
+  spanMessages: (owner: string, archive: string) => `${keys.spans(owner, archive)}messages/`,
+  spanMessage: (owner: string, archive: string, hash: string) =>
+    `${keys.spanMessages(owner, archive)}${assertHash(hash, "message hash")}.json`,
   reviews: (owner: string, archive: string) => `${keys.session(owner, archive)}/review/`,
   review: (owner: string, archive: string, n: number) => {
     if (!Number.isInteger(n) || n < 0 || n >= 10 ** REVIEW_DIGITS) {

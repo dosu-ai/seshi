@@ -30,6 +30,12 @@
  * sessions, the owner's session folders are walked for span records with no metadata beside
  * them, which are redacted again the same way.
  *
+ * A span record keeps its input as messages stored once per session (`spans/messages/`, by
+ * content hash, F4.4). A record is redacted with its input rebuilt from them; a message the new
+ * rules change is stored again under its new hash and the record rewritten to name it. Once a
+ * session's records are done, every message a rewritten record stopped naming and no record
+ * names any more is deleted: it holds what the new rules take out.
+ *
  * Not touched: `normalized` (the uploader's log state). A later whole upload of such a session,
  * redacted from the transcript with the same new rules, may not hash to the stored prefix; it
  * is then a 409 `conflict`, which the uploader answers with `replace` (as after any rules
@@ -56,12 +62,17 @@ import {
   isOwner,
   keys,
   listOwners,
-  listSpans,
+  listSpanMessages,
   publishObject,
   putSpan,
+  SpanMessages,
   type Store,
+  spanRecords,
+  storedHashes,
+  storedInputOf,
   updateMetadata,
   updateMetadataWithChange,
+  withInput,
 } from "@seshi/store";
 import { getTrace, listSessions, type WithheldCallIds } from "./ingest";
 import { redactSpanPart } from "./spans";
@@ -430,7 +441,8 @@ async function backfillSession(
 }
 
 /** A session's span records through the current rules (see the top of this file): how many
- * an earlier rule set redacted, each rewritten in place unless `dryRun`. */
+ * an earlier rule set redacted, each rewritten in place unless `dryRun`, and then the messages
+ * only the old records named deleted. */
 async function backfillSpans(
   store: Store,
   owner: string,
@@ -439,19 +451,39 @@ async function backfillSpans(
   dryRun: boolean,
 ): Promise<number> {
   let done = 0;
-  for (const record of await listSpans(store, owner, archive)) {
-    if (record.redaction?.rule_set === redactor.rule_set) continue;
+  const messages = new SpanMessages(store, owner, archive);
+  let stored: Set<string> | undefined;
+  /** Messages some record names after this pass. */
+  const named = new Set<string>();
+  /** Messages a rewritten record named before and no longer does. */
+  const replaced = new Set<string>();
+  for await (const record of spanRecords(store, owner, archive)) {
+    const before = storedHashes(record.input);
+    if (record.redaction?.rule_set === redactor.rule_set) {
+      for (const hash of before) named.add(hash);
+      continue;
+    }
     done++;
     if (dryRun) continue;
-    const { part, summary } = redactSpanPart(redactor, record.part);
+    await messages.load(before);
+    const { part, summary } = redactSpanPart(redactor, withInput(record, messages).part);
     const counts = { ...record.redaction?.counts };
     addCounts(counts, summary.counts);
-    const { schema: _schema, ...rest } = record;
-    await putSpan(store, owner, archive, {
-      ...rest,
-      part,
-      redaction: { rule_set: redactor.rule_set, counts },
-    });
+    const { schema: _schema, input: _input, ...rest } = record;
+    stored ??= await listSpanMessages(store, owner, archive);
+    await putSpan(
+      store,
+      owner,
+      archive,
+      { ...rest, part, redaction: { rule_set: redactor.rule_set, counts } },
+      { stored },
+    );
+    const after = new Set(part.input ? storedHashes(storedInputOf(part.input).input) : []);
+    for (const hash of after) named.add(hash);
+    for (const hash of before) if (!after.has(hash)) replaced.add(hash);
+  }
+  for (const hash of replaced) {
+    if (!named.has(hash)) await store.delete(keys.spanMessage(owner, archive, hash));
   }
   return done;
 }

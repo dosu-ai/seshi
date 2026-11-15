@@ -86,9 +86,14 @@ this way.
    (the messages it carried as records, the tool call it ran, the model request it stands for)
    and the redaction rules run on it. Only that is kept, under the session's `spans/` in the
    bucket, never the span as received, and never readable through the API. A span sent twice
-   (exporters retry) is kept once. The request is answered as soon as its spans are stored.
-   `seshi redact backfill` redacts kept span records again after the rules change, including
-   those of sessions not published yet or refused by the filter or model review.
+   (exporters retry) is kept once. A chat request repeats the conversation so far, so each
+   message of a span's input is stored once per session (`spans/messages/`) and the span's
+   record points at it: what a session keeps grows with its calls, not with their square.
+   The request is answered as soon as its spans are stored.
+   `seshi redact backfill` redacts kept span records and their stored messages again after the
+   rules change, including those of sessions not published yet or refused by the filter or
+   model review; a message the new rules change is stored again redacted and the old one
+   deleted. Deleting a session deletes its span records and messages.
 3. **Assembled and published** (F4.4) by the worker's `assembler` job (or, with no worker,
    `seshi sync assemble` from cron) once the session has had
    no new spans for the source's `quiet_period` (10 minutes by default), or about 15 seconds
