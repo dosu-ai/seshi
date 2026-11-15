@@ -3,7 +3,7 @@
 [17](17-review.md) left ten findings unfixed because each needed a decision the design did not
 make. They were decided on 15 Nov 2026 and are recorded on
 [../design-decisions.html](../design-decisions.html) as "Revised 15 Nov 2026" under the decision
-named. This branch records the decisions only; none of them is built yet.
+named. This branch records the decisions; branches 19–24 build them (see the build README).
 
 | # | Question | Decision | Where |
 |---|---|---|---|
@@ -14,7 +14,7 @@ named. This branch records the decisions only; none of them is built yet.
 | 5 | Span records growing with the square of the calls | Store each input-history message once by content hash; span records point at them; the assembler streams. | F4.4 |
 | 6 | Trace objects left by a stopped backfill or replace | A sweep deletes trace objects no metadata names that are over 1 hour old, when a backfill ends and daily. No schema change. | F2.5 |
 | 7 | A change entry lost when a write fails after the pointer moves | Write the change entry before the pointer (at-least-once). | X6.4 |
-| 8 | Change keys colliding within one millisecond | Make keys unique now: `<stamp>-<session_id>-<suffix>-<kind>.json`; update `spec/layout.md` and every feed reader. Nothing is deployed, so no migration. | X6.4 |
+| 8 | Change keys colliding within one millisecond | Make keys unique now: `<stamp>-<archive_id>-<suffix>-<kind>.json` (built with the archive id: native session ids are not key-safe); update `spec/layout.md` and every feed reader. Nothing is deployed, so no migration. | X6.4 |
 | 9 | Windows in the CI test matrix | Run the laptop packages' tests (hooks, spool, uploader, CLI, config) on a Windows runner; the server stays Linux-only. | F8.4 |
 | 10 | Uploader exiting during an outage | Stay running while uploads or retractions wait to retry, for at most 30 minutes after the last success. A pass whose work all failed is not idle. | F9.1 |
 
