@@ -4,6 +4,7 @@
  *
  *   seshi sessions ls [--owner <id>] [--limit N] [--after <cursor>] [--all]
  *   seshi sessions show <agent> <session-id> [--owner <id>] [--trace]
+ *       (with model review on, each stored write's decision: allow, redact or skipped, F3.8)
  *   seshi sessions export <agent> <session-id> [--format seshi|letta|otlp|atif] [--hash <h>]
  *                         [--output <file>|-o <file>] [--owner <id>]
  *   seshi sessions rm <agent> <session-id> [--owner <id>] [--yes]
@@ -21,6 +22,7 @@
 import { statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
+import type { ReviewDecision } from "@seshi/client";
 import {
   isRenderFormat,
   RENDER_FORMATS,
@@ -139,7 +141,25 @@ function listLines(page: SessionsPage, owner: string, style: Style): string[] {
   return lines;
 }
 
-function showLines(m: SessionMetadata, style: Style): string[] {
+/** Model review's decision for each stored write (F3.8), as words: `#0 allow, #1 redact`, or
+ * counts when there are many. Empty when no policy covered any write. */
+export function reviewSummary(reviews: readonly ReviewDecision[], style: Style): string {
+  const role = (d: ReviewDecision["decision"]) => (d === "allow" ? "success" : "warn");
+  if (reviews.length <= 8) {
+    return reviews.map((r) => `#${r.n} ${style.status(r.decision, role(r.decision))}`).join(", ");
+  }
+  const counts = new Map<ReviewDecision["decision"], number>();
+  for (const r of reviews) counts.set(r.decision, (counts.get(r.decision) ?? 0) + 1);
+  return `${reviews.length} writes: ${[...counts]
+    .map(([d, n]) => `${style.status(d, role(d))} ${n}`)
+    .join(", ")}`;
+}
+
+function showLines(
+  m: SessionMetadata,
+  style: Style,
+  reviews: readonly ReviewDecision[] = [],
+): string[] {
   // `row`: the session's (other people's) text, made printable; `line`: our own.
   const line = (label: string, value: string) => [`  ${label.padEnd(11)} ${value}`];
   const row = (label: string, value: string | undefined) =>
@@ -188,6 +208,7 @@ function showLines(m: SessionMetadata, style: Style): string[] {
     ),
     ...row("claims", claims),
     ...row("origin", m.origin_agent),
+    ...(reviews.length > 0 ? line("review", reviewSummary(reviews, style)) : []),
   ];
 }
 
@@ -282,8 +303,17 @@ async function show(
       format: "seshi",
     })) as Trace | null;
   }
+  // Model review's labels, for people (the JSON stays the metadata; `GET …/reviews` has them).
+  const reviews =
+    json || metadata.status === "redacted"
+      ? null
+      : await backend.reviews(
+          ref.agent,
+          ref.sessionId,
+          values.owner ? { owner: values.owner } : {},
+        );
   emit(ctx, json, values.trace ? { metadata, trace } : metadata, () => {
-    const lines = showLines(metadata, style);
+    const lines = showLines(metadata, style, reviews ?? []);
     if (trace)
       lines.push(
         "",

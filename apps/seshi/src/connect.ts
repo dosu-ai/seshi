@@ -6,7 +6,7 @@
  * The CLI config picks: `server = "https://…"` for a team server, or
  * `[local] config = "~/.config/seshi/seshi.toml"` (a server config naming the bucket and its
  * keys) for local mode. Either way the caller gets a `SessionDB`, so the session commands
- * (branch 13) and the uploader (14) do not care which. */
+ * and the uploader (14) do not care which. */
 
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -40,7 +40,7 @@ export interface ConnectOptions {
   env: Record<string, string | undefined>;
   /** The home folder, for `~` in `local.config`. */
   home?: string;
-  /** For a server: the credential `seshi login` stored (branch 13). */
+  /** For a server: the credential `seshi login` stored. */
   token?: string;
   /** With the org key: the username to state (X5.7). */
   user?: string;

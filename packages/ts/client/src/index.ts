@@ -44,6 +44,7 @@ export type {
   OwnersPage,
   RecordKind,
   RecordsPage,
+  ReviewDecision,
   Scope,
   SourceRecord,
   SourceStatus,

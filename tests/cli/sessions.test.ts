@@ -5,7 +5,14 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { HttpSessionDB } from "@seshi/client";
-import { writeDropped, writeFailed } from "@seshi/store";
+import {
+  archiveId,
+  FsStore,
+  type Store,
+  writeDropped,
+  writeFailed,
+  writeReview,
+} from "@seshi/store";
 import { connect } from "seshi/connect";
 import { INTEGRATIONS } from "seshi/integrations";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -26,6 +33,26 @@ const CLAUDE = `${SMALL.trim()}\n${JSON.stringify({
 })}\n`;
 
 const TOKEN = "static-token-for-acme-0123456789";
+
+/** Model review's record for write `n` of a session (F3.8), as the pipeline writes it. */
+function review(
+  store: Store,
+  owner: string,
+  sessionId: string,
+  n: number,
+  decision: "allow" | "redact" | "skipped",
+) {
+  return writeReview(store, owner, archiveId(owner, "claude-code", sessionId), {
+    n,
+    at: "2026-11-14T00:00:00.000Z",
+    content_hash: "0".repeat(64),
+    policy: "default",
+    policy_hash: "1".repeat(64),
+    decision,
+    decision_model: "fake/model",
+    findings: [],
+  });
+}
 
 let server: TestServer;
 let machine: Machine;
@@ -108,6 +135,12 @@ describe("seshi sessions against a server", () => {
     expect(show.out).toContain("claude-code/sess1");
     expect(show.out).toContain("owner       acme (verified)");
     expect(show.out).toContain("project     github.com/acme/widget");
+    expect(show.out).not.toContain("review ");
+    // Model review's decision for each stored write (F3.8), when a policy covered it.
+    await review(server.instance.store, "acme", "sess1", 0, "allow");
+    await review(server.instance.store, "acme", "sess1", 1, "redact");
+    const reviewed = await machine.seshi(["sessions", "show", "claude-code/sess1"]);
+    expect(reviewed.out).toContain("review      #0 allow, #1 redact");
     const withTrace = await machine.seshi(["sessions", "show", "claude-code", "sess1", "--trace"]);
     expect(withTrace.out).toContain("head trace,");
     expect(withTrace.out).toMatch(/assistant +The auth flow/);
@@ -453,6 +486,15 @@ describe("local mode (F8.3, X3.5)", () => {
       expect((await local.seshi(["sessions", "show", "claude-code/s1"])).out).toContain(
         "owner       me (verified)",
       );
+      await review(new FsStore(`file://${join(local.dir, "bucket")}`), "me", "s1", 0, "skipped");
+      expect((await local.seshi(["sessions", "show", "claude-code/s1"])).out).toContain(
+        "review      #0 skipped",
+      );
+      // Search goes through the same local backend: the bucket's own index.
+      const found = await local.seshi(["search", "auth", "flow"]);
+      expect(found.code, found.err).toBe(0);
+      expect(found.err).toContain("building the search index");
+      expect(found.out).toContain("claude-code/s1  me");
       const atif = await local.seshi(["sessions", "export", "claude-code/s1", "--format", "atif"]);
       expect(JSON.parse(atif.out)).toMatchObject({ schema_version: "ATIF-v1.7" });
       expect((await local.seshi(["sessions", "visibility", "claude-code/s1", "owner"])).code).toBe(

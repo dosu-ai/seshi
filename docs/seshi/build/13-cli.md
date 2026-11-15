@@ -197,14 +197,52 @@ A review of this branch against F8, B1.4 and X5 changed:
 - `sessions ls` costs one `/v1/me` for its heading when `--owner` is not given.
 - CI has not run (no PR): `check:brand` is new in `bun run check`.
 
-## Cross-branch wiring once the stack is linear
+## Cross-branch wiring done after the rebase onto 12
 
-- **12 (search)**: `seshi search` should use `openAccount`, `openBackend` and `styleFor`
-  (hits in `style.search`, B1.4, their text through `printable()`), and add `search()` to `Backend` (`ServerBackend` → the
-  client's search call 12 adds; `LocalBackend` → the Instance's index). 12's
-  `GET /v1/search` path lands next to this branch's `/v1/admin/sources…` at the end of
-  openapi.yaml's paths, and both edit the openapi test's route list and the stub list in
-  `commands.test.ts`: keep every entry.
+Rebased onto `seshi-12-search` (07, 08, 09, 10, 11 and 12 below it). Shared lists were merged
+as unions: the stub list in `commands.test.ts` (login, logout, whoami, sessions, tokens, search,
+redact all gone), the openapi test's route list, `spec/openapi.yaml` (12's `/v1/search` and
+07's, 08's and 09's paths, then this branch's `/v1/admin/sources…`; schemas appended),
+`docs/server.md`'s route table and the root `check` line. `HttpSessionDB.redactionRules()` (07)
+and `.search()` (12) are kept beside this branch's client calls, now using the module's
+`refuse()`.
+
+- **12 → 13, search through the account.** `Backend` gains `search(request, hooks)`:
+  `ServerBackend` calls `HttpSessionDB.search` (`GET /v1/search`), `LocalBackend` catches the
+  Instance's index up with the change feed and searches it as `LOCAL_VIEWER` (a turned-off
+  index is `Refused` exit 3, `search_disabled`). `seshi search` now opens the account
+  (`openAccount`), takes the server from `--server` or the CLI config and the credential
+  `seshi login` stored (`openBackend`, so a session token is renewed like any other read);
+  `--token` (with `--user`) overrides the stored credential for one search. `[local] config`
+  goes through `LocalBackend` too. `--config` / `--set` and a server config found where `serve`
+  looks still run in-process, and `--status` / `--rebuild` still need a local index. Errors
+  the search command does not map itself go to `failWith`, so no stored credential is exit 5
+  `not_signed_in`.
+- **12 → 13, styled hits.** `styleFor(ctx, {json, theme})` styles the output: the session ref
+  and the matched words (from `SearchMatch.highlights`, offsets taken before white space is
+  folded, `highlighted()` in `commands/search.ts`) in `style.search`, the place, time, record
+  labels and footer muted. Stored text (session ids, owners, projects, snippets, tool names)
+  goes through `printable()`. `Style.plain()` is the default, so `searchLines` reads as before
+  off a terminal, with `NO_COLOR`, `--no-color` or `--json`.
+- **07 → 13.** `redact test` prints `Redacted: N rule(s) matched T time(s)` with "Redacted" in
+  `style.status(…, "success")`, the passed/failed test counts in success/error, and failing
+  rules with a `FAIL` word. It uses `styleFor(ctx, {json})`, so `--json`, `NO_COLOR` and
+  `--no-color` stay plain; with `--print` the report goes to stderr and is plain.
+- **08 → 13.** `HttpSessionDB.reviews(agent, id, {owner})` reads `GET …/reviews` (null for a
+  session not stored; `ReviewDecision` in `@seshi/client`), and `Backend.reviews` reads it on a
+  server or with `listReviews` in local mode. `sessions show` adds a `review` row with each
+  stored write's decision (`#0 allow, #1 redact`, counts past eight writes) in success/warn
+  colour; nothing when no policy covered a write. `--json` output is unchanged (the metadata,
+  or `{metadata, trace}`); the decisions are on the reviews route.
+
+Tests: `tests/cli/search.test.ts` (search with and without a login, `--token` over it, colour on
+a terminal and none with `NO_COLOR` or `--json`), local-mode search and review rows in
+`tests/cli/sessions.test.ts`, `highlighted()` offsets and hostile snippets in
+`commands/search.test.ts`, the `Redacted` colour in `commands/redact.test.ts`, and the client's
+`reviews()` in `client/src/routes.test.ts`.
+
+## Cross-branch wiring still needed
+
 - **14 (capture)**: the uploader takes its credential from `credentialFor(..., "upload")`,
   called in `apps/seshi` and injected into `ts/capture` (which may not import `seshi/account`,
   X3.2);
@@ -213,11 +251,13 @@ A review of this branch against F8, B1.4 and X5 changed:
   turn colour off). F9.7's retraction needs `HttpSessionDB.tombstone` to send the retraction
   secret: extend the options object added here. 14 may add `CommandContext` fields next to
   `tty`, `noColor`, `terminal`, `secrets`.
-- **07 (redact)**: `redact test` can show "Redacted" with `style.status(..., "success")` (B1.3);
-  it removes `redact` from the stub list this branch also edits.
 - **15 (distribution)**: check `Bun.secrets` in the compiled binaries on macOS, Linux and
   Windows; `check:brand` joins `bun run check` in CI. Root `package.json`'s `check` line is
   edited here (`&& bun run check:brand`); keep every branch's additions.
 - **Shared files touched**: `apps/seshi/package.json` exports `./main` and `./account`;
   `docs/cli.md` rows for login/sessions/tokens/workers/sync (other branches edit their own
   rows); `docs/server.md` route table (appended rows).
+- **Optional, not done**: a remote `redact test` that checks a file against the server's packs
+  through `HttpSessionDB.redactionRules()` (07); `sync status` showing an S3 source's manifest
+  object count and `listed_at` (11). `sync failed` already prints 11's new failure codes
+  (`unsupported_encoding`, `unreadable`) as they come.

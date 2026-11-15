@@ -14,9 +14,10 @@ import { StoreSessionDB } from "@seshi/pipeline";
 import { ensureLayout, FsStore } from "@seshi/store";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { EXIT } from "../cli/exit";
+import { Style, stripStyle } from "../cli/style";
 import { INTEGRATIONS } from "../integrations";
 import { main } from "../main";
-import { requestOf, searchLines, timeArg } from "./search";
+import { highlighted, requestOf, searchLines, timeArg } from "./search";
 
 const formats = new FormatRegistry(BUILTIN_FORMATS);
 const line = (record: Record<string, unknown>) => `${JSON.stringify(record)}\n`;
@@ -230,6 +231,63 @@ describe("seshi search, against a server", () => {
 
 describe("the command's pieces", () => {
   const now = new Date("2026-11-14T12:00:00.000Z");
+
+  it("paints the matched words from their offsets, folding white space around them", () => {
+    const style = new Style("truecolor", "dark");
+    const open = style.open("search");
+    const line = highlighted(
+      "  git push\n\n--force now",
+      [
+        [14, 19],
+        [2, 5],
+      ],
+      style,
+    );
+    expect(line).toBe(`${open}git\x1b[39m push --${open}force\x1b[39m now`);
+    expect(stripStyle(line)).toBe("git push --force now");
+    expect(
+      highlighted(
+        "abc",
+        [
+          [1, 99],
+          [0, 0],
+        ],
+        Style.plain(),
+      ),
+    ).toBe("abc");
+  });
+
+  it("prints stored text without its control characters", () => {
+    const lines = searchLines({
+      query: "x",
+      total: 1,
+      index: { ready_at: "", sessions: 1 },
+      results: [
+        {
+          owner: "alice",
+          agent: "claude-code",
+          session_id: "a\x1b]0;pwned\x07",
+          archive_id: "0".repeat(64),
+          project: "p\x1b[2J",
+          visibility: "org",
+          updated_at: "2026-11-14T09:05:00.000Z",
+          score: 1,
+          hits: 1,
+          matches: [
+            {
+              content_hash: "0".repeat(64),
+              event_index: 0,
+              role: "user",
+              snippet: "see \x1b]52;c;Zm9v\x07 here",
+              highlights: [[0, 3]],
+            },
+          ],
+        },
+      ],
+    });
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: checking none are printed
+    for (const line of lines) expect(line).not.toMatch(/[\x00-\x08\x0b-\x1f\x7f]/);
+  });
 
   it("reads times as dates, RFC 3339 or ages", () => {
     expect(timeArg("7d", "since", now)).toBe("2026-11-07T12:00:00.000Z");

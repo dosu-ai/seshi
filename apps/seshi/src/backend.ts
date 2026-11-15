@@ -1,12 +1,14 @@
-/** What the session and token commands talk to (F8.3): a seshi server through `@seshi/client`
- * with the credential `seshi login` stored, or, in local mode (X3.5), an Instance built
- * in-process for the one person who owns the bucket. The commands see one interface, so
- * `seshi sessions ls` reads the same either way. Nothing else touches a bucket. */
+/** What the session, token and search commands talk to (F8.3): a seshi server through
+ * `@seshi/client` with the credential `seshi login` stored, or, in local mode (X3.5), an
+ * Instance built in-process for the one person who owns the bucket. The commands see one
+ * interface, so `seshi sessions ls` and `seshi search` read the same either way. Nothing else
+ * touches a bucket. */
 
 import type { TokenRequest as AuthTokenRequest, Principal } from "@seshi/auth";
 import {
   HttpSessionDB,
   type OwnerOption,
+  type ReviewDecision,
   type TokenInfo,
   type TokenKind,
   type TokenRequest,
@@ -16,6 +18,8 @@ import {
   type Identity,
   localWriter,
   type RenderFormat,
+  type SearchRequest,
+  type SearchResults,
   type SessionMetadata,
   type SessionsPage,
   type StoredTrace,
@@ -25,11 +29,18 @@ import type { StoreSessionDB } from "@seshi/pipeline";
 import { type Account, accountCredential, serverOf } from "./account/account";
 import type { Purpose } from "./account/credential";
 import { NotSignedIn } from "./account/credential";
+import { EXIT } from "./cli/exit";
+import { Refused } from "./cli/failures";
 import type { CommandContext } from "./commands/index";
 
 export interface TraceOptions extends OwnerOption {
   hash?: string;
   format?: RenderFormat;
+}
+
+export interface SearchHooks {
+  /** Called before a local index is first built from the change feed (it can take a while). */
+  building?: () => void;
 }
 
 export interface Backend {
@@ -55,6 +66,16 @@ export interface Backend {
     visibility: Visibility,
     options?: OwnerOption,
   ): Promise<SessionMetadata | null>;
+  /** What model review decided for each stored write (F3.8), oldest first; null for a session
+   * not stored. */
+  reviews(
+    agent: string,
+    sessionId: string,
+    options?: OwnerOption,
+  ): Promise<ReviewDecision[] | null>;
+  /** Keyword search over what this caller may read (F10): `GET /v1/search` on a server, the
+   * Instance's own index in local mode (brought up to date with the change feed first). */
+  search(request: SearchRequest, hooks?: SearchHooks): Promise<SearchResults>;
   listTokens(filter: { owner?: string; kind?: TokenKind; all?: boolean }): Promise<TokenInfo[]>;
   createToken(request: TokenRequest): Promise<{ token: string; record: TokenInfo }>;
   revokeToken(id: string): Promise<TokenInfo | null>;
@@ -99,6 +120,12 @@ export class ServerBackend implements Backend {
     options: OwnerOption = {},
   ) {
     return this.db.setVisibility(agent, sessionId, visibility, options);
+  }
+  reviews(agent: string, sessionId: string, options: OwnerOption = {}) {
+    return this.db.reviews(agent, sessionId, options);
+  }
+  search(request: SearchRequest): Promise<SearchResults> {
+    return this.db.search(request);
   }
   listTokens(filter: { owner?: string; kind?: TokenKind; all?: boolean }) {
     return this.db.listTokens(filter);
@@ -184,6 +211,32 @@ export class LocalBackend implements Backend {
     options: OwnerOption = {},
   ) {
     return this.db(options.owner).setVisibility(agent, sessionId, visibility);
+  }
+  async reviews(agent: string, sessionId: string, options: OwnerOption = {}) {
+    if (!(await this.getSession(agent, sessionId, options))) return null;
+    const { archiveId, listReviews } = await import("@seshi/store");
+    const owner = options.owner ?? this.owner;
+    const records = await listReviews(
+      this.instance.store,
+      owner,
+      archiveId(owner, agent, sessionId),
+    );
+    return records as ReviewDecision[];
+  }
+  /** The bucket's keys read everything (X5.6), so nothing is filtered by owner. */
+  async search(request: SearchRequest, hooks: SearchHooks = {}): Promise<SearchResults> {
+    const search = this.instance.search;
+    if (!search) {
+      throw new Refused(
+        EXIT.config,
+        "search_disabled",
+        "search is turned off in this config ([search] enabled = false)",
+      );
+    }
+    if (!search.ready()) hooks.building?.();
+    await search.catchUp();
+    const { LOCAL_VIEWER } = await import("@seshi/search");
+    return search.search(LOCAL_VIEWER, request);
   }
   async listTokens(filter: { owner?: string; kind?: TokenKind; all?: boolean }) {
     const { tokenInfo } = await import("@seshi/auth");

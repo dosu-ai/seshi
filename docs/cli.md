@@ -70,7 +70,7 @@ repository's code.
 | `logout [--server <url>] [--all]` | Forget the stored credentials | Built |
 | `whoami [--server <url>]` | Who the CLI is signed in as, and whether the credential still works | Built |
 | `sessions ls [--owner] [--limit N] [--after] [--all]` | An owner's sessions, newest first | Built |
-| `sessions show <agent> <id> [--owner] [--trace]` | A session's metadata; `--trace` adds its head trace, a line per record | Built |
+| `sessions show <agent> <id> [--owner] [--trace]` | A session's metadata and, with model review on, each stored write's decision (`allow`, `redact`, `skipped`; F3.8); `--trace` adds its head trace, a line per record | Built |
 | `sessions export <agent> <id> [--format seshi\|letta\|otlp\|atif] [--hash] [-o <file\|dir>]` | The trace itself, on stdout or into a file | Built |
 | `sessions rm <agent> <id> [--owner] [--yes]` | Delete a session (a tombstone; it cannot be undone). Asks on a terminal, needs `--yes` elsewhere | Built |
 | `sessions visibility <agent> <id> org\|owner [--owner]` | Change who may read a session (X5.10) | Built |
@@ -177,7 +177,9 @@ ignored, and punctuation separates words, so `src/app.ts` finds those words in t
 
 Each result is a session (agent and session id, owner, repository and branch, when it was last
 active, how many records matched) followed by its best matching records with a short excerpt.
-`seshi sessions show` (branch 13) opens one.
+On a terminal the session and the matched words are in the search colour (lilac; magenta on a
+light background), plain with `NO_COLOR`, `--no-color` or `--json`. `seshi sessions show
+<agent>/<session-id> --owner <owner>` opens one.
 
 | Flag | |
 |---|---|
@@ -193,8 +195,8 @@ Where it searches:
 
 - **A server** (`server` in the CLI config, or `--server <url>`): through `GET /v1/search`, as
   the signed-in caller, so you find your own sessions and those visible to the org (admins and
-  services find everything). Until `seshi login` (branch 13) stores a credential, pass it with
-  `--token` (and `--user` with the org key).
+  services find everything), with the credential `seshi login` stored. `--token` (and `--user`
+  with the org key) uses that token for this one search instead.
 - **In-process** (`[local] config` in the CLI config, `--config <seshi.toml>`, or where the
   server's own config is, as for `workers status`): the bucket's keys read everything, so
   nothing is filtered by owner. The local index is brought up to date with the change feed

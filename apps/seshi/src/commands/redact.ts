@@ -44,6 +44,7 @@ import {
 import { isOwner } from "@seshi/store";
 import { EXIT, type ExitCode } from "../cli/exit";
 import { emit, fail, takeJson, usageError } from "../cli/output";
+import { Style, styleFor } from "../cli/style";
 import { buildFormats } from "../integrations";
 import type { CommandContext } from "./index";
 import { configFlags } from "./serve-settings";
@@ -209,7 +210,10 @@ async function test(ctx: CommandContext, json: boolean, args: string[]): Promise
       for (const line of input.output) ctx.stdout(line);
     }
     const out = (line: string) => (values.print ? ctx.stderr(line) : ctx.stdout(line));
-    for (const line of testLines(rules, tests, failed, input)) out(line);
+    // Colour only where the report goes to a terminal's standard output (B1.4); with --print
+    // it goes to stderr, which may not be one.
+    const style = values.print ? Style.plain() : await styleFor(ctx, { json });
+    for (const line of testLines(rules, tests, failed, input, style)) out(line);
   }
   return failed.length > 0 ? EXIT.failure : EXIT.ok;
 }
@@ -219,6 +223,7 @@ function testLines(
   tests: RuleTestResult[],
   failed: RuleTestResult[],
   input: ReadInput | undefined,
+  style: Style = Style.plain(),
 ): string[] {
   const enabled = rules.catalogue.filter((r) => r.enabled).length;
   const off = rules.catalogue.filter((r) => !r.enabled).map((r) => r.id);
@@ -234,7 +239,7 @@ function testLines(
     );
     const ids = Object.keys(input.hits);
     if (ids.length === 0) {
-      lines.push("  no rule matched");
+      lines.push(`  ${style.muted("no rule matched")}`);
     } else {
       const width = Math.max(...ids.map((id) => id.length));
       for (const id of ids.sort()) {
@@ -244,14 +249,19 @@ function testLines(
       }
       const total = Object.values(input.hits).reduce((n, h) => n + h.count, 0);
       lines.push(
-        `${ids.length} rule(s) matched ${total} time(s); what they matched is not shown (--print shows the redacted ${input.kind === "records" ? "records" : "text"})`,
+        `${style.status("Redacted", "success")}: ${ids.length} rule(s) matched ${total} time(s); what they matched is not shown (--print shows the redacted ${input.kind === "records" ? "records" : "text"})`,
       );
     }
   }
-  lines.push(`tests: ${tests.length - failed.length} passed, ${failed.length} failed`);
+  const passed = `${tests.length - failed.length} passed`;
+  lines.push(
+    `tests: ${style.status(passed, "success")}, ${
+      failed.length > 0 ? style.status(`${failed.length} failed`, "error") : "0 failed"
+    }`,
+  );
   for (const f of failed) {
     lines.push(
-      `  ${f.pack}/${f.rule}: ${f.expect === "match" ? "does not match" : "matches"} ${JSON.stringify(f.input)}`,
+      `  ${style.status("FAIL", "error")} ${f.pack}/${f.rule}: ${f.expect === "match" ? "does not match" : "matches"} ${JSON.stringify(f.input)}`,
     );
   }
   return lines;

@@ -145,3 +145,22 @@ export interface JobsStatus {
   sources: SourceStatus[];
   warnings: string[];
 }
+
+/** One stored write's model review (`GET /v1/sessions/{agent}/{id}/reviews`, F3.8). Callers
+ * who are not admins get `schema`, `n`, `at`, `content_hash` and `decision` only. */
+export interface ReviewDecision {
+  schema: "seshi/review/1";
+  n: number;
+  at: string;
+  content_hash: string;
+  /** `allow`, `redact` (findings applied), or `skipped` (review failed and was skipped). */
+  decision: "allow" | "redact" | "skipped";
+  policy?: string;
+  policy_hash?: string;
+  decision_model?: string;
+  redactor_model?: string;
+  findings?: { record: number; field: string; category: string; action: "redact" | "withhold" }[];
+  unmatched?: number;
+  parts?: number;
+  failure?: { step: "decision" | "redactor"; code: string; attempts: number };
+}

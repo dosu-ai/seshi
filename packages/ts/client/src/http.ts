@@ -41,6 +41,7 @@ import type {
   OwnersPage,
   RecordKind,
   RecordsPage,
+  ReviewDecision,
   SourceStatus,
   TokenInfo,
   TokenKind,
@@ -316,6 +317,24 @@ export class HttpSessionDB implements SessionDB {
     if (status === 404) return null;
     if (status !== 200) refuse(status, body);
     return body as SessionMetadata;
+  }
+
+  /** What model review decided for each stored write of the session, oldest first (F3.8,
+   * `GET …/reviews`): the whole audit record for admins, only `n`, `at`, `content_hash` and
+   * `decision` for anyone else who may read it. Null for a session not stored. */
+  async reviews(
+    agent: string,
+    sessionId: string,
+    options: OwnerOption = {},
+  ): Promise<ReviewDecision[] | null> {
+    const { status, body } = await this.request(
+      "GET",
+      `${this.sessionPath(agent, sessionId)}/reviews`,
+      { query: { owner: options.owner } },
+    );
+    if (status === 404) return null;
+    if (status !== 200) refuse(status, body);
+    return (body as { reviews: ReviewDecision[] }).reviews;
   }
 
   async changes(options: ReadChangesOptions = {}): Promise<ChangesPage> {

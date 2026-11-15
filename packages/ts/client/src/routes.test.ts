@@ -79,6 +79,22 @@ describe("reading other owners' sessions (X5.10)", () => {
     });
   });
 
+  it("reads a session's review decisions (F3.8), null for a session not stored", async () => {
+    const review = {
+      schema: "seshi/review/1",
+      n: 0,
+      at: "2026-11-14T00:00:00.000Z",
+      content_hash: "0".repeat(64),
+      decision: "redact",
+    };
+    const { db, seen } = routed({
+      "GET /v1/sessions/claude-code/s/reviews": [200, { reviews: [review] }],
+    });
+    expect(await db.reviews("claude-code", "s", { owner: "bob" })).toEqual([review]);
+    expect(param(seen[0], "owner")).toBe("bob");
+    expect(await db.reviews("claude-code", "nope")).toBeNull();
+  });
+
   it("lists the owners", async () => {
     const { db, seen } = routed({
       "GET /v1/owners": [200, { owners: ["alice"], truncated: false }],

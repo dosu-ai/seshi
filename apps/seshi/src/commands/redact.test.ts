@@ -99,6 +99,27 @@ describe("seshi redact test", () => {
     expect(result.out).not.toContain("ghp_");
   });
 
+  it("says Redacted in the success colour on a terminal, and plainly with NO_COLOR or --json", async () => {
+    const input = file("session.jsonl", TRANSCRIPT);
+    const run = async (args: string[], env: Record<string, string>) => {
+      const out: string[] = [];
+      await main(["redact", "test", input, "--agent", "trajectory", ...args], {
+        env: { SESHI_STORE__URL: `file://${bucket}`, TERM: "xterm-256color", ...env },
+        stdout: (line) => out.push(line),
+        stderr: () => {},
+        tty: { stdout: true, stdin: false },
+      });
+      return out.join("\n");
+    };
+    const coloured = await run([], { SESHI_THEME: "dark" });
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: matching the colour codes
+    expect(coloured).toMatch(/\x1b\[38;5;\d+mRedacted\x1b\[39m: \d+ rule\(s\) matched/);
+    const plain = await run([], { NO_COLOR: "1" });
+    expect(plain).toMatch(/^Redacted: \d+ rule\(s\) matched/m);
+    expect(plain).not.toContain("\x1b[");
+    expect(await run(["--json"], { SESHI_THEME: "dark" })).not.toContain("\x1b[");
+  });
+
   it("detects the format, reads standard input, and prints the redacted records with --print", async () => {
     const result = await seshi(["redact", "test", "-", "--print"], {}, TRANSCRIPT);
     expect(result.code).toBe(EXIT.ok);
