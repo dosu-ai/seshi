@@ -258,7 +258,7 @@ function outputOf(view: SpanView, timestamp: string): NormalizedRecord[] {
 /** One span → its part, by the conventions and then each mapper's `refine`. */
 export function genAiPart(
   span: ReceivedSpan,
-  resource: SpanResource,
+  resource: SpanResource = [],
   mappers: readonly SpanAttributeMapper[] = [],
 ): SpanPart {
   const view: SpanView = {
@@ -309,7 +309,7 @@ export function genAiPart(
  * else the trace id. */
 export function genAiSessionKey(
   span: ReceivedSpan,
-  resource: SpanResource,
+  resource: SpanResource = [],
   mappers: readonly SpanAttributeMapper[] = [],
 ): string {
   const view: SpanView = {

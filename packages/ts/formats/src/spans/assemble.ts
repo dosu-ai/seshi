@@ -334,5 +334,14 @@ export function assembleSpanParts(
   if (cwd) meta.cwd = cwd;
   const version = parts.find((p) => p.meta?.agent_version)?.meta?.agent_version;
   if (version) meta.agent_version = version;
-  return { records: [meta, ...records], llm_calls: [...used.values()] };
+  // Calls in the order the records first name them.
+  const llm_calls: LlmCall[] = [];
+  const listed = new Set<string>();
+  for (const record of records) {
+    const ref = (record as { llm_call?: string }).llm_call;
+    if (ref === undefined || listed.has(ref)) continue;
+    listed.add(ref);
+    llm_calls.push(used.get(ref) as LlmCall);
+  }
+  return { records: [meta, ...records], llm_calls };
 }
