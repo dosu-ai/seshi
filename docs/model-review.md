@@ -39,7 +39,12 @@ which step failed, and the log moves past it as for any drop, a first upload lea
 `skip` (written with regex redaction only, recorded as `skipped`).
 A resend of an upload is answered from the session and not reviewed again; a `rebuild`
 (`seshi capture resend`, or the uploader resending a stale session) is reviewed again whole,
-which is how envelopes skipped or dropped during an outage get reviewed. A policy applies to
+which is how envelopes skipped or dropped during an outage get reviewed. The one exception is
+a dropped first upload: the session remembers where the part it dropped ends (a byte offset,
+a record count and a hash), and a rebuild, a replace or an OTLP session assembled again leaves
+that part out, so it is never sent to a model or stored, even after the rules or the
+normalizer changed. A first upload dropped because review failed is not reviewed again
+either. A policy applies to
 what is written after the server restarts with it: `seshi redact backfill` applies new regex
 rules to stored sessions but does not send them to review again, and what review took out
 stays out.

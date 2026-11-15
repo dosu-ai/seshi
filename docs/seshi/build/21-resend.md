@@ -40,7 +40,8 @@ schemas.
   read for a rebuild too); the refusal says "rebuild". A rebuild at `offset` > 0 is
   `bad_chunk`. A rebuild with no idempotency key gets the derived key plus
   `#rebuild-<uuid>`. Review runs on every record, so envelopes review skipped or dropped are
-  reviewed again. With no trace stored, a rebuild is a first upload (filter included).
+  reviewed again, except a dropped first envelope ("Meeting 20"). With nothing stored, a
+  rebuild is a first upload (filter included).
 - **The uploader.** `SessionState.rebuild { at, key, for? }` and `rebuilt_for`;
   `uploader.last_stale_check`. `SessionSink.stale?()` (optional, additive):
   `httpSink` reads every page through `allStale` (at most 100); local mode's sink lists the
@@ -119,8 +120,9 @@ at all on a machine that stored nothing.
    everything sends every session to review again. `--session` without an id names the current
    session, as `capture off|on` do, and `--agent` works as there.
 6. **Only sessions uploaded from this machine are resent** (`sent`). A session whose first
-   envelope was filtered or dropped was sent, so it is resent (and reviewed again); one never
-   sent has nothing on the server to rebuild.
+   envelope was filtered was sent, so it is resent (and reviewed again); one whose first
+   envelope review dropped is resent, but the dropped part is left out ("Meeting 20"); one
+   never sent has nothing on the server to rebuild.
 7. **The stale check runs at the end of a pass,** so a session stored in that pass is asked
    about too, and what it marks goes on the next pass ("on its next pass", decision 2).
 8. **Once per version.** A session the server still lists after its rebuild (review dropped
@@ -129,6 +131,65 @@ at all on a machine that stored nothing.
 9. **The listing is not filtered by writer.** It lists all of the caller's stale sessions; the
    uploader matches them against its own state, and a session another machine wrote is not in
    it.
+
+## Meeting 20
+
+20 (a dropped first envelope leaves a stub, F3.4) and this branch met in one gap: a rebuild
+takes `Pipeline.whole`'s replace path, which redacted, reviewed and wrote the whole log, the
+records review dropped included. The same path is reached by a replace after a 409 (the rules
+or the normalizer changed since the stub's prefix hash) and by an assembled OTLP session a late
+span forces to replace. Once the stub's first trace is stored the session has a `head`, so
+nothing remembered which part was dropped. F3.4 (revised 15 Nov 2026) says that part is never
+stored or sent to review again.
+
+- **`dropped_prefix` on the metadata** (`metadata.schema.json`, `DroppedPrefix`): `{ bytes,
+  records, prefix_sha256 }`. `recordProgress` sets it to `normalized` whenever the session
+  has no `head` (a stub: everything normalized so far was dropped or held no records); `ingest`
+  keeps it through every later write (it spreads the stored pointer), replace included, and
+  takes a new one from the write that left the dropped start out; a tombstone removes it.
+  Counts and a hash, never content. Conformance example: `metadata.stub.json`.
+- **The replace path leaves it out** (`Pipeline.pastDropped`). For a session with a
+  `dropped_prefix` (or a stub written before the field existed, whose `normalized` is all
+  dropped), the number of leading records to leave out is:
+  1. `records`, when the first `records` records, regex-redacted, still hash to
+     `prefix_sha256`;
+  2. else, for an uploaded `jsonl` log of a chunkable format (`WholeOptions.recordsIn`, from
+     the upload path, which has the text), what the current adapter makes of the log's first
+     `bytes` bytes, cut at the line boundary at or past them (a cut inside a line takes the
+     whole line: more left out rather than less). This covers a rebuild after an adapter
+     change and a replace after a rules change;
+  3. else (an assembled session, `bytes` 0, or a JSON document) `records`.
+  What follows is redacted as the tail of the left-out part (it carries its withheld calls),
+  reviewed alone (`commit` judges what follows the meta record) and written as
+  `[{ role: "meta", source: <format> }, …what follows]`, a `continuation` from the left-out
+  records with their prefix hash, the branch from the envelope (the log's meta record was
+  dropped), `normalized` over all the records, and `dropped_prefix` refreshed to what was left
+  out. Nothing left: `unchanged`, through `progress`. A session with a trace is replaced; a stub
+  is not (it has no trace to replace): its first trace is published as any first trace is, and
+  if review drops what follows, the stub moves on.
+- **Tests.** `pipeline.test.ts` ("written whole again later"): rebuilds with and without a
+  trace, after an adapter change, a replace after a rules change, an assembled replace, the
+  field kept and tombstoned, and a plain session rebuilt whole as before.
+  `tests/review/review.test.ts`: over HTTP, a rebuild and a replace send the provider nothing
+  dropped.
+
+Deviations from the design as given:
+
+1. **A stub's rebuild or replace is not written as a replace.** The design wrote `replace:
+   true` for every write past the dropped start. A stub has no trace to replace, so its first
+   trace is published without `replace` (the change feed's first entry for it is a plain
+   `published`), and a drop of what follows moves the stub on rather than leaving the stub's
+   old state, as for any envelope sent to a stub.
+2. **A dropped start with no records left out is rewritten whole.** When the dropped bytes
+   normalize to no records (they held only transport lines), nothing is left out and the
+   ordinary replace runs, rather than writing a second meta record before the log's own.
+
+Limits: an assembled session (no bytes) whose late span lands inside the dropped part shifts
+what follows by one record, so the last dropped record is reviewed again; a JSON document
+(ATIF) after an adapter change is cut by its old record count. A first upload dropped because
+review failed (`on_failure = "drop"`) is never reviewed again either: a rebuild cannot recover
+it. Sessions that began as stubs before `dropped_prefix` existed and have a trace since carry no
+record of their dropped start (none exist outside these branches).
 
 ## Still to check
 
@@ -145,8 +206,7 @@ at all on a machine that stored nothing.
 - **For the branches in flight:** the capture-pause branch (decision 1) freezes a running
   session at an offset; a rebuild is a whole-log resend and must stop at that frozen offset too
   (`sync` builds the piece from 0 to the transcript's size). The dropped-first-envelope stub
-  branch (decision 3): `staleSession` needs a `head`, so a stub is never listed; a rebuild of a
-  stub takes the first-trace path in `Pipeline.whole` (no `head`) and is filtered and reviewed
-  as a first trace, which should be checked against the stub's stored offset when the two meet.
+  branch (decision 3): `staleSession` needs a `head`, so a stub is never listed. How a rebuild
+  meets a stub is in "Meeting 20".
 - Not run against a live server or real agents; checked with the in-process server and
   fixtures only.

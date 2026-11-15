@@ -206,7 +206,9 @@ paths:
         - `rebuild` builds the session again from the whole log and reviews it again, even
           when the log only extends what is stored (X4.9): it replaces the session, with the
           same permission as `replace`. The uploader sends it for sessions an older normalizer
-          built (`GET /v1/sessions/stale`) and for `seshi capture resend`.
+          built (`GET /v1/sessions/stale`) and for `seshi capture resend`. A rebuild or replace
+          of a session whose first envelopes review dropped leaves that dropped start out: it
+          is never reviewed or stored again (F3.4).
         - Every upload has an idempotency key (the `Idempotency-Key` header, or
           `idempotency_key`; by default the session, the offset and a digest of the
           transcript, plus a fresh suffix for a `rebuild`). A resend with a key the session
@@ -1561,7 +1563,7 @@ components:
         rebuild:
           type: boolean
           default: false
-          description: Rebuild the session from this whole log and review it again even when the log only extends what is stored, where it would otherwise answer `unchanged` or write only the tail (X4.9). A replace, with the same permission (and the retraction secret with the org key). Never a chunk (`422 bad_chunk`). Without an idempotency key each rebuild gets a fresh one. The uploader sends it for the sessions `GET /v1/sessions/stale` lists.
+          description: Rebuild the session from this whole log and review it again even when the log only extends what is stored, where it would otherwise answer `unchanged` or write only the tail (X4.9). A replace, with the same permission (and the retraction secret with the org key). Never a chunk (`422 bad_chunk`). Without an idempotency key each rebuild gets a fresh one. The uploader sends it for the sessions `GET /v1/sessions/stale` lists. A session whose first envelopes review dropped keeps them out (F3.4).
         visibility:
           type: string
           enum: [org, owner]

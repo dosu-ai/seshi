@@ -39,8 +39,8 @@ dropped text is never stored or sent to review again. This closes 04's deviation
     (what a session with a trace answers for an already-applied prefix) and reviews nothing;
     the very same envelope again gets the recorded `dropped` answer (X4.7). One that does not
     extend the stub is `409 conflict`, unless it is a replace by the stub's writer or an admin
-    (X4.6, `mayReplace` with the stub's `retract_hash` for the org key), which writes and
-    reviews the new history whole.
+    (X4.6, `mayReplace` with the stub's `retract_hash` for the org key), which leaves the
+    dropped start out as a rebuild does (21's "Meeting 20").
   - Either way the first trace is a `continuation` from the dropped records (`from_record` =
     the stub's record count, `prefix_sha256` = its prefix hash), as a fork's first trace is,
     so its content hash, the search indexer (`currentTraces`) and the backfill join all treat
@@ -112,7 +112,8 @@ dropped text is never stored or sent to review again. This closes 04's deviation
    needs nothing new: `head` was already optional ("absent before one is stored"), and
    `spec/layout.md` already told readers that no `head` means nothing to read. Only `head`'s
    description changed, with a conformance example. This also keeps the rebase with decision
-   2's metadata change small.
+   2's metadata change small. (Meeting 21 added one, `dropped_prefix`, so the session still
+   knows its dropped start once it has a trace: see 21's "Meeting 20".)
 2. **The stub's first trace has a minimal meta record**, `{ role: "meta", source: <agent> }`,
    not the log's. The meta record came from the dropped envelope; its working directory,
    branch, model and agent version are part of what review dropped (a policy may drop by
@@ -132,24 +133,23 @@ dropped text is never stored or sent to review again. This closes 04's deviation
    extend the stub is a different history (or the rules or the normalizer changed, 04's
    deviation 4), and the server cannot tell which of its bytes were the dropped ones. The
    writer's replace reviews it whole, as for a stored session; any dropped text it still holds
-   goes to review again. The uploader only replaces after a `409 conflict`.
+   goes to review again. The uploader only replaces after a `409 conflict`. *Superseded when
+   20 met 21:* a replace leaves out the log's first `normalized.bytes` bytes (or records), so
+   the dropped text is not reviewed again; see 21's "Meeting 20".
 
 ## Still to check
 
-- **Decision 2 (`rebuild`).** A forced rebuild of a stub session reviews the whole log, the
-  dropped part included, unless the rebuild skips a stub's prefix. Decide when 2 and 20 meet.
-- **Rule and normalizer changes** make a whole resend of a stub session a conflict and then a
-  replace (deviation 5), which re-reviews the dropped text. Chunks are unaffected, and the
-  uploader sends chunks after a stub, so this needs a moved transcript or lost uploader state
-  as well. Keeping a byte offset only (not a hash of the dropped bytes) is what the decision
-  allows.
+- **Rule and normalizer changes** still make a whole resend of a stub session a conflict and
+  then a replace (deviation 5). Since 20 met 21 the replace leaves the dropped bytes out
+  (21's "Meeting 20"); the 409 round trip remains.
 - **Change feed (decisions 7 and 8).** A stub writes no change entry, so the new key format
   and the entry-before-pointer order do not touch it; check after the rebase that a tombstone
   or visibility entry with `content_hash: null` for a session a reader never saw is still
   harmless to every feed reader.
 - **Assembled sessions.** A stub's span records stay under `spans/` as any session's do
-  (F4.4); a late span in the middle of the dropped part makes the assembler replace, which
-  reviews the dropped spans again (deviation 5).
+  (F4.4). A late span makes the assembler replace; since 20 met 21 the replace leaves the
+  dropped records out, by count when a late span landed inside them, so the last dropped
+  record is then reviewed again (21's "Meeting 20").
 - 11's and 14's notes still describe a dropped first envelope answering zeros (what they were
   built against); their code needed no change.
 - `seshi sessions show` of a stub says not found; its owner sees the drop in `seshi sync

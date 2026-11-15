@@ -184,7 +184,8 @@ A session whose first envelope model review dropped (F3.4) has a **stub**: a poi
 `status: "stored"`, no `head`, no `traces`, and nothing of the dropped content. It holds the
 session's identity (`owner`, `session_id`, `agent`, `archive_id`), its `writer`,
 `owner_basis` and `visibility`, the `retract_hash`, and where its log ends: `normalized` (the
-byte offset past the dropped envelope and the prefix hash) and `applied` (the drop's answer).
+byte offset past the dropped envelope and the prefix hash), `dropped_prefix` (the same offset,
+record count and hash, kept once the session has a trace) and `applied` (the drop's answer).
 No change entry is written for it. The next envelope continues from there and is reviewed on
 its own; once stored, it is the session's first trace, a `continuation` from the dropped
 records whose meta record names only the format (`{ "role": "meta", "source": "<agent>" }`).
@@ -204,6 +205,8 @@ Readers neither list nor serve a stub: no `head`, nothing to read.
       "continuation": { "from_record": 6, "prefix_sha256": "…" } }
   ],
   "normalized": { "bytes": 57333, "records": 15, "prefix_sha256": "…", "hash_state": "…" },
+  "dropped_prefix": { "bytes": 2114, "records": 3, "prefix_sha256": "…" },  // only when review
+                                      // dropped the session's first envelopes (F3.4)
   "withheld_calls": { "toolu_01…": "sensitive-file" },
   "applied": [                        // the last envelopes applied, with their answers (X4.7)
     { "idempotency_key": "…@48213#…", "at": "…", "status": "stored", "content_hash": "…",
@@ -247,6 +250,14 @@ sensitive-call rules withhold. Both count the log's records as regex redaction l
 before model review, so they follow the uploader's log: a record model review redacted or an
 envelope it dropped still counts, and `continuation.from_record` is in the same terms.
 `applied` keeps the last 16 envelopes (X4.7).
+
+`dropped_prefix` is the start of the log model review dropped before the session had a trace
+(F3.4): its byte length (0 for an assembled session), its record count and their prefix hash.
+Every write with no trace stored sets it to `normalized`; every later write keeps it, and a
+whole write that does not extend what is stored (a rebuild, a replace, an assembly published
+again) leaves those records out and sets it anew, so the dropped text is never stored or
+reviewed again. It is absent for a session whose first envelope was stored, and removed by a
+tombstone.
 
 ### `changes/<stamp>-<archive_id>-<suffix>-<hash|tombstone|visibility>.json` — `seshi/change/1` ([schema](schemas/change.schema.json))
 
@@ -377,6 +388,15 @@ A log arrives whole (`offset` 0) or as a chunk from where the session's log ends
   (never filtered); nothing past what is stored moves the log on and publishes nothing. One
   that does not extend the session is refused, unless it is sent as a replace by the session's
   original `writer` or an admin (X4.6).
+- A `rebuild` (X4.9) takes the replace path even for a log that extends the session. On that
+  path a session with a `dropped_prefix` keeps its dropped start out: its first `records`
+  records are left out when they still hash to its `prefix_sha256`; otherwise, for an uploaded
+  `jsonl` log, as many records as the current adapter makes of its first `bytes` bytes (cut at
+  the line boundary at or past them, after a rules or adapter change); otherwise (an assembled
+  session, a document) its `records`. What is left is reviewed alone and published as a
+  continuation from the dropped records, with the stub's meta record; nothing left is
+  `unchanged`. Leaving out too much is preferred to reviewing anything dropped again: for an
+  assembled session, a late span inside the dropped part shifts what follows by one record.
 - A resend of an envelope in `applied` gets the recorded answer and runs no stage (X4.7).
 
 A permanent failure is answered to a caller that waits (an upload, a hook) and otherwise

@@ -193,7 +193,8 @@ seshi capture resend --all             # every session uploaded from this machin
 `seshi capture resend` sends sessions this machine uploaded again, whole, with `rebuild`, as the
 uploader does by itself for stale ones: the server builds each from the whole log and reviews it
 again, even when nothing in the log is new. Use it after an outage of the review provider, to
-have envelopes that review skipped or dropped reviewed again. Sessions turned off, never
+have envelopes that review skipped or dropped reviewed again (a dropped first upload stays
+out: it is never sent to review again). Sessions turned off, never
 uploaded from here, or whose transcript is gone are left out and listed. It marks the sessions
 and wakes the uploader; `seshi capture status` shows them as `resending` until they are sent.
 
