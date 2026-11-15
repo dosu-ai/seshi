@@ -1,10 +1,12 @@
-/** Whether a session is worth storing, judged on what would actually ship: its normalized,
- * redacted trajectory. Size rather than turn counts, so a terse agent run whose substance is
- * tool traffic counts as much as a chatty one. The rules are config's `[filter]` (X4.10), with
- * today's values as defaults; the names match the config's.
+/** The session filter (X4.10, was "worthiness"): whether a session is worth storing, judged on
+ * what would actually ship, its normalized and redacted records. Size rather than turn counts,
+ * so a terse agent run whose substance is tool traffic counts as much as a chatty one. The rules
+ * are config's `[filter]`, with each source's overrides (`filterFor`); the names match the
+ * config's.
  *
- * Only a session's first trace is judged: a chunk that continues a stored head is never
- * filtered, so agent-only tails are not lost. */
+ * Only a session's first trace is judged. Chunks and whole-upload tails that continue a stored
+ * trace are never filtered, so agent-only tails are not lost. A filtered session is not stored;
+ * it is only counted in source health. */
 
 import type { NormalizedRecord } from "@seshi/model";
 
@@ -29,12 +31,25 @@ export const DEFAULT_FILTER: Readonly<FilterRules> = Object.freeze({
   require_reply: true,
 });
 
-/** Trivial when the session cannot be a trace (no user record, or nothing answering it: no
- * assistant or tool record), or, with the filter on, when it has under `min_chars`
- * characters. The first part holds whatever the rules say: today's trace format refuses such a
- * session as invalid, and a quiet "not stored" is what an uploader expects for a session that
- * has only started. */
-export function isTrivialTrajectory(
+/** The rules for every source, or the rules for one source by its id (config's
+ * `(id) => filterFor(config, id)`). */
+export type FilterSetting = Readonly<FilterRules> | ((sourceId: string) => Readonly<FilterRules>);
+
+/** The rules `setting` gives `sourceId`; `DEFAULT_FILTER` without a setting. */
+export function filterRulesFor(
+  setting: FilterSetting | undefined,
+  sourceId: string,
+): Readonly<FilterRules> {
+  if (setting === undefined) return DEFAULT_FILTER;
+  return typeof setting === "function" ? setting(sourceId) : setting;
+}
+
+/** Filtered when the session cannot be a trace (no user record, or nothing answering it: no
+ * assistant or tool record), or, with the filter on, when it has under `min_chars` characters.
+ * The first part holds whatever the rules say: the trace format refuses such a session as
+ * invalid, and a quiet "not stored" is what an uploader expects for a session that has only
+ * started. */
+export function isFiltered(
   records: readonly NormalizedRecord[],
   rules: Readonly<FilterRules> = DEFAULT_FILTER,
 ): boolean {

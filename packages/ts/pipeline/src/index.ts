@@ -1,9 +1,15 @@
-/** `@seshi/pipeline`: one session into the store (redact the transcript, store it as a raw part,
- * normalize it through the deployment's format registry, decide what is new, write the
- * canonical trace), and the reads over a store. Layer 2 (X3.2). The write path is today's; branch 04 reworks it
- * into the envelope pipeline (X4). */
+/** `@seshi/pipeline`: one ingest pipeline (X4). An envelope in (`Pipeline.submit`); authorize,
+ * normalize in memory, regex redaction, the session filter, model review; then the trace, the
+ * head and the change entry out, and nothing raw (X6.3). Also the reads over a store and the
+ * direct-to-bucket client until local mode (06) replaces it. Layer 2 (X3.2). */
 
-export { IngestRejected, OffsetMismatch, SessionRejected } from "@seshi/model";
+export {
+  Forbidden,
+  IngestRejected,
+  OffsetMismatch,
+  SessionConflict,
+  SessionRejected,
+} from "@seshi/model";
 export {
   canonicalJson,
   copiedPrefix,
@@ -13,6 +19,25 @@ export {
   type ShippedPrefix,
 } from "./continuation";
 export {
+  checkEnvelope,
+  hasCaller,
+  isLogEnvelope,
+  type LogEnvelope,
+  type SpanEnvelope,
+  type UploadEnvelopeOptions,
+  uploadEnvelope,
+  uploadIdempotencyKey,
+  writerOf,
+} from "./envelope";
+export {
+  DEFAULT_FILTER,
+  type FilterRules,
+  type FilterSetting,
+  filterRulesFor,
+  isFiltered,
+} from "./filter";
+export {
+  APPLIED_KEPT,
   getSession,
   getTrace,
   type IngestInput,
@@ -20,22 +45,46 @@ export {
   type IngestResult,
   ingest,
   listSessions,
-  type PutRawInput,
-  type PutRawResult,
-  putRaw,
-  recordNormalized,
+  recordProgress,
   type StoredTrace,
   type TombstoneInput,
   tombstone,
+  type WithheldCallIds,
   type WriteContext,
+  withApplied,
 } from "./ingest";
 export { DEFAULT_LIMITS, type Limits } from "./limits";
 export { type ConnectOptions, connect, type StoreClientOptions, StoreSessionDB } from "./local";
 export { normalizeTranscript } from "./normalize";
+export {
+  type FailedResult,
+  Pipeline,
+  type PipelineOptions,
+  type SubmitOptions,
+  type SubmitResult,
+} from "./pipeline";
 export {
   type SessionOptions,
   type SessionUpload,
   type StoreSessionResult,
   storeSession,
 } from "./session";
-export { DEFAULT_FILTER, type FilterRules, isTrivialTrajectory } from "./worthiness";
+export {
+  type AssembledSession,
+  type Authorization,
+  type Authorizer,
+  type HealthCounters,
+  MemoryHealthCounters,
+  mayReplace,
+  noHealth,
+  noReview,
+  permissiveAuthorizer,
+  type ReviewDecision,
+  type Reviewer,
+  type ReviewInput,
+  type ReviewNote,
+  type SpanAssembler,
+  type SpanBatch,
+  type SpanBatchResult,
+  StoreHealthCounters,
+} from "./stages";

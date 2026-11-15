@@ -1,7 +1,7 @@
 /** One client API, two backends, as `@dosu/sessiondb` offered it.
  *
- * `connect({ store, owner, formats })` writes a store directly: the transcript is redacted and
- * normalized here, on the machine that calls, and the bucket is written with that machine's
+ * `connect({ store, owner, formats })` writes a store directly: the transcript goes through the
+ * pipeline here, on the machine that calls, and the bucket is written with that machine's
  * credential. `connect({ server, token })` is the HTTP client (`@seshi/client`), which posts the
  * transcript to a server that runs the same pipeline against the bucket it owns. Either way the
  * calls, their results and what they throw are the same.
@@ -42,10 +42,11 @@ import {
   readChanges,
   type Store,
 } from "@seshi/store";
+import { uploadEnvelope } from "./envelope";
+import type { FilterSetting } from "./filter";
 import { getSession, getTrace, listSessions, tombstone } from "./ingest";
 import type { Limits } from "./limits";
-import { storeSession } from "./session";
-import type { FilterRules } from "./worthiness";
+import { Pipeline } from "./pipeline";
 
 export interface StoreClientOptions {
   store: Store;
@@ -64,9 +65,12 @@ export interface StoreClientOptions {
   /** How the owner was established; `verified` by default. */
   owner_basis?: OwnerBasis;
   /** The session filter (`SessionOptions.filter`). */
-  filter?: Readonly<FilterRules>;
+  filter?: FilterSetting;
   /** Size caps (`SessionOptions.limits`). */
   limits?: Readonly<Limits>;
+  /** The pipeline to submit uploads to, shared by every owner's client (the server keeps one);
+   * built from the options above when omitted. */
+  pipeline?: Pipeline;
 }
 
 /** The pipeline over a `Store`, scoped to one owner. */
@@ -76,10 +80,7 @@ export class StoreSessionDB implements SessionDB {
   private readonly storage: StorageView;
   private readonly client: string;
   private readonly now: () => Date;
-  private readonly redaction: RedactionRules | undefined;
-  private readonly formats: FormatRegistry;
-  private readonly filter: Readonly<FilterRules> | undefined;
-  private readonly limits: Readonly<Limits> | undefined;
+  private readonly pipeline: Pipeline;
   readonly writer: Writer;
   private readonly ownerBasis: OwnerBasis;
 
@@ -89,10 +90,17 @@ export class StoreSessionDB implements SessionDB {
     this.storage = options.storage ?? { url: options.store.url };
     this.client = options.client ?? `seshi/${VERSION}`;
     this.now = options.now ?? (() => new Date());
-    this.redaction = options.redaction;
-    this.formats = options.formats;
-    this.filter = options.filter;
-    this.limits = options.limits;
+    this.pipeline =
+      options.pipeline ??
+      new Pipeline({
+        store: options.store,
+        formats: options.formats,
+        client: this.client,
+        now: this.now,
+        redaction: options.redaction,
+        filter: options.filter,
+        limits: options.limits,
+      });
     this.writer = options.writer ?? localWriter(this.owner);
     this.ownerBasis = options.owner_basis ?? "verified";
   }
@@ -104,20 +112,22 @@ export class StoreSessionDB implements SessionDB {
     await probe(this.store, this.owner);
   }
 
-  ingest(upload: Upload): Promise<StoreSessionResult> {
-    return storeSession(
+  /** The upload as an envelope (source id `upload`, this client's writer as the caller),
+   * through the pipeline. */
+  async ingest(upload: Upload): Promise<StoreSessionResult> {
+    const envelope = uploadEnvelope(
       { ...upload, format: upload.format ?? "jsonl", owner: this.owner },
       {
-        store: this.store,
-        formats: this.formats,
-        client: this.client,
+        caller: {
+          kind: this.writer.kind,
+          principal: this.writer.principal,
+          ...(this.writer.credential_id ? { credential_id: this.writer.credential_id } : {}),
+        },
+        owner_basis: this.ownerBasis,
         now: this.now,
-        redaction: this.redaction,
-        filter: this.filter,
-        limits: this.limits,
-        context: { writer: this.writer, owner_basis: this.ownerBasis },
       },
     );
+    return (await this.pipeline.submit(envelope, { onFailure: "throw" })) as StoreSessionResult;
   }
 
   getSession(agent: string, sessionId: string): Promise<SessionMetadata | null> {

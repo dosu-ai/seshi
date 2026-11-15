@@ -1,18 +1,18 @@
-/** The write path: objects in the store out.
- *
- * `putRaw` comes first: the redacted transcript as the session's raw part, and the session's
- * `metadata.json` if it is the first. `ingest` follows with what normalizing that transcript
- * produced: cap → parse (validate, strip NUL, events, hash) → dedupe on `(owner, content_hash)`
- * → publish the canonical trace (`seshi/trace/1`, X6.2) → update `metadata.json` → change
- * entry. `tombstone` undoes both. Redaction happened in `redactRaw` and `normalizeTranscript`;
- * the hash is over what the latter produced.
+/** The write stage: the decided records in, objects in the store out. The pipeline
+ * (`pipeline.ts`) runs every other stage in memory first (X4.3) and calls `ingest` last, so this
+ * is the only place a session's objects are written: cap → parse (validate, strip NUL, events,
+ * hash) → publish the canonical trace (`seshi/trace/1`, X6.2) → update `metadata.json` → change
+ * entry. Nothing raw is stored (X6.3): a session is its pointer, its traces and its change
+ * entries. `tombstone` removes them.
  *
  * `metadata.json` is updated with If-Match and retried on 412 (X6.5), so two writers on one
- * session (an API instance and the worker, two uploads racing) each see the other's update.
- * Every write records who made it (X5.5): the session keeps its original writer and how its
- * owner was established, and each change entry its own writer. */
+ * session (an API instance and the worker, two uploads racing) each see the other's update; a
+ * `guard` lets the caller refuse a version that is not the one it planned against. Every write
+ * records who made it (X5.5): the session keeps its original writer and how its owner was
+ * established, and each change entry its own writer. */
 
 import {
+  type AppliedEnvelope,
   type Claims,
   IngestRejected,
   type IngestResult,
@@ -23,9 +23,7 @@ import {
   type NormalizedState,
   type OwnerBasis,
   type Provenance,
-  type PutRawResult,
   parseTrace,
-  type RawFormat,
   type RedactionSummary,
   type SessionMetadata,
   type SessionTraceRef,
@@ -49,12 +47,29 @@ import {
   publishObject,
   readMetadata,
   type Store,
-  sha256,
   updateMetadata,
 } from "@seshi/store";
 import { DEFAULT_LIMITS, type Limits } from "./limits";
 
-export { IngestRejected, type IngestResult, type PutRawResult, type StoredTrace };
+export { IngestRejected, type IngestResult, type StoredTrace };
+
+/** How many applied envelopes a session remembers (X4.7). A resend older than that is
+ * processed again; for a log that means 409 `offset_mismatch` with where the log ends, which
+ * an uploader already handles. */
+export const APPLIED_KEPT = 16;
+
+/** Withheld call ids, by id (`SessionMetadata.withheld_calls`). */
+export type WithheldCallIds = NonNullable<SessionMetadata["withheld_calls"]>;
+
+/** `applied` with `entry` added (a resend's entry replaces its earlier one), the oldest past
+ * `APPLIED_KEPT` dropped. */
+export function withApplied(
+  applied: readonly AppliedEnvelope[] | undefined,
+  entry: AppliedEnvelope,
+): AppliedEnvelope[] {
+  const kept = (applied ?? []).filter((a) => a.idempotency_key !== entry.idempotency_key);
+  return [...kept, entry].slice(-APPLIED_KEPT);
+}
 
 /** Who is writing and on what basis (X5.5, X5.10), and what the data claimed and came from.
  * Everything is optional: without it a write is the owner's own, through the upload route
@@ -87,7 +102,6 @@ function newSession(
     agent,
     status: "stored",
     traces: [],
-    raw: [],
     writer: context.writer ?? localWriter(owner),
     owner_basis: context.owner_basis ?? "verified",
     visibility: context.visibility ?? "org",
@@ -139,7 +153,7 @@ export interface IngestMetadata {
 export interface IngestInput extends WriteContext {
   store: Store;
   owner: string;
-  /** Normalized and redacted; `parseTrajectory` validates the shape. */
+  /** Normalized, redacted and reviewed; `parseTrace` validates the shape. */
   records: readonly NormalizedRecord[];
   metadata: IngestMetadata;
   /** Identifies the writer in the layout marker (`seshi/0.9.0`). */
@@ -147,6 +161,22 @@ export interface IngestInput extends WriteContext {
   now?: () => Date;
   /** Where the session's log stands once these records are in, written with the pointer. */
   normalized?: NormalizedState;
+  /** The calls the sensitive-call rules withheld in the session's log so far (replaces the
+   * stored set when given; an empty set removes it). */
+  withheld_calls?: WithheldCallIds;
+  /** The envelope this write applies (X4.7): remembered with what it answered, so a resend
+   * gets the same answer. Needs `normalized`. */
+  applied?: { idempotency_key: string; at?: string };
+  /** The trace replaces the session's traces instead of extending them (X4.6): the pointer
+   * lists only it, the earlier objects are removed, and the change entry says `replace`. The
+   * caller has checked that this writer may. */
+  replace?: boolean;
+  /** Runs on the stored pointer inside the conditional update, before anything changes; throws
+   * to abandon the write when the session is not as the caller planned (another write landed
+   * first). The trace object written for it is removed again. */
+  guard?: (existing: SessionMetadata | null) => void;
+  /** The layout marker was already checked by the caller (the pipeline checks it once). */
+  layout_checked?: boolean;
   /** Size caps; `DEFAULT_LIMITS` when omitted. */
   limits?: Readonly<Limits>;
   /** The LLM calls the records' `llm_call` fields name (model, timing, token usage). */
@@ -207,12 +237,13 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
 
   const archive = archiveId(owner, metadata.agent, metadata.session_id);
   const at = now().toISOString();
-  await ensureLayout(store, { createdBy: input.client ?? "seshi" });
+  if (!input.layout_checked) await ensureLayout(store, { createdBy: input.client ?? "seshi" });
 
   const before = await readMetadata(store, owner, archive);
   if (before?.status === "redacted") {
     throw new IngestRejected("redacted", "session was redacted; it will not be stored again");
   }
+  input.guard?.(before);
 
   const outcome = await publishObject(
     store,
@@ -222,12 +253,15 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
   );
 
   const context: WriteContext = { ...input, writer, provenance };
-  // Whether the pointer already listed this trace, as of the version the update applied to.
+  // Whether the pointer already listed this trace, as of the version the update applied to, and
+  // what a replacement took off it.
   let already = false;
+  let replaced: string[] = [];
   const pointer = updateMetadata(store, owner, archive, (existing) => {
     if (existing?.status === "redacted") {
       throw new IngestRejected("redacted", "session was redacted; it will not be stored again");
     }
+    input.guard?.(existing);
     const listed = existing?.traces.find((t) => t.content_hash === trace.content_hash);
     already = listed !== undefined;
     const ref: SessionTraceRef = {
@@ -239,13 +273,17 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
 
     const base =
       existing ?? newSession(owner, archive, metadata.session_id, metadata.agent, at, context);
+    replaced = input.replace
+      ? base.traces.map((t) => t.content_hash).filter((h) => h !== trace.content_hash)
+      : [];
+    const traces = input.replace ? [listed ?? ref] : listed ? base.traces : [...base.traces, ref];
     const next: SessionMetadata = withContext(
       {
         ...base,
         source: trace.source,
         status: "stored",
         head: trace.content_hash,
-        traces: listed ? base.traces : [...base.traces, ref],
+        traces,
         origin_agent: input.origin_agent ?? base.origin_agent ?? trace.source,
         native_session_id: input.native_session_id ?? base.native_session_id ?? metadata.session_id,
         updated_at: at,
@@ -260,6 +298,23 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
     if (parent) next.parent_session_id = parent;
     const normalized = input.normalized ?? base.normalized;
     if (normalized) next.normalized = normalized;
+    if (input.withheld_calls !== undefined) {
+      if (Object.keys(input.withheld_calls).length > 0) next.withheld_calls = input.withheld_calls;
+      else delete next.withheld_calls;
+    }
+    if (input.applied && normalized) {
+      next.applied = withApplied(base.applied, {
+        idempotency_key: input.applied.idempotency_key,
+        at: input.applied.at ?? at,
+        status: already && outcome === "exists" ? "duplicate" : "stored",
+        content_hash: trace.content_hash,
+        records: trace.records.length,
+        events: trace.events.length,
+        records_total: normalized.records,
+        prefix_sha256: normalized.prefix_sha256,
+        bytes_total: normalized.bytes,
+      });
+    }
     if (metadata.normalizer) next.normalizer = metadata.normalizer;
     const redaction = addRedaction(base.redaction, input.redaction);
     if (redaction) next.redaction = redaction;
@@ -268,18 +323,24 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
   try {
     await pointer;
   } catch (err) {
-    // Tombstoned between the check above and now: the tombstone already removed the objects
-    // it knew of, so the one this write just created would be left behind. Remove it too.
-    if (err instanceof IngestRejected && err.code === "redacted" && outcome === "written") {
-      await store.delete(keys.trace(owner, archive, trace.content_hash));
+    // Tombstoned between the check above and now, or the guard refused a session another write
+    // changed: the object this write just created would be left behind (a tombstone already
+    // removed the objects it knew of). Remove it too, unless the pointer already lists it.
+    if (outcome === "written") {
+      const now = await readMetadata(store, owner, archive);
+      if (!now?.traces.some((t) => t.content_hash === trace.content_hash)) {
+        await store.delete(keys.trace(owner, archive, trace.content_hash));
+      }
     }
     throw err;
   }
+  // The pointer no longer lists them, so no reader looks for them any more.
+  for (const hash of replaced) await store.delete(keys.trace(owner, archive, hash));
 
   // A duplicate is one the pointer already lists and whose object was there: nothing new to say.
   // An object that exists without a pointer entry (an interrupted earlier publish) is completed
   // here, pointer and change entry included.
-  const duplicate = already && outcome === "exists";
+  const duplicate = already && outcome === "exists" && replaced.length === 0;
   if (!duplicate) {
     await appendChange(store, {
       kind: "published",
@@ -290,6 +351,7 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
       content_hash: trace.content_hash,
       writer,
       ...(metadata.continuation ? { continuation: metadata.continuation } : {}),
+      ...(input.replace ? { replace: true as const } : {}),
     });
   }
 
@@ -303,130 +365,44 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
   };
 }
 
-export interface PutRawInput extends WriteContext {
+/** Record where a session's log stands when no trace is written for an envelope: a chunk with
+ * no records in it, a whole log with nothing past what is stored, an envelope model review
+ * dropped. The log moves on and the envelope is remembered (X4.7) without a new trace. */
+export async function recordProgress(input: {
   store: Store;
   owner: string;
-  agent: string;
-  session_id: string;
-  part: number;
-  format: RawFormat;
-  /** Already redacted (`redactRaw`) and gzipped. */
-  bytes: Uint8Array;
-  /** Where the part sits in the log: its first byte's offset, and the log bytes it covers
-   * before redaction. */
-  offset: number;
-  length: number;
-  /** The part is the whole log: every other part stored is of an earlier version of it and is
-   * removed. */
-  whole?: boolean;
-  /** The calls withheld in the log so far, this part included (`SessionMetadata.withheld_calls`). */
-  withheld_calls?: SessionMetadata["withheld_calls"];
-  /** Identifies the writer in the layout marker. */
-  client?: string;
-  now?: () => Date;
-  /** Size caps; `DEFAULT_LIMITS` when omitted. */
-  limits?: Readonly<Limits>;
-}
-
-/** Store one raw part. The first thing stored for a session: when there is no `metadata.json`
- * yet this writes one with the part and no head, and the trace, if the transcript normalizes to
- * one, is added by `ingest` after. Idempotent for the same bytes. Raw is transitional: 04 stops
- * storing it (X6.3). */
-export async function putRaw(input: PutRawInput): Promise<PutRawResult> {
-  const { store, owner, part, format, offset, length } = input;
-  const maxBytes = (input.limits ?? DEFAULT_LIMITS).max_upload_bytes;
-  if (input.bytes.length > maxBytes) {
-    throw new IngestRejected("too_large", `raw part exceeds ${maxBytes} bytes`);
-  }
-  if (!Number.isInteger(part) || part < 0) throw new IngestRejected("invalid", "part must be ≥ 0");
-  const archive = archiveId(owner, input.agent, input.session_id);
-  const at = (input.now ?? (() => new Date()))().toISOString();
-  await ensureLayout(store, { createdBy: input.client ?? "seshi" });
-  const before = await readMetadata(store, owner, archive);
-  if (before?.status === "redacted") {
-    throw new IngestRejected("redacted", "session was redacted");
-  }
-
-  const outcome = await publishObject(
-    store,
-    keys.raw(owner, archive, part, format),
-    input.bytes,
-    "application/gzip",
-    "replace",
-  );
-  const withheld =
-    input.withheld_calls && Object.keys(input.withheld_calls).length > 0
-      ? input.withheld_calls
-      : undefined;
-  let stale: SessionMetadata["raw"] = [];
-  const pointer = updateMetadata(store, owner, archive, (existing) => {
-    if (existing?.status === "redacted") {
-      throw new IngestRejected("redacted", "session was redacted");
-    }
-    const others = (existing?.raw ?? []).filter((r) => r.part !== part);
-    stale = input.whole ? others : [];
-    const same = existing?.raw.find((r) => r.part === part);
-    if (same && outcome === "exists" && same.offset === offset && same.length === length) {
-      const kept = JSON.stringify(existing?.withheld_calls ?? null);
-      if (stale.length === 0 && kept === JSON.stringify(withheld ?? null)) return null;
-    }
-    const raw = [
-      ...(input.whole ? [] : others),
-      {
-        part,
-        format,
-        size: input.bytes.length,
-        sha256: sha256(input.bytes),
-        created_at: at,
-        offset,
-        length,
-      },
-    ].sort((a, b) => a.part - b.part);
-    const base = existing ?? newSession(owner, archive, input.session_id, input.agent, at, input);
-    const next: SessionMetadata = withContext(
-      { ...base, raw, raw_format: format, updated_at: at },
-      input,
-    );
-    // A whole log starts the chunk state over: what was normalized was of the parts just removed.
-    if (input.whole) delete next.normalized;
-    if (withheld) next.withheld_calls = withheld;
-    else delete next.withheld_calls;
-    return next;
-  });
-  let update: Awaited<typeof pointer>;
-  try {
-    update = await pointer;
-  } catch (err) {
-    // Tombstoned meanwhile: remove the part just written, as `ingest` removes its trace.
-    if (err instanceof IngestRejected && err.code === "redacted" && outcome === "written") {
-      await store.delete(keys.raw(owner, archive, part, format));
-    }
-    throw err;
-  }
-  if (!update.written) return { status: "exists", part };
-  // The pointer no longer lists them, so no reader looks for them any more.
-  for (const r of stale) await store.delete(keys.raw(owner, archive, r.part, r.format));
-  return { status: "stored", part };
-}
-
-/** Record where a session's log stands when nothing was ingested for it: a trivial session, a
- * chunk with no records in it. */
-export async function recordNormalized(input: {
-  store: Store;
-  owner: string;
-  agent: string;
-  session_id: string;
+  archive_id: string;
   normalized: NormalizedState;
+  withheld_calls?: WithheldCallIds;
+  applied?: { idempotency_key: string; status: "unchanged" | "dropped" };
+  guard?: (existing: SessionMetadata | null) => void;
   now?: () => Date;
 }): Promise<void> {
   const { store, owner, normalized } = input;
-  const archive = archiveId(owner, input.agent, input.session_id);
   const at = (input.now ?? (() => new Date()))().toISOString();
-  await updateMetadata(store, owner, archive, (existing) =>
-    !existing || existing.status === "redacted"
-      ? null
-      : { ...existing, normalized, updated_at: at },
-  );
+  await updateMetadata(store, owner, input.archive_id, (existing) => {
+    if (existing?.status === "redacted") {
+      throw new IngestRejected("redacted", "session was redacted; it will not be stored again");
+    }
+    input.guard?.(existing);
+    if (!existing) return null;
+    const next: SessionMetadata = { ...existing, normalized, updated_at: at };
+    if (input.withheld_calls !== undefined) {
+      if (Object.keys(input.withheld_calls).length > 0) next.withheld_calls = input.withheld_calls;
+      else delete next.withheld_calls;
+    }
+    if (input.applied) {
+      next.applied = withApplied(existing.applied, {
+        idempotency_key: input.applied.idempotency_key,
+        at,
+        status: input.applied.status,
+        records_total: normalized.records,
+        prefix_sha256: normalized.prefix_sha256,
+        bytes_total: normalized.bytes,
+      });
+    }
+    return next;
+  });
 }
 
 export interface TombstoneInput {
@@ -442,14 +418,14 @@ export interface TombstoneInput {
   writer?: Writer;
 }
 
-/** Remove a session's trace and raw objects and mark it redacted. Irreversible; a later ingest
+/** Remove a session's trace objects and mark it redacted. Irreversible; a later ingest
  * of the same session is refused, so a tombstoned session stays gone. The change entry records
  * the reason and the writer, never the content. */
 export async function tombstone(input: TombstoneInput): Promise<{ removed: number } | null> {
   const { store, owner } = input;
   const archive = archiveId(owner, input.agent, input.session_id);
   const at = (input.now ?? (() => new Date()))().toISOString();
-  let removedObjects: { traces: string[]; raw: SessionMetadata["raw"] } | null = null;
+  let removedObjects: { traces: string[] } | null = null;
   let head: string | null = null;
   // Mark it redacted first, so no write that races the removal can give it a new head.
   await updateMetadata(store, owner, archive, (existing) => {
@@ -457,20 +433,17 @@ export async function tombstone(input: TombstoneInput): Promise<{ removed: numbe
       removedObjects = null;
       return null;
     }
-    removedObjects = { traces: existing.traces.map((t) => t.content_hash), raw: existing.raw };
+    removedObjects = { traces: existing.traces.map((t) => t.content_hash) };
     head = existing.head ?? null;
-    const { head: _head, ...rest } = existing;
-    return { ...rest, status: "redacted", traces: [], raw: [], updated_at: at };
+    // What the next chunk would continue from goes too: nothing of the session is left.
+    const { head: _head, normalized: _n, withheld_calls: _w, applied: _a, ...rest } = existing;
+    return { ...rest, status: "redacted", traces: [], updated_at: at };
   });
-  const gone = removedObjects as { traces: string[]; raw: SessionMetadata["raw"] } | null;
+  const gone = removedObjects as { traces: string[] } | null;
   if (gone === null) return null;
   let removed = 0;
   for (const hash of gone.traces) {
     await store.delete(keys.trace(owner, archive, hash));
-    removed++;
-  }
-  for (const r of gone.raw) {
-    await store.delete(keys.raw(owner, archive, r.part, r.format));
     removed++;
   }
   await appendChange(store, {

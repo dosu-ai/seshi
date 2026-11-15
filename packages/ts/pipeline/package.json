@@ -1,7 +1,7 @@
 {
   "name": "@seshi/pipeline",
   "private": true,
-  "description": "Layer 2: the write path (redact, store raw, normalize through the format registry, write the trace) and the reads over a store; the direct-to-bucket client until local mode replaces it.",
+  "description": "Layer 2: the ingest pipeline (envelope, normalize, regex redaction, session filter, model review, write) and the reads over a store; the direct-to-bucket client until local mode replaces it.",
   "type": "module",
   "exports": {
     ".": {

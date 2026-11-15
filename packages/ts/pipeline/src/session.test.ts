@@ -2,7 +2,7 @@ import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BUILTIN_FORMATS, FormatRegistry } from "@seshi/formats";
-import { SessionRejected } from "@seshi/model";
+import { EMPTY_PREFIX_SHA256, SessionRejected } from "@seshi/model";
 import { FsStore } from "@seshi/store";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { storeSession } from "./session";
@@ -55,7 +55,14 @@ describe("the session filter and limits from config", () => {
       store: new FsStore(dir),
       formats,
     });
-    expect(result.status).toBe("trivial");
+    expect(result).toEqual({
+      status: "filtered",
+      records_total: 0,
+      prefix_sha256: EMPTY_PREFIX_SHA256,
+      bytes_total: 0,
+    });
+    // Nothing of a filtered session is stored (X6.3, X4.10).
+    expect(readdirSync(dir)).toEqual(["seshi.json"]);
   });
 
   it("stores a short session when min_chars allows it", async () => {
@@ -91,7 +98,7 @@ describe("the session filter and limits from config", () => {
         { ...upload(transcript), session_id: id },
         { store, formats, filter: lenient },
       );
-      expect(result.status).toBe("trivial");
+      expect(result.status).toBe("filtered");
     }
   });
 
@@ -110,41 +117,36 @@ describe("the session filter and limits from config", () => {
     expect(tail.records_total).toBe(first.records_total + 1);
   });
 
-  it("judges only the first trace for whole uploads too: a tail past `shipped` always ships", async () => {
+  it("judges only the first trace for whole uploads too: a tail past what is stored always ships", async () => {
     const store = new FsStore(dir);
     const head = META + user("x".repeat(2000)) + reply("done");
     const first = await storeSession(upload(head), { store, formats });
     expect(first.status).toBe("stored");
-    const shipped = { records: first.records_total, prefix_sha256: first.prefix_sha256 };
-    // The whole log again, grown by an agent-only tail far under min_chars.
-    const tail = await storeSession(
-      { ...upload(head + reply("one more thing")), shipped },
-      { store, formats },
-    );
+    // The whole log again, grown by an agent-only tail far under min_chars. The server's own
+    // state says what is stored; the client need not send `shipped`.
+    const tail = await storeSession(upload(head + reply("one more thing")), { store, formats });
     expect(tail).toMatchObject({ status: "stored", records: 2 }); // the meta record and the tail
     expect(tail.records_total).toBe(first.records_total + 1);
-    // Nothing new past what shipped: nothing to write.
-    const again = await storeSession(
-      {
-        ...upload(head + reply("one more thing")),
-        shipped: { records: tail.records_total, prefix_sha256: tail.prefix_sha256 },
-      },
-      { store, formats },
-    );
-    expect(again.status).toBe("trivial");
+    // Nothing new past what is stored: nothing to write.
+    const again = await storeSession(upload(`${head + reply("one more thing")}\n`), {
+      store,
+      formats,
+    });
+    expect(again).toMatchObject({ status: "unchanged", records_total: tail.records_total });
   });
 
   it("judges the whole session again when what `shipped` names was never stored", async () => {
     const store = new FsStore(dir);
     const short = META + user("hi") + reply("hello");
     const first = await storeSession(upload(short), { store, formats });
-    expect(first.status).toBe("trivial");
-    // The client sends back the trivial answer's prefix; the session has since grown past
-    // min_chars, so all of it is stored, not a continuation of records that never were.
+    expect(first.status).toBe("filtered");
+    // A client that still sends a prefix of the session (an older one, which kept the records
+    // it saw): the session has since grown past min_chars, so all of it is stored, not a
+    // continuation of records that never were.
     const grown = await storeSession(
       {
         ...upload(short + reply("y".repeat(2000))),
-        shipped: { records: first.records_total, prefix_sha256: first.prefix_sha256 },
+        shipped: { records: 3, prefix_sha256: "0".repeat(64) },
       },
       { store, formats },
     );
@@ -160,7 +162,7 @@ describe("the session filter and limits from config", () => {
         formats,
         limits: { max_records: 50_000, max_records_bytes: 32 << 20, max_upload_bytes: 10 },
       }),
-    ).rejects.toMatchObject({ code: "too_large", message: "raw part exceeds 10 bytes" });
+    ).rejects.toMatchObject({ code: "too_large", message: "upload exceeds 10 bytes" });
     await expect(
       storeSession(
         { ...upload(transcript), session_id: "s2" },

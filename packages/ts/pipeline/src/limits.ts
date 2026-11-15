@@ -7,12 +7,13 @@ export interface Limits {
   max_records: number;
   /** JSON bytes of the records array. */
   max_records_bytes: number;
-  /** Gzipped bytes of one raw part (one upload). */
+  /** Bytes of one upload's transcript (the envelope's log text), uncompressed. Nothing of it is
+   * stored (X6.3); the cap bounds what is normalized in memory. */
   max_upload_bytes: number;
 }
 
 export const DEFAULT_LIMITS: Readonly<Limits> = Object.freeze({
   max_records: 50_000,
   max_records_bytes: 32 * 1024 * 1024,
-  max_upload_bytes: 64 * 1024 * 1024,
+  max_upload_bytes: 256 * 1024 * 1024,
 });

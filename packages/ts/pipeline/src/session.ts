@@ -1,58 +1,24 @@
-/** One session into the store: the transcript is stored first, as a raw part of the session,
- * and the trace is made from what was stored. Two steps, store → normalize, and the second can
- * run again on its own (an adapter improved, a format was recognized later) without the first.
- *
- * - `storeSession`: redact the transcript, write it as a raw part (the first one creates the
- *   session), then `normalizeStored`.
- * - `normalizeStored`: read the stored raw, normalize it to `trajectory-v1` (a Datadog
- *   Trajectory stream becomes Letta records here, like every other format), decide what is
- *   new, write the trace.
- *
- * A transcript arrives whole, or as a chunk: the log's bytes from where the last upload ended
- * (`offset`, which must be the session's `normalized.bytes`). A chunk is stored as its own raw
- * part and normalized on its own, as the records those lines stand for, and ships as a
- * continuation of the head: the meta record plus the chunk's records, marked with where they
- * start. The server keeps what the continuation needs between chunks (`metadata.normalized`:
- * bytes covered, records so far, the prefix hash mid-stream), so a chunk needs no `shipped`.
- * Until the session has a head, there is nothing to continue and the chunks so far are
- * normalized together as the whole log, judged for worth the way a whole upload is; once it
- * has one, every chunk with records in it ships. Whether a session is worth a trace is decided
- * once, not per chunk.
- *
- * The HTTP routes call `storeSession` with what they read off the wire. Nothing here knows
- * about HTTP. */
+/** `storeSession`: one upload through the pipeline, as the session API takes it. The upload is
+ * turned into the envelope it stands for (`uploadEnvelope`, source id `upload`) and submitted to
+ * a `Pipeline` built from the options; nothing here knows about HTTP. The HTTP route and local
+ * mode go through `StoreSessionDB`, which does the same with one pipeline it keeps. */
 
-import { gunzipSync, gzipSync } from "node:zlib";
-import { type FormatRegistry, NORMALIZER, NormalizeError } from "@seshi/formats";
+import type { FormatRegistry } from "@seshi/formats";
 import {
-  IngestRejected,
-  type NormalizedRecord,
-  type NormalizedState,
-  type NormalizeStoredResult,
+  localWriter,
   OffsetMismatch,
-  PrefixHash,
-  type RawPart,
-  type SessionMetadata,
   SessionRejected,
   type SessionUpload,
-  type ShippedPrefix,
-  type ShippedState,
   type StoreSessionResult,
 } from "@seshi/model";
-import { applyRules, type RedactionRules, redactionRules, redactRaw } from "@seshi/redact";
-import { ensureLayout, getBytes, keys, type Store } from "@seshi/store";
-import { copiedPrefix, planShipment } from "./continuation";
-import {
-  getSession,
-  getTrace,
-  ingest,
-  putRaw,
-  recordNormalized,
-  type WriteContext,
-} from "./ingest";
+import type { RedactionRules, Redactor } from "@seshi/redact";
+import type { Store } from "@seshi/store";
+import { uploadEnvelope } from "./envelope";
+import type { FilterSetting } from "./filter";
+import type { WriteContext } from "./ingest";
 import type { Limits } from "./limits";
-import { normalizeTranscript } from "./normalize";
-import { type FilterRules, isTrivialTrajectory } from "./worthiness";
+import { Pipeline } from "./pipeline";
+import type { Authorizer, HealthCounters, Reviewer } from "./stages";
 
 export { OffsetMismatch, SessionRejected, type SessionUpload, type StoreSessionResult };
 
@@ -67,334 +33,37 @@ export interface SessionOptions {
   /** The operator's own redaction (`redactionRules`); the built-in rules when omitted. Either
    * way the built-ins apply. */
   redaction?: RedactionRules;
+  /** The redaction stage itself, in place of `redaction`. */
+  redactor?: Redactor;
   /** Who writes and on what basis; the owner through the upload route when omitted. */
-  context?: WriteContext;
-  /** The session filter (X4.10), config's `[filter]`; `DEFAULT_FILTER` when omitted. It judges
-   * a session's first trace only: chunks that continue a head always ship. */
-  filter?: Readonly<FilterRules>;
+  context?: Pick<WriteContext, "writer" | "owner_basis">;
+  /** The session filter (X4.10), config's `[filter]` or the rules per source; `DEFAULT_FILTER`
+   * when omitted. It judges a session's first trace only. */
+  filter?: FilterSetting;
   /** Size caps, config's `[limits]`; `DEFAULT_LIMITS` when omitted. */
   limits?: Readonly<Limits>;
+  authorizer?: Authorizer;
+  reviewer?: Reviewer;
+  health?: HealthCounters;
 }
 
-const BUILTIN_RULES = redactionRules();
-
-/** A recorded branch name, or undefined for the detached (`HEAD`) and empty values agents
- * record. */
-function recordedBranch(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const branch = value.trim();
-  return branch && branch !== "HEAD" ? branch : undefined;
-}
-
-/** What a fork copied from the session it was made from, when that parent is stored here. */
-async function forkCopy(
-  store: Store,
-  owner: string,
-  agent: string,
-  forkOf: string | undefined,
-  records: NormalizedRecord[],
-) {
-  if (!forkOf) return undefined;
-  const parent = await getSession(store, owner, agent, forkOf);
-  if (!parent?.head) return undefined;
-  const trace = await getTrace(store, owner, parent.archive_id, parent.head);
-  return copiedPrefix(records, (trace?.records as NormalizedRecord[] | undefined) ?? null);
-}
-
-interface NormalizeStoredInput {
-  owner: string;
-  agent: string;
-  session_id: string;
-  /** The raw part just stored, when one was: a chunk past the head continues it. Without one,
-   * or when the session has no head to continue, every part is normalized together as the
-   * whole log. */
-  part?: number;
-  project?: string;
-  branch?: string;
-  parent_session_id?: string;
-  fork_of?: string;
-  shipped?: ShippedPrefix;
-}
-
-/** The records of a transcript; none for one the adapter reads but finds no conversation in
- * (a session that has only started), which is trivial rather than refused. A blank transcript
- * is refused: there is nothing in it to store. */
-function normalize(
-  formats: FormatRegistry,
-  input: Parameters<typeof normalizeTranscript>[1],
-): NormalizedRecord[] {
-  if (input.transcript.trim() === "") {
-    throw new SessionRejected("empty", "transcript is empty");
-  }
-  try {
-    return normalizeTranscript(formats, input).records;
-  } catch (err) {
-    if (err instanceof NormalizeError)
-      throw new SessionRejected(`normalize_${err.code}`, err.message);
-    throw err;
-  }
-}
-
-async function readPart(
-  store: Store,
-  owner: string,
-  archive: string,
-  part: RawPart,
-): Promise<string> {
-  const bytes = await getBytes(store, keys.raw(owner, archive, part.part, part.format));
-  if (bytes === null) throw new IngestRejected("invalid", `raw part ${part.part} is missing`);
-  return new TextDecoder().decode(gunzipSync(bytes));
-}
-
-/** The parts in log order: by where they sit. */
-function inLogOrder(parts: readonly RawPart[]): RawPart[] {
-  return [...parts].sort((a, b) => a.offset - b.offset || a.part - b.part);
-}
-
-/** Where the log ends after `parts`. */
-function logEnd(parts: readonly RawPart[]): number {
-  const last = parts.at(-1) as RawPart;
-  return last.offset + last.length;
-}
-
-/** The second step on its own: the stored raw to a trace. */
-async function normalizeStored(
-  input: NormalizeStoredInput,
-  options: SessionOptions,
-): Promise<NormalizeStoredResult> {
-  const { store } = options;
-  const { owner, agent, session_id: sessionId } = input;
-  const metadata = await getSession(store, owner, agent, sessionId);
-  if (!metadata || metadata.raw.length === 0) {
-    throw new IngestRejected("invalid", "no raw part stored for this session");
-  }
-  const stored =
-    input.part === undefined ? undefined : metadata.raw.find((r) => r.part === input.part);
-  if (input.part !== undefined && !stored) {
-    throw new IngestRejected("invalid", `no raw part ${input.part} stored for this session`);
-  }
-  const continues =
-    stored !== undefined &&
-    stored.offset > 0 &&
-    metadata.head !== undefined &&
-    metadata.normalized !== undefined &&
-    stored.offset === metadata.normalized.bytes;
-  return continues
-    ? continueStored(input, metadata, stored, options)
-    : wholeStored(input, metadata, options);
-}
-
-/** Every part together as the whole log, shipped the way a whole upload is: all of it, or the
- * tail past what the client says shipped before. */
-async function wholeStored(
-  input: NormalizeStoredInput,
-  metadata: SessionMetadata,
-  options: SessionOptions,
-): Promise<NormalizeStoredResult> {
-  const { store, client, now } = options;
-  const { owner, agent, session_id: sessionId } = input;
-  const parts = inLogOrder(metadata.raw);
-  const chunks: string[] = [];
-  for (const part of parts) chunks.push(await readPart(store, owner, metadata.archive_id, part));
-  const transcript = chunks.join("");
-
-  const records = normalize(options.formats, { source: agent, transcript });
-  const hash = PrefixHash.of(records);
-  const bytes = logEnd(parts);
-  const normalized: NormalizedState = {
-    bytes,
-    records: records.length,
-    prefix_sha256: hash.digest(),
-    hash_state: hash.export(),
-  };
-  const whole: ShippedState = {
-    records_total: records.length,
-    prefix_sha256: hash.digest(),
-    bytes_total: bytes,
-  };
-
-  // A resumed session: the client says how much shipped before (what it stored from the last
-  // answer); the planner picks the tail, and falls back to the whole session when the prefix
-  // no longer matches. A fork's copy of its parent's history is the parent's to ship.
-  // What shipped counts only once the session has a trace: until then nothing of it is stored
-  // (the earlier answers were `trivial`), so the whole session is judged again, as chunks are.
-  const shipped = metadata.head !== undefined ? input.shipped : undefined;
-  let plan = shipped ? planShipment(records, shipped) : { records, fresh: records };
-  // The session filter judges a session's first trace only (X4.10): a tail that continues the
-  // stored head always ships, or an agent-only tail would be lost for good (the answer says
-  // it shipped). A fork's first trace is its own, so it is judged.
-  const continuesHead = plan.continuation !== undefined;
-  const copied = await forkCopy(store, owner, agent, input.fork_of, records);
-  if (!plan.continuation && copied) plan = planShipment(records, copied);
-  const filtered = continuesHead
-    ? plan.fresh.length === 0
-    : isTrivialTrajectory(plan.fresh, options.filter);
-  if (filtered) {
-    await recordNormalized({ store, owner, agent, session_id: sessionId, normalized, now });
-    return { status: "trivial", ...whole };
-  }
-
-  // The branch the transcript recorded as it began, else what the client resolved.
-  const meta = records[0]?.role === "meta" ? records[0] : undefined;
-  const branch = recordedBranch(meta?.git_branch) ?? input.branch;
-
-  const result = await ingest({
-    store,
-    owner,
-    records: plan.records,
-    metadata: {
-      session_id: sessionId,
-      agent,
-      project: input.project,
-      branch,
-      parent_session_id: input.parent_session_id,
-      ...(plan.continuation ? { continuation: plan.continuation } : {}),
-      normalizer: NORMALIZER,
-    },
-    normalized,
-    client,
-    now,
-    limits: options.limits,
-    ...options.context,
-  });
-  return { ...result, ...whole };
-}
-
-/** One chunk past the head: its records, as a continuation of what the server knows shipped. */
-async function continueStored(
-  input: NormalizeStoredInput,
-  metadata: SessionMetadata,
-  stored: RawPart,
-  options: SessionOptions,
-): Promise<NormalizeStoredResult> {
-  const { store, client, now } = options;
-  const { owner, agent, session_id: sessionId } = input;
-  const state = metadata.normalized as NormalizedState;
-  const offset = stored.offset;
-  const bytes = offset + stored.length;
-
-  const transcript = await readPart(store, owner, metadata.archive_id, stored);
-  const records = normalize(options.formats, {
-    source: agent,
-    transcript,
-    chunk: { offset, session_id: sessionId },
-  });
-  if (records.length === 0) {
-    // Lines with no records in them (transport, progress): the log moved on, nothing shipped.
-    const normalized = { ...state, bytes };
-    await recordNormalized({ store, owner, agent, session_id: sessionId, normalized, now });
-    return {
-      status: "trivial",
-      records_total: state.records,
-      prefix_sha256: state.prefix_sha256,
-      bytes_total: bytes,
-    };
-  }
-
-  const hash = PrefixHash.resume(state.hash_state);
-  for (const record of records) hash.append(record);
-  const normalized: NormalizedState = {
-    bytes,
-    records: hash.records,
-    prefix_sha256: hash.digest(),
-    hash_state: hash.export(),
-  };
-
-  // The session's meta record is the head's: a chunk has none of its own.
-  const head = await getTrace(store, owner, metadata.archive_id, metadata.head as string);
-  const headMeta = head?.records[0]?.role === "meta" ? head.records[0] : undefined;
-  const meta = headMeta ? [headMeta] : [];
-
-  const result = await ingest({
-    store,
-    owner,
-    records: [...meta, ...records],
-    metadata: {
-      session_id: sessionId,
-      agent,
-      project: input.project ?? metadata.project,
-      branch: input.branch ?? metadata.branch,
-      parent_session_id: input.parent_session_id,
-      continuation: { from_record: state.records, prefix_sha256: state.prefix_sha256 },
-      normalizer: NORMALIZER,
-    },
-    normalized,
-    client,
-    now,
-    limits: options.limits,
-    ...options.context,
-  });
-  return {
-    ...result,
-    records_total: normalized.records,
-    prefix_sha256: normalized.prefix_sha256,
-    bytes_total: bytes,
-  };
-}
-
-/** Both steps: the transcript into the store, then the trace out of it. A chunk (`offset` > 0)
- * must start where the session's log ends, else `OffsetMismatch` and nothing is stored. */
+/** Store one upload, whole or a chunk from `offset`. Throws `SessionRejected` (422),
+ * `OffsetMismatch` (409 with `expected`), `SessionConflict` (409) or `Forbidden` (403); nothing
+ * is stored when it does. */
 export async function storeSession(
   upload: SessionUpload,
-  sessionOptions: SessionOptions,
+  options: SessionOptions,
 ): Promise<StoreSessionResult> {
-  const { store, client, now } = sessionOptions;
-  // `agent` names a format of the registry. The type no longer says so (it was a closed union
-  // before the registry), so check it before anything is written: the raw part is stored first
-  // and would otherwise be filed under an archive no adapter can read.
-  if (!sessionOptions.formats.has(upload.agent)) {
-    throw new SessionRejected(
-      "unsupported_agent",
-      `no normalizer for '${upload.agent}' (one of ${sessionOptions.formats.sources.join(", ")})`,
-    );
-  }
-  await ensureLayout(store, { createdBy: client ?? "seshi" });
-  const options = sessionOptions;
-  const { owner, agent, session_id: sessionId, transcript, format } = upload;
-  const offset = upload.offset ?? 0;
-  const length = new TextEncoder().encode(transcript).length;
-
-  let part = 0;
-  let carried: SessionMetadata["withheld_calls"] = {};
-  if (offset > 0) {
-    if (format !== "jsonl") {
-      throw new SessionRejected("bad_chunk", "only a jsonl log can be sent in chunks");
-    }
-    if (!options.formats.isChunkable(agent)) {
-      throw new SessionRejected("bad_chunk", `a ${agent} document cannot be sent in chunks`);
-    }
-    if (!transcript.endsWith("\n")) {
-      throw new SessionRejected("bad_chunk", "a chunk must end at a line boundary");
-    }
-    const existing = await getSession(store, owner, agent, sessionId);
-    const expected = existing?.normalized?.bytes ?? 0;
-    if (offset !== expected) throw new OffsetMismatch(offset, expected);
-    // A chunk sent again after its normalization failed takes the same part number.
-    const parts = existing?.raw ?? [];
-    part =
-      parts.find((r) => r.offset === offset)?.part ?? Math.max(-1, ...parts.map((r) => r.part)) + 1;
-    carried = existing?.withheld_calls ?? {};
-  }
-
-  // Sensitive calls and the operator's patterns first, then the built-in secret patterns.
-  const ruled = applyRules(transcript, format, options.redaction ?? BUILTIN_RULES, carried);
-  const raw = await putRaw({
-    store,
-    owner,
-    agent,
-    session_id: sessionId,
-    part,
-    format,
-    bytes: new Uint8Array(gzipSync(redactRaw(ruled.text, format))),
-    offset,
-    length,
-    whole: offset === 0,
-    withheld_calls: ruled.withheld,
-    client,
-    now,
-    limits: options.limits,
-    ...options.context,
+  const writer = options.context?.writer ?? localWriter(upload.owner);
+  const envelope = uploadEnvelope(upload, {
+    caller: {
+      kind: writer.kind,
+      principal: writer.principal,
+      ...(writer.credential_id ? { credential_id: writer.credential_id } : {}),
+    },
+    owner_basis: options.context?.owner_basis ?? "verified",
+    now: options.now,
   });
-  const result = await normalizeStored({ ...upload, part }, options);
-  return { ...result, raw };
+  const pipeline = new Pipeline(options);
+  return (await pipeline.submit(envelope, { onFailure: "throw" })) as StoreSessionResult;
 }
