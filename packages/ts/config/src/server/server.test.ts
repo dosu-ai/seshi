@@ -164,8 +164,31 @@ describe("sources", () => {
       lag: 120_000,
       backfill: 7 * 86_400_000,
       tags: [],
+      page_size: 500,
+      quiet_period: 600_000,
     });
     expect(config.sources[2]).toMatchObject({ ordered_keys: false, format: "atif" });
+  });
+
+  it("take Datadog tags as key:value, a bare site, an http(s) API URL and a page size", () => {
+    expect(
+      ok({
+        sources: [
+          { ...datadog, tags: ["env:prod", "team:ai:core"], api_url: "http://127.0.0.1:1" },
+        ],
+      }).sources[0],
+    ).toMatchObject({ tags: ["env:prod", "team:ai:core"], api_url: "http://127.0.0.1:1" });
+    expect(messages({ sources: [{ ...datadog, tags: ["prod"] }] })[0]).toContain("key:value");
+    expect(messages({ sources: [{ ...datadog, tags: ["env:"] }] })[0]).toContain("key:value");
+    expect(messages({ sources: [{ ...datadog, site: "https://app.datadoghq.com" }] })[0]).toContain(
+      "sources.0.site",
+    );
+    expect(messages({ sources: [{ ...datadog, api_url: "ftp://x" }] })[0]).toContain(
+      "sources.0.api_url",
+    );
+    expect(messages({ sources: [{ ...datadog, page_size: 5001 }] })[0]).toContain(
+      "sources.0.page_size",
+    );
   });
 
   it("want an id of their own, used once, and never 'upload'", () => {

@@ -6,7 +6,7 @@
 import * as z from "zod";
 import { secret } from "../secret";
 import { duration } from "../units";
-import { sourceId, storeUrl, visibility } from "./common";
+import { httpUrl, sourceId, storeUrl, visibility } from "./common";
 import { filterOverride } from "./filter";
 import { bucketCredentials } from "./store";
 
@@ -44,18 +44,36 @@ export const datadogSource = z
     site: z
       .string()
       .min(1)
+      .regex(/^[a-z0-9.-]+$/, "a Datadog site such as datadoghq.com or us5.datadoghq.com")
       .default("datadoghq.com")
       .describe("The Datadog site (datadoghq.eu, us5.datadoghq.com…)."),
+    api_url: httpUrl
+      .optional()
+      .describe(
+        "The Export API's base URL, instead of https://api.<site> (a proxy, or a test server).",
+      ),
     api_key: secret().describe("The Datadog API key."),
     app_key: secret().describe("The Datadog application key."),
     ml_app: z.string().min(1).optional().describe("The LLM Observability ml_app to read."),
-    tags: z.array(z.string().min(1)).default([]).describe("Span tags to filter by."),
+    tags: z
+      .array(z.string().regex(/^[^:\s]+:\S.*$/, "a tag as key:value"))
+      .default([])
+      .describe("Span tags to filter by, each key:value; a span must carry all of them."),
     interval: duration().prefault("5m").describe("How often it polls."),
     overlap: duration()
       .prefault("10m")
       .describe("How far before the checkpoint each run reads again, for late spans (F5.2)."),
     lag: duration().prefault("2m").describe("How far behind now each run stops (F5.2)."),
     backfill: duration().prefault("7d").describe("How far back the first run reads (F5.2)."),
+    page_size: z
+      .int()
+      .min(1)
+      .max(5000)
+      .default(500)
+      .describe("Spans per Export API page (Datadog allows up to 5000, 50 MB a response)."),
+    quiet_period: duration()
+      .prefault("10m")
+      .describe("Publish a session once no new spans have arrived for it for this long (F4.4)."),
   })
   .describe("Datadog LLM Observability (F5), polled.");
 
