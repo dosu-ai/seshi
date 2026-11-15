@@ -481,6 +481,10 @@ describe("the token API (X5.9, X5.11)", () => {
       2,
     );
     expect((await call("DELETE", `/v1/tokens/${"0".repeat(20)}`, admin)).status).toBe(404);
+    // Revoking by owner names a person or service account; the org key (owner `*`) is rotated.
+    const star = await call("POST", "/v1/tokens/revoke", { ...admin, body: { owner: "*" } });
+    expect(star.status).toBe(400);
+    expect((await call("GET", "/v1/tokens?kind=org", admin)).body.tokens).toHaveLength(1);
   });
 
   it("refuses a request that makes no sense", async () => {

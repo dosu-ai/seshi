@@ -746,6 +746,9 @@ export function createApp(options: AppOptions) {
     await caller(request, "tokens:admin");
     const body = await readJson(request, 64 * 1024);
     const owner = str(body, "owner", true) as string;
+    // A person's or service account's id: the org key (owner `*`) is rotated, not revoked by
+    // owner (X5.11).
+    if (!isOwner(owner)) throw new HttpError(400, "bad_field", "owner is not an owner id");
     const kind = body.kind === undefined ? undefined : tokenKind(body.kind);
     const revoked = await auth.tokens.revokeOwner(owner, kind);
     return json({ revoked: revoked.map(tokenInfo) });
