@@ -338,6 +338,24 @@ describe("sessions", () => {
     expect(metadata?.traces).toHaveLength(1);
   });
 
+  it("refuses a body that inflates past what an upload can need (413)", async () => {
+    app = createApp({
+      store,
+      storage: { url: store.url },
+      tokens: [{ token: TOKEN, owner: "acme" }],
+      limits: { max_records: 50_000, max_records_bytes: 32 << 20, max_upload_bytes: 1024 },
+    });
+    // A few KiB of gzip that would inflate to 8 MiB.
+    const bomb = Bun.gzipSync(new Uint8Array(8 << 20).fill(32));
+    const res = await call("POST", "/v1/sessions", {
+      token: TOKEN,
+      body: bomb,
+      headers: { "content-type": "application/json", "content-encoding": "gzip" },
+    });
+    expect(res.status).toBe(413);
+    expect((await res.json()).error.code).toBe("too_large");
+  });
+
   it("ships a resumed session's tail as a continuation", async () => {
     const token = TOKEN;
     const first = await call("POST", "/v1/sessions", {

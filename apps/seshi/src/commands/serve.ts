@@ -7,7 +7,7 @@
 
 import { randomUUID } from "node:crypto";
 import { parseArgs } from "node:util";
-import { createApp } from "@seshi/api";
+import { createApp, maxBodyBytes } from "@seshi/api";
 import { ConfigError, filterFor, loadServerConfig } from "@seshi/config";
 import type { FormatRegistry } from "@seshi/formats";
 import { VERSION } from "@seshi/model";
@@ -144,8 +144,9 @@ async function start(ctx: CommandContext, formats: FormatRegistry): Promise<void
   const server = Bun.serve({
     hostname: settings.hostname,
     port: settings.port,
-    // A raw transcript can be large; gzipped uploads are decoded after this check.
-    maxRequestBodySize: Math.max(256 * 1024 * 1024, settings.limits.max_upload_bytes),
+    // A transcript up to limits.max_upload_bytes, as JSON; a gzipped body is held to the same
+    // cap once decoded.
+    maxRequestBodySize: maxBodyBytes(settings.limits.max_upload_bytes),
     // A large upload or a long list against a bucket can take more than Bun's 10s default.
     idleTimeout: 120,
     fetch: app.fetch,

@@ -157,7 +157,7 @@ and a reply, so `require_user = false` and `require_reply = false` have no effec
 |---|---|---|
 | `max_records` | `50000` | Records in one trace |
 | `max_records_bytes` | `"32MiB"` | JSON bytes of one trace's records |
-| `max_upload_bytes` | `"256MiB"` | Bytes of one upload's transcript as sent (before any gzip of the request); nothing of it is stored |
+| `max_upload_bytes` | `"256MiB"` | Bytes of one upload's transcript as sent (before any gzip of the request); nothing of it is stored. A request body, decoded, is refused (`413`) past twice this plus 1 MiB |
 
 Past a limit the session is refused with 422 `too_large`.
 

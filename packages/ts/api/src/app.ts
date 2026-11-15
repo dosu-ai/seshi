@@ -14,6 +14,7 @@
  * one API with a network in it. */
 
 import { timingSafeEqual } from "node:crypto";
+import { gunzipSync } from "node:zlib";
 import { MIN_SECRET_LENGTH, verifyToken } from "@seshi/auth";
 import type { FormatRegistry } from "@seshi/formats";
 import {
@@ -34,6 +35,7 @@ import {
   VERSION,
 } from "@seshi/model";
 import {
+  DEFAULT_LIMITS,
   type FilterSetting,
   type HealthCounters,
   type Limits,
@@ -123,22 +125,37 @@ function bearer(request: Request): string | undefined {
   return scheme?.toLowerCase() === "bearer" && token ? token : undefined;
 }
 
-async function readBody(request: Request): Promise<Uint8Array> {
+/** The largest request body an upload of `maxUploadBytes` of transcript needs, decoded: the
+ * transcript as a JSON string (escaping grows it) plus the other fields. `seshi serve` caps the
+ * request at it too. */
+export function maxBodyBytes(maxUploadBytes: number): number {
+  return maxUploadBytes * 2 + 1024 * 1024;
+}
+
+function tooLarge(max: number): HttpError {
+  return new HttpError(413, "too_large", `request body exceeds ${max} bytes`);
+}
+
+/** The body, gunzipped when sent gzipped, refused past `max` bytes either way: a small gzipped
+ * body can inflate to far more than any upload. */
+async function readBody(request: Request, max: number): Promise<Uint8Array> {
   const bytes = new Uint8Array(await request.arrayBuffer());
+  if (bytes.length > max) throw tooLarge(max);
   const encoding = request.headers.get("content-encoding")?.toLowerCase();
   if (!encoding || encoding === "identity") return bytes;
   if (encoding === "gzip") {
     try {
-      return Bun.gunzipSync(bytes);
-    } catch {
+      return new Uint8Array(gunzipSync(bytes, { maxOutputLength: max }));
+    } catch (err) {
+      if ((err as { code?: unknown }).code === "ERR_BUFFER_TOO_LARGE") throw tooLarge(max);
       throw new HttpError(400, "bad_encoding", "body is not valid gzip");
     }
   }
   throw new HttpError(415, "unsupported_encoding", `Content-Encoding ${encoding} not supported`);
 }
 
-async function readJson(request: Request): Promise<Record<string, unknown>> {
-  const bytes = await readBody(request);
+async function readJson(request: Request, max: number): Promise<Record<string, unknown>> {
+  const bytes = await readBody(request, max);
   let parsed: unknown;
   try {
     parsed = JSON.parse(new TextDecoder().decode(bytes));
@@ -204,6 +221,7 @@ export function createApp(options: AppOptions) {
   const client = options.client ?? `seshi/${VERSION}`;
   const now = options.now ?? (() => new Date());
   const routes: Route[] = [];
+  const bodyLimit = maxBodyBytes((options.limits ?? DEFAULT_LIMITS).max_upload_bytes);
   const pipeline = new Pipeline({
     store,
     formats,
@@ -304,7 +322,7 @@ export function createApp(options: AppOptions) {
 
   route("POST", "/v1/sessions", async ({ request }) => {
     const db = authorize(request);
-    const body = await readJson(request);
+    const body = await readJson(request, bodyLimit);
     const agent = sourceOf(formats, str(body, "agent", true) as string);
     const format = (str(body, "format") ?? "jsonl") as RawFormat;
     if (format !== "jsonl" && format !== "json") {

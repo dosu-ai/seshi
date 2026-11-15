@@ -375,6 +375,15 @@ describe("the server honours it", () => {
     expect((await call("POST", "/v1/sessions", { raw: "{not json" })).status).toBe(400);
     expect((await call("POST", "/v1/sessions", { raw: "{}", encoding: "gzip" })).status).toBe(400);
     expect((await call("POST", "/v1/sessions", { raw: "{}", encoding: "br" })).status).toBe(415);
+    const tiny = createApp({
+      store,
+      storage: { url: store.url },
+      tokens: [{ token: TOKEN, owner: "acme" }],
+      limits: { max_records: 50_000, max_records_bytes: 32 << 20, max_upload_bytes: 16 },
+    });
+    expect(
+      (await call("POST", "/v1/sessions", { raw: " ".repeat((1 << 20) + 64), app: tiny })).status,
+    ).toBe(413);
     expect(
       (
         await call("POST", "/v1/sessions", {

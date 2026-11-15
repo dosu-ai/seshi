@@ -136,6 +136,13 @@ paths:
               schema: { $ref: "#/components/schemas/IngestResult" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "413":
+          description: |
+            `too_large`: the request body, decoded, is larger than any upload under
+            `limits.max_upload_bytes` can need (twice that, plus 1 MiB), so it was not read.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
         "415": { $ref: "#/components/responses/UnsupportedEncoding" }
         "403":
           description: |

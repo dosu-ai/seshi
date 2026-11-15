@@ -249,8 +249,10 @@ runs twice.
 nothing is stored: `unsupported_agent`, `too_large` (over `limits.max_upload_bytes`, or a
 trace over the record caps), `redacted`, `empty` (a blank transcript), `bad_chunk`,
 `normalize_<code>`, `invalid`. A log the adapter reads but finds no conversation in yet (a
-session that has only started) is `filtered`, not an error. `502 storage_error` is the bucket
-failing and is retryable.
+session that has only started) is `filtered`, not an error. `413 too_large` is a request
+body that, decoded (gunzipped), is larger than any upload can need: twice
+`limits.max_upload_bytes` plus 1 MiB. `502 storage_error` is the bucket failing and is
+retryable.
 
 #### In chunks
 
