@@ -135,22 +135,54 @@ export function writeCheckpoint(
     : replaceJson(store, key, checkpoint, etag);
 }
 
+/** Remove a checkpoint as read at `etag` (If-Match), so the source's next run starts as its
+ * first did (`seshi reprocess`, X4.9). `PreconditionFailed` when a run moved it since. */
+export function deleteCheckpoint(store: Store, sourceId: string, etag: string): Promise<void> {
+  return store.delete(keys.checkpoint(sourceId), { ifMatch: etag });
+}
+
 // --- worker heartbeat ---------------------------------------------------------
 
 export const HEARTBEAT_SCHEMA = "seshi/heartbeat/1" as const;
 
-/** What the worker writes every minute (X7.5); status reads it to spot a stopped worker, or a
- * second one (the instance id keeps changing). */
+/** One job's record in the heartbeat: what status shows for it (X7.5). */
+export interface JobRecord {
+  /** When its last run started and ended. */
+  last_started?: string;
+  last_finished?: string;
+  /** `ok`, `error`, or `discarded` (another worker moved its checkpoint, X7.3). */
+  last_outcome?: "ok" | "error" | "discarded";
+  /** When it last ended without an error. */
+  last_ok?: string;
+  /** Its last error, with when it happened; kept until a later run succeeds. */
+  last_error?: { at: string; message: string };
+  runs: number;
+  failures: number;
+  /** What its last run reported (envelopes submitted, sessions stored…). */
+  last_summary?: Record<string, number>;
+}
+
+/** What the worker writes every `worker.heartbeat_interval` (X7.5); status reads it to spot a
+ * stopped worker, or a second one. Last writer wins; a worker that finds another live worker's
+ * heartbeat names it in `others`, so either one's heartbeat shows both (X7.3). */
 export interface Heartbeat {
   schema: typeof HEARTBEAT_SCHEMA;
-  /** A random id per running process. */
+  /** The writing process: unique per run (`<instance id>-<random>`). */
   instance: string;
+  /** The stable instance id (`server.instance_id`, else the host name). */
+  host?: string;
   version: string;
   roles: string[];
   started_at: string;
   at: string;
+  /** How often it writes, in milliseconds: status calls a heartbeat older than three of these
+   * stopped. */
+  interval_ms?: number;
+  /** Its jobs, by name. */
+  jobs?: Record<string, JobRecord>;
+  /** Other workers whose heartbeat it found fresh, with when that heartbeat was written. */
+  others?: { instance: string; at: string }[];
 }
-
 export function readHeartbeat(store: Store): Promise<Versioned<Heartbeat> | null> {
   return readJson<Heartbeat>(store, keys.heartbeat());
 }

@@ -13,6 +13,7 @@ export {
   type HealthOutcome,
   type HealthShard,
   healthDay,
+  pruneHealth,
   readHealth,
   sourcesWithHealth,
 } from "./health";
@@ -52,8 +53,10 @@ export {
   type Checkpoint,
   clearPending,
   createToken,
+  deleteCheckpoint,
   HEARTBEAT_SCHEMA,
   type Heartbeat,
+  type JobRecord,
   listPending,
   listReviews,
   listTokens,

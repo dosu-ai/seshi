@@ -1,6 +1,13 @@
 import type { FormatAdapter } from "@seshi/model";
 import { describe, expect, it } from "vitest";
-import { defineIntegration, formatsOf, type Integration } from "./index";
+import {
+  CheckpointLost,
+  type Connector,
+  connectorsOf,
+  defineIntegration,
+  formatsOf,
+  type Integration,
+} from "./index";
 
 const adapter = (source: string): FormatAdapter => ({
   source,
@@ -48,5 +55,36 @@ describe("formatsOf", () => {
         { name: "b", formats: [adapter("x")] },
       ]),
     ).toThrow(/provided by both 'a' and 'b'/);
+  });
+});
+
+const connector = (kind: string): Connector => ({ kind, run: async () => undefined });
+
+describe("connectorsOf", () => {
+  it("lists every integration's connectors in registry order", () => {
+    const integrations: Integration[] = [
+      { name: "a", connectors: [connector("datadog")] },
+      { name: "b" },
+      { name: "c", connectors: [connector("cursor-cloud")] },
+    ];
+    expect(connectorsOf(integrations).map((c) => c.kind)).toEqual(["datadog", "cursor-cloud"]);
+  });
+
+  it("refuses two connectors for one source type", () => {
+    expect(() =>
+      connectorsOf([
+        { name: "a", connectors: [connector("datadog")] },
+        { name: "b", connectors: [connector("datadog")] },
+      ]),
+    ).toThrow(/provided by both 'a' and 'b'/);
+  });
+});
+
+describe("CheckpointLost", () => {
+  it("names the source whose run is discarded", () => {
+    const err = new CheckpointLost("dd-prod");
+    expect(err.sourceId).toBe("dd-prod");
+    expect(err.message).toMatch(/dd-prod.*discarded/);
+    expect(err).toBeInstanceOf(Error);
   });
 });

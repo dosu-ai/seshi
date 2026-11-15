@@ -8,6 +8,7 @@ import { archiveId, keys } from "./layout";
 import {
   clearPending,
   createToken,
+  deleteCheckpoint,
   listPending,
   listReviews,
   listTokens,
@@ -93,6 +94,18 @@ describe("checkpoints", () => {
       PreconditionFailed,
     );
     expect((await readCheckpoint(store, "dd-prod"))?.value.cursor).toEqual({ cursor: "b" });
+  });
+
+  it("are removed with If-Match, so a rewind loses to a run that moved it", async () => {
+    const first = await writeCheckpoint(store, "dd-prod", { cursor: "a" }, null);
+    const second = await writeCheckpoint(store, "dd-prod", { cursor: "b" }, first);
+    await expect(deleteCheckpoint(store, "dd-prod", first)).rejects.toBeInstanceOf(
+      PreconditionFailed,
+    );
+    await deleteCheckpoint(store, "dd-prod", second);
+    expect(await readCheckpoint(store, "dd-prod")).toBeNull();
+    // The next run starts as the first did: If-None-Match again.
+    await writeCheckpoint(store, "dd-prod", { cursor: "c" }, null);
   });
 });
 

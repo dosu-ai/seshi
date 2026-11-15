@@ -124,3 +124,31 @@ export async function sourcesWithHealth(store: Store): Promise<string[]> {
     if (!page.truncated || after === undefined) return [...ids].sort();
   }
 }
+
+/** Delete a source's shards for days before the last `keepDays` UTC days (today included).
+ * Days are listed in order, so it stops at the first day to keep. Returns how many shards it
+ * deleted. */
+export async function pruneHealth(
+  store: Store,
+  source: string,
+  options: { keepDays: number; now?: () => Date },
+): Promise<number> {
+  const today = (options.now ?? (() => new Date()))();
+  const keepFrom = healthDay(
+    new Date(today.getTime() - Math.max(0, options.keepDays - 1) * 24 * 60 * 60 * 1000),
+  );
+  const prefix = keys.healthAll(source);
+  let deleted = 0;
+  let after: string | undefined;
+  for (;;) {
+    const page = await store.list(prefix, { startAfter: after });
+    for (const key of page.keys) {
+      const day = key.slice(prefix.length, prefix.length + 10);
+      if (day >= keepFrom) return deleted;
+      await store.delete(key);
+      deleted++;
+    }
+    after = page.keys.at(-1);
+    if (!page.truncated || after === undefined) return deleted;
+  }
+}
