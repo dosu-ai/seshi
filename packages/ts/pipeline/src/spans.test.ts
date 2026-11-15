@@ -10,7 +10,7 @@ import {
   type SpanPart,
   type StoreSessionResult,
 } from "@seshi/model";
-import { ruleRedactor } from "@seshi/redact";
+import { type Redactor, redactLlmCalls, ruleRedactor } from "@seshi/redact";
 import {
   archiveId,
   FsStore,
@@ -25,13 +25,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getTrace, listSessions, tombstone } from "./ingest";
 import { Pipeline } from "./pipeline";
-import {
-  assemblePending,
-  FINAL_GRACE_MS,
-  redactLlmCalls,
-  redactSpanPart,
-  SpanStore,
-} from "./spans";
+import { assemblePending, FINAL_GRACE_MS, redactSpanPart, SpanStore } from "./spans";
 import { MemoryHealthCounters } from "./stages";
 
 let dir: string;
@@ -126,7 +120,7 @@ function setup(options: { minChars?: number } = {}) {
   return { pipeline, assembler, health, assemble };
 }
 
-describe("redactLlmCalls", () => {
+describe("redactLlmCalls (@seshi/redact) on span LLM calls", () => {
   it("redacts an LLM call's error and string parameters, and counts the matches", () => {
     const calls: LlmCall[] = [
       {
@@ -137,14 +131,26 @@ describe("redactLlmCalls", () => {
       },
       { id: "c2" },
     ];
-    const { calls: out, summary } = redactLlmCalls(redactor, calls);
+    const { calls: out, counts } = redactLlmCalls(redactor, calls);
     expect(out?.[0]?.error).toBe("bad key [redacted:github-token]");
     expect(out?.[0]?.parameters).toEqual({ stop: "[redacted:github-token]", max_tokens: 5 });
     expect(out?.[0]?.model).toBe("m");
     expect(out?.[1]).toEqual({ id: "c2" });
-    expect(summary.counts).toEqual({ "github-token": 2 });
+    expect(counts).toEqual({ "github-token": 2 });
     expect(calls[0]?.error).toContain(TOKEN);
     expect(redactLlmCalls(redactor, undefined).calls).toBeUndefined();
+  });
+
+  it("redacts through a redactor that has no redactText, as system records", () => {
+    const recordsOnly: Redactor = {
+      rule_set: redactor.rule_set,
+      redact: (records, carried) => redactor.redact(records, carried),
+    };
+    const { calls, counts } = redactLlmCalls(recordsOnly, [
+      { id: "c1", error: `bad key ${TOKEN}`, parameters: { stop: TOKEN } },
+    ]);
+    expect(JSON.stringify(calls)).not.toContain(TOKEN);
+    expect(counts).toEqual({ "github-token": 2 });
   });
 });
 
@@ -432,6 +438,29 @@ describe("publishing an assembled session", () => {
     expect(await assemble()).toMatchObject({ outcomes: { stored: 1 } });
     const metadata = await readMetadata(store, OWNER, ARCHIVE);
     expect(metadata?.traces).toHaveLength(2);
+  });
+
+  it("redacts a span's LLM call error on arrival and counts it once in the session (07)", async () => {
+    const { pipeline, assemble } = setup();
+    const failed = chat("what is auth?", "a session token", {
+      status: { code: 2, message: `401: key ${TOKEN} revoked` },
+    });
+    await pipeline.submit(envelope([failed]));
+    const [record] = await listSpans(store, OWNER, ARCHIVE);
+    expect(JSON.stringify(record)).not.toContain(TOKEN);
+    expect(record?.part.llm_call?.error).toContain("[redacted:github-token]");
+    expect(record?.redaction).toEqual({
+      rule_set: redactor.rule_set,
+      counts: { "github-token": 1 },
+    });
+    later(QUIET);
+    await assemble();
+    const metadata = await readMetadata(store, OWNER, ARCHIVE);
+    const trace = await getTrace(store, OWNER, ARCHIVE, metadata?.head as string);
+    expect(trace?.llm_calls?.[0]?.error).toBe("401: key [redacted:github-token] revoked");
+    expect(JSON.stringify(trace)).not.toContain(TOKEN);
+    // Counted when the span arrived; the publish pass finds the marker, not the token.
+    expect(metadata?.redaction?.counts).toEqual({ "github-token": 1 });
   });
 
   it("redacts an LLM call's free text before it is written", async () => {

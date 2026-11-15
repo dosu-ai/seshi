@@ -17,6 +17,14 @@
  * redacted with the current rules is skipped, and redacted records redact to themselves, so a
  * run can be stopped and started again.
  *
+ * Span records (09): a session's records under `spans/` that an earlier rule set redacted are
+ * redacted again with the current rules and rewritten in place, whatever became of its traces
+ * (a session the assembler published after the rules changed is `current`, but its span records
+ * are not). Their counts stay on the records, which the assembler adds to the session when it
+ * next publishes it; they are not added to the session's or the report's counts here, since the
+ * span records repeat what the traces hold. Spans of sessions never published (pending, or
+ * refused by the filter or review) have no metadata and are not reached.
+ *
  * Not touched: `normalized` (the uploader's log state). A later whole upload of such a session,
  * redacted from the transcript with the same new rules, may not hash to the stored prefix; it
  * is then a 409 `conflict`, which the uploader answers with `replace` (as after any rules
@@ -42,11 +50,14 @@ import {
   isOwner,
   keys,
   listOwners,
+  listSpans,
   publishObject,
+  putSpan,
   type Store,
   updateMetadata,
 } from "@seshi/store";
 import { getTrace, listSessions, type WithheldCallIds } from "./ingest";
+import { redactSpanPart } from "./spans";
 
 /** What became of one session. */
 export type BackfillOutcome =
@@ -75,6 +86,8 @@ export interface BackfillSession {
   content_hash?: string;
   /** Why, for `conflict` and `failed`. */
   message?: string;
+  /** Span records redacted again with the current rules (or that would be, in a dry run). */
+  spans?: number;
 }
 
 export interface BackfillOptions {
@@ -106,6 +119,8 @@ export interface BackfillReport {
   counts: Record<string, number>;
   /** The sessions rewritten, in conflict or failed (the others are only counted). */
   sessions: BackfillSession[];
+  /** Span records redacted again with the current rules, across every session looked at. */
+  spans: number;
   /** Stopped at `limit` or by the signal before every session was looked at. */
   more: boolean;
 }
@@ -357,6 +372,33 @@ async function backfillSession(
   return { ...base, outcome: "rewritten", counts, content_hash: trace.content_hash };
 }
 
+/** A session's span records through the current rules (see the top of this file): how many
+ * an earlier rule set redacted, each rewritten in place unless `dryRun`. */
+async function backfillSpans(
+  store: Store,
+  owner: string,
+  archive: string,
+  redactor: Redactor,
+  dryRun: boolean,
+): Promise<number> {
+  let done = 0;
+  for (const record of await listSpans(store, owner, archive)) {
+    if (record.redaction?.rule_set === redactor.rule_set) continue;
+    done++;
+    if (dryRun) continue;
+    const { part, summary } = redactSpanPart(redactor, record.part);
+    const counts = { ...record.redaction?.counts };
+    addCounts(counts, summary.counts);
+    const { schema: _schema, ...rest } = record;
+    await putSpan(store, owner, archive, {
+      ...rest,
+      part,
+      redaction: { rule_set: redactor.rule_set, counts },
+    });
+  }
+  return done;
+}
+
 /** Run the backfill over the store (see the top of this file). */
 export async function backfillRedaction(options: BackfillOptions): Promise<BackfillReport> {
   const now = options.now ?? (() => new Date());
@@ -366,6 +408,7 @@ export async function backfillRedaction(options: BackfillOptions): Promise<Backf
     outcomes: { current: 0, unchanged: 0, rewritten: 0, conflict: 0, failed: 0, skipped: 0 },
     counts: {},
     sessions: [],
+    spans: 0,
     more: false,
   };
   for (const owner of options.owners ?? []) {
@@ -381,6 +424,19 @@ export async function backfillRedaction(options: BackfillOptions): Promise<Backf
         return report;
       }
       const done = await backfillSession(session, options, now().toISOString());
+      if (done.outcome !== "skipped") {
+        const spans = await backfillSpans(
+          options.store,
+          session.owner,
+          session.archive_id,
+          options.redactor,
+          options.dryRun === true,
+        );
+        if (spans > 0) {
+          done.spans = spans;
+          report.spans += spans;
+        }
+      }
       report.outcomes[done.outcome]++;
       if (done.outcome === "rewritten" && done.counts) addCounts(report.counts, done.counts);
       if (

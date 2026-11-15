@@ -90,7 +90,7 @@ import {
   type WriteContext,
 } from "./ingest";
 import { DEFAULT_LIMITS, type Limits } from "./limits";
-import { redactLlmCalls as redactCallsAsRecords, redactSpanPart } from "./spans";
+import { redactSpanPart } from "./spans";
 import {
   type AssembledSession,
   type Authorization,
@@ -289,9 +289,8 @@ function isSpanIds(part: SpanPart): boolean {
 /** How a whole session is written. */
 interface WholeOptions {
   replace: boolean;
+  /** Redacted, and counted, by `commit` (F2). */
   llm_calls?: readonly LlmCall[];
-  /** Matches found outside the records' pass (the LLM calls' free text), added to its counts. */
-  extra?: RedactionSummary;
   /** For an assembled session: what redaction found in its spans when they arrived, summed over
    * all of them. A write of the whole session counts all of it; a tail counts what the
    * session's stored counts do not have yet. */
@@ -415,14 +414,12 @@ export class Pipeline {
     try {
       checkEnvelope(envelope);
       const auth = await this.authorizer.authorize(envelope);
-      // LLM calls carry free text (an error message, string parameters): redacted like the
-      // records before anything is written (04's open item).
-      const calls = redactCallsAsRecords(this.redactor, input.llm_calls);
+      // LLM calls carry free text (an error message, string parameters): `commit` redacts what
+      // the written records refer to with the rule set and counts it, as for any write (F2).
       const outcome = await this.planned(envelope, auth, (run) =>
         this.whole(run, input.records, 0, {
           replace: true,
-          llm_calls: calls.calls,
-          extra: calls.summary,
+          ...(input.llm_calls ? { llm_calls: input.llm_calls } : {}),
           ...(input.redaction ? { arrived: input.redaction } : {}),
         }),
       );
@@ -779,25 +776,22 @@ export class Pipeline {
     });
   }
 
-  /** A write's redaction summary: the records' pass, plus matches found elsewhere (`extra`),
-   * plus for an assembled session what its spans' arrival found (`arrived`; see
-   * `WholeOptions`). */
+  /** A write's redaction summary: the records' pass, plus for an assembled session what its
+   * spans' arrival found (`arrived`; see `WholeOptions`). The LLM calls' matches are added by
+   * `commit`. */
   private summaryOf(
     pass: RedactionSummary,
     options: WholeOptions,
     session: SessionMetadata | null,
     whole: boolean,
   ): RedactionSummary {
-    if (!options.extra && !options.arrived) return pass;
+    if (!options.arrived) return pass;
     const counts: Record<string, number> = { ...pass.counts };
     const add = (more: Readonly<Record<string, number>>) => {
       for (const [rule, n] of Object.entries(more))
         if (n > 0) counts[rule] = (counts[rule] ?? 0) + n;
     };
-    if (options.extra) add(options.extra.counts);
-    if (options.arrived) {
-      add(whole ? options.arrived.counts : countsNotIn(options.arrived, session?.redaction));
-    }
+    add(whole ? options.arrived.counts : countsNotIn(options.arrived, session?.redaction));
     return { rule_set: pass.rule_set, counts };
   }
 

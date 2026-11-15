@@ -93,10 +93,11 @@ service account. User docs: [docs/otlp.md](../../otlp.md).
     - A marker without an envelope is dropped. So is a redacted session, whose spans are also
       deleted.
     - A missing span adapter or a thrown publish keeps the marker.
-  - `publishAssembled` redacts LLM calls (`redactLlmCalls`: `error` and string `parameters`
-    through the records redactor as `system` records, 04's open item). It counts what the
-    spans' arrival redacted (`AssembledSession.redaction`): all of it for a first trace or a
-    replace, and only what the stored counts lack for a tail.
+  - `publishAssembled` hands the LLM calls to `commit`, which redacts them for every write
+    (07's `redactLlmCalls` from `@seshi/redact`: `error` and string `parameters` through
+    `redactText`, 04's open item) and counts them. It counts what the spans' arrival redacted
+    (`AssembledSession.redaction`): all of it for a first trace or a replace, and only what
+    the stored counts lack for a tail.
   - `tombstone` deletes the session's span records and pending marker.
 - **Instance and config**: every Instance builds a `SpanStore` (unless `InstanceParts.assembler`
   is given) and registers the `assembler` job (`BUILTIN_JOBS`, worker placement) every
@@ -163,8 +164,10 @@ service account. User docs: [docs/otlp.md](../../otlp.md).
 - **Assembler knobs**: `assemblePending` takes `finalGraceMs`, `limit`, `quietMs`, `signal`,
   `onError`; the job wires `quietMs` from config. Lowering `FINAL_GRACE_MS` or making it
   config is one line.
-- **Redaction of spans**: anything with the `Redactor` contract works (07). `redactSpanPart` and
-  `redactLlmCalls` call only `redact(records, carried)`.
+- **Redaction of spans**: anything with the `Redactor` contract works (07). `redactSpanPart`
+  uses `redact(records, carried)` for records and tool calls, and `redactLlmCalls`
+  (`@seshi/redact`) for the LLM call, which uses `redactText` and falls back to `redact` with a
+  `system` record for a redactor without it.
 
 ## Deviations and why
 
@@ -269,22 +272,55 @@ A review of the branch against F4, X4.2 and the build rules found and fixed:
 4. **The partial_success message** for left-out spans names both reasons (no start time, ids).
 5. **06's racy heartbeat test**, as above.
 
-## Cross-branch wiring once the stack is linear
+## Cross-branch wiring done on the linear stack
+
+Rebased onto 08 (with 07 below it). `feat(pipeline): wire span and LLM call redaction, and
+review of assembled sessions, now that 07 and 08 are in the stack`:
 
 - **07 (redaction rules)**:
-  - If the `Redactor` interface changes, `redactSpanPart` and `redactLlmCalls` in
-    `packages/ts/pipeline/src/spans.ts` must follow.
-  - `seshi redact backfill` should also re-redact span records under `owners/*/sessions/*/spans/`
-    (they hold content at rest) and LLM calls in stored traces.
+  - One `redactLlmCalls`: 09's own copy in `spans.ts` (synthetic `system` records through
+    `redact`) is gone. `redactSpanPart` uses 07's `redactLlmCalls` from `@seshi/redact`
+    (`redactText` on the Instance's rule set, `instance.redaction` via `ruleRedactor`). It now
+    falls back to `redact` with a `system` record for a `Redactor` without `redactText`, so no
+    redactor lets an LLM call through. `@seshi/pipeline` no longer exports `redactLlmCalls`.
+  - `publishAssembled` no longer redacts LLM calls itself (and `WholeOptions.extra` is gone):
+    `commit` redacts and counts them for every write, as 07 made it. A span's LLM call is
+    redacted and counted on arrival (its record's `redaction`), and those counts reach the
+    session through `arrived`; the publish pass finds the marker, not the secret, so nothing
+    is counted twice (test in `spans.test.ts`).
+  - `seshi redact backfill` also redacts span records again (`backfillSpans` in
+    `backfill.ts`): for every session it looks at that is not `skipped`, each span record
+    whose `redaction.rule_set` is not the current one is redacted with `redactSpanPart` and
+    rewritten in place with the current rule set and its counts added. This runs even for a
+    `current` session, since the assembler may have published it after the rules changed.
+    Span counts stay on the records (they repeat the traces), so they are not added to the
+    session's or the report's counts; the report and `BackfillSession` gain `spans`, and the
+    CLI prints how many span records it redacted. Stored LLM calls were already backfilled by
+    07. Test in `backfill.test.ts`.
+  - 07's assembled-session test looked the session up under the `trajectory` format; it now
+    uses `otlp-genai` (a separate `test(pipeline)` commit).
+- **08 (model review)**: two tests in `tests/review/review.test.ts` send a GenAI span through
+  `POST /otlp/v1/traces` of an Instance with a review policy scoped to the `otlp` source, run
+  the `assembler` job, and check that review redacts the assembled trace and records its
+  decision, and that a drop leaves no session and a drop record under `sources/console/`.
+
+## Cross-branch wiring once the stack is linear
+
+- **07 (redaction rules)**, still open:
+  - If the `Redactor` interface changes, `redactSpanPart` in `packages/ts/pipeline/src/spans.ts`
+    must follow.
+  - Backfill does not reach span records of sessions with no metadata: pending ones (their next
+    publish redacts the trace with the current rules, but the records stay as they were) and
+    ones the filter refused or review dropped. Reaching them means walking `assembly/pending/`
+    or the `spans/` folders.
+  - A span arriving while backfill rewrites the same span record can be overwritten by the
+    backfill's copy (both are redacted; the backfill's with the current rules).
   - A rules change makes the next assembled publish a replace (the prefix no longer hashes the
     same), which is expected.
 - **08 (model review)**:
-  - Review runs on assembled sessions through `publishAssembled` → `commit`, with the marker's
-    envelope (`source: "otlp"`, no payload) and only the records a write adds (the tail on a
-    continuation).
   - A drop writes a drop record and leaves the span records, so later spans re-assemble and
-    re-review the session.
-  - `[review] policies` naming an `otlp` source id apply to it.
+    re-review the session. Span records keep text that review would have redacted (they are
+    regex-redacted only, X6.3); see "Span records are never pruned".
 - **10 (Datadog)**: see Extension points. `SubmitOutcome` in kit already includes `accepted`.
   Add `quiet_period` to `datadogSource` if wanted (the job reads it generically). Register the
   `datadog-llmobs` format with `spans` in the integration.

@@ -28,7 +28,7 @@ import type {
   StoreSessionResult,
 } from "@seshi/model";
 import { SessionRejected } from "@seshi/model";
-import type { Redactor } from "@seshi/redact";
+import { type Redactor, redactLlmCalls } from "@seshi/redact";
 import {
   clearPending,
   deleteSpans,
@@ -52,57 +52,9 @@ function addCounts(into: Counts, from: Readonly<Counts> | undefined): Counts {
   return into;
 }
 
-/** The free text of LLM calls (`error`, string `parameters`) through the records redactor: each
- * string goes through as a `system` record, so any `Redactor` (07's packs included) applies
- * without its contract growing. Ids, models, times and stop reasons are structural and kept. */
-export function redactLlmCalls(
-  redactor: Redactor,
-  calls: readonly LlmCall[] | undefined,
-): { calls: LlmCall[] | undefined; summary: RedactionSummary } {
-  const counts: Counts = {};
-  if (!calls || calls.length === 0) {
-    return {
-      calls: calls ? [...calls] : undefined,
-      summary: { rule_set: redactor.rule_set, counts },
-    };
-  }
-  const texts: string[] = [];
-  const at: { call: number; field: "error" | string }[] = [];
-  calls.forEach((call, i) => {
-    if (typeof call.error === "string" && call.error !== "") {
-      texts.push(call.error);
-      at.push({ call: i, field: "error" });
-    }
-    for (const [key, value] of Object.entries(call.parameters ?? {})) {
-      if (typeof value === "string" && value !== "") {
-        texts.push(value);
-        at.push({ call: i, field: `parameters.${key}` });
-      }
-    }
-  });
-  if (texts.length === 0)
-    return { calls: [...calls], summary: { rule_set: redactor.rule_set, counts } };
-  const out = calls.map((call) => ({
-    ...call,
-    ...(call.parameters ? { parameters: { ...call.parameters } } : {}),
-  }));
-  const redacted = redactor.redact(
-    texts.map((content) => ({ role: "system", content, timestamp: "" }) as NormalizedRecord),
-  );
-  addCounts(counts, redacted.summary.counts);
-  redacted.records.forEach((record, i) => {
-    const place = at[i] as { call: number; field: string };
-    const text = (record as { content: string }).content;
-    const call = out[place.call] as LlmCall;
-    if (place.field === "error") call.error = text;
-    else if (call.parameters) call.parameters[place.field.slice("parameters.".length)] = text;
-  });
-  return { calls: out, summary: { rule_set: redactor.rule_set, counts } };
-}
-
 /** One span part through regex redaction: its input and output records, its tool call (as a
  * call and its result, so the sensitive-file and secret-command rules apply), and its LLM
- * call's free text. */
+ * call's free text (`redactLlmCalls` from `@seshi/redact`, through the same rule set). */
 export function redactSpanPart(
   redactor: Redactor,
   part: SpanPart,
@@ -143,8 +95,8 @@ export function redactSpanPart(
     };
   }
   if (part.llm_call) {
-    const { calls, summary } = redactLlmCalls(redactor, [part.llm_call]);
-    addCounts(counts, summary.counts);
+    const { calls, counts: found } = redactLlmCalls(redactor, [part.llm_call]);
+    addCounts(counts, found);
     out.llm_call = calls?.[0] as LlmCall;
   }
   return { part: out, summary: { rule_set: redactor.rule_set, counts } };

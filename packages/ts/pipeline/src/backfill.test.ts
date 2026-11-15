@@ -8,6 +8,8 @@ import {
   archiveId,
   FsStore,
   keys,
+  listSpans,
+  putSpan,
   readChanges,
   readMetadata,
   type Store,
@@ -417,6 +419,56 @@ describe("backfillRedaction (F2.5)", () => {
     const trace = await getTrace(store, "alice", archive, after?.head as string);
     expect(JSON.stringify(trace)).not.toContain("ACME-");
     expect(trace?.llm_calls?.[0]).toMatchObject({ id: "c1", model: "m", parameters: { n: 1 } });
+  });
+
+  it("redacts a session's span records again, even when its traces are current (09)", async () => {
+    const oldRules = compileRuleSet();
+    const span = (id: string, text: string) => ({
+      received_at: ts,
+      source_id: "console",
+      format: "otlp-genai",
+      part: {
+        trace_id: "ab".repeat(16),
+        span_id: id,
+        name: "chat m",
+        started_at: ts,
+        content: true,
+        output: [{ role: "assistant", content: text, timestamp: ts }],
+        llm_call: { id: `c-${id}`, error: `bad key ${text}` },
+      } as never,
+      redaction: { rule_set: oldRules.hash, counts: { "github-token": 1 } },
+    });
+    // s1 was stored with the old rules; s2 with the new ones (the assembler published it after
+    // the rules changed), but its span records are still the old rules' work.
+    await store1("s1", meta() + user(LONG) + reply("ok"));
+    await store1("s2", meta() + user(LONG) + reply("ok"), 0, "alice", NEW_RULES);
+    const s1 = archiveId("alice", "trajectory", "s1");
+    const s2 = archiveId("alice", "trajectory", "s2");
+    await putSpan(store, "alice", s1, span("0000000000000001", "ACME-1234"));
+    await putSpan(store, "alice", s2, span("0000000000000002", "ACME-5678"));
+    await putSpan(store, "alice", s2, {
+      ...span("0000000000000003", "nothing here"),
+      redaction: { rule_set: NEW_RULES.hash, counts: {} },
+    });
+
+    const dry = await run({ dryRun: true });
+    expect(dry.spans).toBe(2);
+    expect(JSON.stringify(await listSpans(store, "alice", s2))).toContain("ACME-5678");
+
+    const report = await run();
+    expect(report.outcomes).toMatchObject({ unchanged: 1, current: 1 });
+    expect(report.spans).toBe(2);
+    // Span records repeat what the traces hold: their counts stay on the records.
+    expect(report.counts).toEqual({});
+    for (const archive of [s1, s2]) {
+      const records = await listSpans(store, "alice", archive);
+      expect(JSON.stringify(records)).not.toContain("ACME-");
+      for (const record of records) expect(record.redaction?.rule_set).toBe(NEW_RULES.hash);
+    }
+    const [redone] = await listSpans(store, "alice", s1);
+    expect(redone?.part.llm_call?.error).toBe("bad key [redacted:acme-key]");
+    expect(redone?.redaction?.counts).toEqual({ "github-token": 1, "acme-key": 2 });
+    expect((await run()).spans).toBe(0);
   });
 
   it("tells each session as it is done", async () => {

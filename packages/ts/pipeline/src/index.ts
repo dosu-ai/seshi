@@ -86,7 +86,6 @@ export {
   type AssembleReport,
   assemblePending,
   FINAL_GRACE_MS,
-  redactLlmCalls,
   redactSpanPart,
   SpanStore,
   type SpanStoreOptions,

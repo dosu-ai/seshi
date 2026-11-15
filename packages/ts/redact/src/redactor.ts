@@ -150,20 +150,31 @@ export function ruleRedactor(rules: RuleSet = compileRuleSet()): Redactor {
   };
 }
 
+/** One string through `redact`, as the content of a `system` record. */
+function textAsRecord(redactor: Redactor, text: string): { text: string; counts: Counts } {
+  const out = redactor.redact([
+    { role: "system", content: text, timestamp: "" } as NormalizedRecord,
+  ]);
+  const content = (out.records[0] as { content?: unknown } | undefined)?.content;
+  return { text: typeof content === "string" ? content : text, counts: { ...out.summary.counts } };
+}
+
 /** The free text an LLM call carries (`error`, and the string values of `parameters`) through
  * the redactor's `redactText`, as `text`. Ids, model, provider, stop reason and timing are
- * structural and stay. Calls with nothing to redact are returned as they are; a redactor without
- * `redactText` (a test fake) leaves them all. `counts` are by rule id, for the session's summary. */
+ * structural and stay. Calls with nothing to redact are returned as they are. A redactor without
+ * `redactText` gets each string as the content of a `system` record through `redact`, so no
+ * `Redactor` lets an LLM call through unredacted. `counts` are by rule id, for the session's
+ * summary. */
 export function redactLlmCalls(
   redactor: Redactor,
   calls: readonly LlmCall[] | undefined,
 ): { calls: LlmCall[] | undefined; counts: Record<string, number> } {
   const counts: Counts = {};
-  if (!calls || calls.length === 0 || !redactor.redactText) {
+  if (!calls || calls.length === 0) {
     return { calls: calls ? [...calls] : undefined, counts };
   }
   const text = (value: string): string => {
-    const out = redactor.redactText?.(value, "text") ?? { text: value, counts: {} };
+    const out = redactor.redactText?.(value, "text") ?? textAsRecord(redactor, value);
     for (const [id, n] of Object.entries(out.counts)) bump(counts, id, n);
     return out.text;
   };

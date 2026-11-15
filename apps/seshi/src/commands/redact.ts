@@ -444,6 +444,11 @@ async function backfill(ctx: CommandContext, json: boolean, args: string[]): Pro
       if (counts.length > 0) {
         lines.push(`taken out: ${counts.map(([id, n]) => `${id} ${n}`).join(", ")}`);
       }
+      if (report.spans > 0) {
+        lines.push(
+          `${dryRun ? "would redact" : "redacted"} ${report.spans} span record${report.spans === 1 ? "" : "s"} again`,
+        );
+      }
       if (report.more) lines.push("stopped before the end: run it again to go on");
       if (o.conflict > 0) lines.push("run it again for the sessions that changed meanwhile");
       return lines;

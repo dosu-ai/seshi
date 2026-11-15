@@ -7,10 +7,10 @@ import { join } from "node:path";
 import { createApp } from "@seshi/api";
 import { InstanceError } from "@seshi/instance";
 import type { StoreSessionResult } from "@seshi/model";
-import { backfillRedaction } from "@seshi/pipeline";
+import { backfillRedaction, getTrace } from "@seshi/pipeline";
 import { compileRuleSet, ruleRedactor, validatePack } from "@seshi/redact";
 import { type FakeServer, fakeProviderServer, KeywordModel } from "@seshi/review/testing";
-import { listRecords, listReviews, readMetadata } from "@seshi/store";
+import { archiveId, listRecords, listReviews, readMetadata } from "@seshi/store";
 import { afterEach, describe, expect, it } from "vitest";
 import { bootInstance } from "../tooling/instance";
 
@@ -346,6 +346,122 @@ describe("model review in the pipeline", () => {
       policy: "default",
       redactor_model: "anthropic/claude-haiku-5-5",
       findings: [{ record: 1, field: "content", category: "secret", action: "redact" }],
+    });
+  });
+});
+
+describe("model review of assembled OTLP sessions (08 with 09)", () => {
+  const CONVERSATION = "conv-review";
+  const OWNER = "svc:console";
+  const attr = (key: string, value: string) => ({ key, value: { stringValue: value } });
+  const messages = (role: string, text: string) =>
+    JSON.stringify([{ role, parts: [{ type: "text", content: text }] }]);
+  const ns = (at: Date) => (BigInt(at.getTime()) * 1_000_000n).toString();
+
+  /** One GenAI chat span in OTLP's JSON mapping. */
+  const request = (input: string, output: string, at: Date) => ({
+    resourceSpans: [
+      {
+        scopeSpans: [
+          {
+            spans: [
+              {
+                traceId: "cd".repeat(16),
+                spanId: "00000000000000a1",
+                name: "chat m",
+                startTimeUnixNano: ns(at),
+                endTimeUnixNano: ns(new Date(at.getTime() + 1000)),
+                attributes: [
+                  attr("gen_ai.operation.name", "chat"),
+                  attr("gen_ai.conversation.id", CONVERSATION),
+                  attr("gen_ai.input.messages", messages("user", input)),
+                  attr("gen_ai.output.messages", messages("assistant", output)),
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+
+  async function bootOtlp(policy: string) {
+    let clock = new Date("2026-11-01T10:00:00Z");
+    const booted = await bootInstance(
+      [
+        "[filter]\nenabled = false",
+        '[[sources]]\nid = "console"\ntype = "otlp"\nquiet_period = "1m"',
+        `[[review.policies]]\n${policy}sources = ["console"]`,
+      ].join("\n"),
+      { now: () => clock, roles: ["api", "worker"] },
+    );
+    cleanups.push(() => booted.cleanup());
+    const app = createApp(booted.instance);
+    const init = await booted.instance.auth.initAdmin({ owner: "ops" });
+    const issued = await app.fetch(
+      new Request("http://seshi.test/v1/tokens", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${init.admin?.token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ kind: "service", service: "console", scopes: ["sessions:write"] }),
+      }),
+    );
+    const token = ((await issued.json()) as { token: string }).token;
+    /** Send one chat span, wait out the quiet period, and run the assembler. */
+    const publish = async (input: string, output: string) => {
+      const response = await app.fetch(
+        new Request("http://seshi.test/otlp/v1/traces", {
+          method: "POST",
+          headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+          body: JSON.stringify(request(input, output, clock)),
+        }),
+      );
+      expect(response.status).toBe(200);
+      clock = new Date(clock.getTime() + 2 * 60_000);
+      const record = await booted.instance.jobs.runNow("assembler");
+      expect(record.last_error).toBeUndefined();
+      return record.last_summary;
+    };
+    return { ...booted, publish, archive: archiveId(OWNER, "otlp-genai", CONVERSATION) };
+  }
+
+  it("reviews the assembled session before it is written and records the decision", async () => {
+    const s = server();
+    const { publish, store, archive } = await bootOtlp(anthropic(s));
+    expect(await publish(`log in with ops / ${SECRET}`, "done")).toMatchObject({ published: 1 });
+    const metadata = await readMetadata(store, OWNER, archive);
+    expect(metadata?.status).toBe("stored");
+    const trace = await getTrace(store, OWNER, archive, metadata?.head as string);
+    expect(JSON.stringify(trace)).not.toContain(SECRET);
+    expect(JSON.stringify(trace)).toContain("log in with ops / [redacted:secret]");
+    expect(await listReviews(store, OWNER, archive)).toEqual([
+      expect.objectContaining({
+        n: 0,
+        content_hash: metadata?.head,
+        decision: "redact",
+        policy: "default",
+        findings: [expect.objectContaining({ category: "secret", action: "redact" })],
+      }),
+    ]);
+    expect(s.requests.map((r) => r.api)).toEqual(["anthropic", "anthropic"]);
+  });
+
+  it("drops an assembled session review drops, under the OTLP source", async () => {
+    const s = server();
+    const { publish, store, archive } = await bootOtlp(anthropic(s));
+    expect(await publish("here is the CUSTOMER TABLE: ana, 41 rua", "ok")).toMatchObject({
+      published: 1,
+    });
+    expect(await readMetadata(store, OWNER, archive)).toBeNull();
+    const { records } = await listRecords(store, "dropped", "console");
+    expect(records).toHaveLength(1);
+    expect(records[0]?.record).toMatchObject({
+      reason: "review_drop",
+      policy: "default",
+      source_kind: "otlp",
+      session_key: CONVERSATION,
     });
   });
 });

@@ -201,7 +201,8 @@ Rules apply to sessions stored after the server restarts with them (F1.5). To ap
 what is already stored, run `seshi redact backfill --since 30d` (or `--all`) where the server's
 config is, after the restart: each session an earlier rule set redacted is redacted again, a
 session the new rules change gets one new trace and its old trace objects are deleted, and a
-change entry (`replace`, `reason: "redacted"`) tells readers to take the new trace. It cannot be
+change entry (`replace`, `reason: "redacted"`) tells readers to take the new trace. LLM calls'
+free text and the span records of OTLP and poller sessions are redacted again too. It cannot be
 undone; `--dry-run` says what it would do.
 
 A client can redact before upload with the same rules (F2.4): `GET /v1/redaction/rules` serves
