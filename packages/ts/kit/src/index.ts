@@ -41,7 +41,15 @@ export interface HookHandler {
 export type SubmitOutcome =
   | StoreSessionResult
   | { status: "failed"; code: string; message: string; record: string }
-  | { status: "accepted"; archive_id: string; spans: number };
+  | {
+      status: "accepted";
+      archive_id: string;
+      /** Spans in the span store; the assembler publishes the session later (X4.4). */
+      spans: number;
+      /** Spans of the envelope the format could not read (no start time, ids that are not
+       * OTLP hex), left out. */
+      rejected?: number;
+    };
 
 /** Where a log line from a connector goes; the instance prefixes it with the source id. */
 export interface ConnectorLogger {
