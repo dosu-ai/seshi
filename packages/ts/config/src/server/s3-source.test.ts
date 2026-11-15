@@ -39,6 +39,9 @@ describe("a folder source (file://)", () => {
       "reads seshi's own bucket",
     );
     expect(issues({ url: "/data" }, "file:///data/seshi")[0]).toContain("reads seshi's own bucket");
+    expect(issues({ url: "file:///data/drop/../seshi/./in" }, "file:///data/seshi")[0]).toContain(
+      "reads seshi's own bucket",
+    );
     expect(parse({ url: "file:///data/drop" }, "file:///data/seshi").success).toBe(true);
     expect(parse({ url: "file:///data/seshi2" }, "file:///data/seshi").success).toBe(true);
     // A folder and a bucket never overlap.

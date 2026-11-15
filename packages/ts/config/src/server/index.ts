@@ -2,6 +2,7 @@
  * the schema index: a later branch adds or refines its section in its own file and adds one
  * line here. `spec/config.schema.json` is generated from it (`bun run schema`). */
 
+import { posix } from "node:path";
 import * as z from "zod";
 import { authSection } from "./auth";
 import { captureSection } from "./capture";
@@ -39,7 +40,10 @@ const sections = z.strictObject({
  * `file` with its path as the prefix. */
 function bucketOf(url: string, extra = ""): { at: string; prefix: string } | undefined {
   const folder = /^(?:file:\/\/)?(\/.*)$/.exec(url);
-  const match = folder ? ["", "file", "", folder[1]] : /^(s3|r2):\/\/([^/]+)\/?(.*)$/.exec(url);
+  // A folder's `.` and `..` segments are resolved: `/data/x/../seshi` is `/data/seshi`.
+  const match = folder
+    ? ["", "file", "", posix.normalize(folder[1] as string)]
+    : /^(s3|r2):\/\/([^/]+)\/?(.*)$/.exec(url);
   if (!match) return undefined;
   const prefix = [match[3], extra]
     .map((p) => (p ?? "").replace(/^\/+|\/+$/g, ""))
