@@ -8,7 +8,8 @@
 import { randomUUID } from "node:crypto";
 import { parseArgs } from "node:util";
 import { createApp, maxBodyBytes } from "@seshi/api";
-import { ConfigError, filterFor, loadServerConfig } from "@seshi/config";
+import { Auth } from "@seshi/auth";
+import { ConfigError, filterFor, loadServerConfig, visibilityFor } from "@seshi/config";
 import type { FormatRegistry } from "@seshi/formats";
 import { VERSION } from "@seshi/model";
 import { StoreHealthCounters } from "@seshi/pipeline";
@@ -93,7 +94,7 @@ async function start(ctx: CommandContext, formats: FormatRegistry): Promise<void
   });
   for (const warning of loaded.warnings) ctx.stderr(`seshi: warning: ${warning}`);
   const settings = serveSettings(loaded.config);
-  const { tokens, tokenSecret, owners, url } = settings;
+  const { owners, url } = settings;
   const client = `seshi/${VERSION}`;
 
   const redaction = await readPacks(settings.redactionPacks);
@@ -127,18 +128,38 @@ async function start(ctx: CommandContext, formats: FormatRegistry): Promise<void
     instance: `serve-${randomUUID().slice(0, 8)}`,
     onError: (err) => ctx.stderr(`seshi: warning: source health not recorded: ${message(err)}`),
   });
+  let auth: Auth;
+  try {
+    auth = new Auth(settings.auth, {
+      store,
+      deployment,
+      sources: loaded.config.sources.map((s) => s.id),
+    });
+  } catch (err) {
+    fail(message(err));
+  }
+  // Without static tokens or an IdP, only tokens in the bucket let anyone in.
+  if (owners.length === 0 && !settings.auth.oidc) {
+    const live = await auth.tokens.list().catch(() => []);
+    if (live.length === 0) {
+      ctx.stderr(
+        "seshi: warning: no token can call this server yet: run `seshi admin init` where this config is, or set auth.tokens",
+      );
+    }
+  }
   const app = createApp({
     store,
     storage,
     formats,
-    tokens,
-    tokenSecret,
+    auth,
     client,
     redaction,
     // Each source's own rules over [filter] (X4.10); uploads get [filter].
     filter: (sourceId) => filterFor(loaded.config, sourceId),
     limits: settings.limits,
     health,
+    // The request, then the token's default, then the source's, then default_visibility.
+    visibility: (sourceId) => visibilityFor(loaded.config, sourceId),
   });
 
   const server = Bun.serve({
@@ -153,9 +174,14 @@ async function start(ctx: CommandContext, formats: FormatRegistry): Promise<void
   });
 
   const host = ["0.0.0.0", "::"].includes(settings.hostname) ? "localhost" : settings.hostname;
-  const who = [...owners, ...(tokenSecret ? ["whoever holds a signed token"] : [])].join(", ");
+  const who = [
+    ...(settings.auth.orgKey ? ["the org key"] : []),
+    ...(settings.auth.oidc ? [`sign-in through ${settings.auth.oidc.issuer}`] : []),
+    ...(owners.length > 0 ? [`static tokens for ${owners.join(", ")}`] : []),
+    "seshi tokens",
+  ].join(", ");
   ctx.stdout(
-    `seshi ${VERSION} listening on http://${host}:${server.port}, storing sessions in ${url} (deployment ${deployment}) for ${who}${
+    `seshi ${VERSION} listening on http://${host}:${server.port}, storing sessions in ${url} (deployment ${deployment}); accepting ${who}${
       loaded.file ? ` (config ${loaded.file})` : ""
     }`,
   );

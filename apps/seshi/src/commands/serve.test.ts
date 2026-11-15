@@ -133,7 +133,7 @@ describe("seshi serve", () => {
     );
     try {
       expect(server.out).toContain(`sessions in file://${join(dir, "from-file")}`);
-      expect(server.out).toContain("for alice, default");
+      expect(server.out).toContain("static tokens for alice, default");
       expect(server.out).toContain(`(config ${join(realpathSync(dir), "seshi.toml")})`);
       const response = await fetch(`http://127.0.0.1:${server.port}/v1/me`, {
         headers: { authorization: "Bearer alice-token-0123456789" },
@@ -222,13 +222,13 @@ describe("seshi serve", () => {
     expect(out).toContain("seshi: Unknown option '--port'");
   });
 
-  it("does not read the old SESSIONDB_* names", async () => {
-    const { code, out } = await boot({
+  it("does not read the old SESSIONDB_* names, and says when no token can call it", async () => {
+    const { out } = await boot({
       SESHI_AUTH__TOKENS__DEFAULT: "",
       SESSIONDB_TOKEN: "sdb_test-token-0123456789abcdef",
     });
-    expect(code).toBe(1);
-    expect(out).toContain("no way to call the server");
+    expect(out).toContain("no token can call this server yet: run `seshi admin init`");
+    expect(out).not.toContain("static tokens for");
   });
 });
 
@@ -252,7 +252,7 @@ describe("serveSettings", () => {
     throw new Error("expected a ServeConfigError");
   };
 
-  it("maps tokens, the legacy secret, the store, the listen address, the filter and limits", () => {
+  it("maps the auth settings, the store, the listen address, the filter and limits", () => {
     const settings = serveSettings(
       config(
         {
@@ -267,18 +267,25 @@ describe("serveSettings", () => {
         {
           SESHI_AUTH__TOKENS__ALICE: " alice-token-0123456789 ",
           SESHI_AUTH__TOKENS__BOB: "bob-token-0123456789",
-          SESHI_AUTH__LEGACY_TOKEN_SECRET: "s".repeat(32),
+          SESHI_AUTH__SESSION_KEYS__K1: ` ${"s".repeat(32)} `,
+          SESHI_AUTH__ADMINS: "Ops@Acme.com",
           SESHI_STORE__CREDENTIALS__ACCESS_KEY_ID: "AKIA",
           SESHI_STORE__CREDENTIALS__SECRET_ACCESS_KEY: "shh",
         },
       ),
     );
     expect(settings).toEqual({
-      tokens: [
-        { token: "alice-token-0123456789", owner: "alice" },
-        { token: "bob-token-0123456789", owner: "bob" },
-      ],
-      tokenSecret: "s".repeat(32),
+      auth: {
+        staticTokens: [
+          { token: "alice-token-0123456789", owner: "alice" },
+          { token: "bob-token-0123456789", owner: "bob" },
+        ],
+        orgKey: true,
+        admins: ["ops@acme.com"],
+        aliases: {},
+        sessionKeys: { k1: "s".repeat(32) },
+        signingKeyId: "k1",
+      },
       owners: ["alice", "bob"],
       url: "file:///tmp/x",
       store: { region: "eu-west-1", credentials: { accessKeyId: "AKIA", secretAccessKey: "shh" } },
@@ -311,12 +318,19 @@ describe("serveSettings", () => {
   });
 
   it("refuses what the server always refused", () => {
-    expect(error(config({}))).toContain("no way to call the server");
+    // No static token is fine: seshi tokens in the bucket let callers in (X5.9).
+    expect(serveSettings(config({})).auth.staticTokens).toEqual([]);
     expect(error(config({}, { SESHI_AUTH__TOKENS__ALICE: "short" }))).toContain(
       "auth.tokens.alice must be 16+ characters",
     );
-    expect(error(config({}, { SESHI_AUTH__LEGACY_TOKEN_SECRET: "short" }))).toContain(
-      "auth.legacy_token_secret must be 32+ characters",
+    expect(error(config({}, { SESHI_AUTH__SESSION_KEYS__K1: "short" }))).toContain(
+      "auth.session_keys.k1 must be 32+ characters",
+    );
+    expect(error(config({ "auth.tokens.svc:otlp": "token-0123456789abcdef" }))).toContain(
+      "'svc:otlp' is not a valid owner id",
+    );
+    expect(error(config({ "auth.owner_aliases.a": "b", "auth.owner_aliases.b": "a" }))).toContain(
+      "leads round in a circle",
     );
     expect(
       error(
@@ -330,7 +344,7 @@ describe("serveSettings", () => {
       ),
     ).toBe("auth.tokens: the same token is given to two owners");
     expect(error(config({ "auth.tokens.a/b": "token-0123456789abcdef" }))).toContain(
-      "'a/b' is not a valid owner name",
+      "'a/b' is not a valid owner id",
     );
     expect(
       error(

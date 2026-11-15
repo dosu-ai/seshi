@@ -31,6 +31,10 @@ export interface CommandSpec {
 }
 
 export const COMMANDS: Readonly<Record<string, CommandSpec>> = {
+  admin: {
+    summary: "set up the server: the first admin token and the org key (admin init)",
+    load: () => import("./admin"),
+  },
   config: {
     summary: "check the config, or show every value and where it came from",
     load: () => import("./config"),

@@ -14,13 +14,13 @@ describe("configEntries", () => {
   it("lists every value with its origin, durations and sizes in units, secrets masked", () => {
     const loaded = load({
       SESHI_AUTH__TOKENS__ALICE: "alice-token-0123456789",
-      SESHI_AUTH__LEGACY_TOKEN_SECRET__ENV: "SHARED",
+      SESHI_AUTH__SESSION_KEYS__K1__ENV: "SHARED",
       SESHI_RECORDS__FAILED_RETENTION: "7d",
     });
     const byName = Object.fromEntries(configEntries(loaded).map((e) => [e.name, e]));
     expect(byName["store.url"]).toMatchObject({ value: "file:///data", origin: { source: "env" } });
     expect(byName["auth.tokens.alice"]?.value).toBe("<secret>");
-    expect(byName["auth.legacy_token_secret"]?.value).toBe("<secret: env SHARED>");
+    expect(byName["auth.session_keys.k1"]?.value).toBe("<secret: env SHARED>");
     expect(byName["records.failed_retention"]?.value).toBe("7d");
     expect(byName["records.dropped_retention"]).toMatchObject({
       value: "30d",
@@ -28,7 +28,7 @@ describe("configEntries", () => {
     });
     expect(byName["limits.max_records_bytes"]?.value).toBe("32MiB");
     expect(byName.sources?.value).toEqual([]);
-    expect(byName["auth.session_keys"]?.value).toEqual({});
+    expect(byName["auth.owner_aliases"]?.value).toEqual({});
     expect(JSON.stringify(configEntries(loaded))).not.toContain("alice-token");
   });
 
@@ -58,7 +58,10 @@ describe("checkServerConfig", () => {
         {},
         {
           default_visibility: "owner",
-          auth: { oidc: { issuer: "https://idp.acme.com", client_id: "c" } },
+          auth: {
+            oidc: { issuer: "https://idp.acme.com", client_id: "c" },
+            session_keys: { k1: "k".repeat(32) },
+          },
         },
       ),
     );

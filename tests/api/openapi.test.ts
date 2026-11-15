@@ -8,12 +8,14 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type App, type AppOptions, createApp as createServer } from "@seshi/api";
+import { Auth, CREDENTIAL_SCOPES } from "@seshi/auth";
+import { FakeIdp } from "@seshi/auth/testing";
 import { storeSession } from "@seshi/pipeline";
 import { FsStore, type Store, StoreError } from "@seshi/store";
 import { Ajv2020, type ValidateFunction } from "ajv/dist/2020";
 import addFormats from "ajv-formats";
 import { buildFormats } from "seshi/integrations";
-import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { transcript } from "../tooling/testdata";
 
 // --- the document -------------------------------------------------------------------------
@@ -153,6 +155,7 @@ async function call(
   path: string,
   options: {
     token?: string | null;
+    user?: string;
     body?: unknown;
     raw?: string;
     encoding?: string;
@@ -164,6 +167,7 @@ async function call(
   const headers: Record<string, string> = {};
   if (options.encoding) headers["content-encoding"] = options.encoding;
   if (options.token !== null) headers.authorization = `Bearer ${options.token ?? TOKEN}`;
+  if (options.user !== undefined) headers["x-seshi-user"] = options.user;
   let body: string | undefined;
   if (options.raw !== undefined) {
     body = options.raw;
@@ -235,7 +239,15 @@ describe("the document itself", () => {
     expect(routes).toEqual(
       [
         "GET /healthz",
+        "GET /v1/auth/config",
+        "POST /v1/auth/exchange",
         "GET /v1/me",
+        "GET /v1/owners",
+        "PATCH /v1/sessions/{agent}/{session_id}",
+        "POST /v1/tokens",
+        "GET /v1/tokens",
+        "POST /v1/tokens/revoke",
+        "DELETE /v1/tokens/{id}",
         "POST /v1/sessions",
         "GET /v1/sessions",
         "GET /v1/sessions/{agent}/{session_id}",
@@ -433,11 +445,41 @@ describe("the server honours it", () => {
       delete: () => Promise.reject(new StoreError("down")),
       list: () => Promise.reject(new StoreError("down")),
     };
-    const down = createApp({
-      store: broken,
-      storage: { url: broken.url },
-      tokens: [{ token: TOKEN, owner: "acme" }],
+    // An admin's session token is checked without the bucket, so the token routes reach it.
+    const downAuth = new Auth(
+      {
+        staticTokens: [{ token: TOKEN, owner: "acme" }],
+        orgKey: true,
+        admins: [],
+        aliases: {},
+        sessionKeys: { k1: "k".repeat(32) },
+      },
+      { store: broken, deployment: "test" },
+    );
+    const down = createApp({ store: broken, storage: { url: broken.url }, auth: downAuth });
+    const signed = await downAuth.sessions?.sign({
+      owner: "ops",
+      role: "admin",
+      scopes: CREDENTIAL_SCOPES.admin,
     });
+    const admin = { app: down, token: signed?.token };
+    expect((await call("GET", "/v1/owners", { app: down })).status).toBe(502);
+    expect(
+      (
+        await call("PATCH", "/v1/sessions/claude-code/x", {
+          app: down,
+          body: { visibility: "owner" },
+        })
+      ).status,
+    ).toBe(502);
+    expect(
+      (await call("POST", "/v1/tokens", { ...admin, body: { kind: "admin", owner: "x" } })).status,
+    ).toBe(502);
+    expect((await call("GET", "/v1/tokens", admin)).status).toBe(502);
+    expect(
+      (await call("POST", "/v1/tokens/revoke", { ...admin, body: { owner: "x" } })).status,
+    ).toBe(502);
+    expect((await call("DELETE", `/v1/tokens/${"0".repeat(20)}`, admin)).status).toBe(502);
     const body = { agent: "claude-code", session_id: "x", transcript: CLAUDE };
     // Who the token is needs no bucket.
     expect((await call("GET", "/v1/me", { app: down })).status).toBe(200);
@@ -447,6 +489,159 @@ describe("the server honours it", () => {
     expect((await call("GET", "/v1/sessions/claude-code/x/trace", { app: down })).status).toBe(502);
     expect((await call("DELETE", "/v1/sessions/claude-code/x", { app: down })).status).toBe(502);
     expect((await call("GET", "/v1/changes", { app: down })).status).toBe(502);
+  });
+});
+
+describe("identity and access (X5)", () => {
+  let idp: FakeIdp;
+  let x5: App;
+  let auth: Auth;
+
+  beforeAll(async () => {
+    idp = await FakeIdp.create();
+  });
+
+  beforeEach(() => {
+    auth = new Auth(
+      {
+        staticTokens: [{ token: TOKEN, owner: "acme" }],
+        orgKey: true,
+        admins: [],
+        aliases: {},
+        sessionKeys: { k1: "k".repeat(32) },
+        oidc: {
+          issuer: idp.issuer,
+          client_id: "seshi-cli",
+          audience: idp.audience,
+          owner_claim: "sub",
+          groups_claim: "groups",
+        },
+      },
+      { store, deployment: "test", oidcKeys: idp.keys },
+    );
+    x5 = createApp({ store, storage: { url: store.url }, auth });
+  });
+
+  it("the auth routes", async () => {
+    expect((await call("GET", "/v1/auth/config", { token: null, app: x5 })).status).toBe(200);
+    const signedIn = await call("POST", "/v1/auth/exchange", {
+      token: null,
+      app: x5,
+      body: { id_token: await idp.idToken({ email: "a@acme.com" }), machine: { id: "mbp" } },
+    });
+    expect(signedIn.status).toBe(200);
+    expect(signedIn.body).toHaveProperty("device_token");
+    expect(
+      (await call("POST", "/v1/auth/exchange", { token: null, app: x5, raw: "{}" })).status,
+    ).toBe(400);
+    expect(
+      (
+        await call("POST", "/v1/auth/exchange", {
+          token: null,
+          app: x5,
+          body: { id_token: await idp.idToken({ aud: "elsewhere" }) },
+        })
+      ).status,
+    ).toBe(401);
+    // The default server has no IdP.
+    expect(
+      (await call("POST", "/v1/auth/exchange", { token: null, body: { id_token: "x" } })).status,
+    ).toBe(404);
+  });
+
+  it("owners, visibility and scopes", async () => {
+    const { admin: first, org_key } = await auth.initAdmin({ owner: "ops" });
+    const admin = { app: x5, token: first?.token };
+    const alice = { app: x5, token: org_key?.token, user: "alice" };
+    const created = await call("POST", "/v1/tokens", {
+      ...admin,
+      body: { kind: "device", owner: "alice", label: "laptop" },
+    });
+    expect(created.status).toBe(201);
+    const device = { app: x5, token: (created.body as { token: string }).token };
+    const body = { agent: "claude-code", session_id: "s1", transcript: CLAUDE };
+    expect((await call("POST", "/v1/sessions", { ...device, body })).status).toBe(201);
+
+    expect((await call("GET", "/v1/owners", alice)).status).toBe(200);
+    expect((await call("GET", "/v1/owners?after=a/b", alice)).status).toBe(400);
+    expect((await call("GET", "/v1/owners", { app: x5, token: null })).status).toBe(401);
+    // A device token writes and reads nothing.
+    expect((await call("GET", "/v1/owners", device)).status).toBe(403);
+    expect((await call("GET", "/v1/sessions", device)).status).toBe(403);
+    expect((await call("GET", "/v1/sessions/claude-code/s1", device)).status).toBe(403);
+    expect((await call("GET", "/v1/sessions/claude-code/s1/trace", device)).status).toBe(403);
+    expect((await call("GET", "/v1/changes", device)).status).toBe(403);
+    expect((await call("DELETE", "/v1/sessions/claude-code/s1", alice)).status).toBe(403);
+
+    const patch = (as: object, visibility: unknown, path = "/v1/sessions/claude-code/s1") =>
+      call("PATCH", path, { ...as, body: { visibility } });
+    expect((await patch(alice, "owner")).status).toBe(200);
+    expect((await call("GET", "/v1/sessions/claude-code/s1?owner=alice", alice)).status).toBe(200);
+    expect(
+      (
+        await call("PATCH", "/v1/sessions/claude-code/s1", {
+          ...alice,
+          raw: JSON.stringify({ visibility: "everyone" }),
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await call("PATCH", "/v1/sessions/claude-code/s1", {
+          app: x5,
+          token: null,
+          body: { visibility: "org" },
+        })
+      ).status,
+    ).toBe(401);
+    expect((await patch(device, "org")).status).toBe(403);
+    expect((await patch(alice, "org", "/v1/sessions/claude-code/nope")).status).toBe(404);
+    expect((await call("DELETE", "/v1/sessions/claude-code/s1?owner=alice", admin)).status).toBe(
+      200,
+    );
+    expect(
+      (await patch({ ...admin }, "org", "/v1/sessions/claude-code/s1?owner=alice")).status,
+    ).toBe(410);
+  });
+
+  it("the token routes", async () => {
+    const { admin: first } = await auth.initAdmin({ owner: "ops" });
+    const admin = { app: x5, token: first?.token };
+    const member = { app: x5, token: TOKEN };
+    const created = await call("POST", "/v1/tokens", {
+      ...admin,
+      body: { kind: "service", service: "sync", scopes: ["sessions:read", "search"] },
+    });
+    expect(created.status).toBe(201);
+    const id = (created.body as { record: { id: string } }).record.id;
+    expect((await call("POST", "/v1/tokens", { ...admin, body: { kind: "device" } })).status).toBe(
+      400,
+    );
+    expect(
+      (await call("POST", "/v1/tokens", { app: x5, token: null, body: { kind: "org" } })).status,
+    ).toBe(401);
+    expect((await call("POST", "/v1/tokens", { ...member, body: { kind: "org" } })).status).toBe(
+      403,
+    );
+    expect((await call("GET", "/v1/tokens?kind=service", admin)).status).toBe(200);
+    expect((await call("GET", "/v1/tokens?all=maybe", admin)).status).toBe(400);
+    expect((await call("GET", "/v1/tokens", { app: x5, token: null })).status).toBe(401);
+    expect((await call("GET", "/v1/tokens", member)).status).toBe(403);
+    expect((await call("DELETE", `/v1/tokens/${id}`, admin)).status).toBe(200);
+    expect((await call("DELETE", `/v1/tokens/${"0".repeat(20)}`, admin)).status).toBe(404);
+    expect((await call("DELETE", `/v1/tokens/${id}`, { app: x5, token: null })).status).toBe(401);
+    expect((await call("DELETE", `/v1/tokens/${id}`, member)).status).toBe(403);
+    expect(
+      (await call("POST", "/v1/tokens/revoke", { ...admin, body: { owner: "svc:sync" } })).status,
+    ).toBe(200);
+    expect((await call("POST", "/v1/tokens/revoke", { ...admin, raw: "{}" })).status).toBe(400);
+    expect(
+      (await call("POST", "/v1/tokens/revoke", { app: x5, token: null, body: { owner: "x" } }))
+        .status,
+    ).toBe(401);
+    expect(
+      (await call("POST", "/v1/tokens/revoke", { ...member, body: { owner: "x" } })).status,
+    ).toBe(403);
   });
 });
 

@@ -6,6 +6,7 @@ import {
   type ServerConfig,
   serverConfigSchema,
   signingKeyId,
+  visibilityFor,
 } from "./index";
 
 const parse = (tree: Record<string, unknown>) =>
@@ -97,6 +98,31 @@ describe("auth", () => {
     ]);
     expect(signingKeyId(ok({ auth: { session_keys: { only: "x" } } }))).toBe("only");
     expect(signingKeyId(ok({}))).toBeUndefined();
+  });
+
+  it("needs a session key to sign with when an IdP is set (X5.9)", () => {
+    expect(
+      messages({ auth: { oidc: { issuer: "https://acme.okta.com", client_id: "x" } } }),
+    ).toEqual(["auth.session_keys: auth.oidc needs a key here to sign session tokens (X5.9)"]);
+  });
+
+  it("no longer takes the shared HS256 secret (X5.2)", () => {
+    expect(messages({ auth: { legacy_token_secret: "x".repeat(32) } })[0]).toContain(
+      "legacy_token_secret",
+    );
+  });
+
+  it("gives each source's visibility, then default_visibility (X5.10)", () => {
+    const config = ok({
+      default_visibility: "owner",
+      sources: [
+        { id: "console", type: "otlp", visibility: "org" },
+        { id: "dd", type: "otlp" },
+      ],
+    });
+    expect(visibilityFor(config, "console")).toBe("org");
+    expect(visibilityFor(config, "dd")).toBe("owner");
+    expect(visibilityFor(config, "upload")).toBe("owner");
   });
 
   it("wants an https issuer URL", () => {

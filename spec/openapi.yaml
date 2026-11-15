@@ -14,8 +14,14 @@ info:
     the JSON Schemas in `schemas/`, which these components reference. A reader can read the
     bucket, or ask for a trace rendered as Letta, OTLP or ATIF (`GET …/trace?format=`).
 
-    Every request but `/healthz` carries `Authorization: Bearer <token>`. A token is bound to
-    one owner and every call is scoped to `owners/<owner>/`. Request bodies may be sent
+    Every request but `/healthz`, `/v1/auth/config` and `/v1/auth/exchange` carries
+    `Authorization: Bearer <token>` (X5): the org key with the caller's username in
+    `X-Seshi-User`, a session, device, admin or service token, or a static token from config.
+    The credential names the caller's owner ID and carries scopes (`sessions:write`,
+    `sessions:read`, `sessions:delete`, `search`, `sources:admin`, `tokens:admin`). A caller
+    writes only its own sessions; it reads its own and those whose visibility is `org`, or
+    everything as an admin or a service reader. Reads take `?owner=` to read another owner's
+    sessions; a session the caller may not read answers `404`. Request bodies may be sent
     `Content-Encoding: gzip`.
 
     The TypeScript SDK's `HttpSessionDB` maps the error responses back to the errors its store
@@ -37,9 +43,11 @@ security:
 
 tags:
   - name: health
+  - name: auth
   - name: identity
   - name: sessions
   - name: changes
+  - name: tokens
 
 paths:
   /healthz:
@@ -63,14 +71,66 @@ paths:
                     description: The server's release.
               example: { ok: true, version: "0.1.1" }
 
+  /v1/auth/config:
+    get:
+      tags: [auth]
+      summary: Which ways in the server takes.
+      operationId: authConfig
+      description: |
+        Lets `seshi login --server <url>` pick its flow (X5.7): the org key, sign-in through
+        the IdP (device flow or PKCE against `oidc.issuer` with `oidc.client_id`), or both.
+      security: []
+      responses:
+        "200":
+          description: The server's modes.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthConfig" }
+
+  /v1/auth/exchange:
+    post:
+      tags: [auth]
+      summary: Exchange an IdP ID token for seshi tokens.
+      operationId: exchange
+      description: |
+        Checks the ID token against the IdP's published keys: signature, issuer, audience
+        (`auth.oidc.audience`, else the client id), expiry, and `nonce` when either side has
+        one (X5.2). Answers a session token (one hour) and, when the request names a
+        `machine`, a device token for it (90 days); a device token earlier issued for that
+        machine is revoked. The owner ID is the ID token's `owner_claim` (X5.8); the role is
+        admin for members of `admin_group` or emails on `admins` (X5.3).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ExchangeRequest" }
+      responses:
+        "200":
+          description: The seshi tokens, each shown once.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExchangeResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401":
+          description: "`unauthorized`: the ID token does not check out, or lacks the owner claim."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: "`no_idp`: this server has no IdP; members use the org key."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
   /v1/me:
     get:
       tags: [identity]
-      summary: Who the token is, and where its sessions go.
+      summary: Who the credential is, and where sessions go.
       operationId: me
       description: |
-        The owner the token is bound to and the bucket the server writes, as a reader would
-        need to know it, so a client can point a reader at it. Never a secret.
+        The caller's owner ID, credential kind, role, scopes and owner basis, and the bucket
+        the server writes, as a reader would need to know it. Never a secret.
       responses:
         "200":
           description: The identity.
@@ -78,6 +138,34 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Identity" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /v1/owners:
+    get:
+      tags: [identity]
+      summary: The owners the bucket holds sessions for.
+      operationId: listOwners
+      description: |
+        Owner IDs in key order (X5.8): people and service accounts (`svc:<source-id>`). There
+        is no stored list of people; this lists the bucket's owner folders. Needs
+        `sessions:read`.
+      parameters:
+        - name: after
+          in: query
+          description: The `cursor` of the last page.
+          schema: { $ref: "#/components/schemas/Owner" }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 100 }
+      responses:
+        "200":
+          description: A page of owners.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OwnersPage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "502": { $ref: "#/components/responses/StorageError" }
 
   /v1/sessions:
     post:
@@ -146,8 +234,9 @@ paths:
         "415": { $ref: "#/components/responses/UnsupportedEncoding" }
         "403":
           description: |
-            `forbidden`: a `replace` by someone other than the session's original writer or an
-            admin. Nothing is stored.
+            `forbidden`: the credential cannot write (`sessions:write`), or a `replace` by
+            someone other than the session's original writer or an admin (an org-key caller
+            never replaces a session whose owner was verified). Nothing is stored.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -176,12 +265,15 @@ paths:
 
     get:
       tags: [sessions]
-      summary: List the owner's sessions.
+      summary: List an owner's sessions.
       operationId: listSessions
       description: |
-        Every session's `metadata.json` under the owner, paged by key. A full listing; a
-        reader that wants an index builds its own from the change feed.
+        Every session's `metadata.json` under the owner (the caller's own by default, with
+        the old owner IDs `auth.owner_aliases` folds into it), paged by key, as far as the
+        caller may read them (X5.10). A full listing; a reader that wants an index builds its
+        own from the change feed.
       parameters:
+        - $ref: "#/components/parameters/owner"
         - name: after
           in: query
           description: The `cursor` of the last page.
@@ -197,12 +289,14 @@ paths:
               schema: { $ref: "#/components/schemas/SessionsPage" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "502": { $ref: "#/components/responses/StorageError" }
 
   /v1/sessions/{agent}/{session_id}:
     parameters:
       - $ref: "#/components/parameters/agent"
       - $ref: "#/components/parameters/session_id"
+      - $ref: "#/components/parameters/owner"
     get:
       tags: [sessions]
       summary: The session's pointer.
@@ -214,7 +308,42 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/SessionMetadata" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/StorageError" }
+    patch:
+      tags: [sessions]
+      summary: Change who may read the session.
+      operationId: setVisibility
+      description: |
+        The session's owner or an admin changes its visibility (X5.10), with a credential
+        that can read (not a write-only device token). A change appends a
+        `visibility_changed` entry to the change feed; setting what it already is writes
+        nothing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [visibility]
+              properties:
+                visibility: { $ref: "#/components/schemas/Visibility" }
+      responses:
+        "200":
+          description: The session's `metadata.json`, as it now is.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionMetadata" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "410":
+          description: The session was tombstoned; nothing of it is left to read.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
         "502": { $ref: "#/components/responses/StorageError" }
     delete:
       tags: [sessions]
@@ -224,6 +353,8 @@ paths:
         Remove the session's trace objects, mark its pointer `redacted`, and append a
         tombstone to the change feed. Irreversible: a later upload of the same session is
         refused with `422 redacted`. A reader that already copied the trace still has it.
+        Needs `sessions:delete` (X5.3): an admin token; the owner's session token issued in
+        the last 10 minutes; or a static token for its owner. The org key cannot delete.
       responses:
         "200":
           description: Removed.
@@ -237,6 +368,7 @@ paths:
                     type: integer
                     description: How many objects were deleted.
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "502": { $ref: "#/components/responses/StorageError" }
 
@@ -244,6 +376,7 @@ paths:
     parameters:
       - $ref: "#/components/parameters/agent"
       - $ref: "#/components/parameters/session_id"
+      - $ref: "#/components/parameters/owner"
     get:
       tags: [sessions]
       summary: The session's trace.
@@ -270,6 +403,7 @@ paths:
                   - { $ref: "#/components/schemas/AtifDocument" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404":
           description: |
             `not_found`: no such session (a filtered session is not stored), or no trace with
@@ -287,13 +421,16 @@ paths:
   /v1/changes:
     get:
       tags: [changes]
-      summary: The owner's change feed.
+      summary: An owner's change feed.
       operationId: changes
       description: |
-        One entry per publish or tombstone, in key order; keys are time-stamped, so the feed is
-        a listing after a cursor. Stamps come from the clocks of the machines that uploaded, so
-        a consumer re-reads a lag window behind its cursor and dedupes by key.
+        One entry per publish, tombstone or visibility change, in key order; keys are
+        time-stamped, so the feed is a listing after a cursor. Stamps come from the clocks of
+        the machines that uploaded, so a consumer re-reads a lag window behind its cursor and
+        dedupes by key. Another owner's feed shows the entries of sessions the caller may
+        read now (X5.10).
       parameters:
+        - $ref: "#/components/parameters/owner"
         - name: after
           in: query
           description: The last key already processed.
@@ -313,6 +450,140 @@ paths:
               schema: { $ref: "#/components/schemas/ChangesPage" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
+  /v1/tokens:
+    post:
+      tags: [tokens]
+      summary: Create a seshi token.
+      operationId: createToken
+      description: |
+        Needs `tokens:admin` (X5.9). `org`: an org key (with `auth.org_key.enabled`). `admin`
+        and `device`: a person's token (`owner`); a device token lasts 90 days unless
+        `expires_at` says otherwise. `service`: a service account `svc:<service>` that reads
+        (`["sessions:read", "search"]`, the default) or writes (`["sessions:write"]`, for a
+        configured source's id), never both. The token is shown once; only its hash is stored.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TokenRequest" }
+      responses:
+        "201":
+          description: The token and its record.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token, record]
+                properties:
+                  token:
+                    type: string
+                    description: "`seshi_<id>_<secret>`. Shown once."
+                  record: { $ref: "#/components/schemas/TokenInfo" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "502": { $ref: "#/components/responses/StorageError" }
+    get:
+      tags: [tokens]
+      summary: List token records.
+      operationId: listTokens
+      description: Needs `tokens:admin`. Live tokens unless `all=true`; never a hash.
+      parameters:
+        - name: owner
+          in: query
+          schema: { type: string }
+        - name: kind
+          in: query
+          schema: { $ref: "#/components/schemas/TokenKind" }
+        - name: all
+          in: query
+          description: Revoked and expired tokens too.
+          schema: { type: string, enum: ["true", "false"] }
+      responses:
+        "200":
+          description: The records.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tokens]
+                properties:
+                  tokens:
+                    type: array
+                    items: { $ref: "#/components/schemas/TokenInfo" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
+  /v1/tokens/revoke:
+    post:
+      tags: [tokens]
+      summary: Revoke every live token of an owner.
+      operationId: revokeOwnerTokens
+      description: |
+        Offboarding (X5.11): every live token of `owner`, or only those of `kind`, is revoked
+        at once. The owner's sessions stay. Needs `tokens:admin`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [owner]
+              properties:
+                owner: { type: string, minLength: 1 }
+                kind: { $ref: "#/components/schemas/TokenKind" }
+      responses:
+        "200":
+          description: The tokens revoked.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [revoked]
+                properties:
+                  revoked:
+                    type: array
+                    items: { $ref: "#/components/schemas/TokenInfo" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
+  /v1/tokens/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    delete:
+      tags: [tokens]
+      summary: Revoke one token.
+      operationId: revokeToken
+      description: |
+        Marks the record revoked (If-Match). It stops working at once on this server and
+        within 30 seconds (the token cache) on any other. Needs `tokens:admin`.
+      responses:
+        "200":
+          description: The record, revoked.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token]
+                properties:
+                  token: { $ref: "#/components/schemas/TokenInfo" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: "`not_found`: no such token."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
         "502": { $ref: "#/components/responses/StorageError" }
 
 components:
@@ -321,9 +592,10 @@ components:
       type: http
       scheme: bearer
       description: |
-        A token bound to one owner: one listed in the server's `auth.tokens` (16+
-        characters), or an HS256 JWT signed with its `auth.legacy_token_secret` whose `sub` is
-        the owner and whose `exp` has not passed.
+        A seshi token (`seshi_<id>_<secret>`: the org key, an admin, device or service token),
+        a session token the server signed (a JWT from `/v1/auth/exchange`), or a static token
+        from `auth.tokens` (16+ characters). With the org key, `X-Seshi-User` names the
+        caller (X5.12). There are no shared-secret tokens (X5.2).
 
   parameters:
     agent:
@@ -338,6 +610,12 @@ components:
       required: true
       description: The harness's own id for the session.
       schema: { type: string, minLength: 1 }
+    owner:
+      name: owner
+      in: query
+      required: false
+      description: Whose session(s); the caller's own by default (X5.10).
+      schema: { $ref: "#/components/schemas/Owner" }
 
   responses:
     BadRequest:
@@ -356,12 +634,25 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
     Unauthorized:
-      description: No token, or not one the server knows. `code` is `unauthorized`.
+      description: |
+        No credential, or not one the server accepts: unknown, expired or revoked, or the
+        org key without `X-Seshi-User`. `code` is `unauthorized`.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Forbidden:
+      description: |
+        The credential cannot do this: it lacks the scope the call needs (a device token
+        reads nothing, the org key deletes nothing), or the session is not the caller's and
+        the caller is not an admin, or a delete with a session token older than 10 minutes
+        (X5.3). `code` is `forbidden`.
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
     NotFound:
-      description: No such session for this owner. `code` is `not_found`.
+      description: |
+        No such session for this owner, or one the caller may not read (X5.10). `code` is
+        `not_found`.
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
@@ -385,8 +676,144 @@ components:
 
     Owner:
       type: string
-      description: One path segment; the name a token is bound to, usually a person.
-      pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+      description: |
+        An owner ID (X5.8), one path segment: a person's (a username, an email or an IdP
+        subject) or a service account's, `svc:<source-id>` (X5.4).
+      pattern: "^([A-Za-z0-9][A-Za-z0-9._@+-]{0,127}|svc:[a-z0-9]+(-[a-z0-9]+)*)$"
+
+    Visibility:
+      type: string
+      enum: [org, owner]
+      description: "`org`: every member reads it. `owner`: only its owner (admins and services read everything)."
+
+    Scope:
+      type: string
+      enum: [sessions:write, sessions:read, sessions:delete, search, sources:admin, tokens:admin]
+
+    TokenKind:
+      type: string
+      enum: [org, admin, device, service]
+
+    AuthConfig:
+      type: object
+      required: [version, org_key, oidc, session_token_seconds, delete_fresh_seconds]
+      properties:
+        version: { type: string }
+        org_key:
+          type: boolean
+          description: The org key is accepted (X5.12).
+        oidc:
+          description: The IdP to sign in through, or null without one.
+          oneOf:
+            - type: "null"
+            - type: object
+              required: [issuer, client_id, audience, scopes]
+              properties:
+                issuer: { type: string }
+                client_id: { type: string }
+                audience: { type: string }
+                scopes:
+                  type: array
+                  items: { type: string }
+        session_token_seconds: { type: integer }
+        delete_fresh_seconds:
+          type: integer
+          description: How recent a session token must be to delete.
+
+    ExchangeRequest:
+      type: object
+      required: [id_token]
+      properties:
+        id_token:
+          type: string
+          description: The IdP's ID token, fresh from sign-in.
+        nonce:
+          type: string
+          description: The nonce the CLI put in its sign-in request.
+        machine:
+          type: object
+          description: The first sign-in from this machine, or a renewal of its device token.
+          required: [id]
+          properties:
+            id: { type: string, pattern: "^[A-Za-z0-9._:-]{1,128}$" }
+            name: { type: string }
+        visibility: { $ref: "#/components/schemas/Visibility" }
+
+    ExchangeResult:
+      type: object
+      required: [session_token, expires_at, owner, role, scopes]
+      properties:
+        session_token:
+          type: string
+          description: Signed by the server; one hour.
+        expires_at: { type: string, format: date-time }
+        owner: { $ref: "#/components/schemas/Owner" }
+        role: { type: string, enum: [member, admin] }
+        scopes:
+          type: array
+          items: { $ref: "#/components/schemas/Scope" }
+        device_token:
+          type: object
+          required: [token, id, expires_at]
+          properties:
+            token: { type: string, description: Shown once. }
+            id: { type: string }
+            expires_at: { type: string, format: date-time }
+
+    TokenRequest:
+      type: object
+      required: [kind]
+      properties:
+        kind: { $ref: "#/components/schemas/TokenKind" }
+        owner:
+          type: string
+          description: The person, for `admin` and `device`.
+        service:
+          type: string
+          description: For `service`, the account `svc:<service>`; a configured source's id to write.
+        scopes:
+          type: array
+          items: { $ref: "#/components/schemas/Scope" }
+        visibility: { $ref: "#/components/schemas/Visibility" }
+        expires_at: { type: string, format: date-time }
+        label: { type: string }
+
+    TokenInfo:
+      type: object
+      description: "`tokens/<id>.json` without its hash."
+      required: [schema, id, kind, owner, scopes, created_at, expires_at, revoked]
+      properties:
+        schema: { const: seshi/token/1 }
+        id: { type: string }
+        kind: { $ref: "#/components/schemas/TokenKind" }
+        owner:
+          type: string
+          description: The owner ID, or `*` for the org key.
+        scopes:
+          type: array
+          items: { $ref: "#/components/schemas/Scope" }
+        visibility: { $ref: "#/components/schemas/Visibility" }
+        owner_basis: { type: string, enum: [verified, claimed, service] }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: [string, "null"], format: date-time }
+        revoked: { type: boolean }
+        revoked_at: { type: string, format: date-time }
+        label: { type: string }
+        created_by: { type: object }
+        machine: { type: object }
+        claims: { type: object }
+
+    OwnersPage:
+      type: object
+      required: [owners, truncated]
+      properties:
+        owners:
+          type: array
+          items: { $ref: "#/components/schemas/Owner" }
+        cursor:
+          type: string
+          description: Pass as `after` for the next page.
+        truncated: { type: boolean }
 
     Sha256:
       type: string
@@ -487,7 +914,14 @@ components:
         visibility:
           type: string
           enum: [org, owner]
-          description: Who may read a new session; the deployment's default when omitted.
+          description: Who may read a new session (X5.10); the token's default, then the source's, then the server's when omitted.
+        claims:
+          type: object
+          description: |
+            Identity the data asserts (X5.5), kept from a fixed allowlist (`email`, `name`,
+            `username`, `git_email`, `git_name`, `account_ids`); anything else is dropped.
+            Never decides ownership; the credential's own (an org-key username, an IdP email)
+            win.
         idempotency_key:
           type: string
           minLength: 1
@@ -552,10 +986,24 @@ components:
 
     Identity:
       type: object
-      required: [owner, storage]
+      required: [owner, storage, kind, role, scopes, owner_basis, credential_id]
       properties:
         owner: { $ref: "#/components/schemas/Owner" }
         storage: { $ref: "#/components/schemas/StorageView" }
+        kind:
+          type: string
+          enum: [person, device, service, admin, static]
+          description: The kind of credential (X5.1).
+        role: { type: string, enum: [member, admin, service] }
+        scopes:
+          type: array
+          items: { $ref: "#/components/schemas/Scope" }
+        owner_basis: { type: string, enum: [verified, claimed, service] }
+        credential_id:
+          type: string
+          description: The token's id; never the secret.
+        visibility: { $ref: "#/components/schemas/Visibility" }
+        expires_at: { type: string, format: date-time }
 
     RenderFormat:
       type: string

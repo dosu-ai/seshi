@@ -169,6 +169,7 @@ describe("env names (F1.2)", () => {
           ...STORE,
           SESHI_AUTH__OIDC__ISSUER: "https://idp.example.com",
           SESHI_AUTH__OIDC__CLIENT_ID: "seshi-cli",
+          SESHI_AUTH__SESSION_KEYS__K1: "k".repeat(32),
           SESHI_SERVER__PUBLIC_URL: "https://seshi.example.com",
         },
       },
@@ -177,6 +178,7 @@ describe("env names (F1.2)", () => {
       issuer: "https://idp.example.com",
       client_id: "seshi-cli",
       owner_claim: "sub",
+      groups_claim: "groups",
     });
     expect(config.server.public_url).toBe("https://seshi.example.com");
   });
@@ -270,11 +272,11 @@ describe("env names (F1.2)", () => {
     const loaded = server(
       {
         "/run/key": "from-file\n",
-        "/work/seshi.toml": `[store]\nurl = "file:///f"\n[auth]\nlegacy_token_secret = "literal"\n`,
+        "/work/seshi.toml": `[store]\nurl = "file:///f"\n[auth.session_keys]\nk1 = "literal"\n`,
       },
-      { env: { SESHI_AUTH__LEGACY_TOKEN_SECRET__FILE: "/run/key" } },
+      { env: { SESHI_AUTH__SESSION_KEYS__K1__FILE: "/run/key" } },
     );
-    const secret = loaded.config.auth.legacy_token_secret as Secret;
+    const secret = loaded.config.auth.session_keys.k1 as Secret;
     expect(secret.ref).toEqual({ kind: "file", path: "/run/key" });
     expect(secret.reveal()).toBe("from-file");
   });
@@ -287,13 +289,13 @@ describe("env names (F1.2)", () => {
       {
         env: {
           SESHI_ALICE_TOKEN: "alice-token-0123456789",
-          SESHI_AUTH__LEGACY_TOKEN_SECRET__ENV: "SESHI_JWT_SECRET",
+          SESHI_AUTH__SESSION_KEYS__K1__ENV: "SESHI_JWT_SECRET",
           SESHI_JWT_SECRET: "j".repeat(32),
         },
       },
     );
     expect(loaded.config.auth.tokens.alice?.reveal()).toBe("alice-token-0123456789");
-    expect(loaded.config.auth.legacy_token_secret?.reveal()).toBe("j".repeat(32));
+    expect(loaded.config.auth.session_keys.k1?.reveal()).toBe("j".repeat(32));
     // Only at a secret field: `{ env = … }` elsewhere is not a reference.
     expect(
       issues(() =>

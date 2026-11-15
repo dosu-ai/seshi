@@ -12,13 +12,13 @@ export type SourceKind = "upload" | "hook" | "otlp" | "datadog" | "s3" | "cursor
 /** A configured source's id, or `upload` for hooks and the CLI: words of lowercase letters and digits joined by single `-`. */
 export type SourceId = string;
 
-/** Which kind of credential made a call (X5.1, X5.9): `person` (IdP session token or org key with a stated username), `device` (write-only device token), `service` (a service account: a reader, an OTLP destination, a poller), `admin`, `static` (a token from config), `legacy` (an HS256 token minted outside the server, until X5.2 drops them) or `local` (local mode, writing a bucket it owns, X3.5). */
-export type CallerKind = "person" | "device" | "service" | "admin" | "static" | "legacy" | "local";
+/** Which kind of credential made a call (X5.1, X5.9): `person` (IdP session token or org key with a stated username), `device` (write-only device token), `service` (a service account: a reader, an OTLP destination, a poller), `admin` (an admin token, or the session token of a person with the admin role), `static` (a token from config) or `local` (local mode, writing a bucket it owns, X3.5). */
+export type CallerKind = "person" | "device" | "service" | "admin" | "static" | "local";
 
 /** Who wrote something (X5.5): the caller's kind, the person or service account, the credential it used, and the source the data came through. */
 export interface Writer {
   kind: CallerKind;
-  /** The owner id of the person, or `svc:<source-id>` for a service account. */
+  /** The owner id of the person (X5.8), or `svc:<source-id>` for a service account. */
   principal: string;
   /** The id of the token or key used, when it has one; never the secret. */
   credential_id?: string;

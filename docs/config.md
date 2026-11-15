@@ -55,7 +55,7 @@ and `--set`, and `--cli` for the CLI's own config (below).
   lower case.
 - `[[sources]]` are defined in the file only, each with an `id`; env can override a field of
   one by its id (upper case, `-` as `_`).
-- A secret can be given as a reference from env too: `SESHI_AUTH__LEGACY_TOKEN_SECRET__FILE=/run/secrets/jwt`.
+- A secret can be given as a reference from env too: `SESHI_AUTH__SESSION_KEYS__K1__FILE=/run/secrets/session-key`.
 - Only `SESHI_*` names are read. Today's `SESSIONDB_*` names are not.
 - A `SESHI_*` name that is not a setting stops the server, except the ones below and a
   variable a secret reads (`{ env = "SESHI_DD_KEY" }`, or the value of a `…__ENV` variable),
@@ -119,19 +119,30 @@ Traces are always stored in seshi's one canonical format (`seshi/trace/1`, X6.2)
 | Key | Default | |
 |---|---|---|
 | `tokens` | `{}` | Static tokens: `owner = token` (secrets, 16+ characters), each everything for that owner. For one person and development (X5.12). `owners/<owner>/` is where their sessions go |
-| `legacy_token_secret` | | Also accept HS256 JWTs signed with this secret (`sub` the owner, `exp` required), 32+ characters. Kept from sessiondb until seshi tokens replace it (X5.2) |
-| `org_key.enabled` | `true` | The trusted org key (X5.12). *Later* |
-| `oidc` | | `issuer`, `client_id`, `audience`, `owner_claim` (default `"sub"`), `admin_group`. *Later* |
-| `admins` | `[]` | Admin emails with an IdP (X5.3). *Later* |
-| `owner_aliases` | `{}` | `old = "new"` owner IDs (X5.8). *Later* |
-| `session_keys`, `session_key_id` | `{}` | Keys that sign session tokens, by id (secrets), and which one signs (required with more than one). *Later* |
+| `org_key.enabled` | `true` | Accept the trusted org key (X5.12): members write as the username they state in `X-Seshi-User`, lowercased, and read org-wide; it cannot delete. `seshi admin init` makes the key; `false` turns trust off once everyone signs in through the IdP |
+| `oidc.issuer` | | The IdP (X5.2). Its keys are read from its discovery document. Setting `oidc` needs a key in `session_keys` |
+| `oidc.client_id` | | The CLI's client id, registered as a public client (X5.7) |
+| `oidc.audience` | `client_id` | The ID token audience required, specific to this deployment (X1.4) |
+| `oidc.owner_claim` | `"sub"` | The claim owner IDs come from (X5.8): `sub`, `oid` on Entra, or `email` (lowercased) to match org-key usernames |
+| `oidc.admin_group` | | Members of this IdP group are admins (X5.3) |
+| `oidc.groups_claim` | `"groups"` | The ID token claim listing the person's groups |
+| `admins` | `[]` | Emails of admins (X5.3), for IdPs whose ID tokens carry no groups (Google). An email the IdP marks unverified does not count |
+| `owner_aliases` | `{}` | `old = "new"` owner IDs (X5.8), applied when reading: sessions stored under the old ID are read and listed as the new one's |
+| `session_keys` | `{}` | Keys that sign session tokens, by id (secrets, 32+ characters each). Session tokens last an hour; an old key stays to verify until its tokens expire (X5.9) |
+| `session_key_id` | | The key in `session_keys` that signs; required with more than one |
 
-`seshi serve` needs at least one of `tokens` and `legacy_token_secret` today.
+There is no shared HS256 secret any more (X5.2): seshi signs its own session tokens, and every
+other token is a seshi token stored hashed in the bucket (`tokens/<id>.json`). Without static
+tokens, run `seshi admin init` once where this config is: it prints the first admin token and
+the org key, each shown once. `seshi serve` warns when no token can call it yet.
 
 ### `default_visibility`
 
-`"org"` (default) or `"owner"` (X5.10). *Later*. Without an IdP the org key reads every
-session, so `config check` warns that `owner` is not enforced.
+`"org"` (default) or `"owner"` (X5.10): the visibility of a new session when neither the
+upload (`visibility`) nor the token's default sets one; a source's own `visibility` comes
+before it. Members read their own sessions and every `org` session; admins and service
+readers read everything. Without an IdP anyone holding the org key can state any username, so
+`owner` keeps nothing from another member, and `config check` warns.
 
 ### `[filter]`
 

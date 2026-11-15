@@ -3,6 +3,7 @@
  * errors. This is the contract between the two halves of the client: a route or a mapping
  * that drifts fails here. */
 
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -65,9 +66,14 @@ beforeEach(() => {
     owner: "acme",
     formats: FORMATS,
     now,
-    // The server records a static token's writes as `static`; the direct client stands for
-    // the same caller.
-    writer: { kind: "static", principal: "acme", source_id: "upload" },
+    // The server records a static token's writes as `static`, with a hash naming the token;
+    // the direct client stands for the same caller.
+    writer: {
+      kind: "static",
+      principal: "acme",
+      credential_id: `static-${createHash("sha256").update(TOKEN).digest("hex").slice(0, 16)}`,
+      source_id: "upload",
+    },
   });
   store = new FsStore(join(dir, "server"));
   const app = createApp({
@@ -98,7 +104,13 @@ async function both<T>(call: (db: SessionDB) => Promise<T>): Promise<T> {
 
 describe("the two backends agree", () => {
   it("on identity", async () => {
-    expect(await http.me()).toEqual({ owner: "acme", storage: { url: store.url } });
+    // The server also says what the credential is (X5.1); local mode has no credential.
+    expect(await http.me()).toMatchObject({
+      owner: "acme",
+      storage: { url: store.url },
+      kind: "static",
+      role: "member",
+    });
   });
 
   it("on a session's life: store, read, chunk, list, changes, tombstone", async () => {

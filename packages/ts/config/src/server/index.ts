@@ -5,7 +5,7 @@
 import * as z from "zod";
 import { authSection } from "./auth";
 import { captureSection } from "./capture";
-import { visibility } from "./common";
+import { type Visibility, visibility } from "./common";
 import { filterSection } from "./filter";
 import { limitsSection } from "./limits";
 import { recordsSection } from "./records";
@@ -86,6 +86,13 @@ export const serverConfigSchema = sections
         message: `names no key in auth.session_keys (${keys.join(", ") || "none"})`,
       });
     }
+    if (config.auth.oidc !== undefined && keys.length === 0) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["auth", "session_keys"],
+        message: "auth.oidc needs a key here to sign session tokens (X5.9)",
+      });
+    }
     if (keyId === undefined && keys.length > 1) {
       ctx.addIssue({
         code: "custom",
@@ -128,6 +135,12 @@ export function filterFor(config: ServerConfig, sourceId: string): ServerConfig[
     Object.entries(source?.filter ?? {}).filter(([, value]) => value !== undefined),
   );
   return { ...config.filter, ...override };
+}
+
+/** The visibility of a new session from `sourceId` when its request and token set none
+ * (X5.10): the source's own setting, else `default_visibility`. */
+export function visibilityFor(config: ServerConfig, sourceId: string): Visibility {
+  return config.sources.find((s) => s.id === sourceId)?.visibility ?? config.default_visibility;
 }
 
 /** Which key signs new session tokens: `session_key_id`, else the only key. */

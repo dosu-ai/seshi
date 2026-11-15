@@ -253,44 +253,6 @@
             ]
           }
         },
-        "legacy_token_secret": {
-          "description": "Accept HS256 JWTs signed with this secret (sub = owner, exp required). Kept from sessiondb until seshi tokens replace it (X5.2). 32+ characters.",
-          "x-seshi-secret": true,
-          "anyOf": [
-            {
-              "type": "string",
-              "minLength": 1
-            },
-            {
-              "type": "object",
-              "properties": {
-                "env": {
-                  "type": "string",
-                  "minLength": 1,
-                  "description": "the environment variable to read"
-                }
-              },
-              "required": [
-                "env"
-              ],
-              "additionalProperties": false
-            },
-            {
-              "type": "object",
-              "properties": {
-                "file": {
-                  "type": "string",
-                  "minLength": 1,
-                  "description": "the file to read"
-                }
-              },
-              "required": [
-                "file"
-              ],
-              "additionalProperties": false
-            }
-          ]
-        },
         "org_key": {
           "description": "The trusted org key (X5.12).",
           "default": {},
@@ -332,6 +294,12 @@
               "description": "Members of this IdP group are admins (X5.3).",
               "type": "string",
               "minLength": 1
+            },
+            "groups_claim": {
+              "default": "groups",
+              "description": "The ID token claim that lists the person's groups, for admin_group.",
+              "type": "string",
+              "minLength": 1
             }
           },
           "required": [
@@ -364,7 +332,7 @@
           }
         },
         "session_keys": {
-          "description": "Keys that sign session tokens, by key id (X5.9). Old keys stay to verify until they expire.",
+          "description": "Keys that sign session tokens, by key id (X5.9). Old keys stay to verify until they expire. 32+ characters each; required with auth.oidc.",
           "type": "object",
           "propertyNames": {
             "type": "string",

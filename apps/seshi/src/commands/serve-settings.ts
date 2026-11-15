@@ -1,9 +1,8 @@
 /** What `seshi serve` needs from a loaded server config, checked: nothing is read or opened
  * here, so `seshi config check` runs the same checks without starting anything. */
 
-import { MIN_SECRET_LENGTH } from "@seshi/auth";
+import { type AuthSettings, AuthSettingsError, authSettings } from "@seshi/auth";
 import { type FlagValue, parseListen, type ServerConfig } from "@seshi/config";
-import { assertOwner } from "@seshi/store";
 
 /** A setting the server cannot start with: printed as `seshi: <message>`, exit 1. */
 export class ServeConfigError extends Error {
@@ -17,11 +16,10 @@ function fail(message: string): never {
   throw new ServeConfigError(message);
 }
 
-export const MIN_TOKEN_LENGTH = 16;
-
 export interface ServeSettings {
-  tokens: Array<{ token: string; owner: string }>;
-  tokenSecret: string | undefined;
+  /** `[auth]`, checked, secrets revealed (X5). */
+  auth: AuthSettings;
+  /** The owners of static tokens: their folders are probed at boot. */
   owners: string[];
   url: string;
   store: {
@@ -49,33 +47,12 @@ export function serveSettings(config: ServerConfig): ServeSettings {
       `server.roles is ${config.server.roles.join(", ")}: the worker role runs no jobs yet, so an instance needs api`,
     );
   }
-  const tokens = Object.entries(config.auth.tokens).map(([owner, secret]) => {
-    try {
-      assertOwner(owner);
-    } catch {
-      fail(`auth.tokens: '${owner}' is not a valid owner name: letters, digits, . _ - (up to 128)`);
-    }
-    const token = secret.reveal().trim();
-    if (token.length < MIN_TOKEN_LENGTH) {
-      fail(
-        `auth.tokens.${owner} must be ${MIN_TOKEN_LENGTH}+ characters (try: openssl rand -hex 24)`,
-      );
-    }
-    return { token, owner };
-  });
-  if (new Set(tokens.map((t) => t.token)).size !== tokens.length) {
-    fail("auth.tokens: the same token is given to two owners");
-  }
-  const tokenSecret = config.auth.legacy_token_secret?.reveal().trim() || undefined;
-  if (tokens.length === 0 && tokenSecret === undefined) {
-    fail(
-      "no way to call the server: set auth.tokens (owner = token; SESHI_AUTH__TOKENS__<OWNER>) or auth.legacy_token_secret",
-    );
-  }
-  if (tokenSecret !== undefined && tokenSecret.length < MIN_SECRET_LENGTH) {
-    fail(
-      `auth.legacy_token_secret must be ${MIN_SECRET_LENGTH}+ characters (try: openssl rand -hex 32)`,
-    );
+  let auth: AuthSettings;
+  try {
+    auth = authSettings(config);
+  } catch (err) {
+    if (err instanceof AuthSettingsError) fail(err.message);
+    throw err;
   }
 
   const listen = parseListen(config.server.listen);
@@ -93,9 +70,8 @@ export function serveSettings(config: ServerConfig): ServeSettings {
     : undefined;
 
   return {
-    tokens,
-    tokenSecret,
-    owners: [...new Set(tokens.map((t) => t.owner))],
+    auth,
+    owners: [...new Set(auth.staticTokens.map((t) => t.owner))],
     url: store.url,
     store: {
       ...(store.region ? { region: store.region } : {}),

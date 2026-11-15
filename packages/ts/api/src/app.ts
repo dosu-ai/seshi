@@ -1,54 +1,91 @@
-/** The HTTP surface: one `fetch(Request) → Response` the tests call directly and `main.ts`
- * serves. One bucket, and the tokens that may use it, both from the environment: a list of
- * `name:token` pairs, a secret that signed tokens are checked against (`signed-token.ts`), or
- * both. Each token names a person, and that person's sessions live under `owners/<name>/`: a
- * token writes there and reads only there, so teammates never see each other's transcripts. A
- * client with a token posts transcripts; the server turns each into an envelope and runs it
- * through the pipeline inline (X4.4): normalized, redacted, filtered and reviewed in memory, and
- * only the trace written (X6.3), so the laptop never holds a bucket credential and the bucket
- * never holds an unredacted byte.
+/** The HTTP surface: one `fetch(Request) → Response` the tests call directly and `seshi serve`
+ * serves, over one bucket. Every call but `/healthz`, `/v1/auth/config` and the IdP exchange
+ * carries a credential (X5): the org key with the caller's username, a session, device, admin
+ * or service token, or a static token from config. `@seshi/auth` turns it into a principal with
+ * a role and scopes, and the routes check the scope a call needs and, for a session, its owner
+ * and visibility (X5.3, X5.10): a member reads their own sessions and the org's, an admin or a
+ * service reads all.
  *
- * Every route is a `StoreSessionDB` call (the SDK's client over the bucket, one per owner, all
- * submitting to one `Pipeline`) with the request read off the wire and the result or error
- * mapped to a status. The SDK's HTTP backend does the reverse on the other side, so the two are
- * one API with a network in it. */
+ * Uploads become envelopes and go through the pipeline inline (X4.4): normalized, redacted,
+ * filtered and reviewed in memory, and only the trace written (X6.3), so the laptop never holds
+ * a bucket credential and the bucket never holds an unredacted byte. A principal always writes
+ * its own sessions; the pipeline's authorize stage (`ownershipAuthorizer`) holds every write to
+ * that.
+ *
+ * Reads take `?owner=` to read another owner's sessions; without it a caller reads its own, and
+ * `[auth.owner_aliases]` folds an old owner id into its new one (X5.8). */
 
-import { timingSafeEqual } from "node:crypto";
 import { gunzipSync } from "node:zlib";
-import { MIN_SECRET_LENGTH, verifyToken } from "@seshi/auth";
-import type { FormatRegistry } from "@seshi/formats";
 import {
-  type CallerKind,
+  Auth,
+  AuthRequestError,
+  canRead,
+  ownershipAuthorizer,
+  type Principal,
+  pickClaims,
+  requireDelete,
+  requireScope,
+  requireVisibilityChange,
+  type Scope,
+  type TokenRequest,
+  tokenInfo,
+  USER_HEADER,
+} from "@seshi/auth";
+import type { FormatRegistry } from "@seshi/formats";
+import { renderTrace } from "@seshi/formats";
+import {
+  type ChangesPage,
   Forbidden,
+  type Identity,
+  IngestRejected,
   isRenderFormat,
   MAX_IDEMPOTENCY_KEY_LENGTH,
   OffsetMismatch,
   type RawFormat,
   RENDER_FORMATS,
   SessionConflict,
+  type SessionMetadata,
   SessionRejected,
   type StorageView,
   StoreError,
   type StoreSessionResult,
+  Unauthorized,
   UPLOAD_SOURCE,
   type Upload,
   VERSION,
+  type Visibility,
+  type Writer,
 } from "@seshi/model";
 import {
   DEFAULT_LIMITS,
   type FilterSetting,
+  getSession,
+  getTrace,
   type HealthCounters,
   type Limits,
+  listSessions,
   Pipeline,
   type Reviewer,
   StoreSessionDB,
+  setVisibility,
+  tombstone,
+  type VisibilitySetting,
 } from "@seshi/pipeline";
 import type { RedactionRules } from "@seshi/redact";
-import { assertOwner, type Store } from "@seshi/store";
+import {
+  archiveId,
+  isOwner,
+  keys,
+  listOwners,
+  readChanges,
+  readMetadata,
+  type Store,
+  type TokenKind,
+} from "@seshi/store";
 
 export type { StorageView };
 
-/** A bearer token and the person it belongs to: the `owners/<owner>/` folder it may use. */
+/** A static token and the owner it is bound to (`[auth.tokens]`, X5.12). */
 export interface TokenGrant {
   token: string;
   owner: string;
@@ -61,11 +98,11 @@ export interface AppOptions {
   /** The transcript formats the server accepts: `apps/seshi` builds the registry from its
    * integrations. */
   formats: FormatRegistry;
-  /** Bearer tokens that may call the API, each bound to one owner. */
+  /** Identity and access (X5), built from `[auth]` (`seshi serve` builds it). Without it, an
+   * `Auth` with only `tokens` as static tokens and the org key on. */
+  auth?: Auth;
+  /** Static tokens, when no `auth` is given. */
   tokens?: TokenGrant[];
-  /** Signed tokens are accepted too when set: an HS256 JWT whose `sub` is the owner, minted
-   * by whoever else holds this secret. One of `tokens` and `tokenSecret` is required. */
-  tokenSecret?: string;
   /** Identifies this server in layout markers (`seshi/0.9.0`). */
   client?: string;
   now?: () => Date;
@@ -80,6 +117,9 @@ export interface AppOptions {
   reviewer?: Reviewer;
   /** Source health counters (X4.8); none when omitted. */
   health?: HealthCounters;
+  /** A new session's visibility when neither the request nor the token sets one: the
+   * source's, then `default_visibility` (X5.10); `org` when omitted. */
+  visibility?: VisibilitySetting;
 }
 
 type Handler = (ctx: Context) => Promise<Response> | Response;
@@ -200,26 +240,67 @@ function intParam(url: URL, name: string, fallback: number, max: number): number
   return Math.min(n, max);
 }
 
-function tokensEqual(a: string, b: string): boolean {
-  const x = Buffer.from(a);
-  const y = Buffer.from(b);
-  return x.length === y.length && timingSafeEqual(x, y);
+function bool(body: Record<string, unknown>, key: string): boolean {
+  const value = body[key] ?? false;
+  if (typeof value !== "boolean") throw new HttpError(400, "bad_field", `${key} must be a boolean`);
+  return value;
 }
+
+function visibilityField(value: unknown, where = "visibility"): Visibility | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (value !== "org" && value !== "owner") {
+    throw new HttpError(400, "bad_field", `${where} must be org or owner`);
+  }
+  return value;
+}
+
+/** The writer a principal's writes record (X5.5): through the upload route. */
+function writerFor(principal: Principal): Writer {
+  return {
+    kind: principal.kind,
+    principal: principal.owner,
+    credential_id: principal.credential_id,
+    source_id: UPLOAD_SOURCE,
+  };
+}
+
+/** Who the caller is, as `GET /v1/me` answers it. */
+function identityOf(principal: Principal, storage: StorageView): Identity {
+  return {
+    owner: principal.owner,
+    storage,
+    kind: principal.kind,
+    role: principal.role,
+    scopes: [...principal.scopes].sort(),
+    owner_basis: principal.owner_basis,
+    credential_id: principal.credential_id,
+    ...(principal.visibility ? { visibility: principal.visibility } : {}),
+    ...(principal.expires_at ? { expires_at: principal.expires_at.toISOString() } : {}),
+  };
+}
+
+const TOKEN_KINDS: readonly TokenKind[] = ["org", "admin", "device", "service"];
 
 export function createApp(options: AppOptions) {
   const { store, storage, formats } = options;
-  const tokens = (options.tokens ?? [])
-    .filter((t) => t.token.length > 0)
-    .map((t) => ({ token: t.token, owner: assertOwner(t.owner) }));
-  const tokenSecret = options.tokenSecret || undefined;
-  if (tokens.length === 0 && tokenSecret === undefined) {
-    throw new Error("at least one token, or a token secret, is required");
-  }
-  if (tokenSecret !== undefined && tokenSecret.length < MIN_SECRET_LENGTH) {
-    throw new Error(`the token secret must be ${MIN_SECRET_LENGTH}+ characters`);
-  }
   const client = options.client ?? `seshi/${VERSION}`;
   const now = options.now ?? (() => new Date());
+  const auth =
+    options.auth ??
+    new Auth(
+      {
+        staticTokens: (options.tokens ?? []).filter((t) => t.token.length > 0),
+        orgKey: true,
+        admins: [],
+        aliases: {},
+        sessionKeys: {},
+      },
+      { store, deployment: "local", now },
+    );
+  for (const { owner } of auth.settings.staticTokens) {
+    if (!isOwner(owner)) throw new Error(`invalid owner: ${JSON.stringify(owner)}`);
+  }
+  const aliases = auth.aliases;
   const routes: Route[] = [];
   const bodyLimit = maxBodyBytes((options.limits ?? DEFAULT_LIMITS).max_upload_bytes);
   const pipeline = new Pipeline({
@@ -232,33 +313,9 @@ export function createApp(options: AppOptions) {
     limits: options.limits,
     reviewer: options.reviewer,
     health: options.health,
+    authorizer: ownershipAuthorizer(),
+    visibility: options.visibility,
   });
-
-  /** The SDK over the bucket, scoped to each owner a token names and to the kind of token it
-   * was (a static token from config, or a legacy signed token), which every write records as
-   * its writer (X5.5): the listed owners up front, a signed token's owner the first time it
-   * calls. Both kinds bind the owner, so the owner is `verified`. */
-  const clients = new Map<string, StoreSessionDB>();
-  function clientFor(owner: string, kind: CallerKind = "static"): StoreSessionDB {
-    const id = `${kind}:${owner}`;
-    let db = clients.get(id);
-    if (!db) {
-      db = new StoreSessionDB({
-        store,
-        storage,
-        owner,
-        formats,
-        client,
-        now,
-        pipeline,
-        writer: { kind, principal: owner, source_id: UPLOAD_SOURCE },
-        owner_basis: "verified",
-      });
-      clients.set(id, db);
-    }
-    return db;
-  }
-  for (const { owner } of tokens) clientFor(owner);
 
   function route(method: string, path: string, handler: Handler): void {
     const names: string[] = [];
@@ -271,27 +328,122 @@ export function createApp(options: AppOptions) {
     routes.push({ method, pattern, names, handler });
   }
 
-  /** The client for the owner the request's token is bound to; every read and write goes
-   * through it and is scoped to that owner. */
-  function authorize(request: Request): StoreSessionDB {
-    const token = bearer(request);
-    if (!token) throw new HttpError(401, "unauthorized", "a valid token is required");
-    const grant = tokens.find((known) => tokensEqual(token, known.token));
-    if (grant) return clientFor(grant.owner, "static");
-    const owner = tokenSecret !== undefined ? verifyToken(tokenSecret, token, now()) : undefined;
-    if (owner === undefined) throw new HttpError(401, "unauthorized", "a valid token is required");
-    return clientFor(owner, "legacy");
+  /** The principal the request's credential stands for; `Unauthorized` (401) otherwise. */
+  function authenticate(request: Request): Promise<Principal> {
+    return auth.authenticate(bearer(request), request.headers.get(USER_HEADER) ?? undefined);
+  }
+
+  /** The principal, when its credential carries `scope`; 403 otherwise. */
+  async function caller(request: Request, scope: Scope): Promise<Principal> {
+    const principal = await authenticate(request);
+    requireScope(principal, scope);
+    return principal;
+  }
+
+  /** The SDK over the bucket, writing as the principal: its own sessions, its writer, its
+   * owner basis, claims and default visibility (X5.5, X5.10). */
+  function writerClient(principal: Principal): StoreSessionDB {
+    return new StoreSessionDB({
+      store,
+      storage,
+      owner: principal.owner,
+      formats,
+      client,
+      now,
+      pipeline,
+      writer: writerFor(principal),
+      owner_basis: principal.owner_basis,
+      claims: principal.claims,
+      ...(principal.visibility ? { visibility: principal.visibility } : {}),
+    });
+  }
+
+  /** The owner a read is about: `?owner=`, else the caller's own. */
+  function ownerOf(url: URL, principal: Principal): string {
+    const owner = url.searchParams.get("owner") ?? principal.owner;
+    if (!isOwner(owner)) throw new HttpError(400, "bad_query", "owner is not an owner id");
+    return owner;
+  }
+
+  /** A session the principal may read, from the folders the owner's sessions are stored under
+   * (aliases applied), with the folder it was found in. A session it may not read is "not
+   * found", so its existence is not given away. */
+  async function readable(
+    principal: Principal,
+    owner: string,
+    agent: string,
+    sessionId: string,
+  ): Promise<{ folder: string; metadata: SessionMetadata }> {
+    for (const folder of aliases.storedAs(owner)) {
+      const metadata = await getSession(store, folder, agent, sessionId);
+      if (metadata === null) continue;
+      if (!canRead(principal, metadata, aliases)) break;
+      return { folder, metadata };
+    }
+    throw new HttpError(404, "not_found", "no such session");
+  }
+
+  function sessionParams(params: Record<string, string>): { agent: string; sessionId: string } {
+    return {
+      agent: decodeURIComponent(params.agent as string),
+      sessionId: decodeURIComponent(params.session_id as string),
+    };
   }
 
   // --- health -----------------------------------------------------------------
 
   route("GET", "/healthz", () => json({ ok: true, version: VERSION }));
 
+  // --- auth (X5.2, X5.7) ------------------------------------------------------------
+
+  route("GET", "/v1/auth/config", () => json({ version: VERSION, ...auth.modes() }));
+
+  route("POST", "/v1/auth/exchange", async ({ request }) => {
+    const body = await readJson(request, 64 * 1024);
+    const idToken = str(body, "id_token", true) as string;
+    const nonce = str(body, "nonce");
+    const rawMachine = body.machine;
+    let machine: { id: string; name?: string } | undefined;
+    if (rawMachine !== undefined && rawMachine !== null) {
+      if (typeof rawMachine !== "object" || Array.isArray(rawMachine)) {
+        throw new HttpError(400, "bad_field", "machine must be an object with an id");
+      }
+      const m = rawMachine as Record<string, unknown>;
+      const id = str(m, "id", true) as string;
+      const name = str(m, "name");
+      machine = { id, ...(name ? { name } : {}) };
+    }
+    const visibility = visibilityField(body.visibility);
+    try {
+      const result = await auth.exchange({
+        id_token: idToken,
+        ...(nonce !== undefined ? { nonce } : {}),
+        ...(machine ? { machine } : {}),
+        ...(visibility ? { visibility } : {}),
+      });
+      return json(result);
+    } catch (err) {
+      if (err instanceof AuthRequestError) {
+        throw new HttpError(err.code === "no_idp" ? 404 : 400, err.code, err.message);
+      }
+      throw err;
+    }
+  });
+
   // --- identity -----------------------------------------------------------------
 
   route("GET", "/v1/me", async ({ request }) => {
-    const db = authorize(request);
-    return json(await db.me());
+    const principal = await authenticate(request);
+    return json(identityOf(principal, storage));
+  });
+
+  route("GET", "/v1/owners", async ({ request, url }) => {
+    await caller(request, "sessions:read");
+    const after = url.searchParams.get("after") ?? undefined;
+    if (after !== undefined && !isOwner(after)) {
+      throw new HttpError(400, "bad_query", "after is not an owner id");
+    }
+    return json(await listOwners(store, { after, limit: intParam(url, "limit", 100, 1000) }));
   });
 
   // --- sessions ---------------------------------------------------------
@@ -313,7 +465,6 @@ export function createApp(options: AppOptions) {
         );
       }
       if (err instanceof SessionConflict) throw new HttpError(409, err.code, err.message);
-      if (err instanceof Forbidden) throw new HttpError(403, err.code, err.message);
       if (err instanceof SessionRejected) throw new HttpError(422, err.code, err.message);
       throw err;
     }
@@ -321,7 +472,7 @@ export function createApp(options: AppOptions) {
   }
 
   route("POST", "/v1/sessions", async ({ request }) => {
-    const db = authorize(request);
+    const principal = await caller(request, "sessions:write");
     const body = await readJson(request, bodyLimit);
     const agent = sourceOf(formats, str(body, "agent", true) as string);
     const format = (str(body, "format") ?? "jsonl") as RawFormat;
@@ -342,13 +493,12 @@ export function createApp(options: AppOptions) {
     ) {
       throw new HttpError(400, "bad_field", "shipped needs records and prefix_sha256");
     }
-    const replace = body.replace ?? false;
-    if (typeof replace !== "boolean")
-      throw new HttpError(400, "bad_field", "replace must be a boolean");
-    const visibility = str(body, "visibility");
-    if (visibility !== undefined && visibility !== "org" && visibility !== "owner") {
-      throw new HttpError(400, "bad_field", "visibility must be org or owner");
+    const replace = bool(body, "replace");
+    const visibility = visibilityField(body.visibility);
+    if (body.claims !== undefined && (typeof body.claims !== "object" || body.claims === null)) {
+      throw new HttpError(400, "bad_field", "claims must be an object");
     }
+    const claims = pickClaims(body.claims);
     const idempotencyKey =
       request.headers.get("idempotency-key") ?? str(body, "idempotency_key") ?? undefined;
     if (idempotencyKey === "") {
@@ -361,7 +511,7 @@ export function createApp(options: AppOptions) {
         `an idempotency key must be at most ${MAX_IDEMPOTENCY_KEY_LENGTH} characters`,
       );
     }
-    return stored(db, {
+    return stored(writerClient(principal), {
       agent,
       session_id: str(body, "session_id", true) as string,
       transcript: str(body, "transcript", true) as string,
@@ -373,6 +523,7 @@ export function createApp(options: AppOptions) {
       fork_of: str(body, "fork_of"),
       ...(replace ? { replace } : {}),
       ...(visibility ? { visibility } : {}),
+      ...(claims ? { claims } : {}),
       ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
       ...(shipped
         ? {
@@ -385,32 +536,55 @@ export function createApp(options: AppOptions) {
     });
   });
 
+  /** One owner's sessions a page at a time, across the folders aliases fold into it (up to
+   * `limit` keys from each), as far as the principal may read them. The cursor is the last key
+   * listed, which says which folder it is in. */
   route("GET", "/v1/sessions", async ({ request, url }) => {
-    const db = authorize(request);
-    const page = await db.listSessions({
-      after: url.searchParams.get("after") ?? undefined,
-      limit: intParam(url, "limit", 100, 1000),
-    });
-    return json(page);
+    const principal = await caller(request, "sessions:read");
+    const owner = ownerOf(url, principal);
+    const after = url.searchParams.get("after") ?? undefined;
+    const limit = intParam(url, "limit", 100, 1000);
+    const folders = aliases
+      .storedAs(owner)
+      .map((folder) => ({ folder, prefix: keys.sessions(folder) }))
+      .sort((a, b) => (a.prefix < b.prefix ? -1 : 1));
+    const sessions: SessionMetadata[] = [];
+    let cursor: string | undefined;
+    let truncated = false;
+    for (const { folder, prefix } of folders) {
+      let startAfter: string | undefined;
+      if (after !== undefined) {
+        if (after.startsWith(prefix)) startAfter = after;
+        else if (after > prefix) continue;
+      }
+      const page = await listSessions(store, folder, { startAfter, limit });
+      sessions.push(...page.sessions.filter((m) => canRead(principal, m, aliases)));
+      cursor = page.cursor ?? cursor;
+      // A page ends inside a folder; the next one picks up there and goes on to the rest.
+      if (page.truncated) {
+        truncated = true;
+        break;
+      }
+    }
+    return json({ sessions, cursor, truncated });
   });
 
-  route("GET", "/v1/sessions/:agent/:session_id", async ({ request, params }) => {
-    const db = authorize(request);
-    const metadata = await db.getSession(
-      decodeURIComponent(params.agent as string),
-      decodeURIComponent(params.session_id as string),
-    );
-    if (!metadata) throw new HttpError(404, "not_found", "no such session");
+  route("GET", "/v1/sessions/:agent/:session_id", async ({ request, params, url }) => {
+    const principal = await caller(request, "sessions:read");
+    const { agent, sessionId } = sessionParams(params);
+    const { metadata } = await readable(principal, ownerOf(url, principal), agent, sessionId);
     return json(metadata);
   });
 
   route("GET", "/v1/sessions/:agent/:session_id/trace", async ({ request, params, url }) => {
-    const db = authorize(request);
-    const agent = decodeURIComponent(params.agent as string);
-    const sessionId = decodeURIComponent(params.session_id as string);
-    // The client answers null for every reason there is no trace; the route says which.
-    const metadata = await db.getSession(agent, sessionId);
-    if (!metadata) throw new HttpError(404, "not_found", "no such session");
+    const principal = await caller(request, "sessions:read");
+    const { agent, sessionId } = sessionParams(params);
+    const { folder, metadata } = await readable(
+      principal,
+      ownerOf(url, principal),
+      agent,
+      sessionId,
+    );
     if (metadata.status === "redacted") {
       throw new HttpError(410, "redacted", "session was redacted; no trace");
     }
@@ -420,29 +594,163 @@ export function createApp(options: AppOptions) {
     }
     const hash = url.searchParams.get("hash") ?? metadata.head;
     if (!hash) throw new HttpError(404, "no_trace", "session has no trace");
-    const trace = await db.getTrace(agent, sessionId, hash, format);
+    if (!/^[0-9a-f]{64}$/.test(hash)) throw new HttpError(404, "not_found", "no such trace");
+    const trace = await getTrace(store, folder, archiveId(folder, agent, sessionId), hash);
     if (!trace) throw new HttpError(404, "not_found", "no such trace");
-    return json(trace);
+    return json(renderTrace(trace, format));
   });
 
-  route("DELETE", "/v1/sessions/:agent/:session_id", async ({ request, params }) => {
-    const db = authorize(request);
-    const result = await db.tombstone(
-      decodeURIComponent(params.agent as string),
-      decodeURIComponent(params.session_id as string),
-    );
+  route("PATCH", "/v1/sessions/:agent/:session_id", async ({ request, params, url }) => {
+    const principal = await caller(request, "sessions:read");
+    const { agent, sessionId } = sessionParams(params);
+    const body = await readJson(request, 64 * 1024);
+    const visibility = visibilityField(body.visibility);
+    if (visibility === undefined) {
+      throw new HttpError(400, "missing_field", "visibility is required");
+    }
+    const { folder } = await readable(principal, ownerOf(url, principal), agent, sessionId);
+    requireVisibilityChange(principal, folder, aliases);
+    let metadata: SessionMetadata | null;
+    try {
+      metadata = await setVisibility({
+        store,
+        owner: folder,
+        agent,
+        session_id: sessionId,
+        visibility,
+        now,
+        writer: writerFor(principal),
+      });
+    } catch (err) {
+      if (err instanceof IngestRejected && err.code === "redacted") {
+        throw new HttpError(410, "redacted", err.message);
+      }
+      throw err;
+    }
+    if (!metadata) throw new HttpError(404, "not_found", "no such session");
+    return json(metadata);
+  });
+
+  route("DELETE", "/v1/sessions/:agent/:session_id", async ({ request, params, url }) => {
+    const principal = await caller(request, "sessions:delete");
+    const { agent, sessionId } = sessionParams(params);
+    const { folder } = await readable(principal, ownerOf(url, principal), agent, sessionId);
+    requireDelete(principal, folder, now(), aliases);
+    const result = await tombstone({
+      store,
+      owner: folder,
+      agent,
+      session_id: sessionId,
+      now,
+      reason: "deleted",
+      writer: writerFor(principal),
+    });
     if (!result) throw new HttpError(404, "not_found", "no such session");
     return json(result);
   });
 
+  /** One owner's change feed. A member reading someone else's sees the entries of sessions
+   * that are visible to the org now (X5.10). */
   route("GET", "/v1/changes", async ({ request, url }) => {
-    const db = authorize(request);
-    const page = await db.changes({
+    const principal = await caller(request, "sessions:read");
+    const owner = ownerOf(url, principal);
+    const page: ChangesPage = await readChanges(store, owner, {
       after: url.searchParams.get("after") ?? undefined,
       since: url.searchParams.get("since") ?? undefined,
       limit: intParam(url, "limit", 100, 1000),
     });
-    return json(page);
+    if (canRead(principal, { owner, visibility: "owner" }, aliases)) return json(page);
+    const visible = new Map<string, boolean>();
+    const entries = [];
+    for (const item of page.entries) {
+      const archive = item.entry.archive_id;
+      let ok = visible.get(archive);
+      if (ok === undefined) {
+        const metadata = await readMetadata(store, owner, archive);
+        ok = metadata !== null && canRead(principal, metadata, aliases);
+        visible.set(archive, ok);
+      }
+      if (ok) entries.push(item);
+    }
+    return json({ ...page, entries });
+  });
+
+  // --- tokens (X5.9, X5.11) -------------------------------------------------------
+
+  function tokenKind(value: unknown): TokenKind {
+    if (typeof value !== "string" || !(TOKEN_KINDS as readonly string[]).includes(value)) {
+      throw new HttpError(400, "bad_field", `kind must be one of ${TOKEN_KINDS.join(", ")}`);
+    }
+    return value as TokenKind;
+  }
+
+  route("POST", "/v1/tokens", async ({ request }) => {
+    const principal = await caller(request, "tokens:admin");
+    const body = await readJson(request, 64 * 1024);
+    const scopes = body.scopes;
+    if (
+      scopes !== undefined &&
+      (!Array.isArray(scopes) || !scopes.every((s) => typeof s === "string"))
+    ) {
+      throw new HttpError(400, "bad_field", "scopes must be a list of scopes");
+    }
+    const expiresAt = str(body, "expires_at");
+    const expires = expiresAt === undefined ? undefined : new Date(expiresAt);
+    if (expires !== undefined && Number.isNaN(expires.getTime())) {
+      throw new HttpError(400, "bad_field", "expires_at must be an RFC 3339 time");
+    }
+    const visibility = visibilityField(body.visibility);
+    const owner = str(body, "owner");
+    const service = str(body, "service");
+    const label = str(body, "label");
+    const tokenRequest: TokenRequest = {
+      kind: tokenKind(body.kind),
+      ...(owner !== undefined ? { owner } : {}),
+      ...(service !== undefined ? { service } : {}),
+      ...(scopes !== undefined ? { scopes: scopes as Scope[] } : {}),
+      ...(visibility ? { visibility } : {}),
+      ...(expires !== undefined ? { expires_at: expires } : {}),
+      ...(label !== undefined ? { label } : {}),
+    };
+    try {
+      const issued = await auth.issue(tokenRequest, principal);
+      return json({ token: issued.token, record: tokenInfo(issued.record) }, 201);
+    } catch (err) {
+      if (err instanceof AuthRequestError) throw new HttpError(400, err.code, err.message);
+      throw err;
+    }
+  });
+
+  route("GET", "/v1/tokens", async ({ request, url }) => {
+    await caller(request, "tokens:admin");
+    const owner = url.searchParams.get("owner") ?? undefined;
+    const kind = url.searchParams.get("kind");
+    const all = url.searchParams.get("all");
+    if (all !== null && all !== "true" && all !== "false") {
+      throw new HttpError(400, "bad_query", "all must be true or false");
+    }
+    const records = await auth.tokens.list({
+      ...(owner !== undefined ? { owner } : {}),
+      ...(kind !== null ? { kind: tokenKind(kind) } : {}),
+      all: all === "true",
+    });
+    return json({ tokens: records.map(tokenInfo) });
+  });
+
+  route("POST", "/v1/tokens/revoke", async ({ request }) => {
+    await caller(request, "tokens:admin");
+    const body = await readJson(request, 64 * 1024);
+    const owner = str(body, "owner", true) as string;
+    const kind = body.kind === undefined ? undefined : tokenKind(body.kind);
+    const revoked = await auth.tokens.revokeOwner(owner, kind);
+    return json({ revoked: revoked.map(tokenInfo) });
+  });
+
+  route("DELETE", "/v1/tokens/:id", async ({ request, params }) => {
+    await caller(request, "tokens:admin");
+    const record = await auth.tokens.revoke(params.id as string);
+    if (!record) throw new HttpError(404, "not_found", "no such token");
+    return json({ token: tokenInfo(record) });
   });
 
   // --- dispatch -----------------------------------------------------------------
@@ -463,6 +771,8 @@ export function createApp(options: AppOptions) {
         return await r.handler({ request, url, params });
       } catch (err) {
         if (err instanceof HttpError) return error(err.status, err.code, err.message);
+        if (err instanceof Unauthorized) return error(401, err.code, err.message);
+        if (err instanceof Forbidden) return error(403, err.code, err.message);
         if (err instanceof StoreError) {
           return error(502, "storage_error", `storage failed: ${err.message}`);
         }
@@ -476,7 +786,7 @@ export function createApp(options: AppOptions) {
       : error(404, "not_found", `no route ${url.pathname}`);
   }
 
-  return { fetch };
+  return { fetch, auth, pipeline };
 }
 
 export type App = ReturnType<typeof createApp>;

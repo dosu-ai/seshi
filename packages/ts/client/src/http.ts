@@ -32,6 +32,10 @@ export interface HttpClientOptions {
   /** The server's base URL (`https://sessiondb.example.com`). */
   server: string;
   token: string;
+  /** With the org key (X5.12): the username to write as, sent as `X-Seshi-User`. The CLI
+   * resolves it from SESHI_USER, the CLI config's `user`, git's user.email, then the OS user
+   * name (X5.7). Other credentials name their owner themselves. */
+  user?: string;
   /** For tests and custom transports: defaults to the global `fetch`. */
   fetch?: Fetch;
   /** Bodies past this many bytes are sent `Content-Encoding: gzip`. Default 8 KiB. */
@@ -66,6 +70,7 @@ interface ErrorBody {
 export class HttpSessionDB implements SessionDB {
   readonly server: string;
   private readonly token: string;
+  private readonly user: string | undefined;
   private readonly fetch: Fetch;
   private readonly gzipFrom: number;
   private readonly timeoutMs: number;
@@ -74,6 +79,7 @@ export class HttpSessionDB implements SessionDB {
   constructor(options: HttpClientOptions) {
     this.server = options.server.replace(/\/+$/, "");
     this.token = options.token;
+    this.user = options.user;
     this.fetch = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
     this.gzipFrom = options.gzipFrom ?? 8 * 1024;
     this.timeoutMs = options.timeoutMs ?? 120_000;
@@ -92,6 +98,7 @@ export class HttpSessionDB implements SessionDB {
     const headers: Record<string, string> = {
       authorization: `Bearer ${this.token}`,
       "user-agent": this.userAgent,
+      ...(this.user !== undefined ? { "x-seshi-user": this.user } : {}),
     };
     let body: BodyInit | undefined;
     if (options.body !== undefined) {
@@ -182,7 +189,7 @@ export class HttpSessionDB implements SessionDB {
 
   async listSessions(options: ListSessionsOptions = {}): Promise<SessionsPage> {
     const { status, body } = await this.request("GET", "/v1/sessions", {
-      query: { after: options.after, limit: options.limit },
+      query: { after: options.after, limit: options.limit, owner: options.owner },
     });
     if (status !== 200) HttpSessionDB.refuse(status, body);
     return body as SessionsPage;

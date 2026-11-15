@@ -30,6 +30,11 @@ export const oidcSection = z
       .min(1)
       .optional()
       .describe("Members of this IdP group are admins (X5.3)."),
+    groups_claim: z
+      .string()
+      .min(1)
+      .default("groups")
+      .describe("The ID token claim that lists the person's groups, for admin_group."),
   })
   .describe("Sign-in through an identity provider (X5.2). Absent: no IdP.");
 
@@ -40,11 +45,6 @@ export const authSection = z
       .default({})
       .describe(
         "Static tokens (X5.12): owner = token, each one everything for that owner, for single-user and development setups. 16+ characters.",
-      ),
-    legacy_token_secret: secret()
-      .optional()
-      .describe(
-        "Accept HS256 JWTs signed with this secret (sub = owner, exp required). Kept from sessiondb until seshi tokens replace it (X5.2). 32+ characters.",
       ),
     org_key: z
       .strictObject({
@@ -68,7 +68,7 @@ export const authSection = z
       .record(z.string().min(1), secret())
       .default({})
       .describe(
-        "Keys that sign session tokens, by key id (X5.9). Old keys stay to verify until they expire.",
+        "Keys that sign session tokens, by key id (X5.9). Old keys stay to verify until they expire. 32+ characters each; required with auth.oidc.",
       ),
     session_key_id: z
       .string()

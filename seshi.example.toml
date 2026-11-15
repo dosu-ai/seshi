@@ -15,8 +15,23 @@ region = "us-east-1"
 access_key_id = { env = "AWS_ACCESS_KEY_ID" }
 secret_access_key = { file = "/run/secrets/bucket-secret-key" }
 
+# Who may call the server (X5). For a team, run `seshi admin init` once: it prints the first
+# admin token and the org key. With an IdP, people sign in instead; uncomment [auth.oidc] and
+# give session tokens a key to be signed with.
+[auth]
+admins = ["ops@acme.com"]
+
+# [auth.oidc]
+# issuer = "https://acme.okta.com"
+# client_id = "0oa1seshicli"
+# owner_claim = "email"
+# admin_group = "seshi-admins"
+
+# [auth.session_keys]
+# k1 = { file = "/run/secrets/seshi-session-key" }
+
 [auth.tokens]
-# owner = token: one per person, for single-user and development setups.
+# owner = token: static tokens, for single-user and development setups.
 alice = { env = "ALICE_TOKEN" }
 
 [filter]

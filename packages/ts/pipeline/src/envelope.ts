@@ -39,7 +39,6 @@ const CALLER_KINDS: ReadonlySet<string> = new Set([
   "service",
   "admin",
   "static",
-  "legacy",
   "local",
 ]);
 const OWNER_BASES: ReadonlySet<string> = new Set(["verified", "claimed", "service"]);

@@ -81,10 +81,13 @@ describe("seshi config check", () => {
   });
 
   it("runs the server's own checks too", async () => {
-    const path = file("seshi.toml", `[store]\nurl = "file:///tmp/x"\n`);
+    const path = file(
+      "seshi.toml",
+      `[store]\nurl = "file:///tmp/x"\n[auth.session_keys]\nk1 = "short"\n`,
+    );
     const { code, err } = await seshi(["config", "check", "--config", path]);
     expect(code).toBe(1);
-    expect(err).toContain("error: no way to call the server");
+    expect(err).toContain("error: auth.session_keys.k1 must be 32+ characters");
   });
 
   it("prints warnings and notices, and still passes", async () => {
