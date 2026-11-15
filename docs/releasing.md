@@ -54,6 +54,18 @@ scripts and the npm launcher map machines onto the same ids, and tests keep them
 target (musl, say) means a line there, a runner in the `binaries` and `verify` matrices, and
 the install script's detection.
 
+## The workflow's own security
+
+`ci.yml` gives every job a read-only `GITHUB_TOKEN`; `release`, `image` (`packages: write`)
+and `npm` (`id-token: write`, for provenance) grant themselves more. No checkout keeps its
+credentials: semantic-release pushes the release commit and tag with the abbs-bot app token
+it is handed. Every action is pinned to a commit SHA with its release in a trailing comment
+(`uses: owner/action@<sha> # vX.Y.Z`), as are the S3 test service image (by digest) and
+awscli. Dependabot (`.github/dependabot.yml`) proposes action updates weekly; to bump one by
+hand, resolve the tag with `gh api repos/<owner>/<repo>/git/ref/tags/<tag>` (an annotated
+tag's object is a tag: follow it through `git/tags/<sha>` to the commit) and update the
+comment with the SHA.
+
 ## Trying it locally
 
 ```sh
