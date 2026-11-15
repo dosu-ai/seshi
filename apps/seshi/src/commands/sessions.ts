@@ -33,7 +33,7 @@ import { type Account, openAccount } from "../account/account";
 import { type Backend, openBackend } from "../backend";
 import { EXIT } from "../cli/exit";
 import { failWith, Refused } from "../cli/failures";
-import { emit, takeJson, usageError } from "../cli/output";
+import { emit, fail, takeJson, usageError } from "../cli/output";
 import { printable, type Style, styleFor } from "../cli/style";
 import type { CommandContext } from "./index";
 
@@ -364,6 +364,26 @@ async function confirm(ctx: CommandContext, question: string): Promise<boolean> 
   return /^y(es)?$/i.test(answer.trim());
 }
 
+function deleteName(ref: { agent: string; sessionId: string }, values: Values): string {
+  return printable(`${ref.agent}/${ref.sessionId}${values.owner ? ` of ${values.owner}` : ""}`);
+}
+
+/** Whether the person means it: `--yes`, or a terminal's yes. Asked before the backend is
+ * opened, so the session token is renewed for the delete only once they have answered, and
+ * the delete goes out within the server's freshness window however long they took (X5.3). */
+async function confirmDelete(
+  ctx: CommandContext,
+  ref: { agent: string; sessionId: string },
+  values: Values,
+): Promise<boolean> {
+  if (values.yes) return true;
+  const name = deleteName(ref, values);
+  if (!ctx.terminal || !ctx.tty?.stdin) {
+    throw new UsageError(`deleting ${name} cannot be undone: add --yes`);
+  }
+  return confirm(ctx, `Delete ${name}? Its traces are removed and it cannot be undone.`);
+}
+
 async function rm(
   ctx: CommandContext,
   json: boolean,
@@ -372,18 +392,7 @@ async function rm(
   values: Values,
   style: Style,
 ) {
-  const name = printable(
-    `${ref.agent}/${ref.sessionId}${values.owner ? ` of ${values.owner}` : ""}`,
-  );
-  if (!values.yes) {
-    if (!ctx.terminal || !ctx.tty?.stdin) {
-      throw new UsageError(`deleting ${name} cannot be undone: add --yes`);
-    }
-    if (!(await confirm(ctx, `Delete ${name}? Its traces are removed and it cannot be undone.`))) {
-      ctx.stderr("seshi: nothing deleted");
-      return EXIT.failure;
-    }
-  }
+  const name = deleteName(ref, values);
   const result = await backend.tombstone(
     ref.agent,
     ref.sessionId,
@@ -460,6 +469,9 @@ export async function run(ctx: CommandContext): Promise<number> {
             : `sessions ${sub} takes one session`,
         );
       }
+    }
+    if (sub === "rm" && !(await confirmDelete(ctx, ref as NonNullable<typeof ref>, values))) {
+      return fail(ctx, json, EXIT.failure, "cancelled", "nothing deleted");
     }
     account = openAccount(ctx);
     const style = await styleFor(ctx, { json, theme: account.cli.theme });
