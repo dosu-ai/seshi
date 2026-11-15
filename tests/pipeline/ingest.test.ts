@@ -14,7 +14,17 @@ import {
   putRaw,
   tombstone,
 } from "@seshi/pipeline";
-import { archiveId, FsStore, keys, LAYOUT_KEY, readChanges } from "@seshi/store";
+import {
+  archiveId,
+  encodeJson,
+  FsStore,
+  getBytes,
+  keys,
+  LAYOUT_KEY,
+  LayoutError,
+  LEGACY_LAYOUT_KEY,
+  readChanges,
+} from "@seshi/store";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { golden } from "../tooling/testdata";
 
@@ -63,19 +73,26 @@ describe("ingest", () => {
 
     const session = await getSession(store, "acme", "claude", "sess1");
     expect(session).toMatchObject({
-      schema: "sessionstorage/metadata/1",
+      schema: "seshi/metadata/1",
       owner: "acme",
       status: "stored",
       head: result.content_hash,
       project: "github.com/acme/widget",
       branch: "main",
       source: "claude-code",
+      // Who wrote it and on what basis (X5.5), who may read it (X5.10), where it came from.
+      writer: { kind: "local", principal: "acme", source_id: "upload" },
+      owner_basis: "verified",
+      visibility: "org",
+      provenance: { source: "upload", source_id: "upload", format: "claude" },
+      origin_agent: "claude-code",
+      native_session_id: "sess1",
     });
     expect(session?.traces).toHaveLength(1);
 
     const trace = await getTrace(store, "acme", result.archive_id, result.content_hash);
     expect(trace).toMatchObject({
-      schema: "sessionstorage/trace/1",
+      schema: "seshi/trace/1",
       content_hash: result.content_hash,
       agent: "claude",
       session_id: "sess1",
@@ -87,7 +104,11 @@ describe("ingest", () => {
     const changes = await readChanges(store, "acme");
     expect(changes.entries.map((e) => e.entry.kind)).toEqual(["published"]);
     expect(changes.entries[0]?.entry.content_hash).toBe(result.content_hash);
-    expect(await store.get(LAYOUT_KEY)).not.toBeNull();
+    expect(changes.entries[0]?.entry).toMatchObject({
+      schema: "seshi/change/1",
+      writer: { kind: "local", principal: "acme", source_id: "upload" },
+    });
+    expect(await getBytes(store, LAYOUT_KEY)).not.toBeNull();
   });
 
   it("dedupes the same content and backfills lineage", async () => {
@@ -211,7 +232,7 @@ describe("putRaw", () => {
     expect(session?.raw).toHaveLength(1);
     expect(session?.raw_format).toBe("jsonl");
     const archive = archiveId("acme", "claude", "sess1");
-    expect(await store.get(keys.raw("acme", archive, 0, "jsonl"))).toEqual(bytes);
+    expect(await getBytes(store, keys.raw("acme", archive, 0, "jsonl"))).toEqual(bytes);
   });
 
   it("creates the session when the part is the first thing stored, and ingest adds the trace", async () => {
@@ -309,7 +330,7 @@ describe("tombstone", () => {
     expect(session?.status).toBe("redacted");
     expect(session?.head).toBeUndefined();
     expect(await getTrace(store, "acme", stored.archive_id, stored.content_hash)).toBeNull();
-    expect(await store.get(keys.raw("acme", stored.archive_id, 0, "jsonl"))).toBeNull();
+    expect(await getBytes(store, keys.raw("acme", stored.archive_id, 0, "jsonl"))).toBeNull();
 
     const changes = (await readChanges(store, "acme")).entries;
     expect(changes.map((e) => e.entry.kind)).toEqual(["published", "tombstone"]);
@@ -322,6 +343,188 @@ describe("tombstone", () => {
     expect(
       await tombstone({ store, owner: "acme", agent: "claude", session_id: "never", now }),
     ).toBeNull();
+  });
+});
+
+describe("who wrote what (X5.5)", () => {
+  const device = {
+    kind: "device" as const,
+    principal: "alice",
+    credential_id: "tok_alice-laptop",
+    source_id: "upload",
+  };
+
+  it("keeps the original writer and owner basis, records each write's writer, and merges claims", async () => {
+    const first = await ingest({
+      store,
+      owner: "alice",
+      records: records("claude-basic"),
+      metadata: meta,
+      now,
+      writer: device,
+      owner_basis: "claimed",
+      visibility: "owner",
+      claims: { git_email: "alice@example.com" },
+    });
+    const admin = { kind: "admin" as const, principal: "root", source_id: "upload" };
+    await ingest({
+      store,
+      owner: "alice",
+      records: [
+        ...records("claude-basic"),
+        { role: "user", content: "more", timestamp: "2026-01-01T00:00:00Z" },
+      ],
+      metadata: meta,
+      now,
+      writer: admin,
+      owner_basis: "verified",
+      visibility: "org",
+      claims: { account_ids: { anthropic: "acct-1" } },
+    });
+    const session = await getSession(store, "alice", "claude", "sess1");
+    expect(session?.writer).toEqual(device);
+    expect(session?.owner_basis).toBe("claimed");
+    expect(session?.visibility).toBe("owner");
+    expect(session?.claims).toEqual({
+      git_email: "alice@example.com",
+      account_ids: { anthropic: "acct-1" },
+    });
+    expect(session?.traces.map((t) => t.content_hash)[0]).toBe(first.content_hash);
+    const writers = (await readChanges(store, "alice")).entries.map((e) => e.entry.writer);
+    expect(writers).toEqual([device, admin]);
+  });
+
+  it("records a tombstone's reason and writer, never its content", async () => {
+    await ingest({ store, owner: "acme", records: records("claude-basic"), metadata: meta, now });
+    await ingest({
+      store,
+      owner: "acme",
+      records: records("codex-subagent-report"),
+      metadata: { ...meta, session_id: "sess2" },
+      now,
+    });
+    await tombstone({ store, owner: "acme", agent: "claude", session_id: "sess1", now });
+    await tombstone({
+      store,
+      owner: "acme",
+      agent: "claude",
+      session_id: "sess2",
+      now,
+      reason: "retracted",
+      writer: device,
+    });
+    const tombstones = (await readChanges(store, "acme")).entries
+      .map((e) => e.entry)
+      .filter((e) => e.kind === "tombstone");
+    expect(tombstones.map((e) => [e.reason, e.writer.kind])).toEqual([
+      ["deleted", "local"],
+      ["retracted", "device"],
+    ]);
+  });
+});
+
+describe("the canonical trace (X6.2)", () => {
+  it("carries LLM calls, record ids and provenance, and hashes as plain trajectory-v1 does", async () => {
+    const plain = records("claude-basic");
+    const enriched = plain.map((record, i) =>
+      record.role === "assistant"
+        ? { ...record, id: `msg-${i}`, llm_call: "call-1" }
+        : record.role === "tool"
+          ? { ...record, duration_ms: 12 }
+          : record,
+    );
+    const llm_calls = [
+      {
+        id: "call-1",
+        model: "claude-sonnet-4-5",
+        provider: "anthropic",
+        usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 100 },
+        stop_reason: "end_turn",
+      },
+    ];
+    const result = await ingest({
+      store,
+      owner: "acme",
+      records: enriched,
+      metadata: meta,
+      now,
+      llm_calls,
+      provenance: { source: "hook", source_id: "upload", format: "claude-code" },
+      normalized: undefined,
+    });
+    expect(result.content_hash).toBe(expectedHash("claude-basic"));
+    const trace = await getTrace(store, "acme", result.archive_id, result.content_hash);
+    expect(trace?.llm_calls).toEqual(llm_calls);
+    expect(trace?.provenance).toEqual({
+      source: "hook",
+      source_id: "upload",
+      format: "claude-code",
+    });
+    expect(trace?.records.find((r) => r.role === "assistant")).toMatchObject({
+      llm_call: "call-1",
+    });
+    expect(trace?.records.find((r) => r.role === "tool")).toMatchObject({ duration_ms: 12 });
+  });
+
+  it("refuses a record that names an LLM call the trace does not have", async () => {
+    const bad = records("claude-basic").map((r) =>
+      r.role === "assistant" ? { ...r, llm_call: "missing" } : r,
+    );
+    await expect(
+      ingest({ store, owner: "acme", records: bad, metadata: meta, now }),
+    ).rejects.toMatchObject({
+      code: "invalid",
+      message: expect.stringContaining("llm_call missing"),
+    });
+  });
+
+  it("sums redaction counts over a session's writes", async () => {
+    const ruleSet = "f".repeat(64);
+    await ingest({
+      store,
+      owner: "acme",
+      records: records("claude-basic"),
+      metadata: meta,
+      now,
+      redaction: { rule_set: ruleSet, counts: { "aws-key": 1 } },
+    });
+    await ingest({
+      store,
+      owner: "acme",
+      records: [...records("claude-basic"), { role: "user", content: "x", timestamp: "t" }],
+      metadata: meta,
+      now,
+      redaction: { rule_set: ruleSet, counts: { "aws-key": 2, "github-token": 1 } },
+    });
+    expect((await getSession(store, "acme", "claude", "sess1"))?.redaction).toEqual({
+      rule_set: ruleSet,
+      counts: { "aws-key": 3, "github-token": 1 },
+    });
+  });
+});
+
+describe("conditional pointer writes (X6.5)", () => {
+  it("lists every trace when writers race on one session", async () => {
+    const variants = Array.from({ length: 5 }, (_, i) => [
+      ...records("claude-basic"),
+      { role: "user" as const, content: `turn ${i}`, timestamp: "2026-01-01T00:00:00Z" },
+    ]);
+    const results = await Promise.all(
+      variants.map((r) => ingest({ store, owner: "acme", records: r, metadata: meta, now })),
+    );
+    const session = await getSession(store, "acme", "claude", "sess1");
+    expect(new Set(session?.traces.map((t) => t.content_hash))).toEqual(
+      new Set(results.map((r) => r.content_hash)),
+    );
+    expect((await readChanges(store, "acme")).entries).toHaveLength(5);
+  });
+
+  it("refuses a prefix that holds a sessiondb store, before writing anything", async () => {
+    await store.put(LEGACY_LAYOUT_KEY, encodeJson({ schema: "sessionstorage/layout/1" }));
+    await expect(
+      ingest({ store, owner: "acme", records: records("claude-basic"), metadata: meta, now }),
+    ).rejects.toBeInstanceOf(LayoutError);
+    expect((await store.list("owners/")).keys).toEqual([]);
   });
 });
 

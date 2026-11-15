@@ -8,13 +8,13 @@
  * 2. each record set is parsed and what came out (`content_hash`, events, the rest of the trace,
  *    or the rejection) is written to `<name>.expected.json` beside it.
  *
- * `tests/goldens.test.ts` asserts `parseTrajectory` still reproduces every expected file, so a
+ * `tests/goldens.test.ts` asserts `parseTrace` still reproduces every expected file, so a
  * change to the hash or the event derivation is a visible diff, never an accident. Commit the
  * outputs. */
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import { parseTrajectory, TrajectoryError } from "@seshi/model";
+import { parseTrace, TrajectoryError } from "@seshi/model";
 import { normalizeTranscript } from "@seshi/pipeline";
 import { buildFormats } from "seshi/integrations";
 import { expectedOf } from "./goldens";
@@ -57,7 +57,7 @@ for (const testdata of testdataDirs()) {
   for (const name of names) {
     const set = JSON.parse(readFileSync(join(goldens, `${name}.records.json`), "utf8"));
     try {
-      const expected = expectedOf(parseTrajectory(set));
+      const expected = expectedOf(parseTrace(set));
       writeJson(goldens, `${name}.expected.json`, expected);
       console.log(`${name}: ${expected.content_hash.slice(0, 12)}`);
     } catch (err) {

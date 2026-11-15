@@ -1,4 +1,4 @@
-/** The part of a `Trace` the goldens pin: everything `parseTrajectory` derives from the
+/** The part of a `Trace` the goldens pin: everything `parseTrace` derives from the
  * records. Shared by `tooling/write-goldens.ts`, which writes it, and `goldens.test.ts`, which
  * checks it. */
 

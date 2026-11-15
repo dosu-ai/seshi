@@ -74,7 +74,7 @@ describe("precedence (F1.1)", () => {
   it("defaults every section the file leaves out, with today's values", () => {
     const { config } = server({}, { env: STORE });
     expect(config.server).toEqual({ listen: ":7200", roles: ["api", "worker"] });
-    expect(config.store).toEqual({ url: "file:///data", format: "letta" });
+    expect(config.store).toEqual({ url: "file:///data" });
     expect(config.auth).toEqual({
       tokens: {},
       org_key: { enabled: true },

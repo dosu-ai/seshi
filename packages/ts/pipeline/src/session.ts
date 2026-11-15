@@ -23,13 +23,7 @@
  * about HTTP. */
 
 import { gunzipSync, gzipSync } from "node:zlib";
-import {
-  type FormatRegistry,
-  fromOtlp,
-  NORMALIZER,
-  NormalizeError,
-  otlpMeta,
-} from "@seshi/formats";
+import { type FormatRegistry, NORMALIZER, NormalizeError } from "@seshi/formats";
 import {
   IngestRejected,
   type NormalizedRecord,
@@ -44,12 +38,18 @@ import {
   type ShippedPrefix,
   type ShippedState,
   type StoreSessionResult,
-  type TraceFormat,
 } from "@seshi/model";
 import { applyRules, type RedactionRules, redactionRules, redactRaw } from "@seshi/redact";
-import { ensureLayout, keys, markerFormat, type Store } from "@seshi/store";
+import { ensureLayout, getBytes, keys, type Store } from "@seshi/store";
 import { copiedPrefix, planShipment } from "./continuation";
-import { getSession, getTrace, ingest, putRaw, recordNormalized } from "./ingest";
+import {
+  getSession,
+  getTrace,
+  ingest,
+  putRaw,
+  recordNormalized,
+  type WriteContext,
+} from "./ingest";
 import type { Limits } from "./limits";
 import { normalizeTranscript } from "./normalize";
 import { type FilterRules, isTrivialTrajectory } from "./worthiness";
@@ -67,10 +67,8 @@ export interface SessionOptions {
   /** The operator's own redaction (`redactionRules`); the built-in rules when omitted. Either
    * way the built-ins apply. */
   redaction?: RedactionRules;
-  /** How traces are written: `letta` (trajectory-v1 records, the default) or `otlp` (GenAI
-   * spans). A new store records it in its layout marker; an existing one must match it, so a
-   * writer that did not opt in to `otlp` never writes an `otlp` store. */
-  format?: TraceFormat;
+  /** Who writes and on what basis; the owner through the upload route when omitted. */
+  context?: WriteContext;
   /** The session filter (X4.10), config's `[filter]`; `DEFAULT_FILTER` when omitted. It judges
    * a session's first trace only: chunks that continue a head always ship. */
   filter?: Readonly<FilterRules>;
@@ -80,9 +78,6 @@ export interface SessionOptions {
 
 const BUILTIN_RULES = redactionRules();
 
-/** `SessionOptions` once the store's format is known. */
-type Resolved = SessionOptions & { format: TraceFormat };
-
 /** A recorded branch name, or undefined for the detached (`HEAD`) and empty values agents
  * record. */
 function recordedBranch(value: unknown): string | undefined {
@@ -91,31 +86,19 @@ function recordedBranch(value: unknown): string | undefined {
   return branch && branch !== "HEAD" ? branch : undefined;
 }
 
-/** What a fork copied from the session it was made from, when that parent is stored here. In
- * an `otlp` store the parent's records are read back from its spans. */
+/** What a fork copied from the session it was made from, when that parent is stored here. */
 async function forkCopy(
   store: Store,
   owner: string,
   agent: string,
   forkOf: string | undefined,
   records: NormalizedRecord[],
-  format: TraceFormat,
 ) {
   if (!forkOf) return undefined;
   const parent = await getSession(store, owner, agent, forkOf);
   if (!parent?.head) return undefined;
-  if (format === "otlp") {
-    const head = await getTrace(store, owner, parent.archive_id, parent.head, "otlp");
-    let parentRecords: NormalizedRecord[] | null = null;
-    try {
-      parentRecords = head ? fromOtlp(head).records : null;
-    } catch {
-      parentRecords = null;
-    }
-    return copiedPrefix(records, parentRecords);
-  }
   const trace = await getTrace(store, owner, parent.archive_id, parent.head);
-  return copiedPrefix(records, trace?.records ?? null);
+  return copiedPrefix(records, (trace?.records as NormalizedRecord[] | undefined) ?? null);
 }
 
 interface NormalizeStoredInput {
@@ -158,7 +141,7 @@ async function readPart(
   archive: string,
   part: RawPart,
 ): Promise<string> {
-  const bytes = await store.get(keys.raw(owner, archive, part.part, part.format));
+  const bytes = await getBytes(store, keys.raw(owner, archive, part.part, part.format));
   if (bytes === null) throw new IngestRejected("invalid", `raw part ${part.part} is missing`);
   return new TextDecoder().decode(gunzipSync(bytes));
 }
@@ -177,7 +160,7 @@ function logEnd(parts: readonly RawPart[]): number {
 /** The second step on its own: the stored raw to a trace. */
 async function normalizeStored(
   input: NormalizeStoredInput,
-  options: Resolved,
+  options: SessionOptions,
 ): Promise<NormalizeStoredResult> {
   const { store } = options;
   const { owner, agent, session_id: sessionId } = input;
@@ -206,9 +189,9 @@ async function normalizeStored(
 async function wholeStored(
   input: NormalizeStoredInput,
   metadata: SessionMetadata,
-  options: Resolved,
+  options: SessionOptions,
 ): Promise<NormalizeStoredResult> {
-  const { store, client, now, format } = options;
+  const { store, client, now } = options;
   const { owner, agent, session_id: sessionId } = input;
   const parts = inLogOrder(metadata.raw);
   const chunks: string[] = [];
@@ -241,7 +224,7 @@ async function wholeStored(
   // stored head always ships, or an agent-only tail would be lost for good (the answer says
   // it shipped). A fork's first trace is its own, so it is judged.
   const continuesHead = plan.continuation !== undefined;
-  const copied = await forkCopy(store, owner, agent, input.fork_of, records, format);
+  const copied = await forkCopy(store, owner, agent, input.fork_of, records);
   if (!plan.continuation && copied) plan = planShipment(records, copied);
   const filtered = continuesHead
     ? plan.fresh.length === 0
@@ -271,8 +254,8 @@ async function wholeStored(
     normalized,
     client,
     now,
-    format,
     limits: options.limits,
+    ...options.context,
   });
   return { ...result, ...whole };
 }
@@ -282,9 +265,9 @@ async function continueStored(
   input: NormalizeStoredInput,
   metadata: SessionMetadata,
   stored: RawPart,
-  options: Resolved,
+  options: SessionOptions,
 ): Promise<NormalizeStoredResult> {
-  const { store, client, now, format } = options;
+  const { store, client, now } = options;
   const { owner, agent, session_id: sessionId } = input;
   const state = metadata.normalized as NormalizedState;
   const offset = stored.offset;
@@ -317,17 +300,9 @@ async function continueStored(
     hash_state: hash.export(),
   };
 
-  // The session's meta record is the head's: a chunk has none of its own. An OTLP head carries
-  // it on its resource.
-  const head = await getTrace(store, owner, metadata.archive_id, metadata.head as string, format);
-  const headMeta =
-    head === null
-      ? undefined
-      : "resourceSpans" in head
-        ? otlpMeta(head)
-        : head.records[0]?.role === "meta"
-          ? head.records[0]
-          : undefined;
+  // The session's meta record is the head's: a chunk has none of its own.
+  const head = await getTrace(store, owner, metadata.archive_id, metadata.head as string);
+  const headMeta = head?.records[0]?.role === "meta" ? head.records[0] : undefined;
   const meta = headMeta ? [headMeta] : [];
 
   const result = await ingest({
@@ -346,8 +321,8 @@ async function continueStored(
     normalized,
     client,
     now,
-    format,
     limits: options.limits,
+    ...options.context,
   });
   return {
     ...result,
@@ -373,10 +348,8 @@ export async function storeSession(
       `no normalizer for '${upload.agent}' (one of ${sessionOptions.formats.sources.join(", ")})`,
     );
   }
-  const traceFormat = markerFormat(
-    await ensureLayout(store, client ?? "sessionstorage", sessionOptions.format ?? "letta"),
-  );
-  const options: Resolved = { ...sessionOptions, format: traceFormat };
+  await ensureLayout(store, { createdBy: client ?? "seshi" });
+  const options = sessionOptions;
   const { owner, agent, session_id: sessionId, transcript, format } = upload;
   const offset = upload.offset ?? 0;
   const length = new TextEncoder().encode(transcript).length;
@@ -419,8 +392,8 @@ export async function storeSession(
     withheld_calls: ruled.withheld,
     client,
     now,
-    trace_format: traceFormat,
     limits: options.limits,
+    ...options.context,
   });
   const result = await normalizeStored({ ...upload, part }, options);
   return { ...result, raw };

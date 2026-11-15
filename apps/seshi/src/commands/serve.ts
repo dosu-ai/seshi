@@ -16,7 +16,14 @@ import {
   type RedactionRules,
   redactionRules,
 } from "@seshi/redact";
-import { ensureLayout, openStore, probe, type StorageView, type Store } from "@seshi/store";
+import {
+  ensureLayout,
+  LayoutError,
+  openStore,
+  probe,
+  type StorageView,
+  type Store,
+} from "@seshi/store";
 import { buildFormats } from "../integrations";
 import type { CommandContext } from "./index";
 import { configFlags, ServeConfigError, serveSettings } from "./serve-settings";
@@ -84,8 +91,8 @@ async function start(ctx: CommandContext, formats: FormatRegistry): Promise<void
   });
   for (const warning of loaded.warnings) ctx.stderr(`seshi: warning: ${warning}`);
   const settings = serveSettings(loaded.config);
-  const { tokens, tokenSecret, owners, url, format } = settings;
-  const client = `sessiondb-server/${VERSION}`;
+  const { tokens, tokenSecret, owners, url } = settings;
+  const client = `seshi/${VERSION}`;
 
   const redaction = await readPacks(settings.redactionPacks);
 
@@ -97,11 +104,19 @@ async function start(ctx: CommandContext, formats: FormatRegistry): Promise<void
     fail(message(err));
   }
 
-  // Fail at boot, not on the first session, when the bucket or its keys are wrong.
+  // Fail at boot, not on the first session, when the bucket or its keys are wrong, or the
+  // prefix is another deployment's (X1.4) or a sessiondb store.
+  let deployment: string;
   try {
-    await ensureLayout(store, client, format);
+    const marker = await ensureLayout(store, {
+      createdBy: client,
+      deploymentId: settings.deploymentId,
+      org: settings.org,
+    });
+    deployment = marker.deployment_id;
     for (const owner of owners) await probe(store, owner);
   } catch (err) {
+    if (err instanceof LayoutError) fail(`cannot use ${url}: ${message(err)}`);
     fail(`cannot write to ${url}: ${message(err)}`);
   }
 
@@ -113,7 +128,6 @@ async function start(ctx: CommandContext, formats: FormatRegistry): Promise<void
     tokenSecret,
     client,
     redaction,
-    format,
     filter: settings.filter,
     limits: settings.limits,
   });
@@ -131,7 +145,7 @@ async function start(ctx: CommandContext, formats: FormatRegistry): Promise<void
   const host = ["0.0.0.0", "::"].includes(settings.hostname) ? "localhost" : settings.hostname;
   const who = [...owners, ...(tokenSecret ? ["whoever holds a signed token"] : [])].join(", ");
   ctx.stdout(
-    `seshi ${VERSION} listening on http://${host}:${server.port}, writing ${format} traces to ${url} for ${who}${
+    `seshi ${VERSION} listening on http://${host}:${server.port}, storing sessions in ${url} (deployment ${deployment}) for ${who}${
       loaded.file ? ` (config ${loaded.file})` : ""
     }`,
   );

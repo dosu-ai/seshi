@@ -15,7 +15,7 @@ export interface FilterRules {
    * record; less is a greeting rather than an investigation. */
   min_chars: number;
   /** At least one user record. Turning it off has no effect yet: the trace format needs one
-   * (`parseTrajectory`), so such a session cannot be stored either way. */
+   * (`parseTrace`), so such a session cannot be stored either way. */
   require_user: boolean;
   /** At least one assistant or tool record answering it. Turning it off has no effect yet, for
    * the same reason. */

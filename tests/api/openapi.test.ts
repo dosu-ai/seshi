@@ -4,7 +4,7 @@
  * seen. A route that drifts from the document fails here, and so does a response the
  * document describes that the server never gives. */
 
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type App, type AppOptions, createApp as createServer } from "@seshi/api";
@@ -18,6 +18,7 @@ import { transcript } from "../tooling/testdata";
 // --- the document -------------------------------------------------------------------------
 
 const SPEC_PATH = join(import.meta.dirname, "../../spec/openapi.yaml");
+const SCHEMAS = join(import.meta.dirname, "../../spec/schemas");
 
 const FORMATS = buildFormats();
 /** The server with this binary's formats, as `seshi serve` builds it. */
@@ -27,8 +28,25 @@ const createApp = (options: Omit<AppOptions, "formats">) =>
 // biome-ignore lint/suspicious/noExplicitAny: a parsed document, walked by path
 const spec: any = Bun.YAML.parse(readFileSync(SPEC_PATH, "utf8"));
 
+/** The stored objects' JSON Schemas (`spec/schemas/`), which the document references as
+ * `./schemas/<name>.schema.json`: each is registered under its `$id`, the file name. */
+function linkSchemas(node: unknown): void {
+  if (Array.isArray(node)) node.forEach(linkSchemas);
+  else if (node && typeof node === "object") {
+    const object = node as Record<string, unknown>;
+    if (typeof object.$ref === "string" && object.$ref.startsWith("./schemas/")) {
+      object.$ref = object.$ref.slice("./schemas/".length);
+    }
+    Object.values(object).forEach(linkSchemas);
+  }
+}
+
 const ajv = new Ajv2020({ strict: false, allErrors: true });
 addFormats(ajv);
+for (const file of readdirSync(SCHEMAS).filter((f) => f.endsWith(".schema.json"))) {
+  ajv.addSchema(JSON.parse(readFileSync(join(SCHEMAS, file), "utf8")));
+}
+linkSchemas(spec);
 ajv.addSchema(spec, "spec");
 
 /** A JSON pointer into the document, escaped. */
@@ -348,30 +366,26 @@ describe("the server honours it", () => {
     expect((await call("DELETE", "/v1/sessions/claude-code/x", { token: null })).status).toBe(401);
   });
 
-  it("an otlp bucket", async () => {
-    const otlp = createApp({
-      store,
-      storage: { url: store.url },
-      tokens: [{ token: TOKEN, owner: "acme" }],
-      format: "otlp",
+  it("every render format", async () => {
+    const body = { agent: "claude-code", session_id: "render", transcript: CLAUDE };
+    expect((await call("POST", "/v1/sessions", { body })).status).toBe(201);
+    const path = "/v1/sessions/claude-code/render/trace";
+    const seshi = await call("GET", path);
+    expect(seshi.body).toMatchObject({ schema: "seshi/trace/1" });
+    expect((await call("GET", `${path}?format=seshi`)).body).toEqual(seshi.body);
+    const letta = await call("GET", `${path}?format=letta`);
+    expect(letta.body).toMatchObject({
+      schema: "sessionstorage/trace/1",
+      content_hash: (seshi.body as { content_hash: string }).content_hash,
     });
-    const me = await call("GET", "/v1/me", { app: otlp });
-    expect(me.body).toMatchObject({ format: "otlp" });
-    const body = { agent: "claude-code", session_id: "sess1", transcript: CLAUDE };
-    expect((await call("POST", "/v1/sessions", { body, app: otlp })).status).toBe(201);
-    const trace = await call("GET", "/v1/sessions/claude-code/sess1/trace", { app: otlp });
-    expect(trace.status).toBe(200);
-    expect(trace.body).toHaveProperty("resourceSpans");
-    // The bucket is otlp now; a server configured for letta is refused it.
-    const letta = createApp({
-      store,
-      storage: { url: store.url },
-      tokens: [{ token: TOKEN, owner: "acme" }],
-      format: "letta",
+    expect((await call("GET", `${path}?format=otlp`)).body).toHaveProperty("resourceSpans");
+    expect((await call("GET", `${path}?format=atif`)).body).toMatchObject({
+      schema_version: "ATIF-v1.7",
+      agent: { name: "claude-code" },
     });
-    const refused = await call("POST", "/v1/sessions", { body, app: letta });
-    expect(refused.status).toBe(502);
-    expect(JSON.stringify(refused.body)).toContain("holds otlp traces");
+    const bad = await call("GET", `${path}?format=xml`);
+    expect(bad.status).toBe(400);
+    expect(JSON.stringify(bad.body)).toContain("seshi, letta, otlp, atif");
   });
 
   it("a failing bucket", async () => {
@@ -389,7 +403,8 @@ describe("the server honours it", () => {
       tokens: [{ token: TOKEN, owner: "acme" }],
     });
     const body = { agent: "claude-code", session_id: "x", transcript: CLAUDE };
-    expect((await call("GET", "/v1/me", { app: down })).status).toBe(502);
+    // Who the token is needs no bucket.
+    expect((await call("GET", "/v1/me", { app: down })).status).toBe(200);
     expect((await call("POST", "/v1/sessions", { body, app: down })).status).toBe(502);
     expect((await call("GET", "/v1/sessions", { app: down })).status).toBe(502);
     expect((await call("GET", "/v1/sessions/claude-code/x", { app: down })).status).toBe(502);

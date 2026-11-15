@@ -63,6 +63,9 @@ beforeEach(() => {
     owner: "acme",
     formats: FORMATS,
     now,
+    // The server records a static token's writes as `static`; the direct client stands for
+    // the same caller.
+    writer: { kind: "static", principal: "acme", source_id: "upload" },
   });
   store = new FsStore(join(dir, "server"));
   const app = createApp({
@@ -93,11 +96,7 @@ async function both<T>(call: (db: SessionDB) => Promise<T>): Promise<T> {
 
 describe("the two backends agree", () => {
   it("on identity", async () => {
-    expect(await http.me()).toEqual({
-      owner: "acme",
-      storage: { url: store.url },
-      format: "letta",
-    });
+    expect(await http.me()).toEqual({ owner: "acme", storage: { url: store.url } });
   });
 
   it("on a session's life: store, read, chunk, list, changes, tombstone", async () => {
@@ -136,6 +135,10 @@ describe("the two backends agree", () => {
     const trace = (await both((db) => db.getTrace("claude-code", "sess1"))) as Trace | null;
     expect(trace?.content_hash).toBe(first.content_hash);
     await both((db) => db.getTrace("claude-code", "sess1", first.content_hash));
+    // Every rendering agrees too (X6.2).
+    for (const format of ["seshi", "letta", "otlp", "atif"] as const) {
+      await both((db) => db.getTrace("claude-code", "sess1", undefined, format));
+    }
 
     const page = await both((db) => db.listSessions({ limit: 10 }));
     expect(page.sessions).toHaveLength(1);

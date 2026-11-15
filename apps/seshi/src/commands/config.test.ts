@@ -69,13 +69,13 @@ describe("seshi config check", () => {
   });
 
   it("fails on unknown keys and bad values, every one, with where each came from", async () => {
-    const path = file("seshi.toml", `[store]\nurl = "s3://b/p"\nformat = "xml"\nurll = "x"\n`);
+    const path = file("seshi.toml", `[store]\nurl = "s3://b/p"\nregion = 7\nurll = "x"\n`);
     const { code, err } = await seshi(["config", "check", "--config", path], {
       SESHI_FILTER__MIN_CHARS: "lots",
     });
     expect(code).toBe(1);
     expect(err).toContain(`error: store.urll: unknown key (in ${path})`);
-    expect(err).toContain(`store.format:`);
+    expect(err).toContain(`store.region:`);
     expect(err).toContain("filter.min_chars:");
     expect(err).toContain("(from env SESHI_FILTER__MIN_CHARS)");
   });

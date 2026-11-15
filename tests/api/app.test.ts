@@ -8,7 +8,7 @@ import type { NormalizeInput } from "@seshi/formats";
 import { prefixSha256 } from "@seshi/model";
 import { getTrace, normalizeTranscript as normalize } from "@seshi/pipeline";
 import { redactionRules } from "@seshi/redact";
-import { archiveId, FsStore, gunzipJson, keys, readMetadata } from "@seshi/store";
+import { archiveId, FsStore, getBytes, gunzipJson, keys, readMetadata } from "@seshi/store";
 import { buildFormats } from "seshi/integrations";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { transcript } from "../tooling/testdata";
@@ -121,7 +121,7 @@ describe("auth", () => {
     ]) {
       const res = await call("GET", "/v1/me", { token });
       expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ owner, storage: { url: store.url }, format: "letta" });
+      expect(await res.json()).toEqual({ owner, storage: { url: store.url } });
     }
   });
 
@@ -170,11 +170,7 @@ describe("auth", () => {
     it("accepts a token the secret signed, as the owner it names", async () => {
       const res = await call("GET", "/v1/me", { token: mint("u-42") });
       expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({
-        owner: "u-42",
-        storage: { url: store.url },
-        format: "letta",
-      });
+      expect(await res.json()).toEqual({ owner: "u-42", storage: { url: store.url } });
     });
 
     it("scopes it to that owner's folder, like a listed token", async () => {
@@ -275,7 +271,7 @@ describe("sessions", () => {
 
     // Nothing unredacted reached the bucket: the trace and the raw part are both scrubbed.
     const trace = gunzipJson<{ records: unknown[]; metadata: { normalizer?: unknown } }>(
-      (await store.get(keys.trace("acme", archive, body.content_hash))) as Uint8Array,
+      (await getBytes(store, keys.trace("acme", archive, body.content_hash))) as Uint8Array,
     );
     // The trace says what normalized it, so a later pass can pick out what to redo.
     expect(trace.metadata.normalizer).toEqual({
@@ -285,7 +281,7 @@ describe("sessions", () => {
     const traceText = JSON.stringify(trace);
     expect(traceText).not.toContain("hunter2secretvalue42");
     expect(traceText).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz012345");
-    const rawBytes = (await store.get(keys.raw("acme", archive, 0, "jsonl"))) as Uint8Array;
+    const rawBytes = (await getBytes(store, keys.raw("acme", archive, 0, "jsonl"))) as Uint8Array;
     const rawText = new TextDecoder().decode(Bun.gunzipSync(new Uint8Array(rawBytes)));
     expect(rawText).not.toContain("hunter2secretvalue42");
     expect(rawText).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz012345");
@@ -317,7 +313,9 @@ describe("sessions", () => {
     });
     expect(res.status).toBe(201);
     const archive = archiveId("acme", "claude-code", "sess-own");
-    const raw = gunzipSync((await store.get(keys.raw("acme", archive, 0, "jsonl"))) as Uint8Array);
+    const raw = gunzipSync(
+      (await getBytes(store, keys.raw("acme", archive, 0, "jsonl"))) as Uint8Array,
+    );
     const text = new TextDecoder().decode(raw);
     expect(text).toContain("The auth [redacted:custom-pattern]");
     expect(text).not.toContain("The auth flow");
@@ -722,7 +720,7 @@ describe("sessions", () => {
     expect((await gone.json()).removed).toBeGreaterThan(0);
     expect((await call("GET", "/v1/sessions/claude-code/sess4/trace", { token })).status).toBe(410);
     const archive = archiveId("acme", "claude-code", "sess4");
-    expect(await store.get(keys.trace("acme", archive, metadata.head))).toBeNull();
+    expect(await getBytes(store, keys.trace("acme", archive, metadata.head))).toBeNull();
     expect((await call("DELETE", "/v1/sessions/claude-code/nope", { token })).status).toBe(404);
 
     // A redacted session cannot come back.
@@ -906,11 +904,11 @@ describe("Datadog Trajectory format", () => {
     expect(metadata?.parent_session_id).toBeUndefined();
 
     const trace = gunzipJson<{ events: { role: string }[] }>(
-      (await store.get(keys.trace("acme", archive, body.content_hash))) as Uint8Array,
+      (await getBytes(store, keys.trace("acme", archive, body.content_hash))) as Uint8Array,
     );
     expect(trace.events.map((e) => e.role)).toContain("tool_call");
     expect(JSON.stringify(trace)).not.toContain("hunter2secretvalue42");
-    const rawBytes = (await store.get(keys.raw("acme", archive, 0, "jsonl"))) as Uint8Array;
+    const rawBytes = (await getBytes(store, keys.raw("acme", archive, 0, "jsonl"))) as Uint8Array;
     const rawText = new TextDecoder().decode(Bun.gunzipSync(new Uint8Array(rawBytes)));
     expect(rawText).toContain('"event_type":"session_end"');
     expect(rawText).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz012345");

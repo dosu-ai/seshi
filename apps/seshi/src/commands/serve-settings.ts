@@ -30,7 +30,10 @@ export interface ServeSettings {
     accountId?: string;
     credentials?: { accessKeyId: string; secretAccessKey: string; sessionToken?: string };
   };
-  format: ServerConfig["store"]["format"];
+  /** The deployment the bucket must belong to (`store.deployment_id`, X1.4). */
+  deploymentId: string | undefined;
+  /** The organization the bucket must belong to (`store.org`, X1.4). */
+  org: string | undefined;
   redactionPacks: string[];
   hostname: string;
   port: number;
@@ -100,7 +103,8 @@ export function serveSettings(config: ServerConfig): ServeSettings {
       ...(store.account_id ? { accountId: store.account_id } : {}),
       ...(credentials ? { credentials } : {}),
     },
-    format: store.format,
+    deploymentId: store.deployment_id,
+    org: store.org,
     redactionPacks: config.redaction.packs,
     hostname: listen.hostname,
     port: listen.port,

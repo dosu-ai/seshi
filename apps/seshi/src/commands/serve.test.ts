@@ -1,4 +1,12 @@
-import { chmodSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig, type ServerConfig, serverConfigSchema } from "@seshi/config";
@@ -124,7 +132,7 @@ describe("seshi serve", () => {
       ["--listen", "127.0.0.1:0"],
     );
     try {
-      expect(server.out).toContain(`traces to file://${join(dir, "from-file")}`);
+      expect(server.out).toContain(`sessions in file://${join(dir, "from-file")}`);
       expect(server.out).toContain("for alice, default");
       expect(server.out).toContain(`(config ${join(realpathSync(dir), "seshi.toml")})`);
       const response = await fetch(`http://127.0.0.1:${server.port}/v1/me`, {
@@ -141,7 +149,7 @@ describe("seshi serve", () => {
     writeFileSync(file, `[store]\nurl = "file://${join(dir, "named")}"\n`);
     const server = await listening({ SESHI_STORE__URL: "" }, ["--config", file]);
     try {
-      expect(server.out).toContain(`traces to file://${join(dir, "named")}`);
+      expect(server.out).toContain(`sessions in file://${join(dir, "named")}`);
     } finally {
       await server.stop();
     }
@@ -157,13 +165,55 @@ describe("seshi serve", () => {
   });
 
   it("exits 1 with every config problem, and where each value came from", async () => {
-    const { code, out } = await boot({ SESHI_STORE__FORMAT: "xml", SESHI_STORE__URLL: "x" });
+    const { code, out } = await boot({ SESHI_FILTER__MIN_CHARS: "lots", SESHI_STORE__URLL: "x" });
     expect(code).toBe(1);
     expect(out).toContain("seshi: SESHI_STORE__URLL: not a setting");
-    const second = await boot({ SESHI_STORE__FORMAT: "xml" });
+    const second = await boot({ SESHI_FILTER__MIN_CHARS: "lots" });
     expect(second.code).toBe(1);
-    expect(second.out).toContain("seshi: store.format:");
-    expect(second.out).toContain("(from env SESHI_STORE__FORMAT)");
+    expect(second.out).toContain("seshi: filter.min_chars:");
+    expect(second.out).toContain("(from env SESHI_FILTER__MIN_CHARS)");
+    // The per-bucket trace format is gone (X6.2): naming it is an unknown setting.
+    const third = await boot({ SESHI_STORE__FORMAT: "otlp" });
+    expect(third.code).toBe(1);
+    expect(third.out).toContain("seshi: SESHI_STORE__FORMAT: not a setting");
+  });
+
+  it("records the deployment and org in the bucket's marker, and refuses another's bucket", async () => {
+    const first = await listening({
+      SESHI_STORE__DEPLOYMENT_ID: "prod-eu",
+      SESHI_STORE__ORG: "acme",
+    });
+    try {
+      expect(first.out).toContain("(deployment prod-eu)");
+    } finally {
+      await first.stop();
+    }
+    const marker = JSON.parse(readFileSync(join(dir, "bucket", "seshi.json"), "utf8"));
+    expect(marker).toMatchObject({
+      schema: "seshi/layout/1",
+      trace_schema: "seshi/trace/1",
+      deployment_id: "prod-eu",
+      org: "acme",
+      created_by: `seshi/${VERSION}`,
+    });
+    const staging = await boot({ SESHI_STORE__DEPLOYMENT_ID: "staging" });
+    expect(staging.code).toBe(1);
+    expect(staging.out).toContain('belongs to deployment "prod-eu", not "staging"');
+    const globex = await boot({ SESHI_STORE__ORG: "globex" });
+    expect(globex.code).toBe(1);
+    expect(globex.out).toContain('belongs to org "acme", not "globex"');
+  });
+
+  it("refuses a bucket a sessiondb server wrote", async () => {
+    mkdirSync(join(dir, "bucket"), { recursive: true });
+    writeFileSync(
+      join(dir, "bucket", "sessionstorage.json"),
+      JSON.stringify({ schema: "sessionstorage/layout/1", created_at: "x", created_by: "y" }),
+    );
+    const { code, out } = await boot({});
+    expect(code).toBe(1);
+    expect(out).toContain("seshi: cannot use file://");
+    expect(out).toContain("holds a sessiondb store");
   });
 
   it("exits 1 on an unknown flag", async () => {
@@ -207,8 +257,9 @@ describe("serveSettings", () => {
       config(
         {
           "server.listen": "[::1]:8080",
-          "store.format": "otlp",
           "store.region": "eu-west-1",
+          "store.deployment_id": "prod-eu",
+          "store.org": "acme",
           "redaction.packs": "/etc/rules.json",
           "filter.min_chars": 10,
           "limits.max_upload_bytes": "1MiB",
@@ -231,7 +282,8 @@ describe("serveSettings", () => {
       owners: ["alice", "bob"],
       url: "file:///tmp/x",
       store: { region: "eu-west-1", credentials: { accessKeyId: "AKIA", secretAccessKey: "shh" } },
-      format: "otlp",
+      deploymentId: "prod-eu",
+      org: "acme",
       redactionPacks: ["/etc/rules.json"],
       hostname: "::1",
       port: 8080,
@@ -244,12 +296,13 @@ describe("serveSettings", () => {
     });
   });
 
-  it("defaults to letta traces on every interface, port 7200, with no packs", () => {
+  it("defaults to every interface, port 7200, no packs and no deployment or org to check", () => {
     const settings = serveSettings(
       config({}, { SESHI_AUTH__TOKENS__DEFAULT: "single-token-0123456789" }),
     );
     expect(settings).toMatchObject({
-      format: "letta",
+      deploymentId: undefined,
+      org: undefined,
       hostname: "0.0.0.0",
       port: 7200,
       redactionPacks: [],

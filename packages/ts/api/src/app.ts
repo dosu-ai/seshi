@@ -15,13 +15,16 @@ import { timingSafeEqual } from "node:crypto";
 import { MIN_SECRET_LENGTH, verifyToken } from "@seshi/auth";
 import type { FormatRegistry } from "@seshi/formats";
 import {
+  type CallerKind,
+  isRenderFormat,
   OffsetMismatch,
   type RawFormat,
+  RENDER_FORMATS,
   SessionRejected,
   type StorageView,
   StoreError,
   type StoreSessionResult,
-  type TraceFormat,
+  UPLOAD_SOURCE,
   type Upload,
   VERSION,
 } from "@seshi/model";
@@ -49,14 +52,11 @@ export interface AppOptions {
   /** Signed tokens are accepted too when set: an HS256 JWT whose `sub` is the owner, minted
    * by whoever else holds this secret. One of `tokens` and `tokenSecret` is required. */
   tokenSecret?: string;
-  /** Identifies this server in layout markers (`sessiondb-server/0.1.0`). */
+  /** Identifies this server in layout markers (`seshi/0.9.0`). */
   client?: string;
   now?: () => Date;
   /** The operator's redaction, added to the built-in rules for every session. */
   redaction?: RedactionRules;
-  /** How traces are written to the bucket: `letta` (the default) or `otlp`. The bucket's
-   * layout marker must agree. */
-  format?: TraceFormat;
   /** The session filter (X4.10), config's `[filter]`; today's rules when omitted. */
   filter?: Readonly<FilterRules>;
   /** Size caps, config's `[limits]`; today's when omitted. */
@@ -184,15 +184,18 @@ export function createApp(options: AppOptions) {
   if (tokenSecret !== undefined && tokenSecret.length < MIN_SECRET_LENGTH) {
     throw new Error(`the token secret must be ${MIN_SECRET_LENGTH}+ characters`);
   }
-  const client = options.client ?? `sessiondb-server/${VERSION}`;
+  const client = options.client ?? `seshi/${VERSION}`;
   const now = options.now ?? (() => new Date());
   const routes: Route[] = [];
 
-  /** The SDK over the bucket, scoped to each owner a token names: the listed owners up
-   * front, a signed token's owner the first time it calls. */
+  /** The SDK over the bucket, scoped to each owner a token names and to the kind of token it
+   * was (a static token from config, or a legacy signed token), which every write records as
+   * its writer (X5.5): the listed owners up front, a signed token's owner the first time it
+   * calls. Both kinds bind the owner, so the owner is `verified`. */
   const clients = new Map<string, StoreSessionDB>();
-  function clientFor(owner: string): StoreSessionDB {
-    let db = clients.get(owner);
+  function clientFor(owner: string, kind: CallerKind = "static"): StoreSessionDB {
+    const id = `${kind}:${owner}`;
+    let db = clients.get(id);
     if (!db) {
       db = new StoreSessionDB({
         store,
@@ -202,11 +205,12 @@ export function createApp(options: AppOptions) {
         client,
         now,
         redaction: options.redaction,
-        format: options.format,
         filter: options.filter,
         limits: options.limits,
+        writer: { kind, principal: owner, source_id: UPLOAD_SOURCE },
+        owner_basis: "verified",
       });
-      clients.set(owner, db);
+      clients.set(id, db);
     }
     return db;
   }
@@ -229,11 +233,10 @@ export function createApp(options: AppOptions) {
     const token = bearer(request);
     if (!token) throw new HttpError(401, "unauthorized", "a valid token is required");
     const grant = tokens.find((known) => tokensEqual(token, known.token));
-    const owner =
-      grant?.owner ??
-      (tokenSecret !== undefined ? verifyToken(tokenSecret, token, now()) : undefined);
+    if (grant) return clientFor(grant.owner, "static");
+    const owner = tokenSecret !== undefined ? verifyToken(tokenSecret, token, now()) : undefined;
     if (owner === undefined) throw new HttpError(401, "unauthorized", "a valid token is required");
-    return clientFor(owner);
+    return clientFor(owner, "legacy");
   }
 
   // --- health -----------------------------------------------------------------
@@ -244,7 +247,7 @@ export function createApp(options: AppOptions) {
 
   route("GET", "/v1/me", async ({ request }) => {
     const db = authorize(request);
-    return json({ ...(await db.me()), format: await db.traceFormat() });
+    return json(await db.me());
   });
 
   // --- sessions ---------------------------------------------------------
@@ -341,9 +344,13 @@ export function createApp(options: AppOptions) {
     if (metadata.status === "redacted") {
       throw new HttpError(410, "redacted", "session was redacted; no trace");
     }
+    const format = url.searchParams.get("format") ?? "seshi";
+    if (!isRenderFormat(format)) {
+      throw new HttpError(400, "bad_query", `format must be one of ${RENDER_FORMATS.join(", ")}`);
+    }
     const hash = url.searchParams.get("hash") ?? metadata.head;
     if (!hash) throw new HttpError(404, "no_trace", "session is stored raw only; no trace yet");
-    const trace = await db.getTrace(agent, sessionId, hash);
+    const trace = await db.getTrace(agent, sessionId, hash, format);
     if (!trace) throw new HttpError(404, "not_found", "no such trace");
     return json(trace);
   });
@@ -390,7 +397,7 @@ export function createApp(options: AppOptions) {
           return error(502, "storage_error", `storage failed: ${err.message}`);
         }
         const message = err instanceof Error ? err.message : String(err);
-        console.error(`[sessiondb] ${request.method} ${url.pathname}: ${message}`);
+        console.error(`[seshi] ${request.method} ${url.pathname}: ${message}`);
         return error(500, "internal", "internal error");
       }
     }

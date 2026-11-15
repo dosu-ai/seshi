@@ -151,5 +151,5 @@ export {
   sourcesSection,
   UPLOAD_SOURCE_ID,
 } from "./sources";
-export { type StoreSection, storeSection, TRACE_FORMATS } from "./store";
+export { type StoreSection, storeSection } from "./store";
 export { type WorkerSection, workerSection } from "./worker";

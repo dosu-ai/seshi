@@ -14,6 +14,7 @@ import {
   type ListSessionsOptions,
   OffsetMismatch,
   type ReadChangesOptions,
+  type RenderFormat,
   type SessionDB,
   type SessionMetadata,
   SessionRejected,
@@ -159,11 +160,16 @@ export class HttpSessionDB implements SessionDB {
     return body as SessionMetadata;
   }
 
-  async getTrace(agent: string, sessionId: string, hash?: string): Promise<StoredTrace | null> {
+  async getTrace(
+    agent: string,
+    sessionId: string,
+    hash?: string,
+    format?: RenderFormat,
+  ): Promise<StoredTrace | null> {
     const { status, body } = await this.request(
       "GET",
       `${this.sessionPath(agent, sessionId)}/trace`,
-      { query: { hash } },
+      { query: { hash, format } },
     );
     if (status === 404 || status === 410) return null;
     if (status !== 200) HttpSessionDB.refuse(status, body);

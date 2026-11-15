@@ -11,29 +11,31 @@
  * replaces it with an Instance built in-process. */
 
 import { type HttpClientOptions, HttpSessionDB } from "@seshi/client";
-import type { FormatRegistry } from "@seshi/formats";
+import { type FormatRegistry, renderTrace } from "@seshi/formats";
 import {
   type ChangesPage,
   type Identity,
   type ListSessionsOptions,
+  localWriter,
+  type OwnerBasis,
   type ReadChangesOptions,
+  type RenderFormat,
   type SessionDB,
   type SessionMetadata,
   type SessionsPage,
   type StorageView,
   type StoredTrace,
   type StoreSessionResult,
-  type TraceFormat,
+  type TombstoneReason,
   type Upload,
   VERSION,
+  type Writer,
 } from "@seshi/model";
 import type { RedactionRules } from "@seshi/redact";
 import {
   archiveId,
   assertOwner,
   ensureLayout,
-  LAYOUT_KEY,
-  layoutFormat,
   type OpenStoreOptions,
   openStore,
   probe,
@@ -52,15 +54,15 @@ export interface StoreClientOptions {
   formats: FormatRegistry;
   /** What `me()` reports as the store's location; derived from the store's URL when omitted. */
   storage?: StorageView;
-  /** Identifies this writer in the layout marker (`sessiondb-cli/0.2.0`). */
+  /** Identifies this writer in the layout marker (`seshi/0.9.0`). */
   client?: string;
   now?: () => Date;
   /** Redaction added to the built-in rules (`redactionRules`). */
   redaction?: RedactionRules;
-  /** How traces are written: `letta` (trajectory-v1 records, the default) or `otlp` (GenAI
-   * spans). A new store takes it; an existing one must hold it, so writing an `otlp` store
-   * takes opting in. Reads (`getTrace`, `me`) follow whatever the store holds either way. */
-  format?: TraceFormat;
+  /** Who this client writes as (X5.5); the owner itself in local mode by default. */
+  writer?: Writer;
+  /** How the owner was established; `verified` by default. */
+  owner_basis?: OwnerBasis;
   /** The session filter (`SessionOptions.filter`). */
   filter?: Readonly<FilterRules>;
   /** Size caps (`SessionOptions.limits`). */
@@ -75,38 +77,30 @@ export class StoreSessionDB implements SessionDB {
   private readonly client: string;
   private readonly now: () => Date;
   private readonly redaction: RedactionRules | undefined;
-  private readonly format: TraceFormat | undefined;
   private readonly formats: FormatRegistry;
   private readonly filter: Readonly<FilterRules> | undefined;
   private readonly limits: Readonly<Limits> | undefined;
-  private resolved: TraceFormat | undefined;
+  readonly writer: Writer;
+  private readonly ownerBasis: OwnerBasis;
 
   constructor(options: StoreClientOptions) {
     this.owner = assertOwner(options.owner);
     this.store = options.store;
     this.storage = options.storage ?? { url: options.store.url };
-    this.client = options.client ?? `@dosu/sessiondb/${VERSION}`;
+    this.client = options.client ?? `seshi/${VERSION}`;
     this.now = options.now ?? (() => new Date());
     this.redaction = options.redaction;
-    this.format = options.format;
     this.formats = options.formats;
     this.filter = options.filter;
     this.limits = options.limits;
-  }
-
-  /** The store's trace format: its marker's, checked against the one configured. Remembered
-   * once the store has a marker, since a store never changes format. */
-  async traceFormat(): Promise<TraceFormat> {
-    if (this.resolved) return this.resolved;
-    const format = await layoutFormat(this.store, this.format);
-    if (await this.store.stat(LAYOUT_KEY)) this.resolved = format;
-    return format;
+    this.writer = options.writer ?? localWriter(this.owner);
+    this.ownerBasis = options.owner_basis ?? "verified";
   }
 
   /** Write the layout marker and this owner's probe, so a wrong bucket or key fails here and
    * not on the first session. */
   async check(): Promise<void> {
-    await ensureLayout(this.store, this.client, this.format ?? "letta");
+    await ensureLayout(this.store, { createdBy: this.client });
     await probe(this.store, this.owner);
   }
 
@@ -119,9 +113,9 @@ export class StoreSessionDB implements SessionDB {
         client: this.client,
         now: this.now,
         redaction: this.redaction,
-        format: this.format,
         filter: this.filter,
         limits: this.limits,
+        context: { writer: this.writer, owner_basis: this.ownerBasis },
       },
     );
   }
@@ -130,13 +124,19 @@ export class StoreSessionDB implements SessionDB {
     return getSession(this.store, this.owner, agent, sessionId);
   }
 
-  async getTrace(agent: string, sessionId: string, hash?: string): Promise<StoredTrace | null> {
+  async getTrace(
+    agent: string,
+    sessionId: string,
+    hash?: string,
+    format: RenderFormat = "seshi",
+  ): Promise<StoredTrace | null> {
     const metadata = await this.getSession(agent, sessionId);
     if (!metadata || metadata.status === "redacted") return null;
     const wanted = hash ?? metadata.head;
-    if (!wanted) return null;
+    if (!wanted || !/^[0-9a-f]{64}$/.test(wanted)) return null;
     const archive = archiveId(this.owner, agent, sessionId);
-    return getTrace(this.store, this.owner, archive, wanted, await this.traceFormat());
+    const trace = await getTrace(this.store, this.owner, archive, wanted);
+    return trace === null ? null : renderTrace(trace, format);
   }
 
   listSessions(options: ListSessionsOptions = {}): Promise<SessionsPage> {
@@ -146,14 +146,19 @@ export class StoreSessionDB implements SessionDB {
     });
   }
 
-  async tombstone(agent: string, sessionId: string): Promise<{ removed: number } | null> {
+  async tombstone(
+    agent: string,
+    sessionId: string,
+    reason: TombstoneReason = "deleted",
+  ): Promise<{ removed: number } | null> {
     return tombstone({
       store: this.store,
       owner: this.owner,
       agent,
       session_id: sessionId,
       now: this.now,
-      format: await this.traceFormat(),
+      reason,
+      writer: this.writer,
     });
   }
 
@@ -161,7 +166,7 @@ export class StoreSessionDB implements SessionDB {
     return readChanges(this.store, this.owner, options);
   }
 
-  /** Who this client is, without touching the store; `traceFormat()` reads the store's format. */
+  /** Who this client is, without touching the store. */
   async me(): Promise<Identity> {
     return { owner: this.owner, storage: this.storage };
   }
@@ -178,8 +183,6 @@ export type ConnectOptions =
       client?: string;
       /** Redaction added to the built-in rules (`redactionRules`). */
       redaction?: RedactionRules;
-      /** The trace format; see `StoreClientOptions.format`. */
-      format?: TraceFormat;
     } & OpenStoreOptions);
 
 /** A client from its configuration: a server and a token, or a store and an owner. */
@@ -187,10 +190,10 @@ export function connect(options: ConnectOptions): SessionDB {
   if ("server" in options) {
     return new HttpSessionDB(options);
   }
-  const { store: target, owner, formats, client, redaction, format, ...open } = options;
+  const { store: target, owner, formats, client, redaction, ...open } = options;
   if (typeof target === "string") {
     const { store, storage } = openStore(target, open);
-    return new StoreSessionDB({ store, storage, owner, formats, client, redaction, format });
+    return new StoreSessionDB({ store, storage, owner, formats, client, redaction });
   }
-  return new StoreSessionDB({ store: target, owner, formats, client, redaction, format });
+  return new StoreSessionDB({ store: target, owner, formats, client, redaction });
 }

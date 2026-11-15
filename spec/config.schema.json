@@ -185,17 +185,8 @@
           "type": "string",
           "minLength": 1
         },
-        "format": {
-          "default": "letta",
-          "description": "How traces are written: letta (trajectory-v1 records) or otlp (GenAI spans). A bucket holds one format, fixed by its first writer. Transitional: one canonical format replaces it (X6.2).",
-          "type": "string",
-          "enum": [
-            "letta",
-            "otlp"
-          ]
-        },
         "deployment_id": {
-          "description": "This deployment's id, recorded in the layout marker (X1.4).",
+          "description": "This deployment's id, recorded in the layout marker (seshi.json, X1.4): the server will not start against a bucket marked for another. Without it the first server generates one.",
           "type": "string",
           "minLength": 1
         },

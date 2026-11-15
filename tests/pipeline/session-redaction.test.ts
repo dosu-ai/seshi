@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { gunzipSync } from "node:zlib";
 import { getSession, storeSession } from "@seshi/pipeline";
 import { redactionRules } from "@seshi/redact";
-import { archiveId, FsStore, keys } from "@seshi/store";
+import { archiveId, FsStore, getBytes, keys } from "@seshi/store";
 import { buildFormats } from "seshi/integrations";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -69,7 +69,8 @@ const answer = line({
 });
 
 async function rawPart(part: number): Promise<string> {
-  const bytes = await store.get(
+  const bytes = await getBytes(
+    store,
     keys.raw(owner, archiveId(owner, "claude-code", sid), part, "jsonl"),
   );
   return new TextDecoder().decode(gunzipSync(bytes as Uint8Array));
@@ -123,7 +124,8 @@ describe("storeSession redaction", () => {
     expect(raw).toContain("[redacted:custom-pattern]");
     expect(raw).not.toContain("plainvalue");
     const metadata = await getSession(store, owner, "claude-code", sid);
-    const trace = await store.get(
+    const trace = await getBytes(
+      store,
       keys.trace(owner, metadata?.archive_id as string, metadata?.head as string),
     );
     const text = new TextDecoder().decode(gunzipSync(trace as Uint8Array));

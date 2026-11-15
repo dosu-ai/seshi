@@ -1,6 +1,6 @@
 /** `@seshi/pipeline`: one session into the store (redact the transcript, store it as a raw part,
- * normalize it through the deployment's format registry, decide what is new, write the trace),
- * and the reads over a store. Layer 2 (X3.2). The write path is today's; branch 04 reworks it
+ * normalize it through the deployment's format registry, decide what is new, write the
+ * canonical trace), and the reads over a store. Layer 2 (X3.2). The write path is today's; branch 04 reworks it
  * into the envelope pipeline (X4). */
 
 export { IngestRejected, OffsetMismatch, SessionRejected } from "@seshi/model";
@@ -27,6 +27,7 @@ export {
   type StoredTrace,
   type TombstoneInput,
   tombstone,
+  type WriteContext,
 } from "./ingest";
 export { DEFAULT_LIMITS, type Limits } from "./limits";
 export { type ConnectOptions, connect, type StoreClientOptions, StoreSessionDB } from "./local";

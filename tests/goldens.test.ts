@@ -1,5 +1,5 @@
 /** For every golden (the cross-language ones in `spec/testdata/goldens/`, each integration's in
- * its `testdata/goldens/`, ATIF's in `packages/ts/formats/testdata/goldens/`), `parseTrajectory`
+ * its `testdata/goldens/`, ATIF's in `packages/ts/formats/testdata/goldens/`), `parseTrace`
  * must still produce the committed `content_hash`, events and trace fields, or reject with
  * `TrajectoryError` where the golden says so. `content_hash` is a layout contract
  * (`spec/layout.md`): a change here is a change every reader sees, so it has to be a deliberate
@@ -7,7 +7,7 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
-import { parseTrajectory, TrajectoryError } from "@seshi/model";
+import { parseTrace, TrajectoryError } from "@seshi/model";
 import { describe, expect, it } from "vitest";
 import { type Expected, expectedOf } from "./tooling/goldens";
 import { ROOT, testdataDirs } from "./tooling/testdata";
@@ -39,14 +39,14 @@ describe("goldens", () => {
 
         if (expected.rejected) {
           it(`${name}: rejected (${expected.error})`, () => {
-            expect(() => parseTrajectory(records)).toThrow(TrajectoryError);
-            expect(() => parseTrajectory(records)).toThrow(expected.error);
+            expect(() => parseTrace(records)).toThrow(TrajectoryError);
+            expect(() => parseTrace(records)).toThrow(expected.error);
           });
           continue;
         }
 
         it(`${name}: content_hash ${expected.content_hash.slice(0, 12)}`, () => {
-          expect(expectedOf(parseTrajectory(records))).toEqual(expected);
+          expect(expectedOf(parseTrace(records))).toEqual(expected);
         });
       }
     });
