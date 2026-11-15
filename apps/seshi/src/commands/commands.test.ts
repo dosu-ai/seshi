@@ -475,7 +475,9 @@ describe("seshi reprocess (X4.9)", () => {
   it("refuses uploads, unknown sources and bad usage", async () => {
     const upload = await seshi(["reprocess", "--source", "upload"], { toml: SOURCES });
     expect(upload.code).toBe(EXIT.failure);
-    expect(upload.err).toContain("not built yet");
+    // Uploaded sessions are rebuilt from the machines that uploaded them (X4.9).
+    expect(upload.err).toContain("seshi capture resend");
+    expect(upload.err).not.toContain("not built yet");
     expect((await seshi(["reprocess", "--source", "nope"], { toml: SOURCES })).code).toBe(
       EXIT.notFound,
     );

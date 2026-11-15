@@ -8,8 +8,9 @@
  *                   [--config <file>] [--set path=value]…
  *
  * `--run` polls the source once right away instead of waiting for the worker. Uploads (source
- * `upload`) are refused: they are not polled, and the uploader resend X4.9 describes (from the
- * machines that hold the transcripts) is not built yet (14's "Still to check"). */
+ * `upload`) are refused: they are not polled, and the server keeps no raw logs to rebuild them
+ * from. The machines that hold the transcripts resend them (X4.9): the uploader resends the
+ * sessions the server marks stale by itself, and `seshi capture resend` does it by hand (21). */
 
 import { isDeepStrictEqual, parseArgs } from "node:util";
 import { SourceError } from "@seshi/sources";
@@ -19,8 +20,12 @@ import { emit, fail, takeJson, usageError } from "../cli/output";
 import type { CommandContext } from "./index";
 import { openServer, SERVER_OPTIONS, serverFailure } from "./server-instance";
 
-const USAGE =
-  "usage: seshi reprocess --source <id> [--since <time>] [--dry-run] [--run] [--json] [--config <file>] [--set path=value]…";
+const USAGE = [
+  "usage: seshi reprocess --source <id> [--since <time>] [--dry-run] [--run] [--json] [--config <file>] [--set path=value]…",
+  "Rewinds a polled source. Uploaded sessions (source upload) are rebuilt from the machines that",
+  "uploaded them instead: their uploaders resend stale sessions by themselves, and",
+  "seshi capture resend [--all | --session <id>] does it by hand.",
+].join("\n");
 
 export async function run(ctx: CommandContext): Promise<number> {
   const { json, rest } = takeJson(ctx.argv);

@@ -451,7 +451,7 @@ export class Sources {
     if (id === UPLOAD_SOURCE) {
       throw new SourceError(
         "not_polled",
-        "uploads are not polled, so they cannot be read again from here; resending uploaded sessions from the machines that hold them is not built yet",
+        "uploads are not polled, and the server keeps no raw logs to rebuild them from; they are resent from the machines that uploaded them: the uploader resends stale sessions by itself, and seshi capture resend [--all | --session <id>] does it by hand",
       );
     }
     const { config, connector } = this.pollable(id);

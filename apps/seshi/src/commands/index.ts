@@ -96,7 +96,8 @@ export const COMMANDS: Readonly<Record<string, CommandSpec>> = {
     load: () => import("./redact"),
   },
   reprocess: {
-    summary: "rewind a source so its sessions are read and written again",
+    summary:
+      "rewind a polled source so its sessions are read and written again (uploads: capture resend)",
     load: () => import("./reprocess"),
   },
   review: {

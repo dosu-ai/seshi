@@ -118,7 +118,8 @@ Where the config and bucket keys are:
   quiet; remove records past retention; checkpoints, record counts and health; the records of
   envelopes that were not stored and why, never their content.
 - `seshi reprocess --source <id> [--since <time>] [--run]`: rewind a source so its sessions are
-  read and written again (X4.9), while the source still has them.
+  read and written again (X4.9), while the source still has them. Uploads are not polled and
+  the server keeps no raw logs: the machines that uploaded them resend them (`rebuild`, below).
 
 From an admin's laptop, signed in with `seshi login`, `seshi workers status` and `seshi sync
 status|failed|dropped` read the same through `/v1/admin/jobs` and `/v1/admin/sources` (add
@@ -305,6 +306,7 @@ id; turning it back on uploads it as a new session (`<id>~1`).
   "offset": 0,                     // where `transcript` starts in the log: 0 for the whole log
                                    // (the default), else a chunk from there; see "In chunks"
   "replace": false,                // rewrite a session this upload does not extend; see below
+  "rebuild": false,                // build the session again from this whole log; see below
   "visibility": "org",             // or "owner", for a new session (X5.10)
   "idempotency_key": "…",          // optional; the Idempotency-Key header wins; see below
   "retract_hash": "<sha256 hex>"   // optional: the uploading machine's retraction secret,
@@ -353,6 +355,31 @@ the pipeline. Nothing is written until every stage has run:
    first, so no change goes unannounced; a write that fails after it leaves an entry readers
    find already answered by the metadata).
 
+**Rebuilding (X4.9).** `rebuild` builds the session again from the whole log and reviews it
+again, even when the log only extends what is stored (where step 4 would answer `unchanged` or
+write only the tail): it replaces the session as `replace` does, with the same permission, the
+retraction secret included for the org key. It is never a chunk (`422 bad_chunk`). Without an
+idempotency key of its own, each rebuild gets a fresh one, so it is never answered from an
+earlier upload of the same log. A rebuild that builds the very trace already stored answers
+`duplicate`.
+
+Each session's `metadata.json` records the format version that built it
+(`normalizer.format_version`: the oldest of its traces, since a chunk leaves the prefix as it
+was built). When a format's adapter changes what a transcript normalizes to, its version is
+raised, and sessions built by an older one are **stale**. The server cannot rebuild them
+itself (it keeps no raw logs), so `GET /v1/sessions/stale` (`sessions:write`, the uploader's
+credential) lists the caller's own stale sessions, paged by key like `GET /v1/sessions`:
+
+```jsonc
+{ "sessions": [ { "agent": "claude-code", "session_id": "…",
+                  "built_with": "1+trajectory.0.3.0", "current": "2+trajectory.0.3.0" } ],
+  "cursor": "…", "truncated": false }
+```
+
+The uploader asks at most hourly and resends each stale session it still holds, whole, with
+`rebuild` ([capture.md](capture.md#the-uploader)). A session with no version recorded is
+stale; a release that changes no adapter makes nothing stale.
+
 **Which branch?** The one the transcript recorded as it began (Claude Code's `gitBranch`,
 Codex's `session_meta`), else the client's `branch`.
 
@@ -372,7 +399,7 @@ answers zeros, and a dropped first upload answers its stub's offset. The statuse
 
 **Resends.** Every upload has an idempotency key: the `Idempotency-Key` header, else
 `idempotency_key`, else one derived from the session, the offset and a digest of the
-transcript. A session remembers the last 16 it applied with their answers, so an upload sent
+transcript (with a fresh suffix for a `rebuild`). A session remembers the last 16 it applied with their answers, so an upload sent
 again (the client lost the answer) gets the same answer, status code included, and nothing
 runs twice.
 
