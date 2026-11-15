@@ -241,8 +241,9 @@ Read and written by the binary only, so their types are code-first in `@seshi/st
   and the poller's own `cursor` object.
 - `worker/heartbeat.json` (`seshi/heartbeat/1`): instance id, version, roles, start and last
   run. Last writer wins; status reads a changing instance id as a second worker.
-- `assembly/pending/<archive_id>` (`seshi/pending/1`): owner, archive id and when the last
-  span batch arrived.
+- `assembly/pending/<archive_id>` (`seshi/pending/1`): owner, archive id, when the last
+  span batch arrived, and a random `touch` id, so every touch changes the ETag the assembler
+  deletes it by.
 - `owners/<o>/sessions/<a>/spans/<trace_id>-<span_id>.json`: one normalized, redacted span
   record each, for the assembler (F4); never readable through the API.
 - `owners/<o>/sessions/<a>/review/<n>.json` (`seshi/review/1`): for the `n`th stored write,

@@ -122,9 +122,11 @@ describe("assembly pending markers", () => {
       owner: "acme",
       archive_id: a,
       touched_at: "2026-11-14T09:00:01.000Z",
+      touch: expect.stringMatching(/^[0-9a-f]{16}$/),
     });
-    // A batch arrives while the assembler publishes: its clear fails and the marker stays.
-    await touchPending(store, "acme", a, at("02"));
+    // A batch arrives while the assembler publishes, even in the same millisecond: its clear
+    // fails and the marker stays.
+    await touchPending(store, "acme", a, at("01"));
     await expect(clearPending(store, a, read?.etag as string)).rejects.toBeInstanceOf(
       PreconditionFailed,
     );

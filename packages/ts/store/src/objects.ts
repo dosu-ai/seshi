@@ -8,6 +8,7 @@
  * checkpoints and pending-marker deletes use If-Match, so a second worker's write fails with
  * `PreconditionFailed` instead of overwriting (X7.3). */
 
+import { randomBytes } from "node:crypto";
 import type { OwnerBasis, Visibility } from "@seshi/model";
 import { createJson, putJson, readJson, replaceJson, updateJson, type Versioned } from "./json";
 import { assertOwner, keys } from "./layout";
@@ -161,6 +162,10 @@ export interface PendingMarker {
   archive_id: string;
   /** When the last batch arrived: the assembler waits for a quiet period after it (F4.4). */
   touched_at: string;
+  /** Random per touch, so every touch changes the marker's ETag. Without it two touches in one
+   * millisecond write the same bytes (the same MD5 ETag), and the assembler's If-Match delete
+   * would clear a marker a batch touched after the assembler read it. */
+  touch: string;
 }
 
 /** Record that `archive` has new spans; returns the marker's ETag. */
@@ -175,6 +180,7 @@ export function touchPending(
     owner: assertOwner(owner),
     archive_id: archive,
     touched_at: now().toISOString(),
+    touch: randomBytes(8).toString("hex"),
   };
   return putJson(store, keys.pending(archive), marker);
 }
