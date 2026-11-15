@@ -224,7 +224,7 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
   const context: WriteContext = { ...input, writer, provenance };
   // Whether the pointer already listed this trace, as of the version the update applied to.
   let already = false;
-  await updateMetadata(store, owner, archive, (existing) => {
+  const pointer = updateMetadata(store, owner, archive, (existing) => {
     if (existing?.status === "redacted") {
       throw new IngestRejected("redacted", "session was redacted; it will not be stored again");
     }
@@ -265,6 +265,16 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
     if (redaction) next.redaction = redaction;
     return changed(existing, next) ? next : null;
   });
+  try {
+    await pointer;
+  } catch (err) {
+    // Tombstoned between the check above and now: the tombstone already removed the objects
+    // it knew of, so the one this write just created would be left behind. Remove it too.
+    if (err instanceof IngestRejected && err.code === "redacted" && outcome === "written") {
+      await store.delete(keys.trace(owner, archive, trace.content_hash));
+    }
+    throw err;
+  }
 
   // A duplicate is one the pointer already lists and whose object was there: nothing new to say.
   // An object that exists without a pointer entry (an interrupted earlier publish) is completed

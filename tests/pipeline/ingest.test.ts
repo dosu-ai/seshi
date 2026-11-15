@@ -297,6 +297,40 @@ describe("putRaw", () => {
 });
 
 describe("tombstone", () => {
+  it("leaves no trace behind when it lands while an ingest is publishing", async () => {
+    await ingest({ store, owner: "acme", records: records("claude-basic"), metadata: meta, now });
+    // The session is tombstoned right after the racing ingest wrote its trace object and
+    // before it updates the pointer: the tombstone cannot know of that object.
+    let raced = false;
+    const racing = new Proxy(store, {
+      get(target, prop, receiver) {
+        if (prop !== "put") return Reflect.get(target, prop, receiver);
+        return async (key: string, body: Uint8Array, options?: object) => {
+          const put = await target.put(key, body, options);
+          if (!raced && key.includes("/trace.")) {
+            raced = true;
+            await tombstone({ store: target, owner: "acme", agent: "claude", session_id: "sess1" });
+          }
+          return put;
+        };
+      },
+    });
+    await expect(
+      ingest({
+        store: racing,
+        owner: "acme",
+        records: records("claude-queued-input"),
+        metadata: meta,
+        now,
+      }),
+    ).rejects.toMatchObject({ code: "redacted" });
+    expect(raced).toBe(true);
+    const archive = archiveId("acme", "claude", "sess1");
+    expect((await store.list(keys.session("acme", archive))).keys).toEqual([
+      keys.metadata("acme", archive),
+    ]);
+  });
+
   it("removes trace and raw objects, marks the session redacted, and refuses re-ingest", async () => {
     const stored = await ingest({
       store,
