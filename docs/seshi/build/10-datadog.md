@@ -29,10 +29,15 @@ session's spans to 09's span assembler as the source's service account. A new sp
     API answer changed shape: …"); single odd items are skipped and counted.
   - 429: waits `Retry-After` (seconds or a date), else `X-RateLimit-Reset`, else exponential
     backoff, inside the run, up to 6 times; a wait over 5 minutes fails the run instead. 5xx,
-    `meta.status: "timeout"` and network failures: 4 attempts with backoff. Anything else
+    `meta.status: "timeout"`, network failures and a request with no answer (body included)
+    within `requestTimeoutMs` (2 minutes): 4 attempts with backoff. Redirects are not followed
+    (`redirect: "manual"`; a 3xx is a `DatadogApiError`), since fetch would carry the key headers
+    to the redirect's host. Anything else
     (401, 403, 400) is a `DatadogApiError` with Datadog's own `errors` text (bounded) and, for
     401/403, a hint about the keys. No message holds a key. Waits are abortable.
   - `apiBase(site, api_url)`: `https://api.<site>`, dropping an `app.` or scheme in front.
+    `readDatadogConfig` refuses an `api_url` that is plain `http` to anything but `localhost`,
+    `127.0.0.1` or `[::1]`, and a tag list naming one key twice (the filter is a map).
 - **Span conversion** (`spans.ts`): `toReceivedSpan` turns a Datadog span into OTLP's JSON
   mapping (`ReceivedSpan`), with Datadog's fields as `datadog.*` attributes (`span_kind`,
   `model_name`, `input.value`, `input.messages` as JSON, `metadata` as JSON, `metrics.<name>`,
@@ -180,8 +185,10 @@ session's spans to 09's span assembler as the source's service account. A new sp
   window (tested with a 400; Datadog might answer otherwise).
 - **Rate limits** of the Export API (not documented): `page_size` 500 and 20 pages a run are
   guesses; a 5000-span page with full content may hit the 50 MB answer cap.
-- **Application key scopes**: whether an application key can be limited to LLM Observability
-  read (F5 Access).
+- **Application key scopes** (F5 Access): Datadog's scoped application keys can be given any
+  permission, and its LLM Observability APIs name `llm_observability_read`; docs/datadog.md says
+  to scope the key to that. Not checked against a real org: that the search endpoint accepts a
+  key with only that permission.
 - **X4.5 duplicates**: a session uploaded from the daemon's file (`datadog-trajectory`) and
   polled (`datadog-llmobs`) is two archives under different owners. `native_session_id` matches;
   `origin_agent` is the format name in both (`datadog-llmobs` here), not the client
@@ -189,6 +196,38 @@ session's spans to 09's span assembler as the source's service account. A new sp
   daemon adapter does, `datadog-trajectory:claude-code`) needs a field on `SpanPart` or the
   meta.
 - Span records of datadog sessions are never pruned (09's open item applies).
+
+## Review fixes
+
+A review of the branch against F5, X3.2, X5.4 and the build rules (code read and run, the
+Export API and Trajectory tag docs checked again) found and fixed:
+
+1. **The keys followed redirects.** Bun's fetch follows a redirect and sends custom headers to
+   the new host (checked with two local servers: `DD-API-KEY` arrived at the second). A 3xx from
+   Datadog or a proxy at `api_url` would have handed both keys to whatever host it named.
+   `searchPage` now sends `redirect: "manual"` and fails the run on a 3xx. Tested with a second
+   local server that must see no request.
+2. **A request that never answered held the source forever.** The job runner has no run
+   timeout and `ctx.signal` only fires on shutdown. Each request (answer body included) now
+   times out after `requestTimeoutMs` (2 minutes) and is retried like a network failure.
+3. **Plain-http `api_url` to another host** would send the keys in clear; refused outside
+   loopback (in the connector, so `sources.ts` is unchanged).
+4. **A tag key given twice** (`env:prod`, `env:dev`) silently kept only the last in the filter
+   map; refused when the config is read.
+5. **A numeric `parent_id`** (the docs say string) is now stringified like `span_id`, so a
+   child is not orphaned.
+6. **Test gap**: nothing pinned that a later turn leaves the earlier turns' records and calls
+   unchanged. Every publish re-assembles the whole session, and if the prefix moved, each new
+   turn would be stored as a replace instead of a tail (09's continuation rule). A
+   `format.test.ts` case now checks it on the fixture's two turns.
+
+Checked and left as they are: deviation 1 (Trajectory's tag reference does put
+`trajectory.session_id` on turn, agent-message, tool, LLM, carrier and permission-wait spans,
+and the correlation tag only on compaction and correlation spans); the request and answer shapes
+against Datadog's Export API page and API reference (the reference's example sorts by
+`-start_ns`, the Export API page lists `timestamp`/`-timestamp`; `timestamp` is kept); no test
+reaches the network (`commands.test.ts`'s `dd` source is only run through the fake connector or
+with no Datadog poller); span records hold redacted parts, not the raw `datadog.*` attributes.
 
 ## Cross-branch wiring once the stack is linear
 

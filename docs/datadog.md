@@ -13,7 +13,8 @@ read a changed answer as nothing.
 ## Set it up
 
 1. Create a Datadog API key and an application key. The application key needs to read LLM
-   Observability; scope it to that where your Datadog plan allows scoped application keys.
+   Observability: create it as a scoped application key with only the `llm_observability_read`
+   permission where your Datadog org allows scoped keys.
 2. Add a source to `seshi.toml`. Keys are secret references, so the file can be committed:
 
    ```toml
@@ -35,7 +36,8 @@ read a changed answer as nothing.
    ```
 
    Every field is in [config.md](config.md#sources). `api_url` replaces
-   `https://api.<site>` (a proxy).
+   `https://api.<site>` (a proxy). It must be `https`, since the keys travel in request headers;
+   plain `http` is accepted for `localhost` only.
 3. Restart `seshi serve` (with the worker role). `seshi sync status datadog-prod` says the
    source is polled; `seshi sync run datadog-prod` polls it once, for cron or to try it.
 
@@ -53,8 +55,9 @@ Each run reads one time window, oldest spans first, a page at a time (F5.1, F5.2
 
 Datadog's 429 answers are honoured: the run waits as long as `Retry-After` (or
 `X-RateLimit-Reset`) asks, up to five minutes, and then fails so the job's backoff takes over.
-5xx answers and network failures are retried; a refused key (401, 403) fails the run with the
-reason. A failed run leaves the checkpoint where it was, so the next one reads the same spans
+5xx answers, network failures and a request with no answer within two minutes are retried; a
+refused key (401, 403) fails the run with the reason. A redirect is never followed (the keys
+would go along to the other host): it fails the run, naming the status. A failed run leaves the checkpoint where it was, so the next one reads the same spans
 (X4.8).
 
 ## Sessions
@@ -113,6 +116,7 @@ works while Datadog still holds the spans (its LLM Observability retention).
 |---|---|
 | `Datadog answered 403 … (check api_key and app_key…)` | A wrong key, a key for another site, or an application key that cannot read LLM Observability |
 | `the Datadog Export API answer changed shape` | The preview API changed; the poller needs updating. The checkpoint did not move |
+| `Datadog answered 30x (a redirect, not followed…)` | `site` or `api_url` names a host that redirects (often `app.` instead of `api.`, or a proxy); point it at the API host |
 | `Datadog rate-limited the search for …s` | Datadog asked for a wait over five minutes; the job tries again later |
 | Sessions appear late | `lag`, `interval` and `quiet_period` add up: a turn shows up after about all three |
 | No session, `filtered` in health | Minimal capture, or the session filter judged the session too short (`[filter]`, or the source's `filter`) |
