@@ -4,10 +4,9 @@
  * (`bun run check:hook` enforces it). Nothing here may import a command module at the top
  * level.
  *
- * Each command lives in its own file. Commands a later branch builds are stubs that exit 9
- * (`notImplemented`); that branch replaces the file and, if the summary changes, its line
- * here. Conventions every command follows: `--json` for one JSON document on stdout, and the
- * stable exit codes in `../cli/exit.ts`. */
+ * Each command lives in its own file; every command group is built (the `notImplemented` stubs
+ * of the parallel branches are gone, exit 9 stays reserved). Conventions every command follows:
+ * `--json` for one JSON document on stdout, and the stable exit codes in `../cli/exit.ts`. */
 
 import type { Integration } from "@seshi/kit";
 import type { SecretBackend } from "../account/secrets";

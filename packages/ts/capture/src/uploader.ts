@@ -716,27 +716,30 @@ export class Uploader {
           s.sent = true;
         });
       }
-      const redacted = await this.preRedact.redact({
-        agent: agent.format,
-        encoding: agent.encoding,
-        text: piece.text,
-        ...(!whole && session.carried ? { carried: session.carried } : {}),
-      });
-      const upload: Upload = {
-        agent: agent.format,
-        session_id: uploadId(session),
-        transcript: redacted.text,
-        format: agent.encoding,
-        offset: whole ? 0 : (session.server_offset ?? 0),
-        retract_hash: retractHash(secret),
-        ...(await this.details(session, agent, place)),
-        // No `shipped`: the server's own state decides whether a whole log extends the session
-        // (04), and a client's prefix once let a fresh tail be judged by the session filter.
-        ...(replace ? { replace: true } : {}),
-      };
-
+      let redacted: { text: string; carried?: Record<string, unknown> };
       let result: StoreSessionResult;
       try {
+        // Inside the try: fetching the org's rules can need a sign-in or fail for a while, and
+        // then nothing is sent, exactly as when the upload itself does.
+        redacted = await this.preRedact.redact({
+          agent: agent.format,
+          encoding: agent.encoding,
+          text: piece.text,
+          ...(!whole && session.carried ? { carried: session.carried } : {}),
+        });
+        const upload: Upload = {
+          agent: agent.format,
+          session_id: uploadId(session),
+          transcript: redacted.text,
+          format: agent.encoding,
+          offset: whole ? 0 : (session.server_offset ?? 0),
+          retract_hash: retractHash(secret),
+          ...(await this.details(session, agent, place)),
+          // No `shipped`: the server's own state decides whether a whole log extends the
+          // session (04), and a client's prefix once let a fresh tail be judged by the session
+          // filter.
+          ...(replace ? { replace: true } : {}),
+        };
         result = await (await this.getSink()).ingest(upload);
       } catch (err) {
         if (err instanceof SignInNeeded) return { uploaded, signIn: err.message };

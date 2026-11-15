@@ -110,6 +110,25 @@ for sessions the hooks missed, never reaching back past when capture was install
 Uploads use the credential `seshi login` stored: the device token (with an IdP) or the org key
 and your username. In local mode they go to your own bucket.
 
+### Redacting before upload (F2.4)
+
+Nothing a rule knows leaves the machine. Before each piece is sent, the uploader redacts it with
+your server's rule packs and the built-in pack, the same rules the server runs
+([server.md](server.md#your-own-redaction)): secrets become `[redacted:<rule>]`, and a call
+that reads a sensitive file (`.env`, keys) or runs a secret command keeps its call while its
+result is withheld, even when the result only arrives in a later chunk. The server redacts
+everything again regardless, so what the client did is never trusted.
+
+The uploader fetches the rules (`GET /v1/redaction/rules`) once per run and keeps them in
+`redaction-rules.json`; the next run sends their ETag and an unchanged rule set costs a `304`.
+A server without the rules route leaves the built-in pack. When the server cannot serve the
+rules, the ones fetched before are used; with none, nothing is sent until it can (retried like
+any upload). Redacting changes line lengths, so the uploader keeps its place in your file and
+the server's offset (in redacted bytes) apart. After the server's rules change, the next whole
+upload of a session this machine stored may get `409 conflict`, and is sent again with
+`replace`. In local mode the Instance in the same process redacts before it writes, so nothing
+is fetched.
+
 ## Retraction (F9.7)
 
 Turning a session off stops its uploads and removes what was uploaded. Each session has a random
@@ -146,12 +165,12 @@ command waits for it.
 | `spool/` | one small file per hook event: paths and ids, never transcript text |
 | `uploader.json` | the running uploader's process id and heartbeat |
 | `rules.json` | the capture rules as last read from the CLI config |
+| `redaction-rules.json` | your server's redaction rules as last fetched, with their ETag |
 | `capture.log` | errors from hooks and the uploader (hooks never print) |
 
 `SESHI_NO_UPLOADER=1` makes hooks spool without starting an uploader (CI, tests).
 
 ## Not yet
 
-Client-side pre-redaction (F2.4) before upload is wired once the rule packs (branch 07) are in;
-the server always redacts either way. The Claude desktop app's Session Capture chip (a mod) and
-Datadog Trajectory's local files are later.
+The Claude desktop app's Session Capture chip (a mod) and Datadog Trajectory's local files are
+later.

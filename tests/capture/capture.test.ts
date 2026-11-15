@@ -17,6 +17,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { getSession } from "@seshi/pipeline";
+import { compileRuleSet, validatePack } from "@seshi/redact";
 import { readChanges } from "@seshi/store";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Machine, startServer, type TestServer } from "../tooling/cli";
@@ -590,6 +591,209 @@ describe("local mode (X3.5)", () => {
       expect(JSON.parse(show.out).status).toBe("redacted");
     } finally {
       local.cleanup();
+    }
+  });
+});
+
+describe("pre-redaction before upload (F2.4)", () => {
+  const acme = compileRuleSet({
+    packs: [
+      validatePack(
+        { id: "acme", rules: [{ id: "acme-key", pattern: "ACME-\\d{4}" }] },
+        { source: "acme.toml" },
+      ),
+    ],
+  });
+  const line = (record: Record<string, unknown>) => `${JSON.stringify(record)}\n`;
+  /** A head with an org-rule secret in a prompt and a call reading `.env`, whose result only
+   * comes in the next piece. */
+  const head = `${HEAD}${line({
+    type: "user",
+    uuid: "u9",
+    parentUuid: "a3",
+    timestamp: "2026-09-01T00:00:08.500Z",
+    sessionId: "sess1",
+    message: { role: "user", content: "deploy with ACME-1234 please" },
+  })}${line({
+    type: "assistant",
+    uuid: "a9",
+    parentUuid: "u9",
+    timestamp: "2026-09-01T00:00:08.600Z",
+    sessionId: "sess1",
+    message: {
+      role: "assistant",
+      model: "claude-x",
+      content: [{ type: "tool_use", id: "toolu_env", name: "Read", input: { file_path: ".env" } }],
+    },
+  })}`;
+  const tail = `${line({
+    type: "user",
+    uuid: "u10",
+    parentUuid: "a9",
+    timestamp: "2026-09-01T00:00:09.000Z",
+    sessionId: "sess1",
+    message: {
+      role: "user",
+      content: [
+        { type: "tool_result", tool_use_id: "toolu_env", content: "API_PASS=hunter2hunter2" },
+      ],
+    },
+  })}${line({
+    type: "assistant",
+    uuid: "a10",
+    parentUuid: "u10",
+    timestamp: "2026-09-01T00:00:09.500Z",
+    sessionId: "sess1",
+    message: { role: "assistant", model: "claude-x", content: "Rotated ACME-5678 too." },
+  })}`;
+
+  const uploads = () =>
+    server.requests.filter((r) => r.method === "POST" && r.path === "/v1/sessions");
+  const rulesFetches = () => server.requests.filter((r) => r.path === "/v1/redaction/rules");
+
+  it("redacts every piece with the org's rules before it leaves, and fetches them again only when changed", async () => {
+    await server.stop();
+    server = await startServer({ redaction: acme });
+    orgKey = (await server.auth.initAdmin({ owner: "ops" })).org_key?.token as string;
+    await signIn(machine, server.url, orgKey);
+    writeFileSync(file, head);
+    await hook();
+    expect((await daemon()).summary).toMatchObject({ uploaded: 1 });
+
+    const first = uploads()[0];
+    expect(first?.body).not.toContain("ACME-1234");
+    expect(first?.body).toContain("[redacted:acme-key]");
+    expect(rulesFetches()).toMatchObject([{ status: 200 }]);
+    expect(rulesFetches()[0]?.headers["if-none-match"]).toBeUndefined();
+    expect(existsSync(join(stateDir(), "redaction-rules.json"))).toBe(true);
+    // The withheld call stays with the session for the next piece, and the server's offset is
+    // counted in redacted bytes.
+    const key = `claude-code:${SESSION}`;
+    expect(state().sessions[key]).toMatchObject({
+      carried: { toolu_env: "sensitive-file" },
+      aligned: false,
+      file_offset: Buffer.byteLength(head),
+    });
+    // The server found nothing more of the org's rules to take out: the client already had.
+    const metadata = await stored();
+    expect(metadata?.redaction?.rule_set).toBe(acme.hash);
+    expect(metadata?.redaction?.counts["acme-key"]).toBeUndefined();
+
+    // The next run asks with the ETag (304), and the chunk withholds the .env call's result.
+    appendFileSync(file, tail);
+    await hook();
+    expect((await daemon()).summary).toMatchObject({ uploaded: 1 });
+    expect(rulesFetches().map((r) => r.status)).toEqual([200, 304]);
+    expect(rulesFetches()[1]?.headers["if-none-match"]).toBe(`"${acme.hash}"`);
+    const chunk = JSON.parse(uploads()[1]?.body ?? "{}");
+    expect(chunk.offset).toBe(Buffer.byteLength(JSON.parse(first?.body ?? "{}").transcript));
+    expect(chunk.transcript).not.toContain("hunter2");
+    expect(chunk.transcript).not.toContain("ACME-5678");
+    const after = await stored();
+    expect(after?.traces).toHaveLength(2);
+    expect(after?.traces[1]?.continuation).toBeDefined();
+    expect(state().sessions[key].file_offset).toBe(Buffer.byteLength(head + tail));
+  });
+
+  it("fetches a server's rules once per run, and none in local mode (the Instance redacts)", async () => {
+    await hook();
+    await daemon();
+    expect(rulesFetches()).toHaveLength(1);
+    const local = new Machine();
+    try {
+      const toml = join(local.dir, "seshi.toml");
+      writeFileSync(toml, `[store]\nurl = "file://${join(local.dir, "bucket")}"\n`);
+      local.cliConfig(`[local]\nconfig = "${toml}"\nowner = "me"\n`);
+      const localFile = join(local.dir, "l1.jsonl");
+      writeFileSync(localFile, head);
+      await local.seshi(["hook", "claude-code", "Stop"], {
+        stdin: JSON.stringify({ session_id: "l1", transcript_path: localFile, cwd: local.dir }),
+      });
+      expect((await daemon(local)).summary).toMatchObject({ uploaded: 1 });
+      expect(existsSync(join(stateDir(local), "redaction-rules.json"))).toBe(false);
+    } finally {
+      local.cleanup();
+    }
+  });
+
+  /** The served instance behind a proxy that answers the rules route itself when told to: a
+   * server from before the route (404), or one that cannot serve it for now (503). */
+  async function behindProxy() {
+    const mode: { rules: "pass" | 404 | 503; seen: number[] } = { rules: "pass", seen: [] };
+    const proxy = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      async fetch(request) {
+        const url = new URL(request.url);
+        if (url.pathname === "/v1/redaction/rules" && mode.rules !== "pass") {
+          mode.seen.push(mode.rules);
+          return Response.json({ error: { code: "x", message: "no" } }, { status: mode.rules });
+        }
+        const body = ["GET", "HEAD"].includes(request.method)
+          ? undefined
+          : await request.arrayBuffer();
+        const answer = await fetch(`${server.url}${url.pathname}${url.search}`, {
+          method: request.method,
+          headers: request.headers,
+          body,
+        });
+        if (url.pathname === "/v1/redaction/rules") mode.seen.push(answer.status);
+        return answer;
+      },
+    });
+    await server.stop();
+    server = await startServer({ redaction: acme });
+    orgKey = (await server.auth.initAdmin({ owner: "ops" })).org_key?.token as string;
+    await signIn(machine, `http://127.0.0.1:${proxy.port}`, orgKey);
+    return { mode, stop: () => proxy.stop(true) };
+  }
+
+  it("pre-redacts with the built-in pack against a server without the rules route", async () => {
+    const proxy = await behindProxy();
+    try {
+      proxy.mode.rules = 404;
+      writeFileSync(file, head);
+      await hook();
+      expect((await daemon()).summary).toMatchObject({ uploaded: 1 });
+      // The built-in pack withheld the .env call; the org's own rule was not known here.
+      expect(state().sessions[`claude-code:${SESSION}`].carried).toEqual({
+        toolu_env: "sensitive-file",
+      });
+      expect(uploads()[0]?.body).toContain("ACME-1234");
+      expect(existsSync(join(stateDir(), "redaction-rules.json"))).toBe(false);
+    } finally {
+      proxy.stop();
+    }
+  });
+
+  it("uses the rules fetched before when the server cannot serve them, and waits with none", async () => {
+    const proxy = await behindProxy();
+    try {
+      proxy.mode.rules = 503;
+      writeFileSync(file, head);
+      await hook();
+      // No rules yet and none kept: nothing is sent, as when an upload fails for a while.
+      expect((await daemon()).summary).toMatchObject({ uploaded: 0, failed: 1 });
+      expect(uploads()).toHaveLength(0);
+      expect(state().sessions[`claude-code:${SESSION}`].failures).toBe(1);
+
+      // Fetched once, then unavailable: the next run redacts with the kept document.
+      const other = join(machine.dir, ".claude", "projects", "-code-app", "s2.jsonl");
+      writeFileSync(other, head.replaceAll("sess1", "s2"));
+      await hook("Stop", { session_id: "s2", transcript_path: other });
+      proxy.mode.rules = "pass";
+      expect((await daemon()).summary).toMatchObject({ uploaded: 1 });
+      proxy.mode.rules = 503;
+      appendFileSync(other, tail.replaceAll("sess1", "s2"));
+      await hook("Stop", { session_id: "s2", transcript_path: other });
+      expect((await daemon()).summary).toMatchObject({ uploaded: 1 });
+      expect(proxy.mode.seen).toEqual([503, 200, 503]);
+      const chunk = JSON.parse(uploads()[1]?.body ?? "{}");
+      expect(chunk.session_id).toBe("s2");
+      expect(chunk.transcript).not.toContain("ACME-5678");
+      expect(chunk.transcript).not.toContain("hunter2");
+    } finally {
+      proxy.stop();
     }
   });
 });

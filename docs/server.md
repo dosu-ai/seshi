@@ -294,7 +294,9 @@ free text and the span records of OTLP and poller sessions are redacted again to
 undone; `--dry-run` says what it would do.
 
 A client can redact before upload with the same rules (F2.4): `GET /v1/redaction/rules` serves
-your packs to any signed-in caller. The server redacts everything again regardless.
+your packs to any signed-in caller, with an ETag. `seshi`'s capture uploader does this for every
+piece it sends ([capture.md](capture.md#redacting-before-upload-f24)). The server redacts
+everything again regardless.
 
 ### Model review
 

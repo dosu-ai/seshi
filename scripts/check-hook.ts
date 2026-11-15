@@ -42,6 +42,10 @@ export const FORBIDDEN: readonly (string | RegExp)[] = [
   "@seshi/client",
   "@seshi/formats",
   "@letta-ai/trajectory",
+  // Pre-redaction (07 wired in 14) runs in the uploader only: rule packs and RE2 never load in
+  // a hook.
+  "@seshi/redact",
+  "re2js",
 ];
 
 /** The modules a hook evaluates first: the router, the two fast commands, and the agents'

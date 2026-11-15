@@ -1,6 +1,6 @@
 /** The commands this branch builds (workers, sync, reprocess, normalize, healthcheck) and the
- * F8.1 conventions every command shares: the full command list, `--json`, stable exit codes,
- * and the stubs for commands later branches build. */
+ * F8.1 conventions every command shares: the full command list, `--json` and stable exit
+ * codes. */
 
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

@@ -87,7 +87,9 @@ User docs: [docs/capture.md](../../capture.md) (new), docs/cli.md (rows), docs/c
     every 2 s, beats the lock before every session of a pass, stops when idle 5 minutes (not
     with `keepAlive`) or when the lock is taken over (also mid-pass). A retraction that finds
     nothing (404) for a session this machine stored is `retract: "failed"`, never reported done.
-    An idle pass writes nothing. `preRedact` is the F2.4 seam (identity by default).
+    An idle pass writes nothing. `preRedact` is the F2.4 seam (identity by default; the app
+    wires 07's rule packs into it), called inside the upload's `try`, so a rules fetch that
+    needs a sign-in or fails for now is handled like the upload failing.
   - `status.ts`: the status line's words (at most two problems: config error, sign in, upload
     failing, retraction refused, N queued) and `sessionWord`.
   - `fast.ts` (`@seshi/capture/fast`): what hook and statusline load; no client, no zod.
@@ -155,10 +157,11 @@ User docs: [docs/capture.md](../../capture.md) (new), docs/cli.md (rows), docs/c
   export; then one line in `apps/seshi/src/capture-agents.ts` and its path in
   `scripts/check-hook.ts` `HOOK_ENTRIES`. Installers use kit's `readJsonConfig`,
   `writeJsonConfig`, `writeFileAtomic`, `isSeshiHook`.
-- **Pre-redaction (07)**: replace `preRedactor()` in `apps/seshi/src/capture-runtime.ts`. The
-  uploader calls `redact({agent, encoding, text, carried})` per piece and stores the returned
-  `carried` per session; return the same text when nothing matched. It must be deterministic
-  and line-preserving.
+- **Pre-redaction**: `preRedactor(account, {cacheFile, log})` in
+  `apps/seshi/src/capture-runtime.ts` (07's rule packs, see the wiring below). The uploader calls
+  `redact({agent, encoding, text, carried})` per piece and stores the returned `carried` per
+  session; it must be deterministic and line-preserving. A test or embedder can pass its own
+  `preRedact` in the uploader options.
 - **Another sink**: implement `SessionSink`; `captureRuntime(ctx, options)` takes uploader
   options for tests and embedders.
 - **More status-line problems**: add them in `status.ts` `statusLine` (keep at most two).
@@ -247,22 +250,35 @@ A review of this branch against F9/B1.6 fixed, each with a test:
   positions, or prune by age) if it gets large.
 - A transcript whose last line is never terminated is never sent past its last newline.
 - The `/seshi` skill's wording and how reliably Claude Code runs it.
+- Pre-redaction's cost on a very large whole log (every line is parsed and redacted in the
+  uploader) was not measured. A client whose rule set differs from the server's (`same:
+  false`, for example a newer server's built-in rule) only logs it; the server redacts again.
 
 ## Cross-branch wiring once the stack is linear
 
-- **07 (redaction rules)**: in `capture-runtime.ts` `preRedactor(account)`, fetch
-  `HttpSessionDB.redactionRules()` once per uploader run (`ruleSetFromDocument`), and return a
-  `PreRedactor` whose `redact` calls `redactTranscript(rules, text, format, carried)` and maps
-  `{text, withheld}` to `{text, carried: withheld}`. Import `@seshi/redact` only there (never
-  from the hook path; check-hook forbids nothing of it today, but it costs ~11 ms). 07 also
-  edits the stub list in `apps/seshi/src/commands/commands.test.ts`; this branch left
-  `["search", "redact"]` there: keep the union of removals (12 removes `search`, 07 `redact`).
-  07's backfill note: the next whole upload of a backfilled session is a 409 `conflict`; this
-  uploader resends with `replace` when it stored the session, as 07 expects.
-- **12 (search)**: none needed; its stub stays in the stub list until 12 lands. Both branches
-  append to `spec/openapi.yaml` and `tests/api/openapi.test.ts`; this branch edits the existing
-  `DELETE /v1/sessions/{agent}/{session_id}` operation and the upload body schema rather than
-  adding paths.
+- **07 (redaction rules), done after the rebase**: `preRedactor(account)` in
+  `apps/seshi/src/capture-runtime.ts` fetches the rules once per uploader run, on the first
+  piece, with the upload credential (`HttpSessionDB.redactionRulesSince(etag)`, new: it sends
+  If-None-Match and answers `null` on 304), builds them with `ruleSetFromDocument`, and calls
+  `redactTranscript(rules, text, encoding, carried)` per piece, returning `{text, carried:
+  withheld}` (no `carried` when nothing is withheld). The document and its ETag are kept in
+  the capture folder (`redaction-rules.json`, `CapturePaths.redactionRules`), so an unchanged
+  rule set costs a 304. A 404 (a server from before the route) or a document this client
+  cannot use leaves the built-in pack; a server that cannot serve the rules leaves the
+  document kept from before, and with none the piece waits (transient, backed off); 401 is
+  "sign in". Local mode does nothing here: its Instance redacts before it writes. The uploader
+  now calls `preRedact` inside the upload's `try`. `@seshi/redact` and the client are imported
+  there only, with `import()`; `check-hook` now forbids `@seshi/redact` and `re2js`. Offsets:
+  the uploader already kept the file offset and the server's (redacted-byte) offset apart and
+  sends complete lines only. Tests: `tests/capture/capture.test.ts` "pre-redaction before
+  upload (F2.4)" runs hooks and `seshi daemon --once` against a served Instance with an org
+  pack, and checks the request bodies (nothing secret sent, a withheld `.env` result in the
+  next chunk), the 200 then 304 fetch, the server's counts, the 404 and 503 fallbacks, and
+  local mode. The 409 `conflict` after a rules change or backfill was already handled
+  (`replace` when this machine stored the session).
+- **12 (search), done after the rebase**: the stub list in `commands.test.ts` is gone with its
+  last entries (07 built `redact`, 12 `search`), and so is `apps/seshi/src/cli/stub.ts`; exit 9
+  stays reserved. `scripts/build-binary.test.ts` no longer runs `search` as a stub.
 - **15 (distribution)**: run `check:hook` against `dist/seshi` in CI (the timed hook now uses a
   temporary home and a payload); verify the compiled binary's hook on Windows and the service
   entries on each OS; the npm-installed binary's `execPath` is what `capture install` writes

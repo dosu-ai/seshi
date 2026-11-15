@@ -11,7 +11,11 @@ interface Seen {
 }
 
 /** A client over a fake server that answers every request with `status` and `body`. */
-function client(status: number, body: unknown, options: { gzipFrom?: number } = {}) {
+function client(
+  status: number,
+  body: unknown,
+  options: { gzipFrom?: number; headers?: Record<string, string> } = {},
+) {
   const seen: Seen[] = [];
   const db = new HttpSessionDB({
     server: "https://seshi.example.com/",
@@ -25,7 +29,10 @@ function client(status: number, body: unknown, options: { gzipFrom?: number } = 
         body: init?.body as Uint8Array | undefined,
       });
       const text = typeof body === "string" ? body : JSON.stringify(body);
-      return new Response(text, { status });
+      return new Response(status === 304 ? null : text, {
+        status,
+        ...(options.headers ? { headers: options.headers } : {}),
+      });
     },
   });
   return { db, seen };
@@ -48,6 +55,17 @@ describe("HttpSessionDB", () => {
     await expect(
       client(401, { error: { code: "unauthorized" } }).db.redactionRules(),
     ).rejects.toThrow(ServerError);
+  });
+
+  it("fetches them again only when they changed (If-None-Match)", async () => {
+    const doc = { schema: "seshi/redaction-rules/1", rule_set: "h", builtin: "b", packs: [] };
+    const fresh = client(200, doc, { headers: { etag: '"h"' } });
+    expect(await fresh.db.redactionRulesSince()).toEqual({ document: doc, etag: '"h"' });
+    expect(fresh.seen[0]?.headers["if-none-match"]).toBeUndefined();
+    const same = client(304, null, { headers: { etag: '"h"' } });
+    expect(await same.db.redactionRulesSince('"h"')).toBeNull();
+    expect(same.seen[0]?.headers["if-none-match"]).toBe('"h"');
+    await expect(client(304, null).db.redactionRulesSince()).rejects.toThrow(ServerError);
   });
 
   it("gzips a body past gzipFrom", async () => {

@@ -49,7 +49,7 @@ repository's code.
 | 6 | `conflict` | Refused because of the state it found (a checkpoint another worker moved; a second `admin init`). Later may succeed |
 | 7 | `unavailable` | A server, bucket or vendor API could not be reached |
 | 8 | `attention` | Worked, with something to look at (a stopped or second worker, a failed job) |
-| 9 | `notImplemented` | Part of seshi, not built yet in this binary |
+| 9 | `notImplemented` | Part of seshi, not built yet in this binary (reserved: every command is built today) |
 
 ## Commands
 

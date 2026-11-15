@@ -64,9 +64,8 @@ describe("the compiled binary (X2.2)", () => {
     };
   }
 
-  it("runs without Bun's sources: version, a stub, a lazy command reading stdin", async () => {
+  it("runs without Bun's sources: version, a hook, a lazy command reading stdin", async () => {
     expect((await run(["--version"])).out.trim()).toBe(`seshi ${VERSION}`);
-    expect((await run(["search", "x"])).code).toBe(9);
     // A hook loads its agent's capture module lazily and spools the session.
     const payload = JSON.stringify({
       session_id: "s",

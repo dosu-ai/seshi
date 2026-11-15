@@ -18,6 +18,9 @@ export interface CapturePaths {
   uploader: string;
   /** The capture rules the CLI config held when it last changed (the hook's fast path). */
   rules: string;
+  /** The org's redaction rules as the uploader last fetched them, with their ETag, so an
+   * unchanged rule set costs a 304 (F2.4). Written by `apps/seshi`'s pre-redactor. */
+  redactionRules: string;
   /** Errors from hooks and the uploader: hooks never print, so they go here (F9.1). */
   log: string;
 }
@@ -41,6 +44,7 @@ export function capturePaths(host: CaptureHost): CapturePaths {
     spool: at(dir, "spool"),
     uploader: at(dir, "uploader.json"),
     rules: at(dir, "rules.json"),
+    redactionRules: at(dir, "redaction-rules.json"),
     log: at(dir, "capture.log"),
   };
 }

@@ -8,11 +8,13 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { gunzipSync } from "node:zlib";
 import { createApp } from "@seshi/api";
 import { Auth, type AuthSettings } from "@seshi/auth";
 import { FakeIdp } from "@seshi/auth/testing";
 import type { Instance } from "@seshi/instance";
 import type { Integration } from "@seshi/kit";
+import type { RuleSet } from "@seshi/redact";
 import { FsStore } from "@seshi/store";
 import { Logins, MemorySecrets } from "seshi/account";
 import { INTEGRATIONS } from "seshi/integrations";
@@ -94,15 +96,34 @@ export class Machine {
 }
 
 /** A seshi server on 127.0.0.1 over its own Instance and folder store. */
+/** One request the test server answered: what a client sent, as the server read it. */
+export interface SeenRequest {
+  method: string;
+  path: string;
+  status: number;
+  /** Request headers, lowercased. */
+  headers: Record<string, string>;
+  /** The request body as text, gunzipped. */
+  body: string;
+}
+
 export interface TestServer {
   url: string;
   instance: Instance;
   auth: Auth;
+  /** Every request served, in order. */
+  requests: SeenRequest[];
   stop(): Promise<void>;
 }
 
 export async function startServer(
-  options: { settings?: Partial<AuthSettings>; idp?: FakeIdp; config?: string } = {},
+  options: {
+    settings?: Partial<AuthSettings>;
+    idp?: FakeIdp;
+    config?: string;
+    /** The rule set the server redacts with and serves (F2.4); the built-in pack by default. */
+    redaction?: RuleSet;
+  } = {},
 ): Promise<TestServer> {
   const dir = mkdtempSync(join(tmpdir(), "seshi-server-"));
   const store = new FsStore(`file://${join(dir, "bucket")}`);
@@ -121,12 +142,32 @@ export async function startServer(
     store,
     auth,
     ...(options.config ? { config: options.config } : {}),
+    ...(options.redaction ? { redaction: options.redaction } : {}),
   });
-  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: createApp(instance).fetch });
+  const app = createApp(instance);
+  const requests: SeenRequest[] = [];
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(request) {
+      const bytes = new Uint8Array(await request.clone().arrayBuffer());
+      const gzipped = request.headers.get("content-encoding") === "gzip";
+      const response = await app.fetch(request);
+      requests.push({
+        method: request.method,
+        path: new URL(request.url).pathname,
+        status: response.status,
+        headers: Object.fromEntries(request.headers),
+        body: new TextDecoder().decode(gzipped ? gunzipSync(bytes) : bytes),
+      });
+      return response;
+    },
+  });
   return {
     url: `http://127.0.0.1:${server.port}`,
     instance,
     auth,
+    requests,
     async stop() {
       server.stop(true);
       await instance.close(1000);

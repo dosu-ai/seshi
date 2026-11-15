@@ -105,6 +105,13 @@ interface RequestOptions {
   gzipFrom?: number;
 }
 
+/** What one request answered: its status, its JSON body, and its headers. */
+interface Answer {
+  status: number;
+  body: unknown;
+  headers: Headers;
+}
+
 /** One request to the server, its JSON answer and status. Network failures are `StoreError`
  * ("cannot reach"); a 2xx that is not JSON is `ServerError` `bad_response`. */
 async function send(
@@ -112,7 +119,7 @@ async function send(
   method: string,
   path: string,
   options: RequestOptions = {},
-): Promise<{ status: number; body: unknown }> {
+): Promise<Answer> {
   const server = transport.server.replace(/\/+$/, "");
   const fetchImpl = transport.fetch ?? ((input, init) => globalThis.fetch(input, init));
   const timeoutMs = transport.timeoutMs ?? 120_000;
@@ -160,7 +167,7 @@ async function send(
       }
     }
   }
-  return { status: response.status, body: parsed };
+  return { status: response.status, body: parsed, headers: response.headers };
 }
 
 function errorCode(body: unknown): string | undefined {
@@ -224,11 +231,7 @@ export class HttpSessionDB implements SessionDB {
     };
   }
 
-  private request(
-    method: string,
-    path: string,
-    options: RequestOptions = {},
-  ): Promise<{ status: number; body: unknown }> {
+  private request(method: string, path: string, options: RequestOptions = {}): Promise<Answer> {
     return send(this.transport, method, path, {
       ...options,
       gzipFrom: this.gzipFrom,
@@ -394,6 +397,20 @@ export class HttpSessionDB implements SessionDB {
     const { status, body } = await this.request("GET", "/v1/redaction/rules");
     if (status !== 200) refuse(status, body);
     return body;
+  }
+
+  /** `redactionRules` with HTTP caching, for a client that keeps the document between runs:
+   * `etag`, from an earlier answer, goes as If-None-Match. `null` means the rule set has not
+   * changed since; otherwise the document comes back with its own ETag. */
+  async redactionRulesSince(
+    etag?: string,
+  ): Promise<{ document: unknown; etag: string | undefined } | null> {
+    const { status, body, headers } = await this.request("GET", "/v1/redaction/rules", {
+      ...(etag ? { headers: { "if-none-match": etag } } : {}),
+    });
+    if (status === 304 && etag) return null;
+    if (status !== 200) refuse(status, body);
+    return { document: body, etag: headers.get("etag") ?? undefined };
   }
 
   /** The owners with sessions stored. */
