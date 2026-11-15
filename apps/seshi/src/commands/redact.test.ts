@@ -1,9 +1,9 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig, serverConfigSchema } from "@seshi/config";
 import { buildInstance } from "@seshi/instance";
-import { archiveId, openStore, readChanges, readMetadata } from "@seshi/store";
+import { archiveId, getBytes, keys, openStore, readChanges, readMetadata } from "@seshi/store";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { EXIT } from "../cli/exit";
 import { buildFormats } from "../integrations";
@@ -195,27 +195,6 @@ describe("seshi redact test", () => {
 });
 
 describe("seshi redact backfill (F2.5)", () => {
-  /** A session stored by a server with the built-in pack only. */
-  async function storeSession(sessionId: string, content: string) {
-    const config = loadConfig(serverConfigSchema, {
-      env: { SESHI_STORE__URL: `file://${bucket}` },
-    }).config;
-    const instance = await buildInstance(config, { formats: buildFormats(), env: {} });
-    try {
-      await instance.localSessions("alice").ingest({
-        agent: "trajectory",
-        session_id: sessionId,
-        transcript: jsonl(
-          { role: "meta", source: "trajectory" },
-          { role: "user", content: `${content} ${"x".repeat(2000)}`, timestamp: ts },
-          { role: "assistant", content: "ok", timestamp: ts },
-        ),
-      });
-    } finally {
-      await instance.close();
-    }
-  }
-
   it("needs --since or --all, and refuses an owner that is not one", async () => {
     expect((await seshi(["redact", "backfill"])).code).toBe(EXIT.usage);
     expect((await seshi(["redact", "backfill", "--since", "30d", "--all"])).code).toBe(EXIT.usage);
@@ -272,5 +251,97 @@ describe("seshi redact backfill (F2.5)", () => {
 
     const again = await seshi(["redact", "backfill", "--all"], env);
     expect(again.out).toContain("rewrote 0, 0 unchanged, 2 already current, 0 skipped");
+  });
+
+  it("says what its sweep deleted", async () => {
+    await storeSession("s1", "nothing secret");
+    const key = await leftover("s1", 2 * 60 * 60 * 1000);
+    const env = { SESHI_REDACTION__PACKS: file("acme.toml", ACME) };
+    const dry = await seshi(["redact", "backfill", "--all", "--dry-run"], env);
+    expect(dry.out).toContain(
+      "would delete 1 trace object no session names (left by a write that stopped partway)",
+    );
+    const real = await seshi(["redact", "backfill", "--all", "--json"], env);
+    expect(JSON.parse(real.out).sweep).toEqual({ deleted: 1, young: 0, errors: 0 });
+    const { store } = openStore(`file://${bucket}`);
+    expect(await getBytes(store, key)).toBeNull();
+  });
+});
+
+/** A session stored by a server with the built-in pack only. */
+async function storeSession(sessionId: string, content: string) {
+  const config = loadConfig(serverConfigSchema, {
+    env: { SESHI_STORE__URL: `file://${bucket}` },
+  }).config;
+  const instance = await buildInstance(config, { formats: buildFormats(), env: {} });
+  try {
+    await instance.localSessions("alice").ingest({
+      agent: "trajectory",
+      session_id: sessionId,
+      transcript: jsonl(
+        { role: "meta", source: "trajectory" },
+        { role: "user", content: `${content} ${"x".repeat(2000)}`, timestamp: ts },
+        { role: "assistant", content: "ok", timestamp: ts },
+      ),
+    });
+  } finally {
+    await instance.close();
+  }
+}
+
+/** An unnamed trace object in alice's session, `ms` old: what a write that stopped left. */
+async function leftover(sessionId: string, ms: number, hash = "a".repeat(64)): Promise<string> {
+  const { store } = openStore(`file://${bucket}`);
+  const key = keys.trace("alice", archiveId("alice", "trajectory", sessionId), hash);
+  await store.put(key, new TextEncoder().encode("left behind"));
+  const at = new Date(Date.now() - ms);
+  utimesSync(join(bucket, ...key.split("/")), at, at);
+  return key;
+}
+
+describe("seshi redact sweep (F2.5)", () => {
+  it("deletes unnamed trace objects over an hour old, keeps the rest, and says so", async () => {
+    await storeSession("s1", "hello");
+    const old = await leftover("s1", 2 * 60 * 60 * 1000);
+    const young = await leftover("s1", 60 * 1000, "b".repeat(64));
+    const { store } = openStore(`file://${bucket}`);
+
+    const dry = await seshi(["redact", "sweep", "--dry-run"]);
+    expect(dry.code).toBe(EXIT.ok);
+    expect(dry.out).toMatch(/alice\/[0-9a-f]{12}: would delete trace aaaaaaaaaaaa \(written /);
+    expect(dry.out).toContain("dry run: looked at 3 trace objects in 1 session");
+    expect(dry.out).toContain("kept 1 unnamed trace object under an hour old");
+    expect(await getBytes(store, old)).not.toBeNull();
+
+    const real = await seshi(["redact", "sweep", "--owner", "alice", "--json"]);
+    expect(real.code).toBe(EXIT.ok);
+    expect(JSON.parse(real.out)).toMatchObject({ sessions: 1, traces: 3, deleted: 1, young: 1 });
+    expect(await getBytes(store, old)).toBeNull();
+    expect(await getBytes(store, young)).not.toBeNull();
+    const head = (await readMetadata(store, "alice", archiveId("alice", "trajectory", "s1")))?.head;
+    expect(
+      await getBytes(
+        store,
+        keys.trace("alice", archiveId("alice", "trajectory", "s1"), head as string),
+      ),
+    ).not.toBeNull();
+
+    const again = await seshi(["redact", "sweep"]);
+    expect(again.out).toContain("nothing to delete");
+  });
+
+  it("exits 1 when a session could not be swept, and refuses bad usage", async () => {
+    await storeSession("s1", "hello");
+    await leftover("s1", 2 * 60 * 60 * 1000);
+    const { store } = openStore(`file://${bucket}`);
+    await store.put(
+      keys.metadata("alice", archiveId("alice", "trajectory", "s1")),
+      new TextEncoder().encode("{not json"),
+    );
+    const broken = await seshi(["redact", "sweep"]);
+    expect(broken.code).toBe(EXIT.failure);
+    expect(broken.out).toContain("could not sweep 1 session");
+    expect((await seshi(["redact", "sweep", "extra"])).code).toBe(EXIT.usage);
+    expect((await seshi(["redact", "sweep", "--owner", "no one"])).code).toBe(EXIT.usage);
   });
 });

@@ -5,6 +5,7 @@
  *                     [--print] [--json]
  *   seshi redact backfill (--since <30d | time> | --all) [--owner <id>]… [--dry-run]
  *                     [--limit N] [--as <owner>] [--json] [--config <file>] [--set path=value]…
+ *   seshi redact sweep [--owner <id>]… [--dry-run] [--json] [--config <file>] [--set path=value]…
  *
  * `test` builds the rule set from the built-in pack, the packs `--pack` names and, with
  * `--config`, the server's `[redaction] packs`, checks every rule against its own test strings,
@@ -20,8 +21,14 @@
  * `--all`) that an earlier rule set redacted, writes one new trace for each session the rules
  * change, deletes its old traces, and appends a change entry so readers pick it up (F2.5). It
  * cannot be undone; `--dry-run` says what it would do and writes nothing. Restart the server
- * with the new packs before running it, or the server keeps writing with the old rules. Exit 0,
- * 8 when a session changed while it ran (run it again) or could not be rewritten. */
+ * with the new packs before running it, or the server keeps writing with the old rules. Each
+ * session it looks at is then swept, as `sweep` does. Exit 0, 8 when a session changed while it
+ * ran (run it again) or could not be rewritten.
+ *
+ * `sweep` (F2.5) deletes the trace objects no session's metadata names that are over an hour
+ * old: what a backfill, replace or publish that stopped partway left behind. The worker does it
+ * daily; this is that job as a one-shot (X7.1), for a deployment with no worker, or to finish
+ * at once. Only trace objects are deleted. Exit 0, 1 when a session could not be swept. */
 
 import { type ParseArgsConfig, parseArgs } from "node:util";
 import { loadServerConfig, parseDuration } from "@seshi/config";
@@ -41,10 +48,10 @@ import {
   runRuleTests,
   type WithheldCalls,
 } from "@seshi/redact";
-import { isOwner } from "@seshi/store";
+import { isOwner, type SweptObject, sweepTraces } from "@seshi/store";
 import { EXIT, type ExitCode } from "../cli/exit";
 import { emit, fail, takeJson, usageError } from "../cli/output";
-import { Style, styleFor } from "../cli/style";
+import { printable, Style, styleFor } from "../cli/style";
 import { buildFormats } from "../integrations";
 import type { CommandContext } from "./index";
 import { configFlags } from "./serve-settings";
@@ -53,7 +60,8 @@ import { openServer, SERVER_OPTIONS, serverFailure } from "./server-instance";
 const USAGE = `usage: seshi redact test [<file> | -] [--pack <file>]… [--config <file>] [--set path=value]…
                          [--agent <format> | --text] [--field text|tool_input|tool_output] [--print] [--json]
        seshi redact backfill (--since <30d | time> | --all) [--owner <id>]… [--dry-run] [--limit N]
-                         [--as <owner>] [--json] [--config <file>] [--set path=value]…`;
+                         [--as <owner>] [--json] [--config <file>] [--set path=value]…
+       seshi redact sweep [--owner <id>]… [--dry-run] [--json] [--config <file>] [--set path=value]…`;
 
 /** The writer source id of a backfill's change entries: what rewrote the session. */
 export const BACKFILL_SOURCE_ID = "redaction";
@@ -66,6 +74,7 @@ export async function run(ctx: CommandContext): Promise<number> {
   try {
     if (sub === "test") return await test(ctx, json, args);
     if (sub === "backfill") return await backfill(ctx, json, args);
+    if (sub === "sweep") return await sweep(ctx, json, args);
   } catch (err) {
     if (err instanceof UsageError) return usageError(ctx, json, err.message, USAGE);
     throw err;
@@ -73,7 +82,7 @@ export async function run(ctx: CommandContext): Promise<number> {
   return usageError(
     ctx,
     json,
-    sub === undefined ? "redact needs test or backfill" : `unknown redact command '${sub}'`,
+    sub === undefined ? "redact needs test, backfill or sweep" : `unknown redact command '${sub}'`,
     USAGE,
   );
 }
@@ -373,6 +382,34 @@ function sessionLine(s: BackfillSession, dryRun: boolean): string {
   return `  ${s.owner}/${s.agent}/${s.session_id}: ${what}`;
 }
 
+/** What a sweep did, for the end of `backfill` and `sweep`: nothing when it found nothing. */
+function sweepLines(
+  sweep: { deleted: number; young: number; errors: number; error?: string },
+  dryRun: boolean,
+): string[] {
+  const lines: string[] = [];
+  if (sweep.deleted > 0) {
+    lines.push(
+      `${dryRun ? "would delete" : "deleted"} ${sweep.deleted} trace object${sweep.deleted === 1 ? "" : "s"} no session names (left by a write that stopped partway)`,
+    );
+  }
+  if (sweep.young > 0) {
+    lines.push(
+      `kept ${sweep.young} unnamed trace object${sweep.young === 1 ? "" : "s"} under an hour old (a write may be in flight)`,
+    );
+  }
+  if (sweep.errors > 0) {
+    lines.push(
+      `could not sweep ${sweep.errors} session${sweep.errors === 1 ? "" : "s"}: ${printable(sweep.error ?? "")}`,
+    );
+  }
+  return lines;
+}
+
+function sweptLine(o: SweptObject, dryRun: boolean): string {
+  return `  ${o.owner}/${o.archive_id.slice(0, 12)}: ${dryRun ? "would delete" : "deleted"} trace ${o.content_hash.slice(0, 12)} (written ${o.modified})`;
+}
+
 async function backfill(ctx: CommandContext, json: boolean, args: string[]): Promise<number> {
   const { values, positionals } = parse<BackfillValues>(args, {
     ...SERVER_OPTIONS,
@@ -459,12 +496,70 @@ async function backfill(ctx: CommandContext, json: boolean, args: string[]): Pro
           `${dryRun ? "would redact" : "redacted"} ${report.spans} span record${report.spans === 1 ? "" : "s"} again`,
         );
       }
+      lines.push(...sweepLines(report.sweep, dryRun));
       if (report.more) lines.push("stopped before the end: run it again to go on");
       if (o.conflict > 0) lines.push("run it again for the sessions that changed meanwhile");
       return lines;
     });
     const code: ExitCode = o.conflict + o.failed > 0 ? EXIT.attention : EXIT.ok;
     return code;
+  } finally {
+    process.off("SIGINT", stop);
+    await instance.close();
+  }
+}
+
+// --- sweep --------------------------------------------------------------------------
+
+interface SweepValues {
+  config?: string;
+  set?: string[];
+  owner?: string[];
+  "dry-run"?: boolean;
+}
+
+async function sweep(ctx: CommandContext, json: boolean, args: string[]): Promise<number> {
+  const { values, positionals } = parse<SweepValues>(args, {
+    ...SERVER_OPTIONS,
+    owner: { type: "string", multiple: true },
+    "dry-run": { type: "boolean" },
+  });
+  if (positionals.length > 0) throw new UsageError(`unexpected argument '${positionals[0]}'`);
+  for (const owner of values.owner ?? []) {
+    if (!isOwner(owner)) throw new UsageError(`'${owner}' is not an owner id`);
+  }
+  const dryRun = values["dry-run"] === true;
+  let opened: Awaited<ReturnType<typeof openServer>>;
+  try {
+    opened = await openServer(ctx, values, { roles: [], probe: [], initialize: false });
+  } catch (err) {
+    const code = serverFailure(ctx, json, err);
+    if (code === undefined) throw err;
+    return code;
+  }
+  const { instance } = opened;
+  const controller = new AbortController();
+  const stop = () => controller.abort();
+  process.once("SIGINT", stop);
+  try {
+    const report = await sweepTraces(instance.store, {
+      dryRun,
+      ...(values.owner ? { owners: values.owner } : {}),
+      signal: controller.signal,
+      onSwept: (o) => {
+        if (!json) ctx.stdout(sweptLine(o, dryRun));
+      },
+    });
+    emit(ctx, json, report, () => {
+      const lines = [
+        `${dryRun ? "dry run: " : ""}looked at ${report.traces} trace object${report.traces === 1 ? "" : "s"} in ${report.sessions} session${report.sessions === 1 ? "" : "s"}`,
+        ...sweepLines(report, dryRun),
+      ];
+      if (report.deleted === 0) lines.push("nothing to delete: every old trace object is named");
+      if (report.more) lines.push("stopped before the end: run it again to go on");
+      return lines;
+    });
+    return report.errors > 0 ? EXIT.failure : EXIT.ok;
   } finally {
     process.off("SIGINT", stop);
     await instance.close();

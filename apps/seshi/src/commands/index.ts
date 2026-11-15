@@ -92,7 +92,8 @@ export const COMMANDS: Readonly<Record<string, CommandSpec>> = {
     load: () => import("./normalize"),
   },
   redact: {
-    summary: "try redaction rules on a file, or apply new rules to stored sessions (test|backfill)",
+    summary:
+      "try redaction rules on a file, or apply new rules to stored sessions (test|backfill|sweep)",
     load: () => import("./redact"),
   },
   reprocess: {
