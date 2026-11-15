@@ -64,6 +64,9 @@ const pemPrivateRE =
 // Provider prefixes. sk- allows internal hyphens/underscores so hyphenated
 // formats (sk-ant-…, sk-proj-…) are covered. `sk_user_` is a per-user key shape whose tail is
 // `secrets.token_urlsafe` output, so it spans '-' and '_'.
+// seshi's own opaque tokens (X5.9): `seshi_<20 hex>_<43 base64url>`. The secret can end in `-`,
+// so the end is "no token character next", not `\b`.
+const seshiTokenRE = /(?<![A-Za-z0-9_-])seshi_[0-9a-f]{20}_[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])/g;
 const providerRE =
   /\b(gh[opsur]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{20,}|(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}|sk_user_[A-Za-z0-9_-]{8,}|sk-[A-Za-z0-9_-]*[A-Za-z0-9]{20,}|gsk_[A-Za-z0-9]{20,}|xai-[A-Za-z0-9]{20,}|hf_[A-Za-z0-9]{20,}|npm_[A-Za-z0-9]{30,}|xox[bpcs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{30,}|pul-[0-9a-f]{40}|sbp_[0-9a-f]{40})\b/g;
 // The second alternative drops the leading \b, which would miss a JWT glued to a
@@ -251,6 +254,9 @@ export function redactSecrets(text: string): RedactionResult {
       counts,
       (m) => `${m[1]}${m[2]}${m[3]}[redacted:aws-secret]${closingQuote(m[3], m[5])}`,
     );
+  }
+  if (s.includes("seshi_")) {
+    s = replaceWhole(s, seshiTokenRE, "seshi-token", counts);
   }
   if (s.includes("AKIA") || s.includes("ASIA")) {
     s = replaceWhole(s, awsAccessKeyRE, "aws-access-key", counts);

@@ -30,7 +30,7 @@ import { classifyCall, trimSensitiveInput, type WithheldCalls } from "./sensitiv
 /** Names the built-in rules (secret patterns, sensitive files, secret commands) in the rule-set
  * hash. Bump it when a built-in rule changes, so `metadata.redaction.rule_set` tells sessions
  * redacted before the change from those after. */
-export const BUILTIN_RULES_VERSION = "seshi/rules/1";
+export const BUILTIN_RULES_VERSION = "seshi/rules/2";
 
 export interface RecordRedaction {
   records: NormalizedRecord[];

@@ -270,6 +270,22 @@ describe("redactSecrets", () => {
     });
   });
 
+  describe("seshi tokens (X5.9)", () => {
+    const token = `seshi_${"0123456789abcdef0123"}_${"aB3_-".repeat(8)}xY-`;
+
+    it("redacts one in prose, however it ends", () => {
+      expect(redactSecrets(`my token is ${token} ok`)).toMatchObject({
+        text: "my token is [redacted:seshi-token] ok",
+        counts: { "seshi-token": 1 },
+      });
+      expect(redactSecrets(`"${token}"`).text).toBe('"[redacted:seshi-token]"');
+    });
+
+    it("leaves something shaped otherwise alone", () => {
+      expect(redactSecrets("seshi_status is fine").text).toBe("seshi_status is fine");
+    });
+  });
+
   describe("provider tokens", () => {
     it.each([
       ["github-token", "push with ghp_abcdefghijklmnopqrstuvwx0123456789"],
