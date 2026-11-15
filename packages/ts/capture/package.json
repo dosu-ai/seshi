@@ -6,6 +6,15 @@
   "exports": {
     ".": {
       "bun": "./src/index.ts"
+    },
+    "./fast": {
+      "bun": "./src/fast.ts"
     }
+  },
+  "dependencies": {
+    "@seshi/client": "workspace:*",
+    "@seshi/config": "workspace:*",
+    "@seshi/kit": "workspace:*",
+    "@seshi/model": "workspace:*"
   }
 }
