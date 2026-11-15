@@ -75,7 +75,8 @@ this way.
    bucket, never the span as received, and never readable through the API. A span sent twice
    (exporters retry) is kept once. The request is answered as soon as its spans are stored.
    `seshi redact backfill` redacts kept span records again after the rules change.
-3. **Assembled and published** (F4.4) by the worker's `assembler` job once the session has had
+3. **Assembled and published** (F4.4) by the worker's `assembler` job (or, with no worker,
+   `seshi sync assemble` from cron) once the session has had
    no new spans for the source's `quiet_period` (10 minutes by default), or about 15 seconds
    after a span that ends it (an archived or deleted Managed Agents session; the root span of a
    one-trace request). The assembler orders the spans, keeps each thing said once (a chat
@@ -119,4 +120,4 @@ own usage inside a Messages API request is not counted separately yet.
 | `partial_success` with "Full content" | The destination is in Metadata only mode |
 | Sessions appear after ten minutes | The quiet period; lower `quiet_period` for the source |
 | No session, `filtered` in source health | The session filter judged it too short (`[filter]`, or the source's `filter`) |
-| `seshi workers status` shows `pending_sessions` growing | No worker is running, or the assembler fails: see its last error |
+| `seshi workers status` shows `pending_sessions` growing | No worker is running (run one, or cron `seshi sync assemble`), or the assembler fails: see its last error |

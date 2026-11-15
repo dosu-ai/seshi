@@ -39,7 +39,9 @@ read a changed answer as nothing.
    `https://api.<site>` (a proxy). It must be `https`, since the keys travel in request headers;
    plain `http` is accepted for `localhost` only.
 3. Restart `seshi serve` (with the worker role). `seshi sync status datadog-prod` says the
-   source is polled; `seshi sync run datadog-prod` polls it once, for cron or to try it.
+   source is polled; `seshi sync run datadog-prod` polls it once, for cron or to try it. Without
+   a worker, cron `seshi sync assemble` too: polling stores spans, and the assembler publishes
+   their sessions.
 
 ## How it reads
 

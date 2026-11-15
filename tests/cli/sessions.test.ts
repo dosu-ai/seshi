@@ -609,6 +609,9 @@ describe("remote status (X7.5)", () => {
     const run = await machine.seshi(["sync", "run", "upload", "--server", server.url]);
     expect(run.code).toBe(2);
     expect(run.err).toContain("polls on its own");
+    const assemble = await machine.seshi(["sync", "assemble", "--server", server.url]);
+    expect(assemble.code).toBe(2);
+    expect(assemble.err).toContain("assembles on its own");
   });
 
   it("uses the signed-in server when no server config is here", async () => {

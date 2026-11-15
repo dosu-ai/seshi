@@ -2,6 +2,10 @@
  * hangs off it (X1.2), and the background jobs its worker role runs (X7). */
 
 export {
+  type AssembleHost,
+  type AssemblePass,
+  assembleOnce,
+  assemblerJob,
   BUILTIN_JOBS,
   heartbeatFresh,
   heartbeatJob,
@@ -13,6 +17,7 @@ export {
   STALE_HEARTBEATS,
 } from "./builtin-jobs";
 export {
+  type AssembleRun,
   type BuildOptions,
   buildInstance,
   defaultInstanceId,

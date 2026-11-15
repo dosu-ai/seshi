@@ -6,11 +6,15 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type Connector, defineIntegration, type Integration } from "@seshi/kit";
-import type { Envelope } from "@seshi/model";
+import { ENVELOPE_SCHEMA, type Envelope } from "@seshi/model";
+import { Pipeline, SpanStore } from "@seshi/pipeline";
 import {
+  archiveId,
   ensureLayout,
   FsStore,
   readCheckpoint,
+  readMetadata,
+  readPending,
   writeCheckpoint,
   writeDropped,
   writeFailed,
@@ -18,7 +22,7 @@ import {
 } from "@seshi/store";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { EXIT } from "../cli/exit";
-import { INTEGRATIONS } from "../integrations";
+import { buildFormats, INTEGRATIONS } from "../integrations";
 import { main } from "../main";
 import { healthUrl, listenSetting } from "./healthcheck";
 import { COMMANDS } from "./index";
@@ -296,6 +300,97 @@ describe("seshi sync", () => {
     expect(
       (await seshi(["sync", "failed", "dd", "--since", "whenever"], { toml: SOURCES })).code,
     ).toBe(EXIT.usage);
+  });
+});
+
+describe("seshi sync assemble (X7.1)", () => {
+  const OWNER = "svc:claude";
+  // The one-span sessions below are shorter than the filter's default min_chars.
+  const UNFILTERED = `${SOURCES}\n[filter]\nenabled = false\n`;
+  const messages = (role: string, text: string) =>
+    JSON.stringify([{ role, parts: [{ type: "text", content: text }] }]);
+  const attr = (key: string, value: string) => ({ key, value: { stringValue: value } });
+
+  /** A span batch for one Claude Platform session, stored as the api role stores it (span
+   * records and a pending marker), `agoMs` before now. */
+  async function storeSpans(session: string, agoMs: number) {
+    const at = new Date(Date.now() - agoMs);
+    const now = () => at;
+    const store = new FsStore(bucket);
+    const pipeline = new Pipeline({
+      store,
+      formats: buildFormats(INTEGRATIONS),
+      now,
+      assembler: new SpanStore({ store, now }),
+    });
+    const ns = (BigInt(at.getTime()) * 1_000_000n).toString();
+    const envelope: Envelope = {
+      schema: ENVELOPE_SCHEMA,
+      source: "otlp",
+      source_id: "claude",
+      format: "otlp-genai",
+      session_key: session,
+      payload: {
+        kind: "spans",
+        spans: [
+          {
+            traceId: "ab".repeat(16),
+            spanId: "0000000000000001",
+            name: "chat m",
+            startTimeUnixNano: ns,
+            endTimeUnixNano: ns,
+            attributes: [
+              attr("gen_ai.operation.name", "chat"),
+              attr("gen_ai.conversation.id", session),
+              attr("gen_ai.input.messages", messages("user", "please summarise the release notes")),
+              attr(
+                "gen_ai.output.messages",
+                messages("assistant", "the release adds sync assemble"),
+              ),
+            ],
+          },
+        ],
+      },
+      caller: { kind: "service", principal: OWNER, credential_id: "tok1" },
+      owner: OWNER,
+      owner_basis: "service",
+      idempotency_key: `batch-${session}`,
+      received_at: at.toISOString(),
+    };
+    expect(await pipeline.submit(envelope, { onFailure: "throw" })).toMatchObject({
+      status: "accepted",
+    });
+    return archiveId(OWNER, "otlp-genai", session);
+  }
+
+  it("publishes the span sessions that went quiet, with no worker running", async () => {
+    const quiet = await storeSpans("sesn_quiet", 60 * 60_000);
+    const fresh = await storeSpans("sesn_fresh", 0);
+    const store = new FsStore(bucket);
+
+    const run = await seshi(["sync", "assemble", "--json"], { toml: UNFILTERED });
+    expect(run.code).toBe(EXIT.ok);
+    expect(JSON.parse(run.out)).toMatchObject({
+      published: 1,
+      waiting: 1,
+      errors: 0,
+      outcomes: { stored: 1 },
+      more: false,
+    });
+    expect(await readMetadata(store, OWNER, quiet)).toMatchObject({ status: "stored" });
+    expect(await readPending(store, quiet)).toBeNull();
+    // Still inside its quiet period: kept for a later run.
+    expect(await readMetadata(store, OWNER, fresh)).toBeNull();
+    expect(await readPending(store, fresh)).not.toBeNull();
+
+    const again = await seshi(["sync", "assemble"], { toml: UNFILTERED });
+    expect(again.code).toBe(EXIT.ok);
+    expect(again.out).toContain("assembler: 0 session(s) published, 1 waiting for quiet");
+  });
+
+  it("takes no source id and runs only where the server config is", async () => {
+    expect((await seshi(["sync", "assemble", "claude"], { toml: SOURCES })).code).toBe(EXIT.usage);
+    expect((await seshi(["sync", "assemble", "--force"], { toml: SOURCES })).code).toBe(EXIT.usage);
   });
 });
 

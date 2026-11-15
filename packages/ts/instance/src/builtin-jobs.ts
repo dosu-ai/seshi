@@ -3,7 +3,7 @@
  * and embedders pass more through `InstanceParts.jobs`. */
 
 import type { FormatRegistry } from "@seshi/formats";
-import { assemblePending, type Pipeline } from "@seshi/pipeline";
+import { type AssembleReport, assemblePending, type Pipeline } from "@seshi/pipeline";
 import type { SearchService } from "@seshi/search";
 import type { Sources } from "@seshi/sources";
 import {
@@ -191,31 +191,51 @@ export function pollerJobs(host: JobHost): Job[] {
 /** A source's quiet period when its config names none (F4.4; config's default for `otlp`). */
 export const DEFAULT_QUIET_PERIOD_MS = 10 * 60 * 1000;
 
+/** What one assembler pass needs: the parts of the instance it reads and publishes through. */
+export type AssembleHost = Pick<JobHost, "store" | "formats" | "pipeline" | "config" | "now">;
+
+/** One assembler pass and its first error. */
+export interface AssemblePass {
+  report: AssembleReport;
+  /** The first session the pass could not assemble, and why (its marker stays). */
+  error?: string;
+}
+
+/** One pass of the span assembler over the pending markers (X7.4, F4.4): what the `assembler`
+ * job runs on the worker and `seshi sync assemble` runs from cron (X7.1). */
+export async function assembleOnce(
+  host: AssembleHost,
+  signal?: AbortSignal,
+): Promise<AssemblePass> {
+  const quiet = (sourceId: string) =>
+    host.config.sources.find((s) => s.id === sourceId)?.quiet_period ?? DEFAULT_QUIET_PERIOD_MS;
+  let error: string | undefined;
+  const report = await assemblePending({
+    store: host.store,
+    formats: host.formats,
+    publish: (session) => host.pipeline.publishAssembled(session),
+    quietMs: quiet,
+    now: () => host.now(),
+    ...(signal ? { signal } : {}),
+    onError: (archive, err) => {
+      error ??= `session ${archive.slice(0, 12)}: ${err instanceof Error ? err.message : String(err)}`;
+    },
+  });
+  return { report, ...(error ? { error } : {}) };
+}
+
 /** The span assembler (X7.4, F4.4): publishes sessions whose spans have gone quiet, through
  * the pipeline. Its backlog is the pending markers. */
 export function assemblerJob(host: JobHost): Job {
-  const quiet = (sourceId: string) =>
-    host.config.sources.find((s) => s.id === sourceId)?.quiet_period ?? DEFAULT_QUIET_PERIOD_MS;
   return {
     name: "assembler",
     kind: "assembler",
     placement: "worker",
     intervalMs: host.config.worker.assembly_interval,
     async run(signal) {
-      let firstError: string | undefined;
-      const report = await assemblePending({
-        store: host.store,
-        formats: host.formats,
-        publish: (session) => host.pipeline.publishAssembled(session),
-        quietMs: quiet,
-        now: () => host.now(),
-        signal,
-        onError: (archive, err) => {
-          firstError ??= `session ${archive.slice(0, 12)}: ${err instanceof Error ? err.message : String(err)}`;
-        },
-      });
+      const { report, error } = await assembleOnce(host, signal);
       return {
-        ...(firstError ? { outcome: "error" as const, error: firstError } : {}),
+        ...(error ? { outcome: "error" as const, error } : {}),
         more: report.more,
         summary: {
           published: report.published,

@@ -102,16 +102,18 @@ One job runs on every instance with the `api` role instead, worker or not:
 A failed run is retried after 5 seconds, doubling per failure in a row up to the job's
 interval. A poll whose envelope failed transiently (the bucket) never saves its checkpoint
 past it, so the retry reads it again. A session the assembler could not publish (the bucket
-failed) keeps its marker and is tried again. Each poll is also a one-shot command for cron:
-`seshi sync run <id>`.
+failed) keeps its marker and is tried again. Each worker job is also a one-shot command for
+cron: `seshi sync run <id>` polls a source, `seshi sync assemble` runs the span assembler. A
+deployment with no worker needs both: polling alone stores OTLP and Datadog spans but never
+publishes their sessions.
 
 Where the config and bucket keys are:
 
 - `seshi workers status [--json]`: the worker (`running`, `stopped`, `never`, or `several`),
   each job's last run, last error and backlog, and each source's drop and failure counts.
   Exit 8 when something needs a look. `GET /v1/admin/jobs` answers the same for admins.
-- `seshi sync run <id>`, `sync status [<id>]`, `sync failed <id>`, `sync dropped <id>`: poll
-  once; checkpoints, record counts and health; the records of envelopes that were not stored
+- `seshi sync run <id>`, `sync assemble`, `sync status [<id>]`, `sync failed <id>`,
+  `sync dropped <id>`: poll once; publish the span sessions that went quiet; checkpoints, record counts and health; the records of envelopes that were not stored
   and why, never their content.
 - `seshi reprocess --source <id> [--since <time>] [--run]`: rewind a source so its sessions are
   read and written again (X4.9), while the source still has them.
@@ -148,7 +150,8 @@ run `seshi serve`. The image's entry point is `seshi` and its command `serve`. I
 and needs only the settings above, from env or a mounted `/etc/seshi/seshi.toml`: there is no
 database, no volume (unless the store is `file://`), and no state outside the bucket. API
 instances scale to many alike; the worker role wants one instance that stays up (a minimum of
-one, not scaled to zero), or run its jobs from cron with `seshi sync run`. Keep
+one, not scaled to zero), or run its jobs from cron with `seshi sync run <id>` for each
+polled source and `seshi sync assemble` for OTLP and Datadog sessions. Keep
 the request timeout at 120 seconds or more; a large transcript can take that long to normalize
 and verify. Platforms that cap request bodies (Cloud Run's HTTP/1 limit is 32 MiB) are fine as
 long as clients send `Content-Encoding: gzip`, which every route accepts.

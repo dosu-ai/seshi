@@ -103,7 +103,9 @@ service account. User docs: [docs/otlp.md](../../otlp.md).
   is given) and registers the `assembler` job (`BUILTIN_JOBS`, worker placement) every
   `worker.assembly_interval` (new, `30s`). Its backlog is `pending_sessions`. `JobHost` gains
   `pipeline`, `formats`, `config.sources` (for `quiet_period`) and
-  `config.worker.assembly_interval`.
+  `config.worker.assembly_interval`. (17-review: the job's pass is `assembleOnce`, also run
+  by `Instance.assemble` and `seshi sync assemble`, the one-shot X7.1 asks for, so a
+  deployment with no worker can publish span sessions from cron.)
 - **API** (`@seshi/api` `src/otlp/`):
   - `protobuf.ts`: a hand-written decoder for the trace proto subset
     (`ExportTraceServiceRequest` into the JSON mapping; unknown fields skipped; depth, length

@@ -61,7 +61,7 @@ import {
   readLayout,
   type Store,
 } from "@seshi/store";
-import { BUILTIN_JOBS, type JobFactory, type JobHost } from "./builtin-jobs";
+import { assembleOnce, BUILTIN_JOBS, type JobFactory, type JobHost } from "./builtin-jobs";
 import { JobRunner } from "./jobs";
 import { type Logger, quietLogger } from "./log";
 import { type InstanceStatus, instanceStatus } from "./status";
@@ -372,6 +372,74 @@ export class Instance {
   source(id: string): SourceConfig | undefined {
     return this.config.sources.find((s) => s.id === id);
   }
+
+  /** Run the span assembler now, whatever this instance's roles: `seshi sync assemble`, the
+   * one-shot a deployment with no worker runs from cron (X7.1), as the `assembler` job does
+   * on the worker. Passes run until nothing more is waiting, a pass hits an error (its
+   * session keeps its marker), a pass gets nowhere, or `maxPasses` (100) ran. Counts are
+   * summed over the passes; `waiting` is the last pass's. */
+  async assemble(options: { signal?: AbortSignal; maxPasses?: number } = {}): Promise<AssembleRun> {
+    const maxPasses = options.maxPasses ?? 100;
+    const run: AssembleRun = {
+      passes: 0,
+      published: 0,
+      waiting: 0,
+      failed: 0,
+      retouched: 0,
+      errors: 0,
+      dropped: 0,
+      outcomes: {},
+      more: false,
+    };
+    for (;;) {
+      const { report, error } = await assembleOnce(this, options.signal);
+      run.passes += 1;
+      run.published += report.published;
+      run.waiting = report.waiting;
+      run.failed += report.failed;
+      run.retouched += report.retouched;
+      run.errors += report.errors;
+      run.dropped += report.dropped;
+      for (const [status, n] of Object.entries(report.outcomes)) {
+        run.outcomes[status] = (run.outcomes[status] ?? 0) + n;
+      }
+      run.more = report.more;
+      if (error !== undefined) run.error ??= error;
+      const progress = report.published + report.failed + report.dropped + report.retouched;
+      if (
+        !report.more ||
+        error !== undefined ||
+        progress === 0 ||
+        options.signal?.aborted ||
+        run.passes >= maxPasses
+      ) {
+        return run;
+      }
+    }
+  }
+}
+
+/** What `Instance.assemble` did, summed over its passes. */
+export interface AssembleRun {
+  passes: number;
+  /** Sessions published (any outcome the pipeline answered). */
+  published: number;
+  /** Sessions still inside their quiet period after the last pass (F4.4). */
+  waiting: number;
+  /** Sessions the pipeline recorded a permanent failure for (their marker cleared). */
+  failed: number;
+  /** Sessions whose marker stayed because a batch arrived while they were published. */
+  retouched: number;
+  /** Sessions skipped by an error (marker kept, tried again next time). */
+  errors: number;
+  /** Markers removed without publishing (session deleted, or no envelope). */
+  dropped: number;
+  /** How the pipeline answered, by status. */
+  outcomes: Record<string, number>;
+  /** More sessions are ready than these passes handled: run it again. */
+  more: boolean;
+  /** The first session that could not be assembled, and why. */
+  error?: string;
 }
 
 /** How `buildInstance` opens and reads what an Instance needs. */

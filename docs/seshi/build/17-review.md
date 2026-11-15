@@ -131,6 +131,15 @@ what changed.
   is null though the object is there; the API serves the head by hash and 404s an unnamed
   object on both routes. Deleting the leftovers is in the list below.
 
+- **background, medium**: X7.1's "each job is also a one-shot command" did not hold for the
+  span assembler, and docs/server.md offered cron `seshi sync run` in place of a worker. With
+  `--roles api` plus cron, OTLP and Datadog spans were stored with their pending markers and
+  no session was ever published. The assembler's pass is now `assembleOnce` (the job and
+  `Instance.assemble` share it), and `seshi sync assemble [--json]` runs passes until nothing
+  more is ready (exit 1 when a session could not be assembled; its marker stays). server.md,
+  cli.md, datadog.md and otlp.md name it. Test: two span sessions stored as the api role
+  stores them, `sync assemble` publishes the quiet one and leaves the fresh one waiting.
+
 ## Not fixed
 
 - **ingest, medium** (split vote, judged a documented deviation): a change entry is lost when

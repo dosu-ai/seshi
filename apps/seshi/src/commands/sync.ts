@@ -1,7 +1,8 @@
-/** `seshi sync` (X7.1, X4.8, X6.4): the pollers as one-shot commands, and what they left
- * behind. Run where the server's config and bucket keys are.
+/** `seshi sync` (X7.1, X4.8, X6.4): the pollers and the span assembler as one-shot commands,
+ * and what they left behind. Run where the server's config and bucket keys are.
  *
  *   seshi sync run <source> [--force] [--json]       poll a source once (for cron, X7.1)
+ *   seshi sync assemble [--json]                     publish quiet span sessions once (cron)
  *   seshi sync status [<source>] [--days N] [--json] checkpoints, record counts, health
  *   seshi sync failed <source> [--since <time>] [--limit N] [--json]
  *   seshi sync dropped <source> [--since <time>] [--limit N] [--json]
@@ -12,15 +13,21 @@
  *
  * `status`, `failed` and `dropped` also run from a machine signed in with `seshi login` as an
  * admin, through the server's `/v1/admin/sources` routes: `--server <url>`, or the CLI config's
- * `server` when no server config is here (`admin-target.ts`). `run` polls from where the
- * server config is only; on a server the worker polls on its own.
+ * `server` when no server config is here (`admin-target.ts`). `run` and `assemble` run from
+ * where the server config is only; on a server the worker runs them on its own.
+ *
+ * `assemble` is the span assembler as a one-shot (X7.1): it publishes the OTLP and Datadog
+ * sessions whose spans went quiet (F4.4), as the worker's `assembler` job does. A deployment
+ * whose instances all run `--roles api` runs it from cron next to `sync run`, or span sessions
+ * are stored as span records and never published.
  *
  * `run` exits 0 when the run finished, 6 (`conflict`) when another worker moved the checkpoint
- * and the run was discarded (X7.3), 1 when the connector failed. */
+ * and the run was discarded (X7.3), 1 when the connector failed. `assemble` exits 0, or 1 when
+ * a session could not be assembled (its marker stays for the next run). */
 
 import { parseArgs } from "node:util";
 import type { HttpSessionDB, RecordsPage } from "@seshi/client";
-import type { Instance } from "@seshi/instance";
+import type { AssembleRun, Instance } from "@seshi/instance";
 import { UPLOAD_SOURCE } from "@seshi/model";
 import { type RunReport, SourceError, type SourceStatus } from "@seshi/sources";
 import {
@@ -38,11 +45,14 @@ import type { CommandContext } from "./index";
 import { openServer, SERVER_OPTIONS, serverFailure } from "./server-instance";
 
 const USAGE = `usage: seshi sync run <source> [--force] [--json]
+       seshi sync assemble [--json]
        seshi sync status [<source>] [--days N] [--json]
        seshi sync failed <source> [--since <time>] [--limit N] [--json]
        seshi sync dropped <source> [--since <time>] [--limit N] [--json]
        (each also takes --config <file> and --set path=value;
         status, failed and dropped take --server <url> instead)`;
+
+const SUBCOMMANDS = ["run", "assemble", "status", "failed", "dropped"];
 
 const OPTIONS = {
   ...SERVER_OPTIONS,
@@ -109,6 +119,27 @@ async function runSource(
   emit(ctx, json, report, () => reportLines(report));
   if (report.outcome === "discarded") return EXIT.conflict;
   return report.outcome === "error" ? EXIT.failure : EXIT.ok;
+}
+
+function assembleLines(run: AssembleRun): string[] {
+  const outcomes = Object.entries(run.outcomes)
+    .map(([k, v]) => `${v} ${k}`)
+    .join(", ");
+  const lines = [
+    `assembler: ${run.published} session(s) published${outcomes ? ` (${outcomes})` : ""}, ${run.waiting} waiting for quiet, ${run.failed} failed, ${run.errors} error(s)`,
+  ];
+  if (run.retouched > 0)
+    lines.push(`${run.retouched} got new spans while publishing: run it again`);
+  else if (run.more) lines.push("more is waiting: run it again");
+  if (run.error) lines.push(`error: ${printable(run.error)}`);
+  return lines;
+}
+
+/** The span assembler once (X7.1), for a deployment with no worker. */
+async function assemble(ctx: CommandContext, json: boolean, instance: Instance) {
+  const result = await instance.assemble();
+  emit(ctx, json, result, () => assembleLines(result));
+  return result.errors > 0 ? EXIT.failure : EXIT.ok;
 }
 
 async function status(
@@ -225,7 +256,7 @@ async function remoteSync(
 export async function run(ctx: CommandContext): Promise<number> {
   const { json, rest } = takeJson(ctx.argv);
   const [sub, ...args] = rest;
-  if (!sub || !["run", "status", "failed", "dropped"].includes(sub)) {
+  if (!sub || !SUBCOMMANDS.includes(sub)) {
     return usageError(
       ctx,
       json,
@@ -246,7 +277,15 @@ export async function run(ctx: CommandContext): Promise<number> {
     return usageError(ctx, json, (err as Error).message, USAGE);
   }
   const id = positionals[0];
-  if (positionals.length > 1 || (sub !== "status" && id === undefined)) {
+  if (sub === "assemble" && (positionals.length > 0 || values.force !== undefined)) {
+    return usageError(
+      ctx,
+      json,
+      "sync assemble takes no source id: it publishes every source's quiet span sessions",
+      USAGE,
+    );
+  }
+  if (positionals.length > 1 || (sub !== "status" && sub !== "assemble" && id === undefined)) {
     return usageError(ctx, json, `sync ${sub} takes one source id`, USAGE);
   }
   if (values.server !== undefined && (values.config !== undefined || values.set !== undefined)) {
@@ -255,9 +294,9 @@ export async function run(ctx: CommandContext): Promise<number> {
   try {
     const target = await adminTarget(ctx, values);
     if (target.kind === "remote") {
-      if (sub === "run") {
+      if (sub === "run" || sub === "assemble") {
         throw new UsageError(
-          `sync run polls from where the server config is (X7.1); ${target.server}'s worker polls on its own`,
+          `sync ${sub} runs from where the server config is (X7.1); ${target.server}'s worker ${sub === "run" ? "polls" : "assembles"} on its own`,
         );
       }
       return await remoteSync(
@@ -269,15 +308,17 @@ export async function run(ctx: CommandContext): Promise<number> {
         values,
       );
     }
-    // Only `run` writes; the others refuse a bucket no server has used rather than claim it.
+    // Only `run` and `assemble` write; the others refuse a bucket no server has used rather
+    // than claim it.
     const local = target.config ? { ...values, config: target.config } : values;
     const { instance } = await openServer(ctx, local, {
       roles: [],
       probe: [],
-      initialize: sub === "run",
+      initialize: sub === "run" || sub === "assemble",
     });
     try {
       if (sub === "run") return await runSource(ctx, json, instance, id as string, values);
+      if (sub === "assemble") return await assemble(ctx, json, instance);
       if (sub === "status") return await status(ctx, json, instance, id, values);
       return await records(ctx, json, instance, sub as "failed" | "dropped", id as string, values);
     } finally {
