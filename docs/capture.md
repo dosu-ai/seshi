@@ -56,8 +56,11 @@ One decision function judges every session, the same for hooks, the sweep, the s
    repo, `--add-dir`) carries that work in its transcript, so it is not uploaded, and nothing
    more of a captured session is sent once it works in an excluded repo. What it uploaded
    before stays (rule changes do not retract).
-2. **A pause** (`seshi capture pause 2h`, or until `seshi capture resume`) stops everything
-   personal.
+2. **A pause** (`seshi capture pause 2h`, or until `seshi capture resume`) holds every upload
+   back while it lasts. It does not keep anything out: what sessions write during it stays in
+   their transcripts and is uploaded when the pause ends, including sessions that started and
+   ended during it. To keep a session out, turn it off (`seshi capture off --session`), which
+   also retracts what it uploaded.
 3. **The most specific personal level decides**: the session's own toggle, then the longest
    matching folder rule (`[[capture.paths]]`), then the global `capture.enabled` (on by default
    once capture is installed).

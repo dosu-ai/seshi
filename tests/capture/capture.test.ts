@@ -424,6 +424,22 @@ describe("capture rules from the CLI (F9.5)", () => {
     expect(spooled()).toBe(2); // the resume's wake-up, and the hook
   });
 
+  it("says a pause holds uploads back, and that what is written meanwhile goes up after", async () => {
+    const pause = await machine.seshi(["capture", "pause", "1h"]);
+    expect(pause.out).toContain("nothing is uploaded until");
+    expect(pause.out).toContain("uploaded when the pause ends");
+    expect(pause.out).not.toContain("nothing is captured");
+    // Nothing goes while it lasts; the next hook after it sends what was written meanwhile.
+    appendFileSync(file, TAIL);
+    await hook();
+    expect((await daemon()).summary).toMatchObject({ uploaded: 0 });
+    expect(await stored()).toBeNull();
+    await machine.seshi(["capture", "resume"]);
+    await hook();
+    expect((await daemon()).summary).toMatchObject({ uploaded: 1 });
+    expect((await stored())?.status).toBe("stored");
+  });
+
   it("sets a folder rule and the global level in the CLI config, keeping the rest", async () => {
     machine.cliConfig(`# mine\nserver = "${server.url}"\nuser = "${OWNER}"\n`);
     const off = await machine.seshi(["capture", "off", "--path", project]);

@@ -80,7 +80,7 @@ repository's code.
 | `capture install [<agent>…] [--service] [--command <program>]` | Wire seshi into Claude Code, Codex and Cursor on this machine (F9.6); with no agent, every one found. Merges into each agent's own config and keeps every hook there ([capture.md](capture.md#installing)) |
 | `capture uninstall [<agent>…] [--service]` | Take out only seshi's entries |
 | `capture status [--session [<id>]] [--agent <a>]` | Whether this folder (or session) is captured and which rule decided, where uploads go, the queue, problems, agents, recent sessions. Exit 8 when something needs action |
-| `capture pause [<duration>]`, `capture resume` | Stop capturing for a while (`2h`), or until resumed |
+| `capture pause [<duration>]`, `capture resume` | Hold every upload back for a while (`2h`), or until resumed; what sessions write meanwhile is uploaded when it ends ([capture.md](capture.md#what-is-captured)) |
 | `capture off\|on [--session [<id>]] [--agent <a>]`, `capture off\|on --path <folder>`, `capture off\|on` | Turn capture off or on for one session (off retracts what was uploaded, F9.7), a folder, or everything (F9.5) |
 | `hook <agent> <event>` | Internal: agents call it on their events (F9.1). Reads the payload, applies the rules, spools, starts the uploader. Always exits 0 and prints nothing |
 | `daemon [--keep-alive] [--once] [--idle <duration>]` | The background uploader and sweep (F9.1, F9.3); hooks start it. One per machine; `--keep-alive` (the service entry) waits for its turn instead of exiting |

@@ -176,6 +176,14 @@ what changed.
   excludes the session, in the hook, the uploader, the status line, `capture status` and
   `seshi upload`. Personal folder rules still go by the current folder. Tests: rules, hook (the
   `seen` entry, a known session that left B), uploader (both cases), end to end.
+- **client, high** (fixed in part: the promise, not the behaviour): `seshi capture pause` said
+  "nothing is captured until …" and capture.md said a pause "stops everything personal", but a
+  pause is only a gate on the decision: the first upload after it sends everything written
+  meanwhile, and a session run entirely during it is swept up after. The command now says
+  "nothing is uploaded until …", that what sessions write meanwhile is uploaded when the pause
+  ends, and that `capture off --session` keeps a session out; capture.md, cli.md and the rules
+  header say the same. Test: the message, and a session written during a pause uploaded by the
+  first hook after resume. Making a pause keep content out is under "Not fixed".
 
 ## Not fixed
 
@@ -237,3 +245,13 @@ what changed.
   permanent failure. The stale manifest is somewhat less rare than the deviation says (the
   checkpoint is saved every 25 objects and not after a transient error), but no data is lost
   or processed twice; not recording it would carve an exception into X6.4.
+
+- **client, high** (the behaviour of the pause finding above): making a pause keep what is
+  written during it out of the store. The decisions say only "seshi capture pause 2h for
+  everything" (F9.5) and decide capture per session when it is judged (turning a session back
+  on uploads all of it again, F9.7), so excluding a span of time is a semantics they do not
+  settle: turn every session seen or started during the pause off (which, by F9.7, also
+  retracts what a session uploaded before the pause), or skip the paused bytes (the server log
+  is contiguous, and a whole resend after a 409, a moved transcript or a replace would send
+  them anyway), or keep "defer". Left for that decision; the CLI and docs now describe what
+  a pause does.

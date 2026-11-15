@@ -6,7 +6,8 @@
  * 1. Shared rules can only turn capture off, and always win: the org rule (the CLI config's
  *    `capture.remotes`: only repos whose remote matches) and a repo's `.seshi/config.toml`
  *    with `capture = false`, in the folder the session runs in or any other it was seen in.
- * 2. A pause (`seshi capture pause`) stops everything personal.
+ * 2. A pause (`seshi capture pause`) stops everything personal while it lasts: a gate on the
+ *    decision, so what a session writes meanwhile goes up once it ends.
  * 3. Otherwise the most specific personal level that says anything decides: the session's own
  *    toggle, then the longest matching folder rule (`[[capture.paths]]`), then the global
  *    `capture.enabled`.

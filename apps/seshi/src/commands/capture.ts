@@ -17,7 +17,8 @@
  * session the agent's environment names, else the latest seen in this folder), for a folder
  * (`--path`, a `[[capture.paths]]` rule in the CLI config), or for everything (the CLI config's
  * `capture.enabled`). Turning a session off stops its uploads and retracts what was uploaded
- * (F9.7). `pause` stops everything for a while, or until `resume`.
+ * (F9.7). `pause` holds every upload back for a while, or until `resume`; what sessions write
+ * meanwhile goes up when it ends (a session is judged as a whole, when it is judged).
  *
  * Every subcommand takes `--json`. Exit codes: 0; 2 usage; 3 a config or state file it cannot
  * use; 4 no agent to install for; 8 (`status`) something needs action. */
@@ -513,8 +514,12 @@ async function pause(ctx: CommandContext, json: boolean, args: Args): Promise<nu
     state.paused = { at: now.toISOString(), ...(until ? { until } : {}) };
   });
   const style = await styleFor(ctx, { json });
+  // A pause holds uploads back; it does not take anything out. What sessions write meanwhile is
+  // in their transcripts and goes up once capture is on again (decisions are taken per session,
+  // when it is judged), so say so, and name what does keep a session out.
   emit(ctx, json, { paused: true, until: until ?? null }, () => [
-    `${style.status("paused", "warn")}: nothing is captured ${until ? `until ${until}` : "until seshi capture resume"}`,
+    `${style.status("paused", "warn")}: nothing is uploaded ${until ? `until ${until}` : "until seshi capture resume"}.`,
+    "  What sessions write meanwhile is uploaded when the pause ends. To keep a session out, turn it off: seshi capture off --session <id>",
   ]);
   return EXIT.ok;
 }
