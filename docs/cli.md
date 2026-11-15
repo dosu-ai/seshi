@@ -83,10 +83,10 @@ repository's code.
 `serve`, `admin`, `workers`, `sync`, `reprocess`, `redact backfill` and `review` run where the
 server's config and bucket keys are: they load the server config the way `serve` does
 (`--config`, `SESHI_CONFIG`, `./seshi.toml`, `/etc/seshi/seshi.toml`, then `SESHI_*` env and
-`--set`). `workers status` and `sync status|failed|dropped` also run from an admin's laptop through the server's admin routes:
-with `--server <url>`, or, when no server config is found, the CLI config's `server` (its
-`[local] config` is read as the server config instead). `sync run` and `reprocess` stay where
-the config is.
+`--set`). `workers status` and `sync status|failed|dropped` also run from an admin's laptop
+through the server's admin routes: with `--server <url>`, or, when no server config is found,
+the CLI config's `server` (its `[local] config` is read as the server config instead). `sync
+run` and `reprocess` stay where the config is.
 
 ## Redaction rules
 

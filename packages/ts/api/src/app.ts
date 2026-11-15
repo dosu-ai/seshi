@@ -800,6 +800,7 @@ export function createApp(instance: Instance) {
 
   const traces = otlpTraces(instance, { bearer, readBody, maxBodyBytes: bodyLimit });
   route("POST", "/otlp/v1/traces", ({ request }) => traces(request));
+
   // --- admin: sources (X4.8, X6.4) ------------------------------------------------------
   // What `seshi sync status|failed|dropped` read over HTTP. A source no longer in [[sources]]
   // keeps its records until retention prunes them, so its records can still be read.
