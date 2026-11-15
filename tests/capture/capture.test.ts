@@ -469,6 +469,47 @@ describe("capture rules from the CLI (F9.5)", () => {
     });
   });
 
+  it("answers the desktop chip's calls with the fields it reads (F9.4)", async () => {
+    // integrations/claude-code/plugin/hooks/register.tsx runs exactly these and reads these
+    // fields; a change here is a change to the Session Capture chip.
+    const ask = async () =>
+      JSON.parse(
+        (
+          await machine.seshi(["statusline", "--json", "--agent", "claude-code"], {
+            stdin: JSON.stringify({ session_id: SESSION }),
+          })
+        ).out,
+      );
+    const toggle = async (which: "on" | "off") =>
+      JSON.parse(
+        (
+          await machine.seshi([
+            "capture",
+            which,
+            "--session",
+            SESSION,
+            "--agent",
+            "claude-code",
+            "--json",
+          ])
+        ).out,
+      );
+    expect(await ask()).toMatchObject({
+      capturing: true,
+      reason: expect.any(String),
+      problems: expect.any(Array),
+    });
+    expect(await toggle("off")).toMatchObject({
+      capture: false,
+      retracting: expect.any(Boolean),
+      fresh: expect.any(Boolean),
+      unfrozen: expect.any(Boolean),
+    });
+    expect(await ask()).toMatchObject({ capturing: false, reason: "turned off for this session" });
+    expect(await toggle("on")).toMatchObject({ capture: true });
+    expect(await ask()).toMatchObject({ capturing: true, reason: "turned on for this session" });
+  });
+
   it("stops a running session where it is; resume keeps it stopped, capture on uploads all of it", async () => {
     await hook();
     await daemon();

@@ -237,13 +237,7 @@ A review of this branch against F9/B1.6 fixed, each with a test:
 
 ## Still to check
 
-- **The Claude desktop mod (F9.4, F9.5, F9.6) is not built.** The decisions mark the Session
-  Capture ◉/⏸ chip, its toggle and `/session-capture` Agreed, and F9.6's plugin ships "the
-  desktop mod"; the plugin holds only the hooks and the `/seshi` skill. Building it means a
-  mod for the desktop app's own extension surface, which nothing in this repository targets
-  and no test here can run; the extension point above says what it must do. The `/seshi`
-  skill's `capture off|on|status --session` covers one session from the app meanwhile, but
-  there is no always-visible indicator. Left for that work (17-review "Not fixed").
+- **The Claude desktop mod (F9.4, F9.5, F9.6)** is built in [25](25-desktop-mod.md).
 - **The first-run notice for Cursor and Codex (F9.4) is not built.** Only `seshi capture
   status` is. A hook prints nothing by design (speed, and an agent may treat output as
   input); Codex's `notify` has no way to show anything, and Cursor's hooks can only answer a

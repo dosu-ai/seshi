@@ -1,0 +1,14 @@
+{
+  "name": "seshi",
+  "description": "seshi's Claude Code plugin: Session Capture hooks, the /seshi skill and the desktop Session Capture chip.",
+  "owner": {
+    "name": "Dosu"
+  },
+  "plugins": [
+    {
+      "name": "seshi",
+      "source": "./integrations/claude-code/plugin",
+      "description": "Session Capture for Claude Code: the capture hooks, the /seshi skill, and in the desktop app the Session Capture chip and /session-capture."
+    }
+  ]
+}

@@ -382,11 +382,6 @@ Run at `seshi-17-review` after the fixes above:
   checkpoint is saved every 25 objects and not after a transient error), but no data is lost
   or processed twice; not recording it would carve an exception into X6.4.
 
-- **coverage, medium**: the Claude desktop mod (F9.4–F9.6: the Session Capture chip, its
-  toggle and `/session-capture`, shipped in the plugin) is not built. It is a mod for the
-  desktop app's own extension surface, which nothing here targets and no test here can run;
-  too large for this review. The `/seshi` skill covers toggling one session meanwhile.
-  Recorded in 14's "Still to check", capture.md's "Not yet" and the build README.
 - **coverage, medium**: the first-run notice for Cursor and Codex (F9.4) is not built. Hooks
   print nothing by design, Codex's notify cannot show anything and Cursor's hooks can only
   steer the agent, so the notice needs a channel the decisions do not choose (a desktop

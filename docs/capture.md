@@ -115,6 +115,12 @@ needs action follows a separator, at most two things. It reads only local files,
 network. Claude Code runs it as its status line; for Cursor and Codex, `seshi capture status`
 says the same and more (which rule decided, the queue, the last errors).
 
+The Claude desktop app's Code tab has no status line. There, seshi's Claude Code plugin draws the
+same words as a chip in the prompt footer; clicking it turns capture off or on for the session,
+and `/session-capture [on|off|status]` does the same by command. It needs the plugin installed
+(`/plugin install seshi --marketplace dosu-ai/sessiondb`), not just `seshi capture install`; see
+[the plugin's README](../integrations/claude-code/plugin/README.md#the-desktop-chip).
+
 ## The uploader
 
 Hooks only append a small file per event to the spool and exit, always with 0 and no output, in
@@ -229,7 +235,5 @@ and wakes the uploader; `seshi capture status` shows them as `resending` until t
 
 ## Not yet
 
-The Claude desktop app's Session Capture chip and `/session-capture` (a mod), a first-run
-notice inside Cursor and Codex that capture is on, and Datadog Trajectory's local files are
-later. In the desktop app, the
-`/seshi` skill's `capture off|on|status --session` covers one session meanwhile.
+A first-run notice inside Cursor and Codex that capture is on, and Datadog Trajectory's local
+files, are later.

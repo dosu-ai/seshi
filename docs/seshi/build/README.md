@@ -34,11 +34,11 @@ Branch names use a hyphen (`seshi-01-restructure`), not a slash: git cannot hold
 | 22 | `seshi-22-otlp` | OTLP body caps; span input history stored once | F4.1, F4.4 (18 rows 4, 5) | Built |
 | 23 | `seshi-23-orphan-sweep` | The orphan sweep: after backfill and replace, daily, `seshi redact sweep` | F2.5 (18 row 6) | Built |
 | 24 | `seshi-24-capture` | Pause stops sessions where they are; the uploader stays up while retries wait; Windows CI | F9.5, F9.1, F8.4 (18 rows 1, 10, 9) | Built |
+| 25 | `seshi-25-desktop-mod` | The Claude desktop app's Session Capture chip and `/session-capture`, in the Claude Code plugin; a plugin marketplace | F9.4–F9.6 | Built |
 
 F7 (Cursor Cloud sync) is deferred and is not built. Agreed but not built, found in 17's review
-and left for a decision (see [17](17-review.md#not-fixed)): the Claude desktop mod (F9.4–F9.6's
-Session Capture chip and `/session-capture`), the first-run notice for Cursor and Codex (F9.4),
-and the uploader resend that reprocesses uploaded sessions (X4.9, F3.4). B1.3's state words
+and left for a decision (see [17](17-review.md#not-fixed)): the first-run notice for Cursor and
+Codex (F9.4). The Claude desktop mod (F9.4–F9.6) is built in 25, and the uploader resend in 21. B1.3's state words
 are used on the search empty state and `seshi upload`'s lines (17); the rest of B1.3 (the other
 commands' lines, poses in the docs) is not applied.
 
@@ -58,11 +58,11 @@ Each branch has its notes here: [01](01-restructure.md), [02](02-config.md), [03
 [12](12-search.md), [13](13-cli.md), [14](14-capture.md), [15](15-distribution.md),
 [16](16-readme.md), [17](17-review.md), [18](18-decisions.md), [19](19-change-feed.md),
 [20](20-review-drop.md), [21](21-resend.md), [22](22-otlp.md), [23](23-orphan-sweep.md),
-[24](24-capture.md).
+[24](24-capture.md), [25](25-desktop-mod.md).
 
 ## How the stack was built
 
-The stack is linear, in the order of the table: `seshi` ← 01 ← 02 ← … ← 15 ← 16 ← 17 ← 18 ← 19 ← … ← 24. Each
+The stack is linear, in the order of the table: `seshi` ← 01 ← 02 ← … ← 15 ← 16 ← 17 ← 18 ← 19 ← … ← 24 ← 25. Each
 branch is pushed; there are no PRs yet.
 
 Branches 01–06 were built one after another. Branches 07–15 were then built in parallel, each
