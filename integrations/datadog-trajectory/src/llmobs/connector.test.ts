@@ -420,6 +420,21 @@ describe("readDatadogConfig", () => {
       /page_size/,
     );
     expect(() => readDatadogConfig({ api_key: "k", app_key: "a", lag: "2m" })).toThrow(/lag/);
+    expect(() =>
+      readDatadogConfig({ api_key: "k", app_key: "a", tags: ["env:prod", "env:dev"] }),
+    ).toThrow(/given twice/);
+  });
+
+  it("sends the keys over plain http only to this machine", () => {
+    const base = { api_key: "k", app_key: "a" };
+    for (const url of ["https://dd-proxy.internal", "http://127.0.0.1:8126", "http://localhost"]) {
+      expect(readDatadogConfig({ ...base, api_url: url }).api_url).toBe(url);
+    }
+    expect(() => readDatadogConfig({ ...base, api_url: "http://dd-proxy.internal" })).toThrow(
+      /must be https/,
+    );
+    expect(() => readDatadogConfig({ ...base, api_url: "ftp://x" })).toThrow(/must be https/);
+    expect(() => readDatadogConfig({ ...base, api_url: "not a url" })).toThrow(/not a URL/);
   });
 });
 

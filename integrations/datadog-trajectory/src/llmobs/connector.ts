@@ -15,7 +15,14 @@
 import { createHash } from "node:crypto";
 import type { Connector, ConnectorContext, Cursor } from "@seshi/kit";
 import { type Claims, ENVELOPE_SCHEMA, type Envelope, type ReceivedSpan } from "@seshi/model";
-import { abortableSleep, apiBase, DatadogApiError, type SearchPage, searchPage } from "./api";
+import {
+  abortableSleep,
+  apiBase,
+  DatadogApiError,
+  type SearchPage,
+  searchPage,
+  tagFilter,
+} from "./api";
 import { DATADOG_LLMOBS, datadogClaims } from "./format";
 import { sessionOf, tagsOf, tagValue, toReceivedSpan } from "./spans";
 
@@ -94,9 +101,12 @@ export function readDatadogConfig(raw: Readonly<Record<string, unknown>>): Datad
   if (!Number.isInteger(page) || page < 1 || page > 5000) {
     throw new Error("the datadog source's page_size must be 1 to 5000");
   }
+  // Checked here so a bad tag list fails the run before any request (the filter is a map).
+  tagFilter(tags);
+  const api_url = apiUrl(raw.api_url);
   return {
     site,
-    ...(typeof raw.api_url === "string" && raw.api_url !== "" ? { api_url: raw.api_url } : {}),
+    ...(api_url ? { api_url } : {}),
     api_key: secretValue(raw.api_key as SecretLike, "api_key"),
     app_key: secretValue(raw.app_key as SecretLike, "app_key"),
     ...(typeof raw.ml_app === "string" && raw.ml_app !== "" ? { ml_app: raw.ml_app } : {}),
@@ -106,6 +116,28 @@ export function readDatadogConfig(raw: Readonly<Record<string, unknown>>): Datad
     backfill: duration(raw.backfill ?? 7 * 86_400_000, "backfill"),
     page_size: page,
   };
+}
+
+/** `api_url`, checked: the keys travel in its headers, so plain HTTP is only for this machine
+ * (a test server, a local proxy). */
+function apiUrl(raw: unknown): string | undefined {
+  if (typeof raw !== "string" || raw === "") return undefined;
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error("the datadog source's api_url is not a URL");
+  }
+  const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+  if (url.protocol === "http:" && !loopback) {
+    throw new Error(
+      "the datadog source's api_url must be https (plain http would send the keys in clear); http is allowed for localhost only",
+    );
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    throw new Error("the datadog source's api_url must be https");
+  }
+  return raw;
 }
 
 const isIso = (v: unknown): v is string => typeof v === "string" && !Number.isNaN(Date.parse(v));
