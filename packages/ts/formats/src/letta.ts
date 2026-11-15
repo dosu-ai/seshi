@@ -16,6 +16,7 @@
 import {
   normalizeTranscript as letta,
   normalizeToCanonical as lettaCanonical,
+  NORMALIZER_VERSION,
   type TranscriptTrajectorySource,
 } from "@letta-ai/trajectory";
 import type {
@@ -36,6 +37,11 @@ export interface LettaAdapterOptions {
   source: LettaSource;
   /** Whether a log can arrive in chunks; default true. */
   chunkable?: boolean;
+  /** The integration's own revision of what it does around the library (`prepare`, `finish`,
+   * `calls`); default 1. Raise it with a change that alters a stored transcript's records. The
+   * adapter's version is this and the library's (`2+trajectory.0.3.0`), so a new library
+   * makes sessions stale too (X4.9). */
+  revision?: number;
   detect?: FormatDetection;
   /** The transcript as the library should see it. A chunk past a session's head is prepared
    * the same way as a whole log. */
@@ -75,6 +81,7 @@ export function lettaAdapter(options: LettaAdapterOptions): FormatAdapter {
   return {
     source,
     chunkable: options.chunkable ?? true,
+    version: `${options.revision ?? 1}+trajectory.${NORMALIZER_VERSION}`,
     detect: options.detect,
     normalize(transcript: string, chunk?: Chunk): NormalizedRecord[] | NormalizedTranscript {
       const prepared = prepare ? prepare(transcript) : transcript;

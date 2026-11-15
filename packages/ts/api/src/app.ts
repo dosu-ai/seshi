@@ -66,6 +66,7 @@ import {
   listSessions,
   type StoreSessionDB,
   setVisibility,
+  staleSessions,
   tombstone,
 } from "@seshi/pipeline";
 import { rulesDocument } from "@seshi/redact";
@@ -458,6 +459,7 @@ export function createApp(instance: Instance) {
       throw new HttpError(400, "bad_field", "shipped needs records and prefix_sha256");
     }
     const replace = bool(body, "replace");
+    const rebuild = bool(body, "rebuild");
     const visibility = visibilityField(body.visibility);
     if (body.claims !== undefined && (typeof body.claims !== "object" || body.claims === null)) {
       throw new HttpError(400, "bad_field", "claims must be an object");
@@ -479,9 +481,11 @@ export function createApp(instance: Instance) {
         `an idempotency key must be at most ${MAX_IDEMPOTENCY_KEY_LENGTH} characters`,
       );
     }
-    // A replace proves the uploading machine with the session's retraction secret (F9.7), in
-    // the same header a retraction uses; the org key needs it (X5.12, `mayReplace`).
-    const retractSecret = replace ? (request.headers.get(RETRACT_HEADER) ?? undefined) : undefined;
+    // A replace (or a rebuild, which is one) proves the uploading machine with the session's
+    // retraction secret (F9.7), in the same header a retraction uses; the org key needs it
+    // (X5.12, `mayReplace`).
+    const retractSecret =
+      replace || rebuild ? (request.headers.get(RETRACT_HEADER) ?? undefined) : undefined;
     const upload: Upload = {
       agent,
       session_id: str(body, "session_id", true) as string,
@@ -493,6 +497,7 @@ export function createApp(instance: Instance) {
       parent_session_id: str(body, "parent_session_id"),
       fork_of: str(body, "fork_of"),
       ...(replace ? { replace } : {}),
+      ...(rebuild ? { rebuild } : {}),
       ...(visibility ? { visibility } : {}),
       ...(claims ? { claims } : {}),
       ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
@@ -541,6 +546,22 @@ export function createApp(instance: Instance) {
       }
     }
     return json({ sessions, cursor, truncated });
+  });
+
+  /** The caller's own sessions an older normalizer built (X4.9), for the uploader that sent
+   * them: it sends each again whole with `rebuild`. Paged by key as `GET /v1/sessions` is, so a
+   * page can hold none and still be truncated. `sessions:write`, since that is what the
+   * uploader's credential holds; only the caller's own sessions, and only their ids. */
+  route("GET", "/v1/sessions/stale", async ({ request, url }) => {
+    const principal = await caller(request, "sessions:write");
+    const after = url.searchParams.get("after") ?? undefined;
+    const limit = intParam(url, "limit", 1000, 1000);
+    return json(
+      await staleSessions(store, principal.owner, formats, {
+        ...(after !== undefined ? { after } : {}),
+        limit,
+      }),
+    );
   });
 
   route("GET", "/v1/sessions/:agent/:session_id", async ({ request, params, url }) => {

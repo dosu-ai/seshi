@@ -39,7 +39,8 @@
   "branch": "main",
   "normalizer": {
     "name": "@dosu/sessiondb",
-    "version": "0.9.0+trajectory.0.3.0"
+    "version": "0.9.0+trajectory.0.3.0",
+    "format_version": "1+trajectory.0.3.0"
   },
   "normalized": {
     "bytes": 48213,

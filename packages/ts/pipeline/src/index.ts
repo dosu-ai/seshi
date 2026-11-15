@@ -110,3 +110,4 @@ export {
   type SpanBatchResult,
   StoreHealthCounters,
 } from "./stages";
+export { staleSession, staleSessions } from "./stale";

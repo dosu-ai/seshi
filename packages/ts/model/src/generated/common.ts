@@ -71,10 +71,12 @@ export interface Provenance {
   location?: SourceLocation;
 }
 
-/** Which code normalized the records, so `seshi reprocess` can pick the sessions an adapter fix affects (X4.9). */
+/** Which code normalized the records, so the sessions an adapter fix affects can be picked out and rebuilt (X4.9). */
 export interface Normalizer {
   name: string;
   version: string;
+  /** The format adapter's own normalizer version (`1+trajectory.0.3.0`): what the records a transcript normalizes to depend on, compared number by number. On a session's metadata it is the oldest that built any of its stored traces, so a session is stale when it is older than the format's current one (X4.9). Absent on what was written before it was recorded, which counts as stale. */
+  format_version?: string;
 }
 
 /** Marks a trace that is the tail of an already-stored session. */

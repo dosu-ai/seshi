@@ -39,6 +39,8 @@ export interface Envelope {
   visibility?: Visibility;
   /** A whole upload that may replace the session rather than extend it (X4.6). Only the session's original writer or an admin may set it. */
   replace?: boolean;
+  /** A whole upload that rebuilds the session from the whole log and reviews it again, even when the log only extends what is stored (X4.9): the session is replaced as with `replace`, which it needs the same permission as. The uploader sends it for sessions the server marks stale, and `seshi capture resend` by hand. */
+  rebuild?: boolean;
   /** What the uploader says shipped of the session before, from an earlier answer. The server's own state decides whether a whole upload extends the session; this is used only for a session that has none. */
   shipped?: ShippedPrefix;
   project?: string;

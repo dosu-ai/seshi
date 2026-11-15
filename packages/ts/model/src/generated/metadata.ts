@@ -55,7 +55,7 @@ export interface SessionMetadata {
   origin_agent?: string;
   /** The session's id in the agent that ran it (X4.5). */
   native_session_id?: string;
-  /** What normalized the head trace (X4.9). */
+  /** What normalized the head trace (X4.9). Its `format_version` is the oldest that built any stored trace of the session: a chunk normalized by a newer adapter does not make the prefix current, a whole write does. */
   normalizer?: Normalizer;
   /** The hash of the uploader's retraction secret (F9.7), kept from the session's first upload. The secret sent in X-Seshi-Retract (a retraction, or an org-key replace) is checked against it. */
   retract_hash?: Sha256;

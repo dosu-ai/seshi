@@ -24,6 +24,7 @@ export {
   TRAJECTORY_VERSION,
 } from "./letta";
 export {
+  compareNormalizerVersions,
   FormatRegistry,
   NORMALIZER,
   NormalizeError,

@@ -254,6 +254,7 @@ describe("the document itself", () => {
         "DELETE /v1/tokens/{id}",
         "POST /v1/sessions",
         "GET /v1/sessions",
+        "GET /v1/sessions/stale",
         "GET /v1/sessions/{agent}/{session_id}",
         "DELETE /v1/sessions/{agent}/{session_id}",
         "GET /v1/sessions/{agent}/{session_id}/trace",
@@ -393,11 +394,30 @@ describe("the server honours it", () => {
       body: { agent: "claude-code", session_id: "theirs", transcript: rewritten, replace: true },
     });
     expect(forbidden.status).toBe(403);
+    // A rebuild is a replace (X4.9): the same writer only, and never a chunk.
+    const rebuildOthers = await call("POST", "/v1/sessions", {
+      body: { agent: "claude-code", session_id: "theirs", transcript: CLAUDE, rebuild: true },
+    });
+    expect(rebuildOthers.status).toBe(403);
+    const rebuildChunk = await call("POST", "/v1/sessions", {
+      body: {
+        agent: "claude-code",
+        session_id: "sess1",
+        transcript: PROGRESS,
+        offset: bytes_total,
+        rebuild: true,
+      },
+    });
+    expect(rebuildChunk.status).toBe(422);
+    expect(rebuildChunk.body).toMatchObject({ error: { code: "bad_chunk" } });
 
     // Reads.
     expect((await call("GET", "/v1/sessions")).status).toBe(200);
     expect((await call("GET", "/v1/sessions?limit=5")).status).toBe(200);
     expect((await call("GET", "/v1/sessions?limit=0")).status).toBe(400);
+    expect((await call("GET", "/v1/sessions/stale")).status).toBe(200);
+    expect((await call("GET", "/v1/sessions/stale?limit=0")).status).toBe(400);
+    expect((await call("GET", "/v1/sessions/stale", { token: null })).status).toBe(401);
     expect((await call("GET", "/v1/sessions/claude-code/sess1")).status).toBe(200);
     expect((await call("GET", "/v1/sessions/claude-code/sess1/trace")).status).toBe(200);
     expect(
@@ -561,6 +581,7 @@ describe("the server honours it", () => {
     expect((await call("GET", "/v1/me", { app: down })).status).toBe(200);
     expect((await call("POST", "/v1/sessions", { body, app: down })).status).toBe(502);
     expect((await call("GET", "/v1/sessions", { app: down })).status).toBe(502);
+    expect((await call("GET", "/v1/sessions/stale", { app: down })).status).toBe(502);
     expect((await call("GET", "/v1/sessions/claude-code/x", { app: down })).status).toBe(502);
     expect((await call("GET", "/v1/sessions/claude-code/x/trace", { app: down })).status).toBe(502);
     expect((await call("GET", "/v1/sessions/claude-code/x/export", { app: down })).status).toBe(
@@ -824,6 +845,11 @@ describe("identity and access (X5)", () => {
     });
     expect(created.status).toBe(201);
     const id = (created.body as { record: { id: string } }).record.id;
+    // The stale listing is the uploader's: a reader's token cannot write, so it is refused.
+    const syncToken = (created.body as { token: string }).token;
+    expect((await call("GET", "/v1/sessions/stale", { app: x5, token: syncToken })).status).toBe(
+      403,
+    );
     expect((await call("POST", "/v1/tokens", { ...admin, body: { kind: "device" } })).status).toBe(
       400,
     );

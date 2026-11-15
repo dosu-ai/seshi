@@ -51,6 +51,10 @@ export interface SessionUpload {
   /** A whole upload that does not extend the session rewrites it instead of being refused
    * (`SessionConflict`, X4.6). Only the session's original writer or an admin may. */
   replace?: boolean;
+  /** Rebuild the session from this whole log and review it again, even when the log only
+   * extends what is stored (X4.9): a replace, which needs the same permission. Never a chunk.
+   * Without an `idempotency_key` each rebuild gets a fresh one. */
+  rebuild?: boolean;
   /** Identifies this upload across resends (X4.7); derived from the session, the offset and
    * the text when omitted. A resend with the same key gets the same answer. */
   idempotency_key?: string;
@@ -162,6 +166,26 @@ export interface SessionsPage {
   truncated: boolean;
 }
 
+/** A session of the caller's that an older normalizer built (X4.9): its format's adapter has
+ * changed since, so the session should be sent again whole with `rebuild`. */
+export interface StaleSession {
+  /** The format it is filed under. */
+  agent: string;
+  session_id: string;
+  /** The format version that built it (`normalizer.format_version`); absent when not recorded. */
+  built_with?: string;
+  /** The format's current normalizer version. */
+  current: string;
+}
+
+export interface StaleSessionsPage {
+  sessions: StaleSession[];
+  /** Pass as `after` to continue. */
+  cursor: string | undefined;
+  /** More sessions to look through: a page can be empty and still be truncated. */
+  truncated: boolean;
+}
+
 export interface Identity {
   owner: string;
   /** Where the sessions go, as a reader would need to know it. */
@@ -199,6 +223,8 @@ export interface SessionDB {
     format?: RenderFormat,
   ): Promise<StoredTrace | null>;
   listSessions(options?: ListSessionsOptions): Promise<SessionsPage>;
+  /** The caller's own sessions an older normalizer built (X4.9), a page at a time. */
+  staleSessions(options?: { after?: string; limit?: number }): Promise<StaleSessionsPage>;
   /** Drop the session's objects and append a tombstone; null for one not stored. */
   tombstone(agent: string, sessionId: string): Promise<{ removed: number } | null>;
   /** The change feed after a cursor. */

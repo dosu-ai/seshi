@@ -1,7 +1,7 @@
 import type { FormatAdapter, NormalizedRecord } from "@seshi/model";
 import { describe, expect, it } from "vitest";
-import { BUILTIN_FORMATS } from "./index";
-import { FormatRegistry, NORMALIZER, NormalizeError } from "./registry";
+import { BUILTIN_FORMATS, lettaAdapter, TRAJECTORY_VERSION } from "./index";
+import { compareNormalizerVersions, FormatRegistry, NORMALIZER, NormalizeError } from "./registry";
 
 const META = { role: "meta", source: "a" } as NormalizedRecord;
 const USER = { role: "user", content: "hi", timestamp: "2026-09-01T00:00:00Z" } as NormalizedRecord;
@@ -132,5 +132,41 @@ describe("NORMALIZER", () => {
   it("keeps the name traces have always recorded", () => {
     expect(NORMALIZER.name).toBe("@dosu/sessiondb");
     expect(NORMALIZER.version).toMatch(/^\d+\.\d+\.\d+.*\+trajectory\./);
+  });
+});
+
+describe("normalizer versions (X4.9)", () => {
+  it("compares versions number by number", () => {
+    expect(compareNormalizerVersions("1", "1")).toBe(0);
+    expect(compareNormalizerVersions("1", "2")).toBeLessThan(0);
+    expect(compareNormalizerVersions("1+trajectory.0.3.0", "1+trajectory.0.10.0")).toBeLessThan(0);
+    expect(compareNormalizerVersions("2+trajectory.0.3.0", "1+trajectory.0.9.0")).toBeGreaterThan(
+      0,
+    );
+    // A number missing is 0, so an adapter that starts naming its library is newer.
+    expect(compareNormalizerVersions("1", "1+trajectory.0.3.0")).toBeLessThan(0);
+    expect(compareNormalizerVersions("1.0", "1")).toBe(0);
+  });
+
+  it("gives each format its version, 1 by default, and says what is stale", () => {
+    const registry = new FormatRegistry([adapter("a"), adapter("b", { version: "3" })]);
+    expect(registry.versionOf("a")).toBe("1");
+    expect(registry.versionOf("b")).toBe("3");
+    expect(registry.versionOf("c")).toBeUndefined();
+    expect(registry.normalizerFor("b")).toEqual({ ...NORMALIZER, format_version: "3" });
+    expect(registry.isStale("b", "2")).toBe(true);
+    expect(registry.isStale("b", "3")).toBe(false);
+    expect(registry.isStale("b", "4")).toBe(false);
+    // Nothing recorded: built before versions were.
+    expect(registry.isStale("a", undefined)).toBe(true);
+    // A format this deployment does not read cannot be rebuilt here.
+    expect(registry.isStale("c", undefined)).toBe(false);
+  });
+
+  it("names the library a Letta-based adapter runs, so a new library makes sessions stale", () => {
+    const atif = new FormatRegistry([...BUILTIN_FORMATS]);
+    expect(atif.versionOf("atif")).toBe(`1+trajectory.${TRAJECTORY_VERSION}`);
+    const revised = lettaAdapter({ source: "pi", revision: 2 });
+    expect(revised.version).toBe(`2+trajectory.${TRAJECTORY_VERSION}`);
   });
 });

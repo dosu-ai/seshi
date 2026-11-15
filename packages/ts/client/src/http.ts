@@ -27,6 +27,7 @@ import {
   type SessionMetadata,
   SessionRejected,
   type SessionsPage,
+  type StaleSessionsPage,
   type StoredTrace,
   StoreError,
   type StoreSessionResult,
@@ -301,6 +302,18 @@ export class HttpSessionDB implements SessionDB {
     });
     if (status !== 200) refuse(status, body);
     return body as SessionsPage;
+  }
+
+  /** `GET /v1/sessions/stale`: the caller's own sessions an older normalizer built (X4.9), a
+   * page at a time. Needs `sessions:write`, which the uploader's credential has. */
+  async staleSessions(
+    options: { after?: string; limit?: number } = {},
+  ): Promise<StaleSessionsPage> {
+    const { status, body } = await this.request("GET", "/v1/sessions/stale", {
+      query: { after: options.after, limit: options.limit },
+    });
+    if (status !== 200) refuse(status, body);
+    return body as StaleSessionsPage;
   }
 
   /** Delete the session: a tombstone in its owner's change feed (X5.3); null for one not

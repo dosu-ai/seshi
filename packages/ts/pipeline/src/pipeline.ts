@@ -31,7 +31,7 @@
  * `sources/<id>/failed/` for one that is not (pollers, the assembler); a transient one (the
  * store) is always thrown, so it is retried (X4.8). */
 
-import { type FormatRegistry, NORMALIZER, NormalizeError } from "@seshi/formats";
+import { type FormatRegistry, NormalizeError } from "@seshi/formats";
 import {
   type AppliedEnvelope,
   EMPTY_PREFIX_SHA256,
@@ -41,6 +41,7 @@ import {
   type LlmCall,
   type NormalizedRecord,
   type NormalizedState,
+  type Normalizer,
   OffsetMismatch,
   PrefixHash,
   prefixSha256,
@@ -305,6 +306,9 @@ function isSpanIds(part: SpanPart): boolean {
 /** How a whole session is written. */
 interface WholeOptions {
   replace: boolean;
+  /** Build the session again from these records and review them, even when they only extend
+   * what is stored (X4.9): a replace, with its permission. */
+  rebuild?: boolean;
   /** The retraction secret sent with a `replace` (`SubmitOptions.retractSecret`). */
   retract_secret?: string;
   /** Redacted, and counted, by `commit` (F2). */
@@ -355,6 +359,9 @@ interface Plan {
   branch?: string;
   /** Refuses a stored session that is not the one the plan was made against. */
   guard: (existing: SessionMetadata | null) => void;
+  /** What the session's metadata records as its normalizer, when it is not this write's: a
+   * chunk added to a session an older normalizer built leaves it stale (X4.9). */
+  sessionNormalizer?: Normalizer;
 }
 
 interface Outcome {
@@ -568,6 +575,9 @@ export class Pipeline {
       if (!payload.text.endsWith("\n")) {
         throw new SessionRejected("bad_chunk", "a chunk must end at a line boundary");
       }
+      if (envelope.rebuild === true) {
+        throw new SessionRejected("bad_chunk", "a rebuild sends the whole log, at offset 0");
+      }
       return this.planned(envelope, auth, (run) => this.chunk(run, payload.text, payload.offset));
     }
     if (payload.text.trim() === "") throw new SessionRejected("empty", "transcript is empty");
@@ -580,6 +590,7 @@ export class Pipeline {
     return this.planned(envelope, auth, (run) =>
       this.whole(run, records, utf8Length(payload.text), {
         replace: envelope.replace === true,
+        ...(envelope.rebuild === true ? { rebuild: true } : {}),
         ...(retractSecret !== undefined ? { retract_secret: retractSecret } : {}),
         ...(llm_calls ? { llm_calls } : {}),
       }),
@@ -700,7 +711,19 @@ export class Pipeline {
     // The session's meta record is the head's: a chunk has none of its own. A stub has no head,
     // and its meta record was in what review dropped: the stub's own stands in.
     const meta = session.head ? await this.headMeta(run, session.head) : stubMeta(envelope);
+    // The tail is this normalizer's, the prefix still whatever built it: a session an older one
+    // built stays stale until it is rebuilt whole (X4.9).
+    const current = this.formats.normalizerFor(envelope.format);
+    const builtWith = session.normalizer?.format_version;
+    const sessionNormalizer: Normalizer = this.formats.isStale(envelope.format, builtWith)
+      ? {
+          name: current.name,
+          version: current.version,
+          ...(builtWith ? { format_version: builtWith } : {}),
+        }
+      : current;
     return this.commit(run, {
+      sessionNormalizer,
       write: [...(meta ? [meta] : []), ...redacted.records],
       continuation: { from_record: state.records, prefix_sha256: state.prefix_sha256 },
       normalized,
@@ -767,7 +790,9 @@ export class Pipeline {
         (envelope.shipped
           ? { records: envelope.shipped.records, prefix_sha256: envelope.shipped.prefix_sha256 }
           : undefined);
-      if (base && base.records > 0 && base.records <= raw.length) {
+      // A rebuild writes the whole session again even when it extends what is stored, so what
+      // review skipped or dropped, or an older normalizer built, is built and reviewed anew.
+      if (!options.rebuild && base && base.records > 0 && base.records <= raw.length) {
         // Redact the stored prefix and the tail as two passes of one: the tail carries the
         // prefix's withheld calls, and only the tail's matches count, since only it is written.
         const prefix = this.redactor.redact(raw.slice(0, base.records));
@@ -796,7 +821,7 @@ export class Pipeline {
           });
         }
       }
-      if (!options.replace) {
+      if (!options.replace && !options.rebuild) {
         throw new SessionConflict(
           "the upload does not extend the stored session (its records do not start with what is stored); send it with replace to rewrite the session",
         );
@@ -808,7 +833,7 @@ export class Pipeline {
             (session.owner_basis ?? "claimed") === "claimed" &&
             !proven
             ? "with the org key, only the machine that uploaded a session may replace it: send its retraction secret (X-Seshi-Retract), or use an admin token"
-            : "only the session's original writer or an admin may replace it",
+            : `only the session's original writer or an admin may ${options.rebuild ? "rebuild" : "replace"} it`,
         );
       }
       const all = this.redactor.redact(raw);
@@ -952,8 +977,9 @@ export class Pipeline {
         branch: plan.branch,
         parent_session_id: envelope.parent_session_id,
         ...(plan.continuation ? { continuation: plan.continuation } : {}),
-        normalizer: NORMALIZER,
+        normalizer: this.formats.normalizerFor(envelope.format),
       },
+      ...(plan.sessionNormalizer ? { session_normalizer: plan.sessionNormalizer } : {}),
       normalized: plan.normalized,
       withheld_calls: plan.withheld,
       applied: { idempotency_key: envelope.idempotency_key },

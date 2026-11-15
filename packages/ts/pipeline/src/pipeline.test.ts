@@ -2,7 +2,13 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
-import { BUILTIN_FORMATS, FormatRegistry, otlpGenAiFormat } from "@seshi/formats";
+import {
+  ATIF_FORMAT,
+  BUILTIN_FORMATS,
+  FormatRegistry,
+  otlpGenAiFormat,
+  TRAJECTORY_FORMAT,
+} from "@seshi/formats";
 import {
   EMPTY_PREFIX_SHA256,
   type Envelope,
@@ -40,6 +46,7 @@ import {
   type SpanAssembler,
   StoreHealthCounters,
 } from "./stages";
+import { staleSessions } from "./stale";
 
 let dir: string;
 let store: FsStore;
@@ -1244,5 +1251,157 @@ describe("identity and visibility (X5)", () => {
       credential_id: "org",
       source_id: "upload",
     });
+  });
+});
+
+describe("stale sessions and rebuilds (X4.9)", () => {
+  /** The same formats, with the trajectory adapter at `version`. */
+  const at = (version: string) =>
+    new FormatRegistry([ATIF_FORMAT, { ...TRAJECTORY_FORMAT, version }, otlpGenAiFormat()]);
+  const stale = (registry: FormatRegistry) => staleSessions(store, "alice", registry);
+
+  it("records the format version that built a session, and lists it stale once the adapter is newer", async () => {
+    await submit(pipeline({ formats: at("1") }), upload(HEAD));
+    expect((await session())?.normalizer).toMatchObject({
+      name: "@dosu/sessiondb",
+      format_version: "1",
+    });
+    expect((await stale(at("1"))).sessions).toEqual([]);
+    expect((await stale(at("1.0.1"))).sessions).toEqual([
+      { agent: "trajectory", session_id: "s1", built_with: "1", current: "1.0.1" },
+    ]);
+    // An older server is not newer: nothing to rebuild there.
+    expect((await stale(at("0.9"))).sessions).toEqual([]);
+  });
+
+  it("keeps the oldest version through a chunk; a rebuild makes the session current", async () => {
+    await submit(pipeline({ formats: at("1") }), upload(HEAD));
+    const tail = user("more") + reply("again");
+    const newer = pipeline({ formats: at("2") });
+    expect((await submit(newer, upload(tail, bytes(HEAD)))).status).toBe("stored");
+    // The tail is the new adapter's, the prefix still the old one's.
+    expect((await session())?.normalizer?.format_version).toBe("1");
+    expect((await stale(at("2"))).sessions).toHaveLength(1);
+
+    const rebuilt = await submit(newer, upload(HEAD + tail, 0, { rebuild: true }));
+    expect(rebuilt).toMatchObject({ status: "stored", records_total: 5 });
+    expect((await session())?.normalizer?.format_version).toBe("2");
+    expect((await stale(at("2"))).sessions).toEqual([]);
+  });
+
+  it("counts a session with no recorded version as stale", async () => {
+    await submit(pipeline(), upload(HEAD));
+    const { normalizer: _gone, ...older } = (await session()) as NonNullable<
+      Awaited<ReturnType<typeof session>>
+    >;
+    await store.put(
+      keys.metadata("alice", ARCHIVE),
+      new TextEncoder().encode(JSON.stringify(older)),
+    );
+    expect((await stale(formats)).sessions).toEqual([
+      { agent: "trajectory", session_id: "s1", current: "1" },
+    ]);
+  });
+
+  it("rebuilds and reviews again a log that only repeats what is stored, instead of `unchanged`", async () => {
+    // Review failed and the policy skipped it: written with regex redaction only (F3.4).
+    let decide: (input: ReviewInput) => ReviewDecision = () => ({ action: "skipped" });
+    const r = reviewer((input) => decide(input));
+    const p = pipeline({ reviewer: r });
+    const first = await submit(p, upload(HEAD));
+    expect(first.status).toBe("stored");
+    expect(r.seen).toHaveLength(1);
+    // The same log again, as it would come without a rebuild.
+    expect((await submit(p, upload(HEAD, 0, { idempotency_key: "again" }))).status).toBe(
+      "unchanged",
+    );
+    expect(r.seen).toHaveLength(1);
+
+    // The provider is back: a rebuild reviews every record again, not only a tail.
+    decide = (input) => ({
+      action: "redact",
+      records: input.records.map((rec) =>
+        rec.role === "user" ? { ...rec, content: "[redacted:review]" } : rec,
+      ),
+    });
+    const rebuilt = await submit(p, upload(HEAD, 0, { rebuild: true }));
+    expect(rebuilt).toMatchObject({ status: "stored", records_total: 3 });
+    expect(rebuilt.status === "stored" && rebuilt.content_hash).not.toBe(
+      first.status === "stored" && first.content_hash,
+    );
+    expect(r.seen).toHaveLength(2);
+    expect(r.seen[1]?.records).toHaveLength(2);
+    const { entries } = await readChanges(store, "alice");
+    expect(entries.at(-1)?.entry).toMatchObject({ kind: "published", replace: true });
+    expect((await session())?.traces).toHaveLength(1);
+    const head = await getTrace(store, "alice", ARCHIVE, (await session())?.head as string);
+    expect(JSON.stringify(head?.records)).not.toContain("x".repeat(2000));
+
+    // Each rebuild without a key of its own gets a fresh one: never answered from the last. The
+    // same review again builds the same trace, which is already there.
+    expect((await submit(p, upload(HEAD, 0, { rebuild: true }))).status).toBe("duplicate");
+    expect(r.seen).toHaveLength(3);
+    // With a key, a resend of the same rebuild is answered once.
+    await submit(p, upload(HEAD, 0, { rebuild: true, idempotency_key: "rebuild-1" }));
+    await submit(p, upload(HEAD, 0, { rebuild: true, idempotency_key: "rebuild-1" }));
+    expect(r.seen).toHaveLength(4);
+  });
+
+  it("reviews a dropped envelope again with a rebuild", async () => {
+    let drop = false;
+    const r = reviewer(() =>
+      drop
+        ? {
+            action: "drop",
+            reason: "review_failed",
+            policy: "p",
+            policy_hash: "e".repeat(64),
+            decision_model: "m",
+          }
+        : { action: "allow" },
+    );
+    const p = pipeline({ reviewer: r });
+    await submit(p, upload(HEAD));
+    drop = true;
+    const tail = user("secret plans") + reply("noted");
+    expect((await submit(p, upload(tail, bytes(HEAD)))).status).toBe("dropped");
+    // The log moved past the dropped chunk: the whole log only extends what is stored.
+    expect((await submit(p, upload(HEAD + tail, 0, { idempotency_key: "k" }))).status).toBe(
+      "unchanged",
+    );
+    drop = false;
+    const rebuilt = await submit(p, upload(HEAD + tail, 0, { rebuild: true }));
+    expect(rebuilt).toMatchObject({ status: "stored", records: 5 });
+    expect(r.seen.at(-1)?.records).toHaveLength(4);
+  });
+
+  it("needs the permission a replace needs, and is never a chunk", async () => {
+    const p = pipeline();
+    await submit(p, upload(HEAD));
+    const bob: UploadEnvelopeOptions = {
+      caller: { kind: "static", principal: "bob" },
+      owner_basis: "verified",
+    };
+    await expect(submit(p, upload(HEAD, 0, { rebuild: true }, bob))).rejects.toThrow(
+      "only the session's original writer or an admin may rebuild it",
+    );
+    await expect(submit(p, upload(HEAD, 0, { rebuild: true }, bob))).rejects.toBeInstanceOf(
+      Forbidden,
+    );
+    const admin: UploadEnvelopeOptions = {
+      caller: { kind: "admin", principal: "root" },
+      owner_basis: "verified",
+    };
+    // The same log builds the same trace: rebuilt, reviewed, and already there.
+    expect((await submit(p, upload(HEAD, 0, { rebuild: true }, admin))).status).toBe("duplicate");
+    await expect(
+      submit(p, upload(user("more"), bytes(HEAD), { rebuild: true })),
+    ).rejects.toMatchObject({ code: "bad_chunk" });
+  });
+
+  it("is a first upload, filter and all, for a session the server holds nothing of", async () => {
+    const tiny = META + user("hi") + reply("hello");
+    expect((await submit(pipeline(), upload(tiny, 0, { rebuild: true }))).status).toBe("filtered");
+    expect((await submit(pipeline(), upload(HEAD, 0, { rebuild: true }))).status).toBe("stored");
   });
 });

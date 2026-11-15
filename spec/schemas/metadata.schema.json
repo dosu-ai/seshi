@@ -64,7 +64,7 @@
       "type": "string"
     },
     "normalizer": {
-      "description": "What normalized the head trace (X4.9).",
+      "description": "What normalized the head trace (X4.9). Its `format_version` is the oldest that built any stored trace of the session: a chunk normalized by a newer adapter does not make the prefix current, a whole write does.",
       "$ref": "common.schema.json#/$defs/Normalizer"
     },
     "retract_hash": {

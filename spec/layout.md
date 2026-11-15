@@ -141,7 +141,8 @@ Nothing else of a session's content is stored (X6.3): no raw transcript, no payl
     "cwd": "/repo/app", "git_branch": "main", "model": "…",
     "parent_session_id": "…",
     "continuation": { "from_record": 6, "prefix_sha256": "…" },
-    "normalizer": { "name": "@dosu/sessiondb", "version": "0.9.0+trajectory.0.3.0" }
+    "normalizer": { "name": "@dosu/sessiondb", "version": "0.9.0+trajectory.0.3.0",
+                    "format_version": "1+trajectory.0.3.0" }
   },
   "llm_calls": [
     { "id": "call_1", "model": "claude-sonnet-4-5", "provider": "anthropic",
@@ -217,7 +218,9 @@ Readers neither list nor serve a stub: no `head`, nothing to read.
   "provenance": { "source": "hook", "source_id": "upload", "format": "claude-code" },
   "origin_agent": "claude-code",      // with native_session_id, collapses a session that
   "native_session_id": "…",           // arrived by two routes (X4.5)
-  "normalizer": { "name": "…", "version": "…" },
+  "normalizer": { "name": "…", "version": "…",   // format_version: the oldest that built
+                  "format_version": "…" },          // a stored trace; older than the
+                                                     // format's is stale (X4.9)
   "retract_hash": "<sha256>",         // F9.7: first upload's retraction secret, hashed
   "created_at": "…", "updated_at": "…"
 }

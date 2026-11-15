@@ -12,7 +12,7 @@
  * Redaction is not this layer's: the pipeline passes it as `postprocess`, so that the registry
  * reports a chunk empty by what is left after it, as it always has. */
 
-import type { Chunk, FormatAdapter, LlmCall, NormalizedRecord } from "@seshi/model";
+import type { Chunk, FormatAdapter, LlmCall, NormalizedRecord, Normalizer } from "@seshi/model";
 import { VERSION } from "@seshi/model";
 import { asTranscript } from "./calls";
 import { detectFormat } from "./detect";
@@ -26,6 +26,22 @@ export const NORMALIZER = {
   name: "@dosu/sessiondb",
   version: `${VERSION}+trajectory.${TRAJECTORY_VERSION}`,
 } as const;
+
+/** An adapter's normalizer version when it declares none. */
+const FIRST_VERSION = "1";
+
+/** Two normalizer versions compared number by number (`1+trajectory.0.3.0` is 1, 0, 3, 0; a
+ * missing number is 0): negative when `a` is older, 0 when the same, positive when newer. */
+export function compareNormalizerVersions(a: string, b: string): number {
+  const numbers = (v: string) => (v.match(/\d+/g) ?? []).map((n) => Number.parseInt(n, 10));
+  const x = numbers(a);
+  const y = numbers(b);
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    const d = (x[i] ?? 0) - (y[i] ?? 0);
+    if (d !== 0) return d;
+  }
+  return 0;
+}
 
 /** The adapter's refusals that only mean "no conversation here": the session is trivial, not
  * unsupported. */
@@ -81,6 +97,30 @@ export class FormatRegistry {
 
   has(source: string): boolean {
     return this.adapters.has(source);
+  }
+
+  /** A format's current normalizer version (`FormatAdapter.version`, `1` when it declares
+   * none); undefined for a format this registry does not know. */
+  versionOf(source: string): string | undefined {
+    const adapter = this.adapters.get(source);
+    return adapter ? (adapter.version ?? FIRST_VERSION) : undefined;
+  }
+
+  /** What a trace of `source` records as its normalizer: the release, and the format's own
+   * version (X4.9). */
+  normalizerFor(source: string): Normalizer {
+    const format_version = this.versionOf(source);
+    return format_version ? { ...NORMALIZER, format_version } : { ...NORMALIZER };
+  }
+
+  /** Whether a session of `source` built by `builtWith` (its `normalizer.format_version`) was
+   * built by an older normalizer than the format's current one (X4.9). A session with none
+   * recorded is stale; one of a format this registry does not know is not (nothing here could
+   * rebuild it). */
+  isStale(source: string, builtWith: string | undefined): boolean {
+    const current = this.versionOf(source);
+    if (current === undefined) return false;
+    return builtWith === undefined || compareNormalizerVersions(builtWith, current) < 0;
   }
 
   get(source: string): FormatAdapter | undefined {

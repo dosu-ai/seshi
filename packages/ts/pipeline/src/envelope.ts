@@ -2,7 +2,7 @@
  * `spec/schemas/envelope.schema.json` into `@seshi/model`; this module checks one at run time,
  * builds the one an upload stands for, and answers the questions every stage asks of it. */
 
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   type Caller,
   type Claims,
@@ -166,13 +166,17 @@ export function uploadEnvelope(upload: SessionUpload, options: UploadEnvelopeOpt
     caller: options.caller,
     owner: upload.owner,
     owner_basis: options.owner_basis,
+    // A rebuild without a key of its own gets a fresh one: the same log was most likely applied
+    // before, and its key would answer from that instead of building again (X4.9).
     idempotency_key:
-      upload.idempotency_key ?? uploadIdempotencyKey(upload.session_id, offset, upload.transcript),
+      upload.idempotency_key ??
+      `${uploadIdempotencyKey(upload.session_id, offset, upload.transcript)}${upload.rebuild ? `#rebuild-${randomUUID()}` : ""}`,
     received_at: (options.now ?? (() => new Date()))().toISOString(),
   };
   if (options.claims && Object.keys(options.claims).length > 0) envelope.claims = options.claims;
   if (upload.visibility) envelope.visibility = upload.visibility;
   if (upload.replace) envelope.replace = true;
+  if (upload.rebuild) envelope.rebuild = true;
   if (upload.shipped) envelope.shipped = upload.shipped;
   if (upload.project !== undefined) envelope.project = upload.project;
   if (upload.branch !== undefined) envelope.branch = upload.branch;

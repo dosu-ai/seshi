@@ -21,6 +21,7 @@ import {
   METADATA_SCHEMA,
   type NormalizedRecord,
   type NormalizedState,
+  type Normalizer,
   type OwnerBasis,
   type Provenance,
   parseTrace,
@@ -151,7 +152,9 @@ export interface IngestMetadata {
   branch?: string;
   parent_session_id?: string;
   continuation?: { from_record: number; prefix_sha256: string };
-  normalizer?: { name: string; version: string };
+  /** What normalized these records; recorded on the trace, and on the session unless
+   * `session_normalizer` says otherwise. */
+  normalizer?: Normalizer;
 }
 
 export interface IngestInput extends WriteContext {
@@ -192,6 +195,10 @@ export interface IngestInput extends WriteContext {
   origin_agent?: string;
   /** The session's id in that agent (X4.5); `session_id` by default. */
   native_session_id?: string;
+  /** What the session's metadata records as its normalizer, when it is not this trace's
+   * (`metadata.normalizer`): a continuation keeps the older format version that built the
+   * session's prefix, so the session stays stale until it is rebuilt (X4.9). */
+  session_normalizer?: Normalizer;
   /** The uploading machine's retraction hash (F9.7). The first one a session gets is kept:
    * only the machine that first uploaded it can retract it, whoever writes later. */
   retract_hash?: string;
@@ -337,7 +344,8 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
         bytes_total: normalized.bytes,
       });
     }
-    if (metadata.normalizer) next.normalizer = metadata.normalizer;
+    const normalizer = input.session_normalizer ?? metadata.normalizer;
+    if (normalizer) next.normalizer = normalizer;
     if (input.retract_hash && !base.retract_hash) next.retract_hash = input.retract_hash;
     const redaction = addRedaction(input.replace ? undefined : base.redaction, input.redaction);
     if (redaction) next.redaction = redaction;

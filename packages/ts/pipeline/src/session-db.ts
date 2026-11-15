@@ -19,6 +19,7 @@ import {
   type SessionDB,
   type SessionMetadata,
   type SessionsPage,
+  type StaleSessionsPage,
   type StorageView,
   type StoredTrace,
   type StoreSessionResult,
@@ -35,6 +36,7 @@ import type { FilterSetting } from "./filter";
 import { getSession, getTrace, listSessions, setVisibility, tombstone } from "./ingest";
 import type { Limits } from "./limits";
 import { Pipeline } from "./pipeline";
+import { staleSessions } from "./stale";
 
 export interface StoreClientOptions {
   store: Store;
@@ -163,6 +165,11 @@ export class StoreSessionDB implements SessionDB {
       limit: options.limit,
     });
     return { ...page, sessions: page.sessions.filter((m) => !isStub(m)) };
+  }
+
+  /** The owner's sessions an older normalizer built (X4.9), a page at a time. */
+  staleSessions(options: { after?: string; limit?: number } = {}): Promise<StaleSessionsPage> {
+    return staleSessions(this.store, this.owner, this.pipeline.formats, options);
   }
 
   async tombstone(

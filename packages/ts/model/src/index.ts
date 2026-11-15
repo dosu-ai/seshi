@@ -17,6 +17,8 @@ export type {
   SessionUpload,
   ShippedPrefix,
   ShippedState,
+  StaleSession,
+  StaleSessionsPage,
   StorageView,
   StoredTrace,
   StoreSessionResult,

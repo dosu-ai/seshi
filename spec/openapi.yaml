@@ -203,9 +203,14 @@ paths:
           With the org key the stated username does not prove that (anyone holding the key can
           state it, X5.12): the replace also carries the session's retraction secret in
           `X-Seshi-Retract` (F9.7), which only the machine that uploaded it holds.
+        - `rebuild` builds the session again from the whole log and reviews it again, even
+          when the log only extends what is stored (X4.9): it replaces the session, with the
+          same permission as `replace`. The uploader sends it for sessions an older normalizer
+          built (`GET /v1/sessions/stale`) and for `seshi capture resend`.
         - Every upload has an idempotency key (the `Idempotency-Key` header, or
           `idempotency_key`; by default the session, the offset and a digest of the
-          transcript). A resend with a key the session recently applied gets the same answer.
+          transcript, plus a fresh suffix for a `rebuild`). A resend with a key the session
+          recently applied gets the same answer.
 
         `201` when a trace was written, `200` otherwise. `422` is final for that upload; `409
         offset_mismatch` says where to resume from; `502` is the bucket failing and is
@@ -311,6 +316,40 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/SessionsPage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
+  /v1/sessions/stale:
+    get:
+      tags: [sessions]
+      summary: List the caller's stale sessions.
+      operationId: staleSessions
+      description: |
+        The caller's own sessions an older normalizer built (X4.9): each session's metadata
+        records the format version that built it (`normalizer.format_version`, the oldest of
+        its traces), and a session is stale when that is older than its format's current
+        version, or not recorded. The server keeps no raw logs, so it cannot rebuild them: the
+        uploader that sent them sends each again whole with `rebuild`. Needs `sessions:write`
+        (what the uploader's credential holds); lists only the session ids of the caller's own
+        sessions. Paged by key like `GET /v1/sessions`, so a page can hold no session and still
+        be `truncated`.
+      parameters:
+        - name: after
+          in: query
+          description: The `cursor` of the last page.
+          schema: { type: string }
+        - name: limit
+          in: query
+          description: How many keys to look through (not sessions to return).
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 1000 }
+      responses:
+        "200":
+          description: A page of stale sessions.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StaleSessionsPage" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
@@ -1519,6 +1558,10 @@ components:
           type: boolean
           default: false
           description: A whole upload that does not extend the session rewrites it instead of `409 conflict`. Only the session's original writer or an admin may; with the org key, only with the session's retraction secret in `X-Seshi-Retract`.
+        rebuild:
+          type: boolean
+          default: false
+          description: Rebuild the session from this whole log and review it again even when the log only extends what is stored, where it would otherwise answer `unchanged` or write only the tail (X4.9). A replace, with the same permission (and the retraction secret with the org key). Never a chunk (`422 bad_chunk`). Without an idempotency key each rebuild gets a fresh one. The uploader sends it for the sessions `GET /v1/sessions/stale` lists.
         visibility:
           type: string
           enum: [org, owner]
@@ -1669,6 +1712,28 @@ components:
           description: Pass as `after` for the next page. Absent when the page is empty.
         truncated: { type: boolean }
 
+    StaleSessionsPage:
+      type: object
+      required: [sessions, truncated]
+      properties:
+        sessions:
+          type: array
+          items:
+            type: object
+            required: [agent, session_id, current]
+            additionalProperties: false
+            properties:
+              agent: { type: string, description: The format the session is filed under. }
+              session_id: { type: string }
+              built_with:
+                type: string
+                description: The format version that built it; absent when none was recorded.
+              current: { type: string, description: The format's current normalizer version. }
+        cursor:
+          type: string
+          description: Pass as `after` for the next page. Absent when nothing was looked at.
+        truncated: { type: boolean }
+
     ToolCall:
       type: object
       required: [id, name, args]
@@ -1773,6 +1838,7 @@ components:
               properties:
                 name: { type: string, description: What produced `records`; the SDK. }
                 version: { type: string, description: Its release, with the `@letta-ai/trajectory` it ran as build metadata. }
+                format_version: { type: string, description: "The format adapter's own normalizer version (X4.9): what makes a session stale." }
           additionalProperties: true
 
     AtifDocument:

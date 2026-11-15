@@ -227,6 +227,8 @@ describe("sessions", () => {
     expect(trace.metadata.normalizer).toEqual({
       name: "@dosu/sessiondb",
       version: expect.stringMatching(/^\d+\.\d+\.\d+\+trajectory\.\d+\.\d+\.\d+$/),
+      // The format's own version, which says when the session is stale (X4.9).
+      format_version: expect.stringMatching(/^\d+\+trajectory\.\d+\.\d+\.\d+$/),
     });
     const traceText = JSON.stringify(trace);
     expect(traceText).not.toContain("hunter2secretvalue42");
