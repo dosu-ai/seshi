@@ -31,6 +31,7 @@ function spawn(env: Record<string, string>, args: string[] = []) {
       SESHI_AUTH__TOKENS__DEFAULT: "sdb_test-token-0123456789abcdef",
       SESHI_STORE__URL: `file://${join(dir, "bucket")}`,
       SESHI_SERVER__LISTEN: "127.0.0.1:0",
+      SESHI_SEARCH__PATH: join(dir, "search.sqlite"),
       ...env,
     },
     stdout: "pipe",
@@ -137,7 +138,7 @@ describe("seshi serve", () => {
     }
   });
 
-  it("serves /healthz only with --roles worker, and runs no jobs with --roles api", async () => {
+  it("serves /healthz only with --roles worker, and runs only the indexer with --roles api", async () => {
     const worker = await listening({}, ["--roles", "worker"]);
     try {
       expect(worker.out).toContain("worker only: /healthz and nothing else");
@@ -152,7 +153,9 @@ describe("seshi serve", () => {
     const api = await listening({}, ["--roles", "api"]);
     try {
       expect(api.out).toContain("roles: api (instance");
-      expect(api.out).not.toContain("jobs:");
+      // Every instance that serves search keeps its own index (F10.3); the worker's jobs stay
+      // on the worker.
+      expect(api.out).toMatch(/; jobs: search-index$/m);
     } finally {
       await api.stop();
     }

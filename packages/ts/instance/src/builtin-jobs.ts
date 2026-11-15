@@ -4,6 +4,7 @@
 
 import type { FormatRegistry } from "@seshi/formats";
 import { assemblePending, type Pipeline } from "@seshi/pipeline";
+import type { SearchService } from "@seshi/search";
 import type { Sources } from "@seshi/sources";
 import {
   type Heartbeat,
@@ -18,12 +19,15 @@ import {
   writeHeartbeat,
 } from "@seshi/store";
 import type { Job, JobRunner } from "./jobs";
+import { searchIndexJobs } from "./search-job";
 
 /** What a job factory gets: the parts of the instance jobs are built from. */
 export interface JobHost {
   readonly store: Store;
   readonly sources: Sources;
   readonly jobs: JobRunner;
+  /** Session search, when `[search]` is enabled (the indexer job, F10.2). */
+  readonly search?: SearchService;
   readonly config: {
     readonly worker: { readonly heartbeat_interval: number; readonly assembly_interval: number };
     /** Each source's quiet period applies to its sessions' spans (F4.4). */
@@ -33,6 +37,7 @@ export interface JobHost {
       readonly failed_retention: number;
       readonly health_retention: number;
     };
+    readonly search: { readonly interval: number };
   };
   readonly roles: readonly string[];
   /** This process, unique per run. */
@@ -242,4 +247,5 @@ export const BUILTIN_JOBS: readonly JobFactory[] = [
   (host) => [retentionJob(host)],
   pollerJobs,
   (host) => [assemblerJob(host)],
+  searchIndexJobs,
 ];

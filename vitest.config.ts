@@ -1,3 +1,5 @@
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { defineConfig } from "vitest/config";
 
 /** Every workspace package exports its source through the `bun` condition (X3.4); Vite does not
@@ -19,5 +21,8 @@ export default defineConfig({
     ],
     pool: "forks",
     testTimeout: 30_000,
+    // An Instance whose config names no search.path keeps its index in the user cache folder
+    // (F10.3); tests must never write there.
+    env: { XDG_CACHE_HOME: join(tmpdir(), "seshi-vitest-cache") },
   },
 });

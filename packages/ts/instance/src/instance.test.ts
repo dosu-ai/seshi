@@ -245,12 +245,13 @@ describe("an Instance", () => {
       "retention",
       "source:dd",
       "assembler",
+      "search-index",
     ]);
     expect(
       make(DD)
         .jobs.list()
         .map((j) => j.name),
-    ).toEqual(["heartbeat", "retention", "assembler"]);
+    ).toEqual(["heartbeat", "retention", "assembler", "search-index"]);
     const extra = make("", {
       jobs: [
         () => [

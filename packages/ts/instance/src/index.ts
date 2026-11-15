@@ -33,6 +33,7 @@ export {
   RETRY_BASE_MS,
 } from "./jobs";
 export { type Logger, lineLogger, quietLogger } from "./log";
+export { SEARCH_JOB, searchIndexJobs } from "./search-job";
 export {
   assessWorker,
   type InstanceStatus,

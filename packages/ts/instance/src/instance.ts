@@ -50,6 +50,7 @@ import {
   type RuleSet,
 } from "@seshi/redact";
 import { ReviewSetupError, reviewerFromConfig } from "@seshi/review";
+import { SearchService } from "@seshi/search";
 import { builtinConnectors, Sources } from "@seshi/sources";
 import {
   assertOwner,
@@ -122,6 +123,8 @@ export interface InstanceParts {
   id?: string;
   /** Jobs beyond the built-in ones. */
   jobs?: readonly JobFactory[];
+  /** Session search (F10); built from `[search]` when omitted, none when null. */
+  search?: SearchService | null;
   now?: () => Date;
   /** How connectors reach their APIs and auth reaches the IdP. */
   fetch?: typeof fetch;
@@ -162,6 +165,8 @@ export class Instance {
   readonly jobs: JobRunner;
   /** Where span batches go: the span store, unless the parts named another. */
   readonly assembler: SpanAssembler;
+  /** Session search over a local index (F10.3); undefined when `search.enabled` is false. */
+  readonly search: SearchService | undefined;
   readonly roles: readonly Role[];
   /** The stable instance id. */
   readonly id: string;
@@ -257,6 +262,24 @@ export class Instance {
       now: this.now,
     });
 
+    this.search =
+      parts.search === null
+        ? undefined
+        : (parts.search ??
+          (config.search.enabled
+            ? new SearchService({
+                store: this.store,
+                deployment: this.deployment,
+                settings: {
+                  ...(config.search.path ? { path: config.search.path } : {}),
+                  events: config.search.events,
+                },
+                aliases: this.auth.aliases,
+                now: this.now,
+                log: this.log,
+              })
+            : undefined));
+
     this.jobs = new JobRunner({
       worker: this.roles.includes("worker"),
       now: this.now,
@@ -266,6 +289,7 @@ export class Instance {
       store: this.store,
       sources: this.sources,
       jobs: this.jobs,
+      ...(this.search ? { search: this.search } : {}),
       config,
       roles: this.roles,
       process: this.process,
@@ -303,6 +327,7 @@ export class Instance {
     if (this.closed) return;
     this.closed = true;
     await this.jobs.stop(timeoutMs);
+    this.search?.close();
     let timer: ReturnType<typeof setTimeout> | undefined;
     await Promise.race([
       this.health.flush(),

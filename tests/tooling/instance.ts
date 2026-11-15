@@ -24,7 +24,8 @@ export function serverConfig(
     : `[store]\nurl = ${JSON.stringify(options.storeUrl ?? "file:///unused-test-store")}\n${toml}`;
   return loadConfig(serverConfigSchema, {
     file: "seshi.toml",
-    env: options.env ?? {},
+    // Each test's search index lives in memory unless the test says otherwise.
+    env: { SESHI_SEARCH__PATH: ":memory:", ...options.env },
     fs: { readFile: () => text, mode: () => 0o100600 },
   }).config;
 }
