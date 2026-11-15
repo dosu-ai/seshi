@@ -53,7 +53,9 @@ authorize stage holds every write to its caller's own sessions. The shared HS256
 - **Exchange (X5.2).** `POST /v1/auth/exchange {id_token, nonce?, machine?, visibility?}`
   returns a session token. With `machine` it also returns a device token; earlier device tokens
   for the same owner and machine are revoked. Admin comes from `admin_group` in `groups_claim`,
-  or from a verified email on `admins` (X5.3). `GET /v1/auth/config` returns `org_key`, `oidc`
+  or from a verified email on `admins` (X5.3). With `owner_claim = "email"`, an ID token whose
+  email the IdP marks `email_verified: false` is refused (401): it could be anyone's address.
+  `GET /v1/auth/config` returns `org_key`, `oidc`
   (issuer, client id, audience, scopes) and the token lifetimes.
 - **Pipeline seam.**
   - `Authorization` and `Authorizer` moved to `@seshi/model` (`authz.ts`), so auth can implement
@@ -64,8 +66,9 @@ authorize stage holds every write to its caller's own sessions. The shared HS256
     - `svc:` owners always have basis `service`, and only they do;
     - anyone else writes their own owner, unless an admin;
     - `claimed` belongs to `person` callers only.
-  - `mayReplace(auth, writer, basis)`: a `claimed` caller never replaces a session whose basis
-    isn't `claimed`.
+  - A `claimed` caller (the org key) never writes to a session whose basis isn't `claimed`:
+    no chunk, no extension, no replace (`Forbidden` in `Pipeline.planned`, before any plan).
+    `mayReplace(auth, writer, basis)` holds the same rule for replaces.
   - `PipelineOptions.visibility` (`VisibilitySetting`) is the source and server fallback.
   - Change entries carry `owner_basis`.
   - `setVisibility()` writes a `visibility_changed` entry and refuses a redacted session.
@@ -125,7 +128,8 @@ authorize stage holds every write to its caller's own sessions. The shared HS256
   `auth.aliases.storedAs`.
 - **Pollers and OTLP (09, 10, 11):** spread `serviceIdentity(sourceId)` into the envelope
   (`caller`, `owner`, `owner_basis`). `ownershipAuthorizer` refuses anything else for a non-upload
-  source. Visibility comes from `visibilityFor(config, id)` through `PipelineOptions.visibility`.
+  source. Pass data claims through `pickClaims` (the pipeline does not filter envelope claims).
+  Visibility comes from `visibilityFor(config, id)` through `PipelineOptions.visibility`.
   An OTLP destination's token is `POST /v1/tokens {kind: "service", service: <source id>,
   scopes: ["sessions:write"]}`. The source must be configured.
 - **06 (Instance):** build one `Auth` per Instance with `new Auth(authSettings(config), { store,
@@ -141,9 +145,9 @@ authorize stage holds every write to its caller's own sessions. The shared HS256
   - `seshi tokens …` maps onto `/v1/tokens`.
   - The client still lacks `?owner=` on `getSession`, `getTrace` and `tombstone`, and has no
     `setVisibility`. Add them there.
-- **14 (capture):** the uploader uses the device token or the org key plus user. A 409
-  `conflict` with `replace` from an org-key machine is refused (403) when a verified writer
-  wrote the session.
+- **14 (capture):** the uploader uses the device token or the org key plus user. An org-key
+  machine gets 403 for any write to a session a verified writer started (the person moved to a
+  device token mid-session); treat it as permanent for that session.
 - **New scope users:** `sources:admin` exists and the admin role carries it, but no route checks
   it yet (06, 10, 11).
 - **Tests:** `FakeIdp` from `@seshi/auth/testing`. Build an `Auth` with `oidcKeys: idp.keys`, or
@@ -169,13 +173,17 @@ authorize stage holds every write to its caller's own sessions. The shared HS256
 7. **Org-key callers and owner visibility.** The normal read rules apply to the stated
    username. That is equivalent, since anyone can claim the owner, and other people's private
    sessions stay out of listings.
-8. **The org key can't replace a verified session.** A `claimed` caller never replaces a
-   session whose `owner_basis` is not `claimed`. Org-key sessions under one username stay
-   replaceable by any org-key holder stating it: trust mode can't do better.
+8. **The org key can't touch a verified session.** X5.12 says the key cannot replace other
+   people's sessions. A `claimed` caller never writes to (extends, chunks or replaces) a
+   session whose `owner_basis` is not `claimed`, so a session marked `verified` holds only what
+   verified writers sent. Org-key sessions under one username stay writable by any org-key
+   holder stating it: trust mode can't do better.
 9. **Static tokens are members with every session scope, not admins.** They can't manage
    tokens; `seshi admin init` covers that.
 10. **Visibility change needs `sessions:read` plus being the owner or an admin.** Device tokens
-    can't change it. Org-key callers can, consistent with their trust.
+    can't change it. Org-key callers can change sessions whose basis is `claimed`, but not a
+    verified one: in a mixed deployment, opening a person's `owner` session to the org would
+    show it to members who hold no org key.
 11. **No HS256 shared-secret tokens** (X5.2). `signed-token.ts` was removed; nothing in seshi
     needed it. Dosu's hosted setup mints such tokens (`SESSIONDB_TOKEN_SECRET`) and must move
     to the token API or service tokens before it runs a seshi image (open item).
@@ -187,6 +195,12 @@ authorize stage holds every write to its caller's own sessions. The shared HS256
     and Linux folders; local mode on Windows has no service accounts.
 15. **Rule set bumped to `seshi/rules/2`** for the new `seshi-token` pattern. This changes
     `redaction.rule_set` for new writes; content hashes are unaffected.
+16. **`config check` also warns in a mixed deployment.** With an IdP and the org key on,
+    `owner` visibility is still not enforced against org-key holders, so the warning names
+    that case too and goes away with `auth.org_key.enabled = false`.
+17. **`POST /v1/tokens/revoke` takes an owner id only.** The org key's owner `*` is refused
+    (400): the org key is rotated (`seshi admin init --rotate-org-key` or `DELETE
+    /v1/tokens/:id`), not revoked by owner.
 
 ## Still to check
 
@@ -205,3 +219,8 @@ authorize stage holds every write to its caller's own sessions. The shared HS256
 - `X-Seshi-User` must be ASCII (HTTP header). The CLI should refuse or transliterate a
   non-ASCII username.
 - Nothing enforces `search` yet (12), and `sources:admin` has no route yet.
+- An ID token with several audiences is accepted when one is ours; `azp` is not checked.
+  Public CLI clients get a single audience from the IdPs in scope, so this is left as is.
+- A service token that writes through `POST /v1/sessions` gets the `upload` source's
+  visibility (`default_visibility`), not its source's own `visibility`: the envelope's
+  `source_id` is `upload`. 09 (`/otlp/v1/traces`) should set the destination's source id.
