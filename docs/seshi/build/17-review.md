@@ -63,6 +63,12 @@ what changed.
   B does not extend and must replace again. The uploader marks such a session `replace_next`
   and, once the transcript grows, sends it whole with `replace` instead of chunking at the
   server's offset. Tests: pipeline (drop, conflict, reviewed replace) and uploader.
+- **ingest, low** (split vote, reported medium; the tombstone part confirmed): span records of
+  a session the filter refused or review dropped could not be deleted, because `tombstone`
+  returned for a session without metadata before `deleteSpans`. It now removes their span
+  records and pending marker (answering `removed: n`, with no change entry since nothing was
+  indexed). That such records stay until deleted is X6.3 and 09's open retention item, not
+  changed here. Test: a filtered OTLP session's spans deleted.
 
 ## Not fixed
 

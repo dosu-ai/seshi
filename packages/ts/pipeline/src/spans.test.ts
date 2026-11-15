@@ -275,6 +275,31 @@ describe("span batches through the pipeline", () => {
     ).rejects.toMatchObject({ code: "redacted" });
     expect(await listSpans(store, OWNER, ARCHIVE)).toEqual([]);
   });
+
+  it("deletes the span records of a session the filter refused, which has no metadata", async () => {
+    // Review finding: tombstone returned before deleting spans when there was no metadata, so
+    // a never-published session's span records could not be deleted at all.
+    const { pipeline, assemble } = setup({ minChars: 100_000 });
+    await pipeline.submit(envelope([chat("first question", "first answer")]));
+    later(QUIET);
+    expect(await assemble()).toMatchObject({ outcomes: { filtered: 1 } });
+    expect(await readMetadata(store, OWNER, ARCHIVE)).toBeNull();
+    expect(await listSpans(store, OWNER, ARCHIVE)).toHaveLength(1);
+    const removed = await tombstone({
+      store,
+      owner: OWNER,
+      agent: "otlp-genai",
+      session_id: SESSION,
+      now,
+    });
+    expect(removed).toEqual({ removed: 1 });
+    expect(await listSpans(store, OWNER, ARCHIVE)).toEqual([]);
+    expect(await store.get(keys.pending(ARCHIVE))).toBeNull();
+    // Nothing left: a second delete finds no session.
+    expect(
+      await tombstone({ store, owner: OWNER, agent: "otlp-genai", session_id: SESSION, now }),
+    ).toBeNull();
+  });
 });
 
 describe("assemblePending", () => {

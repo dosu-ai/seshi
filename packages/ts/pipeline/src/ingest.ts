@@ -446,7 +446,8 @@ export interface TombstoneInput {
 
 /** Remove a session's trace objects and mark it redacted. Irreversible; a later ingest
  * of the same session is refused, so a tombstoned session stays gone. The change entry records
- * the reason and the writer, never the content. */
+ * the reason and the writer, never the content. A session never published (no metadata) has
+ * only its span records and pending marker removed; null when there was nothing to remove. */
 export async function tombstone(input: TombstoneInput): Promise<{ removed: number } | null> {
   const { store, owner } = input;
   const archive = archiveId(owner, input.agent, input.session_id);
@@ -468,7 +469,14 @@ export async function tombstone(input: TombstoneInput): Promise<{ removed: numbe
     return { ...rest, status: "redacted", traces: [], updated_at: at };
   });
   const gone = removedObjects as { traces: string[] } | null;
-  if (gone === null) return null;
+  if (gone === null) {
+    // Never published (pending, or refused by the filter or model review): no pointer, but its
+    // span records (F4.4) may hold content, and only this removes them. Nothing was indexed, so
+    // there is no change entry; null when there was nothing at all.
+    const spans = await deleteSpans(store, owner, archive);
+    await store.delete(keys.pending(archive));
+    return spans > 0 ? { removed: spans } : null;
+  }
   let removed = 0;
   for (const hash of gone.traces) {
     await store.delete(keys.trace(owner, archive, hash));

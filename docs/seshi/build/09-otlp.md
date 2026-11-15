@@ -237,7 +237,10 @@ service account. User docs: [docs/otlp.md](../../otlp.md).
   content at rest (regex-redacted, not model-reviewed: X6.3 says so). A retention for published
   sessions' spans may be wanted. The same holds for a session the filter refused or model
   review dropped: nothing of it is published (X4.10), but its span records stay so that later
-  spans can make it pass. A retention would cover those too.
+  spans can make it pass. A retention would cover those too. (17: `tombstone` now removes
+  such a session's span records and pending marker even though it has no metadata, so local
+  `seshi sessions rm` can delete them; the API's DELETE still answers 404 for a session it
+  cannot read, and retention is still open.)
 - **Size limits.** `limits.max_records_bytes` (32 MiB) can refuse a long session with
   full-content spans (0.75 MB each by default); the refusal is a failure record and the spans
   stay. The OTLP body cap is the upload's (`maxBodyBytes(max_upload_bytes)`, about 513 MiB);
