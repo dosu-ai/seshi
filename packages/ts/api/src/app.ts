@@ -64,6 +64,7 @@ import {
   setVisibility,
   tombstone,
 } from "@seshi/pipeline";
+import { rulesDocument } from "@seshi/redact";
 import {
   archiveId,
   isOwner,
@@ -713,6 +714,24 @@ export function createApp(instance: Instance) {
   route("GET", "/v1/admin/jobs", async ({ request }) => {
     await caller(request, "sources:admin");
     return json(await instance.status());
+  });
+
+  // --- redaction (F2.4) -------------------------------------------------------------
+
+  /** The org's rule packs, for a client that redacts before upload: any signed-in caller, the
+   * uploader's write-only device token included. They may say what the org considers secret,
+   * so they are not public. The built-in pack is not sent (the client has its own); `rule_set`
+   * lets the client tell whether its rule set is the server's. The ETag is the rule-set hash,
+   * so a client that sends it back gets 304 until the server's packs change. */
+  route("GET", "/v1/redaction/rules", async ({ request }) => {
+    await authenticate(request);
+    const document = rulesDocument(instance.redaction);
+    const etag = `"${document.rule_set}"`;
+    const cached = request.headers.get("if-none-match");
+    if (cached !== null && cached.split(",").some((t) => t.trim() === etag)) {
+      return new Response(null, { status: 304, headers: { etag } });
+    }
+    return json(document, 200, { etag, "cache-control": "private, no-cache" });
   });
 
   return { fetch: dispatch(routes), auth, pipeline };

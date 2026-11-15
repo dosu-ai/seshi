@@ -117,6 +117,7 @@
         "@seshi/instance": "workspace:*",
         "@seshi/model": "workspace:*",
         "@seshi/pipeline": "workspace:*",
+        "@seshi/redact": "workspace:*",
         "@seshi/store": "workspace:*",
       },
     },

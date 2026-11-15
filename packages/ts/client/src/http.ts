@@ -215,4 +215,13 @@ export class HttpSessionDB implements SessionDB {
     if (status !== 200) HttpSessionDB.refuse(status, body);
     return body as Identity;
   }
+
+  /** The org's redaction rule packs (`GET /v1/redaction/rules`, F2.4), for redacting before
+   * upload: a `seshi/redaction-rules/1` document, unchecked. `@seshi/redact`'s
+   * `ruleSetFromDocument` validates it and builds the rule set. */
+  async redactionRules(): Promise<unknown> {
+    const { status, body } = await this.request("GET", "/v1/redaction/rules");
+    if (status !== 200) HttpSessionDB.refuse(status, body);
+    return body;
+  }
 }

@@ -40,6 +40,16 @@ describe("HttpSessionDB", () => {
     expect(seen[0]?.headers["user-agent"]).toBe(`@dosu/sessiondb/${VERSION}`);
   });
 
+  it("fetches the org's redaction rules", async () => {
+    const doc = { schema: "seshi/redaction-rules/1", rule_set: "h", builtin: "b", packs: [] };
+    const { db, seen } = client(200, doc);
+    expect(await db.redactionRules()).toEqual(doc);
+    expect(seen[0]?.url).toBe("https://seshi.example.com/v1/redaction/rules");
+    await expect(
+      client(401, { error: { code: "unauthorized" } }).db.redactionRules(),
+    ).rejects.toThrow(ServerError);
+  });
+
   it("gzips a body past gzipFrom", async () => {
     const { db, seen } = client(201, { status: "trivial" }, { gzipFrom: 10 });
     await db.ingest({ agent: "claude-code", session_id: "s", transcript: "x".repeat(100) });

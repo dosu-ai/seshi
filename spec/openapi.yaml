@@ -49,6 +49,7 @@ tags:
   - name: changes
   - name: tokens
   - name: admin
+  - name: redaction
 
 paths:
   /healthz:
@@ -664,6 +665,40 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "502": { $ref: "#/components/responses/StorageError" }
+
+  /v1/redaction/rules:
+    get:
+      tags: [redaction]
+      summary: The org's redaction rule packs, for redacting before upload (F2.4).
+      operationId: redactionRules
+      description: |
+        The operator's rule packs (`[redaction] packs`), as validated data, for a client that
+        applies them before a transcript leaves the machine. The built-in pack is not sent: the
+        client has its own, and compares `rule_set` with the hash of the rule set it builds to
+        tell whether its built-ins are the server's. The server redacts everything it receives
+        whatever the client did. Any signed-in caller, a write-only device token included; the
+        packs may describe what the org considers secret, so they are not public. The `ETag` is
+        the rule-set hash: sent back as `If-None-Match`, it gets 304 until the packs change
+        (they change when the server restarts with new packs, F1.5).
+      parameters:
+        - name: If-None-Match
+          in: header
+          required: false
+          description: The `ETag` of an earlier answer.
+          schema: { type: string }
+      responses:
+        "200":
+          description: The packs.
+          headers:
+            ETag:
+              description: The rule-set hash, quoted.
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RedactionRules" }
+        "304":
+          description: The packs are the ones the `If-None-Match` ETag names.
+        "401": { $ref: "#/components/responses/Unauthorized" }
 
 components:
   securitySchemes:
@@ -1456,3 +1491,90 @@ components:
           type: string
           description: The last key on the page; pass as `after`. Absent when the page is empty.
         truncated: { type: boolean }
+
+    RedactionRules:
+      description: |
+        `seshi/redaction-rules/1`: the operator's rule packs, as `GET /v1/redaction/rules`
+        serves them. Each pack is what the server's one pack validator produced; a client
+        validates it again before use.
+      type: object
+      required: [schema, rule_set, builtin, packs]
+      properties:
+        schema: { const: "seshi/redaction-rules/1" }
+        rule_set:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+          description: The server's rule-set hash, as `metadata.redaction.rule_set` records it.
+        builtin:
+          type: string
+          description: The server's built-in pack version (`seshi/rules/3`).
+        packs:
+          type: array
+          items: { $ref: "#/components/schemas/RulePack" }
+
+    RulePack:
+      description: One rule pack (F2.1), defaults filled in. Operator patterns are RE2 syntax.
+      type: object
+      required: [id, disable, rules, sensitive_files, secret_commands]
+      additionalProperties: false
+      properties:
+        id: { $ref: "#/components/schemas/RuleId" }
+        version: { type: string }
+        description: { type: string }
+        disable:
+          type: array
+          description: Built-in rule ids this pack turns off.
+          items: { $ref: "#/components/schemas/RuleId" }
+        rules:
+          type: array
+          items:
+            type: object
+            required: [id, patterns, applies_to]
+            additionalProperties: false
+            properties:
+              id: { $ref: "#/components/schemas/RuleId" }
+              description: { type: string }
+              patterns: { type: array, items: { type: string, minLength: 1 } }
+              replacement:
+                type: string
+                description: What a match becomes; `[redacted:<id>]` when absent.
+              applies_to:
+                type: array
+                items: { enum: [text, tool_input, tool_output] }
+              tests: { $ref: "#/components/schemas/RuleTests" }
+        sensitive_files:
+          type: array
+          items:
+            type: object
+            required: [id, globs]
+            additionalProperties: false
+            properties:
+              id: { $ref: "#/components/schemas/RuleId" }
+              description: { type: string }
+              globs: { type: array, items: { type: string, minLength: 1 } }
+              tests: { $ref: "#/components/schemas/RuleTests" }
+        secret_commands:
+          type: array
+          items:
+            type: object
+            required: [id, patterns]
+            additionalProperties: false
+            properties:
+              id: { $ref: "#/components/schemas/RuleId" }
+              description: { type: string }
+              patterns: { type: array, items: { type: string, minLength: 1 } }
+              tests: { $ref: "#/components/schemas/RuleTests" }
+
+    RuleId:
+      type: string
+      pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+      maxLength: 64
+      description: A rule or pack id; redaction counts are by rule id (F2.3).
+
+    RuleTests:
+      type: object
+      required: [match, no_match]
+      additionalProperties: false
+      properties:
+        match: { type: array, items: { type: string } }
+        no_match: { type: array, items: { type: string } }

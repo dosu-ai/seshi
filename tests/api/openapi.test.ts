@@ -11,6 +11,7 @@ import type { App } from "@seshi/api";
 import { Auth, CREDENTIAL_SCOPES } from "@seshi/auth";
 import { FakeIdp } from "@seshi/auth/testing";
 import { storeSession } from "@seshi/pipeline";
+import { compileRuleSet, validatePack } from "@seshi/redact";
 import { FsStore, type Store, StoreError } from "@seshi/store";
 import { Ajv2020, type ValidateFunction } from "ajv/dist/2020";
 import addFormats from "ajv-formats";
@@ -160,11 +161,12 @@ async function call(
     raw?: string;
     encoding?: string;
     app?: App;
+    headers?: Record<string, string>;
   } = {},
-): Promise<{ status: number; body: unknown }> {
+): Promise<{ status: number; body: unknown; headers: Headers }> {
   const url = new URL(`http://sessiondb.test${path}`);
   const op = operationFor(method, url.pathname);
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { ...options.headers };
   if (options.encoding) headers["content-encoding"] = options.encoding;
   if (options.token !== null) headers.authorization = `Bearer ${options.token ?? TOKEN}`;
   if (options.user !== undefined) headers["x-seshi-user"] = options.user;
@@ -225,7 +227,7 @@ async function call(
     ).toBe(true);
   }
   seen.add(`${op.operationId} ${status}`);
-  return { status, body: parsed };
+  return { status, body: parsed, headers: response.headers };
 }
 
 describe("the document itself", () => {
@@ -256,12 +258,52 @@ describe("the document itself", () => {
         "GET /v1/sessions/{agent}/{session_id}/export",
         "GET /v1/changes",
         "GET /v1/admin/jobs",
+        "GET /v1/redaction/rules",
       ].sort(),
     );
   });
 });
 
 describe("the server honours it", () => {
+  it("the redaction rules, for redacting before upload (F2.4)", async () => {
+    const rules = compileRuleSet({
+      packs: [
+        validatePack(
+          { id: "acme", disable: ["entropy"], rules: [{ id: "acme-key", pattern: "ACME-\\d+" }] },
+          { source: "acme.toml" },
+        ),
+      ],
+    });
+    const withRules = createApp({
+      store,
+      storage: { url: store.url },
+      tokens: [{ token: TOKEN, owner: "acme" }],
+      redaction: rules,
+    });
+    expect((await call("GET", "/v1/redaction/rules", { app: withRules, token: null })).status).toBe(
+      401,
+    );
+    const got = await call("GET", "/v1/redaction/rules", { app: withRules });
+    expect(got.status).toBe(200);
+    expect(got.body).toMatchObject({ rule_set: rules.hash, builtin: rules.builtinVersion });
+    expect((got.body as { packs: { id: string }[] }).packs.map((p) => p.id)).toEqual(["acme"]);
+    expect(got.headers.get("etag")).toBe(`"${rules.hash}"`);
+    const cached = await call("GET", "/v1/redaction/rules", {
+      app: withRules,
+      headers: { "if-none-match": `"other", "${rules.hash}"` },
+    });
+    expect(cached.status).toBe(304);
+    // An old ETag gets the packs again.
+    const stale = await call("GET", "/v1/redaction/rules", {
+      app: withRules,
+      headers: { "if-none-match": '"stale"' },
+    });
+    expect(stale.status).toBe(200);
+    // With no packs: the built-in pack's hash, and no packs to send.
+    const plain = await call("GET", "/v1/redaction/rules");
+    expect(plain.body).toMatchObject({ rule_set: compileRuleSet().hash, packs: [] });
+  });
+
   it("health and identity", async () => {
     expect((await call("GET", "/healthz", { token: null })).status).toBe(200);
     expect((await call("GET", "/v1/me")).status).toBe(200);
