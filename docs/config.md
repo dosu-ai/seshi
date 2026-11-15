@@ -264,7 +264,9 @@ folder (F6.4).
 
 An `s3` source is polled by the built-in S3 poller ([server.md](server.md#syncing-an-s3-bucket)).
 Its `url` is `s3://`, `r2://` or a folder (`file:///path`, for one machine). `include` globs
-(Bun's glob syntax) and `path` match the key under the URL's prefix plus `prefix`. `path` is a
+(Bun's glob syntax) and `path` match the key under the URL's prefix plus `prefix` (both
+name folders: `prefix = "runs"` lists `runs/`, and a partial name such as `"runs/2026-"` is
+not a key prefix; use `include` for that). `path` is a
 template such as `"{username}/{session}.jsonl"`: `{session}` names the session (else the key
 is), `{format}` its format, `{project}` and `{branch}` its work, and `{email}`, `{name}`,
 `{username}`, `{git_email}`, `{git_name}` identity claims recorded in metadata, never the owner

@@ -272,8 +272,9 @@ Read and written by the binary only, so their types are code-first in `@seshi/st
   `modified`, the `format` and `session` it was submitted as, `offset` (how many of its bytes
   the session holds), `tail` (a digest of the up to 4 KiB before `offset`), `gz`, and
   `failed` (the code of a permanent failure of that version); plus `after` (where an
-  unfinished listing resumes), `watch_from` and `hold` (with `ordered_keys`), and
-  `listed_at`.
+  unfinished listing resumes), `watch_from` and `hold` (with `ordered_keys`), `listed_at`,
+  and `epoch` (which reading of the source this is: set when a manifest starts, moved on by
+  every rewind; whole objects' idempotency keys carry it).
 - `worker/heartbeat.json` (`seshi/heartbeat/1`): the writing process (`instance`, unique per
   run) and its stable instance id (`host`), version, roles, start, when it was written (`at`)
   and its `interval_ms`, and `jobs`: each job's runs, failures, last start and finish, last

@@ -143,18 +143,24 @@ source's checkpoint, so an unchanged object is never read again (F6.2).
   `x-amz-meta-seshi-project`, `-branch`) fill the session's project and branch.
 - **Provenance.** The session's metadata records where it came from: `s3://bucket/key` and
   the ETag read. Each envelope's idempotency key is that location and ETag (plus the offset
-  for a chunk, X4.7), so a run repeated after a crash is answered from the session.
+  for a chunk, X4.7), so a run repeated after a crash is answered from the session. A whole
+  object's key also carries the manifest's epoch, which `seshi reprocess` moves on, so an
+  object read again on purpose is normalized again rather than answered from the session.
 - **Deletions are ignored** (F6.4). Deleting a source object never changes the session it
   produced; its key leaves the manifest at the next complete listing. To remove a session,
   delete it in seshi: the poller will not store it again, even when the object changes.
 - **What is not stored** is recorded under `sources/<id>/failed/` with the object's location
-  and a code, never its content, and not tried again until the object changes:
-  `unknown_format`, `too_large` (over `limits.max_upload_bytes`, checked before reading),
-  `not_utf8`, `bad_gzip`, `access_denied` (the bucket refused that one object),
-  `duplicate_session` (two keys mapping to one session), or the pipeline's own codes. A
-  failure to list, or a bucket error other than these, fails the run instead, and the worker
-  retries it with backoff without moving the checkpoint (X4.8). A session the filter removed is only counted, and sent whole again
-  once its object grows. `seshi sync failed evals` lists them.
+  and a code, never its content, and not tried again until the object changes or
+  `seshi reprocess` rewinds it (after fixing the source's `format` or `path`, say):
+  `unknown_format`, `too_large` (over `limits.max_upload_bytes`, checked before reading, and
+  for gzip after unzipping as far as the limit), `not_utf8`, `bad_gzip`,
+  `unsupported_encoding` (a `Content-Encoding` other than gzip), `access_denied` (the bucket
+  refused that one object with 403), `unreadable` (another final 4xx for that one object,
+  such as an archived object), `duplicate_session` (two keys mapping to one session), or the
+  pipeline's own codes. A failure to list, throttling, a 5xx, or a network error fails the
+  run instead, and the worker retries it with backoff without moving the checkpoint (X4.8).
+  A session the filter removed is only counted, and sent whole again once its object grows.
+  `seshi sync failed evals` lists them.
 - **Large buckets.** A run reads at most 200 changed objects, then hands over to the next run
   at once, resuming the listing after the last key it handled. Every run lists the whole
   prefix; when keys sort by time, `ordered_keys = true` lists only after the key before the
@@ -166,9 +172,11 @@ source's checkpoint, so an unchanged object is never read again (F6.2).
   like the bucket client. A source may not point at seshi's own bucket and prefix, or its own
   folder.
 - **Reprocessing.** `seshi reprocess --source evals --since 2026-11-01 --run` forgets the
-  objects changed since then, so the next run reads them whole; one whose normalized records
-  did not change answers `unchanged`. Without `--since` the manifest is removed and every
-  object is read again.
+  objects changed since then, so the next run reads them whole and normalizes them again: one
+  whose records did not change answers `unchanged`, one the normalizer now reads differently
+  is replaced. Without `--since` the manifest is removed and every object is read again. With
+  `ordered_keys` a rewind to a time also lists from the start, since keys say nothing of
+  time.
 
 Put TLS in front of it (a reverse proxy, Cloud Run, a load balancer): transcripts arrive
 unredacted and the server is where that stops being true.
