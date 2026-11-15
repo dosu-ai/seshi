@@ -4,8 +4,14 @@
  * 1. `--version`;
  * 2. `admin init` and `serve` on a temporary folder store, on 127.0.0.1;
  * 3. `login --key -` with the org key, which stores it in the OS keychain (or the 0600 file);
- * 4. `whoami`, which reads it back; `logout`, which removes it; `whoami` again, which must
- *    now say "not signed in".
+ * 4. `whoami`, which reads it back;
+ * 5. `upload` of a transcript holding a secret that only the server's own rule pack knows: the
+ *    uploader fetches the pack, compiles it with RE2 (`re2js`, which must be inside the binary)
+ *    and redacts before sending (F2.4); `sessions export` must show the redacted text;
+ * 6. `capture install claude-code` in a temporary home: the hook and status-line commands it
+ *    writes must name this binary by its absolute path, not `seshi` from the PATH (so an npm
+ *    install never starts Node on an agent's turn);
+ * 7. `logout`, which removes the key; `whoami` again, which must now say "not signed in".
  *
  *   bun run scripts/release/smoke.ts <binary> [--version <X.Y.Z>] [--keychain required|allowed|off]
  *
@@ -14,9 +20,10 @@
  * `off` sets `keychain = false` (SESHI_KEYCHAIN), so nothing touches the real keychain: what
  * the repository's own tests use. With the keychain in play the real home folder is kept,
  * since that is where macOS looks for the login keychain; the CLI config goes to a temporary
- * folder either way. Nothing leaves 127.0.0.1. */
+ * folder either way, and so do capture's state and the agent home `capture install` writes
+ * into. Nothing leaves 127.0.0.1. */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -89,10 +96,71 @@ export function smokeEnv(
   // The CLI config folder: XDG_CONFIG_HOME on macOS and Linux, %APPDATA% on Windows.
   env.XDG_CONFIG_HOME = join(dir, "config");
   env.APPDATA = join(dir, "appdata");
+  // Capture's state (spool, upload positions): XDG_STATE_HOME, or %LOCALAPPDATA% on Windows.
+  env.XDG_STATE_HOME = join(dir, "state");
   env.LOCALAPPDATA = join(dir, "localappdata");
   env.NO_COLOR = "1";
   if (keychain === "off") env.SESHI_KEYCHAIN = "false";
   return env;
+}
+
+/** The id of the smoke test's own rule, which only the server's rule pack knows. */
+const SMOKE_RULE = "smoke-key";
+const SMOKE_SECRET = "SMOKE-314159";
+const SMOKE_SESSION = "5e551000-0000-4000-8000-00000000c0de";
+
+/** A rule pack with one operator rule: RE2 syntax, compiled by `re2js` on the server and again
+ * in the uploader. */
+export const SMOKE_PACK = [
+  'id = "smoke"',
+  "[[rules]]",
+  `id = "${SMOKE_RULE}"`,
+  "pattern = 'SMOKE-[0-9]{6}'",
+  `tests.match = ["deploy with ${SMOKE_SECRET}"]`,
+  'tests.no_match = ["SMOKE-12"]',
+  "",
+].join("\n");
+
+/** A Claude Code transcript that ran in `cwd`, with the pack's secret in its prompt, long
+ * enough to pass the session filter. */
+export function smokeTranscript(cwd: string): string {
+  const records = [
+    {
+      type: "user",
+      uuid: "u1",
+      timestamp: "2026-09-01T00:00:00.000Z",
+      cwd,
+      sessionId: SMOKE_SESSION,
+      message: { role: "user", content: `Deploy with ${SMOKE_SECRET} please.` },
+    },
+    {
+      type: "assistant",
+      uuid: "a1",
+      parentUuid: "u1",
+      timestamp: "2026-09-01T00:00:05.000Z",
+      sessionId: SMOKE_SESSION,
+      message: {
+        role: "assistant",
+        model: "claude-x",
+        content: [{ type: "text", text: `Deploying now. ${"The steps, in order. ".repeat(120)}` }],
+      },
+    },
+  ];
+  return records.map((r) => `${JSON.stringify(r)}\n`).join("");
+}
+
+/** Every `command` string in an agent's settings (hooks and the status line). */
+export function commandsIn(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap(commandsIn);
+  if (value === null || typeof value !== "object") return [];
+  return Object.entries(value).flatMap(([key, v]) =>
+    key === "command" && typeof v === "string" ? [v] : commandsIn(v),
+  );
+}
+
+/** Whether `command` starts with the program `binary`, by its absolute path (quoted or not). */
+export function startsWithProgram(command: string, binary: string): boolean {
+  return command.startsWith(`${binary} `) || command.startsWith(`"${binary}" `);
 }
 
 export async function smoke(options: SmokeOptions): Promise<SmokeResult> {
@@ -104,10 +172,14 @@ export async function smoke(options: SmokeOptions): Promise<SmokeResult> {
   mkdirSync(env.HOME as string, { recursive: true });
   let server: ReturnType<typeof Bun.spawn> | undefined;
 
-  const run = async (args: string[], stdin?: string): Promise<Ran> => {
+  const run = async (
+    args: string[],
+    stdin?: string,
+    runEnv: Record<string, string> = env,
+  ): Promise<Ran> => {
     const proc = Bun.spawn([options.binary, ...args], {
       cwd: dir,
-      env,
+      env: runEnv,
       stdin: stdin === undefined ? "ignore" : new Blob([stdin]),
       stdout: "pipe",
       stderr: "pipe",
@@ -149,9 +221,13 @@ export async function smoke(options: SmokeOptions): Promise<SmokeResult> {
         `listen = "127.0.0.1:${port}"`,
         "[store]",
         `url = "${pathToFileURL(join(dir, "store")).href}"`,
+        "[redaction]",
+        // A TOML literal string: a Windows path's backslashes stay as they are.
+        `packs = ['${join(dir, "smoke.toml")}']`,
         "",
       ].join("\n"),
     );
+    writeFileSync(join(dir, "smoke.toml"), SMOKE_PACK);
     const init = expectOk("admin init", await run(["admin", "init", "--config", config]));
     const lines = init.out.split(/\r?\n/);
     const keyAt = lines.findIndex((line) => line.startsWith("org key"));
@@ -204,6 +280,54 @@ export async function smoke(options: SmokeOptions): Promise<SmokeResult> {
     if (who.login?.user !== "smoke@example.com" || who.login?.stored_in !== storedIn) {
       throw new Error(`whoami says ${JSON.stringify(who)}`);
     }
+
+    // Upload, redacted by the client with the server's own pack (F2.4): RE2 inside the binary.
+    const project = join(dir, "code");
+    mkdirSync(project, { recursive: true });
+    const transcript = join(dir, "transcripts", `${SMOKE_SESSION}.jsonl`);
+    mkdirSync(join(dir, "transcripts"), { recursive: true });
+    writeFileSync(transcript, smokeTranscript(project));
+    const uploaded = JSON.parse(
+      expectOk("upload", await run(["upload", transcript, "--json"])).out,
+    ) as { sessions: { result: string }[] };
+    if (uploaded.sessions[0]?.result !== "uploaded") {
+      throw new Error(`upload did not upload: ${JSON.stringify(uploaded)}`);
+    }
+    const exported = expectOk(
+      "sessions export",
+      await run(["sessions", "export", `claude-code/${SMOKE_SESSION}`]),
+    ).out;
+    if (exported.includes(SMOKE_SECRET) || !exported.includes(`[redacted:${SMOKE_RULE}]`)) {
+      throw new Error(`the stored session was not redacted with the pack's rule:\n${exported}`);
+    }
+    log("ok: uploaded and redacted (RE2)");
+
+    // Hooks name this binary, in a home of their own (never the real ~/.claude).
+    const agentHome = join(dir, "agent-home");
+    mkdirSync(agentHome, { recursive: true });
+    const installEnv = {
+      ...env,
+      HOME: agentHome,
+      USERPROFILE: agentHome,
+      XDG_CONFIG_HOME: join(agentHome, "config"),
+      APPDATA: join(agentHome, "appdata"),
+      SESHI_KEYCHAIN: "false",
+    };
+    expectOk(
+      "capture install",
+      await run(["capture", "install", "claude-code", "--json"], undefined, installEnv),
+    );
+    const settings = JSON.parse(readFileSync(join(agentHome, ".claude", "settings.json"), "utf8"));
+    const commands = commandsIn(settings);
+    const programs = [...new Set([options.binary, realpathSync(options.binary)])];
+    const stray = commands.filter((c) => !programs.some((p) => startsWithProgram(c, p)));
+    if (commands.length === 0 || stray.length > 0) {
+      throw new Error(
+        `capture install wrote commands that do not name ${options.binary}:\n${(stray.length > 0 ? stray : ["(none written)"]).join("\n")}`,
+      );
+    }
+    log(`ok: capture install (${commands.length} commands name the binary)`);
+
     expectOk("logout", await run(["logout", "--json"]));
     const after = await run(["whoami", "--json"]);
     if (after.code === 0) throw new Error(`whoami after logout still answers:\n${after.out}`);

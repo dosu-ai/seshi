@@ -3,7 +3,6 @@
  * They run detached, with no terminal and no input, and the command does not wait for them. */
 
 import { spawn } from "node:child_process";
-import { basename } from "node:path";
 
 /** Whether this process is the compiled `seshi` binary rather than `bun …/main.ts`. */
 export function isCompiled(
@@ -33,9 +32,16 @@ export function hookCommand(
   argv: readonly string[] = process.argv,
   execPath = process.execPath,
 ): string[] {
-  return isCompiled(argv, execPath) && /^seshi(\.exe)?$/i.test(basename(execPath))
+  // Either separator, whatever OS runs this: an npm platform package's `bin\seshi.exe` too.
+  return isCompiled(argv, execPath) && /(^|[\\/])seshi(\.exe)?$/i.test(execPath)
     ? [execPath]
     : ["seshi"];
+}
+
+/** Whether `program` lives in npx's cache (`…/_npx/<hash>/node_modules/…`): `npx seshi` runs
+ * the binary from there, and npx may delete it at any time, taking every hook naming it along. */
+export function inNpxCache(program: string): boolean {
+  return /[\\/]_npx[\\/]/.test(program);
 }
 
 /** Start `words` detached: no terminal, no input or output, not waited for. `cwd` is where it

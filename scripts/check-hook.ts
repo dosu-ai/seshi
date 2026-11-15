@@ -7,8 +7,8 @@
  *    `import()` are not: types are erased and dynamic imports are lazy). Reaching a package on
  *    the forbidden list fails, with the chain of files that got there.
  * 2. The time. `seshi hook claude-code Stop` runs several times, with a Stop payload on stdin in
- *    a temporary home (rules judged, spool written, no uploader started), and its median must
- *    stay under
+ *    a temporary home (rules judged, spool written, no uploader started; a hook that spooled
+ *    nothing fails the check), and its median must stay under
  *    a fixed budget (`--budget-ms`, `SESHI_HOOK_BUDGET_MS`, 250 ms by default). Run from source
  *    it must also take under half of what loading `seshi serve` takes, measured the same way,
  *    so a slow CI machine moves both. `--binary dist/seshi` times the compiled binary instead;
@@ -17,7 +17,15 @@
  *
  *   bun run scripts/check-hook.ts [--static-only] [--binary <path>] [--budget-ms <n>] [--runs <n>] */
 
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
@@ -187,6 +195,15 @@ export function importGraph(
   };
 }
 
+/** How many entries a spool folder holds; 0 when there is none. */
+export function spoolEntries(dir: string): number {
+  try {
+    return readdirSync(dir).filter((name) => name.endsWith(".json")).length;
+  } catch {
+    return 0;
+  }
+}
+
 /** The median wall time of `runs` runs of `command`, in milliseconds, with `stdin` as its input
  * and `env` as its environment when given. */
 export async function medianMs(
@@ -250,11 +267,16 @@ if (import.meta.main) {
     transcript,
     `${JSON.stringify({ type: "user", uuid: "u1", sessionId: "s1", message: { role: "user", content: "hi" } })}\n`,
   );
+  // The same folders on every OS: XDG_* on macOS and Linux, %USERPROFILE%, %LOCALAPPDATA% and
+  // %APPDATA% on Windows, so the compiled check also runs on a Windows runner (15).
   const hookEnv = {
     ...process.env,
     HOME: home,
+    USERPROFILE: home,
     XDG_STATE_HOME: join(home, "state"),
+    LOCALAPPDATA: join(home, "state"),
     XDG_CONFIG_HOME: join(home, "config"),
+    APPDATA: join(home, "config"),
     SESHI_NO_UPLOADER: "1",
   };
   const payload = JSON.stringify({
@@ -269,6 +291,11 @@ if (import.meta.main) {
   await medianMs([...seshi, "--version"], 1, root);
   await medianMs([...seshi, "hook", "claude-code", "Stop"], 1, root, hookRun);
   const hook = await medianMs([...seshi, "hook", "claude-code", "Stop"], runs, root, hookRun);
+  // A hook that failed at once would be fast too: it must have spooled the Stop. (Hooks print
+  // nothing and exit 0 whatever happens; their errors go to capture.log.)
+  const spooled = spoolEntries(join(home, "state", "seshi", "spool"));
+  const captureLog = join(home, "state", "seshi", "capture.log");
+  const hookLog = existsSync(captureLog) ? readFileSync(captureLog, "utf8") : "";
   rmSync(home, { recursive: true, force: true });
   // `serve --bogus` loads the whole server, then stops at the flag.
   const serve = await medianMs([...seshi, "serve", "--bogus-flag"], runs, root);
@@ -276,6 +303,11 @@ if (import.meta.main) {
     `hook: seshi hook ${hook.toFixed(1)} ms (median of ${runs}); loading serve ${serve.toFixed(1)} ms; budget ${budget} ms`,
   );
   const problems: string[] = [];
+  if (spooled === 0) {
+    problems.push(
+      `seshi hook spooled nothing, so it did not do a hook's work${hookLog ? `:\n${hookLog}` : ""}`,
+    );
+  }
   if (hook > budget)
     problems.push(`seshi hook took ${hook.toFixed(1)} ms, over the ${budget} ms budget`);
   if (!values.binary && hook > serve * 0.5) {

@@ -73,10 +73,17 @@ and `@seshi/client` libraries), and install scripts for macOS/Linux (`install.sh
   1. `--version`.
   2. `admin init` and `serve` on a temporary folder store on 127.0.0.1.
   3. `login --key -` with the org key, then a check of where it was stored.
-  4. `whoami` reads it back; `logout`; `whoami` must then fail.
+  4. `whoami` reads it back.
+  5. `upload` of a Claude Code transcript holding a secret only the server's rule pack
+     (`redaction.packs`, one RE2 rule) knows; `sessions export` must show it redacted. The
+     uploader fetches and compiles the pack (07's pre-redaction), so `re2js` runs inside the
+     binary.
+  6. `capture install claude-code` into a temporary home: every hook and status-line command
+     must start with the binary's absolute path.
+  7. `logout`; `whoami` must then fail.
 
   Its environment carries none of the caller's `SESHI_*` settings or credentials, and the CLI
-  config goes to a temporary folder. `required` is for macOS and Windows, `allowed` for Linux
+  config, capture's state and the agent home go to temporary folders. `required` is for macOS and Windows, `allowed` for Linux
   runners without a secret service. `off` sets `SESHI_KEYCHAIN=false` and is what the tests use.
 - **`serve-dir.ts`**: a static server for 127.0.0.1, used by CI for install.ps1 (PowerShell 7
   cannot read file:// URLs) and by the tests. It refuses paths outside its folder.
@@ -245,20 +252,36 @@ and `@seshi/client` libraries), and install scripts for macOS/Linux (`install.sh
 
 ## Cross-branch wiring once the stack is linear
 
+Done when 15 was rebased onto 14 (the stack is now linear through 15):
+
 - **14 (capture)**:
-  - Hook and status-line commands written by `seshi capture install` should name the binary's
-    own path (`process.execPath` in the compiled binary), not `seshi`. Otherwise an npm install
-    starts Node on every agent turn through the launcher. docs/install.md already says hooks
-    do not start Node; make it true.
-  - The uploader's credentials must honour the new `keychain` setting: build the secret store
-    through `openAccount` (or the same `keychain ? defaultSecrets : FileSecrets` choice), not
-    `defaultSecrets` directly.
-  - `CliConfig` now has a required `keychain: boolean`. Object literals of that type (in tests)
-    need `keychain: true`, as `tests/cli/sessions.test.ts` here.
-- **07 (redaction)**: if RE2 comes as WebAssembly or a native module, it must embed in the
-  compiled binary for all six targets. The `binaries` job runs each target's binary, but the
-  smoke test only redacts if a session is uploaded; add an upload to `smoke.ts` once redaction
-  is in.
+  - Hook and status-line commands already named the compiled binary's `process.execPath` (14's
+    `hookCommand`). The name check now accepts either path separator, so an npm platform
+    package's `bin\seshi.exe` qualifies on any host. The npm launcher test in
+    `scripts/release/release.test.ts` runs `capture install` through the Node launcher and checks
+    every command names `node_modules/@seshi/cli-<id>/bin/seshi`, never the launcher. The smoke
+    test checks the same for each release binary.
+  - `seshi capture install` warns when the binary runs from npx's cache (`/_npx/`), which npx
+    may delete; docs/install.md says to install seshi first.
+  - The uploader's credentials already came from `openAccount` (`capture-runtime.ts`), which
+    honours `keychain`; nothing calls `defaultSecrets` directly. The smoke test's upload runs
+    with the keychain mode under test.
+  - `CliConfig` literals: only `tests/cli/sessions.test.ts` and `packages/ts/config/src/cli.test.ts`
+    build them; both carry `keychain: true` and 14's `remotes: []` (resolved in the rebase).
+  - CI: the test job already timed `check:hook --binary dist/seshi` (14). The `binaries` job now
+    times a real hook with each platform's release binary too, and `check:hook` sets
+    `USERPROFILE`, `LOCALAPPDATA` and `APPDATA` so it works on Windows, and fails when the hook
+    spooled nothing (a hook that dies at once is fast as well).
+- **07 (redaction)**: `re2js` is pure JavaScript, so it bundles into the compiled binary like any
+  module, for every target. The smoke test now uploads a session with an RE2 rule and checks the
+  stored trace is redacted, so the `binaries` job proves it on all six targets.
+
+Still open:
+
+- **14**: verifying the compiled hook on a real Windows machine with a real agent, and the
+  service entries (launchd, systemd, Task Scheduler) on each OS; the `binaries` job covers only
+  the timed hook. Moving the binary needs `seshi capture install` again (14's note). Publish
+  `integrations/claude-code/plugin/` if a marketplace is used.
 - **Any branch adding a dependency to `@seshi/model` or `@seshi/client`**: the published
   libraries pick it up from the workspace package.json. A workspace dependency other than a
   published library makes `buildNpm` refuse; X3.2 keeps the client on the model alone.

@@ -97,7 +97,9 @@ The `seshi` package is a small launcher; npm also installs the one optional depe
 matches your machine (`@seshi/cli-darwin-arm64` and so on, chosen by their `os`, `cpu` and
 `libc` fields), which holds the binary. The launcher runs it with your arguments and passes its
 exit status back. Node only starts it: hook commands that `seshi capture install` writes name
-the binary itself, so agents do not start Node on every turn.
+the binary itself, so agents do not start Node on every turn. Run `seshi capture install` from
+an installed seshi, not `npx`: npx keeps the binary in a cache it may delete, and the hooks would
+stop working (seshi warns when it sees that).
 
 If npm was told to skip optional dependencies (`--omit=optional`), or a lock file was made on
 another platform, the binary is missing and `seshi` says so; reinstall with optional

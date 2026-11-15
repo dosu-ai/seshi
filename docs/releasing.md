@@ -10,7 +10,10 @@ from any other branch, and nothing is published by hand.
    on a runner for each of the six targets and runs `scripts/release/smoke.ts` on it: serve on a
    folder store, `admin init`, `login --key` (which stores the org key through `Bun.secrets` in
    the macOS Keychain or Windows Credential Manager, required there; the 0600 file is accepted on
-   Linux runners, which have no secret service), `whoami`, `logout`. It then installs the build
+   Linux runners, which have no secret service), `whoami`, an `upload` that the uploader must
+   redact with an RE2 rule pack the server serves, `capture install` into a temporary home (every
+   hook must name the binary's own path), `logout`. It also times a real `seshi hook` with that
+   binary (`check:hook --binary`, 250 ms). It then installs the build
    with `install.sh`, or `install.ps1` under PowerShell 7 and Windows PowerShell 5.1, from a local
    copy of the release. `darwin-cross` builds the two macOS targets on Linux, as the release
    job does, and `darwin-cross-check` runs `codesign --verify` on them on a Mac (Bun's signer

@@ -62,7 +62,7 @@ import {
 import { EXIT, type ExitCode } from "../cli/exit";
 import { failWith } from "../cli/failures";
 import { emit, fail, takeJson, usageError } from "../cli/output";
-import { hookCommand, isCompiled } from "../cli/spawn";
+import { hookCommand, inNpxCache, isCompiled } from "../cli/spawn";
 import { printable, type Style, styleFor } from "../cli/style";
 import { hostOf, pathsOf, startUploader } from "./capture-host";
 import type { CommandContext } from "./index";
@@ -274,6 +274,11 @@ async function install(ctx: CommandContext, json: boolean, args: Args): Promise<
       EXIT.notFound,
       "no_agent",
       `found no agent to install for (looked for ${agents.map((a) => a.name).join(", ")}); name one: seshi capture install claude-code`,
+    );
+  }
+  if (command[0] !== undefined && inNpxCache(command[0])) {
+    ctx.stderr(
+      `seshi: warning: this seshi runs from npx's cache (${command[0]}), which npx may delete; hooks would stop working. Install seshi (npm install -g seshi, or the install script) and run seshi capture install again`,
     );
   }
   const results: { agent: string; changed: string[]; notes: string[] }[] = [];

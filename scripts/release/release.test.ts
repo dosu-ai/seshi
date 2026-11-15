@@ -3,14 +3,30 @@
  * launcher, and put the installed binary through the smoke test (keychain off, so the real
  * keychain is never touched). Everything stays on 127.0.0.1 and in temporary folders. */
 
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildRelease, type ReleaseAsset, repositoryVersion } from "./build";
 import { buildNpm } from "./npm";
 import { serveDir } from "./serve-dir";
-import { smoke, smokeEnv } from "./smoke";
+import {
+  commandsIn,
+  SMOKE_PACK,
+  smoke,
+  smokeEnv,
+  smokeTranscript,
+  startsWithProgram,
+} from "./smoke";
 import { hostTarget, TARGETS } from "./targets";
 import { exec, installPackages } from "./testing";
 
@@ -39,11 +55,44 @@ describe("smokeEnv", () => {
     expect(env.APPDATA).toBe(join("/tmp/s", "appdata"));
   });
 
+  it("keeps capture's state in the temporary folder", () => {
+    expect(smokeEnv(base, "/tmp/s", "required").XDG_STATE_HOME).toBe(join("/tmp/s", "state"));
+    expect(smokeEnv(base, "/tmp/s", "required").LOCALAPPDATA).toBe(join("/tmp/s", "localappdata"));
+  });
+
   it("keeps the real home for the keychain, and a temporary one with it off", () => {
     expect(smokeEnv(base, "/tmp/s", "required").HOME).toBe("/home/me");
     const off = smokeEnv(base, "/tmp/s", "off");
     expect(off.HOME).toBe(join("/tmp/s", "home"));
     expect(off.SESHI_KEYCHAIN).toBe("false");
+  });
+});
+
+describe("the smoke test's upload and install checks", () => {
+  it("has a pack whose rule matches the transcript's secret, and a transcript long enough to keep", () => {
+    const text = smokeTranscript("/work/code");
+    expect(SMOKE_PACK).toContain("pattern = 'SMOKE-[0-9]{6}'");
+    expect(text).toMatch(/SMOKE-\d{6}/);
+    expect(text.length).toBeGreaterThan(2000);
+    expect(JSON.parse(text.split("\n")[0] as string).cwd).toBe("/work/code");
+  });
+
+  it("finds every command in an agent's settings, and tells the binary's path from bare seshi", () => {
+    const settings = {
+      hooks: {
+        Stop: [{ hooks: [{ type: "command", command: "/opt/seshi/seshi hook claude-code Stop" }] }],
+      },
+      statusLine: { type: "command", command: '"/my apps/seshi" statusline' },
+    };
+    expect(commandsIn(settings)).toEqual([
+      "/opt/seshi/seshi hook claude-code Stop",
+      '"/my apps/seshi" statusline',
+    ]);
+    expect(startsWithProgram("/opt/seshi/seshi hook claude-code Stop", "/opt/seshi/seshi")).toBe(
+      true,
+    );
+    expect(startsWithProgram('"/my apps/seshi" statusline', "/my apps/seshi")).toBe(true);
+    expect(startsWithProgram("seshi hook claude-code Stop", "/opt/seshi/seshi")).toBe(false);
   });
 });
 
@@ -168,6 +217,33 @@ describe.skipIf(!supported || process.platform === "win32")("the host's release"
       const unknown = await exec([Bun.which("node") as string, launcher, "no-such-command"]);
       expect(unknown.code).toBe(2);
       expect(unknown.err).toContain("unknown command");
+
+      // Through the launcher, hooks still name the platform package's binary, never the
+      // launcher: an agent's turn does not start Node.
+      const home = join(dir, "npm-home");
+      mkdirSync(home, { recursive: true });
+      const install = await exec(
+        [Bun.which("node") as string, launcher, "capture", "install", "claude-code", "--json"],
+        {
+          env: {
+            PATH: process.env.PATH ?? "",
+            HOME: home,
+            XDG_CONFIG_HOME: join(home, "config"),
+            XDG_STATE_HOME: join(home, "state"),
+            SESHI_KEYCHAIN: "false",
+            NO_COLOR: "1",
+          },
+        },
+      );
+      expect(install.code, install.err).toBe(0);
+      const binary = realpathSync(
+        join(project, "node_modules", hostTarget().npm, "bin", hostTarget().binary),
+      );
+      const commands = commandsIn(
+        JSON.parse(readFileSync(join(home, ".claude", "settings.json"), "utf8")),
+      );
+      expect(commands.length).toBeGreaterThan(0);
+      for (const command of commands) expect(startsWithProgram(command, binary)).toBe(true);
     },
     60_000,
   );

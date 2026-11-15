@@ -17,7 +17,7 @@ import {
   uninstallService,
   windowsTaskCommand,
 } from "./capture-service";
-import { hookCommand, isCompiled, selfCommand } from "./cli/spawn";
+import { hookCommand, inNpxCache, isCompiled, selfCommand } from "./cli/spawn";
 import { parseCaptureArgs, resolveSession, splitWords } from "./commands/capture";
 import { waitForLock } from "./commands/daemon";
 import { INTEGRATIONS } from "./integrations";
@@ -186,6 +186,22 @@ describe("starting seshi again", () => {
       "/opt/seshi/seshi",
     ]);
     expect(hookCommand(["/opt/bun", "/repo/main.ts"], "/opt/bun")).toEqual(["seshi"]);
+    // Installed from npm: the platform package's binary, not the Node launcher.
+    const npm = "/usr/lib/node_modules/seshi/node_modules/@seshi/cli-linux-x64/bin/seshi";
+    expect(hookCommand([npm, "/$bunfs/root/seshi"], npm)).toEqual([npm]);
+    const exe = "C:\\npm\\node_modules\\@seshi\\cli-windows-x64\\bin\\seshi.exe";
+    expect(hookCommand([exe, "B:\\~BUN\\root\\seshi"], exe)).toEqual([exe]);
+  });
+
+  it("knows a binary in npx's cache, which npx may delete", () => {
+    expect(
+      inNpxCache("/home/me/.npm/_npx/0a1b2c/node_modules/@seshi/cli-linux-x64/bin/seshi"),
+    ).toBe(true);
+    expect(inNpxCache("C:\\Users\\me\\AppData\\Local\\npm-cache\\_npx\\0a1b\\seshi.exe")).toBe(
+      true,
+    );
+    expect(inNpxCache("/usr/lib/node_modules/@seshi/cli-linux-x64/bin/seshi")).toBe(false);
+    expect(inNpxCache("seshi")).toBe(false);
   });
 });
 

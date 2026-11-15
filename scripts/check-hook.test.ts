@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { importGraph, loadTimeImports } from "./check-hook";
+import { importGraph, loadTimeImports, spoolEntries } from "./check-hook";
 
 let root: string;
 beforeEach(() => {
@@ -81,5 +81,14 @@ describe("the hook's import graph (X3.3)", () => {
     expect(graph.external).toEqual(["left-pad", "node:fs"]);
     // The config schema library stays out of a hook too: capture reads its rules from a cache.
     expect(graph.violations.map((v) => v.specifier)).toEqual(["@bufbuild/protobuf", "zod"]);
+  });
+});
+
+describe("spoolEntries", () => {
+  it("counts a spool's entries, and none when there is no spool", () => {
+    expect(spoolEntries(join(root, "missing"))).toBe(0);
+    write("spool/1.json", "{}");
+    write("spool/2.json.tmp", "{");
+    expect(spoolEntries(join(root, "spool"))).toBe(1);
   });
 });

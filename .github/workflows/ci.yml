@@ -72,8 +72,9 @@ jobs:
   # F8.4: the binary on every platform it ships for, built natively on that platform's runner.
   # Each one is put through scripts/release/smoke.ts: serve, admin init, login with the org key
   # (Bun.secrets: the macOS Keychain, Windows Credential Manager, or the 0600 file on a Linux
-  # runner without a secret service), whoami, logout. Then the install script installs it from
-  # a local copy of the release, as a person would.
+  # runner without a secret service), whoami, an upload redacted before sending with an RE2 rule
+  # pack, capture install (hooks must name the binary's path), logout. Then the install script
+  # installs it from a local copy of the release, as a person would.
   binaries:
     strategy:
       fail-fast: false
@@ -101,6 +102,15 @@ jobs:
           bin=dist/site/latest/download/bin/${{ matrix.target }}/seshi
           if [ -f "$bin.exe" ]; then bin="$bin.exe"; fi
           bun run release:smoke "$bin" --keychain ${{ matrix.keychain }}
+      # X3.3 on every platform, with the very binary this job ships: a real `seshi hook` (a
+      # temporary home, a Stop payload, the spool written) under the 250 ms budget. The test job
+      # times dist/seshi on Linux only; this is where a Windows or macOS hook is exercised.
+      - name: Time seshi hook (this platform's binary)
+        shell: bash
+        run: |
+          bin=dist/site/latest/download/bin/${{ matrix.target }}/seshi
+          if [ -f "$bin.exe" ]; then bin="$bin.exe"; fi
+          bun run check:hook --binary "$bin"
       - name: Install with install.sh
         if: runner.os != 'Windows'
         run: |
