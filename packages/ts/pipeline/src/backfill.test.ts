@@ -681,6 +681,14 @@ describe("backfillRedaction (F2.5)", () => {
     expect(await store.stat(left)).toBeNull();
   });
 
+  async function leftover(archive: string, hash: string, ms: number): Promise<string> {
+    const key = keys.trace("alice", archive, hash);
+    await store.put(key, new TextEncoder().encode("left behind"));
+    const at = new Date(Date.now() - ms);
+    utimesSync(join(dir, ...key.split("/")), at, at);
+    return key;
+  }
+
   it("deletes what an earlier stopped write left once it is an hour old, and keeps what is younger", async () => {
     const first = await store1("s1", meta() + user(`hello ${LONG}`) + reply("ok"));
     const archive = archiveId("alice", "trajectory", "s1");
