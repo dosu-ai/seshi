@@ -395,8 +395,7 @@ class S3Run {
       if (err instanceof ObjectChanged) return "changed";
       if (err instanceof ObjectDenied) {
         return this.failure(base, {
-          code: "access_denied",
-          message: "the bucket refused to let this source read the object",
+          ...refusal(err),
           session_key: entry.session,
           idempotency_key: idempotency,
           provenance,
@@ -492,11 +491,8 @@ class S3Run {
     } catch (err) {
       if (err instanceof ObjectChanged) return "changed";
       if (err instanceof ObjectDenied) {
-        return failing(
-          "access_denied",
-          "the bucket refused to let this source read the object",
-          entry?.session ?? fields.session ?? rel,
-        );
+        const { code, message } = refusal(err);
+        return failing(code, message, entry?.session ?? fields.session ?? rel);
       }
       throw err;
     }
@@ -671,6 +667,22 @@ class S3Run {
     else this.ctx.log.warn(`${failure.provenance?.object_key ?? "an object"}: ${failure.message}`);
     return { ...base, failed: failure.code };
   }
+}
+
+/** The failure a bucket's refusal to read one object is recorded as: `access_denied` (403) or
+ * `unreadable` (another final 4xx, with S3's error code, never content). */
+function refusal(err: ObjectDenied): { code: string; message: string } {
+  if (err.status === 403) {
+    return {
+      code: "access_denied",
+      message: "the bucket refused to let this source read the object",
+    };
+  }
+  const code = err.code?.replace(/[^A-Za-z0-9.]/g, "").slice(0, 64);
+  return {
+    code: "unreadable",
+    message: `the bucket answered ${err.status}${code ? ` ${code}` : ""} for this object`,
+  };
 }
 
 /** Where the session's log ends, from the pipeline's answer. */

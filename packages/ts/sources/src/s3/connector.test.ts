@@ -580,6 +580,47 @@ describe("objects that cannot be stored (X4.8)", () => {
     expect(pipeline.sessions.get("lines\na.jsonl")).toBe(lines(0, 2));
   });
 
+  it("records an object the bucket can never serve (archived, SSE-C) rather than stalling", async () => {
+    fake.put("harness/a.jsonl", lines(0, 1));
+    fake.put("harness/b.jsonl", lines(0, 1));
+    fake.put("harness/c.jsonl", lines(0, 1));
+    const original = fake.handle.bind(fake);
+    fake.handle = async (request: Request) => {
+      const path = new URL(request.url).pathname;
+      if (path.endsWith("/a.jsonl")) {
+        return new Response("<Error><Code>InvalidObjectState</Code></Error>", { status: 403 });
+      }
+      if (path.endsWith("/b.jsonl")) {
+        return new Response("<Error><Code>InvalidRequest</Code></Error>", { status: 400 });
+      }
+      return original(request);
+    };
+    const report = await sources().run("evals");
+    expect(report).toMatchObject({ outcome: "ok", outcomes: { failed: 2, stored: 1 } });
+    const recorded = await failures();
+    expect(recorded.map((r) => r.code).sort()).toEqual(["access_denied", "unreadable"]);
+    expect(recorded.find((r) => r.code === "unreadable")?.message).toBe(
+      "the bucket answered 400 InvalidRequest for this object",
+    );
+  });
+
+  it("fails the run, and moves nothing, when the bucket throttles a read", async () => {
+    fake.put("harness/a.jsonl", lines(0, 1));
+    const original = fake.handle.bind(fake);
+    let throttled = false;
+    fake.handle = async (request: Request) => {
+      if (!throttled && !new URL(request.url).searchParams.has("list-type")) {
+        throttled = true;
+        return new Response("<Error><Code>SlowDown</Code></Error>", { status: 429 });
+      }
+      return original(request);
+    };
+    const s = sources();
+    expect((await s.run("evals")).outcome).toBe("error");
+    expect(await failures()).toEqual([]);
+    expect((await s.run("evals")).outcomes).toEqual({ stored: 1 });
+  });
+
   it("keeps keys that look like object internals as plain keys", async () => {
     fake.put("harness/__proto__", lines(0, 1));
     fake.put("harness/constructor", lines(0, 1));

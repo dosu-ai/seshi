@@ -29,11 +29,20 @@ export interface SourceListing {
 /** What a read got: the bytes from `start` to the end, and what the object says of itself. */
 export type SourceRead = FetchedObject;
 
-/** The bucket refuses to let the source read this object (403): a fault of this object, not
- * of the source, so it is recorded and the run goes on. */
+/** The bucket refuses to let the source read this object: 403, or another final 4xx for this
+ * one object (an archived object's `InvalidObjectState`, an SSE-C object's 400). A fault of
+ * this object, not of the source, so it is recorded and the run goes on; retrying it would
+ * hold the whole source back for good. */
 export class ObjectDenied extends Error {
-  constructor(readonly key: string) {
-    super(`${key}: access denied`);
+  constructor(
+    readonly key: string,
+    readonly status = 403,
+    /** S3's error code, when the answer had one. */
+    readonly code?: string,
+  ) {
+    super(
+      `${key}: ${status === 403 ? "access denied" : `refused (${status}${code ? ` ${code}` : ""})`}`,
+    );
     this.name = "ObjectDenied";
   }
 }
@@ -210,6 +219,16 @@ export class S3SourceBucket implements SourceBucket {
         throw new ObjectChanged(key);
       }
       if (err instanceof S3HttpError && err.status === 403) throw new ObjectDenied(key);
+      // Any other 4xx but a timeout or throttling is final for this object.
+      if (
+        err instanceof S3HttpError &&
+        err.status >= 400 &&
+        err.status < 500 &&
+        err.status !== 408 &&
+        err.status !== 429
+      ) {
+        throw new ObjectDenied(key, err.status, err.code);
+      }
       throw err;
     }
   }
