@@ -998,6 +998,27 @@ describe("a dropped first envelope leaves a stub (F3.4, revised 15 Nov 2026)", (
       expect(entries.at(-1)).not.toHaveProperty("replace");
     });
 
+    it("leaves a stub with a trace as it is when a replace holds nothing past the dropped part", async () => {
+      // Found by the scenario explorer (33): the transcript was compacted shorter than what
+      // review dropped; the replace recorded that log's position while the chunk's trace stayed,
+      // so `normalized` fell behind the traces.
+      const { next } = await begunAsStub();
+      const before = await session();
+      const shorter = FIRST.split("\n").slice(0, 2).join("\n").concat("\n");
+      const answer = await submit(
+        pipeline({ reviewer: allowAll() }),
+        upload(shorter, 0, { replace: true }),
+      );
+      // Answered as a dropped replace, with what is stored: the uploader replaces it again once
+      // the log grows past the dropped part.
+      expect(answer).toMatchObject({
+        status: "dropped",
+        records_total: next.records_total,
+        bytes_total: next.bytes_total,
+      });
+      expect(await session()).toEqual(before);
+    });
+
     it("finds the dropped part by its bytes once the adapter changed, and rebuilds past it", async () => {
       const v1 = new FormatRegistry([
         ATIF_FORMAT,

@@ -1,0 +1,20 @@
+# Found by the scenario explorer (tests/tooling/scenario/explore.ts); see tests/scenarios/README.md.
+# seed: 14643 (bun run scenarios:explore --seed 14643 --runs 1 --max-steps 25)
+# original length: 13 steps; shrunk to 10 in 102 runs
+# failure:
+#   step 7 (settle max=40): checkStore found errors
+#     error chain_total: the traces hold records up to 21; normalized says 8 (owners/alice@acme.com/sessions/8953f8500d62223eeb070edfd3dd34d13ac0a023369df67a2fd371d6b69e3cb3/metadata.json)
+name: found by seed 14643
+description: "A generated scenario (seed 14643) shrunk from 13 to 10 steps; the header says how it failed."
+setup: { review: true }
+steps:
+  - review: [drop]
+  - turns: { session: main, count: 2 }
+  - pass
+  - turns: { session: main, count: 2 }
+  - pass
+  - compact: { session: main, mode: shrink, keep: 1 }
+  - settle
+  - fault: { http: POST /v1/sessions, status: 503 }
+  - heal
+  - settle

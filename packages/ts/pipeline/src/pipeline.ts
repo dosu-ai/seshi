@@ -957,6 +957,17 @@ export class Pipeline {
     const tail = this.redactor.redact(raw.slice(skip), prefix.withheld);
     const normalized = stateOf([...prefix.records, ...tail.records], bytes);
     const prefixHash = prefixSha256(prefix.records, skip);
+    if (tail.records.length === 0 && session?.head !== undefined) {
+      // The log ends inside the dropped start (compacted shorter, say), but a trace continues
+      // the stub: recording this log's position would leave `normalized` behind the traces
+      // (checkStore's chain_total, 33). Nothing is written and the session stays as it is,
+      // answered as a replace review dropped is (with what is stored), so the uploader replaces
+      // it again once the log grows past the dropped start (`replace_next`, uploader.ts).
+      return Promise.resolve({
+        status: "dropped",
+        ...shippedOf(session.normalized as NormalizedState),
+      });
+    }
     if (tail.records.length === 0) {
       return this.progress(run, normalized, tail.withheld, "unchanged", common.guard);
     }

@@ -1,0 +1,40 @@
+# Guards a whole log that ends inside a stub's dropped start (33, found by the scenario
+# explorer, seed 14643): review dropped a session's first envelope (a stub), a chunk continued
+# it with a trace, and the transcript was then compacted shorter than the dropped start. The
+# whole resend had nothing past the dropped start, and the server recorded the shorter log's
+# position while the trace stayed: `normalized` said 8 records, the traces held 21 (checkStore
+# `chain_total`, an error). It now leaves the session as it is and answers as a dropped replace,
+# so the uploader replaces it once the log grows past the dropped start.
+name: a stub with a chunk, then a log shorter than the dropped start
+description: >
+  Review drops a session's first envelope, a chunk continues the stub, then the transcript is
+  compacted to less than the dropped start. The resend stores nothing and changes nothing, and
+  the bucket stays consistent; once the transcript grows again it is replaced, past the dropped
+  start, and never re-reviews or stores what was dropped.
+guards: "33: a whole log inside a stub's dropped start leaves a stub with a trace consistent"
+setup:
+  review: true
+steps:
+  - review: [drop]
+  - turns: { session: main, count: 2, mark: dropped-start }
+  - pass
+  - turns: { session: main, count: 2 }
+  - pass
+  - expect:
+      sessions:
+        main: { server: present, records: 21, traces: 1 }
+  - compact: { session: main, mode: shrink, keep: 1 }
+  - pass
+  - expect:
+      pass: { uploaded: 1, failed: 0 }
+      sessions:
+        main: { server: present, records: 21, traces: 1, last-status: dropped, doctor: ok }
+  - settle
+  - turns: { session: main, count: 2, mark: grown-again }
+  - settle
+  - expect:
+      sessions:
+        main: { server: present, last-status: stored, sent-all: true, doctor: ok }
+      bucket:
+        has: [grown-again]
+        lacks: [dropped-start]
