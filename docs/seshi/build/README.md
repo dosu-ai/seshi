@@ -27,6 +27,7 @@ Branch names use a hyphen (`seshi-01-restructure`), not a slash: git cannot hold
 | 15 | `seshi-15-distribution` | Release binaries, npm packages, install scripts | F8.4, X3.8 | Built, rebased |
 | 16 | `seshi-16-readme` | README, outlined lockups and the npm badge, the user docs brought up to date | B1.5 | Built |
 | 17 | `seshi-17-review` | A review of the whole stack against the decisions, with fixes, and the final check of the stack | All (B1.3 in part) | Built, checked |
+| 18 | `seshi-18-decisions` | Decisions on the ten questions 17 left open (not built yet) | F9.5, X4.9, F3.4, F4.1, F4.4, F2.5, X6.4, F8.4, F9.1 | Decided |
 
 F7 (Cursor Cloud sync) is deferred and is not built. Agreed but not built, found in 17's review
 and left for a decision (see [17](17-review.md#not-fixed)): the Claude desktop mod (F9.4–F9.6's
@@ -49,11 +50,11 @@ Each branch has its notes here: [01](01-restructure.md), [02](02-config.md), [03
 [04](04-pipeline.md), [05](05-auth.md), [06](06-instance.md), [07](07-redaction-rules.md),
 [08](08-model-review.md), [09](09-otlp.md), [10](10-datadog.md), [11](11-s3-sync.md),
 [12](12-search.md), [13](13-cli.md), [14](14-capture.md), [15](15-distribution.md),
-[16](16-readme.md), [17](17-review.md).
+[16](16-readme.md), [17](17-review.md), [18](18-decisions.md).
 
 ## How the stack was built
 
-The stack is linear, in the order of the table: `seshi` ← 01 ← 02 ← … ← 15 ← 16 ← 17. Each
+The stack is linear, in the order of the table: `seshi` ← 01 ← 02 ← … ← 15 ← 16 ← 17 ← 18. Each
 branch is pushed; there are no PRs yet.
 
 Branches 01–06 were built one after another. Branches 07–15 were then built in parallel, each

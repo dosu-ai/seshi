@@ -615,6 +615,7 @@ pre.tree .d { color: var(--accent); font-weight: 500; }
         <dl>
           <dt>Detail</dt><dd>With no raw stored, <code>seshi reprocess</code> asks the source again: the uploader resends laptop transcripts, and pollers rewind their checkpoint for S3, Datadog or Cursor. It is filtered by source, agent, normalizer version or date, and writes new heads and change entries. Metadata already records the normalizer version, which picks the sessions to redo.</dd>
           <dt>Limit</dt><dd>It works only while the source still has the data (<a href="#storage">X6.3</a>). Older sessions keep their current trace.</dd>
+          <dt>Revised 15 Nov 2026</dt><dd>The server keeps no raw logs, so <code>seshi reprocess</code> cannot rebuild sessions uploaded from laptops. Instead the server marks a session <code>stale</code> when it was built by an older normalizer, and the uploader resends stale sessions whole with a new <code>rebuild</code> envelope field, which makes the server build and review the session again even when the log only extends what is stored. <code>seshi capture resend [--all | --session &lt;id&gt;]</code> does the same by hand.</dd>
         </dl>
       </div>
     </div>
@@ -892,6 +893,7 @@ pre.tree .d { color: var(--accent); font-weight: 500; }
             </ul>
             Separate prefixes let each be listed, counted and retained on its own: a drop is a policy outcome an admin audits, a failure is a fault to fix and reprocess. They serve admins seeing what was not stored and why, <code>seshi reprocess</code> finding what to fetch again (<a href="#pipeline">X4.9</a>), and source health. <code>seshi sync dropped &lt;id&gt;</code> and <code>seshi sync failed &lt;id&gt;</code> list them. Uploads from hooks and the CLI use the source ID <code>upload</code>. Both are kept for 30 days by default, set separately (<code>[records] dropped_retention</code>, <code>failed_retention</code>). Sessions removed by the session filter are only counted, since they are expected and frequent.</dd>
           <dt>Metadata</dt><dd>Add <code>writer</code>, <code>visibility</code>, <code>claims</code>, <code>redaction</code> (rule-set hash, counts by rule), <code>source</code> provenance.</dd>
+          <dt>Revised 15 Nov 2026</dt><dd>Change entries are written before the session pointer moves, so a write that fails after the pointer update can no longer lose one; a failed publish may leave an entry for a change that did not happen, which readers already tolerate because they read current metadata. Change keys become unique: <code>&lt;stamp&gt;-&lt;session_id&gt;-&lt;suffix&gt;-&lt;hash|tombstone|visibility&gt;.json</code>, so two changes in one millisecond (a bulk delete, say) no longer share a key.</dd>
         </dl>
       </div>
     </div>
@@ -1090,6 +1092,7 @@ pre.tree .d { color: var(--accent); font-weight: 500; }
         <h3>New rules can be applied to stored sessions</h3>
         <dl>
           <dt>Detail</dt><dd><code>seshi redact backfill --since 30d</code> reapplies the current rules to stored traces, writes new trace objects and a change entry, so downstream readers pick up the change. Redaction cannot be undone, because unredacted data is never stored. <code>seshi redact test &lt;file&gt;</code> shows what a rule set would match.</dd>
+          <dt>Revised 15 Nov 2026</dt><dd>Trace objects left behind by a backfill or replace that stopped partway are deleted by a sweep: any trace object that no metadata names and that is over one hour old (by the store&#39;s listing) is removed. The sweep runs when a backfill ends and once a day. The age guard keeps it from deleting the object of a publish still in flight.</dd>
         </dl>
       </div>
     </div>
@@ -1152,6 +1155,7 @@ pre.tree .d { color: var(--accent); font-weight: 500; }
               <li><code>skip</code>: the envelope is written with regex redaction only and marked <code>review: skipped</code>.</li>
             </ul></dd>
           <dt>Either way</dt><dd>The envelope counts as handled: the session's byte offset moves past it so later chunks continue, and pollers advance their checkpoint. After an outage, <code>seshi reprocess</code> can re-ingest skipped or dropped envelopes while the source still has them (<a href="#pipeline">X4.9</a>).</dd>
+          <dt>Revised 15 Nov 2026</dt><dd>F3.4 wins over F3.1 for a session&#39;s first envelope. A drop writes a session stub with no content (session ID, owner, byte offset and prefix hash) beside the drop record, so the offset moves past the dropped envelope, later appends extend the stub and are reviewed on their own, and the dropped text is never stored.</dd>
         </dl>
       </div>
     </div>
@@ -1214,6 +1218,7 @@ pre.tree .d { color: var(--accent); font-weight: 500; }
         <dl>
           <dt>Detail</dt><dd><code>POST /otlp/v1/traces</code>, so the Console's endpoint URL is <code>https://seshi.example.com/otlp</code> (the Console adds <code>/v1/traces</code>). Accept protobuf and JSON, gzip. Reply with <code>ExportTraceServiceResponse</code>, using <code>partial_success</code> for rejected spans. TLS on 443 is a deployment requirement, usually a load balancer.</dd>
           <dt>Why <code>/otlp</code> comes first</dt><dd>The trailing <code>/v1/traces</code> is fixed by the OTLP spec: exporters, and the Console, append it to whatever base URL they are given. That <code>v1</code> is OTLP's version, not seshi's. Only the part before it is ours. Hosted backends differ: Grafana Cloud uses <code>/otlp</code>, LangSmith <code>/otel</code> (and <code>/api/v1/otel</code> when self-hosted), Langfuse <code>/api/public/otel</code>. Keeping it outside seshi's <code>/v1</code> means a future seshi <code>/v2</code> never moves the URL pasted into Console destinations. The alternative, <code>/v1/otlp/v1/traces</code>, also works but repeats <code>v1</code>.</dd>
+          <dt>Revised 15 Nov 2026</dt><dd>OTLP request bodies are capped at 64 MiB on the wire and 256 MiB after gunzip, set by <code>[limits]</code> keys; a larger body gets 413 with a message naming the key. The docs tell exporters to keep batches small.</dd>
         </dl>
       </div>
     </div>
@@ -1241,6 +1246,7 @@ pre.tree .d { color: var(--accent); font-weight: 500; }
         <h3>Assemble, then publish after a quiet period</h3>
         <dl>
           <dt>Detail</dt><dd>Each batch is appended to the session's span store, removing repeats by trace and span ID. The assembler rebuilds the whole trace (spans can arrive late or out of order) and publishes a new head once the session has had no new spans for a set time (default 10 minutes), or on a final span. Datadog sync reuses this assembler.</dd>
+          <dt>Revised 15 Nov 2026</dt><dd>Span records store each message of a chat span&#39;s input history once, keyed by its content hash, and point at those messages instead of copying the history into every span. The assembler streams a session&#39;s records rather than loading them all. This keeps storage and memory linear in the number of calls; the assembled trace is unchanged.</dd>
         </dl>
       </div>
     </div>
@@ -1501,6 +1507,7 @@ pre.tree .d { color: var(--accent); font-weight: 500; }
           <dt>Targets</dt><dd>macOS arm64 and x64, Linux arm64 and x64, Windows x64; Windows arm64 if Bun's compiler supports it when we build.</dd>
           <dt>Windows means</dt><dd>Credentials in Windows Credential Manager (<a href="#f8">F8.2</a>), config under <code>%APPDATA%\seshi</code>, hook commands and agent paths that work in PowerShell and <code>cmd</code> (<a href="#f9">F9</a>), and Windows in the CI test matrix.</dd>
           <dt>Later</dt><dd>Homebrew, and signed or notarized binaries if unsigned ones cause trouble with macOS Gatekeeper or Windows SmartScreen.</dd>
+          <dt>Revised 15 Nov 2026</dt><dd>Windows CI runs the tests of what runs on laptops (hooks, spool, uploader, CLI, config) on a Windows runner, as well as the binaries, the smoke test and <code>install.ps1</code>. The server&#39;s tests stay Linux-only.</dd>
         </dl>
       </div>
     </div>
@@ -1520,6 +1527,7 @@ pre.tree .d { color: var(--accent); font-weight: 500; }
           <dt>Uploader</dt><dd class="rec">Started on demand: the hook starts it if it is not running, and it exits after a few idle minutes. This works the same on macOS, Linux and Windows with nothing to install. <code>seshi capture install --service</code> adds a launchd, systemd or Task Scheduler entry for people who want uploads to continue between agent sessions.</dd>
           <dt>Whole log first</dt><dd>Until a session has a trace on the server, the server stores nothing for it and accepts only the whole log (<a href="#storage">X6.3</a>). On <code>409</code> with <code>expected: 0</code>, which today's protocol already returns, the uploader resends from the start.</dd>
           <dt>Paths</dt><dd>Spool and state live in <code>~/.local/state/seshi/</code> on macOS and Linux and <code>%LOCALAPPDATA%\seshi\</code> on Windows. Hook commands work in sh, PowerShell and <code>cmd</code> (<a href="#f8">F8.4</a>).</dd>
+          <dt>Revised 15 Nov 2026</dt><dd>The uploader stays running while uploads or retractions are waiting to retry, for at most 30 minutes after its last success, then exits as before. A pass whose work all failed no longer counts as idle.</dd>
         </dl>
       </div>
     </div>
@@ -1581,6 +1589,7 @@ pre.tree .d { color: var(--accent); font-weight: 500; }
           </ul></dd>
           <dt>Turning off mid-session</dt><dd>Nothing more of the session is uploaded, by hooks or the sweep, and what was already uploaded is retracted (<a href="#f9">F9.7</a>). Sessions under the session filter's size (<a href="#pipeline">X4.10</a>) were never stored, so turning off early usually leaves nothing to retract.</dd>
           <dt>Where the state lives</dt><dd>One local state file per machine, read by hooks, the sweep, the status line and the mod. This answers the prototype's open question of where the flag should live so capture can read it.</dd>
+          <dt>Revised 15 Nov 2026</dt><dd><code>seshi capture pause</code> stops sessions where they are. A session running when the pause starts keeps what it has uploaded and uploads nothing more, ever; a session started during the pause is off. Nothing is retracted, and a whole-log resend (after a 409, a moved transcript or a replace) sends only up to the offset where the session stopped. Sessions started after the pause ends are captured as usual.</dd>
         </dl>
       </div>
     </div>
@@ -1801,6 +1810,7 @@ pre.tree .d { color: var(--accent); font-weight: 500; }
 <section id="log">
   <h2>Change log</h2>
   <ul class="log">
+    <li><b>15 Nov 2026.</b> Ten questions left open by the build review decided: capture pause stops sessions where they are (F9.5); stale sessions are resent by the uploader with a <code>rebuild</code> flag (X4.9); a dropped first envelope leaves a content-free stub so the offset moves past it (F3.4 over F3.1); OTLP bodies capped at 64 MiB, 256 MiB inflated (F4.1); span history stored once (F4.4); an age-guarded sweep deletes orphaned trace objects (F2.5); change entries written before the pointer, with unique keys (X6.4); Windows CI runs the laptop packages&#39; tests (F8.4); the uploader stays up to 30 minutes while retries are pending (F9.1).</li>
     <li><b>14 Nov 2026.</b> Brand files added under <code>brand/</code> (glyphs, lockups, six poses, <code>tokens.json</code>, PDF, README). B1.7 narrowed to light variants of lilac and spark, an eye colour for dark backgrounds, and the happy pose's mouth.</li>
     <li><b>14 Nov 2026.</b> Brand guidelines v1.1 folded into B1: deep teal, light ink, expression colours and typefaces in the palette table; B1.1 lists the source files; B1.4 adds light-terminal colours, background detection and the no-colour-alone rule; B1.5 uses outlined wordmarks in the README. B1.7 narrowed to what v1.1 still leaves open.</li>
     <li><b>14 Nov 2026.</b> B1.6 agreed: the status line and the desktop chip use the literal label <code>Session Capture ◉/⏸</code>, with problems added after a separator. F9 status line detail and the B1.3 table updated to match.</li>
