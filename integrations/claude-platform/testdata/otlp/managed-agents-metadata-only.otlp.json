@@ -1,0 +1,683 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          {
+            "key": "service.name",
+            "value": {
+              "stringValue": "claude-platform"
+            }
+          }
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": {
+            "name": "com.anthropic.claude-platform"
+          },
+          "spans": [
+            {
+              "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
+              "spanId": "00f067aa0ba902b7",
+              "name": "anthropic.sessions.create",
+              "kind": 2,
+              "startTimeUnixNano": "1793527200000000000",
+              "endTimeUnixNano": "1793527200200000000",
+              "attributes": [
+                {
+                  "key": "gen_ai.provider.name",
+                  "value": {
+                    "stringValue": "anthropic"
+                  }
+                },
+                {
+                  "key": "anthropic.organization.id",
+                  "value": {
+                    "stringValue": "org_01Hx7Example"
+                  }
+                },
+                {
+                  "key": "anthropic.workspace.id",
+                  "value": {
+                    "stringValue": "wrkspc_01Hx7Example"
+                  }
+                },
+                {
+                  "key": "anthropic.session.id",
+                  "value": {
+                    "stringValue": "sesn_01JZexample"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.id",
+                  "value": {
+                    "stringValue": "agent_01JZcoder"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "coder"
+                  }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": {
+                    "stringValue": "claude-sonnet-5"
+                  }
+                },
+                {
+                  "key": "anthropic.request.id",
+                  "value": {
+                    "stringValue": "req_01create"
+                  }
+                },
+                {
+                  "key": "http.request.method",
+                  "value": {
+                    "stringValue": "POST"
+                  }
+                },
+                {
+                  "key": "http.route",
+                  "value": {
+                    "stringValue": "/v1/sessions"
+                  }
+                },
+                {
+                  "key": "http.response.status_code",
+                  "value": {
+                    "intValue": "200"
+                  }
+                }
+              ],
+              "status": {
+                "code": 1
+              }
+            },
+            {
+              "traceId": "5c0a3e2f1d4b4c8e9a7f6b5d4c3b2a19",
+              "spanId": "10a1b2c3d4e5f601",
+              "name": "anthropic.sessions.events.send",
+              "kind": 2,
+              "startTimeUnixNano": "1793527205000000000",
+              "endTimeUnixNano": "1793527205100000000",
+              "attributes": [
+                {
+                  "key": "gen_ai.provider.name",
+                  "value": {
+                    "stringValue": "anthropic"
+                  }
+                },
+                {
+                  "key": "anthropic.organization.id",
+                  "value": {
+                    "stringValue": "org_01Hx7Example"
+                  }
+                },
+                {
+                  "key": "anthropic.workspace.id",
+                  "value": {
+                    "stringValue": "wrkspc_01Hx7Example"
+                  }
+                },
+                {
+                  "key": "anthropic.session.id",
+                  "value": {
+                    "stringValue": "sesn_01JZexample"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "sthr_01JZprimary"
+                  }
+                },
+                {
+                  "key": "anthropic.request.id",
+                  "value": {
+                    "stringValue": "req_01send"
+                  }
+                },
+                {
+                  "key": "http.route",
+                  "value": {
+                    "stringValue": "/v1/sessions/{session_id}/events"
+                  }
+                }
+              ],
+              "status": {
+                "code": 1
+              }
+            },
+            {
+              "traceId": "5c0a3e2f1d4b4c8e9a7f6b5d4c3b2a19",
+              "spanId": "10a1b2c3d4e5f602",
+              "parentSpanId": "10a1b2c3d4e5f601",
+              "name": "anthropic.session.turn",
+              "kind": 1,
+              "startTimeUnixNano": "1793527205100000000",
+              "endTimeUnixNano": "1793527225000000000",
+              "attributes": [
+                {
+                  "key": "gen_ai.provider.name",
+                  "value": {
+                    "stringValue": "anthropic"
+                  }
+                },
+                {
+                  "key": "anthropic.organization.id",
+                  "value": {
+                    "stringValue": "org_01Hx7Example"
+                  }
+                },
+                {
+                  "key": "anthropic.workspace.id",
+                  "value": {
+                    "stringValue": "wrkspc_01Hx7Example"
+                  }
+                },
+                {
+                  "key": "anthropic.session.id",
+                  "value": {
+                    "stringValue": "sesn_01JZexample"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "sthr_01JZprimary"
+                  }
+                },
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "invoke_agent"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.id",
+                  "value": {
+                    "stringValue": "agent_01JZcoder"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "coder"
+                  }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": {
+                    "stringValue": "claude-sonnet-5"
+                  }
+                },
+                {
+                  "key": "anthropic.session.turn.stop_reason",
+                  "value": {
+                    "stringValue": "end_turn"
+                  }
+                }
+              ],
+              "status": {
+                "code": 1
+              }
+            },
+            {
+              "traceId": "5c0a3e2f1d4b4c8e9a7f6b5d4c3b2a19",
+              "spanId": "10a1b2c3d4e5f603",
+              "parentSpanId": "10a1b2c3d4e5f602",
+              "name": "anthropic.model_request",
+              "kind": 1,
+              "startTimeUnixNano": "1793527205200000000",
+              "endTimeUnixNano": "1793527209000000000",
+              "attributes": [
+                {
+                  "key": "gen_ai.provider.name",
+                  "value": {
+                    "stringValue": "anthropic"
+                  }
+                },
+                {
+                  "key": "anthropic.organization.id",
+                  "value": {
+                    "stringValue": "org_01Hx7Example"
+                  }
+                },
+                {
+                  "key": "anthropic.workspace.id",
+                  "value": {
+                    "stringValue": "wrkspc_01Hx7Example"
+                  }
+                },
+                {
+                  "key": "anthropic.session.id",
+                  "value": {
+                    "stringValue": "sesn_01JZexample"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "sthr_01JZprimary"
+                  }
+                },
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "chat"
+                  }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": {
+                    "stringValue": "claude-sonnet-5"
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.input_tokens",
+                  "value": {
+                    "intValue": "4200"
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.output_tokens",
+                  "value": {
+                    "intValue": "96"
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.cache_read.input_tokens",
+                  "value": {
+                    "intValue": "3900"
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.cache_write.input_tokens",
+                  "value": {
+                    "intValue": "250"
+                  }
+                }
+              ],
+              "status": {
+                "code": 1
+              }
+            },
+            {
+              "traceId": "5c0a3e2f1d4b4c8e9a7f6b5d4c3b2a19",
+              "spanId": "10a1b2c3d4e5f604",
+              "parentSpanId": "10a1b2c3d4e5f602",
+              "name": "anthropic.tool_use bash",
+              "kind": 1,
+              "startTimeUnixNano": "1793527209100000000",
+              "endTimeUnixNano": "1793527213500000000",
+              "attributes": [
+                {
+                  "key": "gen_ai.provider.name",
+                  "value": {
+                    "stringValue": "anthropic"
+                  }
+                },
+                {
+                  "key": "anthropic.organization.id",
+                  "value": {
+                    "stringValue": "org_01Hx7Example"
+                  }
+                },
+                {
+                  "key": "anthropic.workspace.id",
+                  "value": {
+                    "stringValue": "wrkspc_01Hx7Example"
+                  }
+                },
+                {
+                  "key": "anthropic.session.id",
+                  "value": {
+                    "stringValue": "sesn_01JZexample"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "sthr_01JZprimary"
+                  }
+                },
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "execute_tool"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "bash"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.id",
+                  "value": {
+                    "stringValue": "sevt_01tooluse"
+                  }
+                },
+                {
+                  "key": "anthropic.tool.evaluated_permission",
+                  "value": {
+                    "stringValue": "allow"
+                  }
+                }
+              ],
+              "status": {
+                "code": 1
+              }
+            },
+            {
+              "traceId": "5c0a3e2f1d4b4c8e9a7f6b5d4c3b2a19",
+              "spanId": "10a1b2c3d4e5f605",
+              "parentSpanId": "10a1b2c3d4e5f602",
+              "name": "anthropic.model_request",
+              "kind": 1,
+              "startTimeUnixNano": "1793527213600000000",
+              "endTimeUnixNano": "1793527224800000000",
+              "attributes": [
+                {
+                  "key": "gen_ai.provider.name",
+                  "value": {
+                    "stringValue": "anthropic"
+                  }
+                },
+                {
+                  "key": "anthropic.organization.id",
+                  "value": {
+                    "stringValue": "org_01Hx7Example"
+                  }
+                },
+                {
+                  "key": "anthropic.workspace.id",
+                  "value": {
+                    "stringValue": "wrkspc_01Hx7Example"
+                  }
+                },
+                {
+                  "key": "anthropic.session.id",
+                  "value": {
+                    "stringValue": "sesn_01JZexample"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "sthr_01JZprimary"
+                  }
+                },
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "chat"
+                  }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": {
+                    "stringValue": "claude-sonnet-5"
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.input_tokens",
+                  "value": {
+                    "intValue": "4600"
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.output_tokens",
+                  "value": {
+                    "intValue": "210"
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.cache_read.input_tokens",
+                  "value": {
+                    "intValue": "4150"
+                  }
+                }
+              ],
+              "status": {
+                "code": 1
+              }
+            },
+            {
+              "traceId": "6d1b4f3e2e5c4d9fab8e7c6d5e4f3b2a",
+              "spanId": "20b1c2d3e4f5a601",
+              "name": "anthropic.sessions.events.send",
+              "kind": 2,
+              "startTimeUnixNano": "1793527260000000000",
+              "endTimeUnixNano": "1793527260100000000",
+              "attributes": [
+                {
+                  "key": "gen_ai.provider.name",
+                  "value": {
+                    "stringValue": "anthropic"
+                  }
+                },
+                {
+                  "key": "anthropic.organization.id",
+                  "value": {
+                    "stringValue": "org_01Hx7Example"
+                  }
+                },
+                {
+                  "key": "anthropic.workspace.id",
+                  "value": {
+                    "stringValue": "wrkspc_01Hx7Example"
+                  }
+                },
+                {
+                  "key": "anthropic.session.id",
+                  "value": {
+                    "stringValue": "sesn_01JZexample"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "sthr_01JZprimary"
+                  }
+                },
+                {
+                  "key": "anthropic.request.id",
+                  "value": {
+                    "stringValue": "req_01send2"
+                  }
+                }
+              ],
+              "status": {
+                "code": 1
+              }
+            },
+            {
+              "traceId": "6d1b4f3e2e5c4d9fab8e7c6d5e4f3b2a",
+              "spanId": "20b1c2d3e4f5a602",
+              "parentSpanId": "20b1c2d3e4f5a601",
+              "name": "anthropic.session.turn",
+              "kind": 1,
+              "startTimeUnixNano": "1793527260100000000",
+              "endTimeUnixNano": "1793527275000000000",
+              "attributes": [
+                {
+                  "key": "gen_ai.provider.name",
+                  "value": {
+                    "stringValue": "anthropic"
+                  }
+                },
+                {
+                  "key": "anthropic.organization.id",
+                  "value": {
+                    "stringValue": "org_01Hx7Example"
+                  }
+                },
+                {
+                  "key": "anthropic.workspace.id",
+                  "value": {
+                    "stringValue": "wrkspc_01Hx7Example"
+                  }
+                },
+                {
+                  "key": "anthropic.session.id",
+                  "value": {
+                    "stringValue": "sesn_01JZexample"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "sthr_01JZprimary"
+                  }
+                },
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "invoke_agent"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "coder"
+                  }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": {
+                    "stringValue": "claude-sonnet-5"
+                  }
+                },
+                {
+                  "key": "anthropic.session.turn.stop_reason",
+                  "value": {
+                    "stringValue": "end_turn"
+                  }
+                }
+              ],
+              "status": {
+                "code": 1
+              }
+            },
+            {
+              "traceId": "6d1b4f3e2e5c4d9fab8e7c6d5e4f3b2a",
+              "spanId": "20b1c2d3e4f5a603",
+              "parentSpanId": "20b1c2d3e4f5a602",
+              "name": "anthropic.model_request",
+              "kind": 1,
+              "startTimeUnixNano": "1793527260200000000",
+              "endTimeUnixNano": "1793527274900000000",
+              "attributes": [
+                {
+                  "key": "gen_ai.provider.name",
+                  "value": {
+                    "stringValue": "anthropic"
+                  }
+                },
+                {
+                  "key": "anthropic.organization.id",
+                  "value": {
+                    "stringValue": "org_01Hx7Example"
+                  }
+                },
+                {
+                  "key": "anthropic.workspace.id",
+                  "value": {
+                    "stringValue": "wrkspc_01Hx7Example"
+                  }
+                },
+                {
+                  "key": "anthropic.session.id",
+                  "value": {
+                    "stringValue": "sesn_01JZexample"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "sthr_01JZprimary"
+                  }
+                },
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "chat"
+                  }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": {
+                    "stringValue": "claude-sonnet-5"
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.input_tokens",
+                  "value": {
+                    "intValue": "5100"
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.output_tokens",
+                  "value": {
+                    "intValue": "180"
+                  }
+                }
+              ],
+              "status": {
+                "code": 1
+              }
+            },
+            {
+              "traceId": "7e2c5a4f3f6d4eaf8c9d8e7f6a5b4c3d",
+              "spanId": "30c1d2e3f4a5b601",
+              "name": "anthropic.sessions.archive",
+              "kind": 2,
+              "startTimeUnixNano": "1793527320000000000",
+              "endTimeUnixNano": "1793527320100000000",
+              "attributes": [
+                {
+                  "key": "gen_ai.provider.name",
+                  "value": {
+                    "stringValue": "anthropic"
+                  }
+                },
+                {
+                  "key": "anthropic.organization.id",
+                  "value": {
+                    "stringValue": "org_01Hx7Example"
+                  }
+                },
+                {
+                  "key": "anthropic.workspace.id",
+                  "value": {
+                    "stringValue": "wrkspc_01Hx7Example"
+                  }
+                },
+                {
+                  "key": "anthropic.session.id",
+                  "value": {
+                    "stringValue": "sesn_01JZexample"
+                  }
+                },
+                {
+                  "key": "http.route",
+                  "value": {
+                    "stringValue": "/v1/sessions/{session_id}/archive"
+                  }
+                }
+              ],
+              "status": {
+                "code": 1
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

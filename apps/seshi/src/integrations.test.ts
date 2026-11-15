@@ -19,6 +19,7 @@ describe("the integration registry", () => {
         "gemini-cli",
         "atif",
         "datadog-trajectory",
+        "otlp-genai",
         "trajectory",
       ].sort(),
     );

@@ -7,6 +7,7 @@
 
 import { BUILTIN_FORMATS, FormatRegistry } from "@seshi/formats";
 import { claudeCode } from "@seshi/integration-claude-code";
+import { claudePlatform } from "@seshi/integration-claude-platform";
 import { codex } from "@seshi/integration-codex";
 import { cursor } from "@seshi/integration-cursor";
 import { datadogTrajectory } from "@seshi/integration-datadog-trajectory";
@@ -23,6 +24,7 @@ export const INTEGRATIONS: readonly Integration[] = [
   pi,
   geminiCli,
   datadogTrajectory,
+  claudePlatform,
 ];
 
 /** The format registry for `integrations`: their formats, then the built-in ones. */

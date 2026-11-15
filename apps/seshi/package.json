@@ -26,6 +26,7 @@
     "@seshi/formats": "workspace:*",
     "@seshi/instance": "workspace:*",
     "@seshi/integration-claude-code": "workspace:*",
+    "@seshi/integration-claude-platform": "workspace:*",
     "@seshi/integration-codex": "workspace:*",
     "@seshi/integration-cursor": "workspace:*",
     "@seshi/integration-datadog-trajectory": "workspace:*",

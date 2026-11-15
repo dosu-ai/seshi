@@ -44,6 +44,7 @@
         "@seshi/formats": "workspace:*",
         "@seshi/instance": "workspace:*",
         "@seshi/integration-claude-code": "workspace:*",
+        "@seshi/integration-claude-platform": "workspace:*",
         "@seshi/integration-codex": "workspace:*",
         "@seshi/integration-cursor": "workspace:*",
         "@seshi/integration-datadog-trajectory": "workspace:*",
@@ -61,6 +62,14 @@
     },
     "integrations/claude-code": {
       "name": "@seshi/integration-claude-code",
+      "dependencies": {
+        "@seshi/formats": "workspace:*",
+        "@seshi/kit": "workspace:*",
+        "@seshi/model": "workspace:*",
+      },
+    },
+    "integrations/claude-platform": {
+      "name": "@seshi/integration-claude-platform",
       "dependencies": {
         "@seshi/formats": "workspace:*",
         "@seshi/kit": "workspace:*",
@@ -369,6 +378,8 @@
     "@seshi/instance": ["@seshi/instance@workspace:packages/ts/instance"],
 
     "@seshi/integration-claude-code": ["@seshi/integration-claude-code@workspace:integrations/claude-code"],
+
+    "@seshi/integration-claude-platform": ["@seshi/integration-claude-platform@workspace:integrations/claude-platform"],
 
     "@seshi/integration-codex": ["@seshi/integration-codex@workspace:integrations/codex"],
 
