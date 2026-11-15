@@ -23,8 +23,8 @@ client ──POST /v1/sessions (transcript, bearer token)──▶ seshi
 
 Three properties follow from that shape:
 
-- The machine running the agent never holds a bucket credential. It holds a token for one
-  person, which can post that person's sessions and read them back, and nothing else.
+- The machine running the agent never holds a bucket credential. It holds a scoped, revocable
+  seshi token (or the org key) that writes that person's sessions, and nothing else.
 - The bucket never holds an unredacted byte. Redaction happens on the server, before anything
   is written, and there is no switch to turn it off.
 - Readers never talk to the server. A read-only key on the bucket is enough to tail the change
@@ -170,10 +170,12 @@ Content hashes are computed from the records exactly as before, so they do not c
 
 ## Access model
 
-A token is bound to a name and every request is scoped to `owners/<name>/` in the bucket. Two
-people on one server never see each other's sessions; a token leaked from one laptop exposes one
-person's archive. A reader with its own bucket key sees every folder, which is the point: the
-team's archive is the bucket, a person's view is their folder.
+Every caller has an owner ID and writes only its own sessions, under `owners/<owner>/` (X5).
+Without an IdP, members share an org key and state their username; with one, they sign in and
+get a one-hour session token and a 90-day device token for the uploader. Org-level sources write
+as service accounts (`svc:<source-id>`). A session is visible to the whole org by default, or
+to its owner only; admins and service readers see everything. `seshi admin init` creates the
+first admin token and the org key. See [docs/server.md](docs/server.md#setting-up-who-may-call-it).
 
 The server sees transcripts before redaction. Run it behind TLS, and read [`SECURITY.md`](SECURITY.md)
 before exposing it.

@@ -9,8 +9,9 @@ redacted trace is the only copy, and a trace is rebuilt by sending the transcrip
 the client still has it. Anything that reads the layout reads the bucket directly: the server
 is a writer and no reader's dependency.
 
-The server (`seshi serve`, `apps/seshi/`) is the pipeline (`packages/ts/pipeline/`) behind HTTP and a token list:
-each route is a call on the SDK's client, scoped to the owner the token names, and the SDK's
+The server (`seshi serve`, `apps/seshi/`) is the pipeline (`packages/ts/pipeline/`) behind HTTP and
+identity and access (`packages/ts/auth/`, X5): each route checks the caller's credential and
+scopes, then reads or writes the bucket for the owner the credential names, and the SDK's
 own HTTP backend (`connect({ server, token })`) speaks this API from the other side. A client
 that holds a bucket credential can run the same SDK against the bucket directly and skip the
 server; what the server adds is that the laptop holds no bucket credential and redaction is
@@ -26,10 +27,11 @@ client ──POST /v1/sessions (transcript, bearer token)──▶ seshi server
                                                  readers tail changes/ (their own read-only key)
 ```
 
-One server, one bucket, one list of tokens, from `seshi.toml` and `SESHI_*` env (see
-[config.md](config.md)). Each token names a person; that person's sessions are filed under
-`owners/<name>/` in the bucket, and the token can post sessions there and read them back, and
-nothing of anyone else's. Nothing else is needed.
+One server, one bucket, from `seshi.toml` and `SESHI_*` env (see [config.md](config.md)).
+Every caller has an owner ID (X5.8): the username an org-key caller states, the IdP subject
+(or email) of a person who signed in, `svc:<source-id>` for a service account, or the name of a
+static token. That owner's sessions are filed under `owners/<owner>/`. Who may read what is the
+session's visibility (X5.10); see [Who sees what](#who-sees-what).
 
 ## Running it
 
@@ -49,8 +51,9 @@ The settings most servers need ([config.md](config.md) has all of them):
 
 | Setting | Env | Purpose |
 |---|---|---|
-| `auth.tokens.<name>` | `SESHI_AUTH__TOKENS__<NAME>` | One per person (`SESHI_AUTH__TOKENS__ALICE=…`). The name is the folder their sessions go under, so keep it stable; the token is 16+ characters (`openssl rand -hex 24`) and can be rotated alone. One person? `SESHI_AUTH__TOKENS__DEFAULT` files under `owners/default/` |
-| `auth.legacy_token_secret` | `SESHI_AUTH__LEGACY_TOKEN_SECRET` | For a hosted server with a tenant per user: tokens signed with this secret are accepted too. An HS256 JWT whose `sub` is the owner and whose `exp` is required; whoever shares the secret (Dosu's backend, for its users) mints one per person, and the token list can be empty. 32+ characters (`openssl rand -hex 32`) |
+| `auth.tokens.<name>` | `SESHI_AUTH__TOKENS__<NAME>` | Static tokens, for one person and development: each is everything for its owner (`SESHI_AUTH__TOKENS__ALICE=…`, 16+ characters, `openssl rand -hex 24`). For a team, use `seshi admin init` and the org key or an IdP instead |
+| `auth.oidc.*`, `auth.session_keys.*` | `SESHI_AUTH__OIDC__ISSUER`, `…__CLIENT_ID`, `SESHI_AUTH__SESSION_KEYS__K1` | Sign-in through your IdP (X5.2) and the key session tokens are signed with (32+ characters) |
+| `auth.org_key.enabled` | `SESHI_AUTH__ORG_KEY__ENABLED` | Default `true`: members holding the org key write as the username they state (X5.12) |
 | `store.url` | `SESHI_STORE__URL` | Required: `r2://bucket/prefix`, `s3://bucket/prefix`, or `file:///path` |
 | `store.credentials.*`, `store.region`, `store.endpoint`, `store.account_id` | `SESHI_STORE__CREDENTIALS__ACCESS_KEY_ID`, … | The bucket's keys and where it is. Unset, the standard `AWS_*` / `S3_*` (and `R2_*` for `r2://`) variables apply |
 | `redaction.packs` | `SESHI_REDACTION__PACKS` | JSON files of your own redaction rules, added to the built-in ones ([below](#your-own-redaction)). The server refuses to start if a pattern in one is not a usable regular expression |
@@ -121,35 +124,57 @@ the request timeout at 120 seconds or more; a large transcript can take that lon
 and verify. Platforms that cap request bodies (Cloud Run's HTTP/1 limit is 32 MiB) are fine as
 long as clients send `Content-Encoding: gzip`, which every route accepts.
 
+### Setting up who may call it
+
+Run `seshi admin init` once, where the config and the bucket keys are. It writes straight to
+the bucket and prints, once each, the first admin token and (with `auth.org_key.enabled`) the
+org key. Run again it refuses; `--force` makes another admin token, `--rotate-org-key`
+revokes the org key and makes a new one. After that, admins manage tokens over the API
+(`/v1/tokens`).
+
+| Credential | Who holds it | What it can do |
+|---|---|---|
+| Org key (no IdP) | Every member's CLI and uploader, with `X-Seshi-User: <username>` | Write as that username (lowercased; owner basis `claimed`); read and search org-wide. No deletes, and never replaces a session whose owner was verified |
+| IdP ID token | The CLI, briefly | Nothing but `POST /v1/auth/exchange` |
+| Session token | The CLI, after sign-in | Read, search; delete the person's own sessions within 10 minutes of being issued. One hour; signed, not stored. An admin's (IdP group `admin_group` or an email in `admins`) can do everything |
+| Device token | The uploader on a laptop | Write the person's own sessions. 90 days; signing in again from the machine renews it |
+| Admin token | Admins | Everything, including deletes and token management |
+| Service token | A reader, or an OTLP destination | Read and search org-wide, or write as `svc:<source-id>` |
+| Static token | Config | Everything for one owner |
+
+Every seshi token is `seshi_<id>_<secret>`, stored as a hash at `tokens/<id>.json`, revocable,
+and cached by the server for 30 seconds: a revoked token stops at once on the instance that
+revoked it and within 30 seconds on any other. `POST /v1/tokens/revoke {owner}` revokes all of
+a person's tokens at once (X5.11); their sessions stay. Without an IdP the only cut-off is
+rotating the org key, which every member then sets again.
+
 ### Who sees what
 
-A token is bound to one name and the server scopes every call to `owners/<name>/`: the
-session list, reads, deletes and the change log. Two people on one server
-never see each other's transcripts; a token leaked from one laptop exposes one person's
-sessions. A reader with its own bucket key sees every folder. That is the point: the team's
-archive is the whole bucket, a person's view is their own folder.
+A session is `org` (the default) or `owner` (X5.10). Its visibility is the upload's
+`visibility`, else the token's default, else the source's, else `default_visibility`, and the
+owner or an admin can change it later (`PATCH /v1/sessions/:agent/:session_id`), which writes a
+`visibility_changed` change entry. Members read their own sessions and every `org` session;
+admins and service readers read everything. Reads name another owner with `?owner=`; a
+session the caller may not read answers 404, as if it were not there.
 
-Renaming a token's name is a move, not a rename: the old folder stays in the bucket (and a
-bucket reader keeps seeing it) but the renamed token no longer does. Add a person, remove a
-person, rotate a token; don't rename.
+Without an IdP anyone with the org key can state any username, so `owner` visibility keeps
+nothing from another member; `seshi config check` says so.
+
+Every write records its writer (caller kind, owner ID, credential ID, source) and how the owner
+was established, `verified`, `claimed` or `service`, on the session and on its change entries
+(X5.5). A leaked token's writes can be found by its credential ID.
 
 To host several teams, run one container per team, each with its own config and its own
-bucket or prefix. Isolation between teams comes from the deployment, not the code.
-
-To host many people without listing them, set `auth.legacy_token_secret` and let something that
-knows who they are mint their tokens: a JWT signed with the secret, `sub` the owner's name,
-`exp` when it stops working. The server checks the signature and the expiry and scopes the
-call to `owners/<sub>/` exactly as it would a listed token; the owner's folder comes into
-being with their first session. This is how Dosu's own sessiondb works: the Dosu backend
-mints a token per user at setup, and reads the bucket with its own key. A leaked signed
-token is good until its `exp`; there is no list to strike it from, so issuers should keep
-them short enough to live with that.
+bucket or prefix. Isolation between teams comes from the deployment, not the code (X1.1).
 
 ## Readers
 
-A reader never talks to the server. Give it a read-only credential on the bucket
-(`s3:ListBucket` on the prefix, `s3:GetObject` under it) and it tails `changes/` with a cursor;
-`GET /v1/me` tells a client which bucket that is so it can pass it on.
+A reader reads through the API with a service token (`POST /v1/tokens {kind: "service",
+service: "<name>"}`): it reads and searches every session, and tails each owner's
+`/v1/changes`. Bucket keys stay on the server (X5.6). A read-only bucket credential
+(`s3:ListBucket` on the prefix, `s3:GetObject` under it) still works for a reader that tails
+`changes/` itself, but it skips every check, so it counts as org-wide read; `GET /v1/me` tells a
+client which bucket that is.
 
 ## API
 
@@ -159,19 +184,30 @@ with the schemas of the objects they carry. `tests/api/openapi.test.ts` holds th
 cannot drift apart. What follows is the same API in prose.
 
 All bodies are JSON unless a route says otherwise. Errors are `{ "error": { "code", "message" } }`.
-Request bodies may be `Content-Encoding: gzip` (any other encoding is a `415`). Every route but `/healthz` wants
-`Authorization: Bearer <token>`.
+Request bodies may be `Content-Encoding: gzip` (any other encoding is a `415`). Every route but `/healthz`,
+`/v1/auth/config` and `/v1/auth/exchange` wants `Authorization: Bearer <token>` (and
+`X-Seshi-User` with the org key): `401 unauthorized` without a credential the server accepts,
+`403 forbidden` for a call the credential's scopes or the session's owner and visibility do not
+allow.
 
 | | |
 |---|---|
 | `GET /healthz` | `{ok, version}`, no auth |
-| `GET /v1/me` | `{owner, storage: {url, region?, account_id?, endpoint?}}`: which bucket this server writes, so a client can point a reader at it. Never a secret |
-| `POST /v1/sessions` | Store a session; see below |
-| `GET /v1/sessions?limit&after` | List |
-| `GET /v1/sessions/:agent/:session_id` | The session's `metadata.json` |
+| `GET /v1/auth/config` | Which ways in the server takes (X5.7): `org_key`, `oidc` (`issuer`, `client_id`, `audience`, `scopes`) or null, and token lifetimes. No auth |
+| `POST /v1/auth/exchange` | `{id_token, nonce?, machine?: {id, name?}, visibility?}`: an IdP ID token for a session token, and with `machine` a device token for it (earlier device tokens for that machine are revoked). `401` for an ID token that does not check out, `404 no_idp` without an IdP. No bearer |
+| `GET /v1/me` | `{owner, storage, kind, role, scopes, owner_basis, credential_id, visibility?, expires_at?}`: who the credential is, and which bucket this server writes, so a client can point a reader at it. Never a secret |
+| `GET /v1/owners?limit&after` | The owners the bucket holds sessions for (`sessions:read`) |
+| `POST /v1/sessions` | Store a session (`sessions:write`); see below |
+| `GET /v1/sessions?owner&limit&after` | List an owner's sessions (the caller's own by default), as far as visibility allows |
+| `GET /v1/sessions/:agent/:session_id?owner` | The session's `metadata.json` |
+| `PATCH /v1/sessions/:agent/:session_id?owner` | `{visibility}`: change who may read it. The owner or an admin |
 | `GET /v1/sessions/:agent/:session_id/trace?hash&format` | The head trace (or a specific one) as the stored canonical trace (`format=seshi`, the default) or rendered as `letta`, `otlp` or `atif`; `400 bad_query` for another format, `404` for a session not stored (a filtered one included), `410` once redacted |
-| `DELETE /v1/sessions/:agent/:session_id` | Tombstone: drop the trace objects, append a tombstone change. Irreversible; a later upload of the same session is refused |
-| `GET /v1/changes?after&since&limit` | The change feed |
+| `DELETE /v1/sessions/:agent/:session_id?owner` | Tombstone: drop the trace objects, append a tombstone change. Irreversible; a later upload of the same session is refused. Needs `sessions:delete`: the owner with a fresh session token or a static token, or an admin |
+| `GET /v1/changes?owner&after&since&limit` | An owner's change feed; another owner's shows the entries of sessions the caller may read |
+| `POST /v1/tokens` | `{kind: org\|admin\|device\|service, owner?, service?, scopes?, visibility?, expires_at?, label?}`: a new token, shown once (`tokens:admin`) |
+| `GET /v1/tokens?owner&kind&all` | Token records without their hashes (`tokens:admin`) |
+| `DELETE /v1/tokens/:id` | Revoke one (`tokens:admin`) |
+| `POST /v1/tokens/revoke` | `{owner, kind?}`: revoke every live token of an owner (`tokens:admin`, X5.11) |
 
 ### `POST /v1/sessions`
 

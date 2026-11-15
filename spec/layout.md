@@ -39,8 +39,10 @@ through the API (X5.6).
 
 ## Identifiers
 
-- **owner** is one path segment (`[A-Za-z0-9][A-Za-z0-9._-]{0,127}`): the name a credential
-  is bound to, usually a person. One owner's objects never reference another's.
+- **owner** is one path segment: a person's owner ID (`[A-Za-z0-9][A-Za-z0-9._@+-]{0,127}`:
+  a username, an email or an IdP subject) or a service account, `svc:<source-id>` (X5.4,
+  X5.8). The server derives it from the caller's identity; a value that does not fit becomes
+  `h-` and 20 hex digits of its SHA-256. One owner's objects never reference another's.
 - **archive_id** = `sha256(owner + "\n" + agent + "\n" + session_id)` (hex). Deterministic, so
   every upload of one session lands in one directory; derived, so no native id or path
   appears in a key.
@@ -232,11 +234,14 @@ cursor (the last key processed) and a lag window.
 { "schema": "seshi/change/1", "kind": "tombstone", "at": "…",
   "owner": "alice", "archive_id": "…", "session_id": "…", "content_hash": "…",
   "writer": { "kind": "device", "principal": "alice", "source_id": "upload" },
-  "reason": "retracted" }
+  "owner_basis": "verified", "reason": "retracted" }
 ```
 
 `kind` is `published`, `tombstone` (with `reason`: `deleted`, `retracted` or `redacted`) or
-`visibility_changed` (with the new `visibility`). Every entry names its `writer`, never content.
+`visibility_changed` (with the new `visibility`). Every entry names its `writer` and the
+session's `owner_basis` (X5.5), never content. The change feed is per owner, so two entries of
+one kind for one owner in the same millisecond share a key (`<stamp>-tombstone`,
+`<stamp>-visibility`) and the second replaces the first.
 A `published` entry with `replace: true` replaced the session's earlier traces (X4.6): a reader
 drops what it held of the session and takes this trace as the whole of it.
 
@@ -245,8 +250,13 @@ drops what it held of the session and takes this trace as the whole of it.
 Read and written by the binary only, so their types are code-first in `@seshi/store`
 (`objects.ts`, `records.ts`) rather than JSON Schemas:
 
-- `tokens/<id>.json` (`seshi/token/1`): a token's hash, kind, owner, scopes, default
-  visibility, expiry and revoked flag. Never the token itself.
+- `tokens/<id>.json` (`seshi/token/1`): one seshi token (X5.9). `kind` is `org`, `admin`,
+  `device` or `service`; `owner` is the person's owner ID, `svc:<id>`, or `*` for the org key
+  (its caller states one); `hash` is `sha256:<hex>` of the whole token `seshi_<id>_<secret>`,
+  never the token itself; `scopes`, `visibility` (the default for what it writes),
+  `owner_basis`, `created_at`, `expires_at` (null: never), `revoked`/`revoked_at`, and
+  `label`, `created_by`, `machine` (a device token's machine) and `claims` (what the IdP
+  verified). Session tokens are signed by the server and not stored.
 - `sources/<id>/checkpoint.json` (`seshi/checkpoint/1`): the source id, when it was saved,
   and the poller's own `cursor` object.
 - `worker/heartbeat.json` (`seshi/heartbeat/1`): instance id, version, roles, start and last
