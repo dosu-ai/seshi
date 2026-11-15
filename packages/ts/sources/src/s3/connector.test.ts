@@ -167,7 +167,7 @@ describe("the first run", () => {
       caller: { kind: "service", principal: "svc:evals" },
       owner: "svc:evals",
       owner_basis: "service",
-      idempotency_key: `s3://src/harness/run-1.jsonl#${object.etag}`,
+      idempotency_key: `s3://src/harness/run-1.jsonl#${object.etag}~${NOW.getTime()}`,
       provenance: { object_key: "s3://src/harness/run-1.jsonl", etag: object.etag },
       received_at: NOW.toISOString(),
       replace: true,
@@ -480,7 +480,7 @@ describe("objects that cannot be stored (X4.8)", () => {
       source_kind: "s3",
       owner: "svc:evals",
       session_key: "notes.txt",
-      idempotency_key: `s3://src/harness/notes.txt#${object.etag}`,
+      idempotency_key: `s3://src/harness/notes.txt#${object.etag}~${NOW.getTime()}`,
       provenance: { object_key: "s3://src/harness/notes.txt", etag: object.etag },
       code: "unknown_format",
     });

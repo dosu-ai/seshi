@@ -201,6 +201,9 @@ class S3Run {
     this.config = ctx.source.config;
     this.formats = options.formats;
     this.manifest = readManifest(ctx.checkpoint.read(), ctx.log);
+    // A manifest that starts (first run, rewind to the start, a cursor it could not read)
+    // starts a new reading of the source.
+    this.manifest.epoch ??= ctx.now().getTime();
     const prefix = sourcePrefix(this.config);
     this.prefix = prefix === "" ? "" : `${prefix}/`;
     this.filter = new KeyFilter(this.config.include);
@@ -464,7 +467,8 @@ class S3Run {
   ): Promise<Handled> {
     const location = this.bucket.locate(object.key);
     const provenance: SourceLocation = { object_key: location, etag: object.etag };
-    const idempotency = `${location}#${object.etag}`;
+    // The epoch keeps a read after `seshi reprocess` from being answered with the old result.
+    const idempotency = `${location}#${object.etag}~${this.manifest.epoch}`;
     const rel = object.key.slice(this.prefix.length);
     const failing = (code: string, message: string, session?: string) =>
       this.failure(base, {

@@ -78,5 +78,9 @@ describe("the S3 manifest (F6.2)", () => {
     expect(rewound.after).toBeUndefined();
     expect(rewound.watch_from).toBeUndefined();
     expect(rewound.listed_at).toBe("2026-11-14T00:00:00.000Z");
+    // A new reading: whole objects read again carry new idempotency keys (X4.9).
+    expect(rewound.epoch).toBe(1);
+    expect(rewindManifest({ ...rewound, epoch: 41 }, since).epoch).toBe(42);
+    expect(readManifest({ v: 1, objects: {}, epoch: 7 }, logger().log).epoch).toBe(7);
   });
 });

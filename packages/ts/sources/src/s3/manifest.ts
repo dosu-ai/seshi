@@ -48,6 +48,11 @@ export interface Manifest {
   hold?: string;
   /** When the last complete listing ended. */
   listed_at?: string;
+  /** Which reading of the source this is: set when a manifest starts (the first run, or after
+   * a rewind to the start) and bumped by every rewind to a time. A whole object's idempotency
+   * key carries it, so an object read again after `seshi reprocess` is normalized again rather
+   * than answered from the session's applied envelopes (X4.7, X4.9). */
+  epoch?: number;
 }
 
 /** A map keyed by object keys, with no prototype: a key such as `__proto__` is just a key. */
@@ -87,13 +92,17 @@ export function readManifest(cursor: Cursor | null, log: ConnectorLogger): Manif
     const value = cursor[field];
     if (typeof value === "string") manifest[field] = value;
   }
+  if (typeof cursor.epoch === "number" && Number.isSafeInteger(cursor.epoch)) {
+    manifest.epoch = cursor.epoch;
+  }
   return manifest;
 }
 
 /** `manifest` with what `seshi reprocess --since` reads again (X4.9): every object that
  * changed at or after `since`, or whose change time is unknown, is forgotten, so the next run
  * reads it whole (a session that did not change answers `unchanged`; one the normalizer now
- * reads differently is replaced, F6.3). With `ordered_keys` the listing starts from the
+ * reads differently is replaced, F6.3). The epoch moves on, so those reads are not answered
+ * from the session's applied envelopes. With `ordered_keys` the listing starts from the
  * beginning again, since keys say nothing of time. Objects whose session an admin deleted are
  * kept: they stay deleted. */
 export function rewindManifest(manifest: Manifest, since: Date): Manifest {
@@ -107,5 +116,7 @@ export function rewindManifest(manifest: Manifest, since: Date): Manifest {
   }
   const rewound: Manifest = { v: MANIFEST_VERSION, objects };
   if (manifest.listed_at !== undefined) rewound.listed_at = manifest.listed_at;
+  // A new reading: what is read again gets new idempotency keys, so it is normalized again.
+  rewound.epoch = (manifest.epoch ?? 0) + 1;
   return rewound;
 }

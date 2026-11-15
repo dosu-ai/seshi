@@ -221,6 +221,24 @@ describe("S3 sync (F6)", () => {
     expect(status.failed).toBe(1);
   });
 
+  it("normalizes again what reprocess rewound, rather than replaying the old answer (X4.9)", async () => {
+    fake.put("harness/carol@x.io/atif-1.json", ATIF, {
+      modified: new Date("2026-11-10T00:00:00Z"),
+    });
+    const instance = await boot();
+    expect((await instance.sources.run("evals")).outcomes).toEqual({ stored: 1 });
+
+    // To a time: the object changed since, so it is read whole and normalized again.
+    await instance.sources.rewind("evals", { since: new Date("2026-11-01T00:00:00Z") });
+    expect((await instance.sources.run("evals")).outcomes).toEqual({ unchanged: 1 });
+    // Twice to the same time still normalizes again.
+    await instance.sources.rewind("evals", { since: new Date("2026-11-01T00:00:00Z") });
+    expect((await instance.sources.run("evals")).outcomes).toEqual({ unchanged: 1 });
+    // To the start: the manifest is gone, and every object is normalized again.
+    await instance.sources.rewind("evals");
+    expect((await instance.sources.run("evals")).outcomes).toEqual({ unchanged: 1 });
+  });
+
   it("is run by the worker's job like any polled source (X7)", async () => {
     fake.put("harness/alice@x.io/sess1.jsonl", CLAUDE);
     const instance = await boot();
