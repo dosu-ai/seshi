@@ -179,7 +179,8 @@ User docs: [docs/capture.md](../../capture.md) (new), docs/cli.md (rows), docs/c
    `native_session_id` therefore also carries the suffix.
 2. **Claude Code's SessionStart is hooked**, beyond F9.2's list, to export `SESHI_SESSION_ID`
    through `CLAUDE_ENV_FILE`: the answer to F9.5's open "how the skill gets the session id".
-   Without it, `--session` alone falls back to the session seen last in the current folder.
+   Without it, `--session` alone falls back to the one session seen in the current folder in the
+   past day (17: more than one is refused with a list, never guessed; subagents never count).
 3. **`capture.remotes`** is the org rule F9.5 gives as an example, as a CLI config field (one
    new field); "delivered with the CLI config" is left to managed config. It matches remotes as
    `host/path` patterns.

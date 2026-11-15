@@ -274,6 +274,49 @@ describe("seshi capture's arguments", () => {
     expect(
       resolveSession({ positionals: [], session: true }, state, {}, "/elsewhere", now),
     ).toContain("which session?");
+
+    // Two sessions in the folder: it names them and picks neither. A subagent (same folder,
+    // seen at the same moment as its parent) is never a candidate.
+    const busy = {
+      ...state,
+      sessions: {
+        ...state.sessions,
+        "codex:t2": {
+          ...state.sessions["codex:t1"],
+          session_id: "t2",
+          last_seen: "2026-11-01T11:59:00Z",
+        },
+        "claude-code:main": {
+          agent: "claude-code",
+          session_id: "main",
+          first_seen: "x",
+          cwd: "/w/app",
+          last_seen: "2026-11-01T11:30:00Z",
+        },
+        "claude-code:agent-a": {
+          agent: "claude-code",
+          session_id: "agent-a",
+          parent_session_id: "main",
+          first_seen: "x",
+          cwd: "/w/app",
+          last_seen: "2026-11-01T11:30:00Z",
+        },
+      },
+    };
+    const both = resolveSession({ positionals: [], session: true }, busy, {}, "/w/app", now);
+    expect(both).toContain("more than one ran here");
+    expect(both).toContain("codex t2");
+    expect(both).toContain("codex t1");
+    expect(both).not.toContain("agent-a");
+    expect(
+      resolveSession(
+        { positionals: [], session: true, agent: "claude-code" },
+        busy,
+        {},
+        "/w/app",
+        now,
+      ),
+    ).toEqual({ agent: "claude-code", id: "main" });
     expect(
       resolveSession({ positionals: [], session: "x", agent: "vim" }, state, {}, "/", now),
     ).toContain("does not capture 'vim'");

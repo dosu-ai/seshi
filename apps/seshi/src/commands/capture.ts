@@ -14,7 +14,7 @@
  * that keeps the uploader running between sessions.
  *
  * `off` and `on` set a capture rule (F9.5): for one session (`--session`; with no id, the
- * session the agent's environment names, else the latest seen in this folder), for a folder
+ * session the agent's environment names, else the one seen in this folder), for a folder
  * (`--path`, a `[[capture.paths]]` rule in the CLI config), or for everything (the CLI config's
  * `capture.enabled`). Turning a session off stops its uploads and retracts what was uploaded
  * (F9.7). `pause` holds every upload back for a while, or until `resume`; what sessions write
@@ -149,7 +149,10 @@ function accountOrNone(ctx: CommandContext): Account | undefined {
 }
 
 /** Which session `--session` names: the id given, else `SESHI_SESSION_ID` (set by the agent's
- * SessionStart hook), else the session seen last in this folder in the past day. */
+ * SessionStart hook), else the one session seen in this folder in the past day. With more than
+ * one there (two agents open in the same repo), it refuses and lists them: picking the latest
+ * could turn off, and retract, a session other than the one asking. Subagents are never
+ * candidates; their parent's toggle covers them. */
 export function resolveSession(
   args: Args,
   state: CaptureState,
@@ -168,17 +171,26 @@ export function resolveSession(
     if (agents.size === 1) agent = [...agents][0];
   }
   if (!id) {
-    const recent = Object.values(state.sessions)
+    const candidates = Object.values(state.sessions)
       .filter(
         (s) =>
           (!agent || s.agent === agent) &&
+          s.parent_session_id === undefined &&
           s.cwd !== undefined &&
           within(cwd, s.cwd, process.platform) &&
           now.getTime() - Date.parse(s.last_seen ?? s.first_seen) < 24 * 3600 * 1000,
       )
-      .sort((a, b) => (b.last_seen ?? "").localeCompare(a.last_seen ?? ""))[0];
+      .sort((a, b) => (b.last_seen ?? "").localeCompare(a.last_seen ?? ""));
+    const recent = candidates[0];
     if (!recent) {
       return "which session? run it from inside the agent (the /seshi skill), or pass --session <id>";
+    }
+    if (candidates.length > 1) {
+      const listed = candidates
+        .slice(0, 5)
+        .map((s) => `${s.agent} ${s.session_id} (last seen ${s.last_seen ?? s.first_seen})`)
+        .join(", ");
+      return `which session? more than one ran here in the past day: ${listed}${candidates.length > 5 ? ", …" : ""}; pass --session <id> (and --agent <agent>)`;
     }
     id = recent.session_id;
     agent = recent.agent;

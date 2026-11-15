@@ -80,8 +80,9 @@ seshi capture status                # what applies here, and why
 
 In Claude Code, `/seshi capture off`, `/seshi capture on` and `/seshi capture status` run
 these for the current session: seshi's SessionStart hook sets `SESHI_SESSION_ID` for the
-commands Claude Code runs. Without it, `--session` alone means the session seen most recently in
-the current folder.
+commands Claude Code runs. Without it, `--session` alone means the one session seen in the
+current folder in the past day; when more than one ran there it lists them and asks for
+`--session <id>` rather than guess (a subagent never counts: its parent's toggle covers it).
 
 ## The status line
 

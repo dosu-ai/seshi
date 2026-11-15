@@ -215,6 +215,15 @@ what changed.
   already took `npx seshi`; it now also takes the install's own command line, for a wrapper,
   and `capture uninstall` takes `--command` (cli.md). Tests: `npx seshi` and a wrapper installed
   twice are one entry and uninstall cleanly; a doubled chain is unwound; `notseshi` is not ours.
+- **client, medium** (split vote; confirmed): with no id and no `SESHI_SESSION_ID` (always for
+  Codex and Cursor, and for Claude Code without `CLAUDE_ENV_FILE`), `--session` took the session
+  seen last under the folder, so with two agent sessions in one repo `capture off --session` from
+  one turned off and retracted the other, and a Claude Code subagent (same folder, same moment
+  as its parent on SubagentStop) could be picked over its parent. 14's deviation 2 documented
+  the fallback, not the ambiguity. It now picks only when exactly one top-level session ran
+  there in the past day, and otherwise refuses (usage, exit 2) listing agent, id and last seen;
+  subagents are never candidates. capture.md and 14 say so. Test: two sessions refused and
+  named, a subagent left out, `--agent` narrowing to one.
 
 ## Not fixed
 
