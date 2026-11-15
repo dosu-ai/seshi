@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { BackendQuery, IndexedEvent, IndexedSession } from "./backend";
 import { MEMORY_INDEX } from "./paths";
 import { parseQuery } from "./query";
-import { INDEX_SCHEMA, SqliteIndex } from "./sqlite";
+import { INDEX_SCHEMA, SqliteIndex, snippetsSql } from "./sqlite";
 import { LOCAL_VIEWER, type Viewer } from "./viewer";
 
 const H = (n: number) => n.toString(16).padStart(64, "0");
@@ -308,6 +308,33 @@ describe("SqliteIndex: filters, sorting and pages (F10.1)", () => {
     expect(query(index, "needle", { matches: 2 }).hits[0]?.matches).toHaveLength(2);
     expect(query(index, "needle", { matches: 0 }).hits[0]?.matches).toEqual([]);
     expect(query(index, "needle").hits[0]?.hits).toBe(5);
+  });
+
+  it("reads the snippets' match once, never once per picked event", () => {
+    // `events_text.rowid IN (…)` beside the MATCH was pushed into FTS5 (`INDEX 0:=M1`), which
+    // evaluated the match again for every id: one search with many matches stalled the server.
+    const path = join(dir, "plan.sqlite");
+    const index = new SqliteIndex({ path, deployment: "d1", events: EVENTS });
+    index.apply({
+      session: session(1),
+      events: [1, 2, 3].map((i) => event(`needle ${i}`, { event_index: i })),
+      replace: true,
+    });
+    expect(query(index, "needle").hits[0]?.matches.map((m) => m.event_index)).toEqual([1, 2, 3]);
+    const db = new Database(path, { readonly: true });
+    try {
+      const plan = db
+        .query(`EXPLAIN QUERY PLAN ${snippetsSql(500)}`)
+        .all("[", "]", "needle", ...Array.from({ length: 500 }, (_, i) => i + 1)) as {
+        detail: string;
+      }[];
+      const fts = plan.map((p) => p.detail).filter((d) => d.includes("events_text"));
+      expect(fts).toHaveLength(1);
+      // The match alone drives the scan: no rowid constraint is handed to FTS5.
+      expect(fts[0]).toMatch(/VIRTUAL TABLE INDEX 0:M1$/);
+    } finally {
+      db.close();
+    }
   });
 });
 

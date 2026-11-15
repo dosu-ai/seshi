@@ -135,6 +135,17 @@ function placeholders(n: number): string {
   return Array.from({ length: n }, () => "?").join(", ");
 }
 
+/** The snippets of `n` picked events: binds the two markers, the match, then the event ids.
+ * `rowid+0`, not `rowid`: SQLite pushes `rowid IN (…)` into FTS5, which then evaluates the
+ * match again for every id, so one search with many matches stalls the server. As an
+ * expression it is only a filter, and FTS5 reads the match once. */
+export function snippetsSql(n: number): string {
+  return `SELECT e.id AS id, e.content_hash, e.event_index, e.role, e.tool_name, e.ts,
+      snippet(events_text, 0, ?, ?, '…', ${SNIPPET_TOKENS}) AS marked
+    FROM events_text JOIN events e ON e.id = events_text.rowid
+    WHERE events_text MATCH ? AND events_text.rowid+0 IN (${placeholders(n)})`;
+}
+
 export interface SqliteIndexOptions {
   /** The file, or `:memory:`. Its folder is created (owner-only) when missing. */
   path: string;
@@ -442,12 +453,7 @@ export class SqliteIndex implements IndexStore {
     if (picked.length === 0) return out;
     const ids = picked.map((p) => p.eid);
     const details = this.db
-      .query(
-        `SELECT e.id AS id, e.content_hash, e.event_index, e.role, e.tool_name, e.ts,
-           snippet(events_text, 0, ?, ?, '…', ${SNIPPET_TOKENS}) AS marked
-         FROM events_text JOIN events e ON e.id = events_text.rowid
-         WHERE events_text MATCH ? AND events_text.rowid IN (${placeholders(ids.length)})`,
-      )
+      .query(snippetsSql(ids.length))
       .all(MATCH_START, MATCH_END, match, ...ids) as {
       id: number;
       content_hash: string;
