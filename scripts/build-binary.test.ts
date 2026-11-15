@@ -93,6 +93,25 @@ describe("the compiled binary (X2.2)", () => {
     expect(JSON.parse(normalized.out.split("\n")[0] as string)).toMatchObject({ role: "meta" });
   });
 
+  it("runs operator patterns under RE2 and the built-in pack inside the binary (F2.2)", async () => {
+    await Bun.write(
+      join(dir, "acme.toml"),
+      'id = "acme"\n[[rules]]\nid = "acme-key"\npattern = \'ACME-(?P<secret>[0-9]{4})\'\ntests.match = ["ACME-1234"]\n',
+    );
+    const tested = await run(
+      ["redact", "test", "-", "--pack", "acme.toml", "--text", "--print", "--json"],
+      "key ACME-1234 and ghp_abcdefghijklmnopqrstuvwx0123456789\n",
+    );
+    expect(tested.code).toBe(0);
+    const doc = JSON.parse(tested.out);
+    expect(doc.output).toEqual(["key ACME-[redacted:acme-key] and [redacted:github-token]"]);
+    expect(doc.tests.failed).toEqual([]);
+    await Bun.write(join(dir, "bad.toml"), 'id = "bad"\n[[rules]]\nid = "x"\npattern = "(a)\\\\1"\n');
+    const refused = await run(["redact", "test", "--pack", "bad.toml"]);
+    expect(refused.code).toBe(3);
+    expect(refused.err).toContain("RE2 has no backreferences");
+  });
+
   it("reads neither the working folder's .env nor its bunfig.toml", async () => {
     // A repository an agent works in: its .env names a store, its bunfig preloads a script.
     await Bun.write(join(dir, ".env"), "SESHI_STORE__URL=file:///from-dotenv\n");

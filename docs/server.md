@@ -60,7 +60,7 @@ The settings most servers need ([config.md](config.md) has all of them):
 | `auth.org_key.enabled` | `SESHI_AUTH__ORG_KEY__ENABLED` | Default `true`: members holding the org key write as the username they state (X5.12) |
 | `store.url` | `SESHI_STORE__URL` | Required: `r2://bucket/prefix`, `s3://bucket/prefix`, or `file:///path` |
 | `store.credentials.*`, `store.region`, `store.endpoint`, `store.account_id` | `SESHI_STORE__CREDENTIALS__ACCESS_KEY_ID`, … | The bucket's keys and where it is. Unset, the standard `AWS_*` / `S3_*` (and `R2_*` for `r2://`) variables apply |
-| `redaction.packs` | `SESHI_REDACTION__PACKS` | JSON files of your own redaction rules, added to the built-in ones ([below](#your-own-redaction)). The server refuses to start if a pattern in one is not a usable regular expression |
+| `redaction.packs` | `SESHI_REDACTION__PACKS` | Your own redaction rule packs (TOML, or today's JSON rule files), on top of the built-in pack ([below](#your-own-redaction)). The server refuses to start on a pack it cannot use or a rule that fails its own test strings |
 | `store.deployment_id`, `store.org` | `SESHI_STORE__DEPLOYMENT_ID`, `SESHI_STORE__ORG` | Recorded in the bucket's layout marker (`seshi.json`); the server refuses to start against a bucket marked for another deployment or org (X1.4). See [the layout](../spec/layout.md) |
 | `server.listen` | `SESHI_SERVER__LISTEN` | Default `:7200`; flag `--listen` |
 
@@ -106,9 +106,11 @@ unredacted and the server is where that stops being true.
 
 ### Your own redaction
 
-Every session's normalized records go through three passes before anything is written, in
-this order. They run on the records, where tool calls, file paths and results are already
-separate fields; the transcript itself is never stored.
+Redaction rules are rule packs (F2.1): the built-in pack, which ships in the binary
+([`packages/ts/redact/packs/builtin.toml`](../packages/ts/redact/packs/builtin.toml)), and
+your own, listed in `redaction.packs`. Every session's normalized records go through them
+before anything is written, in this order. They run on the records, where tool calls, file
+paths and results are already separate fields; the transcript itself is never stored.
 
 1. **Sensitive tool calls.** When a call reads or writes a secrets file (`.env`, a private key,
    `~/.aws/credentials`, Terraform state and the like) or runs a command whose job is to print a
@@ -118,37 +120,90 @@ separate fields; the transcript itself is never stored.
    what names the file. A file is recognized by a call's path arguments, a shell command's
    words, or a patch's file headers, not by text that only mentions it. A result in a later chunk
    than its call is caught too: the session's `metadata.json` keeps the withheld calls' ids.
-2. **Your patterns**, if you have any: a match becomes `[redacted:custom-pattern]`.
+2. **Your text rules**, in pack order, each where its `applies_to` says.
 3. **The built-in secret patterns**: provider tokens, credential assignments, bearer headers,
    JWTs, connection URLs, private-key blocks, and the entropy pass.
 
 Passes 2 and 3 skip the structural fields (ids, roles, timestamps, tool names, the source and
 the branch). The session's `metadata.json` records the rule set's hash and how often each rule
-fired (`redaction`), never what matched.
+fired, by rule id (`redaction`, F2.3), never what matched.
 
-The first and last always run. A pack in `redaction.packs` adds to them, and nothing in it
-can take a built-in away:
+A pack is a TOML file:
 
-```json
-{
-  "patterns": ["ACME-[0-9A-F]{32}", "internal-key: (?<secret>\\S+)"],
-  "sensitive_files": ["config/master.key", "secrets/**", "!secrets/README.md"],
-  "secret_commands": ["acme-cli\\s+token\\b"]
-}
+```toml
+id = "acme"                      # the pack's id
+version = "2026-11-01"           # optional
+disable = ["entropy"]            # built-in rules to turn off, by id
+
+[[rules]]                        # text rules
+id = "acme-key"                  # names the rule in the counts; keep it stable
+description = "Acme API keys"
+pattern = 'ACME-[0-9A-F]{32}'    # RE2 syntax; or patterns = [...]
+replacement = "[redacted:acme-key]"   # the default is [redacted:<id>]
+applies_to = ["text", "tool_input", "tool_output"]   # the default is all three
+tests.match = ["key ACME-0123456789ABCDEF0123456789ABCDEF"]
+tests.no_match = ["ACME-1234"]
+
+[[rules]]
+id = "internal-key"
+pattern = 'internal-key: (?P<secret>\S+)'   # only the `secret` group is replaced
+
+[[sensitive_files]]
+id = "acme-master-key"
+globs = ["config/master.key", "secrets/**", "!secrets/README.md"]
+tests.match = ["app/config/master.key"]
+
+[[secret_commands]]
+id = "acme-token"
+pattern = 'acme-cli\s+token\b'
+tests.match = ["acme-cli token --org x"]
 ```
 
-- `patterns` are JavaScript regular expressions, run over every text field of the records. With
-  a named group `secret`, only that group is replaced, so the second one above keeps
-  `internal-key: `.
-- `sensitive_files` are `.gitignore`-style globs: without a `/` a file's name in any directory,
-  with one the end of its path; `**` crosses directories; `!` makes an exception.
-- `secret_commands` are regular expressions matched at the start of each command in a shell
-  line (after `;`, `&&`, `|`, `$(`, `sudo`, `VAR=value`).
+- **Text rules** (`[[rules]]`) are regular expressions over every text field. `applies_to` picks
+  where: `text` (what the user, the assistant and the system said), `tool_input` (a tool call's
+  arguments) or `tool_output` (what a tool returned). With a named group `secret`, only that
+  group is replaced, so `internal-key` above keeps `internal-key: `.
+- **Your patterns run under RE2** (F2.2): matching takes time linear in the text, so no
+  pattern can hang the server on a crafted session. RE2 has no backreferences and no
+  lookahead or lookbehind; a pattern using them, one that matches empty text, or one too large
+  is refused when the server starts. Named groups are `(?P<name>…)` or `(?<name>…)`,
+  case-insensitive matching is `(?i)`. The built-in rules are reviewed JavaScript patterns.
+- **`sensitive_files`** are `.gitignore`-style globs: without a `/` a file's name in any
+  directory, with one the end of its path; `**` crosses directories; `!` makes an exception,
+  which holds for every file rule, the built-in ones included.
+- **`secret_commands`** are RE2 patterns matched at the start of each command in a shell line
+  (after `;`, `&&`, `|`, `$(`, `sudo`, `VAR=value`).
+- **`tests`** are strings the rule must redact (`match`) and leave alone (`no_match`). The server
+  checks every rule against its own test strings at start-up and refuses to start if one fails,
+  naming the file, the rule and the string.
+- **`disable`** turns built-in rules off by id. The ids are in the built-in pack; `seshi redact
+  test --json` lists every rule with its pack and whether it is on. Your rules cannot reuse a
+  built-in id.
+- Rule ids are lowercase words joined by `-`, unique across every pack: the counts are by id.
+  A rule must not change what any rule replaces text with, so redacting twice changes nothing;
+  the server refuses a rule set where one would.
 
-This is the file Dosu's CLI keeps for an org's rules, so an org's list can be pasted here as
-it is; the CLI's `excluded` and `names_only` lists are about the member's machine and are
-ignored. The rules apply to sessions stored after the server restarts with them; what is
-already in the bucket is not rewritten.
+Today's JSON rule file is still a pack: `redaction.packs` takes `.json` files with `patterns`,
+`sensitive_files` and `secret_commands`, and loads them together as the pack `legacy`, whose
+patterns count as `custom-pattern` (and become `[redacted:custom-pattern]`). This is the file
+Dosu's CLI keeps for an org's rules, so an org's list can be pasted as it is; the CLI's
+`excluded` and `names_only` lists are about the member's machine and are ignored. Its patterns
+now run under RE2 too, so one that used lookaround has to be rewritten.
+
+Try rules before deploying them: `seshi redact test --pack acme.toml` checks a pack's test
+strings, and `seshi redact test session.jsonl --pack acme.toml` shows how often each rule fires
+on a transcript and in which records, without showing what matched (`--print` prints the
+redacted records). See [cli.md](cli.md#redaction-rules).
+
+Rules apply to sessions stored after the server restarts with them (F1.5). To apply them to
+what is already stored, run `seshi redact backfill --since 30d` (or `--all`) where the server's
+config is, after the restart: each session an earlier rule set redacted is redacted again, a
+session the new rules change gets one new trace and its old trace objects are deleted, and a
+change entry (`replace`, `reason: "redacted"`) tells readers to take the new trace. It cannot be
+undone; `--dry-run` says what it would do.
+
+A client can redact before upload with the same rules (F2.4): `GET /v1/redaction/rules` serves
+your packs to any signed-in caller. The server redacts everything again regardless.
 
 ### Deploying
 
@@ -251,6 +306,7 @@ allow.
 | `DELETE /v1/tokens/:id` | Revoke one (`tokens:admin`) |
 | `POST /v1/tokens/revoke` | `{owner, kind?}`: revoke every live token of an owner (`tokens:admin`, X5.11) |
 | `GET /v1/admin/jobs` | The worker, its jobs and every source, as `seshi workers status --json` prints them (`sources:admin`, X7.5) |
+| `GET /v1/redaction/rules` | The operator's rule packs and the rule-set hash, for redacting before upload (F2.4). Any signed-in caller; `ETag` is the hash, `If-None-Match` gets `304` |
 
 ### `POST /v1/sessions`
 

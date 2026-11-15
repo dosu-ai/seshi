@@ -113,10 +113,12 @@ transcript again while the client still has it).
    session keeps.
 2. **Redact.** What a tool call returned is withheld when the call read a secrets file
    (`.env`, keys, cloud credentials) or ran a command that prints one (`printenv`, `gh auth
-   token`); then your own patterns, if you set any; then the built-in ones (provider tokens,
-   key/value credentials in several languages, bearer headers, JWTs, connection URLs, PEM
-   blocks, and a Shannon-entropy pass for what no pattern knows), with identifiers that link a
-   tool call to its result left alone.
+   token`); then your own rule packs, if you set any (TOML, run under RE2); then the built-in
+   pack (provider tokens, key/value credentials in several languages, bearer headers, JWTs,
+   connection URLs, PEM blocks, and a Shannon-entropy pass for what no pattern knows), with
+   identifiers that link a tool call to its result left alone. Each session records which rule
+   set ran and how often each rule fired; `seshi redact backfill` applies new rules to what is
+   already stored.
 3. **Filter.** A session's first trace under 2000 characters of conversation, or with no user
    turn, or with nothing answering it, is `filtered`: nothing of it is stored. Whatever extends
    a stored session (a chunk, the tail of a grown log) is never filtered.

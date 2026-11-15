@@ -51,11 +51,38 @@ repository's code.
 | `sessions ls\|show\|export\|rm`, `tokens` | Sessions and tokens through the API | Branch 13 |
 | `capture install\|uninstall\|status\|pause\|resume\|off\|on`, `hook <agent> <event>`, `upload <path>`, `daemon`, `statusline` | Capture on this machine (F9) | Branch 14 |
 | `search <query>` | Search what you may read (F10) | Branch 12 |
-| `redact test\|backfill` | Try rules on a file; apply new rules to stored sessions (F2) | Branch 07 |
+| `redact test [<file> \| -] [--pack <file>]… [--config]` | Check rule packs' test strings, and show how often each rule fires on a transcript or text and where, never what matched ([below](#redaction-rules)) | Built |
+| `redact backfill (--since <30d> \| --all) [--dry-run]` | Apply the server's current rules to stored sessions (F2.5, [below](#redaction-rules)). Exit 8 when a session changed while it ran | Built |
 
-`serve`, `admin`, `workers`, `sync` and `reprocess` run where the server's config and bucket
-keys are: they load the server config the way `serve` does (`--config`, `SESHI_CONFIG`,
+`serve`, `admin`, `workers`, `sync`, `reprocess` and `redact backfill` run where the server's
+config and bucket keys are: they load the server config the way `serve` does (`--config`, `SESHI_CONFIG`,
 `./seshi.toml`, `/etc/seshi/seshi.toml`, then `SESHI_*` env and `--set`).
+
+## Redaction rules
+
+`seshi redact test` tries rule packs ([server.md](server.md#your-own-redaction)) without a
+server. The rule set is the built-in pack, the server's `[redaction] packs` when `--config`
+names its config, and each `--pack` file. Without a file it checks every rule against its test
+strings. With a file (or `-` for standard input) it also shows how often each rule fired and
+where: by record for a transcript (its format is detected, or named with `--agent`; it is
+normalized and redacted as the server would), by line for plain text (`--text`, or anything no
+format reads; each line counts as `--field text`, `tool_input` or `tool_output`). It never shows
+what matched; `--print` prints the redacted records or text on stdout (the report goes to
+stderr then). `--json` gives one document: `rule_set`, `builtin`, `packs`, every rule with its
+pack, engine and whether it is on, `tests`, and with a file `input`, `matches` and `output`.
+Exit 1 when a test string fails, 3 for a pack it cannot use, 4 for a missing file.
+
+`seshi redact backfill` applies the server's current rule set to stored sessions (F2.5): the
+ones written `--since` a duration (`30d`) or time, or `--all`, optionally only `--owner <id>`
+(repeatable), stopping after `--limit N` rewritten. A session an earlier rule set redacted is
+redacted again; one the new rules change gets one new trace with the whole session, its old
+trace objects are deleted, its counts grow, and a `published` change entry with `replace:
+true` and `reason: "redacted"`, written as `--as <owner>` (default `admin`, source
+`redaction`), tells readers to take the new trace. A session the rules do not change only has
+its rule set recorded. Redaction cannot be undone; `--dry-run` writes nothing and lists what
+would change. It is safe to stop and run again: sessions already redacted with the current
+rules are skipped. Restart the server with the new packs first, or it keeps writing with the
+old rules. Exit 8 when a session changed while it ran (run it again).
 
 ## Talking to a server, or to your own bucket (F8.3, X3.5)
 

@@ -20,8 +20,10 @@ Shannon-entropy pass for anything long and random in a secret-shaped position. A
 shape none of those recognise reaches the bucket. Before it, a pass withholds what tool calls
 returned when they touched a secrets file or ran a command that prints a secret
 (`packages/ts/redact/src/sensitive.ts`), since those are mostly values no pattern
-recognises; an operator can add patterns, files and commands of their own
-(`redaction.packs`), never remove a built-in one. Treat the bucket as sensitive data with a
+recognises. An operator adds rules of their own in rule packs (`redaction.packs`), whose
+patterns run under RE2, so no operator pattern can make matching take more than linear time;
+a pack can turn off a built-in rule by its id (`disable`), which `seshi redact test` lists, so
+review packs like code. Matched values are never stored or logged, only counts by rule id. Treat the bucket as sensitive data with a
 narrow audience, not as a public artifact. If you find a secret shape the pass misses, report
 it as a vulnerability.
 

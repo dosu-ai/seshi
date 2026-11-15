@@ -182,10 +182,15 @@ are kept (X6.4). `health_retention`, `"90d"`: how many days of source health cou
 
 ### `[redaction]`
 
-`packs`, default `[]`: rule pack files applied on top of the built-in rules, which always run.
-Today a pack is the JSON file sessiondb took (`patterns`, `sensitive_files`,
-`secret_commands`; see [server.md](server.md#your-own-redaction)); TOML packs come with F2.1.
-The server refuses to start on a pattern that is not usable, naming the file.
+`packs`, default `[]`: rule pack files, in order, on top of the built-in pack, which always
+runs (F2.1). A `.toml` file is a rule pack (`id`, `rules`, `sensitive_files`,
+`secret_commands`, `disable`); a `.json` file is the rule file sessiondb took (`patterns`,
+`sensitive_files`, `secret_commands`), and every JSON file loads together as the pack `legacy`.
+See [server.md](server.md#your-own-redaction). Your patterns run under RE2 (F2.2). The server
+refuses to start on a pack it cannot use, a pattern RE2 cannot run, a rule id used twice, a
+`disable` of something that is not a built-in rule, or a rule that fails its own test strings,
+naming the file. A change applies after a restart; `seshi redact backfill` applies it to
+stored sessions.
 
 ### `[review]`
 

@@ -212,7 +212,9 @@ envelope model review dropped (X6.3, X4.10). Once tombstoned it has no `head`.
 
 `writer` and `owner_basis` are the first write's; each later write's writer is on its change
 entry. `claims` merge over writes from a fixed allowlist (X5.5). `redaction.counts` sum over
-writes (only what each write stored is counted). A session that grew gets a second trace with
+writes, by rule id (only what each write stored is counted), and `redaction.rule_set` is the
+hash of the rule set that last ran over the session (F2.3); `seshi redact backfill` redoes the
+sessions whose rule set is not the current one. A session that grew gets a second trace with
 a `continuation`; a reader that wants the whole session concatenates in `traces` order. A
 replace (X4.6) leaves one trace in `traces`, removes the others' objects, and starts `applied`
 and `redaction` over from the replacing write.
@@ -243,7 +245,9 @@ session's `owner_basis` (X5.5), never content. The change feed is per owner, so 
 one kind for one owner in the same millisecond share a key (`<stamp>-tombstone`,
 `<stamp>-visibility`) and the second replaces the first.
 A `published` entry with `replace: true` replaced the session's earlier traces (X4.6): a reader
-drops what it held of the session and takes this trace as the whole of it.
+drops what it held of the session and takes this trace as the whole of it. With `reason:
+"redacted"` it was a redaction backfill (F2.5): new rules were applied to the stored session,
+its traces were joined into this one, and the old trace objects were deleted.
 
 ### Server state
 
