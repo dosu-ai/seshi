@@ -12,9 +12,20 @@ import { runScenario } from "../tooling/scenario/runner";
 import { loadScenario, type Scenario, ScenarioError } from "../tooling/scenario/schema";
 
 const DIR = import.meta.dirname;
-const FILES = readdirSync(DIR)
-  .filter((name) => name.endsWith(".yaml"))
-  .sort();
+const yamls = (dir: string) => {
+  try {
+    return readdirSync(join(DIR, dir)).filter((name) => name.endsWith(".yaml"));
+  } catch {
+    return [];
+  }
+};
+/** The hand-kept scenarios, then the explorer's shrunk finds kept as regressions (found/). */
+const FILES = [
+  ...yamls(".").sort(),
+  ...yamls("found")
+    .sort()
+    .map((name) => `found/${name}`),
+];
 
 describe("capture scenarios", () => {
   it("has scenarios to run", () => {

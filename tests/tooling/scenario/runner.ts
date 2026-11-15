@@ -534,7 +534,9 @@ class Runner {
     const now = this.world.clock.ms();
     let next: number | undefined;
     for (const s of Object.values(this.state().sessions)) {
-      if (s.toggle === "off") continue;
+      // A session turned off waits for nothing, except a retraction: it waits out the backoff
+      // an earlier failure set (uploader.ts retracts only sessions that are `due`).
+      if (s.toggle === "off" && s.retract !== "pending") continue;
       for (const at of [s.next_attempt_at, s.rebuild?.not_before]) {
         if (!at) continue;
         const ms = Date.parse(at);
@@ -606,6 +608,18 @@ class Runner {
 
     // The bucket: no errors, and only the warnings the scenario allows.
     const allow = new Set([...this.scenario.setup.allow, ...extraAllow]);
+    // A change entry whose write failed after it landed, or whose pointer write then failed, is
+    // left behind for good by design (19, X6.4, decision 7: readers and checkers tolerate it,
+    // checkStore warns, never errors). Allowed only when such a store fault fired.
+    if (this.world.plan.log.some((l) => CHANGE_WRITE_FAULT.test(l))) {
+      allow.add("change_orphan");
+      allow.add("change_not_applied");
+    }
+    // A trace object written by a write that then failed (its pointer, its own answer) and
+    // retried with other content, or one a failed delete left, is named by nothing: the orphan
+    // sweep (F2.5) removes it once it is an hour old (32, scenario 14). Allowed once any store
+    // fault fired.
+    if (this.world.plan.log.some((l) => l.startsWith("store "))) allow.add("orphan_trace");
     const report = await checkStore(this.world.store, { now: this.world.clock.now });
     const bad = report.findings.filter((f) => f.severity === "error" || !allow.has(f.code));
     if (bad.length > 0) this.fail("once quiet, checkStore is not clean", bad.map(findingLine));
@@ -633,8 +647,13 @@ class Runner {
             `${key}: stored from here, but the server has ${current?.status ?? "nothing"} for ${id}`,
           );
         }
-      } else if (current && current.status === "stored") {
-        problems.push(`${key}: never stored from here, but the server holds ${id}`);
+      } else if (current && current.status === "stored" && !s.sent) {
+        // Sent but never answered as stored is allowed: `stored` is set only from an answer, and
+        // a session whose answer was lost and which is not sent again (a pause stopped it, F9.5;
+        // it went into a folder that turns capture off, 27 #13) keeps what it uploaded without
+        // ever hearing so. Quiet, nothing waits to be sent, so anything still captured would
+        // have been answered by now. Invariant 2 bounds what a stopped session may hold.
+        problems.push(`${key}: never sent from here, but the server holds ${id}`);
       }
     }
     if (problems.length > 0)
@@ -795,6 +814,9 @@ class Runner {
     return this.passes;
   }
 }
+
+/** A fired store fault on a change entry or a session pointer, as the fault log words it. */
+const CHANGE_WRITE_FAULT = /^store put \S*\/(changes\/\S+|sessions\/[^/\s]+\/metadata\.json):/;
 
 function findingLine(f: Finding): string {
   return `${f.severity} ${f.code}: ${f.message}${f.key ? ` (${f.key})` : ""}`;

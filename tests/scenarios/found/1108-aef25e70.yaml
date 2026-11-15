@@ -1,0 +1,24 @@
+# Found by the scenario explorer (tests/tooling/scenario/explore.ts); see tests/scenarios/README.md.
+# seed: 1108 (bun run scenarios:explore --seed 1108 --runs 1 --max-steps 25)
+# original length: 9 steps; shrunk to 9 in 27 runs
+# failure:
+#   step 9 (settle max=40): once quiet, checkStore is not clean
+#     warn change_orphan: published d912f9e4c01b…, but the session has no metadata (owners/me/changes/20260901T090000.011Z-a40d5f79786facfbb0389dcac9dbb5f3a92980bed8517574779723b503b81808-47dbff8a-d912f9e4c01be4dbd23d7b4461c437d333130f098d9f2e775e…
+#     faults fired:
+#       store put owners/me/sessions/a40d5f79786facfbb0389dcac9dbb5f3a92980bed8517574779723b503b81808/metadata.json: store put owners/*/sessions/*/metadata.json #1 → fail
+#     capture log (last lines):
+#       2026-09-01T09:00:00.014Z uploader: claude-code:main: will retry: injected store failure for owners/me/sessions/a40d5f79786facfbb0389dcac9dbb5f3a92980bed8517574779723b503b81808/metadata.json (store put owners/*/sessions/*/metadata.json #1 →…
+#       2026-09-02T09:00:00.022Z uploader: claude-code:main: nothing to retract on the server
+name: found by seed 1108
+description: "A generated scenario (seed 1108) shrunk from 9 to 9 steps; the header says how it failed."
+setup: { mode: local, seed: 105 }
+steps:
+  - pass
+  - fault: { store: put, key: "owners/*/sessions/*/metadata.json" }
+  - turns: { session: main, count: 2 }
+  - pass
+  - clock: +1d
+  - capture: off --session main
+  - restart-server
+  - heal
+  - settle

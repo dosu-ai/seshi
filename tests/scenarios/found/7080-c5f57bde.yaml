@@ -1,0 +1,22 @@
+# Found by the scenario explorer (tests/tooling/scenario/explore.ts); see tests/scenarios/README.md.
+# seed: 7080 (bun run scenarios:explore --seed 7080 --runs 1 --max-steps 25)
+# original length: 17 steps; shrunk to 8 in 76 runs
+# failure:
+#   step 8 (settle max=40): once quiet, checkStore is not clean
+#     warn orphan_trace: trace bf0eb4d081f4… is named by no metadata (written 2026-09-01T09:00:00.012Z) (owners/me/sessions/a40d5f79786facfbb0389dcac9dbb5f3a92980bed8517574779723b503b81808/trace.bf0eb4d081f4ddd848a8f666f830f64568de2f1b1a10cbc1fcbd…
+#     faults fired:
+#       store put owners/me/sessions/a40d5f79786facfbb0389dcac9dbb5f3a92980bed8517574779723b503b81808/trace.bf0eb4d081f4ddd848a8f666f830f64568de2f1b1a10cbc1fcbdc224c15fab0d.json.gz: store put owners/*/sessions/*/trace.* #1 ×2 → fail after the write
+#     capture log (last lines):
+#       2026-09-01T09:00:00.012Z uploader: claude-code:main: will retry: injected store failure for owners/me/sessions/a40d5f79786facfbb0389dcac9dbb5f3a92980bed8517574779723b503b81808/trace.bf0eb4d081f4ddd848a8f666f830f64568de2f1b1a10cbc1fcbdc224c…
+name: found by seed 7080
+description: "A generated scenario (seed 7080) shrunk from 17 to 8 steps; the header says how it failed."
+setup: { mode: local }
+steps:
+  - turns: { session: main, count: 2 }
+  - fault: { store: put, key: "owners/*/sessions/*/trace.*", after: true, times: 2 }
+  - pass
+  - turns: { session: main, count: 2 }
+  - clock: +2h
+  - capture: on --session main
+  - heal
+  - settle
