@@ -13,8 +13,9 @@
  *
  * which reviews every envelope with Claude Haiku 5.5 on the Anthropic API for both steps, with
  * seshi's default prompts and categories (F3.5). `resolveSteps` applies the defaults: the
- * redactor takes the decision step's provider, model, key and endpoint unless it names another
- * provider. The review package (`@seshi/review`) builds the providers from what it returns. */
+ * redactor takes the decision step's provider, model and endpoint unless it names another
+ * provider, and its key only for that same endpoint. The review package (`@seshi/review`)
+ * builds the providers from what it returns. */
 
 import * as z from "zod";
 import { type Secret, secret } from "../secret";
@@ -178,7 +179,9 @@ export interface ResolvedStep {
 }
 
 /** A policy's two steps with every default applied: the redactor takes the decision step's
- * provider, and with it the model, key and endpoint, unless it names a provider of its own. */
+ * provider, and with it the model, endpoint, effort and timeout, unless it names a provider of
+ * its own. It takes the decision step's key only when it also sends to the decision step's
+ * endpoint, so a key never goes to an endpoint it was not configured for. */
 export function resolveSteps(policy: ReviewPolicy): {
   decision: ResolvedStep;
   redactor: ResolvedStep;
@@ -199,11 +202,16 @@ export function resolveSteps(policy: ReviewPolicy): {
   const r = policy.redactor;
   const inherits = r.provider === undefined || r.provider === decisionProvider;
   const redactorProvider = r.provider ?? decisionProvider;
+  const base_url =
+    r.base_url ?? (inherits ? decision.base_url : DEFAULT_BASE_URLS[redactorProvider]);
+  // The decision step's key goes only where the decision step sends it: a redactor with an
+  // endpoint of its own needs its own key.
+  const sameEndpoint = inherits && base_url === decision.base_url;
   const redactor: ResolvedStep = {
     provider: redactorProvider,
     model: r.model ?? (inherits ? decision.model : DEFAULT_REVIEW_MODEL),
-    base_url: r.base_url ?? (inherits ? decision.base_url : DEFAULT_BASE_URLS[redactorProvider]),
-    api_key: r.api_key ?? (inherits ? decision.api_key : undefined),
+    base_url,
+    api_key: r.api_key ?? (sameEndpoint ? decision.api_key : undefined),
     prompt: r.prompt,
     prompt_file: r.prompt_file,
     max_tokens: r.max_tokens ?? DEFAULT_REDACTOR_MAX_TOKENS,

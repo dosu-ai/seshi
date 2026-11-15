@@ -237,8 +237,9 @@ the name redacted text is marked with (`[redacted:<name>]`). Seshi's defaults ar
 `personal` and `customer-data`.
 
 A redactor that names no `provider`, or the decision step's, inherits the decision step's
-`provider`, `model`, `api_key`, `base_url`, `effort` and `timeout`; one that names another
-provider inherits none of them. A policy that could not send (no key) or names a provider this
+`provider`, `model`, `base_url`, `effort` and `timeout`, and its `api_key` too unless the
+redactor sets a `base_url` of its own (a key only goes to the endpoint it was given for); one
+that names another provider inherits none of them. A policy that could not send (no key) or names a provider this
 binary lacks stops start-up rather than drop every envelope. `seshi config check` names every
 provider and endpoint a policy sends envelopes to, and `seshi review eval` measures a policy on
 labelled fixtures before you change it.

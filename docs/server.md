@@ -245,8 +245,10 @@ A resend of an upload is answered from the session and not reviewed again.
 and each tool call's arguments, with the record's role and the tool's name. Never the
 transcript as uploaded, the meta record (working directory, branch), ids, timestamps, or LLM
 call details. It goes to the endpoint the step names and nowhere else: keys and endpoints come
-only from the config (never `ANTHROPIC_API_KEY` or similar from the environment), redirects are
-refused, and the providers' error text is never recorded or logged. Only parts labelled
+only from the config (never `ANTHROPIC_API_KEY` or similar from the environment), a key goes
+only to the endpoint it was configured with, redirects are refused, the provider client never
+logs requests (whatever `ANTHROPIC_LOG` says), and the providers' error text is never recorded
+or logged. Only parts labelled
 `redact` reach the redactor. `seshi config check` names every provider and endpoint a policy
 sends to. To keep transcripts in-house, point both steps at a local model through
 `provider = "openai-compatible"` and its `base_url`.

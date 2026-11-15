@@ -327,6 +327,38 @@ describe("review", () => {
     });
   });
 
+  it("does not hand the decision step's key to a redactor with an endpoint of its own", () => {
+    // Same provider, another endpoint: the key stays with the decision step.
+    expect(
+      messages({
+        review: {
+          policies: [{ id: "p", decision, redactor: { base_url: "https://proxy.example" } }],
+        },
+      }),
+    ).toEqual([
+      "review.policies.0.redactor: anthropic needs an api_key (review is off until a provider key is given)",
+    ]);
+    const config = ok({
+      review: {
+        policies: [
+          {
+            id: "p",
+            decision: { provider: "openai-compatible", model: "m", api_key: "sk-gw" },
+            redactor: { base_url: "http://gpu.internal/v1" },
+          },
+          // Naming the decision step's own endpoint again is the same endpoint.
+          { id: "q", decision, redactor: { base_url: "https://api.anthropic.com" } },
+        ],
+      },
+    });
+    const [p, q] = config.review.policies as [ReviewPolicy, ReviewPolicy];
+    const local = resolveSteps(p).redactor;
+    expect(local).toMatchObject({ provider: "openai-compatible", model: "m" });
+    expect(local.base_url).toBe("http://gpu.internal/v1");
+    expect(local.api_key).toBeUndefined();
+    expect(resolveSteps(q).redactor.api_key?.reveal()).toBe(decision.api_key);
+  });
+
   it("refuses a policy that could not send, or would be refused on every call (F3.5)", () => {
     expect(messages({ review: { policies: [{ id: "p" }] } })).toEqual([
       "review.policies.0.decision: anthropic needs an api_key (review is off until a provider key is given)",
