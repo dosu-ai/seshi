@@ -39,6 +39,8 @@ export interface SmokeOptions {
   log?: (line: string) => void;
   /** Per command, in ms. */
   timeout?: number;
+  /** How long the server has to answer /healthz, in ms; `timeout` by default. */
+  readyTimeout?: number;
 }
 
 export interface SmokeResult {
@@ -242,7 +244,7 @@ export async function smoke(options: SmokeOptions): Promise<SmokeResult> {
       stderr: "pipe",
     });
     const url = `http://127.0.0.1:${port}`;
-    const deadline = Date.now() + timeout;
+    const deadline = Date.now() + (options.readyTimeout ?? timeout);
     for (;;) {
       try {
         if ((await fetch(`${url}/healthz`)).ok) break;

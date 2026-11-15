@@ -106,7 +106,8 @@ describe.skipIf(process.platform === "win32")("smoke", () => {
         [
           "#!/bin/sh",
           'case "$1" in',
-          '  --version) echo "seshi 9.9.9" ;;',
+          // Slower than the readiness wait, as a loaded machine can be: it must not count.
+          '  --version) sleep 1.5; echo "seshi 9.9.9" ;;',
           '  admin) printf "org key\\n  sk-test\\n" ;;',
           '  serve) echo "never listening" >&2; exec sleep 600 ;;',
           "esac",
@@ -115,7 +116,8 @@ describe.skipIf(process.platform === "win32")("smoke", () => {
       );
       chmodSync(binary, 0o755);
       const started = Date.now();
-      await expect(smoke({ binary, keychain: "off", timeout: 1_000 })).rejects.toThrow(
+      // Only the wait for the server is short; commands keep the per-command timeout.
+      await expect(smoke({ binary, keychain: "off", readyTimeout: 1_000 })).rejects.toThrow(
         /did not come up[\s\S]*never listening/,
       );
       expect(Date.now() - started).toBeLessThan(10_000);
