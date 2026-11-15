@@ -1,0 +1,42 @@
+# Guards F9.1's lock across process deaths: a long-running `seshi daemon` holds the uploader
+# lock (a `--once` started meanwhile says an uploader is running and exits); SIGKILLed, it leaves
+# `uploader.json` naming a dead pid. Two uploaders then start at once: one takes the stale lock
+# over and sends, the other finds it held by a live uploader. In-process the lock is never taken.
+name: a stale lock is taken over, by one uploader
+description: >
+  A long-running daemon uploads a session and keeps the lock; a --once beside it exits at once.
+  The daemon is SIGKILLed, leaving its lock behind. Two --once uploaders start together, the
+  server slowed by a delay: exactly one takes the stale lock over and sends the new turns, once.
+guards: "F9.1: a dead uploader's lock is taken over by exactly one of the next uploaders"
+setup: { mode: process }
+steps:
+  - turns: { session: main, count: 2 }
+  - daemon: { as: long, idle: 5m }
+  - await: { request: POST /v1/sessions }
+  - wait: 1s
+  - background: { as: beside, step: pass }
+  - join: beside
+  - expect:
+      runs:
+        beside: { started: false }
+      uploader-lock: live
+      sessions:
+        main: { server: present, traces: 1, sent-all: true }
+  - kill: long
+  - expect:
+      runs:
+        long: { killed: true }
+      uploader-lock: stale
+  - turns: { session: main, count: 2, hook: Stop, mark: after-the-kill }
+  - fault: { http: POST /v1/sessions, delay: 1500ms }
+  - background: { as: next-a, step: pass }
+  - background: { as: next-b, step: pass }
+  - join: [next-a, next-b]
+  - expect:
+      started: { of: [next-a, next-b], count: 1 }
+      requests: { "POST /v1/sessions": 2 }
+      uploader-lock: absent
+      sessions:
+        main: { traces: 2, matches-transcript: true, sent-all: true }
+      bucket: { has: [after-the-kill] }
+  - settle

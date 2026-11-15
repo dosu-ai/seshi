@@ -1,0 +1,46 @@
+# Guards X4.7 (idempotency) and X6.3 (the offset protocol) over real TCP: a connection reset
+# before the server sees anything, a request cut halfway through its body, an answer the server
+# committed but never delivered, and an answer cut after its first bytes. In-process these are
+# a wrapped fetch throwing; here they are sockets closing, with Bun's HTTP client on one end and
+# seshi serve on the other.
+name: torn connections over real TCP
+description: >
+  Three sessions upload in one pass: the first meets a reset, the second a request closed after
+  200 body bytes, the third a committed upload whose answer is dropped. Later a chunk's answer
+  is closed after 40 bytes (inside the status line's head). Each time the uploader backs off and
+  retries; the server ends with one trace per piece and no record twice.
+guards: "X4.7 × X6.3 over TCP: torn requests never commit, a lost answer is resent idempotently"
+setup: { mode: process }
+steps:
+  - turns: { session: a, count: 3 }
+  - turns: { session: b, count: 3 }
+  - turns: { session: c, count: 3 }
+  # Uploads go oldest first: a, b, c. Each rule fires on the first request that reaches it.
+  - fault: { http: POST /v1/sessions, reset: true }
+  - fault: { http: POST /v1/sessions, close-request: 200 }
+  - fault: { http: POST /v1/sessions, drop-response: true }
+  - pass
+  - expect:
+      pass: { uploaded: 0, failed: 3, retrying: 3 }
+      sessions:
+        a: { server: absent }
+        b: { server: absent }
+        c: { server: present, traces: 1 }
+  - settle
+  - expect:
+      sessions:
+        a: { traces: 1, matches-transcript: true, sent-all: true }
+        b: { traces: 1, matches-transcript: true, sent-all: true }
+        c: { traces: 1, matches-transcript: true, sent-all: true }
+  - turns: { session: a, count: 2, mark: chunk }
+  - fault: { http: POST /v1/sessions, close-response: 40 }
+  - pass
+  - expect:
+      pass: { failed: 1 }
+      sessions:
+        a: { traces: 2 }
+  - settle
+  - expect:
+      sessions:
+        a: { traces: 2, matches-transcript: true, sent-all: true }
+      requests: { "POST /v1/sessions": 8 }

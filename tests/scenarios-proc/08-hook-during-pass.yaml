@@ -1,0 +1,36 @@
+# Guards F9.1's spool across processes: hooks (separate processes) spool while an uploader pass
+# is mid-send. The pass took in the spool before it started sending; what a hook spools after
+# that, a known session's new turns and a session never seen, waits for the next pass, and
+# nothing is lost or sent twice. In-process, a hook and a pass never overlap.
+name: a hook during a pass is not lost
+description: >
+  While a pass holds a chunk at the proxy for 1.5 s, the session writes a turn (its Stop hook
+  spools it) and a new session starts (its hook spools it too). The pass ends having sent only
+  what it took in; the next pass sends the rest; every record is stored once.
+guards: "F9.1: what hooks spool during a pass goes in the next one"
+setup: { mode: process }
+steps:
+  - turns: { session: main, count: 2 }
+  - pass
+  - turns: { session: main, count: 1, mark: before-the-pass }
+  - fault: { http: POST /v1/sessions, delay: 1500ms }
+  - background: { as: sending, step: pass }
+  - await: { request: POST /v1/sessions }
+  - turns: { session: main, count: 2, mark: during-the-pass }
+  - turns: { session: other, count: 2, mark: new-during-the-pass }
+  - join: sending
+  - expect:
+      runs:
+        sending: { pass: { uploaded: 1 } }
+      sessions:
+        main: { traces: 2, sent-all: false }
+      bucket: { has: [before-the-pass], lacks: [during-the-pass, new-during-the-pass] }
+  - pass
+  - expect:
+      pass: { taken: 2, uploaded: 2, failed: 0 }
+      sessions:
+        main: { traces: 3, matches-transcript: true, sent-all: true }
+        other: { server: present, traces: 1, matches-transcript: true, sent-all: true }
+      bucket: { has: [during-the-pass, new-during-the-pass] }
+      requests: { "POST /v1/sessions": 4 }
+  - settle
