@@ -55,30 +55,90 @@ export interface ParseOptions {
   provenance?: Provenance;
 }
 
-const USAGE_KEYS = new Set([
+const USAGE_KEYS = [
   "input_tokens",
   "output_tokens",
   "cache_read_input_tokens",
   "cache_creation_input_tokens",
   "reasoning_tokens",
   "total_tokens",
-]);
+] as const;
 
-/** The LLM calls, checked: unique ids, counts that are whole numbers ≥ 0, and every record's
- * `llm_call` naming one of them. */
-function checkLlmCalls(calls: readonly LlmCall[], records: readonly TraceRecord[]): void {
+const CALL_STRINGS = [
+  "model",
+  "provider",
+  "started_at",
+  "ended_at",
+  "stop_reason",
+  "request_id",
+  "error",
+] as const;
+
+/** One LLM call as `trace.schema.json` defines it: known fields kept and type-checked, unknown
+ * ones dropped (as `validateTraceRecords` drops them from records), so nothing outside the
+ * contract reaches the bucket. */
+function checkLlmCall(value: unknown, index: number): LlmCall {
+  const bad = (what: string): never => {
+    throw new TrajectoryError(`llm call ${index}: ${what}`);
+  };
+  if (typeof value !== "object" || value === null || Array.isArray(value)) bad("must be an object");
+  const call = value as Record<string, unknown>;
+  if (typeof call.id !== "string" || call.id === "") bad("needs an id");
+  const out: LlmCall = { id: call.id as string };
+  for (const key of CALL_STRINGS) {
+    const field = call[key];
+    if (field === undefined || field === null) continue;
+    if (typeof field !== "string") bad(`${key} must be a string`);
+    out[key] = field as string;
+  }
+  if (call.duration_ms !== undefined && call.duration_ms !== null) {
+    const ms = call.duration_ms;
+    if (typeof ms !== "number" || !Number.isFinite(ms) || ms < 0) {
+      bad("duration_ms must be a number ≥ 0");
+    }
+    out.duration_ms = ms as number;
+  }
+  if (call.usage !== undefined && call.usage !== null) {
+    if (typeof call.usage !== "object" || Array.isArray(call.usage)) bad("usage must be an object");
+    const usage = call.usage as Record<string, unknown>;
+    for (const key of Object.keys(usage)) {
+      if (!(USAGE_KEYS as readonly string[]).includes(key))
+        bad(`usage.${key} is not a token count`);
+    }
+    const counts: NonNullable<LlmCall["usage"]> = {};
+    for (const key of USAGE_KEYS) {
+      const n = usage[key];
+      if (n === undefined || n === null) continue;
+      if (!Number.isInteger(n) || (n as number) < 0) {
+        bad(`usage.${key} must be a whole number ≥ 0`);
+      }
+      counts[key] = n as number;
+    }
+    out.usage = counts;
+  }
+  if (call.parameters !== undefined && call.parameters !== null) {
+    const params = call.parameters;
+    if (typeof params !== "object" || Array.isArray(params)) bad("parameters must be an object");
+    const kept: NonNullable<LlmCall["parameters"]> = {};
+    for (const [key, v] of Object.entries(params as Record<string, unknown>)) {
+      if (v !== null && !["string", "number", "boolean"].includes(typeof v)) {
+        bad(`parameters.${key} must be a string, number, boolean or null`);
+      }
+      kept[key] = v as string | number | boolean | null;
+    }
+    out.parameters = kept;
+  }
+  return out;
+}
+
+/** The LLM calls, checked (`checkLlmCall`): unique ids, and every record's `llm_call` naming
+ * one of them. */
+function checkLlmCalls(input: readonly unknown[], records: readonly TraceRecord[]): LlmCall[] {
+  const calls = input.map(checkLlmCall);
   const ids = new Set<string>();
   for (const call of calls) {
-    if (typeof call.id !== "string" || call.id === "") {
-      throw new TrajectoryError("an llm call needs an id");
-    }
     if (ids.has(call.id)) throw new TrajectoryError(`llm call ${call.id} appears twice`);
     ids.add(call.id);
-    for (const [key, value] of Object.entries(call.usage ?? {})) {
-      if (!USAGE_KEYS.has(key) || !Number.isInteger(value) || (value as number) < 0) {
-        throw new TrajectoryError(`llm call ${call.id}: usage.${key} must be a whole number ≥ 0`);
-      }
-    }
   }
   records.forEach((record, index) => {
     const ref = "llm_call" in record ? record.llm_call : undefined;
@@ -86,6 +146,7 @@ function checkLlmCalls(calls: readonly LlmCall[], records: readonly TraceRecord[
       throw new TrajectoryError(`record ${index}: llm_call ${ref} is not in llm_calls`);
     }
   });
+  return calls;
 }
 
 /** The events of a validated record list (meta first), with stable indices. */
@@ -165,8 +226,9 @@ export function parseTrace(input: unknown, options: ParseOptions = {}): Trace {
     throw new TrajectoryError("first record must be the meta record");
   }
   const meta: TraceMetaRecord = first;
-  const llmCalls = options.llm_calls ? (stripNul(options.llm_calls) as LlmCall[]) : [];
-  checkLlmCalls(llmCalls, records);
+  const given = options.llm_calls === undefined ? [] : stripNul(options.llm_calls);
+  if (!Array.isArray(given)) throw new TrajectoryError("llm_calls must be an array");
+  const llmCalls = checkLlmCalls(given, records);
   const events = eventsOf(records);
   const continuation = options.metadata?.continuation;
   const problem = continuation ? null : conversationError(meta.source, events);

@@ -478,6 +478,56 @@ describe("the canonical trace (X6.2)", () => {
     });
   });
 
+  it("keeps an LLM call to the contract: unknown fields dropped, wrong types refused", async () => {
+    const recs = records("claude-basic").map((r, i) =>
+      r.role === "assistant" && i > 0 ? { ...r, llm_call: "c1" } : r,
+    );
+    const result = await ingest({
+      store,
+      owner: "acme",
+      records: recs,
+      metadata: meta,
+      now,
+      llm_calls: [
+        {
+          id: "c1",
+          model: "claude-opus",
+          usage: { input_tokens: 3, output_tokens: 4 },
+          parameters: { temperature: 0, stop: null },
+          cost_usd: 0.25,
+        } as never,
+      ],
+    });
+    const trace = await getTrace(store, "acme", result.archive_id, result.content_hash);
+    expect(trace?.llm_calls).toEqual([
+      {
+        id: "c1",
+        model: "claude-opus",
+        usage: { input_tokens: 3, output_tokens: 4 },
+        parameters: { temperature: 0, stop: null },
+      },
+    ]);
+    for (const [call, message] of [
+      [{ id: "c1", model: 42 }, "model must be a string"],
+      [{ id: "c1", parameters: { tools: { a: 1 } } }, "parameters.tools"],
+      [{ id: "c1", usage: { input_tokens: 1.5 } }, "usage.input_tokens"],
+      [{ id: "c1", usage: { cost: 1 } }, "usage.cost"],
+      [{ id: "c1", duration_ms: -1 }, "duration_ms"],
+      [{ model: "x" }, "needs an id"],
+    ] as const) {
+      await expect(
+        ingest({
+          store,
+          owner: "acme",
+          records: recs,
+          metadata: { ...meta, session_id: "llm-bad" },
+          now,
+          llm_calls: [call as never],
+        }),
+      ).rejects.toMatchObject({ code: "invalid", message: expect.stringContaining(message) });
+    }
+  });
+
   it("sums redaction counts over a session's writes", async () => {
     const ruleSet = "f".repeat(64);
     await ingest({
