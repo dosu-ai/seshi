@@ -388,6 +388,27 @@ describe("the upload protocol", () => {
     expect(server.uploads[1]?.transcript).toBe(line("three"));
   });
 
+  it("forgets the last answer when offset_mismatch moves it to the end of the transcript", async () => {
+    // Found by the scenario explorer (33): a chunk landed but its answer was lost; the retry was
+    // told the server's offset, which is the transcript's end, so nothing more went and no
+    // answer replaced the one before: the doctor compared the server with that stale answer.
+    writeFileSync(transcript(), line("one") + line("two"));
+    hooked();
+    await uploader().pass();
+    expect(session().shipped?.records).toBe(2);
+    const stored = server.sessions.get("s1");
+    if (stored) stored.text += line("three");
+    appendFileSync(transcript(), line("three"));
+    await uploader().pass();
+    const size = Buffer.byteLength(line("one") + line("two") + line("three"));
+    expect(session()).toMatchObject({ file_offset: size, server_offset: size });
+    expect(session().shipped).toBeUndefined();
+    // The next answer sets it again.
+    appendFileSync(transcript(), line("four"));
+    await uploader().pass();
+    expect(session().shipped?.records).toBe(4);
+  });
+
   it("resends from where the server says on offset_mismatch, and the whole log when it says 0", async () => {
     writeFileSync(transcript(), line("one") + line("two"));
     hooked();

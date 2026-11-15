@@ -1,0 +1,24 @@
+# Found by the scenario explorer (tests/tooling/scenario/explore.ts); see tests/scenarios/README.md.
+# seed: 7587 (bun run scenarios:explore --seed 7587 --runs 1 --max-steps 25)
+# original length: 18 steps; shrunk to 9 in 102 runs
+# failure:
+#   step 9 (settle max=40): once quiet, seshi doctor fails a check
+#     main: offsets: the last answer said 11 records (ad7dfe87e4d1), the server now holds 21 (62b087a80919)
+#         the server holds 7940 bytes (21 records); 7940 bytes of the transcript sent
+#     faults fired:
+#       store put owners/me/sessions/a40d5f79786facfbb0389dcac9dbb5f3a92980bed8517574779723b503b81808/metadata.json: store put owners/*/sessions/*/metadata.json #1 ×2 → fail after the write
+#     capture log (last lines):
+#       2026-09-01T09:00:00.023Z uploader: claude-code:main: will retry: injected store failure for owners/me/sessions/a40d5f79786facfbb0389dcac9dbb5f3a92980bed8517574779723b503b81808/metadata.json (store put owners/*/sessions/*/metadata.json #1 ×…
+name: found by seed 7587
+description: "A generated scenario (seed 7587) shrunk from 18 to 9 steps; the header says how it failed."
+setup: { mode: local }
+steps:
+  - turns: { session: main, count: 2 }
+  - pass
+  - fault: { store: put, key: "owners/*/sessions/*/metadata.json", after: true, times: 2 }
+  - turns: { session: main, count: 2 }
+  - rules: { add: [{ id: r1, pattern: typed constant }] }
+  - pass
+  - heal
+  - backfill
+  - settle

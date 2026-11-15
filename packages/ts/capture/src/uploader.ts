@@ -1060,6 +1060,10 @@ export class Uploader {
             await this.save(key, (s) => {
               s.file_offset = expected;
               s.server_offset = expected;
+              // The last answer's records and prefix describe a log the server has moved past;
+              // with nothing left to send, no answer would replace them, and the doctor would
+              // compare the server with a stale answer (33). The next answer sets them again.
+              delete s.shipped;
               // The server already holds past where a pause stopped the session (a piece whose
               // answer was lost): it keeps that, and nothing past it is sent.
               if (s.frozen && s.frozen.offset < expected) s.frozen.offset = expected;
