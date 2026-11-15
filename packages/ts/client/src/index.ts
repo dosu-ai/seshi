@@ -19,5 +19,35 @@ export type {
   StoreSessionResult,
   Upload,
 } from "@seshi/model";
-export { IngestRejected, OffsetMismatch, SessionRejected, StoreError } from "@seshi/model";
-export { type HttpClientOptions, HttpSessionDB, ServerError } from "./http";
+export {
+  Forbidden,
+  IngestRejected,
+  OffsetMismatch,
+  SessionConflict,
+  SessionRejected,
+  StoreError,
+} from "@seshi/model";
+export {
+  authConfig,
+  exchangeIdToken,
+  type HttpClientOptions,
+  HttpSessionDB,
+  type OwnerOption,
+  ServerError,
+  type TransportOptions,
+} from "./http";
+export type {
+  AuthConfig,
+  ExchangeRequest,
+  ExchangeResult,
+  JobsStatus,
+  OwnersPage,
+  RecordKind,
+  RecordsPage,
+  Scope,
+  SourceRecord,
+  SourceStatus,
+  TokenInfo,
+  TokenKind,
+  TokenRequest,
+} from "./types";
