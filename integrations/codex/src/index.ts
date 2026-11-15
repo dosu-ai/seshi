@@ -7,8 +7,10 @@
 import { lettaAdapter } from "@seshi/formats";
 import { defineIntegration, type FormatAdapter } from "@seshi/kit";
 import type { JsonObject } from "@seshi/model";
+import { CODEX_CAPTURE } from "./capture";
 import { subagentReportsAsObservations, withoutInheritedHistory } from "./codex-rollout";
 
+export { CODEX_CAPTURE } from "./capture";
 export { subagentReportsAsObservations, withoutInheritedHistory } from "./codex-rollout";
 
 const isObject = (value: unknown): value is JsonObject =>
@@ -31,4 +33,5 @@ export const CODEX_FORMAT: FormatAdapter = lettaAdapter({
 export const codex = defineIntegration({
   name: "codex",
   formats: [CODEX_FORMAT],
+  capture: CODEX_CAPTURE,
 });

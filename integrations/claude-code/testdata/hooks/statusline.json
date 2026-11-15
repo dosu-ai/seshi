@@ -1,0 +1,15 @@
+{
+  "hook_event_name": "Status",
+  "session_id": "1f2e3d4c-5b6a-4789-9abc-def012345678",
+  "transcript_path": "/Users/dev/.claude/projects/-Users-dev-code-app/1f2e3d4c-5b6a-4789-9abc-def012345678.jsonl",
+  "cwd": "/Users/dev/code/app",
+  "model": {
+    "id": "claude-opus-5-5",
+    "display_name": "Opus"
+  },
+  "workspace": {
+    "current_dir": "/Users/dev/code/app",
+    "project_dir": "/Users/dev/code/app"
+  },
+  "version": "2.1.0"
+}

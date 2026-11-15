@@ -6,6 +6,9 @@
   "exports": {
     ".": {
       "bun": "./src/index.ts"
+    },
+    "./capture": {
+      "bun": "./src/local/capture.ts"
     }
   },
   "dependencies": {

@@ -1,0 +1,9 @@
+{
+  "name": "seshi",
+  "description": "Session Capture: uploads Claude Code sessions to your team's seshi server as they happen, with a /seshi skill to turn capture off or on for a session.",
+  "author": {
+    "name": "Dosu"
+  },
+  "homepage": "https://github.com/dosu-ai/sessiondb",
+  "license": "MIT"
+}

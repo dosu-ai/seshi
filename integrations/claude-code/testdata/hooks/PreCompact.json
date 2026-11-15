@@ -1,0 +1,8 @@
+{
+  "session_id": "1f2e3d4c-5b6a-4789-9abc-def012345678",
+  "transcript_path": "/Users/dev/.claude/projects/-Users-dev-code-app/1f2e3d4c-5b6a-4789-9abc-def012345678.jsonl",
+  "cwd": "/Users/dev/code/app",
+  "hook_event_name": "PreCompact",
+  "trigger": "auto",
+  "custom_instructions": ""
+}

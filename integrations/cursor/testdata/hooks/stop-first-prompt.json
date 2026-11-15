@@ -1,0 +1,10 @@
+{
+  "conversation_id": "c0ffee00-1111-4222-8333-444455556666",
+  "generation_id": "g-7",
+  "workspace_roots": [
+    "/Users/dev/code/app"
+  ],
+  "hook_event_name": "stop",
+  "status": "completed",
+  "transcript_path": ""
+}
