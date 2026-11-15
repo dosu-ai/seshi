@@ -3,7 +3,7 @@
  * launcher, and put the installed binary through the smoke test (keychain off, so the real
  * keychain is never touched). Everything stays on 127.0.0.1 and in temporary folders. */
 
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -45,6 +45,35 @@ describe("smokeEnv", () => {
     expect(off.HOME).toBe(join("/tmp/s", "home"));
     expect(off.SESHI_KEYCHAIN).toBe("false");
   });
+});
+
+describe.skipIf(process.platform === "win32")("smoke", () => {
+  it("stops and reports a server that never comes up, rather than waiting on it", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "seshi-smoke-stuck-"));
+    try {
+      const binary = join(dir, "seshi");
+      writeFileSync(
+        binary,
+        [
+          "#!/bin/sh",
+          'case "$1" in',
+          '  --version) echo "seshi 9.9.9" ;;',
+          '  admin) printf "org key\\n  sk-test\\n" ;;',
+          '  serve) echo "never listening" >&2; exec sleep 600 ;;',
+          "esac",
+          "",
+        ].join("\n"),
+      );
+      chmodSync(binary, 0o755);
+      const started = Date.now();
+      await expect(smoke({ binary, keychain: "off", timeout: 1_000 })).rejects.toThrow(
+        /did not come up[\s\S]*never listening/,
+      );
+      expect(Date.now() - started).toBeLessThan(10_000);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 20_000);
 });
 
 describe("serveDir", () => {

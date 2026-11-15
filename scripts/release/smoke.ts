@@ -158,10 +158,11 @@ export async function smoke(options: SmokeOptions): Promise<SmokeResult> {
     const orgKey = lines[keyAt + 1]?.trim();
     if (keyAt === -1 || !orgKey) throw new Error(`admin init printed no org key:\n${init.out}`);
 
+    // stdout is not read, so it must not be a pipe the server could fill and block on.
     server = Bun.spawn([options.binary, "serve", "--config", config], {
       cwd: dir,
       env,
-      stdout: "pipe",
+      stdout: "ignore",
       stderr: "pipe",
     });
     const url = `http://127.0.0.1:${port}`;
@@ -173,8 +174,11 @@ export async function smoke(options: SmokeOptions): Promise<SmokeResult> {
         // Not listening yet.
       }
       if (server.exitCode !== null || Date.now() > deadline) {
+        // Its stderr ends only when it exits: stop a server that is still running first.
+        server.kill();
+        const code = await server.exited;
         const err = await new Response(server.stderr as ReadableStream).text();
-        throw new Error(`seshi serve did not come up (exit ${server.exitCode}):\n${err}`);
+        throw new Error(`seshi serve did not come up (exit ${code}):\n${err}`);
       }
       await Bun.sleep(100);
     }

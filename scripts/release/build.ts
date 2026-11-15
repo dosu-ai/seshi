@@ -135,8 +135,22 @@ function hostTargetId(): string | undefined {
   }
 }
 
+/** The caller's environment without its seshi settings: the binary must not read them, and
+ * an empty environment breaks Windows programs (no SYSTEMROOT). */
+export function binaryEnv(base: Record<string, string | undefined>): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [name, value] of Object.entries(base)) {
+    if (value !== undefined && !name.toUpperCase().startsWith("SESHI_")) env[name] = value;
+  }
+  return env;
+}
+
 async function checkRuns(binary: string, version: string): Promise<void> {
-  const proc = Bun.spawn([binary, "--version"], { stdout: "pipe", stderr: "pipe", env: {} });
+  const proc = Bun.spawn([binary, "--version"], {
+    stdout: "pipe",
+    stderr: "pipe",
+    env: binaryEnv(process.env),
+  });
   const [code, out] = await Promise.all([proc.exited, new Response(proc.stdout).text()]);
   if (code !== 0 || out.trim() !== `seshi ${version}`) {
     throw new Error(`${binary} --version printed ${JSON.stringify(out.trim())} (exit ${code})`);

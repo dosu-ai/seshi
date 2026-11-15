@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { parseChecksums, readArchive, sha256 } from "./archive";
-import { buildRelease, selectTargets } from "./build";
+import { binaryEnv, buildRelease, selectTargets } from "./build";
 import { CHECKSUMS, hostTarget, INSTALL_SCRIPTS, TARGETS } from "./targets";
 import { standInCompile } from "./testing";
 
@@ -73,5 +73,19 @@ describe("selectTargets", () => {
     ]);
     expect(selectTargets(["host"])).toEqual([hostTarget()]);
     expect(() => selectTargets(["linux-ia32"])).toThrow(/unknown target/);
+  });
+});
+
+describe("binaryEnv", () => {
+  it("drops the caller's seshi settings and keeps the rest", () => {
+    expect(
+      binaryEnv({
+        PATH: "/bin",
+        SYSTEMROOT: "C:\\Windows",
+        SESHI_SERVER: "https://elsewhere",
+        seshi_keychain: "false",
+        UNSET: undefined,
+      }),
+    ).toEqual({ PATH: "/bin", SYSTEMROOT: "C:\\Windows" });
   });
 });
