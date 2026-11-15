@@ -1,7 +1,7 @@
 /** The one `seshi` binary (X2.2): `apps/seshi/src/main.ts` and everything it imports, compiled
  * with Bun into a single executable that needs no Bun, Node or node_modules to run. The server
- * Docker image is built from it (apps/seshi/Dockerfile); branch 15 builds the release binaries
- * for every platform with the same script.
+ * Docker image is built from it (apps/seshi/Dockerfile), and scripts/release/build.ts builds the
+ * release binaries for every platform with the same command line (docs/releasing.md).
  *
  *   bun run build [--target <bun-target>] [--outfile <path>]
  *

@@ -1,0 +1,177 @@
+/** Builds a release's GitHub assets (F8.4): the `seshi` binary for every target, each in its
+ * archive with the licence, the two install scripts, and `SHA256SUMS` over all of them.
+ *
+ *   bun run release:build [--version <X.Y.Z>] [--target <id>]… [--out <dir>]
+ *
+ * - `--target darwin-arm64` (repeatable, or `host`) limits the build; every target by default.
+ *   Cross-compiling downloads the target's Bun runtime, so a full build needs the network.
+ * - `--version` is checked against the repository's version (`@seshi/model`'s package.json,
+ *   which `scripts/release-version.ts` set), because each binary embeds it.
+ * - The output is `dist/release/` unless `--out` says otherwise: the assets at its top, the bare
+ *   binaries under `bin/<id>/` (not uploaded).
+ *
+ * Every archive is read back and its binary compared with what was compiled, and the host's
+ * binary, when built, must print `seshi <version>`. */
+
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { parseArgs } from "node:util";
+import { buildCommand } from "../build-binary";
+import { checksumFile, readArchive, sha256, tarGz, zip } from "./archive";
+import {
+  CHECKSUMS,
+  hostTarget,
+  INSTALL_SCRIPTS,
+  TARGETS,
+  type Target,
+  targetById,
+} from "./targets";
+
+export const ROOT = resolve(import.meta.dirname, "../..");
+
+export interface ReleaseAsset {
+  name: string;
+  sha256: string;
+  size: number;
+  /** The target whose binary the archive holds; none for an install script. */
+  target?: string;
+}
+
+export interface BuildReleaseOptions {
+  root?: string;
+  out: string;
+  targets?: readonly Target[];
+  /** Must equal the repository's version when given. */
+  version?: string;
+  /** Archive timestamps; the build's start by default. */
+  mtime?: number;
+  /** Compiles one target to `outfile`. Bun's compiler by default; tests may pass a stand-in. */
+  compile?: (target: Target, outfile: string) => Promise<void>;
+  log?: (line: string) => void;
+}
+
+export function repositoryVersion(root = ROOT): string {
+  const manifest = JSON.parse(readFileSync(join(root, "packages/ts/model/package.json"), "utf8"));
+  return manifest.version as string;
+}
+
+/** Compiles `target` with the same flags as `bun run build`. */
+export async function compileTarget(target: Target, outfile: string, root = ROOT): Promise<void> {
+  const { argv } = buildCommand({ root, target: target.bun, outfile });
+  mkdirSync(dirname(outfile), { recursive: true });
+  const proc = Bun.spawn(argv, { cwd: root, stdout: "pipe", stderr: "pipe" });
+  const [code, out, err] = await Promise.all([
+    proc.exited,
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ]);
+  if (code !== 0) throw new Error(`compiling ${target.id} failed (${code}):\n${out}${err}`);
+}
+
+/** The archive for one target: the binary (executable) and the licence. */
+export function archiveFor(target: Target, binary: Uint8Array, license: Uint8Array, mtime = 0) {
+  const entries = [
+    { name: target.binary, data: binary, mode: 0o755 },
+    { name: "LICENSE", data: license, mode: 0o644 },
+  ];
+  return target.os === "windows" ? zip(entries, mtime) : tarGz(entries, mtime);
+}
+
+export async function buildRelease(options: BuildReleaseOptions): Promise<ReleaseAsset[]> {
+  const root = options.root ?? ROOT;
+  const log = options.log ?? (() => {});
+  const version = repositoryVersion(root);
+  if (options.version !== undefined && options.version !== version) {
+    throw new Error(
+      `--version ${options.version} but packages/ts/model/package.json says ${version}; run scripts/release-version.ts first`,
+    );
+  }
+  const targets = options.targets ?? TARGETS;
+  const mtime = options.mtime ?? Date.now();
+  const compile =
+    options.compile ?? ((t: Target, outfile: string) => compileTarget(t, outfile, root));
+  const license = readFileSync(join(root, "LICENSE"));
+  mkdirSync(options.out, { recursive: true });
+
+  const files = new Map<string, Uint8Array>();
+  const assets: ReleaseAsset[] = [];
+  for (const target of targets) {
+    const outfile = join(options.out, "bin", target.id, target.binary);
+    rmSync(outfile, { force: true });
+    log(`compile ${target.id} (${target.bun})`);
+    await compile(target, outfile);
+    const binary = readFileSync(outfile);
+    const archive = archiveFor(target, binary, license, mtime);
+    const back = readArchive(target.asset, archive).find((e) => e.name === target.binary);
+    if (!back || sha256(back.data) !== sha256(binary)) {
+      throw new Error(`${target.asset}: the archived binary differs from the compiled one`);
+    }
+    writeFileSync(join(options.out, target.asset), archive);
+    files.set(target.asset, archive);
+    assets.push({
+      name: target.asset,
+      sha256: sha256(archive),
+      size: archive.byteLength,
+      target: target.id,
+    });
+    if (target.id === hostTargetId()) await checkRuns(outfile, version);
+  }
+  for (const script of INSTALL_SCRIPTS) {
+    const data = readFileSync(join(root, "scripts/install", script));
+    writeFileSync(join(options.out, script), data);
+    files.set(script, data);
+    assets.push({ name: script, sha256: sha256(data), size: data.byteLength });
+  }
+  writeFileSync(join(options.out, CHECKSUMS), checksumFile(files));
+  log(`${CHECKSUMS}: ${files.size} assets`);
+  return assets;
+}
+
+function hostTargetId(): string | undefined {
+  try {
+    return hostTarget().id;
+  } catch {
+    return undefined;
+  }
+}
+
+async function checkRuns(binary: string, version: string): Promise<void> {
+  const proc = Bun.spawn([binary, "--version"], { stdout: "pipe", stderr: "pipe", env: {} });
+  const [code, out] = await Promise.all([proc.exited, new Response(proc.stdout).text()]);
+  if (code !== 0 || out.trim() !== `seshi ${version}`) {
+    throw new Error(`${binary} --version printed ${JSON.stringify(out.trim())} (exit ${code})`);
+  }
+}
+
+/** `--target` values to targets: ids, or `host`. */
+export function selectTargets(names: readonly string[]): Target[] {
+  if (names.length === 0) return [...TARGETS];
+  const picked = names.map((name) => (name === "host" ? hostTarget() : targetById(name)));
+  return TARGETS.filter((t) => picked.includes(t));
+}
+
+if (import.meta.main) {
+  const { values } = parseArgs({
+    args: process.argv.slice(2),
+    options: {
+      version: { type: "string" },
+      target: { type: "string", multiple: true },
+      out: { type: "string" },
+    },
+    strict: true,
+  });
+  try {
+    const assets = await buildRelease({
+      out: resolve(values.out ?? join(ROOT, "dist/release")),
+      targets: selectTargets(values.target ?? []),
+      ...(values.version ? { version: values.version } : {}),
+      log: (line) => console.log(`release: ${line}`),
+    });
+    for (const asset of assets) {
+      console.log(`${asset.sha256}  ${asset.name}  (${(asset.size / 1e6).toFixed(1)} MB)`);
+    }
+  } catch (err) {
+    console.error(`release: ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
+  }
+}
