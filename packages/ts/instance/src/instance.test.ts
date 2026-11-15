@@ -301,7 +301,7 @@ describe("an Instance", () => {
 describe("the worker (X7)", () => {
   it("polls each source on its interval, writes the heartbeat, and status shows both", async () => {
     const connector = pagingConnector();
-    const instance = await buildInstance(config(`${DD}\n[worker]\nheartbeat_interval = 40\n`), {
+    const instance = await buildInstance(config(`${DD}\n[worker]\nheartbeat_interval = 200\n`), {
       formats,
       env: {},
       connectors: [connector],
@@ -314,7 +314,8 @@ describe("the worker (X7)", () => {
           ((await readCheckpoint(instance.store, "dd"))?.value.cursor.page as number) >= 3,
       );
       await until(
-        async () => (await readHeartbeat(instance.store))?.value.jobs?.["source:dd"] !== undefined,
+        async () =>
+          (await readHeartbeat(instance.store))?.value.jobs?.["source:dd"]?.last_outcome === "ok",
       );
       const beat = (await readHeartbeat(instance.store))?.value;
       expect(beat).toMatchObject({
@@ -358,15 +359,18 @@ describe("the worker (X7)", () => {
   });
 
   it("spots a second worker from the heartbeat (X7.3)", async () => {
-    const toml = "[worker]\nheartbeat_interval = 30\n";
+    // Long enough that a loaded test machine still writes each beat within its fresh window.
+    const toml = "[worker]\nheartbeat_interval = 200\n";
     const one = await buildInstance(config(toml), { formats, env: {}, id: "one" });
     const two = await buildInstance(config(toml), { formats, env: {}, id: "two" });
     one.start();
     two.start();
     try {
-      await until(async () => (await one.status()).worker.state === "several");
+      // Whichever wrote last, the heartbeat names the other.
+      for (const instance of [one, two]) {
+        await until(async () => (await instance.status()).worker.state === "several");
+      }
       const status = await two.status();
-      expect(status.worker.state).toBe("several");
       expect(status.warnings.join("\n")).toMatch(/2 workers are running/);
     } finally {
       await Promise.all([one.close(), two.close()]);

@@ -65,7 +65,7 @@ interval = "1h"
 visibility = "owner"
 
 [worker]
-heartbeat_interval = 50
+heartbeat_interval = 200
 `;
 
 let booted: Awaited<ReturnType<typeof bootInstance>> | undefined;
