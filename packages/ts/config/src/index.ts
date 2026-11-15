@@ -27,6 +27,7 @@ export {
   CONFIG_ENV,
   cliConfigPath,
   findServerConfig,
+  NOT_SETTINGS_ENV,
   SERVER_CONFIG_NAME,
   SYSTEM_CONFIG_PATH,
 } from "./paths";

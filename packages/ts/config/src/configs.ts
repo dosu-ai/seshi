@@ -3,7 +3,7 @@
 
 import { type CliConfig, cliConfigSchema } from "./cli";
 import { type ConfigFs, type Loaded, type LoadOptions, loadConfig, nodeFs, shapeOf } from "./load";
-import { CONFIG_ENV, cliConfigPath, findServerConfig } from "./paths";
+import { cliConfigPath, findServerConfig, NOT_SETTINGS_ENV } from "./paths";
 import { type ServerConfig, serverConfigSchema } from "./server/index";
 
 export interface ServerLoadOptions extends Omit<LoadOptions, "file" | "foreign" | "ignoreEnv"> {
@@ -31,7 +31,7 @@ export function loadServerConfig(options: ServerLoadOptions = {}): Loaded<Server
     fs,
     env,
     file: found.path,
-    ignoreEnv: [CONFIG_ENV],
+    ignoreEnv: [...NOT_SETTINGS_ENV],
     foreign: [shapeOf(cliConfigSchema)],
   });
 }
@@ -62,7 +62,7 @@ export function loadCliConfig(options: CliLoadOptions = {}): Loaded<CliConfig> {
     fs,
     env,
     file,
-    ignoreEnv: [CONFIG_ENV],
+    ignoreEnv: [...NOT_SETTINGS_ENV],
     foreign: [shapeOf(serverConfigSchema)],
   });
 }

@@ -77,6 +77,15 @@
             "additionalProperties": false,
             "description": "A personal capture rule for a folder (F9.5)."
           }
+        },
+        "remotes": {
+          "default": [],
+          "description": "The org rule (F9.5): when set, only repos with a git remote matching one of these patterns are captured (github.com/acme, github.com/acme/*). It can only turn capture off.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
         }
       },
       "additionalProperties": false

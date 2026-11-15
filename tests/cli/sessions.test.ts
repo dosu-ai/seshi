@@ -469,7 +469,7 @@ describe("local mode (F8.3, X3.5)", () => {
         cli: {
           local: { config: toml, owner: "me" },
           theme: "auto",
-          capture: { enabled: true, paths: [] },
+          capture: { enabled: true, paths: [], remotes: [] },
         },
         env: {},
         integrations: INTEGRATIONS,

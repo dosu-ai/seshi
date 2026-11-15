@@ -5,6 +5,16 @@ import { join, resolve, win32 } from "node:path";
 
 /** The env variable naming the server's config file. */
 export const CONFIG_ENV = "SESHI_CONFIG";
+
+/** `SESHI_*` variables that are not settings, which both loaders pass over: the config file's
+ * name, and capture's own (F9): `SESHI_SESSION_ID` and `SESHI_AGENT`, which an agent's
+ * SessionStart hook sets for every command the agent runs, and `SESHI_NO_UPLOADER`. */
+export const NOT_SETTINGS_ENV: readonly string[] = [
+  CONFIG_ENV,
+  "SESHI_SESSION_ID",
+  "SESHI_AGENT",
+  "SESHI_NO_UPLOADER",
+];
 export const SERVER_CONFIG_NAME = "seshi.toml";
 export const SYSTEM_CONFIG_PATH = "/etc/seshi/seshi.toml";
 

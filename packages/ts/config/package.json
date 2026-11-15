@@ -6,6 +6,9 @@
   "exports": {
     ".": {
       "bun": "./src/index.ts"
+    },
+    "./paths": {
+      "bun": "./src/paths.ts"
     }
   },
   "dependencies": {

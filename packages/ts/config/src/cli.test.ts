@@ -63,14 +63,17 @@ describe("the CLI's config", () => {
       server: "https://seshi.acme.dev",
       user: "alice@acme.com",
       theme: "dark",
-      capture: { enabled: false, paths: [{ path: "~/clients/acme", capture: false }] },
+      capture: { enabled: false, paths: [{ path: "~/clients/acme", capture: false }], remotes: [] },
     });
   });
 
   it("is defaults when there is no file", () => {
     const loaded = loadCliConfig({ home: "/home/a", platform: "linux", fs: fs({}) });
     expect(loaded.file).toBeUndefined();
-    expect(loaded.config).toEqual({ theme: "auto", capture: { enabled: true, paths: [] } });
+    expect(loaded.config).toEqual({
+      theme: "auto",
+      capture: { enabled: true, paths: [], remotes: [] },
+    });
   });
 
   it("is as strict as the server's", () => {

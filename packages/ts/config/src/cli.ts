@@ -55,6 +55,12 @@ export const cliConfigSchema = z
           .array(capturePath)
           .default([])
           .describe("Rules by folder; the longest match decides."),
+        remotes: z
+          .array(z.string().min(1))
+          .default([])
+          .describe(
+            "The org rule (F9.5): when set, only repos with a git remote matching one of these patterns are captured (github.com/acme, github.com/acme/*). It can only turn capture off.",
+          ),
       })
       .prefault({})
       .describe("Personal capture rules (F9.5)."),
