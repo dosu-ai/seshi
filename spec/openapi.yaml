@@ -926,6 +926,106 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
 
+  /v1/admin/sources:
+    get:
+      tags: [admin]
+      summary: Every configured source and `upload` (X4.8, X6.4).
+      operationId: adminSources
+      description: |
+        Each source's checkpoint, drop and failure record counts, and source health summed
+        over the last `days` days. `seshi sync status` reads it from a machine without the
+        server's config. Needs `sources:admin` (admins).
+      parameters:
+        - $ref: "#/components/parameters/days"
+      responses:
+        "200":
+          description: The sources, read now.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sources]
+                properties:
+                  sources:
+                    type: array
+                    items: { $ref: "#/components/schemas/SourceStatus" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
+  /v1/admin/sources/{id}:
+    get:
+      tags: [admin]
+      summary: One source's checkpoint, record counts and health.
+      operationId: adminSource
+      description: Needs `sources:admin`. `upload` is the source of hooks and `seshi upload`.
+      parameters:
+        - $ref: "#/components/parameters/source_id"
+        - $ref: "#/components/parameters/days"
+      responses:
+        "200":
+          description: The source, read now.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SourceStatus" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: "`unknown_source`: no configured source has this id."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
+  /v1/admin/sources/{id}/{kind}:
+    get:
+      tags: [admin]
+      summary: A source's failure or drop records, oldest first (X6.4).
+      operationId: adminSourceRecords
+      description: |
+        One record per envelope that was not stored: `failed` for a permanent pipeline
+        failure (X4.8), `dropped` for a model review drop (F3.4). Each says when, which
+        session and idempotency key, and why; never the content. A source no longer in
+        `[[sources]]` keeps its records until retention prunes them, so they can be read.
+        `seshi sync failed|dropped` reads it. Needs `sources:admin`.
+      parameters:
+        - $ref: "#/components/parameters/source_id"
+        - name: kind
+          in: path
+          required: true
+          schema: { enum: [failed, dropped] }
+        - name: since
+          in: query
+          required: false
+          description: Only records at or after this time. Ignored with `after`.
+          schema: { type: string, format: date-time }
+        - name: after
+          in: query
+          required: false
+          description: The `cursor` of the last page.
+          schema: { type: string }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 50 }
+      responses:
+        "200":
+          description: A page of records.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecordsPage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: "`unknown_source`: no such source, configured or with records."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
 components:
   securitySchemes:
     bearer:
@@ -956,6 +1056,18 @@ components:
       required: false
       description: Whose session(s); the caller's own by default (X5.10).
       schema: { $ref: "#/components/schemas/Owner" }
+    source_id:
+      name: id
+      in: path
+      required: true
+      description: A source id from `[[sources]]`, or `upload`.
+      schema: { type: string, minLength: 1 }
+    days:
+      name: days
+      in: query
+      required: false
+      description: How many days of source health to sum (up to 90).
+      schema: { type: integer, minimum: 1, default: 7 }
 
   responses:
     BadRequest:
@@ -1970,3 +2082,80 @@ components:
             items: { type: integer, minimum: 0 }
             minItems: 2
             maxItems: 2
+
+    SourceStatus:
+      type: object
+      required: [id, type, enabled, polled, checkpoint, dropped, failed, health]
+      properties:
+        id: { type: string }
+        type:
+          type: string
+          description: The source's `type` (`otlp`, `datadog`, `s3`), or `upload`.
+        enabled: { type: boolean }
+        polled:
+          type: boolean
+          description: The worker polls it (enabled, with a connector in this binary).
+        connector: { type: string }
+        interval_ms: { type: integer }
+        note:
+          type: string
+          description: Why it is not polled, when it is not.
+        checkpoint:
+          oneOf:
+            - type: "null"
+            - type: object
+              required: [updated_at, cursor]
+              properties:
+                updated_at: { type: string, format: date-time }
+                cursor: { type: object }
+        dropped: { type: integer, minimum: 0 }
+        failed: { type: integer, minimum: 0 }
+        health:
+          type: object
+          description: Outcome counts over the days asked for (X4.8).
+          additionalProperties: { type: integer }
+
+    SourceRecord:
+      type: object
+      description: |
+        A drop (`seshi/dropped/1`) or failure (`seshi/failed/1`) record: that an envelope
+        arrived and why it was not stored, never what it contained.
+      required: [schema, at, source, idempotency_key]
+      properties:
+        schema: { enum: [seshi/dropped/1, seshi/failed/1] }
+        at: { type: string, format: date-time }
+        source: { type: string }
+        source_kind: { type: string }
+        owner: { type: string }
+        session_key: { type: string }
+        idempotency_key: { type: string }
+        provenance: { type: object }
+        code:
+          type: string
+          description: A failure's pipeline error code.
+        message:
+          type: string
+          description: A failure's message, with quoted data elided.
+        reason: { enum: [review_drop, review_failed] }
+        policy: { type: string }
+        policy_hash: { type: string }
+        decision_model: { type: string }
+
+    RecordsPage:
+      type: object
+      required: [source, kind, records, truncated]
+      properties:
+        source: { type: string }
+        kind: { enum: [failed, dropped] }
+        records:
+          type: array
+          items:
+            type: object
+            required: [key, record]
+            properties:
+              key: { type: string }
+              record: { $ref: "#/components/schemas/SourceRecord" }
+        cursor:
+          type: string
+          description: The last key on the page; pass as `after`.
+        truncated: { type: boolean }

@@ -72,10 +72,12 @@ import {
   isOwner,
   keys,
   listOwners,
+  listRecords,
   listReviews,
   type ReviewRecord,
   readChanges,
   readMetadata,
+  sourcesWithRecords,
   type TokenKind,
 } from "@seshi/store";
 import { otlpTraces } from "./otlp/receiver";
@@ -798,6 +800,71 @@ export function createApp(instance: Instance) {
 
   const traces = otlpTraces(instance, { bearer, readBody, maxBodyBytes: bodyLimit });
   route("POST", "/otlp/v1/traces", ({ request }) => traces(request));
+  // --- admin: sources (X4.8, X6.4) ------------------------------------------------------
+  // What `seshi sync status|failed|dropped` read over HTTP. A source no longer in [[sources]]
+  // keeps its records until retention prunes them, so its records can still be read.
+
+  /** Whether `id` names a source this deployment knows: `upload`, a configured one, or (with
+   * `withRecords`) one that still has records. */
+  async function knownSource(id: string, withRecords: boolean): Promise<boolean> {
+    if (id === UPLOAD_SOURCE || instance.source(id) !== undefined) return true;
+    return withRecords && (await sourcesWithRecords(store)).includes(id);
+  }
+
+  function unknownSource(id: string): HttpError {
+    return new HttpError(404, "unknown_source", `no source '${id}'`);
+  }
+
+  function daysParam(url: URL): number {
+    return intParam(url, "days", 7, 90);
+  }
+
+  /** Every configured source and `upload`: checkpoint, record counts and health over
+   * `?days=` (7 by default). */
+  route("GET", "/v1/admin/sources", async ({ request, url }) => {
+    await caller(request, "sources:admin");
+    const days = daysParam(url);
+    const ids = [...instance.config.sources.map((s) => s.id), UPLOAD_SOURCE];
+    const sources = [];
+    for (const id of ids) sources.push(await instance.sources.status(id, { days }));
+    return json({ sources });
+  });
+
+  route("GET", "/v1/admin/sources/:id", async ({ request, params, url }) => {
+    await caller(request, "sources:admin");
+    const id = decodeURIComponent(params.id as string);
+    if (!(await knownSource(id, false))) throw unknownSource(id);
+    return json(await instance.sources.status(id, { days: daysParam(url) }));
+  });
+
+  /** A source's failure or drop records, oldest first: why each envelope was not stored,
+   * never its content. `?since=` (a time) or `?after=` (the last key seen), `?limit=`. */
+  route("GET", "/v1/admin/sources/:id/:kind", async ({ request, params, url }) => {
+    await caller(request, "sources:admin");
+    const id = decodeURIComponent(params.id as string);
+    const kind = params.kind as string;
+    if (kind !== "failed" && kind !== "dropped") {
+      throw new HttpError(404, "not_found", `no route ${url.pathname}`);
+    }
+    if (!(await knownSource(id, true))) throw unknownSource(id);
+    const limit = intParam(url, "limit", 50, 1000);
+    const after = url.searchParams.get("after") ?? undefined;
+    if (after !== undefined && !after.startsWith(keys.records(kind, id))) {
+      throw new HttpError(400, "bad_query", `after is not a key of ${id}'s ${kind} records`);
+    }
+    const sinceParam = url.searchParams.get("since");
+    let since: string | undefined;
+    if (sinceParam !== null) {
+      const at = new Date(sinceParam);
+      if (Number.isNaN(at.getTime())) throw new HttpError(400, "bad_query", "since is not a time");
+      since = at.toISOString();
+    }
+    const page = await listRecords(store, kind, id, {
+      limit,
+      ...(after !== undefined ? { after } : since !== undefined ? { since } : {}),
+    });
+    return json({ source: id, kind, ...page });
+  });
 
   return { fetch: dispatch(routes), auth, pipeline };
 }

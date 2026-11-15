@@ -12,7 +12,7 @@ import { Auth, CREDENTIAL_SCOPES } from "@seshi/auth";
 import { FakeIdp } from "@seshi/auth/testing";
 import { storeSession } from "@seshi/pipeline";
 import { compileRuleSet, validatePack } from "@seshi/redact";
-import { FsStore, type Store, StoreError } from "@seshi/store";
+import { FsStore, type Store, StoreError, writeDropped, writeFailed } from "@seshi/store";
 import { Ajv2020, type ValidateFunction } from "ajv/dist/2020";
 import addFormats from "ajv-formats";
 import { buildFormats } from "seshi/integrations";
@@ -263,6 +263,9 @@ describe("the document itself", () => {
         "GET /v1/sessions/{agent}/{session_id}/reviews",
         "POST /otlp/v1/traces",
         "GET /v1/search",
+        "GET /v1/admin/sources",
+        "GET /v1/admin/sources/{id}",
+        "GET /v1/admin/sources/{id}/{kind}",
       ].sort(),
     );
   });
@@ -566,6 +569,9 @@ describe("the server honours it", () => {
     expect((await call("GET", "/v1/sessions/claude-code/x/reviews", { app: down })).status).toBe(
       502,
     );
+    expect((await call("GET", "/v1/admin/sources", admin)).status).toBe(502);
+    expect((await call("GET", "/v1/admin/sources/upload", admin)).status).toBe(502);
+    expect((await call("GET", "/v1/admin/sources/upload/failed", admin)).status).toBe(502);
     expect((await call("DELETE", "/v1/sessions/claude-code/x", { app: down })).status).toBe(502);
     expect((await call("GET", "/v1/changes", { app: down })).status).toBe(502);
   });
@@ -690,6 +696,78 @@ describe("identity and access (X5)", () => {
     expect(
       (await patch({ ...admin }, "org", "/v1/sessions/claude-code/s1?owner=alice")).status,
     ).toBe(410);
+  });
+
+  it("the admin source routes", async () => {
+    const { admin: first, org_key } = await auth.initAdmin({ owner: "ops" });
+    const admin = { app: x5, token: first?.token };
+    const alice = { app: x5, token: org_key?.token, user: "alice" };
+    const nobody = { app: x5, token: null };
+    // A source no longer configured still has its records.
+    await writeFailed(store, {
+      at: "2026-11-01T00:00:00.000Z",
+      source: "gone",
+      idempotency_key: "k1",
+      code: "invalid",
+      message: "no records",
+    });
+    await writeDropped(store, {
+      at: "2026-11-02T00:00:00.000Z",
+      source: "upload",
+      idempotency_key: "k2",
+      session_key: "s1",
+      reason: "review_drop",
+      policy: "default",
+      policy_hash: "h",
+      decision_model: "m",
+    });
+
+    const all = await call("GET", "/v1/admin/sources?days=3", admin);
+    expect(all.status).toBe(200);
+    expect((all.body as { sources: { id: string }[] }).sources.map((s) => s.id)).toEqual([
+      "upload",
+    ]);
+    expect((await call("GET", "/v1/admin/sources?days=0", admin)).status).toBe(400);
+    expect((await call("GET", "/v1/admin/sources", alice)).status).toBe(403);
+    expect((await call("GET", "/v1/admin/sources", nobody)).status).toBe(401);
+
+    const upload = await call("GET", "/v1/admin/sources/upload", admin);
+    expect(upload.status).toBe(200);
+    expect(upload.body).toMatchObject({ id: "upload", dropped: 1, failed: 0 });
+    expect((await call("GET", "/v1/admin/sources/upload?days=x", admin)).status).toBe(400);
+    expect((await call("GET", "/v1/admin/sources/gone", admin)).status).toBe(404);
+    expect((await call("GET", "/v1/admin/sources/upload", alice)).status).toBe(403);
+    expect((await call("GET", "/v1/admin/sources/upload", nobody)).status).toBe(401);
+
+    const failed = await call("GET", "/v1/admin/sources/gone/failed", admin);
+    expect(failed.status).toBe(200);
+    expect(failed.body).toMatchObject({
+      source: "gone",
+      kind: "failed",
+      records: [{ record: { code: "invalid" } }],
+    });
+    const dropped = await call("GET", "/v1/admin/sources/upload/dropped?limit=1", admin);
+    expect(dropped.body).toMatchObject({ records: [{ record: { session_key: "s1" } }] });
+    const cursor = (dropped.body as { cursor: string }).cursor;
+    const next = await call(
+      "GET",
+      `/v1/admin/sources/upload/dropped?after=${encodeURIComponent(cursor)}`,
+      admin,
+    );
+    expect(next.body).toMatchObject({ records: [] });
+    const later = await call(
+      "GET",
+      "/v1/admin/sources/gone/failed?since=2026-11-02T00:00:00Z",
+      admin,
+    );
+    expect(later.body).toMatchObject({ records: [] });
+    expect((await call("GET", "/v1/admin/sources/gone/failed?since=soon", admin)).status).toBe(400);
+    expect(
+      (await call("GET", "/v1/admin/sources/upload/failed?after=elsewhere", admin)).status,
+    ).toBe(400);
+    expect((await call("GET", "/v1/admin/sources/nope/failed", admin)).status).toBe(404);
+    expect((await call("GET", "/v1/admin/sources/upload/failed", alice)).status).toBe(403);
+    expect((await call("GET", "/v1/admin/sources/upload/failed", nobody)).status).toBe(401);
   });
 
   it("the token routes", async () => {
