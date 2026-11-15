@@ -508,6 +508,39 @@ describe("server presence", () => {
     );
   });
 
+  it("passes a stub whose later whole send (a resend) answered unchanged", () => {
+    // Found by the scenario explorer (33): `seshi capture resend` of a stub sends it whole, the
+    // server adds nothing past the dropped start and answers `unchanged`; the doctor read only
+    // `dropped` as a stub and failed "the server holds nothing of it".
+    const unchanged = (f: (ev: SessionEvidence) => void) =>
+      evidence((ev) => {
+        (ev.local as SessionState).last_status = "unchanged";
+        ev.server.metadata = null;
+        f(ev);
+      });
+    const served = presenceCheck(unchanged(() => {}));
+    expectStatus(served, "ok");
+    expect(served.detail?.[0]).toContain("unchanged");
+    const local = presenceCheck(
+      unchanged((ev) => {
+        ev.server.sees_stubs = true;
+        ev.server.pointer = metadata({ head: undefined, traces: [] });
+      }),
+    );
+    expectStatus(local, "ok");
+    expect(local.summary).toContain("a later whole send added nothing");
+    // Seen in local mode with no stub there: still lost.
+    expectStatus(
+      presenceCheck(
+        unchanged((ev) => {
+          ev.server.sees_stubs = true;
+          ev.server.pointer = null;
+        }),
+      ),
+      "fail",
+    );
+  });
+
   it("passes a filtered session with nothing stored, and fails one deleted on the server", () => {
     expectStatus(
       presenceCheck(

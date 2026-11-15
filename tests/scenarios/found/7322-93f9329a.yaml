@@ -1,0 +1,16 @@
+# Found by the scenario explorer (tests/tooling/scenario/explore.ts); see tests/scenarios/README.md.
+# seed: 7322 (bun run scenarios:explore --seed 7322 --runs 1 --max-steps 25)
+# original length: 24 steps; shrunk to 6 in 109 runs
+# failure:
+#   step 6 (settle max=40): once quiet, seshi doctor fails a check
+#     main: presence: this machine stored main (3970 bytes sent), but the local bucket holds nothing of it
+name: found by seed 7322
+description: "A generated scenario (seed 7322) shrunk from 24 to 6 steps; the header says how it failed."
+setup: { mode: local, review: true }
+steps:
+  - review: [drop]
+  - turns: { session: main, count: 2 }
+  - pass
+  - capture: resend --all
+  - turns: { session: a, count: 2 }
+  - settle

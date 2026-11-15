@@ -370,13 +370,17 @@ function presenceNow(
       const frozen = s.frozen ? `, stopped by a pause at ${bytes(s.frozen.offset)}` : "";
       return result(id, title, "ok", `stored as ${uid}: head ${short(m?.head)}${frozen}`);
     }
-    if (s.last_status === "dropped") {
+    // A stub answers `dropped` first, and `unchanged` to a later whole send of nothing past the
+    // dropped start (a rebuild, `seshi capture resend`): the server holds the stub all along
+    // (StoreSessionResult, model/api.ts).
+    const stubbed = s.last_status === "dropped" || s.last_status === "unchanged";
+    if (stubbed) {
       if (pointer && isStub(pointer)) {
         return result(
           id,
           title,
           "ok",
-          `a stub: review dropped its first envelope, nothing of it stored`,
+          `a stub: review dropped its first envelope, nothing of it stored${s.last_status === "unchanged" ? "; a later whole send added nothing" : ""}`,
         );
       }
       if (!ev.server.sees_stubs) {
@@ -385,7 +389,11 @@ function presenceNow(
           title,
           "ok",
           `review dropped its first envelope: a stub ${where} does not show (it serves no stubs)`,
-          { detail: [`the laptop's last answer was dropped at ${bytes(s.server_offset ?? 0)}`] },
+          {
+            detail: [
+              `the laptop's last answer was ${s.last_status} at ${bytes(s.server_offset ?? 0)}`,
+            ],
+          },
         );
       }
       return lost(`review dropped its first envelope, but ${where} has no stub for ${uid}`);
