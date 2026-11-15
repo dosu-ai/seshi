@@ -89,6 +89,27 @@ describe("seshi", () => {
     expect(takeNoColor(["--no-color"])).toEqual({ noColor: true, rest: [] });
   });
 
+  it("prints a command's usage on <command> --help, exit 0", async () => {
+    // `hook` (called by agents, prints nothing) and `statusline` (reads the agent's payload)
+    // take no command line to speak of.
+    const names = Object.keys(COMMANDS).filter((n) => n !== "hook" && n !== "statusline");
+    for (const name of names) {
+      for (const flag of ["--help", "-h"]) {
+        const result = await run([name, flag]);
+        expect({ name, flag, code: result.code }).toEqual({ name, flag, code: 0 });
+        expect(result.out).toContain(`seshi ${name}`);
+        expect(result.out).toContain("usage:");
+        expect(result.err).toBe("");
+      }
+    }
+    const json = await run(["sessions", "--help", "--json"]);
+    expect(json.code).toBe(0);
+    expect(JSON.parse(json.out).usage).toContain("seshi sessions ls");
+    // After `--` it is an argument, and a wrong command line is still exit 2.
+    expect((await run(["sessions", "--", "--help"])).code).toBe(2);
+    expect((await run(["sessions", "frobnicate"])).code).toBe(2);
+  });
+
   it("registers every command lazily", () => {
     expect(Object.keys(COMMANDS)).toContain("serve");
     for (const spec of Object.values(COMMANDS)) expect(typeof spec.load).toBe("function");

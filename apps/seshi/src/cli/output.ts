@@ -36,13 +36,26 @@ export function fail(
   return code;
 }
 
-/** A usage error: the message and the usage line, exit `usage`. */
+/** Whether `--help` or `-h` is among `argv` (before a `--`). */
+export function asksForHelp(argv: readonly string[]): boolean {
+  const end = argv.indexOf("--");
+  return (end === -1 ? argv : argv.slice(0, end)).some((a) => a === "--help" || a === "-h");
+}
+
+/** A usage error: the message and the usage line, exit `usage`. When the command line asked
+ * for `--help` (or `-h`), which no command parses as an option, the usage is the answer
+ * instead: on stdout (`{"usage"}` with `json`), exit 0, as `seshi --help` and
+ * `seshi config --help` do. */
 export function usageError(
   ctx: CommandContext,
   json: boolean,
   message: string,
   usage: string,
 ): ExitCode {
+  if (asksForHelp(ctx.argv)) {
+    ctx.stdout(json ? JSON.stringify({ usage }) : usage);
+    return EXIT.ok;
+  }
   if (json) return fail(ctx, true, EXIT.usage, "usage", `${message}\n${usage}`);
   ctx.stderr(`seshi: ${message}`);
   ctx.stderr(usage);

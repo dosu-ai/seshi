@@ -111,7 +111,8 @@ export const COMMANDS: Readonly<Record<string, CommandSpec>> = {
     load: () => import("./serve"),
   },
   sessions: {
-    summary: "list, show, export and delete sessions (ls|show|export|rm)",
+    summary:
+      "list, show, export and delete sessions, set who sees them (ls|show|export|rm|visibility)",
     load: () => import("./sessions"),
   },
   statusline: {

@@ -4,10 +4,11 @@ One binary, `seshi` (X2.2), holds the CLI, the hooks agents call and the server.
 loads only its own code (X3.3), so `seshi hook`, which runs on every agent turn, starts in a
 few milliseconds; `bun run check:hook` holds it to that in CI.
 
-`seshi --help` lists the commands, `seshi --version` prints the release. Install it with the
-install script, npm (`npm i -g seshi`) or a GitHub release binary ([install.md](install.md));
-build it with `bun run build` (`dist/seshi`); from a checkout, `bun run seshi <command>` runs
-the same thing from source.
+`seshi --help` lists the commands, `seshi <command> --help` prints that command's usage, and
+`seshi --version` prints the release. Install it with the install script, npm
+(`npm i -g seshi`) or a GitHub release binary ([install.md](install.md)); build it with
+`bun run build` (`dist/seshi`); from a checkout, `bun run seshi <command>` runs the same thing
+from source.
 
 The compiled binary reads settings from `SESHI_*` env and the TOML files only. Unlike
 `bun run`, it never reads the working folder's `.env` or `bunfig.toml`: `seshi hook` runs in

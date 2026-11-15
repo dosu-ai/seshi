@@ -17,7 +17,7 @@ import { checkServerConfig } from "@seshi/config";
 import { lineLogger } from "@seshi/instance";
 import { VERSION } from "@seshi/model";
 import { EXIT } from "../cli/exit";
-import { fail } from "../cli/output";
+import { fail, usageError } from "../cli/output";
 import type { CommandContext } from "./index";
 import { openServer, serverFailure } from "./server-instance";
 
@@ -45,9 +45,7 @@ async function start(ctx: CommandContext, argv: string[]): Promise<number | unde
       allowPositionals: false,
     }));
   } catch (err) {
-    ctx.stderr(`seshi: ${message(err)}`);
-    ctx.stderr(USAGE);
-    return EXIT.usage;
+    return usageError(ctx, false, message(err), USAGE);
   }
   const log = lineLogger(ctx.stdout, ctx.stderr);
   const { instance, loaded, settings } = await openServer(ctx, values, { log });

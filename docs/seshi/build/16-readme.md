@@ -151,7 +151,7 @@ lockups and the badge. It changed:
     user agent*: the default is `@seshi/client/<version>` and the CLI and uploader send
     `seshi/<version>`; the normalizer name is unchanged.
   - `seshi --help` lists `sessions (ls|show|export|rm)` without `visibility`, which the
-    command has.
+    command has. *Resolved in 17*: the summary names `visibility`.
   - The Docker Compose service and volume are still named `sessiondb` (kept on purpose, so an
     existing volume survives), and the image is `ghcr.io/dosu-ai/sessiondb` until the
     repository is renamed (X3.8).
