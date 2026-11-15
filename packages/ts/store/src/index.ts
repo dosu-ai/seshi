@@ -6,6 +6,17 @@
 export { type ChangesPage, type ReadChangesOptions, readChanges } from "./changes";
 export { FsStore, STALE_LOCK_MS } from "./fs";
 export {
+  addHealth,
+  HEALTH_OUTCOMES,
+  HEALTH_SCHEMA,
+  type HealthCounts,
+  type HealthOutcome,
+  type HealthShard,
+  healthDay,
+  readHealth,
+  sourcesWithHealth,
+} from "./health";
+export {
   createJson,
   decodeJson,
   encodeJson,
@@ -20,7 +31,9 @@ export {
 } from "./json";
 export {
   archiveId,
+  assertDay,
   assertHash,
+  assertInstanceId,
   assertOwner,
   assertSourceId,
   assertTokenId,

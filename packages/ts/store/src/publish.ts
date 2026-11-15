@@ -1,6 +1,6 @@
 /** The publish protocol: write a trace object, verify it landed intact, then update the
- * session's pointer and append a change entry. A trace is content-addressed and a raw part
- * part-numbered, so re-publishing the same bytes is a no-op and two writers converge. The
+ * session's pointer and append a change entry. A trace is content-addressed, so re-publishing
+ * the same bytes is a no-op and two writers converge. The
  * pointer (`metadata.json`) is mutable and written with If-Match (X6.5): two writers updating
  * one session each re-read and retry instead of one losing the other's update. */
 
@@ -33,8 +33,8 @@ export type PublishOutcome = "written" | "exists";
 
 /** How an occupied key is treated. `immutable` is for content-addressed keys (a trace): the first
  * object wins, since whatever differs in a later one (timestamps, lineage) is outside the hash and
- * the first writer's view is as good as any. `replace` is for part-numbered keys (a raw part): the
- * same bytes are a no-op and different bytes replace. */
+ * the first writer's view is as good as any. `replace` is for keys whose object may change (a span
+ * record sent again): the same bytes are a no-op and different bytes replace. */
 export type PublishMode = "immutable" | "replace";
 
 /** Write `body` at `key` unless it is already there, and verify what landed: by ETag when the

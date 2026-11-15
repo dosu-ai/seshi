@@ -33,7 +33,8 @@ describe("layout", () => {
     const base = `owners/acme/sessions/${archive}`;
     expect(keys.metadata("acme", archive)).toBe(`${base}/metadata.json`);
     expect(keys.trace("acme", archive, hash)).toBe(`${base}/trace.${hash}.json.gz`);
-    expect(keys.raw("acme", archive, 2, "jsonl")).toBe(`${base}/raw.2.jsonl.gz`);
+    // No raw parts any more (X6.3): a session is its pointer, traces and change entries.
+    expect("raw" in keys).toBe(false);
     expect(keys.spans("acme", archive)).toBe(`${base}/spans/`);
     expect(keys.span("acme", archive, "0af7651916cd43dd8448eb211c80319c", "b7ad6b7169203331")).toBe(
       `${base}/spans/0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331.json`,
@@ -57,6 +58,13 @@ describe("layout", () => {
     expect(keys.heartbeat()).toBe("worker/heartbeat.json");
     expect(keys.pending(archive)).toBe(`assembly/pending/${archive}`);
     expect(keys.pendingAll()).toBe("assembly/pending/");
+    expect(keys.health("upload", "2026-11-14", "i-01")).toBe(
+      "sources/upload/health/2026-11-14/i-01.json",
+    );
+    expect(keys.healthDay("upload", "2026-11-14")).toBe("sources/upload/health/2026-11-14/");
+    expect(() => keys.health("upload", "2026-13-99", "i")).toThrow(/invalid day/);
+    expect(() => keys.health("upload", "14-11-2026", "i")).toThrow(/invalid day/);
+    expect(() => keys.health("upload", "2026-11-14", "../x")).toThrow(/invalid instance id/);
   });
 
   it("validates source ids as config does, upload included", () => {

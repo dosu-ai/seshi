@@ -1,0 +1,126 @@
+/** Source health counters: how many envelopes from each source ended how (X4.8, X4.10). A
+ * filtered session is only counted, never recorded, so these counters are the one place a
+ * misconfigured source shows up (Datadog minimal capture, metadata-only OTLP); 06's status
+ * reads them.
+ *
+ * `sources/<id>/health/<yyyy-mm-dd>/<instance>.json`: one object per source, UTC day and
+ * writing process. Every API instance and the worker count into their own shard, so no two
+ * processes contend on one object; a reader sums the shards of a day. Each shard is updated
+ * with If-Match (X6.5), so concurrent flushes in one process cannot lose counts either. Code-first:
+ * only the binary reads them (X3.10). */
+
+import { readJson, updateJson } from "./json";
+import { assertDay, keys } from "./layout";
+import type { Store } from "./store";
+
+export const HEALTH_SCHEMA = "seshi/source-health/1" as const;
+
+/** How an envelope ended. `stored`: a new trace. `duplicate`: the trace was already there, or
+ * the envelope was a resend (X4.7). `unchanged`: nothing new in it. `filtered`: the session
+ * filter kept it out (X4.10). `dropped`: model review dropped it (F3). `failed`: a permanent
+ * failure with no caller to tell, recorded under `failed/` (X4.8). `rejected`: refused to a
+ * caller (422, 409 conflict, 403). */
+export type HealthOutcome =
+  | "stored"
+  | "duplicate"
+  | "unchanged"
+  | "filtered"
+  | "dropped"
+  | "failed"
+  | "rejected";
+
+export const HEALTH_OUTCOMES: readonly HealthOutcome[] = [
+  "stored",
+  "duplicate",
+  "unchanged",
+  "filtered",
+  "dropped",
+  "failed",
+  "rejected",
+];
+
+export type HealthCounts = Partial<Record<HealthOutcome, number>>;
+
+/** One shard: one process's counts for one source and day. */
+export interface HealthShard {
+  schema: typeof HEALTH_SCHEMA;
+  source: string;
+  day: string;
+  instance: string;
+  counts: HealthCounts;
+  updated_at: string;
+}
+
+/** The UTC day of `at`, `YYYY-MM-DD`. */
+export function healthDay(at: Date): string {
+  return at.toISOString().slice(0, 10);
+}
+
+function add(into: HealthCounts, counts: HealthCounts): HealthCounts {
+  const out: HealthCounts = { ...into };
+  for (const outcome of HEALTH_OUTCOMES) {
+    const n = counts[outcome];
+    if (n) out[outcome] = (out[outcome] ?? 0) + n;
+  }
+  return out;
+}
+
+/** Add `counts` to one process's shard for `day`. */
+export async function addHealth(
+  store: Store,
+  input: { source: string; day: string; instance: string; counts: HealthCounts; at: string },
+): Promise<void> {
+  const { source, day, instance } = input;
+  if (!HEALTH_OUTCOMES.some((o) => (input.counts[o] ?? 0) > 0)) return;
+  await updateJson<HealthShard>(store, keys.health(source, day, instance), (current) => ({
+    schema: HEALTH_SCHEMA,
+    source,
+    day,
+    instance,
+    counts: add(current?.counts ?? {}, input.counts),
+    updated_at: input.at,
+  }));
+}
+
+/** A source's counts by day, every shard summed, oldest first; from `since` (a day) on when
+ * given. */
+export async function readHealth(
+  store: Store,
+  source: string,
+  options: { since?: string } = {},
+): Promise<{ day: string; counts: HealthCounts }[]> {
+  const prefix = keys.healthAll(source);
+  const startAfter =
+    options.since === undefined ? undefined : `${prefix}${assertDay(options.since)}`;
+  const days = new Map<string, HealthCounts>();
+  let after = startAfter;
+  for (;;) {
+    const page = await store.list(prefix, { startAfter: after });
+    for (const key of page.keys) {
+      const day = key.slice(prefix.length, prefix.length + 10);
+      const found = await readJson<HealthShard>(store, key);
+      if (!found) continue;
+      days.set(day, add(days.get(day) ?? {}, found.value.counts));
+    }
+    after = page.keys.at(-1);
+    if (!page.truncated || after === undefined) break;
+  }
+  return [...days.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([day, counts]) => ({ day, counts }));
+}
+
+/** The source ids that have health counters, from a listing of `sources/`. */
+export async function sourcesWithHealth(store: Store): Promise<string[]> {
+  const ids = new Set<string>();
+  let after: string | undefined;
+  for (;;) {
+    const page = await store.list("sources/", { startAfter: after });
+    for (const key of page.keys) {
+      const m = /^sources\/([^/]+)\/health\//.exec(key);
+      if (m) ids.add(m[1] as string);
+    }
+    after = page.keys.at(-1);
+    if (!page.truncated || after === undefined) return [...ids].sort();
+  }
+}

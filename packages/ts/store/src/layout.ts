@@ -6,12 +6,12 @@
  * sources/<source_id>/checkpoint.json                          poller cursor (X7)
  * sources/<source_id>/dropped/<stamp>-<key_hash>.json          envelopes review dropped (X6.4)
  * sources/<source_id>/failed/<stamp>-<key_hash>.json           envelopes that failed (X4.8)
+ * sources/<source_id>/health/<yyyy-mm-dd>/<instance>.json      outcome counters (X4.8)
  * worker/heartbeat.json                                        the worker's last run (X7.5)
  * assembly/pending/<archive_id>                                sessions with new spans (X7.4)
  * owners/<owner>/.probe                                        a writer's write check
  * owners/<owner>/sessions/<archive_id>/metadata.json           the session's pointer
  * owners/<owner>/sessions/<archive_id>/trace.<content_hash>.json.gz   seshi/trace/1
- * owners/<owner>/sessions/<archive_id>/raw.<n>.<jsonl|json>.gz        raw part (until 04)
  * owners/<owner>/sessions/<archive_id>/spans/<trace_id>-<span_id>.json   span records (F4)
  * owners/<owner>/sessions/<archive_id>/review/<n>.json         model review decisions (F3)
  * owners/<owner>/changes/<stamp>-<content_hash|tombstone|visibility>.json   change feed
@@ -20,13 +20,16 @@
  * Every segment a caller supplies is checked here, so no key can escape its folder. */
 
 import { createHash } from "node:crypto";
-import type { ChangeKind, RawFormat } from "@seshi/model";
+import type { ChangeKind } from "@seshi/model";
 import { StoreError } from "./store";
 
 const OWNER = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 /** A configured source's id, as `@seshi/config` accepts them, or `upload`. */
 const SOURCE_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const TOKEN_ID = /^[A-Za-z0-9_-]{8,64}$/;
+/** A health counter shard's writer: one process's instance id. */
+const INSTANCE_ID = /^[A-Za-z0-9_-]{1,64}$/;
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const HEX64 = /^[0-9a-f]{64}$/;
 const HEX = /^[0-9a-f]+$/;
 
@@ -46,6 +49,19 @@ export function assertSourceId(id: string): string {
 export function assertTokenId(id: string): string {
   if (!TOKEN_ID.test(id)) throw new StoreError(`invalid token id: ${JSON.stringify(id)}`);
   return id;
+}
+
+export function assertInstanceId(id: string): string {
+  if (!INSTANCE_ID.test(id)) throw new StoreError(`invalid instance id: ${JSON.stringify(id)}`);
+  return id;
+}
+
+/** A UTC day, `YYYY-MM-DD`. */
+export function assertDay(day: string): string {
+  if (!DAY.test(day) || Number.isNaN(Date.parse(`${day}T00:00:00Z`))) {
+    throw new StoreError(`invalid day: ${JSON.stringify(day)}`);
+  }
+  return day;
 }
 
 /** An archive id or content hash: 64 lowercase hex characters. */
@@ -87,6 +103,10 @@ export const keys = {
   records: (kind: RecordKind, sourceId: string) => `${keys.source(sourceId)}${kind}/`,
   record: (kind: RecordKind, sourceId: string, at: string, idempotencyKey: string) =>
     `${keys.records(kind, sourceId)}${changeStamp(at)}-${recordKeyHash(idempotencyKey)}.json`,
+  healthAll: (sourceId: string) => `${keys.source(sourceId)}health/`,
+  healthDay: (sourceId: string, day: string) => `${keys.healthAll(sourceId)}${assertDay(day)}/`,
+  health: (sourceId: string, day: string, instance: string) =>
+    `${keys.healthDay(sourceId, day)}${assertInstanceId(instance)}.json`,
   heartbeat: () => "worker/heartbeat.json",
   pendingAll: () => "assembly/pending/",
   pending: (archive: string) => `assembly/pending/${assertHash(archive, "archive id")}`,
@@ -98,8 +118,6 @@ export const keys = {
   metadata: (owner: string, archive: string) => `${keys.session(owner, archive)}/metadata.json`,
   trace: (owner: string, archive: string, hash: string) =>
     `${keys.session(owner, archive)}/trace.${assertHash(hash, "content hash")}.json.gz`,
-  raw: (owner: string, archive: string, part: number, format: RawFormat) =>
-    `${keys.session(owner, archive)}/raw.${part}.${format}.gz`,
   spans: (owner: string, archive: string) => `${keys.session(owner, archive)}/spans/`,
   span: (owner: string, archive: string, traceId: string, spanId: string) =>
     `${keys.spans(owner, archive)}${assertSpanKey(traceId, spanId)}.json`,
