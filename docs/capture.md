@@ -245,7 +245,7 @@ and what the server, or your local bucket, stored. Each check says `ok`, `warn`,
 | Server presence | Stored when sent and stored; gone or tombstoned when turned off and retracted; nothing when filtered; a stub when review dropped the first upload |
 | Retraction secret | The secret kept here is the one the session was stored with |
 | Offsets | Where the server's log ends agrees with what this machine sent (and a pause's stop) |
-| Records, Prefix hash | The transcript, normalized again up to the server's offset, has as many records as the server counts, and the same prefix hash (compared only under the same redaction rules) |
+| Records, Prefix hash | The transcript, normalized again up to the server's offset, has as many records as the server counts, and the same prefix hash (compared only under the same redaction rules, and not after a redaction backfill rewrote the session, which leaves the prefix hash of the earlier rules) |
 | Trace chain | Every trace can be fetched, continuations follow on, the total is the metadata's |
 | Redaction residue | No redaction rule matches anything stored; a match names the rule and record, never the text |
 | Staleness | The session was built by the current normalizer, or a rebuild is on its way |

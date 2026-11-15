@@ -599,6 +599,22 @@ export function recordsCheck(
   );
 }
 
+/** Whether a redaction backfill (F2.5) rewrote the session's traces after its prefix hash was
+ * last computed from a whole log. A backfill leaves `normalized` as the earlier rules made it,
+ * by design (the next whole upload conflicts and replaces); only a whole write (a first
+ * publish, a replace, a rebuild) computes it afresh. The change feed says which came last: a
+ * backfill's entry is a `published` replace with `reason: "redacted"`; a whole write's is a
+ * `published` entry without `continuation`. Undefined feed: false. */
+function backfilledSincePrefix(ev: SessionEvidence): boolean {
+  let backfilled = false;
+  for (const { entry } of ev.server.changes ?? []) {
+    if (entry.kind !== "published") continue;
+    if (entry.reason === "redacted") backfilled = true;
+    else if (!entry.continuation) backfilled = false;
+  }
+  return backfilled;
+}
+
 export function prefixCheck(
   ev: SessionEvidence,
   deps: DoctorDeps,
@@ -636,6 +652,15 @@ export function prefixCheck(
     );
   }
   const hash = prefixSha256(deps.redaction.records(local.records), local.records.length);
+  if (hash !== n.prefix_sha256 && backfilledSincePrefix(ev)) {
+    return result(
+      id,
+      title,
+      "skip",
+      "a redaction backfill rewrote the stored records after this prefix was recorded; the prefix keeps the earlier rules' hash, so it cannot be compared",
+      { hint: "the next whole upload is a 409 conflict, answered with replace" },
+    );
+  }
   if (hash !== n.prefix_sha256) {
     const stale = deps.normalizer.stale(ev.capture?.format as string, m.normalizer?.format_version);
     return result(

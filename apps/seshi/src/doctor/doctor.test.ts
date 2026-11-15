@@ -635,6 +635,36 @@ describe("records and the prefix hash", () => {
     expect(check.summary).toContain("rule set");
   });
 
+  it("skip a prefix a redaction backfill left behind, until a whole write computes it again", () => {
+    // The backfill rewrote the traces under this machine's rules and left `normalized` as the
+    // earlier rules made it (F2.5): the hashes cannot agree, and nothing is wrong.
+    const backfill = {
+      ...change("published", T1),
+      entry: { ...change("published", T1).entry, replace: true, reason: "redacted" },
+    } as ReturnType<typeof change>;
+    const chunk = {
+      ...change("published", T2),
+      entry: {
+        ...change("published", T2).entry,
+        continuation: { from_record: 3, prefix_sha256: prefixSha256(RECORDS, 3) },
+      },
+    } as ReturnType<typeof change>;
+    const after = (changes: ReturnType<typeof change>[]) =>
+      evidence((ev) => {
+        ev.server.metadata = metadata({
+          normalized: { bytes: SIZE, records: 4, prefix_sha256: "e".repeat(64), hash_state: "x" },
+        });
+        ev.server.changes = changes;
+      });
+    const skipped = prefixCheck(after([change("published", T1), backfill]), deps());
+    expectStatus(skipped, "skip");
+    expect(skipped.summary).toContain("redaction backfill");
+    // A chunk after the backfill continues the old hash: still not comparable.
+    expectStatus(prefixCheck(after([change("published", T1), backfill, chunk]), deps()), "skip");
+    // A whole write after it (a replace) computed the prefix afresh: a mismatch fails again.
+    expectStatus(prefixCheck(after([backfill, change("published", T1)]), deps()), "fail");
+  });
+
   it("count the records review dropped on both sides", () => {
     const check = recordsCheck(
       evidence((ev) => {
