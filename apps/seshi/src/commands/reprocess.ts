@@ -11,7 +11,7 @@
  * `upload`) are reprocessed by the capture uploader, which resends from the machines that hold
  * the transcripts (branch 14). */
 
-import { parseArgs } from "node:util";
+import { isDeepStrictEqual, parseArgs } from "node:util";
 import { SourceError } from "@seshi/sources";
 import { isPreconditionFailed } from "@seshi/store";
 import { EXIT, type ExitCode } from "../cli/exit";
@@ -55,6 +55,10 @@ export async function run(ctx: CommandContext): Promise<number> {
     if (Number.isNaN(since.getTime())) {
       return usageError(ctx, json, "--since must be a date or time", USAGE);
     }
+    // Nothing after now can be read again; a mistyped year would otherwise pass silently.
+    if (since.getTime() > Date.now()) {
+      return usageError(ctx, json, `--since ${since.toISOString()} is in the future`, USAGE);
+    }
   }
   const dryRun = values["dry-run"] === true;
   if (dryRun && values.run) return usageError(ctx, json, "--dry-run and --run conflict", USAGE);
@@ -72,6 +76,12 @@ export async function run(ctx: CommandContext): Promise<number> {
         const lines = [
           `${dryRun ? "would rewind" : "rewound"} source ${id} ${target}: checkpoint ${JSON.stringify(rewind.before)} → ${JSON.stringify(rewind.after)}`,
         ];
+        if (since && rewind.before !== null && isDeepStrictEqual(rewind.before, rewind.after)) {
+          // A rewind never moves a checkpoint forward past what the source has not read.
+          lines.push(
+            `checkpoint unchanged: the source has read nothing since ${since.toISOString()} yet`,
+          );
+        }
         if (report) {
           lines.push(
             `ran once: ${report.outcome}, ${report.submitted} envelope(s) submitted${report.error ? ` (${report.error})` : ""}`,

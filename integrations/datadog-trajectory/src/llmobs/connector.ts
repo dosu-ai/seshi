@@ -447,8 +447,22 @@ export function datadogConnector(options: DatadogConnectorOptions = {}): Connect
     },
 
     /** Read everything since `since` again (X4.9): the next window starts there, minus the
-     * overlap. Seen ids are dropped so nothing is left out. */
-    rewind(_cursor, since) {
+     * overlap. Seen ids are dropped so nothing is left out. A rewind never moves the
+     * checkpoint forward: when the source has not read up to `since` yet (its last window
+     * ended before it, or a window being read starts before it), the checkpoint stays as it
+     * is, so what lies between it and `since` is still read. An unreadable checkpoint is
+     * replaced. */
+    rewind(cursor, since) {
+      let current: DatadogCursor | undefined;
+      try {
+        current = cursor === null ? undefined : readDatadogCursor(cursor);
+      } catch {
+        current = undefined;
+      }
+      const frontier = current?.until ?? current?.window?.from;
+      if (current && frontier !== undefined && Date.parse(frontier) <= since.getTime()) {
+        return current as unknown as Cursor;
+      }
       return { v: 1, until: new Date(since.getTime()).toISOString() } as unknown as Cursor;
     },
   };

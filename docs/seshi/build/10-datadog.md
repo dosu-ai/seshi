@@ -102,7 +102,8 @@ session's spans to 09's span assembler as the source's service account. A new sp
     cursor. A finished window opened by an earlier run also returns `more`, so the next window
     opens at once. A saved page cursor Datadog refuses (400) restarts the window once.
   - `lag_ms` is now minus `until`. `rewind(cursor, since)` returns `{v: 1, until: since}`
-    (X4.9).
+    (X4.9), unless the checkpoint (its `until`, or a first window's `from`) is already at or
+    before `since`: then it is kept, so a rewind never skips unread spans (17-review).
   - Config is read with `readDatadogConfig` (keys revealed from `Secret`), the checkpoint with
     `readDatadogCursor`, which refuses a cursor of another shape and says to rewind.
 - **Fixtures** (`integrations/datadog-trajectory/testdata/llmobs/`, README says how they were

@@ -139,6 +139,13 @@ what changed.
   more is ready (exit 1 when a session could not be assembled; its marker stays). server.md,
   cli.md, datadog.md and otlp.md name it. Test: two span sessions stored as the api role
   stores them, `sync assemble` publishes the quiet one and leaves the fresh one waiting.
+- **background, low**: the Datadog connector's `rewind` ignored the checkpoint and returned
+  `{v: 1, until: since}`, so `seshi reprocess --since` later than the checkpoint skipped the
+  unread spans between them for good, and a future date stalled the source behind `lag_ms` 0.
+  `rewind` now keeps a checkpoint already at or before `since` (an unreadable one is still
+  replaced), `reprocess` refuses a `--since` in the future and says when the checkpoint stays.
+  datadog.md and 10 say so. Tests: connector (back, forward, future, first window, bad cursor)
+  and the command (future refused, checkpoint kept).
 
 ## Not fixed
 

@@ -396,6 +396,44 @@ describe("the connector", () => {
     });
   });
 
+  it("never rewinds the checkpoint forward past spans it has not read", () => {
+    const rewind = (cursor: unknown, since: string) =>
+      DATADOG_CONNECTOR.rewind?.(cursor as Cursor, new Date(since), {});
+    const seen = { abc: Date.parse("2026-11-14T09:55:00Z") };
+    const behind = { v: 1, until: "2026-11-14T10:00:00.000Z", seen };
+    // Back from the checkpoint: read again from there, seen ids dropped.
+    expect(rewind(behind, "2026-11-13T00:00:00Z")).toEqual({
+      v: 1,
+      until: "2026-11-13T00:00:00.000Z",
+    });
+    // Past it (the worker was down, or a mistyped date): the checkpoint stays, so the spans
+    // between it and `since` are still read and the next window does not wait for `since`.
+    expect(rewind(behind, "2026-11-15T00:00:00Z")).toEqual(behind);
+    expect(rewind(behind, "2027-01-01T00:00:00Z")).toEqual(behind);
+    expect(
+      nextWindow(
+        readDatadogCursor(rewind(behind, "2027-01-01T00:00:00Z") as Cursor),
+        { overlap: 600_000, lag: 60_000, backfill: 86_400_000 },
+        new Date("2026-11-15T12:00:00Z"),
+      ),
+    ).toEqual({ from: "2026-11-14T09:50:00.000Z", to: "2026-11-15T11:59:00.000Z" });
+    // A first window still being read: it starts before `since`, so it is kept.
+    const first = {
+      v: 1,
+      window: { from: "2026-11-14T00:00:00.000Z", to: "2026-11-15T00:00:00.000Z", page: "p2" },
+    };
+    expect(rewind(first, "2026-11-14T12:00:00Z")).toEqual(first);
+    expect(rewind(first, "2026-11-13T12:00:00Z")).toEqual({
+      v: 1,
+      until: "2026-11-13T12:00:00.000Z",
+    });
+    // A checkpoint this version cannot read is replaced.
+    expect(rewind({ v: 9 }, "2026-11-15T00:00:00Z")).toEqual({
+      v: 1,
+      until: "2026-11-15T00:00:00.000Z",
+    });
+  });
+
   it("keeps the previous window's ids while reading the overlap they may reappear in", async () => {
     TWO_PAGES();
     const from = Date.parse("2026-11-14T09:00:00Z");

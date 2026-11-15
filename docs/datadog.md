@@ -120,7 +120,9 @@ session filter drops them (X4.10), and the source's health counts them as `filte
 
 `seshi reprocess --source datadog-prod --since 2026-11-01` makes the next run read everything
 from that time again (X4.9); without `--since` the source starts over with its backfill. This
-works while Datadog still holds the spans (its LLM Observability retention).
+works while Datadog still holds the spans (its LLM Observability retention). A `--since` later
+than what the source has read so far leaves the checkpoint where it is (spans after it are
+still unread, so they are read anyway); one in the future is refused.
 
 ## Troubleshooting
 

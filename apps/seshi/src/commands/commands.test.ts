@@ -440,6 +440,25 @@ describe("seshi reprocess (X4.9)", () => {
     expect((await seshi(["reprocess", "--source", "dd", "--dry-run", "--run"])).code).toBe(
       EXIT.usage,
     );
+    const future = new Date(Date.now() + 86_400_000).toISOString();
+    const ahead = await seshi(["reprocess", "--source", "dd", "--since", future], {
+      toml: SOURCES,
+    });
+    expect(ahead.code).toBe(EXIT.usage);
+    expect(ahead.err).toContain("is in the future");
+  });
+
+  it("never moves a Datadog checkpoint forward past spans it has not read", async () => {
+    const store = new FsStore(bucket);
+    const until = new Date(Date.now() - 2 * 86_400_000).toISOString();
+    const since = new Date(Date.now() - 86_400_000).toISOString();
+    await writeCheckpoint(store, "dd", { v: 1, until }, null);
+    const later = await seshi(["reprocess", "--source", "dd", "--since", since], {
+      toml: SOURCES,
+    });
+    expect(later.code).toBe(EXIT.ok);
+    expect(later.out).toContain(`checkpoint unchanged: the source has read nothing since ${since}`);
+    expect((await readCheckpoint(store, "dd"))?.value.cursor).toEqual({ v: 1, until });
   });
 });
 
