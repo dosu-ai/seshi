@@ -288,7 +288,7 @@ skipped. An object's `x-amz-meta-seshi-<field>` metadata (`-` for `_`) wins over
 | `search.events` | `["user", "assistant", "tool_call"]` | Which trace events are indexed, by role: prompts, assistant text, and tool calls (names and inputs, so file paths and commands). Add `tool_result` to search tool output too (a bigger index). Changing it rebuilds the index |
 | `worker.heartbeat_interval` | `"1m"` | How often the worker writes `worker/heartbeat.json` (X7.5); status calls a heartbeat older than three intervals stopped |
 | `worker.assembly_interval` | `"30s"` | How often the span assembler looks for sessions whose spans have gone quiet (F4.4, X7.4) |
-| `capture.allow_retract` | `true` | Let the uploading machine retract a session (F9.7). *Later* |
+| `capture.allow_retract` | `true` | Let the machine that uploaded a session retract it with its per-session secret (F9.7). With `false`, a retraction is refused (`403 retract_disabled`) and only an admin or the owner's fresh sign-in can delete |
 
 ## The CLI's config
 
@@ -303,12 +303,36 @@ user = "alice@acme.com"                  # SESHI_USER: the username stated with 
 theme = "auto"                           # SESHI_THEME: auto, dark or light
 
 [capture]
-enabled = true                           # SESHI_CAPTURE__ENABLED
+enabled = true                           # SESHI_CAPTURE__ENABLED: the global level (F9.5)
+remotes = ["github.com/acme"]            # SESHI_CAPTURE__REMOTES: the org rule, see below
 
 [[capture.paths]]                        # personal rules by folder, longest match wins (F9.5)
 path = "~/clients/acme"
 capture = false
 ```
+
+**Capture rules** (F9.5, [capture.md](capture.md#what-is-captured)). `capture.enabled` is the
+global level, on by default once capture is installed; `seshi capture off|on` sets it.
+`[[capture.paths]]` are personal folder rules (`seshi capture off|on --path <folder>` adds or
+changes one); the longest matching folder decides. `capture.remotes` is the org rule, meant to
+be delivered with a managed CLI config: when it is set, only sessions in a git repo with a
+remote matching one of its patterns are captured (`github.com/acme` matches every repo under
+it; `*` stands for one path segment, `**` for any number). Like a repo's own `capture = false`,
+it can only turn capture off. A repo opts out for everyone who works in it with its own
+committed `.seshi/config.toml`:
+
+```toml
+capture = false        # no session in this repo is captured, whatever anyone's personal rules
+visibility = "owner"   # sessions uploaded from this repo are private to their owner (X5.10)
+```
+
+A repo config that cannot be read (a wrong type, bad TOML) turns capture off in that repo until
+it is fixed. Hooks read the CLI config through a cache (`rules.json` in the capture folder),
+loaded again whenever the file or a `SESHI_CAPTURE__*` variable changes.
+
+`SESHI_SESSION_ID`, `SESHI_AGENT` and `SESHI_NO_UPLOADER` are capture's own variables, not
+settings; both loaders pass over them (with `SESHI_CONFIG`). Claude Code sets the first two for
+every command it runs in a captured session, so the `/seshi` skill can name the session.
 
 `seshi login --server <url>` writes `server` here, and `--user` writes `user`; everything else
 in the file is left as written. The credentials themselves are never in this file: they go in

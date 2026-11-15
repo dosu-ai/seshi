@@ -75,7 +75,15 @@ repository's code.
 | `sessions rm <agent> <id> [--owner] [--yes]` | Delete a session (a tombstone; it cannot be undone). Asks on a terminal, needs `--yes` elsewhere | Built |
 | `sessions visibility <agent> <id> org\|owner [--owner]` | Change who may read a session (X5.10) | Built |
 | `tokens ls [--owner] [--kind] [--all]`, `tokens create <kind> [--owner] [--service] [--scope]… [--visibility] [--expires 30d\|date] [--label]`, `tokens revoke <id>\|--owner <id> [--kind]` | Manage tokens (X5.9, X5.11; admins). A new token is printed once | Built |
-| `capture install\|uninstall\|status\|pause\|resume\|off\|on`, `hook <agent> <event>`, `upload <path>`, `daemon`, `statusline` | Capture on this machine (F9) | Branch 14 |
+| `capture install [<agent>…] [--service] [--command <program>]` | Wire seshi into Claude Code, Codex and Cursor on this machine (F9.6); with no agent, every one found. Merges into each agent's own config and keeps every hook there ([capture.md](capture.md#installing)) | Built |
+| `capture uninstall [<agent>…] [--service]` | Take out only seshi's entries | Built |
+| `capture status [--session [<id>]] [--agent <a>]` | Whether this folder (or session) is captured and which rule decided, where uploads go, the queue, problems, agents, recent sessions. Exit 8 when something needs action | Built |
+| `capture pause [<duration>]`, `capture resume` | Stop capturing for a while (`2h`), or until resumed | Built |
+| `capture off\|on [--session [<id>]] [--agent <a>]`, `capture off\|on --path <folder>`, `capture off\|on` | Turn capture off or on for one session (off retracts what was uploaded, F9.7), a folder, or everything (F9.5) | Built |
+| `hook <agent> <event>` | Internal: agents call it on their events (F9.1). Reads the payload, applies the rules, spools, starts the uploader. Always exits 0 and prints nothing | Built |
+| `daemon [--keep-alive] [--once] [--idle <duration>]` | The background uploader and sweep (F9.1, F9.3); hooks start it. One per machine | Built |
+| `upload <path>… \| --since <duration>` `[--agent <a>]` | Send transcripts by hand, or backfill the installed agents' recent sessions, through the same rules and state as hooks | Built |
+| `statusline [--agent <a>]` | One line for an agent's status bar: `Session Capture ◉` or `⏸`, problems after a separator (B1.6). Local state only, no network | Built |
 | `search <words…> [filters] [--json]`, `search --status\|--rebuild` | Search what you may read (F10); see [below](#search) | Built |
 | `redact test [<file> \| -] [--pack <file>]… [--config]` | Check rule packs' test strings, and show how often each rule fires on a transcript or text and where, never what matched ([below](#redaction-rules)) | Built |
 | `redact backfill (--since <30d> \| --all) [--dry-run]` | Apply the server's current rules to stored sessions (F2.5, [below](#redaction-rules)). Exit 8 when a session changed while it ran | Built |

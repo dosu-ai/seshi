@@ -499,7 +499,7 @@ allow.
 | `PATCH /v1/sessions/:agent/:session_id?owner` | `{visibility}`: change who may read it. The owner or an admin |
 | `GET /v1/sessions/:agent/:session_id/trace?hash&format` | The head trace (or a specific one) as the stored canonical trace (`format=seshi`, the default) or rendered as `letta`, `otlp` or `atif`; `400 bad_query` for another format, `404` for a session not stored (a filtered one included), `410` once redacted |
 | `GET /v1/sessions/:agent/:session_id/export?hash&format` | The same trace as a download: `Content-Disposition: attachment; filename="<agent>-<session>-<hash>.<format>.json"` |
-| `DELETE /v1/sessions/:agent/:session_id?owner` | Tombstone: drop the trace objects, append a tombstone change. Irreversible; a later upload of the same session is refused. Needs `sessions:delete`: the owner with a fresh session token or a static token, or an admin |
+| `DELETE /v1/sessions/:agent/:session_id?owner` | Tombstone: drop the trace objects, append a tombstone change. Irreversible; a later upload of the same session is refused. Needs `sessions:delete`: the owner with a fresh session token or a static token, or an admin. With `X-Seshi-Retract` it is a [retraction](#retraction-f97) by the machine that uploaded the session |
 | `GET /v1/changes?owner&after&since&limit` | An owner's change feed; another owner's shows the entries of sessions the caller may read |
 | `POST /v1/tokens` | `{kind: org\|admin\|device\|service, owner?, service?, scopes?, visibility?, expires_at?, label?}`: a new token, shown once (`tokens:admin`) |
 | `GET /v1/tokens?owner&kind&all` | Token records without their hashes (`tokens:admin`) |
@@ -513,6 +513,33 @@ allow.
 | `GET /v1/admin/sources?days` | Every configured source and `upload`: checkpoint, drop and failure counts, health over the last `days` (7) days, as `seshi sync status --json` prints them (`sources:admin`) |
 | `GET /v1/admin/sources/:id?days` | One source's status; `404 unknown_source` for an id no source has (`sources:admin`) |
 | `GET /v1/admin/sources/:id/failed`, `…/dropped` `?since&after&limit` | A source's failure or drop records, oldest first, as `seshi sync failed\|dropped --json` prints them; never content. A source no longer configured can still have its records read (`sources:admin`, X6.4) |
+
+### Retraction (F9.7)
+
+A person can turn capture off in the middle of a session (`seshi capture off --session`, the
+`/seshi` skill), and what was already uploaded must go too. The uploader's credentials cannot
+delete (a device token is write-only, the org key cannot delete at all), so each session carries
+a retraction secret instead. Before a session's first upload, the uploading machine makes a
+random secret and keeps it in its capture state file; every upload sends only its sha256 as
+`retract_hash`, and the server keeps the first hash a session gets in its `metadata.json`.
+
+To retract, the machine sends `DELETE /v1/sessions/:agent/:session_id` with its normal upload
+credential (`sessions:write`) and the secret in `X-Seshi-Retract`. The server compares the
+secret's hash with the stored one (in constant time) and runs the normal delete: trace objects
+removed, the session marked redacted, a tombstone with reason `retracted` and the caller as its
+writer. It acts on the caller's own sessions only (`?owner` is ignored).
+
+| Answer | When |
+|---|---|
+| `200 {removed}` | Retracted |
+| `403 bad_retract_secret` | Not the secret the session was uploaded with, or it was uploaded with none (another machine, a lost state file: then `seshi sessions rm` with an IdP, or an admin) |
+| `403 retract_disabled` | The server's `capture.allow_retract` is `false` |
+| `404 not_found` | The caller has no such session |
+| `410 redacted` | It was already removed |
+
+A leaked org key or device token cannot delete anyone's sessions this way: the secret never
+leaves the machine that uploaded them. A retracted session is never stored again under that
+id; turning it back on uploads it as a new session (`<id>~1`).
 
 ### `POST /v1/sessions`
 
@@ -533,7 +560,9 @@ allow.
                                    // (the default), else a chunk from there; see "In chunks"
   "replace": false,                // rewrite a session this upload does not extend; see below
   "visibility": "org",             // or "owner", for a new session (X5.10)
-  "idempotency_key": "…"           // optional; the Idempotency-Key header wins; see below
+  "idempotency_key": "…",          // optional; the Idempotency-Key header wins; see below
+  "retract_hash": "<sha256 hex>"   // optional: the uploading machine's retraction secret,
+                                   // hashed (F9.7); see "Retraction" below
 }
 ```
 
