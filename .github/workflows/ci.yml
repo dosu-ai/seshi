@@ -124,6 +124,42 @@ jobs:
             Stop-Process -Id $server.Id -Force
           }
 
+  # The release job cross-compiles the macOS binaries on Linux, and Bun's in-process Mach-O
+  # signer has shipped broken ad-hoc signatures more than once (oven-sh/bun#29120, #39758):
+  # macOS then kills the binary at launch. `binaries` builds natively on a Mac, so it cannot see
+  # that. These build the darwin targets the way the release job does and check them on a Mac.
+  darwin-cross:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - run: bun install --frozen-lockfile
+      - run: bun run release:build --target darwin-arm64 --target darwin-x64 --out dist/cross
+      - uses: actions/upload-artifact@v4
+        with:
+          name: darwin-cross
+          path: dist/cross/seshi-darwin-*.tar.gz
+          retention-days: 3
+
+  darwin-cross-check:
+    needs: darwin-cross
+    runs-on: macos-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: darwin-cross
+          path: cross
+      - name: The Linux-built macOS binaries are validly signed and run
+        run: |
+          for id in darwin-arm64 darwin-x64; do
+            mkdir -p "cross/$id"
+            tar -xzf "cross/seshi-$id.tar.gz" -C "cross/$id"
+            codesign --verify --verbose "cross/$id/seshi"
+          done
+          cross/darwin-arm64/seshi --version
+
   # Every push to main with a Conventional Commit since the last release is a release
   # (release.config.js): the version is chosen from the commits, every target is
   # cross-compiled, and a vX.Y.Z tag and a GitHub release with the archives, the install
@@ -134,7 +170,7 @@ jobs:
   # release bot (its credentials are the org-wide ABBS_BOT_* secrets): main only takes pull
   # requests, and that app is the ruleset's one bypass actor.
   release:
-    needs: [test, docker, binaries]
+    needs: [test, docker, binaries, darwin-cross-check]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:

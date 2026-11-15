@@ -74,6 +74,12 @@ describe("ci.yml", () => {
     for (const target of TARGETS) expect(CI, target.id).toContain(`target: ${target.id}`);
   });
 
+  it("checks the Linux-built macOS binaries on a Mac before releasing", () => {
+    expect(CI).toContain("bun run release:build --target darwin-arm64 --target darwin-x64");
+    expect(CI).toContain('codesign --verify --verbose "cross/$id/seshi"');
+    expect(CI).toMatch(/needs: \[test, docker, binaries, darwin-cross-check\]/);
+  });
+
   it("calls only scripts that exist", () => {
     for (const script of new Set(CI.match(/scripts\/[\w/.-]+\.(ts|sh|ps1)/g) ?? [])) {
       expect(existsSync(join(ROOT, script)), script).toBe(true);
