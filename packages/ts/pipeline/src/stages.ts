@@ -84,7 +84,9 @@ export interface ReviewNote {
 }
 
 export interface ReviewInput {
-  envelope: Envelope;
+  /** The envelope without its payload: the reviewer judges `records`, which regex redaction has
+   * already run on, and never sees the unredacted transcript or spans (X4.3, F3). */
+  envelope: Omit<Envelope, "payload">;
   owner: string;
   archive_id: string;
   /** The session as stored before this write; null for a new one. */

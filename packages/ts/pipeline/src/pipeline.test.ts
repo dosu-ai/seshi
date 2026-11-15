@@ -490,6 +490,15 @@ describe("model review (F3 seam)", () => {
     expect(r.seen[1]?.session?.head).toBeDefined();
   });
 
+  it("never hands the reviewer the unredacted payload, only the redacted records", async () => {
+    const r = reviewer(() => ({ action: "allow" }));
+    const secret = "ghp_abcdefghijklmnopqrstuvwxyz012345";
+    await submit(pipeline({ reviewer: r }), upload(HEAD + user(`token ${secret}`) + reply("ok")));
+    expect(r.seen[0]?.envelope).toMatchObject({ session_key: "s1", source_id: "upload" });
+    expect("payload" in (r.seen[0]?.envelope ?? {})).toBe(false);
+    expect(JSON.stringify(r.seen)).not.toContain(secret);
+  });
+
   it("drops a first trace: nothing of the session stored, a drop record says why", async () => {
     const health = new MemoryHealthCounters();
     const drop = reviewer(() => ({

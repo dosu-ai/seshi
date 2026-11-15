@@ -651,8 +651,10 @@ export class Pipeline {
     const { envelope, session } = run;
     const lead = metaOf(plan.write) ? 1 : 0;
     const judged = plan.write.slice(lead);
+    // The reviewer may send what it judges to a model provider: never the raw payload.
+    const { payload: _payload, ...about } = envelope;
     const decision = await this.reviewer.review({
-      envelope,
+      envelope: about,
       owner: run.owner,
       archive_id: run.archive,
       session,
