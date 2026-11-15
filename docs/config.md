@@ -189,8 +189,8 @@ runs (F2.1). A `.toml` file is a rule pack (`id`, `rules`, `sensitive_files`,
 See [server.md](server.md#your-own-redaction). Your patterns run under RE2 (F2.2). The server
 refuses to start on a pack it cannot use, a pattern RE2 cannot run, a rule id used twice, a
 `disable` of something that is not a built-in rule, or a rule that fails its own test strings,
-naming the file. A change applies after a restart; `seshi redact backfill` applies it to
-stored sessions.
+naming the file; `seshi config check` reports the same problems. A change applies after a
+restart; `seshi redact backfill` applies it to stored sessions.
 
 ### `[review]`
 

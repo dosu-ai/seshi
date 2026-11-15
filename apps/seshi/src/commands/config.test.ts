@@ -90,6 +90,31 @@ describe("seshi config check", () => {
     expect(err).toContain("error: auth.session_keys.k1 must be 32+ characters");
   });
 
+  it("loads the redaction packs as serve would, naming what stops one (F2.1)", async () => {
+    const good = file(
+      "acme.toml",
+      'id = "acme"\n[[rules]]\nid = "acme-key"\npattern = "ACME-[0-9]{4}"\n',
+    );
+    const failing = file(
+      "bad.toml",
+      'id = "bad"\n[[rules]]\nid = "k"\npattern = "K-[0-9]{4}"\ntests.match = ["K-12"]\n',
+    );
+    const config = (packs: string[]) =>
+      file(
+        "seshi.toml",
+        `[store]\nurl = "file:///tmp/x"\n[redaction]\npacks = ${JSON.stringify(packs)}\n`,
+      );
+    expect((await seshi(["config", "check", "--config", config([good])])).code).toBe(0);
+    const refused = await seshi(["config", "check", "--config", config([good, failing])]);
+    expect(refused.code).toBe(3);
+    expect(refused.err).toContain(
+      `error: ${failing} (pack bad): k: does not match its test string "K-12"`,
+    );
+    const missing = await seshi(["config", "check", "--config", config([join(dir, "none.toml")])]);
+    expect(missing.code).toBe(3);
+    expect(missing.err).toContain("cannot read redaction pack");
+  });
+
   it("prints warnings and notices, and still passes", async () => {
     const path = file(
       "seshi.toml",

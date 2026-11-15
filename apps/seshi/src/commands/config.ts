@@ -2,12 +2,14 @@
  *
  *   seshi config check [--cli] [--config <file>] [--json] [--set path=value]…
  *       Validates the server's config (or the CLI's, with --cli) the way `seshi serve` loads it,
- *       secret references included, and prints warnings. Exit 0 when it can be used, 3 (config)
- *       when not.
+ *       secret references included, and the redaction packs it names (every rule compiled and
+ *       checked against its own test strings, as serve does), and prints warnings. Exit 0 when
+ *       it can be used, 3 (config) when not.
  *   seshi config show [--cli] [--config <file>] [--origin] [--json] [--set path=value]…
  *       Prints every value, with --origin where it came from (flag, env, file, default).
  *       Secrets are masked and not read. */
 
+import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { parseArgs } from "node:util";
 import {
@@ -22,6 +24,7 @@ import {
   loadCliConfig,
   loadServerConfig,
 } from "@seshi/config";
+import { compileRuleSet, loadPacks, RulePackError } from "@seshi/redact";
 import { EXIT } from "../cli/exit";
 import type { CommandContext } from "./index";
 import { configFlags, ServeConfigError, serveSettings } from "./serve-settings";
@@ -72,6 +75,32 @@ function where(loaded: Loaded<unknown>): string {
   return loaded.file ?? "no config file (env and defaults)";
 }
 
+/** What stops `[redaction] packs` from loading, as serve would load them (F2.1). */
+function packProblems(paths: readonly string[]): string[] {
+  const files: { path: string; text: string }[] = [];
+  const problems: string[] = [];
+  for (const path of paths) {
+    try {
+      files.push({ path, text: readFileSync(path, "utf8") });
+    } catch (err) {
+      problems.push(`cannot read redaction pack ${path}: ${(err as Error).message}`);
+    }
+  }
+  if (problems.length > 0) return problems;
+  try {
+    const loaded = loadPacks(files);
+    compileRuleSet({
+      packs: loaded.map((l) => l.pack),
+      sources: Object.fromEntries(loaded.map((l) => [l.pack.id, l.source])),
+      runTests: true,
+    });
+  } catch (err) {
+    if (err instanceof RulePackError) return err.problems.map((p) => `${p.where}: ${p.message}`);
+    throw err;
+  }
+  return [];
+}
+
 function check(ctx: CommandContext, options: Options): number {
   const errors: string[] = [];
   let file: string | undefined;
@@ -85,6 +114,7 @@ function check(ctx: CommandContext, options: Options): number {
       loaded = server;
       report = checkServerConfig(server.config);
       serveSettings(server.config);
+      errors.push(...packProblems(server.config.redaction.packs));
     }
   } catch (err) {
     if (err instanceof ConfigError) {
