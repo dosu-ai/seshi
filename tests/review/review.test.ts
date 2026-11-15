@@ -187,6 +187,47 @@ describe("model review in the pipeline", () => {
     expect(metadata?.head).toBe(tail.content_hash);
   });
 
+  it("sends the models only what regex redaction left (X4.3)", async () => {
+    const s = server();
+    const { ingest } = await boot(anthropic(s));
+    const token = "ghp_abcdefghijklmnopqrstuvwxyz012345";
+    stored(await ingest(META + user(`push with ${token} please`) + reply("pushed")));
+    expect(s.requests.length).toBeGreaterThan(0);
+    for (const request of s.requests) {
+      const body = JSON.stringify(request.body);
+      expect(body).toContain("push with");
+      expect(body).not.toContain(token);
+    }
+  });
+
+  it("moves the log past a dropped continuation, so later writes go on (F3.4)", async () => {
+    const s = server();
+    const { ingest, db, store, dir } = await boot(anthropic(s));
+    const first = META + user("start the work") + reply("started");
+    const head = stored(await ingest(first));
+
+    const dropped = first + user("paste of the CUSTOMER TABLE: ana, 41 rua") + reply("noted");
+    expect((await ingest(dropped)).status).toBe("dropped");
+    const { records } = await listRecords(store, "dropped", "upload");
+    expect(records.map((r) => r.record.reason)).toEqual(["review_drop"]);
+
+    // The next upload is the whole log again; only what follows the dropped records is new.
+    const later = dropped + user("carry on") + reply("done");
+    const tail = stored(await ingest(later));
+    expect(JSON.stringify(s.requests.at(-1)?.body)).not.toContain("CUSTOMER TABLE");
+    // The new trace continues after the dropped records (meta, two, then the two dropped).
+    const trace = await db.getTrace("trajectory", "s1");
+    expect(trace).toMatchObject({ metadata: { continuation: { from_record: 5 } } });
+    expect(JSON.stringify(trace)).toContain("carry on");
+    expect(JSON.stringify(trace)).not.toContain("CUSTOMER TABLE");
+    expect(bucketText(dir)).not.toContain("CUSTOMER TABLE");
+    const reviews = await listReviews(store, "alice", head.archive_id);
+    expect(reviews.map((r) => [r.decision, r.content_hash])).toEqual([
+      ["allow", head.content_hash],
+      ["allow", tail.content_hash],
+    ]);
+  });
+
   it("can send the redactor's step to a local OpenAI-compatible model without a key", async () => {
     const s = server();
     const { ingest } = await boot(
