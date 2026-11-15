@@ -309,8 +309,11 @@ recorded under `sources/<id>/failed/`; a model review drop is recorded under
 4. For a replace, delete the trace objects the pointer no longer lists.
 5. Append the change entry.
 
-A writer that dies between steps leaves either nothing visible (before 3) or an object without
-a change entry (between 3 and 5); the next publish of the same content completes it. Each
+A writer that dies between steps leaves either an unlisted object (before 3; the next publish
+of the same content lists it and appends its change entry) or a listed trace without a change
+entry (between 3 and 5). The pointer already records the envelope in `applied`, so a resend is
+answered from there and does not append the missing entry; the session's next published entry
+names it again. Each
 envelope is planned against the session as it read it, so of two racing on one session one
 lands and the other is planned again (a whole log) or told where the log now ends (a chunk).
 

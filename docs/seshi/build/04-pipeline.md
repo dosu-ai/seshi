@@ -25,7 +25,8 @@ trace objects and its change entries.
   3. `Redactor` (`@seshi/redact` `ruleRedactor`, below).
   4. The session filter, on the first trace only.
   5. `Reviewer` (`noReview()` by default). It can allow, redact (one record out for one record
-     in), skip (`skipped`) or drop.
+     in), skip (`skipped`) or drop. It gets the envelope without its payload: it judges the
+     regex-redacted records, never the raw transcript.
   6. `ingest`: trace, pointer, change entry. A `ReviewNote` goes to `review/<n>.json`.
 - **No raw (X6.3).** `putRaw`, `keys.raw`, `RawPart`, `metadata.raw` and `raw_format` are gone,
   and so is `raw` in the session API's result. Until a session has a trace, nothing of it is
@@ -38,14 +39,15 @@ trace objects and its change entries.
   `unchanged`. Otherwise the upload gets `SessionConflict` (409 `conflict`), unless
   `replace` is set. `replace` needs `mayReplace`: the same principal and source as the stored
   `writer`, or an admin. Anyone else gets `Forbidden` (403). A replace leaves one trace in
-  `traces`, deletes the other trace objects, and writes `replace: true` on the change entry
-  (`change.schema.json`). Whole documents (ATIF, OpenCode) that grew still extend; one
+  `traces`, deletes the other trace objects, starts `applied` and `redaction` over from the
+  replacing write, and writes `replace: true` on the change entry (`change.schema.json`). Whole documents (ATIF, OpenCode) that grew still extend; one
   rewritten from the start is replaced by its writer.
 - **Idempotency (X4.7).** `metadata.applied` keeps the last 16 envelopes (`APPLIED_KEPT`) with
   their answers (`AppliedEnvelope` in `metadata.schema.json`). A resend gets the recorded
   answer and runs no stage, including review (F3.7), and the health counters count it as
   `duplicate`. Uploads take the `Idempotency-Key` header, then `idempotency_key`, then
-  `<session>@<offset>#<sha256(text)[:32]>`.
+  `<session>@<offset>#<sha256(text)[:32]>`. A key is at most 2048 characters
+  (`MAX_IDEMPOTENCY_KEY_LENGTH`): longer is `bad_envelope`, or 400 on the upload route.
 - **Writers racing.** `ingest` takes a `guard`, which runs on the stored pointer before the
   object is written and again inside the If-Match update. A chunk that lost the race gets
   `OffsetMismatch` with the new end. A whole upload that lost is planned again, up to 3 times
@@ -53,7 +55,9 @@ trace objects and its change entries.
 - **Failures (X4.8).** A permanent failure (`SessionRejected`, `OffsetMismatch`,
   `SessionConflict`, `Forbidden`) is thrown to a caller who waits. For other sources it goes to
   `writeFailed` under `sources/<id>/failed/` (provenance, code and message, never content), and
-  `submit` answers `{ status: "failed", code, message, record }`. A transient failure
+  `submit` answers `{ status: "failed", code, message, record }`. The message goes through
+  `recordedMessage`, which elides double-quoted text (adapters quote what they could not read)
+  and caps it at 300 characters. A transient failure
   (`StoreError`, a reviewer that throws) is always thrown. A review drop goes to `writeDropped`.
   For a session with a trace, a drop also moves the log past the envelope (`recordProgress`),
   so later chunks continue.
@@ -66,7 +70,7 @@ trace objects and its change entries.
     fails an upload. `flush()` waits for the writes.
   - `MemoryHealthCounters` keeps counts in memory.
   - `noHealth()` is the library default. `seshi serve` wires `StoreHealthCounters` with
-    `serve-<random>`.
+    `serve-<random>` and flushes it on SIGINT/SIGTERM (bounded at 5 s).
 - **Session filter (X4.10).** `worthiness.ts` became `filter.ts`: `isFiltered`, `FilterRules`,
   `DEFAULT_FILTER`, and `FilterSetting` (rules, or `(sourceId) => rules`). `serve` passes
   `(id) => filterFor(config, id)`. The outcome is `filtered`, not `trivial`.
@@ -91,6 +95,9 @@ trace objects and its change entries.
   `health`, and `filter` as a `FilterSetting`. `POST /v1/sessions` takes `replace`,
   `visibility`, `idempotency_key` and the `Idempotency-Key` header, and answers 409 `conflict`
   and 403 `forbidden`. `HttpSessionDB` maps them back to `SessionConflict` and `Forbidden`.
+  The request body is capped at `maxBodyBytes(max_upload_bytes)` (twice the transcript cap
+  plus 1 MiB), on the wire (serve's `maxRequestBodySize`) and once gunzipped; past it, 413
+  `too_large`.
   `StoreSessionDB` submits envelopes to a pipeline it is given or builds. `storeSession` is a
   thin wrapper.
 - **Contract and docs.**
@@ -122,7 +129,8 @@ trace objects and its change entries.
 - **07 (rule packs):** replace `ruleRedactor` with a pack-based `Redactor`, keeping the
   contract: deterministic, idempotent, carried withheld ids, counts. Bump
   `BUILTIN_RULES_VERSION` when built-ins change.
-- **08 (model review):** implement `Reviewer`. Return `ReviewDecision`, put findings in
+- **08 (model review):** implement `Reviewer`. `ReviewInput.envelope` has no payload; keep it
+  that way, so nothing unredacted reaches the provider. Return `ReviewDecision`, put findings in
   `ReviewNote` (it is written to `review/<n>.json`), and set `drop` fields for the drop record.
   Retries and `on_failure` are the reviewer's; a throw is transient.
 - **09 (OTLP):** implement `SpanAssembler`. Store spans, touch the pending marker, then call
@@ -176,6 +184,28 @@ trace objects and its change entries.
 12. **`require_user` / `require_reply = false` still have no effect** (from 02): `parseTrace`
     needs both on a first trace.
 
+## Review fixes
+
+A review of the branch added these commits on top of the implementation:
+
+- Idempotency keys are bounded (2048 characters); an uploader-chosen key used to be kept
+  unbounded in `metadata.applied`.
+- Failure records no longer quote data: `recordedMessage` (above). Before, a trajectory record
+  with an odd role was recorded as `unknown role "<the value>"`.
+- A replace starts `applied` and `redaction` over. Before, a resend of a pre-replace upload was
+  answered with a content hash whose object the replace had deleted, and the counts kept
+  counting matches in content no longer stored.
+- The reviewer gets the envelope without its payload.
+- The upload route bounds the gunzipped body (a small gzip could inflate without limit), and
+  serve's request cap follows `max_upload_bytes`, which now measures the uncompressed
+  transcript.
+- serve flushes the health counters on shutdown.
+- New test: a whole log's short agent-only tail is stored under a filter that refuses
+  everything (the known gotcha, on the whole-upload path).
+- `spec/layout.md` no longer says the next publish completes a missing change entry: a resend
+  is answered from `applied`, so a crash between the pointer update and the change entry leaves
+  that entry missing until the session's next published entry.
+
 ## Still to check
 
 - The live S3 test still has not run. New for 04: `ingest` deletes a trace object after a
@@ -190,3 +220,11 @@ trace objects and its change entries.
   `ingest` called directly still checks it each time.
 - Prefixes written by 03 (raw parts, `raw` in metadata) no longer validate. 03 was never
   released, so there is no migration.
+- `llm_calls` handed to `publishAssembled` are not run through the redactor (only records
+  are). `LlmCall.error` and `parameters` are free text; 09 should redact them when it builds
+  them, or the `Redactor` contract should grow to cover them.
+- `recordedMessage` is a heuristic: it removes double-quoted text only. A Letta adapter error
+  that echoes data unquoted would still be recorded; 10/11 should check their adapters'
+  messages.
+- A crash between the pointer update and the change entry leaves that entry missing (see
+  layout.md). 06's indexer should not rely on `changes/` alone to find every trace.
