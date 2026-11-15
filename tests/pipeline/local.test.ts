@@ -4,6 +4,7 @@ import { join } from "node:path";
 import {
   IngestRejected,
   OffsetMismatch,
+  SessionConflict,
   type SessionDB,
   SessionRejected,
   StoreError,
@@ -84,7 +85,7 @@ describe("over a store", () => {
       }),
     );
     expect(result.status).toBe("stored");
-    expect(result.raw).toEqual({ status: "stored", part: 0 });
+    expect(result).not.toHaveProperty("raw");
 
     const metadata = await db.getSession("claude-code", "sess1");
     expect(metadata).toMatchObject({
@@ -119,16 +120,32 @@ describe("over a store", () => {
     expect(await db.tombstone("claude-code", "nope")).toBeNull();
   });
 
-  it("answers null for a trace a trivial session does not have", async () => {
+  it("stores nothing of a filtered session", async () => {
     const result = await db.ingest({ agent: "claude-code", session_id: "tiny", transcript: SMALL });
-    expect(result.status).toBe("trivial");
-    expect(await db.getSession("claude-code", "tiny")).toMatchObject({ traces: [] });
+    expect(result).toMatchObject({ status: "filtered", bytes_total: 0 });
+    expect(await db.getSession("claude-code", "tiny")).toBeNull();
     expect(await db.getTrace("claude-code", "tiny")).toBeNull();
+  });
+
+  it("refuses a whole upload that does not extend the session, and replaces it on request", async () => {
+    await db.ingest({ agent: "claude-code", session_id: "sess1", transcript: CLAUDE });
+    const other = CLAUDE.replace("The auth flow:", "Another answer:");
+    await expect(
+      db.ingest({ agent: "claude-code", session_id: "sess1", transcript: other }),
+    ).rejects.toBeInstanceOf(SessionConflict);
+    const replaced = await db.ingest({
+      agent: "claude-code",
+      session_id: "sess1",
+      transcript: other,
+      replace: true,
+    });
+    expect(replaced.status).toBe("stored");
+    expect((await db.getSession("claude-code", "sess1"))?.traces).toHaveLength(1);
   });
 
   it("tombstones, and refuses the session after", async () => {
     await db.ingest({ agent: "claude-code", session_id: "sess1", transcript: CLAUDE });
-    expect(await db.tombstone("claude-code", "sess1")).toEqual({ removed: 2 });
+    expect(await db.tombstone("claude-code", "sess1")).toEqual({ removed: 1 });
     expect(await db.getTrace("claude-code", "sess1")).toBeNull();
     expect(await db.getSession("claude-code", "sess1")).toMatchObject({ status: "redacted" });
 

@@ -6,7 +6,7 @@ import { type App, type AppOptions, createApp as createServer } from "@seshi/api
 import { signToken } from "@seshi/auth";
 import type { NormalizeInput } from "@seshi/formats";
 import { prefixSha256 } from "@seshi/model";
-import { getTrace, normalizeTranscript as normalize } from "@seshi/pipeline";
+import { getTrace, normalizeTranscript as normalize, storeSession } from "@seshi/pipeline";
 import { redactionRules } from "@seshi/redact";
 import { archiveId, FsStore, getBytes, gunzipJson, keys, readMetadata } from "@seshi/store";
 import { buildFormats } from "seshi/integrations";
@@ -21,7 +21,7 @@ const normalizeTranscript = (input: NormalizeInput) => normalize(FORMATS, input)
 
 const TOKEN = "sdb_test-token-0123456789abcdef";
 const OTHER = "sdb_other-token-0123456789abcdef";
-/** The fixture is a greeting-sized session; the server calls those trivial. */
+/** The fixture is a greeting-sized session; the session filter keeps those out. */
 const SMALL = transcript("claude-basic.claude-code.jsonl");
 /** The same session with an answer long enough to be worth storing. */
 const CLAUDE = `${SMALL.trim()}\n${JSON.stringify({
@@ -233,7 +233,7 @@ describe("sessions", () => {
     expect((await call("POST", "/v1/sessions", { body: {} })).status).toBe(401);
   });
 
-  it("normalizes, redacts and stores a raw transcript, with the raw part beside it", async () => {
+  it("normalizes, redacts and stores a transcript as its trace, and nothing else of it", async () => {
     const token = TOKEN;
     const res = await call("POST", "/v1/sessions", {
       token,
@@ -251,10 +251,9 @@ describe("sessions", () => {
       archive_id: string;
       content_hash: string;
       records: number;
-      raw: { status: string; part: number };
     };
     expect(body.status).toBe("stored");
-    expect(body.raw).toEqual({ status: "stored", part: 0 });
+    expect(body).not.toHaveProperty("raw");
 
     const archive = archiveId("acme", "claude-code", "sess1");
     expect(body.archive_id).toBe(archive);
@@ -267,9 +266,13 @@ describe("sessions", () => {
       status: "stored",
       head: body.content_hash,
     });
-    expect(metadata?.raw).toHaveLength(1);
+    // No raw part (X6.3): the session is its pointer and its trace.
+    expect((await store.list(keys.session("acme", archive))).keys).toEqual([
+      keys.metadata("acme", archive),
+      keys.trace("acme", archive, body.content_hash),
+    ]);
 
-    // Nothing unredacted reached the bucket: the trace and the raw part are both scrubbed.
+    // Nothing unredacted reached the bucket.
     const trace = gunzipJson<{ records: unknown[]; metadata: { normalizer?: unknown } }>(
       (await getBytes(store, keys.trace("acme", archive, body.content_hash))) as Uint8Array,
     );
@@ -281,18 +284,14 @@ describe("sessions", () => {
     const traceText = JSON.stringify(trace);
     expect(traceText).not.toContain("hunter2secretvalue42");
     expect(traceText).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz012345");
-    const rawBytes = (await getBytes(store, keys.raw("acme", archive, 0, "jsonl"))) as Uint8Array;
-    const rawText = new TextDecoder().decode(Bun.gunzipSync(new Uint8Array(rawBytes)));
-    expect(rawText).not.toContain("hunter2secretvalue42");
-    expect(rawText).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz012345");
 
-    // The same transcript again is a duplicate, not a second trace.
+    // The same upload again is answered as the first time (X4.7), not stored twice.
     const again = await call("POST", "/v1/sessions", {
       token,
       body: { agent: "claude-code", session_id: "sess1", transcript: CLAUDE },
     });
-    expect(again.status).toBe(200);
-    expect((await again.json()).status).toBe("duplicate");
+    expect(again.status).toBe(201);
+    expect(await again.json()).toEqual(body);
 
     // The change feed has the one publish.
     const changes = await call("GET", "/v1/changes", { token });
@@ -312,16 +311,17 @@ describe("sessions", () => {
       body: { agent: "claude-code", session_id: "sess-own", transcript: CLAUDE },
     });
     expect(res.status).toBe(201);
+    const { content_hash } = (await res.json()) as { content_hash: string };
     const archive = archiveId("acme", "claude-code", "sess-own");
-    const raw = gunzipSync(
-      (await getBytes(store, keys.raw("acme", archive, 0, "jsonl"))) as Uint8Array,
+    const trace = gunzipSync(
+      (await getBytes(store, keys.trace("acme", archive, content_hash))) as Uint8Array,
     );
-    const text = new TextDecoder().decode(raw);
+    const text = new TextDecoder().decode(trace);
     expect(text).toContain("The auth [redacted:custom-pattern]");
     expect(text).not.toContain("The auth flow");
   });
 
-  it("accepts a gzipped body; the raw copy is always stored, and stored first", async () => {
+  it("accepts a gzipped body", async () => {
     const token = TOKEN;
     const payload = JSON.stringify({
       agent: "claude-code",
@@ -334,13 +334,8 @@ describe("sessions", () => {
       headers: { "content-type": "application/json", "content-encoding": "gzip" },
     });
     expect(res.status).toBe(201);
-    expect((await res.json()).raw).toEqual({ status: "stored", part: 0 });
     const metadata = await readMetadata(store, "acme", archiveId("acme", "claude-code", "sess2"));
-    expect(metadata?.raw).toMatchObject([{ part: 0, format: "jsonl" }]);
-    // The raw part is older than, or as old as, the trace made from it.
-    expect(
-      metadata?.raw[0]?.created_at.localeCompare(metadata?.traces[0]?.created_at ?? ""),
-    ).toBeLessThanOrEqual(0);
+    expect(metadata?.traces).toHaveLength(1);
   });
 
   it("ships a resumed session's tail as a continuation", async () => {
@@ -375,15 +370,11 @@ describe("sessions", () => {
       },
     })}\n`;
 
-    // The client sends back what the last answer told it; the planner then writes only the tail.
+    // The server knows what it stored, so it writes only the tail; a client need not send
+    // `shipped`.
     const second = await call("POST", "/v1/sessions", {
       token,
-      body: {
-        agent: "claude-code",
-        session_id: "sess3",
-        transcript: resumed,
-        shipped: { records: shipped.records_total, prefix_sha256: shipped.prefix_sha256 },
-      },
+      body: { agent: "claude-code", session_id: "sess3", transcript: resumed },
     });
     expect(second.status).toBe(201);
     const tail = (await second.json()) as {
@@ -401,8 +392,86 @@ describe("sessions", () => {
       from_record: shipped.records_total,
       prefix_sha256: shipped.prefix_sha256,
     });
-    // The raw part now holds the whole resumed log, replaced in place.
-    expect(metadata?.raw).toHaveLength(1);
+  });
+
+  it("refuses a whole upload that does not extend the session (409), and replaces it for its writer", async () => {
+    const token = TOKEN;
+    const first = await call("POST", "/v1/sessions", {
+      token,
+      body: { agent: "claude-code", session_id: "sess4", transcript: CLAUDE },
+    });
+    expect(first.status).toBe(201);
+    const rewritten = CLAUDE.replace("The auth flow:", "A different answer:");
+    const conflict = await call("POST", "/v1/sessions", {
+      token,
+      body: { agent: "claude-code", session_id: "sess4", transcript: rewritten },
+    });
+    expect(conflict.status).toBe(409);
+    expect(await conflict.json()).toMatchObject({ error: { code: "conflict" } });
+    const bad = await call("POST", "/v1/sessions", {
+      token,
+      body: { agent: "claude-code", session_id: "sess4", transcript: rewritten, replace: "yes" },
+    });
+    expect(bad.status).toBe(400);
+    const replaced = await call("POST", "/v1/sessions", {
+      token,
+      body: { agent: "claude-code", session_id: "sess4", transcript: rewritten, replace: true },
+    });
+    expect(replaced.status).toBe(201);
+    const archive = archiveId("acme", "claude-code", "sess4");
+    expect((await readMetadata(store, "acme", archive))?.traces).toHaveLength(1);
+  });
+
+  it("forbids replacing a session another writer wrote (403)", async () => {
+    // The same owner through a different kind of token is the same writer; a session written
+    // through local mode (another principal's writer) is not.
+    await storeSession(
+      {
+        owner: "acme",
+        agent: "claude-code",
+        session_id: "sess5",
+        transcript: CLAUDE,
+        format: "jsonl",
+      },
+      {
+        store,
+        formats: FORMATS,
+        context: { writer: { kind: "service", principal: "svc-import", source_id: "upload" } },
+      },
+    );
+    const res = await call("POST", "/v1/sessions", {
+      token: TOKEN,
+      body: {
+        agent: "claude-code",
+        session_id: "sess5",
+        transcript: CLAUDE.replace("The auth flow:", "Mine now:"),
+        replace: true,
+      },
+    });
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ error: { code: "forbidden" } });
+  });
+
+  it("takes an idempotency key from the header or the body", async () => {
+    const token = TOKEN;
+    const post = (transcript: string, headers: Record<string, string>, extra = {}) =>
+      call("POST", "/v1/sessions", {
+        token,
+        headers,
+        body: { agent: "claude-code", session_id: "sess6", transcript, ...extra },
+      });
+    const first = await post(CLAUDE, { "idempotency-key": "upload-1" });
+    expect(first.status).toBe(201);
+    // Same key, other bytes: the same envelope as far as the server can tell.
+    const again = await post(`${CLAUDE}\n`, { "idempotency-key": "upload-1" });
+    expect(await again.json()).toEqual(await first.json());
+    const metadata = await readMetadata(store, "acme", archiveId("acme", "claude-code", "sess6"));
+    expect(metadata?.applied?.map((a) => a.idempotency_key)).toEqual(["upload-1"]);
+    const viaBody = await post(`${CLAUDE}\n\n`, {}, { idempotency_key: "upload-2" });
+    expect(viaBody.status).toBe(200);
+    expect((await viaBody.json()).status).toBe("unchanged");
+    const empty = await post(CLAUDE, { "idempotency-key": "" });
+    expect(empty.status).toBe(400);
   });
 
   describe("chunks", () => {
@@ -433,7 +502,6 @@ describe("sessions", () => {
       records_total: number;
       prefix_sha256: string;
       bytes_total: number;
-      raw: { part: number };
     };
     const post = async (body: Record<string, unknown>) => {
       const res = await call("POST", "/v1/sessions", {
@@ -460,7 +528,6 @@ describe("sessions", () => {
         records: 3,
         records_total: first.records_total + 2,
         bytes_total: bytes(CLAUDE) + bytes(chunk2),
-        raw: { part: 1 },
       });
 
       const [s3, third] = await post({ transcript: chunk3, offset: second.bytes_total });
@@ -468,14 +535,15 @@ describe("sessions", () => {
       expect(third.records_total).toBe(second.records_total + 2);
       expect(third.bytes_total).toBe(bytes(whole));
 
-      // Every chunk is its own raw part; the traces are the head and two continuations.
+      // Nothing of the chunks is kept but their traces: the head and two continuations, and
+      // the small state the next chunk continues from.
       const archive = archiveId("acme", "claude-code", "chunked");
       const metadata = await readMetadata(store, "acme", archive);
-      expect(metadata?.raw).toMatchObject([
-        { part: 0, offset: 0, length: bytes(CLAUDE) },
-        { part: 1, offset: bytes(CLAUDE), length: bytes(chunk2) },
-        { part: 2, offset: bytes(CLAUDE) + bytes(chunk2), length: bytes(chunk3) },
-      ]);
+      expect(
+        (await store.list(keys.session("acme", archive))).keys.filter(
+          (k) => !k.includes("/trace."),
+        ),
+      ).toEqual([keys.metadata("acme", archive)]);
       expect(metadata?.normalized).toMatchObject({
         bytes: bytes(whole),
         records: third.records_total,
@@ -498,12 +566,9 @@ describe("sessions", () => {
       expect(stitched).toEqual(expected);
       expect(third.prefix_sha256).toBe(prefixSha256(expected, expected.length));
 
-      // So a client can go back to whole uploads with `shipped` and still be continued.
+      // So a client can go back to whole uploads and still be continued.
       const chunk4 = turn(12, `Fourth. ${"And more. ".repeat(300)}`);
-      const [s4, fourth] = await post({
-        transcript: whole + chunk4,
-        shipped: { records: third.records_total, prefix_sha256: third.prefix_sha256 },
-      });
+      const [s4, fourth] = await post({ transcript: whole + chunk4 });
       expect(s4).toBe(201);
       expect(fourth).toMatchObject({ records: 3, records_total: third.records_total + 2 });
       const after = await readMetadata(store, "acme", archive);
@@ -511,8 +576,7 @@ describe("sessions", () => {
         from_record: third.records_total,
         prefix_sha256: third.prefix_sha256,
       });
-      // A whole upload replaces the parts: one part again, and the chunk state is the whole's.
-      expect(after?.raw).toMatchObject([{ part: 0, offset: 0, length: bytes(whole + chunk4) }]);
+      // The chunk state is the whole's.
       expect(after?.normalized?.bytes).toBe(bytes(whole + chunk4));
     });
 
@@ -521,7 +585,7 @@ describe("sessions", () => {
       const [status, answer] = await post({ transcript: noise, offset: first.bytes_total });
       expect(status).toBe(200);
       expect(answer).toMatchObject({
-        status: "trivial",
+        status: "unchanged",
         records_total: first.records_total,
         prefix_sha256: first.prefix_sha256,
         bytes_total: bytes(CLAUDE) + bytes(noise),
@@ -593,33 +657,31 @@ describe("sessions", () => {
         first.records_total,
         second.records_total,
       ]);
-      // Sent again from the same place (a whole upload with `shipped`), the same tail is the
-      // same trace.
-      const [s4, fourth] = await post({
-        transcript: CLAUDE + again(10) + again(11),
-        shipped: { records: second.records_total, prefix_sha256: second.prefix_sha256 },
-      });
+      // Sent again whole, nothing past what is stored: nothing to write.
+      const [s4, fourth] = await post({ transcript: CLAUDE + again(10) + again(11) });
       expect(s4).toBe(200);
-      expect(fourth.status).toBe("duplicate");
+      expect(fourth).toMatchObject({ status: "unchanged", records_total: third.records_total });
       expect((await readMetadata(store, "acme", archive))?.traces).toHaveLength(3);
     });
 
-    it("holds chunks until the session is worth a trace, then normalizes them together", async () => {
-      // The greeting-sized log is trivial; so is its first chunk.
+    it("stores nothing until the session passes the filter: chunks wait for the whole log", async () => {
+      // The greeting-sized log is filtered, and nothing of it is kept, so the answer tells the
+      // client to send the whole log next time (X6.3).
       const [s1, first] = await post({ transcript: SMALL });
       expect(s1).toBe(200);
-      expect(first.status).toBe("trivial");
-      const chunk2 = turn(10, "Short.");
-      const [s2, second] = await post({ transcript: chunk2, offset: first.bytes_total });
-      expect(s2).toBe(200);
-      expect(second.status).toBe("trivial");
-      // A substantial answer: the three chunks are now one session, with one trace.
-      const chunk3 = turn(11, `Long. ${"Detail. ".repeat(300)}`);
-      const [s3, third] = await post({ transcript: chunk3, offset: second.bytes_total });
-      expect(s3).toBe(201);
+      expect(first).toMatchObject({ status: "filtered", bytes_total: 0, records_total: 0 });
       const archive = archiveId("acme", "claude-code", "chunked");
+      expect(await readMetadata(store, "acme", archive)).toBeNull();
+      // A client that sends a chunk anyway is told to start from 0.
+      const chunk2 = turn(10, "Short.");
+      const [s2, second] = await post({ transcript: chunk2, offset: bytes(SMALL) });
+      expect(s2).toBe(409);
+      expect(second).toMatchObject({ error: { code: "offset_mismatch", expected: 0 } });
+      // The whole log once it has grown: judged whole, stored as one trace.
+      const chunk3 = turn(11, `Long. ${"Detail. ".repeat(300)}`);
+      const [s3, third] = await post({ transcript: SMALL + chunk2 + chunk3 });
+      expect(s3).toBe(201);
       const metadata = await readMetadata(store, "acme", archive);
-      expect(metadata?.raw).toHaveLength(3);
       expect(metadata?.traces).toHaveLength(1);
       expect(metadata?.traces[0].continuation).toBeUndefined();
       const whole = normalizeTranscript({
@@ -647,7 +709,8 @@ describe("sessions", () => {
         "acme",
         archiveId("acme", "claude-code", "chunked"),
       );
-      expect(metadata?.raw).toHaveLength(1);
+      expect(metadata?.traces).toHaveLength(1);
+      expect(metadata?.normalized?.bytes).toBe(first.bytes_total);
 
       // A chunk must be whole lines of a jsonl log.
       [status, body] = await post({ transcript: '{"type":"user"', offset: first.bytes_total });
@@ -767,7 +830,7 @@ describe("sessions", () => {
     expect((await refused.json()).error.code).toBe("too_large");
   });
 
-  it("calls a greeting-sized session trivial: raw stored, no trace, no change entry", async () => {
+  it("filters a greeting-sized session: nothing stored, no change entry", async () => {
     const token = TOKEN;
     const res = await call("POST", "/v1/sessions", {
       token,
@@ -775,26 +838,18 @@ describe("sessions", () => {
     });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
-      status: "trivial",
-      records_total: expect.any(Number),
-      prefix_sha256: expect.any(String),
-      bytes_total: Buffer.byteLength(SMALL),
-      raw: { status: "stored", part: 0 },
+      status: "filtered",
+      records_total: 0,
+      prefix_sha256: prefixSha256([], 0),
+      bytes_total: 0,
     });
-    const metadata = await readMetadata(store, "acme", archiveId("acme", "claude-code", "tiny"));
-    expect(metadata).toMatchObject({
-      status: "stored",
-      traces: [],
-      raw: [{ part: 0, offset: 0, length: Buffer.byteLength(SMALL) }],
-    });
-    expect(metadata?.head).toBeUndefined();
+    expect(await readMetadata(store, "acme", archiveId("acme", "claude-code", "tiny"))).toBeNull();
     expect(await (await call("GET", "/v1/changes", { token })).json()).toMatchObject({
       entries: [],
     });
-    // The session is there, raw only; asking for its trace says so.
     const trace = await call("GET", "/v1/sessions/claude-code/tiny/trace", { token });
     expect(trace.status).toBe(404);
-    expect((await trace.json()).error.code).toBe("no_trace");
+    expect((await trace.json()).error.code).toBe("not_found");
   });
 
   it("prefers the branch the transcript recorded over the client's", async () => {
@@ -877,17 +932,15 @@ describe("Datadog Trajectory format", () => {
       body: { agent: "datadog-trajectory", session_id: sessionId, transcript },
     });
 
-  it("stores the session under datadog-trajectory, raw first, then the trace", async () => {
+  it("stores the session under datadog-trajectory", async () => {
     const res = await post(STREAM);
     expect(res.status).toBe(201);
     const body = (await res.json()) as {
       status: string;
       archive_id: string;
       content_hash: string;
-      raw: { status: string; part: number };
     };
     expect(body.status).toBe("stored");
-    expect(body.raw).toEqual({ status: "stored", part: 0 });
 
     const archive = archiveId("acme", "datadog-trajectory", STREAM_SESSION);
     expect(body.archive_id).toBe(archive);
@@ -899,7 +952,6 @@ describe("Datadog Trajectory format", () => {
       branch: "feature/auth",
       status: "stored",
       head: body.content_hash,
-      raw_format: "jsonl",
     });
     expect(metadata?.parent_session_id).toBeUndefined();
 
@@ -908,15 +960,11 @@ describe("Datadog Trajectory format", () => {
     );
     expect(trace.events.map((e) => e.role)).toContain("tool_call");
     expect(JSON.stringify(trace)).not.toContain("hunter2secretvalue42");
-    const rawBytes = (await getBytes(store, keys.raw("acme", archive, 0, "jsonl"))) as Uint8Array;
-    const rawText = new TextDecoder().decode(Bun.gunzipSync(new Uint8Array(rawBytes)));
-    expect(rawText).toContain('"event_type":"session_end"');
-    expect(rawText).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz012345");
+    expect(JSON.stringify(trace)).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz012345");
 
-    // The same file again changes nothing.
+    // The same file again changes nothing: the same answer, no second trace.
     const again = await post(STREAM);
-    expect(again.status).toBe(200);
-    expect((await again.json()).status).toBe("duplicate");
+    expect(await again.json()).toEqual(body);
     expect((await readMetadata(store, "acme", archive))?.traces).toHaveLength(1);
 
     // And the session reads back through the ordinary routes.
@@ -926,19 +974,19 @@ describe("Datadog Trajectory format", () => {
     expect(read.status).toBe(200);
   });
 
-  it("calls a greeting-sized session trivial", async () => {
+  it("filters a greeting-sized session", async () => {
     const res = await post(STREAM_SMALL);
     expect(res.status).toBe(200);
-    expect((await res.json()).status).toBe("trivial");
+    expect((await res.json()).status).toBe("filtered");
   });
 
-  it("rejects a file that is not a session stream, after storing it raw", async () => {
+  it("rejects a file that is not a session stream, storing nothing", async () => {
     const res = await post('{"event_type":"user_prompt","prompt":"hi"}\n', "junk");
     expect(res.status).toBe(422);
     expect((await res.json()).error.code).toBe("normalize_missing_session_start");
     expect(
       await readMetadata(store, "acme", archiveId("acme", "datadog-trajectory", "junk")),
-    ).toMatchObject({ traces: [], raw: [{ part: 0 }] });
+    ).toBeNull();
   });
 });
 
@@ -978,7 +1026,6 @@ describe("ATIF documents", () => {
       agent: "atif",
       source: "claude-code",
       head: body.content_hash,
-      raw_format: "json",
     });
     const trace = (await getTrace(store, "acme", archive, body.content_hash)) as {
       source: string;
@@ -994,8 +1041,11 @@ describe("ATIF documents", () => {
     expect(JSON.stringify(trace)).not.toContain("hunter2secretvalue42");
 
     const again = await post({ transcript: ATIF_DOC });
-    expect(again.status).toBe(200);
-    expect((await again.json()).status).toBe("duplicate");
+    expect(await again.json()).toEqual(body);
+    // The same document re-serialized is another envelope, but nothing new.
+    const reformatted = await post({ transcript: `${ATIF_DOC}\n` });
+    expect(reformatted.status).toBe(200);
+    expect((await reformatted.json()).status).toBe("unchanged");
   });
 
   it("refuses a document sent in chunks, whatever the format says", async () => {
@@ -1007,10 +1057,10 @@ describe("ATIF documents", () => {
     }
     // Nothing was stored for them.
     const metadata = await readMetadata(store, "acme", archiveId("acme", "atif", ATIF_SESSION));
-    expect(metadata?.raw).toHaveLength(1);
+    expect(metadata?.traces).toHaveLength(1);
   });
 
-  it("refuses ATIF-v1.9 by name, after storing it raw", async () => {
+  it("refuses ATIF-v1.9 by name, storing nothing", async () => {
     const res = await post({
       transcript: atifDocument((doc) => {
         doc.schema_version = "ATIF-v1.9";
@@ -1021,8 +1071,6 @@ describe("ATIF documents", () => {
       code: "normalize_invalid_input",
       message: "ATIF-v1.9 is not supported: this normalizer reads ATIF-v1.0 through ATIF-v1.8",
     });
-    expect(
-      await readMetadata(store, "acme", archiveId("acme", "atif", ATIF_SESSION)),
-    ).toMatchObject({ traces: [], raw: [{ part: 0, format: "json" }] });
+    expect(await readMetadata(store, "acme", archiveId("acme", "atif", ATIF_SESSION))).toBeNull();
   });
 });

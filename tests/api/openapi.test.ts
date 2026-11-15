@@ -8,6 +8,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type App, type AppOptions, createApp as createServer } from "@seshi/api";
+import { storeSession } from "@seshi/pipeline";
 import { FsStore, type Store, StoreError } from "@seshi/store";
 import { Ajv2020, type ValidateFunction } from "ajv/dist/2020";
 import addFormats from "ajv-formats";
@@ -271,23 +272,23 @@ describe("the server honours it", () => {
       prefix_sha256: string;
     };
 
-    // Duplicate, with `shipped`; a chunk with nothing in it; a wrong offset.
+    // A resend; the log again with nothing new in it; a chunk with nothing in it; a wrong
+    // offset.
     const again = await call("POST", "/v1/sessions", {
+      body: { agent: "claude-code", session_id: "sess1", transcript: CLAUDE },
+    });
+    expect(again).toEqual(stored);
+    const unchanged = await call("POST", "/v1/sessions", {
       body: {
         agent: "claude-code",
         session_id: "sess1",
         transcript: CLAUDE,
         shipped: { records: records_total, prefix_sha256 },
+        idempotency_key: "resent-whole",
       },
     });
-    // Everything shipped already: nothing new to write.
-    expect(again.status).toBe(200);
-    expect(again.body).toMatchObject({ status: "trivial" });
-    const duplicate = await call("POST", "/v1/sessions", {
-      body: { agent: "claude-code", session_id: "sess1", transcript: CLAUDE },
-    });
-    expect(duplicate.status).toBe(200);
-    expect(duplicate.body).toMatchObject({ status: "duplicate" });
+    expect(unchanged.status).toBe(200);
+    expect(unchanged.body).toMatchObject({ status: "unchanged" });
     const chunk = await call("POST", "/v1/sessions", {
       body: {
         agent: "claude-code",
@@ -296,12 +297,38 @@ describe("the server honours it", () => {
         offset: bytes_total,
       },
     });
-    expect(chunk.body).toMatchObject({ status: "trivial" });
+    expect(chunk.body).toMatchObject({ status: "unchanged" });
     const wrong = await call("POST", "/v1/sessions", {
       body: { agent: "claude-code", session_id: "sess1", transcript: PROGRESS, offset: 5 },
     });
     expect(wrong.status).toBe(409);
     expect(wrong.body).toMatchObject({ error: { expected: bytes_total + PROGRESS.length } });
+
+    // A whole upload that does not extend the session; its replace, by its writer only.
+    const rewritten = CLAUDE.replace("The auth flow:", "Another answer:");
+    const conflict = await call("POST", "/v1/sessions", {
+      body: { agent: "claude-code", session_id: "sess1", transcript: rewritten },
+    });
+    expect(conflict.status).toBe(409);
+    expect(conflict.body).toMatchObject({ error: { code: "conflict" } });
+    await storeSession(
+      {
+        owner: "acme",
+        agent: "claude-code",
+        session_id: "theirs",
+        transcript: CLAUDE,
+        format: "jsonl",
+      },
+      {
+        store,
+        formats: FORMATS,
+        context: { writer: { kind: "service", principal: "svc-import", source_id: "upload" } },
+      },
+    );
+    const forbidden = await call("POST", "/v1/sessions", {
+      body: { agent: "claude-code", session_id: "theirs", transcript: rewritten, replace: true },
+    });
+    expect(forbidden.status).toBe(403);
 
     // Reads.
     expect((await call("GET", "/v1/sessions")).status).toBe(200);
@@ -323,7 +350,7 @@ describe("the server honours it", () => {
     const tiny = await call("POST", "/v1/sessions", {
       body: { agent: "claude-code", session_id: "tiny", transcript: SMALL },
     });
-    expect(tiny.body).toMatchObject({ status: "trivial" });
+    expect(tiny.body).toMatchObject({ status: "filtered" });
     expect((await call("GET", "/v1/sessions/claude-code/tiny/trace")).status).toBe(404);
     expect((await call("DELETE", "/v1/sessions/claude-code/sess1")).status).toBe(200);
     expect((await call("GET", "/v1/sessions/claude-code/sess1/trace")).status).toBe(410);

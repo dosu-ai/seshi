@@ -1,9 +1,9 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { gzipSync } from "node:zlib";
 import type { NormalizedRecord } from "@seshi/model";
 import {
+  APPLIED_KEPT,
   getSession,
   getTrace,
   IngestRejected,
@@ -11,8 +11,9 @@ import {
   listSessions,
   planShipment,
   prefixSha256,
-  putRaw,
+  recordProgress,
   tombstone,
+  withApplied,
 } from "@seshi/pipeline";
 import {
   archiveId,
@@ -194,105 +195,150 @@ describe("ingest", () => {
   });
 });
 
-describe("putRaw", () => {
-  it("stores parts beside the trace, idempotently, and records them in the pointer", async () => {
-    await ingest({ store, owner: "acme", records: records("claude-basic"), metadata: meta, now });
-    const bytes = new Uint8Array(gzipSync('{"line":1}\n'));
-    const first = await putRaw({
-      store,
-      owner: "acme",
-      agent: "claude",
-      session_id: "sess1",
-      part: 0,
-      format: "jsonl",
-      offset: 0,
-      length: 11,
-      bytes,
-      now,
-    });
-    expect(first).toEqual({ status: "stored", part: 0 });
-    expect(
-      await putRaw({
-        store,
-        owner: "acme",
-        agent: "claude",
-        session_id: "sess1",
-        part: 0,
-        format: "jsonl",
-        offset: 0,
-        length: 11,
-        bytes,
-        now,
-      }),
-    ).toEqual({
-      status: "exists",
-      part: 0,
-    });
-    const session = await getSession(store, "acme", "claude", "sess1");
-    expect(session?.raw).toHaveLength(1);
-    expect(session?.raw_format).toBe("jsonl");
-    const archive = archiveId("acme", "claude", "sess1");
-    expect(await getBytes(store, keys.raw("acme", archive, 0, "jsonl"))).toEqual(bytes);
+describe("ingest's options for the pipeline", () => {
+  const state = (n: number) => ({
+    bytes: 100 * n,
+    records: n,
+    prefix_sha256: "a".repeat(64),
+    hash_state: `${n}:x`,
   });
 
-  it("creates the session when the part is the first thing stored, and ingest adds the trace", async () => {
-    const bytes = new Uint8Array([1, 2, 3]);
-    const first = await putRaw({
-      store,
-      owner: "acme",
-      agent: "claude",
-      session_id: "raw-first",
-      part: 0,
-      format: "jsonl",
-      offset: 0,
-      length: 11,
-      bytes,
-      now,
-    });
-    expect(first).toEqual({ status: "stored", part: 0 });
-    const before = await getSession(store, "acme", "claude", "raw-first");
-    expect(before).toMatchObject({
-      status: "stored",
-      agent: "claude",
-      session_id: "raw-first",
-      traces: [],
-      raw: [{ part: 0, format: "jsonl", size: 3 }],
-    });
-    expect(before?.head).toBeUndefined();
-    expect(before?.source).toBeUndefined();
-    expect((await readChanges(store, "acme")).entries).toEqual([]);
-
-    // The same bytes again: nothing to do.
-    expect(
-      await putRaw({
-        store,
-        owner: "acme",
-        agent: "claude",
-        session_id: "raw-first",
-        part: 0,
-        format: "jsonl",
-        offset: 0,
-        length: 11,
-        bytes,
-        now,
-      }),
-    ).toEqual({ status: "exists", part: 0 });
-
+  it("remembers the envelope it applied, the log state and the withheld calls", async () => {
     const stored = await ingest({
       store,
       owner: "acme",
       records: records("claude-basic"),
-      metadata: { ...meta, session_id: "raw-first" },
+      metadata: meta,
+      now,
+      normalized: state(4),
+      withheld_calls: { toolu_1: "sensitive-file" },
+      applied: { idempotency_key: "k1" },
+    });
+    const session = await getSession(store, "acme", "claude", "sess1");
+    expect(session?.normalized).toEqual(state(4));
+    expect(session?.withheld_calls).toEqual({ toolu_1: "sensitive-file" });
+    expect(session?.applied).toEqual([
+      {
+        idempotency_key: "k1",
+        at: expect.any(String),
+        status: "stored",
+        content_hash: stored.content_hash,
+        records: stored.records,
+        events: stored.events,
+        records_total: 4,
+        prefix_sha256: "a".repeat(64),
+        bytes_total: 400,
+      },
+    ]);
+    // The same trace again, applied by another envelope: a duplicate, remembered as one; an
+    // empty withheld set removes it.
+    await ingest({
+      store,
+      owner: "acme",
+      records: records("claude-basic"),
+      metadata: meta,
+      now,
+      normalized: state(4),
+      withheld_calls: {},
+      applied: { idempotency_key: "k2" },
+    });
+    const again = await getSession(store, "acme", "claude", "sess1");
+    expect(again?.applied?.map((a) => [a.idempotency_key, a.status])).toEqual([
+      ["k1", "stored"],
+      ["k2", "duplicate"],
+    ]);
+    expect(again && "withheld_calls" in again).toBe(false);
+  });
+
+  it("keeps the last APPLIED_KEPT envelopes", () => {
+    let applied: ReturnType<typeof withApplied> = [];
+    for (let i = 0; i < APPLIED_KEPT + 5; i++) {
+      applied = withApplied(applied, {
+        idempotency_key: `k${i}`,
+        at: "2026-11-14T09:00:00.000Z",
+        status: "unchanged",
+        records_total: 0,
+        prefix_sha256: "a".repeat(64),
+        bytes_total: 0,
+      });
+    }
+    expect(applied).toHaveLength(APPLIED_KEPT);
+    expect(applied[0]?.idempotency_key).toBe("k5");
+    // A resend's entry moves to the end instead of appearing twice.
+    applied = withApplied(applied, { ...(applied[0] as (typeof applied)[number]) });
+    expect(applied.map((a) => a.idempotency_key).filter((k) => k === "k5")).toHaveLength(1);
+    expect(applied.at(-1)?.idempotency_key).toBe("k5");
+  });
+
+  it("leaves nothing behind when the guard refuses the stored session", async () => {
+    await ingest({ store, owner: "acme", records: records("claude-basic"), metadata: meta, now });
+    const archive = archiveId("acme", "claude", "sess1");
+    const before = (await store.list(keys.session("acme", archive))).keys;
+    let calls = 0;
+    await expect(
+      ingest({
+        store,
+        owner: "acme",
+        records: records("claude-queued-input"),
+        metadata: meta,
+        now,
+        // Accept the first look (before the object is written), refuse inside the update.
+        guard: () => {
+          if (calls++ > 0) throw new Error("changed");
+        },
+      }),
+    ).rejects.toThrow("changed");
+    expect((await store.list(keys.session("acme", archive))).keys).toEqual(before);
+  });
+
+  it("replaces the session's traces with one, removing the others", async () => {
+    const first = await ingest({
+      store,
+      owner: "acme",
+      records: records("claude-basic"),
+      metadata: meta,
       now,
     });
-    const after = await getSession(store, "acme", "claude", "raw-first");
-    expect(after).toMatchObject({
-      head: stored.content_hash,
-      source: "claude-code",
-      created_at: before?.created_at,
-      raw: [{ part: 0 }],
+    const second = await ingest({
+      store,
+      owner: "acme",
+      records: records("claude-queued-input"),
+      metadata: meta,
+      now,
+      replace: true,
     });
-    expect(after?.traces).toHaveLength(1);
+    const session = await getSession(store, "acme", "claude", "sess1");
+    expect(session?.traces.map((t) => t.content_hash)).toEqual([second.content_hash]);
+    expect(await getTrace(store, "acme", first.archive_id, first.content_hash)).toBeNull();
+    const changes = (await readChanges(store, "acme")).entries;
+    expect(changes.map((c) => c.entry.replace)).toEqual([undefined, true]);
+  });
+
+  it("records progress without a trace: the log moves on and the envelope is remembered", async () => {
+    await ingest({ store, owner: "acme", records: records("claude-basic"), metadata: meta, now });
+    const archive = archiveId("acme", "claude", "sess1");
+    await recordProgress({
+      store,
+      owner: "acme",
+      archive_id: archive,
+      normalized: state(7),
+      applied: { idempotency_key: "k9", status: "dropped" },
+      now,
+    });
+    const session = await getSession(store, "acme", "claude", "sess1");
+    expect(session?.normalized).toEqual(state(7));
+    expect(session?.applied).toEqual([
+      expect.objectContaining({ idempotency_key: "k9", status: "dropped", bytes_total: 700 }),
+    ]);
+    expect(session?.traces).toHaveLength(1);
+    // Nothing to move for a session that is not stored.
+    await recordProgress({
+      store,
+      owner: "acme",
+      archive_id: archiveId("acme", "claude", "none"),
+      normalized: state(1),
+    });
+    expect(await getSession(store, "acme", "claude", "none")).toBeNull();
   });
 });
 
@@ -331,61 +377,22 @@ describe("tombstone", () => {
     ]);
   });
 
-  it("leaves no raw part behind when it lands while a part is being stored", async () => {
-    await ingest({ store, owner: "acme", records: records("claude-basic"), metadata: meta, now });
-    let raced = false;
-    const racing = new Proxy(store, {
-      get(target, prop, receiver) {
-        if (prop !== "put") return Reflect.get(target, prop, receiver);
-        return async (key: string, body: Uint8Array, options?: object) => {
-          const put = await target.put(key, body, options);
-          if (!raced && key.includes("/raw.")) {
-            raced = true;
-            await tombstone({ store: target, owner: "acme", agent: "claude", session_id: "sess1" });
-          }
-          return put;
-        };
-      },
-    });
-    await expect(
-      putRaw({
-        store: racing,
-        owner: "acme",
-        agent: "claude",
-        session_id: "sess1",
-        part: 0,
-        format: "jsonl",
-        offset: 0,
-        length: 1,
-        bytes: new Uint8Array(gzipSync("x")),
-        now,
-      }),
-    ).rejects.toMatchObject({ code: "redacted" });
-    expect(raced).toBe(true);
-    const archive = archiveId("acme", "claude", "sess1");
-    expect((await store.list(keys.session("acme", archive))).keys).toEqual([
-      keys.metadata("acme", archive),
-    ]);
-  });
-
-  it("removes trace and raw objects, marks the session redacted, and refuses re-ingest", async () => {
+  it("removes the trace objects and the log state, marks the session redacted, and refuses re-ingest", async () => {
     const stored = await ingest({
       store,
       owner: "acme",
       records: records("claude-basic"),
       metadata: meta,
       now,
+      normalized: { bytes: 10, records: 4, prefix_sha256: "a".repeat(64), hash_state: "4:x" },
+      withheld_calls: { t1: "secret-output" },
+      applied: { idempotency_key: "k1" },
     });
-    await putRaw({
+    await ingest({
       store,
       owner: "acme",
-      agent: "claude",
-      session_id: "sess1",
-      part: 0,
-      format: "jsonl",
-      offset: 0,
-      length: 11,
-      bytes: new Uint8Array(gzipSync("x")),
+      records: records("claude-queued-input"),
+      metadata: meta,
       now,
     });
     const result = await tombstone({
@@ -400,13 +407,17 @@ describe("tombstone", () => {
     const session = await getSession(store, "acme", "claude", "sess1");
     expect(session?.status).toBe("redacted");
     expect(session?.head).toBeUndefined();
+    for (const field of ["normalized", "withheld_calls", "applied"]) {
+      expect(session && field in session).toBe(false);
+    }
     expect(await getTrace(store, "acme", stored.archive_id, stored.content_hash)).toBeNull();
-    expect(await getBytes(store, keys.raw("acme", stored.archive_id, 0, "jsonl"))).toBeNull();
+    expect((await store.list(keys.session("acme", stored.archive_id))).keys).toEqual([
+      keys.metadata("acme", stored.archive_id),
+    ]);
 
     const changes = (await readChanges(store, "acme")).entries;
-    expect(changes.map((e) => e.entry.kind)).toEqual(["published", "tombstone"]);
-    expect(changes[1]?.key.endsWith("-tombstone.json")).toBe(true);
-    expect(changes[1]?.entry.content_hash).toBe(stored.content_hash);
+    expect(changes.map((e) => e.entry.kind)).toEqual(["published", "published", "tombstone"]);
+    expect(changes[2]?.key.endsWith("-tombstone.json")).toBe(true);
 
     await expect(
       ingest({ store, owner: "acme", records: records("claude-basic"), metadata: meta, now }),

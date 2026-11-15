@@ -9,7 +9,9 @@ import { join } from "node:path";
 import { type AppOptions, createApp as createServer } from "@seshi/api";
 import { HttpSessionDB, ServerError } from "@seshi/client";
 import {
+  Forbidden,
   OffsetMismatch,
+  SessionConflict,
   type SessionDB,
   SessionRejected,
   StoreError,
@@ -112,10 +114,11 @@ describe("the two backends agree", () => {
       ),
     );
 
+    // The same upload again is answered as the first time (X4.7).
     const again = await both((db) =>
       db.ingest({ agent: "claude-code", session_id: "sess1", transcript: CLAUDE }),
     );
-    expect(again.status).toBe("duplicate");
+    expect(again).toEqual(first);
 
     const chunk = await both((db) =>
       db.ingest({
@@ -125,12 +128,12 @@ describe("the two backends agree", () => {
         offset: first.bytes_total,
       }),
     );
-    expect(chunk.status).toBe("trivial");
+    expect(chunk.status).toBe("unchanged");
     expect(chunk.bytes_total).toBe(first.bytes_total + PROGRESS.length);
 
     const metadata = await both((db) => db.getSession("claude-code", "sess1"));
     expect(metadata?.head).toBe(first.content_hash);
-    expect(metadata?.raw).toHaveLength(2);
+    expect(metadata?.normalized?.bytes).toBe(chunk.bytes_total);
 
     const trace = (await both((db) => db.getTrace("claude-code", "sess1"))) as Trace | null;
     expect(trace?.content_hash).toBe(first.content_hash);
@@ -148,19 +151,35 @@ describe("the two backends agree", () => {
     await both((db) => db.changes({ after: changes.cursor }));
     await both((db) => db.changes({ since: "2026-10-30T16:00:00.000Z" }));
 
-    expect(await both((db) => db.tombstone("claude-code", "sess1"))).toEqual({ removed: 3 });
+    expect(await both((db) => db.tombstone("claude-code", "sess1"))).toEqual({ removed: 1 });
     await both((db) => db.getTrace("claude-code", "sess1"));
     expect(await both((db) => db.getSession("claude-code", "sess1"))).toMatchObject({
       status: "redacted",
     });
   });
 
-  it("on a trivial session: stored raw, no trace", async () => {
+  it("on a filtered session: nothing stored", async () => {
     const result = await both((db) =>
       db.ingest({ agent: "claude-code", session_id: "tiny", transcript: SMALL }),
     );
-    expect(result.status).toBe("trivial");
+    expect(result.status).toBe("filtered");
+    expect(await both((db) => db.getSession("claude-code", "tiny"))).toBeNull();
     expect(await both((db) => db.getTrace("claude-code", "tiny"))).toBeNull();
+  });
+
+  it("on a whole upload that does not extend the session, and its replace", async () => {
+    await both((db) => db.ingest({ agent: "claude-code", session_id: "r", transcript: CLAUDE }));
+    const other = CLAUDE.replace("The auth flow:", "Something else:");
+    expect(other).not.toBe(CLAUDE);
+    for (const db of [http, direct]) {
+      await expect(
+        db.ingest({ agent: "claude-code", session_id: "r", transcript: other }),
+      ).rejects.toBeInstanceOf(SessionConflict);
+    }
+    const replaced = await both((db) =>
+      db.ingest({ agent: "claude-code", session_id: "r", transcript: other, replace: true }),
+    );
+    expect(replaced.status).toBe("stored");
   });
 
   it("on what is not there", async () => {
@@ -200,6 +219,25 @@ describe("the HTTP backend throws what the pipeline throws", () => {
     const again = http.ingest({ agent: "claude-code", session_id: "gone", transcript: CLAUDE });
     await expect(again).rejects.toBeInstanceOf(SessionRejected);
     await expect(again).rejects.toMatchObject({ code: "redacted" });
+  });
+
+  it("SessionConflict and Forbidden from their statuses", async () => {
+    const answer = (status: number, code: string) =>
+      new HttpSessionDB({
+        server: "http://s.test",
+        token: TOKEN,
+        fetch: () => Promise.resolve(Response.json({ error: { code, message: code } }, { status })),
+      });
+    await expect(
+      answer(409, "conflict").ingest({ agent: "claude-code", session_id: "x", transcript: CLAUDE }),
+    ).rejects.toBeInstanceOf(SessionConflict);
+    await expect(
+      answer(403, "forbidden").ingest({
+        agent: "claude-code",
+        session_id: "x",
+        transcript: CLAUDE,
+      }),
+    ).rejects.toBeInstanceOf(Forbidden);
   });
 
   it("ServerError for the rest", async () => {

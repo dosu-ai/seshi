@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gunzipSync } from "node:zlib";
@@ -68,16 +68,30 @@ const answer = line({
   message: { role: "assistant", model: "claude-x", content: [{ type: "text", text: "Done." }] },
 });
 
-async function rawPart(part: number): Promise<string> {
+/** The head trace as stored, as text. */
+async function headTrace(): Promise<string> {
+  const metadata = await getSession(store, owner, "claude-code", sid);
   const bytes = await getBytes(
     store,
-    keys.raw(owner, archiveId(owner, "claude-code", sid), part, "jsonl"),
+    keys.trace(owner, archiveId(owner, "claude-code", sid), metadata?.head as string),
   );
   return new TextDecoder().decode(gunzipSync(bytes as Uint8Array));
 }
 
+/** Everything in the store, as text (gzipped objects unzipped). */
+function everything(root: string): string {
+  let out = "";
+  for (const entry of readdirSync(root, { withFileTypes: true, recursive: true })) {
+    if (!entry.isFile()) continue;
+    const bytes = readFileSync(join(entry.parentPath, entry.name));
+    out += entry.name.endsWith(".gz") ? gunzipSync(bytes).toString() : bytes.toString();
+  }
+  return out;
+}
+
 describe("storeSession redaction", () => {
   it("withholds a sensitive result that arrives in a later chunk than its call", async () => {
+    // The call and its result in one whole upload first, so the session has a trace…
     const first = prompt + readEnv;
     const one = await storeSession(
       { owner, agent: "claude-code", session_id: sid, transcript: first, format: "jsonl" },
@@ -98,15 +112,18 @@ describe("storeSession redaction", () => {
       },
       { store, formats },
     );
-    const raw = await rawPart(1);
-    expect(raw).not.toContain("plainvalue");
-    expect(raw).toContain("[redacted:sensitive-file]");
+    // …then the result in a chunk of its own: withheld from the ids the session carries.
+    const trace = await headTrace();
+    expect(trace).not.toContain("plainvalue");
+    expect(trace).toContain("[redacted:sensitive-file]");
+    expect(trace).toContain('"withheld":"sensitive-file"');
+    expect(everything(dir)).not.toContain("plainvalue");
     expect((await getSession(store, owner, "claude-code", sid))?.withheld_calls).toEqual({
       toolu_env: "sensitive-file",
     });
   });
 
-  it("applies the operator's patterns to the raw part and the trace", async () => {
+  it("applies the operator's patterns to the trace, and stores nothing else of the transcript", async () => {
     const redaction = redactionRules({ patterns: ["cust_[a-z0-9]{6}"] });
     const result = await storeSession(
       {
@@ -119,18 +136,18 @@ describe("storeSession redaction", () => {
       { store, formats, redaction },
     );
     expect(result.status).toBe("stored");
-    const raw = await rawPart(0);
-    expect(raw).not.toContain("cust_abc123");
-    expect(raw).toContain("[redacted:custom-pattern]");
-    expect(raw).not.toContain("plainvalue");
-    const metadata = await getSession(store, owner, "claude-code", sid);
-    const trace = await getBytes(
-      store,
-      keys.trace(owner, metadata?.archive_id as string, metadata?.head as string),
-    );
-    const text = new TextDecoder().decode(gunzipSync(trace as Uint8Array));
+    const text = await headTrace();
     expect(text).not.toContain("cust_abc123");
+    expect(text).toContain("[redacted:custom-pattern]");
     expect(text).not.toContain("plainvalue");
+    expect(everything(dir)).not.toContain("cust_abc123");
+    expect(everything(dir)).not.toContain("plainvalue");
+    // What ran is recorded, never what it matched (F2.3).
+    const metadata = await getSession(store, owner, "claude-code", sid);
+    expect(metadata?.redaction?.counts).toMatchObject({
+      "custom-pattern": 1,
+      "sensitive-file": 1,
+    });
   });
 
   it("keeps no withheld_calls on a session that has none", async () => {
