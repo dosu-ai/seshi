@@ -61,6 +61,8 @@ export {
   listReviews,
   listTokens,
   PENDING_SCHEMA,
+  type PendingDetails,
+  type PendingEnvelope,
   type PendingMarker,
   REVIEW_SCHEMA,
   type ReviewFailure,
@@ -114,6 +116,15 @@ export {
   S3Store,
   type S3StoreOptions,
 } from "./s3";
+export {
+  deleteSpans,
+  listSpanKeys,
+  listSpans,
+  putSpan,
+  putSpans,
+  SPAN_SCHEMA,
+  type SpanRecord,
+} from "./spans";
 export {
   type DeleteOptions,
   getBytes,

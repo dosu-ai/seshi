@@ -9,7 +9,7 @@
  * `PreconditionFailed` instead of overwriting (X7.3). */
 
 import { randomBytes } from "node:crypto";
-import type { Claims, OwnerBasis, Visibility } from "@seshi/model";
+import type { Claims, Envelope, OwnerBasis, Visibility } from "@seshi/model";
 import { createJson, putJson, readJson, replaceJson, updateJson, type Versioned } from "./json";
 import { assertOwner, keys } from "./layout";
 import type { Store } from "./store";
@@ -212,6 +212,24 @@ export interface PendingMarker {
    * millisecond write the same bytes (the same MD5 ETag), and the assembler's If-Match delete
    * would clear a marker a batch touched after the assembler read it. */
   touch: string;
+  /** The source the spans came from: its quiet period applies (F4.4). */
+  source_id?: string;
+  /** The last batch's envelope without its payload: who sent the spans, whose session it is,
+   * which session and format. The assembler publishes the session as it (09). */
+  envelope?: PendingEnvelope;
+  /** The last batch held a span that ends the session: publish without waiting the whole
+   * quiet period (F4.4). */
+  final?: boolean;
+}
+
+/** An envelope as a pending marker keeps it: never the payload. */
+export type PendingEnvelope = Omit<Envelope, "payload">;
+
+/** What a touch records beside the time. */
+export interface PendingDetails {
+  source_id?: string;
+  envelope?: PendingEnvelope;
+  final?: boolean;
 }
 
 /** Record that `archive` has new spans; returns the marker's ETag. */
@@ -220,6 +238,7 @@ export function touchPending(
   owner: string,
   archive: string,
   now: () => Date = () => new Date(),
+  details: PendingDetails = {},
 ): Promise<string> {
   const marker: PendingMarker = {
     schema: PENDING_SCHEMA,
@@ -227,6 +246,9 @@ export function touchPending(
     archive_id: archive,
     touched_at: now().toISOString(),
     touch: randomBytes(8).toString("hex"),
+    ...(details.source_id ? { source_id: details.source_id } : {}),
+    ...(details.envelope ? { envelope: details.envelope } : {}),
+    ...(details.final ? { final: true } : {}),
   };
   return putJson(store, keys.pending(archive), marker);
 }
