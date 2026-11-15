@@ -595,6 +595,13 @@ describe("seshi healthcheck", () => {
       const base = `http://127.0.0.1:${server.port}`;
       expect((await seshi(["healthcheck", "--url", `${base}/healthz`])).code).toBe(EXIT.ok);
       expect((await seshi(["healthcheck", "--url", `${base}/other`])).code).toBe(EXIT.unavailable);
+      // --json, as every command takes it (F8.1).
+      const up = await seshi(["healthcheck", "--url", `${base}/healthz`, "--json"]);
+      expect(up.code).toBe(EXIT.ok);
+      expect(JSON.parse(up.out)).toEqual({ ok: true, url: `${base}/healthz` });
+      const down = await seshi(["healthcheck", "--url", `${base}/other`, "--json"]);
+      expect(down.code).toBe(EXIT.unavailable);
+      expect(JSON.parse(down.err)).toMatchObject({ error: { code: "unavailable" } });
     } finally {
       server.stop(true);
     }

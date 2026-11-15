@@ -17,7 +17,9 @@ repository's code.
 ## Conventions (F8.1)
 
 - Output is readable lines by default. With `--json`, a command prints exactly one JSON
-  document on stdout, and an error as `{"error": {"code", "message"}}` on stderr.
+  document on stdout, and an error as `{"error": {"code", "message"}}` on stderr. Every
+  command takes it but `serve` (a running server, which logs) and `hook` (called by agents,
+  which prints nothing).
 - Messages go to stderr as `seshi: …`, warnings as `seshi: warning: …`. Questions (a
   confirmation, a hidden org key) and sign-in instructions go to stderr too, so stdout stays the
   answer.
@@ -58,7 +60,7 @@ repository's code.
 |---|---|
 | `serve [--config] [--listen] [--roles api,worker] [--set path=value]…` | Run the server: the HTTP API and the worker's jobs ([server.md](server.md#roles-and-background-work)) |
 | `config check\|show [--cli] [--origin] [--json]` | Validate the config, or show every value and where it came from ([config.md](config.md)) |
-| `admin init [--owner] [--force] [--rotate-org-key]` | The first admin token and the org key ([server.md](server.md#setting-up-who-may-call-it)) |
+| `admin init [--owner] [--force] [--rotate-org-key] [--json]` | The first admin token and the org key ([server.md](server.md#setting-up-who-may-call-it)); `--json`: `{admin: {id, owner, token}, org_key: {id, token}, revoked}`, for a deployment script |
 | `workers status [--server <url>] [--json]` | The worker, its jobs' last runs, errors and backlog, each source's drop and failure counts (X7.5). Exit 8 when something needs a look |
 | `sync run <id> [--force]` | Poll a source once, for cron (X7.1). Exit 6 when another worker moved the checkpoint |
 | `sync assemble` | Run the span assembler once, for cron (X7.1): publish the OTLP and Datadog sessions whose spans went quiet. Exit 1 when a session could not be assembled (it is tried again next run) |
@@ -68,7 +70,7 @@ repository's code.
 | `reprocess --source <id> [--since <time>] [--dry-run] [--run]` | Rewind a source so its sessions are read again (X4.9). Uploads are resent by the capture uploader (14) |
 | `review eval [--policy <id>] [--fixtures <file or folder>]` | Score a model review policy on labelled fixtures, through its real providers: label accuracy, false and missed drops, redactor recall, leaks (F3.8; [model-review.md](model-review.md)). Seshi's own fixtures by default. Exit 8 when any fixture came out other than labelled |
 | `normalize [--agent <format>] [<file> \| -]` | A transcript as canonical, redacted records, one per line (`--json`: one document, with the `llm_calls` the records name: model and token usage per call). For tools in other languages (X3.10) |
-| `healthcheck [--url] [--config]` | Ask a running server's `/healthz` where `server.listen` says it listens (the container's health check) |
+| `healthcheck [--url] [--config] [--json]` | Ask a running server's `/healthz` where `server.listen` says it listens (the container's health check); `--json`: `{ok, url, version}` |
 | `login [--server <url>] [--key <key>\|-] [--token <token>\|-] [--user <name>] [--browser\|--device] [--visibility org\|owner]` | Sign in to a server (F8.2), [below](#signing-in-f82) |
 | `logout [--server <url>] [--all]` | Forget the stored credentials |
 | `whoami [--server <url>]` | Who the CLI is signed in as, and whether the credential still works |

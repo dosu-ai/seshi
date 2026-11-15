@@ -63,6 +63,25 @@ describe("seshi admin init (X5.12)", () => {
     expect(await (await me(orgKey as string, "bob")).json()).toMatchObject({ owner: "bob" });
   });
 
+  it("prints the tokens as one JSON document with --json (F8.1)", async () => {
+    const first = await seshi(["admin", "init", "--json", "--owner", "ops"]);
+    expect(first.code).toBe(0);
+    const document = JSON.parse(first.out);
+    expect(document).toMatchObject({
+      admin: { owner: "ops", id: expect.any(String) },
+      org_key: { id: expect.any(String) },
+      revoked: [],
+    });
+    expect(tokensIn(document.admin.token)).toHaveLength(1);
+    expect(tokensIn(document.org_key.token)).toHaveLength(1);
+    const again = await seshi(["admin", "init", "--json"]);
+    expect(again.code).toBe(6);
+    expect(JSON.parse(again.err)).toMatchObject({ error: { code: "conflict" } });
+    const rotated = JSON.parse((await seshi(["admin", "init", "--json", "--rotate-org-key"])).out);
+    expect(rotated.revoked).toEqual([document.org_key.id]);
+    expect(rotated.admin).toBeUndefined();
+  });
+
   it("refuses to run twice, makes another admin with --force, and rotates the org key", async () => {
     expect((await seshi(["admin", "init"])).code).toBe(0);
     const again = await seshi(["admin", "init"]);

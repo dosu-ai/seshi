@@ -260,6 +260,14 @@ what changed.
   the job once and `seshi sync prune [--json]` prints what it removed (exit 1 when the bucket
   failed). The search indexer needs none: it runs on every api instance. cli.md, server.md and
   06 say so. Test: old and new drop and failure records, `sync prune` removes the old ones.
+- **coverage, low**: `seshi admin init --json` and `seshi healthcheck --json` failed with
+  "Unknown option '--json'" (exit 2), against F8.1's "--json on every command", so a
+  deployment script had to scrape the admin token and org key, printed once, from text. Both
+  now take it: `admin init` prints `{admin: {id, owner, token}, org_key: {id, token},
+  revoked}` (errors as the JSON error object, a second run `conflict`), `healthcheck` prints
+  `{ok, url, version}` or the `unavailable` error. `serve` and `hook` stay without it (a
+  running server; a hook prints nothing by design), as cli.md now says. Tests: both commands
+  with `--json`, success and failure.
 - **coverage, test only** (found while fixing): `uploader.test.ts`'s "seen in a repo that
   turns capture off" spooled two entries in one millisecond, which the spool orders by a
   random suffix, so it failed about one run in six. Its entries are now spooled a millisecond
