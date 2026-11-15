@@ -79,6 +79,15 @@ afterEach(async () => {
 
 const stateDir = (m = machine) => join(m.dir, ".local", "state", "seshi");
 const state = (m = machine) => JSON.parse(readFileSync(join(stateDir(m), "state.json"), "utf8"));
+/** A stale rebuild waits a random time within a day (26): move its time to now, as if that had
+ * passed, keeping what the uploader decided otherwise. */
+const rebuildDueNow = (key: string, m = machine) => {
+  const s = state(m);
+  const rebuild = s.sessions[key].rebuild;
+  expect(Date.parse(rebuild.not_before)).toBeGreaterThan(Date.now() - 60_000);
+  rebuild.not_before = new Date(0).toISOString();
+  writeFileSync(join(stateDir(m), "state.json"), JSON.stringify(s), { mode: 0o600 });
+};
 const spooled = (m = machine) => {
   try {
     return readdirSync(join(stateDir(m), "spool")).filter((n) => n.endsWith(".json")).length;
@@ -809,6 +818,9 @@ describe("local mode (X3.5)", () => {
       writeFileSync(localState, JSON.stringify(s), { mode: 0o600 });
       await daemon(local);
       expect(state(local).sessions["claude-code:l1"].rebuild).toBeDefined();
+      // It waits its turn within the day (26), then goes.
+      expect((await daemon(local)).summary).toMatchObject({ uploaded: 0 });
+      rebuildDueNow("claude-code:l1", local);
       expect((await daemon(local)).summary).toMatchObject({ uploaded: 1, failed: 0 });
       expect(
         (await getSession(bucket, "me", "claude-code", "l1"))?.normalizer?.format_version,
@@ -1067,6 +1079,9 @@ describe("resending uploaded sessions (X4.9)", () => {
     // the machine with the retraction secret).
     await daemon();
     expect(state().sessions[KEY].rebuild).toMatchObject({ key: expect.any(String) });
+    // It waits its turn within the day (26): nothing goes until then.
+    expect((await daemon()).summary).toMatchObject({ uploaded: 0 });
+    rebuildDueNow(KEY);
     const { summary } = await daemon();
     expect(summary).toMatchObject({ uploaded: 1, failed: 0 });
     const rebuilt = await stored();

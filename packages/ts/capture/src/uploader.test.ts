@@ -232,6 +232,8 @@ function uploader(options: Partial<UploaderOptions> = {}): Uploader {
     log: () => {},
     git: async () => ({ email: "me@acme.com" }),
     retryBaseMs: 1000,
+    // A stale rebuild goes at once unless a test spreads it.
+    random: () => 0,
     ...options,
   });
 }
@@ -1214,6 +1216,57 @@ describe("resending stale sessions (X4.9)", () => {
     server.staleList = [{ agent: "claude-code", session_id: "s1", built_with: "1", current }];
   };
   const rebuilds = () => server.uploads.filter((u) => u.rebuild);
+
+  it("spreads a stale rebuild over the day, chunks going on meanwhile", async () => {
+    writeFileSync(transcript(), line("one") + line("two"));
+    hooked();
+    await uploader().pass();
+    staleAt("2");
+    later(HOUR);
+    // Halfway through the 24-hour spread: twelve hours from the check.
+    const spread = { random: () => 0.5 };
+    await uploader(spread).pass();
+    expect(session().rebuild?.not_before).toBe(new Date(clock.getTime() + 12 * HOUR).toISOString());
+    // Waiting: no rebuild, but new turns still go as chunks.
+    appendFileSync(transcript(), line("three"));
+    hooked();
+    await uploader(spread).pass();
+    expect(rebuilds()).toHaveLength(0);
+    expect(server.uploads.at(-1)).toMatchObject({ transcript: line("three") });
+    later(11 * HOUR);
+    await uploader(spread).pass();
+    expect(rebuilds()).toHaveLength(0);
+    // Its time has come: the whole log, once.
+    later(HOUR);
+    await uploader(spread).pass();
+    expect(rebuilds()).toHaveLength(1);
+    expect(rebuilds()[0]?.transcript).toBe(line("one") + line("two") + line("three"));
+    expect(session().rebuild).toBeUndefined();
+  });
+
+  it("sends at most two rebuilds a pass; the rest go in the passes after", async () => {
+    for (const id of ["s1", "s2", "s3"]) {
+      writeFileSync(transcript(id), line("one", id));
+      hooked(id);
+    }
+    await uploader().pass();
+    await updateState(paths, (s) => {
+      for (const id of ["s1", "s2", "s3"]) {
+        (s.sessions[`fake:${id}`] as SessionState).rebuild = {
+          at: clock.toISOString(),
+          key: `k-${id}`,
+        };
+      }
+    });
+    await uploader().pass();
+    expect(rebuilds()).toHaveLength(2);
+    await uploader().pass();
+    expect(
+      rebuilds()
+        .map((u) => u.session_id)
+        .sort(),
+    ).toEqual(["s1", "s2", "s3"]);
+  });
 
   it("resends a session the server lists as stale, whole with rebuild, once per version", async () => {
     writeFileSync(transcript(), line("one") + line("two") + line("three"));

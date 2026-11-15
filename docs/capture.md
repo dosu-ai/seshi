@@ -147,9 +147,11 @@ for sessions the hooks missed, never reaching back past when capture was install
 The server keeps no raw transcripts, so when seshi's reading of an agent's format improves, it
 cannot rebuild what it already stored: the machine that uploaded a session sends it again. At
 most once an hour the uploader asks the server which of your sessions an older version of the
-format's normalizer built (`GET /v1/sessions/stale`), and on its next pass sends each one it
-still has the transcript of again, whole, marked `rebuild`: the server builds the session from
-the whole log and reviews it again, replacing what it held. Each session goes once per
+format's normalizer built (`GET /v1/sessions/stale`), and sends each one it still has the
+transcript of again, whole, marked `rebuild`: the server builds the session from the whole log
+and reviews it again, replacing what it held. A normalizer change makes many sessions stale at
+once, so each waits a random time within a day before it goes, and an uploader pass sends at
+most two; new turns of the session go as usual meanwhile. `seshi capture resend` does not wait. Each session goes once per
 normalizer version, even if the server still lists it afterwards (model review dropped the
 rebuild, say). A session turned off is never sent again, and one whose transcript is gone
 cannot be.

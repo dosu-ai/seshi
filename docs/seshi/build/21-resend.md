@@ -193,10 +193,9 @@ record of their dropped start (none exist outside these branches).
 
 ## Still to check
 
-- **Cost at scale.** A `@letta-ai/trajectory` upgrade makes every session of the Letta-based
-  formats stale at once: every uploader resends everything it still holds within the hour, each
-  reviewed again when a policy applies. The pass sends them one after another with no spread
-  or budget; a large backlog may want one.
+- **Cost at scale.** A bump of `@letta-ai/trajectory`'s `NORMALIZER_VERSION` makes every
+  session of the Letta-based formats stale at once. Spread in [26](26-resend-spread.md): each
+  waits a random time within 24 hours, and a pass sends at most two.
 - **Pipeline changes are not versioned.** Only adapters carry a version. A change in the
   pipeline that alters records (trace parsing, the call attachment in `@seshi/formats`) needs
   the affected adapters' versions raised by hand; regex rules have their own backfill.

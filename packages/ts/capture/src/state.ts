@@ -90,8 +90,11 @@ export interface SessionState {
   replace_next?: boolean;
   /** Send the whole log again with `rebuild` (X4.9): the server listed the session as stale
    * (`for`: the format version it is stale against), or `seshi capture resend` asked. Cleared
-   * once an upload of it is answered; `key` is its idempotency key, kept across retries. */
-  rebuild?: { at: string; key: string; for?: string };
+   * once an upload of it is answered; `key` is its idempotency key, kept across retries.
+   * `not_before`: a stale rebuild waits until then, a random time the uploader picks within
+   * `resendSpreadMs`, so a normalizer bump that makes every session stale at once does not
+   * resend them all in the same hour (`seshi capture resend` sets none: it goes now). */
+  rebuild?: { at: string; key: string; for?: string; not_before?: string };
   /** The format version the last stale rebuild was for: a stale listing that names it again (a
    * rebuild model review dropped, say) does not send the session again. */
   rebuilt_for?: string;

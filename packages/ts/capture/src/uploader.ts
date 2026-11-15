@@ -18,9 +18,11 @@
  *   replace model review drops leaves the server's session as it was, which this log no
  *   longer extends: once the transcript grows it goes whole with `replace` again.
  * - A session the server lists as stale (an older normalizer built it, X4.9), or one
- *   `seshi capture resend` marks, goes whole with `rebuild` on the next pass, once: the server
- *   builds and reviews it again even when the log only extends what is stored. The server is
- *   asked at most hourly, and only by a machine that stored something.
+ *   `seshi capture resend` marks, goes whole with `rebuild`, once: the server builds and reviews
+ *   it again even when the log only extends what is stored. The server is asked at most hourly,
+ *   and only by a machine that stored something. A stale session waits a random time within
+ *   `resendSpreadMs` (24 h) first, and a pass sends at most `rebuildsPerPass` (2) rebuilds, so a
+ *   normalizer bump does not resend every session on every machine in the same hour.
  * - 403 `forbidden`, 422: permanent until the transcript changes. 401 or no credential: "sign
  *   in" (B1.6), nothing more is tried this pass. Anything else is retried with backoff, and
  *   three passes in a row of that is "upload failing".
@@ -148,6 +150,13 @@ export interface UploaderOptions {
   sweepIntervalMs?: number;
   /** How often to ask the server which sessions are stale (X4.9). Default 1 hour. */
   staleIntervalMs?: number;
+  /** A stale session's rebuild waits a random time up to this long, so the machines of a team
+   * do not all resend every session in the hour a normalizer bump lands. Default 24 hours. */
+  resendSpreadMs?: number;
+  /** The most rebuilds one pass sends; the rest wait for the next pass. Default 2. */
+  rebuildsPerPass?: number;
+  /** In [0, 1): where in `resendSpreadMs` a rebuild lands. `Math.random` by default. */
+  random?: () => number;
   /** Stop after this long with nothing to do. Default 5 minutes. */
   idleMs?: number;
   /** While uploads or retractions wait to retry, stay up until this long after the last
@@ -242,6 +251,11 @@ export class Uploader {
   private readonly log: (line: string) => void;
   private readonly sweepIntervalMs: number;
   private readonly staleIntervalMs: number;
+  private readonly resendSpreadMs: number;
+  private readonly rebuildsPerPass: number;
+  private readonly random: () => number;
+  /** Rebuilds this pass may still send. */
+  private rebuildsLeft = 0;
   /** After a failed stale check, not before this (ms). */
   private nextStaleCheck = 0;
   private readonly idleMs: number;
@@ -266,6 +280,9 @@ export class Uploader {
     this.log = options.log ?? ((line) => appendLog(options.paths.log, `uploader: ${line}`));
     this.sweepIntervalMs = options.sweepIntervalMs ?? 15 * 60 * SECOND;
     this.staleIntervalMs = options.staleIntervalMs ?? 60 * 60 * SECOND;
+    this.resendSpreadMs = options.resendSpreadMs ?? 24 * 60 * 60 * SECOND;
+    this.rebuildsPerPass = options.rebuildsPerPass ?? 2;
+    this.random = options.random ?? Math.random;
     this.idleMs = options.idleMs ?? 5 * 60 * SECOND;
     this.retryWindowMs = options.retryWindowMs ?? 30 * 60 * SECOND;
     this.pollMs = options.pollMs ?? 2 * SECOND;
@@ -357,6 +374,7 @@ export class Uploader {
       queued: 0,
     };
     summary.taken = await this.takeSpool();
+    this.rebuildsLeft = this.rebuildsPerPass;
     const snapshot = await this.rulesOf();
     const before = readState(this.paths);
     const sweepDue =
@@ -626,13 +644,23 @@ export class Uploader {
         if (!agent || !session.stored || session.rebuild || this.off(st, session)) continue;
         const entry = listed.get(`${agent.format}\n${uploadId(session)}`);
         if (!entry || session.rebuilt_for === entry.current) continue;
-        session.rebuild = { at: now.toISOString(), key: rebuildKey(), for: entry.current };
+        // A random time within the spread: one normalizer bump marks every session of its
+        // formats stale on every machine at once, and the server reviews each rebuild again.
+        const wait = Math.floor(this.random() * this.resendSpreadMs);
+        session.rebuild = {
+          at: now.toISOString(),
+          key: rebuildKey(),
+          for: entry.current,
+          not_before: new Date(now.getTime() + wait).toISOString(),
+        };
         marked++;
       }
       st.uploader = { ...st.uploader, last_stale_check: now.toISOString() };
     });
     if (marked > 0) {
-      this.log(`${marked} session(s) were built by an older normalizer; resending them whole`);
+      this.log(
+        `${marked} session(s) were built by an older normalizer; resending them whole within ${Math.round(this.resendSpreadMs / 3_600_000)}h`,
+      );
     }
   }
 
@@ -662,6 +690,11 @@ export class Uploader {
     return session.retract === "pending" || sessionToggle(state, session.agent, session) === "off";
   }
 
+  /** A rebuild whose time has come (one `seshi capture resend` marked has no wait). */
+  private rebuildDue(rebuild: NonNullable<SessionState["rebuild"]>): boolean {
+    return !rebuild.not_before || Date.parse(rebuild.not_before) <= this.now().getTime();
+  }
+
   /** Not waiting for a retry. */
   private due(session: SessionState): boolean {
     return !session.next_attempt_at || Date.parse(session.next_attempt_at) <= this.now().getTime();
@@ -673,8 +706,9 @@ export class Uploader {
     if (size === 0) return false;
     if (session.error?.permanent && session.error.size === size) return false;
     const limit = sendLimit(session, size);
-    // A rebuild sends the whole log, up to where a pause stopped the session (F9.5).
-    if (session.rebuild) return limit > 0;
+    // A rebuild sends the whole log, up to where a pause stopped the session (F9.5). One still
+    // waiting for its time leaves the session to its ordinary chunks meanwhile.
+    if (session.rebuild && this.rebuildDue(session.rebuild)) return limit > 0;
     if (!session.stored) return limit > 0 && session.held_at_size !== limit;
     return limit !== (session.file_offset ?? 0);
   }
@@ -888,6 +922,8 @@ export class Uploader {
     let replace = false;
     let recoveries = 0;
     let forceWhole = false;
+    /** This sync took one of the pass's rebuilds. */
+    let rebuilding = false;
     for (;;) {
       const current = readState(this.paths);
       const session = current.sessions[key];
@@ -903,8 +939,15 @@ export class Uploader {
       const moved = session.sent_path !== undefined && session.sent_path !== path;
       // A replace that review dropped left the server's session as it was: replace it again.
       const replaceAgain = session.stored === true && session.replace_next === true;
-      // Stale on the server, or `seshi capture resend`: the whole log, built and reviewed again.
-      const rebuild = session.rebuild;
+      // Stale on the server, or `seshi capture resend`: the whole log, built and reviewed again,
+      // once its time has come and while the pass has rebuilds left (the rest go next pass).
+      if (!rebuilding && session.rebuild && this.rebuildDue(session.rebuild)) {
+        if (this.rebuildsLeft > 0) {
+          this.rebuildsLeft--;
+          rebuilding = true;
+        }
+      }
+      const rebuild = rebuilding ? session.rebuild : undefined;
       const whole =
         forceWhole ||
         moved ||
