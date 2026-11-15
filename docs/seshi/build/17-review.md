@@ -339,6 +339,32 @@ what changed.
   token from config deletes its own owner's sessions with no freshness rule. It says so.
 - **docs, low**: spec/openapi.yaml was titled `sessiondb` and described "a sessiondb server".
   It names seshi; the legacy Letta render's `sessionstorage/trace/1` mentions stay.
+- **cli, low** (found in the final check): `seshi <command> --help` answered
+  `Unknown option '--help'` with exit 2 for every command but `config`, and `seshi --help`
+  listed `sessions (ls|show|export|rm)` without `visibility` (16's note). `usageError` now
+  prints the usage on stdout with exit 0 when the command line holds `--help` or `-h` (before
+  a `--`), `serve` reports its parse errors through it, and the summary names `visibility`.
+  Test: `main.test.ts` runs `--help` and `-h` on every command but `hook` and `statusline`.
+
+## Final check
+
+Run at `seshi-17-review` after the fixes above:
+
+- `bun run check` and `bun run typecheck` pass; every generator (`schema`, `types`, `packs`,
+  `brand`, `fixtures`, `goldens`) leaves the tree clean. `bun run test` passed in six of seven
+  full runs. In the other, on a machine at a load average of about 10, `tests/api/app.test.ts`
+  "refuses a chunk that does not start where the log ends" hit vitest's 30 s timeout (the
+  file normally runs in 0.3 s). It did not come back in five more full runs or 25 runs of the
+  file alone; a hang in the in-process app over `FsStore` is not ruled out. Left open.
+- `bun run build`, then `bun run scripts/release/smoke.ts dist/seshi --keychain off` passes on
+  macOS arm64, and `bun run check:hook` passes from source and against `dist/seshi` (about
+  20 ms against the 250 ms budget).
+- `docker build -f apps/seshi/Dockerfile .` builds, and the image runs `--version`.
+- The stack is linear: `origin/seshi` ← 01 ← … ← 16 ← 17, no merge commits, and `main` is
+  inside `seshi`. `bun run check` and `bun run typecheck` pass at every tip, and so does
+  `bun run test` at every tip but 14 and 16, where the uploader's "beats between sessions"
+  test failed once each: the spool-order flake fixed above (ties now break on the session
+  key), which only 17 carries.
 
 ## Not fixed
 

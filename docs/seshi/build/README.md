@@ -26,7 +26,7 @@ Branch names use a hyphen (`seshi-01-restructure`), not a slash: git cannot hold
 | 14 | `seshi-14-capture` | Hooks, spool, uploader, sweep, capture rules, status line, retraction | F9, B1.6 | Built, rebased |
 | 15 | `seshi-15-distribution` | Release binaries, npm packages, install scripts | F8.4, X3.8 | Built, rebased |
 | 16 | `seshi-16-readme` | README, outlined lockups and the npm badge, the user docs brought up to date | B1.5 | Built |
-| 17 | `seshi-17-review` | A review of the whole stack against the decisions, with fixes | All (B1.3 in part) | Built on 16 |
+| 17 | `seshi-17-review` | A review of the whole stack against the decisions, with fixes, and the final check of the stack | All (B1.3 in part) | Built, checked |
 
 F7 (Cursor Cloud sync) is deferred and is not built. Agreed but not built, found in 17's review
 and left for a decision (see [17](17-review.md#not-fixed)): the Claude desktop mod (F9.4–F9.6's
@@ -34,6 +34,16 @@ Session Capture chip and `/session-capture`), the first-run notice for Cursor an
 and the uploader resend that reprocesses uploaded sessions (X4.9, F3.4). B1.3's state words
 are used on the search empty state and `seshi upload`'s lines (17); the rest of B1.3 (the other
 commands' lines, poses in the docs) is not applied.
+
+Status: every branch is built and pushed; nothing is merged and CI has not run on any of them
+(no PRs). `seshi-17-review` is the tip to review or merge. Its final check (see
+[17](17-review.md#final-check)) passed `check`, `typecheck`, `test`, the generators, the
+compiled binary's smoke test, `check:hook` and the Docker build there, and `check` and
+`typecheck` at every tip below it. `test` also passed at every tip but 14 and 16, which still
+carry the uploader's spool-order flake that 17 fixed (and one unexplained 30 s timeout at 17
+in seven full runs, recorded there). What is left is in each note's "Still to check" and 17's
+"Not fixed": mostly checks against real services (S3 backends, the Console, Datadog, IdPs,
+agents, Windows) and decisions the design does not yet make.
 
 Each branch has its notes here: [01](01-restructure.md), [02](02-config.md), [03](03-store.md),
 [04](04-pipeline.md), [05](05-auth.md), [06](06-instance.md), [07](07-redaction-rules.md),
