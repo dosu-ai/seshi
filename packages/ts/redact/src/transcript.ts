@@ -47,6 +47,11 @@ const STRUCTURAL_KEYS: ReadonlySet<string> = new Set([
   "messageId",
   "requestId",
   "request_id",
+  // As the server's record redaction leaves them (`redactor.ts`): a branch name that looks
+  // random to the entropy rule would otherwise reach the server as a marker.
+  "source",
+  "gitBranch",
+  "git_branch",
 ]);
 
 function isStructural(key: string | undefined): boolean {

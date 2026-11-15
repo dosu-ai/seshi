@@ -71,10 +71,11 @@ describe("redactTranscript (client pre-redaction, F2.4)", () => {
       type: "user",
       sessionId: id,
       uuid: id,
+      gitBranch: id,
       message: { content: id },
     });
     const row = JSON.parse(redactTranscript(rules, line, "jsonl").text);
-    expect([row.sessionId, row.uuid]).toEqual([id, id]);
+    expect([row.sessionId, row.uuid, row.gitBranch]).toEqual([id, id, id]);
     expect(row.message.content).toBe("[redacted:entropy]");
   });
 
