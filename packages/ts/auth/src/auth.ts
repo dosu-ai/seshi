@@ -3,7 +3,6 @@
  * principals, exchanges IdP ID tokens for seshi tokens (X5.2), issues and revokes stored tokens
  * (X5.9, X5.11) and creates the first admin (`seshi admin init`, X5.12). */
 
-import { createHash } from "node:crypto";
 import { type Claims, type Fetch, Unauthorized, type Visibility } from "@seshi/model";
 import { isOwner, type Store, type TokenKind, type TokenRecord } from "@seshi/store";
 import type { JWTVerifyGetKey } from "jose";
@@ -184,7 +183,7 @@ export class Auth {
   async authenticate(token: string | undefined, user?: string): Promise<Principal> {
     if (!token) throw new Unauthorized();
     const fixed = this.settings.staticTokens.find((t) => secretsEqual(t.token, token));
-    if (fixed) return this.staticPrincipal(fixed.owner, fixed.token);
+    if (fixed) return this.staticPrincipal(fixed.owner);
     if (isOpaqueToken(token)) {
       const record = await this.tokens.verify(token);
       if (!record) throw new Unauthorized();
@@ -212,8 +211,10 @@ export class Auth {
     throw new Unauthorized();
   }
 
-  private staticPrincipal(owner: string, token: string): Principal {
-    const digest = createHash("sha256").update(token, "utf8").digest("hex").slice(0, 16);
+  /** A static token is named by its config entry, `static-<owner>` (one token per owner): never
+   * by anything derived from the secret, since the id is recorded in every write's `writer` and
+   * any reader of the owner's sessions sees it. */
+  private staticPrincipal(owner: string): Principal {
     return {
       kind: "static",
       owner,
@@ -221,7 +222,7 @@ export class Auth {
       role: "member",
       scopes: new Set(CREDENTIAL_SCOPES.static),
       credential: "static",
-      credential_id: `static-${digest}`,
+      credential_id: `static-${owner}`,
       claims: {},
     };
   }

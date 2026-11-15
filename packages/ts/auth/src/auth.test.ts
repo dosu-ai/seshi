@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -67,8 +68,13 @@ describe("authenticate (X5.1)", () => {
       role: "member",
       credential: "static",
     });
-    expect(p.credential_id).toMatch(/^static-[0-9a-f]{16}$/);
+    // Named by its config entry, never by the secret or a hash of it: every reader of the
+    // owner's sessions sees the id in their writer.
+    expect(p.credential_id).toBe("static-dev");
     expect(p.credential_id).not.toContain(STATIC);
+    expect(p.credential_id).not.toContain(
+      createHash("sha256").update(STATIC).digest("hex").slice(0, 8),
+    );
     expect([...p.scopes].sort()).toEqual([
       "search",
       "sessions:delete",

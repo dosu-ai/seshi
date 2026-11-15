@@ -69,6 +69,12 @@ what changed.
   records and pending marker (answering `removed: n`, with no change entry since nothing was
   indexed). That such records stay until deleted is X6.3 and 09's open retention item, not
   changed here. Test: a filtered OTLP session's spans deleted.
+- **auth, low** (split vote, confirmed): a static token's `credential_id` was `static-` plus
+  16 hex of an unsalted sha256 of the token, and it is stored in every write's `writer` and
+  returned to anyone who reads the owner's sessions or changes, so a person-chosen token could
+  be checked offline against guesses. It is now `static-<owner>` (one static token per owner
+  in `[auth.tokens]`), never derived from the secret; 05's note says so. Test: `authenticate`
+  names the static token `static-dev` and the id carries no part of the token's hash.
 
 ## Not fixed
 

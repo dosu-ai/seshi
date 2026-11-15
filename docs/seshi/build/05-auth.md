@@ -48,8 +48,9 @@ authorize stage holds every write to its caller's own sessions. The shared HS256
   | Admin token | `admin`, all scopes |
   | Service token | `service`, `svc:<name>`; read and search, or write |
 
-  `credential_id` is the record id, the session token's `jti`, or `static-<16 hex of
-  sha256(token)>`.
+  `credential_id` is the record id, the session token's `jti`, or `static-<owner>` (the
+  config entry; never derived from the secret, since every reader of the owner's sessions sees
+  it in `writer`).
 - **Exchange (X5.2).** `POST /v1/auth/exchange {id_token, nonce?, machine?, visibility?}`
   returns a session token. With `machine` it also returns a device token; earlier device tokens
   for the same owner and machine are revoked. Admin comes from `admin_group` in `groups_claim`,

@@ -3,7 +3,6 @@
  * errors. This is the contract between the two halves of the client: a route or a mapping
  * that drifts fails here. */
 
-import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -65,12 +64,12 @@ beforeEach(() => {
     owner: "acme",
     formats: FORMATS,
     now,
-    // The server records a static token's writes as `static`, with a hash naming the token;
-    // the direct client stands for the same caller.
+    // The server records a static token's writes as `static`, named by its owner's config
+    // entry; the direct client stands for the same caller.
     writer: {
       kind: "static",
       principal: "acme",
-      credential_id: `static-${createHash("sha256").update(TOKEN).digest("hex").slice(0, 16)}`,
+      credential_id: "static-acme",
       source_id: "upload",
     },
   });
