@@ -122,6 +122,11 @@ async function start(ctx: CommandContext, formats: FormatRegistry): Promise<void
     fail(`cannot write to ${url}: ${message(err)}`);
   }
 
+  // This process's own shard of the source health counters (X4.8), flushed on shutdown.
+  const health = new StoreHealthCounters(store, {
+    instance: `serve-${randomUUID().slice(0, 8)}`,
+    onError: (err) => ctx.stderr(`seshi: warning: source health not recorded: ${message(err)}`),
+  });
   const app = createApp({
     store,
     storage,
@@ -133,11 +138,7 @@ async function start(ctx: CommandContext, formats: FormatRegistry): Promise<void
     // Each source's own rules over [filter] (X4.10); uploads get [filter].
     filter: (sourceId) => filterFor(loaded.config, sourceId),
     limits: settings.limits,
-    // This process's own shard of the source health counters (X4.8).
-    health: new StoreHealthCounters(store, {
-      instance: `serve-${randomUUID().slice(0, 8)}`,
-      onError: (err) => ctx.stderr(`seshi: warning: source health not recorded: ${message(err)}`),
-    }),
+    health,
   });
 
   const server = Bun.serve({
@@ -163,8 +164,10 @@ async function start(ctx: CommandContext, formats: FormatRegistry): Promise<void
     );
   }
 
-  function shutdown(): void {
+  async function shutdown(): Promise<void> {
     server.stop();
+    // Write what was counted since the last flush; best-effort, and bounded.
+    await Promise.race([health.flush(), Bun.sleep(5000)]);
     process.exit(0);
   }
   process.on("SIGINT", shutdown);
