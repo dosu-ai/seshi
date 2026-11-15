@@ -74,7 +74,8 @@ this way.
    and the redaction rules run on it. Only that is kept, under the session's `spans/` in the
    bucket, never the span as received, and never readable through the API. A span sent twice
    (exporters retry) is kept once. The request is answered as soon as its spans are stored.
-   `seshi redact backfill` redacts kept span records again after the rules change.
+   `seshi redact backfill` redacts kept span records again after the rules change, including
+   those of sessions not published yet or refused by the filter or model review.
 3. **Assembled and published** (F4.4) by the worker's `assembler` job (or, with no worker,
    `seshi sync assemble` from cron) once the session has had
    no new spans for the source's `quiet_period` (10 minutes by default), or about 15 seconds

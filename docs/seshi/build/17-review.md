@@ -268,6 +268,14 @@ what changed.
   `{ok, url, version}` or the `unavailable` error. `serve` and `hook` stay without it (a
   running server; a hook prints nothing by design), as cli.md now says. Tests: both commands
   with `--json`, success and failure.
+- **coverage, medium** (split vote; confirmed, though 09 recorded it as open): `seshi redact
+  backfill` walked sessions through their metadata, so the span records of sessions never
+  published (pending, refused by the filter, dropped by review) kept what a new rule takes
+  out, while otlp.md and redaction.md said backfill redacts kept span records. After each
+  owner's sessions, backfill now walks the owner's session folders for `spans/` with no
+  `metadata.json` (stepping over each archive's spans) and redacts those records again in
+  place, counted in `spans`. otlp.md, redaction.md and 09 say so. Test: span records of a
+  pending archive beside a stored session and of an owner with only spans, dry run and run.
 - **coverage, test only** (found while fixing): `uploader.test.ts`'s "seen in a repo that
   turns capture off" spooled two entries in one millisecond, which the spool orders by a
   random suffix, so it failed about one run in six. Its entries are now spooled a millisecond

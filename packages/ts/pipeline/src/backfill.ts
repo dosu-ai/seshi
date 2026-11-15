@@ -24,7 +24,9 @@
  * are not). Their counts stay on the records, which the assembler adds to the session when it
  * next publishes it; they are not added to the session's or the report's counts here, since the
  * span records repeat what the traces hold. Spans of sessions never published (pending, or
- * refused by the filter or review) have no metadata and are not reached.
+ * refused by the filter or review) have no metadata: after an owner's sessions, the owner's
+ * session folders are walked for span records with no metadata beside them, which are
+ * redacted again the same way.
  *
  * Not touched: `normalized` (the uploader's log state). A later whole upload of such a session,
  * redacted from the transcript with the same new rules, may not hash to the stored prefix; it
@@ -121,7 +123,8 @@ export interface BackfillReport {
   counts: Record<string, number>;
   /** The sessions rewritten, in conflict or failed (the others are only counted). */
   sessions: BackfillSession[];
-  /** Span records redacted again with the current rules, across every session looked at. */
+  /** Span records redacted again with the current rules, across every session looked at and
+   * the sessions never published. */
   spans: number;
   /** Stopped at `limit` or by the signal before every session was looked at. */
   more: boolean;
@@ -135,6 +138,37 @@ async function* sessionsOf(store: Store, owner: string): AsyncGenerator<SessionM
     for (const session of page.sessions) yield session;
     if (!page.truncated || page.cursor === undefined) return;
     startAfter = page.cursor;
+  }
+}
+
+/** The archives of `owner` that hold span records but no metadata: sessions never published
+ * (pending, or refused by the filter or review). Keys sort `metadata.json` before `spans/`, so
+ * an archive's metadata, if it has any, is seen before its spans; listing steps over each
+ * archive's spans once it reaches them. */
+async function* unpublishedSpanArchives(store: Store, owner: string): AsyncGenerator<string> {
+  const prefix = keys.sessions(owner);
+  let after: string | undefined;
+  let published: string | undefined;
+  for (;;) {
+    const page = await store.list(prefix, { startAfter: after, limit: 1000 });
+    let stepped = false;
+    for (const key of page.keys) {
+      const rest = key.slice(prefix.length);
+      const slash = rest.indexOf("/");
+      if (slash < 0) continue;
+      const archive = rest.slice(0, slash);
+      const name = rest.slice(slash + 1);
+      if (name === "metadata.json") published = archive;
+      else if (name.startsWith("spans/")) {
+        if (published !== archive) yield archive;
+        // `0` sorts right after `/`: past every span record of this archive.
+        after = `${prefix}${archive}/spans0`;
+        stepped = true;
+        break;
+      }
+      after = key;
+    }
+    if (!stepped && (!page.truncated || page.keys.length === 0)) return;
   }
 }
 
@@ -463,6 +497,19 @@ export async function backfillRedaction(options: BackfillOptions): Promise<Backf
         report.sessions.push(done);
       }
       options.onSession?.(done);
+    }
+    for await (const archive of unpublishedSpanArchives(options.store, owner)) {
+      if (options.signal?.aborted) {
+        report.more = true;
+        return report;
+      }
+      report.spans += await backfillSpans(
+        options.store,
+        owner,
+        archive,
+        options.redactor,
+        options.dryRun === true,
+      );
     }
   }
   return report;

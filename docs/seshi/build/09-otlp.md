@@ -322,10 +322,10 @@ review of assembled sessions, now that 07 and 08 are in the stack`:
 - **07 (redaction rules)**, still open:
   - If the `Redactor` interface changes, `redactSpanPart` in `packages/ts/pipeline/src/spans.ts`
     must follow.
-  - Backfill does not reach span records of sessions with no metadata: pending ones (their next
-    publish redacts the trace with the current rules, but the records stay as they were) and
-    ones the filter refused or review dropped. Reaching them means walking `assembly/pending/`
-    or the `spans/` folders.
+  - ~~Backfill does not reach span records of sessions with no metadata~~ (resolved in 17):
+    after an owner's sessions, backfill walks the owner's session folders for `spans/` with no
+    `metadata.json` beside them (pending, filtered or review-dropped sessions) and redacts them
+    again in place.
   - A span arriving while backfill rewrites the same span record can be overwritten by the
     backfill's copy (both are redacted; the backfill's with the current rules).
   - A rules change makes the next assembled publish a replace (the prefix no longer hashes the

@@ -585,6 +585,51 @@ describe("backfillRedaction (F2.5)", () => {
     expect((await run()).spans).toBe(0);
   });
 
+  it("redacts the span records of sessions never published (pending, filtered, dropped)", async () => {
+    const oldRules = compileRuleSet();
+    const span = (id: string, text: string) => ({
+      received_at: ts,
+      source_id: "console",
+      format: "otlp-genai",
+      part: {
+        trace_id: "cd".repeat(16),
+        span_id: id,
+        name: "chat m",
+        started_at: ts,
+        content: true,
+        output: [{ role: "assistant", content: text, timestamp: ts }],
+      } as never,
+      redaction: { rule_set: oldRules.hash, counts: {} },
+    });
+    // alice has a stored session beside one that never published; bob has only spans.
+    await store1("s1", meta() + user(LONG) + reply("ok"));
+    const pending = archiveId("alice", "otlp-genai", "sesn_pending");
+    const refused = archiveId("bob", "otlp-genai", "sesn_refused");
+    await putSpan(store, "alice", pending, span("0000000000000001", "ACME-1111"));
+    await putSpan(store, "alice", pending, span("0000000000000002", "ACME-2222"));
+    await putSpan(store, "bob", refused, span("0000000000000003", "ACME-3333"));
+    expect(await readMetadata(store, "alice", pending)).toBeNull();
+
+    expect((await run({ dryRun: true })).spans).toBe(3);
+    expect(JSON.stringify(await listSpans(store, "bob", refused))).toContain("ACME-3333");
+    const report = await run();
+    expect(report.spans).toBe(3);
+    for (const [owner, archive] of [
+      ["alice", pending],
+      ["bob", refused],
+    ] as const) {
+      const records = await listSpans(store, owner, archive);
+      expect(JSON.stringify(records)).not.toContain("ACME-");
+      for (const record of records) expect(record.redaction?.rule_set).toBe(NEW_RULES.hash);
+    }
+    // Still unpublished: no session was made of them.
+    expect(await readMetadata(store, "alice", pending)).toBeNull();
+    expect((await run()).spans).toBe(0);
+    // An owner named on the command line is walked the same way.
+    await putSpan(store, "bob", refused, span("0000000000000004", "ACME-4444"));
+    expect((await run({ owners: ["bob"] })).spans).toBe(1);
+  });
+
   it("tells each session as it is done", async () => {
     await store1("s1", meta() + user(`ACME-1234 ${LONG}`) + reply("ok"));
     await store1("s2", meta() + user(LONG) + reply("ok"));
