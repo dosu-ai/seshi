@@ -132,6 +132,11 @@ export const COMMANDS: Readonly<Record<string, CommandSpec>> = {
     summary: "one short line for an agent's status bar",
     load: () => import("./statusline"),
   },
+  store: {
+    summary:
+      "check a bucket against the layout's invariants, read-only (check: metadata, traces, the change feed, spans)",
+    load: () => import("./store"),
+  },
   sync: {
     summary:
       "poll a source, assemble spans or prune records once, and see checkpoints, failures and drops (run|assemble|prune|status|failed|dropped)",

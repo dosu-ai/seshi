@@ -125,6 +125,7 @@ describe("the command groups (F8.1)", () => {
         "serve",
         "sessions",
         "statusline",
+        "store",
         "sync",
         "tokens",
         "upload",
