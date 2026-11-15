@@ -24,6 +24,14 @@ jobs:
       - run: bun run check
       - run: bun run typecheck
       - run: bun run test
+      # X3.3: seshi hook runs on every agent turn. Fail on a stray top-level import of server,
+      # pipeline, store or search code, or a start-up over budget, from source and compiled.
+      - name: Time seshi hook (source)
+        run: bun run check:hook
+      - name: Build the binary and time seshi hook (compiled)
+        run: |
+          bun run build
+          bun run check:hook --binary dist/seshi
       - name: Create the S3 test bucket
         run: |
           pip install --quiet awscli
@@ -44,10 +52,18 @@ jobs:
       - run: docker build -f apps/seshi/Dockerfile -t sessiondb .
       - name: Boot against a file store and hit /healthz
         run: |
+          docker run --rm sessiondb --version
           docker run -d --name sessiondb -p 7200:7200 \
-            -e SESHI_AUTH__TOKENS__CI=ci-token-0123456789abcdef -e SESHI_STORE__URL=file:///data sessiondb
+            -e SESHI_AUTH__TOKENS__CI=ci-token-0123456789abcdef -e SESHI_STORE__URL=file:///data \
+            -e SESHI_WORKER__HEARTBEAT_INTERVAL=1s sessiondb
           for i in $(seq 1 20); do
-            curl -fsS http://127.0.0.1:7200/healthz && exit 0
+            if curl -fsS http://127.0.0.1:7200/healthz; then
+              # The image's own health check, and the worker role's heartbeat (X7.5).
+              docker exec sessiondb seshi healthcheck
+              sleep 2
+              docker exec sessiondb seshi workers status --json | grep -q '"state": "running"'
+              exit 0
+            fi
             sleep 1
           done
           docker logs sessiondb

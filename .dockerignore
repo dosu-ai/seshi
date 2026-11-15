@@ -5,8 +5,10 @@ spec/testdata
 **/testdata
 **/*.test.ts
 tests
-scripts
+scripts/*
+!scripts/build-binary.ts
 docs
 brand
 *.md
 .env
+dist

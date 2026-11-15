@@ -1,7 +1,13 @@
 # seshi in a container. Fill in `.env` (copy `.env.example`: the tokens, the bucket URL and its
 # keys, as SESHI_* settings), then `docker compose up -d`. A seshi.toml can be mounted at
 # /etc/seshi/seshi.toml instead (docs/config.md). The /data volume only matters for a file://
-# store.
+# store. The image is the compiled seshi binary; its entry point is `seshi`, so `command`
+# takes a seshi command line, and `docker compose exec sessiondb seshi workers status` shows
+# the background jobs.
+#
+# One container runs both roles (api and worker), which is what most deployments want. To run
+# more API instances, give them `command: ["serve", "--roles", "api"]` and keep exactly one
+# service with the worker role (X7.2).
 services:
   # The service and volume keep their sessiondb names, so an existing volume is kept.
   sessiondb:
@@ -9,6 +15,7 @@ services:
       context: .
       dockerfile: apps/seshi/Dockerfile
     env_file: .env
+    command: ["serve"]
     ports:
       - "${HOST_PORT:-7200}:7200"
     volumes:
