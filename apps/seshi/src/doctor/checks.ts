@@ -578,6 +578,14 @@ function localRecords(ev: SessionEvidence, deps: DoctorDeps): LocalRecords {
       skip: "no answer came for what was sent: where the server's log ends in the transcript is not known",
     };
   }
+  // The server holds more than this machine heard of: a piece whose answer was lost, and whether
+  // pre-redaction kept its lengths is not known either (33).
+  if (s.server_offset !== undefined && n.bytes > s.server_offset) {
+    return {
+      end: 0,
+      skip: `the server holds ${bytes(n.bytes - s.server_offset)} past what this machine heard of (an answer was lost): where its log ends in the transcript is not known`,
+    };
+  }
   let end: number;
   if (s.server_offset === n.bytes && s.file_offset !== undefined) end = s.file_offset;
   else if (s.aligned !== false) end = n.bytes;

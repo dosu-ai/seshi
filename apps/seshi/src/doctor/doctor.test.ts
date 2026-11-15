@@ -835,6 +835,19 @@ describe("records and the prefix hash", () => {
     expectStatus(prefixCheck(stub(prefixSha256(RECORDS, 1)), deps()), "fail");
   });
 
+  it("skip records when the server holds a piece this machine heard no answer for", () => {
+    const ahead = evidence((ev) => {
+      Object.assign(ev.local as SessionState, {
+        file_offset: SIZE - 8,
+        server_offset: SIZE - 8,
+        shipped: undefined,
+      });
+    });
+    const check = recordsCheck(ahead, deps());
+    expectStatus(check, "skip");
+    expect(check.summary).toContain("past what this machine heard of");
+  });
+
   it("count the records review dropped on both sides", () => {
     const check = recordsCheck(
       evidence((ev) => {
