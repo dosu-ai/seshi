@@ -958,6 +958,29 @@ describe("a pause stops sessions where they are (F9.5, revised 15 Nov 2026)", ()
     expect(session()).toMatchObject({ toggle: "off", path: moved });
   });
 
+  it("keeps any known session whose transcript moved with no hook naming it", async () => {
+    // Found by the scenario explorer (33): a session seen in a repo that turns capture off
+    // gets no path from its hooks; once its transcript moved it was forgotten, folders and
+    // secret with it, and captured again as new, the excluded repo's part included.
+    writeFileSync(transcript(), head);
+    hooked();
+    await uploader().pass();
+    const secret = session().secret;
+    const moved = join(dir, "elsewhere", "s1.jsonl");
+    mkdirSync(join(dir, "elsewhere"));
+    renameSync(transcript(), moved);
+    const locating: CaptureAgent = {
+      ...agent,
+      locate: (id) => (id === "s1" && existsSync(moved) ? moved : undefined),
+    };
+    await uploader({ agents: [locating] }).pass({ sweep: true });
+    expect(session()).toMatchObject({ path: moved, secret, stored: true });
+    // A transcript gone for good (deleted, nowhere to find): the session is forgotten.
+    rmSync(moved);
+    await uploader({ agents: [locating] }).pass({ sweep: true });
+    expect(session()).toBeUndefined();
+  });
+
   it("follows a stopped session's transcript that moved, keeping its stop and its secret", async () => {
     // Found by the scenario explorer (33): during a pause the hook named the moved transcript
     // to nobody, and the sweep forgot the session (its old path gone), with its stop and the
