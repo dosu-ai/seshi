@@ -46,8 +46,9 @@ service readers read everything. Seshi tokens (`seshi_…`: org key, admin, devi
 stored only as SHA-256 hashes in the bucket, revocable one by one or all of a person's at once,
 and a revocation takes effect within the server's 30-second cache. Session tokens are signed
 with a key only the server holds (`auth.session_keys`), last an hour, and name the deployment,
-so a token from another deployment is refused. A delete needs an admin token or a session
-token issued in the last 10 minutes. ID tokens from the IdP are checked (signature against
+so a token from another deployment is refused. A delete needs an admin token, a session
+token issued in the last 10 minutes, or a static token from config for its own owner's
+sessions. ID tokens from the IdP are checked (signature against
 the IdP's published keys, issuer, audience, expiry, nonce) and used only to obtain a seshi
 token. There is no shared HS256 secret: nothing outside the server can mint a token. Static
 tokens from config are compared in constant time and must be at least 16 characters.
