@@ -109,6 +109,61 @@ describe("health and routing", () => {
   });
 });
 
+/** A body sent as a stream in `size`-byte chunks with no Content-Length (chunked), counting
+ * how many bytes the server pulled from it. */
+function streamed(bytes: Uint8Array, size = 1024) {
+  const pulled = { bytes: 0 };
+  let at = 0;
+  const stream = new ReadableStream<Uint8Array>(
+    {
+      pull(controller) {
+        if (at >= bytes.length) {
+          controller.close();
+          return;
+        }
+        const chunk = bytes.slice(at, at + size);
+        at += chunk.length;
+        pulled.bytes += chunk.length;
+        controller.enqueue(chunk);
+      },
+    },
+    { highWaterMark: 0 },
+  );
+  return { stream, pulled };
+}
+
+function post(path: string, body: ReadableStream<Uint8Array>, headers: Record<string, string>) {
+  return app.fetch(
+    new Request(`http://sessiondb.test${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...headers },
+      body,
+      duplex: "half",
+    } as RequestInit),
+  );
+}
+
+describe("request bodies", () => {
+  it("refuses an unauthenticated body past the route's limit without reading it whole (413)", async () => {
+    // POST /v1/auth/exchange takes 64 KiB and no credential: 4 MiB sent chunked is cut off
+    // at the first chunk past the limit, not buffered first.
+    const big = new Uint8Array(4 << 20).fill(32);
+    const chunked = streamed(big);
+    const res = await post("/v1/auth/exchange", chunked.stream, {});
+    expect(res.status).toBe(413);
+    expect((await res.json()).error.code).toBe("too_large");
+    expect(chunked.pulled.bytes).toBeLessThanOrEqual(64 * 1024 + 1024);
+
+    // A declared length past the limit is refused before anything is read.
+    const declared = streamed(big);
+    const early = await post("/v1/auth/exchange", declared.stream, {
+      "content-length": String(big.length),
+    });
+    expect(early.status).toBe(413);
+    expect(declared.pulled.bytes).toBe(0);
+  });
+});
+
 describe("auth", () => {
   it("accepts any configured token, and nothing else", async () => {
     expect((await call("GET", "/v1/me")).status).toBe(401);

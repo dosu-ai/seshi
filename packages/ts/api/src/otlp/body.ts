@@ -38,11 +38,12 @@ function tooLarge(key: string, max: number, what: string): OtlpBodyError {
   );
 }
 
-/** Reads `stream` whole, refusing it at the first chunk that takes it past `max`. */
-async function readCapped(
+/** Reads `stream` whole, refusing it with `refuse()` at the first chunk that takes it past
+ * `max`: the stream is cancelled there and never read to its end. The JSON routes use it too. */
+export async function readCapped(
   stream: ReadableStream<Uint8Array>,
   max: number,
-  refuse: () => OtlpBodyError,
+  refuse: () => Error,
 ): Promise<Uint8Array> {
   const reader = stream.getReader();
   const chunks: Uint8Array[] = [];

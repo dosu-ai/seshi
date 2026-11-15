@@ -85,6 +85,7 @@ import {
   sourcesWithRecords,
   type TokenKind,
 } from "@seshi/store";
+import { readCapped } from "./otlp/body";
 import { otlpTraces } from "./otlp/receiver";
 import { searchRequestOf } from "./search";
 
@@ -162,21 +163,25 @@ function tooLarge(max: number): HttpError {
 }
 
 /** The body, gunzipped when sent gzipped, refused past `max` bytes either way: a small gzipped
- * body can inflate to far more than any upload. */
+ * body can inflate to far more than any upload. A `Content-Length` past `max` is refused before
+ * anything is read; otherwise the body is read as a stream and refused at the first chunk past
+ * `max`, so no route holds more of a body (an unauthenticated caller's included) than its limit. */
 async function readBody(request: Request, max: number): Promise<Uint8Array> {
-  const bytes = new Uint8Array(await request.arrayBuffer());
-  if (bytes.length > max) throw tooLarge(max);
+  const declared = Number(request.headers.get("content-length") ?? Number.NaN);
+  if (Number.isFinite(declared) && declared > max) throw tooLarge(max);
   const encoding = request.headers.get("content-encoding")?.toLowerCase();
-  if (!encoding || encoding === "identity") return bytes;
-  if (encoding === "gzip") {
-    try {
-      return new Uint8Array(gunzipSync(bytes, { maxOutputLength: max }));
-    } catch (err) {
-      if ((err as { code?: unknown }).code === "ERR_BUFFER_TOO_LARGE") throw tooLarge(max);
-      throw new HttpError(400, "bad_encoding", "body is not valid gzip");
-    }
+  if (encoding && encoding !== "identity" && encoding !== "gzip") {
+    throw new HttpError(415, "unsupported_encoding", `Content-Encoding ${encoding} not supported`);
   }
-  throw new HttpError(415, "unsupported_encoding", `Content-Encoding ${encoding} not supported`);
+  const stream = request.body;
+  const bytes = stream ? await readCapped(stream, max, () => tooLarge(max)) : new Uint8Array();
+  if (!encoding || encoding === "identity") return bytes;
+  try {
+    return new Uint8Array(gunzipSync(bytes, { maxOutputLength: max }));
+  } catch (err) {
+    if ((err as { code?: unknown }).code === "ERR_BUFFER_TOO_LARGE") throw tooLarge(max);
+    throw new HttpError(400, "bad_encoding", "body is not valid gzip");
+  }
 }
 
 async function readJson(request: Request, max: number): Promise<Record<string, unknown>> {
