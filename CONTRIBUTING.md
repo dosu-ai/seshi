@@ -59,6 +59,18 @@ S3-compatible endpoint ([RustFS](https://github.com/rustfs/rustfs)); to run it l
 `SESSIONDB_TEST_S3_ENDPOINT`, `_BUCKET`, `_ACCESS_KEY` and `_SECRET_KEY` at any S3-compatible
 service. Without them it skips.
 
+## Scenarios
+
+Where capture paths meet (a pause and a rebuild, a review stub and a replace, a resend after a
+lost answer, a retraction during an outage), write a scenario rather than another hand-built
+unit test: a YAML file in [tests/scenarios](tests/scenarios/README.md) listing agent turns,
+uploader passes, capture commands, clock moves and injected faults (HTTP answers, store
+failures), with what must hold. The runner drives a real served Instance and real `seshi`
+commands in-process, checks its invariants after every step (offsets, nothing stored past a
+pause, no planted secret in the bucket, `checkStore` errors) and the doctor and `checkStore` once
+the system is quiet. Each file is a test in `bun run test`; the whole set takes a few seconds and
+no tokens. Name the bug or decision a scenario guards in its header comment.
+
 ## Verifying a change end to end
 
 Unit and integration tests run seshi in-process. To show a change working the way a user meets

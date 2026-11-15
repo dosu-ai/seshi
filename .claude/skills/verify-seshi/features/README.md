@@ -58,6 +58,11 @@ behaviour. It then has exactly four H2 sections, in this order:
 - [Doctor and explore](./doctor-explore.md): `seshi doctor` checks a session end to end, and the
   `seshi explore` page shows the same evidence read-only.
 
+For behaviour across capture paths (a pause meeting a rebuild, a review stub meeting a replace, a
+resend after a lost answer, faults in the server or the bucket), see the scenario runner in
+[tests/scenarios](../../../../tests/scenarios/README.md): it covers those combinations in-process,
+with injected faults and a moved clock, which a live run here cannot reach.
+
 Not mapped yet: the Claude desktop Session Capture chip (`claude plugin test
 integrations/claude-code/plugin`, plus a look in the desktop app); OTLP intake
 (`POST /otlp/v1/traces`); the Datadog and S3 pollers; IdP sign-in.
