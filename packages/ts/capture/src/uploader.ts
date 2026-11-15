@@ -231,29 +231,49 @@ export class Uploader {
    * another uploader takes the lock over. */
   async run(options: { signal?: AbortSignal; keepAlive?: boolean; lock?: HeldUploaderLock } = {}) {
     let lastWork = this.now().getTime();
-    while (!options.signal?.aborted) {
-      if (options.lock && !options.lock.beat(this.now())) {
-        this.log("another uploader took over; stopping");
-        return;
-      }
-      let worked = false;
-      try {
-        const summary = await this.pass();
-        worked = summary.taken + summary.found + summary.uploaded + summary.retracted > 0;
-      } catch (err) {
-        this.log(`pass failed: ${message(err)}`);
-      }
-      const now = this.now().getTime();
-      if (worked) lastWork = now;
-      if (!options.keepAlive && now - lastWork >= this.idleMs) return;
-      await new Promise<void>((resolve) => {
-        const timer = setTimeout(resolve, this.pollMs);
-        options.signal?.addEventListener("abort", () => {
-          clearTimeout(timer);
-          resolve();
+    const lock = options.lock;
+    // A long pass (a backlog, a slow server) renews the heartbeat between sessions, so a hook
+    // does not take this uploader for a hung one and start another.
+    if (lock) this.heartbeat = () => lock.beat(this.now());
+    try {
+      while (!options.signal?.aborted) {
+        if (lock && !lock.beat(this.now())) {
+          this.log("another uploader took over; stopping");
+          return;
+        }
+        let worked = false;
+        try {
+          const summary = await this.pass();
+          worked = summary.taken + summary.found + summary.uploaded + summary.retracted > 0;
+        } catch (err) {
+          this.log(`pass failed: ${message(err)}`);
+        }
+        const now = this.now().getTime();
+        if (worked) lastWork = now;
+        if (!options.keepAlive && now - lastWork >= this.idleMs) return;
+        await new Promise<void>((resolve) => {
+          const done = () => {
+            clearTimeout(timer);
+            options.signal?.removeEventListener("abort", done);
+            resolve();
+          };
+          const timer = setTimeout(done, this.pollMs);
+          options.signal?.addEventListener("abort", done, { once: true });
         });
-      });
+      }
+    } finally {
+      this.heartbeat = undefined;
     }
+  }
+
+  /** Renews the running uploader's lock; false once another uploader took it over. */
+  private heartbeat: (() => boolean) | undefined;
+
+  /** Whether to go on with this pass: false once another uploader took the lock over. */
+  private stillHeld(): boolean {
+    if (!this.heartbeat || this.heartbeat()) return true;
+    this.log("another uploader took over; stopping this pass");
+    return false;
   }
 
   /** One pass: take in the spool, sweep when due, retract, upload, and write the summary the
@@ -290,6 +310,7 @@ export class Uploader {
       if (summary.signIn) break;
       const session = state.sessions[key] as SessionState;
       if (session.retract !== "pending" || !this.due(session)) continue;
+      if (!this.stillHeld()) break;
       const outcome = await this.retract(key, session);
       if (outcome.signIn) summary.signIn = outcome.signIn;
       else if (outcome.ok) {
@@ -308,13 +329,14 @@ export class Uploader {
       const session = state.sessions[key];
       if (!session || session.toggle === "off" || session.retract === "pending") continue;
       const agent = this.agents.get(session.agent);
-      if (!agent) continue;
+      if (!agent || !this.due(session)) continue;
       const path = await this.transcriptOf(key, session, agent);
-      if (!path || !this.due(session)) continue;
+      if (!path) continue;
       const size = this.sizeOf(path);
       if (size === undefined || !this.pending(session, size)) continue;
       const place = placeOf(session.cwd);
       if (!this.decision(snapshot, session, place, state).capture) continue;
+      if (!this.stillHeld()) break;
       const outcome = await this.sync(key, agent, place, path, size);
       summary.uploaded += outcome.uploaded;
       if (outcome.uploaded > 0) succeeded = true;

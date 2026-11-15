@@ -30,6 +30,7 @@ import { type RetractOutcome, RetractRefused, type SessionSink, SignInNeeded } f
 import { appendSpool } from "./spool";
 import { readState, type SessionState, updateState } from "./state";
 import { type PreRedactor, retractHash, Uploader, type UploaderOptions } from "./uploader";
+import { acquireUploaderLock, type HeldUploaderLock } from "./uploader-lock";
 
 /** A server in memory that keeps the upload protocol (X6.3, X4.6): a session's whole log until
  * it holds one with `minLines` lines, then chunks at its offset; a whole log that does not
@@ -624,5 +625,25 @@ describe("running", () => {
     const running = uploader({ pollMs: 5 }).run({ signal: stop.signal, keepAlive: true });
     stop.abort();
     await running;
+  });
+
+  it("beats between sessions, and stops mid-pass once another uploader took over", async () => {
+    for (const id of ["s1", "s2"]) {
+      writeFileSync(transcript(id), line("one", id) + line("two", id));
+      hooked(id);
+    }
+    const lock = acquireUploaderLock(paths, clock) as HeldUploaderLock;
+    const beats: string[] = [];
+    const sink: SessionSink = Object.create(server);
+    sink.ingest = async (upload) => {
+      beats.push(JSON.parse(readFileSync(paths.uploader, "utf8")).beat);
+      const result = await server.ingest(upload);
+      // Another uploader takes the lock over while this upload is in flight.
+      writeFileSync(paths.uploader, JSON.stringify({ ...lock.lock, token: "theirs" }));
+      return result;
+    };
+    await uploader({ sink: async () => sink, pollMs: 5 }).run({ lock, keepAlive: true });
+    expect(server.uploads.map((u) => u.session_id)).toEqual(["s1"]);
+    expect(beats).toHaveLength(1);
   });
 });
