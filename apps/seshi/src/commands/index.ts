@@ -1,9 +1,13 @@
-/** The command registry: every `seshi` command, by name, with the module that runs it. A
- * command's module is imported only when that command runs (X3.3), so `seshi hook` and
- * `seshi statusline` never evaluate the server, protobuf or search code. Nothing here may import
- * a command module at the top level.
+/** The command registry: every `seshi` command group (F8.1), by name, with the module that
+ * runs it. A command's module is imported only when that command runs (X3.3), so `seshi hook`
+ * and `seshi statusline` never evaluate the server, protobuf or search code
+ * (`bun run check:hook` enforces it). Nothing here may import a command module at the top
+ * level.
  *
- * Later branches add commands here, one entry each. */
+ * Each command lives in its own file. Commands a later branch builds are stubs that exit 9
+ * (`notImplemented`); that branch replaces the file and, if the summary changes, its line
+ * here. Conventions every command follows: `--json` for one JSON document on stdout, and the
+ * stable exit codes in `../cli/exit.ts`. */
 
 import type { Integration } from "@seshi/kit";
 
@@ -16,6 +20,8 @@ export interface CommandContext {
   stderr(line: string): void;
   /** The integrations this binary was built with (the static registry), loaded on demand. */
   integrations(): Promise<readonly Integration[]>;
+  /** All of standard input, for commands that read `-`; absent where there is none. */
+  stdin?(): Promise<string>;
 }
 
 export interface CommandModule {
@@ -35,12 +41,81 @@ export const COMMANDS: Readonly<Record<string, CommandSpec>> = {
     summary: "set up the server: the first admin token and the org key (admin init)",
     load: () => import("./admin"),
   },
+  capture: {
+    summary: "agent integrations on this machine: install|uninstall|status|pause|resume|off|on",
+    load: () => import("./capture"),
+  },
   config: {
     summary: "check the config, or show every value and where it came from",
     load: () => import("./config"),
   },
+  daemon: {
+    summary: "run the background uploader and sweep",
+    load: () => import("./daemon"),
+  },
+  healthcheck: {
+    summary: "ask a running server's /healthz whether it is up (container health checks)",
+    load: () => import("./healthcheck"),
+  },
+  hook: {
+    summary: "internal: called by agents on their events (hook <agent> <event>)",
+    load: () => import("./hook"),
+  },
+  login: {
+    summary: "sign in to a seshi server",
+    load: () => import("./login"),
+  },
+  logout: {
+    summary: "forget the stored credentials",
+    load: () => import("./logout"),
+  },
+  normalize: {
+    summary: "print a transcript as canonical, redacted records (any format this binary reads)",
+    load: () => import("./normalize"),
+  },
+  redact: {
+    summary: "try redaction rules on a file, or apply new rules to stored sessions (test|backfill)",
+    load: () => import("./redact"),
+  },
+  reprocess: {
+    summary: "rewind a source so its sessions are read and written again",
+    load: () => import("./reprocess"),
+  },
+  search: {
+    summary: "search the sessions you may read",
+    load: () => import("./search"),
+  },
   serve: {
-    summary: "run the server: the HTTP API over one bucket",
+    summary: "run the server: the HTTP API and the worker over one bucket",
     load: () => import("./serve"),
+  },
+  sessions: {
+    summary: "list, show, export and delete sessions (ls|show|export|rm)",
+    load: () => import("./sessions"),
+  },
+  statusline: {
+    summary: "one short line for an agent's status bar",
+    load: () => import("./statusline"),
+  },
+  sync: {
+    summary:
+      "poll a source once, and see checkpoints, failures and drops (run|status|failed|dropped)",
+    load: () => import("./sync"),
+  },
+  tokens: {
+    summary: "manage seshi tokens",
+    load: () => import("./tokens"),
+  },
+  upload: {
+    summary: "send transcripts or folders of them by hand",
+    load: () => import("./upload"),
+  },
+  whoami: {
+    summary: "who the CLI is signed in as, and to which server",
+    load: () => import("./whoami"),
+  },
+  workers: {
+    summary: "the worker, its jobs and their last runs (status)",
+    load: () => import("./workers"),
   },
 };

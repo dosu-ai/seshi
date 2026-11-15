@@ -4,7 +4,9 @@
  *
  *   seshi serve          run the server
  *   seshi --version      print the version
- *   seshi --help         list the commands */
+ *   seshi --help         list the commands
+ *
+ * Exit codes are stable (F8.1, `cli/exit.ts`): 2 for a command line it cannot read. */
 
 import { VERSION } from "@seshi/model";
 import { COMMANDS, type CommandContext, type CommandSpec } from "./commands/index";
@@ -16,6 +18,7 @@ export interface MainOptions {
   /** The command registry; the built-in one by default. */
   commands?: Readonly<Record<string, CommandSpec>>;
   integrations?: CommandContext["integrations"];
+  stdin?: CommandContext["stdin"];
 }
 
 function usage(commands: Readonly<Record<string, CommandSpec>>): string {
@@ -62,10 +65,13 @@ export async function main(argv: string[], options: MainOptions = {}): Promise<n
     stderr,
     integrations:
       options.integrations ?? (() => import("./integrations").then((m) => m.INTEGRATIONS)),
+    stdin: options.stdin ?? (() => Bun.stdin.text()),
   });
 }
 
 if (import.meta.main) {
-  const code = await main(process.argv.slice(2));
-  if (code !== undefined) process.exit(code);
+  // No top-level await: the compiled binary is bytecode, which needs a CommonJS-shaped entry.
+  void main(process.argv.slice(2)).then((code) => {
+    if (code !== undefined) process.exit(code);
+  });
 }
