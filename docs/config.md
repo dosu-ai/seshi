@@ -33,10 +33,10 @@ seshi config show --json [--origin]
 
 `check` exits 0 when `seshi serve` could start with the config, 3 (`config`) when not. It runs
 the same checks `serve` does (tokens long enough, a way to call the server), warns about
-settings that do less than they say (a literal secret in a file others can read, `owner` visibility without
-an IdP), and names every provider a review policy sends data to. `show` does not read secret
-references, so it works where those files or variables are not present. Both take `--config`
-and `--set`, and `--cli` for the CLI's own config (below).
+settings that do less than they say (a literal secret in a file others can read, `owner`
+visibility without an IdP, `server.public_url`), and names every provider a review policy sends
+data to. `show` does not read secret references, so it works where those files or variables are
+not present. Both take `--config` and `--set`, and `--cli` for the CLI's own config (below).
 
 ## Environment names
 
@@ -92,15 +92,12 @@ milliseconds. Sizes are `<n><unit>` with `B`, `KB`, `MB`, `GB`, `KiB`, `MiB` or 
 
 ## Settings
 
-Fields marked *later* are typed and validated now, so a config can be written ahead; the
-branch that builds the feature gives them their effect.
-
 ### `[server]`
 
 | Key | Default | |
 |---|---|---|
 | `listen` | `":7200"` | `host:port`, `:port` (every interface) or `port`; `[::1]:7200` for IPv6. Flag `--listen` |
-| `public_url` | | The URL clients reach the server at, behind any proxy. *Later* (sign-in) |
+| `public_url` | | The URL clients reach the server at, behind any proxy. Accepted but unused: sign-in goes from the CLI to the IdP directly (X5.7), so nothing reads it, and `config check` warns when it is set |
 | `roles` | `["api", "worker"]` | What this instance runs (X7.1). Flag `--roles`. `api` serves the HTTP API; `worker` runs the background jobs (pollers, retention, the heartbeat). Run exactly one worker (X7.2); an instance without `api` answers `/healthz` only |
 | `instance_id` | the host name | This instance's stable name: its source health shard and the heartbeat's `host` (letters, digits, `_`, `-`, up to 64) |
 

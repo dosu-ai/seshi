@@ -49,6 +49,13 @@ export function checkServerConfig(config: ServerConfig): CheckReport {
     );
   }
 
+  // Sign-in is built without it: the CLI talks to the IdP itself (X5.7), so nothing reads it.
+  if (config.server.public_url !== undefined) {
+    warnings.push(
+      "server.public_url has no effect: nothing in seshi reads it (sign-in goes from the CLI to the IdP directly)",
+    );
+  }
+
   // Every provider a policy sends envelopes to, as resolved: defaults and the redactor's
   // inheritance applied. A step without its key fails validation, so it needs no warning.
   for (const policy of config.review.policies) {

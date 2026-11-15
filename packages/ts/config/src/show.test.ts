@@ -117,6 +117,15 @@ describe("checkServerConfig", () => {
     expect(report.warnings).toEqual([]);
   });
 
+  it("warns that server.public_url does nothing", () => {
+    expect(
+      checkServerConfig(config({}, { server: { public_url: "https://seshi.acme.com" } })).warnings,
+    ).toEqual([
+      "server.public_url has no effect: nothing in seshi reads it (sign-in goes from the CLI to the IdP directly)",
+    ]);
+    expect(checkServerConfig(config({})).warnings).toEqual([]);
+  });
+
   it("warns that relaxing require_user or require_reply does nothing yet", () => {
     expect(
       checkServerConfig(

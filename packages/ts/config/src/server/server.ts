@@ -28,7 +28,7 @@ export const serverSection = z
     public_url: httpUrl
       .optional()
       .describe(
-        "The URL clients reach this server at, behind any proxy (sign-in redirects, links).",
+        "The URL clients reach this server at, behind any proxy. Accepted but unused: nothing reads it, and config check warns when it is set.",
       ),
     roles: z
       .array(z.enum(ROLES))
