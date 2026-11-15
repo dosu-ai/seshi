@@ -122,9 +122,10 @@ User docs: [docs/capture.md](../../capture.md) (new), docs/cli.md (rows), docs/c
   - `capture install|uninstall|status|pause|resume|off|on` with `--session [id]`, `--agent`,
     `--path`, `--service`, `--command`. `off --session` writes the toggle, marks a retraction
     when something was sent, spools it and starts the uploader; `on` cancels a pending
-    retraction. `install` reports an agent whose config it cannot read and installs the others
-    (exit 1). `--path` and global edit the CLI config in place (`capture-config.ts`), loaded
-    before writing. `status` exits 8 when something needs action.
+    retraction. `install` and `uninstall` report an agent whose config they cannot read and do
+    the others (exit 1; `uninstall` keeps that agent in the state). `--path` and global edit
+    the CLI config in place (`capture-config.ts`), loaded before writing. `status` exits 8 when
+    something needs action.
   - `upload <path>… | --since <d>` `[--agent]`: identifies each file's agent, applies the same
     decision, records the sessions (clearing old refusals), then runs passes itself, or waits
     up to 2 minutes for a running uploader.

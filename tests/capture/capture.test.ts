@@ -543,6 +543,31 @@ describe("seshi capture install|uninstall|status (F9.6)", () => {
     expect(readFileSync(join(machine.dir, ".cursor", "hooks.json"), "utf8")).toBe("{ broken");
   });
 
+  it("uninstalls the agents it can and reports one whose config it cannot read", async () => {
+    const install = await machine.seshi(["capture", "install", "claude-code", "codex", "cursor"]);
+    expect(install.code, install.err).toBe(0);
+    writeFileSync(join(machine.dir, ".cursor", "hooks.json"), "{ broken");
+    const run = await machine.seshi(["capture", "uninstall", "--json"]);
+    expect(run.code).toBe(1);
+    expect(run.err).toBe("");
+    const report = JSON.parse(run.out);
+    expect(report.uninstalled.map((r: { agent: string }) => r.agent)).toEqual([
+      "claude-code",
+      "codex",
+    ]);
+    expect(report.failed).toEqual([
+      { agent: "cursor", error: expect.stringContaining("not valid JSON") },
+    ]);
+    // The agents removed leave the state (the sweep stops); the one that failed stays.
+    expect(Object.keys(state().agents)).toEqual(["cursor"]);
+    expect(readFileSync(join(machine.dir, ".claude", "settings.json"), "utf8")).not.toContain(
+      "seshi hook",
+    );
+    const human = await machine.seshi(["capture", "uninstall"]);
+    expect(human.code).toBe(1);
+    expect(human.out).toContain("not removed cursor");
+  });
+
   it("installs a named agent, refuses an unknown one, and says when it finds none", async () => {
     const fresh = new Machine();
     try {

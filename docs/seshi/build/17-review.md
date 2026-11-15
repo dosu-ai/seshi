@@ -188,6 +188,14 @@ what changed.
   time>" beside "capturing") and kept it in `--json` as `paused`, since only `resume` clears
   the record. Both now show the pause only while `isPaused` holds. Test: a pause whose `until`
   has passed is absent from both; an open-ended one is shown.
+- **client, medium**: `seshi capture uninstall` stopped at the first agent whose config it
+  could not read (a malformed `~/.cursor/hooks.json`): the plain error went past `failWith`
+  as a stack trace (no JSON under `--json`), exit 1, and the state was never updated, so the
+  agents whose hooks were already removed stayed in `state.agents` and the uploader kept
+  sweeping their folders. Each agent is now uninstalled in its own `try`, as `install` does:
+  failures are reported (`failed` in JSON, "not removed" in text), the others leave the state,
+  the failed one stays, exit 1. 14 says so. Test: Claude Code, Codex and Cursor installed, Cursor
+  broken; uninstall removes two, reports one, no stack trace.
 
 ## Not fixed
 

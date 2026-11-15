@@ -343,31 +343,52 @@ async function uninstall(ctx: CommandContext, json: boolean, args: Args): Promis
   const { paths } = pathsOf(ctx);
   const command = hookCommand();
   const results: { agent: string; changed: string[]; notes: string[] }[] = [];
+  // As install: one agent's config it cannot read does not stop the others; it is reported, its
+  // agent stays in the state (its hooks are still there), exit 1.
+  const failed: { agent: string; error: string }[] = [];
   for (const agent of agents) {
     if (!agent.installer) continue;
-    const report = await agent.installer.uninstall({ ...host, command });
-    if (report.changed.length > 0 || args.positionals.length > 0)
-      results.push({ agent: agent.name, ...report });
+    try {
+      const report = await agent.installer.uninstall({ ...host, command });
+      if (report.changed.length > 0 || args.positionals.length > 0)
+        results.push({ agent: agent.name, ...report });
+    } catch (err) {
+      failed.push({ agent: agent.name, error: (err as Error).message });
+    }
   }
   await updateState(paths, (state) => {
-    for (const agent of agents) delete state.agents[agent.name];
+    for (const agent of agents) {
+      if (!failed.some((f) => f.agent === agent.name)) delete state.agents[agent.name];
+    }
   });
   const service = args.service
     ? await uninstallService(serviceContext(ctx, serviceCommand(command)))
     : undefined;
   const style = await styleFor(ctx, { json });
-  emit(ctx, json, { uninstalled: results, ...(service ? { service } : {}) }, () => [
-    ...(results.length === 0 ? ["seshi was not installed in any agent's config"] : []),
-    ...results.map(
-      (r) =>
-        `${style.status("removed", "success")} ${r.agent}${r.changed.length > 0 ? `: ${r.changed.join(", ")}` : " (nothing of seshi's was there)"}`,
-    ),
-    ...(service
-      ? [`${service.changed ? "service removed" : "no service entry"}: ${service.entry}`]
-      : []),
-    "Sessions already uploaded stay on the server; seshi capture off --session <id> still retracts one.",
-  ]);
-  return EXIT.ok;
+  emit(
+    ctx,
+    json,
+    {
+      uninstalled: results,
+      ...(failed.length > 0 ? { failed } : {}),
+      ...(service ? { service } : {}),
+    },
+    () => [
+      ...(results.length === 0 && failed.length === 0
+        ? ["seshi was not installed in any agent's config"]
+        : []),
+      ...results.map(
+        (r) =>
+          `${style.status("removed", "success")} ${r.agent}${r.changed.length > 0 ? `: ${r.changed.join(", ")}` : " (nothing of seshi's was there)"}`,
+      ),
+      ...failed.map((f) => `${style.status("not removed", "error")} ${f.agent}: ${f.error}`),
+      ...(service
+        ? [`${service.changed ? "service removed" : "no service entry"}: ${service.entry}`]
+        : []),
+      "Sessions already uploaded stay on the server; seshi capture off --session <id> still retracts one.",
+    ],
+  );
+  return failed.length > 0 ? EXIT.failure : EXIT.ok;
 }
 
 async function status(ctx: CommandContext, json: boolean, args: Args): Promise<number> {
