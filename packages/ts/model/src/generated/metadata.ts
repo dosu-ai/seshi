@@ -36,6 +36,7 @@ export interface SessionMetadata {
   head?: Sha256;
   traces: SessionTraceRef[];
   normalized?: NormalizedState;
+  dropped_prefix?: DroppedPrefix;
   /** Tool calls whose results the sensitive-call rules withhold, by call id, so a result that arrives in a later chunk than its call is withheld too. With `normalized`, the small state a chunk is normalized with (X6.3). */
   withheld_calls?: {
     [key: string]: "sensitive-file" | "secret-output";
@@ -82,6 +83,16 @@ export interface NormalizedState {
   prefix_sha256: Sha256;
   /** The prefix hash mid-stream (`PrefixHash.export()`), so the next chunk's records extend it. */
   hash_state: string;
+}
+
+/** The start of a session's log that model review dropped before anything of the session was stored (F3.4): what its stub held, kept once the session has a trace. A whole write that does not extend what is stored (a `rebuild`, a `replace`, an assembled session written again) leaves these records out, so the dropped text is never stored or reviewed again. Counts and a hash, never content. Absent for a session whose first envelope was stored. */
+export interface DroppedPrefix {
+  /** Bytes of the log the dropped records came from (0 for a session assembled from spans): a whole log's first `bytes` bytes are the dropped part, whatever the normalizer now makes of them. */
+  bytes: number;
+  /** How many records the dropped part normalized to when last written. */
+  records: number;
+  /** The prefix hash of those records as regex redaction left them (as `NormalizedState.prefix_sha256`). */
+  prefix_sha256: Sha256;
 }
 
 /** One envelope applied to the session, and what it answered. */

@@ -13,6 +13,7 @@ import {
   EMPTY_PREFIX_SHA256,
   type Envelope,
   Forbidden,
+  type FormatAdapter,
   isStub,
   type NormalizedRecord,
   OffsetMismatch,
@@ -834,9 +835,12 @@ describe("a dropped first envelope leaves a stub (F3.4, revised 15 Nov 2026)", (
     expect(r.seen[1]?.records).toHaveLength(2);
   });
 
-  it("is replaced by its writer, and a log that does not extend it is a conflict", async () => {
+  it("is replaced by its writer past the dropped bytes, and a log that does not extend it is a conflict", async () => {
     const { p, r } = await stubbed();
-    const other = META + user("A".repeat(2000)) + reply("another history");
+    // Another history, exactly as long as the dropped envelope.
+    const padded = (n: number) => META + user("A".repeat(n)) + reply("another history");
+    const other = padded(2000 + bytes(FIRST) - bytes(padded(2000)));
+    expect(bytes(other)).toBe(bytes(FIRST));
     await expect(submit(p, upload(other))).rejects.toBeInstanceOf(SessionConflict);
     const bob: UploadEnvelopeOptions = {
       caller: { kind: "static", principal: "bob" },
@@ -845,12 +849,21 @@ describe("a dropped first envelope leaves a stub (F3.4, revised 15 Nov 2026)", (
     await expect(submit(p, upload(other, 0, { replace: true }, bob))).rejects.toBeInstanceOf(
       Forbidden,
     );
-    const replaced = await submit(p, upload(other, 0, { replace: true }));
-    expect(replaced).toMatchObject({ status: "stored", records: 3, records_total: 3 });
-    expect(r.seen.at(-1)?.records).toHaveLength(2);
+    // What lies in the dropped bytes is never reviewed or stored, whatever they now hold.
+    const nothing = await submit(p, upload(other, 0, { replace: true }));
+    expect(nothing).toMatchObject({ status: "unchanged", records_total: 3 });
+    expect(r.seen).toHaveLength(1);
+    expect((await session())?.head).toBeUndefined();
+    const grown = other + user("past it") + reply("kept");
+    const replaced = await submit(p, upload(grown, 0, { replace: true }));
+    expect(replaced).toMatchObject({ status: "stored", records: 3, records_total: 5 });
+    expect(r.seen.at(-1)?.records.map((x) => (x as { content?: unknown }).content)).toEqual([
+      "past it",
+      "kept",
+    ]);
     const metadata = await session();
     expect(metadata?.traces).toHaveLength(1);
-    expect(metadata?.traces[0]?.continuation).toBeUndefined();
+    expect(metadata?.traces[0]?.continuation?.from_record).toBe(3);
   });
 
   it("can be tombstoned, after which nothing extends it, and keeps a visibility change", async () => {
@@ -904,6 +917,250 @@ describe("a dropped first envelope leaves a stub (F3.4, revised 15 Nov 2026)", (
     });
     expect(await db.getSession("trajectory", "s1")).toMatchObject({ head: expect.any(String) });
     expect((await db.listSessions()).sessions).toHaveLength(1);
+  });
+
+  describe("written whole again later: a rebuild, a replace, an assembly (21 meets 20)", () => {
+    const tail = user("now fix the build") + reply("fixed");
+    const allowAll = () => reviewer(() => ({ action: "allow" }));
+    const contents = (input: ReviewInput | undefined) =>
+      input?.records.map((x) => (x as { content?: unknown }).content);
+    /** The stored head trace, as text. */
+    const headText = async (owner = "alice", archive = ARCHIVE) => {
+      const metadata = await readMetadata(store, owner, archive);
+      return JSON.stringify(await getTrace(store, owner, archive, metadata?.head as string));
+    };
+    const DROPPED_TEXT = ["customer table", "acme-checkout", '"listed"'];
+    const expectNone = (text: string) => {
+      for (const dropped of DROPPED_TEXT) expect(text).not.toContain(dropped);
+    };
+
+    /** A stub, then its first trace from the next chunk. */
+    async function begunAsStub(options: Partial<PipelineOptions> = {}) {
+      const p = pipeline({ reviewer: judge(), ...options });
+      const answer = await submit(p, upload(FIRST, 0, { retract_hash }));
+      const next = await submit(p, upload(tail, answer.bytes_total));
+      expect(next.status).toBe("stored");
+      return { p, answer, next };
+    }
+
+    it("never reviews or stores the dropped part on a rebuild, with a trace or without", async () => {
+      const { answer, next } = await begunAsStub();
+      expect((await session())?.dropped_prefix).toEqual({
+        bytes: bytes(FIRST),
+        records: 3,
+        prefix_sha256: answer.prefix_sha256,
+      });
+      // Whatever review would say of it now, the dropped part is not sent to it.
+      const allow = allowAll();
+      const rebuilt = await submit(
+        pipeline({ reviewer: allow }),
+        upload(FIRST + tail, 0, { rebuild: true }),
+      );
+      // Rebuilt and reviewed again: the trace the chunk wrote.
+      expect(rebuilt).toMatchObject({ status: "duplicate", records_total: 5 });
+      expect((rebuilt as { content_hash: string }).content_hash).toBe(
+        (next as { content_hash: string }).content_hash,
+      );
+      expect(allow.seen).toHaveLength(1);
+      expect(contents(allow.seen[0])).toEqual(["now fix the build", "fixed"]);
+      expect(allow.seen[0]?.meta).toEqual({ role: "meta", source: "trajectory" });
+      expectNone(JSON.stringify(allow.seen));
+      expectNone(await headText());
+      expect((await session())?.traces).toEqual([
+        expect.objectContaining({
+          continuation: { from_record: 3, prefix_sha256: answer.prefix_sha256 },
+        }),
+      ]);
+
+      // A stub with no trace yet: a rebuild of only what was dropped stores and reviews nothing;
+      // one that grew is the session's first trace, reviewed and stored past the dropped part.
+      const s2 = archiveId("alice", "trajectory", "s2");
+      await submit(pipeline({ reviewer: judge() }), upload(FIRST, 0, { session_id: "s2" }));
+      const later = allowAll();
+      const q = pipeline({ reviewer: later });
+      expect(await submit(q, upload(FIRST, 0, { session_id: "s2", rebuild: true }))).toMatchObject({
+        status: "unchanged",
+        records_total: 3,
+      });
+      expect(later.seen).toHaveLength(0);
+      expect((await readMetadata(store, "alice", s2))?.head).toBeUndefined();
+      const first = await submit(q, upload(FIRST + tail, 0, { session_id: "s2", rebuild: true }));
+      expect(first).toMatchObject({ status: "stored", records: 3, records_total: 5 });
+      expect(contents(later.seen[0])).toEqual(["now fix the build", "fixed"]);
+      expectNone(JSON.stringify(later.seen));
+      expectNone(await headText("alice", s2));
+      expect((await readMetadata(store, "alice", s2))?.traces[0]?.continuation?.from_record).toBe(
+        3,
+      );
+      // A stub has no trace to replace: its first trace is published as any first trace is.
+      const entries = (await readChanges(store, "alice")).entries.map((e) => e.entry);
+      expect(entries.at(-1)).toMatchObject({ kind: "published", archive_id: s2 });
+      expect(entries.at(-1)).not.toHaveProperty("replace");
+    });
+
+    it("finds the dropped part by its bytes once the adapter changed, and rebuilds past it", async () => {
+      const v1 = new FormatRegistry([
+        ATIF_FORMAT,
+        { ...TRAJECTORY_FORMAT, version: "1" },
+        otlpGenAiFormat(),
+      ]);
+      // Version 2 acknowledges every user record with a record of its own, so the dropped part
+      // now normalizes to four records: by its old count, its last one would be reviewed again.
+      const acknowledging: FormatAdapter = {
+        ...TRAJECTORY_FORMAT,
+        version: "2",
+        normalize: (text, chunk) =>
+          (TRAJECTORY_FORMAT.normalize(text, chunk) as NormalizedRecord[]).flatMap((rec) =>
+            rec.role === "user"
+              ? [rec, { role: "assistant", content: "(read)", timestamp: ts } as NormalizedRecord]
+              : [rec],
+          ),
+      };
+      const v2 = new FormatRegistry([ATIF_FORMAT, acknowledging, otlpGenAiFormat()]);
+      await begunAsStub({ formats: v1 });
+      const allow = allowAll();
+      const rebuilt = await submit(
+        pipeline({ reviewer: allow, formats: v2 }),
+        upload(FIRST + tail, 0, { rebuild: true }),
+      );
+      expect(rebuilt).toMatchObject({ status: "stored", records: 4, records_total: 7 });
+      expect(allow.seen).toHaveLength(1);
+      expect(contents(allow.seen[0])).toEqual(["now fix the build", "(read)", "fixed"]);
+      expectNone(JSON.stringify(allow.seen));
+      expectNone(await headText());
+      const metadata = await session();
+      expect(metadata?.traces).toEqual([
+        expect.objectContaining({ continuation: expect.objectContaining({ from_record: 4 }) }),
+      ]);
+      expect(metadata?.dropped_prefix).toMatchObject({ bytes: bytes(FIRST), records: 4 });
+      expect(metadata?.normalizer?.format_version).toBe("2");
+    });
+
+    it("leaves the dropped part out of a replace after the rules changed", async () => {
+      const { answer } = await begunAsStub();
+      // A rule that matches the dropped text: its records no longer hash to what was dropped.
+      const allow = allowAll();
+      const strict = pipeline({
+        reviewer: allow,
+        redaction: redactionRules({ patterns: ["customer"] }),
+      });
+      await expect(submit(strict, upload(FIRST + tail))).rejects.toBeInstanceOf(SessionConflict);
+      const replaced = await submit(strict, upload(FIRST + tail, 0, { replace: true }));
+      expect(replaced).toMatchObject({ status: "stored", records: 3, records_total: 5 });
+      expect(allow.seen).toHaveLength(1);
+      expect(contents(allow.seen[0])).toEqual(["now fix the build", "fixed"]);
+      expectNone(JSON.stringify(allow.seen));
+      expectNone(await headText());
+      const metadata = await session();
+      expect(metadata?.traces).toHaveLength(1);
+      const from = metadata?.traces[0]?.continuation;
+      expect(from?.from_record).toBe(3);
+      expect(from?.prefix_sha256).not.toBe(answer.prefix_sha256);
+      expect(metadata?.dropped_prefix).toEqual({
+        bytes: bytes(FIRST),
+        records: 3,
+        prefix_sha256: from?.prefix_sha256,
+      });
+    });
+
+    it("leaves the dropped part out when a late span makes the assembler replace the session", async () => {
+      const envelope: Envelope = {
+        ...upload(HEAD),
+        source: "otlp",
+        source_id: "console",
+        format: "otlp-genai",
+        session_key: "sesn_1",
+        caller: { kind: "service", principal: "svc-console" },
+        owner: "svc-console",
+        owner_basis: "service",
+        payload: {
+          kind: "spans",
+          spans: [
+            {
+              traceId: "ab".repeat(16),
+              spanId: "cd".repeat(8),
+              name: "chat",
+              startTimeUnixNano: "1790000000000000000",
+            },
+          ],
+        },
+        idempotency_key: "ab/cd",
+      };
+      const records = (text: string) =>
+        formats.normalize({ source: "trajectory", transcript: text }).records;
+      const archive = archiveId("svc-console", "otlp-genai", "sesn_1");
+      const p = pipeline({ reviewer: judge() });
+      expect(await p.publishAssembled({ envelope, records: records(FIRST) })).toMatchObject({
+        status: "dropped",
+      });
+      expect((await readMetadata(store, "svc-console", archive))?.dropped_prefix).toMatchObject({
+        bytes: 0,
+        records: 3,
+      });
+      expect(await p.publishAssembled({ envelope, records: records(FIRST + tail) })).toMatchObject({
+        status: "stored",
+        records: 3,
+      });
+
+      // A span that arrived late lands inside what was stored: the assembly no longer extends
+      // the trace, so the assembler replaces the session.
+      const late = FIRST + user("now fix the build") + reply("a late span") + reply("fixed");
+      const allow = allowAll();
+      const replaced = await pipeline({ reviewer: allow }).publishAssembled({
+        envelope,
+        records: records(late),
+      });
+      expect(replaced).toMatchObject({ status: "stored", records: 4, records_total: 6 });
+      expect(contents(allow.seen[0])).toEqual(["now fix the build", "a late span", "fixed"]);
+      expectNone(JSON.stringify(allow.seen));
+      expectNone(await headText("svc-console", archive));
+      const metadata = await readMetadata(store, "svc-console", archive);
+      expect(metadata?.traces).toEqual([
+        expect.objectContaining({ continuation: expect.objectContaining({ from_record: 3 }) }),
+      ]);
+      const entries = (await readChanges(store, "svc-console")).entries.map((e) => e.entry);
+      expect(entries.at(-1)).toMatchObject({ kind: "published", replace: true });
+    });
+
+    it("keeps where the dropped part ends through later chunks, drops, replaces and rebuilds", async () => {
+      const { p, answer, next } = await begunAsStub();
+      const kept = { bytes: bytes(FIRST), records: 3, prefix_sha256: answer.prefix_sha256 };
+      const more = await submit(p, upload(user("more") + reply("again"), next.bytes_total));
+      expect(more.status).toBe("stored");
+      expect((await session())?.dropped_prefix).toEqual(kept);
+      const dropped = await submit(
+        p,
+        upload(user("the customer table again") + reply("ok"), more.bytes_total),
+      );
+      expect(dropped.status).toBe("dropped");
+      expect((await session())?.dropped_prefix).toEqual(kept);
+      // A replace with another history past the dropped part.
+      const other = FIRST + user("another way") + reply("done");
+      const replaced = await submit(p, upload(other, 0, { replace: true }));
+      expect(replaced).toMatchObject({ status: "stored", records: 3, records_total: 5 });
+      expect((await session())?.dropped_prefix).toEqual(kept);
+      expect((await session())?.traces).toHaveLength(1);
+      // A rebuild of it builds the same trace again.
+      expect((await submit(p, upload(other, 0, { rebuild: true }))).status).toBe("duplicate");
+      expect((await session())?.dropped_prefix).toEqual(kept);
+      // Nothing of the session is left once it is tombstoned.
+      await tombstone({ store, owner: "alice", agent: "trajectory", session_id: "s1" });
+      expect(await session()).not.toHaveProperty("dropped_prefix");
+    });
+
+    it("rebuilds a session that never was a stub whole, as before", async () => {
+      const allow = allowAll();
+      const p = pipeline({ reviewer: allow });
+      await submit(p, upload(HEAD));
+      expect((await submit(p, upload(HEAD + tail))).status).toBe("stored");
+      const rebuilt = await submit(p, upload(HEAD + tail, 0, { rebuild: true }));
+      expect(rebuilt).toMatchObject({ status: "stored", records: 5, records_total: 5 });
+      expect(allow.seen.at(-1)?.records).toHaveLength(4);
+      const metadata = await session();
+      expect(metadata).not.toHaveProperty("dropped_prefix");
+      expect(metadata?.traces).toHaveLength(1);
+      expect(metadata?.traces[0]?.continuation).toBeUndefined();
+    });
   });
 });
 

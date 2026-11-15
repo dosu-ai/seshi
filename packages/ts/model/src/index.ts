@@ -79,6 +79,7 @@ export type {
   ChangeEntry,
   ChangeKind,
   Claims,
+  DroppedPrefix,
   LayoutMarker,
   LogEncoding,
   NormalizedState,

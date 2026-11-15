@@ -23,7 +23,9 @@
  * the stored prefix) or set `replace`, which only the original writer or an admin may (X4.6).
  * A session whose first envelope model review dropped keeps a stub with no trace, only where
  * its log ends and the prefix hash (F3.4): it is extended exactly as a stored session is, so
- * the dropped records are never stored or judged again.
+ * the dropped records are never stored or judged again. The session remembers that dropped
+ * start (`dropped_prefix`) once it has a trace, and a whole write that does not extend what is
+ * stored (a rebuild, a replace, an assembled session written again) leaves it out too.
  *
  * Every envelope carries an idempotency key (X4.7); a session remembers the last ones it applied
  * with their answers, so a resend gets the same answer and runs no stage again. A permanent
@@ -34,6 +36,7 @@
 import { type FormatRegistry, NormalizeError } from "@seshi/formats";
 import {
   type AppliedEnvelope,
+  type DroppedPrefix,
   EMPTY_PREFIX_SHA256,
   type Envelope,
   Forbidden,
@@ -317,6 +320,11 @@ interface WholeOptions {
    * all of them. A write of the whole session counts all of it; a tail counts what the
    * session's stored counts do not have yet. */
   arrived?: RedactionSummary;
+  /** For an uploaded log: how many records its first `bytes` bytes normalize to now, cut at the
+   * line boundary at or past them (`bytes`, the cut). Finds where a session's dropped start ends
+   * when its records no longer hash to it (F3.4). Undefined when the log cannot be cut (a
+   * document) or what the cut leaves cannot be read. */
+  recordsIn?: (bytes: number) => { records: number; bytes: number } | undefined;
 }
 
 /** `total` less what `stored` already counts (by rule, never below zero); everything when the
@@ -362,6 +370,8 @@ interface Plan {
   /** What the session's metadata records as its normalizer, when it is not this write's: a
    * chunk added to a session an older normalizer built leaves it stale (X4.9). */
   sessionNormalizer?: Normalizer;
+  /** The session's dropped start as this write leaves it out (F3.4); the stored one otherwise. */
+  dropped_prefix?: DroppedPrefix;
 }
 
 interface Outcome {
@@ -593,8 +603,34 @@ export class Pipeline {
         ...(envelope.rebuild === true ? { rebuild: true } : {}),
         ...(retractSecret !== undefined ? { retract_secret: retractSecret } : {}),
         ...(llm_calls ? { llm_calls } : {}),
+        recordsIn: (bytes) => this.recordsIn(envelope, bytes),
       }),
     );
+  }
+
+  /** How many records a whole log's first `bytes` bytes normalize to with the current adapter,
+   * cut at the first line boundary at or past them (a cut that falls inside a line takes all of
+   * it, so more is left out rather than less); undefined for a log that cannot be cut there (a
+   * document) or whose start cannot be read. */
+  private recordsIn(
+    envelope: LogEnvelope,
+    bytes: number,
+  ): { records: number; bytes: number } | undefined {
+    const { payload } = envelope;
+    const cuttable = payload.encoding === "jsonl" && this.formats.isChunkable(envelope.format);
+    if (!cuttable) return undefined;
+    const encoded = new TextEncoder().encode(payload.text);
+    let cut = Math.min(bytes, encoded.length);
+    while (cut < encoded.length && encoded[cut - 1] !== 0x0a) cut++;
+    const text = new TextDecoder().decode(encoded.subarray(0, cut));
+    if (text.trim() === "") return { records: 0, bytes: cut };
+    try {
+      const { records } = this.normalize(envelope.format, text, envelope.session_key);
+      return { records: records.length, bytes: cut };
+    } catch (err) {
+      if (err instanceof SessionRejected) return undefined;
+      throw err;
+    }
   }
 
   /** Read the session, answer a resend from it, else run `body` against it; plan again when
@@ -836,6 +872,12 @@ export class Pipeline {
             : `only the session's original writer or an admin may ${options.rebuild ? "rebuild" : "replace"} it`,
         );
       }
+      // A session whose first envelopes review dropped: the rewrite leaves the dropped start out.
+      const dropped = session.dropped_prefix ?? (stub ? session.normalized : undefined);
+      if (dropped && (dropped.records > 0 || dropped.bytes > 0)) {
+        const past = this.pastDropped(run, raw, bytes, dropped, options, common);
+        if (past) return past;
+      }
       const all = this.redactor.redact(raw);
       // A rewrite of a session that passed the filter is not judged again.
       return this.commit(run, {
@@ -864,6 +906,69 @@ export class Pipeline {
       normalized: stateOf(records, bytes),
       withheld: all.withheld,
       summary: this.summaryOf(all.summary, options, session, true),
+    });
+  }
+
+  /** A whole write that does not extend what is stored (a rebuild, a replace, an assembled
+   * session written again) of a session whose first envelopes model review dropped (F3.4): the
+   * dropped start is left out, and only what follows it is reviewed and written, as the
+   * continuation of the dropped records a stub's first trace is. Where the dropped start ends:
+   * - its records, when they still hash to what was dropped (as regex redaction leaves them);
+   * - else, for an uploaded log, what the current adapter makes of its first `bytes` bytes (the
+   *   rules or the adapter changed since);
+   * - else (an assembled session, or a document) the count that was dropped: a span that
+   *   arrived late inside the dropped part leaves the last dropped record in what follows.
+   * Undefined when nothing is left out (the dropped start held no records), so the session is
+   * rewritten whole. A write of nothing past the dropped start answers `unchanged`. */
+  private pastDropped(
+    run: Run,
+    raw: readonly NormalizedRecord[],
+    bytes: number,
+    dropped: DroppedPrefix,
+    options: WholeOptions,
+    common: {
+      llm_calls: readonly LlmCall[] | undefined;
+      project: string | undefined;
+      guard: (existing: SessionMetadata | null) => void;
+    },
+  ): Promise<StoreSessionResult> | undefined {
+    const { session, envelope } = run;
+    let skip = Math.min(dropped.records, raw.length);
+    let cut = dropped.bytes;
+    const same =
+      dropped.records > 0 &&
+      dropped.records <= raw.length &&
+      prefixSha256(this.redactor.redact(raw.slice(0, dropped.records)).records, dropped.records) ===
+        dropped.prefix_sha256;
+    if (!same && dropped.bytes > 0) {
+      const now = options.recordsIn?.(dropped.bytes);
+      if (now) {
+        skip = Math.min(now.records, raw.length);
+        cut = now.bytes;
+      }
+    }
+    if (skip === 0) return undefined;
+    // The dropped start and what follows as two passes of one, as for a tail that extends what is
+    // stored: what follows carries the dropped part's withheld calls, and only its matches count.
+    const prefix = this.redactor.redact(raw.slice(0, skip));
+    const tail = this.redactor.redact(raw.slice(skip), prefix.withheld);
+    const normalized = stateOf([...prefix.records, ...tail.records], bytes);
+    const prefixHash = prefixSha256(prefix.records, skip);
+    if (tail.records.length === 0) {
+      return this.progress(run, normalized, tail.withheld, "unchanged", common.guard);
+    }
+    return this.commit(run, {
+      ...common,
+      // The log's meta record and the branch it names are in the dropped start.
+      branch: envelope.branch,
+      write: [stubMeta(envelope), ...tail.records],
+      continuation: { from_record: skip, prefix_sha256: prefixHash },
+      // A stub has no trace to replace: its first trace extends it, and a drop moves it on.
+      ...(session?.head !== undefined ? { replace: true } : {}),
+      normalized,
+      withheld: tail.withheld,
+      summary: this.summaryOf(tail.summary, options, session, true),
+      dropped_prefix: { bytes: cut, records: skip, prefix_sha256: prefixHash },
     });
   }
 
@@ -992,6 +1097,7 @@ export class Pipeline {
       llm_calls: calls.calls,
       redaction: summary,
       ...(envelope.retract_hash ? { retract_hash: envelope.retract_hash } : {}),
+      ...(plan.dropped_prefix ? { dropped_prefix: plan.dropped_prefix } : {}),
       ...this.context(run),
     });
     const note = "note" in decision ? decision.note : undefined;

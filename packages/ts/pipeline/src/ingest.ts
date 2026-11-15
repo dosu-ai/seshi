@@ -14,6 +14,7 @@
 import {
   type AppliedEnvelope,
   type Claims,
+  type DroppedPrefix,
   IngestRejected,
   type IngestResult,
   type LlmCall,
@@ -202,6 +203,10 @@ export interface IngestInput extends WriteContext {
   /** The uploading machine's retraction hash (F9.7). The first one a session gets is kept:
    * only the machine that first uploaded it can retract it, whoever writes later. */
   retract_hash?: string;
+  /** The start of the log model review dropped before anything was stored (F3.4), as this write
+   * leaves it out: a whole write past it sets it anew. Otherwise the stored one is kept, replace
+   * included, so the dropped part is never stored or reviewed again. */
+  dropped_prefix?: DroppedPrefix;
 }
 
 function byteLength(value: unknown): number {
@@ -324,6 +329,8 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
     if (parent) next.parent_session_id = parent;
     const normalized = input.normalized ?? base.normalized;
     if (normalized) next.normalized = normalized;
+    // Kept from the stub through every write (`...base`), or set anew by a whole write past it.
+    if (input.dropped_prefix) next.dropped_prefix = input.dropped_prefix;
     if (input.withheld_calls !== undefined) {
       if (Object.keys(input.withheld_calls).length > 0) next.withheld_calls = input.withheld_calls;
       else delete next.withheld_calls;
@@ -429,6 +436,11 @@ function newStub(owner: string, archive: string, stub: StubInput, at: string): S
   return metadata;
 }
 
+/** The dropped part of a log, from the state its log was in when it was dropped. */
+function droppedPrefixOf(state: NormalizedState): DroppedPrefix {
+  return { bytes: state.bytes, records: state.records, prefix_sha256: state.prefix_sha256 };
+}
+
 /** Record where a session's log stands when no trace is written for an envelope: a chunk with
  * no records in it, a whole log with nothing past what is stored, an envelope model review
  * dropped. The log moves on and the envelope is remembered (X4.7) without a new trace.
@@ -437,7 +449,8 @@ function newStub(owner: string, archive: string, stub: StubInput, at: string): S
  * for a session whose first envelope model review dropped. It holds the session's identity, its
  * writer, where its log ends and the prefix hash, and no `head`, so the next envelope continues
  * past the dropped one and is reviewed on its own (`isStub`). Without `stub`, nothing is written
- * for a session that has no pointer. */
+ * for a session that has no pointer. A session with no trace records its log state as its
+ * `dropped_prefix` too, which every later write keeps. */
 export async function recordProgress(input: {
   store: Store;
   owner: string;
@@ -459,6 +472,10 @@ export async function recordProgress(input: {
     const base = existing ?? (stub ? newStub(owner, input.archive_id, stub, at) : null);
     if (!base) return null;
     const next: SessionMetadata = { ...base, normalized, updated_at: at };
+    // A session with no trace stores nothing of its log: everything normalized so far was
+    // dropped (or held no records). Remember it past the first trace, so a whole write that does
+    // not extend what is stored (a rebuild, a replace) still leaves it out (F3.4).
+    if (base.head === undefined) next.dropped_prefix = droppedPrefixOf(normalized);
     if (input.withheld_calls !== undefined) {
       if (Object.keys(input.withheld_calls).length > 0) next.withheld_calls = input.withheld_calls;
       else delete next.withheld_calls;
@@ -510,7 +527,14 @@ export async function tombstone(input: TombstoneInput): Promise<{ removed: numbe
     }
     removedObjects = { traces: existing.traces.map((t) => t.content_hash) };
     // What the next chunk would continue from goes too: nothing of the session is left.
-    const { head: _head, normalized: _n, withheld_calls: _w, applied: _a, ...rest } = existing;
+    const {
+      head: _head,
+      normalized: _n,
+      dropped_prefix: _d,
+      withheld_calls: _w,
+      applied: _a,
+      ...rest
+    } = existing;
     return {
       next: { ...rest, status: "redacted", traces: [], updated_at: at },
       change: {

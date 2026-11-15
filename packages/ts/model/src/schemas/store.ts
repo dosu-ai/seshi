@@ -29,6 +29,7 @@ export type {
 export type { LayoutMarker } from "../generated/layout";
 export type {
   AppliedEnvelope,
+  DroppedPrefix,
   NormalizedState,
   SessionMetadata,
   SessionTraceRef,

@@ -603,6 +603,37 @@ describe("a dropped first envelope leaves a stub (F3.4, revised 15 Nov 2026)", (
     expect(bucketText(dir)).not.toContain("hello there");
   });
 
+  it("sends the provider nothing dropped when the session is rebuilt or replaced whole (X4.9)", async () => {
+    const s = server();
+    const { upload, call, dir } = await bootStub(anthropic(s));
+    const dropped = await upload(DUMPED);
+    const stored = await upload(NEXT, dropped.body.bytes_total);
+    expect(stored.body).toMatchObject({ status: "stored", records_total: 5 });
+    const whole = (extra: Record<string, unknown>, transcript = DUMPED + NEXT) =>
+      call("POST", "/v1/sessions", {
+        body: { agent: "trajectory", session_id: "s1", transcript, offset: 0, ...extra },
+      });
+
+    // The uploader resends a stale session whole: only what follows the dropped part is
+    // reviewed again, and it builds the trace already stored.
+    let from = s.requests.length;
+    const rebuilt = await whole({ rebuild: true });
+    expect(rebuilt.body).toMatchObject({ status: "duplicate", records_total: 5 });
+    expect(s.requests.length).toBeGreaterThan(from);
+    expect(sent(s, from)).toContain("now fix the build");
+    expect(sent(s, from)).not.toContain("CUSTOMER TABLE");
+
+    // Another history after the dropped part (a 409, then a replace): the same.
+    from = s.requests.length;
+    const other = DUMPED + user("another way") + reply("done");
+    expect((await whole({}, other)).status).toBe(409);
+    const replaced = await whole({ replace: true }, other);
+    expect(replaced.body).toMatchObject({ status: "stored", records: 3, records_total: 5 });
+    expect(sent(s, from)).toContain("another way");
+    expect(sent(s, from)).not.toContain("CUSTOMER TABLE");
+    expect(bucketText(dir)).not.toContain("CUSTOMER TABLE");
+  });
+
   it("is not listed, served, searched or on another reader's change feed until it has a trace", async () => {
     const s = server();
     const { upload, call, db, instance } = await bootStub(anthropic(s));
