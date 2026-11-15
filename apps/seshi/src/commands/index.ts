@@ -59,7 +59,8 @@ export const COMMANDS: Readonly<Record<string, CommandSpec>> = {
     load: () => import("./admin"),
   },
   capture: {
-    summary: "agent integrations on this machine: install|uninstall|status|pause|resume|off|on",
+    summary:
+      "agent integrations on this machine: install|uninstall|status|pause|resume|off|on|resend",
     load: () => import("./capture"),
   },
   config: {

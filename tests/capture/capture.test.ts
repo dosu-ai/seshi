@@ -19,7 +19,7 @@ import { join } from "node:path";
 import { VERSION } from "@seshi/model";
 import { getSession } from "@seshi/pipeline";
 import { compileRuleSet, validatePack } from "@seshi/redact";
-import { readChanges } from "@seshi/store";
+import { archiveId, FsStore, keys, readChanges } from "@seshi/store";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Machine, startServer, type TestServer } from "../tooling/cli";
 import { transcript } from "../tooling/testdata";
@@ -694,6 +694,31 @@ describe("local mode (X3.5)", () => {
       expect(summary).toMatchObject({ uploaded: 1 });
       const ls = await local.seshi(["sessions", "ls"]);
       expect(ls.out).toContain("claude-code/l1");
+
+      // Stale in the bucket (no format version recorded): the uploader resends it (X4.9).
+      const bucket = new FsStore(join(local.dir, "bucket"));
+      const metadata = (await getSession(bucket, "me", "claude-code", "l1")) as NonNullable<
+        Awaited<ReturnType<typeof getSession>>
+      >;
+      const { format_version: _gone, ...normalizer } = metadata.normalizer ?? {
+        name: "x",
+        version: "0",
+      };
+      await bucket.put(
+        keys.metadata("me", archiveId("me", "claude-code", "l1")),
+        new TextEncoder().encode(JSON.stringify({ ...metadata, normalizer })),
+      );
+      const localState = join(stateDir(local), "state.json");
+      const s = state(local);
+      delete s.uploader.last_stale_check;
+      writeFileSync(localState, JSON.stringify(s), { mode: 0o600 });
+      await daemon(local);
+      expect(state(local).sessions["claude-code:l1"].rebuild).toBeDefined();
+      expect((await daemon(local)).summary).toMatchObject({ uploaded: 1, failed: 0 });
+      expect(
+        (await getSession(bucket, "me", "claude-code", "l1"))?.normalizer?.format_version,
+      ).toBeDefined();
+
       await local.seshi(["capture", "off", "--session", "l1"]);
       expect((await daemon(local)).summary).toMatchObject({ retracted: 1 });
       const show = await local.seshi(["sessions", "show", "claude-code/l1", "--json"]);
@@ -907,5 +932,133 @@ describe("pre-redaction before upload (F2.4)", () => {
     } finally {
       proxy.stop();
     }
+  });
+});
+
+describe("resending uploaded sessions (X4.9)", () => {
+  const KEY = `claude-code:${SESSION}`;
+  /** The server's session as an older normalizer left it: no format version recorded. */
+  async function makeStale(id = SESSION) {
+    const store = server.instance.store;
+    const metadata = (await stored(id)) as NonNullable<Awaited<ReturnType<typeof stored>>>;
+    const { format_version: _gone, ...normalizer } = metadata.normalizer ?? {
+      name: "x",
+      version: "0",
+    };
+    await store.put(
+      keys.metadata(OWNER, archiveId(OWNER, "claude-code", id)),
+      new TextEncoder().encode(JSON.stringify({ ...metadata, normalizer })),
+    );
+  }
+  /** As if the uploader last asked the server more than an hour ago. */
+  function forgetStaleCheck() {
+    const path = join(stateDir(), "state.json");
+    const s = state();
+    delete s.uploader.last_stale_check;
+    writeFileSync(path, JSON.stringify(s), { mode: 0o600 });
+  }
+
+  it("resends a session the server marks stale by itself, once, rebuilt from the whole log", async () => {
+    await hook();
+    await daemon();
+    appendFileSync(file, TAIL);
+    await hook();
+    await daemon();
+    expect((await stored())?.traces).toHaveLength(2);
+    expect((await stored())?.normalizer?.format_version).toMatch(/^\d+\+trajectory\./);
+    await makeStale();
+    forgetStaleCheck();
+    // One pass learns it is stale; the next sends it whole with rebuild (the org key proves
+    // the machine with the retraction secret).
+    await daemon();
+    expect(state().sessions[KEY].rebuild).toMatchObject({ key: expect.any(String) });
+    const { summary } = await daemon();
+    expect(summary).toMatchObject({ uploaded: 1, failed: 0 });
+    const rebuilt = await stored();
+    expect(rebuilt?.normalizer?.format_version).toMatch(/^\d+\+trajectory\./);
+    // Built again whole: one trace in place of the head and its continuation.
+    expect(rebuilt?.traces).toHaveLength(1);
+    const { entries } = await readChanges(server.instance.store, OWNER);
+    expect(entries.at(-1)?.entry).toMatchObject({ kind: "published", replace: true });
+    // No longer stale; nothing more is sent.
+    forgetStaleCheck();
+    await daemon();
+    expect((await daemon()).summary).toMatchObject({ uploaded: 0 });
+    expect(state().sessions[KEY].rebuild).toBeUndefined();
+  });
+
+  it("resends one session by hand with --session", async () => {
+    await hook();
+    await daemon();
+    const before = (await readChanges(server.instance.store, OWNER)).entries.length;
+    machine.spawned.length = 0;
+    const run = await machine.seshi(["capture", "resend", "--session", SESSION, "--json"]);
+    expect(run.code, run.err).toBe(0);
+    expect(JSON.parse(run.out)).toEqual({ resending: [KEY], skipped: [] });
+    expect(machine.spawned).toEqual([{ words: ["daemon"], self: true }]);
+    const status = await machine.seshi(["capture", "status", "--session", SESSION, "--json"]);
+    expect(JSON.parse(status.out).session.state).toBe("resending");
+    expect((await daemon()).summary).toMatchObject({ uploaded: 1 });
+    // The log only repeats what is stored, yet it was built and reviewed again: no `unchanged`.
+    expect(state().sessions[KEY].last_status).toBe("duplicate");
+    expect(state().sessions[KEY].rebuild).toBeUndefined();
+    const after = await stored();
+    expect(after?.applied?.at(-1)?.idempotency_key).toMatch(/^rebuild-/);
+    expect((await readChanges(server.instance.store, OWNER)).entries.length).toBe(before);
+  });
+
+  it("resends every session uploaded from here with --all, but never one turned off", async () => {
+    const second = "2a3b4c5d-6e7f-4089-9abc-def012345678";
+    const other = join(file, "..", `${second}.jsonl`);
+    writeFileSync(other, HEAD);
+    await hook();
+    await hook("Stop", { session_id: second, transcript_path: other });
+    // Seen but never uploaded: nothing to resend.
+    await hook("Stop", {
+      session_id: "never-sent",
+      transcript_path: join(file, "..", "nope.jsonl"),
+    });
+    await daemon();
+    expect((await stored(second))?.status).toBe("stored");
+    await machine.seshi(["capture", "off", "--session", second]);
+
+    const run = await machine.seshi(["capture", "resend", "--all", "--json"]);
+    expect(run.code, run.err).toBe(0);
+    const answer = JSON.parse(run.out);
+    expect(answer.resending).toEqual([KEY]);
+    expect(answer.skipped).toEqual(
+      expect.arrayContaining([{ key: `claude-code:${second}`, reason: "turned off" }]),
+    );
+    const { summary } = await daemon();
+    expect(summary).toMatchObject({ uploaded: 1, retracted: 1 });
+    expect((await stored(second))?.status).toBe("redacted");
+    expect(state().sessions[`claude-code:${second}`].rebuild).toBeUndefined();
+
+    const text = await machine.seshi(["capture", "resend", "--all"]);
+    expect(text.out).toContain("1 session(s)");
+    expect(text.out).toContain("not resent, turned off");
+  });
+
+  it("refuses bad usage, a session it has not seen, and one turned off", async () => {
+    expect((await machine.seshi(["capture", "resend"])).code).toBe(2);
+    expect((await machine.seshi(["capture", "resend", "--all", "--session", "x"])).code).toBe(2);
+    expect((await machine.seshi(["capture", "resend", "--all", "--path", "/y"])).code).toBe(2);
+    expect((await machine.seshi(["capture", "resend", "--all", "extra"])).code).toBe(2);
+    const unseen = await machine.seshi([
+      "capture",
+      "resend",
+      "--session",
+      "nope",
+      "--agent",
+      "claude-code",
+    ]);
+    expect(unseen.code).toBe(4);
+    await hook();
+    await daemon();
+    await machine.seshi(["capture", "off", "--session", SESSION]);
+    const off = await machine.seshi(["capture", "resend", "--session", SESSION]);
+    expect(off.code).toBe(6);
+    expect(off.out).toContain("turned off");
+    expect(state().sessions[KEY].rebuild).toBeUndefined();
   });
 });

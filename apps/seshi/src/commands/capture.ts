@@ -7,6 +7,7 @@
  *   seshi capture resume
  *   seshi capture off|on [--session [<id>]] [--agent <agent>]
  *   seshi capture off|on --path <folder>
+ *   seshi capture resend --all | --session [<id>] [--agent <agent>]
  *
  * `install` merges seshi's hooks into each agent's own config (F9.6), keeping every hook there;
  * with no agent named it installs for every agent found on this machine. `uninstall` takes out
@@ -20,9 +21,16 @@
  * (F9.7). `pause` holds every upload back for a while, or until `resume`; what sessions write
  * meanwhile goes up when it ends (a session is judged as a whole, when it is judged).
  *
+ * `resend` sends sessions this machine uploaded again, whole, with `rebuild` (X4.9): the server
+ * builds and reviews each again even when its log only extends what is stored, so a session an
+ * older normalizer built, or one whose envelopes review skipped or dropped, is redone. The
+ * uploader does the same by itself for the sessions the server says are stale. Sessions turned
+ * off, never uploaded, or whose transcript is gone are left out.
+ *
  * Every subcommand takes `--json`. Exit codes: 0; 2 usage; 3 a config or state file it cannot
  * use; 4 no agent to install for; 8 (`status`) something needs action. */
 
+import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   appendSpool,
@@ -33,6 +41,7 @@ import {
   otherFolders,
   placeOf,
   readState,
+  rebuildKey,
   type SessionState,
   StateUnreadable,
   sessionKey,
@@ -79,6 +88,7 @@ const USAGE = [
   "       seshi capture resume",
   "       seshi capture off|on [--session [<id>]] [--agent <agent>]",
   "       seshi capture off|on --path <folder>",
+  "       seshi capture resend --all | --session [<id>] [--agent <agent>]",
 ].join("\n");
 
 interface Args {
@@ -89,6 +99,8 @@ interface Args {
   path?: string;
   service?: boolean;
   command?: string;
+  /** `resend --all`. */
+  all?: boolean;
 }
 
 /** The flags, by hand: `--session` takes an optional value, which `parseArgs` cannot. */
@@ -126,6 +138,9 @@ export function parseCaptureArgs(argv: readonly string[]): Args | string {
       }
       case "--service":
         args.service = true;
+        break;
+      case "--all":
+        args.all = true;
         break;
       default:
         if (word.startsWith("--")) return `unknown option ${word}`;
@@ -222,6 +237,8 @@ export async function run(ctx: CommandContext): Promise<number> {
       case "off":
       case "on":
         return await toggle(ctx, json, parsed, sub);
+      case "resend":
+        return await resend(ctx, json, parsed);
       default:
         return usageError(
           ctx,
@@ -707,5 +724,85 @@ async function toggleSession(
     { agent, session_id: id, capture: which === "on", retracting, fresh },
     () => lines,
   );
+  return EXIT.ok;
+}
+
+/** Why a session cannot be resent from here, or undefined when it can. */
+function notResendable(state: CaptureState, s: SessionState): string | undefined {
+  if (s.retract === "pending" || sessionToggle(state, s.agent, s) === "off") return "turned off";
+  if (!s.sent) return "never uploaded from here";
+  if (!s.path || !existsSync(s.path)) return "its transcript is gone";
+  return undefined;
+}
+
+/** `seshi capture resend`: mark sessions for a whole resend with `rebuild` (X4.9), and wake the
+ * uploader to send them. */
+async function resend(ctx: CommandContext, json: boolean, args: Args): Promise<number> {
+  if (args.positionals.length > 0) {
+    return usageError(ctx, json, `unexpected ${args.positionals.join(" ")}`, USAGE);
+  }
+  if (args.path !== undefined || args.service || args.command !== undefined) {
+    return usageError(ctx, json, "resend takes --all or --session [<id>]", USAGE);
+  }
+  if (args.all && args.session !== undefined) {
+    return usageError(ctx, json, "--all and --session cannot go together", USAGE);
+  }
+  if (!args.all && args.session === undefined) {
+    return usageError(ctx, json, "resend needs --all or --session [<id>]", USAGE);
+  }
+  const { paths } = pathsOf(ctx);
+  const now = new Date();
+  const state = readState(paths);
+  let keys: string[];
+  if (args.all) {
+    keys = Object.keys(state.sessions)
+      .filter((k) => !args.agent || state.sessions[k]?.agent === args.agent)
+      .sort();
+  } else {
+    const which = resolveSession(args, state, ctx.env, process.cwd(), now);
+    if (typeof which === "string") return usageError(ctx, json, which, USAGE);
+    const key = sessionKey(which.agent, which.id);
+    if (!state.sessions[key]) {
+      return fail(
+        ctx,
+        json,
+        EXIT.notFound,
+        "not_found",
+        `this machine has not seen ${which.agent} session ${which.id}`,
+      );
+    }
+    keys = [key];
+  }
+  const marked: string[] = [];
+  const skipped: { key: string; reason: string }[] = [];
+  await updateState(paths, (st) => {
+    for (const key of keys) {
+      const session = st.sessions[key];
+      if (!session) continue;
+      const reason = notResendable(st, session);
+      if (reason) {
+        skipped.push({ key, reason });
+        continue;
+      }
+      session.rebuild = { at: now.toISOString(), key: rebuildKey() };
+      // Asked for by hand: a refusal that waits for the transcript to change does not hold it.
+      if (session.error?.permanent) delete session.error;
+      marked.push(key);
+    }
+    return marked.length > 0;
+  });
+  if (marked.length > 0) {
+    appendSpool(paths, { v: 1, kind: "wake", at: now.toISOString() });
+    await startUploader(ctx, paths);
+  }
+  const style = await styleFor(ctx, { json });
+  emit(ctx, json, { resending: marked, skipped }, () => [
+    marked.length > 0
+      ? `${style.status("resending", "success")} ${marked.length} session(s) whole, to be built and reviewed again; seshi capture status shows them until they are sent.`
+      : "Nothing to resend.",
+    ...skipped.map((s) => `  ${printable(s.key)}: not resent, ${s.reason}`),
+  ]);
+  // One session asked for by name that cannot be resent is a refusal; --all reports and goes on.
+  if (!args.all && marked.length === 0) return EXIT.conflict;
   return EXIT.ok;
 }
