@@ -14,9 +14,9 @@ export function checkServerConfig(config: ServerConfig): CheckReport {
   const warnings: string[] = [];
   const notices: string[] = [];
 
-  // Without an IdP the org key reads org-wide, so `owner` keeps nothing from other members
-  // (X5.10, X5.12).
-  if (config.auth.oidc === undefined && config.auth.org_key.enabled) {
+  // The org key reads org-wide, so `owner` keeps nothing from anyone holding it (X5.10,
+  // X5.12): without an IdP that is every member; mixed with one, every member still on the key.
+  if (config.auth.org_key.enabled) {
     const owners = [
       ...(config.default_visibility === "owner" ? ["default_visibility"] : []),
       ...config.sources
@@ -25,7 +25,9 @@ export function checkServerConfig(config: ServerConfig): CheckReport {
     ];
     if (owners.length > 0) {
       warnings.push(
-        `${owners.join(", ")} = "owner" is not enforced without an IdP: the org key reads every session (X5.10)`,
+        config.auth.oidc === undefined
+          ? `${owners.join(", ")} = "owner" is not enforced without an IdP: the org key reads every session (X5.10)`
+          : `${owners.join(", ")} = "owner" is not enforced against org-key holders: they can state any username; set auth.org_key.enabled = false once everyone signs in (X5.10, X5.12)`,
       );
     }
   }

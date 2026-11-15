@@ -65,7 +65,24 @@ describe("checkServerConfig", () => {
         },
       ),
     );
-    expect(withIdp.warnings).toEqual([]);
+    // Mixed with an IdP, org-key holders can still state anyone's username (X5.12).
+    expect(withIdp.warnings).toEqual([
+      'default_visibility = "owner" is not enforced against org-key holders: they can state any username; set auth.org_key.enabled = false once everyone signs in (X5.10, X5.12)',
+    ]);
+    const idpOnly = checkServerConfig(
+      config(
+        {},
+        {
+          default_visibility: "owner",
+          auth: {
+            oidc: { issuer: "https://idp.acme.com", client_id: "c" },
+            session_keys: { k1: "k".repeat(32) },
+            org_key: { enabled: false },
+          },
+        },
+      ),
+    );
+    expect(idpOnly.warnings).toEqual([]);
   });
 
   it("names every provider review sends data to (F3.5)", () => {

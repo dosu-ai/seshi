@@ -123,7 +123,7 @@ Traces are always stored in seshi's one canonical format (`seshi/trace/1`, X6.2)
 | `oidc.issuer` | | The IdP (X5.2). Its keys are read from its discovery document. Setting `oidc` needs a key in `session_keys` |
 | `oidc.client_id` | | The CLI's client id, registered as a public client (X5.7) |
 | `oidc.audience` | `client_id` | The ID token audience required, specific to this deployment (X1.4) |
-| `oidc.owner_claim` | `"sub"` | The claim owner IDs come from (X5.8): `sub`, `oid` on Entra, or `email` (lowercased) to match org-key usernames |
+| `oidc.owner_claim` | `"sub"` | The claim owner IDs come from (X5.8): `sub`, `oid` on Entra, or `email` (lowercased) to match org-key usernames; an ID token whose email the IdP marks unverified is then refused |
 | `oidc.admin_group` | | Members of this IdP group are admins (X5.3) |
 | `oidc.groups_claim` | `"groups"` | The ID token claim listing the person's groups |
 | `admins` | `[]` | Emails of admins (X5.3), for IdPs whose ID tokens carry no groups (Google). An email the IdP marks unverified does not count |
@@ -141,8 +141,9 @@ the org key, each shown once. `seshi serve` warns when no token can call it yet.
 `"org"` (default) or `"owner"` (X5.10): the visibility of a new session when neither the
 upload (`visibility`) nor the token's default sets one; a source's own `visibility` comes
 before it. Members read their own sessions and every `org` session; admins and service
-readers read everything. Without an IdP anyone holding the org key can state any username, so
-`owner` keeps nothing from another member, and `config check` warns.
+readers read everything. Anyone holding the org key can state any username, so `owner` keeps
+nothing from them: without an IdP that is every member, and with one, every member still on
+the key. `config check` warns in both cases, until `auth.org_key.enabled = false`.
 
 ### `[filter]`
 
