@@ -77,6 +77,7 @@ import {
   readMetadata,
   type TokenKind,
 } from "@seshi/store";
+import { otlpTraces } from "./otlp/receiver";
 
 export type { StorageView };
 
@@ -762,6 +763,11 @@ export function createApp(instance: Instance) {
     }
     return json(document, 200, { etag, "cache-control": "private, no-cache" });
   });
+
+  // --- OTLP ingest (F4), outside /v1: OTLP's own v1 follows ----------------------
+
+  const traces = otlpTraces(instance, { bearer, readBody, maxBodyBytes: bodyLimit });
+  route("POST", "/otlp/v1/traces", ({ request }) => traces(request));
 
   return { fetch: dispatch(routes), auth, pipeline };
 }

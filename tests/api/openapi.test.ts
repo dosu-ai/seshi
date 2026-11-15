@@ -160,6 +160,7 @@ async function call(
     body?: unknown;
     raw?: string;
     encoding?: string;
+    contentType?: string;
     app?: App;
     headers?: Record<string, string>;
   } = {},
@@ -173,7 +174,7 @@ async function call(
   let body: string | undefined;
   if (options.raw !== undefined) {
     body = options.raw;
-    headers["content-type"] = "application/json";
+    headers["content-type"] = options.contentType ?? "application/json";
   } else if (options.body !== undefined) {
     const requestSchema = validator(
       "paths",
@@ -260,6 +261,7 @@ describe("the document itself", () => {
         "GET /v1/admin/jobs",
         "GET /v1/redaction/rules",
         "GET /v1/sessions/{agent}/{session_id}/reviews",
+        "POST /otlp/v1/traces",
       ].sort(),
     );
   });
@@ -727,6 +729,95 @@ describe("identity and access (X5)", () => {
     expect(
       (await call("POST", "/v1/tokens/revoke", { ...member, body: { owner: "x" } })).status,
     ).toBe(403);
+  });
+
+  it("OTLP ingest", async () => {
+    const sources = '[[sources]]\nid = "console"\ntype = "otlp"\n';
+    const otlpAuth = new Auth(
+      {
+        staticTokens: [{ token: TOKEN, owner: "acme" }],
+        orgKey: true,
+        admins: [],
+        aliases: {},
+        sessionKeys: {},
+      },
+      { store, deployment: "test", sources: ["console", "idle"] },
+    );
+    const otlp = createApp({
+      store,
+      auth: otlpAuth,
+      config: `${sources}[[sources]]\nid = "idle"\ntype = "otlp"\nenabled = false\n[limits]\nmax_upload_bytes = 2048\n`,
+    });
+    const { admin } = await otlpAuth.initAdmin({ owner: "ops" });
+    const by = await otlpAuth.authenticate(admin?.token, undefined);
+    const writer = (service: string) =>
+      otlpAuth.issue({ kind: "service", service, scopes: ["sessions:write"] }, by);
+    const console = (await writer("console")).token;
+    const idle = (await writer("idle")).token;
+    const reader = (await otlpAuth.issue({ kind: "service", service: "sync" }, by)).token;
+    const span = (attributes: unknown[]) =>
+      JSON.stringify({
+        resourceSpans: [
+          {
+            scopeSpans: [
+              {
+                spans: [
+                  {
+                    traceId: "ab".repeat(16),
+                    spanId: "cd".repeat(8),
+                    name: "chat",
+                    startTimeUnixNano: "1790000000000000000",
+                    attributes,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+    const content = span([{ key: "gen_ai.input.messages", value: { stringValue: "[]" } }]);
+    const send = (token: string | null | undefined, raw: string, contentType?: string) =>
+      call("POST", "/otlp/v1/traces", {
+        app: otlp,
+        token,
+        raw,
+        ...(contentType ? { contentType } : {}),
+      });
+
+    expect((await send(console, content)).body).toEqual({});
+    const metadataOnly = await send(console, span([]));
+    expect(metadataOnly.status).toBe(200);
+    expect(metadataOnly.body).toMatchObject({ partialSuccess: { rejectedSpans: "1" } });
+    expect((await send(null, content)).status).toBe(401);
+    expect((await send(TOKEN, content)).status).toBe(403);
+    expect((await send(reader, content)).status).toBe(403);
+    expect((await send(idle, content)).status).toBe(403);
+    expect((await send(console, content, "text/plain")).status).toBe(415);
+    expect((await send(console, "{not json")).status).toBe(400);
+    expect((await send(console, JSON.stringify({ pad: "x".repeat(1_100_000) }))).status).toBe(413);
+
+    const broken: Store = {
+      url: store.url,
+      get: () => Promise.resolve(null),
+      put: () => Promise.reject(new StoreError("down")),
+      stat: () => Promise.resolve(null),
+      delete: () => Promise.reject(new StoreError("down")),
+      list: () => Promise.resolve({ keys: [], truncated: false }),
+    };
+    const brokenAuth = new Auth(
+      { staticTokens: [], orgKey: false, admins: [], aliases: {}, sessionKeys: {} },
+      { store, deployment: "test", sources: ["console"] },
+    );
+    const down = createApp({ store: broken, auth: brokenAuth, config: sources });
+    const { admin: downAdmin } = await brokenAuth.initAdmin({ owner: "ops", force: true });
+    const issued = await brokenAuth.issue(
+      { kind: "service", service: "console", scopes: ["sessions:write"] },
+      await brokenAuth.authenticate(downAdmin?.token, undefined),
+    );
+    expect(
+      (await call("POST", "/otlp/v1/traces", { app: down, token: issued.token, raw: content }))
+        .status,
+    ).toBe(503);
   });
 });
 

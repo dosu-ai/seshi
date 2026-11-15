@@ -50,6 +50,7 @@ tags:
   - name: tokens
   - name: admin
   - name: redaction
+  - name: otlp
 
 paths:
   /healthz:
@@ -727,6 +728,91 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "502": { $ref: "#/components/responses/StorageError" }
+
+  /otlp/v1/traces:
+    post:
+      tags: [otlp]
+      summary: OTLP/HTTP trace ingest (F4).
+      operationId: otlpTraces
+      description: |
+        Where an OTLP exporter, such as a Claude Console destination, sends spans: its endpoint
+        is `https://<seshi>/otlp` and it appends `/v1/traces` (OTLP's own version, outside
+        seshi's `/v1`, F4.1). The body is an `ExportTraceServiceRequest` as protobuf
+        (`application/x-protobuf`, what the Console sends) or in OTLP's JSON mapping
+        (`application/json`), optionally `Content-Encoding: gzip`; the answer is in the same
+        encoding.
+
+        The caller is the destination: a service token for an `otlp` source in `[[sources]]`
+        with scope `sessions:write` (`POST /v1/tokens {kind: service, service: <source id>,
+        scopes: [sessions:write]}`, F4.2). Its sessions belong to `svc:<source id>` and take
+        the source's visibility. Spans are grouped into sessions by `anthropic.session.id`,
+        else `gen_ai.conversation.id`, else the trace id (F4.3), normalized and redacted on
+        arrival into the span store, and answered once stored (X4.4); the session is
+        assembled and published once its spans have been quiet for the source's
+        `quiet_period`, or shortly after a final span (F4.4). A span sent twice is kept once.
+
+        A batch where no span carries prompt or response content (a destination in
+        "Metadata only" mode) is answered `200` with `partial_success` rejecting every span and
+        a message saying to switch the destination to full content; nothing is stored (F4.5).
+        Spans that cannot be read (no valid ids or start time) are rejected the same way while
+        the rest are stored. Errors are a `google.rpc.Status` (`code`, `message`).
+      security:
+        - bearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              description: An `ExportTraceServiceRequest` in OTLP's JSON mapping.
+              type: object
+              properties:
+                resourceSpans: { type: array, items: { type: object } }
+          application/x-protobuf:
+            schema:
+              description: An `ExportTraceServiceRequest`, protobuf-encoded.
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: |
+            Accepted. `partialSuccess` (`partial_success` in protobuf) is present when spans were
+            rejected: how many, and why.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OtlpExportResponse" }
+            application/x-protobuf:
+              schema: { type: string, format: binary }
+        "400":
+          description: The body is not an `ExportTraceServiceRequest`, or not valid gzip.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OtlpStatus" }
+        "401":
+          description: No credential, or not one the server accepts.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OtlpStatus" }
+        "403":
+          description: |
+            The credential is not a writing service token for an enabled `otlp` source.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OtlpStatus" }
+        "413":
+          description: The body is larger than the server takes (`limits.max_upload_bytes`).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OtlpStatus" }
+        "415":
+          description: A `Content-Type` other than `application/x-protobuf` or `application/json`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OtlpStatus" }
+        "503":
+          description: The bucket failed. Exporters retry; spans already stored are kept once.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OtlpStatus" }
 
 components:
   securitySchemes:
@@ -1663,3 +1749,24 @@ components:
         reviews:
           type: array
           items: { $ref: "#/components/schemas/ReviewDecision" }
+
+    OtlpExportResponse:
+      description: An `ExportTraceServiceResponse` in OTLP's JSON mapping (F4.1).
+      type: object
+      properties:
+        partialSuccess:
+          type: object
+          properties:
+            rejectedSpans:
+              description: How many spans were not accepted (an int64, written as a string).
+              type: string
+              pattern: "^[0-9]+$"
+            errorMessage: { type: string }
+
+    OtlpStatus:
+      description: A `google.rpc.Status`, what OTLP/HTTP answers a failed request with.
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: integer, description: "A google.rpc.Code (3 invalid argument, 7 permission denied, 14 unavailable, 16 unauthenticated)." }
+        message: { type: string }
