@@ -122,6 +122,62 @@ describe("seshi sessions against a server", () => {
     expect((await machine.seshi(["sessions", "show", "claude-code"])).code).toBe(2);
   });
 
+  it("never prints a session's control characters to the terminal", async () => {
+    // A member's transcript and project carrying escape sequences: a title change, an OSC 52
+    // clipboard write, a cursor move that would hide a line.
+    const db = new HttpSessionDB({ server: server.url, token: TOKEN });
+    const nasty = `${JSON.stringify({
+      type: "user",
+      uuid: "u1",
+      timestamp: "2026-09-01T00:00:00.000Z",
+      sessionId: "evil",
+      message: { role: "user", content: "hi\x1b]0;owned\x07 \x1b]52;c;cm0gLXJm\x07\x1b[2Aok" },
+    })}\n${JSON.stringify({
+      type: "assistant",
+      uuid: "a1",
+      timestamp: "2026-09-01T00:00:01.000Z",
+      sessionId: "evil",
+      message: {
+        role: "assistant",
+        model: "claude-x",
+        content: [{ type: "text", text: `Sure \x1b[31mred\x1b[0m. ${"words ".repeat(400)}` }],
+      },
+    })}\n`;
+    await db.ingest({
+      agent: "claude-code",
+      session_id: "evil",
+      transcript: nasty,
+      project: "acme\x1b[1Kwidget",
+    });
+    const tty = { stdout: true, stdin: false };
+    const env = { TERM: "xterm-256color", COLORTERM: "truecolor", SESHI_THEME: "dark" };
+    for (const argv of [
+      ["sessions", "ls"],
+      ["sessions", "show", "claude-code/evil", "--trace"],
+    ]) {
+      const result = await machine.seshi(argv, { tty, env });
+      expect(result.code, result.err).toBe(0);
+      // Colour on, yet once our own SGR sequences are gone, no control character is left.
+      expect(result.out).toContain("\x1b[");
+      const ours = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
+      const left = [...result.out.replace(ours, "")].filter((c) => {
+        const code = c.charCodeAt(0);
+        return c !== "\n" && (code < 0x20 || (code >= 0x7f && code <= 0x9f));
+      });
+      expect(left, argv.join(" ")).toEqual([]);
+    }
+    // What is left of the sequences is inert text.
+    const trace = await machine.seshi(["sessions", "show", "claude-code/evil", "--trace"], {
+      tty,
+      env,
+    });
+    expect(trace.out).toContain("hi\uFFFD]0;owned\uFFFD");
+    expect(trace.out).toContain("\uFFFD[2Aok");
+    // JSON escapes them; it is for programs.
+    const json = await machine.seshi(["sessions", "show", "claude-code/evil", "--json"]);
+    expect(JSON.parse(json.out).project).toBe("acme\x1b[1Kwidget");
+  });
+
   it("exports in each format, to standard output or a file", async () => {
     const atif = await machine.seshi([
       "sessions",
@@ -193,6 +249,25 @@ describe("seshi sessions against a server", () => {
     ]);
     expect(wrongHash.code).toBe(4);
     expect((await machine.seshi(["sessions", "export", "claude-code/nope"])).code).toBe(4);
+    // A file that cannot be written is a failure with a message, not a crash.
+    const nowhere = await machine.seshi([
+      "sessions",
+      "export",
+      "claude-code/sess1",
+      "-o",
+      join(machine.dir, "missing", "out.json"),
+      "--json",
+    ]);
+    expect(nowhere.code).toBe(1);
+    expect(JSON.parse(nowhere.err)).toMatchObject({ error: { code: "io" } });
+  });
+
+  it("names a logins file it cannot read instead of crashing", async () => {
+    writeFileSync(join(machine.configDir, "logins.json"), "{ not json");
+    const ls = await machine.seshi(["sessions", "ls"]);
+    expect(ls.code).toBe(3);
+    expect(ls.err).toContain("logins.json is not a JSON object");
+    expect(ls.err).toContain("seshi login");
   });
 
   it("changes visibility, and deletes only with --yes or a terminal's yes", async () => {

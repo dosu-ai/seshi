@@ -159,6 +159,18 @@ describe("signing in through the IdP (X5.7)", () => {
     await logins.update(server.url, { session: { issued_at: old, expires_at: later } });
     expect((await machine.seshi(["sessions", "show", "claude-code", "s1"])).code).toBe(0);
     expect(idp.calls.filter((c) => c.grant === "refresh_token")).toHaveLength(1);
+    // The person is asked first: a declined delete renews nothing.
+    const declined = await machine.seshi(["sessions", "rm", "claude-code/s1", "--json"], {
+      terminal: {
+        ask: async () => "n",
+        background: async () => undefined,
+        openUrl: async () => false,
+      },
+      tty: { stdout: false, stdin: true },
+    });
+    expect(declined.code).toBe(1);
+    expect(JSON.parse(declined.err)).toMatchObject({ error: { code: "cancelled" } });
+    expect(idp.calls.filter((c) => c.grant === "refresh_token")).toHaveLength(1);
     const rm = await machine.seshi(["sessions", "rm", "claude-code/s1", "--yes"]);
     expect(rm.code, rm.err).toBe(0);
     expect(rm.out).toContain("Deleted claude-code/s1");
@@ -229,8 +241,20 @@ describe("signing in without an IdP (X5.12)", () => {
       owner: "carol@acme.com",
       owner_basis: "claimed",
     });
+    // The username stated, as typed: the owner id is its lowercased form.
+    expect(JSON.parse(who.out).login).toMatchObject({ mode: "org_key", user: "carol@acme.com" });
+    const mixed = await machine.seshi(["whoami"], { env: { SESHI_USER: "Carol@Acme.com" } });
+    expect(mixed.out).toContain("stating 'Carol@Acme.com'");
     const asBob = await machine.seshi(["whoami", "--json"], { env: { SESHI_USER: "" } });
     expect(JSON.parse(asBob.out).identity.owner).toBe("bob@acme.com");
+
+    // --visibility is the IdP device token's default; it means nothing with the org key.
+    const visibility = await machine.seshi(
+      ["login", "--server", plain.url, "--key", "-", "--visibility", "owner"],
+      { stdin: `${org_key?.token}\n` },
+    );
+    expect(visibility.code).toBe(2);
+    expect(visibility.err).toContain("device token");
 
     // The org key manages no tokens.
     const tokens = await machine.seshi(["tokens", "ls"], { env: { SESHI_USER: "" } });

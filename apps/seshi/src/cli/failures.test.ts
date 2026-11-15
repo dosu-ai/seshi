@@ -34,6 +34,11 @@ describe("what each failure exits with (F8.1)", () => {
     expect(exit(new Refused(EXIT.conflict, "c", "m"))).toBe(EXIT.conflict);
     const instanceError = Object.assign(new Error("bucket"), { name: "InstanceError" });
     expect(exit(instanceError)).toBe(EXIT.config);
+    const io = Object.assign(new Error("ENOENT: no such file or directory, open 'x'"), {
+      code: "ENOENT",
+      syscall: "open",
+    });
+    expect(classify(io)).toMatchObject({ exit: EXIT.failure, code: "io" });
     expect(classify(new Error("a bug"))).toBeUndefined();
   });
 

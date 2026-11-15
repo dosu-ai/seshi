@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 import type { CommandContext } from "../commands/index";
 import { BRAND_COLOURS } from "./brand-tokens";
-import { colourLevel, detectTheme, Style, stripStyle, styleFor, themeFromColorFgBg } from "./style";
+import {
+  colourLevel,
+  detectTheme,
+  printable,
+  Style,
+  stripStyle,
+  styleFor,
+  themeFromColorFgBg,
+} from "./style";
 import type { Terminal } from "./terminal";
 
 const TTY = { env: { TERM: "xterm" }, tty: true };
@@ -118,6 +126,16 @@ describe("Style", () => {
     expect(stripStyle(line)).toBe("running 2s ago x");
     expect(style.glyph("✓", "ok")).toBe("✓");
     expect(style.paint("success", "")).toBe("");
+  });
+});
+
+describe("printable", () => {
+  it("turns every control character of someone else's text into U+FFFD, a tab into a space", () => {
+    expect(printable("plain text, ünïcode ✓")).toBe("plain text, ünïcode ✓");
+    expect(printable("a\tb")).toBe("a b");
+    expect(printable("\x1b]52;c;eA==\x07\x1b[2A\r\n\x7f\x9b")).toBe(
+      "\uFFFD]52;c;eA==\uFFFD\uFFFD[2A\uFFFD\uFFFD\uFFFD\uFFFD",
+    );
   });
 });
 
