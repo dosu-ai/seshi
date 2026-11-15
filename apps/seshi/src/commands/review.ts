@@ -29,7 +29,7 @@ import { EXIT } from "../cli/exit";
 import { emit, fail, takeJson, usageError } from "../cli/output";
 import type { CommandContext } from "./index";
 import { configFlags } from "./serve-settings";
-import { SERVER_OPTIONS, serverFailure } from "./server-instance";
+import { cwdConfigHint, SERVER_OPTIONS, serverFailure } from "./server-instance";
 
 const USAGE =
   "usage: seshi review eval [--policy <id>] [--fixtures <file or folder>] [--config <file>] [--set path=value]… [--json]";
@@ -106,6 +106,7 @@ export async function run(ctx: CommandContext): Promise<number> {
     return usageError(ctx, json, (err as Error).message, USAGE);
   }
   try {
+    cwdConfigHint(ctx, values.config);
     const loaded = loadServerConfig({
       configFlag: values.config,
       env: ctx.env,

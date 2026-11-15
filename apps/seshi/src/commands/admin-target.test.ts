@@ -47,9 +47,18 @@ describe("where admin status is read from", () => {
     expect(await adminTarget(ctx({ SESHI_CONFIG: "/x.toml" }), {}, none)).toEqual({
       kind: "local",
     });
+  });
+
+  it("never reads ./seshi.toml (only serve does), and says how to use it", async () => {
     const here = { exists: (p: string) => p === join(dir, "seshi.toml"), cwd: dir };
+    const errors: string[] = [];
+    const quiet = { ...ctx(), stderr: (line: string) => errors.push(line) };
+    // The CLI config's server wins over a seshi.toml in the folder.
     cliConfig('server = "https://seshi.acme.com"\n');
-    expect(await adminTarget(ctx(), {}, here)).toEqual({ kind: "local" });
+    await expect(adminTarget(quiet, {}, here)).rejects.toThrow(/not signed in/);
+    expect(errors).toEqual([expect.stringMatching(/pass --config \.\/seshi\.toml/)]);
+    cliConfig("");
+    expect(await adminTarget(quiet, {}, here)).toEqual({ kind: "local" });
   });
 
   it("is local mode's bucket config, else the signed-in server, else env alone", async () => {

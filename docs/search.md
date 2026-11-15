@@ -43,7 +43,8 @@ Where it searches:
   services find everything), with the credential `seshi login` stored. `--token` (and `--user`
   with the org key) uses that token for this one search instead.
 - **In-process** (`[local] config` in the CLI config, `--config <seshi.toml>`, or where the
-  server's own config is, as for `workers status`): the bucket's keys read everything, so
+  server's own config is, as for `workers status`: `SESHI_CONFIG` or `/etc/seshi/seshi.toml`,
+  never a `./seshi.toml` it is not told about): the bucket's keys read everything, so
   nothing is filtered by owner. The local index is brought up to date with the change feed
   before each search, and built from scratch the first time (which reads every change entry
   once). `seshi search --status` says where the index file is and what it holds;

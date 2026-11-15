@@ -26,24 +26,30 @@ export interface ServerConfigLookup {
   exists(path: string): boolean;
   /** Overrides `/etc/seshi/seshi.toml` (tests). */
   systemPath?: string;
+  /** Look for `./seshi.toml` too. Only `seshi serve` does: any other command may run in a
+   * checkout someone else wrote, whose `seshi.toml` could name a bucket of theirs and secret
+   * references (`{ env = … }`, `{ file = … }`) that would send this machine's to it. */
+  cwdFile?: boolean;
 }
 
-/** The server's config file: `--config`, else `SESHI_CONFIG`, else `./seshi.toml`, else
- * `/etc/seshi/seshi.toml` (F1.1). A file named by the flag or env must exist (`explicit`);
- * the other two are used when present, and with neither the config is env and defaults. */
+/** The server's config file: `--config`, else `SESHI_CONFIG`, else `./seshi.toml` (with
+ * `cwdFile` only), else `/etc/seshi/seshi.toml` (F1.1). A file named by the flag or env must
+ * exist (`explicit`); the other two are used when present, and with neither the config is env
+ * and defaults. `skipped` is a `./seshi.toml` that is there but was not read, because nothing
+ * named it and `cwdFile` is off: the command can say how to use it (`--config`). */
 export function findServerConfig(lookup: ServerConfigLookup): {
   path?: string;
   explicit: boolean;
+  skipped?: string;
 } {
   const named = lookup.flag ?? (lookup.env[CONFIG_ENV] || undefined);
   if (named !== undefined) return { path: resolve(lookup.cwd, named), explicit: true };
-  for (const candidate of [
-    join(lookup.cwd, SERVER_CONFIG_NAME),
-    lookup.systemPath ?? SYSTEM_CONFIG_PATH,
-  ]) {
-    if (lookup.exists(candidate)) return { path: candidate, explicit: false };
-  }
-  return { explicit: false };
+  const here = join(lookup.cwd, SERVER_CONFIG_NAME);
+  if (lookup.cwdFile === true && lookup.exists(here)) return { path: here, explicit: false };
+  const skipped = lookup.cwdFile !== true && lookup.exists(here) ? { skipped: here } : {};
+  const system = lookup.systemPath ?? SYSTEM_CONFIG_PATH;
+  if (lookup.exists(system)) return { path: system, explicit: false, ...skipped };
+  return { explicit: false, ...skipped };
 }
 
 /** The CLI's config file: `%APPDATA%\seshi\config.toml` on Windows, else

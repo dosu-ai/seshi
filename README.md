@@ -88,9 +88,9 @@ region = "us-east-1"                   # keys from store.credentials, or the usu
 ```
 
 ```sh
-seshi config check                     # every problem at once, with where each value came from
-seshi admin init                       # prints the first admin token and the org key, once each
-seshi serve                            # listens on :7200; put TLS in front of it
+seshi config check --config seshi.toml # every problem at once, with where each value came from
+seshi admin init --config seshi.toml   # prints the first admin token and the org key, once each
+seshi serve                            # reads ./seshi.toml; listens on :7200; put TLS in front
 ```
 
 Or run the container image, `ghcr.io/dosu-ai/sessiondb`, with the same file mounted at

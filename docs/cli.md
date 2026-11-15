@@ -98,11 +98,14 @@ repository's code.
 
 `serve`, `admin`, `workers`, `sync`, `reprocess`, `redact backfill`, `redact sweep` and `review` run where the
 server's config and bucket keys are: they load the server config the way `serve` does
-(`--config`, `SESHI_CONFIG`, `./seshi.toml`, `/etc/seshi/seshi.toml`, then `SESHI_*` env and
-`--set`). `workers status` and `sync status|failed|dropped` also run from an admin's laptop
-through the server's admin routes: with `--server <url>`, or, when no server config is found,
-the CLI config's `server` (its `[local] config` is read as the server config instead). `sync
-run` and `reprocess` stay where the config is.
+(`--config`, `SESHI_CONFIG`, `/etc/seshi/seshi.toml`, then `SESHI_*` env and `--set`), except
+that only `serve` reads `./seshi.toml` without being told to. The folder may be a checkout
+someone else wrote, whose secret references would send your env or files to its bucket, so
+the others (and `config check`, and `search` with no server configured) say so in a one-line
+hint instead: pass `--config ./seshi.toml`. `workers status` and `sync status|failed|dropped`
+also run from an admin's laptop through the server's admin routes: with `--server <url>`, or,
+when no server config is found, the CLI config's `server` (its `[local] config` is read as the
+server config instead). `sync run` and `reprocess` stay where the config is.
 
 ## Talking to a server, or to your own bucket (F8.3, X3.5)
 

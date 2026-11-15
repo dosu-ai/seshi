@@ -13,6 +13,8 @@ export interface ServerLoadOptions extends Omit<LoadOptions, "file" | "foreign" 
   cwd?: string;
   /** Overrides `/etc/seshi/seshi.toml` (tests). */
   systemPath?: string;
+  /** Read `./seshi.toml` when nothing names a file: `seshi serve` only (`findServerConfig`). */
+  cwdFile?: boolean;
 }
 
 /** The server's config: the file `findServerConfig` picks, `SESHI_*` env and flags. */
@@ -25,6 +27,7 @@ export function loadServerConfig(options: ServerLoadOptions = {}): Loaded<Server
     cwd: options.cwd ?? process.cwd(),
     exists: (path) => fs.mode(path) !== undefined,
     systemPath: options.systemPath,
+    cwdFile: options.cwdFile,
   });
   return loadConfig(serverConfigSchema, {
     ...options,

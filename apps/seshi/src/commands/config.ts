@@ -28,6 +28,7 @@ import { compileRuleSet, loadPacks, RulePackError } from "@seshi/redact";
 import { EXIT } from "../cli/exit";
 import type { CommandContext } from "./index";
 import { configFlags, ServeConfigError, serveSettings } from "./serve-settings";
+import { cwdConfigHint } from "./server-instance";
 
 const USAGE = `usage: seshi config check [--cli] [--config <file>] [--json] [--set path=value]…
        seshi config show  [--cli] [--config <file>] [--origin] [--json] [--set path=value]…`;
@@ -57,6 +58,7 @@ function loadCli(ctx: CommandContext, options: Options, resolveSecrets: boolean)
 
 function loadServer(ctx: CommandContext, options: Options, resolveSecrets: boolean) {
   const { listen, roles, set } = options;
+  cwdConfigHint(ctx, options.config);
   return loadServerConfig({
     configFlag: options.config,
     env: ctx.env,

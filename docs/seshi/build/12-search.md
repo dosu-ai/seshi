@@ -87,8 +87,8 @@ an indexer per instance tails every owner's change feed into a local SQLite FTS5
   --json`; `--status` and `--rebuild` for the local index. Picks, in order: `--config`/`--set`
   (in-process, as the server commands), `--server` or CLI `server` (HTTP with `--token`, and
   `--user` for the org key), CLI `[local] config` (local mode via `connect()`), then a server
-  config where `serve` would find one (`SESHI_CONFIG`, `./seshi.toml`, `/etc/seshi/seshi.toml`,
-  or `SESHI_STORE__URL`). In-process uses `LOCAL_VIEWER` (bucket keys read everything, X5.6) and
+  config where a server host keeps one (`SESHI_CONFIG`, `/etc/seshi/seshi.toml`, or
+  `SESHI_STORE__URL`; never `./seshi.toml`, which only `serve` reads unasked). In-process uses `LOCAL_VIEWER` (bucket keys read everything, X5.6) and
   catches the index up before each query. Plain output (`resultLines`, `searchLines`). Exit
   codes 0/2/3/5/7 as in docs/cli.md.
 - **Config**: `[search]` gains `interval` (`"15s"`, > 0) and `events` (roles, default

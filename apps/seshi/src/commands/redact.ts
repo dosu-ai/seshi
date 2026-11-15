@@ -55,7 +55,7 @@ import { printable, Style, styleFor } from "../cli/style";
 import { buildFormats } from "../integrations";
 import type { CommandContext } from "./index";
 import { configFlags } from "./serve-settings";
-import { openServer, SERVER_OPTIONS, serverFailure } from "./server-instance";
+import { cwdConfigHint, openServer, SERVER_OPTIONS, serverFailure } from "./server-instance";
 
 const USAGE = `usage: seshi redact test [<file> | -] [--pack <file>]… [--config <file>] [--set path=value]…
                          [--agent <format> | --text] [--field text|tool_input|tool_output] [--print] [--json]
@@ -146,6 +146,7 @@ async function test(ctx: CommandContext, json: boolean, args: string[]): Promise
   const paths: string[] = [];
   if (values.config !== undefined || values.set !== undefined) {
     let loaded: ReturnType<typeof loadServerConfig>;
+    cwdConfigHint(ctx, values.config);
     try {
       loaded = loadServerConfig({
         configFlag: values.config,

@@ -44,12 +44,13 @@ cat > seshi.toml <<'TOML'
 url = "s3://acme-sessions/seshi"      # or r2://bucket/prefix, or file:///var/lib/seshi
 region = "us-east-1"
 TOML
-seshi config check                    # every problem at once, with where each value came from
-seshi admin init                      # prints the first admin token and the org key, once
-seshi serve                           # http://localhost:7200
+seshi config check --config seshi.toml   # every problem at once, with where each value came from
+seshi admin init --config seshi.toml     # prints the first admin token and the org key, once
+seshi serve                              # http://localhost:7200
 ```
 
-The config is `./seshi.toml`, `/etc/seshi/seshi.toml`, or the file `--config` names, with
+The config is `./seshi.toml` (read unasked by `seshi serve` only: every other command needs
+`--config` or `SESHI_CONFIG` for it), `/etc/seshi/seshi.toml`, or the file `--config` names, with
 `SESHI_*` env over it and flags over env; [`seshi.example.toml`](../seshi.example.toml) is a
 commented example and [config.md](config.md) lists every setting. The compiled binary reads
 nothing else: no `.env`, no `bunfig.toml`. From a checkout, `bun start` runs the server from

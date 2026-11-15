@@ -40,9 +40,11 @@ function server(
   files: Record<string, string | { text: string; mode: number }>,
   options: Parameters<typeof loadServerConfig>[0] = {},
 ) {
+  // As `seshi serve` loads it: the only command that reads ./seshi.toml unasked.
   return loadServerConfig({
     cwd: "/work",
     systemPath: "/etc/seshi/seshi.toml",
+    cwdFile: true,
     fs: memFs(files),
     ...options,
   });
@@ -132,6 +134,9 @@ describe("which file (F1.1)", () => {
     expect(server(files).file).toBe("/work/seshi.toml");
     const { "/work/seshi.toml": _, ...noLocal } = files;
     expect(server(noLocal).file).toBe("/etc/seshi/seshi.toml");
+    // Any other command never reads ./seshi.toml unasked: the folder may be someone's checkout.
+    expect(server(files, { cwdFile: false }).file).toBe("/etc/seshi/seshi.toml");
+    expect(server(at("/work/seshi.toml"), { cwdFile: false, env: STORE }).file).toBeUndefined();
   });
 
   it("resolves a relative --config against the working directory", () => {

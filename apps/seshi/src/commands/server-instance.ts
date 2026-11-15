@@ -3,7 +3,14 @@
  * (F1.1), check what serve checks, then `buildInstance` with this binary's integrations. Their
  * setting errors print the same way and exit `config` (3). */
 
-import { ConfigError, type Loaded, loadServerConfig, type ServerConfig } from "@seshi/config";
+import { existsSync } from "node:fs";
+import {
+  ConfigError,
+  findServerConfig,
+  type Loaded,
+  loadServerConfig,
+  type ServerConfig,
+} from "@seshi/config";
 import {
   buildInstance,
   type Instance,
@@ -38,7 +45,25 @@ export interface OpenServerOptions {
   log?: Logger;
   /** False for a read-only command: a bucket with no layout marker is refused, not claimed. */
   initialize?: boolean;
+  /** Read `./seshi.toml` when nothing names a config: `seshi serve` only. */
+  cwdFile?: boolean;
 }
+
+/** Say how to use a `./seshi.toml` this command did not read. Only `seshi serve` reads one
+ * unasked (F1.1, revised): anywhere else the folder may be a checkout someone else wrote, and
+ * its secret references could send this machine's env or files to a bucket of theirs. */
+export function cwdConfigHint(
+  ctx: CommandContext,
+  configFlag: string | undefined,
+  cwd: string = process.cwd(),
+): void {
+  const { skipped } = findServerConfig({ flag: configFlag, env: ctx.env, cwd, exists: existsSync });
+  if (skipped !== undefined) ctx.stderr(SKIPPED_CONFIG_HINT);
+}
+
+/** The hint for a `./seshi.toml` that was there but not read. */
+export const SKIPPED_CONFIG_HINT =
+  "seshi: hint: ./seshi.toml here was not read (only seshi serve reads it unasked); pass --config ./seshi.toml to use it";
 
 export interface OpenedServer {
   instance: Instance;
@@ -53,10 +78,12 @@ export async function openServer(
   args: ServerArgs,
   options: OpenServerOptions = {},
 ): Promise<OpenedServer> {
+  if (options.cwdFile !== true) cwdConfigHint(ctx, args.config);
   const loaded = loadServerConfig({
     configFlag: args.config,
     env: ctx.env,
     flags: configFlags(args),
+    ...(options.cwdFile === true ? { cwdFile: true } : {}),
   });
   for (const warning of loaded.warnings) ctx.stderr(`seshi: warning: ${warning}`);
   const settings = serveSettings(loaded.config);

@@ -15,7 +15,10 @@ check|show` validate and print it. Reference: [docs/config.md](../../config.md).
   TOML is read with `Bun.TOML.parse`. Pure: env, files (`ConfigFs`), platform and cwd are
   options; each call returns its own `Loaded { config, file, origins, warnings, shape }`.
 - **Which file** (`paths.ts`): `findServerConfig` = `--config`, `SESHI_CONFIG`, `./seshi.toml`,
-  `/etc/seshi/seshi.toml`; a named file must exist. `cliConfigPath` =
+  `/etc/seshi/seshi.toml`; a named file must exist. `./seshi.toml` only with `cwdFile`, which
+  only `seshi serve` passes (a checkout's file could aim secret references at its own bucket);
+  otherwise a `./seshi.toml` that is there comes back as `skipped`, and the command prints a
+  hint to pass `--config ./seshi.toml` (`server-instance.ts` `cwdConfigHint`). `cliConfigPath` =
   `%APPDATA%\seshi\config.toml` on Windows, else `$XDG_CONFIG_HOME/seshi/config.toml`, else
   `~/.config/seshi/config.toml`. `loadServerConfig` / `loadCliConfig` (`configs.ts`) wrap both.
 - **Env mapping** (`layers.ts`, F1.2): `SESHI_` + upper-cased path, `__` between levels. Values

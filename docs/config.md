@@ -7,9 +7,14 @@
    from the working directory (Bun loads it), and `docker compose` passes `.env` to the
    container; the installed `seshi` binary never reads `.env`, so export the variables or use
    the TOML file there.
-3. **The TOML file**: `--config <file>`, else `SESHI_CONFIG`, else `./seshi.toml`, else
-   `/etc/seshi/seshi.toml`. A file named by `--config` or `SESHI_CONFIG` must exist; the
-   other two are used when present. With no file, the config is env and defaults.
+3. **The TOML file**: `--config <file>`, else `SESHI_CONFIG`, else `./seshi.toml` (for
+   `seshi serve` only), else `/etc/seshi/seshi.toml`. A file named by `--config` or
+   `SESHI_CONFIG` must exist; the other two are used when present. With no file, the config
+   is env and defaults. Every other command (`config check`, `admin`, `workers`, `sync`,
+   `reprocess`, `review`, `search`, `redact`) never reads `./seshi.toml` unless it is named:
+   the folder you run them in may be a checkout someone else wrote, and its secret references
+   (`{ env = … }`, `{ file = … }`) would send your variables or files to the bucket it names.
+   When one is there, they print a hint to pass `--config ./seshi.toml`.
 4. **Defaults**: today's values, listed below.
 
 The schema is strict: an unknown key, in the file or as a `SESHI_*` name, stops the server
@@ -25,7 +30,7 @@ settings).
 ## Checking and showing it
 
 ```sh
-seshi config check                 # validate, read every secret reference, print warnings
+seshi config check --config seshi.toml   # validate, read every secret reference, print warnings
 seshi config show                  # every value, secrets masked
 seshi config show --origin         # ... and where each came from: flag, env, file, default
 seshi config show --json [--origin]

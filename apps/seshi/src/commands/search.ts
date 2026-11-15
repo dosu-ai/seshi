@@ -11,7 +11,7 @@
  * (`GET /v1/search`) when the CLI config names one (`server`, or `--server`), with the
  * credential `seshi login` stored (`--token`, with `--user` for the org key, overrides it); or
  * in-process, with `[local] config` in the CLI config. `--config` / `--set`, or a server config
- * where `seshi serve` would find one (`SESHI_CONFIG`, `./seshi.toml`, `/etc/seshi/seshi.toml`),
+ * where a server host keeps one (`SESHI_CONFIG`, `/etc/seshi/seshi.toml`; never `./seshi.toml`),
  * also search in-process. In-process, whoever holds the bucket keys reads everything (X5.6), so
  * nothing is filtered by owner; the local index is brought up to date with the change feed
  * before every search (built from scratch the first time).
@@ -49,7 +49,7 @@ import { printable, Style, styleFor } from "../cli/style";
 import { NotConnected } from "../connect";
 import { USER_AGENT } from "../user-agent";
 import type { CommandContext } from "./index";
-import { openServer, serverFailure } from "./server-instance";
+import { cwdConfigHint, openServer, serverFailure } from "./server-instance";
 
 const USAGE = [
   "usage: seshi search <words…> [--owner <id>] [--agent <a>] [--repo <r>] [--branch <b>] [--source <id>]",
@@ -215,7 +215,8 @@ function statusLines(status: SearchStatus): string[] {
   ];
 }
 
-/** Whether a server config is where `seshi serve` would look for one. */
+/** Whether a server config is where a server host keeps one (`SESHI_CONFIG`, `/etc/seshi`, or
+ * `SESHI_STORE__URL`). Never `./seshi.toml`: the folder may be a checkout someone else wrote. */
 function serverConfigHere(ctx: CommandContext): boolean {
   if (ctx.env.SESHI_STORE__URL) return true;
   return (
@@ -358,6 +359,7 @@ export async function run(ctx: CommandContext): Promise<number> {
     if (serverConfigHere(ctx)) {
       return await withServer(ctx, json, values, mode, request, style);
     }
+    cwdConfigHint(ctx, undefined);
     return fail(
       ctx,
       json,

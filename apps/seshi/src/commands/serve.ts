@@ -59,7 +59,8 @@ async function start(ctx: CommandContext, argv: string[]): Promise<number | unde
     return usageError(ctx, false, message(err), USAGE);
   }
   const log = lineLogger(ctx.stdout, ctx.stderr);
-  const { instance, loaded, settings } = await openServer(ctx, values, { log });
+  // Only serve reads ./seshi.toml unasked: it runs where its own config is.
+  const { instance, loaded, settings } = await openServer(ctx, values, { log, cwdFile: true });
   for (const warning of checkServerConfig(loaded.config).warnings) log.warn(warning);
   const { owners, url } = settings;
 

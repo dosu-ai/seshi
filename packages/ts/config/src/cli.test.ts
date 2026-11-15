@@ -1,3 +1,4 @@
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { cliConfigSchema } from "./cli";
 import { loadCliConfig } from "./configs";
@@ -35,6 +36,28 @@ describe("findServerConfig", () => {
   it("names nothing when no file is there", () => {
     expect(findServerConfig({ env: {}, cwd: "/w", exists: () => false })).toEqual({
       explicit: false,
+    });
+  });
+
+  it("reads ./seshi.toml only when asked (seshi serve), and says when it skipped one", () => {
+    // Joined as this platform does: the lookup runs on Windows too.
+    const local = join("/w", "seshi.toml");
+    const here = (p: string) => p === local;
+    const both = (p: string) => here(p) || p === "/etc/s.toml";
+    expect(findServerConfig({ env: {}, cwd: "/w", exists: here })).toEqual({
+      explicit: false,
+      skipped: local,
+    });
+    expect(
+      findServerConfig({ env: {}, cwd: "/w", exists: both, systemPath: "/etc/s.toml" }),
+    ).toEqual({ path: "/etc/s.toml", explicit: false, skipped: local });
+    expect(findServerConfig({ env: {}, cwd: "/w", exists: here, cwdFile: true })).toEqual({
+      path: local,
+      explicit: false,
+    });
+    expect(findServerConfig({ env: { SESHI_CONFIG: "x.toml" }, cwd: "/w", exists: here })).toEqual({
+      path: resolve("/w", "x.toml"),
+      explicit: true,
     });
   });
 });
