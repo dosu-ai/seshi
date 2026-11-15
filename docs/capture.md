@@ -296,7 +296,7 @@ the server stored them.
 | `~/.local/state/seshi/` (`$XDG_STATE_HOME/seshi`; `%LOCALAPPDATA%\seshi` on Windows) | the capture folder, readable only by you |
 | `state.json` | toggles, the pause and past pauses, where each paused session stopped, upload positions, retraction secrets, problems |
 | `spool/` | one small file per hook event: paths and ids, never transcript text |
-| `uploader.json` | the running uploader's process id and heartbeat |
+| `uploader.json` | the running uploader's process id and heartbeat; `uploader.json.takeover` exists for a moment while an uploader takes over a dead one's lock, so two never both do |
 | `rules.json` | the capture rules as last read from the CLI config |
 | `redaction-rules.json` | your server's redaction rules as last fetched, with their ETag |
 | `capture.log` | errors from hooks and the uploader (hooks never print) |

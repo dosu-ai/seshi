@@ -5,7 +5,7 @@
  * the old one finds on its next beat that the lock is no longer its own and stops. */
 
 import { randomBytes } from "node:crypto";
-import { closeSync, openSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, openSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { ensurePrivateDir, readText, writePrivateFile } from "./files";
 import type { CapturePaths } from "./paths";
@@ -96,8 +96,41 @@ export function acquireUploaderLock(
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
     if (uploaderRunning(paths, now)) return null;
-    writePrivateFile(paths.uploader, JSON.stringify(lock));
+    if (!takeOver(paths, lock, now)) return null;
   }
   const held = new HeldUploaderLock(paths, lock);
   return held.held() ? held : null;
+}
+
+/** A takeover guard older than this was left by a process that died taking over. */
+export const TAKEOVER_STALE_MS = 10_000;
+
+/** Replace a lock judged stale with `lock`, one taker at a time. Two uploaders started together
+ * (two hooks, a hook and the service) both find the old lock stale; without the guard each
+ * writes its own and reads it back before the other writes, and both run. Under the guard, a
+ * file created exclusively, the lock is judged again and replaced only if still stale; a taker
+ * that finds the guard held gives way (the one holding it is taking over). */
+function takeOver(paths: CapturePaths, lock: UploaderLock, now: Date): boolean {
+  const guard = `${paths.uploader}.takeover`;
+  let fd: number;
+  try {
+    fd = openSync(guard, "wx", 0o600);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+    // A guard left by a taker that died mid-takeover is removed, and the next uploader tries.
+    try {
+      if (now.getTime() - statSync(guard).mtimeMs > TAKEOVER_STALE_MS)
+        rmSync(guard, { force: true });
+    } catch {}
+    return false;
+  }
+  try {
+    writeFileSync(fd, lock.token);
+    closeSync(fd);
+    if (uploaderRunning(paths, now)) return false;
+    writePrivateFile(paths.uploader, JSON.stringify(lock));
+    return true;
+  } finally {
+    rmSync(guard, { force: true });
+  }
 }

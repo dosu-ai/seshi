@@ -25,6 +25,7 @@ import {
   processAlive,
   readUploaderLock,
   STALE_MS,
+  TAKEOVER_STALE_MS,
   uploaderRunning,
 } from "./uploader-lock";
 
@@ -249,5 +250,26 @@ describe("one uploader per machine", () => {
     expect(third).not.toBeNull();
     expect(readUploaderLock(paths)?.token).toBe(third?.lock.token);
     expect(next?.held()).toBe(false);
+  });
+
+  it("lets one taker at a time replace a stale lock (two uploaders started together)", () => {
+    const now = new Date();
+    const dead = acquireUploaderLock(paths, now, 2 ** 30);
+    const guard = `${paths.uploader}.takeover`;
+    // Another uploader is taking the stale lock over right now: this one gives way and leaves
+    // the lock alone, instead of writing its own over it and both running.
+    writeFileSync(guard, "other");
+    expect(acquireUploaderLock(paths, now)).toBeNull();
+    expect(readUploaderLock(paths)?.token).toBe(dead?.lock.token);
+    // A guard left by a taker that died mid-takeover is cleared, and the next uploader takes over.
+    const old = new Date(Date.now() - TAKEOVER_STALE_MS - 1000);
+    utimesSync(guard, old, old);
+    expect(acquireUploaderLock(paths, now)).toBeNull();
+    const next = acquireUploaderLock(paths, now);
+    expect(next?.held()).toBe(true);
+    expect(() => statSync(guard)).toThrow();
+    // Taken over, the lock is live: a second taker finds it so.
+    expect(acquireUploaderLock(paths, now)).toBeNull();
+    expect(next?.held()).toBe(true);
   });
 });
