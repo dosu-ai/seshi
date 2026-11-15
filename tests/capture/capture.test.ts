@@ -641,6 +641,8 @@ describe("seshi upload (F8.1)", () => {
     const backfill = await machine.seshi(["upload", "--since", "3650d", "--agent", "claude-code"]);
     expect(backfill.code, backfill.err).toBe(0);
     expect(backfill.out).toContain("uploaded");
+    // B1.3's state word on the success line.
+    expect(backfill.out).toContain("Collected 1 session");
     expect((await stored())?.status).toBe("stored");
     expect((await machine.seshi(["upload"])).code).toBe(2);
     expect((await machine.seshi(["upload", "--since", "lots"])).code).toBe(2);

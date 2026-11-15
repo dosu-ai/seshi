@@ -109,7 +109,7 @@ describe("seshi search, in-process", () => {
       "s2",
     ]);
     const old = await seshi(["topic", "--until", "2026-10-01", "--config", toml]);
-    expect(old.out).toBe("No sessions match.");
+    expect(old.out).toBe("Exploring: no sessions match.");
     const paged = await seshi(["topic", "--limit", "1", "--config", toml]);
     expect(paged.out).toContain("1 of 2 sessions shown; more with --cursor 1");
   });
@@ -346,6 +346,6 @@ describe("the command's pieces", () => {
         results: [],
         index: { ready_at: "", sessions: 0 },
       }),
-    ).toEqual(["No more sessions match."]);
+    ).toEqual(["Exploring: no more sessions match."]);
   });
 });

@@ -179,10 +179,13 @@ export function resultLines(result: SearchResult, style: Style = Style.plain()):
   return lines;
 }
 
-/** Every line `seshi search` prints for an answer. */
+/** Every line `seshi search` prints for an answer. An empty answer carries B1.3's state word
+ * for a search, Exploring. */
 export function searchLines(results: SearchResults, style: Style = Style.plain()): string[] {
   if (results.results.length === 0) {
-    return [results.total === 0 ? "No sessions match." : "No more sessions match."];
+    return [
+      `${style.status("Exploring", "search")}: ${results.total === 0 ? "no sessions match." : "no more sessions match."}`,
+    ];
   }
   const lines: string[] = [];
   for (const result of results.results) {

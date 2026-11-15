@@ -276,6 +276,14 @@ what changed.
   `metadata.json` (stepping over each archive's spans) and redacts those records again in
   place, counted in `spans`. otlp.md, redaction.md and 09 say so. Test: span records of a
   pending archive beside a stored session and of an owner with only spans, dry run and run.
+- **coverage, low** (fixed in part): B1.3 (Agreed) maps seshi's states to the six expressions
+  and their words, but no branch owned it and only `redact test` used a word ("Redacted").
+  The search empty state now says `Exploring: no sessions match.` and `seshi upload` says
+  `Collected N sessions` and `All done: nothing to upload`, coloured as B1.4 says and with the
+  word always printed. The build README gives B1.3 to 17, in part: the other commands' lines
+  (capture status, sync status, pause) and B1.5's poses in docs empty states (the docs are
+  Markdown pages with no empty states) are not applied. Tests: search's empty lines, upload's
+  success line.
 - **coverage, test only** (found while fixing): `uploader.test.ts`'s "seen in a repo that
   turns capture off" spooled two entries in one millisecond, which the spool orders by a
   random suffix, so it failed about one run in six. Its entries are now spooled a millisecond

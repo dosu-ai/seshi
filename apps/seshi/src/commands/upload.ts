@@ -291,8 +291,10 @@ async function upload(
     outcomes.push({ path, key, result: word, ...(s?.error ? { reason: s.error.message } : {}) });
   }
   const style = await styleFor(ctx, { json });
+  // B1.3's state words: Collected for what was uploaded, All done when there was nothing to do.
+  const collected = outcomes.filter((o) => o.result === "uploaded").length;
   emit(ctx, json, { sessions: outcomes, ...(signIn ? { sign_in: signIn } : {}) }, () => [
-    ...(outcomes.length === 0 ? ["nothing to upload"] : []),
+    ...(outcomes.length === 0 ? [`${style.status("All done", "success")}: nothing to upload`] : []),
     ...outcomes.map((o) => {
       const role =
         o.result === "uploaded"
@@ -305,6 +307,11 @@ async function upload(
       return `${style.status(o.result, role)} ${printable(o.key ?? o.path)}${o.reason ? `: ${printable(o.reason)}` : ""}`;
     }),
     ...(signIn ? [`${style.status("sign in", "warn")}: ${printable(signIn)}`] : []),
+    ...(collected > 0
+      ? [
+          `${style.status("Collected", "success")} ${collected} session${collected === 1 ? "" : "s"}`,
+        ]
+      : []),
   ]);
   if (signIn) return EXIT.auth;
   if (refused) return EXIT.failure;
