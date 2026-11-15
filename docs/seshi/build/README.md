@@ -42,6 +42,7 @@ Branch names use a hyphen (`seshi-01-restructure`), not a slash: git cannot hold
 | 30 | `seshi-30-verify-skill` | The `verify-seshi` agent skill: `control-seshi` drives a real, isolated seshi (local or served) and keeps evidence; a feature map of five user-facing features | All | Built |
 | 31 | `seshi-31-store-check` | `seshi store check`: a read-only checker of the bucket's invariants (`checkStore` in `@seshi/store`), and a fix for continued stubs counting as stale | X6, F2.5, F3.4, F4.4, X4.9 | Built |
 | 32 | `seshi-32-scenarios` | An in-process capture scenario runner (YAML scenarios, HTTP and store faults, a moved clock, invariants after every step) with 19 scenarios, and a doctor fix it found | F9, X4, X6 | Built |
+| 33 | `seshi-33-scenario-gen` | Generated scenarios with shrinking (fast-check): a fixed-seed budget in `bun run test`, `bun run scenarios:explore` for longer runs; 16 bugs found and fixed | F9, X4, X6, F3.4, F2.5 | Built |
 
 F7 (Cursor Cloud sync) is deferred and is not built. Agreed but not built, found in 17's review
 and left for a decision (see [17](17-review.md#not-fixed)): the first-run notice for Cursor and
@@ -65,11 +66,11 @@ Each branch has its notes here: [01](01-restructure.md), [02](02-config.md), [03
 [12](12-search.md), [13](13-cli.md), [14](14-capture.md), [15](15-distribution.md),
 [16](16-readme.md), [17](17-review.md), [18](18-decisions.md), [19](19-change-feed.md),
 [20](20-review-drop.md), [21](21-resend.md), [22](22-otlp.md), [23](23-orphan-sweep.md),
-[24](24-capture.md), [25](25-desktop-mod.md), [26](26-resend-spread.md), [27](27-security-fixes.md), [28](28-doctor.md), [29](29-explore.md), [31](31-store-check.md), [32](32-scenarios.md).
+[24](24-capture.md), [25](25-desktop-mod.md), [26](26-resend-spread.md), [27](27-security-fixes.md), [28](28-doctor.md), [29](29-explore.md), [31](31-store-check.md), [32](32-scenarios.md), [33](33-scenario-gen.md).
 
 ## How the stack was built
 
-The stack is linear, in the order of the table: `seshi` ← 01 ← 02 ← … ← 15 ← 16 ← 17 ← 18 ← 19 ← … ← 24 ← 25 ← 26 ← 27 ← 28 ← 29 ← 30 ← 31 ← 32. Each
+The stack is linear, in the order of the table: `seshi` ← 01 ← 02 ← … ← 15 ← 16 ← 17 ← 18 ← 19 ← … ← 24 ← 25 ← 26 ← 27 ← 28 ← 29 ← 30 ← 31 ← 32 ← 33. Each
 branch is pushed; there are no PRs yet.
 
 Branches 01–06 were built one after another. Branches 07–15 were then built in parallel, each
