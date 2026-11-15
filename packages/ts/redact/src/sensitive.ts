@@ -28,89 +28,27 @@
  * `VAR=value` assignments). Both lists are the format Dosu's CLI takes for an org's own. */
 
 import type { RawFormat } from "@seshi/model";
+import { builtinPack } from "./builtin";
 
 export type WithheldKind = "sensitive-file" | "secret-output";
 
 /** Calls taken out so far, by id, with what their results are replaced by. */
 export type WithheldCalls = Record<string, WithheldKind>;
 
-/** Files that hold secrets in nearly every project and machine. */
-export const BUILTIN_SENSITIVE_FILES: readonly string[] = [
-  ".env",
-  ".env.*",
-  "!.env.example",
-  "!.env.sample",
-  "!.env.template",
-  "!.env.dist",
-  "*.pem",
-  "*.key",
-  "*.p12",
-  "*.pfx",
-  "*.keystore",
-  "*.jks",
-  "id_rsa",
-  "id_dsa",
-  "id_ecdsa",
-  "id_ed25519",
-  ".netrc",
-  "_netrc",
-  ".pgpass",
-  ".npmrc",
-  ".pypirc",
-  ".git-credentials",
-  ".dockercfg",
-  ".docker/config.json",
-  ".aws/credentials",
-  ".azure/accessTokens.json",
-  ".config/gcloud/**/*credentials*.json",
-  "application_default_credentials.json",
-  "service-account*.json",
-  ".kube/config",
-  "*.tfvars",
-  "*.tfstate",
-  "secrets.yml",
-  "secrets.yaml",
-  ".vault-token",
-];
-
-/** Commands whose output is a secret, or the environment that holds them. */
-export const BUILTIN_SECRET_COMMANDS: readonly string[] = [
-  String.raw`printenv\b`,
-  String.raw`env(?:\s+-0)?\s*$`,
-  String.raw`set\s*$`,
-  String.raw`export\s+-p\s*$`,
-  String.raw`gh\s+auth\s+token\b`,
-  String.raw`(?:gh|glab)\s+auth\s+status\b.*(?:--show-token|\s-t\b)`,
-  String.raw`git\s+credential\s+fill\b`,
-  String.raw`aws\s+configure\s+(?:get|export-credentials)\b`,
-  String.raw`aws\s+sts\s+(?:get-session-token|get-federation-token|assume-role\S*)\b`,
-  String.raw`aws\s+ecr(?:-public)?\s+get-login-password\b`,
-  String.raw`aws\s+secretsmanager\s+get-secret-value\b`,
-  String.raw`aws\s+ssm\s+get-parameters?(?:-by-path)?\b.*--with-decryption`,
-  String.raw`gcloud\s+auth\s+(?:application-default\s+)?print-(?:access|identity)-token\b`,
-  String.raw`gcloud\s+secrets\s+versions\s+access\b`,
-  String.raw`az\s+(?:account\s+get-access-token|keyvault\s+secret\s+show)\b`,
-  String.raw`kubectl\s+get\s+secrets?\b`,
-  String.raw`kubectl\s+config\s+view\b.*--raw`,
-  String.raw`vault\s+(?:kv\s+get|read|token\s+create|print\s+token)\b`,
-  String.raw`op\s+(?:read|inject|item\s+get)\b`,
-  String.raw`security\s+find-(?:generic|internet)-password\b`,
-  String.raw`doppler\s+secrets\b`,
-  String.raw`heroku\s+(?:auth:token|config)\b`,
-  String.raw`fly(?:ctl)?\s+auth\s+token\b`,
-  String.raw`sops\s+(?:-d|--decrypt|decrypt)\b`,
-  String.raw`ansible-vault\s+(?:view|decrypt)\b`,
-  String.raw`pass\s+show\b`,
-];
-
 export interface SensitiveFiles {
   include: RegExp[];
   exclude: RegExp[];
 }
 
+/** Anything that says whether a command (one segment of a shell line, prefixes removed) is a
+ * secret command: a `RegExp`, or an operator's RE2 pattern (`matcher.ts`). */
+export interface CommandTest {
+  test(command: string): boolean;
+}
+
 export interface SensitiveRules {
   files: SensitiveFiles;
-  commands: RegExp[];
+  commands: readonly CommandTest[];
 }
 
 function globRegExp(raw: string): RegExp {
@@ -139,11 +77,11 @@ function globRegExp(raw: string): RegExp {
   return new RegExp(`(?:^|/)${body}$`, "i");
 }
 
-/** The built-in globs, then `extra`, as one set. Blank lines and `#` comments are skipped. */
-export function sensitiveFiles(extra: readonly string[] = []): SensitiveFiles {
+/** `globs` as one set, with nothing built in. Blank lines and `#` comments are skipped. */
+export function globFiles(globs: readonly string[]): SensitiveFiles {
   const include: RegExp[] = [];
   const exclude: RegExp[] = [];
-  for (const raw of [...BUILTIN_SENSITIVE_FILES, ...extra]) {
+  for (const raw of globs) {
     const glob = raw.trim();
     if (!glob || glob.startsWith("#")) continue;
     if (glob.startsWith("!")) {
@@ -153,6 +91,21 @@ export function sensitiveFiles(extra: readonly string[] = []): SensitiveFiles {
     }
   }
   return { include, exclude };
+}
+
+/** The built-in pack's sensitive-file globs (`packs/builtin.toml`). */
+export function builtinSensitiveFiles(): string[] {
+  return builtinPack().sensitive_files.flatMap((rule) => rule.globs);
+}
+
+/** The built-in pack's secret commands (`packs/builtin.toml`). */
+export function builtinSecretCommands(): string[] {
+  return builtinPack().secret_commands.flatMap((rule) => rule.patterns);
+}
+
+/** The built-in globs, then `extra`, as one set. Blank lines and `#` comments are skipped. */
+export function sensitiveFiles(extra: readonly string[] = []): SensitiveFiles {
+  return globFiles([...builtinSensitiveFiles(), ...extra]);
 }
 
 export interface CompiledCommands {
@@ -165,7 +118,7 @@ export interface CompiledCommands {
 export function secretCommands(extra: readonly string[] = []): CompiledCommands {
   const commands: RegExp[] = [];
   const invalid: CompiledCommands["invalid"] = [];
-  for (const raw of [...BUILTIN_SECRET_COMMANDS, ...extra]) {
+  for (const raw of [...builtinSecretCommands(), ...extra]) {
     const source = raw.trim();
     if (!source || source.startsWith("#")) continue;
     let re: RegExp;
@@ -219,7 +172,7 @@ const COMMAND_PREFIX =
   /^(?:sudo(?:\s+-\S+)*\s+|[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|\S*)\s+|(?:command|exec|time|nohup)\s+)/;
 
 /** Whether a shell line runs one of `commands` as any of its commands. */
-export function runsSecretCommand(text: string, commands: readonly RegExp[]): boolean {
+export function runsSecretCommand(text: string, commands: readonly CommandTest[]): boolean {
   if (commands.length === 0) return false;
   for (const raw of text.split(/\r?\n|;|&&|\|\||\||\$\(|`|\(|\)/)) {
     let segment = raw.trim();
@@ -397,6 +350,7 @@ class Pass {
   constructor(
     readonly rules: SensitiveRules,
     carried: Readonly<WithheldCalls>,
+    private readonly onWithhold?: WithholdListener,
   ) {
     this.withheld = { ...carried };
   }
@@ -420,12 +374,18 @@ class Pass {
 
     const input = inputOf(value);
     if (input) {
-      const kind = this.classify(parsedInput(input.holder[input.key]));
+      const parsed = parsedInput(input.holder[input.key]);
+      const kind = this.classify(parsed);
       if (kind) {
+        let known = false;
         for (const key of ID_KEYS) {
           const id = value[key];
-          if (typeof id === "string" && id) this.withheld[id] = kind;
+          if (typeof id === "string" && id) {
+            known ||= Object.hasOwn(this.withheld, id);
+            this.withheld[id] = kind;
+          }
         }
+        if (!known) this.onWithhold?.(parsed, kind);
         return this.redactCall(value, input, kind);
       }
     } else {
@@ -499,6 +459,10 @@ function redactDocument(text: string, pass: Pass): string {
   return next === parsed ? text : JSON.stringify(next);
 }
 
+/** Told of each call a pass withholds (once per call, not again for one carried in), with the
+ * call's input and why: how the rule set counts by rule id (F2.3). */
+export type WithholdListener = (input: unknown, kind: WithheldKind) => void;
+
 export interface SensitiveResult {
   text: string;
   /** `carried` and every call this pass took out: what the next chunk's pass starts from. */
@@ -512,8 +476,9 @@ export function redactSensitive(
   format: RawFormat,
   rules: SensitiveRules,
   carried: Readonly<WithheldCalls> = {},
+  onWithhold?: WithholdListener,
 ): SensitiveResult {
-  const pass = new Pass(rules, carried);
+  const pass = new Pass(rules, carried, onWithhold);
   const text =
     format === "json"
       ? redactDocument(transcript, pass)

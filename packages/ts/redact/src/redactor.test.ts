@@ -1,7 +1,9 @@
 import type { NormalizedRecord } from "@seshi/model";
 import { describe, expect, it } from "vitest";
+import { validatePack } from "./pack";
 import { ruleRedactor, ruleSetHash } from "./redactor";
 import { redactionRules } from "./rules";
+import { compileRuleSet } from "./ruleset";
 
 const ts = "2026-11-14T09:00:00Z";
 const meta = { role: "meta", source: "claude-code", git_branch: "feat/ABC-1234-x7Kq9" } as const;
@@ -122,5 +124,74 @@ describe("ruleRedactor", () => {
       builtin.rule_set,
     );
     expect(builtin.redact([meta]).summary).toEqual({ rule_set: builtin.rule_set, counts: {} });
+  });
+});
+
+describe("ruleRedactor over packs", () => {
+  const acme = validatePack(
+    {
+      id: "acme",
+      disable: ["entropy"],
+      rules: [
+        { id: "row-id", pattern: "ROW-\\d+", applies_to: ["tool_output"] },
+        { id: "arg-key", pattern: "--key=(?P<secret>\\S+)", applies_to: ["tool_input"] },
+        { id: "codename", pattern: "(?i)project bluebird" },
+      ],
+      sensitive_files: [{ id: "acme-master", globs: ["config/master.key"] }],
+      secret_commands: [{ id: "acme-token", pattern: "acme-cli\\s+token\\b" }],
+    },
+    { source: "acme.toml" },
+  );
+  const redactor = ruleRedactor(compileRuleSet({ packs: [acme] }));
+
+  it("runs each text rule only where its applies_to says, and counts by rule id", () => {
+    const { records, summary } = redactor.redact([
+      meta,
+      { role: "user", content: "ROW-1 for Project Bluebird", timestamp: ts },
+      call("c1", "Bash", { command: "deploy --key=abc ROW-2" }),
+      result("c1", "ROW-3 --key=def"),
+    ]);
+    expect(records[1]).toMatchObject({ content: "ROW-1 for [redacted:codename]" });
+    expect(
+      JSON.parse((records[2] as { tool_calls: { args: string }[] }).tool_calls[0]?.args ?? ""),
+    ).toEqual({ command: "deploy --key=[redacted:arg-key] ROW-2" });
+    expect(records[3]).toMatchObject({ content: "[redacted:row-id] --key=def" });
+    expect(summary.counts).toEqual({ codename: 1, "arg-key": 1, "row-id": 1 });
+  });
+
+  it("counts a withheld call under the rule it met", () => {
+    const { summary } = redactor.redact([
+      meta,
+      call("a", "Read", { file_path: "app/config/master.key" }),
+      call("b", "Read", { file_path: ".env" }),
+      call("c", "Bash", { command: "acme-cli token" }),
+      call("d", "Bash", { command: "printenv" }),
+      result("a", "x"),
+    ]);
+    expect(summary.counts).toEqual({
+      "acme-master": 1,
+      "sensitive-file": 1,
+      "acme-token": 1,
+      "secret-output": 1,
+    });
+  });
+
+  it("leaves a built-in rule a pack turned off", () => {
+    const { records } = redactor.redact([
+      meta,
+      { role: "user", content: "DEPLOY_CRED=aB3xY7pQ9zK2mN8vR4tWcD5f", timestamp: ts },
+    ]);
+    expect(records[1]).toMatchObject({ content: "DEPLOY_CRED=aB3xY7pQ9zK2mN8vR4tWcD5f" });
+  });
+
+  it("redacts one string outside the records as the rules treat its place", () => {
+    expect(redactor.redactText?.("ROW-9 and Project Bluebird")).toEqual({
+      text: "ROW-9 and [redacted:codename]",
+      counts: { codename: 1 },
+    });
+    expect(redactor.redactText?.("ROW-9", "tool_output")).toEqual({
+      text: "[redacted:row-id]",
+      counts: { "row-id": 1 },
+    });
   });
 });

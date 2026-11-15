@@ -27,6 +27,7 @@
     "check:hook": "bun run scripts/check-hook.ts",
     "schema": "bun run scripts/config-schema.ts",
     "types": "bun run scripts/model-types.ts",
+    "packs": "bun run scripts/builtin-pack.ts",
     "fixtures": "bun run tests/tooling/fixtures.ts",
     "goldens": "bun run tests/tooling/write-goldens.ts"
   },

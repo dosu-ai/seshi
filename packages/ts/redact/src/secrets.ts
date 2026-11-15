@@ -7,6 +7,36 @@ const REDACTION_MARKER = "[redacted:";
 
 type RedactionCounts = Record<string, number>;
 
+/** Every rule id `redactSecrets` can count, in the order its passes run. The built-in pack
+ * (`packs/builtin.toml`) lists each of them, so an operator pack can turn one off by id (F2.1). */
+export const BUILTIN_SECRET_KINDS: readonly string[] = [
+  "private-key",
+  "url-credentials",
+  "aws-secret",
+  "seshi-token",
+  "aws-access-key",
+  "quoted-secret",
+  "bearer-token",
+  "jwt",
+  "credential",
+  "github-token",
+  "gitlab-token",
+  "stripe-key",
+  "user-key",
+  "anthropic-key",
+  "openai-key",
+  "groq-key",
+  "xai-key",
+  "huggingface-token",
+  "npm-token",
+  "slack-token",
+  "google-api-key",
+  "pulumi-token",
+  "supabase-token",
+  "provider-token",
+  "entropy",
+];
+
 export interface RedactionResult {
   text: string;
   /** Total replacements across all kinds. */
@@ -206,7 +236,7 @@ function closingQuote(open: string, close: string): string {
   return open === "" ? "" : close;
 }
 
-function replaceProvider(s: string, counts: RedactionCounts): string {
+function replaceProvider(s: string, counts: RedactionCounts, off: Off): string {
   return s.replace(providerRE, (v) => {
     let kind = "provider-token";
     if (/^(gh[opsur]_|github_pat_)/.test(v)) kind = "github-token";
@@ -223,21 +253,28 @@ function replaceProvider(s: string, counts: RedactionCounts): string {
     else if (v.startsWith("AIza")) kind = "google-api-key";
     else if (v.startsWith("pul-")) kind = "pulumi-token";
     else if (v.startsWith("sbp_")) kind = "supabase-token";
+    if (off?.has(kind)) return v;
     add(counts, kind, 1);
     return `${REDACTION_MARKER}${kind}]`;
   });
 }
 
-export function redactSecrets(text: string): RedactionResult {
+/** Rule ids turned off; none when absent. */
+type Off = ReadonlySet<string> | undefined;
+
+/** `text` with every built-in secret pattern applied, except the rules in `off` (an operator
+ * pack turned them off by id, F2.1). */
+export function redactSecrets(text: string, off?: ReadonlySet<string>): RedactionResult {
   const counts: RedactionCounts = {};
   if (text === "") return { text, count: 0, counts };
   let s = text;
   const lower = s.toLowerCase();
+  const on = (kind: string) => !off?.has(kind);
 
-  if (s.includes("-----BEGIN")) {
+  if (on("private-key") && s.includes("-----BEGIN")) {
     s = replaceWhole(s, pemPrivateRE, "private-key", counts);
   }
-  if (s.includes("://")) {
+  if (on("url-credentials") && s.includes("://")) {
     s = replaceSubmatch(
       s,
       connURLRE,
@@ -246,7 +283,7 @@ export function redactSecrets(text: string): RedactionResult {
       (m) => `${m[1]}${m[2]}:[redacted:url-credentials]@${m[4]}`,
     );
   }
-  if (lower.includes("aws")) {
+  if (on("aws-secret") && lower.includes("aws")) {
     s = replaceSubmatch(
       s,
       awsSecretRE,
@@ -255,21 +292,22 @@ export function redactSecrets(text: string): RedactionResult {
       (m) => `${m[1]}${m[2]}${m[3]}[redacted:aws-secret]${closingQuote(m[3], m[5])}`,
     );
   }
-  if (s.includes("seshi_")) {
+  if (on("seshi-token") && s.includes("seshi_")) {
     s = replaceWhole(s, seshiTokenRE, "seshi-token", counts);
   }
-  if (s.includes("AKIA") || s.includes("ASIA")) {
+  if (on("aws-access-key") && (s.includes("AKIA") || s.includes("ASIA"))) {
     s = replaceWhole(s, awsAccessKeyRE, "aws-access-key", counts);
   }
   if (
-    lower.includes("password") ||
-    lower.includes("passwd") ||
-    lower.includes("pwd") ||
-    lower.includes("secret") ||
-    lower.includes("token") ||
-    lower.includes("api key") ||
-    lower.includes("api_key") ||
-    lower.includes("apikey")
+    on("quoted-secret") &&
+    (lower.includes("password") ||
+      lower.includes("passwd") ||
+      lower.includes("pwd") ||
+      lower.includes("secret") ||
+      lower.includes("token") ||
+      lower.includes("api key") ||
+      lower.includes("api_key") ||
+      lower.includes("apikey"))
   ) {
     s = replaceSubmatch(
       s,
@@ -279,7 +317,7 @@ export function redactSecrets(text: string): RedactionResult {
       (m) => `${m[1]}${m[2]}${m[3]}[redacted:quoted-secret]${m[5]}`,
     );
   }
-  if (lower.includes("bearer") || lower.includes("basic ")) {
+  if (on("bearer-token") && (lower.includes("bearer") || lower.includes("basic "))) {
     s = replaceSubmatch(
       s,
       bearerRE,
@@ -288,10 +326,10 @@ export function redactSecrets(text: string): RedactionResult {
       (m) => `${m[1]}${m[2]}[redacted:bearer-token]`,
     );
   }
-  if (s.includes("eyJ")) {
+  if (on("jwt") && s.includes("eyJ")) {
     s = replaceWhole(s, jwtRE, "jwt", counts);
   }
-  if (containsAny(lower, labelHints)) {
+  if (on("credential") && containsAny(lower, labelHints)) {
     s = replaceSubmatch(
       s,
       labeledLineRE,
@@ -300,7 +338,7 @@ export function redactSecrets(text: string): RedactionResult {
       (m) => `${m[1]}[redacted:credential]`,
     );
   }
-  if (kvAssignmentNearby(lower)) {
+  if (on("credential") && kvAssignmentNearby(lower)) {
     const kvRepl = (m: string[]) =>
       `${m[1]}${m[2]}${m[3]}[redacted:credential]${closingQuote(m[3], m[5])}`;
     s = replaceSubmatch(s, genericKVRE, "credential", counts, kvRepl);
@@ -309,9 +347,9 @@ export function redactSecrets(text: string): RedactionResult {
     s = replaceSubmatch(s, genericKVIntlRE, "credential", counts, kvRepl);
   }
   if (containsAny(s, providerHints)) {
-    s = replaceProvider(s, counts);
+    s = replaceProvider(s, counts, off);
   }
-  s = redactEntropy(s, counts);
+  if (on("entropy")) s = redactEntropy(s, counts);
 
   let count = 0;
   for (const n of Object.values(counts)) count += n;
