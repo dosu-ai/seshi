@@ -141,6 +141,39 @@ describe("the installer (F9.6)", () => {
     );
   });
 
+  it("knows its notify by a --command not named seshi, and unwinds one chained to itself", async () => {
+    const notify = () =>
+      (Bun.TOML.parse(readFileSync(config(), "utf8")) as { notify?: string[] }).notify;
+    const npx = { ...host, command: ["npx", "seshi"] };
+    await codexInstaller.install(npx);
+    const second = await codexInstaller.install(npx);
+    expect(second.notes).toEqual([]);
+    expect(notify()).toEqual(["npx", "seshi", "hook", "codex", "notify"]);
+    expect((await codexInstaller.status(npx)).installed).toBe(true);
+    expect((await codexInstaller.uninstall({ ...host, ...context })).changed).toEqual([config()]);
+    expect(notify()).toBeUndefined();
+
+    // A wrapper with any name is known by the command it was installed with.
+    const wrapper = { ...host, command: ["/usr/local/bin/my-wrapper"] };
+    await codexInstaller.install(wrapper);
+    await codexInstaller.install(wrapper);
+    expect(notify()).toEqual(["/usr/local/bin/my-wrapper", "hook", "codex", "notify"]);
+    expect((await codexInstaller.uninstall(wrapper)).changed).toEqual([config()]);
+    expect(notify()).toBeUndefined();
+
+    // What an older seshi left: its own notify chained after itself, then the user's program.
+    writeFileSync(
+      config(),
+      `notify = ${JSON.stringify(["npx", "seshi", "hook", "codex", "notify", "--", "npx", "seshi", "hook", "codex", "notify", "--", "say", "hi"])}\n`,
+    );
+    await codexInstaller.install(npx);
+    expect(notify()).toEqual(["npx", "seshi", "hook", "codex", "notify", "--", "say", "hi"]);
+    await codexInstaller.uninstall({ ...host, ...context });
+    expect(notify()).toEqual(["say", "hi"]);
+    expect(isSeshiNotify(["notseshi", "hook", "codex", "notify"])).toBe(false);
+    expect(isSeshiNotify(["hook", "codex", "notify"])).toBe(false);
+  });
+
   it("creates the setting when there is none, and removes it all on uninstall", async () => {
     const report = await codexInstaller.install({ ...host, ...context });
     expect(report.changed).toEqual([config()]);

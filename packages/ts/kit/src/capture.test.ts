@@ -100,6 +100,10 @@ describe("hook commands", () => {
     expect(isSeshiHook("notseshi hook claude-code Stop", "claude-code")).toBe(false);
     expect(isSeshiHook("say seshi", "claude-code")).toBe(false);
     expect(isSeshiHook(undefined, "claude-code")).toBe(false);
+    // A wrapper with any name, known by the command line an install wrote.
+    expect(isSeshiHook("my-wrap hook claude-code Stop", "claude-code")).toBe(false);
+    expect(isSeshiHook("my-wrap hook claude-code Stop", "claude-code", "my-wrap")).toBe(true);
+    expect(isSeshiHook("my-wrap hook cursor stop", "claude-code", "my-wrap")).toBe(false);
     expect(isSeshiStatusline("/opt/seshi statusline")).toBe(true);
     expect(isSeshiStatusline("my-line")).toBe(false);
   });

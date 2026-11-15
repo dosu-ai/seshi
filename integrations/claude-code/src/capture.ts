@@ -278,8 +278,8 @@ function groupsOf(table: HooksTable, event: string): HookGroup[] {
   return Array.isArray(groups) ? groups : [];
 }
 
-function hasOurs(groups: HookGroup[]): boolean {
-  return groups.some((g) => (g.hooks ?? []).some((h) => isSeshiHook(h.command, AGENT)));
+function hasOurs(groups: HookGroup[], own: string): boolean {
+  return groups.some((g) => (g.hooks ?? []).some((h) => isSeshiHook(h.command, AGENT, own)));
 }
 
 const STATUSLINE_NOTE =
@@ -299,7 +299,7 @@ export const claudeCodeInstaller: Installer = {
       let found = false;
       for (const group of groups) {
         for (const hook of group.hooks ?? []) {
-          if (isSeshiHook(hook.command, AGENT)) {
+          if (isSeshiHook(hook.command, AGENT, commandLine(context.command))) {
             hook.command = command;
             found = true;
           }
@@ -342,7 +342,9 @@ export const claudeCodeInstaller: Installer = {
         const groups = groupsOf(table, event);
         const kept: HookGroup[] = [];
         for (const group of groups) {
-          const hooks = (group.hooks ?? []).filter((h) => !isSeshiHook(h.command, AGENT));
+          const hooks = (group.hooks ?? []).filter(
+            (h) => !isSeshiHook(h.command, AGENT, commandLine(context.command)),
+          );
           if (hooks.length !== (group.hooks ?? []).length) touched = true;
           if (hooks.length > 0 || group.hooks === undefined) kept.push({ ...group, hooks });
         }
@@ -377,7 +379,9 @@ export const claudeCodeInstaller: Installer = {
     const present = existsSync(path);
     const settings = present ? readJsonConfig(path) : {};
     const table = present ? hooksOf(settings) : {};
-    const missing = CLAUDE_CODE_EVENTS.filter((e) => !hasOurs(groupsOf(table, e)));
+    const missing = CLAUDE_CODE_EVENTS.filter(
+      (e) => !hasOurs(groupsOf(table, e), commandLine(context.command)),
+    );
     const status = settings.statusLine as { command?: unknown } | undefined;
     const notes: string[] = [];
     if (present && missing.length > 0 && missing.length < CLAUDE_CODE_EVENTS.length) {

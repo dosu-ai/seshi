@@ -129,7 +129,7 @@ export const cursorInstaller: Installer = {
     for (const event of CURSOR_EVENTS) {
       const command = `${commandLine(context.command)} hook ${AGENT} ${event}`;
       const hooks = list(table[event]);
-      const ours = hooks.filter((h) => isSeshiHook(h.command, AGENT));
+      const ours = hooks.filter((h) => isSeshiHook(h.command, AGENT, commandLine(context.command)));
       if (ours.length > 0) for (const hook of ours) hook.command = command;
       else hooks.push({ command });
       table[event] = hooks;
@@ -146,7 +146,9 @@ export const cursorInstaller: Installer = {
     let touched = false;
     for (const event of Object.keys(table)) {
       const hooks = list(table[event]);
-      const kept = hooks.filter((h) => !isSeshiHook(h.command, AGENT));
+      const kept = hooks.filter(
+        (h) => !isSeshiHook(h.command, AGENT, commandLine(context.command)),
+      );
       if (kept.length === hooks.length) continue;
       touched = true;
       if (kept.length > 0) table[event] = kept;
@@ -162,7 +164,8 @@ export const cursorInstaller: Installer = {
     const present = existsSync(path);
     const table = present ? hooksTable(readJsonConfig(path)) : {};
     const missing = CURSOR_EVENTS.filter(
-      (e) => !list(table[e]).some((h) => isSeshiHook(h.command, AGENT)),
+      (e) =>
+        !list(table[e]).some((h) => isSeshiHook(h.command, AGENT, commandLine(context.command))),
     );
     return {
       installed: present && missing.length === 0,

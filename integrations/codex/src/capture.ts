@@ -132,18 +132,32 @@ export function locateRollout(sessionId: string, host: CaptureHost): string | un
 
 const HOOK_WORDS = ["hook", AGENT, "notify"];
 
-/** Whether a `notify` value is seshi's: `<seshi> hook codex notify [-- <old program>…]`. */
-export function isSeshiNotify(notify: unknown): notify is string[] {
-  if (!Array.isArray(notify) || notify.length < 4) return false;
-  if (!notify.every((w) => typeof w === "string")) return false;
-  const program = basename(notify[0] as string).replace(/\.exe$/i, "");
-  return program === "seshi" && HOOK_WORDS.every((w, i) => notify[i + 1] === w);
+/** Whether a `notify` value is seshi's: `<command…> hook codex notify [-- <old program>…]`,
+ * where the command is one or more words (`seshi`, `npx seshi`, a path) and one of them is a
+ * `seshi` binary, or the command is `own` (the `--command` an install was given, a wrapper
+ * named anything). */
+export function isSeshiNotify(notify: unknown, own?: readonly string[]): notify is string[] {
+  if (!Array.isArray(notify) || !notify.every((w) => typeof w === "string")) return false;
+  const words = notify as string[];
+  const end = words.indexOf("--");
+  const head = end === -1 ? words : words.slice(0, end);
+  const at = head.length - HOOK_WORDS.length;
+  if (at < 1 || !HOOK_WORDS.every((w, i) => head[at + i] === w)) return false;
+  const command = head.slice(0, at);
+  if (own && own.length === command.length && own.every((w, i) => command[i] === w)) return true;
+  return command.some((w) => basename(w.replace(/\\/g, "/")).replace(/\.exe$/i, "") === "seshi");
 }
 
-/** The program seshi's `notify` runs after itself: the words after `--`. */
-export function chainedNotify(notify: readonly string[]): string[] {
-  const at = notify.indexOf("--");
-  return at === -1 ? [] : notify.slice(at + 1);
+/** The program seshi's `notify` runs after itself: the words after `--`. A chain that is seshi's
+ * own notify again (installs whose command an older seshi did not recognize as its own) is
+ * unwound, so seshi never runs itself. */
+export function chainedNotify(notify: readonly string[], own?: readonly string[]): string[] {
+  let chain = [...notify];
+  for (;;) {
+    const at = chain.indexOf("--");
+    chain = at === -1 ? [] : chain.slice(at + 1);
+    if (!isSeshiNotify(chain, own)) return chain;
+  }
 }
 
 /** Where a top-level `key = …` assignment is in TOML text (start and end offsets, the end after
@@ -221,7 +235,7 @@ export const codexInstaller: Installer = {
     const { text, notify } = readNotify(path);
     const notes: string[] = [];
     let chain: string[] = [];
-    if (isSeshiNotify(notify)) chain = chainedNotify(notify);
+    if (isSeshiNotify(notify, context.command)) chain = chainedNotify(notify, context.command);
     else if (Array.isArray(notify) && notify.every((w) => typeof w === "string")) {
       chain = notify as string[];
       if (chain.length > 0) {
@@ -243,8 +257,8 @@ export const codexInstaller: Installer = {
     const path = configPath(context);
     if (!existsSync(path)) return { changed: [], notes: [] };
     const { text, notify } = readNotify(path);
-    if (!isSeshiNotify(notify)) return { changed: [], notes: [] };
-    const chain = chainedNotify(notify);
+    if (!isSeshiNotify(notify, context.command)) return { changed: [], notes: [] };
+    const chain = chainedNotify(notify, context.command);
     writeFileAtomic(path, withNotify(text, chain.length > 0 ? chain : null));
     return {
       changed: [path],
@@ -255,7 +269,7 @@ export const codexInstaller: Installer = {
   async status(context: InstallContext): Promise<InstallStatus> {
     const path = configPath(context);
     const present = existsSync(path);
-    const ours = present && isSeshiNotify(readNotify(path).notify);
+    const ours = present && isSeshiNotify(readNotify(path).notify, context.command);
     return { installed: ours, files: [{ path, present, ours }], notes: [] };
   },
 };

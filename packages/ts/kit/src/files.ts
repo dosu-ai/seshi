@@ -78,10 +78,12 @@ function commandWord(word: string): string {
 }
 
 /** Whether `command` is a seshi hook command for `agent`: its program is a `seshi` binary (any
- * folder, `.exe` or not) and its words are `hook <agent> …`. How installers tell their own
- * entries from everyone else's. */
-export function isSeshiHook(command: unknown, agent: string): boolean {
+ * folder, `.exe` or not) and its words are `hook <agent> …`, or it is `own` (the command line
+ * an install writes, `commandLine(--command)`, a wrapper named anything) followed by those
+ * words. How installers tell their own entries from everyone else's. */
+export function isSeshiHook(command: unknown, agent: string, own?: string): boolean {
   if (typeof command !== "string") return false;
+  if (own !== undefined && command.startsWith(`${own} hook ${agent} `)) return true;
   const escaped = agent.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return new RegExp(`(^|[\\\\/\\s"'])seshi(\\.exe)?["']?\\s+hook\\s+${escaped}(\\s|$)`).test(
     command,

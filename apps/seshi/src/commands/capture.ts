@@ -1,7 +1,7 @@
 /** `seshi capture`: the agent integrations on this machine (F9).
  *
  *   seshi capture install [<agent>…] [--service] [--command <program>]
- *   seshi capture uninstall [<agent>…] [--service]
+ *   seshi capture uninstall [<agent>…] [--service] [--command <program>]
  *   seshi capture status [--session [<id>]] [--agent <agent>]
  *   seshi capture pause [<duration>]
  *   seshi capture resume
@@ -73,7 +73,7 @@ import type { CommandContext } from "./index";
 
 const USAGE = [
   "usage: seshi capture install [<agent>…] [--service] [--command <program>]",
-  "       seshi capture uninstall [<agent>…] [--service]",
+  "       seshi capture uninstall [<agent>…] [--service] [--command <program>]",
   "       seshi capture status [--session [<id>]] [--agent <agent>]",
   "       seshi capture pause [<duration>]",
   "       seshi capture resume",
@@ -341,7 +341,8 @@ async function uninstall(ctx: CommandContext, json: boolean, args: Args): Promis
   if (typeof agents === "number") return agents;
   const host = hostOf(ctx);
   const { paths } = pathsOf(ctx);
-  const command = hookCommand();
+  // The program an install was given with --command (a wrapper): its entries are seshi's too.
+  const command = args.command ? splitWords(args.command) : hookCommand();
   const results: { agent: string; changed: string[]; notes: string[] }[] = [];
   // As install: one agent's config it cannot read does not stop the others; it is reported, its
   // agent stays in the state (its hooks are still there), exit 1.

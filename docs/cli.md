@@ -78,7 +78,7 @@ repository's code.
 | `sessions visibility <agent> <id> org\|owner [--owner]` | Change who may read a session (X5.10) |
 | `tokens ls [--owner] [--kind] [--all]`, `tokens create <kind> [--owner] [--service] [--scope]… [--visibility] [--expires 30d\|date] [--label]`, `tokens revoke <id>\|--owner <id> [--kind]` | Manage tokens (X5.9, X5.11; admins). A new token is printed once |
 | `capture install [<agent>…] [--service] [--command <program>]` | Wire seshi into Claude Code, Codex and Cursor on this machine (F9.6); with no agent, every one found. Merges into each agent's own config and keeps every hook there ([capture.md](capture.md#installing)) |
-| `capture uninstall [<agent>…] [--service]` | Take out only seshi's entries |
+| `capture uninstall [<agent>…] [--service] [--command <program>]` | Take out only seshi's entries (`--command`: the program an install was given, when it is not named `seshi`) |
 | `capture status [--session [<id>]] [--agent <a>]` | Whether this folder (or session) is captured and which rule decided, where uploads go, the queue, problems, agents, recent sessions. Exit 8 when something needs action |
 | `capture pause [<duration>]`, `capture resume` | Hold every upload back for a while (`2h`), or until resumed; what sessions write meanwhile is uploaded when it ends ([capture.md](capture.md#what-is-captured)) |
 | `capture off\|on [--session [<id>]] [--agent <a>]`, `capture off\|on --path <folder>`, `capture off\|on` | Turn capture off or on for one session (off retracts what was uploaded, F9.7), a folder, or everything (F9.5) |

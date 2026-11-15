@@ -205,6 +205,16 @@ what changed.
   and sh all take, and any other word with a backslash is double-quoted, backslashes before a
   quote doubled. 14's Windows item says so. Test: `/bin/sh` splits Windows paths (with and
   without spaces, UNC) and quoted words back into the same words.
+- **client, low** (reported medium): Codex's `isSeshiNotify` knew seshi's notify only by a first
+  word named `seshi`, so with `--command "npx seshi"` (or a wrapper) a second install chained
+  seshi to itself (each turn ran the hook twice), `status` said not installed and `uninstall`
+  removed nothing, against capture.md's "twice is once" and F9.6. It now finds
+  `hook codex notify` after the command words, which must hold a `seshi` binary or be the
+  command the install was given, and `chainedNotify` unwinds a chain that is seshi's own
+  notify again (repairing what older installs left). Claude Code's and Cursor's `isSeshiHook`
+  already took `npx seshi`; it now also takes the install's own command line, for a wrapper,
+  and `capture uninstall` takes `--command` (cli.md). Tests: `npx seshi` and a wrapper installed
+  twice are one entry and uninstall cleanly; a doubled chain is unwound; `notseshi` is not ours.
 
 ## Not fixed
 
