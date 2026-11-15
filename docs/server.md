@@ -82,11 +82,12 @@ The worker's jobs:
 | `heartbeat` | `worker.heartbeat_interval` (1m) | Writes `worker/heartbeat.json`: who runs, since when, and each job's last run and error (X7.5) |
 | `retention` | 6h | Prunes drop and failure records and source health days past `[records]` retention |
 | `source:<id>` | the source's `interval` | Polls a source through its connector (X3.11), from its checkpoint (X7.4) |
+| `assembler` | `worker.assembly_interval` (30s) | Publishes sessions whose spans (OTLP, F4) have been quiet for their source's `quiet_period`, from the pending markers (X7.4); its backlog is the sessions waiting |
 
 A failed run is retried after 5 seconds, doubling per failure in a row up to the job's
 interval. A poll whose envelope failed transiently (the bucket) never saves its checkpoint
-past it, so the retry reads it again. Later branches add the span assembler (09) and the
-search indexer (12). Each poll is also a one-shot command for cron: `seshi sync run <id>`.
+past it, so the retry reads it again. A session the assembler could not publish (the bucket
+failed) keeps its marker and is tried again. A later branch adds the search indexer (12). Each poll is also a one-shot command for cron: `seshi sync run <id>`.
 
 Where the config and bucket keys are:
 
@@ -324,6 +325,10 @@ session the caller may not read answers 404, as if it were not there.
 Without an IdP anyone with the org key can state any username, so `owner` visibility keeps
 nothing from another member; `seshi config check` says so.
 
+A service token writes as its source's service account, `svc:<source-id>`, whichever route it
+uses: what it posts to `POST /v1/sessions` is filed under its own source, not `upload`, so that
+source's `visibility`, `filter` and health apply (X5.4).
+
 Every write records its writer (caller kind, owner ID, credential ID, source) and how the owner
 was established, `verified`, `claimed` or `service`, on the session and on its change entries
 (X5.5). A leaked token's writes can be found by its credential ID.
@@ -376,6 +381,7 @@ allow.
 | `GET /v1/admin/jobs` | The worker, its jobs and every source, as `seshi workers status --json` prints them (`sources:admin`, X7.5) |
 | `GET /v1/redaction/rules` | The operator's rule packs and the rule-set hash, for redacting before upload (F2.4). Any signed-in caller; `ETag` is the hash, `If-None-Match` gets `304` |
 | `GET /v1/sessions/:agent/:session_id/reviews?owner` | What model review decided for each stored write (`sessions:read`, F3.8): the whole audit record for admins, only `n`, `at`, `content_hash` and `decision` for anyone else who may read the session |
+| `POST /otlp/v1/traces` | OTLP/HTTP trace ingest (F4): `ExportTraceServiceRequest` as protobuf or JSON from an OTLP destination's service token. Outside `/v1`, and its errors are OTLP's (`google.rpc.Status`). See [otlp.md](otlp.md) |
 
 ### `POST /v1/sessions`
 

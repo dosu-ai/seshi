@@ -273,9 +273,20 @@ Read and written by the binary only, so their types are code-first in `@seshi/st
   `others`, so either heartbeat shows both workers (X7.3, X7.5).
 - `assembly/pending/<archive_id>` (`seshi/pending/1`): owner, archive id, when the last
   span batch arrived, and a random `touch` id, so every touch changes the ETag the assembler
-  deletes it by.
-- `owners/<o>/sessions/<a>/spans/<trace_id>-<span_id>.json`: one normalized, redacted span
-  record each, for the assembler (F4); never readable through the API.
+  deletes it by. Also the batch's `source_id` (whose `quiet_period` applies), its `envelope`
+  without the payload (who sent the spans, whose session it is, which session and format: the
+  assembler publishes as it), and `final` when a batch held a span that ends the session (an
+  archived or deleted Managed Agents session, or the root span of a session that is one
+  trace), so the session is published after a short grace instead of the whole quiet period
+  (F4.4). A batch keeps a `final` an earlier one set.
+- `owners/<o>/sessions/<a>/spans/<trace_id>-<span_id>.json` (`seshi/span/1`): one span each,
+  as its format normalized it and regex redaction left it, never as received: `received_at`,
+  `source_id`, `format`, `part` (the span's ids, times, status, operation and thread, its input
+  and output as trajectory-v1 records, its tool call, its LLM call, its response id, whether it
+  had content, whether it is final, what it says of the session's model) and `redaction` (rule
+  set and counts of this span's matches). A span sent twice lands on the same key. Records stay
+  after the session is published, so a late span can rebuild it; never readable through the
+  API; deleted with the session (F4.4, X6.3).
 - `owners/<o>/sessions/<a>/review/<n>.json` (`seshi/review/1`): for the `n`th stored write,
   the policy and its hash, the decision (`allow`, `redact`, `skipped`), both models
   (`<provider>/<model>`), and the findings by record (the index in the trace that write
@@ -323,6 +334,18 @@ A log arrives whole (`offset` 0) or as a chunk from where the session's log ends
 A permanent failure is answered to a caller that waits (an upload, a hook) and otherwise
 recorded under `sources/<id>/failed/`; a model review drop is recorded under
 `sources/<id>/dropped/` and, for a session with a trace, moves the log on past the envelope.
+
+A span set (OTLP, Datadog: X4.2) is not a log. Each span is normalized by its format's span
+adapter and regex-redacted on arrival, written to the session's `spans/` (a repeat lands on the
+same key) and the session's `assembly/pending/<archive_id>` marker touched; the call returns
+then (X4.4). The worker's assembler lists the markers and, for a session quiet for its source's
+`quiet_period` (or a short grace after a final span), reads its span records, orders them into
+records and LLM calls, and publishes the whole session as the marker's envelope: the session
+filter judges only its first trace, a session that grew is published as a continuation, and
+one that changed earlier on (a late span in the middle) replaces it, its writer being the
+source's service account. Model review judges the assembled session. The marker is then
+deleted with `If-Match`, so a batch that arrived meanwhile keeps it for another pass (X7.4).
+Deleting a session deletes its span records and marker too.
 
 ## The publish protocol
 

@@ -96,6 +96,13 @@ is the harness the document names in `agent.name`, and each embedded subagent is
 own session with `parent_session_id`. The rules are in
 [`docs/server.md`](docs/server.md#atif-documents).
 
+### OpenTelemetry traces
+
+The server is also an OTLP/HTTP trace endpoint: point a Claude Console OpenTelemetry
+destination (or any exporter that follows the GenAI conventions) at `https://<server>/otlp`
+with a service token, and each Messages API request or Managed Agents session becomes a session
+of that destination's service account. Setup and what is kept: [`docs/otlp.md`](docs/otlp.md).
+
 ## What the server does with a session
 
 Every upload becomes an envelope that goes through one pipeline, in memory; only the trace is
