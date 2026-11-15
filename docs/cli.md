@@ -8,6 +8,11 @@ few milliseconds; `bun run check:hook` holds it to that in CI.
 `bun run build` (`dist/seshi`); from a checkout, `bun run seshi <command>` runs the same thing
 from source.
 
+The compiled binary reads settings from `SESHI_*` env and the TOML files only. Unlike
+`bun run`, it never reads the working folder's `.env` or `bunfig.toml`: `seshi hook` runs in
+whatever repository the agent is in, and a `bunfig.toml` `preload` there would run that
+repository's code.
+
 ## Conventions (F8.1)
 
 - Output is readable lines by default. With `--json`, a command prints exactly one JSON

@@ -21,6 +21,8 @@ describe("buildCommand", () => {
       "--bytecode",
       "--conditions",
       "bun",
+      "--no-compile-autoload-dotenv",
+      "--no-compile-autoload-bunfig",
       "--outfile",
       outfile,
     ]);
@@ -89,5 +91,17 @@ describe("the compiled binary (X2.2)", () => {
     );
     expect(normalized.code).toBe(0);
     expect(JSON.parse(normalized.out.split("\n")[0] as string)).toMatchObject({ role: "meta" });
+  });
+
+  it("reads neither the working folder's .env nor its bunfig.toml", async () => {
+    // A repository an agent works in: its .env names a store, its bunfig preloads a script.
+    await Bun.write(join(dir, ".env"), "SESHI_STORE__URL=file:///from-dotenv\n");
+    await Bun.write(join(dir, "preload.ts"), 'console.log("PRELOADED");\n');
+    await Bun.write(join(dir, "bunfig.toml"), 'preload = ["./preload.ts"]\n');
+    const shown = await run(["config", "show", "--json"]);
+    expect(shown.out + shown.err).not.toContain("from-dotenv");
+    expect(shown.out + shown.err).not.toContain("PRELOADED");
+    const version = await run(["--version"]);
+    expect(version.out.trim()).toBe(`seshi ${VERSION}`);
   });
 });

@@ -42,6 +42,12 @@ export function buildCommand(options: BuildOptions): { argv: string[]; outfile: 
     // Workspace packages export their sources under the `bun` condition (X3.4).
     "--conditions",
     "bun",
+    // `seshi hook` runs in whatever folder the agent works in. A compiled Bun binary would
+    // otherwise read that folder's .env (settings the user never meant for seshi) and
+    // bunfig.toml (whose `preload` runs code from the repository). Settings come from
+    // SESHI_* env and the TOML files only.
+    "--no-compile-autoload-dotenv",
+    "--no-compile-autoload-bunfig",
     ...(options.target ? ["--target", options.target] : []),
     "--outfile",
     outfile,

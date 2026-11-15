@@ -42,7 +42,9 @@ cp .env.example .env     # a token, the bucket URL and its keys, as SESHI_* vari
 bun start                # http://localhost:7200
 ```
 
-Bun reads `.env` from the working directory on its own; `.env` is gitignored. The same file is
+Bun reads `.env` from the working directory on its own when run from source (`bun start`);
+`.env` is gitignored. The compiled binary does not (docs/cli.md), so outside a checkout set
+`SESHI_*` in the environment or use a TOML file. The same file is
 what `docker compose` hands the container (`docker compose up -d`). A TOML file works as well
 (`./seshi.toml`, `/etc/seshi/seshi.toml`, or `--config`; start from
 [`seshi.example.toml`](../seshi.example.toml)), with env over it and flags over env.
