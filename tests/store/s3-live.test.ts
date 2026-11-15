@@ -9,7 +9,7 @@
 
 import type { NormalizedRecord } from "@seshi/model";
 import { getSession, getTrace, ingest, tombstone } from "@seshi/pipeline";
-import { readChanges, S3Store } from "@seshi/store";
+import { getBytes, PreconditionFailed, readChanges, S3Store, updateObject } from "@seshi/store";
 import { describe, expect, it } from "vitest";
 import { golden } from "../tooling/testdata";
 
@@ -18,10 +18,11 @@ const bucket = process.env.SESSIONDB_TEST_S3_BUCKET;
 const accessKeyId = process.env.SESSIONDB_TEST_S3_ACCESS_KEY;
 const secretAccessKey = process.env.SESSIONDB_TEST_S3_SECRET_KEY;
 const configured = Boolean(endpoint && bucket && accessKeyId && secretAccessKey);
-// Signed fetch runs everywhere; `Bun.S3Client` only under `bun --bun vitest run`.
+// `S3Store` signs its own requests over `fetch` on every runtime (Bun.S3Client cannot send
+// If-Match / If-None-Match); the global fetch and an explicit one should agree.
 const clients = [
-  { name: "fetch", fetch: (input: string, init?: RequestInit) => fetch(input, init) },
-  ...(typeof Bun !== "undefined" ? [{ name: "Bun.S3Client", fetch: undefined }] : []),
+  { name: "global fetch", fetch: undefined },
+  { name: "explicit fetch", fetch: (input: string, init?: RequestInit) => fetch(input, init) },
 ];
 
 const records = golden<NormalizedRecord[]>("claude-basic.records.json");
@@ -44,19 +45,40 @@ describe.skipIf(!configured).each(clients)(
       const s = store();
       const body = new TextEncoder().encode("hello");
       await s.put("a/b.txt", body, { contentType: "text/plain" });
-      expect(await s.get("a/b.txt")).toEqual(body);
+      expect(await s.get("a/b.txt")).toEqual({ body, etag: "5d41402abc4b2a76b9719d911017c592" });
       expect(await s.stat("a/b.txt")).toEqual({
         size: 5,
         etag: "5d41402abc4b2a76b9719d911017c592",
       });
-      expect(await s.get("a/missing")).toBeNull();
+      expect(await getBytes(s, "a/missing")).toBeNull();
       expect(await s.stat("a/missing")).toBeNull();
       await s.put("a/c.txt", body);
       expect((await s.list("a/")).keys).toEqual(["a/b.txt", "a/c.txt"]);
       expect((await s.list("a/", { startAfter: "a/b.txt" })).keys).toEqual(["a/c.txt"]);
       await s.delete("a/b.txt");
       await s.delete("a/b.txt");
-      expect(await s.get("a/b.txt")).toBeNull();
+      expect(await getBytes(s, "a/b.txt")).toBeNull();
+    });
+
+    it("honours If-None-Match and If-Match on PUT (X6.5)", async () => {
+      const s = store();
+      const enc = (v: string) => new TextEncoder().encode(v);
+      const created = await s.put("c/k", enc("one"), { ifNoneMatch: "*" });
+      await expect(s.put("c/k", enc("two"), { ifNoneMatch: "*" })).rejects.toBeInstanceOf(
+        PreconditionFailed,
+      );
+      await s.put("c/k", enc("two"), { ifMatch: created.etag });
+      await expect(s.put("c/k", enc("three"), { ifMatch: created.etag })).rejects.toBeInstanceOf(
+        PreconditionFailed,
+      );
+      await Promise.all(
+        Array.from({ length: 4 }, () =>
+          updateObject(s, "c/n", (cur) =>
+            enc(String(Number(cur ? new TextDecoder().decode(cur.body) : "0") + 1)),
+          ),
+        ),
+      );
+      expect(new TextDecoder().decode((await getBytes(s, "c/n")) as Uint8Array)).toBe("4");
     });
 
     it("ingests, dedupes, tails the change feed and tombstones", async () => {

@@ -1,6 +1,7 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { S3Store } from "./s3";
-import { StoreError } from "./store";
+import { PreconditionFailed, StoreError, updateObject } from "./store";
 
 interface Seen {
   method: string;
@@ -29,7 +30,10 @@ describe("S3Store over fetch", () => {
   it("addresses AWS virtual-hosted, signed for the region", async () => {
     const { fetch, seen } = fakeFetch(() => new Response("hi"));
     const store = S3Store.fromUrl("s3://acme/archive", { region: "eu-west-1", credentials, fetch });
-    expect(await store.get("owners/a/x.json")).toEqual(new TextEncoder().encode("hi"));
+    expect(await store.get("owners/a/x.json")).toEqual({
+      body: new TextEncoder().encode("hi"),
+      etag: "",
+    });
     expect(seen[0]?.url).toBe("https://acme.s3.eu-west-1.amazonaws.com/archive/owners/a/x.json");
     expect(seen[0]?.headers.authorization).toContain("/eu-west-1/s3/aws4_request");
   });
@@ -104,17 +108,106 @@ describe("S3Store over fetch", () => {
     expect(String((err as StoreError).cause)).toContain("403 AccessDenied: nope");
   });
 
-  it("refuses to start without credentials", () => {
-    const saved = { ...process.env };
-    for (const k of ["S3_ACCESS_KEY_ID", "AWS_ACCESS_KEY_ID", "R2_ACCESS_KEY_ID"]) {
-      delete process.env[k];
-    }
-    try {
-      expect(() =>
-        S3Store.fromUrl("r2://b", { accountId: "a", fetch: async () => new Response() }),
-      ).toThrow(/R2_ACCESS_KEY_ID/);
-    } finally {
-      process.env = saved;
-    }
+  it("refuses to start without credentials, and reads them from the env it is given", async () => {
+    expect(() =>
+      S3Store.fromUrl("r2://b", { accountId: "a", fetch: async () => new Response(), env: {} }),
+    ).toThrow(/R2_ACCESS_KEY_ID/);
+    const { fetch, seen } = fakeFetch(() => new Response(null, { status: 404 }));
+    const store = S3Store.fromUrl("r2://b", {
+      accountId: "a",
+      fetch,
+      env: { R2_ACCESS_KEY_ID: "R2KEY", R2_SECRET_ACCESS_KEY: "s" },
+    });
+    await store.get("k");
+    expect(seen[0]?.headers.authorization).toContain("Credential=R2KEY/");
+  });
+});
+
+describe("S3Store conditional writes", () => {
+  it("returns the etag with the object and from a PUT", async () => {
+    const { fetch } = fakeFetch(({ method }) =>
+      method === "GET"
+        ? new Response("hi", { headers: { etag: '"abc"' } })
+        : new Response(null, { headers: { etag: 'W/"def"' } }),
+    );
+    const store = S3Store.fromUrl("s3://b", { credentials, fetch });
+    expect((await store.get("k"))?.etag).toBe("abc");
+    expect(await store.put("k", new Uint8Array())).toEqual({ etag: "def" });
+  });
+
+  it("sends If-None-Match and If-Match (quoted), signed with the request", async () => {
+    const { fetch, seen } = fakeFetch(() => new Response(null));
+    const store = S3Store.fromUrl("s3://b", { credentials, fetch });
+    await store.put("a", new Uint8Array(), { ifNoneMatch: "*" });
+    await store.put("b", new Uint8Array(), { ifMatch: "abc" });
+    await store.delete("c", { ifMatch: "def" });
+    await store.put("d", new Uint8Array());
+    expect(seen[0]?.headers["if-none-match"]).toBe("*");
+    expect(seen[0]?.headers.authorization).toContain("if-none-match");
+    expect(seen[1]?.headers["if-match"]).toBe('"abc"');
+    expect(seen[2]?.headers["if-match"]).toBe('"def"');
+    expect(seen[3]?.headers["if-match"]).toBeUndefined();
+    expect(seen[3]?.headers["if-none-match"]).toBeUndefined();
+  });
+
+  it("turns 412, and S3's 409 ConditionalRequestConflict, into PreconditionFailed", async () => {
+    const answers = [
+      new Response("<Error><Code>PreconditionFailed</Code></Error>", { status: 412 }),
+      new Response("<Error><Code>ConditionalRequestConflict</Code></Error>", { status: 409 }),
+      new Response("<Error><Code>PreconditionFailed</Code></Error>", { status: 412 }),
+      new Response("<Error><Code>OperationAborted</Code></Error>", { status: 409 }),
+    ];
+    const { fetch } = fakeFetch(() => answers.shift() as Response);
+    const store = S3Store.fromUrl("s3://b", { credentials, fetch });
+    await expect(store.put("k", new Uint8Array(), { ifNoneMatch: "*" })).rejects.toBeInstanceOf(
+      PreconditionFailed,
+    );
+    await expect(store.put("k", new Uint8Array(), { ifMatch: "x" })).rejects.toBeInstanceOf(
+      PreconditionFailed,
+    );
+    await expect(store.delete("k", { ifMatch: "x" })).rejects.toBeInstanceOf(PreconditionFailed);
+    const other = await store.put("k", new Uint8Array()).catch((e: unknown) => e);
+    expect(other).toBeInstanceOf(StoreError);
+    expect(other).not.toBeInstanceOf(PreconditionFailed);
+  });
+
+  it("runs read-modify-write against a bucket that honours the conditions", async () => {
+    const bucket = new Map<string, Uint8Array>();
+    const md5 = (b: Uint8Array) => createHash("md5").update(b).digest("hex");
+    const fetch = async (input: string, init?: RequestInit) => {
+      const key = new URL(input).pathname;
+      const headers = (init?.headers ?? {}) as Record<string, string>;
+      const current = bucket.get(key);
+      const tag = current ? `"${md5(current)}"` : undefined;
+      if (init?.method === "GET") {
+        return current
+          ? new Response(current as BodyInit, { headers: { etag: tag as string } })
+          : new Response(null, { status: 404 });
+      }
+      if (headers["if-none-match"] === "*" && current) return new Response(null, { status: 412 });
+      if (headers["if-match"] !== undefined && headers["if-match"] !== tag) {
+        return new Response(null, { status: 412 });
+      }
+      await new Promise((r) => setTimeout(r, Math.random() * 2));
+      const body = new Uint8Array(init?.body as Uint8Array);
+      // Re-check after the delay, as a bucket applies the condition atomically.
+      const now = bucket.get(key);
+      if ((now ? `"${md5(now)}"` : undefined) !== tag) return new Response(null, { status: 412 });
+      bucket.set(key, body);
+      return new Response(null, { headers: { etag: `"${md5(body)}"` } });
+    };
+    const store = S3Store.fromUrl("s3://b", { credentials, fetch, endpoint: "http://s3.test" });
+    const dec = (b?: Uint8Array) => (b ? new TextDecoder().decode(b) : "0");
+    await Promise.all(
+      Array.from({ length: 8 }, () =>
+        updateObject(
+          store,
+          "n",
+          (current) => new TextEncoder().encode(String(Number(dec(current?.body)) + 1)),
+          { retries: 50, sleep: () => new Promise((r) => setTimeout(r, Math.random() * 2)) },
+        ),
+      ),
+    );
+    expect(dec((await store.get("n"))?.body)).toBe("8");
   });
 });

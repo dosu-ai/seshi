@@ -54,6 +54,17 @@ function xmlValues(xml: string, tag: string): string[] {
   return out;
 }
 
+/** An ETag header without its quotes (and a weak `W/` prefix); undefined when absent. */
+function unquote(value: string | null): string | undefined {
+  if (!value) return undefined;
+  return value.replace(/^W\//, "").replace(/^"|"$/g, "");
+}
+
+/** An ETag as a conditional header wants it: quoted. */
+function quote(etag: string): string {
+  return etag.startsWith('"') ? etag : `"${etag}"`;
+}
+
 export class FetchS3Client {
   private readonly fetchImpl: Fetch;
 
@@ -104,35 +115,53 @@ export class FetchS3Client {
     );
   }
 
-  async get(key: string): Promise<Uint8Array | null> {
+  async get(key: string): Promise<{ body: Uint8Array; etag: string } | null> {
     const response = await this.send("GET", this.url(key));
     if (response.status === 404) {
       await response.body?.cancel();
       return null;
     }
     if (!response.ok) return FetchS3Client.fail("GET", key, response);
-    return new Uint8Array(await response.arrayBuffer());
+    const etag = unquote(response.headers.get("etag")) ?? "";
+    return { body: new Uint8Array(await response.arrayBuffer()), etag };
   }
 
-  async put(key: string, body: Uint8Array, contentType: string): Promise<void> {
-    const response = await this.send("PUT", this.url(key), body, { "content-type": contentType });
+  /** PUT, with `If-Match` / `If-None-Match` when given (S3 and R2 honour both on PUT); a
+   * failed condition is a 412 (or S3's 409 `ConditionalRequestConflict` when two conditional
+   * writes race), thrown as `S3HttpError`. */
+  async put(
+    key: string,
+    body: Uint8Array,
+    contentType: string,
+    condition: { ifMatch?: string; ifNoneMatch?: "*" } = {},
+  ): Promise<{ etag?: string }> {
+    const headers: Record<string, string> = { "content-type": contentType };
+    if (condition.ifMatch !== undefined) headers["if-match"] = quote(condition.ifMatch);
+    if (condition.ifNoneMatch !== undefined) headers["if-none-match"] = condition.ifNoneMatch;
+    const response = await this.send("PUT", this.url(key), body, headers);
     if (!response.ok) return FetchS3Client.fail("PUT", key, response);
     await response.body?.cancel();
+    const etag = unquote(response.headers.get("etag"));
+    return etag ? { etag } : {};
   }
 
   async head(key: string): Promise<{ size: number; etag?: string } | null> {
     const response = await this.send("HEAD", this.url(key));
     if (response.status === 404) return null;
     if (!response.ok) return FetchS3Client.fail("HEAD", key, response);
-    const etag = response.headers.get("etag")?.replace(/^"|"$/g, "");
+    const etag = unquote(response.headers.get("etag"));
     return {
       size: Number(response.headers.get("content-length") ?? 0),
       ...(etag ? { etag } : {}),
     };
   }
 
-  async delete(key: string): Promise<void> {
-    const response = await this.send("DELETE", this.url(key));
+  /** DELETE, with `If-Match` when given. Which S3-compatible backends honour it on DELETE is
+   * still to check (X6.5); one that ignores it deletes unconditionally. */
+  async delete(key: string, condition: { ifMatch?: string } = {}): Promise<void> {
+    const headers: Record<string, string> = {};
+    if (condition.ifMatch !== undefined) headers["if-match"] = quote(condition.ifMatch);
+    const response = await this.send("DELETE", this.url(key), undefined, headers);
     if (!response.ok && response.status !== 404) {
       return FetchS3Client.fail("DELETE", key, response);
     }
