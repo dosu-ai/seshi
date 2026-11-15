@@ -135,8 +135,10 @@ session, so `config check` warns that `owner` is not enforced.
 
 ### `[filter]`
 
-The session filter (X4.10), today's worthiness rules. It judges a session's first trace only:
-once a session has a trace, every chunk that continues it is stored.
+The session filter (X4.10), once called worthiness. It judges a session's first trace only:
+once a session has a trace, every chunk and every whole-upload tail that continues it is
+stored. A filtered session is not stored at all (the upload answers `filtered`); it is only
+counted in the source's health counters, so a source that sends too little shows up there.
 
 | Key | Default | |
 |---|---|---|
@@ -145,7 +147,7 @@ once a session has a trace, every chunk that continues it is stored.
 | `require_user` | `true` | At least one user record |
 | `require_reply` | `true` | At least one assistant or tool record |
 
-A source can override any rule in `[sources.filter]`. Today's trace format needs a user record
+A source can override any rule in `[sources.filter]`; uploads use `[filter]` itself. Today's trace format needs a user record
 and a reply, so `require_user = false` and `require_reply = false` have no effect yet (and
 `config check` says so); a session without them is not stored either way.
 
@@ -155,7 +157,7 @@ and a reply, so `require_user = false` and `require_reply = false` have no effec
 |---|---|---|
 | `max_records` | `50000` | Records in one trace |
 | `max_records_bytes` | `"32MiB"` | JSON bytes of one trace's records |
-| `max_upload_bytes` | `"64MiB"` | Bytes of one upload, gzipped |
+| `max_upload_bytes` | `"256MiB"` | Bytes of one upload's transcript as sent (before any gzip of the request); nothing of it is stored |
 
 Past a limit the session is refused with 422 `too_large`.
 

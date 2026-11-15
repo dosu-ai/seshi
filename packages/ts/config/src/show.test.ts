@@ -35,7 +35,7 @@ describe("configEntries", () => {
   it("nests the printed values for JSON", () => {
     const tree = displayTree(load({})) as Record<string, Record<string, unknown>>;
     expect(tree.store).toEqual({ url: "file:///data" });
-    expect(tree.limits?.max_upload_bytes).toBe("64MiB");
+    expect(tree.limits?.max_upload_bytes).toBe("256MiB");
   });
 });
 

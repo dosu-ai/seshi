@@ -23,7 +23,7 @@ alice = { env = "ALICE_TOKEN" }
 min_chars = 2000
 
 [limits]
-max_upload_bytes = "64MiB"
+max_upload_bytes = "256MiB"
 
 [redaction]
 packs = ["/etc/seshi/redaction.json"]

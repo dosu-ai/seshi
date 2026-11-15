@@ -485,8 +485,8 @@
           ]
         },
         "max_upload_bytes": {
-          "description": "Bytes of one upload, gzipped.",
-          "default": "64MiB",
+          "description": "Bytes of one upload's transcript as sent, before any gzip of the request.",
+          "default": "256MiB",
           "x-seshi-format": "bytes",
           "anyOf": [
             {
