@@ -23,12 +23,15 @@ import {
   decide,
   identifySafely,
   isPaused,
+  otherFolders,
   placeOf,
   readHead,
   readState,
   type SessionState,
   StateUnreadable,
+  seenIn,
   sessionKey,
+  sessionToggle,
   sessionWord,
   sweepAgent,
   updateState,
@@ -195,13 +198,16 @@ async function upload(
     const key = sessionKey(agent.name, info.session_id);
     if (keys.has(key)) continue;
     const known = state.sessions[key];
+    const cwd = info.cwd ?? known?.cwd;
+    const toggle = sessionToggle(state, agent.name, known, info.parent_session_id);
     const decision = decide(
       {
         rules: snapshot.rules,
         ...(snapshot.error ? { rulesError: snapshot.error } : {}),
-        place: placeOf(info.cwd ?? known?.cwd),
-        ...(known?.toggle ? { toggle: known.toggle } : {}),
+        place: placeOf(cwd),
+        ...(toggle ? { toggle } : {}),
         paused: isPaused(state, now),
+        seen: otherFolders(known, cwd).map(placeOf),
       },
       host.platform,
     );
@@ -225,7 +231,7 @@ async function upload(
       const key = sessionKey(addition.agent, addition.session_id);
       const session = st.sessions[key] ?? addition;
       session.path = addition.path;
-      if (addition.cwd) session.cwd = addition.cwd;
+      if (addition.cwd) seenIn(session, addition.cwd);
       // Asked for by hand: try again what was refused or held back.
       delete session.error;
       delete session.next_attempt_at;
@@ -263,7 +269,7 @@ async function upload(
         const settled = [...only].every((key) => {
           const s = st.sessions[key];
           if (!s?.path) return true;
-          if (s.error || s.toggle === "off") return true;
+          if (s.error || sessionToggle(st, s.agent, s) === "off") return true;
           const size = statSync(s.path, { throwIfNoEntry: false })?.size ?? 0;
           return s.stored ? (s.file_offset ?? 0) >= size : s.held_at_size === size;
         });

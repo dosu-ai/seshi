@@ -29,6 +29,7 @@ import {
   captureRules,
   decide,
   isPaused,
+  otherFolders,
   placeOf,
   readState,
   type SessionState,
@@ -375,7 +376,7 @@ async function status(ctx: CommandContext, json: boolean, args: Args): Promise<n
   const snapshot = await captureRules(host, paths);
   const cwd = process.cwd();
   const paused = isPaused(state, now);
-  const judge = (folder: string | undefined, toggle?: SessionState["toggle"]) =>
+  const judge = (folder: string | undefined, toggle?: SessionState["toggle"], seen?: string[]) =>
     decide(
       {
         rules: snapshot.rules,
@@ -383,6 +384,7 @@ async function status(ctx: CommandContext, json: boolean, args: Args): Promise<n
         place: placeOf(folder),
         ...(toggle ? { toggle } : {}),
         paused,
+        ...(seen ? { seen: seen.map(placeOf) } : {}),
       },
       host.platform,
     );
@@ -397,7 +399,11 @@ async function status(ctx: CommandContext, json: boolean, args: Args): Promise<n
     session = {
       ...which,
       ...(known ? { state: known } : {}),
-      decision: judge(known?.cwd ?? cwd, sessionToggle(state, which.agent, known)),
+      decision: judge(
+        known?.cwd ?? cwd,
+        sessionToggle(state, which.agent, known),
+        otherFolders(known, known?.cwd ?? cwd),
+      ),
     };
   }
   const agents = await allCaptureAgents();

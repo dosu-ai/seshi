@@ -132,4 +132,27 @@ describe("the decision (F9.5)", () => {
     });
     expect(judge({ toggle: "off" })).toMatchObject({ capture: false, level: "session" });
   });
+
+  it("turns a session off when a shared rule excludes any folder it was seen in", () => {
+    const excluded: Place = {
+      cwd: "/work/secret",
+      repo: repo({ root: "/work/secret", config: { capture: false } }),
+    };
+    const here: Place = { cwd: "/work/app", repo: repo() };
+    expect(judge({ place: here, seen: [excluded], toggle: "on" })).toMatchObject({
+      capture: false,
+      level: "repo",
+      reason: "it also ran in /work/secret, where the repo turns capture off (.seshi/config.toml)",
+    });
+    const rules: CaptureRules = { ...DEFAULT_RULES, remotes: ["github.com/acme"] };
+    expect(judge({ rules, place: here, seen: [{ cwd: "/tmp" }] })).toMatchObject({
+      capture: false,
+      level: "org",
+    });
+    // Personal rules go by the folder it is in now.
+    const paths: CaptureRules = { ...DEFAULT_RULES, paths: [{ path: "/home", capture: false }] };
+    expect(judge({ rules: paths, place: here, seen: [{ cwd: "/home/x" }] })).toMatchObject({
+      capture: true,
+    });
+  });
 });

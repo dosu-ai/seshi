@@ -48,8 +48,10 @@ import {
   type CaptureState,
   isPaused,
   newSecret,
+  otherFolders,
   readState,
   type SessionState,
+  seenIn,
   sessionKey,
   sessionToggle,
   updateState,
@@ -384,7 +386,7 @@ export class Uploader {
     }
     await updateState(this.paths, (state) => {
       for (const { entry } of items) {
-        if (entry.kind !== "capture") continue;
+        if (entry.kind !== "capture" && entry.kind !== "seen") continue;
         if (!this.agents.has(entry.agent)) {
           this.log(`ignored a hook for an agent this binary does not know: ${entry.agent}`);
           continue;
@@ -395,10 +397,14 @@ export class Uploader {
           session_id: entry.session_id,
           first_seen: entry.at,
         };
-        if (entry.transcript_path) session.path = entry.transcript_path;
-        if (entry.cwd) session.cwd = entry.cwd;
+        // A folder a shared rule turns off names the transcript only for a session not known:
+        // never moves a known one's path.
+        if (entry.transcript_path && (entry.kind === "capture" || !session.path)) {
+          session.path = entry.transcript_path;
+        }
+        if (entry.cwd) seenIn(session, entry.cwd);
         if (entry.parent_session_id) session.parent_session_id = entry.parent_session_id;
-        if (entry.final) session.final = true;
+        if (entry.kind === "capture" && entry.final) session.final = true;
         session.last_seen = entry.at;
         state.sessions[key] = session;
         // A hook that runs means capture is installed for its agent, whoever installed it
@@ -502,6 +508,7 @@ export class Uploader {
         place,
         ...(toggle ? { toggle } : {}),
         paused: isPaused(state, this.now()),
+        seen: otherFolders(session, place.cwd).map(placeOf),
       },
       this.host.platform,
     );

@@ -51,7 +51,11 @@ One decision function judges every session, the same for hooks, the sweep, the s
 
 1. **Shared rules can only turn capture off, and always win.** The org rule (`capture.remotes`
    in a managed CLI config: only repos whose git remote matches) and a repo's own committed
-   `.seshi/config.toml` with `capture = false`.
+   `.seshi/config.toml` with `capture = false`. They hold for every folder a session was seen
+   in: a session that worked in an excluded repo and then moved into a captured one (a nested
+   repo, `--add-dir`) carries that work in its transcript, so it is not uploaded, and nothing
+   more of a captured session is sent once it works in an excluded repo. What it uploaded
+   before stays (rule changes do not retract).
 2. **A pause** (`seshi capture pause 2h`, or until `seshi capture resume`) stops everything
    personal.
 3. **The most specific personal level decides**: the session's own toggle, then the longest

@@ -30,8 +30,12 @@ export interface SessionState {
   session_id: string;
   /** Its transcript, once known. */
   path?: string;
-  /** Where the agent ran: what the capture rules are judged against. */
+  /** Where the agent ran last: what the capture rules are judged against. */
   cwd?: string;
+  /** Every folder a hook or the sweep saw the session in, `cwd` included, captured or not: a
+   * shared rule that turns any of them off turns the session off (F9.5), so moving out of an
+   * excluded repo does not upload what the session did there. */
+  folders?: string[];
   parent_session_id?: string;
   first_seen: string;
   last_seen?: string;
@@ -172,6 +176,24 @@ export function isPaused(state: CaptureState, now: Date): boolean {
   const paused = state.paused;
   if (!paused) return false;
   return paused.until === undefined || Date.parse(paused.until) > now.getTime();
+}
+
+/** The folders `session` was seen in other than `cwd` (the one being judged). */
+export function otherFolders(
+  session: Pick<SessionState, "cwd" | "folders"> | undefined,
+  cwd: string | undefined,
+): string[] {
+  const all = new Set([...(session?.folders ?? []), ...(session?.cwd ? [session.cwd] : [])]);
+  if (cwd !== undefined) all.delete(cwd);
+  return [...all];
+}
+
+/** Add `cwd` to the folders `session` was seen in, and make it the current one. */
+export function seenIn(session: SessionState, cwd: string): void {
+  const folders = session.folders ?? (session.cwd ? [session.cwd] : []);
+  if (!folders.includes(cwd)) folders.push(cwd);
+  session.folders = folders;
+  session.cwd = cwd;
 }
 
 /** The toggle that applies to a session: its own, else its parent's, and so on up (F9.5). A

@@ -396,8 +396,14 @@ describe("the status line (F9.4, B1.6)", () => {
     mkdirSync(join(project, ".seshi"));
     writeFileSync(join(project, ".seshi", "config.toml"), "capture = false\n");
     expect((await status()).out).toBe("Session Capture ⏸");
+    machine.spawned.length = 0;
     await hook();
-    expect(spooled()).toBe(0);
+    // Only the folder it was seen in, for the uploader to keep: nothing to upload, so no uploader.
+    expect(spooled()).toBe(1);
+    expect(machine.spawned).toEqual([]);
+    await daemon();
+    expect(await stored()).toBeNull();
+    expect(state().sessions[`claude-code:${SESSION}`]).toMatchObject({ folders: [project] });
     const why = JSON.parse(
       (await machine.seshi(["statusline", "--json"], { stdin: JSON.stringify({ cwd: project }) }))
         .out,

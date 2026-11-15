@@ -13,6 +13,7 @@ export { appendSpool, spoolCount } from "./spool";
 export {
   type CaptureState,
   isPaused,
+  otherFolders,
   readState,
   StateUnreadable,
   sessionKey,

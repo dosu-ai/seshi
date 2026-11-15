@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runHook, shellWord } from "./hook";
 import { type CapturePaths, capturePaths } from "./paths";
 import { captureRules } from "./rules-cache";
-import { readSpool } from "./spool";
+import { readSpool, spoolCount } from "./spool";
 import { updateState } from "./state";
 import { statusLine } from "./status";
 
@@ -124,7 +124,35 @@ describe("runHook (F9.1)", () => {
 
     const unknown = await runHook({ agent, event: "Stop", payload: { id: "c" }, host, paths });
     expect(unknown.skipped[0]?.decision.level).toBe("unknown");
-    expect(readSpool(paths).items).toHaveLength(0);
+    // Only the repo's exclusion is handed on, as a folder seen (no work, no uploader).
+    expect(readSpool(paths).items.map((i) => i.entry)).toEqual([
+      expect.objectContaining({ kind: "seen", session_id: "a", cwd: join(dir, "repo") }),
+    ]);
+    expect(spoolCount(paths)).toBe(0);
+  });
+
+  it("judges a session by every folder it was seen in, so leaving an excluded repo is not enough", async () => {
+    mkdirSync(join(dir, "repo", ".git"), { recursive: true });
+    mkdirSync(join(dir, "repo", ".seshi"));
+    writeFileSync(join(dir, "repo", ".seshi", "config.toml"), "capture = false\n");
+    await updateState(paths, (s) => {
+      s.sessions["fake:a"] = {
+        agent: "fake",
+        session_id: "a",
+        first_seen: "x",
+        cwd: join(dir, "repo"),
+        folders: [join(dir, "repo")],
+      };
+    });
+    const moved = await runHook({
+      agent,
+      event: "Stop",
+      payload: { id: "a", cwd: dir },
+      host,
+      paths,
+    });
+    expect(moved.skipped[0]?.decision).toMatchObject({ capture: false, level: "repo" });
+    expect(moved.spooled).toEqual([]);
   });
 
   it("skips a subagent of a session turned off, unless the subagent is turned on itself", async () => {

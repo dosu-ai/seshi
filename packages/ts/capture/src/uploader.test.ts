@@ -492,6 +492,50 @@ describe("the rules apply to the uploader too (F9.3)", () => {
     expect(server.uploads).toHaveLength(0);
   });
 
+  it("sends nothing more of a session once it was seen in a repo that turns capture off", async () => {
+    const repoAt = (name: string, config?: string) => {
+      mkdirSync(join(dir, name, ".git"), { recursive: true });
+      if (config) {
+        mkdirSync(join(dir, name, ".seshi"));
+        writeFileSync(join(dir, name, ".seshi", "config.toml"), config);
+      }
+      return join(dir, name);
+    };
+    const a = repoAt("a");
+    const b = repoAt("b", "capture = false\n");
+    const entry = (kind: "capture" | "seen", id: string, cwd: string) =>
+      appendSpool(paths, {
+        v: 1,
+        kind,
+        at: clock.toISOString(),
+        agent: "fake",
+        session_id: id,
+        transcript_path: transcript(id),
+        cwd,
+        ...(kind === "capture" ? { event: "Stop" } : {}),
+      } as Parameters<typeof appendSpool>[1]);
+
+    // Started in A and uploaded, then it works in B: the uploader stops sending its new bytes.
+    writeFileSync(transcript("s1"), line("one") + line("two"));
+    entry("capture", "s1", a);
+    await uploader().pass();
+    expect(server.uploads).toHaveLength(1);
+    appendFileSync(transcript("s1"), line("secret B work"));
+    entry("seen", "s1", b);
+    const pass = await uploader().pass();
+    expect(server.uploads).toHaveLength(1);
+    expect(pass.queued).toBe(0);
+    expect(session("s1")).toMatchObject({ cwd: b, folders: [a, b] });
+
+    // Started in B (skipped), then a hook in A: the whole log, B's work in it, is not sent.
+    writeFileSync(transcript("s2"), line("secret B work", "s2") + line("two", "s2"));
+    entry("seen", "s2", b);
+    entry("capture", "s2", a);
+    await uploader().pass();
+    expect(server.uploads).toHaveLength(1);
+    expect(session("s2")).toMatchObject({ cwd: a, folders: [b, a] });
+  });
+
   it("sends nothing of a subagent whose parent is turned off, by hook or sweep", async () => {
     await updateState(paths, (s) => {
       s.agents.fake = { installed_at: "2026-10-01T00:00:00Z" };

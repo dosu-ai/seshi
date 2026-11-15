@@ -165,6 +165,17 @@ what changed.
   locked write that marks a session sent now checks its toggle (its parent's too) and a pending
   retraction, and sends nothing when it is off. Test: a toggle applied from inside `identify`
   (after the read) leaves nothing uploaded and nothing to retract.
+- **client, medium** (reported high): hooks judged the payload's current cwd and recorded
+  nothing when they skipped, while the uploader judged a known session by its stored cwd, so a
+  repo's `capture = false` could be bypassed by moving between folders (started in excluded B
+  then a hook in A sent the whole log, B's work included; started in A then working in B kept
+  every new byte going) and the status line said ⏸ while the uploader sent, against F9.3's
+  one decision and F9.5's "always wins". A hook skipped by a shared rule now spools a `seen`
+  entry (no work, no uploader start), the uploader keeps every folder a session was seen in
+  (`folders`), and `decide` takes them as `seen`: an org or repo rule excluding any of them
+  excludes the session, in the hook, the uploader, the status line, `capture status` and
+  `seshi upload`. Personal folder rules still go by the current folder. Tests: rules, hook (the
+  `seen` entry, a known session that left B), uploader (both cases), end to end.
 
 ## Not fixed
 

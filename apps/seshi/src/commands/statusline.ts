@@ -14,6 +14,7 @@ import {
   captureRules,
   decide,
   isPaused,
+  otherFolders,
   placeOf,
   readState,
   type StatusLine,
@@ -88,6 +89,8 @@ export async function run(ctx: CommandContext): Promise<number> {
       ...(snapshot.error ? { rulesError: snapshot.error } : {}),
       place: placeOf(cwd),
       ...(toggle ? { toggle } : {}),
+      // The folders the uploader judges the session by too, so the two never disagree.
+      seen: otherFolders(known, cwd).map(placeOf),
       paused: state ? isPaused(state, new Date()) : false,
     },
     host.platform,

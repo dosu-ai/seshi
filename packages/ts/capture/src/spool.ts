@@ -27,6 +27,19 @@ export type SpoolEntry =
       parent_session_id?: string;
       final?: boolean;
     }
+  /** A hook skipped the session because a shared rule (the org's or the repo's) turns its
+   * folder off: the uploader records the folder, so the session stays off wherever it goes
+   * next (F9.5). No work of its own, so it starts no uploader. */
+  | {
+      v: typeof SPOOL_VERSION;
+      kind: "seen";
+      at: string;
+      agent: string;
+      session_id: string;
+      cwd: string;
+      transcript_path?: string;
+      parent_session_id?: string;
+    }
   /** A session was turned off: retract what was uploaded (F9.7). The state file says what; the
    * entry wakes the uploader, so a retraction waits in the spool while it is not running. */
   | { v: typeof SPOOL_VERSION; kind: "retract"; at: string; agent: string; session_id: string }
@@ -45,8 +58,10 @@ export function appendSpool(paths: CapturePaths, entry: SpoolEntry, now: Date = 
   const name = `${now.getTime().toString().padStart(14, "0")}-${randomBytes(6).toString("hex")}`;
   const temp = join(paths.spool, `.${name}.tmp`);
   writeFileSync(temp, JSON.stringify(entry), { mode: 0o600 });
-  // A wake-up is no work of its own: its name says so, so the queue count leaves it out.
-  renameSync(temp, join(paths.spool, `${name}${entry.kind === "wake" ? WAKE_SUFFIX : ".json"}`));
+  // A wake-up (or a folder seen) is no work of its own: its name says so, so the queue count
+  // leaves it out.
+  const idle = entry.kind === "wake" || entry.kind === "seen";
+  renameSync(temp, join(paths.spool, `${name}${idle ? WAKE_SUFFIX : ".json"}`));
 }
 
 /** The entries waiting, oldest first. A file that is not an entry is skipped (and reported in

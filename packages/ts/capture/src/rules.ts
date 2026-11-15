@@ -5,7 +5,7 @@
  *
  * 1. Shared rules can only turn capture off, and always win: the org rule (the CLI config's
  *    `capture.remotes`: only repos whose remote matches) and a repo's `.seshi/config.toml`
- *    with `capture = false`.
+ *    with `capture = false`, in the folder the session runs in or any other it was seen in.
  * 2. A pause (`seshi capture pause`) stops everything personal.
  * 3. Otherwise the most specific personal level that says anything decides: the session's own
  *    toggle, then the longest matching folder rule (`[[capture.paths]]`), then the global
@@ -85,6 +85,9 @@ export interface DecideInput {
   /** The session's toggle, when it has one. */
   toggle?: Toggle;
   paused?: boolean;
+  /** The other folders the session was seen in: a shared rule that turns any of them off turns
+   * the session off (a session that left an excluded repo carries what it did there). */
+  seen?: Place[];
 }
 
 /** `remote` (`https://github.com/acme/app.git`, `git@github.com:acme/app`, `ssh://…`) as
@@ -154,23 +157,8 @@ export function folderRule(
   return best?.rule;
 }
 
-/** Whether to capture a session, and which level said so. */
-export function decide(input: DecideInput, platform: NodeJS.Platform = process.platform): Decision {
-  const { rules, place } = input;
-  if (input.rulesError !== undefined) {
-    return {
-      capture: false,
-      level: "config",
-      reason: `the CLI config cannot be read: ${input.rulesError}`,
-    };
-  }
-  if (place.cwd === undefined) {
-    return {
-      capture: false,
-      level: "unknown",
-      reason: "where the session ran is not known, so its repo's rules cannot be checked",
-    };
-  }
+/** The shared rule (the org's, or the repo's own) that turns capture off at `place`, if any. */
+function sharedExclusion(rules: CaptureRules, place: Place): Decision | undefined {
   if (rules.remotes.length > 0) {
     const remotes = place.repo?.remotes ?? [];
     if (!remotes.some((r) => rules.remotes.some((p) => remoteMatches(r, p)))) {
@@ -197,6 +185,40 @@ export function decide(input: DecideInput, platform: NodeJS.Platform = process.p
       level: "repo",
       reason: "the repo turns capture off (.seshi/config.toml)",
     };
+  }
+  return undefined;
+}
+
+/** Whether to capture a session, and which level said so. */
+export function decide(input: DecideInput, platform: NodeJS.Platform = process.platform): Decision {
+  const { rules, place } = input;
+  if (input.rulesError !== undefined) {
+    return {
+      capture: false,
+      level: "config",
+      reason: `the CLI config cannot be read: ${input.rulesError}`,
+    };
+  }
+  if (place.cwd === undefined) {
+    return {
+      capture: false,
+      level: "unknown",
+      reason: "where the session ran is not known, so its repo's rules cannot be checked",
+    };
+  }
+  const shared = sharedExclusion(rules, place);
+  if (shared) return shared;
+  // A session that moved: what it did in an excluded repo is in its transcript, so a shared
+  // rule of any folder it was seen in still wins (F9.5).
+  for (const other of input.seen ?? []) {
+    if (other.cwd === undefined || other.cwd === place.cwd) continue;
+    const excluded = sharedExclusion(rules, other);
+    if (excluded) {
+      return {
+        ...excluded,
+        reason: `it also ran in ${other.repo?.root ?? other.cwd}, where ${excluded.reason}`,
+      };
+    }
   }
   if (input.paused) return { capture: false, level: "pause", reason: "capture is paused" };
   if (input.toggle !== undefined) {
