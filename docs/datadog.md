@@ -68,8 +68,10 @@ would go along to the other host): it fails the run, naming the status. A failed
    Trajectory). Spans that name no session, and Trajectory's automated oversight traces, are
    skipped and counted in the run's log line. Items of a page that are not readable spans (no
    span id, trace id or start time) are skipped too, and leave one `unreadable_spans` record
-   per page under `sources/<source-id>/failed/` (`seshi sync failed <source-id>`, counted as
-   `failed` in health); the rest of the page is stored.
+   per page read under `sources/<source-id>/failed/` (`seshi sync failed <source-id>`, counted
+   as `failed` in health); the rest of the page is stored. Records are not deduplicated: an
+   item that the next window's `overlap` (or a restart of the window) reads again is recorded
+   again.
 2. **Normalized and redacted on arrival** into the span store, as for OTLP
    ([otlp.md](otlp.md#what-happens-to-spans)): the server's rule set (built-in and operator
    packs) runs over each span's text, tool calls and LLM call error, and each span record keeps

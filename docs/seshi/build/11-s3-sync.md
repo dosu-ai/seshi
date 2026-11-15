@@ -230,7 +230,10 @@ A review of the branch added these commits on top of the implementation:
   per page read, with the window (and page cursor) as provenance and a message that quotes
   no data; the rest of the page is still submitted, and the log line points at `sync
   failed`. An answer with no readable span at all still fails the run with
-  `DatadogShapeError` (F5.1). Covered in the connector's unit tests and in
+  `DatadogShapeError` (F5.1). `ctx.fail` does not deduplicate (a record's key carries its
+  time), so an unreadable item that a later window's overlap or a window restart reads again
+  leaves another record and counts as `failed` again; docs/datadog.md says so. Unreadable items
+  may have no span id to remember them by. Covered in the connector's unit tests and in
   `tests/instance/datadog.test.ts`, which checks the record and the `failed` count in source
   health. The datadog connector stays in its integration and the S3 poller stays built in,
   so `connectorsOf(INTEGRATIONS)` is still `["datadog"]`.
