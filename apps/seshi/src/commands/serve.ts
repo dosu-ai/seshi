@@ -126,9 +126,10 @@ async function start(ctx: CommandContext, argv: string[]): Promise<number | unde
   async function shutdown(): Promise<void> {
     if (stopping) return;
     stopping = true;
-    server.stop();
-    // Stop the jobs and write what source health counted; best-effort, and bounded.
-    await instance.close(5000);
+    // Take no new requests and let the ones in flight finish (an upload is written whole or
+    // not at all, and its client resends), while the jobs stop and source health is written;
+    // each bounded, so a stuck request cannot hold the process past its grace period.
+    await Promise.all([Promise.race([server.stop(), Bun.sleep(5000)]), instance.close(5000)]);
     process.exit(0);
   }
   process.on("SIGINT", shutdown);
