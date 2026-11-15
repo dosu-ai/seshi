@@ -1,0 +1,22 @@
+# Found by the scenario explorer (tests/tooling/scenario/explore.ts); see tests/scenarios/README.md.
+# seed: 27520 (bun run scenarios:explore --seed 27520 --runs 1 --max-steps 25)
+# original length: 27 steps; shrunk to 8 in 131 runs
+# failure:
+#   step 8 (settle max=40): once quiet, seshi doctor fails a check
+#     main: queue: refused (redacted): session was redacted; it will not be stored again
+#         9937 bytes not uploaded yet
+#     main: presence: the server deleted main (tombstoned), but this machine did not retract it
+#     capture log (last lines):
+#       2026-09-01T09:00:00.038Z uploader: claude-code:main: retracted
+#       2026-09-01T09:00:00.055Z uploader: claude-code:main: redacted: session was redacted; it will not be stored again
+name: found by seed 27520
+description: "A generated scenario (seed 27520) shrunk from 27 to 8 steps; the header says how it failed."
+steps:
+  - turns: { session: main, count: 2 }
+  - pass
+  - capture: off --session main
+  - move-transcript: { session: main, to: code/moved }
+  - turns: { session: main, count: 1 }
+  - settle
+  - turns: { session: main, count: 2 }
+  - settle

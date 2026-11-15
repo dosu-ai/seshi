@@ -935,6 +935,29 @@ describe("a pause stops sessions where they are (F9.5, revised 15 Nov 2026)", ()
     expect(readState(paths).uploader?.queued).toBe(0);
   });
 
+  it("keeps a session turned off whose transcript moved, finding it where it went", async () => {
+    // Found by the scenario explorer (33): a hook names no path for a session turned off, so
+    // once its transcript moved the sweep found the old path gone and forgot the session, toggle
+    // and all; the next hook captured it again and uploads met the tombstone (422 redacted).
+    writeFileSync(transcript(), head);
+    hooked();
+    await uploader().pass();
+    await updateState(paths, (s) => {
+      const one = s.sessions["fake:s1"] as SessionState;
+      one.toggle = "off";
+      one.toggled_at = clock.toISOString();
+      one.retract = "pending";
+    });
+    await uploader().pass();
+    expect(session()).toMatchObject({ toggle: "off", retract: "done" });
+    const moved = join(dir, "elsewhere", "s1.jsonl");
+    mkdirSync(join(dir, "elsewhere"));
+    renameSync(transcript(), moved);
+    const locating: CaptureAgent = { ...agent, locate: (id) => (id === "s1" ? moved : undefined) };
+    await uploader({ agents: [locating] }).pass({ sweep: true });
+    expect(session()).toMatchObject({ toggle: "off", path: moved });
+  });
+
   it("follows a stopped session's transcript that moved, keeping its stop and its secret", async () => {
     // Found by the scenario explorer (33): during a pause the hook named the moved transcript
     // to nobody, and the sweep forgot the session (its old path gone), with its stop and the

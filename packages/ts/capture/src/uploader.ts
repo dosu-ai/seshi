@@ -599,9 +599,11 @@ export class Uploader {
       }
       for (const [key, session] of Object.entries(st.sessions)) {
         if (session.retract === "pending") continue;
-        if (!session.path && session.toggle) {
+        if (session.toggle && (!session.path || !existsSync(session.path))) {
           // A toggle set before any hook named the transcript stays while the transcript
           // exists (F9.3): forgetting it would let a later hook or sweep capture the session.
+          // So does one whose transcript moved: a hook names no path for a session turned off,
+          // so the old one is gone while the session goes on elsewhere (33).
           const found = this.agents.get(session.agent)?.locate?.(session.session_id, this.host);
           if (found) {
             session.path = found;
