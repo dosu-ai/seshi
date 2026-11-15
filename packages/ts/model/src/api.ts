@@ -2,9 +2,8 @@
  * HTTP client in `@seshi/client`, or the pipeline over a store in `@seshi/pipeline`). They live
  * here, the lowest layer, so the HTTP client depends on nothing but this package (X3.2). */
 
-import type { OtlpTrace } from "./schemas/otlp";
-import type { ChangeEntry, RawFormat, SessionMetadata, TraceFormat } from "./schemas/store";
-import type { Trace } from "./schemas/trace";
+import type { RenderedTrace, RenderFormat } from "./schemas/renders";
+import type { ChangeEntry, RawFormat, SessionMetadata } from "./schemas/store";
 
 /** The shape of `fetch` the HTTP client and the S3 driver need: a URL string and an init to a
  * `Response`. */
@@ -76,8 +75,8 @@ export type NormalizeStoredResult =
 
 export type StoreSessionResult = NormalizeStoredResult & { raw: PutRawResult };
 
-/** A stored trace in the store's format. */
-export type StoredTrace = Trace | OtlpTrace;
+/** A stored trace as it was asked for: the canonical trace, or a rendering of it. */
+export type StoredTrace = RenderedTrace;
 
 export interface ChangesPage {
   entries: { key: string; entry: ChangeEntry }[];
@@ -110,10 +109,6 @@ export interface Identity {
   owner: string;
   /** Where the sessions go, as a reader would need to know it. */
   storage: StorageView;
-  /** The format of the store's traces, as a server reports it; absent from a server older than
-   * the choice (which is `letta`) and from a client over a store, which says it from
-   * `traceFormat()`. */
-  format?: TraceFormat;
 }
 
 export interface SessionDB {
@@ -123,9 +118,15 @@ export interface SessionDB {
   ingest(upload: Upload): Promise<StoreSessionResult>;
   /** The session's pointer, or null for one not stored. */
   getSession(agent: string, sessionId: string): Promise<SessionMetadata | null>;
-  /** The head trace, or the one named by `hash`, in the store's format (`isOtlpTrace` tells
-   * which); null for a session not stored, stored raw only, or redacted. */
-  getTrace(agent: string, sessionId: string, hash?: string): Promise<StoredTrace | null>;
+  /** The head trace, or the one named by `hash`, as the canonical trace (`seshi`, the default)
+   * or rendered as `letta`, `otlp` or `atif`; null for a session not stored, stored raw only,
+   * or redacted. */
+  getTrace(
+    agent: string,
+    sessionId: string,
+    hash?: string,
+    format?: RenderFormat,
+  ): Promise<StoredTrace | null>;
   listSessions(options?: ListSessionsOptions): Promise<SessionsPage>;
   /** Drop the session's objects and append a tombstone; null for one not stored. */
   tombstone(agent: string, sessionId: string): Promise<{ removed: number } | null>;

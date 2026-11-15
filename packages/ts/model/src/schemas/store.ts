@@ -1,116 +1,59 @@
-/** The two mutable objects in the store and the one append-only one. See `spec/layout.md`.
- *
- * `metadata.json` is the live pointer for one session: what raw parts it has, which trace is its
- * head, which traces it has had, and whether it has been redacted. The raw comes first: a session
- * exists from the moment its transcript is stored, and gets a head when the transcript
- * normalizes to something worth a trace. `changes/<key>.json` is one entry per publish or
- * tombstone, what a reader tails. */
+/** The stored objects other languages read (X3.10): the layout marker, a session's
+ * `metadata.json` and its change entries. Their types are generated from `spec/schemas/`
+ * (`src/generated/`); this module names them and adds the constants and helpers code needs.
+ * See `spec/layout.md`. */
 
-export const METADATA_SCHEMA = "sessionstorage/metadata/1" as const;
-export const CHANGE_SCHEMA = "sessionstorage/change/1" as const;
-export const LAYOUT_SCHEMA = "sessionstorage/layout/1" as const;
+import { SCHEMA_ID as CHANGE_SCHEMA_ID } from "../generated/change";
+import type { CallerKind, Writer } from "../generated/common";
+import { SCHEMA_ID as LAYOUT_SCHEMA_ID } from "../generated/layout";
+import { SCHEMA_ID as METADATA_SCHEMA_ID } from "../generated/metadata";
+
+export type { ChangeEntry } from "../generated/change";
+export type {
+  CallerKind,
+  Claims,
+  Continuation,
+  Normalizer,
+  OwnerBasis,
+  Provenance,
+  RedactionSummary,
+  Sha256,
+  SourceId,
+  SourceKind,
+  SourceLocation,
+  Timestamp,
+  Visibility,
+  Writer,
+} from "../generated/common";
+export type { LayoutMarker } from "../generated/layout";
+export type {
+  NormalizedState,
+  RawFormat,
+  RawPart,
+  SessionMetadata,
+  SessionTraceRef,
+} from "../generated/metadata";
+
+export const METADATA_SCHEMA = METADATA_SCHEMA_ID;
+export const CHANGE_SCHEMA = CHANGE_SCHEMA_ID;
+export const LAYOUT_SCHEMA = LAYOUT_SCHEMA_ID;
+
+/** The marker a sessiondb (pre-seshi) prefix holds, `sessionstorage.json`. Seshi does not read
+ * such a prefix: no migration is planned (X1.5). */
+export const LEGACY_LAYOUT_SCHEMA = "sessionstorage/layout/1" as const;
 
 export type SessionStatus = "stored" | "redacted";
 
-/** How a raw transcript part is encoded: one JSON value per line, or one JSON document. */
-export type RawFormat = "jsonl" | "json";
+export type ChangeKind = "published" | "tombstone" | "visibility_changed";
 
-export interface RawPart {
-  part: number;
-  format: RawFormat;
-  /** Bytes as stored (gzip). */
-  size: number;
-  sha256: string;
-  created_at: string;
-  /** Where the part sits in the log it was cut from: the byte offset of its first byte, and
-   * how many of the log's bytes it covers (before redaction, which can shorten it). Part 0 of a
-   * whole upload starts at 0. */
-  offset: number;
-  length: number;
-}
+/** Why a session was tombstoned. */
+export type TombstoneReason = "deleted" | "retracted" | "redacted";
 
-/** How far a session's log has been normalized: the state the next chunk continues from. */
-export interface NormalizedState {
-  /** Bytes of the log normalized so far, up to its last complete line: where the next chunk
-   * starts. */
-  bytes: number;
-  /** How many records the whole session normalizes to, those bytes in. */
-  records: number;
-  /** `prefixSha256` of those records. */
-  prefix_sha256: string;
-  /** The hash mid-stream after those records (`PrefixHash.export()`), so the next chunk's
-   * records extend it. */
-  hash_state: string;
-}
+/** The source id hooks and the CLI upload under (X6.4). */
+export const UPLOAD_SOURCE = "upload" as const;
 
-export interface SessionTraceRef {
-  content_hash: string;
-  created_at: string;
-  /** Record count of the stored trace. */
-  records: number;
-  continuation?: { from_record: number; prefix_sha256: string };
-}
-
-export interface SessionMetadata {
-  schema: typeof METADATA_SCHEMA;
-  owner: string;
-  archive_id: string;
-  session_id: string;
-  agent: string;
-  /** What the trace's meta record says it came from (`datadog-trajectory:claude-code`; an ATIF
-   * document's `agent.name`); absent until a trace is stored. */
-  source?: string;
-  project?: string;
-  branch?: string;
-  parent_session_id?: string;
-  status: SessionStatus;
-  /** The current trace; absent before one is stored (raw only) and once redacted. */
-  head?: string;
-  traces: SessionTraceRef[];
-  raw: RawPart[];
-  raw_format?: RawFormat;
-  /** Where a chunked upload stands; absent until the session's first chunk is normalized. */
-  normalized?: NormalizedState;
-  /** Tool calls whose results are withheld (they touched a sensitive file, or ran a command that
-   * prints a secret), by id, so a result in a later chunk than its call is replaced too. Absent
-   * when there are none. */
-  withheld_calls?: Record<string, "sensitive-file" | "secret-output">;
-  created_at: string;
-  updated_at: string;
-}
-
-export type ChangeKind = "published" | "tombstone";
-
-export interface ChangeEntry {
-  schema: typeof CHANGE_SCHEMA;
-  kind: ChangeKind;
-  at: string;
-  owner: string;
-  archive_id: string;
-  session_id: string;
-  /** The trace the entry is about; for a tombstone of a whole session, its head at the time. */
-  content_hash: string | null;
-  continuation?: { from_record: number; prefix_sha256: string };
-}
-
-/** What a store's trace objects are: `letta` (`sessionstorage/trace/1`, the Letta
- * trajectory-v1 records with their events and hash) or `otlp` (an OTLP/HTTP JSON
- * `ExportTraceServiceRequest` of the same session as GenAI spans). One store holds one format,
- * recorded in its layout marker; a marker with none is `letta`. */
-export type TraceFormat = "letta" | "otlp";
-
-export const TRACE_FORMATS: readonly TraceFormat[] = ["letta", "otlp"];
-
-export function isTraceFormat(value: unknown): value is TraceFormat {
-  return value === "letta" || value === "otlp";
-}
-
-/** `<prefix>/sessionstorage.json`: written once when a prefix is first used. */
-export interface LayoutMarker {
-  schema: typeof LAYOUT_SCHEMA;
-  created_at: string;
-  created_by: string;
-  /** The format of every trace object under the prefix; absent on markers written before
-   * there was a choice, which are `letta`. */
-  format?: TraceFormat;
+/** The writer of a session written in local mode, or by code that names no caller: the owner
+ * itself, through the upload route. */
+export function localWriter(owner: string, kind: CallerKind = "local"): Writer {
+  return { kind, principal: owner, source_id: UPLOAD_SOURCE };
 }

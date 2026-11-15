@@ -1,6 +1,9 @@
-/** Letta trajectory-v1: the record format every session is normalized to and `ingest()` stores.
- * The types are `@letta-ai/trajectory`'s; `validateRecords` is the runtime check on what the
- * adapter produced, so nothing that is not a trajectory reaches the bucket. */
+/** Letta trajectory-v1: the record format every adapter normalizes to, and the core of the
+ * canonical trace's records (`seshi/trace/1`). The types are `@letta-ai/trajectory`'s.
+ * `validateRecords` is the runtime check on trajectory-v1 (unknown fields dropped);
+ * `validateTraceRecords` also keeps and checks the optional fields the canonical trace adds
+ * (`id`, `llm_call`, `withheld`, `duration_ms`, `agent_version`), so nothing that is not a
+ * trace reaches the bucket. */
 
 import type {
   AssistantMessageRecord,
@@ -14,6 +17,7 @@ import type {
   ToolResultRecord,
   UserRecord,
 } from "@letta-ai/trajectory";
+import type { TraceRecord } from "../generated/trace";
 
 export type {
   AssistantMessageRecord,
@@ -81,7 +85,61 @@ function validateToolCall(index: number, value: unknown, at: number): ToolCall {
   return { id, name, args };
 }
 
-function validateRecord(index: number, value: unknown): NormalizedRecord {
+function nonEmptyOptional(
+  index: number,
+  record: Record<string, unknown>,
+  key: string,
+): string | undefined {
+  const value = optionalString(index, record, key);
+  if (value === "") fail(index, `${key} must not be empty`);
+  return value;
+}
+
+const WITHHELD = new Set(["sensitive-file", "secret-output"]);
+
+/** The canonical trace's optional fields on one record, checked; `{}` for trajectory-v1. */
+function extensions(
+  index: number,
+  record: Record<string, unknown>,
+  role: string,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (role === "meta") {
+    const version = optionalString(index, record, "agent_version");
+    if (version !== undefined) out.agent_version = version;
+    return out;
+  }
+  const id = nonEmptyOptional(index, record, "id");
+  if (id !== undefined) out.id = id;
+  if (role !== "tool") {
+    const call = nonEmptyOptional(index, record, "llm_call");
+    if (call !== undefined) out.llm_call = call;
+    return out;
+  }
+  const withheld = record.withheld;
+  if (withheld !== undefined && withheld !== null) {
+    if (typeof withheld !== "string" || !WITHHELD.has(withheld)) {
+      fail(index, "withheld must be sensitive-file or secret-output");
+    }
+    out.withheld = withheld;
+  }
+  const duration = record.duration_ms;
+  if (duration !== undefined && duration !== null) {
+    if (typeof duration !== "number" || !Number.isFinite(duration) || duration < 0) {
+      fail(index, "duration_ms must be a number ≥ 0");
+    }
+    out.duration_ms = duration;
+  }
+  return out;
+}
+
+function validateRecord(index: number, value: unknown, extended: boolean): NormalizedRecord {
+  const record = validateCore(index, value);
+  if (!extended) return record;
+  return { ...record, ...extensions(index, value as Record<string, unknown>, record.role) };
+}
+
+function validateCore(index: number, value: unknown): NormalizedRecord {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     fail(index, "must be an object");
   }
@@ -160,5 +218,13 @@ function validateRecord(index: number, value: unknown): NormalizedRecord {
  * the conversation-level rules (meta first, has a user record, …): `parseTrajectory` does. */
 export function validateRecords(records: unknown): NormalizedRecord[] {
   if (!Array.isArray(records)) throw new TrajectoryError("records must be an array");
-  return records.map((record, index) => validateRecord(index, record));
+  return records.map((record, index) => validateRecord(index, record, false));
+}
+
+/** The records as the canonical trace's records: trajectory-v1, plus the optional fields
+ * `seshi/trace/1` adds, kept and checked. Unknown fields are dropped, as `validateRecords`
+ * drops them. */
+export function validateTraceRecords(records: unknown): TraceRecord[] {
+  if (!Array.isArray(records)) throw new TrajectoryError("records must be an array");
+  return records.map((record, index) => validateRecord(index, record, true) as TraceRecord);
 }

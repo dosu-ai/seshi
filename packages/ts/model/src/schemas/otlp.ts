@@ -1,9 +1,10 @@
-/** OTLP/HTTP JSON, the subset a stored trace uses: one `ExportTraceServiceRequest`, as
- * `opentelemetry-proto`'s JSON mapping writes it (ids as lowercase hex, times as decimal strings
- * of Unix nanoseconds, enums as integers). A stored object can be POSTed as-is to any collector's
- * `/v1/traces`. */
+/** OTLP/HTTP JSON, the subset the OTLP rendering of a trace uses: one
+ * `ExportTraceServiceRequest`, as `opentelemetry-proto`'s JSON mapping writes it (ids as
+ * lowercase hex, times as decimal strings of Unix nanoseconds, enums as integers). A rendering
+ * can be POSTed as-is to any collector's `/v1/traces`. */
 
-export const OTLP_TRACE_SCHEMA = "sessionstorage/trace-otlp/1" as const;
+/** The `seshi.schema` resource attribute of an OTLP rendering. */
+export const OTLP_TRACE_SCHEMA = "seshi/trace-otlp/1" as const;
 
 export type OtlpAnyValue =
   | { stringValue: string }

@@ -1,23 +1,24 @@
-/** trajectory-v1 records → a `Trace`: validate, derive events, hash. The derivation is pinned
- * by `spec/testdata/goldens/` (`goldens.test.ts`), since `content_hash` is a layout contract. One
- * assistant record carrying N `tool_calls` fans out into N `tool_call` events so an excerpt can
- * point at a single call. */
+/** Records → a canonical `Trace` (`seshi/trace/1`): validate, derive events, hash. The
+ * derivation is pinned by `spec/testdata/goldens/` (`goldens.test.ts`), since `content_hash` is
+ * a layout contract: it reads only each record's role, text and tool fields, never the fields
+ * the canonical trace added to trajectory-v1, so a trace hashes as it always did. One assistant
+ * record carrying N `tool_calls` fans out into N `tool_call` events so an excerpt can point at a
+ * single call. */
 
 import { createHash } from "node:crypto";
 import { canonicalText, stripNul } from "./canonical";
+import type { Provenance } from "./schemas/store";
 import {
   type Continuation,
+  type LlmCall,
   TRACE_SCHEMA,
   type Trace,
   type TraceEvent,
   type TraceMetadata,
+  type TraceMetaRecord,
+  type TraceRecord,
 } from "./schemas/trace";
-import {
-  type MetaRecord,
-  type NormalizedRecord,
-  TrajectoryError,
-  validateRecords,
-} from "./schemas/trajectory";
+import { TrajectoryError, validateTraceRecords } from "./schemas/trajectory";
 
 /** Hash of what was said, independent of timestamps, so re-exports dedupe.
  * `sha256(source + "\n" + "\x1e".join(role + "\x1f" + text))`, UTF-8. A continuation hashes
@@ -48,10 +49,47 @@ export interface ParseOptions {
   metadata?: TraceMetadata;
   project?: string;
   branch?: string;
+  /** The LLM calls the records' `llm_call` fields name. */
+  llm_calls?: readonly LlmCall[];
+  /** Where the data came from. */
+  provenance?: Provenance;
+}
+
+const USAGE_KEYS = new Set([
+  "input_tokens",
+  "output_tokens",
+  "cache_read_input_tokens",
+  "cache_creation_input_tokens",
+  "reasoning_tokens",
+  "total_tokens",
+]);
+
+/** The LLM calls, checked: unique ids, counts that are whole numbers ≥ 0, and every record's
+ * `llm_call` naming one of them. */
+function checkLlmCalls(calls: readonly LlmCall[], records: readonly TraceRecord[]): void {
+  const ids = new Set<string>();
+  for (const call of calls) {
+    if (typeof call.id !== "string" || call.id === "") {
+      throw new TrajectoryError("an llm call needs an id");
+    }
+    if (ids.has(call.id)) throw new TrajectoryError(`llm call ${call.id} appears twice`);
+    ids.add(call.id);
+    for (const [key, value] of Object.entries(call.usage ?? {})) {
+      if (!USAGE_KEYS.has(key) || !Number.isInteger(value) || (value as number) < 0) {
+        throw new TrajectoryError(`llm call ${call.id}: usage.${key} must be a whole number ≥ 0`);
+      }
+    }
+  }
+  records.forEach((record, index) => {
+    const ref = "llm_call" in record ? record.llm_call : undefined;
+    if (ref !== undefined && !ids.has(ref)) {
+      throw new TrajectoryError(`record ${index}: llm_call ${ref} is not in llm_calls`);
+    }
+  });
 }
 
 /** The events of a validated record list (meta first), with stable indices. */
-function eventsOf(records: readonly NormalizedRecord[]): TraceEvent[] {
+function eventsOf(records: readonly TraceRecord[]): TraceEvent[] {
   const events: TraceEvent[] = [];
   const toolNames = new Map<string, string>();
   for (const record of records.slice(1)) {
@@ -119,14 +157,16 @@ function conversationError(source: string, events: readonly TraceEvent[]): strin
 }
 
 /** Validate, strip NUL, derive events, hash. Throws `TrajectoryError` for anything that is not
- * a trajectory. */
-export function parseTrajectory(input: unknown, options: ParseOptions = {}): Trace {
-  const records = validateRecords(stripNul(input));
+ * a trace. */
+export function parseTrace(input: unknown, options: ParseOptions = {}): Trace {
+  const records = validateTraceRecords(stripNul(input));
   const first = records[0];
   if (first?.role !== "meta") {
     throw new TrajectoryError("first record must be the meta record");
   }
-  const meta: MetaRecord = first;
+  const meta: TraceMetaRecord = first;
+  const llmCalls = options.llm_calls ? (stripNul(options.llm_calls) as LlmCall[]) : [];
+  checkLlmCalls(llmCalls, records);
   const events = eventsOf(records);
   const continuation = options.metadata?.continuation;
   const problem = continuation ? null : conversationError(meta.source, events);
@@ -160,5 +200,7 @@ export function parseTrajectory(input: unknown, options: ParseOptions = {}): Tra
   };
   if (options.project !== undefined) trace.project = options.project;
   if (options.branch !== undefined) trace.branch = options.branch;
+  if (llmCalls.length > 0) trace.llm_calls = llmCalls;
+  if (options.provenance !== undefined) trace.provenance = options.provenance;
   return trace;
 }

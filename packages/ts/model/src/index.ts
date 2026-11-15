@@ -1,6 +1,8 @@
-/** `@seshi/model`: the types every layer shares (the trace, the stored objects, the session API,
- * the format adapter contract), the canonical text and hashing rules, and trajectory-v1
- * validation. Layer 0: it imports no other `@seshi` package (X3.2). */
+/** `@seshi/model`: the types every layer shares (the canonical trace, the stored objects, the
+ * envelope, the session API, the format adapter contract), the canonical text and hashing
+ * rules, and trace validation. The types of what other languages read are generated from
+ * `spec/schemas/` into `src/generated/` (`bun run types`, X3.10). Layer 0: it imports no other
+ * `@seshi` package (X3.2). */
 
 export type {
   ChangesPage,
@@ -31,7 +33,15 @@ export type {
   HeadValue,
   JsonObject,
 } from "./format-adapter";
-export { type ParseOptions, parseTrajectory } from "./parse";
+export type {
+  Caller,
+  Envelope,
+  LogPayload,
+  Payload,
+  SpanPayload,
+} from "./generated/envelope";
+export { SCHEMA_ID as ENVELOPE_SCHEMA } from "./generated/envelope";
+export { type ParseOptions, parseTrace } from "./parse";
 export { canonicalJson, PrefixHash, prefixSha256, ResumableSha256 } from "./prefix-hash";
 export type {
   OtlpAnyValue,
@@ -43,30 +53,61 @@ export type {
 } from "./schemas/otlp";
 export { OTLP_TRACE_SCHEMA } from "./schemas/otlp";
 export type {
+  AtifDocument,
+  AtifStep,
+  LettaTrace,
+  RenderedTrace,
+  RenderedTraces,
+  RenderFormat,
+} from "./schemas/renders";
+export { isRenderFormat, LETTA_TRACE_SCHEMA, RENDER_FORMATS } from "./schemas/renders";
+export type {
+  CallerKind,
   ChangeEntry,
   ChangeKind,
+  Claims,
   LayoutMarker,
   NormalizedState,
+  Normalizer,
+  OwnerBasis,
+  Provenance,
   RawFormat,
   RawPart,
+  RedactionSummary,
   SessionMetadata,
   SessionStatus,
   SessionTraceRef,
-  TraceFormat,
+  Sha256,
+  SourceId,
+  SourceKind,
+  SourceLocation,
+  Timestamp,
+  TombstoneReason,
+  Visibility,
+  Writer,
 } from "./schemas/store";
 export {
   CHANGE_SCHEMA,
-  isTraceFormat,
   LAYOUT_SCHEMA,
+  LEGACY_LAYOUT_SCHEMA,
+  localWriter,
   METADATA_SCHEMA,
-  TRACE_FORMATS,
+  UPLOAD_SOURCE,
 } from "./schemas/store";
 export type {
   Continuation,
   EventRole,
+  LlmCall,
+  TokenUsage,
   Trace,
+  TraceAssistantRecord,
   TraceEvent,
   TraceMetadata,
+  TraceMetaRecord,
+  TraceRecord,
+  TraceTextRecord,
+  TraceToolCall,
+  TraceToolResultRecord,
 } from "./schemas/trace";
 export { TRACE_SCHEMA } from "./schemas/trace";
 export type {
@@ -81,5 +122,10 @@ export type {
   ToolResultRecord,
   UserRecord,
 } from "./schemas/trajectory";
-export { isScopeCoordinate, TrajectoryError, validateRecords } from "./schemas/trajectory";
+export {
+  isScopeCoordinate,
+  TrajectoryError,
+  validateRecords,
+  validateTraceRecords,
+} from "./schemas/trajectory";
 export { VERSION } from "./version";
