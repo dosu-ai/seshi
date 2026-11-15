@@ -168,7 +168,8 @@ export interface IngestInput extends WriteContext {
    * gets the same answer. Needs `normalized`. */
   applied?: { idempotency_key: string; at?: string };
   /** The trace replaces the session's traces instead of extending them (X4.6): the pointer
-   * lists only it, the earlier objects are removed, and the change entry says `replace`. The
+   * lists only it, the earlier objects are removed, the session's applied envelopes and
+   * redaction counts start over from this write, and the change entry says `replace`. The
    * caller has checked that this writer may. */
   replace?: boolean;
   /** Runs on the stored pointer inside the conditional update, before anything changes; throws
@@ -302,8 +303,11 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
       if (Object.keys(input.withheld_calls).length > 0) next.withheld_calls = input.withheld_calls;
       else delete next.withheld_calls;
     }
+    // A replace starts the session over: what earlier envelopes answered named traces that are
+    // gone, and their redaction counts described content that is no longer stored.
+    if (input.replace) delete next.applied;
     if (input.applied && normalized) {
-      next.applied = withApplied(base.applied, {
+      next.applied = withApplied(input.replace ? [] : base.applied, {
         idempotency_key: input.applied.idempotency_key,
         at: input.applied.at ?? at,
         status: already && outcome === "exists" ? "duplicate" : "stored",
@@ -316,8 +320,9 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
       });
     }
     if (metadata.normalizer) next.normalizer = metadata.normalizer;
-    const redaction = addRedaction(base.redaction, input.redaction);
+    const redaction = addRedaction(input.replace ? undefined : base.redaction, input.redaction);
     if (redaction) next.redaction = redaction;
+    else delete next.redaction;
     return changed(existing, next) ? next : null;
   });
   try {

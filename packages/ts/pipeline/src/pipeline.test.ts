@@ -343,6 +343,25 @@ describe("extend or replace (X4.6)", () => {
     expect(entries.slice(0, -1).every((e) => !("replace" in e.entry))).toBe(true);
   });
 
+  it("starts a replaced session's applied envelopes and redaction counts over", async () => {
+    const p = pipeline();
+    const secret = reply("token ghp_abcdefghijklmnopqrstuvwxyz012345");
+    const firstUpload = upload(HEAD + secret);
+    const first = (await submit(p, firstUpload)) as { content_hash: string };
+    expect((await session())?.redaction?.counts).toEqual({ "github-token": 1 });
+    const other = META + user("y".repeat(2000)) + reply("other");
+    const replaced = await submit(p, upload(other, 0, { replace: true }));
+    const metadata = await session();
+    expect(metadata?.applied?.map((a) => a.content_hash)).toEqual([
+      (replaced as { content_hash: string }).content_hash,
+    ]);
+    expect(metadata?.redaction?.counts).toEqual({});
+    // The first upload sent again is no longer answered with a trace that is gone: it does not
+    // extend the replaced session.
+    await expect(submit(p, firstUpload)).rejects.toBeInstanceOf(SessionConflict);
+    expect(await getTrace(store, "alice", ARCHIVE, first.content_hash)).toBeNull();
+  });
+
   it("forbids a replace by anyone else, and allows an admin's", async () => {
     const p = pipeline();
     await submit(p, upload(HEAD));

@@ -212,7 +212,8 @@ envelope model review dropped (X6.3, X4.10). Once tombstoned it has no `head`.
 entry. `claims` merge over writes from a fixed allowlist (X5.5). `redaction.counts` sum over
 writes (only what each write stored is counted). A session that grew gets a second trace with
 a `continuation`; a reader that wants the whole session concatenates in `traces` order. A
-replace (X4.6) leaves one trace in `traces` and removes the others' objects.
+replace (X4.6) leaves one trace in `traces`, removes the others' objects, and starts `applied`
+and `redaction` over from the replacing write.
 
 `normalized` and `withheld_calls` are the small state the next chunk of the session's log is
 normalized with: where the log ends (`bytes`), how many records it normalizes to and their
