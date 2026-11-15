@@ -281,9 +281,11 @@ skipped. An object's `x-amz-meta-seshi-<field>` metadata (`-` for `_`) wins over
 
 | Key | Default | |
 |---|---|---|
-| `search.enabled` | `true` | *Later* (F10) |
-| `search.backend` | `"sqlite"` | |
-| `search.path` | | The index file on local disk |
+| `search.enabled` | `true` | Serve `GET /v1/search` and `seshi search` from a local index built from the change feed (F10). Off: the route answers 404 `search_disabled` and no indexer runs |
+| `search.backend` | `"sqlite"` | SQLite FTS5 through Bun's built-in SQLite (F10.3) |
+| `search.path` | user cache folder | The index file on local disk: `seshi/search/<deployment>.sqlite` under `$XDG_CACHE_HOME` (else `~/.cache`) on Linux, `~/Library/Caches` on macOS, `%LOCALAPPDATA%\seshi\cache` on Windows; in the image, `/data/.cache/…`. `":memory:"` keeps it in memory (rebuilt on every start). It is derived data: deleting it only costs a rebuild |
+| `search.interval` | `"15s"` | How long the indexer waits after catching up before it reads the change feed again: about how long a new session takes to become searchable |
+| `search.events` | `["user", "assistant", "tool_call"]` | Which trace events are indexed, by role: prompts, assistant text, and tool calls (names and inputs, so file paths and commands). Add `tool_result` to search tool output too (a bigger index). Changing it rebuilds the index |
 | `worker.heartbeat_interval` | `"1m"` | How often the worker writes `worker/heartbeat.json` (X7.5); status calls a heartbeat older than three intervals stopped |
 | `worker.assembly_interval` | `"30s"` | How often the span assembler looks for sessions whose spans have gone quiet (F4.4, X7.4) |
 | `capture.allow_retract` | `true` | Let the uploading machine retract a session (F9.7). *Later* |

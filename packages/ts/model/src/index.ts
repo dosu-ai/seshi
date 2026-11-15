@@ -137,6 +137,15 @@ export {
   validateRecords,
   validateTraceRecords,
 } from "./schemas/trajectory";
+export {
+  SEARCH_SORTS,
+  type SearchIndexState,
+  type SearchMatch,
+  type SearchRequest,
+  type SearchResult,
+  type SearchResults,
+  type SearchSort,
+} from "./search";
 export type {
   AssembledSpans,
   ReceivedSpan,

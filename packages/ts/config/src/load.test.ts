@@ -102,7 +102,12 @@ describe("precedence (F1.1)", () => {
     expect(config.redaction).toEqual({ packs: [] });
     expect(config.review).toEqual({ policies: [] });
     expect(config.sources).toEqual([]);
-    expect(config.search).toEqual({ enabled: true, backend: "sqlite" });
+    expect(config.search).toEqual({
+      enabled: true,
+      backend: "sqlite",
+      interval: 15_000,
+      events: ["user", "assistant", "tool_call"],
+    });
     expect(config.worker).toEqual({ heartbeat_interval: 60_000, assembly_interval: 30_000 });
     expect(config.capture).toEqual({ allow_retract: true });
   });
