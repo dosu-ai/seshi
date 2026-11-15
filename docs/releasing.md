@@ -16,8 +16,10 @@ from any other branch, and nothing is published by hand.
    binary (`check:hook --binary`, 250 ms). It then installs the build
    with `install.sh`, or `install.ps1` under PowerShell 7 and Windows PowerShell 5.1, from a local
    copy of the release. `darwin-cross` builds the two macOS targets on Linux, as the release
-   job does, and `darwin-cross-check` runs `codesign --verify` on them on a Mac (Bun's signer
-   for cross-compiled macOS binaries has broken before, and macOS kills such a binary at launch).
+   job does, and `darwin-cross-check` runs `codesign --verify` on them on a Mac. Bun's signer
+   for macOS binaries has broken before, and its x64 build keeps Bun's own signature, which no
+   longer matches, so `scripts/release/build.ts` gives both darwin binaries a fresh ad-hoc
+   signature (`scripts/release/macho-sign.ts`, no `codesign` needed) before archiving them.
 2. **`release`** runs semantic-release. It picks the version from the commits, writes it into
    `packages/ts/model/package.json` and `bun.lock` (`scripts/release-version.ts`),
    cross-compiles every target with `scripts/release/build.ts` into `dist/release/`, commits the

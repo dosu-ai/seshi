@@ -215,10 +215,13 @@ and `@seshi/client` libraries), and install scripts for macOS/Linux (`install.sh
   on `seshi.exe` downloaded through a browser. Signing is "later" in F8.4.
 - **Bytecode**: `--bytecode` with cross-compilation worked locally for every target. Only the
   host's binary was run.
-- **macOS signatures of cross-compiled binaries**: `darwin-cross-check` has not run yet either.
-  Bun 1.4.2 (`.bun-version`) is reported to sign Linux-built darwin binaries correctly; 1.4.0
-  and 1.4.1 do not. If the check fails after a Bun bump, build the darwin targets on a macOS
-  runner, or re-sign them (`codesign --force --sign -`), before uploading.
+- ~~**macOS signatures of cross-compiled binaries**~~ (resolved in 17-review): Bun 1.4.2 and
+  1.3.11 leave Bun's own Developer ID signature on a darwin-x64 build, which `codesign --verify`
+  rejects, whether compiled on Linux or macOS. `compileTarget` now re-signs both darwin
+  binaries ad hoc with `scripts/release/macho-sign.ts` (a linker-style CodeDirectory, growing
+  `__LINKEDIT` when needed). Checked on a Mac: Bun 1.4.2 output built in a linux/amd64
+  container, and `release:build` for both darwin targets, pass `codesign --verify --strict` and
+  run (x64 under Rosetta). `darwin-cross-check` itself has still not run in CI.
 - **The release ships cross-compiled bytes, not the ones `binaries` tested**: the version is
   chosen inside the release job and embedded in the binary, so the release must compile again.
   `binaries`, `darwin-cross-check` and, after the fact, `verify` cover the gap.

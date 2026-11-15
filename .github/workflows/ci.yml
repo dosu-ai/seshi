@@ -135,9 +135,10 @@ jobs:
           }
 
   # The release job cross-compiles the macOS binaries on Linux, and Bun's in-process Mach-O
-  # signer has shipped broken ad-hoc signatures more than once (oven-sh/bun#29120, #39758):
-  # macOS then kills the binary at launch. `binaries` builds natively on a Mac, so it cannot see
-  # that. These build the darwin targets the way the release job does and check them on a Mac.
+  # signer has shipped broken ad-hoc signatures more than once (oven-sh/bun#29120, #39758);
+  # its x64 build keeps Bun's own, no longer valid, signature. scripts/release/build.ts
+  # therefore re-signs both darwin binaries ad hoc (scripts/release/macho-sign.ts). These build
+  # the darwin targets the way the release job does and check the result on a Mac.
   darwin-cross:
     runs-on: ubuntu-latest
     steps:

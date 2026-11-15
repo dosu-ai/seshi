@@ -18,6 +18,7 @@ import { dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { buildCommand } from "../build-binary";
 import { checksumFile, readArchive, sha256, tarGz, zip } from "./archive";
+import { adhocSign } from "./macho-sign";
 import {
   CHECKSUMS,
   hostTarget,
@@ -55,7 +56,15 @@ export function repositoryVersion(root = ROOT): string {
   return manifest.version as string;
 }
 
-/** Compiles `target` with the same flags as `bun run build`. */
+/** What a compiled binary needs before it ships: a darwin binary gets a fresh ad-hoc signature,
+ * because Bun leaves its own, no longer valid, Developer ID signature on the x64 build
+ * (`macho-sign.ts`). Both darwin targets are signed the same way, on any build machine. */
+export function finishBinary(target: Target, outfile: string): void {
+  if (target.os !== "darwin") return;
+  writeFileSync(outfile, adhocSign(readFileSync(outfile), "seshi"));
+}
+
+/** Compiles `target` with the same flags as `bun run build`, then finishes it. */
 export async function compileTarget(target: Target, outfile: string, root = ROOT): Promise<void> {
   const { argv } = buildCommand({ root, target: target.bun, outfile });
   mkdirSync(dirname(outfile), { recursive: true });
@@ -66,6 +75,7 @@ export async function compileTarget(target: Target, outfile: string, root = ROOT
     new Response(proc.stderr).text(),
   ]);
   if (code !== 0) throw new Error(`compiling ${target.id} failed (${code}):\n${out}${err}`);
+  finishBinary(target, outfile);
 }
 
 /** The archive for one target: the binary (executable) and the licence. */
