@@ -59,6 +59,11 @@ Reference for operators: [docs/redaction.md](../../redaction.md).
     whose RE2 program is over 20,000 (`MAX_PROGRAM_SIZE`).
   - Every operator pattern is RE2: text rules, secret commands, and JSON rule files'
     patterns. Built-in rules stay JavaScript.
+  - Sensitive-file globs (built-in and operator) are not regular expressions at all: since 17,
+    `sensitive.ts` matches each with a linear state-set matcher (Thompson's construction), so a
+    test takes time proportional to the path times the glob. They used to compile to a
+    backtracking JavaScript `RegExp`, which an operator's `**/deploy/**/*.secret` and 14 KB of
+    `deploy/` in a tool call's path held for about 21 s.
 - **Rule set**, `ruleset.ts`. `compileRuleSet({packs, builtin?, runTests?, sources?})` checks
   what spans packs:
   - the built-in pack and `secrets.ts` implement the same ids;

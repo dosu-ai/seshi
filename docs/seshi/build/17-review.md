@@ -92,6 +92,16 @@ what changed.
   uploading machine's secret gets 201; a session with no `retract_hash` cannot be replaced
   with the key), pipeline, `mayReplace`, client header, uploader.
 
+- **dataflow, high**: sensitive-file globs, built-in and operator alike, compiled to
+  backtracking JavaScript `RegExp`s (`(?:.*/)?` and `.*` pieces), outside F2.2's linear-time
+  guarantee, and every path value and command word of every upload was tested against them. An
+  operator's `**/deploy/**/*.secret` and a 14 KB path of repeated `deploy/` held the event loop
+  for about 21 s; the built-in gcloud glob took 4.4 s on a 240 KB command. `sensitive.ts` now
+  matches a glob by stepping a set of states along the path (Thompson's construction, with a
+  literal-suffix check first): time proportional to path times glob, same matches. Tests: the
+  matcher agrees with the old expression on a glob-by-path table, and the crafted paths (70 KB
+  and 240 KB) finish well under 2 s.
+
 ## Not fixed
 
 - **ingest, medium** (split vote, judged a documented deviation): a change entry is lost when

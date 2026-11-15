@@ -51,6 +51,93 @@ describe("sensitive file globs", () => {
     expect(isSensitivePath("secrets/README.md", org)).toBe(false);
   });
 
+  it("matches as the gitignore-style regular expression it replaced", () => {
+    // The backtracking translation globFiles used before (kept here as the reference).
+    const reference = (glob: string) => {
+      let body = "";
+      const g = glob.replace(/^\/+/, "");
+      for (let i = 0; i < g.length; i++) {
+        const c = g[i] as string;
+        if (c === "*" && g[i + 1] === "*") {
+          if (g[i + 2] === "/") {
+            body += "(?:.*/)?";
+            i += 2;
+          } else {
+            body += ".*";
+            i += 1;
+          }
+        } else if (c === "*") body += "[^/]*";
+        else if (c === "?") body += "[^/]";
+        else body += c.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+      }
+      return new RegExp(`(?:^|/)${body}$`, "i");
+    };
+    const globs = [
+      ".env",
+      ".env.*",
+      "*.pem",
+      "id_?sa",
+      "/secrets/**",
+      "**/deploy/**/*.secret",
+      ".config/gcloud/**/*credentials*.json",
+      "a/**/b",
+      "**/x",
+      "**",
+      "x**y",
+      "*/*.key",
+    ];
+    const paths = [
+      ".env",
+      "A/.ENV",
+      ".env.local",
+      "x/.env.prod/y",
+      "k.pem",
+      "dir/k.pem",
+      "id_rsa",
+      "id_rrsa",
+      "secrets",
+      "secrets/a",
+      "app/secrets/a/b",
+      "deploy/x.secret",
+      "deploy/a/b/x.secret",
+      "q/deploy/x.secret",
+      "deployx/x.secret",
+      ".config/gcloud/application_default_credentials.json",
+      "home/.config/gcloud/legacy/my-credentials-1.json",
+      ".config/gcloud/a/b",
+      "a/b",
+      "a/x/y/b",
+      "ab",
+      "x",
+      "a/x",
+      "xy",
+      "x/y",
+      "x/z/y",
+      "d/t.key",
+      "t.key",
+      "e/d/t.key",
+      "",
+    ];
+    for (const glob of globs) {
+      const set = sensitiveFiles([]).include.length;
+      const compiled = sensitiveFiles([glob]).include[set];
+      for (const path of paths) {
+        expect(compiled?.test(path), `${glob} on ${path}`).toBe(reference(glob).test(path));
+      }
+    }
+  });
+
+  it("tests a crafted path in time proportional to its length", () => {
+    const org = sensitiveFiles(["**/deploy/**/*.secret"]);
+    const started = performance.now();
+    // 14 KB took about 21 s as a backtracking RegExp; this is 70 KB.
+    expect(isSensitivePath("deploy/".repeat(10_000), org)).toBe(false);
+    expect(isSensitivePath(`${"deploy/".repeat(10_000)}x.secret`, org)).toBe(true);
+    // The built-in gcloud glob was quadratic on one long word of a command.
+    expect(namesSensitiveFile(`cat ${".config/gcloud/".repeat(16_000)}`, files)).toBe(false);
+    expect(performance.now() - started).toBeLessThan(2_000);
+  });
+
   it("finds a file named among a command's words", () => {
     expect(namesSensitiveFile("cat .env | grep DB", files)).toBe(true);
     expect(namesSensitiveFile("docker run --env-file=.env.prod app", files)).toBe(true);

@@ -36,8 +36,8 @@ export type WithheldKind = "sensitive-file" | "secret-output";
 export type WithheldCalls = Record<string, WithheldKind>;
 
 export interface SensitiveFiles {
-  include: RegExp[];
-  exclude: RegExp[];
+  include: GlobTest[];
+  exclude: GlobTest[];
 }
 
 /** Anything that says whether a command (one segment of a shell line, prefixes removed) is a
@@ -51,43 +51,128 @@ export interface SensitiveRules {
   commands: readonly CommandTest[];
 }
 
-function globRegExp(raw: string): RegExp {
-  const glob = raw.replace(/^\/+/, "");
-  let body = "";
-  for (let i = 0; i < glob.length; i++) {
-    const c = glob[i];
-    if (c === "*" && glob[i + 1] === "*") {
-      // `**/` is any number of directories, none included; `**` alone, anything.
-      if (glob[i + 2] === "/") {
-        body += "(?:.*/)?";
-        i += 2;
+/** One compiled glob; `test` takes a path with `/` separators. */
+export interface GlobTest {
+  test(path: string): boolean;
+}
+
+/** One step of a glob: a character (lowercased), `?`, `*`, `**`, or `**` followed by `/`. */
+type GlobToken =
+  | { kind: "char"; char: string }
+  | { kind: "one" }
+  | { kind: "star" }
+  | { kind: "any" }
+  | { kind: "dirs" };
+
+/** A glob matched by stepping the set of places in it the path so far could have reached
+ * (Thompson's construction), so a test takes time proportional to the path's length times the
+ * glob's, whatever the path holds. The backtracking `RegExp` this replaces (`(?:.*\/)?` and
+ * `.*` pieces) took seconds on a few kilobytes of repeated directory names, and F2.2's reason
+ * for RE2 holds here too: a synchronous match cannot be interrupted, so nothing an upload holds
+ * may make one slow.
+ *
+ * As in `.gitignore`, a glob without a `/` matches a file's name in any directory and one with
+ * a `/` the end of its path; `*` and `?` stay within a directory, `**` crosses them, and `**`
+ * then `/` is any number of directories, none included. Case is ignored.
+ *
+ * States: token `i` is state `i`, state `m` (the number of tokens) accepts, and a `dirs` token
+ * `i` has a second state `m + 1 + i`, inside its directories and waiting for a `/`. */
+class Glob implements GlobTest {
+  private readonly tokens: GlobToken[] = [];
+  /** The literal characters every match ends with, checked before any stepping. */
+  private readonly suffix: string;
+
+  constructor(raw: string) {
+    const glob = raw.replace(/^\/+/, "").toLowerCase();
+    for (let i = 0; i < glob.length; i++) {
+      const c = glob[i] as string;
+      if (c === "*" && glob[i + 1] === "*") {
+        if (glob[i + 2] === "/") {
+          this.tokens.push({ kind: "dirs" });
+          i += 2;
+        } else {
+          this.tokens.push({ kind: "any" });
+          i += 1;
+        }
+      } else if (c === "*") {
+        this.tokens.push({ kind: "star" });
+      } else if (c === "?") {
+        this.tokens.push({ kind: "one" });
       } else {
-        body += ".*";
-        i += 1;
+        this.tokens.push({ kind: "char", char: c });
       }
-    } else if (c === "*") {
-      body += "[^/]*";
-    } else if (c === "?") {
-      body += "[^/]";
-    } else {
-      body += c.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+    }
+    let suffix = "";
+    for (let i = this.tokens.length - 1; i >= 0; i--) {
+      const token = this.tokens[i] as GlobToken;
+      if (token.kind !== "char") break;
+      suffix = token.char + suffix;
+    }
+    this.suffix = suffix;
+  }
+
+  test(path: string): boolean {
+    const p = path.toLowerCase();
+    if (!p.endsWith(this.suffix)) return false;
+    const m = this.tokens.length;
+    const size = 2 * m + 1;
+    let current = new Uint8Array(size);
+    let next = new Uint8Array(size);
+    this.enter(current, 0);
+    for (let at = 0; at < p.length; at++) {
+      const c = p[at] as string;
+      next.fill(0);
+      for (let s = 0; s < size; s++) {
+        if (!current[s] || s === m) continue;
+        if (s > m) {
+          // Inside a `**/`: any character stays inside, and a `/` may also end it.
+          next[s] = 1;
+          if (c === "/") this.enter(next, s - m);
+          continue;
+        }
+        const token = this.tokens[s] as GlobToken;
+        if (token.kind === "char") {
+          if (c === token.char) this.enter(next, s + 1);
+        } else if (token.kind === "one") {
+          if (c !== "/") this.enter(next, s + 1);
+        } else if (token.kind === "star") {
+          if (c !== "/") this.enter(next, s);
+        } else if (token.kind === "any") {
+          this.enter(next, s);
+        }
+        // A `dirs` state reads nothing itself: entering it also entered its inside state.
+      }
+      // A match starts at the path's start or just after a `/`.
+      if (c === "/") this.enter(next, 0);
+      [current, next] = [next, current];
+    }
+    return current[m] === 1;
+  }
+
+  /** `state` and every state reached from it without reading a character. */
+  private enter(set: Uint8Array, state: number): void {
+    const m = this.tokens.length;
+    for (let s = state; s <= m && !set[s]; s++) {
+      set[s] = 1;
+      if (s === m) return;
+      const token = this.tokens[s] as GlobToken;
+      if (token.kind === "dirs") set[m + 1 + s] = 1;
+      else if (token.kind !== "star" && token.kind !== "any") return;
     }
   }
-  // Without a slash, a file's name in any directory; with one, the end of its path.
-  return new RegExp(`(?:^|/)${body}$`, "i");
 }
 
 /** `globs` as one set, with nothing built in. Blank lines and `#` comments are skipped. */
 export function globFiles(globs: readonly string[]): SensitiveFiles {
-  const include: RegExp[] = [];
-  const exclude: RegExp[] = [];
+  const include: GlobTest[] = [];
+  const exclude: GlobTest[] = [];
   for (const raw of globs) {
     const glob = raw.trim();
     if (!glob || glob.startsWith("#")) continue;
     if (glob.startsWith("!")) {
-      if (glob.length > 1) exclude.push(globRegExp(glob.slice(1)));
+      if (glob.length > 1) exclude.push(new Glob(glob.slice(1)));
     } else {
-      include.push(globRegExp(glob));
+      include.push(new Glob(glob));
     }
   }
   return { include, exclude };
