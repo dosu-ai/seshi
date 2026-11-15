@@ -82,8 +82,11 @@ const genericKVIntlRE =
 // the next ("Secret Access Key\n93b6…"), no assignment anywhere. The value is one token on its
 // own line, so prose under a heading ("API key\nThe key lives in …") never matches; hex is
 // allowed, since that is what access keys are and nothing else here would catch them.
+// The separator after the label is `[ \t]*(?::[ \t]*)?`, not `[ \t]*:?[ \t]*`: with the colon
+// optional, two runs of blanks side by side split a long run every possible way before failing,
+// quadratic in it (a label and 240k tabs took 54 s). Both match the same text.
 const labeledLineRE =
-  /((?:^|\n|\\n)[ \t]*(?:secret[ _-]?access[ _-]?key|access[ _-]?key[ _-]?id|secret[ _-]?key|api[ _-]?key|token[ _-]?value|access[ _-]?token|client[ _-]?secret|password|secret|token)[ \t]*:?[ \t]*(?:\n|\\n)+[ \t]*)([A-Za-z0-9/+=._-]{16,})(?=[ \t]*(?:\n|\\n|$|["']))/gi;
+  /((?:^|\n|\\n)[ \t]*(?:secret[ _-]?access[ _-]?key|access[ _-]?key[ _-]?id|secret[ _-]?key|api[ _-]?key|token[ _-]?value|access[ _-]?token|client[ _-]?secret|password|secret|token)[ \t]*(?::[ \t]*)?(?:\n|\\n)+[ \t]*)([A-Za-z0-9/+=._-]{16,})(?=[ \t]*(?:\n|\\n|$|["']))/gi;
 const bearerRE = /\b(Bearer|Basic)(\s+)([A-Za-z0-9._~+/=-]{16,})/gi;
 // A secret named in prose and quoted rather than assigned; the required quotes make it
 // safe to be this loose, since an unquoted mention matches nothing.

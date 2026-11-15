@@ -230,6 +230,29 @@ describe("redactSecrets", () => {
       });
     });
 
+    it("scans a label followed by a long run of blanks in linear time", () => {
+      // `[ \t]*:?[ \t]*` after the label split the run every possible way before failing: a
+      // label and 240k tabs took 54 s.
+      const blanks = 200_000;
+      const inputs = [
+        `password${"\t".repeat(blanks)}x`,
+        `secret key${" ".repeat(blanks)}x`,
+        `token${"\t".repeat(blanks)}:x`,
+        `api key:${" ".repeat(blanks)}x`,
+        `\\nclient secret${" \t".repeat(blanks / 2)}:${"\t".repeat(blanks)}`,
+      ];
+      const started = performance.now();
+      for (const input of inputs) expect(redactSecrets(input).text).toBe(input);
+      expect(performance.now() - started).toBeLessThan(1_000);
+      // The same separators still match: blanks, a colon, blanks, the value on the next line.
+      const value = "19bee4000000000000000000009309aa";
+      for (const sep of ["", " \t ", ":", " : ", "\t:"]) {
+        expect(redactSecrets(`Secret Key${sep}\n${value}`).text).toBe(
+          `Secret Key${sep}\n[redacted:credential]`,
+        );
+      }
+    });
+
     it("leaves prose under a credential heading alone", () => {
       const input =
         "## API key\nThe key is read from Secret Manager at boot.\n\nToken\nRotate it with pulumi config set.";
