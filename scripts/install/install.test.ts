@@ -10,6 +10,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -56,6 +57,8 @@ interface Machine {
   translated?: string;
   /** What `ldd --version` prints. */
   ldd?: string;
+  /** What `getconf GNU_LIBC_VERSION` prints (it fails when not given). */
+  glibc?: string;
 }
 
 describe.skipIf(windows)("install.sh", () => {
@@ -87,6 +90,12 @@ describe.skipIf(windows)("install.sh", () => {
     );
     fake("sysctl", `echo "${m.translated ?? "0"}"`);
     if (m.ldd !== undefined) fake("ldd", `echo "${m.ldd}"`);
+    if (m.glibc !== undefined) {
+      fake(
+        "getconf",
+        `case "$1" in GNU_LIBC_VERSION) echo "${m.glibc}" ;; LONG_BIT) echo 64 ;; *) exit 1 ;; esac`,
+      );
+    }
   }
 
   async function install(
@@ -214,6 +223,12 @@ describe.skipIf(windows)("install.sh", () => {
     [{ os: "Linux", arch: "x86_64" }, "seshi-linux-x64.tar.gz"],
     [{ os: "Linux", arch: "aarch64" }, "seshi-linux-arm64.tar.gz"],
     [{ os: "Linux", arch: "amd64", ldd: "ldd (GNU libc) 2.39" }, "seshi-linux-x64.tar.gz"],
+    [
+      { os: "Linux", arch: "x86_64", ldd: "ldd (Ubuntu GLIBC 2.39-0ubuntu8) 2.39" },
+      "seshi-linux-x64.tar.gz",
+    ],
+    // An ldd that says nothing useful: getconf names glibc.
+    [{ os: "Linux", arch: "x86_64", ldd: "", glibc: "glibc 2.36" }, "seshi-linux-x64.tar.gz"],
   ] as [Machine, string][])("picks the archive for %o", async (m, asset) => {
     writeRelease(root, "1.2.3");
     const ran = await install(["--base-url", base(), "--dir", join(dir, "bin")], { machine: m });
@@ -240,6 +255,16 @@ describe.skipIf(windows)("install.sh", () => {
     const xdg = join(dir, "xdg-bin");
     expect((await install(["--base-url", base()], { env: { XDG_BIN_HOME: xdg } })).code).toBe(0);
     expect(existsSync(join(xdg, "seshi"))).toBe(true);
+  });
+
+  it("writes an absolute folder into the startup file when --dir is relative", async () => {
+    writeRelease(root, "1.2.3");
+    const ran = await install(["--base-url", base(), "--dir", "rel/bin"]);
+    expect(ran.code).toBe(0);
+    // The script runs in `dir`; its pwd is the real path (macOS's /var is /private/var).
+    const abs = join(realpathSync(dir), "rel/bin");
+    expect(ran.out).toContain(`Installed seshi 1.2.3 to ${abs}/seshi`);
+    expect(readFileSync(join(home, ".zshrc"), "utf8")).toContain(`export PATH="${abs}:$PATH"`);
   });
 
   it("adds the folder to PATH in zsh's startup file once", async () => {

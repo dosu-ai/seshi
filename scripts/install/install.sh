@@ -88,8 +88,19 @@ if [ "$os" = darwin ] && [ "$arch" = x64 ]; then
     arch=arm64
   fi
 fi
+# glibc or musl. `ldd --version` names its C library on both; a glibc system may also have
+# musl's loader installed (Debian's musl package), so that only counts when nothing says glibc.
+libc_of() {
+  case "$(ldd --version 2>&1 || true)" in
+    *musl*|*MUSL*) echo musl; return ;;
+    *GLIBC*|*"GNU libc"*|*"GNU C Library"*) echo glibc; return ;;
+  esac
+  if getconf GNU_LIBC_VERSION >/dev/null 2>&1; then echo glibc; return; fi
+  if ls /lib/ld-musl-* >/dev/null 2>&1; then echo musl; return; fi
+  echo glibc
+}
 if [ "$os" = linux ]; then
-  if (ldd --version 2>&1 || true) | grep -qi musl || ls /lib/ld-musl-* >/dev/null 2>&1; then
+  if [ "$(libc_of)" = musl ]; then
     fail "seshi's Linux binaries need glibc, and this system uses musl (Alpine, for example); use a glibc-based system or the Docker image"
   fi
   if [ "$arch" = arm64 ] && [ "$(getconf LONG_BIT 2>/dev/null || echo 64)" = 32 ]; then
@@ -158,6 +169,11 @@ if [ -z "$dir" ]; then
   dir=${XDG_BIN_HOME:-$HOME/.local/bin}
 fi
 mkdir -p "$dir" || fail "could not create $dir"
+# An absolute path, so the PATH check and the startup-file line mean the same from any folder.
+case "$dir" in
+  /*) ;;
+  *) dir=$(cd "$dir" && pwd) || fail "could not resolve $dir" ;;
+esac
 # Copy next to the target, then rename: atomic, and safe while an older seshi is running.
 cp "$tmp/unpacked/seshi" "$dir/.seshi.$$" || fail "could not write to $dir"
 chmod 755 "$dir/.seshi.$$"

@@ -112,7 +112,14 @@ function Install-Seshi {
       # A running seshi.exe cannot be overwritten, but it can be renamed out of the way.
       Move-Item -LiteralPath $target -Destination $old -Force
     }
-    Copy-Item -LiteralPath $exe -Destination $target -Force
+    try {
+      Copy-Item -LiteralPath $exe -Destination $target -Force
+    }
+    catch {
+      # Put the previous seshi back rather than leave none.
+      if (Test-Path -LiteralPath $old) { Move-Item -LiteralPath $old -Destination $target -Force }
+      throw
+    }
     Remove-Item -LiteralPath $old -Force -ErrorAction SilentlyContinue
 
     $installed = & $target --version
