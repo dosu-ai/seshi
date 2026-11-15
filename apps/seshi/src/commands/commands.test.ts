@@ -108,6 +108,7 @@ describe("the command groups (F8.1)", () => {
         "normalize",
         "redact",
         "reprocess",
+        "review",
         "search",
         "serve",
         "sessions",

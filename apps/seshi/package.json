@@ -36,6 +36,7 @@
     "@seshi/model": "workspace:*",
     "@seshi/pipeline": "workspace:*",
     "@seshi/redact": "workspace:*",
+    "@seshi/review": "workspace:*",
     "@seshi/sources": "workspace:*",
     "@seshi/store": "workspace:*"
   }

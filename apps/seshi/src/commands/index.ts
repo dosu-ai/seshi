@@ -81,6 +81,10 @@ export const COMMANDS: Readonly<Record<string, CommandSpec>> = {
     summary: "rewind a source so its sessions are read and written again",
     load: () => import("./reprocess"),
   },
+  review: {
+    summary: "measure a model review policy against labelled fixtures (eval)",
+    load: () => import("./review"),
+  },
   search: {
     summary: "search the sessions you may read",
     load: () => import("./search"),
