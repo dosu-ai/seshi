@@ -369,8 +369,11 @@ records are data, not instructions) is not.
 
 Every release is published as a container image, `ghcr.io/dosu-ai/sessiondb:<version>`, built
 from `apps/seshi/Dockerfile` in this repository (`docker build -f apps/seshi/Dockerfile .` from the
-root). The image is the compiled `seshi` binary (X2.2, `bun run build`) on a slim Debian base;
-its entry point is `seshi` and its command `serve`. It listens on `server.listen` (default
+root). The image is the compiled `seshi` binary (X2.2, `bun run build`) on a slim Debian base:
+a release's image holds the very Linux binaries attached to its GitHub release
+(`--build-arg BINARY=prebuilt`, [releasing.md](releasing.md)), while a build from a checkout
+compiles its own. Outside a container, install the same binary ([install.md](install.md)) and
+run `seshi serve`. The image's entry point is `seshi` and its command `serve`. It listens on `server.listen` (default
 `:7200`), reports `/healthz` for liveness (the image's health check is `seshi healthcheck`),
 and needs only the settings above, from env or a mounted `/etc/seshi/seshi.toml`: there is no
 database, no volume (unless the store is `file://`), and no state outside the bucket. API

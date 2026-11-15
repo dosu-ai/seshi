@@ -4,9 +4,10 @@ One binary, `seshi` (X2.2), holds the CLI, the hooks agents call and the server.
 loads only its own code (X3.3), so `seshi hook`, which runs on every agent turn, starts in a
 few milliseconds; `bun run check:hook` holds it to that in CI.
 
-`seshi --help` lists the commands, `seshi --version` prints the release. Build the binary with
-`bun run build` (`dist/seshi`); from a checkout, `bun run seshi <command>` runs the same thing
-from source.
+`seshi --help` lists the commands, `seshi --version` prints the release. Install it with the
+install script, npm (`npm i -g seshi`) or a GitHub release binary ([install.md](install.md));
+build it with `bun run build` (`dist/seshi`); from a checkout, `bun run seshi <command>` runs
+the same thing from source.
 
 The compiled binary reads settings from `SESHI_*` env and the TOML files only. Unlike
 `bun run`, it never reads the working folder's `.env` or `bunfig.toml`: `seshi hook` runs in
@@ -158,7 +159,8 @@ records (for a server that will later serve it).
 Credentials go in the OS keychain through `Bun.secrets` (macOS Keychain, Windows Credential
 Manager, libsecret), one entry per secret under the service `seshi`. Where there is no keychain
 (a Linux machine without a secret service), they go to `credentials.json` next to the CLI
-config, mode 0600, and login says so. `logins.json` in the same folder holds what is not secret:
+config, mode 0600, and login says so; `keychain = false` in the CLI config (`SESHI_KEYCHAIN=false`)
+uses that file always, for a machine whose keychain prompts or hangs. `logins.json` in the same folder holds what is not secret:
 the mode, who the server says you are, the IdP's token endpoint, expiry times, and this
 machine's id (kept across logouts, so signing in again replaces this machine's device token
 rather than adding one). Secrets are never passed in env.

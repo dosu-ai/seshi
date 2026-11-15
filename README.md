@@ -30,6 +30,17 @@ Three properties follow from that shape:
 - Readers never talk to the server. A read-only key on the bucket is enough to tail the change
   feed, so the archive outlives any particular deployment of this code.
 
+## Install
+
+```sh
+curl -fsSL https://github.com/dosu-ai/sessiondb/releases/latest/download/install.sh | sh   # macOS, Linux
+npm i -g seshi                                                                             # or with npm
+```
+
+On Windows: `irm https://github.com/dosu-ai/sessiondb/releases/latest/download/install.ps1 | iex`.
+Every channel installs the same binary; [docs/install.md](docs/install.md) has the platforms,
+options and checksums.
+
 ## Quick start
 
 ```sh

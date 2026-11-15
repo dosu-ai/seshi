@@ -22,7 +22,7 @@ The repository is a Bun workspace, laid out as in the design decisions (X3,
 | `integrations/` | Everything specific to one agent or vendor (`claude-code`, `codex`, `cursor`, `datadog-trajectory`, `opencode`, `pi`, `gemini-cli`), each exporting one `Integration` from `@seshi/kit`, with its fixtures in `testdata/` |
 | `spec/` | The cross-language contract: `layout.md` (the object layout), `openapi.yaml` (the HTTP API), and `testdata/` (the record sets and goldens every language must pass) |
 | `tests/` | TypeScript tests that cross packages, and the fixture and golden tooling (`tests/tooling/`) |
-| `scripts/` | Repository scripts: the layer check, the release version |
+| `scripts/` | Repository scripts: the layer check, the release version, the release build, npm packages and smoke test (`scripts/release/`, [docs/releasing.md](docs/releasing.md)), the install scripts (`scripts/install/`) |
 | `docs/` | `server.md`, the API and configuration reference |
 
 Packages are layered, and `bun run check` runs the layer check (`scripts/check-layers.ts`)
