@@ -43,6 +43,11 @@ import {
 const TMP_SUFFIX = ".tmp";
 const LOCK_SUFFIX = ".~lock";
 
+/** The store holds sessions: its root and every folder in it are created owner-only, and its
+ * objects, temp files and locks are written owner-only. */
+const DIR_MODE = 0o700;
+const FILE_MODE = 0o600;
+
 /** A lock older than this was left by a process that died mid-write. Writes hold a lock for
  * milliseconds. */
 export const STALE_LOCK_MS = 10_000;
@@ -106,11 +111,11 @@ export class FsStore implements Store {
   private async locked<T>(key: string, path: string, fn: () => Promise<T>): Promise<T> {
     const lock = `${path}${LOCK_SUFFIX}`;
     const token = `${process.pid} ${randomBytes(8).toString("hex")} ${new Date().toISOString()}\n`;
-    await mkdir(dirname(path), { recursive: true });
+    await mkdir(dirname(path), { recursive: true, mode: DIR_MODE });
     const deadline = Date.now() + LOCK_WAIT_MS;
     for (let wait = 2; ; wait = Math.min(wait * 2, 50)) {
       try {
-        const handle = await open(lock, "wx");
+        const handle = await open(lock, "wx", FILE_MODE);
         try {
           await handle.writeFile(token);
         } finally {
@@ -192,7 +197,7 @@ export class FsStore implements Store {
         if (conditional) this.check(key, await this.read(path), options);
         const tmp = `${path}.${randomBytes(6).toString("hex")}${TMP_SUFFIX}`;
         try {
-          await writeFile(tmp, body);
+          await writeFile(tmp, body, { mode: FILE_MODE });
           await rename(tmp, path);
         } catch (err) {
           await rm(tmp, { force: true });
