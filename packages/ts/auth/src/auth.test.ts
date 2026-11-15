@@ -91,6 +91,8 @@ describe("authenticate (X5.1)", () => {
     });
     expect(p.scopes.has("sessions:delete")).toBe(false);
     await expect(a.authenticate(token)).rejects.toThrow("X-Seshi-User");
+    // The stated username is kept as a claim, bounded like any other (X5.5).
+    expect((await a.authenticate(token, "x".repeat(5000))).claims).toEqual({});
     await expect(a.authenticate(token, "  ")).rejects.toThrow("X-Seshi-User");
     // auth.org_key.enabled = false turns trust off.
     await expect(auth({ orgKey: false }).authenticate(token, "alice")).rejects.toThrow(
@@ -235,6 +237,12 @@ describe("the IdP exchange (X5.2)", () => {
     expect(
       (await byEmail.exchange({ id_token: await idp.idToken({ email: "A@B.co" }) })).owner,
     ).toBe("a@b.co");
+    // An email the IdP calls unverified could be anyone's: it never becomes an owner id.
+    await expect(
+      byEmail.exchange({
+        id_token: await idp.idToken({ email: "boss@acme.com", email_verified: false }),
+      }),
+    ).rejects.toThrow("not verified");
     const none = auth({ oidc: undefined });
     await expect(none.exchange({ id_token: "x" })).rejects.toBeInstanceOf(AuthRequestError);
     await expect(

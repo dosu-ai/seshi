@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import { type Claims, type Fetch, Unauthorized, type Visibility } from "@seshi/model";
 import { isOwner, type Store, type TokenKind, type TokenRecord } from "@seshi/store";
 import type { JWTVerifyGetKey } from "jose";
-import { idTokenClaims } from "./claims";
+import { idTokenClaims, pickClaims } from "./claims";
 import { IdTokenError, OidcVerifier } from "./oidc";
 import { isOpaqueToken, secretsEqual } from "./opaque";
 import { claimOwner, isServiceOwner, OwnerAliases, serviceOwner, usernameOwner } from "./owner";
@@ -247,7 +247,8 @@ export class Auth {
           owner_basis: "claimed",
           role: "member",
           credential: "org_key",
-          claims: { username: (user as string).trim() },
+          // Bounded like any claim (X5.5): the header is the caller's to fill.
+          claims: pickClaims({ username: user }) ?? {},
         };
       }
       case "admin":
@@ -308,6 +309,13 @@ export class Auth {
     } catch (err) {
       if (err instanceof IdTokenError) throw new Unauthorized(err.message);
       throw err;
+    }
+    // An owner taken from the email needs an email the IdP stands behind: one it marks
+    // unverified could be anyone's, and would file this person's sessions under theirs.
+    if (oidc.owner_claim === "email" && payload.email_verified === false) {
+      throw new Unauthorized(
+        "the ID token's email is not verified, and owner ids come from the email (owner_claim)",
+      );
     }
     const owner = claimOwner(payload, oidc.owner_claim);
     if (owner === undefined) {
