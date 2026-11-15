@@ -106,7 +106,10 @@ describe("the compiled binary (X2.2)", () => {
     const doc = JSON.parse(tested.out);
     expect(doc.output).toEqual(["key ACME-[redacted:acme-key] and [redacted:github-token]"]);
     expect(doc.tests.failed).toEqual([]);
-    await Bun.write(join(dir, "bad.toml"), 'id = "bad"\n[[rules]]\nid = "x"\npattern = "(a)\\\\1"\n');
+    await Bun.write(
+      join(dir, "bad.toml"),
+      'id = "bad"\n[[rules]]\nid = "x"\npattern = "(a)\\\\1"\n',
+    );
     const refused = await run(["redact", "test", "--pack", "bad.toml"]);
     expect(refused.code).toBe(3);
     expect(refused.err).toContain("RE2 has no backreferences");

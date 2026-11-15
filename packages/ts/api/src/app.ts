@@ -728,7 +728,7 @@ export function createApp(instance: Instance) {
     const document = rulesDocument(instance.redaction);
     const etag = `"${document.rule_set}"`;
     const cached = request.headers.get("if-none-match");
-    if (cached !== null && cached.split(",").some((t) => t.trim() === etag)) {
+    if (cached?.split(",").some((t) => t.trim() === etag)) {
       return new Response(null, { status: 304, headers: { etag } });
     }
     return json(document, 200, { etag, "cache-control": "private, no-cache" });

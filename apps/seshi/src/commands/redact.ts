@@ -280,7 +280,8 @@ async function readInput(
   const hits: Record<string, RuleHits> = {};
   const note = (counts: Counts, at: number) => {
     for (const [id, n] of Object.entries(counts)) {
-      const hit = (hits[id] ??= { count: 0, at: [] });
+      const hit = hits[id] ?? { count: 0, at: [] };
+      hits[id] = hit;
       hit.count += n;
       if (hit.at.at(-1) !== at) hit.at.push(at);
     }
