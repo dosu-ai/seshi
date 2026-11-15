@@ -61,8 +61,8 @@ User docs: [docs/capture.md](../../capture.md) (new), docs/cli.md (rows), docs/c
     worktree file + `commondir`, remotes, branch, `.seshi/config.toml` (`capture`,
     `visibility`; unknown keys ignored, wrong types make it unreadable).
   - `rules-cache.ts`: the CLI config's capture rules through the real loader, cached in
-    `rules.json` keyed by the file's path, size, mtime and the `SESHI_CAPTURE__*`/`SESHI_THEME`
-    variables, so a hook skips the schema library (~20 ms) unless the config changed.
+    `rules.json` keyed by the file's path, size, mtime and every `SESHI_*` setting variable
+    (not capture's own `NOT_SETTINGS_ENV`; a bad one is a loader error, cached only for that env), so a hook skips the schema library (~20 ms) unless the config changed.
   - `hook.ts` `runHook`: handler → decision per session → spool; exported env appended
     shell-quoted.
   - `uploader-lock.ts`: one uploader per machine: pid, host and a heartbeat in `uploader.json`;
@@ -70,7 +70,7 @@ User docs: [docs/capture.md](../../capture.md) (new), docs/cli.md (rows), docs/c
     next beat.
   - `sink.ts`: `SessionSink { target, ingest, retract, ready }`, `httpSink` over
     `HttpSessionDB` (401 → `SignInNeeded`; 403 `bad_retract_secret`/`retract_disabled` →
-    `RetractRefused`; 404/410 on retract → absent).
+    `RetractRefused`; 404 on retract → `absent`, 410 → `gone`).
   - `uploader.ts` `Uploader`: `pass()` takes in the spool (registering an agent as installed on
     its first hook), sweeps when due (15 min), retracts sessions turned off, uploads every due
     session, and writes the summary (queued, target, problems: sign in; upload failing after 3
@@ -79,11 +79,14 @@ User docs: [docs/capture.md](../../capture.md) (new), docs/cli.md (rows), docs/c
     8 MiB; `offset_mismatch` resends from `expected` (whole at 0, or when pre-redaction changed
     lengths); `conflict` on a whole log → `replace` only for a session this machine stored;
     `forbidden`/422/4xx permanent until the file size changes; others back off (5 s doubling to
-    5 min). Before a whole upload, the agent must identify the file as that session's
-    transcript (a hook payload names the path; a file it does not recognise is refused
-    `not_a_transcript` and never sent). The secret is saved before its hash is first sent. A retraction resets the session
+    5 min). Before every piece, whole or chunk, the agent must identify the file as that
+    session's transcript (a hook payload names the path; a file it does not recognise is refused
+    `not_a_transcript` and never sent), and a transcript at another path than the one the
+    offsets were taken in (`sent_path`) goes whole again. The secret is saved before its hash is first sent. A retraction resets the session
     and bumps its generation, so turning it on uploads `<id>~<n>` from the start. `run()` loops
-    every 2 s, stops when idle 5 minutes (not with `keepAlive`) or when the lock is taken over.
+    every 2 s, beats the lock before every session of a pass, stops when idle 5 minutes (not
+    with `keepAlive`) or when the lock is taken over (also mid-pass). A retraction that finds
+    nothing (404) for a session this machine stored is `retract: "failed"`, never reported done.
     An idle pass writes nothing. `preRedact` is the F2.4 seam (identity by default).
   - `status.ts`: the status line's words (at most two problems: config error, sign in, upload
     failing, retraction refused, N queued) and `sessionWord`.
@@ -110,7 +113,8 @@ User docs: [docs/capture.md](../../capture.md) (new), docs/cli.md (rows), docs/c
     bound), else the current folder; colour on unless `NO_COLOR`/`--no-color`
     (`colourLevel({tty: true})`, theme from `SESHI_THEME`, the cached CLI `theme`, `COLORFGBG`);
     ◉ in success, ⏸ muted, problems in warn/error/progress; always exit 0.
-  - `daemon [--keep-alive] [--once] [--idle]`: one per machine (a second exits 0); `--once`
+  - `daemon [--keep-alive] [--once] [--idle]`: one per machine (a second exits 0; with
+    `--keep-alive` it waits for the lock, and waits again after a takeover); `--once`
     makes one pass and prints the summary (exit 5 when a sign-in is needed).
   - `capture install|uninstall|status|pause|resume|off|on` with `--session [id]`, `--agent`,
     `--path`, `--service`, `--command`. `off --session` writes the toggle, marks a retraction
@@ -188,7 +192,8 @@ User docs: [docs/capture.md](../../capture.md) (new), docs/cli.md (rows), docs/c
 8. **Cursor sessions are swept only after a hook saw them**: its transcripts do not say where
    they ran, and the rules need the folder.
 9. **Retraction ignores `?owner`** and works on the caller's own folder: the secret proves the
-   machine, the credential the owner. An org-key machine retracts under the username it states.
+   machine, the credential the owner. An org-key machine retracts under the username it states;
+   old owner ids `[auth.owner_aliases]` folds into the caller's are searched too.
 10. **Permanent refusals wait for the transcript to change**, and only transient failures count
     toward "upload failing": a single unsupported session should not light the status line for
     good. `seshi capture status` and `seshi upload` show refusals.
@@ -198,6 +203,30 @@ User docs: [docs/capture.md](../../capture.md) (new), docs/cli.md (rows), docs/c
     `schtasks`) and reports a failure instead of failing silently; uninstall removes the entry.
 13. **Spool entries are files, not lines** in one file, so no two writers share a file and the
     uploader never reads half an entry (portable to Windows, no append races).
+
+## Review fixes
+
+A review of this branch against F9/B1.6 fixed, each with a test:
+
+- **A hook payload could get an arbitrary file's tail sent.** `identify` ran only before a whole
+  upload; a later payload naming another (longer) file for a stored session had the bytes past
+  the stored offset sent as a chunk. Every piece is identified now, and a moved transcript goes
+  whole.
+- **A retraction that found nothing was reported done.** The server looked only in the caller's
+  own folder, so a session uploaded under an owner id that `[auth.owner_aliases]` folds into the
+  caller's (an org-key username before an IdP sign-in) answered 404, and the uploader marked it
+  retracted. The route now searches the aliased folders (never another owner's), and a 404 for a
+  session this machine stored is a refused retraction; 410 (already removed) is done.
+- **A toggle set before any hook named the transcript was forgotten after a day** (hooks skip a
+  session turned off, so none recorded its path), and the next hook or sweep captured it.
+  `capture off|on --session` and the sweep now `locate` the transcript.
+- **One shell's bad `SESHI_` variable turned capture off everywhere**: the rules cache stored the
+  loader's error under a key without that variable.
+- **The service entry exited when a hook-started uploader held the lock**; launchd restarted it
+  every few seconds and systemd (`Restart=on-failure`) never did. `--keep-alive` waits now.
+- **A long pass did not beat**, so a hook started a second uploader after two minutes; the pass
+  beats per session and stops when taken over. `seshi upload` beats between passes. The poll's
+  abort listener no longer accumulates in a process that never stops.
 
 ## Still to check
 

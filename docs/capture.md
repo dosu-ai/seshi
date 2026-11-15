@@ -40,7 +40,8 @@ Hooks run the binary by its absolute path when seshi is the compiled binary, els
 the agent's PATH; `--command <program>` names it. A Claude Code plugin with the same hooks and
 skill is in `integrations/claude-code/plugin/`, for rolling out through a plugin marketplace or
 managed settings. `--service` adds a launchd agent (macOS), a systemd user unit (Linux) or a
-Task Scheduler task (Windows) that runs `seshi daemon --keep-alive`.
+Task Scheduler task (Windows) that runs `seshi daemon --keep-alive`. While an uploader a hook
+started is still running, the service's uploader waits for it to stop and then takes over.
 
 ## What is captured
 

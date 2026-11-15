@@ -81,7 +81,7 @@ repository's code.
 | `capture pause [<duration>]`, `capture resume` | Stop capturing for a while (`2h`), or until resumed | Built |
 | `capture off\|on [--session [<id>]] [--agent <a>]`, `capture off\|on --path <folder>`, `capture off\|on` | Turn capture off or on for one session (off retracts what was uploaded, F9.7), a folder, or everything (F9.5) | Built |
 | `hook <agent> <event>` | Internal: agents call it on their events (F9.1). Reads the payload, applies the rules, spools, starts the uploader. Always exits 0 and prints nothing | Built |
-| `daemon [--keep-alive] [--once] [--idle <duration>]` | The background uploader and sweep (F9.1, F9.3); hooks start it. One per machine | Built |
+| `daemon [--keep-alive] [--once] [--idle <duration>]` | The background uploader and sweep (F9.1, F9.3); hooks start it. One per machine; `--keep-alive` (the service entry) waits for its turn instead of exiting | Built |
 | `upload <path>… \| --since <duration>` `[--agent <a>]` | Send transcripts by hand, or backfill the installed agents' recent sessions, through the same rules and state as hooks | Built |
 | `statusline [--agent <a>]` | One line for an agent's status bar: `Session Capture ◉` or `⏸`, problems after a separator (B1.6). Local state only, no network | Built |
 | `search <words…> [filters] [--json]`, `search --status\|--rebuild` | Search what you may read (F10); see [below](#search) | Built |
