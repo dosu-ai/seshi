@@ -9,6 +9,7 @@
 
 import { readFileSync } from "node:fs";
 import {
+  allStale,
   appendLog,
   capturePaths,
   gitIdentityIn,
@@ -57,6 +58,7 @@ export async function localSink(ctx: CommandContext, account: Account): Promise<
     target: `local: ${instance.storage.url}`,
     async ready() {},
     ingest: (upload, options) => db.ingest(upload, options),
+    stale: () => allStale((after) => db.staleSessions(after !== undefined ? { after } : {})),
     async retract(agent, sessionId, secret) {
       if (!instance.config.capture.allow_retract) {
         throw new RetractRefused(

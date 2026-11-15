@@ -79,6 +79,35 @@ describe("httpSink", () => {
     await expect(sink().retract("a", "s", "x")).rejects.toMatchObject({ code: "retract_disabled" });
   });
 
+  it("reads every page of the stale listing (X4.9), and turns a 401 into a sign-in", async () => {
+    answer = (request) => {
+      const after = new URL(request.url).searchParams.get("after");
+      return after === null
+        ? Response.json({
+            sessions: [{ agent: "claude-code", session_id: "a", current: "2" }],
+            cursor: "k1",
+            truncated: true,
+          })
+        : after === "k1"
+          ? Response.json({ sessions: [], cursor: "k2", truncated: true })
+          : Response.json({
+              sessions: [{ agent: "codex", session_id: "b", built_with: "1", current: "2" }],
+              truncated: false,
+            });
+    };
+    expect(await sink().stale?.()).toEqual([
+      { agent: "claude-code", session_id: "a", current: "2" },
+      { agent: "codex", session_id: "b", built_with: "1", current: "2" },
+    ]);
+    expect(seen.map((r) => new URL(r.url).pathname)).toEqual([
+      "/v1/sessions/stale",
+      "/v1/sessions/stale",
+      "/v1/sessions/stale",
+    ]);
+    answer = () => error(401, "unauthorized");
+    await expect(sink().stale?.()).rejects.toThrow(SignInNeeded);
+  });
+
   it("is ready only with a credential", async () => {
     await expect(sink().ready()).resolves.toBeUndefined();
     const none = httpSink({

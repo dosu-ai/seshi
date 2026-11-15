@@ -55,6 +55,7 @@ export function sessionWord(s: SessionState): string {
   if (s.toggle === "off") return s.retract === "done" ? "off (retracted)" : "off";
   if (s.error?.permanent) return `refused (${s.error.code})`;
   if (s.error) return "retrying";
+  if (s.rebuild) return "resending";
   if (s.stored) return "uploaded";
   if (s.last_status === "filtered") return "too small yet";
   if (s.last_status === "dropped") return "dropped by review";

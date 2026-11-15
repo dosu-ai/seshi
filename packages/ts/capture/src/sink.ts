@@ -5,7 +5,7 @@
  * token is picked up on the next call. */
 
 import { HttpSessionDB, ServerError } from "@seshi/client";
-import type { Fetch, IngestOptions, StoreSessionResult, Upload } from "@seshi/model";
+import type { Fetch, IngestOptions, StaleSession, StoreSessionResult, Upload } from "@seshi/model";
 
 /** There is no credential to upload with, or the server refused it: the person must sign in
  * (the status line's "sign in", B1.6). */
@@ -42,6 +42,10 @@ export interface SessionSink {
    * server removed it, `gone` when it was already removed, `absent` when the server holds no
    * such session for this credential (never stored, or stored under another owner). */
   retract(agent: string, sessionId: string, secret: string): Promise<RetractOutcome>;
+  /** The sessions of this credential's owner that an older normalizer built (X4.9), every
+   * page of them: the uploader sends the ones it holds again whole with `rebuild`. A sink
+   * without it is never asked. */
+  stale?(): Promise<StaleSession[]>;
   /** Whether there is a credential to send with now, without a request: throws
    * `SignInNeeded` when there is none. Lets the status line drop "sign in" once the person
    * signed in, before anything is uploaded. */
@@ -63,6 +67,28 @@ export interface HttpSinkOptions {
   credential: () => Promise<UploadCredential>;
   fetch?: Fetch;
   userAgent?: string;
+}
+
+/** The most pages of stale sessions read in one go (each up to 1000 keys). */
+const STALE_PAGES = 100;
+
+/** Every stale session a paged listing gives. */
+export async function allStale(
+  page: (after: string | undefined) => Promise<{
+    sessions: StaleSession[];
+    cursor: string | undefined;
+    truncated: boolean;
+  }>,
+): Promise<StaleSession[]> {
+  const out: StaleSession[] = [];
+  let after: string | undefined;
+  for (let n = 0; n < STALE_PAGES; n++) {
+    const next = await page(after);
+    out.push(...next.sessions);
+    if (!next.truncated || next.cursor === undefined || next.cursor === after) break;
+    after = next.cursor;
+  }
+  return out;
 }
 
 /** A sink over the HTTP API (`POST /v1/sessions`, `DELETE /v1/sessions/…` with the secret). */
@@ -92,6 +118,16 @@ export function httpSink(options: HttpSinkOptions): SessionSink {
       const db = await client();
       try {
         return await db.ingest(upload, ingestOptions);
+      } catch (err) {
+        return signIn(err);
+      }
+    },
+    async stale() {
+      const db = await client();
+      try {
+        return await allStale((after) =>
+          db.staleSessions({ ...(after !== undefined ? { after } : {}) }),
+        );
       } catch (err) {
         return signIn(err);
       }

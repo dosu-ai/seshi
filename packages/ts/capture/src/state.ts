@@ -79,6 +79,13 @@ export interface SessionState {
    * longer extends, so the next upload goes whole and replaces again (never a chunk at the
    * server's offset, which would splice this log onto that session). */
   replace_next?: boolean;
+  /** Send the whole log again with `rebuild` (X4.9): the server listed the session as stale
+   * (`for`: the format version it is stale against), or `seshi capture resend` asked. Cleared
+   * once an upload of it is answered; `key` is its idempotency key, kept across retries. */
+  rebuild?: { at: string; key: string; for?: string };
+  /** The format version the last stale rebuild was for: a stale listing that names it again (a
+   * rebuild model review dropped, say) does not send the session again. */
+  rebuilt_for?: string;
   uploaded_at?: string;
   /** The last answer's status (`stored`, `filtered`, `unchanged`, …). */
   last_status?: string;
@@ -105,6 +112,8 @@ export interface CaptureState {
     target?: string;
     /** Passes in a row in which an upload failed for a reason worth retrying. */
     failures?: number;
+    /** When the server was last asked which sessions are stale (X4.9). */
+    last_stale_check?: string;
   };
   /** What needs the person's action (B1.6): a sign-in, uploads that keep failing. */
   problems?: { sign_in?: Problem; upload?: Problem };

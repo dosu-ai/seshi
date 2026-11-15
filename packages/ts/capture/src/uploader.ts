@@ -17,6 +17,10 @@
  *   `replace` when this machine stored the session; otherwise it is a permanent refusal. A
  *   replace model review drops leaves the server's session as it was, which this log no
  *   longer extends: once the transcript grows it goes whole with `replace` again.
+ * - A session the server lists as stale (an older normalizer built it, X4.9), or one
+ *   `seshi capture resend` marks, goes whole with `rebuild` on the next pass, once: the server
+ *   builds and reviews it again even when the log only extends what is stored. The server is
+ *   asked at most hourly, and only by a machine that stored something.
  * - 403 `forbidden`, 422: permanent until the transcript changes. 401 or no credential: "sign
  *   in" (B1.6), nothing more is tried this pass. Anything else is retried with backoff, and
  *   three passes in a row of that is "upload failing".
@@ -26,7 +30,7 @@
  * session off sends the secret to retract it (F9.7). Client-side pre-redaction (F2.4) is the
  * `preRedact` seam: the text of each piece passes through it before it is sent. */
 
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { closeSync, existsSync, openSync, readSync, statSync } from "node:fs";
 import { basename } from "node:path";
 import { ServerError } from "@seshi/client";
@@ -37,6 +41,7 @@ import {
   OffsetMismatch,
   SessionConflict,
   SessionRejected,
+  type StaleSession,
   type StoreSessionResult,
   type Upload,
 } from "@seshi/model";
@@ -137,6 +142,8 @@ export interface UploaderOptions {
   log?: (line: string) => void;
   /** How often to sweep while running. Default 15 minutes. */
   sweepIntervalMs?: number;
+  /** How often to ask the server which sessions are stale (X4.9). Default 1 hour. */
+  staleIntervalMs?: number;
   /** Stop after this long with nothing to do. Default 5 minutes. */
   idleMs?: number;
   /** How often to look at the spool. Default 2 s. */
@@ -183,6 +190,12 @@ export function retractHash(secret: string): string {
   return createHash("sha256").update(secret, "utf8").digest("hex");
 }
 
+/** A fresh idempotency key for a rebuild: kept in the state until the rebuild is answered, so
+ * a retry after a lost answer is not built and reviewed twice (X4.7). */
+export function rebuildKey(): string {
+  return `rebuild-${randomUUID()}`;
+}
+
 /** Whether an error is worth retrying later (the network, the server, the store) rather than a
  * refusal of this session. */
 function transient(err: unknown): boolean {
@@ -200,6 +213,13 @@ function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/** A rebuild answered (or refused for good): it is not sent again, and a stale listing for the
+ * same format version does not mark the session again. A newer mark (`resend` meanwhile) stays. */
+function rebuilt(s: SessionState, rebuild: NonNullable<SessionState["rebuild"]>): void {
+  if (rebuild.for) s.rebuilt_for = rebuild.for;
+  if (s.rebuild?.key === rebuild.key) delete s.rebuild;
+}
+
 export class Uploader {
   private readonly paths: CapturePaths;
   private readonly host: CaptureHost;
@@ -211,6 +231,9 @@ export class Uploader {
   private readonly now: () => Date;
   private readonly log: (line: string) => void;
   private readonly sweepIntervalMs: number;
+  private readonly staleIntervalMs: number;
+  /** After a failed stale check, not before this (ms). */
+  private nextStaleCheck = 0;
   private readonly idleMs: number;
   private readonly pollMs: number;
   private readonly maxChunkBytes: number;
@@ -231,6 +254,7 @@ export class Uploader {
     this.now = options.now ?? (() => new Date());
     this.log = options.log ?? ((line) => appendLog(options.paths.log, `uploader: ${line}`));
     this.sweepIntervalMs = options.sweepIntervalMs ?? 15 * 60 * SECOND;
+    this.staleIntervalMs = options.staleIntervalMs ?? 60 * 60 * SECOND;
     this.idleMs = options.idleMs ?? 5 * 60 * SECOND;
     this.pollMs = options.pollMs ?? 2 * SECOND;
     this.maxChunkBytes = options.maxChunkBytes ?? 8 * 1024 * 1024;
@@ -380,6 +404,8 @@ export class Uploader {
       }
     }
 
+    // Last, so a session stored this pass is asked about too; what it marks goes next pass.
+    if (!summary.signIn) await this.checkStale();
     summary.queued = this.queued(snapshot);
     await this.finish(summary, { succeeded, signedIn, transientFailure });
     return summary;
@@ -503,6 +529,51 @@ export class Uploader {
     return additions.length;
   }
 
+  // --- stale sessions (X4.9) ------------------------------------------------------------
+
+  /** Ask the server which of its sessions an older normalizer built, at most every
+   * `staleIntervalMs`, and mark the ones this machine stored for a whole resend with `rebuild`.
+   * A session already rebuilt for the same format version is not marked again, so a rebuild
+   * that changed nothing on the server (model review dropped it) is not sent every hour. A
+   * session turned off is never marked. Only a machine that stored something asks, so a pass
+   * with nothing to send still opens no sink. */
+  private async checkStale(): Promise<void> {
+    const now = this.now();
+    const state = readState(this.paths);
+    const last = state.uploader?.last_stale_check;
+    if (last && now.getTime() - Date.parse(last) < this.staleIntervalMs) return;
+    if (now.getTime() < this.nextStaleCheck) return;
+    if (!Object.values(state.sessions).some((s) => s.stored)) return;
+    let stale: StaleSession[];
+    try {
+      const sink = await this.getSink();
+      stale = sink.stale ? await sink.stale() : [];
+    } catch (err) {
+      // A sign-in the uploads report; anything else is tried again a while later.
+      if (!(err instanceof SignInNeeded)) {
+        this.log(`could not ask which sessions are stale: ${message(err)}`);
+      }
+      this.nextStaleCheck = now.getTime() + this.retryMaxMs;
+      return;
+    }
+    const listed = new Map(stale.map((s) => [`${s.agent}\n${s.session_id}`, s]));
+    let marked = 0;
+    await updateState(this.paths, (st) => {
+      for (const session of Object.values(st.sessions)) {
+        const agent = this.agents.get(session.agent);
+        if (!agent || !session.stored || session.rebuild || this.off(st, session)) continue;
+        const entry = listed.get(`${agent.format}\n${uploadId(session)}`);
+        if (!entry || session.rebuilt_for === entry.current) continue;
+        session.rebuild = { at: now.toISOString(), key: rebuildKey(), for: entry.current };
+        marked++;
+      }
+      st.uploader = { ...st.uploader, last_stale_check: now.toISOString() };
+    });
+    if (marked > 0) {
+      this.log(`${marked} session(s) were built by an older normalizer; resending them whole`);
+    }
+  }
+
   // --- deciding ----------------------------------------------------------------------------
 
   private decision(
@@ -540,6 +611,7 @@ export class Uploader {
   private pending(session: SessionState, size: number): boolean {
     if (size === 0) return false;
     if (session.error?.permanent && session.error.size === size) return false;
+    if (session.rebuild) return true;
     if (!session.stored) return session.held_at_size !== size;
     return size !== (session.file_offset ?? 0);
   }
@@ -723,13 +795,16 @@ export class Uploader {
       const moved = session.sent_path !== undefined && session.sent_path !== path;
       // A replace that review dropped left the server's session as it was: replace it again.
       const replaceAgain = session.stored === true && session.replace_next === true;
+      // Stale on the server, or `seshi capture resend`: the whole log, built and reviewed again.
+      const rebuild = session.rebuild;
       const whole =
         forceWhole ||
         moved ||
         !session.stored ||
         size < fileOffset ||
         !agent.chunkable ||
-        replaceAgain;
+        replaceAgain ||
+        rebuild !== undefined;
       const replacing = replace || replaceAgain;
       if (!whole && fileOffset >= size) return { uploaded };
       // A path comes from a hook payload: send only a file the agent itself says is this
@@ -791,13 +866,17 @@ export class Uploader {
           // No `shipped`: the server's own state decides whether a whole log extends the
           // session (04), and a client's prefix once let a fresh tail be judged by the session
           // filter.
-          ...(replacing ? { replace: true } : {}),
+          ...(rebuild
+            ? { rebuild: true, idempotency_key: rebuild.key }
+            : replacing
+              ? { replace: true }
+              : {}),
         };
-        // A replace proves this machine uploaded the session with its retraction secret (F9.7):
-        // with the org key a stated username is not enough (X5.12).
+        // A replace (a rebuild is one) proves this machine uploaded the session with its
+        // retraction secret (F9.7): with the org key a stated username is not enough (X5.12).
         result = await (await this.getSink()).ingest(
           upload,
-          replacing ? { retractSecret: secret } : {},
+          replacing || rebuild ? { retractSecret: secret } : {},
         );
       } catch (err) {
         if (err instanceof SignInNeeded) return { uploaded, signIn: err.message };
@@ -846,6 +925,9 @@ export class Uploader {
                   ? err.code
                   : "refused";
         await this.refuse(key, code, message(err), size);
+        // A rebuild the server refuses (another machine wrote the session, say) is not tried
+        // again: the session's next bytes go as they would have without it.
+        if (rebuild) await this.save(key, (s) => rebuilt(s, rebuild));
         return { uploaded, failed: true };
       }
 
@@ -871,7 +953,7 @@ export class Uploader {
           delete s.held_at_size;
           // A dropped replace answers with what the server kept, which this log does not
           // extend: the offsets only wait for the transcript to grow, and then it goes whole.
-          if (replacing && result.status === "dropped") s.replace_next = true;
+          if ((replacing || rebuild) && result.status === "dropped") s.replace_next = true;
           else delete s.replace_next;
         } else {
           // Nothing kept (filtered): the whole log goes again once the transcript grows.
@@ -883,6 +965,7 @@ export class Uploader {
           delete s.carried;
           delete s.replace_next;
         }
+        if (rebuild) rebuilt(s, rebuild);
       });
       if (!stored || piece.end >= size) return { uploaded };
       replace = false;
@@ -913,6 +996,8 @@ export class Uploader {
         "carried",
         "held_at_size",
         "replace_next",
+        "rebuild",
+        "rebuilt_for",
         "error",
         "failures",
         "next_attempt_at",

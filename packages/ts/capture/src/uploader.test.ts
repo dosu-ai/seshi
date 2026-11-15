@@ -20,6 +20,7 @@ import {
   OffsetMismatch,
   SessionConflict,
   SessionRejected,
+  type StaleSession,
   StoreError,
   type StoreSessionResult,
   type Upload,
@@ -31,6 +32,7 @@ import type { RulesSnapshot } from "./rules-cache";
 import { type RetractOutcome, RetractRefused, type SessionSink, SignInNeeded } from "./sink";
 import { appendSpool } from "./spool";
 import { readState, type SessionState, updateState } from "./state";
+import { sessionWord } from "./status";
 import { type PreRedactor, retractHash, Uploader, type UploaderOptions } from "./uploader";
 import { acquireUploaderLock, type HeldUploaderLock } from "./uploader-lock";
 
@@ -53,6 +55,22 @@ class FakeServer implements SessionSink {
   /** Review drops a session's first envelope: the server keeps a stub of where its log ends
    * (F3.4). */
   dropFirst = false;
+  /** What `GET /v1/sessions/stale` lists (X4.9), how often it was asked, and how many asks
+   * fail first. */
+  staleList: StaleSession[] = [];
+  staleCalls = 0;
+  staleFails = 0;
+  /** The retraction secrets rebuilds were sent with. */
+  readonly rebuildSecrets: (string | undefined)[] = [];
+
+  async stale(): Promise<StaleSession[]> {
+    this.staleCalls++;
+    if (this.staleFails > 0) {
+      this.staleFails--;
+      throw new StoreError("down");
+    }
+    return this.staleList;
+  }
 
   async ready() {
     if (!this.signedIn) throw new SignInNeeded("not signed in");
@@ -92,6 +110,19 @@ class FakeServer implements SessionSink {
       const end = Buffer.byteLength(session.text);
       if (offset !== end) throw new OffsetMismatch(offset, end);
       session.text += upload.transcript;
+      return this.answer("stored", session.text);
+    }
+    if (session && upload.rebuild) {
+      // A rebuild replaces whatever is stored, with the permission a replace needs.
+      if (
+        options.retractSecret === undefined ||
+        session.hash !== retractHash(options.retractSecret)
+      ) {
+        throw new Forbidden("only the machine that uploaded a session may rebuild it");
+      }
+      this.rebuildSecrets.push(options.retractSecret);
+      if (this.dropReplace) return this.answer("dropped", session.text);
+      session.text = upload.transcript;
       return this.answer("stored", session.text);
     }
     if (session) {
@@ -883,5 +914,164 @@ describe("running", () => {
     await uploader({ sink: async () => sink, pollMs: 5 }).run({ lock, keepAlive: true });
     expect(server.uploads.map((u) => u.session_id)).toEqual(["s1"]);
     expect(beats).toHaveLength(1);
+  });
+});
+
+describe("resending stale sessions (X4.9)", () => {
+  const HOUR = 3600 * 1000;
+  const later = (ms: number) => {
+    clock = new Date(clock.getTime() + ms);
+  };
+  const staleAt = (current: string) => {
+    server.staleList = [{ agent: "claude-code", session_id: "s1", built_with: "1", current }];
+  };
+  const rebuilds = () => server.uploads.filter((u) => u.rebuild);
+
+  it("resends a session the server lists as stale, whole with rebuild, once per version", async () => {
+    writeFileSync(transcript(), line("one") + line("two") + line("three"));
+    hooked();
+    await uploader().pass();
+    expect(session().stored).toBe(true);
+    // Asked right after the first session was stored, and then not again within the hour.
+    expect(server.staleCalls).toBe(1);
+    staleAt("2");
+    later(5000);
+    await uploader().pass();
+    expect(server.staleCalls).toBe(1);
+
+    later(HOUR);
+    await uploader().pass();
+    expect(server.staleCalls).toBe(2);
+    expect(session().rebuild).toMatchObject({ for: "2", key: expect.stringMatching(/^rebuild-/) });
+    expect(sessionWord(session())).toBe("resending");
+    const key = session().rebuild?.key;
+
+    // The next pass sends it whole, with its key, proving the machine with the secret.
+    await uploader().pass();
+    expect(rebuilds()).toHaveLength(1);
+    expect(rebuilds()[0]).toMatchObject({
+      offset: 0,
+      transcript: line("one") + line("two") + line("three"),
+      rebuild: true,
+      idempotency_key: key,
+    });
+    expect(rebuilds()[0]?.replace).toBeUndefined();
+    expect(server.rebuildSecrets).toEqual([session().secret]);
+    expect(session().rebuild).toBeUndefined();
+    expect(session().rebuilt_for).toBe("2");
+
+    // Still listed (review dropped the rebuild, say): not sent again, pass after pass.
+    later(HOUR);
+    await uploader().pass();
+    await uploader().pass();
+    expect(server.staleCalls).toBe(3);
+    expect(rebuilds()).toHaveLength(1);
+
+    // A newer normalizer still: once more.
+    staleAt("3");
+    later(HOUR);
+    await uploader().pass();
+    await uploader().pass();
+    expect(rebuilds()).toHaveLength(2);
+    // Chunks go on as before afterwards.
+    appendFileSync(transcript(), line("four"));
+    hooked();
+    await uploader().pass();
+    expect(server.uploads.at(-1)).toMatchObject({ transcript: line("four") });
+    expect(server.uploads.at(-1)?.rebuild).toBeUndefined();
+  });
+
+  it("never resends a session turned off, and stops one turned off while it waits", async () => {
+    writeFileSync(transcript(), line("one") + line("two"));
+    writeFileSync(transcript("s2"), line("one", "s2") + line("two", "s2"));
+    hooked();
+    hooked("s2");
+    await uploader().pass();
+    server.staleList = [
+      { agent: "claude-code", session_id: "s1", current: "2" },
+      { agent: "claude-code", session_id: "s2", current: "2" },
+    ];
+    await updateState(paths, (s) => {
+      (s.sessions["fake:s1"] as SessionState).toggle = "off";
+    });
+    later(HOUR);
+    await uploader().pass();
+    expect(session().rebuild).toBeUndefined();
+    expect(session("s2").rebuild).toBeDefined();
+    // Turned off after it was marked: nothing of it goes.
+    await updateState(paths, (s) => {
+      (s.sessions["fake:s2"] as SessionState).toggle = "off";
+    });
+    await uploader().pass();
+    expect(rebuilds()).toHaveLength(0);
+  });
+
+  it("does not ask before anything was stored, and asks again later after a failure", async () => {
+    await uploader().pass();
+    expect(server.staleCalls).toBe(0);
+    writeFileSync(transcript(), line("one") + line("two"));
+    hooked();
+    server.staleFails = 1;
+    const up = uploader();
+    await up.pass();
+    expect(server.staleCalls).toBe(1);
+    expect(readState(paths).uploader?.last_stale_check).toBeUndefined();
+    // Not on every pass while the server cannot answer.
+    later(5000);
+    await up.pass();
+    expect(server.staleCalls).toBe(1);
+    later(10 * 60 * 1000);
+    await up.pass();
+    expect(server.staleCalls).toBe(2);
+    expect(readState(paths).uploader?.last_stale_check).toBe(clock.toISOString());
+  });
+
+  it("keeps a rebuild's key across a retry, and gives up a rebuild the server refuses", async () => {
+    writeFileSync(transcript(), line("one") + line("two"));
+    hooked();
+    await uploader().pass();
+    staleAt("2");
+    later(HOUR);
+    await uploader().pass();
+    const key = session().rebuild?.key;
+    server.failNext = [new StoreError("down")];
+    await uploader().pass();
+    expect(session().rebuild?.key).toBe(key);
+    later(HOUR);
+    await uploader().pass();
+    expect(rebuilds().map((u) => u.idempotency_key)).toEqual([key, key]);
+    expect(session().rebuild).toBeUndefined();
+
+    // Refused for good (another machine wrote it): not tried again, and chunks go on.
+    staleAt("3");
+    later(HOUR);
+    await uploader().pass();
+    server.failNext = [
+      new Forbidden("only the session's original writer or an admin may rebuild it"),
+    ];
+    await uploader().pass();
+    expect(session().rebuild).toBeUndefined();
+    expect(session().rebuilt_for).toBe("3");
+    expect(session().error).toMatchObject({ code: "forbidden", permanent: true });
+    appendFileSync(transcript(), line("three"));
+    hooked();
+    await uploader().pass();
+    expect(server.uploads.at(-1)).toMatchObject({ transcript: line("three") });
+  });
+
+  it("sends a session marked by hand whole with rebuild, even one the server holds nothing of", async () => {
+    // A first envelope review dropped leaves nothing on the server (F3.4).
+    writeFileSync(transcript(), line("one"));
+    hooked();
+    await uploader().pass();
+    expect(session()).toMatchObject({ sent: true, stored: false, last_status: "filtered" });
+    await updateState(paths, (s) => {
+      (s.sessions["fake:s1"] as SessionState).rebuild = { at: clock.toISOString(), key: "k1" };
+    });
+    await uploader().pass();
+    expect(rebuilds()).toHaveLength(1);
+    expect(rebuilds()[0]).toMatchObject({ offset: 0, idempotency_key: "k1" });
+    expect(session().rebuild).toBeUndefined();
+    expect(session().rebuilt_for).toBeUndefined();
   });
 });

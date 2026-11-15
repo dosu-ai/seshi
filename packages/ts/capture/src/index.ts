@@ -43,6 +43,7 @@ export {
 } from "./rules";
 export { captureRules, loadRules, type RulesSnapshot } from "./rules-cache";
 export {
+  allStale,
   type HttpSinkOptions,
   httpSink,
   type RetractOutcome,
@@ -104,6 +105,7 @@ export {
   type PassSummary,
   type PreRedactInput,
   type PreRedactor,
+  rebuildKey,
   retractHash,
   Uploader,
   type UploaderOptions,
