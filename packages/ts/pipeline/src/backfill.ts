@@ -48,8 +48,9 @@
  * Not touched: `normalized` (the uploader's log state). A later whole upload of such a session,
  * redacted from the transcript with the same new rules, may not hash to the stored prefix; it
  * is then a 409 `conflict`, which the uploader answers with `replace` (as after any rules
- * change, 04). Chunks continue as before. `applied` is cleared, since its answers name trace
- * objects that are gone (as a replace does, X4.6). */
+ * change, 04). Chunks continue as before. `applied` is cleared of the answers that name trace
+ * objects, which are gone (as a replace does, X4.6); its drops stay, since they name none and
+ * explain the records review left out between or after the traces. */
 
 import {
   canonicalJson,
@@ -420,9 +421,13 @@ async function backfillSession(
   // leaves an entry for a rewrite that did not happen, which readers take as "read the session
   // again" and find it as it was; the next run rewrites it and writes another.
   const rewrite = step((existing) => {
-    const { applied: _applied, withheld_calls: _withheld, ...rest } = existing;
+    const { applied, withheld_calls: _withheld, ...rest } = existing;
+    // A drop names no trace object, and it is what explains records review left out between
+    // or after the traces (checkStore's chain_gap): it stays (33).
+    const drops = (applied ?? []).filter((a) => a.status === "dropped");
     const next: SessionMetadata = {
       ...rest,
+      ...(drops.length > 0 ? { applied: drops } : {}),
       head: trace.content_hash,
       traces: [
         {

@@ -149,6 +149,27 @@ describe("backfillRedaction (F2.5)", () => {
     expect(chunk.status).toBe("stored");
   });
 
+  it("keeps the drops in applied, which explain records review left out", async () => {
+    // Found by the scenario explorer (33): review dropped a chunk (records in no trace, which a
+    // drop in `applied` explains); the backfill cleared `applied`, and checkStore then found a
+    // gap nothing explained (chain_gap).
+    const first = await store1("s1", meta() + user(`key ACME-1234 ${LONG}`) + reply("ok"));
+    const archive = archiveId("alice", "trajectory", "s1");
+    const drop = {
+      idempotency_key: "dropped-chunk",
+      at: ts,
+      status: "dropped" as const,
+      records_total: first.records_total + 2,
+      prefix_sha256: "d".repeat(64),
+      bytes_total: first.bytes_total + 100,
+    };
+    await updateMetadata(store, "alice", archive, (existing) =>
+      existing ? { ...existing, applied: [...(existing.applied ?? []), drop] } : null,
+    );
+    expect(await run()).toMatchObject({ outcomes: { rewritten: 1 } });
+    expect((await metadata("s1"))?.applied).toEqual([drop]);
+  });
+
   it("is idempotent: a second run finds every session current", async () => {
     await store1("s1", meta() + user(`ACME-1234 ${LONG}`) + reply("ok"));
     await run();
