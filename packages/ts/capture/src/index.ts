@@ -98,6 +98,7 @@ export {
 export {
   type GitIdentity,
   gitIdentity,
+  gitIdentityIn,
   NO_PREREDACTION,
   type PassOptions,
   type PassSummary,

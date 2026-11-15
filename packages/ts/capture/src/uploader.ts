@@ -89,26 +89,34 @@ export const NO_PREREDACTION: PreRedactor = {
 /** A working copy's git identity, sent as claims (X5.5). */
 export type GitIdentity = (cwd: string) => Promise<{ email?: string; name?: string }>;
 
-/** `git config user.email` and `user.name` in `cwd`, each bounded at 2 s. */
-export const gitIdentity: GitIdentity = async (cwd) => {
-  const read = async (key: string): Promise<string | undefined> => {
-    try {
-      const proc = Bun.spawn(["git", "-C", cwd, "config", "--get", key], {
-        stdout: "pipe",
-        stderr: "ignore",
-        stdin: "ignore",
-      });
-      const timer = setTimeout(() => proc.kill(), 2000);
-      const text = await new Response(proc.stdout).text();
-      clearTimeout(timer);
-      return (await proc.exited) === 0 && text.trim() ? text.trim() : undefined;
-    } catch {
-      return undefined;
-    }
+/** `git config user.email` and `user.name` in `cwd`, each bounded at 2 s, with `env` (the
+ * command's environment) laid over the process's, so git reads the global config of the home
+ * the command runs in (`HOME`, `XDG_CONFIG_HOME`, `GIT_CONFIG_GLOBAL`). */
+export const gitIdentityIn =
+  (env: Readonly<Record<string, string | undefined>> = {}): GitIdentity =>
+  async (cwd) => {
+    const read = async (key: string): Promise<string | undefined> => {
+      try {
+        const proc = Bun.spawn(["git", "-C", cwd, "config", "--get", key], {
+          env: { ...process.env, ...env },
+          stdout: "pipe",
+          stderr: "ignore",
+          stdin: "ignore",
+        });
+        const timer = setTimeout(() => proc.kill(), 2000);
+        const text = await new Response(proc.stdout).text();
+        clearTimeout(timer);
+        return (await proc.exited) === 0 && text.trim() ? text.trim() : undefined;
+      } catch {
+        return undefined;
+      }
+    };
+    const [email, name] = await Promise.all([read("user.email"), read("user.name")]);
+    return { ...(email ? { email } : {}), ...(name ? { name } : {}) };
   };
-  const [email, name] = await Promise.all([read("user.email"), read("user.name")]);
-  return { ...(email ? { email } : {}), ...(name ? { name } : {}) };
-};
+
+/** The identity in the process's own environment. */
+export const gitIdentity: GitIdentity = gitIdentityIn();
 
 export interface UploaderOptions {
   paths: CapturePaths;

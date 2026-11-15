@@ -128,6 +128,19 @@ describe("hooks and the uploader (F9.1)", () => {
     expect(state().agents["claude-code"]).toBeDefined();
   });
 
+  it("claims the git identity of the home the command runs in, not the process's", async () => {
+    writeFileSync(
+      join(machine.dir, ".gitconfig"),
+      "[user]\n\temail = dev@machine.test\n\tname = Machine Dev\n",
+    );
+    await hook();
+    expect((await daemon()).summary).toMatchObject({ uploaded: 1 });
+    expect((await stored())?.claims).toMatchObject({
+      git_email: "dev@machine.test",
+      git_name: "Machine Dev",
+    });
+  });
+
   it("sends a short agent-only tail as a continuation, never filtered", async () => {
     await hook();
     await daemon();

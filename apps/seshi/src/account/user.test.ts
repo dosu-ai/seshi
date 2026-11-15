@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { BadUsername, resolveUser, sendableUser } from "./user";
 
@@ -22,6 +25,22 @@ describe("the org key's username (X5.7)", () => {
       user: "dev",
       from: "os",
     });
+  });
+
+  it("reads git user.email from the command's home, not the process's", async () => {
+    const home = mkdtempSync(join(tmpdir(), "seshi-user-"));
+    try {
+      writeFileSync(join(home, ".gitconfig"), "[user]\n\temail = home@acme.test\n");
+      const env = {
+        HOME: home,
+        XDG_CONFIG_HOME: join(home, "config"),
+        GIT_CONFIG_GLOBAL: join(home, ".gitconfig"),
+        GIT_CONFIG_NOSYSTEM: "1",
+      };
+      expect(await resolveUser({ env })).toEqual({ user: "home@acme.test", from: "git" });
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 
   it("refuses a name an HTTP header cannot carry", async () => {

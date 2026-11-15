@@ -53,7 +53,15 @@ export class Machine {
   constructor(env: Record<string, string> = {}) {
     this.dir = mkdtempSync(join(tmpdir(), "seshi-cli-"));
     this.configDir = join(this.dir, "config", "seshi");
-    this.env = { HOME: this.dir, XDG_CONFIG_HOME: join(this.dir, "config"), ...env };
+    this.env = {
+      HOME: this.dir,
+      XDG_CONFIG_HOME: join(this.dir, "config"),
+      // git (claims, the org key's username) reads this machine's config only: not the real
+      // ~/.gitconfig, a GIT_CONFIG_GLOBAL the test process carries, or the system's.
+      GIT_CONFIG_GLOBAL: join(this.dir, ".gitconfig"),
+      GIT_CONFIG_NOSYSTEM: "1",
+      ...env,
+    };
   }
 
   /** The logins `seshi login` wrote. */

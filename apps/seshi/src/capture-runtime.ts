@@ -11,6 +11,7 @@ import { readFileSync } from "node:fs";
 import {
   appendLog,
   capturePaths,
+  gitIdentityIn,
   NO_PREREDACTION,
   type PreRedactor,
   RetractRefused,
@@ -291,6 +292,8 @@ export async function captureRuntime(
       cacheFile: paths.redactionRules,
       log: options.log ?? ((line) => appendLog(paths.log, `uploader: ${line}`)),
     }),
+    // Claims come from the command's home, not whatever home the process was started in.
+    git: gitIdentityIn(ctx.env),
     ...options,
   });
   return {

@@ -36,10 +36,14 @@ export interface ResolveUserOptions {
 }
 
 /** `git config --get user.email`, or undefined. Bounded at 2 s so a broken git cannot hold up
- * the CLI. */
-export async function gitUserEmail(): Promise<string | undefined> {
+ * the CLI. `env` (the command's environment) is laid over the process's, so git reads the
+ * global config of the home the command runs in. */
+export async function gitUserEmail(
+  env: Readonly<Record<string, string | undefined>> = {},
+): Promise<string | undefined> {
   try {
     const proc = Bun.spawn(["git", "config", "--get", "user.email"], {
+      env: { ...process.env, ...env },
       stdout: "pipe",
       stderr: "ignore",
       stdin: "ignore",
@@ -75,7 +79,7 @@ export async function resolveUser(options: ResolveUserOptions): Promise<Resolved
   if (fromEnv) found = { user: fromEnv, from: "SESHI_USER" };
   else if (configured) found = { user: configured, from: "config" };
   else {
-    const email = (await (options.gitEmail ?? gitUserEmail)())?.trim();
+    const email = (await (options.gitEmail ?? (() => gitUserEmail(options.env)))())?.trim();
     if (email) found = { user: email, from: "git" };
     else {
       const os = (options.osUser ?? (() => osUserName(options.env)))()?.trim();
