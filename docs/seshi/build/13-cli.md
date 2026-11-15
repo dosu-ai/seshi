@@ -106,10 +106,17 @@ User docs: [docs/cli.md](../../cli.md) (conventions, commands, signing in), docs
   Throw `Refused(exit, code, message)` for a refusal with its own exit code.
 - **Colour**: `Style` roles only; never a raw escape. Pad before painting. New roles go in
   `INKS` for both themes. A new colour comes from `brand/tokens.json` and `bun run brand`.
+- **Someone else's text** (session content and fields, labels, records, IdP prompts): pass it
+  through `printable()` from `cli/style.ts` before printing it in human output (12's search
+  hits and snippets especially). JSON output needs nothing.
 - **The uploader (14)**: `credentialFor({ logins, env, configuredUser }, server, "upload")`
   from `seshi/account` gives the device token, or the org key and the username to send; pass
   them to `HttpSessionDB` (or `connect({ token, user })`). `NotSignedIn` means "sign in" for the
   status line; a device token past `profile.device.expires_at` is refused before any request.
+  `seshi/account` is in `apps/seshi` (layer 6): code in `ts/capture` (layer 5, X3.2) must not
+  import it. `apps/seshi` calls `credentialFor` and hands the uploader the result, or a
+  `() => Promise<Credential>` it calls before each batch (so a renewed device token is picked
+  up); `check-layers` refuses the import otherwise.
 - **Tests**: `tests/tooling/cli.ts`: `Machine` (a home folder, CLI config folder and
   `MemorySecrets`, `seshi(argv, { stdin, env, terminal, tty })`), `startServer({ settings, idp
   })`, `IdpServer` (a stand-in IdP on 127.0.0.1: discovery, device, authorize, token, refresh;
@@ -151,6 +158,29 @@ User docs: [docs/cli.md](../../cli.md) (conventions, commands, signing in), docs
 13. **A declined `rm` confirmation exits 1**; a server's 400 exits 2 (the command line asked for
     something the server reads as malformed).
 
+## Review fixes
+
+A review of this branch against F8, B1.4 and X5 changed:
+
+- **Terminal control characters.** Human output printed stored text as it came: another
+  member's transcript, a project or branch name, a token label or a failure message could carry
+  escape sequences that move the cursor, hide lines, retitle the window or write the clipboard
+  (OSC 52). `printable()` (in `cli/style.ts`) now replaces every C0, DEL and C1 character with
+  U+FFFD in `sessions ls|show --trace`, `tokens ls`, `sync failed|dropped`, `workers status`'s
+  last errors and the IdP's sign-in prompts. Tested with a hostile transcript.
+- **`sessions rm` asks first, then renews.** It used to renew the session token for the delete
+  before asking, so a declined delete still spent a refresh, and a slow answer could push the
+  delete past the server's 10-minute window (X5.3). A declined delete now reports
+  `cancelled` (also as JSON with `--json`) and calls nothing.
+- **`login --visibility`** applies to the device token of an IdP sign-in only. It was silently
+  ignored with `--key` or `--token`; it is now a usage error there.
+- **`whoami`** showed the owner id (lowercased, or hashed) as the org-key username it states;
+  it now shows the username actually sent.
+- **Files it cannot read or write.** An export to a missing folder, or an unwritable CLI config,
+  crashed with a stack trace; they now exit 1 with `io`. A `logins.json` or `credentials.json`
+  that is not JSON is a config error (exit 3) naming the file and the fix.
+- The cross-branch note for 14 now says `ts/capture` must not import `seshi/account`.
+
 ## Still to check
 
 - The device flow and refresh against Okta, Entra and Google (05's X5.7 item): whether each
@@ -170,12 +200,14 @@ User docs: [docs/cli.md](../../cli.md) (conventions, commands, signing in), docs
 ## Cross-branch wiring once the stack is linear
 
 - **12 (search)**: `seshi search` should use `openAccount`, `openBackend` and `styleFor`
-  (hits in `style.search`, B1.4), and add `search()` to `Backend` (`ServerBackend` → the
+  (hits in `style.search`, B1.4, their text through `printable()`), and add `search()` to `Backend` (`ServerBackend` → the
   client's search call 12 adds; `LocalBackend` → the Instance's index). 12's
   `GET /v1/search` path lands next to this branch's `/v1/admin/sources…` at the end of
   openapi.yaml's paths, and both edit the openapi test's route list and the stub list in
   `commands.test.ts`: keep every entry.
-- **14 (capture)**: the uploader takes its credential from `credentialFor(..., "upload")`;
+- **14 (capture)**: the uploader takes its credential from `credentialFor(..., "upload")`,
+  called in `apps/seshi` and injected into `ts/capture` (which may not import `seshi/account`,
+  X3.2);
   the status line maps `NotSignedIn` to "sign in" (B1.6) and builds its colour with
   `colourLevel`/`new Style(level, theme)` (its stdout is not a terminal, so `styleFor` would
   turn colour off). F9.7's retraction needs `HttpSessionDB.tombstone` to send the retraction

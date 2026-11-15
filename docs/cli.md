@@ -27,6 +27,10 @@ repository's code.
   256-colour value when `TERM` does, else the basic sixteen; the background is never set.
 - No colour or glyphs when stdout is not a terminal, with `NO_COLOR`, with `--no-color` (any
   command, anywhere on the line), and always with `--json`.
+- Text a command did not write itself (a transcript, a project name, a token label, a failure
+  record) is printed with its control characters replaced by U+FFFD, so a stored session cannot
+  move the cursor, retitle the window or write the clipboard. `--json` output keeps them,
+  escaped.
 - The background is dark unless `SESHI_THEME=light|dark` (or `theme` in the CLI config) says
   otherwise, `COLORFGBG` names a light one, or the terminal answers an OSC 11 query within
   100 ms. The colours come from `brand/tokens.json` through the generated
