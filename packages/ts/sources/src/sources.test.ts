@@ -284,6 +284,46 @@ describe("a run", () => {
     expect(await readCheckpoint(store, "dd-prod")).toBeNull();
   });
 
+  it("keeps the checkpoint behind a transient failure the connector swallowed (X4.8)", async () => {
+    await writeCheckpoint(store, "dd-prod", { page: 1 }, null);
+    pipeline.answer = (e) => {
+      if (e.session_key === "a") throw new PreconditionFailed("k", "the store is busy");
+      return { status: "stored" };
+    };
+    let writeError: unknown;
+    const s = make(
+      connector(async (ctx) => {
+        await ctx.submit(envelope("dd-prod", "a")).catch(() => undefined);
+        await ctx.submit(envelope("dd-prod", "b"));
+        await ctx.checkpoint.write({ page: 2 }).catch((err) => {
+          writeError = err;
+        });
+        return undefined;
+      }),
+    );
+    const report = await s.run("dd-prod");
+    expect(report.outcome).toBe("error");
+    expect(report.error).toMatch(/failed transiently/);
+    expect(report.checkpoint_saved).toBe(false);
+    expect(String(writeError)).toMatch(/not saving the checkpoint/);
+    expect((await readCheckpoint(store, "dd-prod"))?.value.cursor).toEqual({ page: 1 });
+  });
+
+  it("takes nothing from a connector after its run ended", async () => {
+    let late: ConnectorContext | undefined;
+    const s = make(
+      connector(async (ctx) => {
+        late = ctx;
+        return undefined;
+      }),
+    );
+    expect((await s.run("dd-prod")).outcome).toBe("ok");
+    await expect(late?.submit(envelope("dd-prod", "z"))).rejects.toThrow(/has ended/);
+    await expect(late?.checkpoint.write({ page: 9 })).rejects.toThrow(/has ended/);
+    expect(pipeline.envelopes).toEqual([]);
+    expect(await readCheckpoint(store, "dd-prod")).toBeNull();
+  });
+
   it("refuses an envelope for another source", async () => {
     const s = make(
       connector(async (ctx) => {

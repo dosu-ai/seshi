@@ -53,7 +53,9 @@ export interface CheckpointHandle {
   /** The cursor as the run started, or null before the source's first run (or after a
    * rewind to the start). */
   read(): Cursor | null;
-  /** Save `cursor`. Write after the envelopes it covers were submitted, never before. */
+  /** Save `cursor`. Write after the envelopes it covers were submitted, never before. Once a
+   * `submit` in this run has thrown (a transient failure, X4.8), `write` refuses, so the
+   * checkpoint never moves past an envelope that was not handled. */
   write(cursor: Cursor): Promise<void>;
 }
 

@@ -251,6 +251,12 @@ export class Sources {
     let submitted = 0;
     let saved = false;
     let lost = false;
+    // A transient failure (the store) of an envelope this run submitted: the checkpoint must
+    // not move past it, even if the connector caught the error and went on (X4.8).
+    let transient: string | undefined;
+    // Set when the run has been reported: a connector that keeps going after its run resolved
+    // (a stray promise) can no longer submit or move the checkpoint.
+    let ended = false;
     const controller = new AbortController();
     const signal = outer ? AbortSignal.any([outer, controller.signal]) : controller.signal;
     const report = (outcome: RunReport["outcome"], extra: Partial<RunReport> = {}): RunReport => ({
@@ -283,18 +289,30 @@ export class Sources {
             `a connector for source '${id}' submitted an envelope for '${envelope.source_id}'`,
           );
         }
+        if (ended) throw new Error(`the run of source '${id}' has ended`);
         if (lost) throw new CheckpointLost(id);
         submitted++;
-        const result = (await this.pipeline.submit(envelope, {
-          onFailure: "record",
-        })) as SubmitOutcome;
+        let result: SubmitOutcome;
+        try {
+          result = (await this.pipeline.submit(envelope, { onFailure: "record" })) as SubmitOutcome;
+        } catch (err) {
+          // Permanent failures are recorded and answered `failed`; what is thrown is transient.
+          transient ??= message(err);
+          throw err;
+        }
         outcomes[result.status] = (outcomes[result.status] ?? 0) + 1;
         return result;
       },
       checkpoint: {
         read: () => (current ? structuredClone(current.cursor) : null),
         write: async (cursor: Cursor) => {
+          if (ended) throw new Error(`the run of source '${id}' has ended`);
           if (lost) throw new CheckpointLost(id);
+          if (transient !== undefined) {
+            throw new Error(
+              `not saving the checkpoint of source '${id}': an envelope failed transiently (${transient}); the next run reads it again`,
+            );
+          }
           try {
             etag = await writeCheckpoint(this.store, id, cursor, etag, this.now);
             saved = true;
@@ -322,6 +340,10 @@ export class Sources {
     try {
       const result = await connector.run(context);
       if (lost) return report("discarded", { error: new CheckpointLost(id).message });
+      if (transient !== undefined) {
+        // The connector swallowed the failure; the run still failed, and its checkpoint stayed.
+        return report("error", { error: `an envelope failed transiently: ${transient}` });
+      }
       return report("ok", {
         more: result?.more === true,
         ...(result?.lag_ms !== undefined ? { lag_ms: result.lag_ms } : {}),
@@ -332,6 +354,7 @@ export class Sources {
       }
       return report("error", { error: message(err) });
     } finally {
+      ended = true;
       controller.abort();
     }
   }
