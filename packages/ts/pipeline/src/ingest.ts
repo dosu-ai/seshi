@@ -39,6 +39,7 @@ import {
   appendChange,
   archiveId,
   decodeJson,
+  deleteSpans,
   ensureLayout,
   getBytes,
   gunzipJson,
@@ -456,6 +457,10 @@ export async function tombstone(input: TombstoneInput): Promise<{ removed: numbe
     await store.delete(keys.trace(owner, archive, hash));
     removed++;
   }
+  // Span records (F4.4) hold the session's content too, and a pending marker would only have
+  // the assembler find them again.
+  await deleteSpans(store, owner, archive);
+  await store.delete(keys.pending(archive));
   await appendChange(store, {
     kind: "tombstone",
     at,

@@ -81,6 +81,17 @@ export {
 } from "./session";
 export { type StoreClientOptions, StoreSessionDB } from "./session-db";
 export {
+  ASSEMBLE_BATCH,
+  type AssembleOptions,
+  type AssembleReport,
+  assemblePending,
+  FINAL_GRACE_MS,
+  redactLlmCalls,
+  redactSpanPart,
+  SpanStore,
+  type SpanStoreOptions,
+} from "./spans";
+export {
   type AssembledSession,
   type Authorization,
   type Authorizer,

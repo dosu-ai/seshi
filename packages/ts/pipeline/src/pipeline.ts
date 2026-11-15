@@ -41,11 +41,14 @@ import {
   OffsetMismatch,
   PrefixHash,
   prefixSha256,
+  type ReceivedSpan,
   type RedactionSummary,
   SessionConflict,
   type SessionMetadata,
   SessionRejected,
   type ShippedState,
+  type SpanPart,
+  type SpanResource,
   StoreError,
   type StoreSessionResult,
   VERSION,
@@ -87,6 +90,7 @@ import {
   type WriteContext,
 } from "./ingest";
 import { DEFAULT_LIMITS, type Limits } from "./limits";
+import { redactLlmCalls as redactCallsAsRecords, redactSpanPart } from "./spans";
 import {
   type AssembledSession,
   type Authorization,
@@ -277,6 +281,33 @@ function withCounts(
   return { ...summary, counts };
 }
 
+/** How a whole session is written. */
+interface WholeOptions {
+  replace: boolean;
+  llm_calls?: readonly LlmCall[];
+  /** Matches found outside the records' pass (the LLM calls' free text), added to its counts. */
+  extra?: RedactionSummary;
+  /** For an assembled session: what redaction found in its spans when they arrived, summed over
+   * all of them. A write of the whole session counts all of it; a tail counts what the
+   * session's stored counts do not have yet. */
+  arrived?: RedactionSummary;
+}
+
+/** `total` less what `stored` already counts (by rule, never below zero); everything when the
+ * rule set changed, since the stored counts are another rule set's. */
+function countsNotIn(
+  total: RedactionSummary,
+  stored: RedactionSummary | undefined,
+): Record<string, number> {
+  if (!stored || stored.rule_set !== total.rule_set) return { ...total.counts };
+  const out: Record<string, number> = {};
+  for (const [rule, n] of Object.entries(total.counts)) {
+    const left = n - (stored.counts[rule] ?? 0);
+    if (left > 0) out[rule] = left;
+  }
+  return out;
+}
+
 /** One envelope on its way through: who, whose, which session, as stored when read. */
 interface Run {
   envelope: Envelope;
@@ -379,8 +410,16 @@ export class Pipeline {
     try {
       checkEnvelope(envelope);
       const auth = await this.authorizer.authorize(envelope);
+      // LLM calls carry free text (an error message, string parameters): redacted like the
+      // records before anything is written (04's open item).
+      const calls = redactCallsAsRecords(this.redactor, input.llm_calls);
       const outcome = await this.planned(envelope, auth, (run) =>
-        this.whole(run, input.records, 0, { replace: true, llm_calls: input.llm_calls }),
+        this.whole(run, input.records, 0, {
+          replace: true,
+          llm_calls: calls.calls,
+          extra: calls.summary,
+          ...(input.redaction ? { arrived: input.redaction } : {}),
+        }),
       );
       this.health.count(envelope.source_id, outcome.replay ? "duplicate" : outcome.result.status);
       return outcome.result;
@@ -428,8 +467,44 @@ export class Pipeline {
       );
     }
     if (!this.formats.has(envelope.format)) this.unsupported(envelope.format);
+    const adapter = this.formats.get(envelope.format)?.spans;
+    if (!adapter) {
+      throw new SessionRejected(
+        "unsupported_payload",
+        `format ${envelope.format} takes logs, not span batches`,
+      );
+    }
+    const { spans, resource = [] } = envelope.payload;
+    // Normalize and regex-redact each span on arrival (X6.3): the span store keeps only what
+    // redaction left, never the span as received. A span the format cannot read is left out.
+    const parts: { part: SpanPart; redaction: RedactionSummary }[] = [];
+    let rejected = 0;
+    for (const span of spans as unknown as ReceivedSpan[]) {
+      let part: SpanPart;
+      try {
+        part = adapter.normalize(span, resource as unknown as SpanResource);
+      } catch {
+        rejected++;
+        continue;
+      }
+      const redacted = redactSpanPart(this.redactor, part);
+      parts.push({ part: redacted.part, redaction: redacted.summary });
+    }
+    if (parts.length === 0) {
+      throw new SessionRejected(
+        spans.length === 0 ? "empty" : "bad_spans",
+        spans.length === 0 ? "the batch has no spans" : "no span in the batch could be read",
+      );
+    }
     const archive_id = archiveId(auth.owner, envelope.format, envelope.session_key);
-    return this.assembler.accept({ envelope, authorization: auth, archive_id });
+    const { payload: _payload, ...about } = envelope;
+    return this.assembler.accept({
+      envelope: about,
+      authorization: auth,
+      archive_id,
+      parts,
+      ...(rejected > 0 ? { rejected } : {}),
+    });
   }
 
   private unsupported(format: string): never {
@@ -601,7 +676,7 @@ export class Pipeline {
     run: Run,
     raw: readonly NormalizedRecord[],
     bytes: number,
-    options: { replace: boolean; llm_calls?: readonly LlmCall[] },
+    options: WholeOptions,
   ): Promise<StoreSessionResult> {
     const { session, envelope } = run;
     const expectedHead = session?.head;
@@ -648,7 +723,7 @@ export class Pipeline {
             continuation: { from_record: base.records, prefix_sha256: base.prefix_sha256 },
             normalized,
             withheld: tail.withheld,
-            summary: tail.summary,
+            summary: this.summaryOf(tail.summary, options, session, false),
           });
         }
       }
@@ -668,7 +743,7 @@ export class Pipeline {
         replace: true,
         normalized: stateOf(all.records, bytes),
         withheld: all.withheld,
-        summary: all.summary,
+        summary: this.summaryOf(all.summary, options, session, true),
       });
     }
 
@@ -687,8 +762,30 @@ export class Pipeline {
       ...(plan.continuation ? { continuation: plan.continuation } : {}),
       normalized: stateOf(records, bytes),
       withheld: all.withheld,
-      summary: all.summary,
+      summary: this.summaryOf(all.summary, options, session, true),
     });
+  }
+
+  /** A write's redaction summary: the records' pass, plus matches found elsewhere (`extra`),
+   * plus for an assembled session what its spans' arrival found (`arrived`; see
+   * `WholeOptions`). */
+  private summaryOf(
+    pass: RedactionSummary,
+    options: WholeOptions,
+    session: SessionMetadata | null,
+    whole: boolean,
+  ): RedactionSummary {
+    if (!options.extra && !options.arrived) return pass;
+    const counts: Record<string, number> = { ...pass.counts };
+    const add = (more: Readonly<Record<string, number>>) => {
+      for (const [rule, n] of Object.entries(more))
+        if (n > 0) counts[rule] = (counts[rule] ?? 0) + n;
+    };
+    if (options.extra) add(options.extra.counts);
+    if (options.arrived) {
+      add(whole ? options.arrived.counts : countsNotIn(options.arrived, session?.redaction));
+    }
+    return { rule_set: pass.rule_set, counts };
   }
 
   /** What a fork copied from the session it was made from, when that parent is stored here. */

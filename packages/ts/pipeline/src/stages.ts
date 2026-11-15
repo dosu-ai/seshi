@@ -15,7 +15,9 @@ import type {
   LlmCall,
   NormalizedRecord,
   OwnerBasis,
+  RedactionSummary,
   SessionMetadata,
+  SpanPart,
   Writer,
 } from "@seshi/model";
 import {
@@ -231,12 +233,18 @@ export class StoreHealthCounters implements HealthCounters {
 
 // --- span sets ------------------------------------------------------------------
 
-/** One batch of spans for the assembler, authorized. */
+/** One batch of spans for the assembler, authorized, normalized and regex-redacted by the
+ * pipeline: the span store never sees a span as received. */
 export interface SpanBatch {
-  envelope: SpanEnvelope;
+  /** The batch's envelope without its payload. */
+  envelope: Omit<SpanEnvelope, "payload">;
   authorization: Authorization;
   /** The session the spans belong to. */
   archive_id: string;
+  /** Each span's part of the session, and what redaction did to it. */
+  parts: { part: SpanPart; redaction?: RedactionSummary }[];
+  /** Spans the format could not read, left out. */
+  rejected?: number;
 }
 
 /** The answer to a span batch: it is in the span store (X4.4); the session is assembled and
@@ -244,13 +252,17 @@ export interface SpanBatch {
 export interface SpanBatchResult {
   status: "accepted";
   archive_id: string;
+  /** Spans stored. */
   spans: number;
+  /** Spans left out because the format could not read them. */
+  rejected?: number;
 }
 
-/** The span assembler (X4.2, F4.4, branch 09). `accept` normalizes and regex-redacts each span
- * on arrival, stores it under the session's `spans/` and touches the session's pending marker;
- * later the assembler orders a session's spans into records and hands them to
- * `Pipeline.publishAssembled`, which runs the session filter, model review and the write. */
+/** The span assembler (X4.2, F4.4, branch 09). `accept` stores each span's normalized,
+ * redacted part under the session's `spans/` and touches the session's pending marker; later
+ * the assembler (`assemblePending`) orders a session's parts into records and hands them to
+ * `Pipeline.publishAssembled`, which runs the session filter, model review and the write.
+ * `SpanStore` is the implementation. */
 export interface SpanAssembler {
   accept(batch: SpanBatch): Promise<SpanBatchResult>;
 }
@@ -264,4 +276,7 @@ export interface AssembledSession {
   records: NormalizedRecord[];
   /** The LLM calls the records' `llm_call` fields name. */
   llm_calls?: LlmCall[];
+  /** What regex redaction found in the session's spans when they arrived, summed over all of
+   * them: the publish adds what the session's stored counts do not have yet. */
+  redaction?: RedactionSummary;
 }

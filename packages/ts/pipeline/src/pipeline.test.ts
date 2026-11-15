@@ -1,7 +1,7 @@
 import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
-import { BUILTIN_FORMATS, FormatRegistry } from "@seshi/formats";
+import { BUILTIN_FORMATS, FormatRegistry, otlpGenAiFormat } from "@seshi/formats";
 import {
   EMPTY_PREFIX_SHA256,
   type Envelope,
@@ -46,7 +46,7 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-const formats = new FormatRegistry(BUILTIN_FORMATS);
+const formats = new FormatRegistry([...BUILTIN_FORMATS, otlpGenAiFormat()]);
 const ts = "2026-09-01T00:00:00Z";
 const line = (record: Record<string, unknown>) => `${JSON.stringify(record)}\n`;
 const META = line({ role: "meta", source: "trajectory" });
@@ -702,12 +702,22 @@ describe("span sets (X4.2)", () => {
     ...upload(HEAD),
     source: "otlp",
     source_id: "console",
-    format: "trajectory",
+    format: "otlp-genai",
     session_key: "sesn_1",
     caller: { kind: "service", principal: "svc-console" },
     owner: "svc-console",
     owner_basis: "service",
-    payload: { kind: "spans", spans: [{ traceId: "ab", spanId: "cd" }] },
+    payload: {
+      kind: "spans",
+      spans: [
+        {
+          traceId: "ab".repeat(16),
+          spanId: "cd".repeat(8),
+          name: "chat",
+          startTimeUnixNano: "1790000000000000000",
+        },
+      ],
+    },
     idempotency_key: "ab/cd",
   });
 
@@ -726,12 +736,12 @@ describe("span sets (X4.2)", () => {
         return {
           status: "accepted",
           archive_id: batch.archive_id,
-          spans: batch.envelope.payload.spans.length,
+          spans: batch.parts.length,
         };
       },
     };
     const p = pipeline({ assembler });
-    const archive = archiveId("svc-console", "trajectory", "sesn_1");
+    const archive = archiveId("svc-console", "otlp-genai", "sesn_1");
     expect(await p.submit(spans())).toEqual({ status: "accepted", archive_id: archive, spans: 1 });
     expect(accepted).toEqual([archive]);
 
