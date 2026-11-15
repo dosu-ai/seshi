@@ -71,6 +71,11 @@ export const COMMANDS: Readonly<Record<string, CommandSpec>> = {
     summary: "run the background uploader and sweep",
     load: () => import("./daemon"),
   },
+  doctor: {
+    summary:
+      "check that sessions are captured right: transcript, capture state and what was stored",
+    load: () => import("./doctor"),
+  },
   healthcheck: {
     summary: "ask a running server's /healthz whether it is up (container health checks)",
     load: () => import("./healthcheck"),

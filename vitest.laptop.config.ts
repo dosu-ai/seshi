@@ -5,8 +5,8 @@ import base from "./vitest.config";
  * docs/seshi/build/18-decisions.md): the capture hooks, spool, uploader, sweep and state; the
  * hooks' contract and the agents' hook handlers and installers; the CLI config; the HTTP client
  * the CLI uploads with; and the CLI's own wiring (accounts and credentials, output, the capture
- * commands' helpers, the entry point). CI runs these on Windows (`bun run test:laptop`); the
- * full suite stays on Linux.
+ * commands' helpers, the session doctor's checks, the entry point). CI runs these on Windows
+ * (`bun run test:laptop`); the full suite stays on Linux.
  *
  * Left out, as server code that stays Linux-only: the server's config and its loader
  * (`load.test.ts`, `show.test.ts`, `server/`), the server commands (`serve`, `admin`,
@@ -25,6 +25,7 @@ export const LAPTOP_TESTS = [
   "apps/seshi/src/account/**/*.test.ts",
   "apps/seshi/src/cli/**/*.test.ts",
   "apps/seshi/src/capture.test.ts",
+  "apps/seshi/src/doctor/**/*.test.ts",
   "apps/seshi/src/integrations.test.ts",
   "apps/seshi/src/main.test.ts",
 ];
