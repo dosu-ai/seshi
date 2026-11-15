@@ -126,12 +126,12 @@ Reference for operators: [docs/server.md](../../server.md#your-own-redaction),
   redactor, writer, since?, owners?, dryRun?, limit?, signal?, onSession?})`. It looks at each
   stored session whose `redaction.rule_set` is not the current one:
   - its traces (head and continuations) are joined into one record list and redacted;
-  - **unchanged**: only the rule set and any newly withheld call ids are recorded, so a result
-    that arrives later is still withheld;
-  - **rewritten**: one new trace holds the whole session, the pointer moves to it (If-Match,
-    guarded on the head and traces it read), every old trace object is deleted, counts are
-    added, `applied` is cleared, and a `published` change entry with `replace: true` and
-    `reason: "redacted"` is written. When only fields outside the hash changed (a meta
+  - **unchanged**: only the rule set and any newly withheld call ids are recorded (not
+    `updated_at`), so a result that arrives later is still withheld;
+  - **rewritten**: one new trace holds the whole session (LLM calls redacted too, a fork's
+    `continuation` kept), the pointer moves to it (If-Match, guarded on the head and traces it
+    read), counts are added, `applied` is cleared, a `published` change entry with `replace:
+    true` and `reason: "redacted"` is written, and then every old trace object is deleted. When only fields outside the hash changed (a meta
     record's `cwd`), the hash stays the same and the object under it is replaced;
   - **conflict**: the session changed meanwhile, or a trace object is missing. It is left for
     the next run, and the orphaned new object is deleted;
@@ -200,11 +200,19 @@ Reference for operators: [docs/server.md](../../server.md#your-own-redaction),
     so add the header to `HttpSessionDB` if polling matters.
   - Use `redactTranscript`, not `redactRaw`: `redactRaw` (kept for compatibility) still
     redacts ids, which can break the server's call/result linkage.
+  - **Offsets.** The server counts the bytes it receives (`normalized.bytes` is offset plus the
+    redacted chunk's length). Pre-redaction changes line lengths, so the uploader must keep two
+    positions per session: where it has read to in the local file, and the redacted bytes it
+    has sent (the `offset` it sends). Redaction is per line and deterministic, so the redacted
+    position can be rebuilt by re-redacting the lines already sent. Redact and send only
+    complete lines: a partial JSON line is redacted as plain text.
   - A rules change between two whole uploads of one session makes the second a 409
     `conflict`; resend with `replace`. A backfill does the same to the next whole upload.
-- **09 (OTLP):** redact each span record with `ruleRedactor(instance.redaction)`, and run
-  `LlmCall.error` and `parameters` through `redactor.redactText` before `publishAssembled`
-  (04's open item; the pipeline still does not redact `llm_calls`).
+- **09 (OTLP):** nothing required for redaction. `publishAssembled` redacts the records (in
+  `whole`) and, since the review fixes, the LLM calls' `error` and string `parameters` (in
+  `commit`, `redactLlmCalls`), counting both in `metadata.redaction`. An assembler that wants
+  span attributes redacted before they sit in the span store can use
+  `ruleRedactor(instance.redaction).redactText`.
 - **12 (search):** a `published` entry with `replace: true` (with or without `reason:
   "redacted"`) means drop everything indexed for the session and index the new trace. A
   backfill also deletes the old trace objects, so an indexer that fetches late gets 404 for
@@ -225,6 +233,35 @@ Reference for operators: [docs/server.md](../../server.md#your-own-redaction),
   - `serve.ts`: the banner line;
   - `config/server/redaction.ts`: the description only.
   `COMMANDS` is unchanged (the summary already fit).
+
+## Review fixes (after the first implementation)
+
+- **LLM calls were stored unredacted.** Only records went through the rule set; an assembled
+  session's `llm_calls` (`error`, string `parameters`) were written as given, against X4.3.
+  `redactLlmCalls(redactor, calls)` (`@seshi/redact`) runs them through `redactText`; the
+  pipeline's `commit` applies it and adds the counts, and backfill applies it to stored calls.
+- **Backfill dropped a fork's continuation.** A fork's first trace continues its parent's copied
+  history (`from_record`, `prefix_sha256`). Backfill stripped it, so the rewritten trace either
+  failed the conversation check (`failed`) or claimed to be a whole session that starts
+  mid-conversation, with a content hash that no longer had `@from_record`. It is now kept on the
+  trace, the pointer's trace ref and the change entry. Its `prefix_sha256` still describes the
+  parent's prefix as the old rules redacted it (see Still to check).
+- **A chunk racing a backfill re-wrote the old meta record.** The chunk's guard checked only the
+  log position, which a backfill does not move, so a chunk planned before the backfill wrote the
+  meta record of the old head (unredacted by the new rules, e.g. its `cwd`). The guard now plans
+  again when the head or the rule set changed, and a head trace that vanished because the
+  session moved plans again instead of writing a continuation with no meta record.
+- **Backfill order and `updated_at`.** The change entry is appended before the old trace objects
+  are deleted, so a stopped run leaves orphans at worst, never a rewritten session no reader was
+  told of (the next run would find it current). A session with nothing new to take out keeps
+  its `updated_at`: only the rule set is recorded.
+- **Pre-redaction left fewer keys alone than the server.** `gitBranch`, `git_branch` and
+  `source` are now structural in `redactTranscript`, as in the record redaction.
+- **A client refused a newer server's rules.** `ruleSetFromDocument` threw when a pack disabled
+  a built-in rule the client's (older) built-in pack lacks. Such disables are dropped on the
+  client; `same` still reports the difference.
+- Tests: fork continuation, a chunk continuing a backfilled session, a chunk racing a backfill,
+  LLM calls in the pipeline and in backfill, `updated_at`, and the version-skew disable.
 
 ## Deviations and why
 
@@ -285,6 +322,13 @@ Reference for operators: [docs/server.md](../../server.md#your-own-redaction),
   it rewrites, not the listing.
 - **Model-review findings** (`review/<n>.json`) name records by index. Backfill keeps the record
   count and order, so they still line up, but nothing checks it.
+- **A fork's continuation after a backfill.** The kept `continuation.prefix_sha256` describes
+  the parent's prefix as the old rules redacted it; once the parent is backfilled too, a reader
+  that checks the fork's prefix against the parent's stored records finds a mismatch. Nothing in
+  the stack checks it today; a reader that does should fall back to `from_record` alone.
+- **In-place replacement.** When the new rules change only what the content hash leaves out
+  (a meta record's `cwd`), the object under the same hash is replaced. Readers that cache trace
+  objects by hash forever must honour the `replace` change entry and fetch again.
 - **The applies_to classification** treats a `reasoning` or `observation` record as `text` and
   a meta record's strings as `text`. Revisit if operators need finer places.
 - CI has not run (no PR).

@@ -125,7 +125,8 @@ paths and results are already separate fields; the transcript itself is never st
    JWTs, connection URLs, private-key blocks, and the entropy pass.
 
 Passes 2 and 3 skip the structural fields (ids, roles, timestamps, tool names, the source and
-the branch). The session's `metadata.json` records the rule set's hash and how often each rule
+the branch). They also run, as `text`, over what an LLM call says in free text (its `error` and
+string `parameters`), for sources that record calls (OTLP). The session's `metadata.json` records the rule set's hash and how often each rule
 fired, by rule id (`redaction`, F2.3), never what matched.
 
 A pack is a TOML file:
