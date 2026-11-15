@@ -21,6 +21,7 @@ import {
   appendSpool,
   captureRules,
   decide,
+  identifySafely,
   isPaused,
   placeOf,
   readHead,
@@ -162,7 +163,7 @@ async function upload(
       const head = readHead(path);
       let found: Candidate | undefined;
       for (const agent of agents) {
-        const info = agent.identify(path, head);
+        const info = identifySafely(agent, path, head);
         if (info) {
           found = { path, agent, info };
           break;

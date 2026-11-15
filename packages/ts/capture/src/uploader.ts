@@ -52,7 +52,7 @@ import {
   updateState,
   uploadId,
 } from "./state";
-import { sweepAgent } from "./sweep";
+import { identifySafely, readHead, sweepAgent } from "./sweep";
 import type { HeldUploaderLock } from "./uploader-lock";
 
 /** One piece of a transcript on its way to the server, before pre-redaction. */
@@ -654,6 +654,22 @@ export class Uploader {
       const fileOffset = session.file_offset ?? 0;
       const whole = forceWhole || !session.stored || size < fileOffset || !agent.chunkable;
       if (!whole && fileOffset >= size) return { uploaded };
+      if (whole) {
+        // A path comes from a hook payload: send only a file the agent itself says is this
+        // session's transcript, never whatever file a payload named.
+        const info = identifySafely(agent, path, readHead(path));
+        if (info?.session_id !== session.session_id) {
+          await this.refuse(
+            key,
+            "not_a_transcript",
+            info
+              ? `${path} is session ${info.session_id}'s transcript`
+              : `${path} is not a ${agent.name} transcript`,
+            size,
+          );
+          return { uploaded, failed: true };
+        }
+      }
       const piece = this.piece(path, whole ? 0 : fileOffset, size, agent.encoding, whole);
       if (!piece) return { uploaded };
 

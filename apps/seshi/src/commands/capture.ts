@@ -277,10 +277,16 @@ async function install(ctx: CommandContext, json: boolean, args: Args): Promise<
     );
   }
   const results: { agent: string; changed: string[]; notes: string[] }[] = [];
+  // One agent's config it cannot read does not stop the others; it is reported, exit 1.
+  const failed: { agent: string; error: string }[] = [];
   for (const agent of targets) {
     if (!agent.installer) continue;
-    const report = await agent.installer.install({ ...host, command });
-    results.push({ agent: agent.name, ...report });
+    try {
+      const report = await agent.installer.install({ ...host, command });
+      results.push({ agent: agent.name, ...report });
+    } catch (err) {
+      failed.push({ agent: agent.name, error: (err as Error).message });
+    }
   }
   const now = new Date().toISOString();
   await updateState(paths, (state) => {
@@ -295,12 +301,18 @@ async function install(ctx: CommandContext, json: boolean, args: Args): Promise<
   emit(
     ctx,
     json,
-    { installed: results, ...(service ? { service } : {}), target: target ?? null },
+    {
+      installed: results,
+      ...(failed.length > 0 ? { failed } : {}),
+      ...(service ? { service } : {}),
+      target: target ?? null,
+    },
     () => [
       ...results.flatMap((r) => [
         `${style.status("installed", "success")} ${r.agent}: ${r.changed.join(", ")}`,
         ...r.notes.map((n) => `  ${style.warn("note")}: ${n}`),
       ]),
+      ...failed.map((f) => `${style.status("not installed", "error")} ${f.agent}: ${f.error}`),
       ...(service
         ? [
             `${style.status(service.problems.length > 0 ? "service failed" : "service installed", service.problems.length > 0 ? "error" : "success")}: ${service.entry}`,
@@ -312,7 +324,7 @@ async function install(ctx: CommandContext, json: boolean, args: Args): Promise<
         : `Not signed in yet: run ${style.bold("seshi login --server <url>")}; sessions wait until then.`,
     ],
   );
-  return service && service.problems.length > 0 ? EXIT.failure : EXIT.ok;
+  return failed.length > 0 || (service && service.problems.length > 0) ? EXIT.failure : EXIT.ok;
 }
 
 async function uninstall(ctx: CommandContext, json: boolean, args: Args): Promise<number> {

@@ -40,6 +40,20 @@ export function readHead(path: string, bytes = HEAD_BYTES): string {
   }
 }
 
+/** What `agent` says a transcript is; null for one it cannot read (an agent's `identify` that
+ * throws on a file it does not expect is treated as "not mine"). */
+export function identifySafely(
+  agent: CaptureAgent,
+  path: string,
+  head: string,
+): TranscriptInfo | null {
+  try {
+    return agent.identify(path, head);
+  } catch {
+    return null;
+  }
+}
+
 /** Where a sweep folder is on this machine. */
 export function sweepRoot(path: SweepPath, host: CaptureHost): string {
   return path.resolve ? path.resolve(host) : expandTilde(path.root, host.home);
@@ -99,7 +113,7 @@ export function sweepAgent(
       }
       // Nothing written since then cannot hold a session that started since then.
       if (stat.mtimeMs < sinceMs || stat.size === 0) continue;
-      const info = agent.identify(file, readHead(file));
+      const info = identifySafely(agent, file, readHead(file));
       if (!info) continue;
       if (startedMs(info, stat.birthtimeMs, stat.mtimeMs) < sinceMs) continue;
       found.push({ agent, path: file, info, size: stat.size, mtimeMs: stat.mtimeMs });

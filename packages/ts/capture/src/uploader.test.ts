@@ -160,7 +160,7 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-const line = (text: string) => `${JSON.stringify({ id: "s1", cwd: dir, text })}\n`;
+const line = (text: string, id = "s1") => `${JSON.stringify({ id, cwd: dir, text })}\n`;
 const transcript = (name = "s1") => join(dir, "sessions", `${name}.jsonl`);
 
 function uploader(options: Partial<UploaderOptions> = {}): Uploader {
@@ -227,6 +227,19 @@ describe("the upload protocol", () => {
     expect(server.uploads).toHaveLength(2);
   });
 
+  it("sends only a file the agent says is that session's transcript", async () => {
+    writeFileSync(join(dir, "id_rsa"), "-----BEGIN KEY-----\n");
+    hooked("s1", join(dir, "id_rsa"));
+    await uploader().pass();
+    expect(server.uploads).toHaveLength(0);
+    expect(session().error).toMatchObject({ code: "not_a_transcript", permanent: true });
+    writeFileSync(transcript("s5"), line("one") + line("two"));
+    hooked("s6", transcript("s5"));
+    await uploader().pass();
+    expect(server.uploads).toHaveLength(0);
+    expect(session("s6").error?.message).toContain("session s1's transcript");
+  });
+
   it("keeps a filtered session's whole log until it grows (X4.10)", async () => {
     server.minLines = 3;
     writeFileSync(transcript(), line("one"));
@@ -280,7 +293,7 @@ describe("the upload protocol", () => {
 
     // A session someone else stored: a conflict is a refusal, kept until the transcript changes.
     server.sessions.set("s2", { text: "other\n" });
-    writeFileSync(transcript("s2"), line("one") + line("two"));
+    writeFileSync(transcript("s2"), line("one", "s2") + line("two", "s2"));
     hooked("s2");
     const pass = await uploader().pass();
     expect(pass.failed).toBe(1);
@@ -297,13 +310,13 @@ describe("the upload protocol", () => {
     await uploader().pass();
     expect(session().error).toMatchObject({ code: "forbidden", permanent: true });
 
-    writeFileSync(transcript("s3"), line("one") + line("two"));
+    writeFileSync(transcript("s3"), line("one", "s3") + line("two", "s3"));
     hooked("s3");
     server.failNext = [new SessionRejected("too_large", "big")];
     await uploader().pass();
     expect(session("s3").error).toMatchObject({ code: "too_large", permanent: true });
 
-    writeFileSync(transcript("s4"), line("one") + line("two"));
+    writeFileSync(transcript("s4"), line("one", "s4") + line("two", "s4"));
     hooked("s4");
     server.failNext = [new ServerError(503, "unavailable", "down")];
     await uploader().pass();
@@ -503,7 +516,7 @@ describe("the spool and the sweep", () => {
 
   it("forgets a session whose transcript is gone, unless a retraction waits", async () => {
     writeFileSync(transcript(), line("one") + line("two"));
-    writeFileSync(transcript("s2"), line("one") + line("two"));
+    writeFileSync(transcript("s2"), line("one", "s2") + line("two", "s2"));
     hooked();
     hooked("s2");
     await uploader().pass();

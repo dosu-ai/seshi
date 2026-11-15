@@ -84,6 +84,7 @@ export {
 export {
   type FoundTranscript,
   HEAD_BYTES,
+  identifySafely,
   readHead,
   sweepAgent,
   sweepRoot,

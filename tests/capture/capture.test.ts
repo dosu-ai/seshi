@@ -440,6 +440,18 @@ describe("seshi capture install|uninstall|status (F9.6)", () => {
     expect(state().agents).toEqual({});
   });
 
+  it("installs the agents it can and reports one whose config it cannot read", async () => {
+    mkdirSync(join(machine.dir, ".cursor"));
+    writeFileSync(join(machine.dir, ".cursor", "hooks.json"), "{ broken");
+    const run = await machine.seshi(["capture", "install", "--json"]);
+    expect(run.code).toBe(1);
+    const report = JSON.parse(run.out);
+    expect(report.installed.map((r: { agent: string }) => r.agent)).toEqual(["claude-code"]);
+    expect(report.failed[0]).toMatchObject({ agent: "cursor" });
+    expect(report.failed[0].error).toContain("not valid JSON");
+    expect(readFileSync(join(machine.dir, ".cursor", "hooks.json"), "utf8")).toBe("{ broken");
+  });
+
   it("installs a named agent, refuses an unknown one, and says when it finds none", async () => {
     const fresh = new Machine();
     try {
@@ -541,7 +553,7 @@ describe("local mode (X3.5)", () => {
       local.cliConfig(`[local]\nconfig = "${toml}"\nowner = "me"\n`);
       const code = join(local.dir, "code");
       mkdirSync(code);
-      const localFile = join(local.dir, "s.jsonl");
+      const localFile = join(local.dir, "l1.jsonl");
       writeFileSync(localFile, HEAD);
       await local.seshi(["hook", "claude-code", "Stop"], {
         stdin: JSON.stringify({ session_id: "l1", transcript_path: localFile, cwd: code }),

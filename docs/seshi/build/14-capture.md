@@ -79,7 +79,9 @@ User docs: [docs/capture.md](../../capture.md) (new), docs/cli.md (rows), docs/c
     8 MiB; `offset_mismatch` resends from `expected` (whole at 0, or when pre-redaction changed
     lengths); `conflict` on a whole log → `replace` only for a session this machine stored;
     `forbidden`/422/4xx permanent until the file size changes; others back off (5 s doubling to
-    5 min). The secret is saved before its hash is first sent. A retraction resets the session
+    5 min). Before a whole upload, the agent must identify the file as that session's
+    transcript (a hook payload names the path; a file it does not recognise is refused
+    `not_a_transcript` and never sent). The secret is saved before its hash is first sent. A retraction resets the session
     and bumps its generation, so turning it on uploads `<id>~<n>` from the start. `run()` loops
     every 2 s, stops when idle 5 minutes (not with `keepAlive`) or when the lock is taken over.
     An idle pass writes nothing. `preRedact` is the F2.4 seam (identity by default).
@@ -113,7 +115,8 @@ User docs: [docs/capture.md](../../capture.md) (new), docs/cli.md (rows), docs/c
   - `capture install|uninstall|status|pause|resume|off|on` with `--session [id]`, `--agent`,
     `--path`, `--service`, `--command`. `off --session` writes the toggle, marks a retraction
     when something was sent, spools it and starts the uploader; `on` cancels a pending
-    retraction. `--path` and global edit the CLI config in place (`capture-config.ts`), loaded
+    retraction. `install` reports an agent whose config it cannot read and installs the others
+    (exit 1). `--path` and global edit the CLI config in place (`capture-config.ts`), loaded
     before writing. `status` exits 8 when something needs action.
   - `upload <path>… | --since <d>` `[--agent]`: identifies each file's agent, applies the same
     decision, records the sessions (clearing old refusals), then runs passes itself, or waits
