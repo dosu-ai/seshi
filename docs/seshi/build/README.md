@@ -34,7 +34,7 @@ Each branch has its notes here: [01](01-restructure.md), [02](02-config.md), [03
 [04](04-pipeline.md), [05](05-auth.md), [06](06-instance.md), [07](07-redaction-rules.md),
 [08](08-model-review.md), [09](09-otlp.md), [10](10-datadog.md), [11](11-s3-sync.md),
 [12](12-search.md), [13](13-cli.md), [14](14-capture.md), [15](15-distribution.md),
-[16](16-readme.md); 17 adds its own.
+[16](16-readme.md), [17](17-review.md).
 
 ## How the stack was built
 
