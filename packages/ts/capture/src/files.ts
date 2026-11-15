@@ -56,6 +56,11 @@ export function readText(path: string): string | undefined {
  * `HEAD`, git's `config`): far more than any real one holds. */
 export const REPO_FILE_MAX_BYTES = 64 * 1024;
 
+/** The most `readBounded` reads of git's own `config`, which grows with every branch and remote
+ * it tracks: real ones pass 64 KiB (one seen at over 64 KiB turned capture off for its repo), so
+ * it gets more room, still bounded so a link to `/dev/zero` or a huge file cannot hang a hook. */
+export const GIT_CONFIG_MAX_BYTES = 4 * 1024 * 1024;
+
 /** A file a repo controls, read without trusting it: its text; `absent` when it is not there;
  * `invalid` (why) when it is anything but a regular file of at most `max` bytes. */
 export type BoundedRead = { text: string } | { absent: true } | { invalid: string };

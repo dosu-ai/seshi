@@ -4,7 +4,7 @@
 
 import { realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { readBounded } from "./files";
+import { GIT_CONFIG_MAX_BYTES, REPO_FILE_MAX_BYTES, readBounded } from "./files";
 import { normalizeRemote, type Place, type RepoConfig } from "./rules";
 
 /** The repo config file, relative to the repo root. */
@@ -21,8 +21,12 @@ function kind(path: string): "dir" | "file" | undefined {
 
 /** A file the repo controls, through `readBounded`: its text (undefined when absent), or why it
  * cannot be trusted, which makes the repo's config invalid (capture off there, fail closed). */
-function repoFile(path: string, name: string): { text?: string; invalid?: string } {
-  const read = readBounded(path);
+function repoFile(
+  path: string,
+  name: string,
+  max = REPO_FILE_MAX_BYTES,
+): { text?: string; invalid?: string } {
+  const read = readBounded(path, max);
   if ("text" in read) return { text: read.text };
   if ("invalid" in read) return { invalid: `${name} ${read.invalid}` };
   return {};
@@ -132,7 +136,7 @@ export function placeOf(cwd: string | undefined): Place {
     }
     const head = repoFile(join(repo.gitDir, "HEAD"), "git's HEAD");
     const config = repoFile(join(repo.root, REPO_CONFIG), REPO_CONFIG);
-    const git = repoFile(join(repo.commonDir, "config"), "git's config");
+    const git = repoFile(join(repo.commonDir, "config"), "git's config", GIT_CONFIG_MAX_BYTES);
     const invalid = config.invalid ?? head.invalid ?? git.invalid;
     const branch = headBranch(head.text);
     place.repo = {

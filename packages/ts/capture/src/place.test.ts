@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { REPO_FILE_MAX_BYTES, readBounded } from "./files";
+import { GIT_CONFIG_MAX_BYTES, REPO_FILE_MAX_BYTES, readBounded } from "./files";
 import { findRepo, gitRemotes, headBranch, parseRepoConfig, placeOf } from "./place";
 import { DEFAULT_RULES, decide, type RepoConfig } from "./rules";
 
@@ -126,7 +126,10 @@ describe("files a repo plants where its config and git files are", () => {
     write("app/.seshi/config.toml", `# ${"x".repeat(REPO_FILE_MAX_BYTES)}\ncapture = true\n`);
     expect(judged()?.invalid).toMatch(/config\.toml is larger than/);
     write("app/.seshi/config.toml", "capture = true\n");
+    // git's own config gets more room: real ones with many branches pass 64 KiB.
     write("app/.git/config", `[core]\n# ${"x".repeat(REPO_FILE_MAX_BYTES)}\n`);
+    expect(judged()?.invalid).toBeUndefined();
+    write("app/.git/config", `[core]\n# ${"x".repeat(GIT_CONFIG_MAX_BYTES)}\n`);
     expect(judged()?.invalid).toMatch(/git's config is larger than/);
   });
 
