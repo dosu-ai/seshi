@@ -121,8 +121,7 @@ describe("the session filter and limits from config", () => {
       { ...upload(head + reply("one more thing")), shipped },
       { store, formats },
     );
-    expect(tail.status).toBe("stored");
-    expect(tail.records).toBe(2); // the meta record and the tail
+    expect(tail).toMatchObject({ status: "stored", records: 2 }); // the meta record and the tail
     expect(tail.records_total).toBe(first.records_total + 1);
     // Nothing new past what shipped: nothing to write.
     const again = await storeSession(
@@ -149,8 +148,7 @@ describe("the session filter and limits from config", () => {
       },
       { store, formats },
     );
-    expect(grown.status).toBe("stored");
-    expect(grown.records).toBe(grown.records_total);
+    expect(grown).toMatchObject({ status: "stored", records: grown.records_total });
   });
 
   it("refuses an upload past max_upload_bytes, and a trace past max_records", async () => {
