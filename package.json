@@ -22,6 +22,7 @@
     "test": "bun --bun vitest run",
     "test:watch": "bun --bun vitest",
     "test:laptop": "bun --bun vitest run --config vitest.laptop.config.ts",
+    "scenarios:process": "bun run tests/tooling/scenario-proc/main.ts",
     "typecheck": "bunx tsc --noEmit",
     "lint": "bunx biome lint .",
     "format": "bunx biome format --write .",
