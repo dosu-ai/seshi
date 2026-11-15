@@ -1,39 +1,30 @@
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import type { NormalizedRecord } from "@seshi/model";
-import { archiveId, FsStore, keys, LAYOUT_KEY, readChanges } from "@seshi/store";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { planShipment, prefixSha256 } from "./continuation";
 import {
   getSession,
   getTrace,
   IngestRejected,
   ingest,
   listSessions,
+  planShipment,
+  prefixSha256,
   putRaw,
   tombstone,
-} from "./ingest";
+} from "@seshi/pipeline";
+import { archiveId, FsStore, keys, LAYOUT_KEY, readChanges } from "@seshi/store";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { golden } from "../tooling/testdata";
 
-const ROOT = join(import.meta.dirname, "..", "..", "..", "..");
-/** Record sets are read as data, wherever they live: the cross-language ones in spec/, the
- * vendor ones in their integration's testdata (no code is imported from it). */
-const GOLDEN_DIRS = [
-  join(ROOT, "spec", "testdata", "goldens"),
-  ...readdirSync(join(ROOT, "integrations")).map((name) =>
-    join(ROOT, "integrations", name, "testdata", "goldens"),
-  ),
-].filter((dir) => existsSync(dir));
-const goldens = (name: string): string => {
-  const dir = GOLDEN_DIRS.find((d) => existsSync(join(d, `${name}.records.json`)));
-  if (!dir) throw new Error(`no golden named ${name}`);
-  return dir;
-};
-const records = (name: string): NormalizedRecord[] =>
-  JSON.parse(readFileSync(join(goldens(name), `${name}.records.json`), "utf8"));
+/** The pipeline's write path over a folder store. Its record sets are fixtures from other
+ * folders (the cross-language ones in spec/, Claude Code's in its integration), so it lives in
+ * tests/ (X3.6). */
+
+const records = (name: string): NormalizedRecord[] => golden(`${name}.records.json`);
 const expectedHash = (name: string): string =>
-  JSON.parse(readFileSync(join(goldens(name), `${name}.expected.json`), "utf8")).content_hash;
+  golden<{ content_hash: string }>(`${name}.expected.json`).content_hash;
 
 let dir: string;
 let store: FsStore;

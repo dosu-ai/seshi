@@ -7,11 +7,11 @@
  * The bucket must exist. MinIO, RustFS, Garage, R2 and AWS all qualify. It crosses packages (the
  * store and the pipeline over it), so it lives in tests/ (X3.6). */
 
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import type { NormalizedRecord } from "@seshi/model";
 import { getSession, getTrace, ingest, tombstone } from "@seshi/pipeline";
 import { readChanges, S3Store } from "@seshi/store";
 import { describe, expect, it } from "vitest";
+import { golden } from "../tooling/testdata";
 
 const endpoint = process.env.SESSIONDB_TEST_S3_ENDPOINT;
 const bucket = process.env.SESSIONDB_TEST_S3_BUCKET;
@@ -24,16 +24,7 @@ const clients = [
   ...(typeof Bun !== "undefined" ? [{ name: "Bun.S3Client", fetch: undefined }] : []),
 ];
 
-const GOLDENS = join(
-  import.meta.dirname,
-  "..",
-  "..",
-  "integrations",
-  "claude-code",
-  "testdata",
-  "goldens",
-);
-const records = JSON.parse(readFileSync(join(GOLDENS, "claude-basic.records.json"), "utf8"));
+const records = golden<NormalizedRecord[]>("claude-basic.records.json");
 
 describe.skipIf(!configured).each(clients)(
   "S3Store over $name against a live endpoint",
