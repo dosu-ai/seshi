@@ -1,9 +1,11 @@
 /** `seshi workers status` (X7.5): whether the worker runs, whether a second one does, each
  * job's last run, last error and backlog, and each source's drop and failure counts. It runs
  * where the server's config and bucket keys are, and reads the bucket (the heartbeat, the
- * checkpoints, the records); `GET /v1/admin/jobs` answers the same over HTTP.
+ * checkpoints, the records); or, from a machine signed in with `seshi login` as an admin, asks
+ * a server's `GET /v1/admin/jobs` (`--server`, or the CLI config's `server` when no server
+ * config is here: `admin-target.ts`).
  *
- *   seshi workers status [--config <file>] [--set path=value]… [--json]
+ *   seshi workers status [--config <file>] [--set path=value]… [--server <url>] [--json]
  *
  * Exit 0, or 8 (`attention`) when the worker stopped, two are running, or a job's last run
  * failed. */
@@ -11,11 +13,15 @@
 import { parseArgs } from "node:util";
 import type { InstanceStatus } from "@seshi/instance";
 import { EXIT } from "../cli/exit";
+import { failWith } from "../cli/failures";
 import { emit, takeJson, usageError } from "../cli/output";
+import { type Role, Style, styleFor } from "../cli/style";
+import { adminTarget } from "./admin-target";
 import type { CommandContext } from "./index";
 import { openServer, SERVER_OPTIONS, serverFailure } from "./server-instance";
 
-const USAGE = "usage: seshi workers status [--config <file>] [--set path=value]… [--json]";
+const USAGE =
+  "usage: seshi workers status [--config <file>] [--set path=value]… [--server <url>] [--json]";
 
 function ago(iso: string | undefined, now: string): string {
   if (!iso) return "never";
@@ -33,14 +39,28 @@ function counts(record: Record<string, number> | undefined): string {
   return parts.length > 0 ? ` (${parts.join(", ")})` : "";
 }
 
+/** The role that colours a worker state or a job outcome (B1.4); the word itself is always
+ * printed. */
+function roleOf(word: string): Role | undefined {
+  if (word === "running" || word === "ok") return "success";
+  if (word === "error") return "error";
+  if (word === "stopped" || word === "several" || word === "discarded") return "warn";
+  return undefined;
+}
+
+function painted(style: Style, word: string): string {
+  const role = roleOf(word);
+  return role ? style.status(word, role) : word;
+}
+
 /** The status as lines for a terminal. */
-export function statusLines(status: InstanceStatus): string[] {
+export function statusLines(status: InstanceStatus, style: Style = Style.plain()): string[] {
   const { worker } = status;
   const lines: string[] = [];
   const workerLine =
     worker.state === "never"
       ? "worker: none has run against this bucket"
-      : `worker: ${worker.state}, ${worker.instance}${worker.version ? ` (seshi ${worker.version})` : ""}, heartbeat ${ago(worker.last_heartbeat, status.at)}`;
+      : `worker: ${painted(style, worker.state)}, ${worker.instance}${worker.version ? ` (seshi ${worker.version})` : ""}, heartbeat ${ago(worker.last_heartbeat, status.at)}`;
   lines.push(`deployment ${status.deployment}`);
   lines.push(workerLine);
   for (const other of worker.others) {
@@ -49,7 +69,7 @@ export function statusLines(status: InstanceStatus): string[] {
   lines.push("", "jobs:");
   for (const job of status.jobs) {
     const last = job.last;
-    const outcome = last?.last_outcome ?? "not run";
+    const outcome = last?.last_outcome ? painted(style, last.last_outcome) : "not run";
     const when = ago(last?.last_finished, status.at);
     const records =
       job.failed !== undefined ? `, ${job.dropped ?? 0} dropped, ${job.failed} failed` : "";
@@ -74,7 +94,7 @@ export function statusLines(status: InstanceStatus): string[] {
   }
   if (status.warnings.length > 0) {
     lines.push("");
-    for (const warning of status.warnings) lines.push(`warning: ${warning}`);
+    for (const warning of status.warnings) lines.push(`${style.warn("warning:")} ${warning}`);
   }
   return lines;
 }
@@ -99,28 +119,46 @@ export async function run(ctx: CommandContext): Promise<number> {
       USAGE,
     );
   }
-  let values: { config?: string; set?: string[] };
+  let values: { config?: string; set?: string[]; server?: string };
   try {
-    ({ values } = parseArgs({ args, options: SERVER_OPTIONS, strict: true }));
+    ({ values } = parseArgs({
+      args,
+      options: { ...SERVER_OPTIONS, server: { type: "string" } },
+      strict: true,
+    }));
   } catch (err) {
     return usageError(ctx, json, (err as Error).message, USAGE);
   }
+  if (values.server !== undefined && (values.config !== undefined || values.set !== undefined)) {
+    return usageError(ctx, json, "give --server, or --config and --set, not both", USAGE);
+  }
+  const style = await styleFor(ctx, { json });
   try {
-    const { instance } = await openServer(ctx, values, {
-      roles: [],
-      probe: [],
-      initialize: false,
-    });
+    const target = await adminTarget(ctx, values);
+    if (target.kind === "remote") {
+      const status = (await target.db.jobs()) as unknown as InstanceStatus;
+      emit(ctx, json, status, () => statusLines(status, style));
+      return needsAttention(status) ? EXIT.attention : EXIT.ok;
+    }
+    const { instance } = await openServer(
+      ctx,
+      { ...values, ...(target.config ? { config: target.config } : {}) },
+      {
+        roles: [],
+        probe: [],
+        initialize: false,
+      },
+    );
     try {
       const status = await instance.status();
-      emit(ctx, json, status, () => statusLines(status));
+      emit(ctx, json, status, () => statusLines(status, style));
       return needsAttention(status) ? EXIT.attention : EXIT.ok;
     } finally {
       await instance.close();
     }
   } catch (err) {
     const code = serverFailure(ctx, json, err);
-    if (code === undefined) throw err;
-    return code;
+    if (code !== undefined) return code;
+    return failWith(ctx, json, err);
   }
 }

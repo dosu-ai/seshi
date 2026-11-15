@@ -10,10 +10,16 @@
  * records of envelopes that were not stored and why, never their content; `upload` is the
  * source id of hooks and `seshi upload`.
  *
+ * `status`, `failed` and `dropped` also run from a machine signed in with `seshi login` as an
+ * admin, through the server's `/v1/admin/sources` routes: `--server <url>`, or the CLI config's
+ * `server` when no server config is here (`admin-target.ts`). `run` polls from where the
+ * server config is only; on a server the worker polls on its own.
+ *
  * `run` exits 0 when the run finished, 6 (`conflict`) when another worker moved the checkpoint
  * and the run was discarded (X7.3), 1 when the connector failed. */
 
 import { parseArgs } from "node:util";
+import type { HttpSessionDB, RecordsPage } from "@seshi/client";
 import type { Instance } from "@seshi/instance";
 import { UPLOAD_SOURCE } from "@seshi/model";
 import { type RunReport, SourceError, type SourceStatus } from "@seshi/sources";
@@ -24,7 +30,9 @@ import {
   sourcesWithRecords,
 } from "@seshi/store";
 import { EXIT, type ExitCode } from "../cli/exit";
+import { failWith, Refused } from "../cli/failures";
 import { emit, fail, takeJson, usageError } from "../cli/output";
+import { adminTarget } from "./admin-target";
 import type { CommandContext } from "./index";
 import { openServer, SERVER_OPTIONS, serverFailure } from "./server-instance";
 
@@ -32,10 +40,12 @@ const USAGE = `usage: seshi sync run <source> [--force] [--json]
        seshi sync status [<source>] [--days N] [--json]
        seshi sync failed <source> [--since <time>] [--limit N] [--json]
        seshi sync dropped <source> [--since <time>] [--limit N] [--json]
-       (each also takes --config <file> and --set path=value)`;
+       (each also takes --config <file> and --set path=value;
+        status, failed and dropped take --server <url> instead)`;
 
 const OPTIONS = {
   ...SERVER_OPTIONS,
+  server: { type: "string" },
   force: { type: "boolean" },
   days: { type: "string" },
   since: { type: "string" },
@@ -45,6 +55,7 @@ const OPTIONS = {
 interface Values {
   config?: string;
   set?: string[];
+  server?: string;
   force?: boolean;
   days?: string;
   since?: string;
@@ -134,26 +145,78 @@ async function records(
     (await sourcesWithRecords(instance.store)).includes(id);
   if (!known) instance.sources.get(id);
   const limit = positiveInt(values.limit, "limit", 50);
-  let since: string | undefined;
-  if (values.since !== undefined) {
-    const at = new Date(values.since);
-    if (Number.isNaN(at.getTime())) throw new UsageError("--since must be a date or time");
-    since = at.toISOString();
-  }
+  const since = sinceOf(values);
   const page = await listRecords(instance.store, kind, id, {
     limit,
     ...(since ? { since } : {}),
   });
-  emit(ctx, json, { source: id, kind, ...page }, () => {
-    if (page.records.length === 0) return [`no ${kind} records for ${id}`];
-    const lines = page.records.map(({ record }) => {
-      const r = record as FailedRecord | DroppedRecord;
-      const why = "code" in r ? `${r.code}: ${r.message}` : `${r.reason} (${r.policy})`;
-      return `${r.at}  ${r.session_key ?? "-"}  ${why}`;
-    });
-    if (page.truncated) lines.push(`… more: --since ${page.records.at(-1)?.record.at}`);
-    return lines;
+  const result = { source: id, kind, ...page };
+  emit(ctx, json, result, () => recordLines(result));
+  return EXIT.ok;
+}
+
+/** `--since` as an ISO time. */
+function sinceOf(values: Values): string | undefined {
+  if (values.since === undefined) return undefined;
+  const at = new Date(values.since);
+  if (Number.isNaN(at.getTime())) throw new UsageError("--since must be a date or time");
+  return at.toISOString();
+}
+
+/** A page of records as lines: when, which session, why; never content. */
+function recordLines(page: {
+  source: string;
+  kind: "failed" | "dropped";
+  records: { record: unknown }[];
+  truncated: boolean;
+}): string[] {
+  if (page.records.length === 0) return [`no ${page.kind} records for ${page.source}`];
+  const lines = page.records.map(({ record }) => {
+    const r = record as FailedRecord | DroppedRecord;
+    const why = "code" in r ? `${r.code}: ${r.message}` : `${r.reason} (${r.policy})`;
+    return `${r.at}  ${r.session_key ?? "-"}  ${why}`;
   });
+  if (page.truncated) {
+    const last = page.records.at(-1)?.record as { at?: string } | undefined;
+    lines.push(`… more: --since ${last?.at}`);
+  }
+  return lines;
+}
+
+/** `status`, `failed` and `dropped` through a server's admin routes. */
+async function remoteSync(
+  ctx: CommandContext,
+  json: boolean,
+  db: HttpSessionDB,
+  sub: "status" | "failed" | "dropped",
+  id: string | undefined,
+  values: Values,
+): Promise<number> {
+  const unknown = (source: string) =>
+    new Refused(EXIT.notFound, "unknown_source", `no source '${source}' on ${db.server}`);
+  if (sub === "status") {
+    const days = positiveInt(values.days, "days", 7);
+    if (id !== undefined) {
+      const status = await db.source(id, { days });
+      if (!status) throw unknown(id);
+      emit(ctx, json, status, () => [`last ${days} day(s):`, statusLine(status as SourceStatus)]);
+      return EXIT.ok;
+    }
+    const sources = await db.sources({ days });
+    emit(ctx, json, { sources }, () => [
+      `last ${days} day(s):`,
+      ...sources.map((s) => statusLine(s as SourceStatus)),
+    ]);
+    return EXIT.ok;
+  }
+  const limit = positiveInt(values.limit, "limit", 50);
+  const since = sinceOf(values);
+  const page: RecordsPage | null = await db.records(sub, id as string, {
+    limit,
+    ...(since ? { since } : {}),
+  });
+  if (!page) throw unknown(id as string);
+  emit(ctx, json, page, () => recordLines(page));
   return EXIT.ok;
 }
 
@@ -184,9 +247,29 @@ export async function run(ctx: CommandContext): Promise<number> {
   if (positionals.length > 1 || (sub !== "status" && id === undefined)) {
     return usageError(ctx, json, `sync ${sub} takes one source id`, USAGE);
   }
+  if (values.server !== undefined && (values.config !== undefined || values.set !== undefined)) {
+    return usageError(ctx, json, "give --server, or --config and --set, not both", USAGE);
+  }
   try {
+    const target = await adminTarget(ctx, values);
+    if (target.kind === "remote") {
+      if (sub === "run") {
+        throw new UsageError(
+          `sync run polls from where the server config is (X7.1); ${target.server}'s worker polls on its own`,
+        );
+      }
+      return await remoteSync(
+        ctx,
+        json,
+        target.db,
+        sub as "status" | "failed" | "dropped",
+        id,
+        values,
+      );
+    }
     // Only `run` writes; the others refuse a bucket no server has used rather than claim it.
-    const { instance } = await openServer(ctx, values, {
+    const local = target.config ? { ...values, config: target.config } : values;
+    const { instance } = await openServer(ctx, local, {
       roles: [],
       probe: [],
       initialize: sub === "run",
@@ -202,7 +285,7 @@ export async function run(ctx: CommandContext): Promise<number> {
     if (err instanceof UsageError) return usageError(ctx, json, err.message, USAGE);
     if (err instanceof SourceError) return fail(ctx, json, sourceCode(err), err.code, err.message);
     const code = serverFailure(ctx, json, err);
-    if (code === undefined) throw err;
-    return code;
+    if (code !== undefined) return code;
+    return failWith(ctx, json, err);
   }
 }
