@@ -137,7 +137,6 @@ describe("the command groups (F8.1)", () => {
       "hook",
       "upload",
       "sessions",
-      "search",
       "tokens",
       "daemon",
       "statusline",
