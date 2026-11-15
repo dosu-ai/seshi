@@ -113,6 +113,43 @@ describe("redactSecrets", () => {
     expect(text).not.toContain("[redacted:jwt]");
   });
 
+  it("scans crafted sk- and URL strings in linear time", () => {
+    // Each took seconds (and grew quadratically) when the sk- and URL-credential rules were
+    // backtracking expressions: 20,000 characters of sk- took about 0.5 s, 120 KB of `a://:b`
+    // about 1.6 s. These are larger.
+    const inputs = [
+      `sk-${"a".repeat(100_000)}_`,
+      "sk-".repeat(100_000),
+      "a://:b".repeat(50_000),
+      `${"a.".repeat(100_000)}://`,
+      'fetch("http://localhost:3000/api/v1/x");'.repeat(8_000),
+    ];
+    const started = performance.now();
+    for (const input of inputs) redactSecrets(input);
+    expect(performance.now() - started).toBeLessThan(1_000);
+  });
+
+  it("ends an sk- key and splits URL credentials where the patterns did", () => {
+    const key = "Zz9".repeat(8);
+    for (const [input, text] of [
+      [`sk-proj_${key}-tail`, "[redacted:openai-key]-tail"],
+      [`sk-${key}_x-${key}-`, "[redacted:openai-key]-"],
+      [`sk-ant-api03-${key}`, "[redacted:anthropic-key]"],
+      [`x-sk-${key} sk-short`, "x-[redacted:openai-key] sk-short"],
+      [`sk--${key}`, "[redacted:openai-key]"],
+      [`sk-${"a".repeat(19)}_`, `sk-${"a".repeat(19)}_`],
+      ["postgres://u:p@ss@db:5432/x y", "postgres://u:[redacted:url-credentials]@db:5432/x y"],
+      ["a.b+c://:pw@h@", "a.b+c://:[redacted:url-credentials]@h@"],
+      ["x_http://u:pw@h", "x_http://u:pw@h"],
+      ["1http://u:pw@h", "1http://u:pw@h"],
+      ["+1.http://u:pw@h", "+1.http://u:[redacted:url-credentials]@h"],
+      ["http://u@h:pw@h", "http://u@h:pw@h"],
+      ["http://u:@h http://v:p@g", "http://u:@h http://v:[redacted:url-credentials]@g"],
+    ]) {
+      expect(redactSecrets(input as string).text, input).toBe(text);
+    }
+  });
+
   it("leaves dotted identifiers that merely contain eyJ alone", () => {
     for (const input of ["keyJsonSchema.properties.name", "surveyJson.data.items.length"]) {
       expect(redactSecrets(input).text).toBe(input);

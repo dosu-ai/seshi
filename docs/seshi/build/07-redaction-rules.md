@@ -279,6 +279,10 @@ Reference for operators: [docs/redaction.md](../../redaction.md).
    built-ins. Their passes depend on substring hints, sub-kind classification, quote-aware
    submatches, ordering and the entropy pass, which a list of patterns cannot express without
    changing what they match. Globs and commands, which are plain data, live in the TOML.
+   "Reviewed" includes time: since 17, the `sk-` key and URL-credential rules find their
+   matches in code (the same matches, linear time) instead of through expressions that
+   backtracked quadratically on crafted strings, and `secrets.test.ts` times adversarial
+   inputs for them as it already did for `jwt`.
 3. **Built-in globs and commands are one rule each** (`sensitive-file`, `secret-output`), so
    existing counts stay the same. Turning one off turns off the whole list; to allow one file,
    use an exception glob in your own pack (`!.npmrc`), which holds across packs.

@@ -97,8 +97,13 @@ const pemPrivateRE =
 // seshi's own opaque tokens (X5.9): `seshi_<20 hex>_<43 base64url>`. The secret can end in `-`,
 // so the end is "no token character next", not `\b`.
 const seshiTokenRE = /(?<![A-Za-z0-9_-])seshi_[0-9a-f]{20}_[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])/g;
+// An `sk-` key is `sk-`, then `[A-Za-z0-9_-]*[A-Za-z0-9]{20,}\b`: as written, that rescans the
+// rest of the token run from every way of splitting it, quadratic on `sk-` and a long run that
+// does not end in 20 alphanumerics (and again from every `sk-` inside one). So the expression
+// only finds where an `sk-` starts (the last alternative, not subject to the closing `\b`), and
+// `skKeyEnd` finds where the key ends, the same end the pattern gives, in one pass per run.
 const providerRE =
-  /\b(gh[opsur]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{20,}|(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}|sk_user_[A-Za-z0-9_-]{8,}|sk-[A-Za-z0-9_-]*[A-Za-z0-9]{20,}|gsk_[A-Za-z0-9]{20,}|xai-[A-Za-z0-9]{20,}|hf_[A-Za-z0-9]{20,}|npm_[A-Za-z0-9]{30,}|xox[bpcs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{30,}|pul-[0-9a-f]{40}|sbp_[0-9a-f]{40})\b/g;
+  /\b(?:(gh[opsur]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{20,}|(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}|sk_user_[A-Za-z0-9_-]{8,}|gsk_[A-Za-z0-9]{20,}|xai-[A-Za-z0-9]{20,}|hf_[A-Za-z0-9]{20,}|npm_[A-Za-z0-9]{30,}|xox[bpcs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{30,}|pul-[0-9a-f]{40}|sbp_[0-9a-f]{40})\b|sk-)/g;
 // The second alternative drops the leading \b, which would miss a JWT glued to a
 // word character: the `n` of an escaped `\n` in JSON-in-a-string, or URL-encoding's `%3D`.
 // Without the boundary it requires the payload to open with `eyJ` too (both segments are JSON
@@ -107,9 +112,11 @@ const providerRE =
 // every `eyJ` inside it, which is quadratic.
 const jwtRE =
   /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\b|(?<=(?:^|[^A-Za-z0-9_-])[A-Za-z0-9_-]{1,8})eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}/g;
-// Password is greedy so a password containing '@' (user:p@ss@host) splits on
-// the last '@' and is redacted whole.
-const connURLRE = /\b([A-Za-z][A-Za-z0-9+.-]*:\/\/)([^\s/@:]*):([^\s]+)@([^\s]+)/g;
+// A URL with credentials is what `\b([A-Za-z][A-Za-z0-9+.-]*:\/\/)([^\s/@:]*):([^\s]+)@([^\s]+)`
+// matches; `replaceConnUrls` finds exactly those matches without the expression. The password
+// is greedy, so one containing '@' (user:p@ss@host) splits on the last '@' and is redacted
+// whole. As an expression that rescanned the rest of a run without whitespace from every `://`
+// in it (`a://:b` repeated, or a minified bundle full of URLs), which is quadratic.
 
 // Cheap substring hints checked first, keeping the regexes off the vast majority
 // of messages, which contain no credentials at all.
@@ -241,27 +248,156 @@ function closingQuote(open: string, close: string): string {
   return open === "" ? "" : close;
 }
 
+const isAlnum = (code: number) =>
+  (code >= 97 && code <= 122) || (code >= 65 && code <= 90) || (code >= 48 && code <= 57);
+const isTokenChar = (code: number) => isAlnum(code) || code === 95 || code === 45; // _ -
+/** What `\b` counts as a word character (no `u` flag): `[A-Za-z0-9_]`. */
+const isRegexWord = (code: number) => isAlnum(code) || code === 95;
+
+/** For an `sk-` at `at`: where its run of `[A-Za-z0-9_-]` ends, and where the key ends, or -1
+ * when it has none. The key ends where `sk-[A-Za-z0-9_-]*[A-Za-z0-9]{20,}\b` would end it: at
+ * the last end of a `-`-separated part of the run, after the `sk-`, whose last 20 characters
+ * are alphanumeric. Any later `sk-` in the same run (one just after a `-`) ends at the same
+ * place, or has no key when that place is not past its own `sk-`. */
+function skKeyEnd(s: string, at: number): { runEnd: number; keyEnd: number } {
+  let keyEnd = -1;
+  let alnum = 0;
+  let i = at + 3;
+  for (; i < s.length; i++) {
+    const code = s.charCodeAt(i);
+    if (!isTokenChar(code)) break;
+    if (code === 45) {
+      if (alnum >= 20) keyEnd = i;
+      alnum = 0;
+    } else {
+      alnum = isAlnum(code) ? alnum + 1 : 0;
+    }
+  }
+  if (alnum >= 20) keyEnd = i;
+  return { runEnd: i, keyEnd };
+}
+
 function replaceProvider(s: string, counts: RedactionCounts, off: Off): string {
-  return s.replace(providerRE, (v) => {
-    let kind = "provider-token";
-    if (/^(gh[opsur]_|github_pat_)/.test(v)) kind = "github-token";
-    else if (/^(?:sk|rk)_(?:live|test)_/.test(v)) kind = "stripe-key";
-    else if (v.startsWith("sk_user_")) kind = "user-key";
-    else if (v.startsWith("sk-ant-")) kind = "anthropic-key";
-    else if (v.startsWith("sk-")) kind = "openai-key";
-    else if (v.startsWith("gsk_")) kind = "groq-key";
-    else if (v.startsWith("xai-")) kind = "xai-key";
-    else if (v.startsWith("hf_")) kind = "huggingface-token";
-    else if (v.startsWith("glpat-")) kind = "gitlab-token";
-    else if (v.startsWith("npm_")) kind = "npm-token";
-    else if (/^xox[bpcs]-/.test(v)) kind = "slack-token";
-    else if (v.startsWith("AIza")) kind = "google-api-key";
-    else if (v.startsWith("pul-")) kind = "pulumi-token";
-    else if (v.startsWith("sbp_")) kind = "supabase-token";
-    if (off?.has(kind)) return v;
+  let out = "";
+  let last = 0;
+  // The `sk-` key end of the token run being read, kept while the run lasts.
+  let run = { runEnd: -1, keyEnd: -1 };
+  const re = new RegExp(providerRE.source, "g");
+  for (let m = re.exec(s); m; m = re.exec(s)) {
+    const at = m.index;
+    let end = at + m[0].length;
+    if (m[1] === undefined) {
+      if (at >= run.runEnd) run = skKeyEnd(s, at);
+      if (run.keyEnd <= at + 3) {
+        // No key here; the pattern moves on to the next position, as it would.
+        re.lastIndex = at + 1;
+        continue;
+      }
+      end = run.keyEnd;
+      re.lastIndex = end;
+    }
+    const kind = providerKind(s.slice(at, end));
+    if (off?.has(kind)) continue;
     add(counts, kind, 1);
-    return `${REDACTION_MARKER}${kind}]`;
-  });
+    out += `${s.slice(last, at)}${REDACTION_MARKER}${kind}]`;
+    last = end;
+  }
+  return last === 0 ? s : out + s.slice(last);
+}
+
+const isSchemeChar = (code: number) => isAlnum(code) || code === 43 || code === 46 || code === 45; // + . -
+const isLetter = (code: number) => (code >= 97 && code <= 122) || (code >= 65 && code <= 90);
+/** What `\s` matches. */
+const isRegexSpace = (code: number) =>
+  (code >= 9 && code <= 13) ||
+  code === 32 ||
+  code === 0xa0 ||
+  code === 0x1680 ||
+  (code >= 0x2000 && code <= 0x200a) ||
+  code === 0x2028 ||
+  code === 0x2029 ||
+  code === 0x202f ||
+  code === 0x205f ||
+  code === 0x3000 ||
+  code === 0xfeff;
+
+/** Every URL with credentials in `s` (see `url-credentials` above) with its password replaced,
+ * the matches `\b([A-Za-z][A-Za-z0-9+.-]*:\/\/)([^\s/@:]*):([^\s]+)@([^\s]+)` finds, found in
+ * time linear in `s`: each scan below covers a stretch no other `://` scans again. */
+function replaceConnUrls(s: string, counts: RedactionCounts): string {
+  let out = "";
+  let last = 0;
+  let n = 0;
+  // The run without whitespace being read: where it ends, and its last '@' with a character
+  // after it (-1 when none).
+  let runEnd = -1;
+  let lastAt = -1;
+  let from = 0;
+  for (let c = s.indexOf("://", from); c >= 0; c = s.indexOf("://", from)) {
+    from = c + 3;
+    // The scheme: the leftmost letter at a word boundary in the scheme characters before `://`.
+    let b = c;
+    while (b > last && isSchemeChar(s.charCodeAt(b - 1))) b--;
+    let start = -1;
+    for (let i = b; i < c; i++) {
+      if (isLetter(s.charCodeAt(i)) && (i === 0 || !isRegexWord(s.charCodeAt(i - 1)))) {
+        start = i;
+        break;
+      }
+    }
+    if (start < 0) continue;
+    // The user, up to the ':' that must follow it.
+    let user = c + 3;
+    for (; user < s.length; user++) {
+      const code = s.charCodeAt(user);
+      if (code === 47 || code === 64 || code === 58 || isRegexSpace(code)) break; // / @ :
+    }
+    if (s.charCodeAt(user) !== 58) continue;
+    const pass = user + 1;
+    if (pass >= runEnd) {
+      let at = -1;
+      let before = -1;
+      let i = pass;
+      for (; i < s.length && !isRegexSpace(s.charCodeAt(i)); i++) {
+        if (s.charCodeAt(i) === 64) {
+          before = at;
+          at = i;
+        }
+      }
+      runEnd = i;
+      // A trailing '@' has no host after it; the one before it, if any, is the split.
+      lastAt = at === runEnd - 1 ? before : at;
+    }
+    // The password is at least one character.
+    if (lastAt < pass + 1) continue;
+    const whole = s.slice(start, runEnd);
+    const next = `${s.slice(start, user)}:[redacted:url-credentials]@${s.slice(lastAt + 1, runEnd)}`;
+    if (next !== whole) n += 1;
+    out += s.slice(last, start) + next;
+    last = runEnd;
+    from = runEnd;
+  }
+  add(counts, "url-credentials", n);
+  return last === 0 ? s : out + s.slice(last);
+}
+
+/** Which provider's token `v` (a provider-pattern match) is: the rule id it counts under. */
+function providerKind(v: string): string {
+  if (/^(gh[opsur]_|github_pat_)/.test(v)) return "github-token";
+  if (/^(?:sk|rk)_(?:live|test)_/.test(v)) return "stripe-key";
+  if (v.startsWith("sk_user_")) return "user-key";
+  if (v.startsWith("sk-ant-")) return "anthropic-key";
+  if (v.startsWith("sk-")) return "openai-key";
+  if (v.startsWith("gsk_")) return "groq-key";
+  if (v.startsWith("xai-")) return "xai-key";
+  if (v.startsWith("hf_")) return "huggingface-token";
+  if (v.startsWith("glpat-")) return "gitlab-token";
+  if (v.startsWith("npm_")) return "npm-token";
+  if (/^xox[bpcs]-/.test(v)) return "slack-token";
+  if (v.startsWith("AIza")) return "google-api-key";
+  if (v.startsWith("pul-")) return "pulumi-token";
+  if (v.startsWith("sbp_")) return "supabase-token";
+  return "provider-token";
 }
 
 /** Rule ids turned off; none when absent. */
@@ -280,13 +416,7 @@ export function redactSecrets(text: string, off?: ReadonlySet<string>): Redactio
     s = replaceWhole(s, pemPrivateRE, "private-key", counts);
   }
   if (on("url-credentials") && s.includes("://")) {
-    s = replaceSubmatch(
-      s,
-      connURLRE,
-      "url-credentials",
-      counts,
-      (m) => `${m[1]}${m[2]}:[redacted:url-credentials]@${m[4]}`,
-    );
+    s = replaceConnUrls(s, counts);
   }
   if (on("aws-secret") && lower.includes("aws")) {
     s = replaceSubmatch(

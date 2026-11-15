@@ -101,6 +101,15 @@ what changed.
   literal-suffix check first): time proportional to path times glob, same matches. Tests: the
   matcher agrees with the old expression on a glob-by-path table, and the crafted paths (70 KB
   and 240 KB) finish well under 2 s.
+- **dataflow, medium**: two built-in secret patterns backtracked quadratically on every string
+  of every upload (server and client uploader): `sk-[A-Za-z0-9_-]*[A-Za-z0-9]{20,}\b` (`sk-`
+  and 20,000 `a` then `_`: 0.5 s; also `sk-` repeated) and the URL-credential expression,
+  rescanned from every `://` (120 KB of `a://:b`: 1.6 s; a minified bundle full of URLs, too).
+  `providerRE` now only finds where an `sk-` starts and `skKeyEnd` finds its end in one pass
+  per token run; `replaceConnUrls` finds the URL matches in code, each stretch scanned once.
+  Same matches (a differential fuzz of 400,000 strings against the old code found no
+  difference). Tests: those inputs and larger ones under 1 s together, and cases pinning where
+  a key ends and where credentials split.
 
 ## Not fixed
 
