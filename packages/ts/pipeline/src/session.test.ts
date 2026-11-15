@@ -110,6 +110,49 @@ describe("the session filter and limits from config", () => {
     expect(tail.records_total).toBe(first.records_total + 1);
   });
 
+  it("judges only the first trace for whole uploads too: a tail past `shipped` always ships", async () => {
+    const store = new FsStore(dir);
+    const head = META + user("x".repeat(2000)) + reply("done");
+    const first = await storeSession(upload(head), { store, formats });
+    expect(first.status).toBe("stored");
+    const shipped = { records: first.records_total, prefix_sha256: first.prefix_sha256 };
+    // The whole log again, grown by an agent-only tail far under min_chars.
+    const tail = await storeSession(
+      { ...upload(head + reply("one more thing")), shipped },
+      { store, formats },
+    );
+    expect(tail.status).toBe("stored");
+    expect(tail.records).toBe(2); // the meta record and the tail
+    expect(tail.records_total).toBe(first.records_total + 1);
+    // Nothing new past what shipped: nothing to write.
+    const again = await storeSession(
+      {
+        ...upload(head + reply("one more thing")),
+        shipped: { records: tail.records_total, prefix_sha256: tail.prefix_sha256 },
+      },
+      { store, formats },
+    );
+    expect(again.status).toBe("trivial");
+  });
+
+  it("judges the whole session again when what `shipped` names was never stored", async () => {
+    const store = new FsStore(dir);
+    const short = META + user("hi") + reply("hello");
+    const first = await storeSession(upload(short), { store, formats });
+    expect(first.status).toBe("trivial");
+    // The client sends back the trivial answer's prefix; the session has since grown past
+    // min_chars, so all of it is stored, not a continuation of records that never were.
+    const grown = await storeSession(
+      {
+        ...upload(short + reply("y".repeat(2000))),
+        shipped: { records: first.records_total, prefix_sha256: first.prefix_sha256 },
+      },
+      { store, formats },
+    );
+    expect(grown.status).toBe("stored");
+    expect(grown.records).toBe(grown.records_total);
+  });
+
   it("refuses an upload past max_upload_bytes, and a trace past max_records", async () => {
     const store = new FsStore(dir);
     const transcript = META + user("x".repeat(3000)) + reply("done");

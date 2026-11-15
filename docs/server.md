@@ -196,8 +196,11 @@ normalizes what it stored, redacts the records, and decides:
   and `prefix_sha256` from that answer as `shipped`. If the session's records still begin with
   that prefix, only the meta record plus the tail is written, marked as a continuation; if not
   (the harness rewrote history, the normalizer changed), the whole session is written and dedupes
-  by content. A fork (`fork_of`) likewise ships only what it added past the history it copied,
-  when the parent is stored here.
+  by content. `shipped` counts only once the session has a trace; before that the whole
+  session is judged again. A tail past a stored head always ships, however short and whoever
+  wrote it (an agent-only tail included): only a session's first trace is judged. A fork
+  (`fork_of`) likewise ships only what it added past the history it copied, when the parent is
+  stored here; that is the fork's first trace, so it is judged.
 - **Which branch?** The one the transcript recorded as it began (Claude Code's `gitBranch`,
   Codex's `session_meta`), else the client's `branch`.
 

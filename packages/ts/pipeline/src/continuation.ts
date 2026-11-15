@@ -25,8 +25,9 @@ export interface ShipPlan {
   records: NormalizedRecord[];
   /** Set when `records` is the meta record plus a tail. */
   continuation?: Continuation;
-  /** The records past what already shipped (all of them for a full ship), meta excluded: what
-   * worthiness is judged on. */
+  /** The records past what already shipped (all of them for a full ship), meta excluded. A
+   * full ship is judged by the session filter on them; a tail that continues a stored head is
+   * not judged (X4.10). */
   fresh: NormalizedRecord[];
 }
 

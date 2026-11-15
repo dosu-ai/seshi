@@ -91,7 +91,8 @@ paths:
         - A session uploaded before writes only its tail when the client sends back `shipped`
           (the `records_total` and `prefix_sha256` from the last answer) and the session's
           records still begin with that prefix; otherwise the whole session is written and
-          dedupes by content.
+          dedupes by content. `shipped` counts only once the session has a trace, and a tail
+          past that trace is never judged trivial for its size or its roles.
         - A chunk (`offset` > 0) is the log's bytes from where the server's copy ends (the
           `bytes_total` of the last answer), whole lines of a `jsonl` log. It is stored as its
           own raw part, normalized on its own, and written as a continuation of the head.

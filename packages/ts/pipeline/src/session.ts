@@ -233,10 +233,20 @@ async function wholeStored(
   // A resumed session: the client says how much shipped before (what it stored from the last
   // answer); the planner picks the tail, and falls back to the whole session when the prefix
   // no longer matches. A fork's copy of its parent's history is the parent's to ship.
-  let plan = input.shipped ? planShipment(records, input.shipped) : { records, fresh: records };
+  // What shipped counts only once the session has a trace: until then nothing of it is stored
+  // (the earlier answers were `trivial`), so the whole session is judged again, as chunks are.
+  const shipped = metadata.head !== undefined ? input.shipped : undefined;
+  let plan = shipped ? planShipment(records, shipped) : { records, fresh: records };
+  // The session filter judges a session's first trace only (X4.10): a tail that continues the
+  // stored head always ships, or an agent-only tail would be lost for good (the answer says
+  // it shipped). A fork's first trace is its own, so it is judged.
+  const continuesHead = plan.continuation !== undefined;
   const copied = await forkCopy(store, owner, agent, input.fork_of, records, format);
   if (!plan.continuation && copied) plan = planShipment(records, copied);
-  if (isTrivialTrajectory(plan.fresh, options.filter)) {
+  const filtered = continuesHead
+    ? plan.fresh.length === 0
+    : isTrivialTrajectory(plan.fresh, options.filter);
+  if (filtered) {
     await recordNormalized({ store, owner, agent, session_id: sessionId, normalized, now });
     return { status: "trivial", ...whole };
   }
