@@ -16,7 +16,7 @@ any other writer must follow the rules below.
     checkpoint.json                                       a poller's cursor (X7)
     dropped/<stamp>-<key_hash>.json                       an envelope model review dropped (X6.4)
     failed/<stamp>-<key_hash>.json                        an envelope that failed (X4.8)
-    health/<yyyy-mm-dd>/<instance>.json                   outcome counters, per process (X4.8)
+    health/<yyyy-mm-dd>/<instance>.json                   outcome counters, per instance (X4.8)
   worker/heartbeat.json                                   the worker's last run (X7.5)
   assembly/pending/<archive_id>                           a session with spans to assemble (X7.4)
   owners/<owner>/
@@ -69,7 +69,7 @@ worker by mistake) never silently lose each other's update:
 |---|---|
 | `seshi.json` | Created with `If-None-Match: *`; a later org claim with `If-Match` |
 | `metadata.json` | `If-None-Match: *` for a new session, else `If-Match` the ETag read; on `412` re-read and retry |
-| `sources/<id>/checkpoint.json` | `If-Match` (first one `If-None-Match`); on `412` the worker discards its run (X7.3) |
+| `sources/<id>/checkpoint.json` | `If-Match` (first one `If-None-Match`); on `412` the worker discards its run (X7.3). `seshi reprocess` removes or rewrites it with `If-Match` too |
 | `tokens/<id>.json` | Created with `If-None-Match: *`; changes (revoke) with `If-Match` |
 | `assembly/pending/<archive_id>` | Touched unconditionally; deleted with `If-Match`, so a batch that arrived meanwhile keeps it |
 | `review/<n>.json`, drop and failure records | Created with `If-None-Match: *` |
@@ -259,8 +259,13 @@ Read and written by the binary only, so their types are code-first in `@seshi/st
   verified). Session tokens are signed by the server and not stored.
 - `sources/<id>/checkpoint.json` (`seshi/checkpoint/1`): the source id, when it was saved,
   and the poller's own `cursor` object.
-- `worker/heartbeat.json` (`seshi/heartbeat/1`): instance id, version, roles, start and last
-  run. Last writer wins; status reads a changing instance id as a second worker.
+- `worker/heartbeat.json` (`seshi/heartbeat/1`): the writing process (`instance`, unique per
+  run) and its stable instance id (`host`), version, roles, start, when it was written (`at`)
+  and its `interval_ms`, and `jobs`: each job's runs, failures, last start and finish, last
+  outcome (`ok`, `error`, `discarded`), last error and last summary. Written every
+  `worker.heartbeat_interval`, last writer wins; status calls a heartbeat older than three
+  intervals stopped. A worker that finds another process's fresh heartbeat names it in
+  `others`, so either heartbeat shows both workers (X7.3, X7.5).
 - `assembly/pending/<archive_id>` (`seshi/pending/1`): owner, archive id, when the last
   span batch arrived, and a random `touch` id, so every touch changes the ETag the assembler
   deletes it by.
@@ -279,8 +284,10 @@ Read and written by the binary only, so their types are code-first in `@seshi/st
   first record to keep.
 - `sources/<id>/health/<yyyy-mm-dd>/<instance>.json` (`seshi/source-health/1`): how many
   envelopes from the source ended `stored`, `duplicate`, `unchanged`, `filtered`, `dropped`,
-  `failed` or `rejected` that UTC day, counted by one process (`instance`); a reader sums a
-  day's shards. A filtered session is only counted here, never recorded (X4.10).
+  `failed` or `rejected` that UTC day, counted by one instance (`instance`: `server.instance_id`,
+  else the host name, so a restart keeps its shard); a reader sums a day's shards. A filtered
+  session is only counted here, never recorded (X4.10). The worker's retention job deletes days
+  past `records.health_retention` (90 days).
 
 ## The ingest pipeline (X4)
 

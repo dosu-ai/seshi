@@ -186,14 +186,18 @@ before exposing it.
 bun install
 bun run test          # the S3 store test needs SESSIONDB_TEST_S3_* and skips without them
 bun run typecheck
-bun run check         # biome lint + format, then the package layer check
+bun run check         # biome lint + format, the package layer check, schemas, the hook's imports
+bun run build         # the compiled seshi binary, dist/seshi (X2.2)
+bun run check:hook    # time seshi hook against its budget (X3.3)
 bun run goldens       # regenerate the goldens after a deliberate change to hashing or events
 ```
 
 The repository is a Bun workspace: `apps/seshi/` is the one binary (`seshi serve` runs the
-server), `packages/ts/` holds its packages (redact, normalize, store, read, the HTTP routes and
-client), `integrations/` holds what is specific to each agent, and `spec/` is the contract they
-honour, the layout and the cross-language goldens. `CONTRIBUTING.md` has the layout.
+server; [docs/cli.md](docs/cli.md) lists every command), `packages/ts/` holds its packages
+(redact, normalize, store, the pipeline, auth, the instance and its worker jobs, the HTTP
+routes and client), `integrations/` holds what is specific to each agent, and `spec/` is the
+contract they honour, the layout and the cross-language goldens. `CONTRIBUTING.md` has the
+layout.
 
 A push to `main` with a [Conventional Commit](https://www.conventionalcommits.org/) in it is a
 release: CI picks the version from the commits, publishes `ghcr.io/dosu-ai/sessiondb` at that

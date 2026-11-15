@@ -1,8 +1,9 @@
 > **Pre-seshi.** This describes the `@dosu/sessiondb` SDK as it was published from `sdks/typescript/`
-> before the seshi restructure. Its code now lives in `packages/ts/` (`connect()` and
-> `StoreSessionDB` in `@seshi/pipeline`, which now also take the format registry; `HttpSessionDB`
-> in `@seshi/client`), and nothing is published to npm until branch 15 (X3.8). Branch 16 rewrites
-> the docs.
+> before the seshi restructure. Its code now lives in `packages/ts/`: `HttpSessionDB` in
+> `@seshi/client`, which is HTTP only. The direct-to-bucket `connect({ store })` is gone (X3.5):
+> one person who owns a bucket uses the CLI's local mode, which builds an Instance
+> (`@seshi/instance`) in-process and writes through `StoreSessionDB` (`@seshi/pipeline`).
+> Nothing is published to npm until branch 15 (X3.8). Branch 16 rewrites the docs.
 
 # @dosu/sessiondb
 

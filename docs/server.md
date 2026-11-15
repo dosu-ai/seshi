@@ -9,13 +9,15 @@ redacted trace is the only copy, and a trace is rebuilt by sending the transcrip
 the client still has it. Anything that reads the layout reads the bucket directly: the server
 is a writer and no reader's dependency.
 
-The server (`seshi serve`, `apps/seshi/`) is the pipeline (`packages/ts/pipeline/`) behind HTTP and
-identity and access (`packages/ts/auth/`, X5): each route checks the caller's credential and
-scopes, then reads or writes the bucket for the owner the credential names, and the SDK's
-own HTTP backend (`connect({ server, token })`) speaks this API from the other side. A client
-that holds a bucket credential can run the same SDK against the bucket directly and skip the
-server; what the server adds is that the laptop holds no bucket credential and redaction is
-not the laptop's to skip.
+The server (`seshi serve`, `apps/seshi/`) is an Instance (`packages/ts/instance/`, X1.2): the
+bucket, identity and access (`packages/ts/auth/`, X5), the pipeline (`packages/ts/pipeline/`)
+and the background jobs (X7), built from one config, with the HTTP routes (`packages/ts/api/`)
+over it. Each route checks the caller's credential and scopes, then reads or writes the bucket
+for the owner the credential names; `@seshi/client` (`HttpSessionDB`) speaks this API from the
+other side. One person who owns a bucket can skip the server: the CLI's local mode (X3.5)
+builds the same Instance in-process ([config.md](config.md#the-clis-config)). For a team the
+server is the point: the laptop holds no bucket credential and redaction is not the laptop's to
+skip.
 
 ```
 client ──POST /v1/sessions (transcript, bearer token)──▶ seshi server
@@ -61,6 +63,39 @@ The settings most servers need ([config.md](config.md) has all of them):
 | `server.listen` | `SESHI_SERVER__LISTEN` | Default `:7200`; flag `--listen` |
 
 Today's `SESSIONDB_*` names and `PORT` are no longer read.
+
+### Roles and background work
+
+`seshi serve` runs two roles (X7.1), chosen with `--roles` or `server.roles`: `api` serves the
+HTTP API, and `worker` runs the background jobs. The default runs both in one process, which is
+what one container wants. Any number of instances can run `--roles api`; exactly one should run
+the worker (X7.2). A second worker by mistake corrupts nothing (X7.3: checkpoints are saved
+with `If-Match`, so the run that loses is discarded and anything it submitted is deduplicated),
+and status says when it sees two. An instance without `api` answers `/healthz` only.
+
+The worker's jobs:
+
+| Job | Every | What it does |
+|---|---|---|
+| `heartbeat` | `worker.heartbeat_interval` (1m) | Writes `worker/heartbeat.json`: who runs, since when, and each job's last run and error (X7.5) |
+| `retention` | 6h | Prunes drop and failure records and source health days past `[records]` retention |
+| `source:<id>` | the source's `interval` | Polls a source through its connector (X3.11), from its checkpoint (X7.4) |
+
+Later branches add the span assembler (09) and the search indexer (12). Each poll is also a
+one-shot command for cron: `seshi sync run <id>`.
+
+Where the config and bucket keys are:
+
+- `seshi workers status [--json]`: the worker (`running`, `stopped`, `never`, or `several`),
+  each job's last run, last error and backlog, and each source's drop and failure counts.
+  Exit 8 when something needs a look. `GET /v1/admin/jobs` answers the same for admins.
+- `seshi sync run <id>`, `sync status [<id>]`, `sync failed <id>`, `sync dropped <id>`: poll
+  once; checkpoints, record counts and health; the records of envelopes that were not stored
+  and why, never their content.
+- `seshi reprocess --source <id> [--since <time>] [--run]`: rewind a source so its sessions are
+  read and written again (X4.9), while the source still has them.
+
+The commands and their exit codes are in [cli.md](cli.md).
 
 Put TLS in front of it (a reverse proxy, Cloud Run, a load balancer): transcripts arrive
 unredacted and the server is where that stops being true.
@@ -115,11 +150,13 @@ already in the bucket is not rewritten.
 
 Every release is published as a container image, `ghcr.io/dosu-ai/sessiondb:<version>`, built
 from `apps/seshi/Dockerfile` in this repository (`docker build -f apps/seshi/Dockerfile .` from the
-root). It listens on `server.listen` (default `:7200`), reports
-`/healthz` for liveness, and needs only the settings above, from env or a mounted
-`/etc/seshi/seshi.toml`: there is no database,
-no volume (unless the store is `file://`), no background work, and no state outside the bucket,
-so any platform that runs a container works, scaled to zero or to many instances alike. Keep
+root). The image is the compiled `seshi` binary (X2.2, `bun run build`) on a slim Debian base;
+its entry point is `seshi` and its command `serve`. It listens on `server.listen` (default
+`:7200`), reports `/healthz` for liveness (the image's health check is `seshi healthcheck`),
+and needs only the settings above, from env or a mounted `/etc/seshi/seshi.toml`: there is no
+database, no volume (unless the store is `file://`), and no state outside the bucket. API
+instances scale to many alike; the worker role wants one instance that stays up (a minimum of
+one, not scaled to zero), or run its jobs from cron with `seshi sync run`. Keep
 the request timeout at 120 seconds or more; a large transcript can take that long to normalize
 and verify. Platforms that cap request bodies (Cloud Run's HTTP/1 limit is 32 MiB) are fine as
 long as clients send `Content-Encoding: gzip`, which every route accepts.
@@ -202,12 +239,14 @@ allow.
 | `GET /v1/sessions/:agent/:session_id?owner` | The session's `metadata.json` |
 | `PATCH /v1/sessions/:agent/:session_id?owner` | `{visibility}`: change who may read it. The owner or an admin |
 | `GET /v1/sessions/:agent/:session_id/trace?hash&format` | The head trace (or a specific one) as the stored canonical trace (`format=seshi`, the default) or rendered as `letta`, `otlp` or `atif`; `400 bad_query` for another format, `404` for a session not stored (a filtered one included), `410` once redacted |
+| `GET /v1/sessions/:agent/:session_id/export?hash&format` | The same trace as a download: `Content-Disposition: attachment; filename="<agent>-<session>-<hash>.<format>.json"` |
 | `DELETE /v1/sessions/:agent/:session_id?owner` | Tombstone: drop the trace objects, append a tombstone change. Irreversible; a later upload of the same session is refused. Needs `sessions:delete`: the owner with a fresh session token or a static token, or an admin |
 | `GET /v1/changes?owner&after&since&limit` | An owner's change feed; another owner's shows the entries of sessions the caller may read |
 | `POST /v1/tokens` | `{kind: org\|admin\|device\|service, owner?, service?, scopes?, visibility?, expires_at?, label?}`: a new token, shown once (`tokens:admin`) |
 | `GET /v1/tokens?owner&kind&all` | Token records without their hashes (`tokens:admin`) |
 | `DELETE /v1/tokens/:id` | Revoke one (`tokens:admin`) |
 | `POST /v1/tokens/revoke` | `{owner, kind?}`: revoke every live token of an owner (`tokens:admin`, X5.11) |
+| `GET /v1/admin/jobs` | The worker, its jobs and every source, as `seshi workers status --json` prints them (`sources:admin`, X7.5) |
 
 ### `POST /v1/sessions`
 
