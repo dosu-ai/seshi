@@ -377,12 +377,17 @@ describe("the worker (X7)", () => {
     one.start();
     two.start();
     try {
-      // Whichever wrote last, the heartbeat names the other.
+      // Whichever wrote last, the heartbeat names the other. State and warning come from one
+      // read of the heartbeat: reading status twice can land on either side of a rewrite.
       for (const instance of [one, two]) {
-        await until(async () => (await instance.status()).worker.state === "several");
+        await until(async () => {
+          const status = await instance.status();
+          return (
+            status.worker.state === "several" &&
+            /2 workers are running/.test(status.warnings.join("\n"))
+          );
+        });
       }
-      const status = await two.status();
-      expect(status.warnings.join("\n")).toMatch(/2 workers are running/);
     } finally {
       await Promise.all([one.close(), two.close()]);
     }
