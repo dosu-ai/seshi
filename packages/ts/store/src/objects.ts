@@ -289,6 +289,23 @@ export interface ReviewRecord {
   decision_model: string;
   redactor_model?: string;
   findings: ReviewFinding[];
+  /** Findings the redactor returned that named no text of the envelope (a record or field it
+   * was not given, or text that is not there), so nothing was removed for them. */
+  unmatched?: number;
+  /** How many parts the envelope was split into to fit the model's input (F3.7). */
+  parts?: number;
+  /** Why review was skipped (`decision: "skipped"`): which step failed and how, never what the
+   * provider said about the content. */
+  failure?: ReviewFailure;
+}
+
+/** A model call that failed after its retries (F3.4): a code, never the provider's text. */
+export interface ReviewFailure {
+  step: "decision" | "redactor";
+  /** `timeout`, `network`, `http_<status>`, `invalid_answer`, `refusal`, `truncated`, … */
+  code: string;
+  /** Calls made, the retries included. */
+  attempts: number;
 }
 
 /** Store the decision for write `n`; `PreconditionFailed` when `n` is taken. */

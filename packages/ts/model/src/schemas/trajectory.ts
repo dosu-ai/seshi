@@ -95,7 +95,7 @@ function nonEmptyOptional(
   return value;
 }
 
-const WITHHELD = new Set(["sensitive-file", "secret-output"]);
+const WITHHELD = new Set(["sensitive-file", "secret-output", "review"]);
 
 /** The canonical trace's optional fields on one record, checked; `{}` for trajectory-v1. */
 function extensions(
@@ -119,7 +119,7 @@ function extensions(
   const withheld = record.withheld;
   if (withheld !== undefined && withheld !== null) {
     if (typeof withheld !== "string" || !WITHHELD.has(withheld)) {
-      fail(index, "withheld must be sensitive-file or secret-output");
+      fail(index, "withheld must be sensitive-file, secret-output or review");
     }
     out.withheld = withheld;
   }

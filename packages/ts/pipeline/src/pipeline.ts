@@ -729,6 +729,8 @@ export class Pipeline {
         policy: decision.policy,
         policy_hash: decision.policy_hash,
         decision_model: decision.decision_model,
+        ...(decision.redactor_model ? { redactor_model: decision.redactor_model } : {}),
+        ...(decision.failure ? { failure: decision.failure } : {}),
       });
       // Nothing of a session without a trace is stored, so there is no log position to move.
       if (!session?.head) return { status: "dropped", ...NOTHING };

@@ -136,8 +136,8 @@
         "timestamp": { "type": "string" },
         "id": { "$ref": "#/$defs/RecordId" },
         "withheld": {
-          "description": "Set when the result's content was replaced because the call touched a sensitive file or printed a secret (F2).",
-          "enum": ["sensitive-file", "secret-output"]
+          "description": "Set when the result's content was replaced: the call touched a sensitive file or printed a secret (F2), or model review withheld it (`review`, F3.1).",
+          "enum": ["sensitive-file", "secret-output", "review"]
         },
         "duration_ms": {
           "description": "How long the call ran, when the source says.",

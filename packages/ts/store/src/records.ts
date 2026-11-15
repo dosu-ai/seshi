@@ -14,6 +14,7 @@
 import type { SourceKind, SourceLocation } from "@seshi/model";
 import { createJson, readJson } from "./json";
 import { changeStamp, keys, type RecordKind, stampTime } from "./layout";
+import type { ReviewFailure } from "./objects";
 import { isPreconditionFailed, type Store } from "./store";
 
 export const DROPPED_SCHEMA = "seshi/dropped/1" as const;
@@ -47,6 +48,10 @@ export interface DroppedRecord extends RecordBase {
   policy: string;
   policy_hash: string;
   decision_model: string;
+  /** The redactor, when the drop came from its step failing. */
+  redactor_model?: string;
+  /** For `review_failed`: which step failed and how (F3.4, F3.8); never content. */
+  failure?: ReviewFailure;
 }
 
 export interface FailedRecord extends RecordBase {

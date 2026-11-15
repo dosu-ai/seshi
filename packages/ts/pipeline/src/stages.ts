@@ -23,6 +23,7 @@ import {
   type HealthCounts,
   type HealthOutcome,
   healthDay,
+  type ReviewFailure,
   type ReviewFinding,
   type Store,
 } from "@seshi/store";
@@ -81,6 +82,12 @@ export interface ReviewNote {
   decision_model: string;
   redactor_model?: string;
   findings: ReviewFinding[];
+  /** Findings that named no text of the envelope, so removed nothing (F3.8). */
+  unmatched?: number;
+  /** How many parts the envelope was split into for the models (F3.7). */
+  parts?: number;
+  /** For `skipped`: which step failed and how (F3.4). */
+  failure?: ReviewFailure;
 }
 
 export interface ReviewInput {
@@ -113,6 +120,9 @@ export type ReviewDecision =
       policy: string;
       policy_hash: string;
       decision_model: string;
+      redactor_model?: string;
+      /** For `review_failed`: which step failed and how. */
+      failure?: ReviewFailure;
     };
 
 export interface Reviewer {

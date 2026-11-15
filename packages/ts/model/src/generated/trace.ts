@@ -85,8 +85,8 @@ export interface TraceToolResultRecord {
   ok?: boolean;
   timestamp: string;
   id?: RecordId;
-  /** Set when the result's content was replaced because the call touched a sensitive file or printed a secret (F2). */
-  withheld?: "sensitive-file" | "secret-output";
+  /** Set when the result's content was replaced: the call touched a sensitive file or printed a secret (F2), or model review withheld it (`review`, F3.1). */
+  withheld?: "sensitive-file" | "secret-output" | "review";
   /** How long the call ran, when the source says. */
   duration_ms?: number;
 }

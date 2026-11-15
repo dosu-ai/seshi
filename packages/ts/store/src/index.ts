@@ -63,6 +63,7 @@ export {
   PENDING_SCHEMA,
   type PendingMarker,
   REVIEW_SCHEMA,
+  type ReviewFailure,
   type ReviewFinding,
   type ReviewRecord,
   readCheckpoint,
