@@ -37,6 +37,13 @@ export const serverSection = z
       .describe(
         "What this instance runs (X7.1): api (the HTTP API), worker (pollers, span assembly). Exactly one instance may run the worker.",
       ),
+    instance_id: z
+      .string()
+      .regex(/^[A-Za-z0-9_-]{1,64}$/, "letters, digits, _ and -, up to 64")
+      .optional()
+      .describe(
+        "This instance's stable name in source health shards and the worker heartbeat; the host name when unset.",
+      ),
   })
   .prefault({})
   .describe("The HTTP server.");

@@ -97,6 +97,7 @@ describe("precedence (F1.1)", () => {
     expect(config.records).toEqual({
       dropped_retention: 30 * 86_400_000,
       failed_retention: 30 * 86_400_000,
+      health_retention: 90 * 86_400_000,
     });
     expect(config.redaction).toEqual({ packs: [] });
     expect(config.review).toEqual({ policies: [] });
@@ -200,7 +201,11 @@ describe("env names (F1.2)", () => {
       },
     );
     expect(config.filter).toMatchObject({ min_chars: 100, enabled: false });
-    expect(config.records).toEqual({ dropped_retention: 7 * 86_400_000, failed_retention: 1000 });
+    expect(config.records).toEqual({
+      dropped_retention: 7 * 86_400_000,
+      failed_retention: 1000,
+      health_retention: 90 * 86_400_000,
+    });
     expect(config.limits.max_upload_bytes).toBe(1024 * 1024);
     expect(config.auth.admins).toEqual(["a@acme.com", "b@acme.com"]);
     expect(config.redaction.packs).toEqual(["/x.json"]);

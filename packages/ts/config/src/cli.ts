@@ -19,6 +19,24 @@ export const cliConfigSchema = z
     server: httpUrl
       .optional()
       .describe("The seshi server this CLI talks to (seshi login --server)."),
+    local: z
+      .strictObject({
+        config: z
+          .string()
+          .min(1)
+          .describe(
+            "A server config (seshi.toml) naming the bucket; ~ is the home folder. Its keys must be able to write the bucket.",
+          ),
+        owner: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("The owner id sessions are stored under; user, else the OS user, when unset."),
+      })
+      .optional()
+      .describe(
+        "Local mode (X3.5): run the pipeline in-process against a bucket you own, instead of talking to a server. Set server or local, not both.",
+      ),
     user: z
       .string()
       .min(1)
@@ -40,6 +58,15 @@ export const cliConfigSchema = z
       })
       .prefault({})
       .describe("Personal capture rules (F9.5)."),
+  })
+  .superRefine((config, ctx) => {
+    if (config.server !== undefined && config.local !== undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["local"],
+        message: "set server (a seshi server) or local (a bucket you own), not both",
+      });
+    }
   })
   .describe("seshi CLI configuration (~/.config/seshi/config.toml).");
 

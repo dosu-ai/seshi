@@ -8,6 +8,26 @@
       "type": "string",
       "format": "uri"
     },
+    "local": {
+      "description": "Local mode (X3.5): run the pipeline in-process against a bucket you own, instead of talking to a server. Set server or local, not both.",
+      "type": "object",
+      "properties": {
+        "config": {
+          "type": "string",
+          "minLength": 1,
+          "description": "A server config (seshi.toml) naming the bucket; ~ is the home folder. Its keys must be able to write the bucket."
+        },
+        "owner": {
+          "description": "The owner id sessions are stored under; user, else the OS user, when unset.",
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "config"
+      ],
+      "additionalProperties": false
+    },
     "user": {
       "description": "The username stated with the org key (X5.7); else git user.email, then the OS user.",
       "type": "string",

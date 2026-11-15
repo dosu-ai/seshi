@@ -98,7 +98,8 @@ branch that builds the feature gives them their effect.
 |---|---|---|
 | `listen` | `":7200"` | `host:port`, `:port` (every interface) or `port`; `[::1]:7200` for IPv6. Flag `--listen` |
 | `public_url` | | The URL clients reach the server at, behind any proxy. *Later* (sign-in) |
-| `roles` | `["api", "worker"]` | What this instance runs (X7.1). Flag `--roles`. The worker role has no jobs yet, so `api` is required |
+| `roles` | `["api", "worker"]` | What this instance runs (X7.1). Flag `--roles`. `api` serves the HTTP API; `worker` runs the background jobs (pollers, retention, the heartbeat). Run exactly one worker (X7.2); an instance without `api` answers `/healthz` only |
+| `instance_id` | the host name | This instance's stable name: its source health shard and the heartbeat's `host` (letters, digits, `_`, `-`, up to 64) |
 
 ### `[store]`
 
@@ -176,7 +177,8 @@ Past a limit the session is refused with 422 `too_large`.
 ### `[records]`
 
 `dropped_retention` and `failed_retention`, both `"30d"`: how long drop and failure records
-are kept (X6.4). *Later*.
+are kept (X6.4). `health_retention`, `"90d"`: how many days of source health counters are kept
+(X4.8). The worker's `retention` job prunes all three every six hours.
 
 ### `[redaction]`
 
@@ -197,8 +199,10 @@ The server refuses to start on a pattern that is not usable, naming the file.
 
 What the server ingests from on its own (F4–F6). Each has an `id` (lower-case letters and
 digits, words joined by single `-`; not `upload`, which uploads use), a `type`, `enabled` (`true`), `visibility`, and `filter`
-overrides. Each writes as its service account `svc:<id>` (X5.4). *Later*; the poller timings
-are provisional until their branches confirm them.
+overrides. Each writes as its service account `svc:<id>` (X5.4). The worker polls a source on
+its `interval` once a connector for its type is in the binary (`seshi sync status` says which
+are polled); the connectors come with their branches (10, 11), and the poller timings are
+provisional until then.
 
 | Type | Fields |
 |---|---|
@@ -215,7 +219,7 @@ Ids are unique, and an `s3` source may not read seshi's own bucket and prefix (F
 | `search.enabled` | `true` | *Later* (F10) |
 | `search.backend` | `"sqlite"` | |
 | `search.path` | | The index file on local disk |
-| `worker.heartbeat_interval` | `"1m"` | *Later* (X7.5) |
+| `worker.heartbeat_interval` | `"1m"` | How often the worker writes `worker/heartbeat.json` (X7.5); status calls a heartbeat older than three intervals stopped |
 | `capture.allow_retract` | `true` | Let the uploading machine retract a session (F9.7). *Later* |
 
 ## The CLI's config
@@ -236,4 +240,14 @@ enabled = true                           # SESHI_CAPTURE__ENABLED
 [[capture.paths]]                        # personal rules by folder, longest match wins (F9.5)
 path = "~/clients/acme"
 capture = false
+```
+
+**Local mode** (X3.5): instead of `server`, a person who owns a bucket can point the CLI at a
+server config (the same `seshi.toml` format, with `[store]` and its keys), and the CLI runs the
+pipeline in-process against that bucket. Set `server` or `local`, not both.
+
+```toml
+[local]
+config = "~/.config/seshi/seshi.toml"    # SESHI_LOCAL__CONFIG: names the bucket and its keys
+owner = "alice"                          # SESHI_LOCAL__OWNER: else user, else the OS user
 ```
