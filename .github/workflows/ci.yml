@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
+  # The process-mode scenarios (scenarios-process below), nightly or by hand.
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
 
 # Every job's GITHUB_TOKEN can read the repository and nothing more, unless the job grants
 # itself more: release, image and npm do, each only what it uses. Checkouts keep no
@@ -16,6 +20,9 @@ permissions:
 
 jobs:
   test:
+    # The nightly schedule runs only scenarios-process; pushes, pull requests and a run by hand
+    # run the rest (so do test-windows, docker, binaries and darwin-cross).
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     services:
       s3:
@@ -62,6 +69,7 @@ jobs:
   # stay on Linux (the test job). Line endings are kept as committed: transcripts, hook payloads
   # and the plugin's files are compared byte for byte.
   test-windows:
+    if: github.event_name != 'schedule'
     runs-on: windows-latest
     steps:
       - run: git config --global core.autocrlf false
@@ -75,6 +83,7 @@ jobs:
       - run: bun run test:laptop
 
   docker:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -107,6 +116,7 @@ jobs:
   # pack, capture install (hooks must name the binary's path), logout. Then the install script
   # installs it from a local copy of the release, as a person would.
   binaries:
+    if: github.event_name != 'schedule'
     strategy:
       fail-fast: false
       matrix:
@@ -173,6 +183,7 @@ jobs:
   # therefore re-signs both darwin binaries ad hoc (scripts/release/macho-sign.ts). These build
   # the darwin targets the way the release job does and check the result on a Mac.
   darwin-cross:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -207,6 +218,25 @@ jobs:
             codesign --verify --verbose "cross/$id/seshi"
           done
           cross/darwin-arm64/seshi --version
+
+  # The process-mode capture scenarios (docs/seshi/build/34-scenario-proc.md): a real seshi
+  # serve, uploaders, hooks and capture commands as separate processes, a TCP fault proxy,
+  # process kills and races. Slow and on free ports, so not in `bun run test`: nightly, or by hand.
+  scenarios-process:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+      - run: bun install --frozen-lockfile
+      - run: bun run scenarios:process
 
   # Every push to main with a Conventional Commit since the last release is a release
   # (release.config.js): the version is chosen from the commits, every target is
