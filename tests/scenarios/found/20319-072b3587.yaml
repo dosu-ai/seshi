@@ -1,0 +1,25 @@
+# Found by the scenario explorer (tests/tooling/scenario/explore.ts); see tests/scenarios/README.md.
+# seed: 20319 (bun run scenarios:explore --seed 20319 --runs 1 --max-steps 25)
+# original length: 25 steps; shrunk to 10 in 143 runs
+# failure:
+#   step 10 (settle max=40): once quiet, seshi doctor fails a check
+#     main: offsets: pre-redaction kept every length, yet 11910 bytes of the transcript map to 7940 bytes on the server
+#         the server holds 7940 bytes (21 records); 11910 bytes of the transcript sent
+#     main: records: the transcript's first 11910 bytes normalize to 31 records; the server counts 21
+#     faults fired:
+#       store delete owners/alice@acme.com/sessions/8953f8500d62223eeb070edfd3dd34d13ac0a023369df67a2fd371d6b69e3cb3/trace.c9bc8387b48faefe8582b8d25c8c4f1902c52c4354543b6986fcc284e17d0f7f.json.gz: store delete owners/*/sessions/*/trace.* #1 → fail
+#     capture log (last lines):
+#       2026-09-01T09:00:00.041Z uploader: claude-code:main: will retry: storage failed: injected store failure for owners/alice@acme.com/sessions/8953f8500d62223eeb070edfd3dd34d13ac0a023369df67a2fd371d6b69e3cb3/trace.c9bc8387b48faefe8582b8d25c8c4…
+name: found by seed 20319
+description: "A generated scenario (seed 20319) shrunk from 25 to 10 steps; the header says how it failed."
+steps:
+  - turns: { session: main, count: 2 }
+  - pass
+  - fault: { store: delete, key: "owners/*/sessions/*/trace.*" }
+  - capture: resend --all
+  - turns: { session: main, count: 2 }
+  - pass
+  - turns: { session: main, count: 2 }
+  - restart-server
+  - heal
+  - settle

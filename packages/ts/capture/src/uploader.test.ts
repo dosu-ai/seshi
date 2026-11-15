@@ -1452,7 +1452,7 @@ describe("resending stale sessions (X4.9)", () => {
       offset: 0,
       transcript: line("one") + line("two") + line("three"),
       rebuild: true,
-      idempotency_key: key,
+      idempotency_key: `${key}@${Buffer.byteLength(line("one") + line("two") + line("three"))}`,
     });
     expect(rebuilds()[0]?.replace).toBeUndefined();
     expect(server.rebuildSecrets).toEqual([session().secret]);
@@ -1538,7 +1538,8 @@ describe("resending stale sessions (X4.9)", () => {
     expect(session().rebuild?.key).toBe(key);
     later(HOUR);
     await uploader().pass();
-    expect(rebuilds().map((u) => u.idempotency_key)).toEqual([key, key]);
+    const end = Buffer.byteLength(line("one") + line("two"));
+    expect(rebuilds().map((u) => u.idempotency_key)).toEqual([`${key}@${end}`, `${key}@${end}`]);
     expect(session().rebuild).toBeUndefined();
 
     // Refused for good (another machine wrote it): not tried again, and chunks go on.
@@ -1558,6 +1559,29 @@ describe("resending stale sessions (X4.9)", () => {
     expect(server.uploads.at(-1)).toMatchObject({ transcript: line("three") });
   });
 
+  it("names the piece in a rebuild's key, so a retry of a grown log is not answered as the first", async () => {
+    // Found by the scenario explorer (33): a rebuild landed but answered 500 (a failed delete
+    // of a replaced object); the transcript grew before the retry, which went with the same key
+    // and was answered with the first attempt's result, leaving the offsets past what the
+    // server held.
+    writeFileSync(transcript(), line("one") + line("two"));
+    hooked();
+    await uploader().pass();
+    staleAt("2");
+    later(HOUR);
+    await uploader().pass();
+    const key = session().rebuild?.key;
+    server.failNext = [new StoreError("down")];
+    await uploader().pass();
+    appendFileSync(transcript(), line("three"));
+    later(HOUR);
+    await uploader().pass();
+    const ends = [line("one") + line("two"), line("one") + line("two") + line("three")];
+    expect(rebuilds().map((u) => u.idempotency_key)).toEqual(
+      ends.map((text) => `${key}@${Buffer.byteLength(text)}`),
+    );
+  });
+
   it("sends a session marked by hand whole with rebuild, even one the server holds nothing of", async () => {
     // A first envelope review dropped leaves nothing on the server (F3.4).
     writeFileSync(transcript(), line("one"));
@@ -1569,7 +1593,10 @@ describe("resending stale sessions (X4.9)", () => {
     });
     await uploader().pass();
     expect(rebuilds()).toHaveLength(1);
-    expect(rebuilds()[0]).toMatchObject({ offset: 0, idempotency_key: "k1" });
+    expect(rebuilds()[0]).toMatchObject({
+      offset: 0,
+      idempotency_key: `k1@${Buffer.byteLength(line("one"))}`,
+    });
     expect(session().rebuild).toBeUndefined();
     expect(session().rebuilt_for).toBeUndefined();
   });

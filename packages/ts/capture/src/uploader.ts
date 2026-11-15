@@ -1030,8 +1030,12 @@ export class Uploader {
           // No `shipped`: the server's own state decides whether a whole log extends the
           // session (04), and a client's prefix once let a fresh tail be judged by the session
           // filter.
+          // A rebuild's key is kept across retries, so a retry after a lost answer is answered
+          // with what the first attempt stored. It names the piece's end too: a retry of a log
+          // that grew meanwhile is another write, and replaying the first answer for it would
+          // leave this machine's offsets past what the server holds (33).
           ...(rebuild
-            ? { rebuild: true, idempotency_key: rebuild.key }
+            ? { rebuild: true, idempotency_key: `${rebuild.key}@${piece.end}` }
             : replacing
               ? { replace: true }
               : {}),
