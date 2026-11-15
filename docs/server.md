@@ -134,7 +134,7 @@ revokes the org key and makes a new one. After that, admins manage tokens over t
 
 | Credential | Who holds it | What it can do |
 |---|---|---|
-| Org key (no IdP) | Every member's CLI and uploader, with `X-Seshi-User: <username>` | Write as that username (lowercased; owner basis `claimed`); read and search org-wide. No deletes, and never replaces a session whose owner was verified |
+| Org key (no IdP) | Every member's CLI and uploader, with `X-Seshi-User: <username>` | Write as that username (lowercased; owner basis `claimed`); read and search org-wide. No deletes; never writes to, replaces or changes the visibility of a session whose owner was verified |
 | IdP ID token | The CLI, briefly | Nothing but `POST /v1/auth/exchange` |
 | Session token | The CLI, after sign-in | Read, search; delete the person's own sessions within 10 minutes of being issued. One hour; signed, not stored. An admin's (IdP group `admin_group` or an email in `admins`) can do everything |
 | Device token | The uploader on a laptop | Write the person's own sessions. 90 days; signing in again from the machine renews it |

@@ -235,8 +235,9 @@ paths:
         "403":
           description: |
             `forbidden`: the credential cannot write (`sessions:write`), or a `replace` by
-            someone other than the session's original writer or an admin (an org-key caller
-            never replaces a session whose owner was verified). Nothing is stored.
+            someone other than the session's original writer or an admin. An org-key caller
+            never writes to, or replaces, a session whose owner was verified. Nothing is
+            stored.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -317,7 +318,8 @@ paths:
       operationId: setVisibility
       description: |
         The session's owner or an admin changes its visibility (X5.10), with a credential
-        that can read (not a write-only device token). A change appends a
+        that can read (not a write-only device token). An org-key caller cannot change a
+        session whose owner was verified (X5.12). A change appends a
         `visibility_changed` entry to the change feed; setting what it already is writes
         nothing.
       requestBody:

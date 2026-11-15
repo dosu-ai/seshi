@@ -575,7 +575,11 @@ describe("identity and access (X5)", () => {
 
     const patch = (as: object, visibility: unknown, path = "/v1/sessions/claude-code/s1") =>
       call("PATCH", path, { ...as, body: { visibility } });
-    expect((await patch(alice, "owner")).status).toBe(200);
+    // The device wrote it, so its owner is verified: the org key may not change it, an admin may.
+    expect((await patch(alice, "owner")).status).toBe(403);
+    expect((await patch(admin, "owner", "/v1/sessions/claude-code/s1?owner=alice")).status).toBe(
+      200,
+    );
     expect((await call("GET", "/v1/sessions/claude-code/s1?owner=alice", alice)).status).toBe(200);
     expect(
       (

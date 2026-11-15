@@ -117,6 +117,15 @@ describe("visibility changes and scopes", () => {
     expect(() => requireVisibilityChange(device, "alice")).toThrow("sessions:read");
   });
 
+  it("keep the org key off a session whose owner was verified (X5.12)", () => {
+    expect(() => requireVisibilityChange(orgKey, "alice", undefined, "claimed")).not.toThrow();
+    expect(() => requireVisibilityChange(orgKey, "alice", undefined, "verified")).toThrow(
+      "owner was verified",
+    );
+    expect(() => requireVisibilityChange(alice, "alice", undefined, "verified")).not.toThrow();
+    expect(() => requireVisibilityChange(admin, "alice", undefined, "verified")).not.toThrow();
+  });
+
   it("say which scope was missing", () => {
     expect(() => requireScope(reader, "sessions:write")).toThrow(
       "it needs the sessions:write scope",

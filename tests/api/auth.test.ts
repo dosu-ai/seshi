@@ -359,6 +359,42 @@ describe("replace with real roles (X4.6)", () => {
     expect((await upload(device, "s1", rewritten)).status).toBe(201);
   });
 
+  it("keeps an org-key caller off a verified session: no new chunks, no visibility change (X5.12)", async () => {
+    const { alice, admin, mint } = await setUp();
+    const device = { token: await mint({ kind: "device", owner: "alice" }) };
+    await upload(device, "s1", { visibility: "owner" });
+    // Extending it would leave a session marked verified holding what anyone with the key sent.
+    const extended = await call("POST", "/v1/sessions", {
+      ...alice,
+      body: {
+        agent: "claude-code",
+        session_id: "s1",
+        transcript: `${CLAUDE("s1").trim()}\n${JSON.stringify({ type: "user", uuid: "u9", timestamp: "2026-09-01T00:00:09.000Z", sessionId: "sess1", message: { role: "user", content: "injected" } })}\n`,
+      },
+    });
+    expect(extended.status).toBe(403);
+    expect(extended.body.error.message).toContain("whose owner was verified");
+    // Opening it to the org would show it to members who hold no org key.
+    const patched = await call("PATCH", "/v1/sessions/claude-code/s1?owner=alice", {
+      ...alice,
+      body: { visibility: "org" },
+    });
+    expect(patched.status).toBe(403);
+    expect(patched.body.error.message).toContain("whose owner was verified");
+    expect(
+      (await readMetadata(store, "alice", archiveId("alice", "claude-code", "s1")))?.visibility,
+    ).toBe("owner");
+    // An admin still can.
+    expect(
+      (
+        await call("PATCH", "/v1/sessions/claude-code/s1?owner=alice", {
+          ...admin,
+          body: { visibility: "org" },
+        })
+      ).status,
+    ).toBe(200);
+  });
+
   it("lets an admin token replace its own sessions, and the original writer replace theirs", async () => {
     const { admin, bob } = await setUp();
     await upload(bob, "s1");

@@ -810,6 +810,16 @@ describe("identity and visibility (X5)", () => {
     expect((await session())?.head).toBeDefined();
   });
 
+  it("never lets a claimed caller add to a session whose owner was verified (X5.12)", async () => {
+    const p = pipeline();
+    await submit(p, upload(HEAD, 0, {}, device));
+    const longer = HEAD + user("more") + reply("yes");
+    await expect(submit(p, upload(longer, 0, {}, orgKey))).rejects.toBeInstanceOf(Forbidden);
+    expect((await session())?.traces).toHaveLength(1);
+    // The person's own token goes on adding to it.
+    expect((await submit(p, upload(longer, 0, {}, device))).status).toBe("stored");
+  });
+
   it("lets an org-key caller replace a session the org key wrote under that username", async () => {
     const p = pipeline();
     await submit(p, upload(HEAD, 0, {}, orgKey));

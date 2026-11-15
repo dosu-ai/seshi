@@ -8,9 +8,11 @@
  *   issued. A static token deletes its owner's. The org key cannot delete (it has no
  *   `sessions:delete`): anyone holding it could claim to be the owner.
  * - Change visibility: the owner or an admin, with a credential that can read (so not a
- *   write-only device token). */
+ *   write-only device token). An org-key caller (owner basis `claimed`) never changes a session
+ *   whose owner was verified: anyone holding the key can state that username, and opening a
+ *   person's `owner` session to the org would show it to members who hold no org key (X5.12). */
 
-import { Forbidden, type Visibility } from "@seshi/model";
+import { Forbidden, type OwnerBasis, type Visibility } from "@seshi/model";
 import { OwnerAliases } from "./owner";
 import type { Principal } from "./principal";
 import type { Scope } from "./scopes";
@@ -79,15 +81,26 @@ export function requireDelete(
   }
 }
 
-/** Throws `Forbidden` unless the principal may change who reads a session of `owner`
- * (X5.10). */
+/** Throws `Forbidden` unless the principal may change who reads a session of `owner`, whose
+ * owner was established as `basis` (X5.10). */
 export function requireVisibilityChange(
   principal: Principal,
   owner: string,
   aliases: OwnerAliases = NO_ALIASES,
+  basis?: OwnerBasis,
 ): void {
   requireScope(principal, "sessions:read");
   if (principal.role !== "admin" && !isOwnSession(principal, owner, aliases)) {
     throw new Forbidden("only the session's owner or an admin may change its visibility");
+  }
+  if (
+    principal.role !== "admin" &&
+    principal.owner_basis === "claimed" &&
+    basis !== undefined &&
+    basis !== "claimed"
+  ) {
+    throw new Forbidden(
+      "the org key cannot change a session whose owner was verified: sign in, or ask an admin",
+    );
   }
 }

@@ -608,8 +608,13 @@ export function createApp(options: AppOptions) {
     if (visibility === undefined) {
       throw new HttpError(400, "missing_field", "visibility is required");
     }
-    const { folder } = await readable(principal, ownerOf(url, principal), agent, sessionId);
-    requireVisibilityChange(principal, folder, aliases);
+    const { folder, metadata: current } = await readable(
+      principal,
+      ownerOf(url, principal),
+      agent,
+      sessionId,
+    );
+    requireVisibilityChange(principal, folder, aliases, current.owner_basis);
     let metadata: SessionMetadata | null;
     try {
       metadata = await setVisibility({

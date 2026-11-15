@@ -471,6 +471,19 @@ export class Pipeline {
       }
       const applied = session?.applied?.find((a) => a.idempotency_key === envelope.idempotency_key);
       if (session && applied) return { result: replayed(applied, session), replay: true };
+      // A caller whose owner is only claimed (the org key, X5.12) writes new sessions under any
+      // username, but never adds to one whose owner was verified: the session would still say
+      // `verified` while holding what anyone with the key sent (X5.5).
+      if (
+        session &&
+        !auth.admin &&
+        auth.owner_basis === "claimed" &&
+        session.owner_basis !== "claimed"
+      ) {
+        throw new Forbidden(
+          "an org-key caller cannot write to a session whose owner was verified; that person's own token can",
+        );
+      }
       try {
         return { result: await body({ envelope, auth, owner, archive, session }) };
       } catch (err) {
