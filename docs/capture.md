@@ -256,6 +256,38 @@ It changes nothing (no uploads, state or spool entries) and exits 8 when a check
 never shows a stub, so against a server a dropped first upload is checked from this machine's
 side only; local mode reads the bucket itself.
 
+### Exploring sessions in a browser
+
+```sh
+seshi explore                     # opens http://127.0.0.1:<port>/?token=… in your browser
+seshi explore --no-open --since 30d --port 8765
+```
+
+`seshi explore` is the doctor with a page: the same evidence and checks, for every session this
+machine saw in the past 7 days (`--since` widens it). The list shows each session's capture glyph
+(`◉`/`⏸`) and reason, its last answer and its worst check (as a word and an icon), with filters
+and a refresh; the checks run in the background, a session at a time. Opening a session shows:
+
+- the header: agent, id, folder, `Session Capture ◉/⏸` with the reason, visibility and where it
+  is stored;
+- the checks, failures first, with their hints;
+- the pipeline: transcript bytes → records → redacted → sent → stored, with the gaps called out
+  (the review-dropped prefix, a pause's stop, a filtered session, withheld tool results);
+- **Records**: the transcript re-normalized by the current adapter and redacted with this
+  machine's rules on the left (a redaction shows as the `[redacted:<rule>]` marker), what the
+  server stored on the right, aligned by record index, with mismatches marked, the end of the
+  server's log, a pause's stop and the dropped prefix drawn as dividers, and long records folded;
+- **Timeline**: spool entries, uploader log lines, change entries, review decisions, toggles,
+  pauses, retractions and rebuilds, by time;
+- **Raw**: the evidence as JSON.
+
+It is read-only: no uploads, no state writes, no spool entries, and only GETs to the server. It
+listens on 127.0.0.1 only; every request needs the token in the address it prints (the page takes
+it out of the address bar, so reloading needs the printed address again), requests naming another
+host are refused, and the page loads nothing from the network. The transcript is never shown raw,
+the retraction secret never leaves the machine (only its hash), and stored records are shown as
+the server stored them.
+
 ## Files
 
 | Where | What |
