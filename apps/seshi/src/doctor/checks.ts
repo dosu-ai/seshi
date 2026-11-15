@@ -682,6 +682,19 @@ function backfilledSincePrefix(ev: SessionEvidence): boolean {
   return backfilled;
 }
 
+/** The ids in the redaction markers (`[redacted:<id>]`) of some records. */
+function markersIn(records: readonly NormalizedRecord[]): Set<string> {
+  const out = new Set<string>();
+  for (const record of records) {
+    for (const match of JSON.stringify(record).matchAll(
+      /\[redacted:([a-z0-9]+(?:-[a-z0-9]+)*)\]/g,
+    )) {
+      out.add(match[1] as string);
+    }
+  }
+  return out;
+}
+
 export function prefixCheck(
   ev: SessionEvidence,
   deps: DoctorDeps,
@@ -726,6 +739,25 @@ export function prefixCheck(
       "skip",
       "a redaction backfill rewrote the stored records after this prefix was recorded; the prefix keeps the earlier rules' hash, so it cannot be compared",
       { hint: "the next whole upload is a 409 conflict, answered with replace" },
+    );
+  }
+  // A rule set that dropped or renamed a rule: a backfill that found nothing more to redact
+  // records the new rule set without rewriting (backfill.ts), and an earlier rule's markers stay
+  // as they are (ruleset.ts), so the stored records keep markers this machine's rules never
+  // write, and the hashes cannot agree (33).
+  const foreign =
+    hash === n.prefix_sha256
+      ? []
+      : [...markersIn(ev.server.traces.flatMap((t) => t.records ?? []))].filter(
+          (marker) => !markersIn(deps.redaction.records(local.records ?? [])).has(marker),
+        );
+  if (foreign.length > 0) {
+    return result(
+      id,
+      title,
+      "skip",
+      `the stored records keep ${foreign.map((m) => `[redacted:${m}]`).join(", ")}, which this machine's rules do not write (an earlier rule set's markers); the hashes cannot agree`,
+      { hint: "a whole upload (seshi capture resend) stores it under the current rules" },
     );
   }
   if (hash !== n.prefix_sha256 && replaceDropped(ev)) {

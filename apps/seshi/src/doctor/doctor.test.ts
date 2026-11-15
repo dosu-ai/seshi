@@ -768,6 +768,29 @@ describe("records and the prefix hash", () => {
     expectStatus(prefixCheck(rewritten, deps()), "warn");
   });
 
+  it("skip the prefix when the stored records keep markers of a rule this machine no longer has", () => {
+    // Found by the scenario explorer (33): a rule was removed (or renamed); the backfill found
+    // nothing more to redact and recorded the new rule set without rewriting, so the stored
+    // records keep the old rule's markers, which this machine's rules cannot reproduce.
+    const marked = (marker: string) =>
+      evidence((ev) => {
+        ev.server.metadata = metadata({
+          normalized: { bytes: SIZE, records: 4, prefix_sha256: "e".repeat(64), hash_state: "x" },
+        });
+        const trace = ev.server.traces[0] as NonNullable<typeof ev.server.traces>[number];
+        trace.records = [
+          RECORDS[0] as NormalizedRecord,
+          { role: "user", content: marker } as NormalizedRecord,
+          ...RECORDS.slice(2, 3),
+        ];
+      });
+    const check = prefixCheck(marked("[redacted:old-rule]"), deps());
+    expectStatus(check, "skip");
+    expect(check.summary).toContain("[redacted:old-rule]");
+    // No foreign marker: a mismatch is still a fault.
+    expectStatus(prefixCheck(marked("first"), deps()), "fail");
+  });
+
   it("skip records and prefix when no answer ever came for what was sent", () => {
     // Found by the scenario explorer (33): the first upload was stored but its answer lost, and
     // a pause stopped the session; pre-redaction had shortened a secret, so mapping the
