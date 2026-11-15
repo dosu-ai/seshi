@@ -503,17 +503,24 @@ describe("the rules apply to the uploader too (F9.3)", () => {
     };
     const a = repoAt("a");
     const b = repoAt("b", "capture = false\n");
+    // Each entry spooled a millisecond after the last, so the spool reads them in the order
+    // written (two in one millisecond are ordered by a random suffix).
+    let spooled = Date.parse("2026-11-01T00:00:00Z");
     const entry = (kind: "capture" | "seen", id: string, cwd: string) =>
-      appendSpool(paths, {
-        v: 1,
-        kind,
-        at: clock.toISOString(),
-        agent: "fake",
-        session_id: id,
-        transcript_path: transcript(id),
-        cwd,
-        ...(kind === "capture" ? { event: "Stop" } : {}),
-      } as Parameters<typeof appendSpool>[1]);
+      appendSpool(
+        paths,
+        {
+          v: 1,
+          kind,
+          at: clock.toISOString(),
+          agent: "fake",
+          session_id: id,
+          transcript_path: transcript(id),
+          cwd,
+          ...(kind === "capture" ? { event: "Stop" } : {}),
+        } as Parameters<typeof appendSpool>[1],
+        new Date(spooled++),
+      );
 
     // Started in A and uploaded, then it works in B: the uploader stops sending its new bytes.
     writeFileSync(transcript("s1"), line("one") + line("two"));
