@@ -223,7 +223,9 @@
     "packages/ts/sources": {
       "name": "@seshi/sources",
       "dependencies": {
+        "@seshi/auth": "workspace:*",
         "@seshi/config": "workspace:*",
+        "@seshi/formats": "workspace:*",
         "@seshi/kit": "workspace:*",
         "@seshi/model": "workspace:*",
         "@seshi/store": "workspace:*",
