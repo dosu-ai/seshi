@@ -20,6 +20,7 @@ import {
   type CallerKind,
   Forbidden,
   isRenderFormat,
+  MAX_IDEMPOTENCY_KEY_LENGTH,
   OffsetMismatch,
   type RawFormat,
   RENDER_FORMATS,
@@ -334,6 +335,13 @@ export function createApp(options: AppOptions) {
       request.headers.get("idempotency-key") ?? str(body, "idempotency_key") ?? undefined;
     if (idempotencyKey === "") {
       throw new HttpError(400, "bad_field", "an idempotency key must not be empty");
+    }
+    if (idempotencyKey !== undefined && idempotencyKey.length > MAX_IDEMPOTENCY_KEY_LENGTH) {
+      throw new HttpError(
+        400,
+        "bad_field",
+        `an idempotency key must be at most ${MAX_IDEMPOTENCY_KEY_LENGTH} characters`,
+      );
     }
     return stored(db, {
       agent,

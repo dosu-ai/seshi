@@ -128,7 +128,7 @@
       "description": "One envelope applied to the session, and what it answered.",
       "type": "object",
       "properties": {
-        "idempotency_key": { "type": "string", "minLength": 1 },
+        "idempotency_key": { "type": "string", "minLength": 1, "maxLength": 2048 },
         "at": { "$ref": "common.schema.json#/$defs/Timestamp" },
         "status": {
           "description": "`stored` (a new trace), `duplicate` (that trace was already stored), `unchanged` (nothing new in it) or `dropped` (model review dropped it).",

@@ -73,6 +73,11 @@ export interface ShippedState {
   bytes_total: number;
 }
 
+/** The longest idempotency key an envelope may carry (X4.7), in characters. A session keeps its
+ * last keys in `metadata.json`, which every write reads, so a key is bounded; an S3 poller's
+ * bucket, object key (up to 1024 bytes) and ETag fit. */
+export const MAX_IDEMPOTENCY_KEY_LENGTH = 2048;
+
 /** `prefix_sha256` of no records: what a session the server holds nothing of answers. */
 export const EMPTY_PREFIX_SHA256 =
   "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945" as const;

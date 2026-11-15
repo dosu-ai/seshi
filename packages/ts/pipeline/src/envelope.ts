@@ -9,6 +9,7 @@ import {
   ENVELOPE_SCHEMA,
   type Envelope,
   type LogPayload,
+  MAX_IDEMPOTENCY_KEY_LENGTH,
   type OwnerBasis,
   SessionRejected,
   type SessionUpload,
@@ -89,7 +90,9 @@ export function checkEnvelope(envelope: Envelope): void {
   }
   nonEmpty(envelope.format, "format");
   nonEmpty(envelope.session_key, "session_key");
-  nonEmpty(envelope.idempotency_key, "idempotency_key");
+  if (nonEmpty(envelope.idempotency_key, "idempotency_key").length > MAX_IDEMPOTENCY_KEY_LENGTH) {
+    refuse(`idempotency_key must be at most ${MAX_IDEMPOTENCY_KEY_LENGTH} characters`);
+  }
   nonEmpty(envelope.received_at, "received_at");
   const owner = nonEmpty(envelope.owner, "owner");
   try {

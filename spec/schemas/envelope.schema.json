@@ -30,7 +30,8 @@
     "idempotency_key": {
       "description": "Identifies the envelope across resends (X4.7): a resend with the same key gets the same answer and is processed once. Session, byte offset and a digest of the text for a hook or upload; bucket, key and ETag for S3; trace and span ids for OTLP and Datadog; agent and run id for Cursor Cloud.",
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "maxLength": 2048
     },
     "provenance": { "$ref": "common.schema.json#/$defs/SourceLocation" },
     "received_at": { "$ref": "common.schema.json#/$defs/Timestamp" },

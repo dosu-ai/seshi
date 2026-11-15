@@ -615,6 +615,11 @@ describe("failures (X4.8)", () => {
         payload: { kind: "log", encoding: "jsonl", text: HEAD, offset: -1 },
       }),
     ).rejects.toMatchObject({ code: "bad_envelope" });
+    // An idempotency key is kept in metadata.json, so it is bounded.
+    await expect(
+      pipeline().submit({ ...upload(HEAD), idempotency_key: "k".repeat(2049) }),
+    ).rejects.toMatchObject({ code: "bad_envelope" });
+    expect(objects()).toEqual([]);
   });
 
   it("counts into the store's health shards", async () => {

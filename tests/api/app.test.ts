@@ -472,6 +472,9 @@ describe("sessions", () => {
     expect((await viaBody.json()).status).toBe("unchanged");
     const empty = await post(CLAUDE, { "idempotency-key": "" });
     expect(empty.status).toBe(400);
+    // Kept in metadata.json with the session's last answers, so a key is bounded.
+    const long = await post(CLAUDE, {}, { idempotency_key: "k".repeat(2049) });
+    expect(long.status).toBe(400);
   });
 
   describe("chunks", () => {

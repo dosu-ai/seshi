@@ -114,7 +114,7 @@ paths:
           in: header
           required: false
           description: Identifies this upload across resends (X4.7); wins over `idempotency_key`.
-          schema: { type: string, minLength: 1 }
+          schema: { type: string, minLength: 1, maxLength: 2048 }
       requestBody:
         required: true
         content:
@@ -484,6 +484,7 @@ components:
         idempotency_key:
           type: string
           minLength: 1
+          maxLength: 2048
           description: Identifies this upload across resends; the `Idempotency-Key` header wins.
       example:
         agent: claude-code
