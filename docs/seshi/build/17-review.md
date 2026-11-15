@@ -374,12 +374,6 @@ Run at `seshi-17-review` after the fixes above:
   `sessions show --trace` "adds its head trace"), inherited from sessiondb main; the trace
   carries `continuation`. A joined export is a feature, not a defect against any decision.
 
-- **ops, low** (split vote): F8.4's "Windows in the CI test matrix" is read as Windows
-  binaries with a smoke test and `install.ps1` under both PowerShells (15-distribution
-  deviation 14); `bun run test` runs on Linux only. Running the full suite on Windows needs
-  either sign-off on the narrowed reading or work to make the suite pass there (shell-script
-  fixtures, POSIX paths, file modes), which cannot be checked without a Windows host. Left for
-  a decision.
 - **background, low** (split vote, judged a documented deviation): an S3 chunk at a stale
   manifest offset writes an `offset_mismatch` failure record before the poller resends the
   object whole, and `workers status` / `sync status` then warn about it. 11's deviation 10
@@ -387,25 +381,6 @@ Run at `seshi-17-review` after the fixes above:
   permanent failure. The stale manifest is somewhat less rare than the deviation says (the
   checkpoint is saved every 25 objects and not after a transient error), but no data is lost
   or processed twice; not recording it would carve an exception into X6.4.
-
-- **client, high** (the behaviour of the pause finding above): making a pause keep what is
-  written during it out of the store. The decisions say only "seshi capture pause 2h for
-  everything" (F9.5) and decide capture per session when it is judged (turning a session back
-  on uploads all of it again, F9.7), so excluding a span of time is a semantics they do not
-  settle: turn every session seen or started during the pause off (which, by F9.7, also
-  retracts what a session uploaded before the pause), or skip the paused bytes (the server log
-  is contiguous, and a whole resend after a 409, a moved transcript or a replace would send
-  them anyway), or keep "defer". Left for that decision; the CLI and docs now describe what
-  a pause does.
-- **client, low** (split vote, judged the agreed behaviour): the uploader counts a pass whose
-  uploads or retractions all failed (or wait in backoff) as idle, so after 5 minutes of an
-  outage it exits with work queued, and the last turns or a pending retraction wait for the
-  next hook on the machine. F9.1 agrees an uploader that "exits after a few idle minutes" with
-  `capture install --service` as the opt-in for uploads between agent sessions, F9.7 says "if
-  the uploader is not running, the retraction waits in the spool", and 14 records the idle stop
-  and backoff; nothing is lost (offsets, the pending retraction and the secret stay in the
-  state) and the status line keeps saying "N queued". Lingering while retries are pending needs
-  a cap value and changes that choice. Left for a decision.
 
 - **coverage, medium**: the Claude desktop mod (F9.4–F9.6: the Session Capture chip, its
   toggle and `/session-capture`, shipped in the plugin) is not built. It is a mod for the
