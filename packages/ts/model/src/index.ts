@@ -22,7 +22,7 @@ export type {
   StoreSessionResult,
   Upload,
 } from "./api";
-export { EMPTY_PREFIX_SHA256, MAX_IDEMPOTENCY_KEY_LENGTH } from "./api";
+export { EMPTY_PREFIX_SHA256, isStub, MAX_IDEMPOTENCY_KEY_LENGTH } from "./api";
 export type { Authorization, Authorizer } from "./authz";
 export { canonicalText, stripNul } from "./canonical";
 export {

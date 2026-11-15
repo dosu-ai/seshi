@@ -2,6 +2,7 @@
  * providers, a local server imitating the provider APIs, and a temporary folder store. No test
  * reaches a real API. */
 
+import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { createApp } from "@seshi/api";
@@ -117,13 +118,13 @@ describe("model review in the pipeline", () => {
     expect(s.requests).toHaveLength(1);
   });
 
-  it("drops: nothing in the session, a drop record with the policy hash (X6.4)", async () => {
+  it("drops: nothing in the session but a stub, a drop record with the policy hash (X6.4)", async () => {
     const s = server();
     const { ingest, store, dir } = await boot(anthropic(s));
-    const answer = await ingest(
-      META + user("here is the CUSTOMER TABLE: ana, 41 rua") + reply("ok"),
-    );
-    expect(answer).toMatchObject({ status: "dropped", bytes_total: 0 });
+    const dumped = META + user("here is the CUSTOMER TABLE: ana, 41 rua") + reply("ok");
+    const answer = await ingest(dumped);
+    // The log moves past the drop (F3.4): the stub holds where it ends.
+    expect(answer).toMatchObject({ status: "dropped", bytes_total: Buffer.byteLength(dumped) });
     const { records } = await listRecords(store, "dropped", "upload");
     expect(records).toHaveLength(1);
     expect(records[0]?.record).toMatchObject({
@@ -133,7 +134,10 @@ describe("model review in the pipeline", () => {
       session_key: "s1",
     });
     expect(bucketText(dir)).not.toContain("CUSTOMER TABLE");
-    expect(await listReviews(store, "alice", "0".repeat(64))).toEqual([]);
+    expect(bucketText(dir)).not.toContain("acme-checkout");
+    const archive = archiveId("alice", "trajectory", "s1");
+    expect(await readMetadata(store, "alice", archive)).toMatchObject({ traces: [] });
+    expect(await listReviews(store, "alice", archive)).toEqual([]);
   });
 
   it("drops with review_failed when the provider keeps failing and on_failure = drop (F3.4)", async () => {
@@ -359,7 +363,7 @@ describe("model review of assembled OTLP sessions (08 with 09)", () => {
   const ns = (at: Date) => (BigInt(at.getTime()) * 1_000_000n).toString();
 
   /** One GenAI chat span in OTLP's JSON mapping. */
-  const request = (input: string, output: string, at: Date) => ({
+  const request = (input: string, output: string, at: Date, spanId = "00000000000000a1") => ({
     resourceSpans: [
       {
         scopeSpans: [
@@ -367,7 +371,7 @@ describe("model review of assembled OTLP sessions (08 with 09)", () => {
             spans: [
               {
                 traceId: "cd".repeat(16),
-                spanId: "00000000000000a1",
+                spanId,
                 name: "chat m",
                 startTimeUnixNano: ns(at),
                 endTimeUnixNano: ns(new Date(at.getTime() + 1000)),
@@ -410,12 +414,12 @@ describe("model review of assembled OTLP sessions (08 with 09)", () => {
     );
     const token = ((await issued.json()) as { token: string }).token;
     /** Send one chat span, wait out the quiet period, and run the assembler. */
-    const publish = async (input: string, output: string) => {
+    const publish = async (input: string, output: string, spanId?: string) => {
       const response = await app.fetch(
         new Request("http://seshi.test/otlp/v1/traces", {
           method: "POST",
           headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-          body: JSON.stringify(request(input, output, clock)),
+          body: JSON.stringify(request(input, output, clock, spanId)),
         }),
       );
       expect(response.status).toBe(200);
@@ -454,7 +458,10 @@ describe("model review of assembled OTLP sessions (08 with 09)", () => {
     expect(await publish("here is the CUSTOMER TABLE: ana, 41 rua", "ok")).toMatchObject({
       published: 1,
     });
-    expect(await readMetadata(store, OWNER, archive)).toBeNull();
+    // A stub (F3.4): where the assembled session ends, no trace.
+    const stub = await readMetadata(store, OWNER, archive);
+    expect(stub).toMatchObject({ status: "stored", traces: [], normalized: { records: 3 } });
+    expect(stub?.head).toBeUndefined();
     const { records } = await listRecords(store, "dropped", "console");
     expect(records).toHaveLength(1);
     expect(records[0]?.record).toMatchObject({
@@ -463,5 +470,214 @@ describe("model review of assembled OTLP sessions (08 with 09)", () => {
       source_kind: "otlp",
       session_key: CONVERSATION,
     });
+
+    // The next call extends the stub: the assembler publishes the whole session again, and only
+    // what is new is reviewed and stored.
+    const calls = s.requests.length;
+    expect(await publish("now fix the build", "fixed", "00000000000000a2")).toMatchObject({
+      published: 1,
+    });
+    expect(s.requests.length).toBe(calls + 1);
+    const sent = JSON.stringify(s.requests.at(-1)?.body);
+    expect(sent).toContain("now fix the build");
+    expect(sent).not.toContain("CUSTOMER TABLE");
+    const metadata = await readMetadata(store, OWNER, archive);
+    expect(metadata?.traces).toEqual([
+      expect.objectContaining({ continuation: expect.objectContaining({ from_record: 3 }) }),
+    ]);
+    const trace = await getTrace(store, OWNER, archive, metadata?.head as string);
+    expect(JSON.stringify(trace?.records)).toContain("now fix the build");
+    expect(JSON.stringify(trace)).not.toContain("CUSTOMER TABLE");
+  });
+});
+
+describe("a dropped first envelope leaves a stub (F3.4, revised 15 Nov 2026)", () => {
+  const BOB_TOKEN = "bob-token-0123456789";
+  const DUMPED = META + user("here is the CUSTOMER TABLE: ana, 41 rua") + reply("ok");
+  const NEXT = user("now fix the build") + reply("fixed it");
+  const bytes = (text: string) => Buffer.byteLength(text);
+  const RETRACT_SECRET = "machine-secret-0123456789";
+  const retract_hash = createHash("sha256").update(RETRACT_SECRET).digest("hex");
+
+  /** An instance with alice's and bob's tokens and a review policy, and its HTTP API. */
+  async function bootStub(policy: string) {
+    const booted = await bootInstance(
+      `[filter]\nenabled = false\n[auth.tokens]\nalice = "${ALICE_TOKEN}"\nbob = "${BOB_TOKEN}"\n[[review.policies]]\n${policy}`,
+    );
+    cleanups.push(() => booted.cleanup());
+    const db = booted.instance.localSessions("alice");
+    const app = createApp(booted.instance);
+    const call = async (
+      method: string,
+      path: string,
+      options: { token?: string; body?: unknown; headers?: Record<string, string> } = {},
+    ) => {
+      const response = await app.fetch(
+        new Request(`http://seshi.test${path}`, {
+          method,
+          headers: {
+            authorization: `Bearer ${options.token ?? ALICE_TOKEN}`,
+            ...(options.body !== undefined ? { "content-type": "application/json" } : {}),
+            ...options.headers,
+          },
+          ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
+        }),
+      );
+      const text = await response.text();
+      // biome-ignore lint/suspicious/noExplicitAny: a test reads whatever the route answered
+      return { status: response.status, body: (text ? JSON.parse(text) : null) as any };
+    };
+    const upload = (transcript: string, offset = 0) =>
+      call("POST", "/v1/sessions", {
+        body: { agent: "trajectory", session_id: "s1", transcript, offset, retract_hash },
+      });
+    return { ...booted, db, call, upload };
+  }
+
+  /** What the provider was sent from request `from` on, as text. */
+  const sent = (s: FakeServer, from = 0) =>
+    s.requests
+      .slice(from)
+      .map((r) => JSON.stringify(r.body))
+      .join("\n");
+
+  it("moves the upload past a drop, reviews the next append alone, and never the dropped part again", async () => {
+    const s = server();
+    const { upload, dir } = await bootStub(anthropic(s));
+    const dropped = await upload(DUMPED);
+    expect(dropped).toMatchObject({
+      status: 200,
+      body: { status: "dropped", records_total: 3, bytes_total: bytes(DUMPED) },
+    });
+    expect(s.requests).toHaveLength(1);
+    expect(bucketText(dir)).not.toContain("CUSTOMER TABLE");
+    expect(bucketText(dir)).not.toContain("acme-checkout");
+
+    // The uploader's next piece is a chunk from the server's offset.
+    const next = await upload(NEXT, dropped.body.bytes_total);
+    expect(next).toMatchObject({ status: 201, body: { status: "stored", records_total: 5 } });
+    expect(s.requests).toHaveLength(2);
+    expect(sent(s, 1)).toContain("now fix the build");
+    expect(sent(s, 1)).not.toContain("CUSTOMER TABLE");
+
+    // A whole-log resend from 0 (after a 409, a moved transcript): only what is past what the
+    // session holds is reviewed and stored.
+    const grown = DUMPED + NEXT + user("and the tests") + reply("green");
+    const resent = await upload(grown);
+    expect(resent).toMatchObject({ status: 201, body: { status: "stored", records_total: 7 } });
+    expect(s.requests).toHaveLength(3);
+    expect(sent(s, 2)).toContain("and the tests");
+    expect(sent(s, 2)).not.toContain("CUSTOMER TABLE");
+    expect(sent(s, 2)).not.toContain("now fix the build");
+    // The same log again: the recorded answer, and nothing reviewed.
+    expect((await upload(grown)).body).toEqual(resent.body);
+    expect(s.requests).toHaveLength(3);
+    expect(bucketText(dir)).not.toContain("CUSTOMER TABLE");
+  });
+
+  it("does the same when review failed and on_failure = drop", async () => {
+    let failing = true;
+    const s = server({
+      reply: (_request, schema, text) =>
+        failing ? { status: 500 } : { answer: MODEL.answer(schema, text) },
+    });
+    const { upload, store, dir } = await bootStub(anthropic(s, "retries = 0\n"));
+    const first = META + user("hello there") + reply("hi");
+    const dropped = await upload(first);
+    expect(dropped.body).toMatchObject({ status: "dropped", bytes_total: bytes(first) });
+    const { records } = await listRecords(store, "dropped", "upload");
+    expect(records[0]?.record).toMatchObject({ reason: "review_failed" });
+    const stub = await readMetadata(store, "alice", archiveId("alice", "trajectory", "s1"));
+    expect(stub).toMatchObject({ traces: [], normalized: { bytes: bytes(first) } });
+    expect(stub?.head).toBeUndefined();
+
+    failing = false;
+    const calls = s.requests.length;
+    const next = await upload(NEXT, dropped.body.bytes_total);
+    expect(next.body).toMatchObject({ status: "stored", records_total: 5 });
+    expect(sent(s, calls)).toContain("now fix the build");
+    expect(sent(s, calls)).not.toContain("hello there");
+    const resent = await upload(first + NEXT + user("more") + reply("ok"));
+    expect(resent.body).toMatchObject({ status: "stored", records_total: 7 });
+    expect(sent(s, calls)).not.toContain("hello there");
+    expect(bucketText(dir)).not.toContain("hello there");
+  });
+
+  it("is not listed, served, searched or on another reader's change feed until it has a trace", async () => {
+    const s = server();
+    const { upload, call, db, instance } = await bootStub(anthropic(s));
+    expect((await upload(DUMPED)).body.status).toBe("dropped");
+
+    expect((await call("GET", "/v1/sessions")).body.sessions).toEqual([]);
+    for (const path of ["", "/trace", "/export", "/reviews"]) {
+      expect((await call("GET", `/v1/sessions/trajectory/s1${path}`)).status).toBe(404);
+    }
+    expect((await call("GET", "/v1/changes")).body.entries).toEqual([]);
+    await instance.search?.catchUp();
+    expect((await call("GET", "/v1/search?q=table")).body.results).toEqual([]);
+    expect(await db.getSession("trajectory", "s1")).toBeNull();
+    expect((await db.listSessions()).sessions).toEqual([]);
+    // Its owner can set who will read it; another reader of the feed does not see that.
+    expect(
+      (await call("PATCH", "/v1/sessions/trajectory/s1", { body: { visibility: "org" } })).status,
+    ).toBe(200);
+    expect(
+      (await call("GET", "/v1/changes?owner=alice", { token: BOB_TOKEN })).body.entries,
+    ).toEqual([]);
+    // Nobody else finds it to change or delete it.
+    expect(
+      (
+        await call("PATCH", "/v1/sessions/trajectory/s1?owner=alice", {
+          token: BOB_TOKEN,
+          body: { visibility: "owner" },
+        })
+      ).status,
+    ).toBe(404);
+    expect(
+      (await call("DELETE", "/v1/sessions/trajectory/s1?owner=alice", { token: BOB_TOKEN })).status,
+    ).toBe(404);
+
+    // Once the next append is stored, the session is a session like any other.
+    await upload(NEXT, bytes(DUMPED));
+    expect((await call("GET", "/v1/sessions")).body.sessions).toHaveLength(1);
+    const trace = await call("GET", "/v1/sessions/trajectory/s1/trace");
+    expect(trace.status).toBe(200);
+    expect(JSON.stringify(trace.body)).not.toContain("CUSTOMER TABLE");
+    await instance.search?.catchUp();
+    expect((await call("GET", "/v1/search?q=build")).body.results).toHaveLength(1);
+    expect((await call("GET", "/v1/search?q=table")).body.results).toEqual([]);
+  });
+
+  it("is retracted with the uploading machine's secret, after which nothing extends it", async () => {
+    const s = server();
+    const { upload, call, store } = await bootStub(anthropic(s));
+    const dropped = await upload(DUMPED);
+    const retract = (secret: string) =>
+      call("DELETE", "/v1/sessions/trajectory/s1", { headers: { "x-seshi-retract": secret } });
+    expect((await retract("not-the-secret")).status).toBe(403);
+    expect(await retract(RETRACT_SECRET)).toMatchObject({ status: 200, body: { removed: 0 } });
+    const gone = await readMetadata(store, "alice", archiveId("alice", "trajectory", "s1"));
+    expect(gone).toMatchObject({ status: "redacted", traces: [] });
+    expect(gone).not.toHaveProperty("normalized");
+    const calls = s.requests.length;
+    expect(await upload(NEXT, dropped.body.bytes_total)).toMatchObject({
+      status: 422,
+      body: { error: { code: "redacted" } },
+    });
+    expect((await upload(DUMPED + NEXT)).status).toBe(422);
+    expect(s.requests).toHaveLength(calls);
+    expect((await retract(RETRACT_SECRET)).status).toBe(410);
+  });
+
+  it("is deleted by its owner like any session", async () => {
+    const s = server();
+    const { upload, call, store } = await bootStub(anthropic(s));
+    await upload(DUMPED);
+    expect(await call("DELETE", "/v1/sessions/trajectory/s1")).toMatchObject({
+      status: 200,
+      body: { removed: 0 },
+    });
+    const gone = await readMetadata(store, "alice", archiveId("alice", "trajectory", "s1"));
+    expect(gone?.status).toBe("redacted");
   });
 });

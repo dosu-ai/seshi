@@ -50,6 +50,9 @@ class FakeServer implements SessionSink {
   signedIn = true;
   /** Review drops every replace. */
   dropReplace = false;
+  /** Review drops a session's first envelope: the server keeps a stub of where its log ends
+   * (F3.4). */
+  dropFirst = false;
 
   async ready() {
     if (!this.signedIn) throw new SignInNeeded("not signed in");
@@ -116,7 +119,7 @@ class FakeServer implements SessionSink {
       text: upload.transcript,
       ...(upload.retract_hash ? { hash: upload.retract_hash } : {}),
     });
-    return this.answer("stored", upload.transcript);
+    return this.answer(this.dropFirst ? "dropped" : "stored", upload.transcript);
   }
 
   async retract(_agent: string, id: string, secret: string): Promise<RetractOutcome> {
@@ -303,6 +306,27 @@ describe("the upload protocol", () => {
     await uploader().pass();
     expect(server.uploads.map((u) => u.offset)).toEqual([0, 0]);
     expect(session().stored).toBe(true);
+  });
+
+  it("moves past a first envelope review dropped, and sends only what follows it (F3.4)", async () => {
+    server.dropFirst = true;
+    const first = line("one") + line("two");
+    writeFileSync(transcript(), first);
+    hooked();
+    await uploader().pass();
+    expect(session()).toMatchObject({
+      stored: true,
+      last_status: "dropped",
+      file_offset: Buffer.byteLength(first),
+      server_offset: Buffer.byteLength(first),
+    });
+    // Nothing new: nothing sent again.
+    await uploader().pass();
+    expect(server.uploads).toHaveLength(1);
+    appendFileSync(transcript(), line("three"));
+    await uploader().pass();
+    expect(server.uploads.map((u) => u.offset)).toEqual([0, Buffer.byteLength(first)]);
+    expect(server.uploads[1]?.transcript).toBe(line("three"));
   });
 
   it("resends from where the server says on offset_mismatch, and the whole log when it says 0", async () => {

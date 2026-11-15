@@ -388,7 +388,10 @@ describe("a datadog session goes through the same redaction and review as OTLP (
       clock = new Date(clock.getTime() + 10 * 60_000);
       await assemble();
 
-      expect(await readMetadata(booted.store, OWNER, archiveId(OWNER, AGENT, SESSION))).toBeNull();
+      // Nothing but a stub of where the session ends (F3.4): no trace.
+      const stub = await readMetadata(booted.store, OWNER, archiveId(OWNER, AGENT, SESSION));
+      expect(stub).toMatchObject({ status: "stored", traces: [] });
+      expect(stub?.head).toBeUndefined();
       const { records } = await listRecords(booted.store, "dropped", SOURCE);
       expect(records.map((r) => r.record)).toContainEqual(
         expect.objectContaining({

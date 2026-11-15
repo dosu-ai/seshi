@@ -10,6 +10,7 @@ import {
   type Claims,
   type Identity,
   type IngestOptions,
+  isStub,
   type ListSessionsOptions,
   localWriter,
   type OwnerBasis,
@@ -132,8 +133,11 @@ export class StoreSessionDB implements SessionDB {
     })) as StoreSessionResult;
   }
 
-  getSession(agent: string, sessionId: string): Promise<SessionMetadata | null> {
-    return getSession(this.store, this.owner, agent, sessionId);
+  /** A session's pointer; null for a stub (F3.4), which has no trace and is not served, as on
+   * the HTTP API. */
+  async getSession(agent: string, sessionId: string): Promise<SessionMetadata | null> {
+    const metadata = await getSession(this.store, this.owner, agent, sessionId);
+    return metadata && isStub(metadata) ? null : metadata;
   }
 
   async getTrace(
@@ -152,11 +156,13 @@ export class StoreSessionDB implements SessionDB {
     return trace === null ? null : renderTrace(trace, format);
   }
 
-  listSessions(options: ListSessionsOptions = {}): Promise<SessionsPage> {
-    return listSessions(this.store, this.owner, {
+  /** A page of the owner's sessions, stubs (F3.4) left out, as on the HTTP API. */
+  async listSessions(options: ListSessionsOptions = {}): Promise<SessionsPage> {
+    const page = await listSessions(this.store, this.owner, {
       startAfter: options.after,
       limit: options.limit,
     });
+    return { ...page, sessions: page.sessions.filter((m) => !isStub(m)) };
   }
 
   async tombstone(

@@ -25,7 +25,7 @@
       "enum": ["stored", "redacted"]
     },
     "head": {
-      "description": "The current trace's content hash; absent before one is stored and once redacted.",
+      "description": "The current trace's content hash; absent before one is stored and once redacted. A `stored` session without one is a stub (F3.4): model review dropped its first envelopes, and it holds only where its log ends (`normalized`) and who wrote it. Readers neither list nor serve a stub.",
       "$ref": "common.schema.json#/$defs/Sha256"
     },
     "traces": { "type": "array", "items": { "$ref": "#/$defs/SessionTraceRef" } },

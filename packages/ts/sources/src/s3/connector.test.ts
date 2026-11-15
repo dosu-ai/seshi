@@ -52,6 +52,9 @@ class LogPipeline implements Submitter {
   readonly sessions = new Map<string, string>();
   /** Answer `filtered` for a session's first log when this says so. */
   filter: (text: string) => boolean = () => false;
+  /** Answer `dropped` for a session's first log when this says so: review dropped it, and the
+   * session keeps a stub of where its log ends (F3.4). */
+  dropFirst: (text: string) => boolean = () => false;
   /** Answer the next envelope this way instead. */
   override: ((e: Envelope) => unknown) | undefined;
   readonly health = {
@@ -80,7 +83,8 @@ class LogPipeline implements Submitter {
     if (stored === undefined) {
       if (this.filter(payload.text)) return { status: "filtered", bytes_total: 0 };
       this.sessions.set(id, payload.text);
-      return { status: "stored", bytes_total: bytes(payload.text) };
+      const status = this.dropFirst(payload.text) ? "dropped" : "stored";
+      return { status, bytes_total: bytes(payload.text) };
     }
     if (payload.text.startsWith(stored)) {
       this.sessions.set(id, payload.text);
@@ -402,6 +406,17 @@ describe("later runs (F6.2)", () => {
     await s.run("evals");
     expect(pipeline.last()).toMatchObject({ offset: 0, text: lines(0, 5) });
     expect(pipeline.envelopes.at(-1)?.replace).toBe(true);
+  });
+
+  it("continues a log whose first version review dropped from where the stub ends (F3.4)", async () => {
+    pipeline.dropFirst = () => true;
+    fake.put("harness/a.jsonl", lines(0, 2));
+    const s = sources();
+    expect((await s.run("evals")).outcomes).toEqual({ dropped: 1 });
+    expect((await manifest()).objects["harness/a.jsonl"]?.offset).toBe(lines(0, 2).length);
+    fake.append("harness/a.jsonl", lines(2, 4));
+    await s.run("evals");
+    expect(pipeline.last()).toMatchObject({ offset: lines(0, 2).length, text: lines(2, 4) });
   });
 
   it("sends the log whole when the session is not where the manifest says", async () => {

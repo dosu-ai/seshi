@@ -400,9 +400,36 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
   };
 }
 
+/** Who a session stub is (F3.4): the session, and who wrote it and may read and retract it.
+ * Never content. */
+export interface StubInput {
+  session_id: string;
+  /** The format the session is filed under. */
+  agent: string;
+  writer?: Writer;
+  owner_basis?: OwnerBasis;
+  visibility?: Visibility;
+  /** The uploading machine's retraction hash (F9.7), so the stub can be retracted. */
+  retract_hash?: string;
+}
+
+/** A stub's pointer: a new session's, with the retraction hash and nothing else (`normalized`
+ * and `applied` are added by `recordProgress`). */
+function newStub(owner: string, archive: string, stub: StubInput, at: string): SessionMetadata {
+  const metadata = newSession(owner, archive, stub.session_id, stub.agent, at, stub);
+  if (stub.retract_hash) metadata.retract_hash = stub.retract_hash;
+  return metadata;
+}
+
 /** Record where a session's log stands when no trace is written for an envelope: a chunk with
  * no records in it, a whole log with nothing past what is stored, an envelope model review
- * dropped. The log moves on and the envelope is remembered (X4.7) without a new trace. */
+ * dropped. The log moves on and the envelope is remembered (X4.7) without a new trace.
+ *
+ * With `stub`, a session that has no pointer yet gets one: a stub (F3.4, revised 15 Nov 2026)
+ * for a session whose first envelope model review dropped. It holds the session's identity, its
+ * writer, where its log ends and the prefix hash, and no `head`, so the next envelope continues
+ * past the dropped one and is reviewed on its own (`isStub`). Without `stub`, nothing is written
+ * for a session that has no pointer. */
 export async function recordProgress(input: {
   store: Store;
   owner: string;
@@ -412,22 +439,24 @@ export async function recordProgress(input: {
   applied?: { idempotency_key: string; status: "unchanged" | "dropped" };
   guard?: (existing: SessionMetadata | null) => void;
   now?: () => Date;
+  stub?: StubInput;
 }): Promise<void> {
-  const { store, owner, normalized } = input;
+  const { store, owner, normalized, stub } = input;
   const at = (input.now ?? (() => new Date()))().toISOString();
   await updateMetadata(store, owner, input.archive_id, (existing) => {
     if (existing?.status === "redacted") {
       throw new IngestRejected("redacted", "session was redacted; it will not be stored again");
     }
     input.guard?.(existing);
-    if (!existing) return null;
-    const next: SessionMetadata = { ...existing, normalized, updated_at: at };
+    const base = existing ?? (stub ? newStub(owner, input.archive_id, stub, at) : null);
+    if (!base) return null;
+    const next: SessionMetadata = { ...base, normalized, updated_at: at };
     if (input.withheld_calls !== undefined) {
       if (Object.keys(input.withheld_calls).length > 0) next.withheld_calls = input.withheld_calls;
       else delete next.withheld_calls;
     }
     if (input.applied) {
-      next.applied = withApplied(existing.applied, {
+      next.applied = withApplied(base.applied, {
         idempotency_key: input.applied.idempotency_key,
         at,
         status: input.applied.status,
@@ -455,8 +484,10 @@ export interface TombstoneInput {
 
 /** Remove a session's trace objects and mark it redacted. Irreversible; a later ingest
  * of the same session is refused, so a tombstoned session stays gone. The change entry records
- * the reason and the writer, never the content. A session never published (no metadata) has
- * only its span records and pending marker removed; null when there was nothing to remove. */
+ * the reason and the writer, never the content. A stub (F3.4) is tombstoned like any session:
+ * it becomes `redacted`, so what would have extended it is refused, and its entry names no
+ * trace. A session never published (no metadata) has only its span records and pending marker
+ * removed; null when there was nothing to remove. */
 export async function tombstone(input: TombstoneInput): Promise<{ removed: number } | null> {
   const { store, owner } = input;
   const archive = archiveId(owner, input.agent, input.session_id);
@@ -489,7 +520,7 @@ export async function tombstone(input: TombstoneInput): Promise<{ removed: numbe
   });
   const gone = removedObjects as { traces: string[] } | null;
   if (gone === null) {
-    // Never published (pending, or refused by the filter or model review): no pointer, but its
+    // Never published (pending, or refused by the filter): no pointer, but its
     // span records (F4.4) may hold content, and only this removes them. Nothing was indexed, so
     // there is no change entry; null when there was nothing at all.
     const spans = await deleteSpans(store, owner, archive);

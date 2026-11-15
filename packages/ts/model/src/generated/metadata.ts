@@ -32,7 +32,7 @@ export interface SessionMetadata {
   parent_session_id?: string;
   /** `stored`, or `redacted` once tombstoned: a redacted session is never stored again. */
   status: "stored" | "redacted";
-  /** The current trace's content hash; absent before one is stored and once redacted. */
+  /** The current trace's content hash; absent before one is stored and once redacted. A `stored` session without one is a stub (F3.4): model review dropped its first envelopes, and it holds only where its log ends (`normalized`) and who wrote it. Readers neither list nor serve a stub. */
   head?: Sha256;
   traces: SessionTraceRef[];
   normalized?: NormalizedState;

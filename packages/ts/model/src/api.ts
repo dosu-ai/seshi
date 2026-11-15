@@ -106,15 +106,25 @@ export const MAX_IDEMPOTENCY_KEY_LENGTH = 2048;
 export const EMPTY_PREFIX_SHA256 =
   "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945" as const;
 
+/** Whether a session's pointer is a stub (F3.4, revised 15 Nov 2026): model review dropped the
+ * session's first envelope, so the pointer holds where its log ends and who wrote it, and no
+ * trace. A stub has no `head` and is `stored`: readers neither list nor serve it (a tombstoned
+ * session has no `head` either, but is `redacted`). */
+export function isStub(metadata: Pick<SessionMetadata, "head" | "status">): boolean {
+  return metadata.status === "stored" && metadata.head === undefined;
+}
+
 /** What storing a session answered.
  *
  * - `stored`: a new trace is the session's head. `duplicate`: that trace was already stored.
- * - `unchanged`: the session has a trace and the upload added nothing to it (lines the adapter
- *   drops, or a whole log with nothing past what is stored); the log position moved on.
+ * - `unchanged`: the session has a trace (or a stub) and the upload added nothing to it (lines
+ *   the adapter drops, or a whole log with nothing past what is stored); the log position moved
+ *   on.
  * - `filtered`: the session filter judged the session's first trace not worth storing (X4.10).
  *   Nothing is stored; send the whole log again once it has grown.
  * - `dropped`: model review dropped it (F3). Nothing of it is stored; the log position moves
- *   past it when the session has a trace. */
+ *   past it. A session with no trace yet keeps only a stub that says where its log ends
+ *   (`isStub`, F3.4), so the next upload is a chunk from there. */
 export type StoreSessionResult =
   | ({ status: "unchanged" | "filtered" | "dropped" } & ShippedState)
   | (IngestResult & ShippedState);

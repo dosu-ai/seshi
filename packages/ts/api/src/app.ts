@@ -41,6 +41,7 @@ import {
   type IngestOptions,
   IngestRejected,
   isRenderFormat,
+  isStub,
   MAX_IDEMPOTENCY_KEY_LENGTH,
   OffsetMismatch,
   type RawFormat,
@@ -317,17 +318,23 @@ export function createApp(instance: Instance) {
 
   /** A session the principal may read, from the folders the owner's sessions are stored under
    * (aliases applied), with the folder it was found in. A session it may not read is "not
-   * found", so its existence is not given away. */
+   * found", so its existence is not given away. So is a stub (F3.4: a session whose first
+   * envelope model review dropped, with no trace), which is never served; with `stubs`, the
+   * session's owner and admins find one, to delete it or change who will read it. */
   async function readable(
     principal: Principal,
     owner: string,
     agent: string,
     sessionId: string,
+    options: { stubs?: boolean } = {},
   ): Promise<{ folder: string; metadata: SessionMetadata }> {
     for (const folder of aliases.storedAs(owner)) {
       const metadata = await getSession(store, folder, agent, sessionId);
       if (metadata === null) continue;
-      if (!canRead(principal, metadata, aliases)) break;
+      if (isStub(metadata)) {
+        if (!options.stubs || !canRead(principal, { ...metadata, visibility: "owner" }, aliases))
+          break;
+      } else if (!canRead(principal, metadata, aliases)) break;
       return { folder, metadata };
     }
     throw new HttpError(404, "not_found", "no such session");
@@ -524,7 +531,8 @@ export function createApp(instance: Instance) {
         else if (after > prefix) continue;
       }
       const page = await listSessions(store, folder, { startAfter, limit });
-      sessions.push(...page.sessions.filter((m) => canRead(principal, m, aliases)));
+      // A stub (F3.4) has no trace to read: it is not listed.
+      sessions.push(...page.sessions.filter((m) => !isStub(m) && canRead(principal, m, aliases)));
       cursor = page.cursor ?? cursor;
       // A page ends inside a folder; the next one picks up there and goes on to the rest.
       if (page.truncated) {
@@ -625,11 +633,13 @@ export function createApp(instance: Instance) {
     if (visibility === undefined) {
       throw new HttpError(400, "missing_field", "visibility is required");
     }
+    // A stub's visibility is what its first trace will have (F3.4).
     const { folder, metadata: current } = await readable(
       principal,
       ownerOf(url, principal),
       agent,
       sessionId,
+      { stubs: true },
     );
     requireVisibilityChange(principal, folder, aliases, current.owner_basis);
     let metadata: SessionMetadata | null;
@@ -710,7 +720,10 @@ export function createApp(instance: Instance) {
     if (secret !== null) return retracted(request, params, secret);
     const principal = await caller(request, "sessions:delete");
     const { agent, sessionId } = sessionParams(params);
-    const { folder } = await readable(principal, ownerOf(url, principal), agent, sessionId);
+    // A stub is deleted too (F3.4), so what would have extended it is refused from then on.
+    const { folder } = await readable(principal, ownerOf(url, principal), agent, sessionId, {
+      stubs: true,
+    });
     requireDelete(principal, folder, now(), aliases);
     const result = await tombstone({
       store,
@@ -743,7 +756,8 @@ export function createApp(instance: Instance) {
       let ok = visible.get(archive);
       if (ok === undefined) {
         const metadata = await readMetadata(store, owner, archive);
-        ok = metadata !== null && canRead(principal, metadata, aliases);
+        // A stub's entries (a visibility change) are about a session not served (F3.4).
+        ok = metadata !== null && !isStub(metadata) && canRead(principal, metadata, aliases);
         visible.set(archive, ok);
       }
       if (ok) entries.push(item);

@@ -669,6 +669,58 @@ describe("backfillRedaction (F2.5)", () => {
     expect((await run({ owners: ["bob"] })).spans).toBe(1);
   });
 
+  it("redacts the span records beside a stub (F3.4), which has no trace to redact", async () => {
+    const oldRules = compileRuleSet();
+    // A session whose first envelope review dropped: a stub, no trace.
+    const dropping = new Pipeline({
+      store,
+      formats,
+      reviewer: {
+        review: async () => ({
+          action: "drop",
+          reason: "review_drop",
+          policy: "p",
+          policy_hash: "e".repeat(64),
+          decision_model: "m",
+        }),
+      },
+    });
+    await dropping.submit(
+      uploadEnvelope(
+        {
+          owner: "alice",
+          agent: "trajectory",
+          session_id: "s9",
+          transcript: meta() + user(LONG) + reply("ok"),
+          format: "jsonl",
+          offset: 0,
+        },
+        { caller: { kind: "static", principal: "alice" }, owner_basis: "verified" },
+      ),
+    );
+    const stub = archiveId("alice", "trajectory", "s9");
+    expect(await readMetadata(store, "alice", stub)).toMatchObject({ traces: [] });
+    await putSpan(store, "alice", stub, {
+      received_at: ts,
+      source_id: "console",
+      format: "otlp-genai",
+      part: {
+        trace_id: "ef".repeat(16),
+        span_id: "0000000000000001",
+        name: "chat m",
+        started_at: ts,
+        content: true,
+        output: [{ role: "assistant", content: "ACME-9999", timestamp: ts }],
+      } as never,
+      redaction: { rule_set: oldRules.hash, counts: {} },
+    });
+
+    const report = await run();
+    expect(report.outcomes.skipped).toBe(1);
+    expect(report.spans).toBe(1);
+    expect(JSON.stringify(await listSpans(store, "alice", stub))).not.toContain("ACME-9999");
+  });
+
   it("tells each session as it is done", async () => {
     await store1("s1", meta() + user(`ACME-1234 ${LONG}`) + reply("ok"));
     await store1("s2", meta() + user(LONG) + reply("ok"));

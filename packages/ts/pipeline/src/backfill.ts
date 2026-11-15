@@ -24,10 +24,11 @@
  * (a session the assembler published after the rules changed is `current`, but its span records
  * are not). Their counts stay on the records, which the assembler adds to the session when it
  * next publishes it; they are not added to the session's or the report's counts here, since the
- * span records repeat what the traces hold. Spans of sessions never published (pending, or
- * refused by the filter or review) have no metadata: after an owner's sessions, the owner's
- * session folders are walked for span records with no metadata beside them, which are
- * redacted again the same way.
+ * span records repeat what the traces hold. A stub (F3.4: a session whose first envelopes review
+ * dropped) has no trace, but its span records are redacted again all the same. Spans of sessions
+ * never published (pending, or refused by the filter) have no metadata: after an owner's
+ * sessions, the owner's session folders are walked for span records with no metadata beside
+ * them, which are redacted again the same way.
  *
  * Not touched: `normalized` (the uploader's log state). A later whole upload of such a session,
  * redacted from the transcript with the same new rules, may not hash to the stored prefix; it
@@ -37,6 +38,7 @@
 
 import {
   canonicalJson,
+  isStub,
   type LlmCall,
   type NormalizedRecord,
   parseTrace,
@@ -479,7 +481,9 @@ export async function backfillRedaction(options: BackfillOptions): Promise<Backf
         return report;
       }
       const done = await backfillSession(session, options, now().toISOString());
-      if (done.outcome !== "skipped") {
+      // A stub (F3.4) has no trace to redact, but an assembled session's span records are kept
+      // beside it, as for a session never published.
+      if (done.outcome !== "skipped" || isStub(session)) {
         const spans = await backfillSpans(
           options.store,
           session.owner,

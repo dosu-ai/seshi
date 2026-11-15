@@ -6,7 +6,10 @@
  * The protocol, per session:
  *
  * - Until the server holds a trace of the session, the whole log is sent (X6.3). A `filtered`
- *   or `dropped` answer keeps nothing, so the whole log goes again once the transcript grows.
+ *   answer keeps nothing, so the whole log goes again once the transcript grows. A `dropped`
+ *   answer keeps the server's offset (a first envelope review dropped leaves a stub, F3.4), so
+ *   what follows goes as a chunk from there; the server never reviews or stores the dropped
+ *   part again, even when a whole log is sent later.
  * - Once it holds one, only the new complete lines go, as a chunk at the server's offset; the
  *   session filter never judges a chunk (X4.10), so an agent-only tail is never lost.
  * - 409 `offset_mismatch`: resend from `expected` (from the start when it is 0).
@@ -871,8 +874,7 @@ export class Uploader {
           if (replacing && result.status === "dropped") s.replace_next = true;
           else delete s.replace_next;
         } else {
-          // Nothing kept (filtered, or dropped before it had a trace): the whole log goes again
-          // once the transcript grows.
+          // Nothing kept (filtered): the whole log goes again once the transcript grows.
           s.file_offset = 0;
           s.server_offset = 0;
           s.held_at_size = size;
