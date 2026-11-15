@@ -97,8 +97,9 @@ repository's code.
 | `redact test [<file> \| -] [--pack <file>]… [--config]` | Check rule packs' test strings, and show how often each rule fires on a transcript or text and where, never what matched ([redaction.md](redaction.md#trying-and-applying-rules)) |
 | `redact backfill (--since <30d> \| --all) [--dry-run]` | Apply the server's current rules to stored sessions (F2.5, [redaction.md](redaction.md#trying-and-applying-rules)). Exit 8 when a session changed while it ran |
 | `redact sweep [--owner <id>]… [--dry-run]` | Delete the trace objects no session names that are over an hour old, as the worker does daily (F2.5, [redaction.md](redaction.md#trying-and-applying-rules)). Exit 1 when a session could not be swept |
+| `store check [--owner <id>]… [--config] [--set path=value]…` | Check the bucket against the layout's invariants ([server.md](server.md#checking-the-bucket)): the layout marker, every session's metadata, head, traces and continuation chain, stubs and deleted sessions, old trace objects no session names, the change feed, span records and their messages, token records. A summary line, then each finding (`error` or `warn`, its code, what is wrong and the key) grouped by session; `--json`: `{store, findings: [{severity, code, owner?, archive_id?, key?, message}], counts}`. Reads only. Exit 0 with no errors (warnings alone included), 8 with any |
 
-`serve`, `admin`, `workers`, `sync`, `reprocess`, `redact backfill`, `redact sweep` and `review` run where the
+`serve`, `admin`, `workers`, `sync`, `reprocess`, `redact backfill`, `redact sweep`, `store check` and `review` run where the
 server's config and bucket keys are: they load the server config the way `serve` does
 (`--config`, `SESHI_CONFIG`, `/etc/seshi/seshi.toml`, then `SESHI_*` env and `--set`), except
 that only `serve` reads `./seshi.toml` without being told to. The folder may be a checkout
@@ -107,7 +108,9 @@ the others (and `config check`, and `search` with no server configured) say so i
 hint instead: pass `--config ./seshi.toml`. `workers status` and `sync status|failed|dropped`
 also run from an admin's laptop through the server's admin routes: with `--server <url>`, or,
 when no server config is found, the CLI config's `server` (its `[local] config` is read as the
-server config instead). `sync run` and `reprocess` stay where the config is.
+server config instead). `sync run` and `reprocess` stay where the config is. `store check` reads
+the bucket itself, so it has no `--server`: with no server config found it checks local mode's
+bucket (the CLI config's `[local] config`), else the one `SESHI_*` env names.
 
 ## Talking to a server, or to your own bucket (F8.3, X3.5)
 

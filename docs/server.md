@@ -132,6 +132,29 @@ run` and `reprocess` stay where the config is.
 
 The commands and their exit codes are in [cli.md](cli.md).
 
+### Checking the bucket
+
+`seshi store check [--owner <id>]… [--json]`, where the config and bucket keys are (or against
+local mode's bucket), reads the whole bucket and reports where it breaks the invariants of
+[spec/layout.md](../spec/layout.md): a missing or foreign layout marker; metadata that does not
+parse, match its schema or name its own key; a head or listed trace with no object, or an
+object whose records do not hash to its key; a continuation chain that does not join up from
+`dropped_prefix` to `normalized`; a stub holding traces or dropped content; a deleted session
+with something left to read; change entries with bad keys, for sessions that do not exist, or
+missing for a change the session shows; span records naming messages that are not stored; token
+records that do not parse (never what they hold). Each finding is an `error` or a `warn`. A
+warning is what the protocol allows for a while: an old trace object no session names (the
+daily sweep deletes it), an entry for a write that failed between its entry and the pointer
+(decision 7 of 18), records no trace holds that no drop explains, a session with no recorded
+normalizer version (it counts as stale).
+
+It only reads (list, get and stat; `s3:ListBucket` and `s3:GetObject` are enough), so it is
+safe to run against a live bucket, from cron or CI after an upgrade, after a restore, or before
+trusting a bucket another writer touched. Exit 0 with no errors, 8 with any, so a script can
+alert on it. It reads every metadata object, change entry, span record and trace object, so on
+a large bucket it takes as long as reading the bucket; `--owner` narrows it. The same check is
+`checkStore` in `@seshi/store`, for tests and tools.
+
 ## Sources
 
 A source is a way sessions reach the server other than `POST /v1/sessions` (whose source is

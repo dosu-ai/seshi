@@ -238,7 +238,18 @@ rule set its own trace was written under (`rule_set`; an entry without one count
 session's), so a chunk written after the rules changed does not make the traces before it look
 current: `seshi redact backfill` redoes every session with a trace not written under the
 current rules. A session that grew gets a second trace with
-a `continuation`; a reader that wants the whole session concatenates in `traces` order. A
+a `continuation`; a reader that wants the whole session concatenates in `traces` order.
+
+The chain joins up. Every trace starts with a meta record, so the first trace holds the
+session's records `[0, records)`, or `[from_record, from_record + records - 1)` when it is a
+continuation (a fork's copy of its parent, or a stub's dropped start), and each later trace is a
+continuation that starts where the one before it ends. The first starts at
+`dropped_prefix.records` when there is one, and the last ends at `normalized.records`. The one
+exception is an envelope model review dropped after the session had a trace: the log moves past
+its records and no trace holds them, so the next continuation starts past them (or the chain
+ends before `normalized.records`), and `applied` records the drop with its `records_total`
+while it is among the last 16. Every trace in `traces` was announced by a `published` change
+entry naming its hash, and a `redacted` session by a `tombstone` entry. A
 replace (X4.6) leaves one trace in `traces`, removes the others' objects, and starts `applied`
 and `redaction` over from the replacing write. Its object replaces one already under the same
 hash (the hash leaves some content out, which new rules or review may have changed), and its
@@ -477,6 +488,12 @@ bytes, and the sweep checks an object's age once more just before it deletes it.
   that failed, or missing harmless.
   The seshi server's search index is such a reader: an SQLite file on each instance's local
   disk, never in the bucket, derived and rebuildable (X6.1).
+
+`seshi store check` (`checkStore` in `@seshi/store`) reads a prefix and reports where it breaks
+the rules on this page: the marker, every pointer against its schema, its key and its traces,
+the chain above, stubs and tombstoned sessions, trace objects no pointer names past the sweep's
+hour, change keys and entries against the sessions they name, and span records against their
+messages. It is a reader: it needs only what a reader needs.
 
 A reader needs `s3:ListBucket` on the prefix and `s3:GetObject` under it. A writer
 additionally needs `s3:PutObject`; tombstoning, pruning and the sweep need `s3:DeleteObject`.
