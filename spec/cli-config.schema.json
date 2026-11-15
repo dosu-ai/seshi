@@ -1,0 +1,67 @@
+{
+  "$id": "https://github.com/dosu-ai/sessiondb/spec/cli-config.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "server": {
+      "description": "The seshi server this CLI talks to (seshi login --server).",
+      "type": "string",
+      "format": "uri"
+    },
+    "user": {
+      "description": "The username stated with the org key (X5.7); else git user.email, then the OS user.",
+      "type": "string",
+      "minLength": 1
+    },
+    "theme": {
+      "default": "auto",
+      "description": "Terminal colours (B1.4): auto detects the background.",
+      "type": "string",
+      "enum": [
+        "auto",
+        "dark",
+        "light"
+      ]
+    },
+    "capture": {
+      "description": "Personal capture rules (F9.5).",
+      "default": {},
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "description": "Capture for this user (F9.5, global level).",
+          "type": "boolean"
+        },
+        "paths": {
+          "default": [],
+          "description": "Rules by folder; the longest match decides.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "description": "A folder; ~ is the home folder. Matched by path prefix."
+              },
+              "capture": {
+                "type": "boolean",
+                "description": "Capture sessions under it, or not."
+              }
+            },
+            "required": [
+              "path",
+              "capture"
+            ],
+            "additionalProperties": false,
+            "description": "A personal capture rule for a folder (F9.5)."
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "description": "seshi CLI configuration (~/.config/seshi/config.toml)."
+}

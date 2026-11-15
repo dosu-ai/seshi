@@ -1,0 +1,1480 @@
+{
+  "$id": "https://github.com/dosu-ai/sessiondb/spec/config.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "server": {
+      "description": "The HTTP server.",
+      "default": {},
+      "type": "object",
+      "properties": {
+        "listen": {
+          "default": ":7200",
+          "description": "Where the HTTP server listens: host:port, :port (every interface) or port.",
+          "type": "string"
+        },
+        "public_url": {
+          "description": "The URL clients reach this server at, behind any proxy (sign-in redirects, links).",
+          "type": "string",
+          "format": "uri"
+        },
+        "roles": {
+          "default": [
+            "api",
+            "worker"
+          ],
+          "description": "What this instance runs (X7.1): api (the HTTP API), worker (pollers, span assembly). Exactly one instance may run the worker.",
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "api",
+              "worker"
+            ]
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "store": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "pattern": "^(?:file:\\/\\/\\/?.*|\\/.*|(?:s3|r2):\\/\\/[^/\\s]+(?:\\/.*)?)$",
+          "description": "Where sessions go: s3://bucket/prefix, r2://bucket/prefix, or file:///path for one machine."
+        },
+        "credentials": {
+          "type": "object",
+          "properties": {
+            "access_key_id": {
+              "x-seshi-secret": true,
+              "description": "The access key id.",
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "env": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "the environment variable to read"
+                    }
+                  },
+                  "required": [
+                    "env"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "file": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "the file to read"
+                    }
+                  },
+                  "required": [
+                    "file"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "secret_access_key": {
+              "x-seshi-secret": true,
+              "description": "The secret access key.",
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "env": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "the environment variable to read"
+                    }
+                  },
+                  "required": [
+                    "env"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "file": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "the file to read"
+                    }
+                  },
+                  "required": [
+                    "file"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "session_token": {
+              "description": "A session token, for temporary credentials.",
+              "x-seshi-secret": true,
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "env": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "the environment variable to read"
+                    }
+                  },
+                  "required": [
+                    "env"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "file": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "the file to read"
+                    }
+                  },
+                  "required": [
+                    "file"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "required": [
+            "access_key_id",
+            "secret_access_key"
+          ],
+          "additionalProperties": false,
+          "description": "Static bucket keys."
+        },
+        "region": {
+          "description": "The bucket's region (s3://).",
+          "type": "string",
+          "minLength": 1
+        },
+        "endpoint": {
+          "description": "An S3-compatible endpoint (MinIO, Backblaze, Wasabi…); overrides the region.",
+          "type": "string",
+          "minLength": 1
+        },
+        "account_id": {
+          "description": "The Cloudflare account id (r2://).",
+          "type": "string",
+          "minLength": 1
+        },
+        "format": {
+          "default": "letta",
+          "description": "How traces are written: letta (trajectory-v1 records) or otlp (GenAI spans). A bucket holds one format, fixed by its first writer. Transitional: one canonical format replaces it (X6.2).",
+          "type": "string",
+          "enum": [
+            "letta",
+            "otlp"
+          ]
+        },
+        "deployment_id": {
+          "description": "This deployment's id, recorded in the layout marker (X1.4).",
+          "type": "string",
+          "minLength": 1
+        },
+        "org": {
+          "description": "The organization this deployment serves (X1.1); the server will not start against a bucket marked for another (X1.4).",
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "additionalProperties": false,
+      "description": "The bucket: the source of truth (X6.1)."
+    },
+    "auth": {
+      "description": "Who may call the server (X5).",
+      "default": {},
+      "type": "object",
+      "properties": {
+        "tokens": {
+          "description": "Static tokens (X5.12): owner = token, each one everything for that owner, for single-user and development setups. 16+ characters.",
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "minLength": 1
+          },
+          "additionalProperties": {
+            "x-seshi-secret": true,
+            "description": "a secret: a literal, { env = \"NAME\" } or { file = \"/path\" }",
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "env": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "the environment variable to read"
+                  }
+                },
+                "required": [
+                  "env"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "the file to read"
+                  }
+                },
+                "required": [
+                  "file"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "legacy_token_secret": {
+          "description": "Accept HS256 JWTs signed with this secret (sub = owner, exp required). Kept from sessiondb until seshi tokens replace it (X5.2). 32+ characters.",
+          "x-seshi-secret": true,
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "object",
+              "properties": {
+                "env": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "the environment variable to read"
+                }
+              },
+              "required": [
+                "env"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "file": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "the file to read"
+                }
+              },
+              "required": [
+                "file"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "org_key": {
+          "description": "The trusted org key (X5.12).",
+          "default": {},
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "default": true,
+              "description": "Accept the org key: members write as the username they state (X5.12).",
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        "oidc": {
+          "type": "object",
+          "properties": {
+            "issuer": {
+              "type": "string",
+              "format": "uri",
+              "description": "The IdP's issuer URL; its keys come from its discovery document."
+            },
+            "client_id": {
+              "type": "string",
+              "minLength": 1,
+              "description": "The CLI's client id, registered in the IdP as a public client (X5.7)."
+            },
+            "audience": {
+              "description": "The ID token audience to require, specific to this deployment (X1.4); the client id when unset.",
+              "type": "string",
+              "minLength": 1
+            },
+            "owner_claim": {
+              "default": "sub",
+              "description": "The claim an owner ID is taken from (X5.8): sub, or oid on Entra, or email.",
+              "type": "string",
+              "minLength": 1
+            },
+            "admin_group": {
+              "description": "Members of this IdP group are admins (X5.3).",
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "issuer",
+            "client_id"
+          ],
+          "additionalProperties": false,
+          "description": "Sign-in through an identity provider (X5.2). Absent: no IdP."
+        },
+        "admins": {
+          "default": [],
+          "description": "Emails of people who are admins with an IdP (X5.3).",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "owner_aliases": {
+          "default": {},
+          "description": "Old owner ID = new owner ID, applied when reading and searching (X5.8).",
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "minLength": 1
+          },
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "session_keys": {
+          "description": "Keys that sign session tokens, by key id (X5.9). Old keys stay to verify until they expire.",
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "minLength": 1
+          },
+          "additionalProperties": {
+            "x-seshi-secret": true,
+            "description": "a secret: a literal, { env = \"NAME\" } or { file = \"/path\" }",
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "env": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "the environment variable to read"
+                  }
+                },
+                "required": [
+                  "env"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "the file to read"
+                  }
+                },
+                "required": [
+                  "file"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "session_key_id": {
+          "description": "The key in session_keys that signs new session tokens; the only one when there is one.",
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "default_visibility": {
+      "default": "org",
+      "description": "Visibility of a session nothing else sets (X5.10): org or owner.",
+      "type": "string",
+      "enum": [
+        "org",
+        "owner"
+      ]
+    },
+    "filter": {
+      "description": "Which sessions are worth storing (X4.10). It judges a session's first trace only.",
+      "default": {},
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "description": "false keeps every session.",
+          "type": "boolean"
+        },
+        "min_chars": {
+          "default": 2000,
+          "description": "At least this many characters of text, tool arguments and tool results (the meta record aside).",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "require_user": {
+          "default": true,
+          "description": "At least one user record. false has no effect until the trace format accepts such sessions.",
+          "type": "boolean"
+        },
+        "require_reply": {
+          "default": true,
+          "description": "At least one assistant or tool record. false has no effect until the trace format accepts such sessions.",
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "limits": {
+      "description": "Size caps; past them a session is refused (422).",
+      "default": {},
+      "type": "object",
+      "properties": {
+        "max_records": {
+          "default": 50000,
+          "description": "Records in one trace.",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "max_records_bytes": {
+          "description": "JSON bytes of one trace's records.",
+          "default": "32MiB",
+          "x-seshi-format": "bytes",
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(\\d+)\\s*(B|KB|MB|GB|KiB|MiB|GiB)$"
+            },
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          ]
+        },
+        "max_upload_bytes": {
+          "description": "Bytes of one upload, gzipped.",
+          "default": "64MiB",
+          "x-seshi-format": "bytes",
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(\\d+)\\s*(B|KB|MB|GB|KiB|MiB|GiB)$"
+            },
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "records": {
+      "description": "Records of envelopes that were not stored (X6.4).",
+      "default": {},
+      "type": "object",
+      "properties": {
+        "dropped_retention": {
+          "description": "How long records of envelopes model review dropped are kept (sources/<id>/dropped/).",
+          "default": "30d",
+          "x-seshi-format": "duration",
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(\\d+)(ms|s|m|h|d|w)$"
+            },
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          ]
+        },
+        "failed_retention": {
+          "description": "How long records of envelopes that failed are kept (sources/<id>/failed/).",
+          "default": "30d",
+          "x-seshi-format": "duration",
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(\\d+)(ms|s|m|h|d|w)$"
+            },
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "redaction": {
+      "description": "Regex redaction (F2). The built-in rules always run.",
+      "default": {},
+      "type": "object",
+      "properties": {
+        "packs": {
+          "default": [],
+          "description": "Rule pack files, applied on top of the built-in rules. Today's JSON file (patterns, sensitive_files, secret_commands) loads as a pack.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "review": {
+      "description": "Model review (F3).",
+      "default": {},
+      "type": "object",
+      "properties": {
+        "policies": {
+          "description": "Review policies; none means no model review.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "description": "The policy's name."
+              },
+              "sources": {
+                "default": [],
+                "description": "Source ids it applies to; all when empty.",
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "agents": {
+                "default": [],
+                "description": "Agents it applies to; all when empty.",
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "repos": {
+                "default": [],
+                "description": "Repositories it applies to; all when empty.",
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "on_failure": {
+                "default": "drop",
+                "description": "After the last retry: drop the envelope, or store it with regex redaction only (F3.4).",
+                "type": "string",
+                "enum": [
+                  "drop",
+                  "skip"
+                ]
+              },
+              "retries": {
+                "default": 3,
+                "description": "Retries of a failed model call (F3.4).",
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "decision": {
+                "type": "object",
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "anthropic",
+                      "bedrock",
+                      "vertex",
+                      "openai-compatible"
+                    ],
+                    "description": "Who runs the model; review sends envelopes there (F3.5)."
+                  },
+                  "model": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "The model name at that provider."
+                  },
+                  "prompt": {
+                    "description": "The prompt, inline.",
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "prompt_file": {
+                    "description": "The prompt, from a file.",
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "api_key": {
+                    "description": "The provider key.",
+                    "x-seshi-secret": true,
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "env": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "the environment variable to read"
+                          }
+                        },
+                        "required": [
+                          "env"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "file": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "the file to read"
+                          }
+                        },
+                        "required": [
+                          "file"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "base_url": {
+                    "description": "The provider's endpoint (openai-compatible, a local model).",
+                    "type": "string",
+                    "format": "uri"
+                  }
+                },
+                "required": [
+                  "provider",
+                  "model"
+                ],
+                "additionalProperties": false,
+                "description": "The decision model: allow, redact or drop (F3.1)."
+              },
+              "redactor": {
+                "description": "The redactor LLM, called only for redact (F3.1).",
+                "type": "object",
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "anthropic",
+                      "bedrock",
+                      "vertex",
+                      "openai-compatible"
+                    ],
+                    "description": "Who runs the model; review sends envelopes there (F3.5)."
+                  },
+                  "model": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "The model name at that provider."
+                  },
+                  "prompt": {
+                    "description": "The prompt, inline.",
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "prompt_file": {
+                    "description": "The prompt, from a file.",
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "api_key": {
+                    "description": "The provider key.",
+                    "x-seshi-secret": true,
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "env": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "the environment variable to read"
+                          }
+                        },
+                        "required": [
+                          "env"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "file": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "the file to read"
+                          }
+                        },
+                        "required": [
+                          "file"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "base_url": {
+                    "description": "The provider's endpoint (openai-compatible, a local model).",
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "categories": {
+                    "default": [],
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "description": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "examples": {
+                          "default": [],
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "name",
+                        "description"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "provider",
+                  "model"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "id",
+              "decision"
+            ],
+            "additionalProperties": false,
+            "description": "A review policy (F3.3)."
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "sources": {
+      "description": "Sources the server ingests from on its own (F4–F6).",
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "otlp"
+              },
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{0,62}$"
+              },
+              "enabled": {
+                "default": true,
+                "description": "false keeps the source configured but idle.",
+                "type": "boolean"
+              },
+              "visibility": {
+                "description": "Visibility of the sessions it writes (X5.10); default_visibility when unset.",
+                "type": "string",
+                "enum": [
+                  "org",
+                  "owner"
+                ]
+              },
+              "filter": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "min_chars": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "require_user": {
+                    "type": "boolean"
+                  },
+                  "require_reply": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false,
+                "description": "This source's session filter rules; the rest come from [filter]."
+              },
+              "quiet_period": {
+                "description": "Publish a session once it has had no new spans for this long (F4.4).",
+                "default": "10m",
+                "x-seshi-format": "duration",
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^(\\d+)(ms|s|m|h|d|w)$"
+                  },
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "id"
+            ],
+            "additionalProperties": false,
+            "description": "An OTLP destination (F4): spans pushed to POST /otlp/v1/traces with its service token."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "datadog"
+              },
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{0,62}$"
+              },
+              "enabled": {
+                "default": true,
+                "description": "false keeps the source configured but idle.",
+                "type": "boolean"
+              },
+              "visibility": {
+                "description": "Visibility of the sessions it writes (X5.10); default_visibility when unset.",
+                "type": "string",
+                "enum": [
+                  "org",
+                  "owner"
+                ]
+              },
+              "filter": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "min_chars": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "require_user": {
+                    "type": "boolean"
+                  },
+                  "require_reply": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false,
+                "description": "This source's session filter rules; the rest come from [filter]."
+              },
+              "site": {
+                "default": "datadoghq.com",
+                "description": "The Datadog site (datadoghq.eu, us5.datadoghq.com…).",
+                "type": "string",
+                "minLength": 1
+              },
+              "api_key": {
+                "x-seshi-secret": true,
+                "description": "The Datadog API key.",
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "env": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "the environment variable to read"
+                      }
+                    },
+                    "required": [
+                      "env"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "file": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "the file to read"
+                      }
+                    },
+                    "required": [
+                      "file"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              "app_key": {
+                "x-seshi-secret": true,
+                "description": "The Datadog application key.",
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "env": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "the environment variable to read"
+                      }
+                    },
+                    "required": [
+                      "env"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "file": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "the file to read"
+                      }
+                    },
+                    "required": [
+                      "file"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              "ml_app": {
+                "description": "The LLM Observability ml_app to read.",
+                "type": "string",
+                "minLength": 1
+              },
+              "tags": {
+                "default": [],
+                "description": "Span tags to filter by.",
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "interval": {
+                "description": "How often it polls.",
+                "default": "5m",
+                "x-seshi-format": "duration",
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^(\\d+)(ms|s|m|h|d|w)$"
+                  },
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                ]
+              },
+              "overlap": {
+                "description": "How far before the checkpoint each run reads again, for late spans (F5.2).",
+                "default": "10m",
+                "x-seshi-format": "duration",
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^(\\d+)(ms|s|m|h|d|w)$"
+                  },
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                ]
+              },
+              "lag": {
+                "description": "How far behind now each run stops (F5.2).",
+                "default": "2m",
+                "x-seshi-format": "duration",
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^(\\d+)(ms|s|m|h|d|w)$"
+                  },
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                ]
+              },
+              "backfill": {
+                "description": "How far back the first run reads (F5.2).",
+                "default": "7d",
+                "x-seshi-format": "duration",
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^(\\d+)(ms|s|m|h|d|w)$"
+                  },
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "id",
+              "api_key",
+              "app_key"
+            ],
+            "additionalProperties": false,
+            "description": "Datadog LLM Observability (F5), polled."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "s3"
+              },
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{0,62}$"
+              },
+              "enabled": {
+                "default": true,
+                "description": "false keeps the source configured but idle.",
+                "type": "boolean"
+              },
+              "visibility": {
+                "description": "Visibility of the sessions it writes (X5.10); default_visibility when unset.",
+                "type": "string",
+                "enum": [
+                  "org",
+                  "owner"
+                ]
+              },
+              "filter": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "min_chars": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "require_user": {
+                    "type": "boolean"
+                  },
+                  "require_reply": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false,
+                "description": "This source's session filter rules; the rest come from [filter]."
+              },
+              "url": {
+                "type": "string",
+                "pattern": "^(?:file:\\/\\/\\/?.*|\\/.*|(?:s3|r2):\\/\\/[^/\\s]+(?:\\/.*)?)$",
+                "description": "The bucket to read: s3://bucket/prefix or r2://bucket/prefix."
+              },
+              "prefix": {
+                "description": "A key prefix under the URL's own.",
+                "type": "string"
+              },
+              "credentials": {
+                "description": "Read-only keys for the source bucket.",
+                "type": "object",
+                "properties": {
+                  "access_key_id": {
+                    "x-seshi-secret": true,
+                    "description": "The access key id.",
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "env": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "the environment variable to read"
+                          }
+                        },
+                        "required": [
+                          "env"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "file": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "the file to read"
+                          }
+                        },
+                        "required": [
+                          "file"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "secret_access_key": {
+                    "x-seshi-secret": true,
+                    "description": "The secret access key.",
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "env": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "the environment variable to read"
+                          }
+                        },
+                        "required": [
+                          "env"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "file": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "the file to read"
+                          }
+                        },
+                        "required": [
+                          "file"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "session_token": {
+                    "description": "A session token, for temporary credentials.",
+                    "x-seshi-secret": true,
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "env": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "the environment variable to read"
+                          }
+                        },
+                        "required": [
+                          "env"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "file": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "the file to read"
+                          }
+                        },
+                        "required": [
+                          "file"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "access_key_id",
+                  "secret_access_key"
+                ],
+                "additionalProperties": false
+              },
+              "role": {
+                "description": "A role to assume instead of static keys.",
+                "type": "object",
+                "properties": {
+                  "arn": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "The role to assume."
+                  },
+                  "external_id": {
+                    "description": "The external id the role requires.",
+                    "x-seshi-secret": true,
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "env": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "the environment variable to read"
+                          }
+                        },
+                        "required": [
+                          "env"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "file": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "the file to read"
+                          }
+                        },
+                        "required": [
+                          "file"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "arn"
+                ],
+                "additionalProperties": false
+              },
+              "region": {
+                "type": "string",
+                "minLength": 1
+              },
+              "endpoint": {
+                "type": "string",
+                "minLength": 1
+              },
+              "account_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "include": {
+                "default": [],
+                "description": "Globs of keys to read; every key when empty.",
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "format": {
+                "default": "auto",
+                "description": "auto (detect each object) or a format name (claude-code, atif…).",
+                "type": "string",
+                "minLength": 1
+              },
+              "ordered_keys": {
+                "default": false,
+                "description": "Keys sort by time, so a run can start after the last key (F6.2).",
+                "type": "boolean"
+              },
+              "interval": {
+                "description": "How often it polls.",
+                "default": "5m",
+                "x-seshi-format": "duration",
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^(\\d+)(ms|s|m|h|d|w)$"
+                  },
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "id",
+              "url"
+            ],
+            "additionalProperties": false,
+            "description": "An S3-compatible bucket other systems write sessions to (F6), polled."
+          }
+        ]
+      }
+    },
+    "search": {
+      "description": "Session search (F10).",
+      "default": {},
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "description": "Serve search from a local index built from the change feed.",
+          "type": "boolean"
+        },
+        "backend": {
+          "default": "sqlite",
+          "description": "The index backend (F10.3).",
+          "type": "string",
+          "enum": [
+            "sqlite"
+          ]
+        },
+        "path": {
+          "description": "The index file on local disk.",
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "worker": {
+      "description": "Background jobs (X7).",
+      "default": {},
+      "type": "object",
+      "properties": {
+        "heartbeat_interval": {
+          "description": "How often the worker writes worker/heartbeat.json (X7.5).",
+          "default": "1m",
+          "x-seshi-format": "duration",
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(\\d+)(ms|s|m|h|d|w)$"
+            },
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "capture": {
+      "description": "Capture integrations (F9).",
+      "default": {},
+      "type": "object",
+      "properties": {
+        "allow_retract": {
+          "default": true,
+          "description": "Let the machine that uploaded a session retract it with its per-session secret (F9.7).",
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "store"
+  ],
+  "additionalProperties": false,
+  "description": "seshi server configuration (seshi.toml). Precedence: flags, then SESHI_* env, then this file, then defaults."
+}
