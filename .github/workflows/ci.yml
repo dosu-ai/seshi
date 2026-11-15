@@ -69,16 +69,72 @@ jobs:
           docker logs sessiondb
           exit 1
 
+  # F8.4: the binary on every platform it ships for, built natively on that platform's runner.
+  # Each one is put through scripts/release/smoke.ts: serve, admin init, login with the org key
+  # (Bun.secrets: the macOS Keychain, Windows Credential Manager, or the 0600 file on a Linux
+  # runner without a secret service), whoami, logout. Then the install script installs it from
+  # a local copy of the release, as a person would.
+  binaries:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: linux-x64, runner: ubuntu-latest, keychain: allowed }
+          - { target: linux-arm64, runner: ubuntu-24.04-arm, keychain: allowed }
+          - { target: darwin-arm64, runner: macos-latest, keychain: required }
+          - { target: darwin-x64, runner: macos-15-intel, keychain: required }
+          - { target: windows-x64, runner: windows-latest, keychain: required }
+          - { target: windows-arm64, runner: windows-11-arm, keychain: required }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - run: bun install --frozen-lockfile
+      # A release folder laid out as GitHub serves one: latest/download/<asset>.
+      - name: Build this platform's release assets
+        run: bun run release:build --target ${{ matrix.target }} --out dist/site/latest/download
+      - name: Smoke test the binary
+        shell: bash
+        run: |
+          bin=dist/site/latest/download/bin/${{ matrix.target }}/seshi
+          if [ -f "$bin.exe" ]; then bin="$bin.exe"; fi
+          bun run release:smoke "$bin" --keychain ${{ matrix.keychain }}
+      - name: Install with install.sh
+        if: runner.os != 'Windows'
+        run: |
+          sh scripts/install/install.sh --base-url "file://$PWD/dist/site" --dir "$RUNNER_TEMP/seshi-bin"
+          "$RUNNER_TEMP/seshi-bin/seshi" --version
+      - name: Install with install.ps1 (PowerShell 7 and Windows PowerShell 5.1)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $server = Start-Process -PassThru -NoNewWindow bun -ArgumentList 'run','scripts/release/serve-dir.ts','dist/site','8765'
+          Start-Sleep -Seconds 2
+          try {
+            ./scripts/install/install.ps1 -BaseUrl http://127.0.0.1:8765 -InstallDir "$env:RUNNER_TEMP\seshi-pwsh"
+            & "$env:RUNNER_TEMP\seshi-pwsh\seshi.exe" --version
+            if ($LASTEXITCODE -ne 0) { exit 1 }
+            powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install/install.ps1 -BaseUrl http://127.0.0.1:8765 -InstallDir "$env:RUNNER_TEMP\seshi-ps51" -NoModifyPath
+            if ($LASTEXITCODE -ne 0) { exit 1 }
+            & "$env:RUNNER_TEMP\seshi-ps51\seshi.exe" --version
+            if ($LASTEXITCODE -ne 0) { exit 1 }
+          } finally {
+            Stop-Process -Id $server.Id -Force
+          }
+
   # Every push to main with a Conventional Commit since the last release is a release
-  # (release.config.js): the version is chosen from the commits, a vX.Y.Z tag and a GitHub
-  # release are cut, and the image job below publishes ghcr.io/dosu-ai/sessiondb at the same
-  # version. Nothing goes to npm until branch 15 publishes seshi and @seshi/client (X3.8).
+  # (release.config.js): the version is chosen from the commits, every target is
+  # cross-compiled, and a vX.Y.Z tag and a GitHub release with the archives, the install
+  # scripts and SHA256SUMS are cut. The jobs after it publish the npm packages and the image
+  # from that release's own assets, then install it on every platform.
   #
   # The release commit and tag are pushed as the abbs-bot GitHub App, the org's
   # release bot (its credentials are the org-wide ABBS_BOT_* secrets): main only takes pull
   # requests, and that app is the ruleset's one bypass actor.
   release:
-    needs: [test, docker]
+    needs: [test, docker, binaries]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
@@ -130,6 +186,20 @@ jobs:
       - uses: actions/checkout@v5
         with:
           ref: v${{ needs.release.outputs.version }}
+      # The image ships the release's own Linux binaries (X2.2: one binary, every channel),
+      # checked against SHA256SUMS, rather than compiling again.
+      - name: Fetch the release's Linux binaries
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p dist/release
+          gh release download "v${{ needs.release.outputs.version }}" --dir dist/release \
+            --pattern 'seshi-linux-*.tar.gz' --pattern SHA256SUMS
+          (cd dist/release && grep -E ' seshi-linux-(x64|arm64)\.tar\.gz$' SHA256SUMS | sha256sum -c -)
+          for pair in amd64:x64 arm64:arm64; do
+            mkdir -p "dist/docker/linux-${pair%%:*}"
+            tar -xzf "dist/release/seshi-linux-${pair##*:}.tar.gz" -C "dist/docker/linux-${pair%%:*}" seshi
+          done
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
@@ -150,8 +220,97 @@ jobs:
           context: .
           file: apps/seshi/Dockerfile
           platforms: linux/amd64,linux/arm64
+          build-args: BINARY=prebuilt
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # F8.4, X3.8: the npm packages, built from the release's archives (so npm carries the very
+  # binaries GitHub does) and published with provenance: @seshi/cli-<target> for every target,
+  # @seshi/model, @seshi/client, then the `seshi` launcher. A package already on the registry
+  # is skipped, so the job can be re-run. Publishing needs NPM_TOKEN (an automation token for
+  # the @seshi scope and the seshi name), or npm trusted publishing set up for this workflow.
+  npm:
+    needs: release
+    if: needs.release.outputs.released == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: v${{ needs.release.outputs.version }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - run: bun install --frozen-lockfile
+      - name: Fetch the release's archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "v${{ needs.release.outputs.version }}" --dir dist/release \
+            --pattern 'seshi-*' --pattern SHA256SUMS
+      - run: bun run release:npm --version ${{ needs.release.outputs.version }} --from dist/release --out dist/npm
+      - run: bun run release:publish-npm --provenance --dir dist/npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # The published release, installed on every platform through each channel: the install
+  # script and npm. Each binary is then smoke tested as in the binaries job.
+  verify:
+    needs: [release, npm]
+    if: needs.release.outputs.released == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: linux-x64, runner: ubuntu-latest, keychain: allowed }
+          - { target: linux-arm64, runner: ubuntu-24.04-arm, keychain: allowed }
+          - { target: darwin-arm64, runner: macos-latest, keychain: required }
+          - { target: darwin-x64, runner: macos-15-intel, keychain: required }
+          - { target: windows-x64, runner: windows-latest, keychain: required }
+          - { target: windows-arm64, runner: windows-11-arm, keychain: required }
+    runs-on: ${{ matrix.runner }}
+    env:
+      VERSION: ${{ needs.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: v${{ needs.release.outputs.version }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: bun install --frozen-lockfile
+      - name: install.sh from the release
+        if: runner.os != 'Windows'
+        run: |
+          curl -fsSL "https://github.com/${{ github.repository }}/releases/download/v$VERSION/install.sh" \
+            | sh -s -- --version "$VERSION" --dir "$RUNNER_TEMP/seshi-bin" --no-modify-path
+          test "$("$RUNNER_TEMP/seshi-bin/seshi" --version)" = "seshi $VERSION"
+          bun run release:smoke "$RUNNER_TEMP/seshi-bin/seshi" --version "$VERSION" --keychain ${{ matrix.keychain }}
+      - name: install.ps1 from the release
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $script = Invoke-RestMethod "https://github.com/${{ github.repository }}/releases/download/v$env:VERSION/install.ps1"
+          & ([scriptblock]::Create($script)) -Version $env:VERSION -InstallDir "$env:RUNNER_TEMP\seshi-bin"
+          $exe = "$env:RUNNER_TEMP\seshi-bin\seshi.exe"
+          if ((& $exe --version) -ne "seshi $env:VERSION") { exit 1 }
+          bun run release:smoke $exe --version $env:VERSION --keychain ${{ matrix.keychain }}
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: npm i -g seshi
+        shell: bash
+        run: |
+          npm install -g "seshi@$VERSION"
+          test "$(seshi --version)" = "seshi $VERSION"
+          test "$(npx --yes "seshi@$VERSION" --version)" = "seshi $VERSION"

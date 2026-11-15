@@ -5,6 +5,13 @@
 #   docker build -f apps/seshi/Dockerfile -t seshi .
 # Multi-platform builds (linux/amd64, linux/arm64) cross-compile on the build machine, so no
 # emulation runs the build.
+#
+# Releases (ci.yml's image job) ship the GitHub release's own Linux binaries instead of compiling
+# again: they are unpacked to dist/docker/linux-<amd64|arm64>/seshi and the build is given
+# `--build-arg BINARY=prebuilt` (BuildKit skips the stage it does not use).
+
+# Where the binary comes from: `build` (compile it here) or `prebuilt` (dist/docker/).
+ARG BINARY=build
 
 FROM --platform=$BUILDPLATFORM oven/bun:1.4-slim AS build
 ARG TARGETARCH
@@ -26,6 +33,12 @@ RUN case "$TARGETARCH" in \
  && bun run scripts/build-binary.ts --target "$target" --outfile /out/seshi \
  && if [ "$TARGETARCH" = "$(dpkg --print-architecture)" ]; then /out/seshi --version; fi
 
+FROM scratch AS prebuilt
+ARG TARGETARCH
+COPY dist/docker/linux-$TARGETARCH/seshi /out/seshi
+
+FROM $BINARY AS binary
+
 FROM debian:bookworm-slim
 # Take the distro's security fixes at build time, and CA certificates for any tool that reads
 # the system store. A non-root user owns /data, with uid 1000 like the earlier image's `bun`
@@ -35,7 +48,7 @@ RUN apt-get update && apt-get upgrade -y \
  && rm -rf /var/lib/apt/lists/* \
  && useradd --system --uid 1000 --home-dir /data --shell /usr/sbin/nologin seshi \
  && mkdir -p /data && chown seshi:seshi /data
-COPY --from=build /out/seshi /usr/local/bin/seshi
+COPY --from=binary --chmod=755 /out/seshi /usr/local/bin/seshi
 
 # Settings come from SESHI_* env or a mounted /etc/seshi/seshi.toml (docs/config.md); the
 # server listens on :7200 unless server.listen says otherwise, and runs the api and worker

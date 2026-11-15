@@ -1,12 +1,19 @@
-/** Every push to main that carries a Conventional Commit is a release: semantic-release reads
- * the commits since the last `vX.Y.Z` tag, picks the next version, writes it into
- * packages/ts/model/package.json (the repository's one version: what traces record as their
- * normalizer, what /healthz and `seshi --version` report) and bun.lock, and cuts the tag and a
- * GitHub release; the `image` job in ci.yml then builds ghcr.io/dosu-ai/sessiondb at the same
- * version.
+/** Every push to main that carries a Conventional Commit is a release (F8.4, X3.8).
+ * semantic-release reads the commits since the last `vX.Y.Z` tag and picks the next version;
+ * then, in this order:
  *
- * Nothing is published to npm: the packages are private workspaces since the seshi restructure
- * (X3.4). Branch 15 rewrites this to publish the seshi binary and @seshi/client (X3.8).
+ * 1. prepare: scripts/release-version.ts writes it into packages/ts/model/package.json (the
+ *    repository's one version: what traces record as their normalizer, what /healthz and
+ *    `seshi --version` report) and bun.lock; scripts/release/build.ts cross-compiles `seshi`
+ *    for every target (scripts/release/targets.ts) into dist/release/: one archive per target,
+ *    install.sh, install.ps1 and SHA256SUMS. @semantic-release/git commits the version files.
+ * 2. The tag `vX.Y.Z` is pushed, and the GitHub release is published with those assets. The
+ *    install scripts download from it, and `…/releases/latest/download/install.sh` is a stable
+ *    URL.
+ * 3. ci.yml's later jobs take it from there, from the release's own assets: `npm` publishes
+ *    the platform packages, @seshi/model, @seshi/client and the `seshi` launcher; `image`
+ *    builds ghcr.io/<repo> from the two Linux binaries; `verify` installs the release on every
+ *    platform through each channel.
  *
  * @type {import('semantic-release').GlobalConfig} */
 export default {
@@ -18,14 +25,24 @@ export default {
     [
       "@semantic-release/exec",
       {
-        // Write the version into the model's package.json and bun.lock. (@semantic-release/git
-        // commits those files below.)
-        prepareCmd: "bun run scripts/release-version.ts ${nextRelease.version}",
+        prepareCmd:
+          "bun run scripts/release-version.ts ${nextRelease.version} && bun run scripts/release/build.ts --version ${nextRelease.version} --out dist/release",
         successCmd:
           "echo 'released=true' >> $GITHUB_OUTPUT && echo 'version=${nextRelease.version}' >> $GITHUB_OUTPUT",
       },
     ],
-    "@semantic-release/github",
+    [
+      "@semantic-release/github",
+      {
+        assets: [
+          { path: "dist/release/seshi-*.tar.gz" },
+          { path: "dist/release/seshi-*.zip" },
+          { path: "dist/release/install.sh" },
+          { path: "dist/release/install.ps1" },
+          { path: "dist/release/SHA256SUMS" },
+        ],
+      },
+    ],
     [
       "@semantic-release/git",
       {

@@ -12,3 +12,5 @@ brand
 *.md
 .env
 dist
+# The release binaries the image job unpacks for `--build-arg BINARY=prebuilt`.
+!dist/docker
