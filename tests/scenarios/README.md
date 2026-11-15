@@ -323,3 +323,102 @@ tests/scenarios/01-pause-then-stale-rebuild.yaml: step 14 (pass sweep=true): an 
   claude-code:main: the pause stopped it at 3970 bytes; the stop moved to 9997 with no lost answer
   claude-code:main: stopped at 3970 bytes (11 records), yet the server holds 26 records
 ```
+
+## Process mode
+
+The runner above lives in one process: it moves the clock and wraps `fetch` and the store, but
+it cannot kill an uploader halfway through a chunk, tear a TCP connection, or run two uploaders
+at once. Process mode runs the same format with real processes, isolated the way the
+verify-seshi skill isolates a run:
+
+```sh
+bun run scenarios:process                       # every tests/scenarios-proc/*.yaml, then the cleanup proof
+bun run scenarios:process tests/scenarios-proc/05-two-uploaders-at-once.yaml --trace
+SCENARIO_SESHI_BIN=dist/seshi bun run scenarios:process   # the compiled binary instead of the source
+```
+
+It is not part of `bun run test` (the set takes about a minute and needs free ports); CI runs it
+nightly. `--keep` keeps a failing scenario's folder (server logs, bucket, state); `--trace`
+prints every request the proxy saw and what became of it. The files live in
+`tests/scenarios-proc/` (not here: every `*.yaml` here is an in-process test), the runner in
+`tests/tooling/scenario-proc/`. Build note: `docs/seshi/build/34-scenario-proc.md`.
+
+**The world.** Each scenario gets a temporary folder with a throwaway home (agent folders, XDG
+folders, the capture state), a `file://` bucket and its own ports. `seshi serve` runs as a
+process (from source, `bun run apps/seshi/src/main.ts`), behind a TCP fault proxy; the machine
+logs in through the proxy with the org key as `alice@acme.com` (`SESHI_KEYCHAIN=false`). Hooks
+are real `seshi hook claude-code …` processes with the payload on stdin; `SESHI_NO_UPLOADER=1`
+keeps them from starting uploaders, so every `seshi daemon` is one the scenario started. Every
+process gets its own process group and is killed by its id in a `finally`, pass or fail; a
+process left over fails the run. Time is real: there is no clock to move.
+
+**The format.** `setup: { mode: process }` (with `repos`, `allow` and `server` as above). These
+steps mean what they mean in-process: `turns`, `subagent`, `compact`, `move-transcript`, `hook`,
+`pass` (`seshi daemon --once --json`), `capture`, `restart-server` (a new `seshi serve` on the
+same port), `heal`, `expect`, `settle`. Refused before anything runs, with the reason: `clock`
+(production code gets no test hooks; use `wait`), `review`, `rules`, `format-bump`, `sweep`,
+`backfill`, store faults, `latency`, `expect: reviewed`, `pass: { sweep: false }`.
+
+| Step | Fields | What it does |
+|---|---|---|
+| `fault` | `http: "<METHOD> <path>"`, `nth`, `times`, one action (below) | Arms a proxy rule. It counts the requests that match from now, fires on the `nth`, for `times` (1, or `always` until `heal`). |
+| `background` | `as`, `step` (a `pass`, `turns`, `hook`, `subagent` or `capture`) | Starts the step and goes on without waiting. |
+| `join` | a name or a list | Waits for background runs; a run that failed fails here. |
+| `await` | `request: "<METHOD> <path>"`, `nth` (1), `timeout` (20s) | Waits until the proxy has seen that request since the last `background` or `daemon` started. |
+| `daemon` | `as`, `idle`, `keep-alive` | Starts a long-running `seshi daemon` (`--keep-alive`: waits for the lock instead of exiting). |
+| `stop` / `kill` | a run's name | SIGTERM (and wait) or SIGKILL its process. |
+| `wait` | a duration (at most 60s) | Real time passes. |
+
+Proxy actions (`kill-client` and `kill-server` take a byte count or `all`):
+
+| Action | What happens |
+|---|---|
+| `delay: 2s` | The request is held, then forwarded. |
+| `close-request: N` | The head and N body bytes reach the server, then both sides close: a torn request. |
+| `reset: true` | The connection closes before anything reaches the server. |
+| `close-response: N` | The server answers; the client gets N bytes of it, then a close. |
+| `status: 503` (`code`, `expected`) | The proxy answers; the server sees nothing. |
+| `drop-response: true` | The server answers in full (it committed); the client gets a close. |
+| `kill-client: N` | After N body bytes reach the server, the one running uploader is SIGKILLed; the server sees a torn request. With `all`, the whole request goes and the answer is never read. |
+| `kill-server: N` | After N body bytes, `seshi serve` is SIGKILLed with the request inside it. Bring it back with `restart-server`. |
+
+`expect` also takes `requests: { "POST /v1/sessions": 2 }` (requests the proxy saw over the run),
+`started: { of: [a, b], count: 1 }` (how many of those passes took the uploader lock),
+`runs: { a: { started, killed, code, pass: { uploaded: 1 } } }` and
+`uploader-lock: absent | live | stale` (`uploader.json`, and whether its pid lives). `pass`
+reads the last foreground pass; a pass a kill rule ended has no summary.
+
+**What is checked** is what the in-process runner checks, read from disk (the state file, the
+bucket) and from `seshi doctor --json`; `checkStore` runs between steps only while nothing runs
+in the background. `settle` joins background runs, stops long-running daemons, then makes passes,
+sleeping until the next retry when only retries are left (backoff starts at 5 s and doubles; it
+refuses to wait more than 70 s), and runs the quiet checks.
+
+```yaml
+# Guards F9.1: two uploaders started together; the lock lets one send.
+name: two uploaders at once send each byte once
+description: >
+  A session has something to send; two uploaders start together while the proxy holds the
+  upload 1.5 s. Exactly one takes the lock, and the server sees one upload.
+setup: { mode: process }
+steps:
+  - turns: { session: main, count: 2 }
+  - fault: { http: POST /v1/sessions, delay: 1500ms }
+  - background: { as: a, step: pass }
+  - background: { as: b, step: pass }
+  - join: [a, b]
+  - expect:
+      started: { of: [a, b], count: 1 }
+      requests: { "POST /v1/sessions": 1 }
+      sessions:
+        main: { traces: 1, matches-transcript: true }
+  - settle
+```
+
+With `seshi daemon --once` made to ignore the lock, this fails:
+
+```
+tests/scenarios-proc/05-two-uploaders-at-once.yaml: step 6 (expect …): expectation not met
+  requests: POST /v1/sessions: expected 1, got 2
+  started: 2 of first-a, first-b took the uploader lock, not 1
+```

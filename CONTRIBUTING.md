@@ -79,6 +79,12 @@ seed each night (it prints the seed), uploading `tests/scenarios/found/` as an a
 failing the job when anything is found. About 3,000 runs take five minutes on a laptop. A found
 file is triaged as the scenarios README says, and kept under `found/` only once it passes.
 
+Process deaths and races (an uploader or server killed mid-request, two uploaders at once, a
+hook or `capture off` during a pass) need real processes: `bun run scenarios:process [files…]`
+runs [tests/scenarios-proc](tests/scenarios/README.md#process-mode) with a real `seshi serve`,
+uploaders and hooks behind a TCP fault proxy, in about a minute. It is not part of `bun run
+test`; CI runs it nightly.
+
 ## Verifying a change end to end
 
 Unit and integration tests run seshi in-process. To show a change working the way a user meets
