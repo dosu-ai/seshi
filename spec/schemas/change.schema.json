@@ -29,7 +29,7 @@
       "$ref": "common.schema.json#/$defs/OwnerBasis"
     },
     "reason": {
-      "description": "Why a session was tombstoned: `deleted` by its owner or an admin, `retracted` by the machine that uploaded it (F9.7), or `redacted` by an operator.",
+      "description": "Why a session was tombstoned: `deleted` by its owner or an admin, `retracted` by the machine that uploaded it (F9.7), or `redacted` by an operator. On a `published` entry with `replace`, `redacted` says a redaction backfill rewrote the session's traces with new rules (F2.5); absent on other publishes.",
       "enum": ["deleted", "retracted", "redacted"]
     },
     "visibility": {

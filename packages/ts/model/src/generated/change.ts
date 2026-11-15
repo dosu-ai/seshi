@@ -22,7 +22,7 @@ export interface ChangeEntry {
   writer: Writer;
   /** How the session's owner was established (X5.5), as metadata records it. */
   owner_basis?: OwnerBasis;
-  /** Why a session was tombstoned: `deleted` by its owner or an admin, `retracted` by the machine that uploaded it (F9.7), or `redacted` by an operator. */
+  /** Why a session was tombstoned: `deleted` by its owner or an admin, `retracted` by the machine that uploaded it (F9.7), or `redacted` by an operator. On a `published` entry with `replace`, `redacted` says a redaction backfill rewrote the session's traces with new rules (F2.5); absent on other publishes. */
   reason?: "deleted" | "retracted" | "redacted";
   /** On `visibility_changed`: the new visibility. */
   visibility?: Visibility;

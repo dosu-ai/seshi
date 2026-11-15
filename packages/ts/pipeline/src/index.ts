@@ -12,6 +12,13 @@ export {
   SessionRejected,
 } from "@seshi/model";
 export {
+  type BackfillOptions,
+  type BackfillOutcome,
+  type BackfillReport,
+  type BackfillSession,
+  backfillRedaction,
+} from "./backfill";
+export {
   canonicalJson,
   copiedPrefix,
   planShipment,
