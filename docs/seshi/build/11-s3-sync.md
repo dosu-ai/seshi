@@ -5,7 +5,7 @@ Branch `seshi-11-s3-sync`, on `seshi-06-instance`. Every binary now polls `[[sou
 local folder), finds new and grown objects from a manifest in its checkpoint, and submits them
 to the pipeline as the source's service account. Append-only logs continue by byte offset,
 reading only their tail; rewritten objects and whole documents are replaced by their original
-writer. Source deletions are ignored. User docs: [server.md](../../server.md#syncing-an-s3-bucket)
+writer. Source deletions are ignored. User docs: [s3-sync.md](../../s3-sync.md)
 and [config.md](../../config.md).
 
 ## What was built

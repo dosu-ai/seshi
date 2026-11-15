@@ -17,7 +17,8 @@ agent turn ──▶ seshi hook ──▶ spool ──▶ seshi daemon (uploader
 
 ## Installing
 
-Sign in first ([cli.md](cli.md#signing-in-f82)), then:
+Sign in to your team's server first (`seshi login`, [cli.md](cli.md#signing-in-f82)), or point
+the CLI at your own bucket ([local mode](config.md#the-clis-config)), then:
 
 ```sh
 seshi capture install            # every agent found on this machine
@@ -114,7 +115,7 @@ and your username. In local mode they go to your own bucket.
 
 Nothing a rule knows leaves the machine. Before each piece is sent, the uploader redacts it with
 your server's rule packs and the built-in pack, the same rules the server runs
-([server.md](server.md#your-own-redaction)): secrets become `[redacted:<rule>]`, and a call
+([redaction.md](redaction.md)): secrets become `[redacted:<rule>]`, and a call
 that reads a sensitive file (`.env`, keys) or runs a secret command keeps its call while its
 result is withheld, even when the result only arrives in a later chunk. The server redacts
 everything again regardless, so what the client did is never trusted.

@@ -186,7 +186,7 @@ are kept (X6.4). `health_retention`, `"90d"`: how many days of source health cou
 runs (F2.1). A `.toml` file is a rule pack (`id`, `rules`, `sensitive_files`,
 `secret_commands`, `disable`); a `.json` file is the rule file sessiondb took (`patterns`,
 `sensitive_files`, `secret_commands`), and every JSON file loads together as the pack `legacy`.
-See [server.md](server.md#your-own-redaction). Your patterns run under RE2 (F2.2). The server
+See [redaction.md](redaction.md). Your patterns run under RE2 (F2.2). The server
 refuses to start on a pack it cannot use, a pattern RE2 cannot run, a rule id used twice, a
 `disable` of something that is not a built-in rule, or a rule that fails its own test strings,
 naming the file; `seshi config check` reports the same problems. A change applies after a
@@ -197,7 +197,7 @@ restart; `seshi redact backfill` applies it to stored sessions.
 `[[review.policies]]`: model review (F3), none by default, so review is off and nothing is sent
 anywhere. A policy has two steps: the decision model labels each envelope `allow`, `redact` or
 `drop`, and for `redact` the redactor LLM finds the text to remove (see
-[server.md](server.md#model-review)). The smallest policy is an id and a key; everything else
+[model-review.md](model-review.md)). The smallest policy is an id and a key; everything else
 has a default:
 
 ```toml
@@ -252,7 +252,7 @@ overrides. Each writes as its service account `svc:<id>` (X5.4). The worker poll
 its `interval` once a connector for its type is in the binary (`seshi sync status` says which
 are polled). The binary polls `datadog` sources ([docs/datadog.md](datadog.md)) through the
 datadog-trajectory integration and `s3` sources with its built-in S3 poller
-([server.md](server.md#syncing-an-s3-bucket)); `otlp` sources are not polled, their
+([s3-sync.md](s3-sync.md)); `otlp` sources are not polled, their
 destination posts to them. What a poller cannot turn into a session (an object it cannot read,
 a Datadog span it cannot parse) is recorded under `sources/<id>/failed/` and listed by
 `seshi sync failed <id>`.
@@ -266,7 +266,7 @@ a Datadog span it cannot parse) is recorded under `sources/<id>/failed/` and lis
 Ids are unique, and an `s3` source may not read seshi's own bucket and prefix, or its own
 folder (F6.4).
 
-An `s3` source is polled by the built-in S3 poller ([server.md](server.md#syncing-an-s3-bucket)).
+An `s3` source is polled by the built-in S3 poller ([s3-sync.md](s3-sync.md)).
 Its `url` is `s3://`, `r2://` or a folder (`file:///path`, for one machine). `include` globs
 (Bun's glob syntax) and `path` match the key under the URL's prefix plus `prefix` (both
 name folders: `prefix = "runs"` lists `runs/`, and a partial name such as `"runs/2026-"` is

@@ -63,7 +63,7 @@ app_key = { env = "DD_APP_KEY" }
 ml_app = "trajectory"
 tags = ["env:prod"]
 
-# A bucket other systems write agent logs to (F6, docs/server.md#syncing-an-s3-bucket): the
+# A bucket other systems write agent logs to (F6, docs/s3-sync.md): the
 # built-in S3 poller reads new and grown objects. It may not be seshi's own bucket and prefix.
 [[sources]]
 id = "eval-logs"

@@ -6,8 +6,7 @@ packs`, parsed and validated by one parser and one validator, compiled into one 
 Operator patterns run under RE2. Every stored session records the rule-set hash and counts by
 rule id. The same code redacts a native transcript for the uploader's pre-redaction, a route
 serves the org's packs to clients, and `seshi redact test|backfill` replace the stub.
-Reference for operators: [docs/server.md](../../server.md#your-own-redaction),
-[docs/cli.md](../../cli.md#redaction-rules).
+Reference for operators: [docs/redaction.md](../../redaction.md).
 
 ## What was built
 
@@ -141,7 +140,7 @@ Reference for operators: [docs/server.md](../../server.md#your-own-redaction),
   It is idempotent and resumable. The report has outcomes, counts by rule, the sessions
   rewritten, in conflict or failed, and `more` (stopped at the limit or by the signal).
 - **`seshi redact`** (`apps/seshi/src/commands/redact.ts`), replacing the stub. Usage is in
-  [docs/cli.md](../../cli.md#redaction-rules).
+  [docs/redaction.md](../../redaction.md#trying-and-applying-rules).
   - `test`: the rule set from the built-in pack, `--pack` files and (with `--config`) the
     server's packs. It runs every test string. On a file or stdin it reports counts per rule
     and where they fired: record numbers for a transcript (detected or `--agent`, normalized

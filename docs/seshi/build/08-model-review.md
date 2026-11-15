@@ -5,7 +5,7 @@ X4.3) now does something: a decision model labels what each envelope adds `allow
 `drop`, and for `redact` a redactor LLM finds the text to remove, which deterministic code
 removes. It runs inline, after regex redaction and the session filter and before anything is
 written. Policies come from `[[review.policies]]`; with none, review is off and nothing is sent
-anywhere. Reference: [docs/server.md](../../server.md#model-review),
+anywhere. Reference: [docs/model-review.md](../../model-review.md),
 [docs/config.md](../../config.md#review).
 
 ## What was built

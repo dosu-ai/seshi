@@ -1,55 +1,64 @@
-# The sessiondb server
+# The seshi server
 
-A client posts the transcript of a session, whole or in chunks as it grows; the server turns
-it into an envelope and runs it through one pipeline, in memory (X4): it normalizes it to
-trajectory-v1, redacts the records, decides whether the session is worth a trace and how much
-of it is new, runs model review when a policy applies, and only then writes the trace to the
-bucket, in the [layout](../spec/layout.md). The transcript itself is never stored (X6.3): the
-redacted trace is the only copy, and a trace is rebuilt by sending the transcript again while
-the client still has it. Anything that reads the layout reads the bucket directly: the server
-is a writer and no reader's dependency.
+`seshi serve` is the server: one process, one config, one bucket. Members' capture uploaders
+and other clients post transcripts to it; it runs each through one pipeline, in memory (X4):
+normalize to trajectory-v1, redact, decide whether the session is worth a trace and how much
+of it is new, run model review when a policy applies, and only then write the trace to the
+bucket, in the [layout](../spec/layout.md). Its worker polls the sources you configure (OTLP
+spans, Datadog, an S3 bucket) through the same pipeline. The transcript itself is never stored
+(X6.3): the redacted trace is the only copy. Anything that reads the layout can read the bucket
+directly: the server is a writer, and no reader depends on it.
 
-The server (`seshi serve`, `apps/seshi/`) is an Instance (`packages/ts/instance/`, X1.2): the
-bucket, identity and access (`packages/ts/auth/`, X5), the pipeline (`packages/ts/pipeline/`)
-and the background jobs (X7), built from one config, with the HTTP routes (`packages/ts/api/`)
-over it. Each route checks the caller's credential and scopes, then reads or writes the bucket
-for the owner the credential names; `@seshi/client` (`HttpSessionDB`) speaks this API from the
-other side. One person who owns a bucket can skip the server: the CLI's local mode (X3.5)
-builds the same Instance in-process ([config.md](config.md#the-clis-config)). For a team the
-server is the point: the laptop holds no bucket credential and redaction is not the laptop's to
-skip.
+For one person who owns a bucket, the server is optional: the CLI's local mode (X3.5) builds
+the same pipeline in-process ([config.md](config.md#the-clis-config)). For a team, the server
+is the point: laptops hold no bucket credential, and redaction is not a laptop's to skip.
 
 ```
-client ──POST /v1/sessions (transcript, bearer token)──▶ seshi server
-                                    normalize · redact · filter · review · write the trace
-                                                                    │
-                                                                    ▼
-                                                   the bucket (s3:// r2:// file://)
-                                                                    ▲
-                                                 readers tail changes/ (their own read-only key)
+capture uploader, seshi upload, any client ──POST /v1/sessions──▶ seshi serve
+OTLP exporters ──POST /otlp/v1/traces──▶       normalize · redact · filter · review · write
+worker: Datadog, S3 sources ──poll──▶                              │
+                                                                   ▼
+                                                  the bucket (s3:// r2:// file://)
+                                                                   ▲
+                                      readers: the API with a service token, or changes/
 ```
 
-One server, one bucket, from `seshi.toml` and `SESHI_*` env (see [config.md](config.md)).
 Every caller has an owner ID (X5.8): the username an org-key caller states, the IdP subject
 (or email) of a person who signed in, `svc:<source-id>` for a service account, or the name of a
 static token. That owner's sessions are filed under `owners/<owner>/`. Who may read what is the
 session's visibility (X5.10); see [Who sees what](#who-sees-what).
 
+Inside, the server is an Instance (`packages/ts/instance/`, X1.2): the bucket, identity and
+access (`packages/ts/auth/`, X5), the pipeline (`packages/ts/pipeline/`) and the background jobs
+(X7), built from one config, with the HTTP routes (`packages/ts/api/`) over it.
+[`@seshi/client`](client.md) speaks the API from the other side.
+
 ## Running it
 
-```bash
-cp .env.example .env     # a token, the bucket URL and its keys, as SESHI_* variables
-bun start                # http://localhost:7200
+Install `seshi` ([install.md](install.md)), write a config, check it, set up the first
+credentials, and start it:
+
+```sh
+cat > seshi.toml <<'TOML'
+[store]
+url = "s3://acme-sessions/seshi"      # or r2://bucket/prefix, or file:///var/lib/seshi
+region = "us-east-1"
+TOML
+seshi config check                    # every problem at once, with where each value came from
+seshi admin init                      # prints the first admin token and the org key, once
+seshi serve                           # http://localhost:7200
 ```
 
-Bun reads `.env` from the working directory on its own when run from source (`bun start`);
-`.env` is gitignored. The compiled binary does not (docs/cli.md), so outside a checkout set
-`SESHI_*` in the environment or use a TOML file. `docker compose` hands the container the same
-`.env` (`docker compose up -d`). A TOML file works as well
-(`./seshi.toml`, `/etc/seshi/seshi.toml`, or `--config`; start from
-[`seshi.example.toml`](../seshi.example.toml)), with env over it and flags over env.
-`seshi config check` validates either before you start. At boot the server writes the layout
-marker and a probe object, so a wrong bucket or key fails there and not on the first session.
+The config is `./seshi.toml`, `/etc/seshi/seshi.toml`, or the file `--config` names, with
+`SESHI_*` env over it and flags over env; [`seshi.example.toml`](../seshi.example.toml) is a
+commented example and [config.md](config.md) lists every setting. The compiled binary reads
+nothing else: no `.env`, no `bunfig.toml`. From a checkout, `bun start` runs the server from
+source and Bun reads `.env` (copy [`.env.example`](../.env.example)); `docker compose up -d`
+hands the container the same `.env`.
+
+At boot the server writes the layout marker and a probe object, so a wrong bucket or key fails
+there and not on the first session. Put TLS in front of it (a reverse proxy, a load balancer,
+Cloud Run): transcripts arrive unredacted, and the server is where that stops being true.
 
 The settings most servers need ([config.md](config.md) has all of them):
 
@@ -60,13 +69,13 @@ The settings most servers need ([config.md](config.md) has all of them):
 | `auth.org_key.enabled` | `SESHI_AUTH__ORG_KEY__ENABLED` | Default `true`: members holding the org key write as the username they state (X5.12) |
 | `store.url` | `SESHI_STORE__URL` | Required: `r2://bucket/prefix`, `s3://bucket/prefix`, or `file:///path` |
 | `store.credentials.*`, `store.region`, `store.endpoint`, `store.account_id` | `SESHI_STORE__CREDENTIALS__ACCESS_KEY_ID`, … | The bucket's keys and where it is. Unset, the standard `AWS_*` / `S3_*` (and `R2_*` for `r2://`) variables apply |
-| `redaction.packs` | `SESHI_REDACTION__PACKS` | Your own redaction rule packs (TOML, or today's JSON rule files), on top of the built-in pack ([below](#your-own-redaction)). The server refuses to start on a pack it cannot use or a rule that fails its own test strings |
+| `redaction.packs` | `SESHI_REDACTION__PACKS` | Your own redaction rule packs (TOML, or today's JSON rule files), on top of the built-in pack ([redaction.md](redaction.md)). The server refuses to start on a pack it cannot use or a rule that fails its own test strings |
 | `store.deployment_id`, `store.org` | `SESHI_STORE__DEPLOYMENT_ID`, `SESHI_STORE__ORG` | Recorded in the bucket's layout marker (`seshi.json`); the server refuses to start against a bucket marked for another deployment or org (X1.4). See [the layout](../spec/layout.md) |
 | `server.listen` | `SESHI_SERVER__LISTEN` | Default `:7200`; flag `--listen` |
 
-Today's `SESSIONDB_*` names and `PORT` are no longer read.
+sessiondb's `SESSIONDB_*` names and `PORT` are not read.
 
-### Roles and background work
+## Roles and background work
 
 `seshi serve` runs two roles (X7.1), chosen with `--roles` or `server.roles`: `api` serves the
 HTTP API, and `worker` runs the background jobs. The default runs both in one process, which is
@@ -81,14 +90,14 @@ The worker's jobs:
 |---|---|---|
 | `heartbeat` | `worker.heartbeat_interval` (1m) | Writes `worker/heartbeat.json`: who runs, since when, and each job's last run and error (X7.5) |
 | `retention` | 6h | Prunes drop and failure records and source health days past `[records]` retention |
-| `source:<id>` | the source's `interval` | Polls a source through its connector (X3.11), from its checkpoint (X7.4): Datadog LLM Observability for `type = "datadog"` ([datadog.md](datadog.md)) |
+| `source:<id>` | the source's `interval` | Polls a source through its connector (X3.11), from its checkpoint (X7.4): Datadog LLM Observability for `type = "datadog"` ([datadog.md](datadog.md)), a bucket for `type = "s3"` ([s3-sync.md](s3-sync.md)) |
 | `assembler` | `worker.assembly_interval` (30s) | Publishes sessions whose spans (OTLP, F4; Datadog, F5) have been quiet for their source's `quiet_period`, from the pending markers (X7.4); its backlog is the sessions waiting |
 
 One job runs on every instance with the `api` role instead, worker or not:
 
 | Job | Every | What it does |
 |---|---|---|
-| `search-index` | `search.interval` (15s) | Reads every owner's change feed into this instance's own search index ([below](#search)) |
+| `search-index` | `search.interval` (15s) | Reads every owner's change feed into this instance's own search index ([search.md](search.md#how-the-index-works)) |
 
 A failed run is retried after 5 seconds, doubling per failure in a row up to the job's
 interval. A poll whose envelope failed transiently (the bucket) never saves its checkpoint
@@ -114,258 +123,19 @@ run` and `reprocess` stay where the config is.
 
 The commands and their exit codes are in [cli.md](cli.md).
 
-### Syncing an S3 bucket
+## Sources
 
-Eval harnesses, ATIF exports and hook uploaders in cloud sandboxes often drop transcripts into
-a bucket. An `s3` source polls one (F6); the poller is built into every binary, so the worker
-polls it as soon as it is configured:
+A source is a way sessions reach the server other than `POST /v1/sessions` (whose source is
+`upload`). Each is a `[[sources]]` entry with its own id, service account (`svc:<id>`),
+visibility, checkpoint and health ([config.md](config.md#sources)):
 
-```toml
-[[sources]]
-id = "evals"
-type = "s3"
-url = "s3://eval-runs/harness"            # or r2://bucket/prefix, or file:///path on one machine
-credentials = { access_key_id = { env = "EVALS_KEY_ID" }, secret_access_key = { env = "EVALS_SECRET" } }
-# role = { arn = "arn:aws:iam::123456789012:role/seshi-read", external_id = { env = "EVALS_EXTERNAL_ID" } }
-include = ["**/*.jsonl", "**/*.json"]
-path = "{email}/{session}.jsonl"           # optional: what a key says about its session
-interval = "5m"
-```
+| `type` | How sessions arrive | Guide |
+|---|---|---|
+| `otlp` | Pushed: OpenTelemetry GenAI spans to `POST /otlp/v1/traces` (a Claude Console destination, or any OTLP/HTTP exporter), assembled into sessions | [otlp.md](otlp.md) |
+| `datadog` | Polled: Datadog LLM Observability's Export API, the turns Datadog Trajectory published | [datadog.md](datadog.md) |
+| `s3` | Polled: transcripts other systems drop into a bucket (eval harnesses, ATIF exports, sandboxes) | [s3-sync.md](s3-sync.md) |
 
-Each run lists the prefix and compares every key's ETag and size with the manifest in the
-source's checkpoint, so an unchanged object is never read again (F6.2).
-
-- **A new object** is read whole. Its format is the source's `format`, else the object's
-  `x-amz-meta-seshi-format`, else `{format}` in `path`, else what detection finds in its start
-  (`format = "auto"`, the default). Its session is the object's `x-amz-meta-seshi-session`,
-  else `{session}` in `path`, else its key under the prefix.
-- **An append-only log that grew** (Claude Code, Codex and other JSONL formats) continues from
-  where its session ends: only the tail is read, with a `Range` request, and submitted as a
-  chunk (X4.4). The poller first checks that the up to 4 KiB before that point are unchanged.
-  Only complete lines are sent; a line still being written waits for the next run.
-- **A rewritten object**, a shrunk one, a whole document (ATIF, OpenCode) or a gzip object is
-  read whole and sent with `replace`: the pipeline extends the session when the object starts
-  with what it holds, and otherwise replaces it, since the poller is the session's original
-  writer (F6.3, X4.6).
-- **Ownership.** Every session belongs to the source's service account `svc:<id>` and is
-  marked `owner_basis: service` (X5.4); the source's `visibility` applies. What the key or the
-  object's metadata say about a person (`{email}`, `{username}`, `{name}`, `{git_email}`,
-  `{git_name}`, or `x-amz-meta-seshi-email` and the like, `-` for `_`) is recorded as claims in
-  the session's metadata (X5.5), never as its owner. `{project}` and `{branch}` (or
-  `x-amz-meta-seshi-project`, `-branch`) fill the session's project and branch.
-- **Provenance.** The session's metadata records where it came from: `s3://bucket/key` and
-  the ETag read. Each envelope's idempotency key is that location and ETag (plus the offset
-  for a chunk, X4.7), so a run repeated after a crash is answered from the session. A whole
-  object's key also carries the manifest's epoch, which `seshi reprocess` moves on, so an
-  object read again on purpose is normalized again rather than answered from the session.
-- **Deletions are ignored** (F6.4). Deleting a source object never changes the session it
-  produced; its key leaves the manifest at the next complete listing. To remove a session,
-  delete it in seshi: the poller will not store it again, even when the object changes.
-- **What is not stored** is recorded under `sources/<id>/failed/` with the object's location
-  and a code, never its content, and not tried again until the object changes or
-  `seshi reprocess` rewinds it (after fixing the source's `format` or `path`, say):
-  `unknown_format`, `too_large` (over `limits.max_upload_bytes`, checked before reading, and
-  for gzip after unzipping as far as the limit), `not_utf8`, `bad_gzip`,
-  `unsupported_encoding` (a `Content-Encoding` other than gzip), `access_denied` (the bucket
-  refused that one object with 403), `unreadable` (another final 4xx for that one object,
-  such as an archived object), `duplicate_session` (two keys mapping to one session), or the
-  pipeline's own codes. A failure to list, throttling, a 5xx, or a network error fails the
-  run instead, and the worker retries it with backoff without moving the checkpoint (X4.8).
-  A session the filter removed is only counted, and sent whole again once its object grows.
-  `seshi sync failed evals` lists them.
-- **Large buckets.** A run reads at most 200 changed objects, then hands over to the next run
-  at once, resuming the listing after the last key it handled. Every run lists the whole
-  prefix; when keys sort by time, `ordered_keys = true` lists only after the key before the
-  newest one (which stays watched while it grows).
-- **Credentials.** The poller needs `s3:ListBucket` on the prefix and `s3:GetObject`, nothing
-  else; with `role` the given keys (or the `AWS_*` environment) need `sts:AssumeRole` on that
-  role, and the role's keys are renewed before they expire. `role` applies to `s3://`. Without
-  `credentials` the poller reads the standard `AWS_*` / `S3_*` (`R2_*` for `r2://`) variables,
-  like the bucket client. A source may not point at seshi's own bucket and prefix, or its own
-  folder.
-- **Reprocessing.** `seshi reprocess --source evals --since 2026-11-01 --run` forgets the
-  objects changed since then, so the next run reads them whole and normalizes them again: one
-  whose records did not change answers `unchanged`, one the normalizer now reads differently
-  is replaced. Without `--since` the manifest is removed and every object is read again. With
-  `ordered_keys` a rewind to a time also lists from the start, since keys say nothing of
-  time.
-
-Put TLS in front of it (a reverse proxy, Cloud Run, a load balancer): transcripts arrive
-unredacted and the server is where that stops being true.
-
-### Your own redaction
-
-Redaction rules are rule packs (F2.1): the built-in pack, which ships in the binary
-([`packages/ts/redact/packs/builtin.toml`](../packages/ts/redact/packs/builtin.toml)), and
-your own, listed in `redaction.packs`. Every session's normalized records go through them
-before anything is written, in this order. They run on the records, where tool calls, file
-paths and results are already separate fields; the transcript itself is never stored.
-
-1. **Sensitive tool calls.** When a call reads or writes a secrets file (`.env`, a private key,
-   `~/.aws/credentials`, Terraform state and the like) or runs a command whose job is to print a
-   secret (`printenv`, `gh auth token`, `kubectl get secret`, `aws configure get`, `vault kv get`,
-   `op read`, …), the call is kept and its result becomes `[redacted:sensitive-file]` or
-   `[redacted:secret-output]`, marked `withheld` in the trace. A file call's input keeps only
-   what names the file. A file is recognized by a call's path arguments, a shell command's
-   words, or a patch's file headers, not by text that only mentions it. A result in a later chunk
-   than its call is caught too: the session's `metadata.json` keeps the withheld calls' ids.
-2. **Your text rules**, in pack order, each where its `applies_to` says.
-3. **The built-in secret patterns**: provider tokens, credential assignments, bearer headers,
-   JWTs, connection URLs, private-key blocks, and the entropy pass.
-
-Passes 2 and 3 skip the structural fields (ids, roles, timestamps, tool names, the source and
-the branch). They also run, as `text`, over what an LLM call says in free text (its `error` and
-string `parameters`), for sources that record calls (OTLP). The session's `metadata.json` records the rule set's hash and how often each rule
-fired, by rule id (`redaction`, F2.3), never what matched.
-
-A pack is a TOML file:
-
-```toml
-id = "acme"                      # the pack's id
-version = "2026-11-01"           # optional
-disable = ["entropy"]            # built-in rules to turn off, by id
-
-[[rules]]                        # text rules
-id = "acme-key"                  # names the rule in the counts; keep it stable
-description = "Acme API keys"
-pattern = 'ACME-[0-9A-F]{32}'    # RE2 syntax; or patterns = [...]
-replacement = "[redacted:acme-key]"   # the default is [redacted:<id>]
-applies_to = ["text", "tool_input", "tool_output"]   # the default is all three
-tests.match = ["key ACME-0123456789ABCDEF0123456789ABCDEF"]
-tests.no_match = ["ACME-1234"]
-
-[[rules]]
-id = "internal-key"
-pattern = 'internal-key: (?P<secret>\S+)'   # only the `secret` group is replaced
-
-[[sensitive_files]]
-id = "acme-master-key"
-globs = ["config/master.key", "secrets/**", "!secrets/README.md"]
-tests.match = ["app/config/master.key"]
-
-[[secret_commands]]
-id = "acme-token"
-pattern = 'acme-cli\s+token\b'
-tests.match = ["acme-cli token --org x"]
-```
-
-- **Text rules** (`[[rules]]`) are regular expressions over every text field. `applies_to` picks
-  where: `text` (what the user, the assistant and the system said), `tool_input` (a tool call's
-  arguments) or `tool_output` (what a tool returned). With a named group `secret`, only that
-  group is replaced, so `internal-key` above keeps `internal-key: `.
-- **Your patterns run under RE2** (F2.2): matching takes time linear in the text, so no
-  pattern can hang the server on a crafted session. RE2 has no backreferences and no
-  lookahead or lookbehind; a pattern using them, one that matches empty text, or one too large
-  is refused when the server starts. Named groups are `(?P<name>…)` or `(?<name>…)`,
-  case-insensitive matching is `(?i)`. The built-in rules are reviewed JavaScript patterns.
-- **`sensitive_files`** are `.gitignore`-style globs: without a `/` a file's name in any
-  directory, with one the end of its path; `**` crosses directories; `!` makes an exception,
-  which holds for every file rule, the built-in ones included.
-- **`secret_commands`** are RE2 patterns matched at the start of each command in a shell line
-  (after `;`, `&&`, `|`, `$(`, `sudo`, `VAR=value`).
-- **`tests`** are strings the rule must redact (`match`) and leave alone (`no_match`). The server
-  checks every rule against its own test strings at start-up and refuses to start if one fails,
-  naming the file, the rule and the string.
-- **`disable`** turns built-in rules off by id. The ids are in the built-in pack; `seshi redact
-  test --json` lists every rule with its pack and whether it is on. Your rules cannot reuse a
-  built-in id.
-- Rule ids are lowercase words joined by `-`, unique across every pack: the counts are by id.
-  A rule must not change what any rule replaces text with, so redacting twice changes nothing;
-  the server refuses a rule set where one would.
-
-Today's JSON rule file is still a pack: `redaction.packs` takes `.json` files with `patterns`,
-`sensitive_files` and `secret_commands`, and loads them together as the pack `legacy`, whose
-patterns count as `custom-pattern` (and become `[redacted:custom-pattern]`). This is the file
-Dosu's CLI keeps for an org's rules, so an org's list can be pasted as it is; the CLI's
-`excluded` and `names_only` lists are about the member's machine and are ignored. Its patterns
-now run under RE2 too, so one that used lookaround has to be rewritten.
-
-Try rules before deploying them: `seshi redact test --pack acme.toml` checks a pack's test
-strings, and `seshi redact test session.jsonl --pack acme.toml` shows how often each rule fires
-on a transcript and in which records, without showing what matched (`--print` prints the
-redacted records). See [cli.md](cli.md#redaction-rules).
-
-Rules apply to sessions stored after the server restarts with them (F1.5). To apply them to
-what is already stored, run `seshi redact backfill --since 30d` (or `--all`) where the server's
-config is, after the restart: each session an earlier rule set redacted is redacted again, a
-session the new rules change gets one new trace and its old trace objects are deleted, and a
-change entry (`replace`, `reason: "redacted"`) tells readers to take the new trace. LLM calls'
-free text and the span records of OTLP and poller sessions are redacted again too. It cannot be
-undone; `--dry-run` says what it would do.
-
-A client can redact before upload with the same rules (F2.4): `GET /v1/redaction/rules` serves
-your packs to any signed-in caller, with an ETag. `seshi`'s capture uploader does this for every
-piece it sends ([capture.md](capture.md#redacting-before-upload-f24)). The server redacts
-everything again regardless.
-
-### Model review
-
-Regular expressions catch secrets with a known shape. Model review (F3) is an optional second
-stage for what they miss: passwords and connection strings in prose, personal data, customer
-data, and envelopes that should not be stored at all. It is off until you write a review policy
-with a provider key (`[[review.policies]]`, [config.md](config.md#review)):
-
-```toml
-[[review.policies]]
-id = "default"
-decision = { api_key = { env = "ANTHROPIC_API_KEY" } }
-```
-
-It runs inline, after regex redaction and the session filter and before anything is written,
-on the records the upload adds (a continuation's new records only):
-
-1. The **decision model** labels the records `allow`, `redact` or `drop`, nothing else. A long
-   upload is split by turn into parts that fit `max_input_chars`; one `drop` drops it.
-2. For `redact`, the **redactor LLM** is shown the parts labelled `redact` and answers with
-   findings: which record, which field, the exact text, a category, and whether to remove the
-   text or withhold the whole tool result. Code applies them: every occurrence of the text in
-   that field becomes `[redacted:<category>]`, or the tool result becomes
-   `[redacted:<category>]` marked `withheld: review`. The model never rewrites anything, so a
-   bad answer can remove too much but cannot add or change text. Text under four characters is
-   never removed on its own.
-3. `allow` and `redact` are written; `drop` writes nothing and leaves a drop record under
-   `sources/<id>/dropped/` with the policy, its hash and the decision model
-   (`seshi sync dropped <id>`). A first upload that is dropped answers zeros, so the next one is
-   the whole log again; a later one still moves the session's log past it.
-
-A failed call, or an answer that does not fit, is retried with backoff (`retries`, 3). After the
-last, `on_failure` decides: `drop` (the default: a drop record with reason `review_failed` and
-which step failed) or `skip` (written with regex redaction only, recorded as `skipped`).
-A resend of an upload is answered from the session and not reviewed again. A policy applies to
-what is written after the server restarts with it: `seshi redact backfill` applies new regex
-rules to stored sessions but does not send them to review again, and what review took out
-stays out.
-
-**What leaves the server.** Only the text of the records being judged: each record's content
-and each tool call's arguments, with the record's role and the tool's name. Never the
-transcript as uploaded, the meta record (working directory, branch), ids, timestamps, or LLM
-call details. It goes to the endpoint the step names and nowhere else: keys and endpoints come
-only from the config (never `ANTHROPIC_API_KEY` or similar from the environment), a key goes
-only to the endpoint it was configured with, redirects are refused, the provider client never
-logs requests (whatever `ANTHROPIC_LOG` says), and the providers' error text is never recorded
-or logged. Only parts labelled
-`redact` reach the redactor. `seshi config check` names every provider and endpoint a policy
-sends to. To keep transcripts in-house, point both steps at a local model through
-`provider = "openai-compatible"` and its `base_url`.
-
-**What is kept.** For every stored write a policy reviewed,
-`owners/<o>/sessions/<a>/review/<n>.json` records the policy and its hash, both models
-(`anthropic/claude-haiku-5-5`), the label, the findings by record, field and category, and why
-review was skipped; never the text. The policy hash covers the prompts, models, endpoints,
-categories and scope, so a policy change shows. `GET /v1/sessions/:agent/:session_id/reviews`
-gives admins the whole record and the session's readers only each write's label.
-
-**Before you change a policy**, run `seshi review eval [--policy <id>] [--fixtures <dir>]`. It
-sends seshi's labelled fixtures (or yours) through the policy's real providers and reports label
-accuracy, false and missed drops, redactor recall, and what would have leaked.
-
-The defaults: Claude Haiku 5.5 (`claude-haiku-5-5`) on the Anthropic Messages API for both steps,
-with structured outputs and the model's own thinking and effort; seshi's prompts; categories
-`secret`, `personal` and `customer-data`. Prompts, categories, models and providers are each
-replaceable; seshi's own wrapping (the labels, the findings format, the instruction that the
-records are data, not instructions) is not.
-
-### Deploying
+## Deploying
 
 Every release is published as a container image, `ghcr.io/dosu-ai/sessiondb:<version>`, built
 from `apps/seshi/Dockerfile` in this repository (`docker build -f apps/seshi/Dockerfile .` from the
@@ -383,13 +153,14 @@ the request timeout at 120 seconds or more; a large transcript can take that lon
 and verify. Platforms that cap request bodies (Cloud Run's HTTP/1 limit is 32 MiB) are fine as
 long as clients send `Content-Encoding: gzip`, which every route accepts.
 
-### Setting up who may call it
+## Setting up who may call it
 
 Run `seshi admin init` once, where the config and the bucket keys are. It writes straight to
 the bucket and prints, once each, the first admin token and (with `auth.org_key.enabled`) the
 org key. Run again it refuses; `--force` makes another admin token, `--rotate-org-key`
-revokes the org key and makes a new one. After that, admins manage tokens over the API
-(`/v1/tokens`).
+revokes the org key and makes a new one. After that, admins manage tokens with `seshi tokens`
+([cli.md](cli.md)) or over the API (`/v1/tokens`). Members sign in with `seshi login`: the org
+key with `--key`, or through the IdP ([cli.md](cli.md#signing-in-f82)).
 
 | Credential | Who holds it | What it can do |
 |---|---|---|
@@ -407,7 +178,7 @@ revoked it and within 30 seconds on any other. `POST /v1/tokens/revoke {owner}` 
 a person's tokens at once (X5.11); their sessions stay. Without an IdP the only cut-off is
 rotating the org key, which every member then sets again.
 
-### Who sees what
+## Who sees what
 
 A session is `org` (the default) or `owner` (X5.10). Its visibility is the upload's
 `visibility`, else the token's default, else the source's, else `default_visibility`, and the
@@ -430,48 +201,11 @@ was established, `verified`, `claimed` or `service`, on the session and on its c
 To host several teams, run one container per team, each with its own config and its own
 bucket or prefix. Isolation between teams comes from the deployment, not the code (X1.1).
 
-### Search
-
-`GET /v1/search` and `seshi search` find sessions by what was said and done in them (F10):
-prompts, assistant text, and tool calls (names and inputs, so file paths and commands); add
-`tool_result` to `search.events` to search tool output too. Results are sessions, best match
-first (bm25), each with its best matching records: the trace and event each is in, and a short
-excerpt with the matched words marked by offsets. Filters: owner, agent, repository, branch,
-source and time.
-
-Every instance that serves the API keeps its own index, an SQLite file on local disk
-(`search.path`, by default in the user cache folder; FTS5 through Bun's built-in SQLite, so
-there is no service to run), and its own cursors in each owner's change feed (F10.3). The
-`search-index` job reads the feeds: a published entry indexes the session's new traces (only
-the new ones for a continuation), a replacing one (`replace: true`, including `seshi redact
-backfill`'s `reason: "redacted"`) drops everything indexed for the session and reads it again
-from the trace it names, a tombstone removes the session, a visibility change updates it
-(F10.2). It indexes each session as its metadata says it is now, so entries read twice, out
-of order or lost leave nothing behind. OTLP and poller sessions (`otlp-genai`,
-`datadog-llmobs`, owned by `svc:<source-id>`) are indexed once the assembler publishes them;
-span records under `spans/` are never read. A new session is searchable within `search.interval`
-of being stored; a new owner's first session within a minute (the list of owners is read
-again every minute). Sessions model review dropped never reach the feed, so they are never
-indexed.
-
-A new or wiped instance builds its index from the feeds before it answers: until then search
-answers `503 index_building` with `Retry-After`. The file survives restarts, and deleting it
-only costs a rebuild; so does `seshi search --rebuild` where the config is. Changing
-`search.events`, or pointing the instance at another deployment's bucket, rebuilds it too. The
-index holds session text (redacted, but the org's): the file is created readable by its owner
-only.
-
-Who finds what follows the read rules (F10.4): a member finds their own sessions and those
-visible to the org; admins and services find everything. The server builds that filter from
-the credential, the index applies it, and each result is checked against the session's live
-metadata before it is returned, so a session made private or deleted after it was indexed is
-never shown. The `search` scope is needed: the org key, member session tokens, static tokens,
-admins and service readers have it; device tokens and writing services do not.
-
 ## Readers
 
-A reader reads through the API with a service token (`POST /v1/tokens {kind: "service",
-service: "<name>"}`): it reads and searches every session, and tails each owner's
+A reader reads through the API with a service token (`seshi tokens create service --service
+<name>`, or `POST /v1/tokens {kind: "service", service: "<name>"}`) and
+[`@seshi/client`](client.md): it reads and searches every session, and tails each owner's
 `/v1/changes`. Bucket keys stay on the server (X5.6). A read-only bucket credential
 (`s3:ListBucket` on the prefix, `s3:GetObject` under it) still works for a reader that tails
 `changes/` itself, but it skips every check, so it counts as org-wide read; `GET /v1/me` tells a
@@ -514,7 +248,7 @@ allow.
 | `GET /v1/redaction/rules` | The operator's rule packs and the rule-set hash, for redacting before upload (F2.4). Any signed-in caller; `ETag` is the hash, `If-None-Match` gets `304` |
 | `GET /v1/sessions/:agent/:session_id/reviews?owner` | What model review decided for each stored write (`sessions:read`, F3.8): the whole audit record for admins, only `n`, `at`, `content_hash` and `decision` for anyone else who may read the session |
 | `POST /otlp/v1/traces` | OTLP/HTTP trace ingest (F4): `ExportTraceServiceRequest` as protobuf or JSON from an OTLP destination's service token. Outside `/v1`, and its errors are OTLP's (`google.rpc.Status`). See [otlp.md](otlp.md) |
-| `GET /v1/search?q&owner&agent&repo&branch&source&since&until&sort&limit&matches&cursor` | Keyword search over what the caller may read (`search`, F10; [above](#search)): `{query, total, results: [{owner, agent, session_id, …, score, hits, matches: [{content_hash, event_index, role, snippet, highlights}]}], cursor?, index}`. `400 bad_query`, `404 search_disabled`, `503 index_building` |
+| `GET /v1/search?q&owner&agent&repo&branch&source&since&until&sort&limit&matches&cursor` | Keyword search over what the caller may read (`search`, F10; [search.md](search.md)): `{query, total, results: [{owner, agent, session_id, …, score, hits, matches: [{content_hash, event_index, role, snippet, highlights}]}], cursor?, index}`. `400 bad_query`, `404 search_disabled`, `503 index_building` |
 | `GET /v1/admin/sources?days` | Every configured source and `upload`: checkpoint, drop and failure counts, health over the last `days` (7) days, as `seshi sync status --json` prints them (`sources:admin`) |
 | `GET /v1/admin/sources/:id?days` | One source's status; `404 unknown_source` for an id no source has (`sources:admin`) |
 | `GET /v1/admin/sources/:id/failed`, `…/dropped` `?since&after&limit` | A source's failure or drop records, oldest first, as `seshi sync failed\|dropped --json` prints them; never content. A source no longer configured can still have its records read (`sources:admin`, X6.4) |
@@ -579,7 +313,7 @@ the pipeline. Nothing is written until every stage has run:
 2. **Redact** the records: the operator's patterns and the built-in secret patterns on every
    text field, and the sensitive-call rules on tool calls (a call that reads `.env` or runs
    `gh auth token` is kept; what it returned is withheld). See
-   [your own redaction](#your-own-redaction).
+   [redaction.md](redaction.md).
 3. **Worth a trace?** The session filter judges a session's first trace only. Under 2000
    characters of conversation (or no user turn, or nothing answering it) is a greeting, not an
    investigation: `200 { "status": "filtered", … }`, and nothing of the session is stored. The
@@ -596,7 +330,7 @@ the pipeline. Nothing is written until every stage has run:
    is the fork's first trace, so it is judged. `shipped` (what an earlier answer said) is read
    only for a session without the server's own state.
 5. **Model review**, when a review policy applies: allow, redact, or drop (`200 dropped`; a
-   drop record says why, never what). See [Model review](#model-review).
+   drop record says why, never what). See [model-review.md](model-review.md).
 6. **Write** the trace, the session's `metadata.json` and the change entry.
 
 **Which branch?** The one the transcript recorded as it began (Claude Code's `gitBranch`,
@@ -671,86 +405,3 @@ sent with `replace`, since it no longer extends what the server holds.
 `agent` is part of the archive id (`sha256(owner, agent, session_id)`), which is why only the
 trajectory source name is accepted (`claude-code`, not `claude`): one spelling, one archive.
 
-### Datadog Trajectory's format
-
-[Trajectory](https://github.com/datadog-labs/trajectory) is Datadog's capture daemon for coding
-agents. It records each session it captures, from Claude Code, Codex, Cursor, Pi and the other
-clients it supports, as one canonical event per line in a file of its own format, at
-`~/.trajectory/trajectories/sessions/<date>/session-<id>.jsonl`. This server reads that format.
-It has no dependency on the daemon or its CLI and no endpoint for it; `datadog-trajectory` is
-one more transcript format, normalized to trajectory-v1 by the server's own adapter
-(`@letta-ai/trajectory` has none for it) and stored like every other.
-
-A file in that format gets in like any other transcript: `POST /v1/sessions` with
-`agent: "datadog-trajectory"` and the file as `transcript`, whole or [in chunks](#in-chunks) as
-the daemon appends to it. A file with no `session_end` is a session that is still running; it
-normalizes to what it has so far, and the next chunk continues it.
-
-The session is filed as `agent: datadog-trajectory` and its trace's `source` names the client
-the daemon captured, `datadog-trajectory:claude-code`, so a session captured both ways (a
-client posting the native log and the same session in Trajectory's format) is two archives,
-each honest about what normalized it. `session_id`, `git_branch` and `parent_session_id` come
-from the file's `session_start`; the branch is the one the daemon recorded.
-
-What the adapter keeps: `user_prompt` / `input_prompt` as user records (as observations when
-the daemon attributes them to something other than a person), `tool_use` with `phase: pre` as
-tool calls under the client's own tool name, `phase: post` as results with `ok` from `success`,
-and `agent_message` as reasoning and assistant records. Accounting and lifecycle events
-(`llm_call`, `turn_end`, `inventory.snapshot`, permissions, subagent start and stop) carry no
-conversation and are dropped; a subagent's answer arrives as the `Agent` tool's result, and its
-own session as its own file. A file with no `session_start` gets `422
-normalize_missing_session_start`.
-
-A session the daemon imported from a client's own history (`trajectory session import`) is
-thinner than one it captured live: no prose from the agent, and tool calls present only as
-their results. The adapter reads those too, and most come out `filtered`, which is right: there
-is no conversation in them.
-
-### ATIF documents
-
-[ATIF](https://github.com/harbor-framework/harbor/blob/main/rfcs/0001-trajectory-format.md) is
-Harbor's Agent Trajectory Interchange Format: one JSON document per session, exported from
-whichever harness ran it ([Decant](https://github.com/dosu-ai/decant) writes it). Post one with
-`agent: "atif"` and `format: "json"`. `@letta-ai/trajectory`'s `atif` adapter normalizes it, and
-the server applies these rules:
-
-- **Whole documents only.** An ATIF document is one JSON value, so a chunk (`offset` > 0) gets
-  `422 bad_chunk` whatever `format` says. A document that grew is sent whole again; its new
-  steps are written as a continuation, and a document rewritten from the start is sent with
-  `replace` by its original writer.
-- **ATIF-v1.0 through ATIF-v1.8.** A later version is refused with
-  `422 normalize_invalid_input`; the message names the version. The adapter reads up to v1.7;
-  a v1.8 document is handed to it as v1.7, its `audio` content parts (the one v1.8 addition)
-  turned into the text `[audio]`, as the adapter writes `[image]` for an image.
-- **The harness comes from `agent.name`.** The session is filed under `agent: atif`, and the
-  archive id derives from that. The trace's `source` is the document's `agent.name`
-  (`claude-code`, `codex`, `copilot-cli`), or `atif` when the name is blank or holds control
-  characters. The trace's `agent` field (`atif`) records that the session came in as ATIF.
-- **Tool errors come from `extra.is_error`.** ATIF has no standard success field. A tool result
-  whose `extra.is_error` is a boolean gets `ok` from it; one without gets no `ok`.
-- **Subagents are sent separately.** The adapter does not normalize embedded
-  `subagent_trajectories` into the parent. The parent keeps the subagent's tool result, a
-  `subagent_trajectory_ref`, as JSON text. Post each subagent as its own session, with
-  `parent_session_id` set to the parent's `session_id`.
-
-The adapter also drops system steps (as it does for every source), metrics, costs, token ids,
-logprobs and `extra` fields. The document's `cwd` and `git_branch` do not reach the trace, so
-send `project` and `branch` with the upload.
-
-### Trajectory-v1 records
-
-A log that is already Letta trajectory-v1, one record per line, is posted as
-`agent: "trajectory"`, whole or in chunks. Nothing normalizes it: each line is parsed and checked
-(a line that is not JSON, or a record that is not trajectory-v1, gets `422
-normalize_invalid_input`), then redacted like any other source's records. A chunk's `meta`
-record is dropped, as for every other chunk. The trace's `source` is what the records' `meta`
-says.
-
-### Which agent wrote it
-
-A caller that holds logs without knowing which agent wrote them (a bucket of them, say) can
-ask the SDK: `detectSource(sample)` takes the start of one file (64 KiB is plenty; a last line
-cut short is ignored, and an ATIF, OpenCode or Gemini CLI document is read from its opening
-keys) and returns the `agent` to post it as, or `null` when the sample matches no format or more
-than one. It tells apart every format above except that pi's session format is shared by its
-forks (OMP, OpenClaw), which it reports as `pi`.
