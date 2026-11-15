@@ -48,6 +48,12 @@ export const cliConfigSchema = z
       .enum(THEMES)
       .default("auto")
       .describe("Terminal colours (B1.4): auto detects the background."),
+    keychain: z
+      .boolean()
+      .default(true)
+      .describe(
+        "Keep credentials in the OS keychain (F8.2). false keeps them in credentials.json (mode 0600) next to this file, for machines whose keychain prompts, hangs or is absent.",
+      ),
     capture: z
       .strictObject({
         enabled: z.boolean().default(true).describe("Capture for this user (F9.5, global level)."),

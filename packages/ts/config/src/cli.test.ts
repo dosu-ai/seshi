@@ -63,6 +63,7 @@ describe("the CLI's config", () => {
       server: "https://seshi.acme.dev",
       user: "alice@acme.com",
       theme: "dark",
+      keychain: true,
       capture: { enabled: false, paths: [{ path: "~/clients/acme", capture: false }], remotes: [] },
     });
   });
@@ -72,6 +73,7 @@ describe("the CLI's config", () => {
     expect(loaded.file).toBeUndefined();
     expect(loaded.config).toEqual({
       theme: "auto",
+      keychain: true,
       capture: { enabled: true, paths: [], remotes: [] },
     });
   });

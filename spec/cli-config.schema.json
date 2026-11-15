@@ -43,6 +43,11 @@
         "light"
       ]
     },
+    "keychain": {
+      "default": true,
+      "description": "Keep credentials in the OS keychain (F8.2). false keeps them in credentials.json (mode 0600) next to this file, for machines whose keychain prompts, hangs or is absent.",
+      "type": "boolean"
+    },
     "capture": {
       "description": "Personal capture rules (F9.5).",
       "default": {},

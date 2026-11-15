@@ -301,6 +301,7 @@ read it.
 server = "https://seshi.acme.internal"   # SESHI_SERVER
 user = "alice@acme.com"                  # SESHI_USER: the username stated with the org key
 theme = "auto"                           # SESHI_THEME: auto, dark or light
+keychain = true                          # SESHI_KEYCHAIN: false keeps credentials in credentials.json
 
 [capture]
 enabled = true                           # SESHI_CAPTURE__ENABLED: the global level (F9.5)
@@ -337,7 +338,9 @@ every command it runs in a captured session, so the `/seshi` skill can name the 
 `seshi login --server <url>` writes `server` here, and `--user` writes `user`; everything else
 in the file is left as written. The credentials themselves are never in this file: they go in
 the OS keychain, or `credentials.json` (0600) beside it where there is none, with the
-non-secret `logins.json` ([cli.md](cli.md#signing-in-f82)).
+non-secret `logins.json` ([cli.md](cli.md#signing-in-f82)). `keychain = false`
+(`SESHI_KEYCHAIN=false`) skips the keychain and always uses that file: for a CI runner, a
+container or a headless machine whose keychain prompts or hangs instead of refusing.
 
 **Local mode** (X3.5): instead of `server`, a person who owns a bucket can point the CLI at a
 server config (the same `seshi.toml` format, with `[store]` and its keys), and the CLI runs the

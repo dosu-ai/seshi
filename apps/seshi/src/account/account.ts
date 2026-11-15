@@ -41,7 +41,9 @@ export function openAccount(ctx: CommandContext): Account {
   const dir = dirname(cliFile);
   const loaded = loadCliConfig({ env, home });
   for (const warning of loaded.warnings) ctx.stderr(`seshi: warning: ${warning}`);
-  const secrets = ctx.secrets ?? defaultSecrets(dir);
+  const secrets =
+    ctx.secrets ??
+    (loaded.config.keychain ? defaultSecrets(dir) : new FileSecrets(join(dir, SECRETS_FILE)));
   return { cli: loaded.config, cliFile, dir, home, env, logins: new Logins(dir, secrets), secrets };
 }
 
