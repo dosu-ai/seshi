@@ -4,7 +4,7 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { ConnectorContext, Cursor, SubmitOutcome } from "@seshi/kit";
+import type { ConnectorContext, ConnectorFailure, Cursor, SubmitOutcome } from "@seshi/kit";
 import type { Envelope, ReceivedSpan } from "@seshi/model";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
@@ -16,6 +16,7 @@ import {
   readDatadogConfig,
   readDatadogCursor,
   serviceEnvelopeIdentity,
+  UNREADABLE_SPANS,
 } from "./connector";
 
 const FIXTURES = join(import.meta.dirname, "..", "..", "testdata", "llmobs");
@@ -71,6 +72,7 @@ interface Fake {
   submitted: Envelope[];
   written: Cursor[];
   logs: string[];
+  failures: ConnectorFailure[];
 }
 
 function fake(
@@ -84,6 +86,7 @@ function fake(
   const submitted: Envelope[] = [];
   const written: Cursor[] = [];
   const logs: string[] = [];
+  const failures: ConnectorFailure[] = [];
   const ctx: ConnectorContext = {
     source: {
       id: "dd-prod",
@@ -126,8 +129,12 @@ function fake(
     },
     signal: new AbortController().signal,
     now: () => options.now ?? NOW,
+    async fail(failure) {
+      failures.push(failure);
+      return `sources/dd-prod/failed/${failures.length}.json`;
+    },
   };
-  return { ctx, submitted, written, logs };
+  return { ctx, submitted, written, logs, failures };
 }
 
 const noWait: DatadogConnectorOptions = { sleep: async () => {}, backoffMs: 1 };
@@ -330,6 +337,38 @@ describe("failures", () => {
     const { ctx, written } = fake();
     await expect(datadogConnector(noWait).run(ctx)).rejects.toThrow(/403: Forbidden/);
     expect(written).toEqual([]);
+  });
+
+  it("records a page's unreadable spans through ctx.fail and goes on with the rest", async () => {
+    const first = page("trajectory-session.page1.json");
+    first.data.push({ attributes: { trace_id: "1", start_ns: 1 } }, "not a span");
+    pages.set(undefined, () => Response.json(first));
+    serve("eyJhZnRlciI6InBhZ2UtMiJ9", "trajectory-session.page2.json");
+    const { ctx, submitted, written, logs, failures } = fake();
+    await datadogConnector(noWait).run(ctx);
+    expect(submitted.length).toBeGreaterThan(0);
+    expect(written).toHaveLength(2);
+    expect(failures).toHaveLength(1);
+    const [failure] = failures;
+    expect(failure?.code).toBe(UNREADABLE_SPANS);
+    expect(failure?.message).toMatch(/^2 span\(s\) .* \(span_id is missing\)$/);
+    expect(failure?.idempotency_key).toMatch(/^datadog:.+\/.+#start~unreadable$/);
+    expect(failure?.provenance?.cursor).toBe(
+      `${requests[0]?.body.data.attributes.filter.from}/${requests[0]?.body.data.attributes.filter.to}`,
+    );
+    expect(JSON.stringify(failure)).not.toContain("not a span");
+    expect(logs.at(-1)).toMatch(/2 unreadable, skipped \(see sync failed\)/);
+  });
+
+  it("only counts unreadable spans when the context cannot record failures", async () => {
+    const first = page("trajectory-session.page1.json");
+    first.data.push({ attributes: {} });
+    pages.set(undefined, () => Response.json(first));
+    serve("eyJhZnRlciI6InBhZ2UtMiJ9", "trajectory-session.page2.json");
+    const { ctx, logs } = fake();
+    const { fail: _fail, ...without } = ctx;
+    await datadogConnector(noWait).run(without);
+    expect(logs.at(-1)).toMatch(/1 unreadable, skipped(;|$)/);
   });
 
   it("fails loudly when the answer changed shape", async () => {

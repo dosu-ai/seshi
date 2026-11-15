@@ -222,7 +222,12 @@ interface PageTally {
   sessions: number;
   rejected: number;
   failed: number;
+  /** Unreadable spans recorded through `ctx.fail` (one record per page). */
+  recorded: number;
 }
+
+/** The code of the failure record a page with unreadable spans leaves (`ctx.fail`). */
+export const UNREADABLE_SPANS = "unreadable_spans";
 
 /** The Datadog LLM Observability poller, with `options` for tests. */
 export function datadogConnector(options: DatadogConnectorOptions = {}): Connector {
@@ -232,7 +237,7 @@ export function datadogConnector(options: DatadogConnectorOptions = {}): Connect
   async function submitPage(
     ctx: ConnectorContext,
     page: SearchPage,
-    window: { from: string; to: string },
+    window: { from: string; to: string; page?: string },
     seen: Map<string, number>,
   ): Promise<PageTally> {
     const tally: PageTally = {
@@ -244,7 +249,9 @@ export function datadogConnector(options: DatadogConnectorOptions = {}): Connect
       sessions: 0,
       rejected: 0,
       failed: 0,
+      recorded: 0,
     };
+    let problem = page.problem;
     const groups = new Map<string, ReceivedSpan[]>();
     for (const raw of page.spans) {
       let span: ReceivedSpan;
@@ -252,6 +259,7 @@ export function datadogConnector(options: DatadogConnectorOptions = {}): Connect
         span = toReceivedSpan(raw);
       } catch {
         tally.invalid++;
+        problem ??= "a span has no trace id, span id or start time";
         continue;
       }
       if (seen.has(span.spanId)) {
@@ -295,6 +303,19 @@ export function datadogConnector(options: DatadogConnectorOptions = {}): Connect
       if (outcome.status === "accepted") tally.rejected += outcome.rejected ?? 0;
       if (outcome.status === "failed") tally.failed++;
       for (const span of spans) seen.set(span.spanId, startMs(span));
+    }
+    // Spans that never became an envelope leave a failure record (X4.8), so `sync failed` and
+    // source health show them; the rest of the page goes on. A page with no readable span at
+    // all is a changed answer shape and has already failed the run (F5.1).
+    if (tally.invalid > 0 && ctx.fail) {
+      const where = `${window.from}/${window.to}`;
+      await ctx.fail({
+        code: UNREADABLE_SPANS,
+        message: `${tally.invalid} span(s) of an Export API page could not be read and were skipped (${problem ?? "unknown shape"})`,
+        idempotency_key: `datadog:${where}#${window.page ?? "start"}~unreadable`,
+        provenance: { cursor: window.page ? `${where}#${window.page}` : where },
+      });
+      tally.recorded++;
     }
     return tally;
   }
@@ -340,7 +361,7 @@ export function datadogConnector(options: DatadogConnectorOptions = {}): Connect
       };
       const seen = new Map(Object.entries(cursor.seen ?? {}));
       const total = { pages: 0, spans: 0, submitted: 0, repeats: 0, unsessioned: 0, invalid: 0 };
-      const totals = { sessions: 0, rejected: 0, failed: 0 };
+      const totals = { sessions: 0, rejected: 0, failed: 0, recorded: 0 };
       let restarted = false;
 
       for (;;) {
@@ -378,6 +399,7 @@ export function datadogConnector(options: DatadogConnectorOptions = {}): Connect
         totals.sessions += tally.sessions;
         totals.rejected += tally.rejected;
         totals.failed += tally.failed;
+        totals.recorded += tally.recorded;
 
         const done = page.next === undefined;
         const until = done ? window.to : cursor.until;
@@ -407,7 +429,11 @@ export function datadogConnector(options: DatadogConnectorOptions = {}): Connect
           ];
           if (total.repeats) parts.push(`${total.repeats} already submitted`);
           if (total.unsessioned) parts.push(`${total.unsessioned} without a session tag, skipped`);
-          if (total.invalid) parts.push(`${total.invalid} unreadable, skipped`);
+          if (total.invalid) {
+            parts.push(
+              `${total.invalid} unreadable, skipped${totals.recorded ? " (see sync failed)" : ""}`,
+            );
+          }
           if (totals.rejected) parts.push(`${totals.rejected} refused by the format`);
           if (totals.failed) parts.push(`${totals.failed} batch(es) failed (see sync failed)`);
           ctx.log.info(parts.join("; "));

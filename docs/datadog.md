@@ -66,7 +66,10 @@ would go along to the other host): it fails the run, naming the status. A failed
    a Trajectory turn), else `trajectory.trace_correlation.session_id` (compaction and correlation
    spans), else a `session_id` tag (LLM Observability's own sessions, for apps that are not
    Trajectory). Spans that name no session, and Trajectory's automated oversight traces, are
-   skipped and counted in the run's log line.
+   skipped and counted in the run's log line. Items of a page that are not readable spans (no
+   span id, trace id or start time) are skipped too, and leave one `unreadable_spans` record
+   per page under `sources/<source-id>/failed/` (`seshi sync failed <source-id>`, counted as
+   `failed` in health); the rest of the page is stored.
 2. **Normalized and redacted on arrival** into the span store, as for OTLP
    ([otlp.md](otlp.md#what-happens-to-spans)): the server's rule set (built-in and operator
    packs) runs over each span's text, tool calls and LLM call error, and each span record keeps
@@ -125,5 +128,6 @@ works while Datadog still holds the spans (its LLM Observability retention).
 | `Datadog rate-limited the search for …s` | Datadog asked for a wait over five minutes; the job tries again later |
 | Sessions appear late | `lag`, `interval` and `quiet_period` add up: a turn shows up after about all three |
 | No session, `filtered` in health | Minimal capture, or the session filter judged the session too short (`[filter]`, or the source's `filter`) |
+| `unreadable_spans` in `seshi sync failed` | Some items of a page were not readable spans and were skipped; the rest was stored. Datadog's answer may be drifting from the documented shape |
 | `… without a session tag, skipped` in the log | Spans of an app that sets no session; filter them out with `ml_app` or `tags` |
 | A session also exists as `datadog-trajectory` | The same session uploaded from the daemon's file too. Both are kept (X4.5); `native_session_id` matches |

@@ -103,6 +103,8 @@ export interface SearchPage {
   spans: DatadogSpan[];
   /** Items of `data` that did not have a span's shape, skipped. */
   invalid: number;
+  /** What was wrong with the first of them, in words that quote no data. */
+  problem?: string;
   /** The cursor of the next page, when there is one. */
   next?: string;
   /** `meta.status`: `done`, or `timeout` when Datadog cut the query short. */
@@ -180,6 +182,7 @@ export function readSearchResponse(value: unknown): SearchPage {
   return {
     spans,
     invalid,
+    ...(first ? { problem: first } : {}),
     ...(typeof after === "string" && after !== "" ? { next: after } : {}),
     ...(typeof meta?.status === "string" ? { status: meta.status } : {}),
   };

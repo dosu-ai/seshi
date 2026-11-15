@@ -20,7 +20,7 @@ describe("seshi.example.toml", () => {
       resolveSecrets: false,
     });
     expect(loaded.config.store.url).toBe("s3://acme-sessions/prod");
-    expect(loaded.config.sources.map((s) => s.id)).toEqual(["datadog-prod"]);
+    expect(loaded.config.sources.map((s) => s.id)).toEqual(["datadog-prod", "eval-logs"]);
   });
 });
 

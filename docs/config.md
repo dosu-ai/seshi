@@ -250,8 +250,12 @@ What the server ingests from on its own (F4–F6). Each has an `id` (lower-case 
 digits, words joined by single `-`; not `upload`, which uploads use), a `type`, `enabled` (`true`), `visibility`, and `filter`
 overrides. Each writes as its service account `svc:<id>` (X5.4). The worker polls a source on
 its `interval` once a connector for its type is in the binary (`seshi sync status` says which
-are polled). The binary polls `datadog` sources ([docs/datadog.md](datadog.md)); the `s3`
-connector comes with its branch (11), and its timings are provisional until then.
+are polled). The binary polls `datadog` sources ([docs/datadog.md](datadog.md)) through the
+datadog-trajectory integration and `s3` sources with its built-in S3 poller
+([server.md](server.md#syncing-an-s3-bucket)); `otlp` sources are not polled, their
+destination posts to them. What a poller cannot turn into a session (an object it cannot read,
+a Datadog span it cannot parse) is recorded under `sources/<id>/failed/` and listed by
+`seshi sync failed <id>`.
 
 | Type | Fields |
 |---|---|

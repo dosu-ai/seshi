@@ -51,9 +51,26 @@ packs = ["/etc/seshi/redaction.json"]
 # decision = { api_key = { env = "ANTHROPIC_API_KEY" } }
 # redactor = { provider = "openai-compatible", model = "local-guard", base_url = "http://gpu:8000/v1" }
 
+# Sources the worker polls on its own; each writes as its service account (svc:<id>) and
+# `seshi sync status` shows how far it got. Datadog LLM Observability (F5, docs/datadog.md):
+# the application key needs llm_observability_read.
 [[sources]]
 id = "datadog-prod"
 type = "datadog"
+site = "datadoghq.com"
 api_key = { env = "DD_API_KEY" }
 app_key = { env = "DD_APP_KEY" }
 ml_app = "trajectory"
+tags = ["env:prod"]
+
+# A bucket other systems write agent logs to (F6, docs/server.md#syncing-an-s3-bucket): the
+# built-in S3 poller reads new and grown objects. It may not be seshi's own bucket and prefix.
+[[sources]]
+id = "eval-logs"
+type = "s3"
+url = "s3://acme-agent-logs"
+prefix = "harness"
+region = "us-east-1"
+include = ["**/*.jsonl"]
+path = "{username}/{session}.jsonl"
+role = { arn = "arn:aws:iam::123456789012:role/seshi-read-agent-logs", external_id = { env = "AGENT_LOGS_EXTERNAL_ID" } }

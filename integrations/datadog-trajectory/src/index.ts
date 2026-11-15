@@ -33,6 +33,7 @@ export {
   readDatadogConfig,
   readDatadogCursor,
   serviceEnvelopeIdentity,
+  UNREADABLE_SPANS,
 } from "./llmobs/connector";
 export {
   assembleDatadogParts,

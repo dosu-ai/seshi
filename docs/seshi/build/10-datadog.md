@@ -246,9 +246,12 @@ with no Datadog poller); span records hold redacted parts, not the raw `datadog.
   source against the local fake provider: a sensitive phrase is redacted and the review record
   written, and a drop lands under `sources/<id>/dropped/` with `source_kind: "datadog"`.
   Still open (as for OTLP): `seshi redact backfill` does not re-run review.
-- **11 (S3 sync)**: `[[sources]]` edits are in `datadogSource` only; merge `sources.ts` by
-  taking both sides' fields, then `bun run schema`. If 11 adds a second built-in connector list
-  in `openServer`, the datadog connector stays in its integration (`connectorsOf(INTEGRATIONS)`).
+- **11 (S3 sync), done in the linear stack**: `sources.ts` keeps both sides' fields and the
+  schema is regenerated. The datadog connector stays in its integration
+  (`connectorsOf(INTEGRATIONS)`); the S3 poller is built in. The poller now records the spans
+  of a page it cannot parse through 11's `ctx.fail` (`unreadable_spans`, one record per page,
+  counted as `failed` in source health) instead of only counting them in its log line; see
+  11's build note.
 - **12 (search)**: merge the job lists. `apps/seshi/src/commands/commands.test.ts` now expects
   `heartbeat, retention, source:dd, assembler` for its `SOURCES` config; 12 appends its
   indexer. Never index `spans/`. Datadog sessions are ordinary sessions (`agent:

@@ -221,13 +221,24 @@ A review of the branch added these commits on top of the implementation:
 
 ## Cross-branch wiring once the stack is linear
 
-- **10 (Datadog)** also implements a connector against the same `ConnectorContext` and
-  `Sources`: keep both sides' additions to `@seshi/kit` and `sources.ts` when rebasing.
-  If 10 added its own way to record connector failures, fold it into `ctx.fail`. Its tests
-  that build a `ConnectorContext` by hand need nothing (`fail` is optional).
-- **docs/config.md**'s `[[sources]]` paragraph still says connectors "come with their
-  branches (10, 11)"; once 10 and 11 are both in, say every binary polls `s3` and `datadog`.
-  `seshi.example.toml` could gain an `s3` source next to the Datadog one.
+- **10 (Datadog), done in the linear stack**: both branches' additions to `@seshi/kit`,
+  `packages/ts/sources/src/sources.ts` and `packages/ts/config/src/server/sources.ts` are
+  kept (10 changed `datadogSource`, 11 `s3Source`; the schema is regenerated). 10 had no
+  failure recording of its own, only a count in its log line, so nothing was folded: its
+  poller now uses `ctx.fail` for the spans of a page it cannot parse (items without a
+  span's shape, or with no trace id, span id or start time). One `unreadable_spans` record
+  per page read, with the window (and page cursor) as provenance and a message that quotes
+  no data; the rest of the page is still submitted, and the log line points at `sync
+  failed`. An answer with no readable span at all still fails the run with
+  `DatadogShapeError` (F5.1). Covered in the connector's unit tests and in
+  `tests/instance/datadog.test.ts`, which checks the record and the `failed` count in source
+  health. The datadog connector stays in its integration and the S3 poller stays built in,
+  so `connectorsOf(INTEGRATIONS)` is still `["datadog"]`.
+- **docs/config.md and seshi.example.toml, done**: the `[[sources]]` paragraph now says the
+  binary polls `datadog` sources through the integration and `s3` sources with the built-in
+  poller, and that what a poller cannot store is listed by `seshi sync failed`. The example
+  config has a fuller Datadog source and an `s3` source (`eval-logs`, with `include`, `path`
+  and `role`); `tests/config/docs.test.ts` loads both.
 - **07 (rule packs)**: changing rules makes a whole re-send not extend the stored prefix
   (04 deviation 4). The poller always sends whole objects with `replace`, so a rule change
   turns into a replace (by the original writer) rather than a conflict; chunks are
@@ -237,6 +248,6 @@ A review of the branch added these commits on top of the implementation:
   again).
 - **13 (CLI)**: `seshi sync failed <id>` shows the new codes (`unknown_format`,
   `too_large`, `not_utf8`, `bad_gzip`, `unsupported_encoding`, `access_denied`,
-  `unreadable`, `duplicate_session`); `sync status`
+  `unreadable`, `duplicate_session`, and Datadog's `unreadable_spans`); `sync status`
   could show the manifest's object count and `listed_at` from the checkpoint cursor.
 - **16 (docs)**: the README's feature list can mention S3 sync.

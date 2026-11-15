@@ -211,6 +211,30 @@ describe("a datadog source", () => {
     const after = await readMetadata(booted.store, OWNER, archiveId(OWNER, AGENT, SESSION));
     expect(after?.traces).toEqual(before?.traces);
   });
+
+  it("records a page's unreadable spans as a failure and counts it in source health (11's ctx.fail)", async () => {
+    // biome-ignore lint/suspicious/noExplicitAny: fixtures are Export API answers
+    (answers.first as any).data.push({ id: "odd", attributes: { trace_id: "1", start_ns: 1 } });
+    const run = await instance.sources.run(SOURCE);
+    expect(run).toMatchObject({
+      outcome: "ok",
+      submitted: 3,
+      outcomes: { accepted: 3, failed: 1 },
+    });
+    const { records } = await listRecords(booted.store, "failed", SOURCE);
+    expect(records.map((r) => r.record)).toEqual([
+      expect.objectContaining({
+        source: SOURCE,
+        source_kind: "datadog",
+        owner: OWNER,
+        code: "unreadable_spans",
+        idempotency_key: expect.stringMatching(/#start~unreadable$/),
+      }),
+    ]);
+    await instance.health.flush();
+    const health = await readHealth(booted.store, SOURCE);
+    expect(health.map((d) => d.counts)).toEqual([expect.objectContaining({ failed: 1 })]);
+  });
 });
 
 // A GitHub token, matched by the built-in `github-token` rule.
