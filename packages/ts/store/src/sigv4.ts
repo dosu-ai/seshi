@@ -21,6 +21,8 @@ export interface SignInput {
   credentials: SigningCredentials;
   /** The signing time; now by default. */
   date?: Date;
+  /** The AWS service the request is for; `s3` by default (`sts` to assume a role). */
+  service?: string;
 }
 
 const EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
@@ -109,7 +111,8 @@ export async function signRequest(input: SignInput): Promise<Record<string, stri
     payloadHash,
   ].join("\n");
 
-  const scope = `${day}/${input.region}/s3/aws4_request`;
+  const service = input.service ?? "s3";
+  const scope = `${day}/${input.region}/${service}/aws4_request`;
   const stringToSign = ["AWS4-HMAC-SHA256", date, scope, await sha256Hex(canonicalRequest)].join(
     "\n",
   );
@@ -119,7 +122,7 @@ export async function signRequest(input: SignInput): Promise<Record<string, stri
     day,
   );
   key = await hmac(key, input.region);
-  key = await hmac(key, "s3");
+  key = await hmac(key, service);
   key = await hmac(key, "aws4_request");
   const signature = hex(await hmac(key, stringToSign));
 

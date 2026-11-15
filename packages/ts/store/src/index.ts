@@ -117,6 +117,14 @@ export {
   type S3StoreOptions,
 } from "./s3";
 export {
+  type FetchedObject,
+  FetchS3Client,
+  type FetchS3Options,
+  type ListedObject,
+  type ObjectListing,
+  S3HttpError,
+} from "./s3-fetch";
+export {
   deleteSpans,
   listSpanKeys,
   listSpans,
@@ -143,3 +151,4 @@ export {
   type UpdateStep,
   updateObject,
 } from "./store";
+export { type AssumedCredentials, type AssumeRoleOptions, assumeRole } from "./sts";

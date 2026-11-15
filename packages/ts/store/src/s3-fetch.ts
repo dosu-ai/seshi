@@ -185,4 +185,121 @@ export class FetchS3Client {
     const keys = xmlValues(xml, "Contents").flatMap((c) => xmlValues(c, "Key"));
     return { keys, truncated: xmlValues(xml, "IsTruncated")[0] === "true" };
   }
+
+  /** One page of ListObjectsV2 with what each object is: its size, ETag and last change, so a
+   * poller can tell a new or changed object from the listing alone (F6.2). Pages continue
+   * with `startAfter` (the last key of the page before) or S3's `continuationToken`. */
+  async listObjects(options: {
+    prefix: string;
+    maxKeys: number;
+    startAfter?: string;
+    continuationToken?: string;
+  }): Promise<ObjectListing> {
+    const url = this.url("", {
+      "list-type": "2",
+      prefix: options.prefix,
+      "max-keys": String(options.maxKeys),
+      "start-after": options.startAfter,
+      "continuation-token": options.continuationToken,
+    });
+    const response = await this.send("GET", url);
+    if (!response.ok) return FetchS3Client.fail("LIST", options.prefix, response);
+    const xml = await response.text();
+    const objects: ListedObject[] = [];
+    for (const contents of xmlValues(xml, "Contents")) {
+      const key = xmlValues(contents, "Key")[0];
+      if (key === undefined) continue;
+      const size = Number(xmlValues(contents, "Size")[0] ?? 0);
+      const etag = unquote(xmlValues(contents, "ETag")[0] ?? null) ?? "";
+      const modified = xmlValues(contents, "LastModified")[0];
+      objects.push({
+        key,
+        size: Number.isFinite(size) && size >= 0 ? size : 0,
+        etag,
+        ...(modified ? { last_modified: modified } : {}),
+      });
+    }
+    const next = xmlValues(xml, "NextContinuationToken")[0];
+    return {
+      objects,
+      truncated: xmlValues(xml, "IsTruncated")[0] === "true",
+      ...(next ? { next_token: next } : {}),
+    };
+  }
+
+  /** GET an object, or the part of it from byte `start` (a `Range` request), only while its
+   * ETag is still `ifMatch` when given. Null when there is no object; a changed object is S3's
+   * 412, thrown as `S3HttpError`. A backend that ignores `Range` answers the whole object
+   * (status 200, `start` 0), which the caller handles the same way. The object's user
+   * metadata (`x-amz-meta-*`) comes back with its prefix removed and names lower-cased. */
+  async getObject(
+    key: string,
+    options: { start?: number; ifMatch?: string } = {},
+  ): Promise<FetchedObject | null> {
+    const headers: Record<string, string> = {};
+    if (options.start !== undefined && options.start > 0) {
+      headers.range = `bytes=${options.start}-`;
+    }
+    if (options.ifMatch !== undefined) headers["if-match"] = quote(options.ifMatch);
+    const response = await this.send("GET", this.url(key), undefined, headers);
+    if (response.status === 404) {
+      await response.body?.cancel();
+      return null;
+    }
+    if (!response.ok) return FetchS3Client.fail("GET", key, response);
+    const body = new Uint8Array(await response.arrayBuffer());
+    const metadata: Record<string, string> = {};
+    response.headers.forEach((value, name) => {
+      const lower = name.toLowerCase();
+      if (lower.startsWith("x-amz-meta-")) metadata[lower.slice("x-amz-meta-".length)] = value;
+    });
+    // `Content-Range: bytes <first>-<last>/<total>` on a 206.
+    const range = /^bytes (\d+)-\d+\/(\d+|\*)$/.exec(response.headers.get("content-range") ?? "");
+    const partial = response.status === 206 && range !== null;
+    const start = partial ? Number(range[1]) : 0;
+    const total = partial && range[2] !== "*" ? Number(range[2]) : start + body.length;
+    const encoding = response.headers.get("content-encoding");
+    return {
+      body,
+      etag: unquote(response.headers.get("etag")) ?? "",
+      start,
+      size: total,
+      metadata,
+      ...(encoding ? { content_encoding: encoding } : {}),
+    };
+  }
+}
+
+/** One object in a listing. */
+export interface ListedObject {
+  /** The full bucket key. */
+  key: string;
+  size: number;
+  /** Unquoted. */
+  etag: string;
+  /** ISO 8601, as S3 reports it. */
+  last_modified?: string;
+}
+
+/** A page of `listObjects`. */
+export interface ObjectListing {
+  objects: ListedObject[];
+  truncated: boolean;
+  /** S3's token for the next page, when it sent one. */
+  next_token?: string;
+}
+
+/** What `getObject` read. */
+export interface FetchedObject {
+  /** The bytes from `start` to the end of the object. */
+  body: Uint8Array;
+  /** Unquoted. */
+  etag: string;
+  /** The offset of `body`'s first byte in the object: 0 unless a range was honoured. */
+  start: number;
+  /** The whole object's size. */
+  size: number;
+  /** User metadata, `x-amz-meta-` removed, names lower-cased. */
+  metadata: Record<string, string>;
+  content_encoding?: string;
 }
