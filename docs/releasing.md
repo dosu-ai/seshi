@@ -6,13 +6,15 @@ from any other branch, and nothing is published by hand.
 
 ## What a release does
 
-1. **Gates.** The `test`, `docker` and `binaries` jobs pass. `binaries` builds `seshi` natively
+1. **Gates.** The `test`, `docker`, `binaries` and `darwin-cross-check` jobs pass. `binaries` builds `seshi` natively
    on a runner for each of the six targets and runs `scripts/release/smoke.ts` on it: serve on a
    folder store, `admin init`, `login --key` (which stores the org key through `Bun.secrets` in
    the macOS Keychain or Windows Credential Manager, required there; the 0600 file is accepted on
    Linux runners, which have no secret service), `whoami`, `logout`. It then installs the build
    with `install.sh`, or `install.ps1` under PowerShell 7 and Windows PowerShell 5.1, from a local
-   copy of the release.
+   copy of the release. `darwin-cross` builds the two macOS targets on Linux, as the release
+   job does, and `darwin-cross-check` runs `codesign --verify` on them on a Mac (Bun's signer
+   for cross-compiled macOS binaries has broken before, and macOS kills such a binary at launch).
 2. **`release`** runs semantic-release. It picks the version from the commits, writes it into
    `packages/ts/model/package.json` and `bun.lock` (`scripts/release-version.ts`),
    cross-compiles every target with `scripts/release/build.ts` into `dist/release/`, commits the

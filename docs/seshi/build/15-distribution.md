@@ -35,6 +35,9 @@ and `@seshi/client` libraries), and install scripts for macOS/Linux (`install.sh
     "external"`) plus tsc declarations; the client's declarations point at the built model's.
     Workspace dependencies become the exact release version (only published ones are allowed);
     others keep their range. Building them needs the repository at the release's version.
+    tsc writes the sources' extensionless relative imports into the declarations;
+    `addDeclarationExtensions` rewrites each to `./x.js` or `./x/index.js`, since a Node ESM
+    project (`module: "NodeNext"`) cannot follow them and would see every type as `any`.
   - `packages.json` lists the publish order: platform packages, libraries, launcher last.
 - **Launcher** (`launcher.ts`): picks the target from `process.platform`/`arch` and, on Linux, the
   libc from Node's report. It resolves `<pkg>/package.json` with the bundle's own CommonJS
@@ -89,6 +92,12 @@ and `@seshi/client` libraries), and install scripts for macOS/Linux (`install.sh
     assets, smoke tests them (keychain required on macOS and Windows), then installs with
     install.sh, or with install.ps1 under both PowerShell 7 and 5.1 from `serve-dir`.
     `release` now needs it.
+  - `darwin-cross` and `darwin-cross-check` (PRs and main): build darwin-arm64 and darwin-x64 on
+    Ubuntu exactly as the release job does, then on a Mac run `codesign --verify` on both and
+    the arm64 binary's `--version`. `release` needs them too. `binaries` builds natively on each
+    Mac, so without these the Linux-built bytes the release ships were never run on macOS, and
+    Bun's in-process Mach-O signer has shipped invalid ad-hoc signatures more than once
+    (oven-sh/bun#29120 in 1.3.12, #39758 in 1.4.0), which macOS answers with SIGKILL.
   - `npm` (after a release): downloads the release's archives, builds the packages and publishes
     them with provenance (`NPM_TOKEN`, `id-token: write`).
   - `image`: downloads and checks the two Linux archives, unpacks them to
@@ -100,12 +109,12 @@ and `@seshi/client` libraries), and install scripts for macOS/Linux (`install.sh
   here, as before) or `prebuilt` (`dist/docker/linux-$TARGETARCH/seshi`). `.dockerignore` lets
   `dist/docker` through. Both paths were built and run locally (`--version`).
 - **Root scripts**: `release:build`, `release:npm`, `release:publish-npm`, `release:smoke`.
-- **Tests** (92 new, 1007 passing in all; about 9 s of the run): archive formats against the system tools; the build with a
+- **Tests** (100 new after review, 1015 passing in all): archive formats against the system tools; the build with a
   stand-in compiler for all six targets; manifests; `buildNpm`'s checks; the launcher in a
   temporary `node_modules` run by Node (arguments, stdin, exit code, signal, a lost exec bit, a
   missing platform package); the libraries imported under Node and type-checked with
-  `NodeNext`; publish order, skipping and refusals with a stand-in npm; install.sh (28 cases
-  over file:// and local HTTP, with stand-in `uname`/`sysctl`/`ldd`); the install scripts'
+  `NodeNext` and `skipLibCheck: false`, with a line that fails if a type is `any`; publish order, skipping and refusals with a stand-in npm; install.sh (31 cases
+  over file:// and local HTTP, with stand-in `uname`/`sysctl`/`ldd`/`getconf`); the install scripts'
   names against `targets.ts`; release.config.js and ci.yml against the scripts. Then the
   real host build is installed by install.sh from a local server, run through the npm
   launcher, and put through the smoke test. Nothing touches the network or the real keychain.
@@ -199,6 +208,40 @@ and `@seshi/client` libraries), and install scripts for macOS/Linux (`install.sh
   on `seshi.exe` downloaded through a browser. Signing is "later" in F8.4.
 - **Bytecode**: `--bytecode` with cross-compilation worked locally for every target. Only the
   host's binary was run.
+- **macOS signatures of cross-compiled binaries**: `darwin-cross-check` has not run yet either.
+  Bun 1.4.2 (`.bun-version`) is reported to sign Linux-built darwin binaries correctly; 1.4.0
+  and 1.4.1 do not. If the check fails after a Bun bump, build the darwin targets on a macOS
+  runner, or re-sign them (`codesign --force --sign -`), before uploading.
+- **The release ships cross-compiled bytes, not the ones `binaries` tested**: the version is
+  chosen inside the release job and embedded in the binary, so the release must compile again.
+  `binaries`, `darwin-cross-check` and, after the fact, `verify` cover the gap.
+
+## Review fixes (after the first implementation)
+
+- **Published declarations were unusable under NodeNext.** `@seshi/model` and `@seshi/client`
+  shipped `.d.ts` files with extensionless relative imports (`from "./api"`). TypeScript with
+  `module: "NodeNext"` cannot resolve them in an ESM package, so every re-exported type was
+  silently `any`; the test passed only because it used `skipLibCheck` and an assignment `any`
+  accepts. Fixed with `addDeclarationExtensions` (npm.ts); the test now checks the
+  declarations and has an `@ts-expect-error` line that fails if a type is `any`.
+- **install.sh refused glibc systems with musl installed.** `ls /lib/ld-musl-*` alone meant musl,
+  but Debian's and Ubuntu's `musl` package installs that loader. ldd naming glibc, or `getconf
+  GNU_LIBC_VERSION`, now decides first; the loader counts only when nothing says glibc.
+- **install.sh wrote a relative `--dir` into PATH and the startup file.** It is made absolute.
+- **install.ps1 left no seshi when the copy failed** after renaming the old one aside. The old one
+  is moved back.
+- **The smoke test could hang for hours.** When `seshi serve` did not come up, it read the
+  still-running server's stderr, which never ends; a CI job would sit until GitHub's six-hour
+  limit. It now stops the server first, and does not pipe the server's unread stdout.
+- **The host check ran `--version` with an empty environment,** which breaks Windows programs (no
+  `SYSTEMROOT`). It now passes the caller's environment without `SESHI_*` (`binaryEnv`).
+- **`keychain = false` after a keychain login** left that login unreadable, and logout deleted
+  only the file's copy, so the secrets stayed in the keychain while seshi said signed out.
+  `openAccount` now warns for each such login; docs/config.md says to log out first.
+- **Linux-built macOS binaries were never run before release.** Added `darwin-cross` and
+  `darwin-cross-check` (see CI above).
+- The launcher sets `process.report.excludeNetwork` before reading the report for the glibc
+  version, so the report skips its network section on every start.
 
 ## Cross-branch wiring once the stack is linear
 
