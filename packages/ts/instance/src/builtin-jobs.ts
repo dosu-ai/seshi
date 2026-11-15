@@ -2,9 +2,12 @@
  * assembler, 09; the search indexer, 12) adds its factory to `BUILTIN_JOBS`, one line; tests
  * and embedders pass more through `InstanceParts.jobs`. */
 
+import type { FormatRegistry } from "@seshi/formats";
+import { assemblePending, type Pipeline } from "@seshi/pipeline";
 import type { Sources } from "@seshi/sources";
 import {
   type Heartbeat,
+  listPending,
   pruneHealth,
   pruneRecords,
   readCheckpoint,
@@ -22,7 +25,9 @@ export interface JobHost {
   readonly sources: Sources;
   readonly jobs: JobRunner;
   readonly config: {
-    readonly worker: { readonly heartbeat_interval: number };
+    readonly worker: { readonly heartbeat_interval: number; readonly assembly_interval: number };
+    /** Each source's quiet period applies to its sessions' spans (F4.4). */
+    readonly sources: readonly { readonly id: string; readonly quiet_period?: number }[];
     readonly records: {
       readonly dropped_retention: number;
       readonly failed_retention: number;
@@ -36,6 +41,10 @@ export interface JobHost {
   readonly id: string;
   readonly version: string;
   readonly startedAt: Date;
+  /** The pipeline the span assembler publishes through. */
+  readonly pipeline: Pipeline;
+  /** The formats whose span adapters assemble sessions. */
+  readonly formats: FormatRegistry;
   now(): Date;
 }
 
@@ -174,9 +183,63 @@ export function pollerJobs(host: JobHost): Job[] {
   );
 }
 
+/** A source's quiet period when its config names none (F4.4; config's default for `otlp`). */
+export const DEFAULT_QUIET_PERIOD_MS = 10 * 60 * 1000;
+
+/** The span assembler (X7.4, F4.4): publishes sessions whose spans have gone quiet, through
+ * the pipeline. Its backlog is the pending markers. */
+export function assemblerJob(host: JobHost): Job {
+  const quiet = (sourceId: string) =>
+    host.config.sources.find((s) => s.id === sourceId)?.quiet_period ?? DEFAULT_QUIET_PERIOD_MS;
+  return {
+    name: "assembler",
+    kind: "assembler",
+    placement: "worker",
+    intervalMs: host.config.worker.assembly_interval,
+    async run(signal) {
+      let firstError: string | undefined;
+      const report = await assemblePending({
+        store: host.store,
+        formats: host.formats,
+        publish: (session) => host.pipeline.publishAssembled(session),
+        quietMs: quiet,
+        now: () => host.now(),
+        signal,
+        onError: (archive, err) => {
+          firstError ??= `session ${archive.slice(0, 12)}: ${err instanceof Error ? err.message : String(err)}`;
+        },
+      });
+      return {
+        ...(firstError ? { outcome: "error" as const, error: firstError } : {}),
+        more: report.more,
+        summary: {
+          published: report.published,
+          waiting: report.waiting,
+          failed: report.failed,
+          retouched: report.retouched,
+          errors: report.errors,
+          dropped: report.dropped,
+          ...report.outcomes,
+        },
+      };
+    },
+    async backlog(): Promise<Record<string, number>> {
+      let pending = 0;
+      let after: string | undefined;
+      for (;;) {
+        const page = await listPending(host.store, { after, limit: 1000 });
+        pending += page.archives.length;
+        if (!page.truncated || page.archives.length === 0) return { pending_sessions: pending };
+        after = page.cursor;
+      }
+    },
+  };
+}
+
 /** The jobs every instance registers, in order. */
 export const BUILTIN_JOBS: readonly JobFactory[] = [
   (host) => [heartbeatJob(host)],
   (host) => [retentionJob(host)],
   pollerJobs,
+  (host) => [assemblerJob(host)],
 ];

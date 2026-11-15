@@ -138,7 +138,7 @@ describe("a team setup end to end", () => {
     expect(await jobs.json()).toMatchObject({
       deployment: "e2e",
       worker: { state: "never" },
-      jobs: [{ name: "heartbeat" }, { name: "retention" }],
+      jobs: [{ name: "heartbeat" }, { name: "retention" }, { name: "assembler" }],
     });
   });
 });

@@ -255,7 +255,7 @@ provisional until then.
 
 | Type | Fields |
 |---|---|
-| `otlp` | `quiet_period` (`"10m"`) |
+| `otlp` | `quiet_period` (`"10m"`): a session is published once its spans have been quiet this long (F4.4). The destination posts to `POST /otlp/v1/traces` with a service token for this source ([docs/otlp.md](otlp.md)) |
 | `datadog` | `site` (`"datadoghq.com"`), `api_key`, `app_key` (secrets), `ml_app`, `tags`, `interval` (`"5m"`), `overlap` (`"10m"`), `lag` (`"2m"`), `backfill` (`"7d"`) |
 | `s3` | `url`, `prefix`, `credentials` or `role` (`arn`, `external_id`), `region`, `endpoint`, `account_id`, `include` globs, `format` (`"auto"`), `ordered_keys` (`false`), `interval` (`"5m"`) |
 
@@ -269,6 +269,7 @@ Ids are unique, and an `s3` source may not read seshi's own bucket and prefix (F
 | `search.backend` | `"sqlite"` | |
 | `search.path` | | The index file on local disk |
 | `worker.heartbeat_interval` | `"1m"` | How often the worker writes `worker/heartbeat.json` (X7.5); status calls a heartbeat older than three intervals stopped |
+| `worker.assembly_interval` | `"30s"` | How often the span assembler looks for sessions whose spans have gone quiet (F4.4, X7.4) |
 | `capture.allow_retract` | `true` | Let the uploading machine retract a session (F9.7). *Later* |
 
 ## The CLI's config

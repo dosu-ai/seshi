@@ -37,6 +37,7 @@ import {
   Pipeline,
   type Reviewer,
   type SpanAssembler,
+  SpanStore,
   StoreHealthCounters,
   StoreSessionDB,
   type VisibilitySetting,
@@ -97,7 +98,8 @@ export interface InstanceParts {
   /** Model review (F3); `buildInstance` builds it from `[review]` (none when there are no
    * policies). `new Instance` takes it as given. */
   reviewer?: Reviewer;
-  /** The span assembler (09). */
+  /** Where span batches go (X4.2, 09); the span store in the bucket (`SpanStore`) when
+   * omitted. The `assembler` job publishes what it holds. */
   assembler?: SpanAssembler;
   /** Identity and access; built from `[auth]` when omitted. */
   auth?: Auth;
@@ -155,6 +157,8 @@ export class Instance {
   readonly health: HealthCounters;
   readonly sources: Sources;
   readonly jobs: JobRunner;
+  /** Where span batches go: the span store, unless the parts named another. */
+  readonly assembler: SpanAssembler;
   readonly roles: readonly Role[];
   /** The stable instance id. */
   readonly id: string;
@@ -215,6 +219,8 @@ export class Instance {
         onError: (err) => this.log.warn(`source health not recorded: ${message(err)}`),
       });
 
+    this.assembler = parts.assembler ?? new SpanStore({ store: this.store, now: this.now });
+
     this.pipeline = new Pipeline({
       store: this.store,
       formats: this.formats,
@@ -225,7 +231,7 @@ export class Instance {
       filter: parts.filter ?? ((sourceId) => filterFor(config, sourceId)),
       limits: this.limits,
       reviewer: parts.reviewer,
-      assembler: parts.assembler,
+      assembler: this.assembler,
       health: this.health,
       authorizer: ownershipAuthorizer(),
       // The request, then the token's default, then the source's, then default_visibility.
@@ -257,6 +263,8 @@ export class Instance {
       id: this.id,
       version: VERSION,
       startedAt: this.startedAt,
+      pipeline: this.pipeline,
+      formats: this.formats,
       now: this.now,
     };
     for (const factory of [...BUILTIN_JOBS, ...(parts.jobs ?? [])]) {

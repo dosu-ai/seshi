@@ -170,7 +170,11 @@ describe("seshi workers status", () => {
     const json = await seshi(["workers", "status", "--json"], { toml: SOURCES });
     const status = JSON.parse(json.out);
     expect(status.worker.state).toBe("never");
-    expect(status.jobs.map((j: { name: string }) => j.name)).toEqual(["heartbeat", "retention"]);
+    expect(status.jobs.map((j: { name: string }) => j.name)).toEqual([
+      "heartbeat",
+      "retention",
+      "assembler",
+    ]);
   });
 
   it("asks for attention when the worker stopped", async () => {
