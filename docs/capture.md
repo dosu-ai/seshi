@@ -189,5 +189,7 @@ command waits for it.
 
 ## Not yet
 
-The Claude desktop app's Session Capture chip (a mod) and Datadog Trajectory's local files are
-later.
+The Claude desktop app's Session Capture chip and `/session-capture` (a mod), a first-run
+notice inside Cursor and Codex that capture is on, resending uploaded sessions so the server
+can rebuild them, and Datadog Trajectory's local files are later. In the desktop app, the
+`/seshi` skill's `capture off|on|status --session` covers one session meanwhile.

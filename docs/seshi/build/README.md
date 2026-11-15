@@ -26,9 +26,14 @@ Branch names use a hyphen (`seshi-01-restructure`), not a slash: git cannot hold
 | 14 | `seshi-14-capture` | Hooks, spool, uploader, sweep, capture rules, status line, retraction | F9, B1.6 | Built, rebased |
 | 15 | `seshi-15-distribution` | Release binaries, npm packages, install scripts | F8.4, X3.8 | Built, rebased |
 | 16 | `seshi-16-readme` | README, outlined lockups and the npm badge, the user docs brought up to date | B1.5 | Built |
-| 17 | `seshi-17-review` | A review of the whole stack against the decisions, with fixes | All | Built on 16 |
+| 17 | `seshi-17-review` | A review of the whole stack against the decisions, with fixes | All (B1.3 in part) | Built on 16 |
 
-F7 (Cursor Cloud sync) is deferred and is not built.
+F7 (Cursor Cloud sync) is deferred and is not built. Agreed but not built, found in 17's review
+and left for a decision (see [17](17-review.md#not-fixed)): the Claude desktop mod (F9.4–F9.6's
+Session Capture chip and `/session-capture`), the first-run notice for Cursor and Codex (F9.4),
+and the uploader resend that reprocesses uploaded sessions (X4.9, F3.4). B1.3's state words
+are used on the search empty state and `seshi upload`'s lines (17); the rest of B1.3 (the other
+commands' lines, poses in the docs) is not applied.
 
 Each branch has its notes here: [01](01-restructure.md), [02](02-config.md), [03](03-store.md),
 [04](04-pipeline.md), [05](05-auth.md), [06](06-instance.md), [07](07-redaction-rules.md),

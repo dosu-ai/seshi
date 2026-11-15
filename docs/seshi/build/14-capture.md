@@ -236,6 +236,20 @@ A review of this branch against F9/B1.6 fixed, each with a test:
 
 ## Still to check
 
+- **The Claude desktop mod (F9.4, F9.5, F9.6) is not built.** The decisions mark the Session
+  Capture ◉/⏸ chip, its toggle and `/session-capture` Agreed, and F9.6's plugin ships "the
+  desktop mod"; the plugin holds only the hooks and the `/seshi` skill. Building it means a
+  mod for the desktop app's own extension surface, which nothing in this repository targets
+  and no test here can run; the extension point above says what it must do. The `/seshi`
+  skill's `capture off|on|status --session` covers one session from the app meanwhile, but
+  there is no always-visible indicator. Left for that work (17-review "Not fixed").
+- **The first-run notice for Cursor and Codex (F9.4) is not built.** Only `seshi capture
+  status` is. A hook prints nothing by design (speed, and an agent may treat output as
+  input); Codex's `notify` has no way to show anything, and Cursor's hooks can only answer a
+  prompt or add a follow-up message the agent would act on. A notice therefore needs another
+  channel (a desktop notification on the first hook, the first `seshi` command after
+  install, or the MDM rollout's own message), which the decisions do not choose. Left for that
+  decision (17-review "Not fixed").
 - **Reprocessing uploads (X4.9, F3.4) is not built.** 06 handed 14 the uploader resend
   ("the uploader resends laptop transcripts", filtered by agent, normalizer version or date);
   nothing here does it. `seshi upload` sends only bytes past `file_offset`, and `replace` goes

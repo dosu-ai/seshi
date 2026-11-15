@@ -368,3 +368,23 @@ what changed.
   and backoff; nothing is lost (offsets, the pending retraction and the secret stay in the
   state) and the status line keeps saying "N queued". Lingering while retries are pending needs
   a cap value and changes that choice. Left for a decision.
+
+- **coverage, medium**: `seshi reprocess` cannot rebuild uploaded sessions; the uploader has
+  no resend mode (X4.9, F3.4). A resend whole with `replace` and a fresh idempotency key would
+  rebuild sessions an adapter fix changed (their log no longer extends the stored prefix), but
+  not re-review review-skipped or dropped envelopes: an identical log extends what is stored
+  and is answered `unchanged`, so that needs a new "rebuild even when it extends" envelope
+  field. Where the command lives on a laptop (`seshi reprocess` runs where the server config
+  is) and how a laptop learns a stored session's normalizer version are not decided. Fixed
+  here: reprocess's refusal, its header, cli.md and 06 no longer say the uploader resends;
+  14's "Still to check" records the gap.
+- **coverage, medium**: the Claude desktop mod (F9.4–F9.6: the Session Capture chip, its
+  toggle and `/session-capture`, shipped in the plugin) is not built. It is a mod for the
+  desktop app's own extension surface, which nothing here targets and no test here can run;
+  too large for this review. The `/seshi` skill covers toggling one session meanwhile.
+  Recorded in 14's "Still to check", capture.md's "Not yet" and the build README.
+- **coverage, medium**: the first-run notice for Cursor and Codex (F9.4) is not built. Hooks
+  print nothing by design, Codex's notify cannot show anything and Cursor's hooks can only
+  steer the agent, so the notice needs a channel the decisions do not choose (a desktop
+  notification, the first `seshi` command, the MDM rollout's message). Recorded in 14's "Still
+  to check", capture.md's "Not yet" and the build README.
