@@ -315,6 +315,24 @@ describe("turning a session off (F9.5, F9.7)", () => {
     expect(state().sessions["claude-code:agent-abc"]).toMatchObject({ retract: "done" });
   });
 
+  it("does not call off a retraction still waiting when turned on: it may have landed", async () => {
+    // Found by the scenario explorer (33): the tombstone landed but its answer was lost; turned
+    // on, the waiting retraction was called off and every later upload met the tombstone
+    // (422 redacted) while this machine thought the session live.
+    await hook();
+    await daemon();
+    await machine.seshi(["capture", "off", "--session", SESSION]);
+    const on = await machine.seshi(["capture", "on", "--session", SESSION, "--json"]);
+    expect(JSON.parse(on.out)).toMatchObject({ capture: true, fresh: true });
+    expect(state().sessions[`claude-code:${SESSION}`]).toMatchObject({ retract: "pending" });
+    const { summary } = await daemon();
+    expect(summary).toMatchObject({ retracted: 1, queued: 1 });
+    // The fresh upload goes on the next pass.
+    expect((await daemon()).summary).toMatchObject({ uploaded: 1 });
+    expect((await stored())?.status).toBe("redacted");
+    expect((await stored(`${SESSION}~1`))?.status).toBe("stored");
+  });
+
   it("records a retraction the server refuses, and the status line says so", async () => {
     await server.stop();
     server = await startServer({ config: "[capture]\nallow_retract = false\n" });

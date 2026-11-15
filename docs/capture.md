@@ -186,7 +186,8 @@ Turning a session off stops its uploads and removes what was uploaded. Each sess
 secret that only its hash ever leaves this machine with; turning the session off sends the
 secret, and the server deletes the session (a tombstone with reason `retracted`). A retraction
 waits in the spool while the uploader is not running. Turning the session on again uploads it
-from the start as a new session (`<id>~1`). A session's subagents (Claude Code's `agent-<id>`
+from the start as a new session (`<id>~1`), also when the retraction is still waiting: it is
+not called off, since it may already have landed with its answer lost. A session's subagents (Claude Code's `agent-<id>`
 sessions, which hold its task prompts and their tool output) go with it unless they were toggled
 themselves: turning the session off retracts what they uploaded and keeps later ones from being
 sent, by hooks or the sweep. If the state file is lost, the secret is gone: delete

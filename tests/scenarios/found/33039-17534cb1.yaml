@@ -1,0 +1,25 @@
+# Found by the scenario explorer (tests/tooling/scenario/explore.ts); see tests/scenarios/README.md.
+# seed: 33039 (bun run scenarios:explore --seed 33039 --runs 1 --max-steps 25)
+# original length: 24 steps; shrunk to 9 in 95 runs
+# failure:
+#   step 9 (settle max=40): once quiet, seshi doctor fails a check
+#     main: queue: refused (redacted): session was redacted; it will not be stored again
+#         3970 bytes not uploaded yet
+#     main: presence: the server deleted main (tombstoned), but this machine did not retract it
+#     faults fired:
+#       http DELETE /v1/sessions/claude-code/main: DELETE /v1/sessions/* #1 → drop-response
+#     capture log (last lines):
+#       2026-09-01T09:00:00.036Z uploader: claude-code:main: retraction will retry: cannot reach <server>: fetch failed: the connection closed before the response (injected)
+#       2026-09-01T09:00:06.042Z uploader: claude-code:main: redacted: session was redacted; it will not be stored again
+name: found by seed 33039
+description: "A generated scenario (seed 33039) shrunk from 24 to 9 steps; the header says how it failed."
+steps:
+  - turns: { session: main, count: 2 }
+  - pass
+  - fault: { http: "DELETE /v1/sessions/*", drop-response: true }
+  - capture: off --session main
+  - pass
+  - capture: on --session main
+  - turns: { session: main, count: 2 }
+  - heal
+  - settle

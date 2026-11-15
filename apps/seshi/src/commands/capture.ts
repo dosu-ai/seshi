@@ -760,13 +760,15 @@ async function toggleSession(
           retracting = true;
         }
       } else {
-        // A retraction not yet done (waiting, or refused) is called off: nothing was removed,
-        // capture goes on.
-        if (s.retract === "pending" || s.retract === "failed") {
+        // A retraction the server refused is called off: nothing was removed, capture goes on.
+        // One still waiting is not: it may have landed with its answer lost, and the server
+        // then refuses the session for good (422 redacted) while this machine thinks it live
+        // (33). It is done, and the session is uploaded again from its start as a new one.
+        if (s.retract === "failed") {
           delete s.retract;
           delete s.retract_error;
         }
-        if ((s.generation ?? 0) > 0 && !s.stored) fresh = true;
+        if (s.retract === "pending" || ((s.generation ?? 0) > 0 && !s.stored)) fresh = true;
         // A session a pause stopped goes on from where it stopped, so the server ends up with
         // all of it (F9.7), what it wrote while stopped included.
         if (s.frozen) {
