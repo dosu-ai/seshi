@@ -451,7 +451,7 @@ export class Sources {
     if (id === UPLOAD_SOURCE) {
       throw new SourceError(
         "not_polled",
-        "uploads are not polled: the capture uploader sends sessions again from the machines that hold them",
+        "uploads are not polled, so they cannot be read again from here; resending uploaded sessions from the machines that hold them is not built yet",
       );
     }
     const { config, connector } = this.pollable(id);

@@ -67,7 +67,7 @@ repository's code.
 | `sync prune` | Run the retention job once, for cron (X7.1): remove drop and failure records and source health shards past `[records]` retention |
 | `sync status [<id>] [--days N] [--server <url>]` | Checkpoints, record counts and source health |
 | `sync failed <id>`, `sync dropped <id>` `[--since] [--limit] [--server <url>]` | Envelopes that failed or that model review dropped, and why; never their content (X6.4). `upload` is the source of hooks and uploads |
-| `reprocess --source <id> [--since <time>] [--dry-run] [--run]` | Rewind a source so its sessions are read again (X4.9). Uploads are resent by the capture uploader (14) |
+| `reprocess --source <id> [--since <time>] [--dry-run] [--run]` | Rewind a source so its sessions are read again (X4.9). Not for uploads (`upload`): they are not polled, and a resend of stored sessions from the machines that hold them is not built yet |
 | `review eval [--policy <id>] [--fixtures <file or folder>]` | Score a model review policy on labelled fixtures, through its real providers: label accuracy, false and missed drops, redactor recall, leaks (F3.8; [model-review.md](model-review.md)). Seshi's own fixtures by default. Exit 8 when any fixture came out other than labelled |
 | `normalize [--agent <format>] [<file> \| -]` | A transcript as canonical, redacted records, one per line (`--json`: one document, with the `llm_calls` the records name: model and token usage per call). For tools in other languages (X3.10) |
 | `healthcheck [--url] [--config] [--json]` | Ask a running server's `/healthz` where `server.listen` says it listens (the container's health check); `--json`: `{ok, url, version}` |

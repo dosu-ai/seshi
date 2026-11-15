@@ -8,8 +8,8 @@
  *                   [--config <file>] [--set path=value]…
  *
  * `--run` polls the source once right away instead of waiting for the worker. Uploads (source
- * `upload`) are reprocessed by the capture uploader, which resends from the machines that hold
- * the transcripts (branch 14). */
+ * `upload`) are refused: they are not polled, and the uploader resend X4.9 describes (from the
+ * machines that hold the transcripts) is not built yet (14's "Still to check"). */
 
 import { isDeepStrictEqual, parseArgs } from "node:util";
 import { SourceError } from "@seshi/sources";
