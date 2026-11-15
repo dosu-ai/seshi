@@ -310,6 +310,11 @@ path = "~/clients/acme"
 capture = false
 ```
 
+`seshi login --server <url>` writes `server` here, and `--user` writes `user`; everything else
+in the file is left as written. The credentials themselves are never in this file: they go in
+the OS keychain, or `credentials.json` (0600) beside it where there is none, with the
+non-secret `logins.json` ([cli.md](cli.md#signing-in-f82)).
+
 **Local mode** (X3.5): instead of `server`, a person who owns a bucket can point the CLI at a
 server config (the same `seshi.toml` format, with `[store]` and its keys), and the CLI runs the
 pipeline in-process against that bucket. Set `server` or `local`, not both.

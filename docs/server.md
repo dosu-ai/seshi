@@ -107,6 +107,11 @@ Where the config and bucket keys are:
 - `seshi reprocess --source <id> [--since <time>] [--run]`: rewind a source so its sessions are
   read and written again (X4.9), while the source still has them.
 
+From an admin's laptop, signed in with `seshi login`, `seshi workers status` and `seshi sync
+status|failed|dropped` read the same through `/v1/admin/jobs` and `/v1/admin/sources` (add
+`--server <url>`, or let them use the CLI config's `server` where no server config is). `sync
+run` and `reprocess` stay where the config is.
+
 The commands and their exit codes are in [cli.md](cli.md).
 
 ### Syncing an S3 bucket
@@ -505,6 +510,9 @@ allow.
 | `GET /v1/sessions/:agent/:session_id/reviews?owner` | What model review decided for each stored write (`sessions:read`, F3.8): the whole audit record for admins, only `n`, `at`, `content_hash` and `decision` for anyone else who may read the session |
 | `POST /otlp/v1/traces` | OTLP/HTTP trace ingest (F4): `ExportTraceServiceRequest` as protobuf or JSON from an OTLP destination's service token. Outside `/v1`, and its errors are OTLP's (`google.rpc.Status`). See [otlp.md](otlp.md) |
 | `GET /v1/search?q&owner&agent&repo&branch&source&since&until&sort&limit&matches&cursor` | Keyword search over what the caller may read (`search`, F10; [above](#search)): `{query, total, results: [{owner, agent, session_id, …, score, hits, matches: [{content_hash, event_index, role, snippet, highlights}]}], cursor?, index}`. `400 bad_query`, `404 search_disabled`, `503 index_building` |
+| `GET /v1/admin/sources?days` | Every configured source and `upload`: checkpoint, drop and failure counts, health over the last `days` (7) days, as `seshi sync status --json` prints them (`sources:admin`) |
+| `GET /v1/admin/sources/:id?days` | One source's status; `404 unknown_source` for an id no source has (`sources:admin`) |
+| `GET /v1/admin/sources/:id/failed`, `…/dropped` `?since&after&limit` | A source's failure or drop records, oldest first, as `seshi sync failed\|dropped --json` prints them; never content. A source no longer configured can still have its records read (`sources:admin`, X6.4) |
 
 ### `POST /v1/sessions`
 
