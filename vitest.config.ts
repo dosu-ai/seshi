@@ -1,6 +1,13 @@
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { defineConfig } from "vitest/config";
+
+/** An Instance whose config names no search.path keeps its index in the user cache folder
+ * (F10.3); tests must never write there, nor see an index a previous run left behind (several
+ * tests use the same deployment id). A fresh folder per run, removed when the run ends. */
+const cache = mkdtempSync(join(tmpdir(), "seshi-vitest-cache-"));
+process.on("exit", () => rmSync(cache, { recursive: true, force: true }));
 
 /** Every workspace package exports its source through the `bun` condition (X3.4); Vite does not
  * know that condition, so it goes in front of Vite's own server defaults (`module`, `node`,
@@ -21,8 +28,6 @@ export default defineConfig({
     ],
     pool: "forks",
     testTimeout: 30_000,
-    // An Instance whose config names no search.path keeps its index in the user cache folder
-    // (F10.3); tests must never write there.
-    env: { XDG_CACHE_HOME: join(tmpdir(), "seshi-vitest-cache") },
+    env: { XDG_CACHE_HOME: cache },
   },
 });
