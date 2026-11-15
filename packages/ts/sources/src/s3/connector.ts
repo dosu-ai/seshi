@@ -504,8 +504,12 @@ class S3Run {
     const said: KeyFields = { ...fields, ...metadataFields(read.metadata) };
     const session = entry?.session ?? said.session ?? rel;
 
-    // Gzip, by its bytes: a fetch may already have undone a `Content-Encoding: gzip`.
-    const gz = isGzip(read.body) || /gzip|deflate|br|zstd/i.test(read.content_encoding ?? "");
+    // Gzip, by its bytes. The bucket client asks fetch not to undo a `Content-Encoding` (that
+    // would inflate without limit), so a gzip-encoded object arrives as gzip and is unzipped
+    // below with a limit; a fetch that undid it anyway leaves text, read whole all the same.
+    const encoding = (read.content_encoding ?? "").trim().toLowerCase();
+    const encoded = encoding !== "" && encoding !== "identity";
+    const gz = isGzip(read.body) || encoded;
     let bytes = read.body;
     if (isGzip(bytes)) {
       try {
@@ -528,6 +532,13 @@ class S3Run {
     try {
       text = decoder.decode(bytes);
     } catch {
+      if (encoded && !isGzip(read.body)) {
+        return failing(
+          "unsupported_encoding",
+          `the object is stored with Content-Encoding ${encoding.slice(0, 40)}; only gzip is unzipped`,
+          session,
+        );
+      }
       return failing("not_utf8", "the object is not UTF-8 text", session);
     }
 

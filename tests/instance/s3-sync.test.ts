@@ -2,6 +2,7 @@
  * S3 connector of an Instance booted the way `seshi serve` boots one, through the real
  * pipeline, formats and session filter, into a folder store. */
 
+import { gzipSync } from "node:zlib";
 import { getTrace } from "@seshi/pipeline";
 import { FakeS3 } from "@seshi/sources/testing";
 import { archiveId, listRecords, readChanges, readCheckpoint, readMetadata } from "@seshi/store";
@@ -219,6 +220,25 @@ describe("S3 sync (F6)", () => {
     expect(records.map((r) => (r.record as { code: string }).code)).toEqual(["unknown_format"]);
     const status = await instance.sources.status("evals");
     expect(status.failed).toBe(1);
+  });
+
+  it("unzips a gzip-encoded object itself, within the size limit, over real HTTP", async () => {
+    // Bun's fetch would inflate `Content-Encoding: gzip` before anyone checked the size.
+    fake.put("harness/alice@x.io/sess1.jsonl", gzipSync(CLAUDE), { contentEncoding: "gzip" });
+    fake.put("harness/bob@x.io/bomb.jsonl", gzipSync(Buffer.alloc(4 << 20, 0x20)), {
+      contentEncoding: "gzip",
+    });
+    fake.put("harness/carol@x.io/odd.jsonl", new Uint8Array([0x8b, 0x00, 0xff, 0xfe]), {
+      contentEncoding: "br",
+    });
+    const instance = await boot(`\n[limits]\nmax_upload_bytes = "1MiB"\n`);
+    const report = await instance.sources.run("evals");
+    expect(report.outcomes).toEqual({ stored: 1, failed: 2 });
+    expect((await readMetadata(instance.store, OWNER, claudeArchive))?.head).toBeDefined();
+    const codes = (await listRecords(instance.store, "failed", "evals")).records.map(
+      (r) => (r.record as { code: string }).code,
+    );
+    expect(codes.sort()).toEqual(["too_large", "unsupported_encoding"]);
   });
 
   it("normalizes again what reprocess rewound, rather than replaying the old answer (X4.9)", async () => {

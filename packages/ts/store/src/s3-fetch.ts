@@ -88,6 +88,7 @@ export class FetchS3Client {
     url: URL,
     body?: Uint8Array,
     headers: Record<string, string> = {},
+    extra: { decompress?: false } = {},
   ): Promise<Response> {
     const signed = await signRequest({
       method,
@@ -101,7 +102,9 @@ export class FetchS3Client {
       method,
       headers: signed,
       ...(body ? { body: body as BodyInit } : {}),
-    });
+      // Bun's fetch option: hand over a `Content-Encoding` body as stored, not decoded.
+      ...extra,
+    } as RequestInit);
   }
 
   private static async fail(method: string, key: string, response: Response): Promise<never> {
@@ -231,7 +234,9 @@ export class FetchS3Client {
    * ETag is still `ifMatch` when given. Null when there is no object; a changed object is S3's
    * 412, thrown as `S3HttpError`. A backend that ignores `Range` answers the whole object
    * (status 200, `start` 0), which the caller handles the same way. The object's user
-   * metadata (`x-amz-meta-*`) comes back with its prefix removed and names lower-cased. */
+   * metadata (`x-amz-meta-*`) comes back with its prefix removed and names lower-cased. The
+   * body is the bytes as stored: a `Content-Encoding` is reported, not undone (Bun's fetch
+   * would otherwise inflate it without limit). */
   async getObject(
     key: string,
     options: { start?: number; ifMatch?: string } = {},
@@ -241,7 +246,11 @@ export class FetchS3Client {
       headers.range = `bytes=${options.start}-`;
     }
     if (options.ifMatch !== undefined) headers["if-match"] = quote(options.ifMatch);
-    const response = await this.send("GET", this.url(key), undefined, headers);
+    // Not decoded by fetch: a small object stored with `Content-Encoding: gzip` could inflate
+    // without bound before anyone checked its size. The caller unzips with a limit.
+    const response = await this.send("GET", this.url(key), undefined, headers, {
+      decompress: false,
+    });
     if (response.status === 404) {
       await response.body?.cancel();
       return null;
