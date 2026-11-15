@@ -2,7 +2,9 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { REPO_FILE_MAX_BYTES, readBounded } from "./files";
 import { findRepo, gitRemotes, headBranch, parseRepoConfig, placeOf } from "./place";
+import { DEFAULT_RULES, decide, type RepoConfig } from "./rules";
 
 let dir: string;
 beforeEach(() => {
@@ -75,6 +77,65 @@ describe("the repo's .seshi/config.toml", () => {
     write("app/.git/HEAD", "ref: refs/heads/main\n");
     write("app/.seshi/config.toml", "capture = false\n");
     expect(placeOf(join(dir, "app")).repo?.config).toEqual({ capture: false });
+  });
+});
+
+describe("files a repo plants where its config and git files are", () => {
+  /** placeOf on `app`, which must come back quickly; its repo config. */
+  function judged(): RepoConfig | undefined {
+    const started = Date.now();
+    const place = placeOf(join(dir, "app"));
+    expect(Date.now() - started).toBeLessThan(2000);
+    return place.repo?.config;
+  }
+
+  it.skipIf(process.platform === "win32")(
+    "turn capture off there, without hanging, when one is a link to /dev/zero",
+    () => {
+      write("app/.git/HEAD", "ref: refs/heads/main\n");
+      mkdirSync(join(dir, "app/.seshi"));
+      symlinkSync("/dev/zero", join(dir, "app/.seshi/config.toml"));
+      expect(judged()?.invalid).toMatch(/config\.toml is not a regular file/);
+      // The same through a worktree's .git pointer, its HEAD and its config.
+      rmSync(join(dir, "app/.seshi"), { recursive: true });
+      symlinkSync("/dev/zero", join(dir, "app/.git/config"));
+      expect(judged()?.invalid).toMatch(/git's config is not a regular file/);
+      rmSync(join(dir, "app/.git"), { recursive: true });
+      write("gitdir/commondir", "..\n");
+      symlinkSync("/dev/zero", join(dir, "gitdir/HEAD"));
+      write("app/.git", `gitdir: ${join(dir, "gitdir")}\n`);
+      expect(judged()?.invalid).toMatch(/HEAD is not a regular file/);
+      rmSync(join(dir, "app/.git"));
+      symlinkSync("/dev/zero", join(dir, "app/.git"));
+      // A .git that is not a file or a folder is not a repo: the search goes on upward.
+      expect(placeOf(join(dir, "app")).repo).toBeUndefined();
+    },
+  );
+
+  it("turn capture off there when one is a folder", () => {
+    write("app/.git/HEAD", "ref: refs/heads/main\n");
+    mkdirSync(join(dir, "app/.seshi/config.toml"), { recursive: true });
+    expect(judged()?.invalid).toMatch(/config\.toml is not a regular file/);
+    expect(decide({ rules: DEFAULT_RULES, place: placeOf(join(dir, "app")) }).reason).toMatch(
+      /cannot be read/,
+    );
+  });
+
+  it("turn capture off there when one is larger than any real one", () => {
+    write("app/.git/HEAD", "ref: refs/heads/main\n");
+    write("app/.seshi/config.toml", `# ${"x".repeat(REPO_FILE_MAX_BYTES)}\ncapture = true\n`);
+    expect(judged()?.invalid).toMatch(/config\.toml is larger than/);
+    write("app/.seshi/config.toml", "capture = true\n");
+    write("app/.git/config", `[core]\n# ${"x".repeat(REPO_FILE_MAX_BYTES)}\n`);
+    expect(judged()?.invalid).toMatch(/git's config is larger than/);
+  });
+
+  it("read bounded: a regular file, an absent one, and anything else", () => {
+    write("ok.txt", "hello");
+    expect(readBounded(join(dir, "ok.txt"))).toEqual({ text: "hello" });
+    expect(readBounded(join(dir, "missing"))).toEqual({ absent: true });
+    expect(readBounded(dir)).toEqual({ invalid: "is not a regular file" });
+    expect(readBounded(join(dir, "ok.txt"), 4)).toEqual({ invalid: "is larger than 4 bytes" });
   });
 });
 

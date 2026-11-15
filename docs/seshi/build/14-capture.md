@@ -59,7 +59,10 @@ User docs: [docs/capture.md](../../capture.md) (new), docs/cli.md (rows), docs/c
     `normalizeRemote`, `remoteMatches`, `within` (segment-wise, case-insensitive on Windows).
   - `place.ts`: the repo around a folder from the files alone (no `git` process): `.git` dir or
     worktree file + `commondir`, remotes, branch, `.seshi/config.toml` (`capture`,
-    `visibility`; unknown keys ignored, wrong types make it unreadable). A repo config only
+    `visibility`; unknown keys ignored, wrong types make it unreadable). Each of these files is
+    read through `files.ts` `readBounded` (lstat, open non-blocking, fstat the descriptor,
+    regular files only, at most 64 KiB); anything else makes the repo config invalid (capture
+    off in that repo only), never a hang or a throw. A repo config only
     narrows: the uploader sends its `visibility` when it is `owner` and ignores `org`, since a
     request's visibility beats the token's default.
   - `rules-cache.ts`: the CLI config's capture rules through the real loader, cached in

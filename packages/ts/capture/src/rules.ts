@@ -205,7 +205,7 @@ function sharedExclusion(rules: CaptureRules, place: Place): Decision | undefine
     return {
       capture: false,
       level: "repo",
-      reason: `the repo's .seshi/config.toml cannot be read: ${repo.config.invalid}`,
+      reason: `the repo's config cannot be read: ${repo.config.invalid}`,
     };
   }
   if (repo?.config.capture === false) {

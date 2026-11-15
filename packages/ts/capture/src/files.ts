@@ -7,11 +7,16 @@ import {
   appendFileSync,
   chmodSync,
   closeSync,
+  constants,
+  fstatSync,
+  lstatSync,
   mkdirSync,
   openSync,
   readFileSync,
+  readSync,
   renameSync,
   rmSync,
+  type Stats,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -44,6 +49,58 @@ export function readText(path: string): string | undefined {
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     throw err;
+  }
+}
+
+/** The most `readBounded` reads of a repo's own file (`.seshi/config.toml`, the `.git` pointer,
+ * `HEAD`, git's `config`): far more than any real one holds. */
+export const REPO_FILE_MAX_BYTES = 64 * 1024;
+
+/** A file a repo controls, read without trusting it: its text; `absent` when it is not there;
+ * `invalid` (why) when it is anything but a regular file of at most `max` bytes. */
+export type BoundedRead = { text: string } | { absent: true } | { invalid: string };
+
+/** Read a file a checkout may have planted (a link to `/dev/zero`, a FIFO, a folder, a huge
+ * file) without hanging or throwing: `lstat` it (and `stat`, through a link), open it without
+ * blocking, `fstat` the descriptor and require a regular file, and read at most `max` bytes. */
+export function readBounded(path: string, max = REPO_FILE_MAX_BYTES): BoundedRead {
+  let stat: Stats;
+  try {
+    stat = lstatSync(path);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") return { absent: true };
+    return { invalid: `cannot be read (${code ?? (err as Error).message})` };
+  }
+  try {
+    if (stat.isSymbolicLink()) stat = statSync(path);
+  } catch {
+    return { invalid: "is a link to nothing" };
+  }
+  if (!stat.isFile()) return { invalid: "is not a regular file" };
+  if (stat.size > max) return { invalid: `is larger than ${max} bytes` };
+  let fd: number;
+  try {
+    fd = openSync(path, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0));
+  } catch (err) {
+    return { invalid: `cannot be read (${(err as NodeJS.ErrnoException).code ?? err})` };
+  }
+  try {
+    // The file could have been swapped since the stat: judge what was opened.
+    if (!fstatSync(fd).isFile()) return { invalid: "is not a regular file" };
+    const buffer = Buffer.alloc(max + 1);
+    let length = 0;
+    while (length < buffer.length) {
+      const read = readSync(fd, buffer, length, buffer.length - length, null);
+      if (read === 0) break;
+      length += read;
+    }
+    if (length > max) return { invalid: `is larger than ${max} bytes` };
+    return { text: buffer.subarray(0, length).toString("utf8") };
+  } catch (err) {
+    return { invalid: `cannot be read (${(err as NodeJS.ErrnoException).code ?? err})` };
+  } finally {
+    closeSync(fd);
   }
 }
 

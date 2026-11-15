@@ -338,7 +338,10 @@ by the team when your token keeps them private (the token's default, then the se
 `default_visibility`, decides instead).
 
 A repo config that cannot be read (a wrong type, bad TOML) turns capture off in that repo until
-it is fixed. Hooks read the CLI config through a cache (`rules.json` in the capture folder),
+it is fixed. So does one that is not a regular file (a folder, or a link to a device such as
+`/dev/zero`) or is larger than 64 KiB, and the same goes for the git files capture reads to
+find the repo (a worktree's `.git` file and `commondir`, `HEAD`, git's `config`): capture reads
+each of them bounded, so a planted file never hangs a hook or the status line. Hooks read the CLI config through a cache (`rules.json` in the capture folder),
 loaded again whenever the file or a `SESHI_CAPTURE__*` variable changes.
 
 `SESHI_SESSION_ID`, `SESHI_AGENT` and `SESHI_NO_UPLOADER` are capture's own variables, not

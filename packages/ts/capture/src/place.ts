@@ -4,7 +4,7 @@
 
 import { realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { readText } from "./files";
+import { readBounded } from "./files";
 import { normalizeRemote, type Place, type RepoConfig } from "./rules";
 
 /** The repo config file, relative to the repo root. */
@@ -19,22 +19,40 @@ function kind(path: string): "dir" | "file" | undefined {
   }
 }
 
+/** A file the repo controls, through `readBounded`: its text (undefined when absent), or why it
+ * cannot be trusted, which makes the repo's config invalid (capture off there, fail closed). */
+function repoFile(path: string, name: string): { text?: string; invalid?: string } {
+  const read = readBounded(path);
+  if ("text" in read) return { text: read.text };
+  if ("invalid" in read) return { invalid: `${name} ${read.invalid}` };
+  return {};
+}
+
 /** The repository `folder` is in: its root and its git folders (`.git`, or the folder a
- * worktree's `.git` file points at, and the shared one it names in `commondir`). */
+ * worktree's `.git` file points at, and the shared one it names in `commondir`). `invalid`
+ * says why a git file it had to read cannot be trusted (not a regular file, too large). */
 export function findRepo(
   folder: string,
-): { root: string; gitDir: string; commonDir: string } | undefined {
+): { root: string; gitDir: string; commonDir: string; invalid?: string } | undefined {
   let at = resolve(folder);
   for (;;) {
     const dotGit = join(at, ".git");
     const found = kind(dotGit);
     if (found === "dir") return { root: at, gitDir: dotGit, commonDir: dotGit };
     if (found === "file") {
-      const pointer = /^gitdir:\s*(.+)$/m.exec(readText(dotGit) ?? "")?.[1]?.trim();
+      const file = repoFile(dotGit, "the .git file");
+      if (file.invalid !== undefined) {
+        return { root: at, gitDir: dotGit, commonDir: dotGit, invalid: file.invalid };
+      }
+      const pointer = /^gitdir:\s*(.+)$/m.exec(file.text ?? "")?.[1]?.trim();
       if (pointer) {
         const gitDir = isAbsolute(pointer) ? pointer : resolve(at, pointer);
-        const common = readText(join(gitDir, "commondir"))?.trim();
-        const commonDir = common ? resolve(gitDir, common) : gitDir;
+        const common = repoFile(join(gitDir, "commondir"), "the worktree's commondir");
+        if (common.invalid !== undefined) {
+          return { root: at, gitDir, commonDir: gitDir, invalid: common.invalid };
+        }
+        const commonText = common.text?.trim();
+        const commonDir = commonText ? resolve(gitDir, commonText) : gitDir;
         return { root: at, gitDir, commonDir };
       }
     }
@@ -105,11 +123,22 @@ export function placeOf(cwd: string | undefined): Place {
   } catch {}
   const repo = findRepo(place.real ?? cwd);
   if (repo) {
-    const branch = headBranch(readText(join(repo.gitDir, "HEAD")));
+    // Every file is read bounded: a repo can plant a link to /dev/zero, a FIFO or a folder
+    // where one is expected, and one that cannot be trusted turns capture off in this repo
+    // only, without hanging or throwing in a hook.
+    if (repo.invalid !== undefined) {
+      place.repo = { root: repo.root, config: { invalid: repo.invalid }, remotes: [] };
+      return place;
+    }
+    const head = repoFile(join(repo.gitDir, "HEAD"), "git's HEAD");
+    const config = repoFile(join(repo.root, REPO_CONFIG), REPO_CONFIG);
+    const git = repoFile(join(repo.commonDir, "config"), "git's config");
+    const invalid = config.invalid ?? head.invalid ?? git.invalid;
+    const branch = headBranch(head.text);
     place.repo = {
       root: repo.root,
-      config: parseRepoConfig(readText(join(repo.root, REPO_CONFIG))),
-      remotes: gitRemotes(readText(join(repo.commonDir, "config")) ?? ""),
+      config: invalid !== undefined ? { invalid } : parseRepoConfig(config.text),
+      remotes: gitRemotes(git.text ?? ""),
       ...(branch ? { branch } : {}),
     };
   }
