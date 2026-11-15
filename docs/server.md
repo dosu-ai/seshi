@@ -52,7 +52,7 @@ The settings most servers need ([config.md](config.md) has all of them):
 | `store.url` | `SESHI_STORE__URL` | Required: `r2://bucket/prefix`, `s3://bucket/prefix`, or `file:///path` |
 | `store.credentials.*`, `store.region`, `store.endpoint`, `store.account_id` | `SESHI_STORE__CREDENTIALS__ACCESS_KEY_ID`, … | The bucket's keys and where it is. Unset, the standard `AWS_*` / `S3_*` (and `R2_*` for `r2://`) variables apply |
 | `redaction.packs` | `SESHI_REDACTION__PACKS` | JSON files of your own redaction rules, added to the built-in ones ([below](#your-own-redaction)). The server refuses to start if a pattern in one is not a usable regular expression |
-| `store.format` | `SESHI_STORE__FORMAT` | How traces are written: `letta` (default), trajectory-v1 records, or `otlp`, OTLP/HTTP JSON GenAI spans that any OpenTelemetry backend reads. A bucket holds one format, fixed by its first writer; the server refuses to start against a bucket in the other. See [the layout](../spec/layout.md#sessionstoragejson--sessionstoragelayout1) |
+| `store.deployment_id`, `store.org` | `SESHI_STORE__DEPLOYMENT_ID`, `SESHI_STORE__ORG` | Recorded in the bucket's layout marker (`seshi.json`); the server refuses to start against a bucket marked for another deployment or org (X1.4). See [the layout](../spec/layout.md) |
 | `server.listen` | `SESHI_SERVER__LISTEN` | Default `:7200`; flag `--listen` |
 
 Today's `SESSIONDB_*` names and `PORT` are no longer read.
@@ -156,11 +156,11 @@ Request bodies may be `Content-Encoding: gzip` (any other encoding is a `415`). 
 | | |
 |---|---|
 | `GET /healthz` | `{ok, version}`, no auth |
-| `GET /v1/me` | `{owner, storage: {url, region?, account_id?, endpoint?}, format}`: which bucket this server writes and in which trace format, so a client can point a reader at it. Never a secret |
+| `GET /v1/me` | `{owner, storage: {url, region?, account_id?, endpoint?}}`: which bucket this server writes, so a client can point a reader at it. Never a secret |
 | `POST /v1/sessions` | Store a session; see below |
 | `GET /v1/sessions?limit&after` | List |
 | `GET /v1/sessions/:agent/:session_id` | The session's `metadata.json` |
-| `GET /v1/sessions/:agent/:session_id/trace?hash` | The head trace (or a specific one), in the bucket's format; `404 no_trace` while raw only, `410` once redacted |
+| `GET /v1/sessions/:agent/:session_id/trace?hash&format` | The head trace (or a specific one) as the stored canonical trace (`format=seshi`, the default) or rendered as `letta`, `otlp` or `atif`; `400 bad_query` for another format, `404 no_trace` while raw only, `410` once redacted |
 | `DELETE /v1/sessions/:agent/:session_id` | Tombstone: drop trace and raw objects, append a tombstone change. Irreversible; a later upload of the same session is refused |
 | `GET /v1/changes?after&since&limit` | The change feed |
 

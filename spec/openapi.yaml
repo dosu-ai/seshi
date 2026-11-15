@@ -8,9 +8,11 @@ info:
 
     A client posts the raw transcript of a coding-agent session, whole or in chunks as it
     grows. The server redacts it, stores it as the session's raw part, normalizes what it
-    stored to Letta trajectory-v1, decides whether it is worth a trace and how much of it is
-    new, and writes the trace beside it in the bucket, in the `sessionstorage` layout
-    (`layout.md` beside this file). Readers do not use this API: they read the bucket.
+    stored, decides whether it is worth a trace and how much of it is new, and writes the trace
+    beside it in the bucket in seshi's one canonical format (`seshi/trace/1`), in the layout of
+    `layout.md` beside this file. Stored objects (trace, metadata, change entry) are defined by
+    the JSON Schemas in `schemas/`, which these components reference. A reader can read the
+    bucket, or ask for a trace rendered as Letta, OTLP or ATIF (`GET …/trace?format=`).
 
     Every request but `/healthz` carries `Authorization: Bearer <token>`. A token is bound to
     one owner and every call is scoped to `owners/<owner>/`. Request bodies may be sent
@@ -75,7 +77,6 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Identity" }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "502": { $ref: "#/components/responses/StorageError" }
 
   /v1/sessions:
     post:
@@ -216,16 +217,22 @@ paths:
           in: query
           description: A specific trace's `content_hash`; the head by default.
           schema: { type: string }
+        - name: format
+          in: query
+          description: How to render the stored trace; `seshi`, the stored canonical trace, by default.
+          schema: { $ref: "#/components/schemas/RenderFormat" }
       responses:
         "200":
-          description: The trace.
+          description: The trace, as `format` renders it.
           content:
             application/json:
               schema:
-                description: In the bucket's format (`Identity.format`).
                 oneOf:
                   - { $ref: "#/components/schemas/Trace" }
+                  - { $ref: "#/components/schemas/LettaTrace" }
                   - { $ref: "#/components/schemas/OtlpTrace" }
+                  - { $ref: "#/components/schemas/AtifDocument" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404":
           description: |
@@ -494,14 +501,14 @@ components:
       properties:
         owner: { $ref: "#/components/schemas/Owner" }
         storage: { $ref: "#/components/schemas/StorageView" }
-        format: { $ref: "#/components/schemas/TraceFormat" }
 
-    TraceFormat:
+    RenderFormat:
       type: string
-      enum: [letta, otlp]
+      enum: [seshi, letta, otlp, atif]
       description: |
-        How the bucket's traces are written: `letta` (`Trace`, trajectory-v1 records) or `otlp`
-        (`OtlpTrace`, OTLP/HTTP JSON GenAI spans). One bucket holds one format.
+        How a trace is returned: `seshi` (`Trace`, the stored canonical trace), `letta`
+        (`LettaTrace`, trajectory-v1 records as sessiondb stored them), `otlp` (`OtlpTrace`,
+        OTLP/HTTP JSON GenAI spans) or `atif` (`AtifDocument`, an ATIF-v1.7 document).
 
     StorageView:
       type: object
@@ -528,74 +535,9 @@ components:
           $ref: "#/components/schemas/Sha256"
           description: Hash of the records before it.
 
-    RawPart:
-      type: object
-      required: [part, format, size, sha256, created_at, offset, length]
-      properties:
-        part: { type: integer, minimum: 0 }
-        format: { type: string, enum: [jsonl, json] }
-        size: { type: integer, description: Bytes as stored (redacted, gzipped). }
-        sha256: { $ref: "#/components/schemas/Sha256" }
-        created_at: { type: string, format: date-time }
-        offset: { type: integer, minimum: 0, description: Where the part starts in the log. }
-        length: { type: integer, minimum: 0, description: The log's bytes it covers, before redaction. }
-
-    SessionTraceRef:
-      type: object
-      required: [content_hash, created_at, records]
-      properties:
-        content_hash: { $ref: "#/components/schemas/Sha256" }
-        created_at: { type: string, format: date-time }
-        records: { type: integer }
-        continuation: { $ref: "#/components/schemas/Continuation" }
-
-    NormalizedState:
-      type: object
-      description: Where a chunked upload stands; what the next chunk continues from.
-      required: [bytes, records, prefix_sha256, hash_state]
-      properties:
-        bytes: { type: integer, minimum: 0, description: Of the log normalized so far; where the next chunk starts. }
-        records: { type: integer, minimum: 0, description: The whole session's, so far. }
-        prefix_sha256: { $ref: "#/components/schemas/Sha256" }
-        hash_state: { type: string, description: The prefix hash mid-stream. }
-
     SessionMetadata:
-      type: object
       description: The session's `metadata.json`; the live pointer, as in `layout.md`.
-      required: [schema, owner, archive_id, session_id, agent, status, traces, raw, created_at, updated_at]
-      properties:
-        schema: { const: sessionstorage/metadata/1 }
-        owner: { $ref: "#/components/schemas/Owner" }
-        archive_id: { $ref: "#/components/schemas/Sha256" }
-        session_id: { type: string }
-        agent: { type: string }
-        source:
-          type: string
-          description: What normalized the trace (`datadog-trajectory:claude-code`; for `atif`, the document's `agent.name`); absent until one is stored.
-        project: { type: string }
-        branch: { type: string }
-        parent_session_id: { type: string }
-        status: { type: string, enum: [stored, redacted] }
-        head:
-          $ref: "#/components/schemas/Sha256"
-          description: The current trace; absent while raw only, and once redacted.
-        traces:
-          type: array
-          items: { $ref: "#/components/schemas/SessionTraceRef" }
-        raw:
-          type: array
-          items: { $ref: "#/components/schemas/RawPart" }
-        raw_format: { type: string, enum: [jsonl, json] }
-        normalized: { $ref: "#/components/schemas/NormalizedState" }
-        withheld_calls:
-          type: object
-          description: >-
-            Tool calls whose results are redacted whole, by id: they touched a sensitive file or
-            ran a command that prints a secret. Kept so a result in a later chunk is redacted
-            too. Absent when there are none.
-          additionalProperties: { type: string, enum: [sensitive-file, secret-output] }
-        created_at: { type: string, format: date-time }
-        updated_at: { type: string, format: date-time }
+      $ref: "./schemas/metadata.schema.json"
 
     SessionsPage:
       type: object
@@ -676,8 +618,12 @@ components:
         ok: { type: boolean }
 
     Trace:
+      description: "`trace.<content_hash>.json.gz`, decoded: the stored canonical trace, immutable and content-addressed, as in `layout.md`."
+      $ref: "./schemas/trace.schema.json"
+
+    LettaTrace:
       type: object
-      description: "`trace.<content_hash>.json.gz`, decoded: immutable and content-addressed, as in `layout.md`."
+      description: "A trace rendered as Letta trajectory-v1 (`?format=letta`): the `sessionstorage/trace/1` object sessiondb stored, with the same events and hash as the canonical trace."
       required: [schema, content_hash, source, agent, session_id, started_at, ended_at, records, events, metadata]
       properties:
         schema: { const: sessionstorage/trace/1 }
@@ -711,12 +657,38 @@ components:
                 version: { type: string, description: Its release, with the `@letta-ai/trajectory` it ran as build metadata. }
           additionalProperties: true
 
+    AtifDocument:
+      type: object
+      description: A trace rendered as an ATIF-v1.7 document (`?format=atif`), token usage as step metrics.
+      required: [schema_version, agent, steps]
+      properties:
+        schema_version: { const: ATIF-v1.7 }
+        session_id: { type: string }
+        agent:
+          type: object
+          required: [name, version]
+          properties:
+            name: { type: string }
+            version: { type: string }
+            model_name: { type: string }
+        steps:
+          type: array
+          items:
+            type: object
+            required: [step_id, source, message]
+            properties:
+              step_id: { type: integer, minimum: 1 }
+              source: { type: string, enum: [system, user, agent] }
+              message: { type: string }
+        final_metrics: { type: object }
+        extra: { type: object }
+
     OtlpTrace:
       type: object
       description: |
-        `trace.<content_hash>.otlp.json.gz`, decoded, in an `otlp` bucket: an OTLP/HTTP JSON
-        `ExportTraceServiceRequest` of the trace as GenAI spans, as in `layout.md`. It can be
-        posted as-is to a collector's `/v1/traces`.
+        A trace rendered as OTLP (`?format=otlp`): an OTLP/HTTP JSON `ExportTraceServiceRequest`
+        of the trace as GenAI spans, as in `layout.md`. It can be posted as-is to a collector's
+        `/v1/traces`.
       required: [resourceSpans]
       properties:
         resourceSpans:
@@ -780,22 +752,8 @@ components:
             message: { type: string }
 
     ChangeEntry:
-      type: object
-      description: One `changes/<stamp>-<hash|tombstone>.json`, as in `layout.md`.
-      required: [schema, kind, at, owner, archive_id, session_id, content_hash]
-      properties:
-        schema: { const: sessionstorage/change/1 }
-        kind: { type: string, enum: [published, tombstone] }
-        at: { type: string, format: date-time }
-        owner: { $ref: "#/components/schemas/Owner" }
-        archive_id: { $ref: "#/components/schemas/Sha256" }
-        session_id: { type: string }
-        content_hash:
-          oneOf:
-            - $ref: "#/components/schemas/Sha256"
-            - type: "null"
-          description: The trace the entry is about; for a tombstone, the head at the time, or null if there was none.
-        continuation: { $ref: "#/components/schemas/Continuation" }
+      description: One `changes/<stamp>-<hash|tombstone|visibility>.json`, as in `layout.md`.
+      $ref: "./schemas/change.schema.json"
 
     ChangesPage:
       type: object

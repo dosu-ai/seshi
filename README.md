@@ -150,23 +150,25 @@ object that is not there.
 
 ## Trace format
 
-Every input is normalized the same way. What the trace objects are written as is a choice,
-`store.format` on the server (`SESHI_STORE__FORMAT`) or `format` on the SDK client:
+Every input is normalized the same way and stored in one canonical format, `seshi/trace/1`
+([`spec/schemas/trace.schema.json`](spec/schemas/trace.schema.json)): the
+[Letta trajectory-v1](https://github.com/letta-ai/trajectory) records, their events and hash,
+plus what the raw transcript used to keep: the model and token usage per LLM call, record ids,
+tool call ids and timings, and where the data came from. Other formats are rendered on read:
 
-| Format | Trace object |
+| `?format=` | What `GET /v1/sessions/:agent/:id/trace` returns |
 |---|---|
-| `letta` (default) | `sessionstorage/trace/1`: the [Letta trajectory-v1](https://github.com/letta-ai/trajectory) records, their events and hash |
-| `otlp` | The same trace as an OTLP/HTTP JSON `ExportTraceServiceRequest`: OpenTelemetry GenAI spans (`invoke_agent`, a `chat` span per model turn, an `execute_tool` span per tool call) that any OpenTelemetry backend reads, and that can be posted as-is to a collector |
+| `seshi` (default) | The stored canonical trace |
+| `letta` | `sessionstorage/trace/1`: plain trajectory-v1 records, events and hash, as sessiondb stored them |
+| `otlp` | An OTLP/HTTP JSON `ExportTraceServiceRequest`: OpenTelemetry GenAI spans (`invoke_agent`, a `chat` span per model turn with its `gen_ai.usage.*`, an `execute_tool` span per tool call), ready to post to a collector. Lossless: `fromOtlp` gives back the canonical trace |
+| `atif` | An ATIF-v1.7 document, with token usage as step metrics |
 
 ```ts
-const db = connect({ store: "r2://sessions/team", owner: "alice", format: "otlp" });
+const trace = await db.getTrace("claude-code", sessionId, undefined, "otlp");
 ```
 
-A bucket holds one format, recorded in its layout marker by its first writer; a writer
-configured for the other refuses it. Writers default to `letta`, so only a writer that opts in
-writes an `otlp` bucket; reads follow whatever the bucket holds. Redaction, dedupe, chunks and forks work the same in both.
-An `otlp` object is lossless: its spans carry the records they were made from, so `fromOtlp(trace)` gives back the `letta` trace with the same `content_hash`. Readers that only know `letta` (Dosu's backend) convert this way. Trajectory-v1 has no token usage, so OTLP spans carry none. See
-[`spec/layout.md`](spec/layout.md) for both objects.
+Content hashes are computed from the records exactly as before, so they do not change. See
+[`spec/layout.md`](spec/layout.md).
 
 ## Access model
 

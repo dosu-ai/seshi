@@ -109,8 +109,10 @@ branch that builds the feature gives them their effect.
 | `region` | | `s3://`. Falls back to `AWS_REGION` |
 | `endpoint` | | S3-compatible services (MinIO, Backblaze, Wasabi). Falls back to `S3_ENDPOINT` |
 | `account_id` | | Cloudflare account for `r2://`. Falls back to `R2_ACCOUNT_ID` |
-| `format` | `"letta"` | `letta` or `otlp`: how traces are written. A bucket holds one, fixed by its first writer. Transitional: one canonical format replaces it (X6.2) |
-| `deployment_id`, `org` | | Recorded in the layout marker; the server refuses a bucket marked for another org (X1.4). *Later* |
+| `deployment_id` | generated | This deployment's id, recorded in the layout marker `seshi.json` the first time a server uses the bucket. A server whose `deployment_id` differs from the marker's refuses to start (X1.4). Without it, the first server generates one and later servers accept whatever the marker says |
+| `org` | | The organization the deployment serves (X1.1). Recorded in the marker the first time a config names it; a server naming another org refuses to start (X1.4) |
+
+Traces are always stored in seshi's one canonical format (`seshi/trace/1`, X6.2) and rendered as Letta, OTLP or ATIF on read (`GET …/trace?format=`). A bucket written by sessiondb (`sessionstorage.json`) is refused: there is no migration (X1.5), so point `url` at a new prefix.
 
 ### `[auth]`
 
