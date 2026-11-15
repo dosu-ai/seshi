@@ -12,6 +12,7 @@ import type { Fetch } from "@seshi/model";
 import { FetchS3Client, S3HttpError } from "./s3-fetch";
 import {
   type DeleteOptions,
+  type ListedKey,
   type ListOptions,
   type ListResult,
   type ObjectStat,
@@ -178,6 +179,7 @@ export class S3Store implements Store {
   }
 
   async list(prefix: string, options: ListOptions = {}): Promise<ListResult> {
+    if (options.details) return this.listDetailed(prefix, options);
     try {
       const response = await this.client.list({
         prefix: this.keyOf(prefix),
@@ -186,6 +188,29 @@ export class S3Store implements Store {
       });
       const strip = this.prefix ? this.prefix.length + 1 : 0;
       return { keys: response.keys.map((k) => k.slice(strip)), truncated: response.truncated };
+    } catch (err) {
+      throw new StoreError(`list ${prefix}`, err);
+    }
+  }
+
+  /** `list` with each object's `LastModified` and size, which ListObjectsV2 sends anyway. */
+  private async listDetailed(prefix: string, options: ListOptions): Promise<ListResult> {
+    try {
+      const response = await this.client.listObjects({
+        prefix: this.keyOf(prefix),
+        maxKeys: options.limit ?? 1000,
+        startAfter: options.startAfter === undefined ? undefined : this.keyOf(options.startAfter),
+      });
+      const strip = this.prefix ? this.prefix.length + 1 : 0;
+      const objects = response.objects.map((o): ListedKey => {
+        const at = o.last_modified === undefined ? Number.NaN : Date.parse(o.last_modified);
+        return {
+          key: o.key.slice(strip),
+          size: o.size,
+          ...(Number.isFinite(at) ? { modified: new Date(at).toISOString() } : {}),
+        };
+      });
+      return { keys: objects.map((o) => o.key), truncated: response.truncated, objects };
     } catch (err) {
       throw new StoreError(`list ${prefix}`, err);
     }

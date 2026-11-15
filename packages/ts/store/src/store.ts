@@ -51,11 +51,26 @@ export interface ListOptions {
   /** Keys lexicographically after this one (exclusive), as S3's `StartAfter`. */
   startAfter?: string;
   limit?: number;
+  /** Also say when each object was last written (`objects`): S3's `LastModified`, a file's
+   * mtime. The folder store reads each listed file's mtime for it, so ask only when needed. */
+  details?: boolean;
+}
+
+/** One listed object, with what the listing says of it. */
+export interface ListedKey {
+  key: string;
+  /** When the object was last written, ISO 8601, as the backend reports it (S3's
+   * `LastModified`, the file's mtime). Absent when the backend does not say, or the object went
+   * between the listing and the look. */
+  modified?: string;
+  size?: number;
 }
 
 export interface ListResult {
   keys: string[];
   truncated: boolean;
+  /** With `details`: each of `keys`, in the same order, with its last change. */
+  objects?: ListedKey[];
 }
 
 export interface Store {

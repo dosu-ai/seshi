@@ -27,6 +27,7 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   type DeleteOptions,
+  type ListedKey,
   type ListOptions,
   type ListResult,
   type ObjectStat,
@@ -262,6 +263,15 @@ export class FsStore implements Store {
       const after = options.startAfter;
       keys = keys.filter((k) => k > after);
     }
-    return { keys: keys.slice(0, limit), truncated: keys.length > limit };
+    const page = keys.slice(0, limit);
+    const truncated = keys.length > limit;
+    if (!options.details) return { keys: page, truncated };
+    const objects = await Promise.all(
+      page.map(async (key): Promise<ListedKey> => {
+        const info = await stat(join(this.root, ...key.split("/"))).catch(() => null);
+        return info ? { key, modified: info.mtime.toISOString(), size: info.size } : { key };
+      }),
+    );
+    return { keys: page, truncated, objects };
   }
 }

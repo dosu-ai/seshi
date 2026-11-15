@@ -153,6 +153,7 @@ export {
   type DeleteOptions,
   getBytes,
   isPreconditionFailed,
+  type ListedKey,
   type ListOptions,
   type ListResult,
   type ObjectStat,
@@ -168,3 +169,11 @@ export {
   updateObject,
 } from "./store";
 export { type AssumedCredentials, type AssumeRoleOptions, assumeRole } from "./sts";
+export {
+  namedTraces,
+  SWEEP_MIN_AGE_MS,
+  type SweepOptions,
+  type SweepReport,
+  type SweptObject,
+  sweepTraces,
+} from "./sweep";

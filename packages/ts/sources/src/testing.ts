@@ -26,6 +26,9 @@ export interface FakeS3Options {
   accessKeyId?: string;
   /** Answer GET with the whole object even when a Range is asked (a backend that ignores it). */
   ignoreRange?: boolean;
+  /** Take PUT (with `If-Match` / `If-None-Match`) and DELETE (with `If-Match`), so the bucket
+   * can back an `S3Store`. Read-only when unset, as a source bucket the poller only reads. */
+  writable?: boolean;
   now?: () => Date;
 }
 
@@ -138,6 +141,10 @@ export class FakeS3 {
     }
     const key = this.keyOf(url);
     if (key === undefined) return error(404, "NoSuchBucket", "no such bucket");
+    if (this.options.writable && key !== "") {
+      if (request.method === "PUT") return this.write(key, request);
+      if (request.method === "DELETE") return this.remove(key, request);
+    }
     if (request.method !== "GET" && request.method !== "HEAD") {
       return error(403, "AccessDenied", "this fake bucket is read-only");
     }
@@ -170,9 +177,59 @@ export class FakeS3 {
     );
   }
 
+  /** A PUT on a writable bucket: S3 answers a failed `If-None-Match: *` or `If-Match` with
+   * 412, and `If-Match` on a key with no object with 404 `NoSuchKey`. */
+  private async write(key: string, request: Request): Promise<Response> {
+    const current = this.objects.get(key);
+    const ifMatch = request.headers.get("if-match");
+    if (request.headers.get("if-none-match") === "*" && current) {
+      return error(
+        412,
+        "PreconditionFailed",
+        "At least one of the pre-conditions you specified did not hold",
+      );
+    }
+    if (ifMatch !== null) {
+      if (!current) return error(404, "NoSuchKey", "The specified key does not exist.");
+      if (ifMatch.replace(/^"|"$/g, "") !== current.etag) {
+        return error(
+          412,
+          "PreconditionFailed",
+          "At least one of the pre-conditions you specified did not hold",
+        );
+      }
+    }
+    const object = this.put(key, new Uint8Array(await request.arrayBuffer()));
+    return new Response(null, { status: 200, headers: { etag: `"${object.etag}"` } });
+  }
+
+  /** A DELETE on a writable bucket: 204 whether or not there was an object. */
+  private remove(key: string, request: Request): Response {
+    const current = this.objects.get(key);
+    const ifMatch = request.headers.get("if-match");
+    if (ifMatch !== null && current && ifMatch.replace(/^"|"$/g, "") !== current.etag) {
+      return error(
+        412,
+        "PreconditionFailed",
+        "At least one of the pre-conditions you specified did not hold",
+      );
+    }
+    this.objects.delete(key);
+    return new Response(null, { status: 204 });
+  }
+
   private get(key: string, request: Request): Response {
     const object = this.objects.get(key);
     if (!object) return error(404, "NoSuchKey", "The specified key does not exist.");
+    if (request.method === "HEAD") {
+      return new Response(null, {
+        headers: {
+          etag: `"${object.etag}"`,
+          "content-length": String(object.body.length),
+          "last-modified": object.modified.toUTCString(),
+        },
+      });
+    }
     const ifMatch = request.headers.get("if-match");
     if (ifMatch !== null && ifMatch.replace(/^"|"$/g, "") !== object.etag) {
       return error(
