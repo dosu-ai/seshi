@@ -11,6 +11,7 @@
         "@semantic-release/git": "^11.0.1",
         "@seshi/api": "workspace:*",
         "@seshi/auth": "workspace:*",
+        "@seshi/capture": "workspace:*",
         "@seshi/client": "workspace:*",
         "@seshi/config": "workspace:*",
         "@seshi/formats": "workspace:*",
@@ -40,6 +41,7 @@
       "dependencies": {
         "@seshi/api": "workspace:*",
         "@seshi/auth": "workspace:*",
+        "@seshi/capture": "workspace:*",
         "@seshi/client": "workspace:*",
         "@seshi/config": "workspace:*",
         "@seshi/formats": "workspace:*",
@@ -146,6 +148,12 @@
     },
     "packages/ts/capture": {
       "name": "@seshi/capture",
+      "dependencies": {
+        "@seshi/client": "workspace:*",
+        "@seshi/config": "workspace:*",
+        "@seshi/kit": "workspace:*",
+        "@seshi/model": "workspace:*",
+      },
     },
     "packages/ts/client": {
       "name": "@seshi/client",

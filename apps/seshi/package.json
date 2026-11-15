@@ -27,6 +27,7 @@
   "dependencies": {
     "@seshi/api": "workspace:*",
     "@seshi/auth": "workspace:*",
+    "@seshi/capture": "workspace:*",
     "@seshi/client": "workspace:*",
     "@seshi/config": "workspace:*",
     "@seshi/formats": "workspace:*",

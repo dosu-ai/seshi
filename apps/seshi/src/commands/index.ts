@@ -34,6 +34,12 @@ export interface CommandContext {
   terminal?(): Promise<Terminal>;
   /** Where credentials are kept (F8.2); the OS keychain with a file fallback when absent. */
   secrets?: SecretBackend;
+  /** Start a program detached, not waited for (a hook starting the uploader, F9.1). `self`
+   * puts the words that start this seshi in front of `words`. Tests record calls instead. */
+  spawn?(words: string[], options?: { self?: boolean }): Promise<void>;
+  /** Run a program and wait for it (a service manager's own command); a real process when
+   * absent. Tests record calls instead. */
+  exec?(words: string[]): Promise<{ code: number; output: string }>;
 }
 
 export interface CommandModule {

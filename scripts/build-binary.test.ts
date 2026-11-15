@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { VERSION } from "@seshi/model";
@@ -48,10 +48,10 @@ describe("the compiled binary (X2.2)", () => {
   }, 60_000);
   afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
-  async function run(args: string[], stdin?: string) {
+  async function run(args: string[], stdin?: string, env: Record<string, string> = {}) {
     const proc = Bun.spawn([binary, ...args], {
       cwd: dir,
-      env: { PATH: process.env.PATH ?? "", HOME: dir },
+      env: { PATH: process.env.PATH ?? "", HOME: dir, ...env },
       stdin: stdin === undefined ? "ignore" : new Blob([stdin]),
       stdout: "pipe",
       stderr: "pipe",
@@ -66,8 +66,16 @@ describe("the compiled binary (X2.2)", () => {
 
   it("runs without Bun's sources: version, a stub, a lazy command reading stdin", async () => {
     expect((await run(["--version"])).out.trim()).toBe(`seshi ${VERSION}`);
-    const hook = await run(["hook", "claude-code", "Stop"]);
-    expect(hook.code).toBe(9);
+    expect((await run(["search", "x"])).code).toBe(9);
+    // A hook loads its agent's capture module lazily and spools the session.
+    const payload = JSON.stringify({
+      session_id: "s",
+      transcript_path: join(dir, "s.jsonl"),
+      cwd: dir,
+    });
+    const hook = await run(["hook", "claude-code", "Stop"], payload, { SESHI_NO_UPLOADER: "1" });
+    expect(hook).toMatchObject({ code: 0, out: "", err: "" });
+    expect(readdirSync(join(dir, ".local", "state", "seshi", "spool"))).toHaveLength(1);
     const lines = [
       {
         type: "user",

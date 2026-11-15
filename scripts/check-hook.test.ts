@@ -74,11 +74,12 @@ describe("the hook's import graph (X3.3)", () => {
 
   it("records npm and node modules without following them, and catches protobuf", () => {
     write("apps/seshi/package.json", JSON.stringify({ name: "seshi" }));
-    write("apps/seshi/src/main.ts", 'import "node:fs";\nimport "zod";\n');
-    write("apps/seshi/src/commands/hook.ts", 'import "@bufbuild/protobuf";\n');
+    write("apps/seshi/src/main.ts", 'import "node:fs";\nimport "left-pad";\n');
+    write("apps/seshi/src/commands/hook.ts", 'import "@bufbuild/protobuf";\nimport "zod";\n');
     write("apps/seshi/src/commands/statusline.ts", "export {};\n");
     const graph = importGraph(root);
-    expect(graph.external).toEqual(["node:fs", "zod"]);
-    expect(graph.violations.map((v) => v.specifier)).toEqual(["@bufbuild/protobuf"]);
+    expect(graph.external).toEqual(["left-pad", "node:fs"]);
+    // The config schema library stays out of a hook too: capture reads its rules from a cache.
+    expect(graph.violations.map((v) => v.specifier)).toEqual(["@bufbuild/protobuf", "zod"]);
   });
 });

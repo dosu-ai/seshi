@@ -6,7 +6,9 @@
  *    command modules, every import that runs at load time is followed (`import type` and
  *    `import()` are not: types are erased and dynamic imports are lazy). Reaching a package on
  *    the forbidden list fails, with the chain of files that got there.
- * 2. The time. `seshi hook claude-code Stop` runs several times and its median must stay under
+ * 2. The time. `seshi hook claude-code Stop` runs several times, with a Stop payload on stdin in
+ *    a temporary home (rules judged, spool written, no uploader started), and its median must
+ *    stay under
  *    a fixed budget (`--budget-ms`, `SESHI_HOOK_BUDGET_MS`, 250 ms by default). Run from source
  *    it must also take under half of what loading `seshi serve` takes, measured the same way,
  *    so a slow CI machine moves both. `--binary dist/seshi` times the compiled binary instead;
@@ -15,7 +17,8 @@
  *
  *   bun run scripts/check-hook.ts [--static-only] [--binary <path>] [--budget-ms <n>] [--runs <n>] */
 
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import ts from "typescript";
@@ -33,13 +36,23 @@ export const FORBIDDEN: readonly (string | RegExp)[] = [
   "@seshi/review",
   "@anthropic-ai/sdk",
   /protobuf|@bufbuild\//,
+  // Capture's fast path (14): the config schema library, the HTTP client and the transcript
+  // adapters stay out of a hook; the rules come from capture's cache.
+  "zod",
+  "@seshi/client",
+  "@seshi/formats",
+  "@letta-ai/trajectory",
 ];
 
-/** The modules a hook evaluates first: the router and the two fast commands. */
+/** The modules a hook evaluates first: the router, the two fast commands, and the agents'
+ * capture modules (a hook loads the one it is called for, with `import()`). */
 export const HOOK_ENTRIES = [
   "apps/seshi/src/main.ts",
   "apps/seshi/src/commands/hook.ts",
   "apps/seshi/src/commands/statusline.ts",
+  "integrations/claude-code/src/capture.ts",
+  "integrations/codex/src/capture.ts",
+  "integrations/cursor/src/local/capture.ts",
 ];
 
 /** The specifiers a file imports at load time: static imports and re-exports, never
@@ -133,7 +146,9 @@ export function importGraph(
     queue.push(file);
   };
 
-  for (const entry of entries) visit(join(absolute, entry), undefined);
+  for (const entry of entries) {
+    if (existsSync(join(absolute, entry))) visit(join(absolute, entry), undefined);
+  }
   while (queue.length > 0) {
     const file = queue.shift() as string;
     for (const specifier of loadTimeImports(readFileSync(file, "utf8"), file)) {
@@ -168,12 +183,24 @@ export function importGraph(
   };
 }
 
-/** The median wall time of `runs` runs of `command`, in milliseconds. */
-export async function medianMs(command: string[], runs: number, cwd: string): Promise<number> {
+/** The median wall time of `runs` runs of `command`, in milliseconds, with `stdin` as its input
+ * and `env` as its environment when given. */
+export async function medianMs(
+  command: string[],
+  runs: number,
+  cwd: string,
+  options: { stdin?: string; env?: Record<string, string | undefined> } = {},
+): Promise<number> {
   const times: number[] = [];
   for (let i = 0; i < runs; i++) {
     const started = performance.now();
-    const proc = Bun.spawn(command, { cwd, stdout: "ignore", stderr: "ignore", stdin: "ignore" });
+    const proc = Bun.spawn(command, {
+      cwd,
+      stdout: "ignore",
+      stderr: "ignore",
+      stdin: options.stdin === undefined ? "ignore" : Buffer.from(options.stdin),
+      ...(options.env ? { env: options.env } : {}),
+    });
     await proc.exited;
     times.push(performance.now() - started);
   }
@@ -211,9 +238,34 @@ if (import.meta.main) {
   const seshi = values.binary
     ? [resolve(values.binary)]
     : ["bun", join(root, "apps/seshi/src/main.ts")];
-  // Warm the file cache once, so the first measured run is not the disk's.
+  // A real hook's work: a temporary home with a transcript, a Stop payload on stdin, the rules
+  // judged and the spool written; no uploader is started.
+  const home = mkdtempSync(join(tmpdir(), "seshi-hook-budget-"));
+  const transcript = join(home, "session.jsonl");
+  writeFileSync(
+    transcript,
+    `${JSON.stringify({ type: "user", uuid: "u1", sessionId: "s1", message: { role: "user", content: "hi" } })}\n`,
+  );
+  const hookEnv = {
+    ...process.env,
+    HOME: home,
+    XDG_STATE_HOME: join(home, "state"),
+    XDG_CONFIG_HOME: join(home, "config"),
+    SESHI_NO_UPLOADER: "1",
+  };
+  const payload = JSON.stringify({
+    session_id: "s1",
+    transcript_path: transcript,
+    cwd: home,
+    hook_event_name: "Stop",
+  });
+  const hookRun = { stdin: payload, env: hookEnv };
+  // Warm the file cache and capture's rules cache once, so the first measured run is neither
+  // the disk's nor the config loader's.
   await medianMs([...seshi, "--version"], 1, root);
-  const hook = await medianMs([...seshi, "hook", "claude-code", "Stop"], runs, root);
+  await medianMs([...seshi, "hook", "claude-code", "Stop"], 1, root, hookRun);
+  const hook = await medianMs([...seshi, "hook", "claude-code", "Stop"], runs, root, hookRun);
+  rmSync(home, { recursive: true, force: true });
   // `serve --bogus` loads the whole server, then stops at the flag.
   const serve = await medianMs([...seshi, "serve", "--bogus-flag"], runs, root);
   console.log(

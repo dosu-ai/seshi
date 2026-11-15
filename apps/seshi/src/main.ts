@@ -24,6 +24,8 @@ export interface MainOptions {
   tty?: CommandContext["tty"];
   terminal?: CommandContext["terminal"];
   secrets?: CommandContext["secrets"];
+  spawn?: CommandContext["spawn"];
+  exec?: CommandContext["exec"];
 }
 
 /** `argv` without `--no-color` (before a `--`), and whether it was there (B1.4). */
@@ -97,6 +99,20 @@ export async function main(argv: string[], options: MainOptions = {}): Promise<n
     ...(noColor ? { noColor } : {}),
     ...(terminal ? { terminal } : {}),
     ...(options.secrets ? { secrets: options.secrets } : {}),
+    ...(options.exec ? { exec: options.exec } : {}),
+    spawn:
+      options.spawn ??
+      (async (words, spawnOptions) => {
+        const { selfCommand, spawnDetached } = await import("./cli/spawn");
+        const env = options.env ?? process.env;
+        // Seshi itself starts in the home folder, not the agent's repository: run from source,
+        // bun would otherwise read that repository's bunfig.toml (and its preload).
+        await spawnDetached(
+          spawnOptions?.self ? [...selfCommand(), ...words] : words,
+          env,
+          spawnOptions?.self ? env.HOME || env.USERPROFILE || undefined : undefined,
+        );
+      }),
   });
 }
 

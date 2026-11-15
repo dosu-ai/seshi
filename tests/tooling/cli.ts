@@ -42,6 +42,11 @@ export class Machine {
   readonly configDir: string;
   readonly secrets = new MemorySecrets();
   readonly env: Record<string, string>;
+  /** What commands asked to start detached (a hook starting the uploader): recorded, never
+   * run. */
+  readonly spawned: { words: string[]; self: boolean }[] = [];
+  /** Programs commands ran and waited for (a service manager): recorded, answered 0. */
+  readonly executed: string[][] = [];
 
   constructor(env: Record<string, string> = {}) {
     this.dir = mkdtempSync(join(tmpdir(), "seshi-cli-"));
@@ -69,6 +74,13 @@ export class Machine {
       stderr: (line) => err.push(line),
       integrations: async () => options.integrations ?? INTEGRATIONS,
       secrets: this.secrets,
+      spawn: async (words, spawnOptions) => {
+        this.spawned.push({ words, self: spawnOptions?.self === true });
+      },
+      exec: async (words) => {
+        this.executed.push(words);
+        return { code: 0, output: "" };
+      },
       ...(options.stdin !== undefined ? { stdin: async () => options.stdin as string } : {}),
       ...(options.terminal ? { terminal: async () => options.terminal as Terminal } : {}),
       ...(options.tty ? { tty: options.tty } : {}),
