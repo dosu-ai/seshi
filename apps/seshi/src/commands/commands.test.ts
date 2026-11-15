@@ -270,6 +270,18 @@ describe("seshi sync", () => {
     const none = await seshi(["sync", "failed", "dd", "--since", "2026-11-15"], { toml: SOURCES });
     expect(none.out).toBe("no failed records for dd");
     expect((await seshi(["sync", "failed", "nope"], { toml: SOURCES })).code).toBe(EXIT.notFound);
+    // A source taken out of [[sources]]: status lists its records, and they can be read.
+    await writeFailed(store, {
+      at: "2026-11-14T10:00:00.000Z",
+      source: "retired",
+      session_key: "s3",
+      idempotency_key: "k3",
+      code: "invalid",
+      message: "gone",
+    });
+    const orphan = await seshi(["sync", "failed", "retired"], { toml: SOURCES });
+    expect(orphan.code).toBe(EXIT.ok);
+    expect(orphan.out).toContain("s3  invalid: gone");
     expect(
       (await seshi(["sync", "failed", "dd", "--since", "whenever"], { toml: SOURCES })).code,
     ).toBe(EXIT.usage);

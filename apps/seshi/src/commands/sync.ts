@@ -17,7 +17,12 @@ import { parseArgs } from "node:util";
 import type { Instance } from "@seshi/instance";
 import { UPLOAD_SOURCE } from "@seshi/model";
 import { type RunReport, SourceError, type SourceStatus } from "@seshi/sources";
-import { type DroppedRecord, type FailedRecord, listRecords } from "@seshi/store";
+import {
+  type DroppedRecord,
+  type FailedRecord,
+  listRecords,
+  sourcesWithRecords,
+} from "@seshi/store";
 import { EXIT, type ExitCode } from "../cli/exit";
 import { emit, fail, takeJson, usageError } from "../cli/output";
 import type { CommandContext } from "./index";
@@ -121,7 +126,13 @@ async function records(
   id: string,
   values: Values,
 ) {
-  if (id !== UPLOAD_SOURCE) instance.sources.get(id);
+  // A source no longer in [[sources]] keeps its records until retention prunes them, and
+  // status still lists it, so they can be read; an id with neither is unknown.
+  const known =
+    id === UPLOAD_SOURCE ||
+    instance.source(id) !== undefined ||
+    (await sourcesWithRecords(instance.store)).includes(id);
+  if (!known) instance.sources.get(id);
   const limit = positiveInt(values.limit, "limit", 50);
   let since: string | undefined;
   if (values.since !== undefined) {
