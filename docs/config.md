@@ -31,9 +31,9 @@ seshi config show --origin         # ... and where each came from: flag, env, fi
 seshi config show --json [--origin]
 ```
 
-`check` exits 0 when `seshi serve` could start with the config, 1 when not. It runs the same
-checks `serve` does (tokens long enough, a way to call the server), warns about settings that
-do less than they say (a literal secret in a file others can read, `owner` visibility without
+`check` exits 0 when `seshi serve` could start with the config, 3 (`config`) when not. It runs
+the same checks `serve` does (tokens long enough, a way to call the server), warns about
+settings that do less than they say (a literal secret in a file others can read, `owner` visibility without
 an IdP), and names every provider a review policy sends data to. `show` does not read secret
 references, so it works where those files or variables are not present. Both take `--config`
 and `--set`, and `--cli` for the CLI's own config (below).
