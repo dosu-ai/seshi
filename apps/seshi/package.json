@@ -21,6 +21,9 @@
     },
     "./explore": {
       "bun": "./src/commands/explore.ts"
+    },
+    "./capture-runtime": {
+      "bun": "./src/capture-runtime.ts"
     }
   },
   "scripts": {
