@@ -26,7 +26,7 @@ Only traces are taken. OTLP logs and metrics (Claude Code's own telemetry, for o
 
    ```sh
    curl -X POST https://seshi.example.com/v1/tokens \
-     -H "Authorization: Bearer $SESHI_ADMIN_TOKEN" -H "Content-Type: application/json" \
+     -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
      -d '{"kind":"service","service":"console-prod","scopes":["sessions:write"],"label":"Claude Console"}'
    ```
 

@@ -25,8 +25,9 @@ and writes the result to S3, Cloudflare R2, any S3-compatible store or a folder,
 
 - **The bucket never holds an unredacted byte.** Redaction runs before anything is written,
   and there is no switch to turn it off. The raw transcript is never stored.
-- **Laptops never hold a bucket credential.** In a team, each person's machine holds a scoped,
-  revocable seshi credential that can only write that person's sessions.
+- **In a team, laptops never hold a bucket credential.** Each machine holds a revocable seshi
+  credential instead: with an identity provider, a device token that can only write its
+  person's sessions; without one, the org key every member shares.
 - **The archive does not depend on the server.** Traces are content-addressed files with a
   change feed beside them, so a reader can tail the bucket with a read-only key.
 
@@ -51,7 +52,7 @@ Name the bucket in a server config, and point the CLI's config at it:
 ```toml
 # ~/.config/seshi/seshi.toml
 [store]
-url = "file:///Users/alice/seshi"      # or s3://bucket/prefix (with region), r2://bucket/prefix
+url = "file:///Users/alice/seshi"      # or s3://bucket/prefix (with region), r2://bucket/prefix (with account_id)
 ```
 
 ```toml
@@ -168,7 +169,8 @@ Datadog, S3 sources ──polled by the worker──▶                        �
 
 Every upload goes through one pipeline in memory, and only its result is written. The log is
 normalized to trajectory-v1 records and redacted. A session's first trace is kept only if it
-holds a real exchange (2,000 characters of conversation). Only what is new is written: a log that
+holds a real exchange (by default, a prompt, a reply, and 2,000 characters of text and tool
+traffic). Only what is new is written: a log that
 grew adds its tail. Model review runs if a policy applies. Then the trace is written under its
 content hash, the session's pointer moves to it, and an entry is appended to the change feed.
 

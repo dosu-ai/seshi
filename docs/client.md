@@ -27,7 +27,7 @@ import { HttpSessionDB, OffsetMismatch } from "@seshi/client";
 
 const db = new HttpSessionDB({
   server: "https://seshi.acme.internal",
-  token: process.env.SESHI_TOKEN!,   // a device, service, admin or static token, or the org key
+  token: process.env.ACME_SESHI_TOKEN!,   // a device, service, admin or static token, or the org key
   user: "alice@acme.com",            // with the org key only: the username to write as
 });
 
@@ -48,6 +48,10 @@ const page = await db.listSessions({ limit: 50 });
 const feed = await db.changes({ after: cursor });
 const found = await db.search({ q: "flaky checkout test", repo: "widget", sort: "recent" });
 ```
+
+Keep your program's own variables out of the `SESHI_` namespace (the example reads
+`ACME_SESHI_TOKEN`): the `seshi` CLI and server read every `SESHI_*` variable as a setting,
+and refuse to start on one that is not ([config.md](config.md)).
 
 The rules for whole uploads, chunks, continuations, forks and resends are the server's
 ([server.md](server.md#post-v1sessions)); the client sends what you give it and maps the

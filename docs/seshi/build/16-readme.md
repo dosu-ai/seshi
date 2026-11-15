@@ -89,6 +89,26 @@ each command's usage. The local-mode quick start was run as written in a throwaw
 (`whoami`, `upload`, `sessions ls`, `search`, `search --status`, `capture status`), and the
 team quick start's `config check` and `admin init` against a folder store.
 
+### Review fixes
+
+A review checked every command, flag, config key, env name and link in the README and
+`docs/` against this tip (each command's usage text, both config schemas, a link and anchor
+check), re-ran the local-mode quick start and the search examples, and rendered the outlined
+lockups and the badge. It changed:
+
+- `docs/client.md` read its token from `SESHI_TOKEN`, and `docs/otlp.md`'s curl example used
+  `$SESHI_ADMIN_TOKEN`. Every `SESHI_*` name is read as a setting, so either variable in the
+  environment stops `seshi serve` and the CLI (`SESHI_TOKEN: not a setting`), the problem 02
+  removed from the old `docs/sdk.md`. They are now `ACME_SESHI_TOKEN` and `$ADMIN_TOKEN`, and
+  `client.md` says why.
+- README, "Why": "laptops never hold a bucket credential" was said of every laptop, and the
+  team credential was described as one that can only write its person's sessions. Local mode
+  puts the bucket key on the laptop, and the org key (no IdP) writes as any username. It now
+  says "in a team", and names the device token and the org key.
+- README: `r2://` needs `store.account_id`, now said beside the URL; the session filter is
+  described as its defaults (a prompt, a reply, 2,000 characters of text and tool traffic)
+  rather than "2,000 characters of conversation".
+
 ## Extension points
 
 - **A new lockup or glyph variant for GitHub or npm**: add it to `LOCKUPS` (or a new constant)
