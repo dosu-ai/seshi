@@ -555,7 +555,7 @@
       "type": "object",
       "properties": {
         "policies": {
-          "description": "Review policies; none means no model review.",
+          "description": "Review policies, first match wins; none means no model review.",
           "type": "array",
           "items": {
             "type": "object",
@@ -576,7 +576,7 @@
               },
               "agents": {
                 "default": [],
-                "description": "Agents it applies to; all when empty.",
+                "description": "Agents (formats) it applies to; all when empty.",
                 "type": "array",
                 "items": {
                   "type": "string",
@@ -585,7 +585,7 @@
               },
               "repos": {
                 "default": [],
-                "description": "Repositories it applies to; all when empty.",
+                "description": "Repositories (the session's project) it applies to, as globs; all when empty. A session without a project matches only a policy with no repos.",
                 "type": "array",
                 "items": {
                   "type": "string",
@@ -603,41 +603,50 @@
               },
               "retries": {
                 "default": 3,
-                "description": "Retries of a failed model call (F3.4).",
+                "description": "Retries of a failed model call, or of an answer that does not fit (F3.4).",
                 "type": "integer",
                 "minimum": 0,
+                "maximum": 10
+              },
+              "max_input_chars": {
+                "default": 100000,
+                "description": "Record text per model call; a longer envelope is split by turn (F3.7).",
+                "type": "integer",
+                "minimum": 1000,
                 "maximum": 9007199254740991
               },
               "decision": {
+                "description": "The decision model: allow, redact or drop (F3.1).",
+                "default": {},
                 "type": "object",
                 "properties": {
                   "provider": {
+                    "description": "Who runs the model; review sends envelopes there (F3.5). anthropic by default; the redactor defaults to the decision step's.",
                     "type": "string",
                     "enum": [
                       "anthropic",
                       "bedrock",
                       "vertex",
                       "openai-compatible"
-                    ],
-                    "description": "Who runs the model; review sends envelopes there (F3.5)."
+                    ]
                   },
                   "model": {
+                    "description": "The model name at that provider; claude-haiku-5-5 on anthropic by default, required for other providers.",
                     "type": "string",
-                    "minLength": 1,
-                    "description": "The model name at that provider."
+                    "minLength": 1
                   },
                   "prompt": {
-                    "description": "The prompt, inline.",
+                    "description": "The prompt, inline; seshi's default prompt when neither is set.",
                     "type": "string",
                     "minLength": 1
                   },
                   "prompt_file": {
-                    "description": "The prompt, from a file.",
+                    "description": "The prompt, from a file read at start.",
                     "type": "string",
                     "minLength": 1
                   },
                   "api_key": {
-                    "description": "The provider key.",
+                    "description": "The provider key. Required for anthropic, and for openai-compatible without a base_url.",
                     "x-seshi-secret": true,
                     "anyOf": [
                       {
@@ -675,49 +684,77 @@
                     ]
                   },
                   "base_url": {
-                    "description": "The provider's endpoint (openai-compatible, a local model).",
+                    "description": "The provider's endpoint: a proxy, an OpenAI-compatible server or a local model. The provider's public API by default.",
                     "type": "string",
                     "format": "uri"
+                  },
+                  "max_tokens": {
+                    "description": "The output cap of one call; 2048 for the decision model, 16000 for the redactor.",
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "effort": {
+                    "description": "anthropic only: output_config.effort for the model; the model's own default when unset.",
+                    "type": "string",
+                    "enum": [
+                      "low",
+                      "medium",
+                      "high",
+                      "xhigh",
+                      "max"
+                    ]
+                  },
+                  "timeout": {
+                    "description": "How long one call may take before it counts as failed; 60s by default.",
+                    "x-seshi-format": "duration",
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^(\\d+)(ms|s|m|h|d|w)$"
+                      },
+                      {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      }
+                    ]
                   }
                 },
-                "required": [
-                  "provider",
-                  "model"
-                ],
-                "additionalProperties": false,
-                "description": "The decision model: allow, redact or drop (F3.1)."
+                "additionalProperties": false
               },
               "redactor": {
                 "description": "The redactor LLM, called only for redact (F3.1).",
+                "default": {},
                 "type": "object",
                 "properties": {
                   "provider": {
+                    "description": "Who runs the model; review sends envelopes there (F3.5). anthropic by default; the redactor defaults to the decision step's.",
                     "type": "string",
                     "enum": [
                       "anthropic",
                       "bedrock",
                       "vertex",
                       "openai-compatible"
-                    ],
-                    "description": "Who runs the model; review sends envelopes there (F3.5)."
+                    ]
                   },
                   "model": {
+                    "description": "The model name at that provider; claude-haiku-5-5 on anthropic by default, required for other providers.",
                     "type": "string",
-                    "minLength": 1,
-                    "description": "The model name at that provider."
+                    "minLength": 1
                   },
                   "prompt": {
-                    "description": "The prompt, inline.",
+                    "description": "The prompt, inline; seshi's default prompt when neither is set.",
                     "type": "string",
                     "minLength": 1
                   },
                   "prompt_file": {
-                    "description": "The prompt, from a file.",
+                    "description": "The prompt, from a file read at start.",
                     "type": "string",
                     "minLength": 1
                   },
                   "api_key": {
-                    "description": "The provider key.",
+                    "description": "The provider key. Required for anthropic, and for openai-compatible without a base_url.",
                     "x-seshi-secret": true,
                     "anyOf": [
                       {
@@ -755,26 +792,63 @@
                     ]
                   },
                   "base_url": {
-                    "description": "The provider's endpoint (openai-compatible, a local model).",
+                    "description": "The provider's endpoint: a proxy, an OpenAI-compatible server or a local model. The provider's public API by default.",
                     "type": "string",
                     "format": "uri"
                   },
+                  "max_tokens": {
+                    "description": "The output cap of one call; 2048 for the decision model, 16000 for the redactor.",
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "effort": {
+                    "description": "anthropic only: output_config.effort for the model; the model's own default when unset.",
+                    "type": "string",
+                    "enum": [
+                      "low",
+                      "medium",
+                      "high",
+                      "xhigh",
+                      "max"
+                    ]
+                  },
+                  "timeout": {
+                    "description": "How long one call may take before it counts as failed; 60s by default.",
+                    "x-seshi-format": "duration",
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^(\\d+)(ms|s|m|h|d|w)$"
+                      },
+                      {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      }
+                    ]
+                  },
                   "categories": {
                     "default": [],
+                    "description": "What the redactor looks for; seshi's default categories when empty.",
                     "type": "array",
                     "items": {
                       "type": "object",
                       "properties": {
                         "name": {
                           "type": "string",
-                          "minLength": 1
+                          "maxLength": 40,
+                          "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$",
+                          "description": "The category's name; redacted text becomes [redacted:<name>]."
                         },
                         "description": {
                           "type": "string",
-                          "minLength": 1
+                          "minLength": 1,
+                          "description": "What belongs in it, for the redactor."
                         },
                         "examples": {
                           "default": [],
+                          "description": "Examples of such text, for the redactor.",
                           "type": "array",
                           "items": {
                             "type": "string"
@@ -789,19 +863,14 @@
                     }
                   }
                 },
-                "required": [
-                  "provider",
-                  "model"
-                ],
                 "additionalProperties": false
               }
             },
             "required": [
-              "id",
-              "decision"
+              "id"
             ],
             "additionalProperties": false,
-            "description": "A review policy (F3.3)."
+            "description": "A review policy (F3.3). The first policy that matches an envelope reviews it."
           }
         }
       },

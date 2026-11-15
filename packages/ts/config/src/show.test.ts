@@ -94,25 +94,27 @@ describe("checkServerConfig", () => {
             policies: [
               {
                 id: "p",
-                decision: { provider: "bedrock", model: "d" },
+                decision: { provider: "anthropic", api_key: "sk-test" },
                 redactor: {
                   provider: "openai-compatible",
                   model: "r",
                   base_url: "http://gpu:8000/v1",
                 },
               },
+              { id: "q", decision: { api_key: "sk-test" } },
             ],
           },
         },
       ),
     );
     expect(report.notices).toEqual([
-      "review policy 'p' sends envelopes to bedrock (decision: d)",
+      "review policy 'p' sends envelopes to anthropic at https://api.anthropic.com (decision: claude-haiku-5-5)",
       "review policy 'p' sends envelopes to openai-compatible at http://gpu:8000/v1 (redactor: r)",
+      // The redactor defaults to the decision step's provider and model (F3.5).
+      "review policy 'q' sends envelopes to anthropic at https://api.anthropic.com (decision: claude-haiku-5-5)",
+      "review policy 'q' sends envelopes to anthropic at https://api.anthropic.com (redactor: claude-haiku-5-5)",
     ]);
-    expect(report.warnings).toEqual([
-      "review policy 'p' redactor has no api_key: openai-compatible will refuse its calls",
-    ]);
+    expect(report.warnings).toEqual([]);
   });
 
   it("warns that relaxing require_user or require_reply does nothing yet", () => {

@@ -125,19 +125,40 @@ url = "file:///tmp/x"
 alice = "alice-token-0123456789"
 [[review.policies]]
 id = "default"
-decision = { provider = "anthropic", model = "claude-haiku-5-5" }
+decision = { api_key = { env = "TEST_ANTHROPIC_KEY" } }
 `,
       0o644,
     );
-    const { code, out } = await seshi(["config", "check", "--config", path]);
+    const { code, out } = await seshi(["config", "check", "--config", path], {
+      TEST_ANTHROPIC_KEY: "sk-test",
+    });
     expect(code).toBe(0);
     expect(out).toContain('warning: default_visibility = "owner" is not enforced without an IdP');
-    expect(out).toContain("warning: review policy 'default' decision has no api_key");
     expect(out).toContain(`holds literal secrets (auth.tokens.alice)`);
     expect(out).toContain(
-      "note: review policy 'default' sends envelopes to anthropic (decision: claude-haiku-5-5)",
+      "note: review policy 'default' sends envelopes to anthropic at https://api.anthropic.com (decision: claude-haiku-5-5)",
     );
-    expect(out).toContain(`ok: ${path} (3 warnings)`);
+    expect(out).toContain(
+      "note: review policy 'default' sends envelopes to anthropic at https://api.anthropic.com (redactor: claude-haiku-5-5)",
+    );
+    expect(out).toContain(`ok: ${path} (2 warnings)`);
+  });
+
+  it("refuses a review policy without a provider key (F3.5)", async () => {
+    const path = file(
+      "seshi.toml",
+      `[store]
+url = "file:///tmp/x"
+[[review.policies]]
+id = "default"
+decision = { model = "claude-haiku-5-5" }
+`,
+    );
+    const { code, out, err } = await seshi(["config", "check", "--config", path]);
+    expect(code).toBe(3);
+    expect(out + err).toContain(
+      "review.policies[default].decision: anthropic needs an api_key (review is off until a provider key is given)",
+    );
   });
 
   it("answers in JSON", async () => {

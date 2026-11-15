@@ -1,8 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { Secret } from "../secret";
 import {
+  DEFAULT_DECISION_MAX_TOKENS,
+  DEFAULT_MAX_INPUT_CHARS,
+  DEFAULT_REDACTOR_MAX_TOKENS,
+  DEFAULT_REVIEW_MODEL,
+  DEFAULT_REVIEW_TIMEOUT_MS,
   filterFor,
   parseListen,
+  type ReviewPolicy,
+  resolveSteps,
   type ServerConfig,
   serverConfigSchema,
   signingKeyId,
@@ -224,7 +231,7 @@ describe("filter", () => {
 });
 
 describe("review", () => {
-  const decision = { provider: "anthropic", model: "m" };
+  const decision = { provider: "anthropic", model: "m", api_key: "sk-test" };
 
   it("takes policies with both steps", () => {
     const config = ok({
@@ -271,5 +278,115 @@ describe("review", () => {
         },
       }),
     ).toEqual(["review.policies.0.decision: prompt or prompt_file, not both"]);
+  });
+
+  it("defaults both steps to Claude Haiku 5.5 on the Anthropic API (F3.5)", () => {
+    const config = ok({ review: { policies: [{ id: "p", decision: { api_key: "sk-test" } }] } });
+    const policy = config.review.policies[0] as ReviewPolicy;
+    expect(policy.max_input_chars).toBe(DEFAULT_MAX_INPUT_CHARS);
+    const { decision: d, redactor: r } = resolveSteps(policy);
+    expect(d).toMatchObject({
+      provider: "anthropic",
+      model: DEFAULT_REVIEW_MODEL,
+      base_url: "https://api.anthropic.com",
+      max_tokens: DEFAULT_DECISION_MAX_TOKENS,
+      timeout_ms: DEFAULT_REVIEW_TIMEOUT_MS,
+    });
+    expect(d.api_key?.reveal()).toBe("sk-test");
+    // The redactor inherits the decision step's provider, model, key and endpoint.
+    expect(r).toMatchObject({
+      provider: "anthropic",
+      model: DEFAULT_REVIEW_MODEL,
+      base_url: "https://api.anthropic.com",
+      max_tokens: DEFAULT_REDACTOR_MAX_TOKENS,
+    });
+    expect(r.api_key?.reveal()).toBe("sk-test");
+  });
+
+  it("does not hand the decision step's key to a redactor on another provider", () => {
+    const config = ok({
+      review: {
+        policies: [
+          {
+            id: "p",
+            decision: { api_key: "sk-test", effort: "low", timeout: "10s" },
+            redactor: { provider: "openai-compatible", model: "llama", base_url: "http://gpu/v1" },
+          },
+        ],
+      },
+    });
+    const { decision: d, redactor: r } = resolveSteps(config.review.policies[0] as ReviewPolicy);
+    expect(d).toMatchObject({ effort: "low", timeout_ms: 10_000 });
+    expect(r).toMatchObject({
+      provider: "openai-compatible",
+      model: "llama",
+      base_url: "http://gpu/v1",
+      api_key: undefined,
+      effort: undefined,
+      timeout_ms: DEFAULT_REVIEW_TIMEOUT_MS,
+    });
+  });
+
+  it("refuses a policy that could not send, or would be refused on every call (F3.5)", () => {
+    expect(messages({ review: { policies: [{ id: "p" }] } })).toEqual([
+      "review.policies.0.decision: anthropic needs an api_key (review is off until a provider key is given)",
+    ]);
+    expect(
+      messages({
+        review: {
+          policies: [
+            { id: "a", decision: { provider: "openai-compatible", model: "m" } },
+            { id: "b", decision: { provider: "openai-compatible", base_url: "http://x/v1" } },
+            { id: "c", decision: { provider: "bedrock", model: "m" } },
+            {
+              id: "d",
+              decision: { api_key: "k" },
+              redactor: { provider: "openai-compatible", base_url: "http://x/v1", effort: "low" },
+            },
+          ],
+        },
+      }),
+    ).toEqual([
+      "review.policies.0.decision: openai-compatible needs an api_key, or a base_url for a server that takes none",
+      "review.policies.1.decision: openai-compatible needs a model",
+      "review.policies.2.decision: provider bedrock is not built yet (F3.5): use anthropic, or reach it through an openai-compatible gateway",
+      "review.policies.3.redactor: openai-compatible needs a model",
+    ]);
+    // A local server without a key is fine.
+    ok({
+      review: {
+        policies: [
+          {
+            id: "p",
+            decision: { provider: "openai-compatible", model: "m", base_url: "http://x/v1" },
+          },
+        ],
+      },
+    });
+  });
+
+  it("checks categories", () => {
+    expect(
+      messages({
+        review: {
+          policies: [
+            {
+              id: "p",
+              decision,
+              redactor: {
+                categories: [
+                  { name: "pii", description: "a" },
+                  { name: "pii", description: "b" },
+                  { name: "Bad Name", description: "c" },
+                ],
+              },
+            },
+          ],
+        },
+      }),
+    ).toEqual([
+      "review.policies.0.redactor.categories.2.name: lower-case letters and digits, joined by - or _",
+      "review.policies.0.redactor.categories.1.name: category 'pii' is named twice",
+    ]);
   });
 });

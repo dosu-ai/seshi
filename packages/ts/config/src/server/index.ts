@@ -155,7 +155,25 @@ export { type FilterOverride, type FilterSection, filterSection } from "./filter
 export { type LimitsSection, limitsSection } from "./limits";
 export { type RecordsSection, recordsSection } from "./records";
 export { type RedactionSection, redactionSection } from "./redaction";
-export { PROVIDERS, type ReviewPolicy, type ReviewSection, reviewSection } from "./review";
+export {
+  BUILT_PROVIDERS,
+  DEFAULT_BASE_URLS,
+  DEFAULT_DECISION_MAX_TOKENS,
+  DEFAULT_MAX_INPUT_CHARS,
+  DEFAULT_REDACTOR_MAX_TOKENS,
+  DEFAULT_REVIEW_MODEL,
+  DEFAULT_REVIEW_TIMEOUT_MS,
+  EFFORTS,
+  PROVIDERS,
+  type ResolvedStep,
+  type ReviewCategory,
+  type ReviewPolicy,
+  type ReviewProvider,
+  type ReviewSection,
+  type ReviewStepConfig,
+  resolveSteps,
+  reviewSection,
+} from "./review";
 export { type SearchSection, searchSection } from "./search";
 export { parseListen, ROLES, type ServerSection, serverSection } from "./server";
 export {

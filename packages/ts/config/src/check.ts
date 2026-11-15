@@ -1,7 +1,7 @@
 /** `seshi config check`'s own findings about a server config that loaded: settings that are
  * valid but do less than they say, and where data is sent. */
 
-import type { ServerConfig } from "./server/index";
+import { resolveSteps, type ServerConfig } from "./server/index";
 
 export interface CheckReport {
   /** Valid, but probably not what was meant. */
@@ -49,26 +49,16 @@ export function checkServerConfig(config: ServerConfig): CheckReport {
     );
   }
 
+  // Every provider a policy sends envelopes to, as resolved: defaults and the redactor's
+  // inheritance applied. A step without its key fails validation, so it needs no warning.
   for (const policy of config.review.policies) {
-    const steps = [
-      ["decision", policy.decision],
-      ["redactor", policy.redactor],
-    ] as const;
-    for (const [step, model] of steps) {
-      if (!model) continue;
+    const steps = resolveSteps(policy);
+    for (const step of ["decision", "redactor"] as const) {
+      const model = steps[step];
       const where = model.base_url ? ` at ${model.base_url}` : "";
       notices.push(
         `review policy '${policy.id}' sends envelopes to ${model.provider}${where} (${step}: ${model.model})`,
       );
-      if (
-        model.api_key === undefined &&
-        model.provider !== "bedrock" &&
-        model.provider !== "vertex"
-      ) {
-        warnings.push(
-          `review policy '${policy.id}' ${step} has no api_key: ${model.provider} will refuse its calls`,
-        );
-      }
     }
   }
 
