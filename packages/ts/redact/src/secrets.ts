@@ -223,9 +223,14 @@ function replaceSubmatch(
 ): string {
   let n = 0;
   const out = s.replace(re, (...args) => {
-    n += 1;
     // args = [match, ...captures, offset, whole string]
-    return repl(args.slice(0, -2) as string[]);
+    const groups = args.slice(0, -2) as string[];
+    const next = repl(groups);
+    // A match whose secret is already a marker (`user:[redacted:url-credentials]@host`) comes
+    // out as it went in: nothing was redacted, so nothing is counted, and redacting redacted
+    // text counts nothing (backfill and a whole upload's prefix rely on it).
+    if (next !== groups[0]) n += 1;
+    return next;
   });
   add(counts, kind, n);
   return out;

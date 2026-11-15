@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { BUILTIN_PACK_TOML, BUILTIN_RULES_VERSION, builtinPack } from "./builtin";
 import { compileRuleSet, runRuleTests } from "./ruleset";
-import { BUILTIN_SECRET_KINDS } from "./secrets";
+import { BUILTIN_SECRET_KINDS, redactSecrets } from "./secrets";
 import { builtinSecretCommands, builtinSensitiveFiles } from "./sensitive";
 
 describe("the built-in pack (packs/builtin.toml)", () => {
@@ -38,6 +38,15 @@ describe("the built-in pack (packs/builtin.toml)", () => {
     const results = runRuleTests(compileRuleSet(), { operator: false });
     expect(results.length).toBeGreaterThan(40);
     expect(results.filter((r) => !r.ok)).toEqual([]);
+  });
+
+  it("redacts what its test strings redact to itself, counting nothing the second time", () => {
+    const inputs = pack.rules.flatMap((r) => r.tests?.match ?? []);
+    for (const input of inputs) {
+      const once = redactSecrets(input);
+      expect(once.count, input).toBeGreaterThan(0);
+      expect(redactSecrets(once.text), input).toEqual({ text: once.text, count: 0, counts: {} });
+    }
   });
 
   it("has a test string for every rule but the fallback name", () => {
