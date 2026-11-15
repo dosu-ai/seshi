@@ -373,6 +373,22 @@ export class Instance {
     return this.config.sources.find((s) => s.id === id);
   }
 
+  /** Run the retention job now, whatever this instance's roles: `seshi sync prune`, the
+   * one-shot a deployment with no worker runs from cron (X7.1), as the `retention` job does on
+   * the worker (X6.4, X4.8). */
+  async prune(): Promise<PruneRun> {
+    const record = await this.jobs.runNow("retention");
+    const summary = record.last_summary ?? {};
+    return {
+      dropped: summary.dropped ?? 0,
+      failed: summary.failed ?? 0,
+      health: summary.health ?? 0,
+      ...(record.last_outcome === "error" && record.last_error
+        ? { error: record.last_error.message }
+        : {}),
+    };
+  }
+
   /** Run the span assembler now, whatever this instance's roles: `seshi sync assemble`, the
    * one-shot a deployment with no worker runs from cron (X7.1), as the `assembler` job does
    * on the worker. Passes run until nothing more is waiting, a pass hits an error (its
@@ -417,6 +433,18 @@ export class Instance {
       }
     }
   }
+}
+
+/** What `Instance.prune` removed. */
+export interface PruneRun {
+  /** Drop records past `records.dropped_retention`. */
+  dropped: number;
+  /** Failure records past `records.failed_retention`. */
+  failed: number;
+  /** Source health shards past `records.health_retention`. */
+  health: number;
+  /** Why the run stopped, when it failed. */
+  error?: string;
 }
 
 /** What `Instance.assemble` did, summed over its passes. */

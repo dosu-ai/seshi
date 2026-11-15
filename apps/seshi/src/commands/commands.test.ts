@@ -394,6 +394,52 @@ describe("seshi sync assemble (X7.1)", () => {
   });
 });
 
+describe("seshi sync prune (X7.1)", () => {
+  it("removes drop and failure records past retention, with no worker running", async () => {
+    const store = new FsStore(bucket);
+    const failed = (at: string, key: string) =>
+      writeFailed(store, {
+        at,
+        source: "dd",
+        session_key: key,
+        idempotency_key: key,
+        code: "invalid",
+        message: "unknown role",
+      });
+    const dropped = (at: string, key: string) =>
+      writeDropped(store, {
+        at,
+        source: "upload",
+        session_key: key,
+        idempotency_key: key,
+        reason: "review_drop",
+        policy: "default",
+        policy_hash: "h",
+        decision_model: "m",
+      });
+    const now = new Date().toISOString();
+    await failed("2020-01-01T00:00:00.000Z", "old-f");
+    await failed(now, "new-f");
+    await dropped("2020-01-01T00:00:00.000Z", "old-d");
+    await dropped(now, "new-d");
+
+    const run = await seshi(["sync", "prune", "--json"], { toml: SOURCES });
+    expect(run.code).toBe(EXIT.ok);
+    expect(JSON.parse(run.out)).toMatchObject({ dropped: 1, failed: 1 });
+    const left = await seshi(["sync", "failed", "dd", "--json"], { toml: SOURCES });
+    expect(JSON.stringify(JSON.parse(left.out))).toContain("new-f");
+    expect(JSON.stringify(JSON.parse(left.out))).not.toContain("old-f");
+
+    const again = await seshi(["sync", "prune"], { toml: SOURCES });
+    expect(again.code).toBe(EXIT.ok);
+    expect(again.out).toContain("retention: 0 drop record(s), 0 failure record(s)");
+  });
+
+  it("takes no source id", async () => {
+    expect((await seshi(["sync", "prune", "dd"], { toml: SOURCES })).code).toBe(EXIT.usage);
+  });
+});
+
 describe("seshi reprocess (X4.9)", () => {
   it("rewinds a source's checkpoint, to a time or to the start, and can run it at once", async () => {
     const store = new FsStore(bucket);

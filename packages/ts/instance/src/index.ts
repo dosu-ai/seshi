@@ -23,6 +23,7 @@ export {
   defaultInstanceId,
   Instance,
   InstanceError,
+  type PruneRun,
   type InstanceParts,
   type Role,
   readRedactionPacks,

@@ -117,7 +117,7 @@ command. The Docker image is built from the compiled binary.
   - The registry lists every F8.1 group, each command in its own file, plus `healthcheck`
     for the image.
   - Built here: `serve`, `config`, `admin`, `workers status`, `sync run|status|failed|dropped`
-    (`sync assemble` added in 17-review),
+    (`sync assemble` and `sync prune` added in 17-review),
     `reprocess`, `normalize`, `healthcheck`.
   - Stubs exit 9 and name their branch: `login`, `logout`, `whoami`, `sessions` and `tokens`
     (13); `capture`, `hook`, `upload`, `daemon` and `statusline` (14); `search` (12); `redact`

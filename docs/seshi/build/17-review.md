@@ -254,6 +254,12 @@ what changed.
   `claude-usage`, `codex-usage`, with `<name>.llm_calls.json`, and `goldens.test.ts` now checks
   every transcript still normalizes to its golden. Tests: the pipeline stores both sessions'
   calls whole and in chunks; Codex chunk cuts.
+- **coverage, medium** (the assembler half was already fixed above as "background"): X7.1's
+  one-shot commands still left out the `retention` job, so a deployment of `--roles api` plus
+  cron never pruned drop and failure records or source health shards. `Instance.prune()` runs
+  the job once and `seshi sync prune [--json]` prints what it removed (exit 1 when the bucket
+  failed). The search indexer needs none: it runs on every api instance. cli.md, server.md and
+  06 say so. Test: old and new drop and failure records, `sync prune` removes the old ones.
 - **coverage, test only** (found while fixing): `uploader.test.ts`'s "seen in a repo that
   turns capture off" spooled two entries in one millisecond, which the spool orders by a
   random suffix, so it failed about one run in six. Its entries are now spooled a millisecond

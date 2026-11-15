@@ -1,8 +1,9 @@
-/** `seshi sync` (X7.1, X4.8, X6.4): the pollers and the span assembler as one-shot commands,
- * and what they left behind. Run where the server's config and bucket keys are.
+/** `seshi sync` (X7.1, X4.8, X6.4): the pollers, the span assembler and retention as one-shot
+ * commands, and what they left behind. Run where the server's config and bucket keys are.
  *
  *   seshi sync run <source> [--force] [--json]       poll a source once (for cron, X7.1)
  *   seshi sync assemble [--json]                     publish quiet span sessions once (cron)
+ *   seshi sync prune [--json]                        prune old drop/failure records once (cron)
  *   seshi sync status [<source>] [--days N] [--json] checkpoints, record counts, health
  *   seshi sync failed <source> [--since <time>] [--limit N] [--json]
  *   seshi sync dropped <source> [--since <time>] [--limit N] [--json]
@@ -13,21 +14,24 @@
  *
  * `status`, `failed` and `dropped` also run from a machine signed in with `seshi login` as an
  * admin, through the server's `/v1/admin/sources` routes: `--server <url>`, or the CLI config's
- * `server` when no server config is here (`admin-target.ts`). `run` and `assemble` run from
- * where the server config is only; on a server the worker runs them on its own.
+ * `server` when no server config is here (`admin-target.ts`). `run`, `assemble` and `prune`
+ * run from where the server config is only; on a server the worker runs them on its own.
  *
  * `assemble` is the span assembler as a one-shot (X7.1): it publishes the OTLP and Datadog
  * sessions whose spans went quiet (F4.4), as the worker's `assembler` job does. A deployment
  * whose instances all run `--roles api` runs it from cron next to `sync run`, or span sessions
- * are stored as span records and never published.
+ * are stored as span records and never published. `prune` is the `retention` job as a
+ * one-shot: it removes drop and failure records and source health shards past `[records]`
+ * retention, which nothing else removes on such a deployment.
  *
  * `run` exits 0 when the run finished, 6 (`conflict`) when another worker moved the checkpoint
  * and the run was discarded (X7.3), 1 when the connector failed. `assemble` exits 0, or 1 when
- * a session could not be assembled (its marker stays for the next run). */
+ * a session could not be assembled (its marker stays for the next run). `prune` exits 0, or 1
+ * when the bucket failed. */
 
 import { parseArgs } from "node:util";
 import type { HttpSessionDB, RecordsPage } from "@seshi/client";
-import type { AssembleRun, Instance } from "@seshi/instance";
+import type { AssembleRun, Instance, PruneRun } from "@seshi/instance";
 import { UPLOAD_SOURCE } from "@seshi/model";
 import { type RunReport, SourceError, type SourceStatus } from "@seshi/sources";
 import {
@@ -46,13 +50,16 @@ import { openServer, SERVER_OPTIONS, serverFailure } from "./server-instance";
 
 const USAGE = `usage: seshi sync run <source> [--force] [--json]
        seshi sync assemble [--json]
+       seshi sync prune [--json]
        seshi sync status [<source>] [--days N] [--json]
        seshi sync failed <source> [--since <time>] [--limit N] [--json]
        seshi sync dropped <source> [--since <time>] [--limit N] [--json]
        (each also takes --config <file> and --set path=value;
         status, failed and dropped take --server <url> instead)`;
 
-const SUBCOMMANDS = ["run", "assemble", "status", "failed", "dropped"];
+const SUBCOMMANDS = ["run", "assemble", "prune", "status", "failed", "dropped"];
+/** The subcommands that take no source id and write: the worker's jobs as one-shots. */
+const ONE_SHOTS = new Set(["assemble", "prune"]);
 
 const OPTIONS = {
   ...SERVER_OPTIONS,
@@ -140,6 +147,16 @@ async function assemble(ctx: CommandContext, json: boolean, instance: Instance) 
   const result = await instance.assemble();
   emit(ctx, json, result, () => assembleLines(result));
   return result.errors > 0 ? EXIT.failure : EXIT.ok;
+}
+
+/** The retention job once (X7.1), for a deployment with no worker. */
+async function prune(ctx: CommandContext, json: boolean, instance: Instance) {
+  const result: PruneRun = await instance.prune();
+  emit(ctx, json, result, () => [
+    `retention: ${result.dropped} drop record(s), ${result.failed} failure record(s) and ${result.health} health shard(s) removed`,
+    ...(result.error ? [`error: ${printable(result.error)}`] : []),
+  ]);
+  return result.error ? EXIT.failure : EXIT.ok;
 }
 
 async function status(
@@ -277,15 +294,17 @@ export async function run(ctx: CommandContext): Promise<number> {
     return usageError(ctx, json, (err as Error).message, USAGE);
   }
   const id = positionals[0];
-  if (sub === "assemble" && (positionals.length > 0 || values.force !== undefined)) {
+  if (ONE_SHOTS.has(sub) && (positionals.length > 0 || values.force !== undefined)) {
     return usageError(
       ctx,
       json,
-      "sync assemble takes no source id: it publishes every source's quiet span sessions",
+      sub === "assemble"
+        ? "sync assemble takes no source id: it publishes every source's quiet span sessions"
+        : "sync prune takes no source id: it prunes every source's old records",
       USAGE,
     );
   }
-  if (positionals.length > 1 || (sub !== "status" && sub !== "assemble" && id === undefined)) {
+  if (positionals.length > 1 || (sub !== "status" && !ONE_SHOTS.has(sub) && id === undefined)) {
     return usageError(ctx, json, `sync ${sub} takes one source id`, USAGE);
   }
   if (values.server !== undefined && (values.config !== undefined || values.set !== undefined)) {
@@ -294,9 +313,10 @@ export async function run(ctx: CommandContext): Promise<number> {
   try {
     const target = await adminTarget(ctx, values);
     if (target.kind === "remote") {
-      if (sub === "run" || sub === "assemble") {
+      if (sub === "run" || ONE_SHOTS.has(sub)) {
+        const does = { run: "polls", assemble: "assembles", prune: "prunes" }[sub];
         throw new UsageError(
-          `sync ${sub} runs from where the server config is (X7.1); ${target.server}'s worker ${sub === "run" ? "polls" : "assembles"} on its own`,
+          `sync ${sub} runs from where the server config is (X7.1); ${target.server}'s worker ${does} on its own`,
         );
       }
       return await remoteSync(
@@ -308,17 +328,18 @@ export async function run(ctx: CommandContext): Promise<number> {
         values,
       );
     }
-    // Only `run` and `assemble` write; the others refuse a bucket no server has used rather
-    // than claim it.
+    // Only `run`, `assemble` and `prune` write; the others refuse a bucket no server has used
+    // rather than claim it.
     const local = target.config ? { ...values, config: target.config } : values;
     const { instance } = await openServer(ctx, local, {
       roles: [],
       probe: [],
-      initialize: sub === "run" || sub === "assemble",
+      initialize: sub === "run" || ONE_SHOTS.has(sub),
     });
     try {
       if (sub === "run") return await runSource(ctx, json, instance, id as string, values);
       if (sub === "assemble") return await assemble(ctx, json, instance);
+      if (sub === "prune") return await prune(ctx, json, instance);
       if (sub === "status") return await status(ctx, json, instance, id, values);
       return await records(ctx, json, instance, sub as "failed" | "dropped", id as string, values);
     } finally {

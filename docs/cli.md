@@ -62,6 +62,7 @@ repository's code.
 | `workers status [--server <url>] [--json]` | The worker, its jobs' last runs, errors and backlog, each source's drop and failure counts (X7.5). Exit 8 when something needs a look |
 | `sync run <id> [--force]` | Poll a source once, for cron (X7.1). Exit 6 when another worker moved the checkpoint |
 | `sync assemble` | Run the span assembler once, for cron (X7.1): publish the OTLP and Datadog sessions whose spans went quiet. Exit 1 when a session could not be assembled (it is tried again next run) |
+| `sync prune` | Run the retention job once, for cron (X7.1): remove drop and failure records and source health shards past `[records]` retention |
 | `sync status [<id>] [--days N] [--server <url>]` | Checkpoints, record counts and source health |
 | `sync failed <id>`, `sync dropped <id>` `[--since] [--limit] [--server <url>]` | Envelopes that failed or that model review dropped, and why; never their content (X6.4). `upload` is the source of hooks and uploads |
 | `reprocess --source <id> [--since <time>] [--dry-run] [--run]` | Rewind a source so its sessions are read again (X4.9). Uploads are resent by the capture uploader (14) |

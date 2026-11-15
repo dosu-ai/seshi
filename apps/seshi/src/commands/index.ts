@@ -120,7 +120,7 @@ export const COMMANDS: Readonly<Record<string, CommandSpec>> = {
   },
   sync: {
     summary:
-      "poll a source or assemble spans once, and see checkpoints, failures and drops (run|assemble|status|failed|dropped)",
+      "poll a source, assemble spans or prune records once, and see checkpoints, failures and drops (run|assemble|prune|status|failed|dropped)",
     load: () => import("./sync"),
   },
   tokens: {
