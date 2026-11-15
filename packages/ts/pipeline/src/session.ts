@@ -50,8 +50,9 @@ import { applyRules, type RedactionRules, redactionRules, redactRaw } from "@ses
 import { ensureLayout, keys, markerFormat, type Store } from "@seshi/store";
 import { copiedPrefix, planShipment } from "./continuation";
 import { getSession, getTrace, ingest, putRaw, recordNormalized } from "./ingest";
+import type { Limits } from "./limits";
 import { normalizeTranscript } from "./normalize";
-import { isTrivialTrajectory } from "./worthiness";
+import { type FilterRules, isTrivialTrajectory } from "./worthiness";
 
 export { OffsetMismatch, SessionRejected, type SessionUpload, type StoreSessionResult };
 
@@ -70,6 +71,11 @@ export interface SessionOptions {
    * spans). A new store records it in its layout marker; an existing one must match it, so a
    * writer that did not opt in to `otlp` never writes an `otlp` store. */
   format?: TraceFormat;
+  /** The session filter (X4.10), config's `[filter]`; `DEFAULT_FILTER` when omitted. It judges
+   * a session's first trace only: chunks that continue a head always ship. */
+  filter?: Readonly<FilterRules>;
+  /** Size caps, config's `[limits]`; `DEFAULT_LIMITS` when omitted. */
+  limits?: Readonly<Limits>;
 }
 
 const BUILTIN_RULES = redactionRules();
@@ -230,7 +236,7 @@ async function wholeStored(
   let plan = input.shipped ? planShipment(records, input.shipped) : { records, fresh: records };
   const copied = await forkCopy(store, owner, agent, input.fork_of, records, format);
   if (!plan.continuation && copied) plan = planShipment(records, copied);
-  if (isTrivialTrajectory(plan.fresh)) {
+  if (isTrivialTrajectory(plan.fresh, options.filter)) {
     await recordNormalized({ store, owner, agent, session_id: sessionId, normalized, now });
     return { status: "trivial", ...whole };
   }
@@ -256,6 +262,7 @@ async function wholeStored(
     client,
     now,
     format,
+    limits: options.limits,
   });
   return { ...result, ...whole };
 }
@@ -330,6 +337,7 @@ async function continueStored(
     client,
     now,
     format,
+    limits: options.limits,
   });
   return {
     ...result,
@@ -402,6 +410,7 @@ export async function storeSession(
     client,
     now,
     trace_format: traceFormat,
+    limits: options.limits,
   });
   const result = await normalizeStored({ ...upload, part }, options);
   return { ...result, raw };

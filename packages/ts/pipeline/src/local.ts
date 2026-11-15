@@ -41,7 +41,9 @@ import {
   type Store,
 } from "@seshi/store";
 import { getSession, getTrace, listSessions, tombstone } from "./ingest";
+import type { Limits } from "./limits";
 import { storeSession } from "./session";
+import type { FilterRules } from "./worthiness";
 
 export interface StoreClientOptions {
   store: Store;
@@ -59,6 +61,10 @@ export interface StoreClientOptions {
    * spans). A new store takes it; an existing one must hold it, so writing an `otlp` store
    * takes opting in. Reads (`getTrace`, `me`) follow whatever the store holds either way. */
   format?: TraceFormat;
+  /** The session filter (`SessionOptions.filter`). */
+  filter?: Readonly<FilterRules>;
+  /** Size caps (`SessionOptions.limits`). */
+  limits?: Readonly<Limits>;
 }
 
 /** The pipeline over a `Store`, scoped to one owner. */
@@ -71,6 +77,8 @@ export class StoreSessionDB implements SessionDB {
   private readonly redaction: RedactionRules | undefined;
   private readonly format: TraceFormat | undefined;
   private readonly formats: FormatRegistry;
+  private readonly filter: Readonly<FilterRules> | undefined;
+  private readonly limits: Readonly<Limits> | undefined;
   private resolved: TraceFormat | undefined;
 
   constructor(options: StoreClientOptions) {
@@ -82,6 +90,8 @@ export class StoreSessionDB implements SessionDB {
     this.redaction = options.redaction;
     this.format = options.format;
     this.formats = options.formats;
+    this.filter = options.filter;
+    this.limits = options.limits;
   }
 
   /** The store's trace format: its marker's, checked against the one configured. Remembered
@@ -110,6 +120,8 @@ export class StoreSessionDB implements SessionDB {
         now: this.now,
         redaction: this.redaction,
         format: this.format,
+        filter: this.filter,
+        limits: this.limits,
       },
     );
   }

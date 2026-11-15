@@ -28,7 +28,7 @@ export {
   type TombstoneInput,
   tombstone,
 } from "./ingest";
-export { LIMITS } from "./limits";
+export { DEFAULT_LIMITS, type Limits } from "./limits";
 export { type ConnectOptions, connect, type StoreClientOptions, StoreSessionDB } from "./local";
 export { normalizeTranscript } from "./normalize";
 export {
@@ -37,4 +37,4 @@ export {
   type StoreSessionResult,
   storeSession,
 } from "./session";
-export { isTrivialTrajectory } from "./worthiness";
+export { DEFAULT_FILTER, type FilterRules, isTrivialTrajectory } from "./worthiness";

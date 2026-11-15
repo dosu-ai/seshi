@@ -25,7 +25,7 @@ import {
   type Upload,
   VERSION,
 } from "@seshi/model";
-import { StoreSessionDB } from "@seshi/pipeline";
+import { type FilterRules, type Limits, StoreSessionDB } from "@seshi/pipeline";
 import type { RedactionRules } from "@seshi/redact";
 import { assertOwner, type Store } from "@seshi/store";
 
@@ -57,6 +57,10 @@ export interface AppOptions {
   /** How traces are written to the bucket: `letta` (the default) or `otlp`. The bucket's
    * layout marker must agree. */
   format?: TraceFormat;
+  /** The session filter (X4.10), config's `[filter]`; today's rules when omitted. */
+  filter?: Readonly<FilterRules>;
+  /** Size caps, config's `[limits]`; today's when omitted. */
+  limits?: Readonly<Limits>;
 }
 
 type Handler = (ctx: Context) => Promise<Response> | Response;
@@ -199,6 +203,8 @@ export function createApp(options: AppOptions) {
         now,
         redaction: options.redaction,
         format: options.format,
+        filter: options.filter,
+        limits: options.limits,
       });
       clients.set(owner, db);
     }

@@ -734,6 +734,41 @@ describe("sessions", () => {
     expect((await retry.json()).error.code).toBe("redacted");
   });
 
+  it("judges sessions by the filter and limits it was given (config [filter], [limits])", async () => {
+    const lenient = createApp({
+      store,
+      storage: { url: store.url },
+      tokens: [{ token: TOKEN, owner: "acme" }],
+      filter: { enabled: true, min_chars: 10, require_user: true, require_reply: true },
+      limits: { max_records: 50_000, max_records_bytes: 32 << 20, max_upload_bytes: 64 << 20 },
+    });
+    const stored = await lenient.fetch(
+      new Request("http://test/v1/sessions", {
+        method: "POST",
+        headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+        body: JSON.stringify({ agent: "claude-code", session_id: "tiny", transcript: SMALL }),
+      }),
+    );
+    expect(stored.status).toBe(201);
+    expect((await stored.json()).status).toBe("stored");
+
+    const tight = createApp({
+      store,
+      storage: { url: store.url },
+      tokens: [{ token: TOKEN, owner: "acme" }],
+      limits: { max_records: 50_000, max_records_bytes: 32 << 20, max_upload_bytes: 16 },
+    });
+    const refused = await tight.fetch(
+      new Request("http://test/v1/sessions", {
+        method: "POST",
+        headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+        body: JSON.stringify({ agent: "claude-code", session_id: "big", transcript: CLAUDE }),
+      }),
+    );
+    expect(refused.status).toBe(422);
+    expect((await refused.json()).error.code).toBe("too_large");
+  });
+
   it("calls a greeting-sized session trivial: raw stored, no trace, no change entry", async () => {
     const token = TOKEN;
     const res = await call("POST", "/v1/sessions", {

@@ -41,7 +41,7 @@ import {
   sha256,
   swapMetadata,
 } from "@seshi/store";
-import { LIMITS } from "./limits";
+import { DEFAULT_LIMITS, type Limits } from "./limits";
 
 export { IngestRejected, type IngestResult, type PutRawResult, type StoredTrace };
 
@@ -70,6 +70,8 @@ export interface IngestInput {
   /** How the trace object is written, default `letta`; refused when the store holds the
    * other. */
   format?: TraceFormat;
+  /** Size caps; `DEFAULT_LIMITS` when omitted. */
+  limits?: Readonly<Limits>;
 }
 
 function byteLength(value: unknown): number {
@@ -80,11 +82,15 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
   const { store, owner, metadata } = input;
   const now = input.now ?? (() => new Date());
 
-  if (input.records.length > LIMITS.maxRecords) {
-    throw new IngestRejected("too_large", `${input.records.length} records > ${LIMITS.maxRecords}`);
+  const limits = input.limits ?? DEFAULT_LIMITS;
+  if (input.records.length > limits.max_records) {
+    throw new IngestRejected(
+      "too_large",
+      `${input.records.length} records > ${limits.max_records}`,
+    );
   }
-  if (byteLength(input.records) > LIMITS.maxRecordsBytes) {
-    throw new IngestRejected("too_large", `records exceed ${LIMITS.maxRecordsBytes} bytes`);
+  if (byteLength(input.records) > limits.max_records_bytes) {
+    throw new IngestRejected("too_large", `records exceed ${limits.max_records_bytes} bytes`);
   }
 
   const traceMetadata: TraceMetadata = {};
@@ -211,6 +217,8 @@ export interface PutRawInput {
   /** The trace format a new store's layout marker records, default `letta`; checked against an
    * existing one. */
   trace_format?: TraceFormat;
+  /** Size caps; `DEFAULT_LIMITS` when omitted. */
+  limits?: Readonly<Limits>;
 }
 
 /** Store one raw part. The first thing stored for a session: when there is no `metadata.json`
@@ -218,8 +226,9 @@ export interface PutRawInput {
  * one, is added by `ingest` after. Idempotent for the same bytes. */
 export async function putRaw(input: PutRawInput): Promise<PutRawResult> {
   const { store, owner, part, format, offset, length } = input;
-  if (input.bytes.length > LIMITS.maxRawPartBytes) {
-    throw new IngestRejected("too_large", `raw part exceeds ${LIMITS.maxRawPartBytes} bytes`);
+  const maxBytes = (input.limits ?? DEFAULT_LIMITS).max_upload_bytes;
+  if (input.bytes.length > maxBytes) {
+    throw new IngestRejected("too_large", `raw part exceeds ${maxBytes} bytes`);
   }
   if (!Number.isInteger(part) || part < 0) throw new IngestRejected("invalid", "part must be ≥ 0");
   const archive = archiveId(owner, input.agent, input.session_id);
