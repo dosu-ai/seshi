@@ -610,8 +610,12 @@ async function toggleSession(
       if (session.sent) session.retract = "pending";
       retracting = session.sent === true;
     } else {
-      // A retraction not yet done is called off: nothing was removed, capture goes on.
-      if (session.retract === "pending") delete session.retract;
+      // A retraction not yet done (waiting, or refused) is called off: nothing was removed,
+      // capture goes on.
+      if (session.retract === "pending" || session.retract === "failed") {
+        delete session.retract;
+        delete session.retract_error;
+      }
       fresh = (session.generation ?? 0) > 0 && !session.stored;
     }
     state.sessions[key] = session;

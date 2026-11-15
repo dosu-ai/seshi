@@ -279,6 +279,16 @@ describe("turning a session off (F9.5, F9.7)", () => {
       env: { NO_COLOR: "1" },
     });
     expect(line.out).toBe("Session Capture ⏸ · retraction refused");
+    // Turned back on: the refused retraction is called off, capture goes on.
+    await machine.seshi(["capture", "on", "--session", SESSION]);
+    const after = state().sessions[`claude-code:${SESSION}`];
+    expect(after.retract).toBeUndefined();
+    expect(after.retract_error).toBeUndefined();
+    const on = await machine.seshi(["statusline"], {
+      stdin: JSON.stringify({ session_id: SESSION, cwd: project }),
+      env: { NO_COLOR: "1" },
+    });
+    expect(on.out).toBe("Session Capture ◉");
   });
 
   it("finds the session from the folder when the agent named none, and says when it cannot", async () => {
