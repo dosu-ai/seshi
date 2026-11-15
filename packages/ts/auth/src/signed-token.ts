@@ -1,5 +1,5 @@
 /** Tokens the server did not have to be told about: a JWT signed with a secret it shares with
- * whoever issues them (`SESSIONDB_TOKEN_SECRET`), naming an owner. A hosted server has one
+ * whoever issues them (`auth.legacy_token_secret`), naming an owner. A hosted server has one
  * tenant per user and cannot carry them as a list in its environment; the issuer (Dosu's
  * backend, for its users) mints one per person, and the server checks the signature and the
  * expiry and reads the owner off the claims. A self-hosted team keeps the static list and never

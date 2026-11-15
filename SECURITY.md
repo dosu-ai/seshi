@@ -21,14 +21,14 @@ shape none of those recognise reaches the bucket. Before it, a pass withholds wh
 returned when they touched a secrets file or ran a command that prints a secret
 (`packages/ts/redact/src/sensitive.ts`), since those are mostly values no pattern
 recognises; an operator can add patterns, files and commands of their own
-(`SESSIONDB_REDACTION_FILE`), never remove a built-in one. Treat the bucket as sensitive data with a
+(`redaction.packs`), never remove a built-in one. Treat the bucket as sensitive data with a
 narrow audience, not as a public artifact. If you find a secret shape the pass misses, report
 it as a vulnerability.
 
 **A token scopes one person.** Every request is confined to `owners/<name>/` for the name the
 token is bound to. A leaked token exposes that person's archive and lets its holder upload
-under their name; rotate it in `SESSIONDB_TOKENS` and restart. Tokens are compared in
-constant time and must be at least 16 characters. A signed token (`SESSIONDB_TOKEN_SECRET`)
+under their name; rotate it in `auth.tokens` and restart. Tokens are compared in
+constant time and must be at least 16 characters. A signed token (`auth.legacy_token_secret`)
 is scoped the same way, by the owner in its `sub`; it cannot be struck from a list, so it
 is good until its `exp`, and rotating the secret invalidates every one at once.
 

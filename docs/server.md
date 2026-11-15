@@ -24,33 +24,38 @@ client ──POST /v1/sessions (raw transcript, bearer token)──▶ sessiondb
                                                  readers tail changes/ (their own read-only key)
 ```
 
-One server, one bucket, one list of tokens, all from `.env`. Each token names a person; that
-person's sessions are filed under `owners/<name>/` in the bucket, and the token can post
-sessions there and read them back, and nothing of anyone else's. Nothing else is needed.
+One server, one bucket, one list of tokens, from `seshi.toml` and `SESHI_*` env (see
+[config.md](config.md)). Each token names a person; that person's sessions are filed under
+`owners/<name>/` in the bucket, and the token can post sessions there and read them back, and
+nothing of anyone else's. Nothing else is needed.
 
 ## Running it
 
 ```bash
-cp .env.example .env     # the token, the bucket URL and its keys
+cp .env.example .env     # a token, the bucket URL and its keys, as SESHI_* variables
 bun start                # http://localhost:7200
 ```
 
 Bun reads `.env` from the working directory on its own; `.env` is gitignored. The same file is
-what `docker compose` hands the container (`docker compose up -d`). At boot the server writes
-the layout marker and a probe object, so a wrong bucket or key fails there and not on the first
-session.
+what `docker compose` hands the container (`docker compose up -d`). A TOML file works as well
+(`./seshi.toml`, `/etc/seshi/seshi.toml`, or `--config`; start from
+[`seshi.example.toml`](../seshi.example.toml)), with env over it and flags over env.
+`seshi config check` validates either before you start. At boot the server writes the layout
+marker and a probe object, so a wrong bucket or key fails there and not on the first session.
 
-| Variable | Required | Purpose |
+The settings most servers need ([config.md](config.md) has all of them):
+
+| Setting | Env | Purpose |
 |---|---|---|
-| `SESSIONDB_TOKENS` | one of the three | `name:token` pairs, comma-separated, one per person (`alice:…,bob:…`). The name is the folder their sessions go under, so keep it stable; the token is 16+ characters (`openssl rand -hex 24`) and can be rotated alone |
-| `SESSIONDB_TOKEN` | | One token with no name, for a one-person install; its sessions go under `owners/default/` |
-| `SESSIONDB_TOKEN_SECRET` | | For a hosted server with a tenant per user: tokens signed with this secret are accepted too. An HS256 JWT whose `sub` is the owner and whose `exp` is required; whoever shares the secret (Dosu's backend, for its users) mints one per person, and the list above can be empty. 32+ characters (`openssl rand -hex 32`) |
-| `SESSIONDB_STORE_URL` | yes | `r2://bucket/prefix`, `s3://bucket/prefix`, or `file:///path` |
-| `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | for `r2://` | |
-| `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | for `s3://` | Or Bun's `S3_*` equivalents; `S3_ENDPOINT` for MinIO, Backblaze, Wasabi… |
-| `SESSIONDB_REDACTION_FILE` | | A JSON file of your own redaction rules, added to the built-in ones ([below](#your-own-redaction)). The server refuses to start if a pattern in it is not a usable regular expression |
-| `SESSIONDB_FORMAT` | | How traces are written: `letta` (default), trajectory-v1 records, or `otlp`, OTLP/HTTP JSON GenAI spans that any OpenTelemetry backend reads. A bucket holds one format, fixed by its first writer; the server refuses to start against a bucket in the other. See [the layout](../spec/layout.md#sessionstoragejson--sessionstoragelayout1) |
-| `PORT` | | Default `7200` |
+| `auth.tokens.<name>` | `SESHI_AUTH__TOKENS__<NAME>` | One per person (`SESHI_AUTH__TOKENS__ALICE=…`). The name is the folder their sessions go under, so keep it stable; the token is 16+ characters (`openssl rand -hex 24`) and can be rotated alone. One person? `SESHI_AUTH__TOKENS__DEFAULT` files under `owners/default/` |
+| `auth.legacy_token_secret` | `SESHI_AUTH__LEGACY_TOKEN_SECRET` | For a hosted server with a tenant per user: tokens signed with this secret are accepted too. An HS256 JWT whose `sub` is the owner and whose `exp` is required; whoever shares the secret (Dosu's backend, for its users) mints one per person, and the token list can be empty. 32+ characters (`openssl rand -hex 32`) |
+| `store.url` | `SESHI_STORE__URL` | Required: `r2://bucket/prefix`, `s3://bucket/prefix`, or `file:///path` |
+| `store.credentials.*`, `store.region`, `store.endpoint`, `store.account_id` | `SESHI_STORE__CREDENTIALS__ACCESS_KEY_ID`, … | The bucket's keys and where it is. Unset, the standard `AWS_*` / `S3_*` (and `R2_*` for `r2://`) variables apply |
+| `redaction.packs` | `SESHI_REDACTION__PACKS` | JSON files of your own redaction rules, added to the built-in ones ([below](#your-own-redaction)). The server refuses to start if a pattern in one is not a usable regular expression |
+| `store.format` | `SESHI_STORE__FORMAT` | How traces are written: `letta` (default), trajectory-v1 records, or `otlp`, OTLP/HTTP JSON GenAI spans that any OpenTelemetry backend reads. A bucket holds one format, fixed by its first writer; the server refuses to start against a bucket in the other. See [the layout](../spec/layout.md#sessionstoragejson--sessionstoragelayout1) |
+| `server.listen` | `SESHI_SERVER__LISTEN` | Default `:7200`; flag `--listen` |
+
+Today's `SESSIONDB_*` names and `PORT` are no longer read.
 
 Put TLS in front of it (a reverse proxy, Cloud Run, a load balancer): transcripts arrive
 unredacted and the server is where that stops being true.
@@ -70,8 +75,8 @@ Every session goes through three passes before anything is written, in this orde
 3. **The built-in secret patterns**: provider tokens, credential assignments, bearer headers,
    JWTs, connection URLs, private-key blocks, and the entropy pass.
 
-The first and last always run. `SESSIONDB_REDACTION_FILE` adds to them, and nothing in it can
-take a built-in away:
+The first and last always run. A pack in `redaction.packs` adds to them, and nothing in it
+can take a built-in away:
 
 ```json
 {
@@ -98,8 +103,9 @@ already in the bucket is not rewritten.
 
 Every release is published as a container image, `ghcr.io/dosu-ai/sessiondb:<version>`, built
 from `apps/seshi/Dockerfile` in this repository (`docker build -f apps/seshi/Dockerfile .` from the
-root). It listens on `PORT` (default `7200`), reports
-`/healthz` for liveness, and needs only the environment variables above: there is no database,
+root). It listens on `server.listen` (default `:7200`), reports
+`/healthz` for liveness, and needs only the settings above, from env or a mounted
+`/etc/seshi/seshi.toml`: there is no database,
 no volume (unless the store is `file://`), no background work, and no state outside the bucket,
 so any platform that runs a container works, scaled to zero or to many instances alike. Keep
 the request timeout at 120 seconds or more; a large transcript can take that long to normalize
@@ -118,10 +124,10 @@ Renaming a token's name is a move, not a rename: the old folder stays in the buc
 bucket reader keeps seeing it) but the renamed token no longer does. Add a person, remove a
 person, rotate a token; don't rename.
 
-To host several teams, run one container per team, each with its own `.env` and its own
+To host several teams, run one container per team, each with its own config and its own
 bucket or prefix. Isolation between teams comes from the deployment, not the code.
 
-To host many people without listing them, set `SESSIONDB_TOKEN_SECRET` and let something that
+To host many people without listing them, set `auth.legacy_token_secret` and let something that
 knows who they are mint their tokens: a JWT signed with the secret, `sub` the owner's name,
 `exp` when it stops working. The server checks the signature and the expiry and scopes the
 call to `owners/<sub>/` exactly as it would a listed token; the owner's folder comes into

@@ -22,7 +22,7 @@ import { connect } from "@dosu/sessiondb";
 const db = connect({ store: "s3://acme-sessions/archive", owner: "alice" });
 
 // Or through a sessiondb server, which runs the same pipeline against its own bucket.
-const db = connect({ server: "https://sessiondb.acme.internal", token: process.env.SESSIONDB_TOKEN });
+const db = connect({ server: "https://sessiondb.acme.internal", token: process.env.SESHI_TOKEN });
 ```
 
 The calls are the same either way:
@@ -61,7 +61,7 @@ HTTP backend adds `ServerError` for the responses that are not one of those.
 | Owner isolation enforced by | The bucket's own policy | The server's token list |
 
 One person with their own bucket wants the first. A team wants the second: redaction is
-enforced where a laptop cannot skip it, and one line in `SESSIONDB_TOKENS` is a person.
+enforced where a laptop cannot skip it, and one entry in the server's `auth.tokens` is a person.
 
 ## Stores
 

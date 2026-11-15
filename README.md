@@ -34,7 +34,7 @@ Three properties follow from that shape:
 
 ```sh
 git clone https://github.com/dosu-ai/sessiondb && cd sessiondb
-cp .env.example .env        # tokens, the bucket URL and its keys
+cp .env.example .env        # SESHI_* settings: tokens, the bucket URL and its keys
 bun install
 bun start                   # http://localhost:7200
 ```
@@ -53,7 +53,7 @@ jq -n --rawfile transcript ~/.claude/projects/-repo-app/8f1c….jsonl \
   '{agent: "claude-code", session_id: "8f1c…", transcript: $transcript,
     project: "github.com/acme/widget", branch: "main"}' |
 curl -sS http://localhost:7200/v1/sessions \
-  -H "Authorization: Bearer $SESSIONDB_TOKEN" -H "Content-Type: application/json" --data-binary @-
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" --data-binary @-
 ```
 
 ```json
@@ -68,14 +68,15 @@ As the session goes on, send only what the log gained since, as a chunk from `by
 tail -c +48214 ~/.claude/projects/-repo-app/8f1c….jsonl |
 jq -Rs '{agent: "claude-code", session_id: "8f1c…", transcript: ., offset: 48213}' |
 curl -sS http://localhost:7200/v1/sessions \
-  -H "Authorization: Bearer $SESSIONDB_TOKEN" -H "Content-Type: application/json" --data-binary @-
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" --data-binary @-
 ```
 
 The chunk is normalized on its own and stored as a continuation of the session's trace; the
 server keeps where the log stands, so a large session costs each time only what was appended.
 
-The full API, every environment variable, and the rules for chunks, continuations and forks
-are in [`docs/server.md`](docs/server.md); the API as a document is
+The full API and the rules for chunks, continuations and forks are in
+[`docs/server.md`](docs/server.md); every setting (TOML, `SESHI_*` env, flags) is in
+[`docs/config.md`](docs/config.md); the API as a document is
 [`spec/openapi.yaml`](spec/openapi.yaml).
 
 ### Datadog Trajectory's format
@@ -134,13 +135,13 @@ an append-only change feed.
 
 ## Storage
 
-`SESSIONDB_STORE_URL` selects the store:
+`store.url` (`SESHI_STORE__URL`) selects the store:
 
 | URL | Credentials |
 |---|---|
-| `r2://bucket/prefix` | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` |
-| `s3://bucket/prefix` | `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
-| `s3://bucket/prefix` + `S3_ENDPOINT` | MinIO, RustFS, Backblaze B2, Wasabi, and other S3-compatible services |
+| `r2://bucket/prefix` | `store.account_id` and `store.credentials`, or `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` |
+| `s3://bucket/prefix` | `store.region` and `store.credentials`, or `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
+| `s3://bucket/prefix` + `store.endpoint` | MinIO, RustFS, Backblaze B2, Wasabi, and other S3-compatible services |
 | `file:///path` | None. A folder on the server's disk, for development or a single box |
 
 Every write is verified (ETag against MD5 where the service reports one, a read-back otherwise)
@@ -150,7 +151,7 @@ object that is not there.
 ## Trace format
 
 Every input is normalized the same way. What the trace objects are written as is a choice,
-`SESSIONDB_FORMAT` on the server or `format` on the SDK client:
+`store.format` on the server (`SESHI_STORE__FORMAT`) or `format` on the SDK client:
 
 | Format | Trace object |
 |---|---|

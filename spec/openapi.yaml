@@ -277,8 +277,8 @@ components:
       type: http
       scheme: bearer
       description: |
-        A token bound to one owner: one listed in the server's `SESSIONDB_TOKENS` (16+
-        characters), or an HS256 JWT signed with its `SESSIONDB_TOKEN_SECRET` whose `sub` is
+        A token bound to one owner: one listed in the server's `auth.tokens` (16+
+        characters), or an HS256 JWT signed with its `auth.legacy_token_secret` whose `sub` is
         the owner and whose `exp` has not passed.
 
   parameters:

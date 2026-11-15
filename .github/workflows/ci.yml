@@ -45,7 +45,7 @@ jobs:
       - name: Boot against a file store and hit /healthz
         run: |
           docker run -d --name sessiondb -p 7200:7200 \
-            -e SESSIONDB_TOKEN=ci-token-0123456789abcdef -e SESSIONDB_STORE_URL=file:///data sessiondb
+            -e SESHI_AUTH__TOKENS__CI=ci-token-0123456789abcdef -e SESHI_STORE__URL=file:///data sessiondb
           for i in $(seq 1 20); do
             curl -fsS http://127.0.0.1:7200/healthz && exit 0
             sleep 1
