@@ -66,7 +66,11 @@ export interface Backend {
 export class ServerBackend implements Backend {
   readonly mode = "server";
 
-  constructor(readonly db: HttpSessionDB) {}
+  /** With the org key: the username this backend states (`X-Seshi-User`), resolved now. */
+  constructor(
+    readonly db: HttpSessionDB,
+    readonly user?: string,
+  ) {}
 
   get where(): string {
     return this.db.server;
@@ -246,5 +250,6 @@ export async function openBackend(
       token: credential.token,
       ...(credential.user ? { user: credential.user } : {}),
     }),
+    credential.user,
   );
 }

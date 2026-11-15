@@ -269,6 +269,15 @@ export async function run(ctx: CommandContext): Promise<number> {
       throw err;
     }
 
+    const viaIdp = values.token === undefined && values.key === undefined && !!config.oidc;
+    if (values.visibility !== undefined && !viaIdp) {
+      // It is the device token's default (X5.10); the org key and a pasted token have theirs.
+      throw new Refused(
+        EXIT.usage,
+        "usage",
+        "--visibility sets the default of the device token an IdP sign-in gets; with the org key, set visibility per repository (.seshi/config.toml) or ask an admin for a token that has it",
+      );
+    }
     let profile: Omit<LoginProfile, "stored_in">;
     let secrets: Record<string, string>;
     const now = new Date().toISOString();

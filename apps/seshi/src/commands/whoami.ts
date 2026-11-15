@@ -11,7 +11,7 @@
 import { parseArgs } from "node:util";
 import type { Identity } from "@seshi/model";
 import { openAccount, serverOf } from "../account/account";
-import { openBackend } from "../backend";
+import { openBackend, ServerBackend } from "../backend";
 import { EXIT } from "../cli/exit";
 import { failWith } from "../cli/failures";
 import { emit, takeJson, usageError } from "../cli/output";
@@ -77,7 +77,7 @@ export async function run(ctx: CommandContext): Promise<number> {
         ? {
             mode: profile.mode,
             stored_in: profile.stored_in,
-            ...(profile.mode === "org_key" && identity.owner ? { user: identity.owner } : {}),
+            ...(backend instanceof ServerBackend && backend.user ? { user: backend.user } : {}),
           }
         : undefined;
       emit(
