@@ -40,6 +40,18 @@ export type SpoolEntry =
       transcript_path?: string;
       parent_session_id?: string;
     }
+  /** A hook saw the session while capture was paused (F9.5): the uploader stops it where it
+   * is (`frozen`), so it sends nothing more after the pause ends either. No work of its own. */
+  | {
+      v: typeof SPOOL_VERSION;
+      kind: "paused";
+      at: string;
+      agent: string;
+      session_id: string;
+      cwd?: string;
+      transcript_path?: string;
+      parent_session_id?: string;
+    }
   /** A session was turned off: retract what was uploaded (F9.7). The state file says what; the
    * entry wakes the uploader, so a retraction waits in the spool while it is not running. */
   | { v: typeof SPOOL_VERSION; kind: "retract"; at: string; agent: string; session_id: string }
@@ -58,9 +70,9 @@ export function appendSpool(paths: CapturePaths, entry: SpoolEntry, now: Date = 
   const name = `${now.getTime().toString().padStart(14, "0")}-${randomBytes(6).toString("hex")}`;
   const temp = join(paths.spool, `.${name}.tmp`);
   writeFileSync(temp, JSON.stringify(entry), { mode: 0o600 });
-  // A wake-up (or a folder seen) is no work of its own: its name says so, so the queue count
-  // leaves it out.
-  const idle = entry.kind === "wake" || entry.kind === "seen";
+  // A wake-up (or a folder seen, or a session seen during a pause) is no work of its own: its
+  // name says so, so the queue count leaves it out.
+  const idle = entry.kind === "wake" || entry.kind === "seen" || entry.kind === "paused";
   renameSync(temp, join(paths.spool, `${name}${idle ? WAKE_SUFFIX : ".json"}`));
 }
 

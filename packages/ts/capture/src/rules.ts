@@ -6,9 +6,13 @@
  * 1. Shared rules can only turn capture off, and always win: the org rule (the CLI config's
  *    `capture.remotes`: only repos whose remote matches) and a repo's `.seshi/config.toml`
  *    with `capture = false`, in the folder the session runs in or any other it was seen in.
- * 2. A pause (`seshi capture pause`) stops everything personal while it lasts: a gate on the
- *    decision, so what a session writes meanwhile goes up once it ends.
- * 3. Otherwise the most specific personal level that says anything decides: the session's own
+ * 2. A session turned off by its own toggle is off.
+ * 3. A pause (`seshi capture pause`) stops sessions where they are (F9.5, revised 15 Nov 2026):
+ *    a session seen while it lasts, or that started in one, keeps what it has uploaded and
+ *    sends nothing past that offset, ever (`frozen`). A pause ending does not undo it; turning
+ *    the session on does (`seshi capture on --session`), and a session turned on after a pause
+ *    began is not stopped by that pause.
+ * 4. Otherwise the most specific personal level that says anything decides: the session's own
  *    toggle, then the longest matching folder rule (`[[capture.paths]]`), then the global
  *    `capture.enabled`.
  *
@@ -76,6 +80,17 @@ export interface Decision {
   level: Level;
   /** One short sentence: why. */
   reason: string;
+  /** Set when a pause stops the session (`level: "pause"`): the transcript offset it stops at.
+   * What lies before it may still be sent again (a whole-log resend after a 409, a moved
+   * transcript, a replace); nothing past it ever is. A caller that keeps state records it as the
+   * session's `frozen` offset, so the session stays stopped after the pause ends. */
+  frozen?: number;
+}
+
+/** A pause, from `seshi capture pause` to its end (`until`; none while it is open-ended). */
+export interface PauseWindow {
+  at: string;
+  until?: string;
 }
 
 export interface DecideInput {
@@ -85,7 +100,20 @@ export interface DecideInput {
   place: Place;
   /** The session's toggle, when it has one. */
   toggle?: Toggle;
+  /** When that toggle was set: a session turned on after a pause began is not stopped by it. */
+  toggledAt?: string;
+  /** A pause is in force now. */
   paused?: boolean;
+  /** When the pause in force began. */
+  pausedAt?: string;
+  /** The offset an earlier pause stopped the session at (its `frozen` state). */
+  frozen?: number;
+  /** Bytes of the transcript the server holds from this machine: where a pause stops it now. */
+  uploaded?: number;
+  /** When the session started, when known, and the pauses recorded (the one in force too): a
+   * session that started during one is off, even when first seen after it ended. */
+  started?: string;
+  pauses?: readonly PauseWindow[];
   /** The other folders the session was seen in: a shared rule that turns any of them off turns
    * the session off (a session that left an excluded repo carries what it did there). */
   seen?: Place[];
@@ -221,7 +249,48 @@ export function decide(input: DecideInput, platform: NodeJS.Platform = process.p
       };
     }
   }
-  if (input.paused) return { capture: false, level: "pause", reason: "capture is paused" };
+  if (input.toggle === "off") {
+    return { capture: false, level: "session", reason: "turned off for this session" };
+  }
+  // A pause stops sessions where they are (F9.5): never retracts, never sends past the offset.
+  // A session turned on after a pause began is the person's own choice, and that pause leaves it.
+  const turnedOnSince = (at: string | undefined) =>
+    input.toggle === "on" &&
+    input.toggledAt !== undefined &&
+    (at === undefined || Date.parse(input.toggledAt) >= Date.parse(at));
+  if (input.frozen !== undefined) {
+    return {
+      capture: false,
+      level: "pause",
+      reason: "stopped by a pause; seshi capture on --session turns it back on",
+      frozen: input.frozen,
+    };
+  }
+  if (input.paused && !turnedOnSince(input.pausedAt)) {
+    return {
+      capture: false,
+      level: "pause",
+      reason: "capture is paused: the session stops where it is",
+      frozen: input.uploaded ?? 0,
+    };
+  }
+  const started = input.started === undefined ? Number.NaN : Date.parse(input.started);
+  const startedIn = Number.isFinite(started)
+    ? input.pauses?.find(
+        (w) =>
+          Date.parse(w.at) <= started &&
+          (w.until === undefined || started < Date.parse(w.until)) &&
+          !turnedOnSince(w.at),
+      )
+    : undefined;
+  if (startedIn) {
+    return {
+      capture: false,
+      level: "pause",
+      reason: "it started while capture was paused",
+      frozen: input.uploaded ?? 0,
+    };
+  }
   if (input.toggle !== undefined) {
     return {
       capture: input.toggle === "on",

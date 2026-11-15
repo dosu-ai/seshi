@@ -23,6 +23,9 @@ export interface FoundTranscript {
   info: TranscriptInfo;
   size: number;
   mtimeMs: number;
+  /** When the session started: its first record's time, else the file's birth time, else its
+   * modification time. */
+  startedMs: number;
 }
 
 /** The first `HEAD_BYTES` of a file as text; empty when it cannot be read. */
@@ -115,8 +118,16 @@ export function sweepAgent(
       if (stat.mtimeMs < sinceMs || stat.size === 0) continue;
       const info = identifySafely(agent, file, readHead(file));
       if (!info) continue;
-      if (startedMs(info, stat.birthtimeMs, stat.mtimeMs) < sinceMs) continue;
-      found.push({ agent, path: file, info, size: stat.size, mtimeMs: stat.mtimeMs });
+      const started = startedMs(info, stat.birthtimeMs, stat.mtimeMs);
+      if (started < sinceMs) continue;
+      found.push({
+        agent,
+        path: file,
+        info,
+        size: stat.size,
+        mtimeMs: stat.mtimeMs,
+        startedMs: started,
+      });
     }
   }
   return found;

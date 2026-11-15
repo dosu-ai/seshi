@@ -18,6 +18,7 @@ export {
   StateUnreadable,
   sessionKey,
   sessionToggle,
+  stateFacts,
 } from "./state";
 export { MAX_PROBLEMS, type StatusLine, type StatusProblem, statusLine } from "./status";
 export { uploaderRunning } from "./uploader-lock";

@@ -21,8 +21,8 @@ import {
   appendSpool,
   captureRules,
   decide,
+  freeze,
   identifySafely,
-  isPaused,
   otherFolders,
   placeOf,
   readHead,
@@ -30,9 +30,11 @@ import {
   type SessionState,
   StateUnreadable,
   seenIn,
+  sendLimit,
   sessionKey,
   sessionToggle,
   sessionWord,
+  stateFacts,
   sweepAgent,
   updateState,
 } from "@seshi/capture";
@@ -194,25 +196,40 @@ async function upload(
   const state = readState(paths);
   const keys = new Map<string, string>();
   const additions: SessionState[] = [];
+  const stopped: { session: SessionState; offset: number }[] = [];
   for (const { path, agent, info } of candidates) {
     const key = sessionKey(agent.name, info.session_id);
     if (keys.has(key)) continue;
     const known = state.sessions[key];
     const cwd = info.cwd ?? known?.cwd;
-    const toggle = sessionToggle(state, agent.name, known, info.parent_session_id);
     const decision = decide(
       {
         rules: snapshot.rules,
         ...(snapshot.error ? { rulesError: snapshot.error } : {}),
         place: placeOf(cwd),
-        ...(toggle ? { toggle } : {}),
-        paused: isPaused(state, now),
+        ...stateFacts(state, agent.name, known, now, info.parent_session_id),
+        ...(info.started_at ? { started: info.started_at } : {}),
         seen: otherFolders(known, cwd).map(placeOf),
       },
       host.platform,
     );
     if (!decision.capture) {
       outcomes.push({ path, key, result: "skipped", reason: decision.reason });
+      // Seen during a pause, or started in one: stopped where it is, as a hook would (F9.5).
+      if (decision.frozen !== undefined && !known?.frozen) {
+        stopped.push({
+          offset: decision.frozen,
+          session: {
+            agent: agent.name,
+            session_id: info.session_id,
+            path,
+            ...(info.cwd ? { cwd: info.cwd } : {}),
+            ...(info.parent_session_id ? { parent_session_id: info.parent_session_id } : {}),
+            first_seen: now.toISOString(),
+            last_seen: now.toISOString(),
+          },
+        });
+      }
       continue;
     }
     keys.set(key, path);
@@ -227,6 +244,12 @@ async function upload(
     });
   }
   await updateState(paths, (st) => {
+    for (const { session: seen, offset } of stopped) {
+      const key = sessionKey(seen.agent, seen.session_id);
+      const session = st.sessions[key] ?? seen;
+      freeze(session, now.toISOString(), offset);
+      st.sessions[key] = session;
+    }
     for (const addition of additions) {
       const key = sessionKey(addition.agent, addition.session_id);
       const session = st.sessions[key] ?? addition;
@@ -271,7 +294,8 @@ async function upload(
           if (!s?.path) return true;
           if (s.error || sessionToggle(st, s.agent, s) === "off") return true;
           const size = statSync(s.path, { throwIfNoEntry: false })?.size ?? 0;
-          return s.stored ? (s.file_offset ?? 0) >= size : s.held_at_size === size;
+          const limit = sendLimit(s, size);
+          return s.stored ? (s.file_offset ?? 0) >= limit : limit === 0 || s.held_at_size === limit;
         });
         if (settled) break;
         await Bun.sleep(250);

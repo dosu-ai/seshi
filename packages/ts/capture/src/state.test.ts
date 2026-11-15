@@ -6,12 +6,17 @@ import { appendLog, LOG_MAX_BYTES, LockTimeout, withLock, writePrivateFile } fro
 import { type CapturePaths, captureDir, capturePaths } from "./paths";
 import { appendSpool, readSpool, removeSpool, spoolCount } from "./spool";
 import {
+  type CaptureState,
   emptyState,
+  endPause,
   isPaused,
+  MAX_PAUSES,
   newSecret,
+  pauseWindows,
   readState,
   StateUnreadable,
   sessionKey,
+  stateFacts,
   updateState,
   uploadId,
 } from "./state";
@@ -104,6 +109,63 @@ describe("the state file (F9.5)", () => {
     expect(
       isPaused({ ...emptyState(), paused: { at: "x", until: "2026-11-01T11:00:00Z" } }, now),
     ).toBe(false);
+  });
+
+  it("keeps a pause that ended, at its own end or now, whichever came first", () => {
+    const now = new Date("2026-11-01T12:00:00Z");
+    const state: CaptureState = { ...emptyState(), paused: { at: "2026-11-01T10:00:00Z" } };
+    endPause(state, now);
+    expect(state.paused).toBeUndefined();
+    expect(state.pauses).toEqual([{ at: "2026-11-01T10:00:00Z", until: now.toISOString() }]);
+    state.paused = { at: "2026-11-01T12:30:00Z", until: "2026-11-01T13:00:00Z" };
+    expect(pauseWindows(state)).toHaveLength(2);
+    endPause(state, new Date("2026-11-01T14:00:00Z"));
+    expect(state.pauses?.at(-1)).toEqual({
+      at: "2026-11-01T12:30:00Z",
+      until: "2026-11-01T13:00:00Z",
+    });
+    for (let i = 0; i < MAX_PAUSES + 5; i++) {
+      state.paused = { at: now.toISOString() };
+      endPause(state, now);
+    }
+    expect(state.pauses).toHaveLength(MAX_PAUSES);
+  });
+
+  it("gives the decision a session's pause facts: its stop, a parent's, the pause in force", () => {
+    const now = new Date("2026-11-01T12:00:00Z");
+    const state = {
+      ...emptyState(),
+      paused: { at: "2026-11-01T11:00:00Z" },
+      sessions: {
+        "a:p": {
+          agent: "a",
+          session_id: "p",
+          first_seen: "x",
+          stored: true,
+          file_offset: 40,
+          frozen: { at: "y", offset: 40 },
+        },
+        "a:c": {
+          agent: "a",
+          session_id: "c",
+          first_seen: "x",
+          parent_session_id: "p",
+          stored: true,
+          file_offset: 10,
+        },
+      },
+    };
+    expect(stateFacts(state, "a", state.sessions["a:p"], now)).toMatchObject({
+      paused: true,
+      pausedAt: "2026-11-01T11:00:00Z",
+      frozen: 40,
+      uploaded: 40,
+      pauses: [{ at: "2026-11-01T11:00:00Z" }],
+    });
+    // A subagent of a stopped session is stopped at what it uploaded, by hook or sweep.
+    expect(stateFacts(state, "a", state.sessions["a:c"], now)).toMatchObject({ frozen: 10 });
+    expect(stateFacts(state, "a", undefined, now, "p")).toMatchObject({ frozen: 0 });
+    expect(stateFacts(emptyState(), "a", undefined, now)).toEqual({ paused: false, uploaded: 0 });
   });
 
   it("names an upload after its retractions, and makes long random secrets", () => {

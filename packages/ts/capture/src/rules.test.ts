@@ -111,6 +111,71 @@ describe("the decision (F9.5)", () => {
     expect(judge({ paused: true, toggle: "on" })).toMatchObject({ capture: false, level: "pause" });
   });
 
+  it("a pause stops a session where it is: at what it uploaded, or nothing for a new one", () => {
+    expect(judge({ paused: true, uploaded: 120 })).toMatchObject({
+      capture: false,
+      level: "pause",
+      frozen: 120,
+    });
+    expect(judge({ paused: true })).toMatchObject({ capture: false, frozen: 0 });
+    // A session turned off is off, pause or not: its own level says so, and nothing freezes.
+    expect(judge({ paused: true, toggle: "off" })).toEqual({
+      capture: false,
+      level: "session",
+      reason: "turned off for this session",
+    });
+  });
+
+  it("a session a pause stopped stays stopped after it ends, whatever the levels below say", () => {
+    expect(judge({ frozen: 80, uploaded: 80 })).toMatchObject({
+      capture: false,
+      level: "pause",
+      frozen: 80,
+    });
+    const rules = { ...DEFAULT_RULES, paths: [{ path: "/work", capture: true }] };
+    expect(judge({ rules, frozen: 80 })).toMatchObject({ level: "pause", frozen: 80 });
+    // The shared rules still win: they say off without an offset.
+    const place = { cwd: "/work/app", repo: repo({ config: { capture: false } }) };
+    expect(judge({ place, frozen: 80 })).toMatchObject({ level: "repo" });
+    expect(judge({ place, frozen: 80 }).frozen).toBeUndefined();
+  });
+
+  it("a session that started during a pause is off, even when first seen after it", () => {
+    const pauses = [{ at: "2026-11-01T10:00:00Z", until: "2026-11-01T12:00:00Z" }];
+    expect(judge({ pauses, started: "2026-11-01T11:00:00Z" })).toMatchObject({
+      capture: false,
+      level: "pause",
+      frozen: 0,
+      reason: "it started while capture was paused",
+    });
+    expect(judge({ pauses, started: "2026-11-01T12:00:00Z" })).toMatchObject({ capture: true });
+    expect(judge({ pauses, started: "2026-11-01T09:59:59Z" })).toMatchObject({ capture: true });
+    // An open-ended pause runs until resumed.
+    expect(
+      judge({ pauses: [{ at: "2026-11-01T10:00:00Z" }], started: "2026-11-02T00:00:00Z" }),
+    ).toMatchObject({ level: "pause" });
+    expect(judge({ pauses })).toMatchObject({ capture: true });
+  });
+
+  it("a session turned on after a pause began is not stopped by that pause", () => {
+    const pausedAt = "2026-11-01T10:00:00Z";
+    expect(
+      judge({ paused: true, pausedAt, toggle: "on", toggledAt: "2026-11-01T10:30:00Z" }),
+    ).toMatchObject({ capture: true, level: "session" });
+    expect(
+      judge({ paused: true, pausedAt, toggle: "on", toggledAt: "2026-11-01T09:30:00Z" }),
+    ).toMatchObject({ capture: false, level: "pause" });
+    const pauses = [{ at: pausedAt, until: "2026-11-01T12:00:00Z" }];
+    expect(
+      judge({
+        pauses,
+        started: "2026-11-01T11:00:00Z",
+        toggle: "on",
+        toggledAt: "2026-11-01T13:00:00Z",
+      }),
+    ).toMatchObject({ capture: true, level: "session" });
+  });
+
   it("the most specific personal level decides: session, then folder, then global", () => {
     const rules: CaptureRules = {
       enabled: false,

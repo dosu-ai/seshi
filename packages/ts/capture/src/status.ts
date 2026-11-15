@@ -53,6 +53,7 @@ export function sessionWord(s: SessionState): string {
   if (s.retract === "pending") return "retracting";
   if (s.retract === "failed") return "retraction refused";
   if (s.toggle === "off") return s.retract === "done" ? "off (retracted)" : "off";
+  if (s.frozen) return "stopped by a pause";
   if (s.error?.permanent) return `refused (${s.error.code})`;
   if (s.error) return "retrying";
   if (s.rebuild) return "resending";

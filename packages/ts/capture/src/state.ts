@@ -12,6 +12,7 @@ import { randomBytes } from "node:crypto";
 import type { ShippedPrefix } from "@seshi/model";
 import { readText, withLock, writePrivateFile } from "./files";
 import type { CapturePaths } from "./paths";
+import type { DecideInput, PauseWindow } from "./rules";
 
 export const STATE_SCHEMA = "seshi/capture-state/1";
 
@@ -41,6 +42,14 @@ export interface SessionState {
   last_seen?: string;
   /** The agent said the session ended. */
   final?: boolean;
+  /** When the session started, as its transcript says (or its file's birth time). */
+  started_at?: string;
+
+  // Set by a pause (F9.5, revised 15 Nov 2026) -----------------------------------------------
+  /** A pause stopped the session here: it keeps what it uploaded and nothing past `offset` (a
+   * transcript offset) is ever sent, even after the pause ends. Only `seshi capture on
+   * --session` takes it away. */
+  frozen?: { at: string; offset: number };
 
   // Set by `seshi capture off|on --session` -------------------------------------------------
   toggle?: Toggle;
@@ -100,8 +109,12 @@ export interface CaptureState {
   /** Agents capture is installed for, and since when: the sweep never reaches back past it
    * (F9.3, no surprise backfill). */
   agents: Record<string, { installed_at: string }>;
-  /** `seshi capture pause [duration]`: everything stops until `until`, or until resumed. */
+  /** `seshi capture pause [duration]`: in force until `until`, or until resumed. Sessions seen
+   * while it lasts are stopped where they are (`SessionState.frozen`), for good. */
   paused?: { at: string; until?: string };
+  /** Pauses that ended, most recent last (at most `MAX_PAUSES`): a session that started in one
+   * stays off when it is first seen after it. */
+  pauses?: { at: string; until: string }[];
   sessions: Record<string, SessionState>;
   uploader?: {
     last_run?: string;
@@ -187,6 +200,80 @@ export function isPaused(state: CaptureState, now: Date): boolean {
   return paused.until === undefined || Date.parse(paused.until) > now.getTime();
 }
 
+/** How many ended pauses the state keeps. */
+export const MAX_PAUSES = 20;
+
+/** Every pause recorded, the one in the state now (in force or run out) last. */
+export function pauseWindows(state: CaptureState): PauseWindow[] {
+  return [...(state.pauses ?? []), ...(state.paused ? [state.paused] : [])];
+}
+
+/** End the pause in the state, if any, keeping it as an ended pause: it ended at `now`, or at
+ * its own `until` when that came first. */
+export function endPause(state: CaptureState, now: Date): void {
+  const paused = state.paused;
+  if (!paused) return;
+  const until =
+    paused.until !== undefined && Date.parse(paused.until) < now.getTime()
+      ? paused.until
+      : now.toISOString();
+  state.pauses = [...(state.pauses ?? []), { at: paused.at, until }].slice(-MAX_PAUSES);
+  delete state.paused;
+}
+
+/** The transcript offset the server holds from this machine: where a pause stops the session. */
+export function uploadedOffset(session: SessionState | undefined): number {
+  return session?.stored ? (session.file_offset ?? 0) : 0;
+}
+
+/** Stop a session where it is (a pause, F9.5); one already stopped keeps its offset. */
+export function freeze(session: SessionState, at: string, offset: number): void {
+  session.frozen ??= { at, offset };
+}
+
+/** The transcript size a session may be sent up to: all of it, or as far as a pause stopped it. */
+export function sendLimit(session: Pick<SessionState, "frozen">, size: number): number {
+  return session.frozen ? Math.min(size, session.frozen.offset) : size;
+}
+
+/** What the decision function needs to know about a session from the state file: its toggle
+ * (its own or a parent's) and when it was set, the pause in force, every pause recorded, and
+ * where a pause stopped it or would stop it. Every caller of `decide` builds its input from
+ * here, so hooks, the sweep, the uploader and the status line judge a session alike (F9.3). */
+export function stateFacts(
+  state: CaptureState,
+  agent: string,
+  session: SessionState | undefined,
+  now: Date,
+  parentId?: string,
+): Pick<
+  DecideInput,
+  "toggle" | "toggledAt" | "paused" | "pausedAt" | "frozen" | "uploaded" | "started" | "pauses"
+> {
+  const holder = toggleHolder(state, agent, session, parentId);
+  const paused = isPaused(state, now);
+  const pauses = pauseWindows(state);
+  // A subagent is part of the session that started it: a parent a pause stopped stops the
+  // subagents it starts later too (at what they uploaded: nothing), unless one has its own toggle.
+  const frozen =
+    session?.frozen ??
+    (session?.toggle
+      ? undefined
+      : frozenParent(state, agent, session, parentId)
+        ? { offset: uploadedOffset(session) }
+        : undefined);
+  return {
+    ...(holder?.toggle ? { toggle: holder.toggle } : {}),
+    ...(holder?.toggled_at ? { toggledAt: holder.toggled_at } : {}),
+    paused,
+    ...(paused && state.paused ? { pausedAt: state.paused.at } : {}),
+    ...(frozen ? { frozen: frozen.offset } : {}),
+    uploaded: uploadedOffset(session),
+    ...(session?.started_at ? { started: session.started_at } : {}),
+    ...(pauses.length > 0 ? { pauses } : {}),
+  };
+}
+
 /** The folders `session` was seen in other than `cwd` (the one being judged). */
 export function otherFolders(
   session: Pick<SessionState, "cwd" | "folders"> | undefined,
@@ -215,13 +302,43 @@ export function sessionToggle(
   session: Pick<SessionState, "toggle" | "parent_session_id"> | undefined,
   parentId?: string,
 ): Toggle | undefined {
-  if (session?.toggle) return session.toggle;
+  return toggleHolder(state, agent, session, parentId)?.toggle;
+}
+
+/** Whether a parent of `session` (up the chain, to the first with a toggle) was stopped by a
+ * pause. */
+function frozenParent(
+  state: CaptureState,
+  agent: string,
+  session: Pick<SessionState, "parent_session_id"> | undefined,
+  parentId?: string,
+): boolean {
   const seen = new Set<string>();
   let parent = session?.parent_session_id ?? parentId;
   while (parent !== undefined && !seen.has(parent)) {
     seen.add(parent);
     const above = state.sessions[sessionKey(agent, parent)];
-    if (above?.toggle) return above.toggle;
+    if (above?.frozen) return true;
+    if (above?.toggle) return false;
+    parent = above?.parent_session_id;
+  }
+  return false;
+}
+
+/** The session whose toggle applies to `session`: itself, or the nearest parent with one. */
+function toggleHolder(
+  state: CaptureState,
+  agent: string,
+  session: Pick<SessionState, "toggle" | "toggled_at" | "parent_session_id"> | undefined,
+  parentId?: string,
+): Pick<SessionState, "toggle" | "toggled_at"> | undefined {
+  if (session?.toggle) return session;
+  const seen = new Set<string>();
+  let parent = session?.parent_session_id ?? parentId;
+  while (parent !== undefined && !seen.has(parent)) {
+    seen.add(parent);
+    const above = state.sessions[sessionKey(agent, parent)];
+    if (above?.toggle) return above;
     parent = above?.parent_session_id;
   }
   return undefined;

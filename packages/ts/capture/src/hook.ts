@@ -10,7 +10,7 @@ import { placeOf } from "./place";
 import { type Decision, decide } from "./rules";
 import { captureRules } from "./rules-cache";
 import { appendSpool } from "./spool";
-import { isPaused, otherFolders, readState, sessionKey, sessionToggle } from "./state";
+import { otherFolders, readState, sessionKey, stateFacts } from "./state";
 
 export interface HookRun {
   agent: CaptureAgent;
@@ -58,25 +58,41 @@ export async function runHook(run: HookRun): Promise<HookOutcome> {
 
   const now = run.now ?? new Date();
   const [{ rules, error }, state] = [await captureRules(run.host, run.paths), readState(run.paths)];
-  const paused = isPaused(state, now);
   for (const capture of result.captures) {
     const known = state.sessions[sessionKey(run.agent.name, capture.session_id)];
-    // A subagent has no toggle of its own until someone sets one: its parent's covers it.
-    const toggle = sessionToggle(state, run.agent.name, known, capture.parent_session_id);
     const cwd = capture.cwd ?? known?.cwd;
     const decision = decide(
       {
         rules,
         ...(error !== undefined ? { rulesError: error } : {}),
         place: placeOf(cwd),
-        ...(toggle ? { toggle } : {}),
-        paused,
+        // A subagent has no toggle of its own until someone sets one: its parent's covers it.
+        ...stateFacts(state, run.agent.name, known, now, capture.parent_session_id),
         seen: otherFolders(known, cwd).map(placeOf),
       },
       run.host.platform,
     );
     if (!decision.capture) {
       outcome.skipped.push({ session_id: capture.session_id, decision });
+      // A pause stops the session where it is (F9.5): the uploader records it, so it stays
+      // stopped once the pause ends. A hook writes no state itself (X3.3).
+      if (decision.frozen !== undefined && known?.frozen === undefined) {
+        appendSpool(
+          run.paths,
+          {
+            v: 1,
+            kind: "paused",
+            at: now.toISOString(),
+            agent: run.agent.name,
+            session_id: capture.session_id,
+            ...(capture.cwd ? { cwd: capture.cwd } : {}),
+            ...(capture.transcript_path ? { transcript_path: capture.transcript_path } : {}),
+            ...(capture.parent_session_id ? { parent_session_id: capture.parent_session_id } : {}),
+          },
+          now,
+        );
+        continue;
+      }
       // A shared rule turns this folder off: the uploader records it, so neither a later hook
       // in another folder nor the upload of a session already known carries this work out.
       if ((decision.level === "org" || decision.level === "repo") && capture.cwd) {

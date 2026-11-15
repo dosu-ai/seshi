@@ -427,15 +427,30 @@ describe("the status line (F9.4, B1.6)", () => {
 });
 
 describe("capture rules from the CLI (F9.5)", () => {
-  it("pauses and resumes", async () => {
+  it("pauses and resumes; a session started during the pause stays off, unretracted", async () => {
     const pause = await machine.seshi(["capture", "pause", "2h", "--json"]);
-    expect(JSON.parse(pause.out).until).toBeDefined();
-    await hook();
-    expect(spooled()).toBe(0);
+    expect(JSON.parse(pause.out)).toMatchObject({ paused: true, until: expect.any(String) });
     expect((await machine.seshi(["capture", "pause", "soon"])).code).toBe(2);
-    expect((await machine.seshi(["capture", "resume"])).out).toContain("resumed");
+    machine.spawned.length = 0;
     await hook();
-    expect(spooled()).toBe(2); // the resume's wake-up, and the hook
+    // Handed over to be stopped, not to upload: nothing queued, no uploader started.
+    expect(spooled()).toBe(1);
+    expect(machine.spawned).toEqual([]);
+    expect((await daemon()).summary).toMatchObject({ uploaded: 0, queued: 0 });
+    expect(state().sessions[`claude-code:${SESSION}`].frozen).toMatchObject({ offset: 0 });
+    const resume = await machine.seshi(["capture", "resume"], { env: { NO_COLOR: "1" } });
+    expect(resume.out).toContain("resumed");
+    expect(resume.out).toContain("1 session a pause stopped stays stopped");
+    expect(state().pauses).toHaveLength(1);
+    // Still off after the pause: hooks spool nothing for it, nothing is uploaded or retracted.
+    await hook();
+    expect(spooled()).toBe(1); // the resume's wake-up only
+    expect((await daemon()).summary).toMatchObject({ uploaded: 0, retracted: 0 });
+    expect(await stored()).toBeNull();
+    const line = await machine.seshi(["statusline", "--json"], {
+      stdin: JSON.stringify({ session_id: SESSION, cwd: project }),
+    });
+    expect(JSON.parse(line.out)).toMatchObject({ capturing: false, level: "pause", frozen_at: 0 });
   });
 
   it("reports a pause that ran out as over", async () => {
@@ -454,20 +469,44 @@ describe("capture rules from the CLI (F9.5)", () => {
     });
   });
 
-  it("says a pause holds uploads back, and that what is written meanwhile goes up after", async () => {
-    const pause = await machine.seshi(["capture", "pause", "1h"]);
-    expect(pause.out).toContain("nothing is uploaded until");
-    expect(pause.out).toContain("uploaded when the pause ends");
-    expect(pause.out).not.toContain("nothing is captured");
-    // Nothing goes while it lasts; the next hook after it sends what was written meanwhile.
+  it("stops a running session where it is; resume keeps it stopped, capture on uploads all of it", async () => {
+    await hook();
+    await daemon();
+    const pause = await machine.seshi(["capture", "pause", "1h"], { env: { NO_COLOR: "1" } });
+    expect(pause.out).toContain("sessions stop where they are until");
+    expect(pause.out).toContain("1 session keeps what was uploaded and sends nothing more");
+    expect(pause.out).not.toContain("uploaded when the pause ends");
+    const key = `claude-code:${SESSION}`;
+    expect(state().sessions[key].frozen).toMatchObject({ offset: Buffer.byteLength(HEAD) });
+    // Nothing more goes, during the pause or after it.
     appendFileSync(file, TAIL);
     await hook();
     expect((await daemon()).summary).toMatchObject({ uploaded: 0 });
-    expect(await stored()).toBeNull();
     await machine.seshi(["capture", "resume"]);
     await hook();
-    expect((await daemon()).summary).toMatchObject({ uploaded: 1 });
+    expect((await daemon()).summary).toMatchObject({ uploaded: 0, retracted: 0 });
+    expect(state().sessions[key].file_offset).toBe(Buffer.byteLength(HEAD));
+    // What it uploaded stays on the server: nothing is retracted.
     expect((await stored())?.status).toBe("stored");
+    expect((await stored())?.traces).toHaveLength(1);
+    const status = await machine.seshi(["capture", "status", "--session", SESSION], {
+      env: { NO_COLOR: "1" },
+    });
+    expect(status.out).toContain("Session Capture: not capturing");
+    expect(status.out).toContain("stopped by a pause");
+    expect(JSON.parse((await machine.seshi(["capture", "status", "--json"])).out).stopped).toBe(1);
+    const line = await machine.seshi(["statusline"], {
+      stdin: JSON.stringify({ session_id: SESSION, cwd: project }),
+      env: { NO_COLOR: "1" },
+    });
+    expect(line.out).toBe("Session Capture ⏸");
+
+    const on = await machine.seshi(["capture", "on", "--session", SESSION, "--json"]);
+    expect(JSON.parse(on.out)).toMatchObject({ capture: true, unfrozen: true, fresh: false });
+    expect((await daemon()).summary).toMatchObject({ uploaded: 1 });
+    expect((await stored())?.traces).toHaveLength(2);
+    expect(state().sessions[key]).toMatchObject({ file_offset: Buffer.byteLength(HEAD + TAIL) });
+    expect(state().sessions[key].frozen).toBeUndefined();
   });
 
   it("sets a folder rule and the global level in the CLI config, keeping the rest", async () => {
@@ -660,6 +699,21 @@ describe("seshi upload (F8.1)", () => {
     expect((await stored())?.status).toBe("stored");
     expect((await machine.seshi(["upload"])).code).toBe(2);
     expect((await machine.seshi(["upload", "--since", "lots"])).code).toBe(2);
+  });
+
+  it("stops a session it is handed during a pause, as a hook would", async () => {
+    await machine.seshi(["capture", "pause"]);
+    const during = await machine.seshi(["upload", file, "--json"]);
+    expect(JSON.parse(during.out).sessions).toEqual([
+      expect.objectContaining({ result: "skipped", reason: expect.stringContaining("paused") }),
+    ]);
+    expect(state().sessions[`claude-code:${SESSION}`].frozen).toMatchObject({ offset: 0 });
+    await machine.seshi(["capture", "resume"]);
+    const after = await machine.seshi(["upload", file, "--json"]);
+    expect(JSON.parse(after.out).sessions).toEqual([
+      expect.objectContaining({ result: "skipped", reason: expect.stringContaining("pause") }),
+    ]);
+    expect(await stored()).toBeNull();
   });
 
   it("exits 5 when not signed in", async () => {

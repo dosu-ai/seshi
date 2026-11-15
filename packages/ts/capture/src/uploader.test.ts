@@ -31,8 +31,15 @@ import { DEFAULT_RULES } from "./rules";
 import type { RulesSnapshot } from "./rules-cache";
 import { type RetractOutcome, RetractRefused, type SessionSink, SignInNeeded } from "./sink";
 import { appendSpool } from "./spool";
-import { readState, type SessionState, updateState } from "./state";
 import { sessionWord } from "./status";
+import {
+  endPause,
+  freeze,
+  readState,
+  type SessionState,
+  updateState,
+  uploadedOffset,
+} from "./state";
 import { type PreRedactor, retractHash, Uploader, type UploaderOptions } from "./uploader";
 import { acquireUploaderLock, type HeldUploaderLock } from "./uploader-lock";
 
@@ -639,6 +646,198 @@ describe("the rules apply to the uploader too (F9.3)", () => {
   });
 });
 
+describe("a pause stops sessions where they are (F9.5, revised 15 Nov 2026)", () => {
+  const pause = () =>
+    updateState(paths, (s) => {
+      s.paused = { at: clock.toISOString() };
+    });
+  /** `seshi capture pause` as it lands: in force, and every session stopped at what it uploaded. */
+  const pauseNow = () =>
+    updateState(paths, (s) => {
+      s.paused = { at: clock.toISOString() };
+      for (const one of Object.values(s.sessions)) {
+        freeze(one, clock.toISOString(), uploadedOffset(one));
+      }
+    });
+  const resume = () =>
+    updateState(paths, (s) => {
+      endPause(s, clock);
+    });
+  /** `seshi capture on --session`. */
+  const turnOn = (id = "s1") =>
+    updateState(paths, (s) => {
+      const one = s.sessions[`fake:${id}`] as SessionState;
+      delete one.frozen;
+      one.toggle = "on";
+      one.toggled_at = clock.toISOString();
+    });
+  const later = (minutes: number) => {
+    clock = new Date(clock.getTime() + minutes * 60_000);
+  };
+  // Lines written with this test's folder (set in beforeEach), so every line is the same length.
+  let head: string;
+  beforeEach(() => {
+    head = line("one") + line("two");
+  });
+
+  it("stops a running session at what it uploaded; later bytes are never sent", async () => {
+    writeFileSync(transcript(), head);
+    hooked();
+    await uploader().pass();
+    // Seen by the uploader while paused, with bytes it had not sent yet.
+    appendFileSync(transcript(), line("three"));
+    hooked();
+    await pause();
+    expect(await uploader().pass()).toMatchObject({ uploaded: 0, queued: 0 });
+    expect(session().frozen).toEqual({
+      at: clock.toISOString(),
+      offset: Buffer.byteLength(head),
+    });
+    later(60);
+    await resume();
+    appendFileSync(transcript(), line("four"));
+    hooked();
+    await uploader().pass({ sweep: true });
+    expect(server.uploads).toHaveLength(1);
+    expect(server.sessions.get("s1")?.text).toBe(head);
+    // Nothing was retracted.
+    expect(server.retractions).toEqual([]);
+    expect(session()).toMatchObject({ stored: true, frozen: { offset: Buffer.byteLength(head) } });
+  });
+
+  it("stops a session between pieces when the pause lands mid-upload, and a 409's whole resend stops there too", async () => {
+    writeFileSync(transcript(), head);
+    hooked();
+    await uploader().pass();
+    appendFileSync(transcript(), line("three") + line("four") + line("five"));
+    hooked();
+    const sink: SessionSink = Object.create(server);
+    let calls = 0;
+    sink.ingest = async (upload, options) => {
+      if (calls++ === 0) {
+        // `seshi capture pause` runs while this chunk is on its way, and the server has lost
+        // the session (expected 0), so the uploader goes back to the whole log.
+        await pauseNow();
+        server.sessions.delete("s1");
+      }
+      return server.ingest(upload, options);
+    };
+    await uploader({ sink: async () => sink, maxChunkBytes: 60 }).pass();
+    expect(server.uploads.slice(1).map((u) => [u.offset, u.transcript])).toEqual([
+      [Buffer.byteLength(head), line("three")],
+      [0, head],
+    ]);
+    expect(server.sessions.get("s1")?.text).toBe(head);
+    expect(session()).toMatchObject({
+      stored: true,
+      file_offset: Buffer.byteLength(head),
+      frozen: { offset: Buffer.byteLength(head) },
+    });
+    await resume();
+    await uploader().pass();
+    expect(server.uploads).toHaveLength(3);
+  });
+
+  it("sends a moved transcript and its replace only up to where the session stopped", async () => {
+    writeFileSync(transcript(), head);
+    hooked();
+    await uploader().pass();
+    // The transcript is rewritten elsewhere (the session moved); the pause lands as it goes up
+    // whole, the server says it does not extend what is stored, and the replace is cut short.
+    const moved = join(dir, "sessions", "s1-moved.jsonl");
+    writeFileSync(moved, line("uno") + line("dos") + line("tres"));
+    hooked("s1", moved);
+    const sink: SessionSink = Object.create(server);
+    let calls = 0;
+    sink.ingest = async (upload, options) => {
+      if (calls++ === 0) await pauseNow();
+      return server.ingest(upload, options);
+    };
+    await uploader({ sink: async () => sink }).pass();
+    const cut = Buffer.byteLength(head);
+    expect(server.uploads.slice(1).map((u) => [u.offset, u.replace ?? false])).toEqual([
+      [0, false],
+      [0, true],
+    ]);
+    expect(server.uploads.at(-1)?.transcript).toBe(
+      readFileSync(moved).subarray(0, cut).toString("utf8"),
+    );
+    expect(Buffer.byteLength(server.sessions.get("s1")?.text ?? "")).toBeLessThanOrEqual(cut);
+  });
+
+  it("keeps a session started during a pause off, by hook, by sweep or first seen after it", async () => {
+    await updateState(paths, (s) => {
+      s.agents.fake = { installed_at: "2026-10-01T00:00:00Z" };
+    });
+    const write = (id: string, at: string) =>
+      writeFileSync(
+        transcript(id),
+        `${JSON.stringify({ id, cwd: dir, at })}\n${JSON.stringify({ id })}\n`,
+      );
+    await pause();
+    const during = clock.toISOString();
+    // A hook during the pause hands the session over to be stopped (`seshi hook` does this).
+    write("hooked", during);
+    appendSpool(paths, {
+      v: 1,
+      kind: "paused",
+      at: during,
+      agent: "fake",
+      session_id: "hooked",
+      cwd: dir,
+      transcript_path: transcript("hooked"),
+    });
+    // The sweep finds another while the pause lasts.
+    write("swept", during);
+    await uploader().pass({ sweep: true });
+    later(30);
+    await resume();
+    // One whose first hook comes only after the pause, though it started during it.
+    write("late", during);
+    hooked("late");
+    later(1);
+    write("after", clock.toISOString());
+    hooked("after");
+    await uploader().pass({ sweep: true });
+    expect(server.uploads.map((u) => u.session_id)).toEqual(["after"]);
+    for (const id of ["hooked", "swept", "late"]) {
+      expect(session(id)).toMatchObject({ frozen: { offset: 0 } });
+    }
+    expect(server.retractions).toEqual([]);
+    expect(readState(paths).uploader?.queued).toBe(0);
+  });
+
+  it("is not undone by resume; turning the session on uploads all of it", async () => {
+    writeFileSync(transcript(), head);
+    hooked();
+    await uploader().pass();
+    await pauseNow();
+    appendFileSync(transcript(), line("three"));
+    later(10);
+    await resume();
+    appendFileSync(transcript(), line("four"));
+    hooked();
+    await uploader().pass();
+    expect(server.uploads).toHaveLength(1);
+    await turnOn();
+    await uploader().pass();
+    expect(server.sessions.get("s1")?.text).toBe(head + line("three") + line("four"));
+    expect(session().frozen).toBeUndefined();
+  });
+
+  it("captures a session turned on after the pause began, while it lasts", async () => {
+    writeFileSync(transcript(), head);
+    hooked();
+    await pauseNow();
+    await uploader().pass();
+    expect(server.uploads).toHaveLength(0);
+    later(1);
+    await turnOn();
+    await uploader().pass();
+    expect(server.sessions.get("s1")?.text).toBe(head);
+  });
+});
+
 describe("retraction (F9.7)", () => {
   async function turnOff(id = "s1") {
     await updateState(paths, (s) => {
@@ -880,6 +1079,95 @@ describe("running", () => {
     const running = uploader({ pollMs: 5 }).run({ signal: stop.signal, keepAlive: true });
     stop.abort();
     await running;
+  });
+
+  /** An uploader whose clock moves a minute every pass (the rules are read once per pass), on the
+   * real defaults: 5 idle minutes, 30 minutes of retrying after the last success. */
+  const timed = (sink: SessionSink = server) => {
+    const start = clock.getTime();
+    const minutes = () => (clock.getTime() - start) / 60_000;
+    const run = uploader({
+      sink: async () => sink,
+      pollMs: 1,
+      rules: async () => {
+        clock = new Date(clock.getTime() + 60_000);
+        return { rules: DEFAULT_RULES };
+      },
+    });
+    return { run, minutes };
+  };
+
+  it("stops after 5 clean idle minutes, as before", async () => {
+    writeFileSync(transcript(), line("one") + line("two"));
+    hooked();
+    const { run, minutes } = timed();
+    await run.run();
+    expect(server.sessions.has("s1")).toBe(true);
+    // Worked on the first pass, then idle from there.
+    expect(minutes()).toBe(6);
+  });
+
+  it("is idle after a refusal: nothing waits to retry", async () => {
+    writeFileSync(transcript(), line("one") + line("two"));
+    hooked();
+    server.failNext = [new SessionRejected("too_large", "big")];
+    const { run, minutes } = timed();
+    await run.run();
+    expect(session().error).toMatchObject({ permanent: true });
+    expect(minutes()).toBe(6);
+  });
+
+  it("stays up while uploads wait to retry, for 30 minutes after its last success", async () => {
+    writeFileSync(transcript(), line("one") + line("two"));
+    writeFileSync(transcript("s2"), line("one", "s2") + line("two", "s2"));
+    hooked();
+    hooked("s2");
+    const sink: SessionSink = Object.create(server);
+    const start = clock.getTime();
+    // An outage: nothing goes through, except s1 once ten minutes in; s2 never does.
+    sink.ingest = async (upload, options) => {
+      const minute = (clock.getTime() - start) / 60_000;
+      if (upload.session_id === "s1" && minute >= 10) return server.ingest(upload, options);
+      throw new ServerError(503, "unavailable", "down");
+    };
+    const { run, minutes } = timed(sink);
+    await run.run();
+    expect(server.sessions.has("s1")).toBe(true);
+    expect(server.sessions.has("s2")).toBe(false);
+    // s1 went up at minute 10 or a little after (its backoff); 30 minutes later it stopped.
+    const success = Date.parse(session().uploaded_at as string);
+    expect((clock.getTime() - success) / 60_000).toBe(30);
+    expect(minutes()).toBeGreaterThan(35);
+    expect(session("s2")).toMatchObject({ error: { permanent: false } });
+    // Nothing is lost: s2 still waits for the next uploader.
+    expect(readState(paths).uploader?.queued).toBe(1);
+  });
+
+  it("stays up at most 30 minutes when nothing has succeeded since it started", async () => {
+    writeFileSync(transcript(), line("one") + line("two"));
+    hooked();
+    await updateState(paths, (s) => {
+      s.sessions["fake:s2"] = {
+        agent: "fake",
+        session_id: "s2",
+        first_seen: clock.toISOString(),
+        toggle: "off",
+        retract: "pending",
+        secret: "x",
+        sent: true,
+      };
+    });
+    const sink: SessionSink = Object.create(server);
+    sink.ingest = async () => {
+      throw new StoreError("cannot reach");
+    };
+    sink.retract = async () => {
+      throw new StoreError("cannot reach");
+    };
+    const { run, minutes } = timed(sink);
+    await run.run();
+    expect(minutes()).toBe(30);
+    expect(session("s2").retract).toBe("pending");
   });
 
   it("sends sessions seen at the same moment in key order, whatever the spool order", async () => {

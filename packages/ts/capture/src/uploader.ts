@@ -54,15 +54,19 @@ import { RetractRefused, type SessionSink, SignInNeeded } from "./sink";
 import { readSpool, removeSpool } from "./spool";
 import {
   type CaptureState,
-  isPaused,
+  freeze,
   newSecret,
   otherFolders,
+  pauseWindows,
   readState,
   type SessionState,
   seenIn,
+  sendLimit,
   sessionKey,
   sessionToggle,
+  stateFacts,
   updateState,
+  uploadedOffset,
   uploadId,
 } from "./state";
 import { identifySafely, readHead, sweepAgent } from "./sweep";
@@ -146,6 +150,9 @@ export interface UploaderOptions {
   staleIntervalMs?: number;
   /** Stop after this long with nothing to do. Default 5 minutes. */
   idleMs?: number;
+  /** While uploads or retractions wait to retry, stay up until this long after the last
+   * success (F9.1, revised 15 Nov 2026). Default 30 minutes. */
+  retryWindowMs?: number;
   /** How often to look at the spool. Default 2 s. */
   pollMs?: number;
   /** The most bytes one chunk carries; a longer tail goes in several. Default 8 MiB. */
@@ -176,6 +183,9 @@ export interface PassSummary {
   failed: number;
   /** Sessions with something not yet uploaded at the end of the pass. */
   queued: number;
+  /** Of those, the uploads and retractions waiting to retry after a failure (backoff): work
+   * still pending, so the pass is not idle. */
+  retrying?: number;
   /** Set when a sign-in is needed; nothing was sent after it. */
   signIn?: string;
 }
@@ -235,6 +245,7 @@ export class Uploader {
   /** After a failed stale check, not before this (ms). */
   private nextStaleCheck = 0;
   private readonly idleMs: number;
+  private readonly retryWindowMs: number;
   private readonly pollMs: number;
   private readonly maxChunkBytes: number;
   private readonly retryBaseMs: number;
@@ -256,6 +267,7 @@ export class Uploader {
     this.sweepIntervalMs = options.sweepIntervalMs ?? 15 * 60 * SECOND;
     this.staleIntervalMs = options.staleIntervalMs ?? 60 * 60 * SECOND;
     this.idleMs = options.idleMs ?? 5 * 60 * SECOND;
+    this.retryWindowMs = options.retryWindowMs ?? 30 * 60 * SECOND;
     this.pollMs = options.pollMs ?? 2 * SECOND;
     this.maxChunkBytes = options.maxChunkBytes ?? 8 * 1024 * 1024;
     this.retryBaseMs = options.retryBaseMs ?? 5 * SECOND;
@@ -268,9 +280,12 @@ export class Uploader {
   }
 
   /** Run passes until idle for `idleMs` (never, with `keepAlive`), the signal aborts, or
-   * another uploader takes the lock over. */
+   * another uploader takes the lock over. A pass whose uploads or retractions all failed, or
+   * all wait in backoff, is not idle: the uploader stays up while such work is pending, for at
+   * most `retryWindowMs` after its last success (F9.1), then exits as before. */
   async run(options: { signal?: AbortSignal; keepAlive?: boolean; lock?: HeldUploaderLock } = {}) {
     let lastWork = this.now().getTime();
+    let lastSuccess = lastWork;
     const lock = options.lock;
     // A long pass (a backlog, a slow server) renews the heartbeat between sessions, so a hook
     // does not take this uploader for a hung one and start another.
@@ -282,15 +297,29 @@ export class Uploader {
           return;
         }
         let worked = false;
+        let succeeded = false;
+        let retrying = 0;
         try {
           const summary = await this.pass();
           worked = summary.taken + summary.found + summary.uploaded + summary.retracted > 0;
+          succeeded = summary.uploaded + summary.retracted > 0;
+          retrying = summary.retrying ?? 0;
         } catch (err) {
           this.log(`pass failed: ${message(err)}`);
         }
         const now = this.now().getTime();
         if (worked) lastWork = now;
-        if (!options.keepAlive && now - lastWork >= this.idleMs) return;
+        if (succeeded) lastSuccess = now;
+        if (!options.keepAlive) {
+          if (retrying > 0) {
+            if (now - lastSuccess >= this.retryWindowMs) {
+              this.log(
+                `stopping with ${retrying} upload(s) or retraction(s) waiting to retry: none succeeded for ${Math.round(this.retryWindowMs / 60_000)} minutes`,
+              );
+              return;
+            }
+          } else if (now - lastWork >= this.idleMs) return;
+        }
         await new Promise<void>((resolve) => {
           const done = () => {
             clearTimeout(timer);
@@ -370,7 +399,7 @@ export class Uploader {
       if (summary.signIn) break;
       // The pass's snapshot is enough to tell what is due; `sync` reads the session afresh
       // before each piece, so a toggle set meanwhile still stops it.
-      const session = state.sessions[key];
+      let session = state.sessions[key];
       if (!session || this.off(state, session)) continue;
       const agent = this.agents.get(session.agent);
       if (!agent || !this.due(session)) continue;
@@ -378,8 +407,22 @@ export class Uploader {
       if (!path) continue;
       const size = this.sizeOf(path);
       if (size === undefined || !this.pending(session, size)) continue;
+      session = await this.startOf(key, session, agent, path, state);
       const place = placeOf(session.cwd);
-      if (!this.decision(snapshot, session, place, state).capture) continue;
+      const decision = this.decision(snapshot, session, place, state);
+      if (decision.frozen !== undefined && !session.frozen) {
+        // Seen during a pause, or started in one: stopped where it is, for good (F9.5).
+        const offset = decision.frozen;
+        const at = this.now().toISOString();
+        session = (await this.save(key, (s) => freeze(s, at, offset))) ?? {
+          ...session,
+          frozen: { at, offset },
+        };
+        this.log(`${key}: stopped by a pause at ${offset} bytes`);
+      }
+      // A stopped session is sent only up to where it stopped: a resend of what the server lost.
+      if (!decision.capture && decision.frozen === undefined) continue;
+      if (!this.pending(session, size)) continue;
       if (!this.stillHeld()) break;
       const outcome = await this.sync(key, agent, place, path, size);
       summary.uploaded += outcome.uploaded;
@@ -406,7 +449,9 @@ export class Uploader {
 
     // Last, so a session stored this pass is asked about too; what it marks goes next pass.
     if (!summary.signIn) await this.checkStale();
-    summary.queued = this.queued(snapshot);
+    const backlog = this.queued(snapshot);
+    summary.queued = backlog.queued;
+    summary.retrying = backlog.retrying;
     await this.finish(summary, { succeeded, signedIn, transientFailure });
     return summary;
   }
@@ -423,7 +468,7 @@ export class Uploader {
     }
     await updateState(this.paths, (state) => {
       for (const { entry } of items) {
-        if (entry.kind !== "capture" && entry.kind !== "seen") continue;
+        if (entry.kind !== "capture" && entry.kind !== "seen" && entry.kind !== "paused") continue;
         if (!this.agents.has(entry.agent)) {
           this.log(`ignored a hook for an agent this binary does not know: ${entry.agent}`);
           continue;
@@ -442,6 +487,18 @@ export class Uploader {
         if (entry.cwd) seenIn(session, entry.cwd);
         if (entry.parent_session_id) session.parent_session_id = entry.parent_session_id;
         if (entry.kind === "capture" && entry.final) session.final = true;
+        // Seen by a hook during a pause: stopped at what it had uploaded (F9.5), unless it was
+        // turned on since, which that pause never overrides.
+        if (
+          entry.kind === "paused" &&
+          !(
+            session.toggle === "on" &&
+            session.toggled_at !== undefined &&
+            Date.parse(session.toggled_at) >= Date.parse(entry.at)
+          )
+        ) {
+          freeze(session, entry.at, uploadedOffset(session));
+        }
         session.last_seen = entry.at;
         state.sessions[key] = session;
         // A hook that runs means capture is installed for its agent, whoever installed it
@@ -458,7 +515,6 @@ export class Uploader {
   private async sweep(snapshot: RulesSnapshot, since?: Date): Promise<number> {
     const now = this.now();
     const state = readState(this.paths);
-    const paused = isPaused(state, now);
     const additions: SessionState[] = [];
     const paths = new Map<string, string>();
     for (const agent of this.agents.values()) {
@@ -472,19 +528,21 @@ export class Uploader {
           if (known.path !== found.path) paths.set(key, found.path);
           continue;
         }
+        const started = new Date(found.startedMs).toISOString();
         // A subagent's transcript found before any hook named it goes by its parent's toggle.
-        const toggle = sessionToggle(state, agent.name, undefined, found.info.parent_session_id);
         const decision = decide(
           {
             rules: snapshot.rules,
             ...(snapshot.error ? { rulesError: snapshot.error } : {}),
             place: placeOf(found.info.cwd),
-            ...(toggle ? { toggle } : {}),
-            paused,
+            ...stateFacts(state, agent.name, undefined, now, found.info.parent_session_id),
+            started,
           },
           this.host.platform,
         );
-        if (!decision.capture) continue;
+        // Found during a pause, or started in one: kept as stopped (F9.5), so neither a later
+        // sweep nor a hook after the pause sends it.
+        if (!decision.capture && decision.frozen === undefined) continue;
         additions.push({
           agent: agent.name,
           session_id: found.info.session_id,
@@ -495,6 +553,10 @@ export class Uploader {
             : {}),
           first_seen: now.toISOString(),
           last_seen: new Date(found.mtimeMs).toISOString(),
+          started_at: started,
+          ...(decision.frozen !== undefined
+            ? { frozen: { at: now.toISOString(), offset: decision.frozen } }
+            : {}),
         });
       }
     }
@@ -582,14 +644,12 @@ export class Uploader {
     place: Place,
     state: CaptureState,
   ): Decision {
-    const toggle = sessionToggle(state, session.agent, session);
     return decide(
       {
         rules: snapshot.rules,
         ...(snapshot.error ? { rulesError: snapshot.error } : {}),
         place,
-        ...(toggle ? { toggle } : {}),
-        paused: isPaused(state, this.now()),
+        ...stateFacts(state, session.agent, session, this.now()),
         seen: otherFolders(session, place.cwd).map(placeOf),
       },
       this.host.platform,
@@ -607,13 +667,45 @@ export class Uploader {
     return !session.next_attempt_at || Date.parse(session.next_attempt_at) <= this.now().getTime();
   }
 
-  /** Whether `session` has something to send at transcript size `size`. */
+  /** Whether `session` has something to send at transcript size `size`: only up to where a
+   * pause stopped it, when one did. */
   private pending(session: SessionState, size: number): boolean {
     if (size === 0) return false;
     if (session.error?.permanent && session.error.size === size) return false;
-    if (session.rebuild) return true;
-    if (!session.stored) return session.held_at_size !== size;
-    return size !== (session.file_offset ?? 0);
+    const limit = sendLimit(session, size);
+    // A rebuild sends the whole log, up to where a pause stopped the session (F9.5).
+    if (session.rebuild) return limit > 0;
+    if (!session.stored) return limit > 0 && session.held_at_size !== limit;
+    return limit !== (session.file_offset ?? 0);
+  }
+
+  /** When a session not yet sent started, recorded once while any pause is recorded: one that
+   * started during a pause is off even when first seen after it (F9.5). */
+  private async startOf(
+    key: string,
+    session: SessionState,
+    agent: CaptureAgent,
+    path: string,
+    state: CaptureState,
+  ): Promise<SessionState> {
+    if (session.started_at || session.sent || pauseWindows(state).length === 0) return session;
+    const info = identifySafely(agent, path, readHead(path));
+    let started = info?.started_at;
+    if (!started || !Number.isFinite(Date.parse(started))) {
+      try {
+        const birth = statSync(path).birthtimeMs;
+        started = birth > 0 ? new Date(birth).toISOString() : undefined;
+      } catch {
+        started = undefined;
+      }
+    }
+    if (!started) return session;
+    const at = started;
+    return (
+      (await this.save(key, (s) => {
+        s.started_at = at;
+      })) ?? { ...session, started_at: at }
+    );
   }
 
   private sizeOf(path: string): number | undefined {
@@ -641,21 +733,33 @@ export class Uploader {
     return found;
   }
 
-  /** Sessions with something not yet uploaded that the rules capture. */
-  private queued(snapshot: RulesSnapshot): number {
+  /** Sessions with something not yet uploaded that the rules capture (up to where a pause
+   * stopped them), and how many of those, retractions included, wait to retry after a failure. */
+  private queued(snapshot: RulesSnapshot): { queued: number; retrying: number } {
     const state = readState(this.paths);
-    let n = 0;
+    let queued = 0;
+    let retrying = 0;
+    const count = (session: SessionState) => {
+      queued++;
+      if (session.next_attempt_at !== undefined && session.error?.permanent !== true) retrying++;
+    };
     for (const session of Object.values(state.sessions)) {
       if (session.retract === "pending") {
-        n++;
+        count(session);
         continue;
       }
       if (this.off(state, session) || !session.path) continue;
       const size = this.sizeOf(session.path);
       if (size === undefined || !this.pending(session, size)) continue;
-      if (this.decision(snapshot, session, placeOf(session.cwd), state).capture) n++;
+      const decision = this.decision(snapshot, session, placeOf(session.cwd), state);
+      if (!decision.capture && decision.frozen === undefined) continue;
+      const judged =
+        decision.frozen !== undefined && !session.frozen
+          ? { ...session, frozen: { at: "", offset: decision.frozen } }
+          : session;
+      if (this.pending(judged, size)) count(session);
     }
-    return n;
+    return { queued, retrying };
   }
 
   // --- uploading ---------------------------------------------------------------------------
@@ -790,6 +894,10 @@ export class Uploader {
       // Turned off (or forgotten) while it was being sent: stop; the retraction comes next.
       if (!session || this.off(current, session)) return { uploaded };
       const fileOffset = session.file_offset ?? 0;
+      // A session a pause stopped is never sent past where it stopped, whatever the reason for
+      // sending (a 409's whole resend, a moved transcript, a replace): read afresh every piece,
+      // so a pause that starts mid-session stops it between pieces.
+      const limit = sendLimit(session, size);
       // A transcript that moved (a later hook named another file) is not where the offsets
       // point: it goes whole, and the server's own state says what it extends (04).
       const moved = session.sent_path !== undefined && session.sent_path !== path;
@@ -801,12 +909,12 @@ export class Uploader {
         forceWhole ||
         moved ||
         !session.stored ||
-        size < fileOffset ||
+        limit < fileOffset ||
         !agent.chunkable ||
         replaceAgain ||
         rebuild !== undefined;
       const replacing = replace || replaceAgain;
-      if (!whole && fileOffset >= size) return { uploaded };
+      if (!whole && fileOffset >= limit) return { uploaded };
       // A path comes from a hook payload: send only a file the agent itself says is this
       // session's transcript, never whatever file a payload named. Chunks too: a later hook
       // can name another file for a session already stored.
@@ -822,7 +930,7 @@ export class Uploader {
         );
         return { uploaded, failed: true };
       }
-      const piece = this.piece(path, whole ? 0 : fileOffset, size, agent.encoding, whole);
+      const piece = this.piece(path, whole ? 0 : fileOffset, limit, agent.encoding, whole);
       if (!piece) return { uploaded };
 
       // The secret is kept before its hash is ever sent, so a crash cannot lose it.
@@ -898,6 +1006,9 @@ export class Uploader {
             await this.save(key, (s) => {
               s.file_offset = expected;
               s.server_offset = expected;
+              // The server already holds past where a pause stopped the session (a piece whose
+              // answer was lost): it keeps that, and nothing past it is sent.
+              if (s.frozen && s.frozen.offset < expected) s.frozen.offset = expected;
             });
           }
           continue;
@@ -942,6 +1053,9 @@ export class Uploader {
         delete s.error;
         delete s.failures;
         delete s.next_attempt_at;
+        // A pause that began while this piece was on its way stopped the session at what it had
+        // uploaded before; the server holds this piece too, so the stop moves to its end.
+        if (stored && s.frozen && s.frozen.offset < piece.end) s.frozen.offset = piece.end;
         if (stored) {
           s.sent_path = path;
           s.file_offset = piece.end;
@@ -959,7 +1073,7 @@ export class Uploader {
           // Nothing kept (filtered): the whole log goes again once the transcript grows.
           s.file_offset = 0;
           s.server_offset = 0;
-          s.held_at_size = size;
+          s.held_at_size = limit;
           delete s.sent_path;
           delete s.shipped;
           delete s.carried;
@@ -967,7 +1081,7 @@ export class Uploader {
         }
         if (rebuild) rebuilt(s, rebuild);
       });
-      if (!stored || piece.end >= size) return { uploaded };
+      if (!stored || piece.end >= limit) return { uploaded };
       replace = false;
       forceWhole = false;
     }

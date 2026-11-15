@@ -18,8 +18,11 @@
  * session the agent's environment names, else the one seen in this folder), for a folder
  * (`--path`, a `[[capture.paths]]` rule in the CLI config), or for everything (the CLI config's
  * `capture.enabled`). Turning a session off stops its uploads and retracts what was uploaded
- * (F9.7). `pause` holds every upload back for a while, or until `resume`; what sessions write
- * meanwhile goes up when it ends (a session is judged as a whole, when it is judged).
+ * (F9.7). `pause` stops sessions where they are (F9.5, revised 15 Nov 2026): every session
+ * running when it starts, or seen while it lasts, keeps what it uploaded and sends nothing more,
+ * ever, and a session started during it is not captured; nothing is retracted. `resume` (or the
+ * pause running out) lets new sessions be captured again; a stopped session stays stopped until
+ * `on --session` turns it on, which uploads all of it.
  *
  * `resend` sends sessions this machine uploaded again, whole, with `rebuild` (X4.9): the server
  * builds and reviews each again even when its log only extends what is stored, so a session an
@@ -37,19 +40,23 @@ import {
   type CaptureState,
   captureRules,
   decide,
+  endPause,
+  freeze,
   isPaused,
   otherFolders,
   placeOf,
+  readSpool,
   readState,
   rebuildKey,
   type SessionState,
   StateUnreadable,
   sessionKey,
-  sessionToggle,
   sessionWord,
   spoolCount,
+  stateFacts,
   subsessionKeys,
   updateState,
+  uploadedOffset,
   uploaderRunning,
   uploadId,
   within,
@@ -430,19 +437,23 @@ async function status(ctx: CommandContext, json: boolean, args: Args): Promise<n
   const snapshot = await captureRules(host, paths);
   const cwd = process.cwd();
   const paused = isPaused(state, now);
-  const judge = (folder: string | undefined, toggle?: SessionState["toggle"], seen?: string[]) =>
+  const judge = (
+    folder: string | undefined,
+    facts: ReturnType<typeof stateFacts>,
+    seen?: string[],
+  ) =>
     decide(
       {
         rules: snapshot.rules,
         ...(snapshot.error ? { rulesError: snapshot.error } : {}),
         place: placeOf(folder),
-        ...(toggle ? { toggle } : {}),
-        paused,
+        ...facts,
         ...(seen ? { seen: seen.map(placeOf) } : {}),
       },
       host.platform,
     );
-  const here = judge(cwd);
+  // A new session here: no toggle, nothing uploaded, so only the pause in force applies.
+  const here = judge(cwd, stateFacts(state, "", undefined, now));
   let session:
     | { agent: string; id: string; state?: SessionState; decision: ReturnType<typeof judge> }
     | undefined;
@@ -455,7 +466,7 @@ async function status(ctx: CommandContext, json: boolean, args: Args): Promise<n
       ...(known ? { state: known } : {}),
       decision: judge(
         known?.cwd ?? cwd,
-        sessionToggle(state, which.agent, known),
+        stateFacts(state, which.agent, known, now),
         otherFolders(known, known?.cwd ?? cwd),
       ),
     };
@@ -479,6 +490,8 @@ async function status(ctx: CommandContext, json: boolean, args: Args): Promise<n
   const service = await serviceInstalled(serviceContext(ctx, hookCommand())).catch(() => false);
   const queued = (state.uploader?.queued ?? 0) + spoolCount(paths);
   const running = uploaderRunning(paths, now);
+  // Sessions a pause stopped: they send nothing more until turned on (F9.5).
+  const stopped = stoppedCount(state);
   const recent = Object.entries(state.sessions)
     .sort(([, a], [, b]) => (b.last_seen ?? "").localeCompare(a.last_seen ?? ""))
     .slice(0, 5);
@@ -507,6 +520,7 @@ async function status(ctx: CommandContext, json: boolean, args: Args): Promise<n
         : {}),
       // A pause that ran out is still in the file until `resume`: it no longer applies.
       paused: paused && state.paused ? state.paused : null,
+      stopped,
       agents: installs,
       target: target ?? null,
       uploader: { running, queued, service, last_run: state.uploader?.last_run ?? null },
@@ -527,7 +541,12 @@ async function status(ctx: CommandContext, json: boolean, args: Args): Promise<n
       `  here (${printable(cwd)}): ${here.reason} (${here.level})`,
       ...(paused && state.paused
         ? [
-            `  ${style.warn("paused")} ${state.paused.until ? `until ${state.paused.until}` : "until seshi capture resume"}`,
+            `  ${style.warn("paused")} ${state.paused.until ? `until ${state.paused.until}` : "until seshi capture resume"}: sessions stop where they are; new ones are not captured`,
+          ]
+        : []),
+      ...(stopped > 0
+        ? [
+            `  ${style.warn("stopped")}: ${stopped} session${stopped === 1 ? "" : "s"} stopped by a pause send nothing more; seshi capture on --session <id> uploads one in full`,
           ]
         : []),
       `  uploads go to: ${target ? printable(target) : "nowhere yet (seshi login --server <url>)"}`,
@@ -563,34 +582,84 @@ async function pause(ctx: CommandContext, json: boolean, args: Args): Promise<nu
   }
   const { paths } = pathsOf(ctx);
   const now = new Date();
+  const at = now.toISOString();
   const until = ms === undefined ? undefined : new Date(now.getTime() + ms).toISOString();
+  // Sessions a hook named that the uploader has not taken in yet are running too.
+  const spooled = readSpool(paths).items.flatMap(({ entry }) =>
+    entry.kind === "capture" ? [entry] : [],
+  );
+  let stopped = 0;
   await updateState(paths, (state) => {
-    state.paused = { at: now.toISOString(), ...(until ? { until } : {}) };
+    // Pausing again while paused moves the end only: a session turned on since it began stays on.
+    const since = isPaused(state, now) && state.paused ? state.paused.at : at;
+    if (since === at) endPause(state, now);
+    state.paused = { at: since, ...(until ? { until } : {}) };
+    for (const entry of spooled) {
+      const key = sessionKey(entry.agent, entry.session_id);
+      state.sessions[key] ??= {
+        agent: entry.agent,
+        session_id: entry.session_id,
+        first_seen: entry.at,
+        ...(entry.transcript_path ? { path: entry.transcript_path } : {}),
+        ...(entry.cwd ? { cwd: entry.cwd } : {}),
+        ...(entry.parent_session_id ? { parent_session_id: entry.parent_session_id } : {}),
+      };
+    }
+    // F9.5 (revised 15 Nov 2026): every session running now stops where it is. It keeps what it
+    // uploaded, nothing is retracted, and nothing past that offset is ever sent. A session turned
+    // on during the pause being extended is the person's own choice, and stays on.
+    for (const session of Object.values(state.sessions)) {
+      if (session.frozen || session.toggle === "off") continue;
+      if (
+        session.toggle === "on" &&
+        session.toggled_at !== undefined &&
+        Date.parse(session.toggled_at) >= Date.parse(since)
+      ) {
+        continue;
+      }
+      freeze(session, at, uploadedOffset(session));
+    }
+    stopped = stoppedCount(state);
   });
   const style = await styleFor(ctx, { json });
-  // A pause holds uploads back; it does not take anything out. What sessions write meanwhile is
-  // in their transcripts and goes up once capture is on again (decisions are taken per session,
-  // when it is judged), so say so, and name what does keep a session out.
-  emit(ctx, json, { paused: true, until: until ?? null }, () => [
-    `${style.status("paused", "warn")}: nothing is uploaded ${until ? `until ${until}` : "until seshi capture resume"}.`,
-    "  What sessions write meanwhile is uploaded when the pause ends. To keep a session out, turn it off: seshi capture off --session <id>",
+  emit(ctx, json, { paused: true, until: until ?? null, stopped }, () => [
+    `${style.status("paused", "warn")}: sessions stop where they are ${until ? `until ${until}` : "until seshi capture resume"}.`,
+    `  ${stopped} session${stopped === 1 ? "" : "s"} keep${stopped === 1 ? "s" : ""} what was uploaded and send${stopped === 1 ? "s" : ""} nothing more, even after the pause; sessions started during it are not captured. Nothing is retracted.`,
+    "  To upload a stopped session in full: seshi capture on --session <id>",
   ]);
   return EXIT.ok;
 }
 
+/** Sessions a pause stopped that are not off anyway. */
+function stoppedCount(state: CaptureState): number {
+  return Object.values(state.sessions).filter((s) => s.frozen && s.toggle !== "off").length;
+}
+
 async function resume(ctx: CommandContext, json: boolean, _args: Args): Promise<number> {
   const { paths } = pathsOf(ctx);
+  const now = new Date();
   let was = false;
+  let stopped = 0;
   await updateState(paths, (state) => {
     was = state.paused !== undefined;
-    delete state.paused;
+    stopped = stoppedCount(state);
+    // Kept as an ended pause: a session that started during it stays off when first seen after.
+    endPause(state, now);
     return was;
   });
-  appendSpool(paths, { v: 1, kind: "wake", at: new Date().toISOString() });
+  appendSpool(paths, { v: 1, kind: "wake", at: now.toISOString() });
   await startUploader(ctx, paths);
   const style = await styleFor(ctx, { json });
-  emit(ctx, json, { paused: false, was_paused: was }, () => [
-    was ? `${style.status("resumed", "success")}: capture is on again` : "capture was not paused",
+  // Resuming does not undo the pause: the sessions it stopped stay stopped (F9.5).
+  emit(ctx, json, { paused: false, was_paused: was, stopped }, () => [
+    was
+      ? `${style.status("resumed", "success")}: sessions started from now on are captured`
+      : "capture was not paused",
+    ...(stopped > 0
+      ? [
+          `  ${stopped} session${stopped === 1 ? "" : "s"} a pause stopped stay${stopped === 1 ? "s" : ""} stopped; seshi capture on --session <id> uploads one in full`,
+        ]
+      : []),
   ]);
   return EXIT.ok;
 }
@@ -663,6 +732,7 @@ async function toggleSession(
   const key = sessionKey(agent, id);
   let retracting = false;
   let fresh = false;
+  let unfrozen = false;
   // A session turned off before any hook named its transcript (`/seshi capture off` as the
   // first prompt): find it now, so the toggle is kept as long as the transcript exists (F9.3)
   // and not forgotten as a session with nothing to show for it.
@@ -696,6 +766,12 @@ async function toggleSession(
           delete s.retract_error;
         }
         if ((s.generation ?? 0) > 0 && !s.stored) fresh = true;
+        // A session a pause stopped goes on from where it stopped, so the server ends up with
+        // all of it (F9.7), what it wrote while stopped included.
+        if (s.frozen) {
+          delete s.frozen;
+          unfrozen = true;
+        }
       }
     }
   });
@@ -717,11 +793,14 @@ async function toggleSession(
       : [
           `${style.status("on", "success")}: Session Capture is on for this session (${printable(agent)} ${printable(id)}).`,
           ...(fresh ? ["It is uploaded again from its start, as a new session."] : []),
+          ...(unfrozen
+            ? ["A pause had stopped it: all of it is uploaded now, what it wrote since included."]
+            : []),
         ];
   emit(
     ctx,
     json,
-    { agent, session_id: id, capture: which === "on", retracting, fresh },
+    { agent, session_id: id, capture: which === "on", retracting, fresh, unfrozen },
     () => lines,
   );
   return EXIT.ok;

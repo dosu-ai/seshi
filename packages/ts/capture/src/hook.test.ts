@@ -131,6 +131,51 @@ describe("runHook (F9.1)", () => {
     expect(spoolCount(paths)).toBe(0);
   });
 
+  it("hands a session seen during a pause to the uploader to stop, and nothing to upload", async () => {
+    const now = new Date("2026-11-01T00:00:00Z");
+    await updateState(paths, (s) => {
+      s.paused = { at: now.toISOString() };
+      s.sessions["fake:old"] = {
+        agent: "fake",
+        session_id: "old",
+        first_seen: "x",
+        frozen: { at: "x", offset: 10 },
+      };
+    });
+    const run = (id: string, at = now) =>
+      runHook({
+        agent,
+        event: "Stop",
+        payload: { id, cwd: dir, path: `/t/${id}.jsonl` },
+        host,
+        paths,
+        now: at,
+      });
+    const outcome = await run("new");
+    expect(outcome.spooled).toEqual([]);
+    expect(outcome.skipped[0]?.decision).toMatchObject({ level: "pause", frozen: 0 });
+    // One already stopped needs nothing more.
+    expect((await run("old")).skipped[0]?.decision).toMatchObject({ frozen: 10 });
+    expect(readSpool(paths).items.map((i) => i.entry)).toEqual([
+      {
+        v: 1,
+        kind: "paused",
+        at: now.toISOString(),
+        agent: "fake",
+        session_id: "new",
+        cwd: dir,
+        transcript_path: "/t/new.jsonl",
+      },
+    ]);
+    expect(spoolCount(paths)).toBe(0);
+    // Once the pause is over, a stopped session is still skipped; a new one is captured.
+    await updateState(paths, (s) => {
+      delete s.paused;
+    });
+    expect((await run("old")).skipped[0]?.decision).toMatchObject({ level: "pause" });
+    expect((await run("later")).spooled).toHaveLength(1);
+  });
+
   it("judges a session by every folder it was seen in, so leaving an excluded repo is not enough", async () => {
     mkdirSync(join(dir, "repo", ".git"), { recursive: true });
     mkdirSync(join(dir, "repo", ".seshi"));

@@ -13,14 +13,13 @@
 import {
   captureRules,
   decide,
-  isPaused,
   otherFolders,
   placeOf,
   readState,
   type StatusLine,
   sessionKey,
-  sessionToggle,
   spoolCount,
+  stateFacts,
   statusLine,
 } from "@seshi/capture/fast";
 import { EXIT } from "../cli/exit";
@@ -82,16 +81,15 @@ export async function run(ctx: CommandContext): Promise<number> {
   }
   const snapshot = await captureRules(host, paths);
   const known = key ? state?.sessions[key] : undefined;
-  const toggle = state && known ? sessionToggle(state, agent, known) : undefined;
   const decision = decide(
     {
       rules: snapshot.rules,
       ...(snapshot.error ? { rulesError: snapshot.error } : {}),
       place: placeOf(cwd),
-      ...(toggle ? { toggle } : {}),
-      // The folders the uploader judges the session by too, so the two never disagree.
+      // The toggle, pause and folders the uploader judges the session by too, so the two never
+      // disagree: a session a pause stopped shows ⏸ after the pause ends.
+      ...(state ? stateFacts(state, agent, known, new Date()) : {}),
       seen: otherFolders(known, cwd).map(placeOf),
-      paused: state ? isPaused(state, new Date()) : false,
     },
     host.platform,
   );
@@ -107,6 +105,7 @@ export async function run(ctx: CommandContext): Promise<number> {
         capturing: line.capturing,
         level: decision.level,
         reason: decision.reason,
+        ...(decision.frozen !== undefined ? { frozen_at: decision.frozen } : {}),
         problems: line.problems.map((p) => p.text),
       }),
     );

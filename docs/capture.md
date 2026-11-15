@@ -61,11 +61,14 @@ One decision function judges every session, the same for hooks, the sweep, the s
    repo, `--add-dir`) carries that work in its transcript, so it is not uploaded, and nothing
    more of a captured session is sent once it works in an excluded repo. What it uploaded
    before stays (rule changes do not retract).
-2. **A pause** (`seshi capture pause 2h`, or until `seshi capture resume`) holds every upload
-   back while it lasts. It does not keep anything out: what sessions write during it stays in
-   their transcripts and is uploaded when the pause ends, including sessions that started and
-   ended during it. To keep a session out, turn it off (`seshi capture off --session`), which
-   also retracts what it uploaded.
+2. **A pause** (`seshi capture pause 2h`, or until `seshi capture resume`) stops sessions where
+   they are. Every session running when it starts, or seen while it lasts, keeps what it has
+   uploaded and uploads nothing more, ever: not after the pause ends either. A session started
+   during the pause is not captured at all, even when it is first seen after the pause. Nothing
+   is retracted. Sessions started after the pause ends (or after `seshi capture resume`) are
+   captured as usual. `resume` does not restart a stopped session; `seshi capture on --session
+   <id>` does, and then all of it is uploaded, including what it wrote while stopped. (A session
+   turned on during a pause is not stopped by that pause.)
 3. **The most specific personal level decides**: the session's own toggle, then the longest
    matching folder rule (`[[capture.paths]]`), then the global `capture.enabled` (on by default
    once capture is installed).
@@ -80,8 +83,15 @@ seshi capture off --session         # this session (from inside the agent: the /
 seshi capture off --session <id> --agent codex
 seshi capture off --path ~/clients/acme
 seshi capture off                   # everything, for this user
+seshi capture pause 2h              # stop every session where it is; new ones are not captured
+seshi capture on --session <id>     # upload a session a pause stopped, all of it
 seshi capture status                # what applies here, and why
 ```
+
+How a pause differs from turning a session off: off retracts what the session uploaded; a pause
+keeps it on the server and sends nothing more. Under the hood, the state file records the offset
+each stopped session reached (`frozen`); every send of that session stops there, even a resend
+of the whole log the server asks for (after a `409`, a moved transcript or a `replace`).
 
 In Claude Code, `/seshi capture off`, `/seshi capture on` and `/seshi capture status` run
 these for the current session: seshi's SessionStart hook sets `SESHI_SESSION_ID` for the
@@ -99,7 +109,8 @@ Session Capture ◉ · upload failing
 Session Capture ⏸
 ```
 
-◉ means this session is being captured, ⏸ that it is not (off, paused or excluded); anything that
+◉ means this session is being captured, ⏸ that it is not (off, stopped by a pause, paused or
+excluded); anything that
 needs action follows a separator, at most two things. It reads only local files, never the
 network. Claude Code runs it as its status line; for Cursor and Codex, `seshi capture status`
 says the same and more (which rule decided, the queue, the last errors).
@@ -108,7 +119,11 @@ says the same and more (which rule decided, the queue, the last errors).
 
 Hooks only append a small file per event to the spool and exit, always with 0 and no output, in
 a few milliseconds (X3.3). The uploader (`seshi daemon`) is started by a hook when it is not
-running and stops after five idle minutes; one runs per machine. For each session it sends:
+running and stops after five idle minutes; one runs per machine. While uploads or retractions
+wait to retry (the server is down, the network is out), it is not idle: it keeps running and
+retrying for up to 30 minutes after its last successful upload or retraction, then stops; what
+is left waits, with its place kept, for the next hook to start it again (or for the service,
+`--service`). For each session it sends:
 
 - the whole log until the server holds a trace of it (a short session the session filter skips
   stays on the machine and is sent whole again once it grows; one whose first upload model
@@ -203,7 +218,7 @@ and wakes the uploader; `seshi capture status` shows them as `resending` until t
 | Where | What |
 |---|---|
 | `~/.local/state/seshi/` (`$XDG_STATE_HOME/seshi`; `%LOCALAPPDATA%\seshi` on Windows) | the capture folder, readable only by you |
-| `state.json` | toggles, pause, upload positions, retraction secrets, problems |
+| `state.json` | toggles, the pause and past pauses, where each paused session stopped, upload positions, retraction secrets, problems |
 | `spool/` | one small file per hook event: paths and ids, never transcript text |
 | `uploader.json` | the running uploader's process id and heartbeat |
 | `rules.json` | the capture rules as last read from the CLI config |
