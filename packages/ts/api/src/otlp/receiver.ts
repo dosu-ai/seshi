@@ -264,7 +264,8 @@ export function otlpTraces(instance: Instance, deps: ReceiverDeps) {
           const result = await instance.pipeline.submit(envelope, { onFailure: "throw" });
           if (result.status === "accepted" && result.rejected) {
             rejected += result.rejected;
-            message ??= "some spans could not be read (no start time)";
+            message ??=
+              "some spans could not be read (no start time, or ids that are not OTLP hex)";
           }
         } catch (err) {
           // This session's spans are refused (it was deleted, none could be read); the others
