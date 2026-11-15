@@ -44,7 +44,26 @@ export function openAccount(ctx: CommandContext): Account {
   const secrets =
     ctx.secrets ??
     (loaded.config.keychain ? defaultSecrets(dir) : new FileSecrets(join(dir, SECRETS_FILE)));
-  return { cli: loaded.config, cliFile, dir, home, env, logins: new Logins(dir, secrets), secrets };
+  const logins = new Logins(dir, secrets);
+  if (!loaded.config.keychain && !ctx.secrets) warnKeychainLogins(ctx, logins);
+  return { cli: loaded.config, cliFile, dir, home, env, logins, secrets };
+}
+
+/** With `keychain = false`, a login made earlier with the keychain cannot be read, and logout
+ * would delete only the file's copy, leaving the secrets in the keychain. Say so. */
+function warnKeychainLogins(ctx: CommandContext, logins: Logins): void {
+  let profiles: ReturnType<Logins["list"]>;
+  try {
+    profiles = logins.list();
+  } catch {
+    return; // An unreadable logins.json is reported by the command that reads it.
+  }
+  for (const profile of profiles) {
+    if (profile.stored_in !== "keychain") continue;
+    ctx.stderr(
+      `seshi: warning: keychain = false, but the login for ${profile.server} keeps its secrets in the OS keychain; run \`seshi logout\` with keychain = true to remove them, then sign in again`,
+    );
+  }
 }
 
 /** The server a command talks to: `--server`, else the CLI config's `server`; undefined when

@@ -43,6 +43,30 @@ describe("openAccount: where secrets go", () => {
     expect(openAccount(ctx({ SESHI_KEYCHAIN: "false" })).secrets).toBeInstanceOf(FileSecrets);
   });
 
+  it("warns when keychain = false hides a login whose secrets are in the keychain", () => {
+    mkdirSync(join(home, "config/seshi"), { recursive: true });
+    writeFileSync(
+      join(home, "config/seshi/logins.json"),
+      JSON.stringify({
+        schema: "seshi/logins/1",
+        logins: {
+          "https://a.example": { server: "https://a.example", mode: "key", stored_in: "keychain" },
+          "https://b.example": { server: "https://b.example", mode: "key", stored_in: "file" },
+        },
+      }),
+    );
+    const warnings: string[] = [];
+    const quiet: string[] = [];
+    openAccount({ ...ctx(), stderr: (line: string) => quiet.push(line) });
+    expect(quiet).toEqual([]);
+    openAccount({
+      ...ctx({ SESHI_KEYCHAIN: "false" }),
+      stderr: (line: string) => warnings.push(line),
+    });
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("https://a.example keeps its secrets in the OS keychain");
+  });
+
   it("a test's own store wins over either", () => {
     const memory = new MemorySecrets();
     expect(openAccount(ctx({ SESHI_KEYCHAIN: "false" }, memory)).secrets).toBe(memory);

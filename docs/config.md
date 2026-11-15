@@ -340,7 +340,9 @@ in the file is left as written. The credentials themselves are never in this fil
 the OS keychain, or `credentials.json` (0600) beside it where there is none, with the
 non-secret `logins.json` ([cli.md](cli.md#signing-in-f82)). `keychain = false`
 (`SESHI_KEYCHAIN=false`) skips the keychain and always uses that file: for a CI runner, a
-container or a headless machine whose keychain prompts or hangs instead of refusing.
+container or a headless machine whose keychain prompts or hangs instead of refusing. Run
+`seshi logout` before turning it off: a login made with the keychain cannot be read with
+`keychain = false`, and every command warns about it until it is removed.
 
 **Local mode** (X3.5): instead of `server`, a person who owns a bucket can point the CLI at a
 server config (the same `seshi.toml` format, with `[store]` and its keys), and the CLI runs the
