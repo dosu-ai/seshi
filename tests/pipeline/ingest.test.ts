@@ -331,6 +331,43 @@ describe("tombstone", () => {
     ]);
   });
 
+  it("leaves no raw part behind when it lands while a part is being stored", async () => {
+    await ingest({ store, owner: "acme", records: records("claude-basic"), metadata: meta, now });
+    let raced = false;
+    const racing = new Proxy(store, {
+      get(target, prop, receiver) {
+        if (prop !== "put") return Reflect.get(target, prop, receiver);
+        return async (key: string, body: Uint8Array, options?: object) => {
+          const put = await target.put(key, body, options);
+          if (!raced && key.includes("/raw.")) {
+            raced = true;
+            await tombstone({ store: target, owner: "acme", agent: "claude", session_id: "sess1" });
+          }
+          return put;
+        };
+      },
+    });
+    await expect(
+      putRaw({
+        store: racing,
+        owner: "acme",
+        agent: "claude",
+        session_id: "sess1",
+        part: 0,
+        format: "jsonl",
+        offset: 0,
+        length: 1,
+        bytes: new Uint8Array(gzipSync("x")),
+        now,
+      }),
+    ).rejects.toMatchObject({ code: "redacted" });
+    expect(raced).toBe(true);
+    const archive = archiveId("acme", "claude", "sess1");
+    expect((await store.list(keys.session("acme", archive))).keys).toEqual([
+      keys.metadata("acme", archive),
+    ]);
+  });
+
   it("removes trace and raw objects, marks the session redacted, and refuses re-ingest", async () => {
     const stored = await ingest({
       store,

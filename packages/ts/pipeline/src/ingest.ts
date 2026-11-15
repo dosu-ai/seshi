@@ -359,7 +359,7 @@ export async function putRaw(input: PutRawInput): Promise<PutRawResult> {
       ? input.withheld_calls
       : undefined;
   let stale: SessionMetadata["raw"] = [];
-  const update = await updateMetadata(store, owner, archive, (existing) => {
+  const pointer = updateMetadata(store, owner, archive, (existing) => {
     if (existing?.status === "redacted") {
       throw new IngestRejected("redacted", "session was redacted");
     }
@@ -393,6 +393,16 @@ export async function putRaw(input: PutRawInput): Promise<PutRawResult> {
     else delete next.withheld_calls;
     return next;
   });
+  let update: Awaited<typeof pointer>;
+  try {
+    update = await pointer;
+  } catch (err) {
+    // Tombstoned meanwhile: remove the part just written, as `ingest` removes its trace.
+    if (err instanceof IngestRejected && err.code === "redacted" && outcome === "written") {
+      await store.delete(keys.raw(owner, archive, part, format));
+    }
+    throw err;
+  }
   if (!update.written) return { status: "exists", part };
   // The pointer no longer lists them, so no reader looks for them any more.
   for (const r of stale) await store.delete(keys.raw(owner, archive, r.part, r.format));
