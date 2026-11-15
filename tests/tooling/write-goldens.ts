@@ -3,7 +3,8 @@
  * 1. every transcript in a `testdata/transcripts/` folder (each integration's, and ATIF's in
  *    `packages/ts/formats`) is normalized through this binary's formats and redacted, as the
  *    server would, and the records written to `<name>.records.json` in the `goldens/` folder
- *    beside it; every hand-written record set in `spec/testdata/records/` is copied into
+ *    beside it (with the LLM calls they name in `<name>.llm_calls.json`, for a transcript that
+ *    records them); every hand-written record set in `spec/testdata/records/` is copied into
  *    `spec/testdata/goldens/` as-is (edge cases no adapter produces);
  * 2. each record set is parsed and what came out (`content_hash`, events, the rest of the trace,
  *    or the rejection) is written to `<name>.expected.json` beside it.
@@ -20,7 +21,7 @@ import { basename, join } from "node:path";
 import { parseTrace, TrajectoryError } from "@seshi/model";
 import { normalizeTranscript } from "@seshi/pipeline";
 import { buildFormats } from "seshi/integrations";
-import { expectedOf } from "./goldens";
+import { expectedOf, llmCallsFile } from "./goldens";
 import { computeCase, redactionCases } from "./redaction-goldens";
 import { testdataDirs } from "./testdata";
 
@@ -48,6 +49,7 @@ for (const testdata of testdataDirs()) {
     });
     if (outcome.empty) throw new Error(`${file}: no conversation`);
     writeJson(goldens, `${name}.records.json`, outcome.records);
+    if (outcome.llm_calls) writeJson(goldens, llmCallsFile(name), outcome.llm_calls);
     names.push(name);
     console.log(`${name}: ${outcome.records.length} records from ${source}`);
   }
@@ -60,8 +62,12 @@ for (const testdata of testdataDirs()) {
 
   for (const name of names) {
     const set = JSON.parse(readFileSync(join(goldens, `${name}.records.json`), "utf8"));
+    const callsPath = join(goldens, llmCallsFile(name));
+    const llm_calls = existsSync(callsPath)
+      ? JSON.parse(readFileSync(callsPath, "utf8"))
+      : undefined;
     try {
-      const expected = expectedOf(parseTrace(set));
+      const expected = expectedOf(parseTrace(set, llm_calls ? { llm_calls } : {}));
       writeJson(goldens, `${name}.expected.json`, expected);
       console.log(`${name}: ${expected.content_hash.slice(0, 12)}`);
     } catch (err) {

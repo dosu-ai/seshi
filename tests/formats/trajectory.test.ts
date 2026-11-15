@@ -12,7 +12,11 @@ const isSource = (source: string) => FORMATS.has(source);
 const isChunkable = (source: string) => FORMATS.isChunkable(source);
 const SOURCES = FORMATS.sources;
 
-const RECORDS = golden<Record<string, unknown>[]>("claude-basic.records.json");
+/** The golden's records as trajectory-v1, which has no `llm_call` (the calls are the canonical
+ * trace's). */
+const RECORDS = golden<Record<string, unknown>[]>("claude-basic.records.json").map(
+  ({ llm_call: _, ...record }) => record,
+);
 const jsonl = (rows: unknown[]) => `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`;
 
 const GITHUB_TOKEN = "ghp_abcdefghijklmnopqrstuvwxyz012345";

@@ -14,7 +14,8 @@
   {
     "role": "assistant",
     "content": "Token is [redacted:github-token] here.",
-    "timestamp": "2026-09-01T00:00:05.000Z"
+    "timestamp": "2026-09-01T00:00:05.000Z",
+    "llm_call": "a1"
   },
   {
     "role": "assistant",
@@ -26,7 +27,8 @@
         "args": "{\"file_path\":\"/repo/app/auth.ts\"}"
       }
     ],
-    "timestamp": "2026-09-01T00:00:06.000Z"
+    "timestamp": "2026-09-01T00:00:06.000Z",
+    "llm_call": "a2"
   },
   {
     "role": "tool",

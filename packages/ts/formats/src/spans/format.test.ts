@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { asTranscript } from "../calls";
 import { FormatRegistry } from "../registry";
 import { genAiSpanAdapter, OTLP_GENAI, otlpGenAiFormat } from "./format";
 
@@ -46,14 +47,15 @@ describe("otlpGenAiFormat", () => {
   });
 
   it("reads an OTLP/JSON export as one session", () => {
-    const records = otlpGenAiFormat().normalize(JSON.stringify(DOC));
+    const { records, llm_calls } = asTranscript(otlpGenAiFormat().normalize(JSON.stringify(DOC)));
+    const call = (records[2] as { llm_call?: string }).llm_call;
     expect(records).toEqual([
       { role: "meta", source: "otlp-genai", model: "m" },
       { role: "user", content: "q", timestamp: "2026-11-01T10:00:00.000Z" },
-      // A log names no LLM calls (the format adapter returns records only): the span path
-      // keeps them.
-      { role: "assistant", content: "a", timestamp: "2026-11-01T10:00:01.000Z" },
+      // A log keeps the LLM calls the span path keeps.
+      { role: "assistant", content: "a", timestamp: "2026-11-01T10:00:01.000Z", llm_call: call },
     ]);
+    expect(llm_calls?.map((c) => c.id)).toEqual([call]);
   });
 
   it("is detected from an export's first key, and refuses what is not JSON", () => {

@@ -6,6 +6,7 @@
  * The types live here, in the lowest layer, because `@seshi/kit` and `@seshi/formats` sit on
  * the same layer and may not import each other (X3.2). */
 
+import type { LlmCall } from "./schemas/trace";
 import type { NormalizedRecord } from "./schemas/trajectory";
 import type { SpanAdapter } from "./spans";
 
@@ -40,6 +41,12 @@ export interface FormatDetection {
   record?: (row: JsonObject) => boolean;
 }
 
+/** A transcript's records with the LLM calls their `llm_call` fields name. */
+export interface NormalizedTranscript {
+  records: NormalizedRecord[];
+  llm_calls?: LlmCall[];
+}
+
 /** One transcript format: native transcript text to trajectory-v1 records, before redaction.
  *
  * `normalize` throws for a transcript it cannot read; an error with a string `code` keeps its
@@ -47,14 +54,19 @@ export interface FormatDetection {
  * conversation yet, which the registry reports as empty rather than as a failure). With `chunk`,
  * the transcript is the bytes of a log past a point already normalized: the result is that
  * chunk's records without a meta record, and a log cut at line boundaries must normalize, chunk
- * by chunk, to the records the whole log does. */
+ * by chunk, to the records the whole log does.
+ *
+ * An adapter whose transcripts record what each model call cost returns `NormalizedTranscript`:
+ * the records, each assistant or reasoning record naming its call in `llm_call`, and the calls
+ * (model, token usage, request id). Raw transcripts are not stored (X6.3), so what the adapter
+ * leaves out here is gone for good (X6.2). */
 export interface FormatAdapter {
   /** The format's name: the `agent` a client sends and what archive ids derive from. */
   readonly source: string;
   /** Whether a log in this format can arrive in chunks. */
   readonly chunkable: boolean;
   readonly detect?: FormatDetection;
-  normalize(transcript: string, chunk?: Chunk): NormalizedRecord[];
+  normalize(transcript: string, chunk?: Chunk): NormalizedRecord[] | NormalizedTranscript;
   /** For a format that also arrives as span sets (OTLP, Datadog): how its spans are grouped,
    * normalized and assembled (X4.2). A format without it takes logs only. */
   readonly spans?: SpanAdapter;

@@ -41,6 +41,7 @@ export type {
   FormatDetection,
   HeadValue,
   JsonObject,
+  NormalizedTranscript,
 } from "./format-adapter";
 export type {
   Caller,

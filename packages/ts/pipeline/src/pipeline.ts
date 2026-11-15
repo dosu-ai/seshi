@@ -560,11 +560,16 @@ export class Pipeline {
     }
     if (payload.text.trim() === "") throw new SessionRejected("empty", "transcript is empty");
     // The whole log's records do not depend on what is stored: normalize once.
-    const records = this.normalize(envelope.format, payload.text, envelope.session_key);
+    const { records, llm_calls } = this.normalize(
+      envelope.format,
+      payload.text,
+      envelope.session_key,
+    );
     return this.planned(envelope, auth, (run) =>
       this.whole(run, records, utf8Length(payload.text), {
         replace: envelope.replace === true,
         ...(retractSecret !== undefined ? { retract_secret: retractSecret } : {}),
+        ...(llm_calls ? { llm_calls } : {}),
       }),
     );
   }
@@ -610,20 +615,23 @@ export class Pipeline {
     }
   }
 
-  /** Stage 2 for a log: the adapter's records, unredacted. A log the adapter reads but finds no
-   * conversation in has none. */
+  /** Stage 2 for a log: the adapter's records, unredacted, and the LLM calls they name (redacted
+   * by `commit`). A log the adapter reads but finds no conversation in has none. */
   private normalize(
     format: string,
     text: string,
     sessionId: string,
     offset = 0,
-  ): NormalizedRecord[] {
+  ): { records: NormalizedRecord[]; llm_calls?: LlmCall[] } {
     try {
-      return this.formats.normalize({
+      const outcome = this.formats.normalize({
         source: format,
         transcript: text,
         ...(offset > 0 ? { chunk: { offset, session_id: sessionId } } : {}),
-      }).records;
+      });
+      return outcome.empty || !outcome.llm_calls
+        ? { records: outcome.records }
+        : { records: outcome.records, llm_calls: outcome.llm_calls };
     } catch (err) {
       if (err instanceof NormalizeError) {
         throw new SessionRejected(`normalize_${err.code}`, err.message);
@@ -655,7 +663,12 @@ export class Pipeline {
         throw new StalePlan();
       }
     };
-    const raw = this.normalize(envelope.format, text, envelope.session_key, offset);
+    const { records: raw, llm_calls } = this.normalize(
+      envelope.format,
+      text,
+      envelope.session_key,
+      offset,
+    );
     const redacted = this.redactor.redact(raw, session.withheld_calls ?? {});
     const bytes = offset + utf8Length(text);
     if (redacted.records.length === 0) {
@@ -686,6 +699,7 @@ export class Pipeline {
       normalized,
       withheld: redacted.withheld,
       summary: redacted.summary,
+      ...(llm_calls ? { llm_calls } : {}),
       project: envelope.project ?? session.project,
       branch: envelope.branch ?? session.branch,
       guard,

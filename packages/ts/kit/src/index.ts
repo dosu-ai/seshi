@@ -20,6 +20,7 @@ export type {
   FormatDetection,
   HeadValue,
   JsonObject,
+  NormalizedTranscript,
   ReceivedSpan,
   SpanAdapter,
   SpanAttribute,

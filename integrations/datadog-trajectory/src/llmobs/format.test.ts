@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { asTranscript } from "@seshi/formats";
 import type { HeadValue, NormalizedRecord, SpanPart } from "@seshi/model";
 import { describe, expect, it } from "vitest";
 import type { DatadogSpan } from "./api-types";
@@ -670,10 +671,14 @@ describe("the datadog-llmobs format", () => {
     ).toBe(false);
   });
 
-  it("reads one session's export whole, without LLM call references", () => {
-    const records = DATADOG_LLMOBS_FORMAT.normalize(fixture("generic-app.json"));
+  it("reads one session's export whole, with the LLM calls its records name", () => {
+    const { records, llm_calls } = asTranscript(
+      DATADOG_LLMOBS_FORMAT.normalize(fixture("generic-app.json")),
+    );
     expect(said(records.slice(1))).toContain("assistant:Order 1234 shipped yesterday.");
-    expect(records.some((r) => "llm_call" in r)).toBe(false);
+    const named = new Set(records.map((r) => (r as { llm_call?: string }).llm_call));
+    expect(llm_calls?.length).toBeGreaterThan(0);
+    for (const call of llm_calls ?? []) expect(named.has(call.id)).toBe(true);
   });
 
   it("leaves out spans of no session, and refuses an export of several", () => {
@@ -684,7 +689,7 @@ describe("the datadog-llmobs format", () => {
         (d: { attributes: { name: string } }) => d.attributes.name !== "nightly-eval",
       ),
     };
-    const records = DATADOG_LLMOBS_FORMAT.normalize(JSON.stringify(one));
+    const { records } = asTranscript(DATADOG_LLMOBS_FORMAT.normalize(JSON.stringify(one)));
     expect(said(records)).not.toContain("assistant:No risky commands.");
     const mixed = [...page.data, ...JSON.parse(fixture("generic-app.json")).data];
     expect(() => DATADOG_LLMOBS_FORMAT.normalize(JSON.stringify({ data: mixed }))).toThrow(

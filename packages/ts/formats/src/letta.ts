@@ -7,14 +7,25 @@
  * A whole transcript goes through the library's `normalizeTranscript`. A chunk goes through its
  * canonical API with a `partial` source context, whose records are the same trajectory-v1
  * records; the meta record it emits for a chunk at offset 0 is dropped, since a chunk's records
- * are never the session's meta. */
+ * are never the session's meta.
+ *
+ * The library keeps no token usage and only one model per session. An integration whose log
+ * records them reads them itself (`calls`), and the adapter names each call on the records it
+ * wrote (`attachCalls`), so the trace keeps what each turn cost and which model answered. */
 
 import {
   normalizeTranscript as letta,
   normalizeToCanonical as lettaCanonical,
   type TranscriptTrajectorySource,
 } from "@letta-ai/trajectory";
-import type { Chunk, FormatAdapter, FormatDetection, NormalizedRecord } from "@seshi/model";
+import type {
+  Chunk,
+  FormatAdapter,
+  FormatDetection,
+  NormalizedRecord,
+  NormalizedTranscript,
+} from "@seshi/model";
+import { attachCalls, type SourceCalls } from "./calls";
 
 export { NORMALIZER_VERSION as TRAJECTORY_VERSION } from "@letta-ai/trajectory";
 
@@ -31,6 +42,10 @@ export interface LettaAdapterOptions {
   prepare?: (transcript: string) => string;
   /** The library's records, adjusted; `transcript` is the one the caller gave, unprepared. */
   finish?: (records: NormalizedRecord[], transcript: string) => NormalizedRecord[];
+  /** The model calls the log records (model, token usage, request id) and which lines each
+   * wrote, read from the transcript the caller gave, unprepared, so that ids taken from where a
+   * line sits are the same whole or in chunks; for a chunk, `chunk` says where it sits. */
+  calls?: (transcript: string, chunk?: Chunk) => SourceCalls;
 }
 
 /** The library's records for a chunk: its canonical records' `record_json`, which is the
@@ -56,17 +71,18 @@ function lettaChunk(source: LettaSource, transcript: string, chunk: Chunk): Norm
 
 /** An adapter that runs `@letta-ai/trajectory` with the integration's fixups around it. */
 export function lettaAdapter(options: LettaAdapterOptions): FormatAdapter {
-  const { source, prepare, finish } = options;
+  const { source, prepare, finish, calls } = options;
   return {
     source,
     chunkable: options.chunkable ?? true,
     detect: options.detect,
-    normalize(transcript: string, chunk?: Chunk): NormalizedRecord[] {
+    normalize(transcript: string, chunk?: Chunk): NormalizedRecord[] | NormalizedTranscript {
       const prepared = prepare ? prepare(transcript) : transcript;
       const records = chunk
         ? lettaChunk(source, prepared, chunk)
         : letta({ source, transcript: prepared }).records;
-      return finish ? finish(records, transcript) : records;
+      const finished = finish ? finish(records, transcript) : records;
+      return calls ? attachCalls(finished, calls(transcript, chunk)) : finished;
     },
   };
 }

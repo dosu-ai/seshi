@@ -79,8 +79,8 @@ session's spans to 09's span assembler as the source's service account. A new sp
     `pickClaims` bounds them.
   - As a log (`seshi normalize`, a POST, an S3 object), a saved Export API answer
     (`{data, meta}`, detected by those two keys) of one session normalizes whole; spans of no
-    session are left out, an answer of several sessions is refused (`invalid_input`), LLM call
-    references are removed as for `otlp-genai`.
+    session are left out, an answer of several sessions is refused (`invalid_input`), and (since
+    17) the LLM calls are kept as on the span path.
 - **The poller** (`connector.ts`), `DATADOG_CONNECTOR` (`kind: "datadog"`), listed in the
   integration's `connectors`, so `buildInstance({ integrations })` schedules every enabled
   `datadog` source as `source:<id>`:

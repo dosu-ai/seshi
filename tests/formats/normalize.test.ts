@@ -175,6 +175,7 @@ describe("normalizeTranscript in chunks", () => {
     ["claude-basic.claude-code.jsonl", "claude-code"],
     ["claude-queued-input.claude-code.jsonl", "claude-code"],
     ["claude-task-notification.claude-code.jsonl", "claude-code"],
+    ["claude-usage.claude-code.jsonl", "claude-code"],
     ["codex-subagent-report.codex.jsonl", "codex"],
     ["codex-forked-subagent.codex.jsonl", "codex"],
     ["datadog-claude-session.datadog-trajectory.jsonl", "datadog-trajectory"],
@@ -250,5 +251,50 @@ describe("normalizeTranscript in chunks", () => {
     });
     expect(chunk.empty).toBeFalsy();
     expect(chunk.records).toHaveLength(1);
+  });
+
+  it("names a Codex call the same whole or in chunks; a head cut before its count names none", () => {
+    const log = read("codex-usage.codex.jsonl");
+    const session_id = "01a0ff74-0000-7ad0-83ee-000000000001";
+    const whole = normalizeTranscript({ source: "codex", transcript: log });
+    const withoutCall = (record: object) => {
+      const { llm_call: _, ...rest } = record as { llm_call?: string };
+      return rest;
+    };
+    const calls = (records: readonly object[]) =>
+      records.map((r) => (r as { llm_call?: string }).llm_call ?? null);
+    const lines = log.split("\n");
+    for (let i = 3; i < lines.length - 1; i++) {
+      const head = `${lines.slice(0, i).join("\n")}\n`;
+      const first = normalizeTranscript({ source: "codex", transcript: head });
+      // A head with no conversation yet is not a session's first upload.
+      if (first.empty) continue;
+      const rest = normalizeTranscript({
+        source: "codex",
+        transcript: lines.slice(i).join("\n"),
+        chunk: { offset: Buffer.byteLength(head), session_id },
+      });
+      const chunked = [...first.records, ...rest.records];
+      // The text is the whole log's at any cut…
+      expect(chunked.map(withoutCall)).toEqual(whole.records.map(withoutCall));
+      // …and every call a chunk names is the whole log's, with the same usage (a chunk that
+      // starts inside a turn has not seen the turn's model).
+      for (const part of [first, rest]) {
+        for (const call of part.empty ? [] : (part.llm_calls ?? [])) {
+          const same = (whole.empty ? [] : (whole.llm_calls ?? [])).find((c) => c.id === call.id);
+          expect(same).toMatchObject(call);
+          expect(call.usage).toEqual(same?.usage);
+        }
+      }
+      // Cut after a token count (between turns or calls): the same records exactly.
+      if (lines[i - 1]?.includes('"token_count"') && !lines[i - 1]?.includes('"info":null')) {
+        expect(chunked).toEqual(whole.records);
+      }
+      // Cut between a call's tool call and its count: the head cannot know the call yet.
+      if (i === 6) {
+        expect(calls(whole.records).slice(2, 4)).toEqual(["call@845", "call@845"]);
+        expect(calls(first.records).slice(2, 4)).toEqual([null, null]);
+      }
+    }
   });
 });

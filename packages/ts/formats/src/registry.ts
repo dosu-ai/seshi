@@ -12,8 +12,9 @@
  * Redaction is not this layer's: the pipeline passes it as `postprocess`, so that the registry
  * reports a chunk empty by what is left after it, as it always has. */
 
-import type { Chunk, FormatAdapter, NormalizedRecord } from "@seshi/model";
+import type { Chunk, FormatAdapter, LlmCall, NormalizedRecord } from "@seshi/model";
 import { VERSION } from "@seshi/model";
+import { asTranscript } from "./calls";
 import { detectFormat } from "./detect";
 import { TRAJECTORY_VERSION } from "./letta";
 
@@ -31,7 +32,9 @@ export const NORMALIZER = {
 const EMPTY_CONVERSATION_CODES = new Set(["missing_user_records", "missing_assistant_records"]);
 
 export type NormalizeOutcome =
-  | { records: NormalizedRecord[]; empty?: false }
+  /** `llm_calls`: the model calls the records' `llm_call` fields name, when the log records
+   * them. */
+  | { records: NormalizedRecord[]; llm_calls?: LlmCall[]; empty?: false }
   /** A log with no conversation in it. */
   | { records: []; empty: true };
 
@@ -106,10 +109,10 @@ export class FormatRegistry {
     try {
       const adapter = this.adapters.get(source);
       if (!adapter) throw new NormalizeError("unsupported_source", `no format named '${source}'`);
-      const raw = adapter.normalize(transcript, chunk);
+      const { records: raw, llm_calls } = asTranscript(adapter.normalize(transcript, chunk));
       const records = options.postprocess ? options.postprocess(raw) : raw;
       if (chunk && records.length === 0) return { records: [], empty: true };
-      return { records };
+      return llm_calls && llm_calls.length > 0 ? { records, llm_calls } : { records };
     } catch (err) {
       const code = (err as { code?: unknown } | null)?.code;
       if (typeof code === "string" && EMPTY_CONVERSATION_CODES.has(code)) {

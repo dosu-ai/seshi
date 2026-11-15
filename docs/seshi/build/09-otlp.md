@@ -218,9 +218,9 @@ service account. User docs: [docs/otlp.md](../../otlp.md).
     and repeats overwrite. It costs one PUT per span on arrival and one GET per span per
     publish.
 14. **An OTLP/JSON export sent as a log** (`POST /v1/sessions` with `agent: otlp-genai`, an S3
-    object, `seshi normalize`) is one session without LLM calls. The `FormatAdapter` contract
-    returns records only, so the records' `llm_call` references are removed rather than left
-    dangling, which the trace would refuse. Growing that contract (03's note) would keep them.
+    object, `seshi normalize`) is one session. Until 17 it had no LLM calls, since the
+    `FormatAdapter` contract returned records only; the contract now takes
+    `{ records, llm_calls }` and the export keeps the calls the span path keeps.
 
 ## Still to check
 

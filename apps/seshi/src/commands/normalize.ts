@@ -6,7 +6,9 @@
  *   seshi normalize [--agent <format>] [--json] [<file> | -]
  *
  * Without `--agent` the format is detected from the transcript. Out: one record per line
- * (JSON Lines), or with `--json` one document `{ agent, records }`. Exit 4 (`notFound`) for a
+ * (JSON Lines), or with `--json` one document `{ agent, records, llm_calls? }`, where
+ * `llm_calls` are the model calls (model, token usage) the records' `llm_call` fields name, for
+ * a log that records them. Exit 4 (`notFound`) for a
  * file that is not there, 1 for a transcript the adapter cannot read. */
 
 import { parseArgs } from "node:util";
@@ -68,15 +70,18 @@ export async function run(ctx: CommandContext): Promise<number> {
     );
   }
   let records: unknown[];
+  let calls: unknown[] | undefined;
   try {
     const outcome = normalizeTranscript(formats, { source: agent, transcript });
     if (outcome.empty) ctx.stderr("seshi: no conversation in this transcript");
     records = outcome.records;
+    calls = outcome.empty ? undefined : outcome.llm_calls;
   } catch (err) {
     if (err instanceof NormalizeError) return fail(ctx, json, EXIT.failure, err.code, err.message);
     throw err;
   }
-  if (json) ctx.stdout(JSON.stringify({ agent, records }, null, 2));
-  else for (const record of records) ctx.stdout(JSON.stringify(record));
+  if (json) {
+    ctx.stdout(JSON.stringify({ agent, records, ...(calls ? { llm_calls: calls } : {}) }, null, 2));
+  } else for (const record of records) ctx.stdout(JSON.stringify(record));
   return EXIT.ok;
 }

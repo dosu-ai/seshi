@@ -437,7 +437,10 @@ describe("POST /otlp/v1/traces", () => {
       "user",
       "assistant",
     ]);
-    expect(stored.llm_calls).toBeUndefined();
+    // The LLM calls the spans name are kept as on the span path (X6.2).
+    expect(stored.llm_calls?.length).toBeGreaterThan(0);
+    const named = new Set(stored.records.map((r) => (r as { llm_call?: string }).llm_call));
+    for (const call of stored.llm_calls ?? []) expect(named.has(call.id)).toBe(true);
   });
 
   it("answers garbage with 400 in the request's encoding", async () => {

@@ -117,8 +117,8 @@ generated from them. The per-bucket `letta`/`otlp` choice (`store.format`) is go
   `writeDropped` / `writeFailed`; prune with `pruneRecords` and `config.records.*`. Dropping
   raw means removing `putRaw`, `raw`/`raw_format` from the metadata schema and the raw key.
   Adapters can now return what raw used to keep: put `llm_call`/`id`/`duration_ms` on records
-  and pass `llm_calls` to `ingest` (the `FormatAdapter` contract still returns records only;
-  extend it, not the trace).
+  and pass `llm_calls` to `ingest` (the `FormatAdapter` contract returns records, or since
+  17 `{ records, llm_calls }`).
 - **05 (auth)**: token records are `TokenRecord` in `@seshi/store` (`[key: string]: unknown`
   for extra fields); refine the shape there. Writer kinds are `CallerKind` in
   `spec/schemas/common.schema.json`; owner ids with `@`/`+`/`svc:` (X5.8) need `assertOwner`
@@ -175,9 +175,11 @@ generated from them. The per-bucket `letta`/`otlp` choice (`store.format`) is go
   missing key with 404 (treated as done) or 412 is also unverified.
 - The live S3 test (`tests/store/s3-live.test.ts`) gained a conditional-write case but was not
   run (no endpoint here); CI runs it.
-- No adapter fills `llm_calls`, record ids or durations yet; the format and pipeline carry them
-  (tests feed them directly). Claude Code's usage, Codex token counts and OTLP spans are the
-  first candidates.
+- ~~No adapter fills `llm_calls`~~ (resolved in 17): `FormatAdapter.normalize` may return
+  `{ records, llm_calls }`; Claude Code (`claude-calls.ts`: model, usage, request id and stop
+  reason per request) and Codex (`codex-calls.ts`: each `token_count` and the turn's model) fill
+  them, and the OTLP and Datadog exports read as a log keep theirs. Record ids and durations
+  from logs are still not filled.
 - Dosu's backend reads the bucket directly: it must accept `seshi/trace/1` objects (a superset
   of the letta object with a new schema id) or read through the API with `?format=letta`.
 - `metadata.redaction` is filled only when a caller passes counts; 07 computes rule-set hashes

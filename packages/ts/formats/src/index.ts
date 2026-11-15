@@ -15,6 +15,7 @@ export {
   unsupportedAtifVersion,
   withAtifDetails,
 } from "./atif";
+export { asTranscript, attachCalls, type CallSite, isoTimestamp, type SourceCalls } from "./calls";
 export { detectFormat } from "./detect";
 export {
   type LettaAdapterOptions,

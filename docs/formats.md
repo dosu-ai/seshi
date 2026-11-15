@@ -120,7 +120,11 @@ Every input is stored in one canonical format, `seshi/trace/1`
 ([`spec/schemas/trace.schema.json`](../spec/schemas/trace.schema.json), X6.2): the
 trajectory-v1 records, their events and content hash, plus what a raw transcript used to keep:
 the model and token usage per LLM call, record ids, tool call ids and timings, and where the
-data came from. The layout it is stored in (immutable content-addressed traces, one pointer per
+data came from. The model and token usage come from what each source records: a Claude Code
+transcript's `message.model` and `message.usage` per request, a Codex rollout's `turn_context`
+model and `token_count` per model response, an OTLP or Datadog span's usage attributes. A
+Codex chunk cut between a response and its `token_count` leaves that response's records
+without a call. The layout it is stored in (immutable content-addressed traces, one pointer per
 session, an append-only change feed) is [`spec/layout.md`](../spec/layout.md).
 
 Other formats are rendered on read, by `GET /v1/sessions/:agent/:id/trace?format=` and

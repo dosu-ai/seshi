@@ -38,5 +38,15 @@
       "tool_call_id": "toolu_01AbCdEfGhJkLmNpQr",
       "tool_name": "Read"
     }
+  ],
+  "llm_calls": [
+    {
+      "id": "a1",
+      "model": "claude-x"
+    },
+    {
+      "id": "a2",
+      "model": "claude-x"
+    }
   ]
 }

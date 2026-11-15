@@ -39,14 +39,12 @@ describe("the Claude Platform integration", () => {
   it("assembles a Managed Agents session into its conversation", () => {
     const groups = spansOf("managed-agents-session");
     const parts = groups.flatMap((g) => g.spans.map((sp) => adapter.normalize(sp, g.resource)));
-    const { records } = adapter.assemble(parts, { source: "otlp-genai" });
-    // Read as one document (a log), it says the same, without the LLM calls a log cannot carry.
-    expect(OTLP_GENAI_FORMAT.normalize(text("managed-agents-session"))).toEqual(
-      records.map((r) => {
-        const { llm_call: _call, ...rest } = r as typeof r & { llm_call?: string };
-        return rest;
-      }),
-    );
+    const { records, llm_calls } = adapter.assemble(parts, { source: "otlp-genai" });
+    // Read as one document (a log), it says the same, LLM calls included.
+    expect(OTLP_GENAI_FORMAT.normalize(text("managed-agents-session"))).toEqual({
+      records,
+      llm_calls,
+    });
     expect(records.map((r) => r.role)).toEqual([
       "meta",
       "system",

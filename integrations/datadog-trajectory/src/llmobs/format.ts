@@ -33,6 +33,7 @@ import type {
   FormatAdapter,
   LlmCall,
   NormalizedRecord,
+  NormalizedTranscript,
   ReceivedSpan,
   SpanAdapter,
   SpanPart,
@@ -644,7 +645,7 @@ export const DATADOG_LLMOBS_FORMAT: FormatAdapter = {
     document: (head) => head.get("data")?.kind === "array" && head.get("meta")?.kind === "object",
   },
   spans: DATADOG_SPANS,
-  normalize(transcript: string): NormalizedRecord[] {
+  normalize(transcript: string): NormalizedTranscript {
     let value: unknown;
     try {
       value = JSON.parse(transcript);
@@ -676,12 +677,8 @@ export const DATADOG_LLMOBS_FORMAT: FormatAdapter = {
         // As above.
       }
     }
-    // A log carries records only (the format adapter contract): the LLM calls the span path
-    // keeps are left out here, and with them the records' references to them.
-    return assembleDatadogParts(parts, { source: DATADOG_LLMOBS }).records.map((record) => {
-      if (!("llm_call" in record)) return record;
-      const { llm_call: _call, ...rest } = record as NormalizedRecord & { llm_call?: string };
-      return rest as NormalizedRecord;
-    });
+    // The LLM calls the span path keeps, kept here too.
+    const { records, llm_calls } = assembleDatadogParts(parts, { source: DATADOG_LLMOBS });
+    return llm_calls.length > 0 ? { records, llm_calls } : { records };
   },
 };

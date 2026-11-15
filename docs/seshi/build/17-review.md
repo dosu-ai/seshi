@@ -238,6 +238,27 @@ what changed.
   says so. Test: plist and unit carry the paths, leave out `SESHI_USER` and note it; Windows
   notes the agent folder and the setting.
 
+- **coverage, high** (reported high, verifiers split high/medium): log adapters dropped token
+  usage and the model of each turn, and with raw not stored (X6.3) that was lost for good
+  (X6.2). `@letta-ai/trajectory` keeps neither, and `FormatAdapter` returned records only, so a
+  Claude Code session from hooks, an upload or S3 stored its text and one model in the meta
+  record. The contract now also takes `{ records, llm_calls }` (the registry, the pipeline's
+  whole and chunk paths and `seshi normalize --json` carry the calls; `commit` redacts them).
+  `lettaAdapter` takes a `calls` reader and names each call on the assistant and reasoning
+  records written at that moment (`attachCalls`; an ambiguous moment names none). Claude Code
+  reads `message.model`, `message.usage`, `stop_reason` and `requestId` per request (made-up
+  `<synthetic>` replies are no call); Codex reads each `token_count`'s `last_token_usage` and
+  the turn's model, a call named `call@<byte offset>` so whole and chunked logs agree (a chunk
+  cut between a response and its count leaves the head's records without a call). The OTLP
+  and Datadog exports read as a log keep their calls too (09 deviation 14). Goldens:
+  `claude-usage`, `codex-usage`, with `<name>.llm_calls.json`, and `goldens.test.ts` now checks
+  every transcript still normalizes to its golden. Tests: the pipeline stores both sessions'
+  calls whole and in chunks; Codex chunk cuts.
+- **coverage, test only** (found while fixing): `uploader.test.ts`'s "seen in a repo that
+  turns capture off" spooled two entries in one millisecond, which the spool orders by a
+  random suffix, so it failed about one run in six. Its entries are now spooled a millisecond
+  apart.
+
 ## Not fixed
 
 - **ingest, medium** (split vote, judged a documented deviation): a change entry is lost when

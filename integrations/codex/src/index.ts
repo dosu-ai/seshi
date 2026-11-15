@@ -2,15 +2,18 @@
  * history and subagent report fixups in `codex-rollout.ts` around it. A forked rollout's
  * inherited history is cut by what its `session_meta` says; a chunk past the rollout's head
  * never holds any of it, since a session has a head only once the subagent's own records,
- * which come after, were stored. */
+ * which come after, were stored. Each model call's model and token usage, which the library
+ * drops, are read by `codex-calls.ts`. */
 
 import { lettaAdapter } from "@seshi/formats";
 import { defineIntegration, type FormatAdapter } from "@seshi/kit";
 import type { JsonObject } from "@seshi/model";
 import { CODEX_CAPTURE } from "./capture";
+import { codexCalls } from "./codex-calls";
 import { subagentReportsAsObservations, withoutInheritedHistory } from "./codex-rollout";
 
 export { CODEX_CAPTURE } from "./capture";
+export { codexCalls } from "./codex-calls";
 export { subagentReportsAsObservations, withoutInheritedHistory } from "./codex-rollout";
 
 const isObject = (value: unknown): value is JsonObject =>
@@ -28,6 +31,7 @@ export const CODEX_FORMAT: FormatAdapter = lettaAdapter({
   },
   prepare: withoutInheritedHistory,
   finish: (records) => subagentReportsAsObservations(records),
+  calls: codexCalls,
 });
 
 export const codex = defineIntegration({

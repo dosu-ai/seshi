@@ -33,7 +33,12 @@ import { golden } from "../tooling/testdata";
  * folders (the cross-language ones in spec/, Claude Code's in its integration), so it lives in
  * tests/ (X3.6). */
 
-const records = (name: string): NormalizedRecord[] => golden(`${name}.records.json`);
+/** A golden's records without the LLM calls they name: these tests are not about calls (the
+ * canonical trace's tests add their own). */
+const records = (name: string): NormalizedRecord[] =>
+  golden<Record<string, unknown>[]>(`${name}.records.json`).map(
+    ({ llm_call: _, ...record }) => record as unknown as NormalizedRecord,
+  );
 const expectedHash = (name: string): string =>
   golden<{ content_hash: string }>(`${name}.expected.json`).content_hash;
 

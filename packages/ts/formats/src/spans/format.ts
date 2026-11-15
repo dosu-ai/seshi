@@ -5,7 +5,7 @@
 
 import type {
   FormatAdapter,
-  NormalizedRecord,
+  NormalizedTranscript,
   ReceivedSpan,
   SpanAdapter,
   SpanPart,
@@ -88,7 +88,7 @@ export function otlpGenAiFormat(options: SpanFormatOptions = {}): FormatAdapter 
     chunkable: false,
     detect: { document: (head) => head.has("resourceSpans") || head.has("resource_spans") },
     spans,
-    normalize(transcript: string): NormalizedRecord[] {
+    normalize(transcript: string): NormalizedTranscript {
       let value: unknown;
       try {
         value = JSON.parse(transcript);
@@ -98,13 +98,9 @@ export function otlpGenAiFormat(options: SpanFormatOptions = {}): FormatAdapter 
         });
       }
       const { groups } = readExportRequest(value);
-      // A log carries records only (the format adapter contract), so the LLM calls the span
-      // path keeps are left out here, and with them the records' references to them.
-      return spans.assemble(partsOf(spans, groups), { source }).records.map((record) => {
-        if (!("llm_call" in record)) return record;
-        const { llm_call: _call, ...rest } = record as NormalizedRecord & { llm_call?: string };
-        return rest as NormalizedRecord;
-      });
+      // The LLM calls the span path keeps, kept here too.
+      const { records, llm_calls } = spans.assemble(partsOf(spans, groups), { source });
+      return llm_calls.length > 0 ? { records, llm_calls } : { records };
     },
   };
 }

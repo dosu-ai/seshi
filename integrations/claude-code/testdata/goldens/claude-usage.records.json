@@ -1,0 +1,50 @@
+[
+  {
+    "role": "meta",
+    "source": "claude-code",
+    "cwd": "/repo/app",
+    "git_branch": "main",
+    "model": "claude-opus-9"
+  },
+  {
+    "role": "user",
+    "content": "List the files, then say done.",
+    "timestamp": "2026-09-02T00:00:00.000Z"
+  },
+  {
+    "role": "assistant",
+    "content": "Listing them.",
+    "timestamp": "2026-09-02T00:00:01.000Z",
+    "llm_call": "req_011CUsage0001"
+  },
+  {
+    "role": "assistant",
+    "content": null,
+    "tool_calls": [
+      {
+        "id": "toolu_01Usage0001",
+        "name": "Bash",
+        "args": "{\"command\":\"ls\"}"
+      }
+    ],
+    "timestamp": "2026-09-02T00:00:02.000Z",
+    "llm_call": "req_011CUsage0001"
+  },
+  {
+    "role": "tool",
+    "tool_call_id": "toolu_01Usage0001",
+    "content": "a.txt",
+    "timestamp": "2026-09-02T00:00:03.000Z"
+  },
+  {
+    "role": "assistant",
+    "content": "Done: a.txt",
+    "timestamp": "2026-09-02T00:00:04.000Z",
+    "llm_call": "req_011CUsage0002"
+  },
+  {
+    "role": "assistant",
+    "content": "API Error: overloaded",
+    "timestamp": "2026-09-02T00:00:05.000Z"
+  }
+]
