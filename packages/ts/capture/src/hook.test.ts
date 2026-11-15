@@ -216,6 +216,13 @@ describe("the rules cache", () => {
     };
     expect((await captureRules({ ...host, env }, paths)).error).toBeUndefined();
   });
+
+  it("never serves one environment's config error to another", async () => {
+    cliConfig("[capture]\nenabled = true\n");
+    const typo = { ...host.env, SESHI_SERVR: "https://x" };
+    expect((await captureRules({ ...host, env: typo }, paths)).error).toBeDefined();
+    expect((await captureRules(host, paths)).error).toBeUndefined();
+  });
 });
 
 describe("the status line's words (B1.6)", () => {

@@ -1,13 +1,13 @@
 /** The capture rules from the CLI config (F9.5), with the same loader every command uses (F1.4),
  * but without paying for it on every hook. Loading and checking the config costs a hook tens of
  * milliseconds (the schema library), so the rules are kept in `rules.json` with what they were
- * read from: the config file's path, size and modification time, and the `SESHI_CAPTURE__*`
+ * read from: the config file's path, size and modification time, and the `SESHI_*` setting
  * variables. A hook reads the cache when all of those still match, and loads the config again
  * only when one changed. The uploader, the sweep and the status line go through the same
  * function, so they all judge with the same rules (F9.3). */
 
 import { realpathSync, statSync } from "node:fs";
-import { cliConfigPath } from "@seshi/config/paths";
+import { cliConfigPath, NOT_SETTINGS_ENV } from "@seshi/config/paths";
 import type { CaptureHost } from "@seshi/kit";
 import { expandTilde } from "@seshi/kit";
 import { readText, writePrivateFile } from "./files";
@@ -47,9 +47,12 @@ function keyOf(host: CaptureHost): CacheKey {
     size = stat.size;
     mtime = stat.mtimeMs;
   } catch {}
+  // Every `SESHI_*` setting, not only the capture ones: the strict loader refuses an unknown or
+  // bad one, and an error cached under a key without it would stop capture in every shell
+  // until the config file changed. Capture's own variables (the session id) are not settings.
   const env: Record<string, string> = {};
   for (const [name, value] of Object.entries(host.env)) {
-    if ((name.startsWith("SESHI_CAPTURE__") || name === "SESHI_THEME") && value !== undefined) {
+    if (name.startsWith("SESHI_") && !NOT_SETTINGS_ENV.includes(name) && value !== undefined) {
       env[name] = value;
     }
   }
