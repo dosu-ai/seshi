@@ -769,6 +769,43 @@ describe("span sets (X4.2)", () => {
     expect(metadata?.owner_basis).toBe("service");
     expect(keys.metadata("svc-console", archive)).toContain(archive);
   });
+
+  it("redacts what an assembled session's LLM calls say, and counts it (F2)", async () => {
+    const acme = validatePack(
+      { id: "acme", rules: [{ id: "acme-key", pattern: "ACME-\\d{4}" }] },
+      { source: "acme.toml" },
+    );
+    const p = pipeline({ redaction: compileRuleSet({ packs: [acme] }) });
+    const records = formats.normalize({ source: "trajectory", transcript: HEAD }).records;
+    const last = records.at(-1) as Record<string, unknown>;
+    last.llm_call = "c1";
+    const stored = await p.publishAssembled({
+      envelope: spans(),
+      records,
+      llm_calls: [
+        {
+          id: "c1",
+          model: "m",
+          error: "401: key ACME-1234 revoked",
+          parameters: { user: "ACME-5678", temperature: 0 },
+        },
+      ],
+    });
+    expect(stored.status).toBe("stored");
+    const archive = archiveId("svc-console", "trajectory", "sesn_1");
+    const metadata = await readMetadata(store, "svc-console", archive);
+    expect(metadata?.redaction?.counts).toEqual({ "acme-key": 2 });
+    const trace = await getTrace(store, "svc-console", archive, metadata?.head as string);
+    expect(JSON.stringify(trace)).not.toContain("ACME-");
+    expect(trace?.llm_calls).toEqual([
+      {
+        id: "c1",
+        model: "m",
+        error: "401: key [redacted:acme-key] revoked",
+        parameters: { user: "[redacted:acme-key]", temperature: 0 },
+      },
+    ]);
+  });
 });
 
 describe("writers racing on one session", () => {

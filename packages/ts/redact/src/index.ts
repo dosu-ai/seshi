@@ -49,7 +49,13 @@ export {
 } from "./pack";
 export { redactRaw } from "./raw";
 export { redactRecords } from "./records";
-export { type RecordRedaction, type Redactor, ruleRedactor, ruleSetHash } from "./redactor";
+export {
+  type RecordRedaction,
+  type Redactor,
+  redactLlmCalls,
+  ruleRedactor,
+  ruleSetHash,
+} from "./redactor";
 export {
   applyRules,
   parseRedactionConfig,

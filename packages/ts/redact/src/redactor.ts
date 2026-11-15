@@ -20,7 +20,7 @@
  * ran is summarized as the rule set's hash and the matches by rule id (F2.3), never what
  * matched. */
 
-import type { NormalizedRecord, RedactionSummary } from "@seshi/model";
+import type { LlmCall, NormalizedRecord, RedactionSummary } from "@seshi/model";
 import type { AppliesTo } from "./pack";
 import { bump, type Counts, compileRuleSet, type RuleSet } from "./ruleset";
 import { classifyCall, trimSensitiveInput, type WithheldCalls } from "./sensitive";
@@ -148,4 +148,42 @@ export function ruleRedactor(rules: RuleSet = compileRuleSet()): Redactor {
       return { text: rules.redactString(text, field, counts), counts };
     },
   };
+}
+
+/** The free text an LLM call carries (`error`, and the string values of `parameters`) through
+ * the redactor's `redactText`, as `text`. Ids, model, provider, stop reason and timing are
+ * structural and stay. Calls with nothing to redact are returned as they are; a redactor without
+ * `redactText` (a test fake) leaves them all. `counts` are by rule id, for the session's summary. */
+export function redactLlmCalls(
+  redactor: Redactor,
+  calls: readonly LlmCall[] | undefined,
+): { calls: LlmCall[] | undefined; counts: Record<string, number> } {
+  const counts: Counts = {};
+  if (!calls || calls.length === 0 || !redactor.redactText) {
+    return { calls: calls ? [...calls] : undefined, counts };
+  }
+  const text = (value: string): string => {
+    const out = redactor.redactText?.(value, "text") ?? { text: value, counts: {} };
+    for (const [id, n] of Object.entries(out.counts)) bump(counts, id, n);
+    return out.text;
+  };
+  const redacted = calls.map((call) => {
+    let next = call;
+    if (typeof call.error === "string") {
+      const error = text(call.error);
+      if (error !== call.error) next = { ...next, error };
+    }
+    if (call.parameters) {
+      let changed = false;
+      const parameters: NonNullable<LlmCall["parameters"]> = {};
+      for (const [key, value] of Object.entries(call.parameters)) {
+        const v = typeof value === "string" ? text(value) : value;
+        if (v !== value) changed = true;
+        parameters[key] = v;
+      }
+      if (changed) next = { ...next, parameters };
+    }
+    return next;
+  });
+  return { calls: redacted, counts };
 }

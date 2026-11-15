@@ -51,7 +51,13 @@ import {
   VERSION,
   type Visibility,
 } from "@seshi/model";
-import { type RedactionRules, type Redactor, redactionRules, ruleRedactor } from "@seshi/redact";
+import {
+  type RedactionRules,
+  type Redactor,
+  redactionRules,
+  redactLlmCalls,
+  ruleRedactor,
+} from "@seshi/redact";
 import {
   archiveId,
   ensureLayout,
@@ -258,6 +264,17 @@ function callsFor(
   );
   const kept = calls.filter((c) => named.has(c.id));
   return kept.length > 0 ? kept : undefined;
+}
+
+/** `summary` with `extra` counts added. */
+function withCounts(
+  summary: RedactionSummary,
+  extra: Readonly<Record<string, number>>,
+): RedactionSummary {
+  if (Object.keys(extra).length === 0) return summary;
+  const counts = { ...summary.counts };
+  for (const [rule, n] of Object.entries(extra)) counts[rule] = (counts[rule] ?? 0) + n;
+  return { ...summary, counts };
 }
 
 /** One envelope on its way through: who, whose, which session, as stored when read. */
@@ -712,6 +729,9 @@ export class Pipeline {
       }
       write = [...plan.write.slice(0, lead), ...decision.records];
     }
+    // An LLM call's free text (its error, string parameters) is redacted like the records (F2).
+    const calls = redactLlmCalls(this.redactor, callsFor(write, plan.llm_calls));
+    const summary = withCounts(plan.summary, calls.counts);
 
     const result = await ingest({
       store: this.store,
@@ -735,8 +755,8 @@ export class Pipeline {
       client: this.client,
       now: this.now,
       limits: this.limits,
-      llm_calls: callsFor(write, plan.llm_calls),
-      redaction: plan.summary,
+      llm_calls: calls.calls,
+      redaction: summary,
       ...this.context(run),
     });
     const note = "note" in decision ? decision.note : undefined;
