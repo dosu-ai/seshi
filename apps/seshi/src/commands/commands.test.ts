@@ -19,6 +19,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { EXIT } from "../cli/exit";
 import { INTEGRATIONS } from "../integrations";
 import { main } from "../main";
+import { healthUrl, listenSetting } from "./healthcheck";
 import { COMMANDS } from "./index";
 
 let dir: string;
@@ -418,5 +419,26 @@ describe("seshi healthcheck", () => {
       EXIT.unavailable,
     );
     expect((await seshi(["healthcheck", "--bogus"])).code).toBe(EXIT.usage);
+  });
+
+  it("asks where serve listens: env, else the TOML file serve reads, else :7200", () => {
+    const files: Record<string, string> = {
+      "/etc/seshi/seshi.toml": '[server]\nlisten = "0.0.0.0:8080"\n',
+      "/custom.toml": '[server]\nlisten = "10.0.0.5:9000"\n[store]\nurl = "file:///x"\n',
+      "/broken.toml": "not = [toml",
+    };
+    const read = (path: string) => files[path];
+    expect(listenSetting({ SESHI_SERVER__LISTEN: ":7300" }, undefined, read)).toBe(":7300");
+    expect(listenSetting({}, undefined, read)).toBe("0.0.0.0:8080");
+    expect(listenSetting({ SESHI_CONFIG: "/custom.toml" }, undefined, read)).toBe("10.0.0.5:9000");
+    expect(listenSetting({}, "/custom.toml", read)).toBe("10.0.0.5:9000");
+    expect(listenSetting({}, "/broken.toml", read)).toBe(":7200");
+    expect(listenSetting({}, undefined, () => undefined)).toBe(":7200");
+
+    expect(healthUrl(":7200")).toBe("http://127.0.0.1:7200/healthz");
+    expect(healthUrl("0.0.0.0:8080")).toBe("http://127.0.0.1:8080/healthz");
+    expect(healthUrl("[::]:8080")).toBe("http://127.0.0.1:8080/healthz");
+    expect(healthUrl("10.0.0.5:9000")).toBe("http://10.0.0.5:9000/healthz");
+    expect(healthUrl("[::1]:9000")).toBe("http://[::1]:9000/healthz");
   });
 });

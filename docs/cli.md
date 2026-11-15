@@ -46,7 +46,7 @@ repository's code.
 | `sync failed <id>`, `sync dropped <id>` `[--since] [--limit]` | Envelopes that failed or that model review dropped, and why; never their content (X6.4). `upload` is the source of hooks and uploads | Built |
 | `reprocess --source <id> [--since <time>] [--dry-run] [--run]` | Rewind a source so its sessions are read again (X4.9). Uploads are resent by the capture uploader (14) | Built |
 | `normalize [--agent <format>] [<file> \| -]` | A transcript as canonical, redacted records, one per line (`--json`: one document). For tools in other languages (X3.10) | Built |
-| `healthcheck [--url]` | Ask a running server's `/healthz` (the container's health check) | Built |
+| `healthcheck [--url] [--config]` | Ask a running server's `/healthz` where `server.listen` says it listens (the container's health check) | Built |
 | `login`, `logout`, `whoami` | Sign in to a server (F8.2) | Branch 13 |
 | `sessions ls\|show\|export\|rm`, `tokens` | Sessions and tokens through the API | Branch 13 |
 | `capture install\|uninstall\|status\|pause\|resume\|off\|on`, `hook <agent> <event>`, `upload <path>`, `daemon`, `statusline` | Capture on this machine (F9) | Branch 14 |
