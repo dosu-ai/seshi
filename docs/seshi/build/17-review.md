@@ -224,6 +224,18 @@ what changed.
   there in the past day, and otherwise refuses (usage, exit 2) listing agent, id and last seen;
   subagents are never candidates. capture.md and 14 say so. Test: two sessions refused and
   named, a subagent left out, `--agent` narrowing to one.
+- **client, low** (reported medium; the agent-folder part refuted): the `--service` entries
+  carried no environment, so with `XDG_STATE_HOME` or `XDG_CONFIG_HOME` set in the shell the
+  service used another capture folder (its own lock, an empty spool, no `state.agents`, so it
+  silently did nothing) and another CLI config, and `SESHI_*` settings such as `SESHI_USER`
+  never reached it (with an org key, sessions it uploaded claimed another username than the
+  hooks' uploader). `CLAUDE_CONFIG_DIR`/`CODEX_HOME` are not read for the sweep, so that part
+  did not hold. The launchd and systemd entries now carry `XDG_STATE_HOME` and
+  `XDG_CONFIG_HOME` (EnvironmentVariables, `Environment=` with `%` doubled); `SESHI_*`
+  settings are never written into an entry file (readable, and the namespace holds server
+  secrets too), so `install --service` names each one set as a note, to move into the CLI
+  config. capture.md says so. Test: plist and unit carry the two, leave out `SESHI_USER` and
+  note it; Windows carries nothing.
 
 ## Not fixed
 

@@ -122,6 +122,35 @@ describe("service entries", () => {
     );
   });
 
+  it("carry the folders' variables the hooks see, and name the settings they cannot", async () => {
+    const env = {
+      XDG_STATE_HOME: "/home/a/state",
+      XDG_CONFIG_HOME: "/home/a/100%cfg",
+      SESHI_USER: "alice@acme.com",
+      SESHI_SESSION_ID: "s1",
+      PATH: "/usr/bin",
+    };
+    const mac = await installService({ ...context("darwin"), env });
+    const plist = readFileSync(mac.entry, "utf8");
+    expect(plist).toContain(
+      "<key>EnvironmentVariables</key>\n  <dict>\n    <key>XDG_STATE_HOME</key>\n    <string>/home/a/state</string>",
+    );
+    expect(plist).not.toContain("SESHI_USER");
+    expect(plist).not.toContain("alice");
+    expect(mac.notes).toEqual([expect.stringMatching(/^SESHI_USER is set here, but the service/)]);
+
+    const linux = await installService({ ...context("linux"), env });
+    const unit = readFileSync(linux.entry, "utf8");
+    expect(unit).toContain('Environment="XDG_STATE_HOME=/home/a/state"\n');
+    expect(unit).toContain('Environment="XDG_CONFIG_HOME=/home/a/100%%cfg"\n');
+    expect(unit).not.toContain("alice");
+
+    // Windows keeps seshi's folders in the profile the task has; nothing to carry.
+    expect((await installService({ ...context("win32"), env })).notes).toHaveLength(1);
+    expect(systemdUnit(["/opt/seshi"])).not.toContain("Environment=");
+    expect(launchdPlist(["/opt/seshi"], "/l")).not.toContain("EnvironmentVariables");
+  });
+
   it("installs and removes a launchd agent", async () => {
     const report = await installService(context("darwin"));
     expect(report).toMatchObject({ changed: true, problems: [] });

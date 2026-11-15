@@ -7,10 +7,19 @@
  * - Windows: a Task Scheduler task, `seshi-uploader`, run at log-on.
  *
  * Each runs `seshi daemon --keep-alive`. The commands that load the entry are run through
- * `exec`, so tests see them without touching the real service manager. */
+ * `exec`, so tests see them without touching the real service manager.
+ *
+ * A service starts with the service manager's bare environment, not the shell's that hooks
+ * inherit. The variables that move seshi's own folders (`XDG_STATE_HOME`, `XDG_CONFIG_HOME`)
+ * are written into the launchd and systemd entries, so the service uses the same capture folder
+ * (lock, spool, state) and CLI config as the hooks; Windows keeps its folders in the user's
+ * profile, which the task has. `SESHI_*` settings are never written there (an entry file is
+ * readable, and the namespace also holds server secrets): installing reports each one set, so
+ * it can go in the CLI config instead. */
 
 import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { NOT_SETTINGS_ENV } from "@seshi/config/paths";
 import { writeFileAtomic } from "@seshi/kit";
 
 export const LAUNCHD_LABEL = "dev.seshi.uploader";
@@ -28,6 +37,8 @@ export interface ServiceContext {
   /** Where the uploader's own output goes. */
   logFile: string;
   exec: Exec;
+  /** The environment `install` runs in: what the entry carries, and what it warns about. */
+  env?: Record<string, string | undefined>;
 }
 
 export interface ServiceReport {
@@ -36,15 +47,53 @@ export interface ServiceReport {
   changed: boolean;
   /** Commands that failed, with what they said. */
   problems: string[];
+  /** Settings in this environment the service will not see. */
+  notes?: string[];
+}
+
+/** The variables that move seshi's folders on macOS and Linux: carried into the entry. */
+export const CARRIED_ENV = ["XDG_STATE_HOME", "XDG_CONFIG_HOME"] as const;
+
+/** What a service entry carries from `env`, and a note per setting it does not. */
+export function serviceEnvironment(
+  env: Record<string, string | undefined>,
+  platform: NodeJS.Platform,
+): { carried: Record<string, string>; notes: string[] } {
+  const carried: Record<string, string> = {};
+  if (platform !== "win32") {
+    for (const name of CARRIED_ENV) {
+      const value = env[name];
+      if (value) carried[name] = value;
+    }
+  }
+  const settings = Object.keys(env)
+    .filter((n) => n.startsWith("SESHI_") && env[n] && !NOT_SETTINGS_ENV.includes(n))
+    .sort();
+  const notes = settings.map(
+    (n) =>
+      `${n} is set here, but the service does not see it: put the setting in the CLI config, or the service uploads without it`,
+  );
+  return { carried, notes };
 }
 
 const xml = (text: string) =>
   text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-export function launchdPlist(command: readonly string[], logFile: string): string {
+export function launchdPlist(
+  command: readonly string[],
+  logFile: string,
+  env: Record<string, string> = {},
+): string {
   const args = [...command, "daemon", "--keep-alive"]
     .map((w) => `    <string>${xml(w)}</string>`)
     .join("\n");
+  const names = Object.keys(env);
+  const environment =
+    names.length === 0
+      ? ""
+      : `  <key>EnvironmentVariables</key>\n  <dict>\n${names
+          .map((n) => `    <key>${xml(n)}</key>\n    <string>${xml(env[n] as string)}</string>`)
+          .join("\n")}\n  </dict>\n`;
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -55,7 +104,7 @@ export function launchdPlist(command: readonly string[], logFile: string): strin
   <array>
 ${args}
   </array>
-  <key>RunAtLoad</key>
+${environment}  <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
   <true/>
@@ -72,12 +121,18 @@ ${args}
 const systemdWord = (w: string) =>
   /^[\w@%+=:,./-]+$/.test(w) ? w : `"${w.replace(/(["\\])/g, "\\$1")}"`;
 
-export function systemdUnit(command: readonly string[]): string {
+/** A systemd `Environment=` assignment: quoted, with `%` doubled (systemd's specifiers). */
+const systemdEnv = (name: string, value: string) =>
+  `Environment="${`${name}=${value}`.replace(/(["\\])/g, "\\$1").replace(/%/g, "%%")}"\n`;
+
+export function systemdUnit(command: readonly string[], env: Record<string, string> = {}): string {
   return `[Unit]
 Description=seshi session capture uploader
 
 [Service]
-ExecStart=${[...command, "daemon", "--keep-alive"].map(systemdWord).join(" ")}
+${Object.entries(env)
+  .map(([n, v]) => systemdEnv(n, v))
+  .join("")}ExecStart=${[...command, "daemon", "--keep-alive"].map(systemdWord).join(" ")}
 Restart=on-failure
 RestartSec=30
 
@@ -116,10 +171,17 @@ async function runAll(context: ServiceContext, commands: string[][]): Promise<st
 }
 
 export async function installService(context: ServiceContext): Promise<ServiceReport> {
+  const report = await install(context);
+  const { notes } = serviceEnvironment(context.env ?? {}, context.platform);
+  return notes.length > 0 ? { ...report, notes } : report;
+}
+
+async function install(context: ServiceContext): Promise<ServiceReport> {
   const entry = entryOf(context);
+  const { carried } = serviceEnvironment(context.env ?? {}, context.platform);
   switch (context.platform) {
     case "darwin": {
-      writeFileAtomic(entry, launchdPlist(context.command, context.logFile), 0o644);
+      writeFileAtomic(entry, launchdPlist(context.command, context.logFile, carried), 0o644);
       // Unload first, so a reinstall picks up a changed command.
       await runAll(context, [["launchctl", "unload", entry]]);
       return {
@@ -146,7 +208,7 @@ export async function installService(context: ServiceContext): Promise<ServiceRe
       return { entry, changed: true, problems };
     }
     default: {
-      writeFileAtomic(entry, systemdUnit(context.command), 0o644);
+      writeFileAtomic(entry, systemdUnit(context.command, carried), 0o644);
       const problems = await runAll(context, [
         ["systemctl", "--user", "daemon-reload"],
         ["systemctl", "--user", "enable", "--now", SYSTEMD_UNIT],

@@ -263,6 +263,7 @@ function serviceContext(ctx: CommandContext, command: readonly string[]) {
     command,
     logFile: paths.log,
     exec: ctx.exec ?? realExec,
+    env: host.env,
   };
 }
 
@@ -338,6 +339,7 @@ async function install(ctx: CommandContext, json: boolean, args: Args): Promise<
         ? [
             `${style.status(service.problems.length > 0 ? "service failed" : "service installed", service.problems.length > 0 ? "error" : "success")}: ${service.entry}`,
             ...service.problems.map((p) => `  ${p}`),
+            ...(service.notes ?? []).map((n) => `  ${style.warn("note")}: ${n}`),
           ]
         : []),
       target
