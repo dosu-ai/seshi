@@ -787,3 +787,270 @@ function codexMessage(role: string, text: string): Record<string, unknown> {
   };
   write("atif-claude-session.atif.json", `${JSON.stringify(doc, null, 2)}\n`);
 }
+
+// --- Token usage (X6.2) -------------------------------------------------------------------
+
+const jsonlOf = (items: Record<string, unknown>[]) =>
+  `${items.map((item) => JSON.stringify(item)).join("\n")}\n`;
+
+/** Claude Code with what each request cost: two requests on two models, the first written as two
+ * lines (its text, then its tool call, the later line's usage the final one), and an API error
+ * Claude Code shows as a reply (model `<synthetic>`, no call). */
+write(
+  "claude-usage.claude-code.jsonl",
+  jsonlOf([
+    {
+      type: "user",
+      uuid: "u1",
+      sessionId: "0c1d2e3f-0000-4000-8000-000000000001",
+      timestamp: "2026-09-02T00:00:00.000Z",
+      cwd: "/repo/app",
+      gitBranch: "main",
+      message: { role: "user", content: "List the files, then say done." },
+    },
+    {
+      type: "assistant",
+      uuid: "a1",
+      parentUuid: "u1",
+      sessionId: "0c1d2e3f-0000-4000-8000-000000000001",
+      requestId: "req_011CUsage0001",
+      timestamp: "2026-09-02T00:00:01.000Z",
+      message: {
+        id: "msg_01Usage0001",
+        role: "assistant",
+        model: "claude-opus-9",
+        content: [{ type: "text", text: "Listing them." }],
+        stop_reason: null,
+        usage: {
+          input_tokens: 1234,
+          output_tokens: 3,
+          cache_read_input_tokens: 789,
+          cache_creation_input_tokens: 10,
+        },
+      },
+    },
+    {
+      type: "assistant",
+      uuid: "a2",
+      parentUuid: "a1",
+      sessionId: "0c1d2e3f-0000-4000-8000-000000000001",
+      requestId: "req_011CUsage0001",
+      timestamp: "2026-09-02T00:00:02.000Z",
+      message: {
+        id: "msg_01Usage0001",
+        role: "assistant",
+        model: "claude-opus-9",
+        content: [
+          { type: "tool_use", id: "toolu_01Usage0001", name: "Bash", input: { command: "ls" } },
+        ],
+        stop_reason: "tool_use",
+        usage: {
+          input_tokens: 1234,
+          output_tokens: 56,
+          cache_read_input_tokens: 789,
+          cache_creation_input_tokens: 10,
+        },
+      },
+    },
+    {
+      type: "user",
+      uuid: "u2",
+      parentUuid: "a2",
+      sessionId: "0c1d2e3f-0000-4000-8000-000000000001",
+      timestamp: "2026-09-02T00:00:03.000Z",
+      message: {
+        role: "user",
+        content: [{ type: "tool_result", tool_use_id: "toolu_01Usage0001", content: "a.txt" }],
+      },
+    },
+    {
+      type: "assistant",
+      uuid: "a3",
+      parentUuid: "u2",
+      sessionId: "0c1d2e3f-0000-4000-8000-000000000001",
+      requestId: "req_011CUsage0002",
+      timestamp: "2026-09-02T00:00:04.000Z",
+      message: {
+        id: "msg_01Usage0002",
+        role: "assistant",
+        model: "claude-haiku-9",
+        content: [{ type: "text", text: "Done: a.txt" }],
+        stop_reason: "end_turn",
+        usage: { input_tokens: 4321, output_tokens: 65, cache_read_input_tokens: 789 },
+      },
+    },
+    {
+      type: "assistant",
+      uuid: "a4",
+      parentUuid: "a3",
+      sessionId: "0c1d2e3f-0000-4000-8000-000000000001",
+      timestamp: "2026-09-02T00:00:05.000Z",
+      isApiErrorMessage: true,
+      message: {
+        id: "b1c2",
+        role: "assistant",
+        model: "<synthetic>",
+        content: [{ type: "text", text: "API Error: overloaded" }],
+        stop_reason: "stop_sequence",
+        usage: { input_tokens: 0, output_tokens: 0 },
+      },
+    },
+  ]),
+);
+
+/** A Codex rollout with token counts: a turn of two model responses (reasoning and a tool call,
+ * then an answer), each closed by its `token_count`, and a second turn on another model. A
+ * `token_count` without `info` counts nothing. */
+write(
+  "codex-usage.codex.jsonl",
+  jsonlOf([
+    {
+      timestamp: "2026-10-03T10:00:00.000Z",
+      type: "session_meta",
+      payload: {
+        id: "01a0ff74-0000-7ad0-83ee-000000000001",
+        timestamp: "2026-10-03T10:00:00.000Z",
+        cwd: "/repo/app",
+      },
+    },
+    {
+      timestamp: "2026-10-03T10:00:00.100Z",
+      type: "turn_context",
+      payload: { cwd: "/repo/app", model: "gpt-9-codex" },
+    },
+    {
+      timestamp: "2026-10-03T10:00:01.000Z",
+      type: "response_item",
+      payload: {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "List the files" }],
+      },
+    },
+    {
+      timestamp: "2026-10-03T10:00:01.500Z",
+      type: "event_msg",
+      payload: { type: "token_count", info: null },
+    },
+    {
+      timestamp: "2026-10-03T10:00:02.000Z",
+      type: "event_msg",
+      payload: { type: "agent_reasoning", text: "Run ls." },
+    },
+    {
+      timestamp: "2026-10-03T10:00:02.500Z",
+      type: "response_item",
+      payload: {
+        type: "function_call",
+        name: "shell",
+        arguments: '{"command":["ls"]}',
+        call_id: "call_1",
+      },
+    },
+    {
+      timestamp: "2026-10-03T10:00:02.600Z",
+      type: "event_msg",
+      payload: {
+        type: "token_count",
+        info: {
+          total_token_usage: {
+            input_tokens: 1200,
+            cached_input_tokens: 800,
+            output_tokens: 40,
+            reasoning_output_tokens: 12,
+            total_tokens: 1240,
+          },
+          last_token_usage: {
+            input_tokens: 1200,
+            cached_input_tokens: 800,
+            output_tokens: 40,
+            reasoning_output_tokens: 12,
+            total_tokens: 1240,
+          },
+          model_context_window: 272000,
+        },
+      },
+    },
+    {
+      timestamp: "2026-10-03T10:00:03.000Z",
+      type: "response_item",
+      payload: { type: "function_call_output", call_id: "call_1", output: "a.txt" },
+    },
+    {
+      timestamp: "2026-10-03T10:00:04.000Z",
+      type: "response_item",
+      payload: {
+        type: "message",
+        role: "assistant",
+        content: [{ type: "output_text", text: "One file: a.txt" }],
+      },
+    },
+    {
+      timestamp: "2026-10-03T10:00:04.100Z",
+      type: "event_msg",
+      payload: {
+        type: "token_count",
+        info: {
+          total_token_usage: {
+            input_tokens: 2500,
+            cached_input_tokens: 1900,
+            output_tokens: 50,
+            reasoning_output_tokens: 12,
+            total_tokens: 2550,
+          },
+          last_token_usage: {
+            input_tokens: 1300,
+            cached_input_tokens: 1100,
+            output_tokens: 10,
+            reasoning_output_tokens: 0,
+            total_tokens: 1310,
+          },
+          model_context_window: 272000,
+        },
+      },
+    },
+    {
+      timestamp: "2026-10-03T10:01:00.000Z",
+      type: "turn_context",
+      payload: { cwd: "/repo/app", model: "gpt-9-codex-mini" },
+    },
+    {
+      timestamp: "2026-10-03T10:01:01.000Z",
+      type: "response_item",
+      payload: { type: "message", role: "user", content: [{ type: "input_text", text: "Thanks" }] },
+    },
+    {
+      timestamp: "2026-10-03T10:01:02.000Z",
+      type: "response_item",
+      payload: {
+        type: "message",
+        role: "assistant",
+        content: [{ type: "output_text", text: "You're welcome." }],
+      },
+    },
+    {
+      timestamp: "2026-10-03T10:01:02.100Z",
+      type: "event_msg",
+      payload: {
+        type: "token_count",
+        info: {
+          total_token_usage: {
+            input_tokens: 4000,
+            cached_input_tokens: 2400,
+            output_tokens: 55,
+            reasoning_output_tokens: 12,
+            total_tokens: 4055,
+          },
+          last_token_usage: {
+            input_tokens: 1500,
+            cached_input_tokens: 500,
+            output_tokens: 5,
+            reasoning_output_tokens: 0,
+            total_tokens: 1505,
+          },
+          model_context_window: 272000,
+        },
+      },
+    },
+  ]),
+);
