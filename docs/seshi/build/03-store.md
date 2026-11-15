@@ -15,12 +15,16 @@ generated from them. The per-bucket `letta`/`otlp` choice (`store.format`) is go
   read-modify-write loop with jittered backoff; `json.ts` adds `readJson` (value + etag),
   `createJson`, `replaceJson`, `putJson`, `updateJson`.
   - **S3/R2** (`s3.ts`, `s3-fetch.ts`): `If-Match` (quoted) / `If-None-Match` on PUT, `If-Match`
-    on DELETE; 412 and S3's 409 `ConditionalRequestConflict` map to `PreconditionFailed`.
-    ETags come from GET and PUT responses, unquoted.
-  - **Folder** (`fs.ts`): a lock file per key (`<path>.~lock`, created with `open(…, "wx")`)
-    around every put and delete; the condition is checked under the lock; a lock older than
-    10 s is taken over. ETag = MD5 of the bytes, like S3's single-part ETag, so `stat` now reads
-    the file. Lock and temp files are never listed and are refused as keys.
+    on DELETE; 412, S3's 409 `ConditionalRequestConflict`, and S3's 404 `NoSuchKey` on an
+    If-Match PUT (the version read is gone) map to `PreconditionFailed`. ETags come from GET
+    and PUT responses, unquoted.
+  - **Folder** (`fs.ts`): a lock file per key (`<path>.~lock`, created with `open(…, "wx")`,
+    holding a random token) around every put and delete; the condition is checked under the
+    lock. A lock older than 10 s is taken over by renaming it aside (atomic, so only one writer
+    takes it; a lock that turns out fresh is put back), and a writer releases only a lock that
+    still holds its token. ETag = MD5 of the bytes, like S3's single-part ETag, so `stat` now
+    reads the file. Lock and temp files are never listed and are refused as keys. Tested with
+    four processes incrementing one object.
 - **Layout additions (X6.4)**, `layout.ts` `keys`: `marker`, `token(id)`, `checkpoint(src)`,
   `records(kind, src)` / `record(kind, src, at, idempotencyKey)`, `heartbeat`, `pending(archive)`,
   `spans` / `span(owner, archive, traceId, spanId)`, `reviews` / `review(owner, archive, n)`
@@ -30,7 +34,8 @@ generated from them. The per-bucket `letta`/`otlp` choice (`store.format`) is go
   - `objects.ts`: token records (`createToken` If-None-Match, `readToken`, `updateToken`,
     `listTokens`), checkpoints (`readCheckpoint`, `writeCheckpoint(store, src, cursor, etag |
     null)`), heartbeat (`readHeartbeat`, `writeHeartbeat`, last writer wins), pending markers
-    (`touchPending`, `readPending`, `listPending`, `clearPending` with If-Match), review
+    (`touchPending`, `readPending`, `listPending`, `clearPending` with If-Match; each touch
+    carries a random `touch` id so it always changes the ETag), review
     decisions (`writeReview` If-None-Match, `listReviews`). Code-first types, as X3.10 allows
     for binary-only objects.
   - `records.ts`: drop and failure records with the shared base (`at`, `source`,
@@ -56,7 +61,8 @@ generated from them. The per-bucket `letta`/`otlp` choice (`store.format`) is go
   input/output/cache/reasoning/total tokens, `stop_reason`, `request_id`, `parameters`,
   `error`) and `provenance` (`source`, `source_id`, `format`, `location {object_key, etag,
   cursor}`). `parseTrace` (was `parseTrajectory`) validates with `validateTraceRecords`, checks
-  `llm_call` refs and usage counts; events and `content_hash` derive from role/text/tool fields
+  each LLM call field by field (unknown fields dropped, as from records; wrong types refused),
+  unique call ids and `llm_call` refs; events and `content_hash` derive from role/text/tool fields
   only, so every golden hash is unchanged (`bun run goldens` leaves the tree clean).
 - **Renderers** (`packages/ts/formats/src/render/`): `toLetta` (the `sessionstorage/trace/1`
   object, plain records, same keys and order sessiondb wrote), `toOtlp` (now over the canonical
@@ -73,7 +79,10 @@ generated from them. The per-bucket `letta`/`otlp` choice (`store.format`) is go
   `visibility_changed` (key suffix `visibility`).
 - **Pipeline** writes through all of this: `ingest`, `putRaw`, `recordNormalized` and
   `tombstone` update `metadata.json` with `updateMetadata` (If-Match + retry; tested with
-  concurrent ingests on one session); `WriteContext { writer, owner_basis, visibility,
+  concurrent ingests on one session). Trace objects are created with If-None-Match
+  (`publishObject` immutable mode), so of two writers racing on one content hash the first
+  object wins. `tombstone` marks the session redacted before deleting its objects, and an
+  ingest or raw part that lands in between deletes the object it just created; `WriteContext { writer, owner_basis, visibility,
   claims, provenance }` on `IngestInput`, `PutRawInput` and `SessionOptions.context`;
   `IngestInput` also takes `llm_calls`, `redaction`, `origin_agent`, `native_session_id`;
   `tombstone` takes `reason` and `writer`. `getTrace(store, owner, archive, hash)` returns the
@@ -160,7 +169,10 @@ generated from them. The per-bucket `letta`/`otlp` choice (`store.format`) is go
 
 - **Conditional DELETE support**: which S3-compatible backends honour `If-Match` on DELETE
   (used by `clearPending`) is unverified; one that ignores it deletes unconditionally. Also
-  still to check from X6.5: MinIO, Backblaze, Wasabi on conditional PUT.
+  still to check from X6.5: MinIO, Backblaze, Wasabi on conditional PUT. Trace objects are
+  now created with If-None-Match too; a backend that ignores it falls back to the old
+  last-writer-wins on a content-hash race. Whether AWS answers a conditional DELETE of a
+  missing key with 404 (treated as done) or 412 is also unverified.
 - The live S3 test (`tests/store/s3-live.test.ts`) gained a conditional-write case but was not
   run (no endpoint here); CI runs it.
 - No adapter fills `llm_calls`, record ids or durations yet; the format and pipeline carry them
