@@ -404,10 +404,14 @@ function presenceNow(
   }
   // Sent, nothing stored.
   if (s.last_status === "filtered") {
-    if (has(m)) {
-      return lost(`the session filter kept it out, yet ${where} holds ${uid}`);
+    if (!has(m)) {
+      return result(id, title, "ok", "filtered: nothing stored until the transcript grows");
     }
-    return result(id, title, "ok", "filtered: nothing stored until the transcript grows");
+    // Sent again once it grew past what the filter judged, and that answer lost (and not sent
+    // since: a pause stopped it): the server holds it though the last answer heard said
+    // filtered (33). Warned below, as any lost answer is.
+    const grown = s.held_at_size !== undefined && (ev.transcript.size ?? 0) > s.held_at_size;
+    if (!grown) return lost(`the session filter kept it out, yet ${where} holds ${uid}`);
   }
   if (has(m)) {
     return result(id, title, "warn", `${where} holds ${uid} though no answer said so here`, {
@@ -485,7 +489,11 @@ export function offsetsCheck(ev: SessionEvidence): CheckResult {
   if (m.status === "redacted") return result(id, title, "skip", "deleted");
   const n = m.normalized;
   const fails: string[] = [];
-  if (s.server_offset !== n.bytes) {
+  // A pause stopped the session after a piece whose answer was lost: the server holds that
+  // piece, past what this machine heard, and nothing more is ever sent to tell it (uploader.ts
+  // keeps what the server holds and sends nothing past the stop; 33).
+  const pausedAhead = s.frozen !== undefined && n.bytes > (s.server_offset ?? 0);
+  if (s.server_offset !== n.bytes && !pausedAhead) {
     fails.push(
       `the server's log ends at ${bytes(n.bytes)}; this machine thinks ${bytes(s.server_offset ?? 0)}`,
     );
@@ -508,6 +516,7 @@ export function offsetsCheck(ev: SessionEvidence): CheckResult {
   }
   if (
     s.shipped &&
+    !pausedAhead &&
     (s.shipped.records !== n.records || s.shipped.prefix_sha256 !== n.prefix_sha256)
   ) {
     fails.push(
@@ -523,6 +532,18 @@ export function offsetsCheck(ev: SessionEvidence): CheckResult {
   }
   if (waiting) {
     return result(id, title, "warn", REPLACE_DROPPED, { detail: [summary], hint: REPLACE_HINT });
+  }
+  if (pausedAhead) {
+    return result(
+      id,
+      title,
+      "warn",
+      `the server's log ends at ${bytes(n.bytes)}, past the ${bytes(s.server_offset ?? 0)} this machine heard of before a pause stopped it: a piece whose answer was lost`,
+      {
+        detail: [summary],
+        hint: `the server keeps it and nothing more is sent; seshi capture on --session ${ev.session_id} uploads the rest`,
+      },
+    );
   }
   return result(id, title, "ok", summary);
 }
@@ -547,6 +568,15 @@ function localRecords(ev: SessionEvidence, deps: DoctorDeps): LocalRecords {
   if (!ev.capture) return { end: 0, skip: `this binary does not capture ${ev.agent}` };
   if (!ev.transcript.exists || !ev.transcript.path) {
     return { end: 0, skip: "the transcript is not here to compare" };
+  }
+  // No answer ever came (it was lost, and the session is not sent again: a pause): whether
+  // pre-redaction kept every length is not known, so neither is where the server's log ends in
+  // the transcript (33).
+  if (s.server_offset === undefined && s.aligned === undefined) {
+    return {
+      end: 0,
+      skip: "no answer came for what was sent: where the server's log ends in the transcript is not known",
+    };
   }
   let end: number;
   if (s.server_offset === n.bytes && s.file_offset !== undefined) end = s.file_offset;

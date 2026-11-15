@@ -561,6 +561,22 @@ describe("server presence", () => {
     );
   });
 
+  it("warns, not fails, on a filtered session the server holds once it grew and an answer was lost", () => {
+    // Found by the scenario explorer (33): filtered at one turn, sent again when it grew, that
+    // answer lost, then stopped by a pause; the last answer heard is still "filtered".
+    const filtered = (held: number) =>
+      evidence((ev) => {
+        Object.assign(ev.local as SessionState, {
+          stored: false,
+          last_status: "filtered",
+          held_at_size: held,
+        });
+      });
+    expectStatus(presenceCheck(filtered(SIZE - 5)), "warn");
+    // Not grown since the filter judged it: the server should hold nothing.
+    expectStatus(presenceCheck(filtered(SIZE)), "fail");
+  });
+
   it("skips when the server cannot be asked", () => {
     expectStatus(
       presenceCheck(
@@ -625,6 +641,28 @@ describe("offsets", () => {
       ),
       "fail",
     );
+  });
+});
+
+describe("offsets after a pause", () => {
+  it("warn, not fail, when the server holds a piece sent before the pause whose answer was lost", () => {
+    // Found by the scenario explorer (33): a chunk landed, its answer was lost, and a pause
+    // stopped the session at what this machine had heard of; nothing more is ever sent.
+    const half = Buffer.byteLength("meta\nfirst\n");
+    const paused = (frozen: boolean) =>
+      evidence((ev) => {
+        Object.assign(ev.local as SessionState, {
+          file_offset: half,
+          server_offset: half,
+          shipped: { records: 2, prefix_sha256: prefixSha256(RECORDS, 2) },
+          ...(frozen ? { frozen: { at: NOW.toISOString(), offset: half } } : {}),
+        });
+      });
+    const check = offsetsCheck(paused(true));
+    expectStatus(check, "warn");
+    expect(check.summary).toContain("before a pause stopped it");
+    // Not paused, the same offsets are a fault: the next upload would be told the offset.
+    expectStatus(offsetsCheck(paused(false)), "fail");
   });
 });
 
@@ -728,6 +766,32 @@ describe("records and the prefix hash", () => {
       });
     });
     expectStatus(prefixCheck(rewritten, deps()), "warn");
+  });
+
+  it("skip records and prefix when no answer ever came for what was sent", () => {
+    // Found by the scenario explorer (33): the first upload was stored but its answer lost, and
+    // a pause stopped the session; pre-redaction had shortened a secret, so mapping the
+    // server's length onto the transcript counted the wrong records.
+    const unanswered = evidence((ev) => {
+      const local = ev.local as SessionState;
+      for (const field of [
+        "stored",
+        "server_offset",
+        "file_offset",
+        "aligned",
+        "shipped",
+      ] as const) {
+        delete local[field];
+      }
+      local.last_status = undefined as never;
+      ev.server.metadata = metadata({
+        normalized: { bytes: SIZE - 3, records: 4, prefix_sha256: PREFIX, hash_state: "x" },
+      });
+    });
+    const records = recordsCheck(unanswered, deps());
+    expectStatus(records, "skip");
+    expect(records.summary).toContain("no answer came");
+    expectStatus(prefixCheck(unanswered, deps()), "skip");
   });
 
   it("count the records review dropped on both sides", () => {

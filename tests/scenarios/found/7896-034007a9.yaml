@@ -1,0 +1,24 @@
+# Found by the scenario explorer (tests/tooling/scenario/explore.ts); see tests/scenarios/README.md.
+# seed: 7896 (bun run scenarios:explore --seed 7896 --runs 1 --max-steps 25)
+# original length: 22 steps; shrunk to 9 in 188 runs
+# failure:
+#   step 9 (settle max=40): once quiet, seshi doctor fails a check
+#     main: offsets: the server's log ends at 7940 bytes; this machine thinks 3970 bytes
+#         the last answer said 11 records (1ae6c4515879), the server now holds 21 (e26308f64902)
+#         the server holds 7940 bytes (21 records); 3970 bytes of the transcript sent, stopped at 3970 bytes
+#     faults fired:
+#       http POST /v1/sessions: POST /v1/sessions #1 → drop-response
+#     capture log (last lines):
+#       2026-09-01T09:00:00.033Z uploader: claude-code:main: will retry: cannot reach <server>: fetch failed: the connection closed before the response (injected)
+name: found by seed 7896
+description: "A generated scenario (seed 7896) shrunk from 22 to 9 steps; the header says how it failed."
+steps:
+  - turns: { session: main, count: 2 }
+  - pass
+  - turns: { session: main, count: 2 }
+  - fault: { http: POST /v1/sessions, drop-response: true }
+  - pass
+  - capture: pause 2h
+  - hook: { session: main, event: SessionStart }
+  - heal
+  - settle
