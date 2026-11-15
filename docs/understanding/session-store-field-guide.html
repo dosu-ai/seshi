@@ -1,0 +1,786 @@
+<title>Session Store Field Guide</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column (~760px) with a sticky section index on wide screens; answers first, evidence after. */
+:root {
+  --bg: #f6f7f8;
+  --surface: #ffffff;
+  --fg: #1b2228;
+  --muted: #5b6670;
+  --line: #dde2e6;
+  --accent: #0f6e6a;
+  --accent-soft: #e2f1ef;
+  --yes: #1f7a3a; --yes-bg: #e5f4e9;
+  --part: #8a5a00; --part-bg: #fbf0d9;
+  --no: #a1302a; --no-bg: #f9e4e2;
+  --code-bg: #eef1f3;
+  --font-display: "Instrument Sans", "Inter", system-ui, sans-serif;
+  --font-body: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12171b; --surface: #182026; --fg: #e3e8ec; --muted: #94a1ab; --line: #2a343c;
+    --accent: #5cc4bc; --accent-soft: #173431;
+    --yes: #79d391; --yes-bg: #183222; --part: #f0c26b; --part-bg: #3a2d12; --no: #f2958e; --no-bg: #3c1f1d;
+    --code-bg: #222c33; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12171b; --surface: #182026; --fg: #e3e8ec; --muted: #94a1ab; --line: #2a343c;
+  --accent: #5cc4bc; --accent-soft: #173431;
+  --yes: #79d391; --yes-bg: #183222; --part: #f0c26b; --part-bg: #3a2d12; --no: #f2958e; --no-bg: #3c1f1d;
+  --code-bg: #222c33; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--fg);
+  font: 15px/1.6 var(--font-body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 40px 80px;
+}
+.wrap { max-width: 1080px; margin: 0 auto; display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 48px; }
+nav.toc { position: sticky; top: calc(24px + env(safe-area-inset-top, 0px)); align-self: start; font-size: 13px; }
+nav.toc p { font: 600 11px/1 var(--font-display); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 12px; }
+nav.toc ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+nav.toc a { color: var(--muted); text-decoration: none; }
+nav.toc a:hover, nav.toc a:focus-visible { color: var(--accent); }
+main { min-width: 0; max-width: 760px; }
+h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; line-height: 1.2; margin: 0; }
+h1 { font-size: 34px; font-weight: 700; letter-spacing: -.01em; }
+h2 { font-size: 24px; font-weight: 600; margin-bottom: 12px; }
+h3 { font-size: 17px; font-weight: 600; margin: 28px 0 8px; }
+p { margin: 0 0 12px; }
+a { color: var(--accent); }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+code { font: 500 0.86em var(--font-mono); background: var(--code-bg); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+.eyebrow { font: 600 11px/1 var(--font-display); text-transform: uppercase; letter-spacing: .09em; color: var(--accent); margin-bottom: 10px; }
+.lede { font-size: 17px; color: var(--muted); max-width: 62ch; margin-top: 12px; }
+.meta { display: flex; flex-wrap: wrap; gap: 8px 20px; font-size: 13px; color: var(--muted); margin-top: 16px; }
+section { padding-top: 48px; margin-top: 48px; border-top: 1px solid var(--line); }
+header + section { border-top: 0; margin-top: 32px; padding-top: 0; }
+
+.answers { display: grid; gap: 12px; }
+.answer { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; display: grid; grid-template-columns: auto minmax(0,1fr); gap: 4px 14px; }
+.answer .q { font: 600 15px/1.35 var(--font-display); }
+.answer .a { grid-column: 2; color: var(--fg); font-size: 14.5px; }
+.answer .a a { white-space: nowrap; }
+.pill { font: 600 11px/1 var(--font-display); text-transform: uppercase; letter-spacing: .06em; padding: 5px 8px; border-radius: 999px; align-self: start; grid-row: span 2; white-space: nowrap; }
+.pill.yes { color: var(--yes); background: var(--yes-bg); }
+.pill.part { color: var(--part); background: var(--part-bg); }
+.pill.no { color: var(--no); background: var(--no-bg); }
+
+.callout { border-left: 3px solid var(--accent); background: var(--accent-soft); padding: 12px 16px; border-radius: 0 8px 8px 0; margin: 16px 0; }
+.callout.warn { border-left-color: var(--part); background: var(--part-bg); }
+.callout p:last-child { margin-bottom: 0; }
+
+.steps { list-style: none; counter-reset: s; padding: 0; margin: 16px 0; display: grid; gap: 10px; }
+.steps li { counter-increment: s; display: grid; grid-template-columns: 28px minmax(0,1fr); gap: 12px; }
+.steps li::before { content: counter(s); font: 600 13px/28px var(--font-mono); text-align: center; width: 28px; height: 28px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); }
+.steps b { font-family: var(--font-display); font-weight: 600; }
+
+.diagram { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin: 16px 0; }
+.diagram svg { display: block; min-width: 640px; width: 100%; height: auto; }
+.diagram svg.wide { min-width: 860px; }
+.diagram .mono { font-family: var(--font-mono); font-size: 10.5px; fill: var(--accent); }
+.diagram .band { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.5; }
+.diagram .arrow.dash { stroke-dasharray: 5 4; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 12.5px; color: var(--muted); margin-top: -6px; }
+.legend span::before { content: ""; display: inline-block; width: 18px; height: 10px; margin-right: 6px; vertical-align: -1px; border-radius: 2px; }
+.legend .l-sdk::before { background: var(--accent-soft); border: 1.5px solid var(--accent); }
+.legend .l-here::before { background: var(--surface); border: 1.5px solid var(--line); }
+.legend .l-out::before { border: 1.5px dashed var(--muted); }
+.diagram text { font-family: var(--font-body); fill: var(--fg); }
+.diagram .sub { fill: var(--muted); font-size: 11px; }
+.diagram .box { fill: var(--surface); stroke: var(--line); stroke-width: 1.5; }
+.diagram .box.hl { fill: var(--accent-soft); stroke: var(--accent); }
+.diagram .box.ext { fill: var(--bg); stroke: var(--muted); stroke-dasharray: 4 3; }
+.diagram .arrow { stroke: var(--muted); stroke-width: 1.5; fill: none; marker-end: url(#ah); }
+.diagram .ahead { fill: var(--muted); }
+
+.tbl { overflow-x: auto; margin: 16px 0; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+th, td { text-align: left; vertical-align: top; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+tr:last-child td { border-bottom: 0; }
+th { font: 600 11px/1.3 var(--font-display); text-transform: uppercase; letter-spacing: .06em; color: var(--muted); background: var(--bg); }
+td:first-child { white-space: nowrap; }
+.tag { display: inline-block; font: 600 10.5px/1 var(--font-display); text-transform: uppercase; letter-spacing: .05em; padding: 4px 6px; border-radius: 4px; }
+.tag.yes { color: var(--yes); background: var(--yes-bg); }
+.tag.part { color: var(--part); background: var(--part-bg); }
+.tag.no { color: var(--no); background: var(--no-bg); }
+
+.two { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; margin: 16px 0; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; min-width: 0; }
+.card h4 { margin: 0 0 6px; font: 600 14px/1.3 var(--font-display); }
+.card ul { margin: 0; padding-left: 18px; font-size: 14px; }
+.card li { margin-bottom: 4px; }
+
+.log { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
+.log li { display: grid; grid-template-columns: 92px minmax(0,1fr); gap: 12px; font-size: 14px; }
+.log time { font: 500 12px/1.6 var(--font-mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.src { font-size: 12.5px; color: var(--muted); }
+
+@media (max-width: 860px) {
+  .wrap { grid-template-columns: minmax(0,1fr); gap: 0; }
+  nav.toc { display: none; }
+}
+@media (max-width: 560px) {
+  h1 { font-size: 28px; }
+  .two { grid-template-columns: minmax(0,1fr); }
+  .answer { grid-template-columns: minmax(0,1fr); }
+  .answer .a { grid-column: 1; }
+  .pill { grid-row: auto; justify-self: start; }
+  .log li { grid-template-columns: minmax(0,1fr); gap: 2px; }
+}
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+html { scroll-behavior: smooth; }
+</style>
+
+<div class="wrap">
+  <nav class="toc" aria-label="Sections">
+    <p>On this page</p>
+    <ol>
+      <li><a href="#answers">Short answers</a></li>
+      <li><a href="#architecture">Architecture</a></li>
+      <li><a href="#config">Server configuration</a></li>
+      <li><a href="#storage">Storage: no database</a></li>
+      <li><a href="#auth">User auth</a></li>
+      <li><a href="#capture">How sessions get in</a></li>
+      <li><a href="#datadog">Datadog Trajectory</a></li>
+      <li><a href="#metadata">Session metadata</a></li>
+      <li><a href="#dropped">Why things get dropped</a></li>
+      <li><a href="#clickhouse">ClickHouse search</a></li>
+      <li><a href="#gaps">Gaps and decisions</a></li>
+      <li><a href="#log">What we've covered</a></li>
+    </ol>
+  </nav>
+
+  <main>
+    <header>
+      <div class="eyebrow">sessiondb · v0.9.0 · onboarding notes</div>
+      <h1>Session Store Field Guide</h1>
+      <p class="lede">What the Session Store (the <code>sessiondb</code> repo) does and doesn't do, written up as we read through it together. Each answer points at the file it comes from, so you can check it.</p>
+      <div class="meta"><span>Last updated 13 Nov 2026</span><span>Read from branch <code>main</code> @ <code>ae974cf</code></span></div>
+    </header>
+
+    <section id="answers" aria-labelledby="answers-h">
+      <h2 id="answers-h">Short answers</h2>
+      <div class="answers">
+        <div class="answer">
+          <span class="pill no">It doesn't capture</span>
+          <div class="q">How does the Session Store capture sessions?</div>
+          <div class="a">It doesn't watch anything. It's a passive writer: a client POSTs a raw transcript file to <code>/v1/sessions</code>, and the server redacts it, stores it, normalizes it to Letta trajectory-v1, and writes it to your bucket. Finding the files and deciding when to upload them is the client's job, and that client isn't in this repo. <a href="#capture">Details →</a></div>
+        </div>
+        <div class="answer">
+          <span class="pill part">Input format only</span>
+          <div class="q">Does it integrate with Datadog Trajectories?</div>
+          <div class="a">Only as a file format. You can post a Trajectory session file as <code>agent: "datadog-trajectory"</code> and a built-in adapter converts it. Nothing talks to the Trajectory daemon or CLI, nothing reads <code>~/.trajectory/</code>, and nothing sends data to Datadog. <a href="#datadog">Details →</a></div>
+        </div>
+        <div class="answer">
+          <span class="pill part">A small set</span>
+          <div class="q">What metadata do we collect?</div>
+          <div class="a">Owner (from the auth token), agent/source, session ID, <code>project</code> (any string the client sends), git branch, cwd, model, parent session, timestamps and normalizer version. There's no user email or display name, no repository visibility, no commit SHA, and no token usage. <a href="#metadata">Details →</a></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="architecture" aria-labelledby="architecture-h">
+      <div class="eyebrow">As of v0.9.0</div>
+      <h2 id="architecture-h">Architecture</h2>
+      <p>All the logic lives in the SDK, <code>@dosu/sessiondb</code> (<code>sdks/typescript/</code>). The server (<code>server/src/app.ts</code>, about 400 lines) is a thin HTTP layer on top of it: it checks tokens and calls the SDK, so the SDK is the part to read first. The SDK's <code>connect()</code> gives callers one API with two backends. With <code>connect({ server, token })</code> the caller posts to a server. With <code>connect({ store, owner })</code> the same pipeline runs on the caller's own machine and writes to the bucket directly. The bucket layout is the contract between whatever writes and whatever reads.</p>
+
+      <div class="diagram" role="img" aria-label="Architecture: clients outside the repo use the SDK either through the sessiondb server (token auth, one SDK client per owner) or directly against the bucket. Both run the SDK pipeline: redact raw, store raw part, normalize, judge and plan, hash and publish. The pipeline writes through a Store interface (FsStore or S3Store) to a bucket in the sessionstorage layout. Readers such as Dosu's backend tail the change feed with their own read-only key.">
+        <svg class="wide" viewBox="0 0 960 676" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ahead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+
+          <!-- Clients -->
+          <text x="20" y="22" class="sub">CLIENTS (OUTSIDE THIS REPO)</text>
+          <rect class="box ext" x="20" y="34" width="270" height="66" rx="8"/>
+          <text x="34" y="58" font-size="13" font-weight="600">Dosu CLI shipper · hooks · runners</text>
+          <text x="34" y="78" class="mono">connect({ server, token })</text>
+          <text x="34" y="92" class="sub">HttpSessionDB</text>
+          <rect class="box ext" x="20" y="118" width="270" height="66" rx="8"/>
+          <text x="34" y="142" font-size="13" font-weight="600">Local tools (e.g. Decant), scripts</text>
+          <text x="34" y="162" class="mono">connect({ store, owner })</text>
+          <text x="34" y="176" class="sub">StoreSessionDB, laptop holds bucket key</text>
+
+          <!-- Server -->
+          <text x="340" y="22" class="sub">SESSIONDB SERVER · server/</text>
+          <rect class="box" x="340" y="34" width="300" height="150" rx="10"/>
+          <text x="356" y="58" font-size="13" font-weight="600">HTTP API (Bun) · app.ts</text>
+          <text x="356" y="80" font-size="12">Bearer token → owner</text>
+          <text x="356" y="96" class="sub">SESSIONDB_TOKENS list, or HS256 JWT sub</text>
+          <text x="356" y="118" font-size="12">POST/GET/DELETE /v1/sessions</text>
+          <text x="356" y="134" class="sub">GET /v1/changes · /v1/me · /healthz</text>
+          <text x="356" y="156" font-size="12">One StoreSessionDB per owner</text>
+          <text x="356" y="172" class="sub">gzip bodies · 120 s timeout · no state</text>
+          <path class="arrow" d="M290,67 L338,67" marker-end="url(#ah2)"/>
+          <text x="296" y="60" class="sub">HTTPS</text>
+
+          <!-- Config -->
+          <text x="680" y="22" class="sub">CONFIG (.env)</text>
+          <rect class="box ext" x="680" y="34" width="260" height="150" rx="8"/>
+          <text x="694" y="58" class="mono">SESSIONDB_STORE_URL</text>
+          <text x="694" y="74" class="sub">s3:// · r2:// · file://</text>
+          <text x="694" y="96" class="mono">SESSIONDB_FORMAT</text>
+          <text x="694" y="112" class="sub">letta (default) or otlp</text>
+          <text x="694" y="134" class="mono">SESSIONDB_REDACTION_FILE</text>
+          <text x="694" y="150" class="sub">org rules, added to built-ins</text>
+          <text x="694" y="172" class="mono">SESSIONDB_TOKEN(S|_SECRET)</text>
+          <path class="arrow dash" d="M680,109 L642,109" marker-end="url(#ah2)"/>
+
+          <!-- Pipeline band -->
+          <rect class="band" x="20" y="226" width="920" height="184" rx="12"/>
+          <text x="36" y="250" font-size="13" font-weight="600">@dosu/sessiondb SDK pipeline · sdks/typescript/src</text>
+          <text x="924" y="250" class="sub" text-anchor="end">storeSession() → ingest()</text>
+          <path class="arrow" d="M490,184 L490,224" marker-end="url(#ah2)"/>
+          <path class="arrow dash" d="M155,184 L155,224" marker-end="url(#ah2)"/>
+
+          <rect class="box" x="36" y="266" width="164" height="128" rx="8"/>
+          <text x="48" y="288" font-size="12.5" font-weight="600">1 · Redact raw</text>
+          <text x="48" y="308" class="sub">sensitive tool results</text>
+          <text x="48" y="324" class="sub">+ your patterns</text>
+          <text x="48" y="340" class="sub">+ built-ins, entropy</text>
+          <text x="48" y="380" class="mono">redact/</text>
+
+          <rect class="box" x="216" y="266" width="164" height="128" rx="8"/>
+          <text x="228" y="288" font-size="12.5" font-weight="600">2 · Store raw part</text>
+          <text x="228" y="308" class="sub">raw.N.&lt;fmt&gt;.gz first</text>
+          <text x="228" y="324" class="sub">a chunk = its own part</text>
+          <text x="228" y="340" class="sub">traces rebuilt from it</text>
+          <text x="228" y="380" class="mono">ingest/session.ts</text>
+
+          <rect class="box" x="396" y="266" width="164" height="128" rx="8"/>
+          <text x="408" y="288" font-size="12.5" font-weight="600">3 · Normalize</text>
+          <text x="408" y="308" class="sub">7 Letta adapters + fixups</text>
+          <text x="408" y="324" class="sub">Datadog adapter (own)</text>
+          <text x="408" y="340" class="sub">trajectory passthrough</text>
+          <text x="408" y="356" class="sub">then redact records</text>
+          <text x="408" y="380" class="mono">normalize/</text>
+
+          <rect class="box" x="576" y="266" width="164" height="128" rx="8"/>
+          <text x="588" y="288" font-size="12.5" font-weight="600">4 · Judge &amp; plan</text>
+          <text x="588" y="308" class="sub">trivial? (&lt; 2,000 chars)</text>
+          <text x="588" y="324" class="sub">tail past shipped prefix</text>
+          <text x="588" y="340" class="sub">fork: skip copied part</text>
+          <text x="588" y="380" class="mono">ingest/</text>
+
+          <rect class="box" x="756" y="266" width="168" height="128" rx="8"/>
+          <text x="768" y="288" font-size="12.5" font-weight="600">5 · Hash &amp; publish</text>
+          <text x="768" y="308" class="sub">events → content_hash</text>
+          <text x="768" y="324" class="sub">letta or OTLP object</text>
+          <text x="768" y="340" class="sub">verify → pointer → feed</text>
+          <text x="768" y="380" class="mono">trace/ · store/publish</text>
+
+          <path class="arrow" d="M200,330 L214,330" marker-end="url(#ah2)"/>
+          <path class="arrow" d="M380,330 L394,330" marker-end="url(#ah2)"/>
+          <path class="arrow" d="M560,330 L574,330" marker-end="url(#ah2)"/>
+          <path class="arrow" d="M740,330 L754,330" marker-end="url(#ah2)"/>
+
+          <!-- Store interface -->
+          <text x="20" y="440" class="sub">STORAGE ADAPTERS · store/</text>
+          <rect class="box" x="20" y="452" width="420" height="102" rx="10"/>
+          <text x="36" y="476" font-size="13" font-weight="600">Store interface · openStore(url)</text>
+          <text x="36" y="500" font-size="12">FsStore</text>
+          <text x="104" y="500" class="sub">file:// · a folder, dev or single box</text>
+          <text x="36" y="522" font-size="12">S3Store</text>
+          <text x="104" y="522" class="sub">s3:// · r2:// · MinIO, B2, Wasabi…</text>
+          <text x="104" y="540" class="sub">Bun S3 client, or fetch + SigV4 under Node</text>
+          <path class="arrow" d="M230,410 L230,450" marker-end="url(#ah2)"/>
+          <path class="arrow" d="M440,503 L498,503" marker-end="url(#ah2)"/>
+
+          <!-- Bucket -->
+          <text x="500" y="440" class="sub">YOUR BUCKET · spec/layout.md</text>
+          <rect class="box" x="500" y="452" width="440" height="208" rx="10"/>
+          <text x="516" y="476" class="mono">sessionstorage.json</text>
+          <text x="690" y="476" class="sub">layout marker, fixes format</text>
+          <text x="516" y="500" class="mono">owners/&lt;owner&gt;/sessions/&lt;archive_id&gt;/</text>
+          <text x="532" y="522" class="mono">metadata.json</text>
+          <text x="690" y="522" class="sub">mutable pointer: head, traces</text>
+          <text x="532" y="542" class="mono">raw.N.jsonl.gz</text>
+          <text x="690" y="542" class="sub">redacted native log</text>
+          <text x="532" y="562" class="mono">trace.&lt;hash&gt;[.otlp].json.gz</text>
+          <text x="740" y="582" class="sub" text-anchor="start">immutable, by content</text>
+          <text x="516" y="608" class="mono">owners/&lt;owner&gt;/changes/</text>
+          <text x="532" y="628" class="mono">&lt;stamp&gt;-&lt;hash|tombstone&gt;.json</text>
+          <text x="532" y="646" class="sub">append-only feed readers tail</text>
+
+          <!-- Readers -->
+          <text x="20" y="584" class="sub">READERS (OUTSIDE THIS REPO)</text>
+          <rect class="box ext" x="20" y="596" width="420" height="64" rx="8"/>
+          <text x="36" y="620" font-size="13" font-weight="600">Dosu backend (memory ingest), any S3 reader</text>
+          <text x="36" y="642" class="sub">own read-only key · list changes/ · fromOtlp() for otlp stores</text>
+          <path class="arrow" d="M498,628 L442,628" marker-end="url(#ah2)"/>
+        </svg>
+      </div>
+      <div class="legend"><span class="l-sdk">SDK pipeline</span><span class="l-here">in this repo</span><span class="l-out">outside this repo</span></div>
+
+      <h3>How the architecture shapes what we build</h3>
+      <div class="two">
+        <div class="card">
+          <h4>Two ways to run it</h4>
+          <ul>
+            <li><b>Server mode:</b> the laptop holds only a per-person token. Redaction can't be skipped, and the server sees transcripts before they're redacted.</li>
+            <li><b>Direct mode:</b> the laptop holds a bucket key and runs redaction itself. Nothing goes over the network, which fits local-only tools.</li>
+            <li>Both write the same bucket layout, so readers can't tell which one wrote a session.</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h4>What it deliberately doesn't have</h4>
+          <ul>
+            <li>No database, no queue, no background jobs. The bucket is the only state.</li>
+            <li>No read path for consumers. Readers go to the bucket, not the server.</li>
+            <li>No capture. Clients find and upload sessions.</li>
+            <li>No push to Datadog or an OTel collector, even though OTLP objects could be posted to one as-is.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="config" aria-labelledby="config-h">
+      <div class="eyebrow">Question</div>
+      <h2 id="config-h">Server configuration</h2>
+      <p>The server is configured only through environment variables. There's no config file, no flags, and no admin API. Bun reads <code>.env</code> from the working directory, and <code>compose.yaml</code> passes the same file to the container. <code>.env.example</code> is the template. Everything is read once at startup in <code>server/src/main.ts</code>, so any change needs a restart.</p>
+
+      <div class="tbl"><table>
+        <thead><tr><th>Variable</th><th>What it controls</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td><code>SESSIONDB_TOKENS</code></td><td>Who may upload: <code>name:token</code> pairs, comma-separated</td><td>The name is the owner folder. Tokens must be 16+ characters, and duplicates are refused.</td></tr>
+          <tr><td><code>SESSIONDB_TOKEN</code></td><td>One unnamed token for a single-person install</td><td>Files sessions under <code>owners/default/</code></td></tr>
+          <tr><td><code>SESSIONDB_TOKEN_SECRET</code></td><td>Accepts HS256 JWTs (<code>sub</code> = owner, <code>exp</code> required)</td><td>32+ characters. This is how the Dosu backend mints a token per user. At least one of the three token settings is required.</td></tr>
+          <tr><td><code>SESSIONDB_STORE_URL</code></td><td>Where everything is written</td><td>Required. <code>s3://</code>, <code>r2://</code>, or <code>file:///</code></td></tr>
+          <tr><td><code>AWS_*</code> / <code>S3_*</code> / <code>R2_*</code></td><td>Bucket credentials, region, endpoint</td><td><code>S3_ENDPOINT</code> covers MinIO, Backblaze and similar services. <code>AWS_SESSION_TOKEN</code> works for short-lived keys.</td></tr>
+          <tr><td><code>SESSIONDB_FORMAT</code></td><td><code>letta</code> (default) or <code>otlp</code></td><td>The bucket's first writer fixes the format. The server won't start against a bucket in the other format.</td></tr>
+          <tr><td><code>SESSIONDB_REDACTION_FILE</code></td><td>Extra redaction rules in JSON: <code>patterns</code>, <code>sensitive_files</code>, <code>secret_commands</code></td><td>Adds to the built-in rules and can't remove any. A bad regex stops startup. Only new uploads are affected.</td></tr>
+          <tr><td><code>PORT</code></td><td>Listen port</td><td>Default <code>7200</code>. <code>SESSIONDB_PORT</code> is compose-only (the host port).</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>Fixed in code (not configurable)</h3>
+      <div class="tbl"><table>
+        <thead><tr><th>Setting</th><th>Value</th><th>Where</th></tr></thead>
+        <tbody>
+          <tr><td>Trivial threshold</td><td>2,000 characters, a user turn, and an answer</td><td><code>ingest/worthiness.ts</code></td></tr>
+          <tr><td>Upload caps (a <code>422</code> when exceeded, final)</td><td>32 MiB of records JSON, 50,000 records, 64 MiB per gzipped raw part</td><td><code>ingest/limits.ts</code></td></tr>
+          <tr><td>Request body / idle timeout</td><td>256 MiB, 120 s</td><td><code>server/src/main.ts</code></td></tr>
+          <tr><td>Accepted <code>agent</code> formats</td><td>The nine normalizers</td><td><code>normalize/index.ts</code></td></tr>
+          <tr><td>Built-in redaction</td><td>Always on</td><td><code>redact/</code></td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>What happens at startup</h3>
+      <p>The server checks every setting and exits with a one-line error if one is wrong. It then writes the layout marker and a probe object for each listed owner, so wrong bucket keys fail at startup rather than on the first upload. The startup log line names the format, the store URL and the owners.</p>
+      <div class="callout"><p><b>No per-owner or per-team settings.</b> To give teams different redaction rules, formats or buckets, you run one container per team. Tokens are fixed at startup, so adding or rotating one means a restart (signed JWTs avoid this).</p></div>
+    </section>
+
+    <section id="storage" aria-labelledby="storage-h">
+      <div class="eyebrow">Question</div>
+      <h2 id="storage-h">Storage: no database</h2>
+      <p>sessiondb doesn't use Postgres, SQLite or any other database. The server depends only on the SDK, and the SDK depends only on <code>@letta-ai/trajectory</code>. The object store (S3, R2, or a folder via <code>file://</code>) holds all of its state. <code>docs/server.md</code> says there is "no database, no volume, no background work, and no state outside the bucket", so any number of server instances can run, including zero.</p>
+      <div class="tbl"><table>
+        <thead><tr><th>Usually a database job</th><th>How sessiondb does it</th></tr></thead>
+        <tbody>
+          <tr><td>A sessions table</td><td>One <code>metadata.json</code> per session at <code>owners/&lt;owner&gt;/sessions/&lt;archive_id&gt;/</code></td></tr>
+          <tr><td>Rows of content</td><td>Write-once objects: <code>raw.N.*.gz</code> and <code>trace.&lt;hash&gt;.json.gz</code></td></tr>
+          <tr><td>Primary key</td><td><code>archive_id = sha256(owner, agent, session_id)</code></td></tr>
+          <tr><td>Change log / replication</td><td><code>owners/&lt;owner&gt;/changes/&lt;stamp&gt;-&lt;hash&gt;.json</code>, which readers follow with a cursor</td></tr>
+          <tr><td>Avoiding conflicting writes</td><td><code>content_hash</code> makes repeated writes harmless, and each write is verified by its ETag or by reading it back. There are no real transactions.</td></tr>
+          <tr><td>Queries</td><td>Listing objects by prefix only. There's no index, so you can't search by branch, project or text.</td></tr>
+        </tbody>
+      </table></div>
+      <p>What this costs: there's no search beyond listing by owner. The change feed's order depends on laptop clocks, so readers need a lag window. Updating <code>metadata.json</code> means reading the object, changing it and writing it back, and the <code>offset</code> check is the only protection against two uploads of the same session at once.</p>
+      <div class="callout"><p><b>A hint of Postgres downstream.</b> <code>trace/canonical.ts:26</code> strips NUL characters because "Postgres text and jsonb reject NUL". So at least one reader, probably Dosu's backend, loads traces into Postgres. Databases sit <i>beside</i> the bucket as derived copies, which is the same pattern the ClickHouse plan uses. (Which reader this is hasn't been confirmed.)</p></div>
+    </section>
+
+    <section id="auth" aria-labelledby="auth-h">
+      <div class="eyebrow">Question</div>
+      <h2 id="auth-h">User auth</h2>
+      <p>Every request carries a bearer token, the token names one owner, and the request can touch only <code>owners/&lt;owner&gt;/</code>. There are no logins, passwords, sessions, roles or user records. The code is in <code>server/src/app.ts</code> (<code>authorize</code>) and <code>server/src/signed-token.ts</code>.</p>
+      <div class="tbl"><table>
+        <thead><tr><th>Token kind</th><th>How it's checked</th><th>Suits</th></tr></thead>
+        <tbody>
+          <tr><td>Listed token (<code>SESSIONDB_TOKENS</code> / <code>SESSIONDB_TOKEN</code>)</td><td>A timing-safe comparison against each entry; a match gives that entry's name as the owner. Tokens must be 16+ characters, duplicates are refused, and changes need a restart.</td><td>A self-hosted team</td></tr>
+          <tr><td>Signed token (<code>SESSIONDB_TOKEN_SECRET</code>)</td><td>An HS256 JWT: anything other than HS256 is refused, the signature is checked with a timing-safe compare, <code>exp</code> is required and must be in the future, and <code>sub</code> must be a valid owner name</td><td>The hosted setup: the <b>Dosu backend mints one per user</b>, and the server never sees a user list</td></tr>
+        </tbody>
+      </table></div>
+      <h3>For each request</h3>
+      <p>The server reads <code>Authorization: Bearer &lt;token&gt;</code>. A missing, wrong or expired token gets <code>401 unauthorized</code>, with no reason given. The owner the token names selects a client scoped to that owner's folder, and every route goes through it: upload, list, read, trace, delete, and <code>/v1/changes</code>. <code>/healthz</code> is the only route that needs no token, and <code>GET /v1/me</code> tells a client which owner and bucket it maps to.</p>
+      <h3>Consequences</h3>
+      <ul>
+        <li><b>The token is the identity.</b> The server doesn't check email, org or team. Whoever mints tokens decides who someone is.</li>
+        <li><b>No sharing between users.</b> No owner can read another's sessions through the API, and there are no team-wide reads. Each team needs its own container.</li>
+        <li><b>Signed tokens can't be revoked.</b> A leaked JWT works until its <code>exp</code>. Short expiry is the only protection, and rotating the secret cuts off everyone at once.</li>
+        <li><b>Renaming an owner moves their data.</b> The old folder stays in the bucket and the new name can't see it.</li>
+      </ul>
+      <div class="callout warn"><p><b>Bucket keys skip auth entirely.</b> Readers such as Dosu's backend, or a future ClickHouse indexer, read the bucket with their own keys and see every owner. Token auth protects only the HTTP API.</p></div>
+    </section>
+
+    <section id="capture" aria-labelledby="capture-h">
+      <div class="eyebrow">Question 1</div>
+      <h2 id="capture-h">How sessions get in</h2>
+      <p>The Session Store is push-based. Coding agents (Claude Code, Codex, Cursor and others) already write a log file on the developer's machine. Something on that machine reads the file and POSTs it. The server never reaches out to a laptop, and it has no hooks or file watchers. The README states the repo's scope directly: the server "takes a log over HTTP".</p>
+
+      <div class="diagram" role="img" aria-label="Flow: agent writes a log on the laptop, a client uploads it to the sessiondb server, which stores raw, normalizes, decides, and publishes to a bucket that readers tail.">
+        <svg viewBox="0 0 720 250" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ahead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+          <text x="10" y="18" class="sub">DEVELOPER MACHINE (not in this repo)</text>
+          <rect class="box ext" x="10" y="28" width="150" height="58" rx="8"/>
+          <text x="22" y="52" font-size="13" font-weight="600">Agent writes log</text>
+          <text x="22" y="72" class="sub">~/.claude/…jsonl, Codex, …</text>
+          <rect class="box ext" x="10" y="120" width="150" height="58" rx="8"/>
+          <text x="22" y="144" font-size="13" font-weight="600">Uploader client</text>
+          <text x="22" y="164" class="sub">e.g. Dosu CLI, a hook</text>
+          <path class="arrow" d="M85,86 L85,118"/>
+
+          <text x="210" y="18" class="sub">SESSIONDB SERVER (this repo)</text>
+          <rect class="box hl" x="210" y="28" width="290" height="200" rx="10"/>
+          <text x="226" y="54" font-size="13" font-weight="600">POST /v1/sessions</text>
+          <text x="226" y="72" class="sub">bearer token → owner</text>
+          <text x="226" y="102" font-size="12.5">1 · Redact + store raw part</text>
+          <text x="226" y="126" font-size="12.5">2 · Normalize → trajectory-v1</text>
+          <text x="226" y="150" font-size="12.5">3 · Trivial? New tail? Fork?</text>
+          <text x="226" y="174" font-size="12.5">4 · Hash, write trace, pointer,</text>
+          <text x="244" y="192" font-size="12.5">change-feed entry</text>
+          <path class="arrow" d="M160,149 L208,149"/>
+          <text x="166" y="140" class="sub">HTTPS</text>
+
+          <text x="550" y="18" class="sub">YOUR BUCKET</text>
+          <rect class="box" x="550" y="28" width="160" height="110" rx="8"/>
+          <text x="562" y="52" font-size="13" font-weight="600">owners/&lt;owner&gt;/</text>
+          <text x="562" y="74" class="sub">raw.N.jsonl.gz</text>
+          <text x="562" y="92" class="sub">trace.&lt;hash&gt;.json.gz</text>
+          <text x="562" y="110" class="sub">metadata.json</text>
+          <text x="562" y="128" class="sub">changes/…</text>
+          <path class="arrow" d="M500,90 L548,90"/>
+          <rect class="box ext" x="550" y="170" width="160" height="58" rx="8"/>
+          <text x="562" y="194" font-size="13" font-weight="600">Readers</text>
+          <text x="562" y="212" class="sub">tail changes/ (own key)</text>
+          <path class="arrow" d="M630,168 L630,140"/>
+        </svg>
+      </div>
+
+      <h3>What happens to an upload</h3>
+      <ol class="steps">
+        <li><div><b>Store raw, redacted.</b> The native log is scrubbed in three passes: whole tool results that touched secrets files or ran secret-printing commands, your own patterns, then built-in token and credential patterns plus an entropy check. It's written as <code>raw.N</code>. Redaction can't be switched off. <span class="src"><code>sdks/typescript/src/redact/</code></span></div></li>
+        <li><div><b>Normalize.</b> The stored raw (not the bytes that came over the wire) is converted to Letta trajectory-v1 records with <code>@letta-ai/trajectory</code>, plus fixups for each source. Because it works from what's stored, any session can be re-normalized later. <span class="src"><code>sdks/typescript/src/normalize/index.ts</code></span></div></li>
+        <li><div><b>Decide.</b> If there's under 2,000 characters of conversation, no user turn, or no reply, the session is <code>trivial</code>: the raw part is kept but no trace is written. If the session was uploaded before, only the new tail is written as a continuation. <span class="src"><code>ingest/worthiness.ts</code>, <code>ingest/session.ts</code></span></div></li>
+        <li><div><b>Publish.</b> <code>content_hash</code> covers what was said, not timestamps, so re-sending the same conversation writes nothing. The steps are: write the trace, verify it (ETag or read-back), update <code>metadata.json</code>, then append to <code>changes/</code>. <span class="src"><code>store/publish.ts</code>, <code>spec/layout.md</code></span></div></li>
+      </ol>
+
+      <h3>Accepted formats (<code>agent</code> values)</h3>
+      <div class="tbl"><table>
+        <thead><tr><th>agent</th><th>Converted by</th><th>Chunkable</th></tr></thead>
+        <tbody>
+          <tr><td><code>claude-code</code>, <code>codex</code>, <code>cursor</code>, <code>pi</code>, <code>gemini-cli</code></td><td>Letta adapters + fixups</td><td>Yes (JSONL)</td></tr>
+          <tr><td><code>opencode</code></td><td>Letta adapter; needs an <code>opencode export</code> JSON file</td><td>No</td></tr>
+          <tr><td><code>atif</code></td><td>Letta ATIF adapter (v1.0–1.8)</td><td>No, whole document only</td></tr>
+          <tr><td><code>datadog-trajectory</code></td><td>sessiondb's own adapter</td><td>Yes</td></tr>
+          <tr><td><code>trajectory</code></td><td>Passed through after validation</td><td>Yes</td></tr>
+        </tbody>
+      </table></div>
+      <p>Clients can send a whole log or append chunks. A chunk's <code>offset</code> must equal the last <code>bytes_total</code>, otherwise the server returns <code>409</code>. The server keeps the hash state between chunks, so a long session costs only what was appended.</p>
+
+      <div class="callout">
+        <p><b>Who is the uploader?</b> No uploader exists in this repo. According to Dosu team knowledge, the Dosu CLI fills that role (its beta "shipper" path, dosu-cli PR #259), and the Dosu backend mints a signed per-user token for each person (<code>SESSIONDB_TOKEN_SECRET</code>). If we want to change <i>when</i> or <i>which</i> sessions are captured, that work happens in the CLI, not here.</p>
+      </div>
+    </section>
+
+    <section id="datadog" aria-labelledby="datadog-h">
+      <div class="eyebrow">Question 2</div>
+      <h2 id="datadog-h">Datadog Trajectory</h2>
+      <p><a href="https://github.com/datadog-labs/trajectory" target="_blank" rel="noopener">Trajectory</a> is Datadog's capture daemon for coding agents. It writes one file per session at <code>~/.trajectory/trajectories/sessions/&lt;date&gt;/session-&lt;id&gt;.jsonl</code>, with one event per line. sessiondb can read that file format, and that is the whole integration.</p>
+
+      <div class="two">
+        <div class="card">
+          <h4>What exists</h4>
+          <ul>
+            <li>An adapter: <code>normalize/datadog-trajectory.ts</code></li>
+            <li>Accepted as <code>agent: "datadog-trajectory"</code>, whole or chunked</li>
+            <li>Trace <code>source</code> is set to <code>datadog-trajectory:&lt;client&gt;</code>, e.g. <code>…:claude-code</code></li>
+            <li>Handles backfilled sessions (<code>trajectory session import</code>)</li>
+            <li>Golden fixtures: <code>datadog-claude-session</code>, <code>datadog-backfilled-session</code></li>
+          </ul>
+        </div>
+        <div class="card">
+          <h4>What doesn't</h4>
+          <ul>
+            <li>Nothing reads <code>~/.trajectory/</code> or runs the daemon</li>
+            <li>No export to Datadog (OTLP traces can go to any collector, but nothing sends them)</li>
+            <li>The same session sent natively <i>and</i> via Trajectory becomes two separate archives, and nothing links them</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3>Which Trajectory events are kept</h3>
+      <div class="tbl"><table>
+        <thead><tr><th>Event</th><th>Becomes</th><th></th></tr></thead>
+        <tbody>
+          <tr><td><code>session_start</code></td><td>Meta record: <code>project_dir</code>/<code>cwd</code>, <code>git_branch</code>, <code>model</code>, <code>client_source</code></td><td><span class="tag yes">kept</span></td></tr>
+          <tr><td><code>user_prompt</code>, <code>input_prompt</code></td><td>User record, or an observation if <code>provenance.actor_type</code> isn't human</td><td><span class="tag yes">kept</span></td></tr>
+          <tr><td><code>tool_use</code> pre / post</td><td>Tool call (native tool name) / tool result, with <code>ok</code> from <code>success</code></td><td><span class="tag yes">kept</span></td></tr>
+          <tr><td><code>agent_message</code></td><td>Reasoning (<code>thinking_text</code>) + assistant (<code>text</code>)</td><td><span class="tag yes">kept</span></td></tr>
+          <tr><td><code>llm_call</code>, <code>turn_end</code></td><td>Token and cost accounting, turn boundaries</td><td><span class="tag no">dropped</span></td></tr>
+          <tr><td><code>inventory.snapshot</code>, permissions, subagent start/stop</td><td>Lifecycle events</td><td><span class="tag no">dropped</span></td></tr>
+          <tr><td><code>session_start</code> extras</td><td><code>client_version</code>, <code>provider</code>, <code>parent_session_id</code>, <code>start_trigger</code></td><td><span class="tag no">dropped</span></td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>What if the data is already in Datadog?</h3>
+      <p>It doesn't work today. sessiondb reads only the <i>local file</i> the daemon writes on each laptop. Trajectory also publishes to Datadog itself, as LLM Observability traces plus metrics (it uses <code>DD_API_KEY</code>). Those traces are a different shape from the local file:</p>
+      <ul>
+        <li>each <b>turn</b> is a separate trace</li>
+        <li>agent messages, tool calls, real LLM calls and synthetic "turn usage" carriers are spans</li>
+        <li>sessions are linked by a correlation tag, <code>trajectory.trace_correlation.session_id</code></li>
+      </ul>
+      <p>Trajectory's own docs (<code>docs/LLM-OBS-SPAN-TAGS.md</code>) describe this. Nothing in sessiondb can read it: there's no Datadog API client, no <code>DD_*</code> configuration, and no adapter for LLM Observability spans.</p>
+      <div class="tbl"><table>
+        <thead><tr><th>To ingest from Datadog we'd need</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td>A puller</td><td>Datadog's LLM Observability export is pull-only. It's a REST API to list and search spans (<code>/api/v2/llm-obs/v1/spans/events[/search]</code>), still in preview, that needs the customer's API and app keys and returns cursor-paged results filtered by <code>@session_id:</code>. I found no push option for spans: log forwarding to custom destinations covers logs only, and webhooks send monitor alerts, not data. So it means polling, and per sessiondb's design the poller belongs in a client, not the server, which has no background jobs.</td></tr>
+          <tr><td>A new adapter</td><td>Converting spans to trajectory-v1: put the turn traces back together into one session through the correlation tag, order the spans, and drop the synthetic spans. It's a different adapter from the one for the local file.</td></tr>
+          <tr><td>Enough content captured</td><td>At Trajectory's <code>minimal</code> capture level, no prompt or output text is sent to Datadog, so every session would come out <code>trivial</code>. <code>standard</code>/<code>full</code> include content, but assistant text can be cut off at a byte limit.</td></tr>
+        </tbody>
+      </table></div>
+      <p>The simpler path is to read the local file on the same machine where the daemon runs, alongside its Datadog publishing. That's what sessiondb already supports. One upside of pulling from Datadog: its spans carry token usage, which is the data the file adapter drops. I haven't checked whether Datadog's API returns full span content in bulk, or whether the daemon keeps local files after it publishes.</p>
+
+      <div class="callout warn">
+        <p><b>The docs and the code disagree.</b> <code>docs/server.md</code> says <code>session_id</code> and <code>parent_session_id</code> "come from the file's <code>session_start</code>". In the code, the adapter only checks that <code>session_start.session_id</code> exists. The archive ID is built from the <code>session_id</code> in the request body, and <code>parent_session_id</code> also comes only from the body (<code>server/src/app.ts:295</code>). A client that leaves these out loses lineage, and if its <code>session_id</code> differs from the file's, nothing catches the mismatch.</p>
+      </div>
+    </section>
+
+    <section id="metadata" aria-labelledby="metadata-h">
+      <div class="eyebrow">Question 3</div>
+      <h2 id="metadata-h">Session metadata</h2>
+      <p>Metadata is stored in two places: the session pointer <code>metadata.json</code> (which changes over time) and each trace object (which never changes). The table lists every field, where it comes from, and how much we can trust it. The schemas are in <code>sdks/typescript/src/schemas/store.ts</code> and <code>spec/layout.md</code>.</p>
+
+      <div class="tbl"><table>
+        <thead><tr><th>You asked about</th><th>Field</th><th>Where it comes from</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td>User</td><td><code>owner</code></td><td>The name bound to the bearer token, or a JWT's <code>sub</code>. Also used as the folder <code>owners/&lt;owner&gt;/</code>. There's no email, display name, or org.</td><td><span class="tag part">ID only</span></td></tr>
+          <tr><td>Repository</td><td><code>project</code></td><td>Any string the client sends (e.g. <code>github.com/acme/widget</code>). The server doesn't derive or check it. Missing if the client doesn't send it.</td><td><span class="tag part">client-trusted</span></td></tr>
+          <tr><td></td><td><code>metadata.cwd</code></td><td>The local working directory from the transcript's meta record. On traces only, not in <code>metadata.json</code>.</td><td><span class="tag yes">from transcript</span></td></tr>
+          <tr><td>Git branch</td><td><code>branch</code>, <code>metadata.git_branch</code></td><td>The branch the transcript recorded wins; the client's <code>branch</code> is used as a fallback. <code>HEAD</code> and empty values are ignored. OpenCode, pi and ATIF record none, so they rely on the client.</td><td><span class="tag yes">collected</span></td></tr>
+          <tr><td>Visibility</td><td>none</td><td>There's no public/private flag and no repo visibility. Access works per owner folder: a token sees only its own owner's sessions, but anyone with a bucket key sees every session.</td><td><span class="tag no">not collected</span></td></tr>
+          <tr><td>Agent</td><td><code>agent</code>, <code>source</code></td><td><code>agent</code> is the format the client posted (and is part of the archive ID). <code>source</code> is what normalized it, e.g. <code>datadog-trajectory:codex</code> or ATIF's <code>agent.name</code>.</td><td><span class="tag yes">collected</span></td></tr>
+          <tr><td>Model</td><td><code>metadata.model</code></td><td>The transcript's meta record, when the harness writes it. There's no provider field.</td><td><span class="tag part">when present</span></td></tr>
+          <tr><td>Lineage</td><td><code>parent_session_id</code></td><td>Request body only. <code>fork_of</code> is used to de-duplicate copied history but isn't saved.</td><td><span class="tag part">client-trusted</span></td></tr>
+          <tr><td>Time</td><td><code>started_at</code>, <code>ended_at</code>, <code>created_at</code>, <code>updated_at</code></td><td>Start and end come from record timestamps (the laptop clock). The other two are server write times.</td><td><span class="tag yes">collected</span></td></tr>
+          <tr><td>Provenance</td><td><code>normalizer</code>, <code>created_by</code></td><td>SDK version + <code>@letta-ai/trajectory</code> version, which tell you which traces a normalizer change affected.</td><td><span class="tag yes">collected</span></td></tr>
+          <tr><td>Storage</td><td><code>raw[]</code>, <code>traces[]</code>, <code>normalized</code>, <code>withheld_calls</code></td><td>Byte offsets, hashes, continuation state, and the IDs of tool calls whose results were withheld.</td><td><span class="tag yes">collected</span></td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>What isn't recorded at all</h3>
+      <p>Token usage and cost (trajectory-v1 has no field for them, so OTLP spans don't include <code>gen_ai.usage.*</code>), model provider, agent/client version, commit SHA or PR, hostname/OS, repo visibility, team/org, tags, and any link between duplicate captures of the same session.</p>
+    </section>
+
+    <section id="dropped" aria-labelledby="dropped-h">
+      <div class="eyebrow">Follow-up questions</div>
+      <h2 id="dropped-h">Why things get dropped</h2>
+      <div class="callout">
+        <p><b>Read this first:</b> "dropped" means left out of the <i>trace</i> (the normalized copy). It never means deleted from the archive. Every upload is first stored as a redacted raw part (<code>raw.N.jsonl.gz</code>), and traces are always rebuilt from that stored raw. A trivial session and a Trajectory file's <code>llm_call</code> events both stay in the bucket, and a later normalizer can turn them into a trace.</p>
+      </div>
+
+      <h3>Why are <code>trivial</code> sessions skipped?</h3>
+      <p>The code says why: under 2,000 characters is "a greeting rather than an investigation" (<code>sdks/typescript/src/ingest/worthiness.ts</code>). A session is trivial if any of these is true:</p>
+      <ul>
+        <li>it has no user record</li>
+        <li>nothing answers it (no assistant or tool record)</li>
+        <li>its text plus tool arguments plus tool results add up to under 2,000 characters</li>
+      </ul>
+      <p>The check counts size rather than turns on purpose, so a terse agent run that's mostly tool calls still counts. A trivial session keeps its raw part. It gets no trace and no <code>head</code>, and it never appears in <code>changes/</code>.</p>
+      <p>The commits and docs don't say why the threshold is 2,000. Two things suggest where it comes from:</p>
+      <ul>
+        <li><b>The main reader learns from sessions.</b> The change feed is what Dosu's backend reads to extract knowledge. Every published trace is something a reader fetches and processes, and "hi" / "thanks" sessions would only add noise and cost.</li>
+        <li><b>The number came from the Dosu CLI.</b> The CLI's <code>isWorthStudying</code> uses the same 2,000 characters but counts differently: it needs about 4 turns and counts only user and assistant text, not tool calls (per Dosu team notes). The server's rule is more lenient. A session can pass the server and still be skipped by the CLI before it's ever uploaded.</li>
+      </ul>
+      <p>A session in chunks is judged once. Until it has a trace, each new chunk re-checks the whole log so far. After that, every chunk with records in it ships, even one that's all tool traffic (commit <code>8acb777</code>).</p>
+
+      <div class="callout warn">
+        <p><b>Known bug: tails can be lost.</b> A <i>whole</i> re-upload that sends <code>shipped</code> judges only the new tail on its own (<code>isTrivialTrajectory(plan.fresh)</code>, <code>ingest/session.ts:265</code>). A tail under 2,000 characters, or one with no user turn, comes back <code>trivial</code>. The response still includes the whole session's <code>records_total</code> and <code>prefix_sha256</code>, and the docs tell clients to save those. The next upload then starts after records that were never written to a trace. Chunked uploads don't have this problem. It's described in the Dosu note "SessionDB Trivial-Tail Data Loss", and it's still in the code at v0.9.0. The layout spec says a tail "is judged as part of the session", which matches the chunk path but not the whole-upload path.</p>
+      </div>
+
+      <h3>Why does the Datadog adapter drop <code>llm_call</code>, <code>turn_end</code> and the <code>session_start</code> extras?</h3>
+      <p>The adapter's own comment gives the stated reason: these events "carry no conversation". The actual constraint is the target format.</p>
+      <div class="tbl"><table>
+        <thead><tr><th>Dropped</th><th>Why</th></tr></thead>
+        <tbody>
+          <tr><td><code>llm_call</code> (tokens, cost)</td><td>Letta trajectory-v1 has no field for usage. Records are only meta, user, assistant, tool, reasoning, observation and system, and <code>validateRecords</code> removes any field it doesn't know. That's also why OTLP spans don't include <code>gen_ai.usage.*</code>. No other format sessiondb accepts has usage data either.</td></tr>
+          <tr><td><code>turn_end</code></td><td>A turn boundary. Turns are already implied by the order of user and assistant records, so it adds nothing to a trace.</td></tr>
+          <tr><td><code>subagent_start/stop</code></td><td>They repeat what the <code>Agent</code> tool's result already says. The subagent's own session arrives as its own file.</td></tr>
+          <tr><td><code>inventory.snapshot</code>, permissions</td><td>State and lifecycle events with no matching record type.</td></tr>
+          <tr><td><code>client_version</code>, <code>provider</code>, <code>start_trigger</code></td><td>The meta record has only <code>source</code>, <code>cwd</code>, <code>git_branch</code> and <code>model</code>. Adding a field means changing the format, which belongs to <code>@letta-ai/trajectory</code>, not to us.</td></tr>
+          <tr><td><code>parent_session_id</code></td><td>Not a format limit. Traces already have <code>metadata.parent_session_id</code>, but the adapter has no way to pass it there. Only the request body sets it. This looks like a gap, not a design choice.</td></tr>
+        </tbody>
+      </table></div>
+      <p>The trajectory-v1 format also protects deduplication: <code>content_hash</code> covers only what was said, so extra telemetry fields wouldn't change the hash anyway. The adapter landed in <code>72c7e35</code> (29 Oct). The same day, <code>5880a23</code> removed an earlier bucket scanner and made Trajectory "an input format only". That scanner needed an always-on server and bucket credentials on every laptop, and it left unredacted files in the bucket.</p>
+      <p><b>If we want token usage,</b> there are three places it could go:</p>
+      <ol>
+        <li>trace <code>metadata</code>, outside the records, the same way <code>parent_session_id</code> and <code>normalizer</code> are stored</li>
+        <li>new <code>gen_ai.usage.*</code> attributes on the OTLP spans</li>
+        <li>upstream in trajectory-v1</li>
+      </ol>
+      <p>Because the raw parts are kept, any of these could be backfilled for sessions we already have.</p>
+    </section>
+
+    <section id="clickhouse" aria-labelledby="clickhouse-h">
+      <div class="eyebrow">Design sketch · not built</div>
+      <h2 id="clickhouse-h">ClickHouse search</h2>
+      <p><b>Recommendation:</b> add ClickHouse as a <i>search index built from the bucket</i>, not as a replacement for the bucket. The architecture is already shaped for this. Readers tail <code>changes/</code> with their own key, every trace already has a list of <code>events</code> that's easy to search (role, text, tool name, <code>ok</code>), and every trace can be rebuilt from the stored raw. An indexer is just one more reader, so the write path, redaction and the three core guarantees stay as they are. If the index breaks, you rebuild it from the bucket.</p>
+
+      <div class="diagram" role="img" aria-label="Proposed: the existing write path fills the bucket. A new indexer tails each owner's change feed, reads traces and metadata, and inserts sessions and events into ClickHouse. A new search API queries ClickHouse with access checks and serves clients.">
+        <svg viewBox="0 0 720 200" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="ah3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ahead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+          <text x="10" y="18" class="sub">EXISTING (UNCHANGED)</text>
+          <rect class="box" x="10" y="30" width="140" height="62" rx="8"/>
+          <text x="22" y="54" font-size="13" font-weight="600">sessiondb write</text>
+          <text x="22" y="74" class="sub">server or direct SDK</text>
+          <rect class="box" x="10" y="122" width="140" height="62" rx="8"/>
+          <text x="22" y="146" font-size="13" font-weight="600">Bucket</text>
+          <text x="22" y="166" class="sub">source of truth</text>
+          <path class="arrow" d="M80,92 L80,120" marker-end="url(#ah3)"/>
+
+          <text x="200" y="18" class="sub">NEW</text>
+          <rect class="box hl" x="200" y="100" width="160" height="84" rx="8"/>
+          <text x="212" y="124" font-size="13" font-weight="600">Indexer</text>
+          <text x="212" y="144" class="sub">tail changes/ per owner</text>
+          <text x="212" y="160" class="sub">trace + metadata → rows</text>
+          <text x="212" y="176" class="sub">tombstone → delete</text>
+          <path class="arrow" d="M150,153 L198,153" marker-end="url(#ah3)"/>
+
+          <rect class="box hl" x="400" y="100" width="140" height="84" rx="8"/>
+          <text x="412" y="124" font-size="13" font-weight="600">ClickHouse</text>
+          <text x="412" y="144" class="sub">sessions · traces</text>
+          <text x="412" y="160" class="sub">events (+ text index)</text>
+          <text x="412" y="176" class="sub">derived, rebuildable</text>
+          <path class="arrow" d="M360,142 L398,142" marker-end="url(#ah3)"/>
+
+          <rect class="box hl" x="580" y="100" width="130" height="84" rx="8"/>
+          <text x="592" y="124" font-size="13" font-weight="600">Search API</text>
+          <text x="592" y="144" class="sub">auth + scoping</text>
+          <text x="592" y="160" class="sub">query → hits</text>
+          <text x="592" y="176" class="sub">link to trace</text>
+          <path class="arrow" d="M540,142 L578,142" marker-end="url(#ah3)"/>
+          <rect class="box ext" x="580" y="30" width="130" height="50" rx="8"/>
+          <text x="592" y="60" font-size="13" font-weight="600">Users, Dosu, agents</text>
+          <path class="arrow" d="M645,98 L645,82" marker-end="url(#ah3)"/>
+        </svg>
+      </div>
+
+      <h3>Changes required</h3>
+      <div class="tbl"><table>
+        <thead><tr><th>Area</th><th>What changes</th><th>Size</th></tr></thead>
+        <tbody>
+          <tr><td>1 · Indexer <span class="tag yes">new</span></td><td>
+            <ul>
+              <li>A long-running reader built on the SDK's <code>readChanges</code> / <code>getTrace</code>.</li>
+              <li>The feed is <b>per owner</b> (<code>owners/&lt;owner&gt;/changes/</code>), so the indexer lists <code>owners/</code> to find owners and keeps a cursor for each.</li>
+              <li>Change stamps come from laptop clocks, so it re-reads a time window behind each cursor and drops entries it already has, by key.</li>
+              <li>Reads <code>metadata.json</code> for session fields and trace order, and converts traces with <code>fromOtlp</code> in <code>otlp</code> buckets.</li>
+              <li>Fills the index for existing sessions with a one-time scan of <code>sessions/</code>.</li>
+            </ul>
+          </td><td>M</td></tr>
+          <tr><td>2 · Schema <span class="tag yes">new</span></td><td>
+            <ul>
+              <li><code>sessions</code>: a ReplacingMergeTree keyed by owner and archive_id, newest <code>updated_at</code> wins. Holds agent, source, project, branch, model, cwd, parent, times, head and status.</li>
+              <li><code>events</code>: a MergeTree ordered by owner, archive_id, trace position and index. Holds role, text, tool_name, ok and timestamp, with a full-text or n-gram index on <code>text</code>.</li>
+              <li>Optionally an embedding column with a vector index, for semantic search.</li>
+            </ul>
+          </td><td>S</td></tr>
+          <tr><td>3 · Search API + access <span class="tag yes">new</span></td><td>
+            <ul>
+              <li>Today the only access rule is "a token sees its own owner folder". Search for one owner is easy.</li>
+              <li>Search across a team needs team, org and visibility fields, which <a href="#metadata">aren't collected</a>, so this is the real design decision.</li>
+              <li>Put it in a separate service, or behind an optional server route, so the server stays stateless by default.</li>
+            </ul>
+          </td><td>M–L</td></tr>
+          <tr><td>4 · Session-wide event order <span class="tag part">change</span></td><td>
+            <ul>
+              <li><code>events[].index</code> starts at 0 in every trace object, so a session sent in chunks has several overlapping index ranges.</li>
+              <li>The indexer has to compute each event's position from the order of <code>traces</code> in <code>metadata.json</code>, or each trace could record its starting event offset (a small layout addition).</li>
+            </ul>
+          </td><td>S</td></tr>
+          <tr><td>5 · Better filters <span class="tag part">change</span></td><td>Search filters are only as good as the metadata. <code>project</code> is free text, there's no org or visibility field, and there's no token usage. Normalizing the repository to a canonical remote is the first fix to make.</td><td>S–M</td></tr>
+          <tr><td>6 · Deletes, redaction, reindexing <span class="tag part">change</span></td><td>
+            <ul>
+              <li><code>DELETE</code> is promised to be irreversible, so tombstones have to remove rows from ClickHouse.</li>
+              <li>Index only redacted traces, never raw parts.</li>
+              <li>Store the <code>normalizer</code> version on each row so a normalizer change can trigger a re-index.</li>
+            </ul>
+          </td><td>S</td></tr>
+          <tr><td>7 · Operations <span class="tag yes">new</span></td><td>
+            <ul>
+              <li>A ClickHouse deployment (Cloud or self-hosted), schema migrations, and monitoring of how far the indexer lags behind the feed.</li>
+              <li>Tool results can be large: truncate them in <code>events</code> and link to the full trace.</li>
+            </ul>
+          </td><td>M</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>Alternatives I'd avoid</h3>
+      <div class="two">
+        <div class="card">
+          <h4>ClickHouse as the store</h4>
+          <ul>
+            <li>Breaks "readers need only a bucket key" and the documented layout.</li>
+            <li>Loses the raw parts and the immutable trace objects.</li>
+            <li>Ties the archive to one database rather than an open format.</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h4>Writing to ClickHouse from the server</h4>
+          <ul>
+            <li>Adds a database to a server that today has none.</li>
+            <li>Ties upload success to ClickHouse being up.</li>
+            <li>Misses direct-mode SDK writers, which never go through the server.</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3>Questions that shape the build</h3>
+      <ul>
+        <li><b>What kind of search?</b> Keyword (a text index), semantic (embeddings plus a vector index, and an embedding step in the indexer), or analytics such as tools used or failure rates (plain columns are enough).</li>
+        <li><b>Semantic search in ClickHouse:</b> exact search works anywhere, using <code>cosineDistance</code> / <code>L2Distance</code> over an <code>Array(Float32)</code> column. Approximate search uses the <code>vector_similarity</code> index (HNSW via usearch), available from 25.8. ClickHouse doesn't create embeddings, so the indexer must call an embedding model. HNSW keeps the whole index in memory and rebuilds it when data parts merge. Every query is also filtered by owner, so filtered vector search needs testing.</li>
+        <li><b>Who searches?</b> Individuals over their own sessions, a team, or Dosu's backend and agents. This decides item 3.</li>
+        <li><b>How fresh?</b> The feed's clock skew means a few minutes of delay is normal. Anything closer to real time needs a different trigger.</li>
+      </ul>
+    </section>
+
+    <section id="gaps" aria-labelledby="gaps-h">
+      <h2 id="gaps-h">Gaps and decisions</h2>
+      <p>These came up while answering the three questions. Each one is a place where we could change something or build something new.</p>
+      <div class="tbl"><table>
+        <thead><tr><th>Topic</th><th>What we found</th><th>Possible direction</th></tr></thead>
+        <tbody>
+          <tr><td>Trivial-tail loss</td><td>A whole re-upload with <code>shipped</code> judges the tail alone. A short tail gets no trace, but the client still advances past it.</td><td>Judge tails the way chunks are judged, or don't advance <code>records_total</code> on <code>trivial</code></td></tr>
+          <tr><td>Two worthiness rules</td><td>The CLI (≥4 turns, text only) and the server (2,000 characters including tool traffic) disagree</td><td>Choose one rule. The CLI's stricter rule drops tool-heavy runs before they're uploaded.</td></tr>
+          <tr><td>Data already in Datadog</td><td>Only the daemon's local file is supported. LLM Observability spans in Datadog can't be ingested.</td><td>Read the local file where the daemon runs, or build a client-side puller and a span adapter</td></tr>
+          <tr><td>Datadog lineage</td><td><code>parent_session_id</code> and <code>session_id</code> in <code>session_start</code> are ignored</td><td>Read them in the adapter, or fix the docs</td></tr>
+          <tr><td>Datadog usage data</td><td><code>llm_call</code> (tokens and cost) is dropped</td><td>Keep it in trace metadata; this is the one source that has usage data</td></tr>
+          <tr><td>Repo identity</td><td><code>project</code> is a free string the client supplies</td><td>Normalize to a canonical remote, or derive it from <code>cwd</code> + git on the client</td></tr>
+          <tr><td>Visibility / sharing</td><td>The only access boundary is the owner folder</td><td>Add a <code>visibility</code> field or team scope to <code>metadata.json</code>, if readers need it</td></tr>
+          <tr><td>Which branch wins</td><td>The server docs say the branch "the transcript recorded as it began". Team knowledge says the CLI picks the <i>last</i> branch for Claude Code. Since the transcript wins, mid-session branch switches may be credited to the original branch.</td><td>Confirm what the Letta adapter emits, then choose a rule</td></tr>
+          <tr><td>Token revocation</td><td>Signed tokens can't be revoked before <code>exp</code>, and there's no team-level access</td><td>Keep expiry short, add a deny-list or a per-owner token version, and add team scopes if readers need them</td></tr>
+          <tr><td>Duplicate captures</td><td>A native upload and a Trajectory upload of the same session become separate archives</td><td>Store a cross-reference, e.g. the native session ID from <code>session_start</code></td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <section id="log" aria-labelledby="log-h">
+      <h2 id="log-h">What we've covered</h2>
+      <ul class="log">
+        <li><time datetime="2026-11-13">13 Nov 2026</time><div>Confirmed there's no database (the bucket holds all state) and traced user auth: listed tokens or HS256 JWTs, one owner per token, every call scoped to that owner's folder. Sources: <code>server/src/app.ts</code>, <code>server/src/signed-token.ts</code>, <code>package.json</code> files, <code>trace/canonical.ts</code>, <code>docs/server.md</code>.</div></li>
+        <li><time datetime="2026-11-13">13 Nov 2026</time><div>Listed the server's configuration: eight environment variables, all read once at startup, plus the limits that are fixed in code. Sources: <code>server/src/main.ts</code>, <code>.env.example</code>, <code>compose.yaml</code>, <code>docs/server.md</code>, <code>ingest/limits.ts</code>, <code>store/s3.ts</code>.</div></li>
+        <li><time datetime="2026-11-13">13 Nov 2026</time><div>Sketched what ClickHouse search would take. Recommendation: a search index built from the bucket and fed by the change feed, plus a new search API. Sources: <code>store/changes.ts</code>, <code>store/layout.ts</code>, <code>schemas/trace.ts</code>.</div></li>
+        <li><time datetime="2026-11-13">13 Nov 2026</time><div>Checked whether sessions already published to Datadog can be ingested. They can't: there's no API client and no adapter for LLM Observability spans. Sources: <code>git grep</code> for <code>DD_*</code> and Datadog APIs (no hits), and Trajectory's README and <code>docs/LLM-OBS-SPAN-TAGS.md</code>.</div></li>
+        <li><time datetime="2026-11-13">13 Nov 2026</time><div>Added an architecture diagram covering the two client backends, the thin server, the five-stage SDK pipeline, the storage adapters, the bucket layout and readers. Sources: <code>client.ts</code>, <code>store/open.ts</code>, <code>server/src/app.ts</code>, <code>spec/layout.md</code>.</div></li>
+        <li><time datetime="2026-11-13">13 Nov 2026</time><div>Second pass: why trivial sessions get no trace, and why the Datadog adapter drops events. Sources: <code>ingest/worthiness.ts</code>, <code>ingest/session.ts</code>, commits <code>72c7e35</code>, <code>5880a23</code>, <code>8acb777</code>, and the Dosu notes "SessionDB Trivial-Tail Data Loss" and "CLI Session Shipping Pipeline".</div></li>
+        <li><time datetime="2026-11-13">13 Nov 2026</time><div>First pass: how sessions are captured, how Datadog Trajectory fits in, and what metadata is collected. Sources: <code>README.md</code>, <code>docs/server.md</code>, <code>spec/layout.md</code>, <code>schemas/</code>, <code>normalize/datadog-trajectory.ts</code>, <code>ingest/session.ts</code>, <code>server/src/app.ts</code>, plus Dosu team notes on the CLI shipper and branch handling.</div></li>
+      </ul>
+    </section>
+  </main>
+</div>

@@ -1,0 +1,1854 @@
+<title>Seshi Design Decisions</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=Space+Grotesk:wght@500;600;700&display=swap">
+<style>
+/* Layout: sticky index rail on the left (desktop), one reading column of decision records; stacks to one column on phones. */
+:root {
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --fg: #181b22;
+  --muted: #5a6170;
+  --line: #dcdfe6;
+  --accent: #2847d0;
+  --accent-soft: #e7ebfc;
+  --ok: #1d7446;
+  --ok-soft: #e1f2e8;
+  --warn: #8f5400;
+  --warn-soft: #faefd9;
+  --code-bg: #eceef3;
+  --font-display: "Space Grotesk", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "IBM Plex Sans", -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1217; --surface: #161a21; --fg: #e5e8ee; --muted: #9aa2b1; --line: #2a303b;
+    --accent: #93a6ff; --accent-soft: #1d2546; --ok: #72d29e; --ok-soft: #142e21;
+    --warn: #efb65a; --warn-soft: #362a12; --code-bg: #1c212a; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1217; --surface: #161a21; --fg: #e5e8ee; --muted: #9aa2b1; --line: #2a303b;
+  --accent: #93a6ff; --accent-soft: #1d2546; --ok: #72d29e; --ok-soft: #142e21;
+  --warn: #efb65a; --warn-soft: #362a12; --code-bg: #1c212a; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--fg); font-family: var(--font-body);
+  font-size: 15px; line-height: 1.6;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 32px 64px;
+}
+.wrap { max-width: 1160px; margin: 0 auto; display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 48px; }
+@media (max-width: 980px) { .wrap { grid-template-columns: minmax(0, 1fr); gap: 24px; } nav.rail { position: static !important; } }
+nav.rail { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 24px); align-self: start; font-size: 13px; }
+nav.rail .brand { font-family: var(--font-display); font-weight: 700; font-size: 22px; letter-spacing: -0.01em; margin-bottom: 4px; }
+nav.rail .sub { color: var(--muted); margin-bottom: 20px; }
+nav.rail h4 { font-family: var(--font-body); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 18px 0 6px; font-weight: 600; }
+nav.rail a { display: flex; gap: 8px; color: var(--fg); text-decoration: none; padding: 3px 0; }
+nav.rail a:hover { color: var(--accent); }
+nav.rail a .k { font-family: var(--font-mono); color: var(--muted); font-size: 12px; min-width: 30px; }
+main { min-width: 0; }
+h1 { font-family: var(--font-display); font-size: clamp(30px, 4vw, 42px); line-height: 1.1; letter-spacing: -0.02em; margin: 0 0 12px; text-wrap: balance; }
+h2 { font-family: var(--font-display); font-size: 26px; letter-spacing: -0.01em; margin: 0 0 6px; text-wrap: balance; display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+h2 .k { font-family: var(--font-mono); font-size: 14px; color: var(--accent); font-weight: 500; }
+h3 { font-family: var(--font-display); font-size: 17px; margin: 0; text-wrap: balance; }
+p { margin: 0 0 12px; max-width: 72ch; }
+.lede { font-size: 17px; color: var(--muted); max-width: 70ch; }
+section { padding-top: 40px; margin-top: 40px; border-top: 1px solid var(--line); scroll-margin-top: 16px; }
+section.first { border-top: 0; margin-top: 8px; padding-top: 0; }
+.intro { color: var(--muted); margin-bottom: 18px; }
+code, .mono { font-family: var(--font-mono); font-size: 0.88em; }
+code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+a { color: var(--accent); }
+.legend { display: flex; flex-wrap: wrap; gap: 10px 18px; margin: 18px 0 0; font-size: 13px; color: var(--muted); align-items: center; }
+.chip { display: inline-block; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; padding: 2px 8px; border-radius: 999px; white-space: nowrap; line-height: 1.6; }
+.chip.proposed { background: var(--accent-soft); color: var(--accent); }
+.chip.open { background: var(--warn-soft); color: var(--warn); }
+.chip.agreed { background: var(--ok-soft); color: var(--ok); }
+.chip.deferred { background: var(--code-bg); color: var(--muted); }
+.meta { font-size: 13px; color: var(--muted); }
+
+/* decision records */
+.dec { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 4px 20px; padding: 18px 0; border-top: 1px solid var(--line); }
+.dec:first-of-type { border-top: 0; }
+.dec .id { font-family: var(--font-mono); font-size: 13px; color: var(--muted); display: flex; flex-direction: column; gap: 6px; align-items: flex-start; padding-top: 2px; }
+.dec .body { min-width: 0; }
+.dec .q { margin: 2px 0 8px; }
+.dec dl { margin: 0; display: grid; grid-template-columns: 118px minmax(0, 1fr); gap: 6px 14px; }
+.dec dt { font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); font-weight: 600; padding-top: 3px; }
+.dec dd { margin: 0; min-width: 0; }
+.dec dd ul { margin: 0; padding-left: 18px; }
+.dec dd li { margin: 2px 0; }
+.dec .rec { font-weight: 500; }
+@media (max-width: 620px) {
+  .dec { grid-template-columns: minmax(0, 1fr); }
+  .dec .id { flex-direction: row; align-items: center; }
+  .dec dl { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .dec dd { margin-bottom: 8px; }
+}
+
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; }
+.decisions { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 4px 20px; margin: 16px 0; }
+.two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 16px 0; }
+@media (max-width: 720px) { .two { grid-template-columns: minmax(0, 1fr); } }
+.two h4, .oq h4 { margin: 0 0 8px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); font-weight: 600; }
+.two ul, .oq ul { margin: 0; padding-left: 18px; }
+.two li, .oq li { margin: 4px 0; }
+.oq { border-left: 3px solid var(--warn); padding: 4px 0 4px 16px; margin: 16px 0 0; }
+
+.scroll { overflow-x: auto; margin: 16px 0; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; min-width: 760px; }
+th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); font-weight: 600; background: var(--bg); }
+tr:last-child td { border-bottom: 0; }
+td .k { font-family: var(--font-mono); color: var(--accent); }
+
+pre.tree { font-family: var(--font-mono); font-size: 13px; line-height: 1.55; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; overflow-x: auto; margin: 16px 0; }
+pre.tree .c { color: var(--muted); }
+pre.tree .d { color: var(--accent); font-weight: 500; }
+
+/* pipeline */
+.flow { display: flex; flex-wrap: wrap; align-items: stretch; gap: 8px; margin: 18px 0; }
+.flow .st { flex: 1 1 130px; min-width: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 13px; position: relative; }
+.flow .st b { display: block; font-family: var(--font-display); font-size: 14px; margin-bottom: 2px; }
+.flow .st span { color: var(--muted); }
+.flow .st.src { border-style: dashed; }
+.flow .st.opt { border-color: var(--warn); }
+.flow .ar { align-self: center; color: var(--muted); font-family: var(--font-mono); }
+@media (max-width: 620px) { .flow { flex-direction: column; } .flow .ar { transform: rotate(90deg); align-self: flex-start; margin-left: 20px; } }
+
+.order { counter-reset: o; list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 8px; }
+.order li { counter-increment: o; display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px; }
+.order li::before { content: counter(o); font-family: var(--font-mono); color: var(--accent); font-weight: 500; }
+.log { font-size: 13.5px; }
+.log li { margin: 4px 0; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+
+<div class="wrap">
+<nav class="rail" aria-label="Contents">
+  <div class="brand">seshi</div>
+  <div class="sub">Design decisions for the sessiondb redesign</div>
+  <h4>Start here</h4>
+  <a href="#overview"><span class="k">—</span>Overview</a>
+  <a href="#first"><span class="k">—</span>Decide these first</a>
+  <h4>Cross-cutting</h4>
+  <a href="#tenancy"><span class="k">X1</span>Tenancy</a>
+  <a href="#runtime"><span class="k">X2</span>Runtime &amp; distribution</a>
+  <a href="#repo"><span class="k">X3</span>Repository structure</a>
+  <a href="#pipeline"><span class="k">X4</span>One ingest pipeline</a>
+  <a href="#identity"><span class="k">X5</span>Identity &amp; access</a>
+  <a href="#storage"><span class="k">X6</span>Storage &amp; format</a>
+  <a href="#worker"><span class="k">X7</span>Background work</a>
+  <h4>Features</h4>
+  <a href="#f1"><span class="k">F1</span>Server config</a>
+  <a href="#f2"><span class="k">F2</span>Regex redaction</a>
+  <a href="#f3"><span class="k">F3</span>Model redaction</a>
+  <a href="#f4"><span class="k">F4</span>OTLP ingestion</a>
+  <a href="#f5"><span class="k">F5</span>Datadog sync</a>
+  <a href="#f6"><span class="k">F6</span>S3 sync</a>
+  <a href="#f7"><span class="k">F7</span>Cursor Cloud sync</a>
+  <a href="#f8"><span class="k">F8</span>Session CLI</a>
+  <a href="#f9"><span class="k">F9</span>Capture integrations</a>
+  <a href="#f10"><span class="k">F10</span>Search</a>
+  <h4>Experience</h4>
+  <a href="#brand"><span class="k">B1</span>Brand &amp; surfaces</a>
+  <h4>Record</h4>
+  <a href="#log"><span class="k">—</span>Change log</a>
+</nav>
+
+<main>
+<section class="first" id="overview">
+  <div class="meta">Working document · started 14 Nov 2026 · base: sessiondb v0.9.0</div>
+  <h1>Seshi design decisions</h1>
+  <p class="lede">Seshi turns sessiondb from an upload-only session store into a toolkit for the whole session lifecycle: capture, ingest from other systems, redact, store, and search. This page records each decision we need to make, the options, a recommendation, and what is still open.</p>
+  <p>Every decision has an ID (<code>X5.2</code>, <code>F4.3</code>) so we can refer to it in discussion. Recommendations are proposals until we agree on them.</p>
+  <div class="legend">
+    <span><span class="chip proposed">Proposed</span> recommendation, not yet agreed</span>
+    <span><span class="chip open">Open</span> needs a call or more research</span>
+    <span><span class="chip agreed">Agreed</span> settled</span>
+    <span><span class="chip deferred">Deferred</span> not in the first version</span>
+  </div>
+
+  <div class="scroll">
+  <table>
+    <thead><tr><th>Feature</th><th>How data arrives</th><th>Who is the caller</th><th>Who the session belongs to</th><th>Biggest open question</th></tr></thead>
+    <tbody>
+      <tr><td><span class="k">F1</span> Server config</td><td>n/a</td><td>Operator</td><td>n/a</td><td>Settled</td></tr>
+      <tr><td><span class="k">F2</span> Regex redaction</td><td>Every ingest</td><td>Operator writes rules</td><td>n/a</td><td>Settled; RE2 under Bun still to check</td></tr>
+      <tr><td><span class="k">F3</span> Model redaction</td><td>Every ingest, inline</td><td>Server</td><td>n/a</td><td>Settled; default decision model still to pick</td></tr>
+      <tr><td><span class="k">F4</span> OTLP ingestion</td><td>Push, <code>POST /otlp/v1/traces</code></td><td>Org-level ingest token</td><td>The destination's service account</td><td>Settled; still to check whether spans carry workspace identity</td></tr>
+      <tr><td><span class="k">F5</span> Datadog sync</td><td>Poll, LLM Obs Export API</td><td>Connector (DD keys)</td><td>The source's service account</td><td>API is preview; capture level</td></tr>
+      <tr><td><span class="k">F6</span> S3 sync</td><td>Poll, ListObjectsV2</td><td>Connector (bucket keys)</td><td>The source's service account</td><td>Large buckets: listing cost per run</td></tr>
+      <tr><td><span class="k">F7</span> Cursor Cloud sync</td><td>Poll, Cloud Agents API</td><td>Connector (Cursor key)</td><td>The source's service account</td><td>Deferred: no public transcript endpoint</td></tr>
+      <tr><td><span class="k">F8</span> Session CLI</td><td>Push, HTTP API</td><td>Person (IdP sign-in, or org key with a stated username)</td><td>The signed-in person</td><td>Settled</td></tr>
+      <tr><td><span class="k">F9</span> Capture integrations</td><td>Push via hooks and spool</td><td>Device token, or the org key</td><td>The signed-in person</td><td>Settled; how the session toggle learns the session ID</td></tr>
+      <tr><td><span class="k">F10</span> Search</td><td>Reads the change feed</td><td>Person or service</td><td>Filtered by visibility</td><td>Settled; ClickHouse and semantic search later</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section id="first">
+  <h2>Decide these first</h2>
+  <p class="intro">Most feature decisions depend on these four. Settling them first avoids redoing feature work.</p>
+  <ol class="order">
+    <li><span><b>Tenancy (<a href="#tenancy">X1</a>).</b> One deployment per organization makes OTLP tokens, connector keys and owner mapping simple. Multi-tenant changes the layout and every auth check.</span></li>
+    <li><span><b>Identity model (<a href="#identity">X5</a>).</b> Three of the ten features ingest org-level data whose user identity is only a claim. We need one rule for who a session belongs to.</span></li>
+    <li><span><b>Stored format (<a href="#storage">X6.2</a>).</b> Today a bucket is locked to <code>letta</code> or <code>otlp</code> by its first writer. OTLP ingestion and search both depend on what we store.</span></li>
+    <li><span><b>Background work (<a href="#worker">X7</a>).</b> The server has no background jobs today. Three pollers, span assembly and the search indexer all need them.</span></li>
+  </ol>
+</section>
+
+<!-- ============ CROSS-CUTTING ============ -->
+
+<section id="tenancy">
+  <h2><span class="k">X1</span>Tenancy</h2>
+  <p class="intro">Who one seshi deployment serves, and where the walls between organizations sit. Sharing inside an org (teams, who can read whose sessions) is an access question and belongs in <a href="#identity">X5</a>.</p>
+  <p>The real dividing line is whether configuration is a file or data. With one org per deployment, config stays a file plus env (<a href="#f1">F1</a>) and a restart applies it. With many orgs per deployment, adding a customer cannot require a restart, so config, connector secrets and IdP settings become data managed over an admin API, and seshi needs somewhere to keep them.</p>
+  <div class="scroll">
+  <table>
+    <thead><tr><th>Concern</th><th>One org per deployment</th><th>Many orgs per deployment</th></tr></thead>
+    <tbody>
+      <tr><td>Config</td><td>TOML and env, restart to change</td><td>Per-org records over an admin API; needs a control-plane store</td></tr>
+      <tr><td>Connector secrets</td><td>Env or files on the host</td><td>Encrypted per-org secret store</td></tr>
+      <tr><td>Sign-in</td><td>One IdP issuer and audience</td><td>Map each issuer to an org; every org brings its own IdP</td></tr>
+      <tr><td>Bucket layout</td><td>Today's <code>owners/&lt;owner&gt;/…</code></td><td><code>orgs/&lt;org&gt;/owners/&lt;owner&gt;/…</code>; change feed and listings per org</td></tr>
+      <tr><td>Isolation</td><td>Separate bucket and keys; a bug cannot cross orgs</td><td>Enforced in code on every path; one bug or one leaked bucket key exposes every org</td></tr>
+      <tr><td>Workers</td><td>One set of pollers, one review budget</td><td>Per-org scheduling, quotas and fair share</td></tr>
+      <tr><td>Search</td><td>One index</td><td>Org filter on every query and index partition</td></tr>
+      <tr><td>Running N orgs</td><td>N processes, mostly idle (see <a href="#tenancy">X1.2</a>)</td><td>One process</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="decisions">
+    <div class="dec">
+      <div class="id">X1.1<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>One deployment serves one organization</h3>
+        <dl>
+          <dt>Options</dt><dd><ul><li>Single-tenant: one org per deployment; owners are people and services inside it.</li><li>Multi-tenant: <code>orgs/&lt;org&gt;/owners/&lt;owner&gt;</code>, org on every token and check.</li></ul></dd>
+          <dt>Recommendation</dt><dd class="rec">Single-tenant. A host that serves many orgs runs one instance per org (<a href="#tenancy">X1.2</a>).</dd>
+          <dt>Why</dt><dd>Every external credential in scope is already org-level: Claude Console destinations, Datadog API and app keys, Cursor service accounts, S3 source buckets. Owner mapping, redaction rules and search permissions are also per org. Multi-tenancy would add an org check to every path and turn config into data, for a case a hosting layer can solve.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">X1.2<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Build so one process can later host many isolated instances</h3>
+        <dl>
+          <dt>Detail</dt><dd>No module-level singletons. Config, store, auth, workers and the search index hang off an <code>Instance</code> built from one config. A later mode such as <code>seshi serve --instances /etc/seshi/orgs/*.toml</code> can then run many orgs in one process, each with its own bucket, keys, IdP and workers, routed by hostname.</dd>
+          <dt>Why</dt><dd>Testability first: each test builds its own <code>Instance</code> with its own config and store, so tests run in parallel without shared global state. It also leaves room to remove the "N idle processes" cost of single-tenancy later, without putting org checks into the data model.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">X1.3<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Each org's data sits behind its own keys</h3>
+        <dl>
+          <dt>Detail</dt><dd>One bucket per org, or one prefix per org with bucket keys limited to that prefix by IAM policy. Never one set of keys that can read several orgs.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">X1.4<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>A deployment refuses another deployment's data and tokens</h3>
+        <dl>
+          <dt>Detail</dt><dd>The layout marker records a <code>deployment_id</code> and <code>org</code>; the server will not start if its config names a different org. The OIDC audience is specific to the deployment. Seshi tokens are stored as hashes in the deployment's own bucket, so they are not valid anywhere else.</dd>
+          <dt>Why</dt><dd>Catches the easy mistakes: a config pointed at the wrong bucket, or a token copied between environments.</dd>
+          <dt>Priority</dt><dd>Low. It guards an edge case, so keep it to the marker check and the audience setting; nothing more elaborate.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">X1.5<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>No migration of shared deployments</h3>
+        <dl>
+          <dt>Decision</dt><dd class="rec">Assume no hosted multi-org sessiondb deployments exist today. Seshi ships no tool to split a shared bucket by org.</dd>
+          <dt>Note</dt><dd>The <code>o-&lt;org&gt;.u-&lt;user&gt;</code> owner naming seen earlier is treated as not in use. If a shared deployment does turn up, its owner names start with the org, so splitting it by prefix stays possible.</dd>
+        </dl>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="runtime">
+  <h2><span class="k">X2</span>Runtime and distribution</h2>
+  <div class="decisions">
+    <div class="dec">
+      <div class="id">X2.1<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Stay on TypeScript and Bun</h3>
+        <dl>
+          <dt>Options</dt><dd><ul><li>TypeScript on Bun throughout (today's stack).</li><li>Go for the CLI and hooks, TypeScript for the server.</li><li>Rust or Go for everything.</li></ul></dd>
+          <dt>Recommendation</dt><dd class="rec">TypeScript on Bun for everything, so normalizers and redaction run identically on the client and the server.</dd>
+          <dt>Why</dt><dd>Client-side pre-redaction (<a href="#f2">F2.4</a>) and local normalization need the same code as the server. A second language means two implementations of every adapter and rule engine.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">X2.2<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>One <code>seshi</code> binary for CLI, hooks and server</h3>
+        <dl>
+          <dt>Options</dt><dd><ul><li>One binary built with <code>bun build --compile</code>; <code>seshi serve</code> runs the server.</li><li>Separate <code>seshi</code> (client) and <code>seshi-server</code> binaries.</li></ul></dd>
+          <dt>Recommendation</dt><dd class="rec">One binary, plus a server Docker image built from it.</dd>
+          <dt>Revisit if</dt><dd>Binary size or the cold start of <code>seshi hook</code> (which runs on every agent turn) becomes a problem. Fallbacks, in order: a tiny shell shim that appends to the spool for hooks, then a separate server binary.</dd>
+        </dl>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="repo">
+  <h2><span class="k">X3</span>Repository structure</h2>
+  <p class="intro">Today: <code>sdks/typescript</code> holds normalize, redact, store, trace and ingest in one published package (<code>@dosu/sessiondb</code>); <code>server/</code> is one HTTP file, an entry point and token code; <code>spec/</code> holds the layout, OpenAPI and test data.</p>
+  <p>Because <a href="#runtime">X2.2</a> puts the CLI, hooks and server in one binary, package boundaries no longer decide what ships: everything is in the binary. They now do two jobs: keep layers apart so each can be tested alone (<a href="#tenancy">X1.2</a>), and let each command load only the code it needs, so hooks start quickly (<a href="#repo">X3.3</a>). Packages are grouped in a folder per language (<a href="#repo">X3.9</a>), and everything specific to one vendor or agent lives in <code>integrations/</code> (<a href="#repo">X3.11</a>).</p>
+<pre class="tree"><span class="d">seshi/</span>
+├─ <span class="d">apps/</span>
+│  └─ <span class="d">seshi/</span>             <span class="c"># the one binary: entry point, command router, integration registry; commands load lazily</span>
+├─ <span class="d">packages/</span>
+│  ├─ <span class="d">ts/</span>                <span class="c"># TypeScript: the binary and its packages (one Bun workspace)</span>
+│  │  ├─ <span class="d">model/</span>           <span class="c"># types for the trace, metadata, change, envelope, generated from spec/; canonical text, hashing</span>
+│  │  ├─ <span class="d">kit/</span>             <span class="c"># interfaces integrations implement: FormatAdapter, Connector, HookHandler, Installer</span>
+│  │  ├─ <span class="d">formats/</span>         <span class="c"># vendor-neutral formats: ATIF, OTel GenAI spans; renderers: letta, otlp, atif; detection</span>
+│  │  ├─ <span class="d">redact/</span>          <span class="c"># rule engine, rule packs, decision-model review</span>
+│  │  ├─ <span class="d">config/</span>          <span class="c"># TOML + env loader, schema, value provenance</span>
+│  │  ├─ <span class="d">store/</span>           <span class="c"># layout, s3/r2/fs drivers, conditional writes, changes, checkpoints, markers, token records</span>
+│  │  ├─ <span class="d">pipeline/</span>        <span class="c"># envelope → normalize → redact → filter → model review → write; span assembler</span>
+│  │  ├─ <span class="d">auth/</span>            <span class="c"># credential verifiers, scopes, owner mapping</span>
+│  │  ├─ <span class="d">sources/</span>         <span class="c"># scheduler and checkpoints for connectors; the generic S3 poller</span>
+│  │  ├─ <span class="d">search/</span>          <span class="c"># indexer, query layer with the permission filter, backends</span>
+│  │  ├─ <span class="d">instance/</span>        <span class="c"># builds an Instance from one config; runs worker jobs (X1.2, X7)</span>
+│  │  ├─ <span class="d">api/</span>             <span class="c"># HTTP routes and the generic OTLP receiver over an Instance</span>
+│  │  ├─ <span class="d">capture/</span>         <span class="c"># spool, uploader, sweep runner, scope rules, status-line state</span>
+│  │  └─ <span class="d">client/</span>          <span class="c"># typed HTTP client (published as @seshi/client)</span>
+│  ├─ <span class="d">py/</span>                <span class="c"># later: Python client and read-only layout reader (X3.10)</span>
+│  │  └─ <span class="d">client/</span>
+│  └─ <span class="d">go/</span>                <span class="c"># later</span>
+│     └─ <span class="d">client/</span>
+├─ <span class="d">integrations/</span>        <span class="c"># everything specific to one vendor or agent (X3.11)</span>
+│  ├─ <span class="d">claude-code/</span>       <span class="c"># transcript adapter, hook handlers, status line, plugin manifest, installer</span>
+│  ├─ <span class="d">codex/</span>             <span class="c"># rollout adapter, notify hook, sweep paths, installer</span>
+│  ├─ <span class="d">cursor/</span>
+│  │  ├─ <span class="d">local/</span>          <span class="c"># agent-transcripts adapter, hooks, installer</span>
+│  │  └─ <span class="d">cloud/</span>          <span class="c"># Cloud Agents poller (F7, deferred)</span>
+│  ├─ <span class="d">datadog-trajectory/</span>
+│  │  ├─ <span class="d">daemon/</span>         <span class="c"># adapter for ~/.trajectory session files, sweep paths</span>
+│  │  └─ <span class="d">llmobs/</span>         <span class="c"># LLM Observability Export API poller, turn spans → session (F5)</span>
+│  └─ <span class="d">claude-platform/</span>   <span class="c"># anthropic.* span attributes for the OTLP receiver (F4)</span>
+├─ <span class="d">brand/</span>               <span class="c"># guidelines, SVG glyph and lockups, expression poses, palette tokens (B1)</span>
+├─ <span class="d">spec/</span>                <span class="c"># the cross-language contract: layout, OpenAPI, JSON Schemas, canonical hashing rules</span>
+│  └─ <span class="d">testdata/</span>          <span class="c"># conformance fixtures every language runs</span>
+├─ <span class="d">tests/</span>               <span class="c"># cross-package TypeScript tests: Instance + temp fs store + api + client</span>
+└─ <span class="d">docs/</span></pre>
+  <div class="decisions">
+    <div class="dec">
+      <div class="id">X3.1<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>One app, domain packages</h3>
+        <dl>
+          <dt>Decision</dt><dd class="rec">One package per domain, and one app, <code>apps/seshi</code>, that builds the binary.</dd>
+          <dt>Why</dt><dd>Each domain gets its own test suite and a declared list of what it depends on. Coarse packages would hide the layering; a single package would rely on lint alone.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">X3.2<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Layered dependencies, checked in CI</h3>
+        <dl>
+          <dt>Layers</dt><dd><ul>
+            <li><b>0</b> <code>ts/model</code></li>
+            <li><b>1</b> <code>ts/kit</code>, <code>ts/formats</code>, <code>ts/redact</code>, <code>ts/config</code>, <code>ts/store</code></li>
+            <li><b>2</b> <code>ts/pipeline</code>, <code>ts/auth</code>, <code>integrations/*</code> (which may use only <code>ts/model</code>, <code>ts/kit</code> and <code>ts/formats</code>)</li>
+            <li><b>3</b> <code>ts/sources</code>, <code>ts/search</code></li>
+            <li><b>4</b> <code>ts/instance</code></li>
+            <li><b>5</b> <code>ts/api</code>; <code>ts/capture</code> (uses <code>ts/client</code>, <code>ts/config</code>, <code>ts/redact</code>, <code>ts/kit</code>, never <code>ts/instance</code>)</li>
+            <li><b>6</b> <code>apps/seshi</code></li>
+          </ul><code>ts/client</code> depends only on <code>ts/model</code>. A package may import from lower layers only.</dd>
+          <dt>Enforcement</dt><dd>A dependency check in CI (for example dependency-cruiser). Declaring dependencies in each <code>package.json</code> is not enough: Bun hoists workspace packages, so an undeclared import still resolves.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">X3.3<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Commands load lazily</h3>
+        <dl>
+          <dt>Detail</dt><dd><code>apps/seshi</code> imports a command's module only when that command runs (<code>await import()</code>). <code>seshi hook</code> and <code>seshi statusline</code> then never evaluate the server, protobuf or search code. CI times <code>seshi hook</code> against a fixed budget so a stray top-level import shows up.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">X3.4<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Internal packages are source-only and unversioned</h3>
+        <dl>
+          <dt>Detail</dt><dd>Each is <code>"private": true</code>, referenced as <code>workspace:*</code>, with exports pointing at <code>src/</code> through the <code>bun</code> condition (today's pattern). No build step and one version for the repo. Vitest picks up the <code>bun</code> condition through <code>resolve.conditions</code>, replacing today's per-package alias.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">X3.5<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Local mode replaces the direct-to-bucket client</h3>
+        <dl>
+          <dt>Detail</dt><dd>Today <code>connect({ store })</code> runs the pipeline on the caller's machine and writes the bucket with its keys. In seshi, local mode builds an <code>Instance</code> in-process from the CLI's config, and <code>ts/client</code> is HTTP-only. Local mode is for one person who owns the bucket; team setups keep bucket keys on the server (<a href="#identity">X5.6</a>).</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">X3.6<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Where tests live</h3>
+        <dl>
+          <dt>Detail</dt><dd>Unit tests sit next to the code (<code>*.test.ts</code>). Fixtures specific to one vendor live in that integration's <code>testdata/</code>. Fixtures every language must pass stay in <code>spec/testdata</code> (<a href="#repo">X3.10</a>). TypeScript tests that cross packages go in <code>tests/</code>, each building its own <code>Instance</code> on a temporary folder store.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">X3.7<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Integrations hold only agent-specific code</h3>
+        <dl>
+          <dt>Detail</dt><dd>An integration holds what is specific to its agent or vendor: transcript adapters, hook payload parsing, status-line wiring, pollers for that vendor's API, manifests and installers. Anything shared (spool, uploader, scheduler, redaction) lives in <code>packages/</code>. How integrations plug in is <a href="#repo">X3.11</a>.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">X3.8<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Names and what gets published</h3>
+        <dl>
+          <dt>Decision</dt><dd class="rec">Publish <code>@seshi/client</code> and <code>@seshi/model</code> to npm, and the binary as <code>seshi</code> through npm, Homebrew and GitHub releases. Give <code>@dosu/sessiondb</code> a last release that points to seshi. The <code>seshi</code> npm name is believed to be available.</dd>
+          <dt>Still to do</dt><dd>Register the name and the <code>@seshi</code> scope before announcing; decide whether the repository is renamed from <code>dosu-ai/sessiondb</code>.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">X3.9<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Packages are grouped in a folder per language</h3>
+        <dl>
+          <dt>Detail</dt><dd><code>packages/ts/&lt;name&gt;</code> today; <code>packages/py/</code> and <code>packages/go/</code> later. Published names do not include the language (<code>packages/ts/client</code> publishes as <code>@seshi/client</code>; a future <code>packages/py/client</code> as <code>seshi</code> on PyPI). The Bun workspace lists <code>packages/ts/*</code> only, so other languages' folders are invisible to it.</dd>
+          <dt>Chosen over</dt><dd>A <code>ts-</code> prefix on each folder (<code>packages/ts-model</code>).</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">X3.10<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>How non-TypeScript packages fit</h3>
+        <dl>
+          <dt>Scope</dt><dd>Other languages get clients for the HTTP API and read-only readers of the bucket layout (for a service that reads the bucket directly). The pipeline, redaction and agent adapters stay TypeScript-only and run in the binary, so they are never ported. A tool in another language that needs redaction or normalization calls the binary (for example <code>seshi redact --stdin</code>).</dd>
+          <dt>Contract</dt><dd>Anything another language reads is defined in <code>spec/</code> first: OpenAPI for the API, JSON Schema for stored objects (metadata, trace, change entry) and the envelope, and the canonical text and hashing rules in prose. Each language generates its types from those files; <code>ts/model</code> is generated too, and CI fails if a generated file is stale. Types only the binary reads, such as config, stay code-first and emit a schema for editors.</dd>
+          <dt>Conformance</dt><dd><code>spec/testdata</code> holds inputs with expected outputs: stored objects to parse, content hashes and archive IDs to reproduce, API exchanges to replay. Every language's package runs the same fixtures. Today's canonical text already follows Python string rules so other languages can reproduce hashes (<code>trace/canonical.ts</code>).</dd>
+          <dt>Tooling</dt><dd>Each language package keeps its own toolchain file (<code>pyproject.toml</code>, <code>go.mod</code>) and releases on its own: npm, PyPI, and Go tags such as <code>packages/go/client/v1.2.0</code>. CI runs a job per language, filtered by path, and every job runs on changes to <code>spec/</code>.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">X3.11<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>One folder per vendor, plugged in through <code>ts/kit</code></h3>
+        <dl>
+          <dt>Options</dt><dd><ul><li>By layer: adapters in <code>ts/formats</code>, pollers in <code>ts/sources</code>, hooks in <code>ts/capture</code>, manifests in <code>integrations/</code>. Adding a vendor touches four places.</li><li>By vendor: everything for one vendor in <code>integrations/&lt;vendor&gt;/</code>; shared packages define interfaces and a registry.</li></ul></dd>
+          <dt>Recommendation</dt><dd class="rec">By vendor. Each integration exports one object that lists what it provides: format adapters, hook handlers, sweep paths, connectors, installers. <code>apps/seshi</code> imports every integration into a static registry and passes it to the <code>Instance</code> and to <code>ts/capture</code>.</dd>
+          <dt>Isolation</dt><dd>Integrations import only <code>ts/model</code>, <code>ts/kit</code> and <code>ts/formats</code>. A connector gets a context from the instance (<code>submit(envelope)</code>, checkpoint read and write, an HTTP client, a logger) instead of touching the store or pipeline, so each integration can be tested alone with recorded fixtures.</dd>
+          <dt>Placement</dt><dd>Vendor-specific code goes to the vendor's folder: Datadog daemon files and the LLM Observability poller both go to <code>integrations/datadog-trajectory/</code>; Cursor's local hooks and Cloud Agents poller to <code>integrations/cursor/</code>. Vendor-neutral code stays shared: the S3 poller in <code>ts/sources</code>, the OTLP receiver in <code>ts/api</code>, ATIF and OTel GenAI mapping in <code>ts/formats</code>.</dd>
+        </dl>
+      </div>
+    </div>
+  </div>
+  <h3 style="margin-top:24px">Where today's code goes</h3>
+  <div class="scroll">
+  <table>
+    <thead><tr><th>Today</th><th>Moves to</th><th>Note</th></tr></thead>
+    <tbody>
+      <tr><td><code>sdks/typescript/src/schemas/*</code>, <code>trace/canonical.ts</code>, <code>trace/parse.ts</code>, <code>ingest/prefix-hash.ts</code></td><td><code>ts/model</code></td><td>Schemas move to <code>spec/</code>; types are generated</td></tr>
+      <tr><td><code>normalize/claude-inputs.ts</code></td><td><code>integrations/claude-code</code></td><td></td></tr>
+      <tr><td><code>normalize/codex-rollout.ts</code></td><td><code>integrations/codex</code></td><td></td></tr>
+      <tr><td><code>normalize/datadog-trajectory.ts</code></td><td><code>integrations/datadog-trajectory/daemon</code></td><td></td></tr>
+      <tr><td><code>normalize/atif.ts</code>, <code>detect.ts</code>, <code>trajectory.ts</code>, <code>index.ts</code>; <code>trace/otlp.ts</code></td><td><code>ts/formats</code></td><td><code>otlp.ts</code> becomes a renderer; detection asks the registry</td></tr>
+      <tr><td><code>redact/*</code></td><td><code>ts/redact</code></td><td>Rule file parsing moves toward TOML packs (F2.1)</td></tr>
+      <tr><td><code>store/*</code></td><td><code>ts/store</code></td><td>Gains conditional writes (X6.5)</td></tr>
+      <tr><td><code>ingest/*</code> (ingest, session, continuation, worthiness, limits, errors)</td><td><code>ts/pipeline</code></td><td>Limits move to config (F1); worthiness becomes the session filter (X4.10)</td></tr>
+      <tr><td><code>client.ts</code></td><td><code>ts/client</code> (HTTP part)</td><td>The store part is replaced by local mode (X3.5)</td></tr>
+      <tr><td><code>server/src/app.ts</code></td><td><code>ts/api</code></td><td>Routes take an <code>Instance</code></td></tr>
+      <tr><td><code>server/src/main.ts</code></td><td><code>ts/config</code> and <code>apps/seshi</code> (<code>serve</code>)</td><td>Env parsing becomes the config loader</td></tr>
+      <tr><td><code>server/src/signed-token.ts</code></td><td><code>ts/auth</code></td><td>Kept only as a legacy verifier, if at all (X5.2)</td></tr>
+      <tr><td><code>spec/testdata/transcripts/*</code> and their goldens</td><td>each integration's <code>testdata/</code></td><td>Vendor inputs; only TypeScript parses them</td></tr>
+      <tr><td><code>spec/testdata/records</code>, edge and reject goldens</td><td><code>spec/testdata</code></td><td>Cross-language conformance</td></tr>
+      <tr><td><code>trace/goldens.ts</code>, <code>scripts/fixtures.ts</code>, <code>scripts/goldens.ts</code></td><td><code>tests/</code> tooling</td><td></td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section id="pipeline">
+  <h2><span class="k">X4</span>One ingest pipeline</h2>
+  <p class="intro">Five ways in, one way through. Every source produces an envelope, and every envelope goes through the same stages. Today's pipeline stores the redacted raw first and then builds the trace from what was stored (<code>ingest/session.ts</code>). Seshi decides everything in memory and writes once at the end. It stores only the normalized, redacted trace, never the raw payload (<a href="#storage">X6.3</a>), so nothing is written before regex redaction, the session filter and model review have run.</p>
+  <div class="flow" role="img" aria-label="Sources produce envelopes; each is normalized in memory, redacted, filtered and optionally reviewed by a model, then the trace is written; readers consume the published trace">
+    <div class="st src"><b>Sources</b><span>hooks and CLI, OTLP push, Datadog, S3 and Cursor pollers</span></div>
+    <div class="ar">→</div>
+    <div class="st"><b>Envelope</b><span>payload, session key, caller, claims, owner</span></div>
+    <div class="ar">→</div>
+    <div class="st"><b>Normalize</b><span>in memory: adapter to canonical trace</span></div>
+    <div class="ar">→</div>
+    <div class="st"><b>Redact</b><span>regex rules on the trace</span></div>
+    <div class="ar">→</div>
+    <div class="st"><b>Filter</b><span>session filter rules</span></div>
+    <div class="ar">→</div>
+    <div class="st opt"><b>Model review</b><span>optional: allow, redact or drop</span></div>
+    <div class="ar">→</div>
+    <div class="st"><b>Write</b><span>trace, head, change entry</span></div>
+    <div class="ar">→</div>
+    <div class="st src"><b>Readers</b><span>API, search indexer, downstream</span></div>
+  </div>
+  <div class="decisions">
+    <div class="dec">
+      <div class="id">X4.1<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>A versioned envelope is the only input to the pipeline</h3>
+        <dl>
+          <dt>Fields</dt><dd><code>source</code> (upload, hook, otlp, datadog, s3, cursor-cloud), <code>source_id</code>, <code>format</code>, <code>session_key</code>, payload (bytes with offset, or a span batch), <code>caller</code> (the verified principal and credential ID), <code>claims</code> (identity the data asserts: email, account IDs, git email), <code>owner</code> (resolved by <a href="#identity">X5.4</a>), <code>idempotency_key</code> (<a href="#pipeline">X4.7</a>), provenance (object key, ETag, API cursor).</dd>
+          <dt>Where</dt><dd>The schema is in <code>spec/</code> and the type is generated into <code>packages/ts/model</code> (<a href="#repo">X3.10</a>). The HTTP routes build envelopes from requests; integrations build them through the <code>submit()</code> context from <code>packages/ts/kit</code> (<a href="#repo">X3.11</a>).</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">X4.2<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Two payload shapes: append-only logs and span sets</h3>
+        <dl>
+          <dt>Detail</dt><dd>Transcripts (Claude Code, Codex, Cursor local, Trajectory files, S3 objects) grow by appending, so the existing offset and continuation protocol applies. Spans (OTLP, Datadog) arrive out of order and repeat, so they go to a span assembler that collects them per session and rebuilds the whole trace (<a href="#f4">F4.4</a>). Cursor Cloud runs append to their agent's session and use the log path.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">X4.3<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Decide in memory, write last</h3>
+        <dl>
+          <dt>Stages</dt><dd><ul>
+            <li>Authorize the caller and resolve the owner.</li>
+            <li>Normalize the payload in memory (with the session's earlier stored parts when it is a chunk).</li>
+            <li>Apply regex redaction to the normalized records: text patterns to every string field, sensitive-file and secret-command rules to tool calls (<a href="#f2">F2</a>).</li>
+            <li>Apply the session filter (<a href="#pipeline">X4.10</a>).</li>
+            <li>If a review policy applies, the decision model labels the envelope allow, redact or drop, and for redact a small LLM finds the text to remove (<a href="#f3">F3</a>).</li>
+            <li>Write the trace, the head and the change entry. The raw payload is discarded.</li>
+          </ul></dd>
+          <dt>Why redaction comes before anything is written</dt><dd>Unredacted data is never stored. With no raw (<a href="#storage">X6.3</a>), the trace is the only thing written, so the rules run on the normalized records, where tool calls, file paths and outputs are already separate fields. Today's code runs the rules over the raw transcript and then the built-in patterns again over the records (<code>normalize/index.ts</code>), because it stores both.</dd>
+          <dt>Change from today</dt><dd>Today raw is written before normalizing, so a normalize failure still leaves something to rebuild from. In seshi a session that fails to normalize stores nothing. A failure record keeps its provenance (<a href="#pipeline">X4.8</a>), and the source supplies it again once the adapter is fixed: the transcript is still on the laptop, the object still in S3, the spans still in Datadog.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">X4.4<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Logs are processed inline; spans, review and indexing are async</h3>
+        <dl>
+          <dt>Detail</dt><dd><ul>
+            <li><b>Logs</b> (uploads, hook chunks, poller submissions): processed through publish before the call returns, as today, so an uploader learns at once about <code>409 offset_mismatch</code> (with <code>expected</code>) or <code>422</code>.</li>
+            <li><b>Spans</b>: the OTLP call returns once the batch is in the span store, so senders are not held up; the assembler publishes later.</li>
+            <li><b>Model review</b>: inline, before anything is written. Uploads come from the background uploader or a poller, so the extra seconds hold up no developer. If the provider fails, the server retries, then the policy's <code>on_failure</code> setting decides: <code>skip</code> review or <code>drop</code> the envelope (<a href="#f3">F3.4</a>).</li>
+            <li><b>Search indexing</b>: a background job (<a href="#worker">X7</a>).</li>
+          </ul></dd>
+          <dt>Rejected</dt><dd>A durable inbox for everything. It would turn every upload error into a later failure record and break the continuation protocol, which needs an immediate answer.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">X4.5<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>The same session arriving by two routes</h3>
+        <dl>
+          <dt>Today</dt><dd><code>archive_id = sha256(owner, agent, session_id)</code>. Each source fills these differently: a Claude Code hook sends the agent's session ID; OTLP uses <code>anthropic.session.id</code>; Datadog uses <code>trajectory.trace_correlation.session_id</code>; Cursor Cloud uses the agent ID.</dd>
+          <dt>Problem</dt><dd>One Trajectory session can arrive from the local daemon file (verified owner, <code>datadog-trajectory</code> log) and from the Datadog poller (claimed owner, spans). Different owners or agents give different archive IDs, so it is stored twice.</dd>
+          <dt>Options</dt><dd><ul><li>Accept duplicates; record <code>origin_agent</code> and <code>native_session_id</code> on both so search and readers can collapse them.</li><li>Source precedence: an operator names which route wins per agent, and the pipeline skips a session whose native ID the winning route already holds (needs a small lookup object per native ID).</li><li>Refuse configurations where two routes cover the same agent.</li></ul></dd>
+          <dt>Decision</dt><dd class="rec">Accept duplicates for now. Record <code>origin_agent</code> and <code>native_session_id</code> on every session so search and readers can collapse them. Add source precedence later if duplicates turn out to matter.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">X4.6<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>When a write replaces a session instead of extending it</h3>
+        <dl>
+          <dt>Today</dt><dd>Checked in the code: a whole upload (offset 0) for an existing session deletes the earlier raw parts and resets the chunk state (<code>putRaw</code> with <code>whole</code>). If the new records do not extend what was shipped, the pipeline publishes a full new head instead of a continuation. So any token that can write for an owner, and knows a session ID, can replace that session's content. Earlier trace objects stay listed.</dd>
+          <dt>Options</dt><dd><ul><li>Keep silent replacement.</li><li>Reject a whole upload that does not extend the session with <code>409 conflict</code>, and require an explicit <code>replace</code> flag that only the original writer or an admin may use.</li></ul></dd>
+          <dt>Decision</dt><dd class="rec">Explicit replace. A whole upload that does not extend the session gets <code>409 conflict</code> unless it sets <code>replace</code>, which only the session's original writer or an admin may use. Document formats that cannot be chunked (ATIF, OpenCode exports) are rewritten whole by design, and their original writer can still replace. The same rule settles <a href="#f6">F6.3</a>.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">X4.7<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Every envelope carries an idempotency key</h3>
+        <dl>
+          <dt>Keys</dt><dd>Hook or upload: session and byte offset. S3: bucket, key and ETag. OTLP and Datadog: trace and span IDs. Cursor Cloud: agent ID and run ID.</dd>
+          <dt>Why</dt><dd>A poller submits and then saves its checkpoint; a crash in between makes it submit again. With idempotent stages that is harmless, so delivery is at-least-once and the result is the same as once.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">X4.8<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Failures with no caller to tell</h3>
+        <dl>
+          <dt>Detail</dt><dd>Pollers and the span assembler have nobody to return a 422 to. A permanent failure (unknown format, over a size limit, adapter error) writes a failure record under <code>sources/&lt;id&gt;/failed/</code> (<a href="#storage">X6.4</a>) with provenance, code and message, never content, and counts toward source health. A transient failure (store or network) retries with backoff and does not move the checkpoint. <code>seshi sync failed &lt;id&gt;</code> lists them.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">X4.9<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Rebuild by re-ingesting from the source</h3>
+        <dl>
+          <dt>Detail</dt><dd>With no raw stored, <code>seshi reprocess</code> asks the source again: the uploader resends laptop transcripts, and pollers rewind their checkpoint for S3, Datadog or Cursor. It is filtered by source, agent, normalizer version or date, and writes new heads and change entries. Metadata already records the normalizer version, which picks the sessions to redo.</dd>
+          <dt>Limit</dt><dd>It works only while the source still has the data (<a href="#storage">X6.3</a>). Older sessions keep their current trace.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">X4.10<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>The session filter, configurable</h3>
+        <dl>
+          <dt>Rename</dt><dd>Today's "worthiness" check (<code>isTrivialTrajectory</code>) becomes the <b>session filter</b>, and its outcome <code>trivial</code> becomes <code>filtered</code>.</dd>
+          <dt>Rules</dt><dd>Today's rules, hard-coded, become config under <code>[filter]</code> with today's values as defaults, and each source can override them:
+            <ul>
+              <li><code>min_chars = 2000</code>: text, tool arguments and tool results, excluding the meta record.</li>
+              <li><code>require_user = true</code>: at least one user record.</li>
+              <li><code>require_reply = true</code>: at least one assistant or tool record.</li>
+            </ul>
+            <code>enabled = false</code> keeps every session.</dd>
+          <dt>Outcome</dt><dd>A filtered session is not stored. It is counted in source health, which makes a misconfigured source visible (Datadog minimal capture, metadata-only OTLP).</dd>
+        </dl>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="identity">
+  <h2><span class="k">X5</span>Identity and access</h2>
+  <p class="intro">Today a static token or an HS256 JWT names the owner, and that token can do everything for that owner. Anyone holding the shared HS256 secret can mint a token for any owner, and nothing can be revoked without a restart. Seshi needs known people, scoped and revocable tokens, and a rule for org-level sources.</p>
+  <p>An identity provider (IdP) is optional, including in production (<a href="#identity">X5.12</a>). Without one, the org trusts its members: everyone holds an org key and says who they are, as Datadog Trajectory does. With one, people sign in and their identity is verified. Both modes share the same people records, owner IDs, tokens and scopes. One org per deployment (<a href="#tenancy">X1.1</a>) means at most one IdP. Uploads come from a background uploader (<a href="#f9">F9</a>), so the upload credential must work for months without a person present.</p>
+  <div class="scroll">
+  <table>
+    <thead><tr><th>Credential</th><th>Mode</th><th>Held by</th><th>Can do</th><th>Lifetime</th><th>Stored</th></tr></thead>
+    <tbody>
+      <tr><td>Org key</td><td>No IdP</td><td>Every member's CLI and uploader</td><td>Write as whatever username the caller states; read and search org-wide</td><td>Until rotated</td><td>Hash in <code>tokens/</code>; revocable</td></tr>
+      <tr><td>IdP ID token</td><td>IdP</td><td>CLI, briefly</td><td>Nothing at the API; exchanged once for seshi tokens</td><td>Minutes</td><td>Not stored</td></tr>
+      <tr><td>Session token</td><td>IdP</td><td>CLI, for interactive commands</td><td>Read, search, delete</td><td>1 hour; renewed through the IdP refresh token</td><td>Signed by the server; not stored</td></tr>
+      <tr><td>Admin token</td><td>Both</td><td>Admins</td><td>Everything, including deletes and token management</td><td>Set at creation</td><td>Hash in <code>tokens/</code>; revocable</td></tr>
+      <tr><td>Device token</td><td>IdP</td><td>Uploader on a laptop</td><td>Write own sessions</td><td>90 days; renewed by signing in</td><td>Hash in <code>tokens/</code>; revocable</td></tr>
+      <tr><td>Service token</td><td>Both</td><td>A reader, or an OTLP destination</td><td>Read org-wide, or write as its service account</td><td>Set by the admin</td><td>Hash in <code>tokens/</code>; revocable</td></tr>
+      <tr><td>Static token</td><td>Config</td><td>Single-user and development setups</td><td>Everything for one owner</td><td>Until config changes</td><td>Config</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="decisions">
+    <div class="dec">
+      <div class="id">X5.1<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Four kinds of caller</h3>
+        <dl>
+          <dt>Kinds</dt><dd><ul><li><b>Person</b>: signed in through the IdP (verified), or named by an org-key caller (claimed).</li><li><b>Device</b>: a person's machine holding a write-only token (IdP mode).</li><li><b>Service account</b>: a reader such as a downstream sync, or a source that writes for the org (an OTLP destination, a poller).</li><li><b>Admin</b>: a person with the admin role.</li></ul> Pollers run inside the server and need no token; each acts as its source's service account (<a href="#identity">X5.4</a>).</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">X5.2<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>With an IdP: sign in once; the API accepts only seshi tokens</h3>
+        <dl>
+          <dt>Decision</dt><dd class="rec"><code>POST /v1/auth/exchange</code> checks an IdP ID token (issuer, audience, expiry, nonce) against the IdP's published keys and returns a session token and, on first sign-in from a machine, a device token. The API itself never sees IdP tokens.</dd>
+          <dt>Why</dt><dd>IdPs differ on access tokens: Google issues opaque ones that cannot be checked offline, and Okta and Entra need a custom API registration. ID tokens are standard everywhere. Seshi tokens carry seshi's scopes and can be revoked in seshi, in both modes.</dd>
+          <dt>Drop</dt><dd>Shared-secret HS256 tokens minted outside the server. Session tokens are signed with a key only the server holds.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">X5.3<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Scopes and roles</h3>
+        <dl>
+          <dt>Scopes</dt><dd><code>sessions:write</code>, <code>sessions:read</code>, <code>sessions:delete</code>, <code>search</code>, <code>sources:admin</code>, <code>tokens:admin</code>.</dd>
+          <dt>Roles</dt><dd><b>member</b>: write own sessions; read and search what visibility allows (<a href="#identity">X5.10</a>); delete own sessions. <b>admin</b>: everything, org-wide. <b>service</b>: read and search org-wide, or write as its service account. With an IdP, a person's role comes from an IdP group named in config (<code>admin_group</code>) or an <code>admins</code> list of emails (Google Workspace ID tokens carry no groups). Without one, everyone holding the org key is a member and admins use admin tokens.</dd>
+          <dt>Deletes</dt><dd>With an IdP, a delete needs a session token issued within the last 10 minutes. Without one, the org key cannot delete (anyone could claim to be the owner); deletes need an admin token.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">X5.4<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Org-level sources write as a service account</h3>
+        <dl>
+          <dt>Decision</dt><dd class="rec">Every source that writes for many people (an OTLP destination, the Datadog, S3 and Cursor pollers) has its own service account, <code>svc:&lt;source-id&gt;</code>. Its sessions belong to that account and are visible org-wide. Claims in the data (<code>trajectory.user_email</code>, git email, an S3 path) are recorded in metadata (<a href="#identity">X5.5</a>) but never decide ownership.</dd>
+          <dt>Why</dt><dd>Those claims are set by users, so mapping them to people would give unverified owners. A service account says honestly where the session came from.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">X5.5<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Record who wrote what</h3>
+        <dl>
+          <dt>Decision</dt><dd class="rec">Metadata and change entries record <code>writer</code> (caller kind, person or service account, credential ID, source ID) and <code>owner_basis</code>: <code>verified</code> (IdP), <code>claimed</code> (org key) or <code>service</code>. Identity claims from the data (account IDs, emails, git email) are copied into metadata from a fixed allowlist; with no raw stored (<a href="#storage">X6.3</a>), this is the only place they survive.</dd>
+          <dt>Why</dt><dd>Today a change entry has no writer. Without one, a leaked token's writes cannot be found, and revoking a token cannot be scoped to what it wrote. The original writer also decides who may replace a session (<a href="#pipeline">X4.6</a>).</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">X5.6<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Bucket keys stay on the server</h3>
+        <dl>
+          <dt>Decision</dt><dd class="rec">Only <code>seshi serve</code> holds bucket keys, and local mode (<a href="#repo">X3.5</a>) for one person who owns the bucket. Services read through the API. Read-only bucket keys for a service are possible but skip every check, so they count as org-wide read.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">X5.7<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>How <code>seshi login</code> works</h3>
+        <dl>
+          <dt>With an IdP</dt><dd>The CLI is registered in the IdP as a public client. It uses the device authorization flow (a code to enter in the browser), or the browser with PKCE and a local redirect where the device flow is not allowed. It keeps the IdP refresh token in the OS keychain and exchanges ID tokens for seshi tokens (<a href="#identity">X5.2</a>). Server config: <code>[auth.oidc] issuer</code>, <code>client_id</code>, <code>owner_claim</code>, <code>admin_group</code>.</dd>
+          <dt>Without one</dt><dd><code>seshi login --key &lt;org key&gt;</code> stores the org key in the keychain. The username is resolved as Trajectory does it: <code>SESHI_USER</code>, then <code>user</code> in the CLI config, then git <code>user.email</code>, then the OS user name (<a href="#identity">X5.12</a>).</dd>
+          <dt>Either way</dt><dd><code>GET /v1/auth/config</code> tells the CLI which mode the server uses, so <code>seshi login --server &lt;url&gt;</code> picks the right flow.</dd>
+          <dt>To check</dt><dd>That Okta, Entra and Google each allow the device flow with the <code>openid email profile</code> scopes for this kind of client.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">X5.8<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Owner IDs come straight from identity; no stored list of people</h3>
+        <dl>
+          <dt>Question</dt><dd>Does seshi need its own list of people? Checked against what each part needs: tokens already record their owner, so authorization does not; revoking a person's tokens filters token records by owner; admins come from IdP groups or the <code>admins</code> list in config; each session's <code>writer</code> and claims already carry the email and name to show (<a href="#identity">X5.5</a>). A list would only be needed to keep one owner ID across a change of identity source.</dd>
+          <dt>Recommendation</dt><dd class="rec">No people list. The owner ID is derived every time from the caller's identity:
+            <ul>
+              <li>With an IdP: the claim named by <code>owner_claim</code>, default <code>sub</code> (use <code>oid</code> on Entra, where <code>sub</code> differs per app).</li>
+              <li>With the org key: the stated username, lowercased.</li>
+              <li>Service accounts: <code>svc:&lt;source-id&gt;</code> (<a href="#identity">X5.4</a>).</li>
+            </ul>
+            The owner pattern gains <code>@</code> and <code>+</code> so emails fit; any value that still does not fit is replaced by a short hash of it.</dd>
+          <dt>What it costs</dt><dd>Switching identity source changes owner IDs: an org that moves from the org key to an IdP, or from Okta to Entra, would find earlier sessions under the old IDs. Two ways round it, both without a list:
+            <ul>
+              <li>Pick the same value in both modes: with <code>owner_claim = "email"</code>, IdP owners match org-key usernames that are emails (git email is the CLI's default username). This trades the stable subject for continuity, so it suits orgs whose emails rarely change.</li>
+              <li>A small alias table in config for exceptions (<code>[auth.owner_aliases]</code>, old ID to new ID), applied when reading and searching.</li>
+            </ul></dd>
+          <dt>Later</dt><dd>A people list can be added if SCIM or people management arrives. Nothing in the layout depends on it.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">X5.9<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Token formats and lifetimes</h3>
+        <dl>
+          <dt>Detail</dt><dd>As in the table above. Session tokens are short-lived and signed, so checking them needs no bucket read; the signing key has an ID so it can be rotated. Every other seshi token is opaque (<code>seshi_…</code>), stored as a hash with person or service account, scopes, default visibility, expiry and revoked flag, and cached by the server for a short time.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">X5.10<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Visibility: <code>org</code> by default, set per session</h3>
+        <dl>
+          <dt>Values</dt><dd><code>org</code>: every member can read and search it. <code>owner</code>: only its owner. Admins and services always see everything.</dd>
+          <dt>Where it is set</dt><dd>In order of precedence:
+            <ul>
+              <li>The upload or ingest request (<code>visibility</code> field), which the CLI fills from repo config (<code>.seshi/config.toml</code>) so a repo can stay private.</li>
+              <li>The token's default visibility, chosen when the token is created (a device token for someone who wants everything private).</li>
+              <li>The source's setting, for pollers and OTLP destinations.</li>
+              <li>The server's <code>default_visibility</code>, which is <code>org</code>.</li>
+            </ul></dd>
+          <dt>Without an IdP</dt><dd>The org key reads org-wide, so <code>owner</code> visibility cannot keep anything from another member. Seshi accepts the field but says so in <code>seshi config check</code>.</dd>
+          <dt>Changing it</dt><dd>The owner or an admin can change a session's visibility later (<code>PATCH /v1/sessions/&lt;id&gt;</code>). The change writes a change entry so the search index updates (<a href="#f10">F10.4</a>).</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">X5.11<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Offboarding and revocation</h3>
+        <dl>
+          <dt>Detail</dt><dd><ul>
+            <li>With an IdP, <code>seshi tokens revoke --owner &lt;id&gt;</code> revokes all of a person's tokens at once. Their sessions stay, under their owner ID.</li>
+            <li>Without one, the only cut-off is rotating the org key, which every member then has to set again.</li>
+            <li>With an IdP, someone removed there also loses interactive access within an hour, and their device token stops at its next renewal, which needs a fresh sign-in.</li>
+            <li>Automatic removal through SCIM is later.</li>
+          </ul></dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">X5.12<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Without an IdP, trust members with an org key</h3>
+        <dl>
+          <dt>Options</dt><dd><ul>
+            <li><b>Static tokens</b> from config, like today's <code>SESSIONDB_TOKENS</code>: one token per named owner, edited by hand.</li>
+            <li><b>Managed people</b>: an admin adds each person and sends a single-use invite; seshi issues and revokes their tokens. Verified, but a second people-admin system next to the IdP.</li>
+            <li><b>Trusted org key</b>: members share an org key and state their username, like Datadog Trajectory's <code>trajectory.user</code>.</li>
+          </ul></dd>
+          <dt>Recommendation</dt><dd class="rec">Trusted org key as the mode without an IdP, IdP for verified identity, static tokens kept for one person and development. Managed people with invites is deferred: an org that needs verified people almost always has an IdP.</dd>
+          <dt>What trust gives up</dt><dd><ul>
+            <li>Anyone with the key can write as anyone. Sessions are marked <code>owner_basis: claimed</code> (<a href="#identity">X5.5</a>).</li>
+            <li>The key reads org-wide, so <code>owner</code> visibility is not enforced (<a href="#identity">X5.10</a>).</li>
+            <li>The key cannot delete or replace other people's sessions; those need an admin token (<a href="#identity">X5.3</a>, <a href="#pipeline">X4.6</a>).</li>
+            <li>Offboarding means rotating the key for everyone (<a href="#identity">X5.11</a>).</li>
+          </ul></dd>
+          <dt>Mixing</dt><dd>A deployment can accept the org key and IdP sign-in at the same time, for example while rolling out an IdP. Each session says which applied. <code>auth.org_key.enabled = false</code> turns trust off once everyone signs in.</dd>
+          <dt>First admin</dt><dd><code>seshi admin init</code>, run where the server's config and bucket keys are (for example inside its container), prints the first admin token and the org key once. No bootstrap secret sits in config.</dd>
+        </dl>
+      </div></div>
+  </div>
+</section>
+
+<section id="storage">
+  <h2><span class="k">X6</span>Storage and data format</h2>
+  <div class="decisions">
+    <div class="dec">
+      <div class="id">X6.1<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>An S3-compatible bucket is the source of truth; a local folder for development</h3>
+        <dl>
+          <dt>Decision</dt><dd class="rec">Seshi runs with only an S3-compatible bucket (S3, R2, MinIO and similar). A local folder (<code>file://</code>) is supported for development and single-machine use. Every index (search, listings by date or repo) is derived from the change feed, optional, and can be rebuilt.</dd>
+          <dt>Folder backend</dt><dd>Exists today (<code>store/fs.ts</code>): writes go to a temporary file and are renamed into place. For conditional writes (<a href="#storage">X6.5</a>) it uses exclusive file creation and a lock file, which is safe for processes on one machine only. Tests use it with a temporary folder (<a href="#repo">X3.6</a>).</dd>
+          <dt>Why</dt><dd>It keeps the "point it at a bucket" setup, the data stays portable, and development needs no cloud account.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">X6.2<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Store one canonical trace format; render others on read</h3>
+        <dl>
+          <dt>Options</dt><dd><ul><li>Keep today's per-bucket choice (<code>letta</code> or <code>otlp</code>, fixed by the first writer).</li><li>Store one canonical format (evolved from trajectory-v1) and render OTLP, Letta and ATIF on read (<code>?format=otlp</code>).</li><li>Store OTLP GenAI spans as the canonical format.</li></ul></dd>
+          <dt>Decision</dt><dd class="rec">One seshi canonical format, with export renderers.</dd>
+          <dt>Without raw</dt><dd>Because raw is not stored (<a href="#storage">X6.3</a>), the canonical format must carry what raw used to keep: token usage, model per turn, timestamps, tool call IDs, LLM call details and source provenance. Anything it leaves out is gone for good.</dd>
+          <dt>Why</dt><dd>The OTel GenAI conventions are still changing and do not cover coding-agent events well (withheld tool output, compaction, subagents). A fixed internal format keeps content hashes stable while exports change.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">X6.3<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Store only the normalized, redacted trace; no raw</h3>
+        <dl>
+          <dt>Today</dt><dd>Both live in the session's folder: <code>raw.&lt;n&gt;.&lt;format&gt;.gz</code> holds what arrived, redacted; <code>trace.&lt;hash&gt;.json.gz</code> holds the normalized trace; <code>metadata.json</code> points to both.</dd>
+          <dt>Recommendation</dt><dd class="rec">Drop raw. A session is its metadata, its trace objects and its change entries.</dd>
+          <dt>Why</dt><dd>One copy of the data instead of two. Raw carried fields the trace drops (account IDs, emails, withheld tool output), so it was the riskier copy. Redaction, deletion and backfill then cover one thing.</dd>
+          <dt>Costs</dt><dd>A fixed adapter bug cannot reach sessions whose source no longer has the data. Anything the canonical format does not model is lost. Small sessions are resent whole until they pass the session filter.</dd>
+          <dt>Options</dt><dd><ul><li>Keep raw for as long as the trace (today).</li><li>Keep raw for a retention window.</li><li>Keep raw only as working storage until publish.</li><li>No raw (recommended).</li></ul></dd>
+        </dl>
+      </div>
+    </div>
+  </div>
+  <h3 style="margin-top:8px">What raw does today, and what replaces it</h3>
+  <div class="scroll">
+  <table>
+    <thead><tr><th>Raw is used for</th><th>Without raw</th></tr></thead>
+    <tbody>
+      <tr><td>Rebuilding traces when an adapter improves</td><td>Re-ingest from the source while it still has the data (<a href="#pipeline">X4.9</a>): transcripts on laptops (Claude Code deletes old ones after its cleanup period), S3 objects, Datadog within its LLM Observability retention, Cursor Cloud agents until deleted. Past that, improvements apply to new sessions only.</td></tr>
+      <tr><td>Chunked uploads before the first trace: chunks are normalized together so the session filter judges the whole log</td><td>The uploader sends the whole log until the session has a trace, then sends chunks. The server stores nothing for a session that has not passed the filter. Today's <code>409</code> with <code>expected: 0</code> already tells an uploader to send the whole log. Chunks after the first trace already normalize on their own (each adapter has a partial mode) with only small state in metadata: the prefix hash and withheld call IDs.</td></tr>
+      <tr><td>Holding OTLP and Datadog spans until a session is assembled</td><td>Each span is normalized and redacted on arrival and stored as a per-span record under the session's <code>spans/</code>, never readable through the API. The assembler orders them and publishes. They stay after publish so late spans can rebuild the trace. Model review runs on the assembled session, so this is the one place where regex-redacted but unreviewed data rests.</td></tr>
+      <tr><td>Fields the trace drops: token usage, model per turn, LLM call details, identity</td><td>The canonical format carries them (<a href="#storage">X6.2</a>). Identity claims are copied into metadata from a fixed allowlist (<a href="#identity">X5.5</a>).</td></tr>
+      <tr><td>Applying model review findings to raw by exact text</td><td>Not needed; findings apply to the trace.</td></tr>
+      <tr><td>Debugging an adapter</td><td><code>seshi normalize &lt;file&gt;</code> runs the adapter locally on the developer's own file; fixtures are added by hand.</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="decisions">
+    <div class="dec">
+      <div class="id">X6.4<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Layout additions</h3>
+        <dl>
+          <dt>New objects</dt><dd><ul>
+            <li><code>tokens/&lt;id&gt;.json</code>: hashed seshi tokens with scopes, owner, expiry, revoked flag.</li>
+            <li><code>sources/&lt;id&gt;/checkpoint.json</code>: poller cursors and manifests.</li>
+            <li><code>worker/heartbeat.json</code>: when the worker last ran, so status can spot a stopped or second worker (<a href="#worker">X7.5</a>). Lease objects come later (<a href="#worker">X7.6</a>).</li>
+            <li><code>assembly/pending/&lt;archive_id&gt;</code>: sessions with spans not yet assembled (<a href="#worker">X7.4</a>).</li>
+            <li><code>owners/&lt;o&gt;/sessions/&lt;a&gt;/spans/</code>: normalized, redacted span records used by the assembler.</li>
+            <li><code>owners/&lt;o&gt;/sessions/&lt;a&gt;/review/&lt;n&gt;.json</code>: what model review decided for each write that was stored (<a href="#f3">F3</a>).</li>
+            <li><code>sources/&lt;id&gt;/dropped/&lt;key&gt;.json</code> and <code>sources/&lt;id&gt;/failed/&lt;key&gt;.json</code>: one record per envelope that was not stored (below).</li>
+          </ul></dd>
+          <dt>Drop and failure records</dt><dd>When an envelope is not stored, nothing lands in its session, so without a record there is no trace that it ever arrived. These records say that it did and why, never what it contained. Both kinds share the same base fields (time, source, owner, session key, idempotency key) and live under separate prefixes:
+            <ul>
+              <li><code>sources/&lt;id&gt;/dropped/</code>: model review chose to drop it, or review failed and <code>on_failure = "drop"</code> (<a href="#f3">F3.4</a>); adds the policy hash and the decision model.</li>
+              <li><code>sources/&lt;id&gt;/failed/</code>: a permanent pipeline failure such as an unknown format or an adapter error (<a href="#pipeline">X4.8</a>); adds the error code and message.</li>
+            </ul>
+            Separate prefixes let each be listed, counted and retained on its own: a drop is a policy outcome an admin audits, a failure is a fault to fix and reprocess. They serve admins seeing what was not stored and why, <code>seshi reprocess</code> finding what to fetch again (<a href="#pipeline">X4.9</a>), and source health. <code>seshi sync dropped &lt;id&gt;</code> and <code>seshi sync failed &lt;id&gt;</code> list them. Uploads from hooks and the CLI use the source ID <code>upload</code>. Both are kept for 30 days by default, set separately (<code>[records] dropped_retention</code>, <code>failed_retention</code>). Sessions removed by the session filter are only counted, since they are expected and frequent.</dd>
+          <dt>Metadata</dt><dd>Add <code>writer</code>, <code>visibility</code>, <code>claims</code>, <code>redaction</code> (rule-set hash, counts by rule), <code>source</code> provenance.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">X6.5<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Use conditional writes for mutable objects</h3>
+        <dl>
+          <dt>Detail</dt><dd>The current store has no conditional writes (no <code>If-Match</code> or <code>If-None-Match</code> in <code>sdks/typescript/src/store</code>). With the worker and several API instances, two writers can update one <code>metadata.json</code>. Use <code>If-Match</code> on metadata, checkpoints and markers, <code>If-None-Match</code> on token records, and retry on 412.</dd>
+          <dt>To check</dt><dd>S3 and R2 support both headers. Check MinIO, Backblaze and Wasabi before listing them as supported.</dd>
+        </dl>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="worker">
+  <h2><span class="k">X7</span>Background work</h2>
+  <p class="intro">The server gains three kinds of job: pollers (one per configured source), the span assembler, and the search indexer. In this first version they all run on one worker instance; API instances can be added freely. Leases for several workers come later.</p>
+  <div class="scroll">
+  <table>
+    <thead><tr><th>Job</th><th>Runs on</th><th>How it finds work</th><th>What it writes</th></tr></thead>
+    <tbody>
+      <tr><td>Poller, per source</td><td>The worker instance</td><td>Its checkpoint: time window, API cursor or S3 manifest</td><td>Envelopes into the pipeline; the checkpoint</td></tr>
+      <tr><td>Span assembler</td><td>The worker instance</td><td>A marker per session with new spans, <code>assembly/pending/&lt;archive_id&gt;</code>, touched on every batch</td><td>Traces, heads, change entries; deletes the marker after publish</td></tr>
+      <tr><td>Search indexer</td><td>Every instance, for its own local index</td><td>Its own cursor, on local disk</td><td>Its local index</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="decisions">
+    <div class="dec">
+      <div class="id">X7.1<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>The server gets worker roles</h3>
+        <dl>
+          <dt>Decision</dt><dd class="rec">In-process roles for pollers, span assembly and indexing, chosen with <code>seshi serve --roles api,worker</code>. Each job is also a one-shot command (<code>seshi sync run datadog-prod</code>) for cron. No queue service.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">X7.2<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>One worker instance in the first version</h3>
+        <dl>
+          <dt>Decision</dt><dd class="rec">Exactly one instance runs the worker role. Any number of instances can run <code>--roles api</code>. The default, <code>seshi serve</code> with no flag, runs both roles in one process, which is what a single-container deployment wants.</dd>
+          <dt>Why</dt><dd>Each deployment serves one org (<a href="#tenancy">X1.1</a>), so most run one container. One worker needs no coordination. If it stops, polling and assembly pause until Docker or Kubernetes restarts it; nothing is lost, because checkpoints and pending markers are in the bucket.</dd>
+          <dt>Options considered</dt><dd>Leases in the bucket (deferred, <a href="#worker">X7.6</a>); an external scheduler running one-shot commands (still possible, X7.1); every instance running every job (multiplies calls against external API limits); fixed assignment of jobs to instances in config (breaks when instances change).</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">X7.3<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>A second worker by mistake is harmless</h3>
+        <dl>
+          <dt>Detail</dt><dd>Checkpoints and cursors are written with <code>If-Match</code>; a worker whose write fails with 412 discards that run. Anything it already submitted is deduplicated by the envelope's idempotency key (<a href="#pipeline">X4.7</a>), and session writes are conditional (<a href="#storage">X6.5</a>). Two workers waste external API calls but do not corrupt data. <code>seshi workers status</code> warns when it sees two.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">X7.4<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Jobs find their work without scanning</h3>
+        <dl>
+          <dt>Detail</dt><dd>As in the table above. The span assembler is the one that needs a new object: without the <code>assembly/pending/</code> markers it would have to list every session to find those with new spans. It lists the markers, publishes sessions quiet for long enough (<a href="#f4">F4.4</a>), and deletes each marker with <code>If-Match</code>, so a batch that arrived during publishing leaves its marker in place.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">X7.5<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Job status is visible</h3>
+        <dl>
+          <dt>Detail</dt><dd><code>seshi workers status</code> and <code>GET /v1/admin/jobs</code> show each job's last run, last error, backlog (pending markers, checkpoint lag) and drop and failure counts (<a href="#storage">X6.4</a>). The worker writes a heartbeat object every minute, which is how status spots a stopped worker or a second one. Admin only.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">X7.6<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Later: leases for several workers</h3>
+        <dl>
+          <dt>When</dt><dd>When workers themselves must survive an instance failing, or one worker cannot keep up.</dd>
+          <dt>Sketch</dt><dd>One lease object per job (<code>leases/&lt;job&gt;.json</code>) holding which instance runs it and until when, taken and renewed with conditional writes. Every worker tries every job, so jobs spread on their own; the assembler can then be split by archive ID prefix into several leases. Nothing in the first version blocks this: checkpoints, cursors and markers already live in the bucket.</dd>
+        </dl>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FEATURES ============ -->
+
+<section id="f1">
+  <h2><span class="k">F1</span>Server configuration</h2>
+  <p class="intro">Today: environment variables only, read once at start-up. Seshi adds a TOML file, with environment variables taking precedence.</p>
+  <div class="decisions">
+    <div class="dec">
+      <div class="id">F1.1<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Precedence: flags, then env, then TOML, then defaults</h3>
+        <dl>
+          <dt>Detail</dt><dd>File from <code>--config</code>, else <code>SESHI_CONFIG</code>, else <code>./seshi.toml</code>, else <code>/etc/seshi/seshi.toml</code>. Command-line flags sit above env, which is the usual convention.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F1.2<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Env names map to TOML paths</h3>
+        <dl>
+          <dt>Decision</dt><dd><code>SESHI_</code> plus the TOML path in upper case, with <code>__</code> between levels: <code>[store] url</code> is <code>SESHI_STORE__URL</code>; <code>[auth.oidc] issuer</code> is <code>SESHI_AUTH__OIDC__ISSUER</code>. Only <code>SESHI_*</code> names are read; there is no compatibility with today's <code>SESSIONDB_*</code> names for now.</dd>
+          <dt>Sources</dt><dd>Lists of sources (<code>[[sources]]</code>) do not map well to env. Sources are defined in TOML only, with an <code>id</code> each; env can override a field of a named source (<code>SESHI_SOURCES__DATADOG_PROD__API_KEY</code>).</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F1.3<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Secrets are references, not values</h3>
+        <dl>
+          <dt>Detail</dt><dd>Any secret field accepts <code>{ env = "DD_API_KEY" }</code> or <code>{ file = "/run/secrets/dd" }</code>, so a TOML file can be committed. The server warns if the config file holds a literal secret and is readable by others.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F1.4<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>One schema, checked strictly</h3>
+        <dl>
+          <dt>Detail</dt><dd>One schema in <code>packages/ts/config</code> generates <code>spec/config.schema.json</code> for editor completion. Unknown keys fail start-up. <code>seshi config check</code> validates; <code>seshi config show --origin</code> prints every value with where it came from (flag, env, file, default) and masks secrets. The CLI's own <code>~/.config/seshi/config.toml</code> uses the same loader.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F1.5<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Reloading</h3>
+        <dl>
+          <dt>Decision</dt><dd>Restart to apply changes in v1. Revisit hot reload for redaction rules and sources once the worker exists.</dd>
+        </dl>
+      </div>
+    </div>
+  </div>
+  <div class="two">
+    <div class="panel"><h4>Access</h4><ul><li>Config is operator-only; nothing in it is settable over the API.</li><li>Config holds connector credentials, so the file and env need the same protection as the bucket keys.</li></ul></div>
+    <div class="panel"><h4>Data and storage</h4><ul><li>Config is not stored in the bucket. The layout marker keeps only the schema and canonical format version.</li><li>Fixed limits in code today (the session filter's 2,000-character minimum, 32 MiB records, 64 MiB per upload) become config with today's values as defaults.</li></ul></div>
+  </div>
+</section>
+
+<section id="f2">
+  <h2><span class="k">F2</span>Regex redaction</h2>
+  <p class="intro">Today: built-in secret patterns plus an operator JSON file with <code>patterns</code>, <code>sensitive_files</code> and <code>secret_commands</code>, applied to raw and trace.</p>
+  <div class="decisions">
+    <div class="dec">
+      <div class="id">F2.1<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Rule packs in TOML</h3>
+        <dl>
+          <dt>Detail</dt><dd>Each rule has <code>id</code>, <code>description</code>, <code>pattern</code>, <code>replacement</code> (default <code>[REDACTED:&lt;id&gt;]</code>), <code>applies_to</code> (text, tool input, tool output) and optional test strings. File globs and secret commands keep their own rule kinds. The built-in pack is versioned; an operator pack can add rules or turn off built-ins by ID. Today's JSON file loads as a pack.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F2.2<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>RE2 semantics for operator patterns</h3>
+        <dl>
+          <dt>Problem</dt><dd>JavaScript regular expressions can backtrack for minutes on crafted input, and a synchronous regex cannot be interrupted. Operator patterns run on every session.</dd>
+          <dt>Options</dt><dd><ul><li>RE2 (linear time, no backreferences or lookaround), through a WebAssembly build.</li><li>JavaScript regex with a static check for risky patterns.</li></ul></dd>
+          <dt>Decision</dt><dd class="rec">RE2 for operator rules; built-in rules may stay on JavaScript regex if they are reviewed.</dd>
+          <dt>To check</dt><dd>That an RE2 WebAssembly build works under Bun and in the compiled binary, and its speed on large sessions.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F2.3<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Record which rules ran, never what they matched</h3>
+        <dl>
+          <dt>Detail</dt><dd>Metadata records the rule-set hash and match counts per rule ID. Matched values are never stored or logged.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F2.4<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>The server always redacts; the CLI can redact first</h3>
+        <dl>
+          <dt>Detail</dt><dd>Server redaction is authoritative. The CLI can fetch the org's rule packs (<code>GET /v1/redaction/rules</code>) and apply them before upload, so secrets never leave the machine. The server still runs the rules, because a client can skip them.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F2.5<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>New rules can be applied to stored sessions</h3>
+        <dl>
+          <dt>Detail</dt><dd><code>seshi redact backfill --since 30d</code> reapplies the current rules to stored traces, writes new trace objects and a change entry, so downstream readers pick up the change. Redaction cannot be undone, because unredacted data is never stored. <code>seshi redact test &lt;file&gt;</code> shows what a rule set would match.</dd>
+        </dl>
+      </div>
+    </div>
+  </div>
+  <div class="two">
+    <div class="panel"><h4>Access</h4><ul><li>Rule packs are operator config.</li><li>Rules are served to signed-in clients for pre-redaction; they may describe what an org considers secret, so they are not public.</li></ul></div>
+    <div class="panel"><h4>Data and storage</h4><ul><li>Rules run on trace records only, since raw is not stored (<a href="#storage">X6.3</a>).</li><li>Backfill writes new trace objects; the old ones should then be deleted, not kept.</li></ul></div>
+  </div>
+</section>
+
+<section id="f3">
+  <h2><span class="k">F3</span>Redaction with a decision model and an LLM</h2>
+  <p class="intro">A second, automatic stage after regex, for what patterns miss: secrets without a known format, personal data, customer data, and envelopes that should not be stored at all. It has two steps. A decision model (for example Jev) labels each envelope <code>allow</code>, <code>redact</code> or <code>drop</code>. Only envelopes labelled <code>redact</code> go to a small, configurable LLM (for example Claude Haiku 5.5), which finds the sensitive text to remove. There is no human review, and the prompts are configurable.</p>
+  <div class="flow" role="img" aria-label="Regex redaction and the session filter run first; the decision model labels the envelope; only redact goes to the redactor LLM; code applies findings; the trace is written or the drop recorded">
+    <div class="st"><b>Regex + filter</b><span>F2, X4.10</span></div>
+    <div class="st"><b>Decision model</b><span>allow, redact or drop</span></div>
+    <div class="st"><b>Redactor LLM</b><span>only for redact</span></div>
+    <div class="st"><b>Apply</b><span>code removes the found text</span></div>
+    <div class="st"><b>Write</b><span>or record the drop</span></div>
+  </div>
+  <div class="decisions">
+    <div class="dec">
+      <div class="id">F3.1<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Two steps: a decision model, then a redactor LLM</h3>
+        <dl>
+          <dt>Decision model</dt><dd class="rec">Returns exactly one of <code>allow</code>, <code>redact</code> or <code>drop</code> per envelope, and no free-form text. <code>allow</code> is written as it is after regex redaction. <code>drop</code> writes nothing and leaves a drop record (<a href="#storage">X6.4</a>). Neither calls the redactor.</dd>
+          <dt>Redactor LLM</dt><dd class="rec">Called only for <code>redact</code>. It returns findings: a location (record, field, exact text), a category and an action (<code>redact</code> the text, or <code>withhold</code> the whole tool result). Deterministic code applies them to the trace. The LLM never rewrites content, so a bad answer can remove too much but cannot add or change anything.</dd>
+          <dt>Edge case</dt><dd>If the redactor finds nothing, the envelope is written after regex redaction only and the review record says <code>redact: no findings</code>, so the disagreement between the two models is visible in evals (<a href="#f3">F3.8</a>).</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F3.2<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Inline, before anything is written</h3>
+        <dl>
+          <dt>Detail</dt><dd>Both steps run in the pipeline after regex redaction and the session filter, on the normalized records of the envelope (<a href="#pipeline">X4.3</a>). Only what is allowed, redacted as the findings say, is written. A dropped envelope leaves nothing in the session; for spans, review runs on the assembled session before publish.</dd>
+          <dt>Why</dt><dd>Nothing unreviewed is ever stored or seen by a reader, and there is no pending state to manage.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F3.3<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Prompts are configurable and versioned</h3>
+        <dl>
+          <dt>Detail</dt><dd>A review policy in config sets, for each step, the provider, the model and the prompt (inline or a file path). The redactor's part also lists the categories with a short description each, and optional examples. Seshi wraps each prompt with its fixed output: the three labels for the decision model, the findings schema for the redactor. Operators change what is judged, not how answers are parsed. The policy's hash is recorded with every decision. Policies can be scoped by source, agent or repo.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F3.4<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Retry, then skip or drop</h3>
+        <dl>
+          <dt>Detail</dt><dd>The server retries a failed call to either model, or an answer that does not fit its output, with backoff (<code>retries = 3</code>). After the last retry the policy's <code>on_failure</code> setting decides:
+            <ul>
+              <li><code>drop</code> (default): nothing is written; the drop is recorded with reason <code>review_failed</code>.</li>
+              <li><code>skip</code>: the envelope is written with regex redaction only and marked <code>review: skipped</code>.</li>
+            </ul></dd>
+          <dt>Either way</dt><dd>The envelope counts as handled: the session's byte offset moves past it so later chunks continue, and pollers advance their checkpoint. After an outage, <code>seshi reprocess</code> can re-ingest skipped or dropped envelopes while the source still has them (<a href="#pipeline">X4.9</a>).</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F3.5<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Default models and prompts, all replaceable</h3>
+        <dl>
+          <dt>Decision</dt><dd class="rec">Seshi ships a default policy: a default decision model, a default redactor (Claude Haiku 5.5 on the Anthropic API) and default prompts and categories. Each can be replaced: Claude through Bedrock or Vertex, any OpenAI-compatible endpoint, or a local model for orgs that cannot send transcripts out.</dd>
+          <dt>Sending data</dt><dd>Review is off until an operator gives a provider key, so the defaults never send transcripts anywhere on their own. <code>seshi config check</code> names every provider a policy sends data to.</dd>
+          <dt>To pick</dt><dd>The default decision model and how it is called (hosted API or run locally).</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F3.6<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Review each chunk on its own, for now</h3>
+        <dl>
+          <dt>Decision</dt><dd class="rec">Both steps see only the envelope being reviewed.</dd>
+          <dt>Known gap</dt><dd>A hook uploads a session in chunks, so one envelope may be a single turn, and judging it alone can miss context ("here are the prod credentials" two turns earlier).</dd>
+          <dt>Later</dt><dd>Pass the last few records of the stored trace as read-only context, which costs more tokens but is never judged again.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F3.7<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Each envelope is reviewed once; no budget</h3>
+        <dl>
+          <dt>Decision</dt><dd class="rec">Each envelope is reviewed once; continuations send only new records, and a resend with the same idempotency key is not reviewed again (<a href="#pipeline">X4.7</a>). Very long envelopes are split by turn to fit the model's context. There is no daily budget: removing sensitive data matters more than controlling cost.</dd>
+          <dt>Cost note</dt><dd>Only envelopes labelled <code>redact</code> reach the LLM, so its cost follows how often sensitive data appears, not total volume.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F3.8<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Keep an audit record and an eval set</h3>
+        <dl>
+          <dt>Detail</dt><dd>Every decision is recorded: both models, the policy hash, the label, and for <code>redact</code> the findings by category and location, never the matched values. Drops are written under <code>sources/&lt;id&gt;/dropped/</code> (<a href="#storage">X6.4</a>), so an operator can see what was dropped and why without the content. Labelled fixtures in the review integration's <code>testdata/</code> measure each step before a policy changes: label accuracy and false drops for the decision model, recall for the redactor.</dd>
+        </dl>
+      </div>
+    </div>
+  </div>
+  <div class="two">
+    <div class="panel"><h4>Access</h4><ul><li>Policies are operator config. Audit records are visible to admins; owners see that a write was redacted or dropped, not the findings.</li><li>Provider keys for both models are server secrets.</li></ul></div>
+    <div class="panel"><h4>Data and storage</h4><ul><li>No pending state: a session holds only reviewed content.</li><li>Decisions are stored next to the session; drops under <code>sources/&lt;id&gt;/dropped/</code>.</li></ul></div>
+  </div>
+</section>
+
+<section id="f4">
+  <h2><span class="k">F4</span>OTLP ingestion</h2>
+  <p class="intro">Target: a seshi URL that can be entered as a destination in the Claude Console, which sends spans for Messages API requests and Managed Agents sessions. Claude's requirements: OTLP/HTTP with protobuf, HTTPS on port 443, a hostname, credentials only in request headers, best-effort delivery that can repeat spans.</p>
+  <div class="decisions">
+    <div class="dec">
+      <div class="id">F4.1<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Endpoint</h3>
+        <dl>
+          <dt>Detail</dt><dd><code>POST /otlp/v1/traces</code>, so the Console's endpoint URL is <code>https://seshi.example.com/otlp</code> (the Console adds <code>/v1/traces</code>). Accept protobuf and JSON, gzip. Reply with <code>ExportTraceServiceResponse</code>, using <code>partial_success</code> for rejected spans. TLS on 443 is a deployment requirement, usually a load balancer.</dd>
+          <dt>Why <code>/otlp</code> comes first</dt><dd>The trailing <code>/v1/traces</code> is fixed by the OTLP spec: exporters, and the Console, append it to whatever base URL they are given. That <code>v1</code> is OTLP's version, not seshi's. Only the part before it is ours. Hosted backends differ: Grafana Cloud uses <code>/otlp</code>, LangSmith <code>/otel</code> (and <code>/api/v1/otel</code> when self-hosted), Langfuse <code>/api/public/otel</code>. Keeping it outside seshi's <code>/v1</code> means a future seshi <code>/v2</code> never moves the URL pasted into Console destinations. The alternative, <code>/v1/otlp/v1/traces</code>, also works but repeats <code>v1</code>.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F4.2<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>One service account and token per destination</h3>
+        <dl>
+          <dt>Detail</dt><dd>The Console can only send fixed headers, so the caller is the destination, not a person. Each destination is a source with its own service account (<a href="#identity">X5.4</a>). An admin mints a service token for it with scope <code>sessions:write</code> and pastes it as an <code>Authorization</code> header. Sessions belong to that service account and are visible org-wide unless the source says otherwise. Separate destinations per workspace give separate service accounts.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F4.3<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Group spans into sessions</h3>
+        <dl>
+          <dt>Detail</dt><dd>Session key: <code>anthropic.session.id</code>, else <code>gen_ai.conversation.id</code>, else the trace ID. A Managed Agents session can cover several traces and threads; grouping by <code>anthropic.session.id</code> collects all of them.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F4.4<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Assemble, then publish after a quiet period</h3>
+        <dl>
+          <dt>Detail</dt><dd>Each batch is appended to the session's span store, removing repeats by trace and span ID. The assembler rebuilds the whole trace (spans can arrive late or out of order) and publishes a new head once the session has had no new spans for a set time (default 10 minutes), or on a final span. Datadog sync reuses this assembler.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F4.5<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Reject metadata-only destinations, for now</h3>
+        <dl>
+          <dt>Problem</dt><dd>With content mode "Metadata only", spans have IDs, timing and token counts but no prompts or responses.</dd>
+          <dt>Decision</dt><dd class="rec">Reject them. A batch in which no span carries prompt or response content is rejected through <code>partial_success</code> (<code>rejected_spans</code>, and an <code>error_message</code> saying to switch the destination to full content). Nothing is stored. Rejections are counted in the source's status (<a href="#worker">X7.5</a>), since the Console may not show the message to anyone.</dd>
+          <dt>Detail</dt><dd>Spans without content inside a batch that has some, such as tool or timing spans, are kept. Usage-only sessions can be added later if cost reporting needs them.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F4.6<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Traces only in v1</h3>
+        <dl>
+          <dt>Detail</dt><dd>An <code>otlp-genai</code> adapter maps <code>anthropic.*</code> and <code>gen_ai.*</code> attributes, so other GenAI-convention producers also work. OTLP logs and metrics (Claude Code's own telemetry, Cursor's enterprise export) are later.</dd>
+        </dl>
+      </div>
+    </div>
+  </div>
+  <div class="two">
+    <div class="panel"><h4>Access</h4><ul><li>Service token, write-only, for the destination's service account.</li><li>Not checked: whether resource attributes carry a workspace or API key ID worth recording as a claim.</li></ul></div>
+    <div class="panel"><h4>Data and storage</h4><ul><li>No OTLP batch is stored. Each span is normalized and redacted on arrival and kept as a record under <code>spans/</code>.</li><li>Full-content spans hold up to 0.75 MB each by default; <code>anthropic.content.truncated</code> marks cut content.</li></ul></div>
+  </div>
+</section>
+
+<section id="f5">
+  <h2><span class="k">F5</span>Datadog Trajectory sync</h2>
+  <p class="intro">Trajectory publishes sessions to Datadog LLM Observability, which has no push export. Getting them out means polling the Export API. Today seshi only reads the Trajectory daemon's local files when a client uploads them.</p>
+  <div class="decisions">
+    <div class="dec">
+      <div class="id">F5.1<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Poll the LLM Observability search endpoint</h3>
+        <dl>
+          <dt>Detail</dt><dd><code>POST /api/v2/llm-obs/v1/spans/events/search</code>, filtered by <code>ml_app</code> and tags from source config, with cursor paging. Needs a Datadog API key and application key from the customer. The endpoints are marked preview and subject to change, so the adapter is pinned to a tested shape and fails loudly when it changes.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F5.2<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Time-window cursor with overlap</h3>
+        <dl>
+          <dt>Detail</dt><dd>Each run queries from the checkpoint minus an overlap (for late-indexed spans) to now minus a lag, removes repeats by span ID, and saves the new checkpoint. The first run backfills a configured window. 429 responses honour <code>Retry-After</code>.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F5.3<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Rebuild sessions from turn traces</h3>
+        <dl>
+          <dt>Detail</dt><dd>In Datadog each turn is its own trace; turns share <code>trajectory.trace_correlation.session_id</code>. Spans go to the span assembler (<a href="#f4">F4.4</a>) with that tag as the session key, through a <code>datadog-llmobs</code> adapter.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F5.4<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Start with polling Datadog only</h3>
+        <dl>
+          <dt>Decision</dt><dd class="rec">The first version polls the Export API. No install on laptops is needed; the owner is the source's service account, with the user's email as a claim.</dd>
+          <dt>Known limits</dt><dd>Session text depends on the team's Trajectory capture level: minimal gives near-empty sessions, which the session filter removes and source health reports.</dd>
+          <dt>Later</dt><dd>Capturing the Trajectory daemon's local files through <a href="#f9">F9</a> (full fidelity, verified owner), or pointing Trajectory's publish destination at seshi's OTLP endpoint (not checked whether it accepts non-Datadog endpoints).</dd>
+        </dl>
+      </div>
+    </div>
+  </div>
+  <div class="two">
+    <div class="panel"><h4>Access</h4><ul><li>Connector with Datadog keys; check whether an application key can be limited to LLM Observability read.</li><li>Sessions belong to the source's service account (<a href="#identity">X5.4</a>). <code>trajectory.user_email</code> and <code>git.email</code>, which users set themselves, are recorded as claims.</li></ul></div>
+    <div class="panel"><h4>Data and storage</h4><ul><li>Spans are normalized and redacted as they arrive; pages are not stored.</li><li>Source health reports sessions removed by the session filter, which usually means capture level is minimal.</li></ul></div>
+  </div>
+</section>
+
+<section id="f6">
+  <h2><span class="k">F6</span>S3-compatible sync</h2>
+  <p class="intro">Other systems drop trajectory files into a bucket: eval harnesses, ATIF exports, hook uploaders in cloud sandboxes. Seshi polls that bucket and ingests new and changed files.</p>
+  <div class="decisions">
+    <div class="dec">
+      <div class="id">F6.1<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Source config</h3>
+        <dl>
+          <dt>Fields</dt><dd><code>url</code>, credentials (static keys or a role to assume with an external ID), <code>prefix</code>, <code>include</code> globs, <code>format</code> (<code>auto</code> or a named adapter), <code>visibility</code>, <code>interval</code>. Sessions belong to the source's service account (<a href="#identity">X5.4</a>).</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F6.2<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Detect changes with a manifest</h3>
+        <dl>
+          <dt>Detail</dt><dd>Each run lists the prefix and compares key, ETag and size with the manifest in the checkpoint. If keys sort by time, <code>ordered_keys = true</code> lets the run start after the last key. For very large buckets, S3 event notifications through SQS can come later.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F6.3<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>What a rewritten object means</h3>
+        <dl>
+          <dt>Decision</dt><dd>Settled by <a href="#pipeline">X4.6</a>. If the new object starts with the old content, the rest is ingested as a continuation. If not, the S3 connector, as the session's original writer, replaces the session.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F6.4<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Deletions in the source are ignored, for now</h3>
+        <dl>
+          <dt>Decision</dt><dd class="rec">Deleting a source object never changes the session it produced, and there is no setting to propagate deletes. To remove a session, an admin deletes it in seshi. Seshi refuses a source that points at its own bucket and prefix.</dd>
+          <dt>Manifest</dt><dd>A key missing from a complete listing is dropped from the manifest, so it does not grow forever. Nothing else happens.</dd>
+          <dt>Later</dt><dd>If needed: compare manifests to see deletions (with a periodic full listing when <code>ordered_keys</code> is on), or S3 <code>ObjectRemoved</code> events; tombstone a session only when no other live key maps to it, so a rename keeps it; and refuse a run that would delete a large share of the manifest, which usually means a wrong prefix or lost permissions.</dd>
+        </dl>
+      </div>
+    </div>
+  </div>
+  <div class="two">
+    <div class="panel"><h4>Access</h4><ul><li>Read-only credentials for the source bucket.</li><li>Sessions belong to the source's service account; the object key is recorded as provenance.</li></ul></div>
+    <div class="panel"><h4>Data and storage</h4><ul><li>The object is not copied. Provenance records bucket, key and ETag so it can be read again.</li><li>Format detection reuses today's <code>detect</code> step.</li></ul></div>
+  </div>
+</section>
+
+<section id="f7">
+  <h2><span class="k">F7</span>Cursor Cloud sync</h2>
+  <p class="intro"><span class="chip deferred">Deferred</span> Not in the first version. The public REST API has no prompts, and the only full transcript comes through the Cursor SDK over an undocumented call, so this waits until Cursor publishes a transcript endpoint or the checks below are done with a real key. The notes stay as the starting point.</p>
+  <p class="intro">Cursor Cloud Agents run in Cursor's cloud, so local hooks and transcripts do not cover them. The public Cloud Agents REST API (v1) lists agents and runs but returns no user prompts anywhere. The Cursor SDK's <code>run.conversation()</code> returns the full structured transcript of a run, so the poller lists with REST and reads each run's transcript through the SDK.</p>
+  <h3 style="margin-top:8px">What Cursor exposes</h3>
+  <div class="scroll">
+  <table>
+    <thead><tr><th>Source</th><th>Gives</th><th>Lacks</th></tr></thead>
+    <tbody>
+      <tr><td>SDK <code>run.conversation()</code></td><td>Per turn: the user message, then steps (assistant text, tool calls, thinking with duration); shell turns with command, stdout, stderr and exit code</td><td>Timestamps per step. Tool call arguments and results use a schema Cursor calls internal and unstable. No documented REST endpoint: the SDK bridge's <code>GetRunConversation</code> returns opaque JSON.</td></tr>
+      <tr><td>SDK <code>Run</code> / REST run</td><td>Status, start time, duration, final reply, branches and PRs; through the SDK also the model and token usage (input, output, cache, reasoning)</td><td>The prompt (REST)</td></tr>
+      <tr><td>REST agent, <code>/v1/agents</code></td><td>Title (<code>name</code>), repos and starting ref, link, timestamps, latest run ID</td><td>Prompt, model, and who started it</td></tr>
+      <tr><td>REST run stream</td><td>Assistant, thinking and tool call events</td><td>User messages. Expires after <code>X-Cursor-Stream-Retention-Seconds</code> (<code>410 stream_expired</code>).</td></tr>
+      <tr><td>REST usage, <code>/v1/agents/{id}/usage</code></td><td>Tokens per run</td><td>Model, cost</td></tr>
+      <tr><td>Legacy v0 conversation</td><td>All user prompts and assistant replies as text</td><td>Tool calls and thinking; message IDs change on every read; available only during Cursor's migration window</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="decisions">
+    <div class="dec">
+      <div class="id">F7.1<span class="chip deferred">Deferred</span></div>
+      <div class="body">
+        <h3>List with REST, read each finished run with <code>run.conversation()</code></h3>
+        <dl>
+          <dt>Detail</dt><dd>Each poll pages <code>GET /v1/agents</code> (up to 100 per page, <code>cursor</code>) and <code>GET /v1/agents/{id}/runs</code>. For each run that finished since the checkpoint, it calls <code>Agent.getRun(runId, { runtime: "cloud", agentId })</code>, checks <code>run.supports("conversation")</code>, and reads <code>run.conversation()</code> together with the run's model, usage, git and timing. Runs still going wait for the next poll.</dd>
+          <dt>Fallback</dt><dd>If a run does not support <code>conversation()</code>, replay its REST stream while it is still retained, else store the final reply only. Either way the session is marked <code>fidelity: partial</code>. The legacy v0 endpoint is not used.</dd>
+          <dt>Session shape</dt><dd>One session per agent (<code>archive_id</code> from the agent ID); each run is a continuation, idempotent on agent ID and run ID (<a href="#pipeline">X4.7</a>).</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F7.2<span class="chip deferred">Deferred</span></div>
+      <div class="body">
+        <h3>Respect Cursor's limits</h3>
+        <dl>
+          <dt>Detail</dt><dd>Listing agents allows 200 requests a minute. Limits for reading a conversation are not documented, so the poller uses a token bucket per source, backs off on 429, and backfills slowly. Stream limits (60 opens a minute, 600 an hour, 50 open at once) only matter for the fallback.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F7.3<span class="chip deferred">Deferred</span></div>
+      <div class="body">
+        <h3>Which Cursor key</h3>
+        <dl>
+          <dt>Ownership</dt><dd>Settled by <a href="#identity">X5.4</a>: sessions belong to the source's service account, whichever key it uses. No Cursor endpoint names the user who started an agent, so there is no person claim to record.</dd>
+          <dt>Options</dt><dd><ul><li>A user API key: only that user's agents, so one source per user, which is also the only way to tell whose agents they are.</li><li>A service account key: possibly the whole team. Both key types work with the SDK; Team Admin keys do not.</li></ul></dd>
+          <dt>To check</dt><dd>Whether a service account key lists all team agents.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F7.4<span class="chip deferred">Deferred</span></div>
+      <div class="body">
+        <h3>New <code>cursor-cloud</code> adapter, pinned and fixture-tested</h3>
+        <dl>
+          <dt>Detail</dt><dd>Maps each <code>ConversationTurn</code> to the canonical trace: user message, assistant text, thinking, tool calls with arguments and results, shell commands with output. The run supplies model, usage, timestamps and PRs; steps inside a run get no timestamps of their own. Richer than the local Cursor transcript, which has no tool output or IDs.</dd>
+          <dt>Unstable schema</dt><dd>Tool call arguments and results follow a schema Cursor calls internal. The SDK version is pinned, recorded conversations live in the integration's <code>testdata/</code>, and an unknown tool shape is kept as raw JSON in the step rather than failing the session.</dd>
+          <dt>Alternative</dt><dd>Cursor's Enterprise OpenTelemetry export can include Cloud Agent prompts and responses when opted in. It is Enterprise-only and sends logs, not traces.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F7.5<span class="chip deferred">Deferred</span></div>
+      <div class="body">
+        <h3>Running the Cursor SDK inside seshi</h3>
+        <dl>
+          <dt>Problem</dt><dd><code>@cursor/sdk</code> targets Node 22.13 and ships native binaries per platform. Cloud-only use is documented not to load the local agent code, but it is not checked whether the package runs under Bun (<a href="#runtime">X2.1</a>) or inside the compiled <code>seshi</code> binary (X2.2).</dd>
+          <dt>Options</dt><dd><ul><li>Import <code>@cursor/sdk</code> directly in <code>integrations/cursor</code>, loaded only when a Cursor source is configured (preferred if it works).</li><li>Run Cursor's SDK bridge, a local Connect/protobuf server, as a sidecar and call <code>GetRunConversation</code>.</li><li>Call the SDK's underlying endpoint directly: undocumented, so rejected.</li></ul></dd>
+          <dt>To check</dt><dd>With a real key: the SDK under Bun and in the compiled binary; whether <code>conversation()</code> works for runs weeks old (Cursor documents no retention for it, unlike the stream); and the undocumented rate limits.</dd>
+        </dl>
+      </div>
+    </div>
+  </div>
+  <div class="two">
+    <div class="panel"><h4>Access</h4><ul><li>Connector with a Cursor user or service account key.</li><li>Sessions belong to the source's service account (<a href="#identity">X5.4</a>); no person claim is available.</li></ul></div>
+    <div class="panel"><h4>Data and storage</h4><ul><li>Conversations are normalized as they are read and not stored; one session per agent, one continuation per run.</li><li>Sessions read through the fallback are marked <code>fidelity: partial</code>.</li></ul></div>
+  </div>
+</section>
+
+<section id="f8">
+  <h2><span class="k">F8</span>Session CLI</h2>
+  <div class="decisions">
+    <div class="dec">
+      <div class="id">F8.1<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Command groups</h3>
+        <dl>
+          <dt>Commands</dt><dd><ul>
+            <li><code>login</code>, <code>logout</code>, <code>whoami</code>: sign in, hold tokens.</li>
+            <li><code>capture install|uninstall|status|pause|resume</code>: agent integrations (<a href="#f9">F9</a>).</li>
+            <li><code>hook &lt;agent&gt; &lt;event&gt;</code>: internal; called by agents.</li>
+            <li><code>upload &lt;path&gt;</code>: send files or folders by hand.</li>
+            <li><code>sessions ls|show|export|rm</code>, <code>search</code>.</li>
+            <li><code>sync run|status</code>, <code>redact test|backfill</code>, <code>tokens</code>: admin.</li>
+            <li><code>config check|show</code>, <code>serve</code>, <code>daemon</code>.</li>
+          </ul></dd>
+          <dt>Output</dt><dd>Readable by default, <code>--json</code> on every command, stable exit codes.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F8.2<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>How the CLI signs in</h3>
+        <dl>
+          <dt>Detail</dt><dd>With an IdP, <code>seshi login</code> runs the device flow (or browser with PKCE), keeps the IdP refresh token for interactive commands, and gets a write-only device token for unattended uploads (<a href="#identity">X5.7</a>). Without one, <code>seshi login --key</code> stores the org key and the uploader uses it with the resolved username (<a href="#identity">X5.12</a>). Credentials go in the OS keychain, falling back to a 0600 file in <code>~/.config/seshi/</code>.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F8.3<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>The CLI talks to a server, or runs one in-process</h3>
+        <dl>
+          <dt>Detail</dt><dd>Team setups use the HTTP API through <code>@seshi/client</code> (<code>packages/ts/client</code>). Local mode (<a href="#repo">X3.5</a>) builds an <code>Instance</code> in-process for one person who owns the bucket. Nothing else touches a bucket.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F8.4<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Distribution: npm, an install script and release binaries, Windows included</h3>
+        <dl>
+          <dt>Decision</dt><dd class="rec">Three channels to start, all shipping the same compiled binary (<a href="#runtime">X2.2</a>):
+            <ul>
+              <li><b>GitHub release binaries</b> for macOS, Linux and Windows, with checksums. The other two channels download from here.</li>
+              <li><b>npm</b>: <code>npm i -g seshi</code> or <code>npx seshi</code>. The <code>seshi</code> package pulls the binary for the platform through optional per-platform packages (<code>@seshi/cli-darwin-arm64</code> and so on), so Node is not needed to run it.</li>
+              <li><b>Install script</b>: <code>curl … | sh</code> for macOS and Linux, a PowerShell script for Windows. Both check the checksum and put <code>seshi</code> on the PATH.</li>
+            </ul></dd>
+          <dt>Targets</dt><dd>macOS arm64 and x64, Linux arm64 and x64, Windows x64; Windows arm64 if Bun's compiler supports it when we build.</dd>
+          <dt>Windows means</dt><dd>Credentials in Windows Credential Manager (<a href="#f8">F8.2</a>), config under <code>%APPDATA%\seshi</code>, hook commands and agent paths that work in PowerShell and <code>cmd</code> (<a href="#f9">F9</a>), and Windows in the CI test matrix.</dd>
+          <dt>Later</dt><dd>Homebrew, and signed or notarized binaries if unsigned ones cause trouble with macOS Gatekeeper or Windows SmartScreen.</dd>
+        </dl>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="f9">
+  <h2><span class="k">F9</span>Capture integrations</h2>
+  <p class="intro">Hooks in each coding agent capture sessions as they happen, a sweep catches what hooks miss, and a status indicator tells the developer whether this session is being captured. Capture can be turned off for everything, a repo, a folder, or one session.</p>
+  <div class="decisions">
+    <div class="dec">
+      <div class="id">F9.1<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Hooks write to a spool and exit</h3>
+        <dl>
+          <dt>Detail</dt><dd><code>seshi hook</code> reads the hook JSON from stdin (transcript path, session ID, cwd), applies the capture rules (<a href="#f9">F9.5</a>), appends an entry to the spool and exits. It always exits 0 and never blocks the agent; errors go to a log. A background uploader drains the spool and sends only the new bytes with the continuation protocol.</dd>
+          <dt>Uploader</dt><dd class="rec">Started on demand: the hook starts it if it is not running, and it exits after a few idle minutes. This works the same on macOS, Linux and Windows with nothing to install. <code>seshi capture install --service</code> adds a launchd, systemd or Task Scheduler entry for people who want uploads to continue between agent sessions.</dd>
+          <dt>Whole log first</dt><dd>Until a session has a trace on the server, the server stores nothing for it and accepts only the whole log (<a href="#storage">X6.3</a>). On <code>409</code> with <code>expected: 0</code>, which today's protocol already returns, the uploader resends from the start.</dd>
+          <dt>Paths</dt><dd>Spool and state live in <code>~/.local/state/seshi/</code> on macOS and Linux and <code>%LOCALAPPDATA%\seshi\</code> on Windows. Hook commands work in sh, PowerShell and <code>cmd</code> (<a href="#f8">F8.4</a>).</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F9.2<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Events per agent</h3>
+        <dl>
+          <dt>Detail</dt><dd><ul>
+            <li>Claude Code: <code>Stop</code>, <code>SubagentStop</code>, <code>PreCompact</code>, <code>SessionEnd</code>.</li>
+            <li>Cursor (IDE and CLI): <code>stop</code>, <code>sessionEnd</code>. <code>transcript_path</code> can be empty on the first prompt, so also key by conversation ID.</li>
+            <li>Codex: <code>notify</code>, plus the rollout files in <code>~/.codex/sessions</code>.</li>
+          </ul></dd>
+          <dt>Later</dt><dd>Datadog Trajectory's local daemon files in <code>~/.trajectory</code>. Left out for now: Datadog is polled (<a href="#f5">F5.4</a>), and capturing both would store every session twice.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F9.3<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Hooks plus a sweep</h3>
+        <dl>
+          <dt>Decision</dt><dd class="rec">The uploader also sweeps the known transcript folders on a timer, which catches crashes, disabled hooks and agent updates that break a hook.</dd>
+          <dt>One decision function</dt><dd>Hooks and the sweep both call the same check against the same local state (<a href="#f9">F9.5</a>), so the sweep can never upload something a hook would have skipped. A session turned off is recorded in the state file and stays recorded while its transcript exists; the sweep reads it before every upload.</dd>
+          <dt>No surprise backfill</dt><dd>The sweep only covers sessions that started after capture was installed. <code>seshi upload --since 30d</code> backfills on purpose, through the same rules.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F9.4<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Status indicator reads local state only</h3>
+        <dl>
+          <dt>Detail</dt><dd><code>seshi statusline</code> reads a small state file the hook and uploader maintain, with no network call. States: capturing, off for this session, paused (until a time), excluded by a rule (and which level), uploads queued, sign-in needed, upload failing. It prints <code>Session Capture ◉</code> or <code>Session Capture ⏸</code>, plus a short problem after a separator (<a href="#brand">B1.6</a>).</dd>
+          <dt>Where it shows</dt><dd><ul>
+            <li>Claude Code in a terminal: its <code>statusLine</code> command.</li>
+            <li>Claude desktop app (Code tab), which has no status line: a mod with a clickable <code>Session Capture ◉/⏸</code> chip in the footer, as in the Session Capture prototype (dosu-ai/dosu PR 13997). Clicking it sets the session toggle below.</li>
+            <li>Cursor and Codex: <code>seshi capture status</code> and a first-run notice.</li>
+          </ul></dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F9.5<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Capture rules at four levels, toggleable inside a session</h3>
+        <dl>
+          <dt>Levels</dt><dd><ul>
+            <li><b>Global</b>: on or off for this user, in the CLI config. On by default once capture is installed.</li>
+            <li><b>Repo</b>: <code>.seshi/config.toml</code> at the repo root, committed, so it applies to everyone who works in the repo (<code>capture = false</code>).</li>
+            <li><b>Directory or workspace</b>: personal path rules in the CLI config, matched by path prefix, so they cover folders that are not repos and are never committed:<br><code>[[capture.paths]] path = "~/clients/acme" capture = false</code></li>
+            <li><b>Session</b>: on or off for one agent session, keyed by agent and session ID.</li>
+          </ul></dd>
+          <dt>How they combine</dt><dd>Shared rules can only turn capture off: an org rule (such as "only repos whose remote is in our GitHub org", delivered with the CLI config) or a repo's <code>capture = false</code> always wins. Otherwise the most specific personal level that says anything decides: session, then directory (longest matching path), then global. So a session can be turned on in a folder that is off, but not in a repo the team has excluded.</dd>
+          <dt>Toggling in a session</dt><dd><ul>
+            <li>A <code>/seshi</code> skill in the Claude Code plugin: <code>/seshi capture off</code>, <code>on</code>, <code>status</code>. It runs <code>seshi capture off --session &lt;id&gt;</code>, which writes the session's entry in the local state file. To check: how the skill gets the current session ID (an environment variable or substitution in the skill).</li>
+            <li>The desktop mod's chip and <code>/session-capture</code> command (<a href="#f9">F9.4</a>) write the same entry.</li>
+            <li>Elsewhere: <code>seshi capture off --session &lt;id&gt;</code>, or <code>seshi capture pause 2h</code> for everything.</li>
+          </ul></dd>
+          <dt>Turning off mid-session</dt><dd>Nothing more of the session is uploaded, by hooks or the sweep, and what was already uploaded is retracted (<a href="#f9">F9.7</a>). Sessions under the session filter's size (<a href="#pipeline">X4.10</a>) were never stored, so turning off early usually leaves nothing to retract.</dd>
+          <dt>Where the state lives</dt><dd>One local state file per machine, read by hooks, the sweep, the status line and the mod. This answers the prototype's open question of where the flag should live so capture can read it.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F9.6<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Install merges; uninstall removes only ours</h3>
+        <dl>
+          <dt>Detail</dt><dd>Claude Code ships as a plugin (hooks, status line, the <code>/seshi</code> skill, and the desktop mod). <code>seshi capture install cursor</code> merges into <code>~/.cursor/hooks.json</code>; Codex gets a config edit. Existing hooks are preserved. Enterprise rollout uses managed settings and team hooks pushed by MDM.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F9.7<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Turning a session off retracts what was uploaded</h3>
+        <dl>
+          <dt>Problem</dt><dd>The uploader's credentials cannot delete: the device token is write-only (<a href="#identity">X5.2</a>) and the org key cannot delete at all (<a href="#identity">X5.3</a>).</dd>
+          <dt>Decision</dt><dd class="rec">A retraction secret per session. On a session's first upload the uploader generates a random secret, keeps it in the local state file next to the session's toggle, and sends only its hash, which the server stores in the session's metadata (<code>retract_hash</code>). Turning the session off makes the uploader stop and send <code>DELETE /v1/sessions/{id}</code> with its normal credential and the secret. The server checks it against the hash and runs the normal delete: a tombstone in the change feed, trace objects removed, the session dropped from search.</dd>
+          <dt>Why</dt><dd>It works the same with or without an IdP and does not depend on the claimed username. Only the machine that uploaded a session can retract it; a leaked org key or device token cannot delete anyone else's sessions, because the secret never leaves that machine. Nobody has to sign in again mid-session.</dd>
+          <dt>Details</dt><dd><ul>
+            <li>The change entry records reason <code>retracted</code>, never the content, so admins can see it happened.</li>
+            <li>An upload in flight when the session is turned off finishes first, then the retraction runs. If the uploader is not running, the retraction waits in the spool.</li>
+            <li>Turning the session back on uploads it from the start as a new session; the replace rule (<a href="#pipeline">X4.6</a>) does not apply because the old one is gone.</li>
+            <li>If the state file is lost (reinstall, new machine), the secret is gone and deleting falls back to <code>seshi sessions rm</code> with an IdP, or an admin.</li>
+            <li>Server setting <code>capture.allow_retract</code>, on by default, for orgs that do not want developers deleting sessions after the fact.</li>
+          </ul></dd>
+          <dt>Options considered</dt><dd>Let the credential that wrote a session delete it (the org key is shared, so any member could delete any key-uploaded session); require a fresh sign-in to turn off (friction, and impossible without an IdP); delay a session's first upload (useful alongside, not instead).</dd>
+        </dl>
+      </div>
+    </div>
+  </div>
+  <div class="two">
+    <div class="panel"><h4>Access</h4><ul><li>With an IdP: a write-only device token; the owner is the person it was issued to (<a href="#identity">X5.7</a>).</li><li>Without one: the org key plus the resolved username, recorded as <code>owner_basis: claimed</code> (<a href="#identity">X5.12</a>).</li><li>Agent account IDs and git email are sent as claims, for spotting mismatches.</li></ul></div>
+    <div class="panel"><h4>Data and storage</h4><ul><li>Spool entries hold paths and offsets, not copies of transcripts.</li><li>Optional client-side redaction (<a href="#f2">F2.4</a>) runs in the uploader.</li><li>Capture rules, session toggles and retraction secrets stay on the machine; the server sees only what was uploaded and a hash per session.</li></ul></div>
+  </div>
+</section>
+
+<section id="f10">
+  <h2><span class="k">F10</span>Session search</h2>
+  <div class="decisions">
+    <div class="dec">
+      <div class="id">F10.1<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Keyword search with filters first</h3>
+        <dl>
+          <dt>Detail</dt><dd>Search prompts, assistant text, tool names and inputs, file paths and commands. Filter by owner, agent, repo, branch, date and source. Results point to a session and the matching records.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F10.2<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>The index is built from the change feed</h3>
+        <dl>
+          <dt>Detail</dt><dd>An indexer job tails <code>changes/</code>: a published entry indexes the new head, a tombstone removes the session. The index can be dropped and rebuilt. Sessions dropped by model review never reach the change feed, so they are never indexed.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F10.3<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>SQLite only, to start</h3>
+        <dl>
+          <dt>Decision</dt><dd class="rec">SQLite FTS5 through Bun's built-in SQLite, behind a backend interface. No new service to run.</dd>
+          <dt>How it runs</dt><dd>Every instance that serves search keeps its own index file on local disk and its own cursor in the change feed (<a href="#worker">X7</a>), so API instances scale without sharing a database. A new or wiped instance rebuilds its index from the change feed before it answers search; until then search returns <code>503</code>.</dd>
+          <dt>Later</dt><dd>ClickHouse as a second backend, for larger orgs or analytics over sessions. The interface is kept narrow (index a session head, remove a session, query with filters) so a second backend does not change the indexer or the API.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F10.4<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Permissions are applied in the query layer</h3>
+        <dl>
+          <dt>Detail</dt><dd>A member's query returns sessions they own plus sessions with <code>org</code> visibility (<a href="#identity">X5.10</a>); admins and services see everything. The index stores owner and visibility on every document and updates on visibility changes; the filter is added by the server, never by the client.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F10.5<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Keyword search first; semantic search later</h3>
+        <dl>
+          <dt>First version</dt><dd><code>GET /v1/search</code> and <code>seshi search</code>.</dd>
+          <dt>Later</dt><dd>Semantic search: embeddings per turn, an embedding provider in config (same data-flow rule as <a href="#f3">F3.5</a>), hybrid ranking. Possibly an MCP tool so agents can search past sessions.</dd>
+        </dl>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="brand">
+  <h2><span class="k">B1</span>Brand and user-facing surfaces</h2>
+  <p class="intro">The seshi brand guidelines (Threadling system v1.0, with the v1.1 implementation pages for exact colours, type and source files) set the look of the README, the CLI, docs and every other surface people see. The mascot is <b>Threadling</b>, one uninterrupted ribbon coiled into a glyph, with two small eyes added only for character moments. Tagline: <i>Every session has a thread.</i> The wordmark is lowercase <code>seshi</code>.</p>
+  <div class="scroll">
+  <table>
+    <thead><tr><th>Colour</th><th>Role</th><th>Contrast on night ink / on paper</th></tr></thead>
+    <tbody>
+      <tr><td><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#76D6C6;border:1px solid var(--line);vertical-align:-1px;margin-right:6px"></span>Thread mint <code>#76D6C6</code></td><td>Glyph on dark backgrounds and dark terminals</td><td>9.8 / 1.6</td></tr>
+      <tr><td><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#247C73;border:1px solid var(--line);vertical-align:-1px;margin-right:6px"></span>Deep teal <code>#247C73</code></td><td>Glyph on light backgrounds and light terminals (v1.1)</td><td>3.4 / 4.5</td></tr>
+      <tr><td><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#171D2A;border:1px solid var(--line);vertical-align:-1px;margin-right:6px"></span>Night ink <code>#171D2A</code></td><td>Dark background</td><td>n/a / 15.3</td></tr>
+      <tr><td><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#F6F4EE;border:1px solid var(--line);vertical-align:-1px;margin-right:6px"></span>Paper <code>#F6F4EE</code></td><td>Light background; lettering on dark</td><td>15.3 / n/a</td></tr>
+      <tr><td><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#173A41;border:1px solid var(--line);vertical-align:-1px;margin-right:6px"></span>Light ink <code>#173A41</code></td><td>Wordmark and UI text on light (v1.1)</td><td>n/a / 11.1</td></tr>
+      <tr><td><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#9C8ADD;border:1px solid var(--line);vertical-align:-1px;margin-right:6px"></span>Memory lilac <code>#9C8ADD</code></td><td>Accent: character version, search</td><td>5.7 / 2.7</td></tr>
+      <tr><td><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#FFCA86;border:1px solid var(--line);vertical-align:-1px;margin-right:6px"></span>Spark <code>#FFCA86</code></td><td>Accent: thinking, attention</td><td>11.3 / 1.4</td></tr>
+      <tr><td><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#389B8C;border:1px solid var(--line);vertical-align:-1px;margin-right:6px"></span>Happy <code>#389B8C</code></td><td>Expression pose (v1.1)</td><td>5.0 / 3.1</td></tr>
+      <tr><td><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#9380D7;border:1px solid var(--line);vertical-align:-1px;margin-right:6px"></span>Searching <code>#9380D7</code></td><td>Expression pose (v1.1)</td><td>5.1 / 3.0</td></tr>
+      <tr><td><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#D79E52;border:1px solid var(--line);vertical-align:-1px;margin-right:6px"></span>Thinking <code>#D79E52</code></td><td>Expression pose (v1.1)</td><td>7.2 / 2.1</td></tr>
+      <tr><td><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#5A9FC6;border:1px solid var(--line);vertical-align:-1px;margin-right:6px"></span>Protected <code>#5A9FC6</code></td><td>Expression pose (v1.1)</td><td>5.8 / 2.7</td></tr>
+      <tr><td><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#C77C9D;border:1px solid var(--line);vertical-align:-1px;margin-right:6px"></span>Syncing <code>#C77C9D</code></td><td>Expression pose (v1.1)</td><td>5.5 / 2.8</td></tr>
+      <tr><td><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#8B96AB;border:1px solid var(--line);vertical-align:-1px;margin-right:6px"></span>Resting <code>#8B96AB</code></td><td>Expression pose (v1.1)</td><td>5.7 / 2.7</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p>v1.1 fixes the brand mark on light backgrounds: deep teal reaches 4.5 on paper, just at the WCAG AA line for text, and light ink is comfortable. Lilac and spark still have no light-background variant, so two CLI roles have no approved colour on light terminals (<a href="#brand">B1.7</a>). The expression colours are for illustrations: all read on night ink, and on paper only Happy and Searching reach the 3:1 needed for graphics. Type: Manrope 600/800 for the wordmark and UI, Manrope 400/500 for docs, JetBrains Mono 400/600 for code and terminal snippets.</p>
+  <div class="decisions">
+    <div class="dec">
+      <div class="id">B1.1<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Brand assets live in the repo, with tokens as the source</h3>
+        <dl>
+          <dt>Detail</dt><dd>A top-level <code>brand/</code> holds the guidelines PDF, SVG sources for the glyph, the dark and light lockups and the six expression poses, and <code>tokens.json</code> as delivered with v1.1 (colour tokens, type, dark and light modes). Now in the repo (uncommitted): <code>brand/glyph/seshi-glyph-{dark,light}.svg</code>, <code>brand/lockup/seshi-lockup-{dark,light}.svg</code>, <code>brand/expressions/seshi-{happy,searching,thinking,protected,syncing,resting}.svg</code>, <code>tokens.json</code>, the v1.1 PDF and a short <code>README.md</code> with the rules that are easy to miss. The light glyph was made from the dark one by swapping the stroke to deep teal. The CLI, README, docs and the Claude desktop mod read colours from the tokens, so a palette change is one edit. Generated sizes (favicon, npm and GitHub avatars) are built from the SVGs.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">B1.2<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Glyph or face, by size and place</h3>
+        <dl>
+          <dt>Rule</dt><dd>The guidelines say the mark must work without a face, eyes only at 48 px and above, and the glyph alone for avatars, favicons and badges. So:
+            <ul>
+              <li><b>No face</b>: CLI output, status line, the desktop mod chip, favicon, npm and GitHub avatars (mint on night ink, readable at 32 px).</li>
+              <li><b>Glyph or a short pose</b>: README header (dark and light lockups through <code>&lt;picture&gt;</code> with <code>prefers-color-scheme</code>).</li>
+              <li><b>Expression poses</b>: docs, empty states, error pages, onboarding, stickers.</li>
+            </ul></dd>
+          <dt>Guardrails</dt><dd>One uninterrupted ribbon, rounded ends, the asymmetric coil kept. No limbs, textures, gradients, busy backgrounds or snail shapes. Never replace the lettering with a face.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">B1.3<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Seshi's states map to Threadling's six expressions</h3>
+        <dl>
+          <dt>Mapping</dt><dd>
+            <div class="scroll">
+            <table>
+              <thead><tr><th>Expression</th><th>Seshi state</th><th>Where</th></tr></thead>
+              <tbody>
+                <tr><td>Happy · Collected</td><td>Session captured and uploaded</td><td><code>capture status</code>, upload success</td></tr>
+                <tr><td>Searching · Exploring</td><td>A search running, or no results</td><td><code>seshi search</code>, search empty state</td></tr>
+                <tr><td>Thinking · Processing</td><td>Uploads queued, model review, assembling spans</td><td>Upload and backfill progress</td></tr>
+                <tr><td>Protected · Redacted</td><td>Redaction applied, a session turned off or retracted</td><td><code>redact test</code>, session toggle (<a href="#f9">F9.5</a>, <a href="#f9">F9.7</a>)</td></tr>
+                <tr><td>Syncing · Connected</td><td>A source polling or caught up</td><td><code>sync status</code>, source health</td></tr>
+                <tr><td>Resting · All done</td><td>Paused, idle, nothing to upload</td><td><code>capture pause</code></td></tr>
+              </tbody>
+            </table>
+            </div></dd>
+          <dt>Use</dt><dd>The words (Collected, Exploring, Processing, Redacted, Connected, All done) give the docs and empty states one vocabulary. Errors are not an expression: they stay plain text with a fix, never a sad face.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">B1.4<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>CLI: quiet colour, plain fallbacks</h3>
+        <dl>
+          <dt>Colour</dt><dd>Mint for success and the brand mark, lilac for search results and links, spark for warnings and work in progress; red stays the terminal's own for errors. Seshi never sets the terminal background. Truecolor when <code>COLORTERM</code> says so, the nearest 256-colour value otherwise, then the basic 16.</dd>
+          <dt>Light terminals</dt><dd>Deep teal replaces mint, as v1.1 requires. Until lilac and spark get light variants (<a href="#brand">B1.7</a>), search and warnings fall back to the terminal's own magenta and yellow, which the user's theme already tunes for its background. Seshi detects the background from <code>COLORFGBG</code> or an OSC 11 query with a short timeout, defaults to dark, and <code>SESHI_THEME=light|dark</code> overrides it.</dd>
+          <dt>Never colour alone</dt><dd>Every coloured status also carries a word or symbol (v1.1 rule), so output reads the same with colour off.</dd>
+          <dt>Off switches</dt><dd>No colour or glyphs when output is not a terminal, when <code>NO_COLOR</code> is set, with <code>--no-color</code>, and always with <code>--json</code> (<a href="#f8">F8.1</a>). Status line output stays one short line.</dd>
+          <dt>Tone</dt><dd>"Quietly playful, clearly technical": short success lines may carry the state word ("Collected 3 sessions"); everything else is plain.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">B1.5<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>README and package pages</h3>
+        <dl>
+          <dt>Detail</dt><dd>Header: the lockup for the reader's colour scheme (dark: mint glyph, paper lettering; light: deep teal glyph, light ink lettering), then the tagline <i>Every session has a thread.</i> and one sentence on what seshi does. npm packages (<code>seshi</code>, <code>@seshi/client</code>, <code>@seshi/model</code>) and the GitHub org use the face-free glyph, mint on night ink. Docs empty states use the expression poses from B1.3.</dd>
+          <dt>Outlined wordmark</dt><dd>The v1.1 lockup SVGs keep the wordmark as live Manrope text. GitHub and npm show SVGs as images without that font, so the README uses copies with the wordmark converted to outlines, built in <code>brand/</code>. Docs pages load Manrope and JetBrains Mono themselves.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">B1.6<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Status line and chip say <code>Session Capture</code></h3>
+        <dl>
+          <dt>Decision</dt><dd class="rec">The Claude Code status line and the desktop mod's chip use the literal label <code>Session Capture</code> with <code>◉</code> (capturing) or <code>⏸</code> (off, paused or excluded), as in the prototype (dosu-ai/dosu PR 13997). No brand word or expression name there.</dd>
+          <dt>Problems</dt><dd>Anything that needs action is added after a separator in the same line: <code>Session Capture ◉ · 3 queued</code>, <code>Session Capture ◉ · sign in</code>, <code>Session Capture ◉ · upload failing</code>. The excluding level shows on hover in the chip and in <code>seshi capture status</code>.</dd>
+          <dt>Why</dt><dd>It says what the indicator does, to people who have not heard of seshi, and it matches the desktop chip so both surfaces read the same.</dd>
+          <dt>CLI output</dt><dd>No glyph; colour and short state words as in <a href="#brand">B1.4</a>.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">B1.7<span class="chip open">Open</span></div>
+      <div class="body">
+        <h3>What v1.1 still leaves open</h3>
+        <dl>
+          <dt>Filled by v1.1</dt><dd>Deep teal and light ink, the six expression colours, the typefaces, dark and light modes, <code>tokens.json</code>, and the list of source files.</dd>
+          <dt>Still missing</dt><dd><ul>
+            <li>Light-background variants of lilac and spark for search and warnings in light terminals (until then, B1.4's fallback).</li>
+            <li>An eye colour for dark backgrounds. The poses draw eyes in <code>#26363D</code>: 11.4:1 on paper and 3.7 to 5.3:1 on the ribbons, but 1.35:1 on night ink, and most eyes sit inside the coil over the background. Until there are dark variants (eyes in paper, say), poses go on paper or a light tint only, which rules them out of GitHub's dark README and a dark docs theme. The eye colour is also not a token.</li>
+            <li>The happy pose has a smile, the only pose with a mouth. The guidelines' idea is "two tiny eyes"; worth confirming it is intended.</li>
+          </ul></dd>
+          <dt>Resolved by the SVGs</dt><dd>All source files are here. Expression poses use their expression colour (the happy pose is now <code>#389B8C</code>, not mint).</dd>
+        </dl>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="log">
+  <h2>Change log</h2>
+  <ul class="log">
+    <li><b>14 Nov 2026.</b> Brand files added under <code>brand/</code> (glyphs, lockups, six poses, <code>tokens.json</code>, PDF, README). B1.7 narrowed to light variants of lilac and spark, an eye colour for dark backgrounds, and the happy pose's mouth.</li>
+    <li><b>14 Nov 2026.</b> Brand guidelines v1.1 folded into B1: deep teal, light ink, expression colours and typefaces in the palette table; B1.1 lists the source files; B1.4 adds light-terminal colours, background detection and the no-colour-alone rule; B1.5 uses outlined wordmarks in the README. B1.7 narrowed to what v1.1 still leaves open.</li>
+    <li><b>14 Nov 2026.</b> B1.6 agreed: the status line and the desktop chip use the literal label <code>Session Capture ◉/⏸</code>, with problems added after a separator. F9 status line detail and the B1.3 table updated to match.</li>
+    <li><b>14 Nov 2026.</b> B1.1–B1.5 agreed: a top-level <code>brand/</code> folder with palette tokens, glyph versus face by size, the state-to-expression mapping, CLI colour rules and the README header. B1.6 and B1.7 stay open.</li>
+    <li><b>14 Nov 2026.</b> X6.4 changed: drop and failure records keep separate prefixes (<code>sources/&lt;id&gt;/dropped/</code>, <code>sources/&lt;id&gt;/failed/</code>) with shared base fields and separate retention.</li>
+    <li><b>14 Nov 2026.</b> New B1 from the seshi brand guidelines (Threadling v1.0): assets and tokens in <code>brand/</code>, glyph-versus-face rules by size, seshi states mapped to the six expressions, CLI colour and fallbacks, README and package pages. Open: a text glyph for terminals, and missing values in the guidelines (light-background colours, three expression colours, typeface, SVGs).</li>
+    <li><b>14 Nov 2026.</b> F7 deferred: Cursor's public API has no prompts and the SDK's transcript call is undocumented. New Deferred status.</li>
+    <li><b>14 Nov 2026.</b> F9.6 agreed; F9 fully agreed.</li>
+    <li><b>14 Nov 2026.</b> New F9.7 agreed: turning a session off retracts it with a per-session secret held by the uploading machine. F10 agreed: SQLite FTS5 only to start, ClickHouse and semantic search later; the Postgres indexer row removed from X7.</li>
+    <li><b>14 Nov 2026.</b> F9.5 agreed.</li>
+    <li><b>14 Nov 2026.</b> F9.1–F9.4 agreed: the uploader starts on demand; hooks plus a sweep sharing one decision function; Trajectory local files moved to Later; status shown in the Claude desktop app through a mod. F9.5 reworked: global, repo, directory and session levels, a <code>/seshi</code> skill to toggle a session. Whole-log retry, identity without an IdP and Windows paths added.</li>
+    <li><b>14 Nov 2026.</b> F8 agreed. F8.4: npm, an install script and GitHub release binaries to start, Windows supported; Homebrew later.</li>
+    <li><b>14 Nov 2026.</b> F7 rewritten after checking Cursor's docs: the v1 REST API has no user prompts, so each finished run is read with the SDK's <code>run.conversation()</code> (prompts, replies, thinking, tool calls, shell output; model and usage on the run). Stream replay is only a fallback; v0 is not used. New F7.5: running the Cursor SDK under Bun.</li>
+    <li><b>14 Nov 2026.</b> F6.4 simplified: source deletions are ignored and there is no <code>propagate_deletes</code> setting; deletion handling deferred.</li>
+    <li><b>14 Nov 2026.</b> F5 agreed; F5.4: polling only to start, local daemon capture later. F6 agreed.</li>
+    <li><b>14 Nov 2026.</b> F4 fully agreed: one service account per destination, grouping by <code>anthropic.session.id</code>, assembly after a quiet period, traces only in v1.</li>
+    <li><b>14 Nov 2026.</b> F4.1 agreed: <code>POST /otlp/v1/traces</code>, kept outside seshi's own <code>/v1</code>.</li>
+    <li><b>14 Nov 2026.</b> F4.5 agreed: metadata-only batches are rejected through <code>partial_success</code>. F4.1 explains why the path is <code>/otlp/v1/traces</code>; overview row corrected to match.</li>
+    <li><b>14 Nov 2026.</b> F3 agreed and reworked into two steps: a decision model labels each envelope allow, redact or drop with no free text, and only redact goes to a small configurable LLM that returns findings for code to apply. Default models and prompts, all replaceable; chunks reviewed alone for now; each envelope reviewed once and no daily budget.</li>
+    <li><b>14 Nov 2026.</b> F2 agreed: TOML rule packs, RE2 for operator patterns, counts not matches recorded, server always redacts with optional client pre-redaction, backfill over stored traces.</li>
+    <li><b>14 Nov 2026.</b> F1.2 changed: no <code>SESSIONDB_*</code> aliases; only <code>SESHI_*</code> names are read for now.</li>
+    <li><b>14 Nov 2026.</b> F1 agreed: flags over env over TOML; <code>SESHI_</code> env names with <code>__</code> nesting and <code>SESSIONDB_*</code> aliases; sources in TOML only; secrets as references; one strict schema; restart to apply changes.</li>
+    <li><b>14 Nov 2026.</b> X7.3 to X7.5 agreed. All cross-cutting decisions (X1 to X7) are settled.</li>
+    <li><b>14 Nov 2026.</b> X7 changed: one worker instance in the first version (X7.2, agreed), leases deferred to multi-server support (X7.6, agreed). Lease mechanics removed; X7.3 to X7.5 cover safety with a second worker, how jobs find work, and job status.</li>
+    <li><b>14 Nov 2026.</b> X7 expanded: lease mechanics (X7.2), correctness without relying on leases (X7.3), how jobs find work (X7.4), assembler sharding later (X7.5), job status (X7.6).</li>
+    <li><b>14 Nov 2026.</b> X6.4 agreed; X6 fully agreed. X4.8 and F3.8 now write rejection records.</li>
+    <li><b>14 Nov 2026.</b> X6.4: drop and failure records merged into rejection records, explained, with 30-day retention. X7.1 agreed: in-process worker roles.</li>
+    <li><b>14 Nov 2026.</b> X5.8 agreed: no people list; X5 fully agreed.</li>
+    <li><b>14 Nov 2026.</b> X6.5 agreed: conditional writes for mutable objects, retry on 412.</li>
+    <li><b>14 Nov 2026.</b> X5.8 revised: no stored people list; owner IDs come from the IdP claim (<code>owner_claim</code>), the org-key username, or the service account. Switching identity source is handled by choosing email as the owner claim or a config alias table.</li>
+    <li><b>14 Nov 2026.</b> X5.12 agreed: without an IdP, members share a trusted org key and state their username.</li>
+    <li><b>14 Nov 2026.</b> X5.12 reworked: without an IdP, members share a trusted org key and state their username (Datadog Trajectory style); managed people with invites deferred. X5.3, X5.5, X5.7, X5.8, X5.10 and X5.11 adjusted for this mode only. X6.1 agreed with a local folder backend for development; X6.2 agreed.</li>
+    <li><b>14 Nov 2026.</b> X5 mostly agreed. An IdP is optional, in production too (new X5.12: managed people with invite codes). X5.4: org-level sources write as a service account, visible org-wide. X5.8 revised: owners are seshi person IDs with the IdP subject as a link. X5.10: visibility <code>org</code> by default, set per request, token, source or server. F4, F5, F6, F7, F9 and F10 updated to match.</li>
+    <li><b>14 Nov 2026.</b> X5 reworked: credentials table; IdP sign-in exchanged once for seshi tokens (X5.2); roles (X5.3); new X5.7 login flow, X5.8 owner IDs and person directory, X5.9 token formats, X5.10 who reads whose sessions (open), X5.11 offboarding.</li>
+    <li><b>14 Nov 2026.</b> X4 fully agreed. X4.5: accept duplicates for now. X4.6: explicit replace (also settles F6.3). X4.4 and F3.4: model review retries, then <code>on_failure</code> is <code>skip</code> or <code>drop</code> (default drop).</li>
+    <li><b>14 Nov 2026.</b> X6.3 agreed: no raw is stored; a session is its metadata, trace objects and change entries.</li>
+    <li><b>14 Nov 2026.</b> No raw: X6.3 now proposes storing only the normalized, redacted trace, with a table of what replaces each use of raw. X4.3, X4.9, X6.2, F2, F3 and the source sections updated to match.</li>
+    <li><b>14 Nov 2026.</b> After review: X4.3 now normalizes in memory and writes last; model review is automatic and inline (allow, redact or drop, no human step, configurable prompts), F3 rewritten; worthiness renamed the session filter and made configurable (X4.10); X6.3 on keeping raw expanded and opened.</li>
+    <li><b>14 Nov 2026.</b> X4 expanded to ten decisions: stage order, inline vs async, duplicates across routes, replace vs extend (today's code replaces silently), idempotency keys, failure records, reprocessing, worthiness per source.</li>
+    <li><b>14 Nov 2026.</b> X3 fully agreed. X3.9 changed to a folder per language (<code>packages/ts/</code>, later <code>packages/py/</code> and <code>packages/go/</code>) instead of a <code>ts-</code> prefix; X3.10 and X3.11 agreed.</li>
+    <li><b>14 Nov 2026.</b> X3.1 to X3.8 agreed. Added X3.9 (language prefix, agreed), X3.10 (non-TypeScript packages) and X3.11 (one folder per vendor, through <code>ts/kit</code>); vendor adapters and pollers move to <code>integrations/</code>.</li>
+    <li><b>14 Nov 2026.</b> X3 revised for the single binary: one app instead of <code>cli</code> and <code>server</code>; new <code>instance</code>, <code>api</code>, <code>capture</code> and <code>formats</code> packages; layers checked in CI, lazy commands, local mode, test locations, naming; a table of where today's code goes.</li>
+    <li><b>14 Nov 2026.</b> X1 settled: X1.2 agreed (for testability), X1.3 agreed, X1.4 agreed as low priority, X1.5 resolved as no migration.</li>
+    <li><b>14 Nov 2026.</b> X2.1 and X2.2 agreed: TypeScript on Bun for everything, one <code>seshi</code> binary for CLI, hooks and server. Revisit if size or hook start-up becomes a problem.</li>
+    <li><b>14 Nov 2026.</b> X1.1 agreed: seshi is single-tenant, one organization per deployment.</li>
+    <li><b>14 Nov 2026.</b> X1 expanded: comparison of the two models and sub-decisions X1.2 to X1.5.</li>
+    <li><b>14 Nov 2026.</b> First draft: seven cross-cutting decisions and decisions for all ten features. Nothing agreed yet.</li>
+  </ul>
+</section>
+</main>
+</div>
