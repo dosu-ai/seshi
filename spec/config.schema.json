@@ -1476,6 +1476,11 @@
                     "maximum": 9007199254740991
                   }
                 ]
+              },
+              "path": {
+                "description": "A template for keys under the prefix, such as {username}/{session}.jsonl: {session} names the session, {format} its format, {project} and {branch} the work, {email}, {name}, {username}, {git_email} and {git_name} identity claims (never the owner, X5.4); * and ** match the rest. Keys that do not match are skipped. Without it the session is the key under the prefix.",
+                "type": "string",
+                "minLength": 1
               }
             },
             "required": [

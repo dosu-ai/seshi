@@ -35,9 +35,11 @@ const sections = z.strictObject({
   capture: captureSection,
 });
 
-/** `scheme`, `bucket` and key prefix of a bucket URL; `undefined` for a folder. */
+/** `scheme`, `bucket` and key prefix of a bucket URL; a folder (`file:///path`, `/path`) is
+ * `file` with its path as the prefix. */
 function bucketOf(url: string, extra = ""): { at: string; prefix: string } | undefined {
-  const match = /^(s3|r2):\/\/([^/]+)\/?(.*)$/.exec(url);
+  const folder = /^(?:file:\/\/)?(\/.*)$/.exec(url);
+  const match = folder ? ["", "file", "", folder[1]] : /^(s3|r2):\/\/([^/]+)\/?(.*)$/.exec(url);
   if (!match) return undefined;
   const prefix = [match[3], extra]
     .map((p) => (p ?? "").replace(/^\/+|\/+$/g, ""))
@@ -177,6 +179,7 @@ export {
 export { type SearchSection, searchSection } from "./search";
 export { parseListen, ROLES, type ServerSection, serverSection } from "./server";
 export {
+  S3_PATH_PLACEHOLDERS,
   type SourceConfig,
   type SourceType,
   sourcesSection,

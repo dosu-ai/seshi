@@ -77,6 +77,44 @@ export const datadogSource = z
   })
   .describe("Datadog LLM Observability (F5), polled.");
 
+/** The placeholders an S3 source's `path` template may name (F6): the session, its format and
+ * work, and the identity claims the key carries (X5.5). */
+export const S3_PATH_PLACEHOLDERS = [
+  "session",
+  "format",
+  "project",
+  "branch",
+  "email",
+  "name",
+  "username",
+  "git_email",
+  "git_name",
+] as const;
+
+const s3PathTemplate = z
+  .string()
+  .min(1)
+  .superRefine((template, ctx) => {
+    const seen = new Set<string>();
+    for (const [, name] of template.matchAll(/\{([^{}]*)\}/g)) {
+      if (!(S3_PATH_PLACEHOLDERS as readonly string[]).includes(name as string)) {
+        ctx.addIssue({
+          code: "custom",
+          message: `unknown placeholder {${name}} (one of ${S3_PATH_PLACEHOLDERS.map((p) => `{${p}}`).join(", ")})`,
+        });
+      } else if (seen.has(name as string)) {
+        ctx.addIssue({ code: "custom", message: `{${name}} appears twice` });
+      }
+      seen.add(name as string);
+    }
+    if (/[{}]/.test(template.replace(/\{[^{}]*\}/g, ""))) {
+      ctx.addIssue({ code: "custom", message: "an unmatched { or }" });
+    }
+    if (template.startsWith("/")) {
+      ctx.addIssue({ code: "custom", message: "relative to the prefix: no leading /" });
+    }
+  });
+
 export const s3Source = z
   .strictObject({
     type: z.literal("s3"),
@@ -108,6 +146,11 @@ export const s3Source = z
       .default(false)
       .describe("Keys sort by time, so a run can start after the last key (F6.2)."),
     interval: duration().prefault("5m").describe("How often it polls."),
+    path: s3PathTemplate
+      .optional()
+      .describe(
+        "A template for keys under the prefix, such as {username}/{session}.jsonl: {session} names the session, {format} its format, {project} and {branch} the work, {email}, {name}, {username}, {git_email} and {git_name} identity claims (never the owner, X5.4); * and ** match the rest. Keys that do not match are skipped. Without it the session is the key under the prefix.",
+      ),
   })
   .describe("An S3-compatible bucket other systems write sessions to (F6), polled.");
 
