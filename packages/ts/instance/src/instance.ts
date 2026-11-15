@@ -48,6 +48,7 @@ import {
   RulePackError,
   type RuleSet,
 } from "@seshi/redact";
+import { ReviewSetupError, reviewerFromConfig } from "@seshi/review";
 import { Sources } from "@seshi/sources";
 import {
   assertOwner,
@@ -93,7 +94,8 @@ export interface InstanceParts {
   /** The redaction rule set: the built-in pack and the operator's packs (F2.1).
    * `buildInstance` reads `redaction.packs` into it; the built-in pack alone when omitted. */
   redaction?: RedactionRules;
-  /** Model review (F3); none until 08 builds one from `[review]`. */
+  /** Model review (F3); `buildInstance` builds it from `[review]` (none when there are no
+   * policies). `new Instance` takes it as given. */
   reviewer?: Reviewer;
   /** The span assembler (09). */
   assembler?: SpanAssembler;
@@ -405,6 +407,23 @@ export async function readRedactionPacks(paths: readonly string[]): Promise<Rule
   }
 }
 
+/** The reviewer `[review]` describes (F3), its prompt files read; none without policies, so
+ * nothing is sent anywhere. A policy that cannot run stops the build. */
+async function buildReviewer(
+  config: ServerConfig,
+  options: BuildOptions,
+): Promise<Reviewer | undefined> {
+  try {
+    return await reviewerFromConfig(config, {
+      ...(options.fetch ? { fetch: options.fetch } : {}),
+      log: options.log ?? quietLogger,
+    });
+  } catch (err) {
+    if (err instanceof ReviewSetupError) throw new InstanceError(err.message, { cause: err });
+    throw err;
+  }
+}
+
 /** Build an Instance from a loaded config: open the bucket, read the redaction packs, check
  * the layout marker (X1.4: the bucket must be this deployment's and org's, and not a sessiondb
  * prefix), and probe the static tokens' owners. Every failure is an `InstanceError` saying
@@ -428,6 +447,7 @@ export async function buildInstance(
     }
   }
   const redaction = options.redaction ?? (await readRedactionPacks(config.redaction.packs));
+  const reviewer = options.reviewer ?? (await buildReviewer(config, options));
   const client = options.client ?? `seshi/${VERSION}`;
 
   if (options.initialize === false) {
@@ -484,6 +504,7 @@ export async function buildInstance(
     deployment: marker.deployment_id,
     connectors: instanceConnectors,
     redaction,
+    ...(reviewer ? { reviewer } : {}),
     client,
   });
 
