@@ -24,6 +24,10 @@
       "const": true
     },
     "writer": { "$ref": "common.schema.json#/$defs/Writer" },
+    "owner_basis": {
+      "description": "How the session's owner was established (X5.5), as metadata records it.",
+      "$ref": "common.schema.json#/$defs/OwnerBasis"
+    },
     "reason": {
       "description": "Why a session was tombstoned: `deleted` by its owner or an admin, `retracted` by the machine that uploaded it (F9.7), or `redacted` by an operator.",
       "enum": ["deleted", "retracted", "redacted"]

@@ -14,6 +14,7 @@ import { type HttpClientOptions, HttpSessionDB } from "@seshi/client";
 import { type FormatRegistry, renderTrace } from "@seshi/formats";
 import {
   type ChangesPage,
+  type Claims,
   type Identity,
   type ListSessionsOptions,
   localWriter,
@@ -29,6 +30,7 @@ import {
   type TombstoneReason,
   type Upload,
   VERSION,
+  type Visibility,
   type Writer,
 } from "@seshi/model";
 import type { RedactionRules } from "@seshi/redact";
@@ -44,7 +46,7 @@ import {
 } from "@seshi/store";
 import { uploadEnvelope } from "./envelope";
 import type { FilterSetting } from "./filter";
-import { getSession, getTrace, listSessions, tombstone } from "./ingest";
+import { getSession, getTrace, listSessions, setVisibility, tombstone } from "./ingest";
 import type { Limits } from "./limits";
 import { Pipeline } from "./pipeline";
 
@@ -64,6 +66,11 @@ export interface StoreClientOptions {
   writer?: Writer;
   /** How the owner was established; `verified` by default. */
   owner_basis?: OwnerBasis;
+  /** Identity the credential established (an org-key username, an IdP email): merged over
+   * what an upload claims, so the data cannot contradict it (X5.5). */
+  claims?: Claims;
+  /** The visibility of a new session when an upload sets none (the token's default, X5.10). */
+  visibility?: Visibility;
   /** The session filter (`SessionOptions.filter`). */
   filter?: FilterSetting;
   /** Size caps (`SessionOptions.limits`). */
@@ -83,6 +90,8 @@ export class StoreSessionDB implements SessionDB {
   private readonly pipeline: Pipeline;
   readonly writer: Writer;
   private readonly ownerBasis: OwnerBasis;
+  private readonly claims: Claims | undefined;
+  private readonly visibility: Visibility | undefined;
 
   constructor(options: StoreClientOptions) {
     this.owner = assertOwner(options.owner);
@@ -103,6 +112,8 @@ export class StoreSessionDB implements SessionDB {
       });
     this.writer = options.writer ?? localWriter(this.owner);
     this.ownerBasis = options.owner_basis ?? "verified";
+    this.claims = options.claims;
+    this.visibility = options.visibility;
   }
 
   /** Write the layout marker and this owner's probe, so a wrong bucket or key fails here and
@@ -115,8 +126,15 @@ export class StoreSessionDB implements SessionDB {
   /** The upload as an envelope (source id `upload`, this client's writer as the caller),
    * through the pipeline. */
   async ingest(upload: Upload): Promise<StoreSessionResult> {
+    const visibility = upload.visibility ?? this.visibility;
+    const claims = { ...upload.claims, ...this.claims };
     const envelope = uploadEnvelope(
-      { ...upload, format: upload.format ?? "jsonl", owner: this.owner },
+      {
+        ...upload,
+        format: upload.format ?? "jsonl",
+        owner: this.owner,
+        ...(visibility ? { visibility } : {}),
+      },
       {
         caller: {
           kind: this.writer.kind,
@@ -124,6 +142,7 @@ export class StoreSessionDB implements SessionDB {
           ...(this.writer.credential_id ? { credential_id: this.writer.credential_id } : {}),
         },
         owner_basis: this.ownerBasis,
+        claims,
         now: this.now,
       },
     );
@@ -168,6 +187,23 @@ export class StoreSessionDB implements SessionDB {
       session_id: sessionId,
       now: this.now,
       reason,
+      writer: this.writer,
+    });
+  }
+
+  /** Change who may read a session (X5.10); null for one not stored. */
+  setVisibility(
+    agent: string,
+    sessionId: string,
+    visibility: Visibility,
+  ): Promise<SessionMetadata | null> {
+    return setVisibility({
+      store: this.store,
+      owner: this.owner,
+      agent,
+      session_id: sessionId,
+      visibility,
+      now: this.now,
       writer: this.writer,
     });
   }

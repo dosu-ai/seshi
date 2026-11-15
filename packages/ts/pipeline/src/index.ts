@@ -46,7 +46,9 @@ export {
   ingest,
   listSessions,
   recordProgress,
+  type SetVisibilityInput,
   type StoredTrace,
+  setVisibility,
   type TombstoneInput,
   tombstone,
   type WithheldCallIds,
@@ -62,6 +64,7 @@ export {
   type PipelineOptions,
   type SubmitOptions,
   type SubmitResult,
+  type VisibilitySetting,
 } from "./pipeline";
 export {
   type SessionOptions,

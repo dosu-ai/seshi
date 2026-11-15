@@ -1,15 +1,16 @@
 /** The seams the pipeline's stages plug into. Each is an interface the pipeline is given, with a
  * default that does the least: the branch that owns a stage supplies the real one.
  *
- * - `Authorizer` (stage 1, X4.3): checks the caller and resolves the owner. 05 (auth) supplies
- *   scopes and roles; the default trusts what the envelope says, which the HTTP route already
- *   resolved from a static or legacy token.
+ * - `Authorizer` (stage 1, X4.3): checks the caller and resolves the owner. `@seshi/auth`'s
+ *   `ownershipAuthorizer` holds the X5 rules; the default trusts what the envelope says.
  * - `Reviewer` (stage 5, F3): labels what an envelope adds `allow`, `redact` or `drop`. 08
  *   supplies the decision model and the redactor; the default allows everything.
  * - `HealthCounters`: counts how each envelope ended, per source (X4.8, X4.10).
  * - `SpanAssembler` (X4.2): takes span batches. 09 builds it and the span store. */
 
 import type {
+  Authorization,
+  Authorizer,
   Envelope,
   LlmCall,
   NormalizedRecord,
@@ -30,23 +31,9 @@ import { writerOf } from "./envelope";
 
 // --- authorize ----------------------------------------------------------------
 
-/** Who may write an envelope's session, as the authorizer resolved it. */
-export interface Authorization {
-  /** Whose session it is (X5.4, X5.8). */
-  owner: string;
-  owner_basis: OwnerBasis;
-  /** Who writes (X5.5): recorded on the change entry, and as the session's original writer
-   * when it is new. */
-  writer: Writer;
-  /** An admin may replace any session (X4.6, X5.3). */
-  admin: boolean;
-}
-
-export interface Authorizer {
-  /** Check that the envelope's caller may write it and resolve whose session it is. Throws
-   * `Forbidden` (permanent) when it may not, `StoreError` when it cannot tell (transient). */
-  authorize(envelope: Envelope): Authorization | Promise<Authorization>;
-}
+/** The stage's contract lives in `@seshi/model`, so `@seshi/auth` (the same layer) can
+ * implement it; re-exported here for callers of the pipeline. */
+export type { Authorization, Authorizer };
 
 /** Trust the envelope: its owner and basis as given, its caller as the writer, admin when the
  * caller is. Right for routes that resolved the caller themselves (a static token binds its
@@ -63,11 +50,24 @@ export function permissiveAuthorizer(): Authorizer {
 }
 
 /** Whether `auth` may replace a session first written by `original` (X4.6): its original writer
- * (the same person or service account, through the same source) or an admin. */
-export function mayReplace(auth: Authorization, original: Writer): boolean {
+ * (the same person or service account, through the same source) or an admin. A caller whose
+ * owner is only `claimed` (an org-key caller, X5.12) never replaces a session whose owner was
+ * established otherwise: anyone holding the key can state that username (X5.3). */
+export function mayReplace(
+  auth: Authorization,
+  original: Writer,
+  originalBasis?: OwnerBasis,
+): boolean {
+  if (auth.admin) return true;
+  if (
+    auth.owner_basis === "claimed" &&
+    originalBasis !== undefined &&
+    originalBasis !== "claimed"
+  ) {
+    return false;
+  }
   return (
-    auth.admin ||
-    (auth.writer.principal === original.principal && auth.writer.source_id === original.source_id)
+    auth.writer.principal === original.principal && auth.writer.source_id === original.source_id
   );
 }
 

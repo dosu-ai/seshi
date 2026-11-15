@@ -49,6 +49,7 @@ import {
   StoreError,
   type StoreSessionResult,
   VERSION,
+  type Visibility,
 } from "@seshi/model";
 import { type RedactionRules, type Redactor, redactionRules, ruleRedactor } from "@seshi/redact";
 import {
@@ -121,7 +122,14 @@ export interface PipelineOptions {
   assembler?: SpanAssembler;
   /** Source health; `noHealth()` when omitted. */
   health?: HealthCounters;
+  /** The visibility of a new session whose envelope sets none (X5.10): the source's setting,
+   * then the server's `default_visibility` (`(id) => visibilityFor(config, id)`); `org` when
+   * omitted. The request and the token's default are the envelope's `visibility`. */
+  visibility?: VisibilitySetting;
 }
+
+/** One visibility for every source, or the visibility per source id. */
+export type VisibilitySetting = Visibility | ((sourceId: string) => Visibility);
 
 /** A permanent failure with no caller to tell, as recorded (X4.8). */
 export interface FailedResult {
@@ -297,6 +305,7 @@ export class Pipeline {
   private readonly reviewer: Reviewer;
   private readonly assembler: SpanAssembler | undefined;
   readonly health: HealthCounters;
+  private readonly visibility: VisibilitySetting;
   private layoutChecked: Promise<unknown> | undefined;
 
   constructor(options: PipelineOptions) {
@@ -311,6 +320,7 @@ export class Pipeline {
     this.reviewer = options.reviewer ?? noReview();
     this.assembler = options.assembler;
     this.health = options.health ?? noHealth();
+    this.visibility = options.visibility ?? "org";
   }
 
   /** The layout marker, checked once per pipeline (and again after a failure). */
@@ -602,7 +612,7 @@ export class Pipeline {
           "the upload does not extend the stored session (its records do not start with what is stored); send it with replace to rewrite the session",
         );
       }
-      if (!mayReplace(run.auth, session.writer)) {
+      if (!mayReplace(run.auth, session.writer, session.owner_basis)) {
         throw new Forbidden("only the session's original writer or an admin may replace it");
       }
       const all = this.redactor.redact(raw);
@@ -747,10 +757,15 @@ export class Pipeline {
   /** Who writes and what the data claims and came from (X5.5). */
   private context(run: Run): WriteContext {
     const { envelope, auth } = run;
+    const visibility =
+      envelope.visibility ??
+      (typeof this.visibility === "function"
+        ? this.visibility(envelope.source_id)
+        : this.visibility);
     return {
       writer: auth.writer,
       owner_basis: auth.owner_basis,
-      ...(envelope.visibility ? { visibility: envelope.visibility } : {}),
+      visibility,
       ...(envelope.claims ? { claims: envelope.claims } : {}),
       provenance: {
         source: envelope.source,

@@ -789,3 +789,67 @@ describe("writers racing on one session", () => {
     expect((await session())?.traces).toHaveLength(2);
   });
 });
+
+describe("identity and visibility (X5)", () => {
+  const other = META + user("y".repeat(2000)) + reply("else");
+  const device: UploadEnvelopeOptions = {
+    caller: { kind: "device", principal: "alice", credential_id: "t1" },
+    owner_basis: "verified",
+  };
+  const orgKey: UploadEnvelopeOptions = {
+    caller: { kind: "person", principal: "alice", credential_id: "org" },
+    owner_basis: "claimed",
+  };
+
+  it("never lets a claimed caller replace a session whose owner was verified (X5.3, X4.6)", async () => {
+    const p = pipeline();
+    await submit(p, upload(HEAD, 0, {}, device));
+    await expect(submit(p, upload(other, 0, { replace: true }, orgKey))).rejects.toBeInstanceOf(
+      Forbidden,
+    );
+    expect((await session())?.head).toBeDefined();
+  });
+
+  it("lets an org-key caller replace a session the org key wrote under that username", async () => {
+    const p = pipeline();
+    await submit(p, upload(HEAD, 0, {}, orgKey));
+    expect((await submit(p, upload(other, 0, { replace: true }, orgKey))).status).toBe("stored");
+    expect((await session())?.owner_basis).toBe("claimed");
+  });
+
+  it("gives a new session the request's visibility, else the source's setting (X5.10)", async () => {
+    const seen: string[] = [];
+    const p = pipeline({
+      visibility: (sourceId) => {
+        seen.push(sourceId);
+        return "owner";
+      },
+    });
+    await submit(p, upload(HEAD));
+    expect((await session())?.visibility).toBe("owner");
+    expect(seen).toEqual(["upload"]);
+    await submit(p, upload(HEAD, 0, { session_id: "s2", visibility: "org" }));
+    expect(
+      (await readMetadata(store, "alice", archiveId("alice", "trajectory", "s2")))?.visibility,
+    ).toBe("org");
+    // An existing session keeps its own.
+    await submit(p, upload(HEAD + user("more") + reply("yes"), 0, { visibility: "org" }));
+    expect((await session())?.visibility).toBe("owner");
+    expect((await pipeline().submit(upload(HEAD, 0, { session_id: "s3" }))).status).toBe("stored");
+    expect(
+      (await readMetadata(store, "alice", archiveId("alice", "trajectory", "s3")))?.visibility,
+    ).toBe("org");
+  });
+
+  it("records the owner basis on change entries (X5.5)", async () => {
+    await submit(pipeline(), upload(HEAD, 0, {}, orgKey));
+    const { entries } = await readChanges(store, "alice");
+    expect(entries.map((e) => e.entry.owner_basis)).toEqual(["claimed"]);
+    expect(entries[0]?.entry.writer).toEqual({
+      kind: "person",
+      principal: "alice",
+      credential_id: "org",
+      source_id: "upload",
+    });
+  });
+});

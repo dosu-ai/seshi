@@ -22,6 +22,7 @@ export type {
   Upload,
 } from "./api";
 export { EMPTY_PREFIX_SHA256, MAX_IDEMPOTENCY_KEY_LENGTH } from "./api";
+export type { Authorization, Authorizer } from "./authz";
 export { canonicalText, stripNul } from "./canonical";
 export {
   Forbidden,
@@ -30,6 +31,7 @@ export {
   SessionConflict,
   SessionRejected,
   StoreError,
+  Unauthorized,
 } from "./errors";
 export type {
   Chunk,

@@ -2,7 +2,7 @@
  * over a store throws these directly, and the HTTP backend turns the server's responses back
  * into them, so a caller's `catch` reads the same either way. The server does the reverse:
  * `SessionRejected` is a 422 with its `code`, `OffsetMismatch` a 409 with `expected`,
- * `SessionConflict` a 409 `conflict`, `Forbidden` a 403. */
+ * `SessionConflict` a 409 `conflict`, `Forbidden` a 403, `Unauthorized` a 401. */
 
 /** A transcript the pipeline refuses: nothing in it, not readable by the adapter, a chunk that
  * is not whole lines, over a cap, or a session that was redacted. Final for that upload:
@@ -61,6 +61,17 @@ export class Forbidden extends Error {
   constructor(message: string) {
     super(message);
     this.name = "Forbidden";
+  }
+}
+
+/** No credential, or one the server does not accept: missing, unknown, expired or revoked, or
+ * an org key without the username it needs (X5.12). The server answers 401 `unauthorized`
+ * and never says which. */
+export class Unauthorized extends Error {
+  readonly code = "unauthorized";
+  constructor(message = "a valid token is required") {
+    super(message);
+    this.name = "Unauthorized";
   }
 }
 

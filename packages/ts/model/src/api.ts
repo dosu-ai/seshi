@@ -4,7 +4,15 @@
 
 import type { ShippedPrefix } from "./generated/envelope";
 import type { RenderedTrace, RenderFormat } from "./schemas/renders";
-import type { ChangeEntry, RawFormat, SessionMetadata, Visibility } from "./schemas/store";
+import type {
+  CallerKind,
+  ChangeEntry,
+  Claims,
+  OwnerBasis,
+  RawFormat,
+  SessionMetadata,
+  Visibility,
+} from "./schemas/store";
 
 export type { ShippedPrefix };
 
@@ -48,6 +56,9 @@ export interface SessionUpload {
   idempotency_key?: string;
   /** Who may read a new session (X5.10); the deployment's default when omitted. */
   visibility?: Visibility;
+  /** Identity the data asserts (X5.5): git email and name, account ids. Kept from a fixed
+   * allowlist; never decides ownership (X5.4). */
+  claims?: Claims;
 }
 
 /** A session to store: `SessionUpload` without the owner, which the backend knows. `format`
@@ -117,6 +128,9 @@ export interface ListSessionsOptions {
   /** The cursor from the last page. */
   after?: string;
   limit?: number;
+  /** Whose sessions: the caller's own when omitted. Another owner's sessions are listed as
+   * far as visibility allows (X5.10). Only the HTTP backend reads it. */
+  owner?: string;
 }
 
 export interface SessionsPage {
@@ -129,6 +143,19 @@ export interface Identity {
   owner: string;
   /** Where the sessions go, as a reader would need to know it. */
   storage: StorageView;
+  /** Which kind of credential the caller holds (X5.1); the server says, local mode omits it. */
+  kind?: CallerKind;
+  /** `member`, `admin` or `service` (X5.3). */
+  role?: "member" | "admin" | "service";
+  /** What the credential may do (X5.3). */
+  scopes?: string[];
+  owner_basis?: OwnerBasis;
+  /** The id of the token used, when it has one; never the secret. */
+  credential_id?: string;
+  /** The visibility what the caller writes gets when the request sets none (X5.10). */
+  visibility?: Visibility;
+  /** When the credential stops working, if it does. */
+  expires_at?: string;
 }
 
 export interface SessionDB {

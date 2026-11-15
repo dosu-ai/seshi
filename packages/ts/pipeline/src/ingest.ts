@@ -258,6 +258,7 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
   // what a replacement took off it.
   let already = false;
   let replaced: string[] = [];
+  let basis: OwnerBasis = input.owner_basis ?? "verified";
   const pointer = updateMetadata(store, owner, archive, (existing) => {
     if (existing?.status === "redacted") {
       throw new IngestRejected("redacted", "session was redacted; it will not be stored again");
@@ -274,6 +275,7 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
 
     const base =
       existing ?? newSession(owner, archive, metadata.session_id, metadata.agent, at, context);
+    basis = base.owner_basis;
     replaced = input.replace
       ? base.traces.map((t) => t.content_hash).filter((h) => h !== trace.content_hash)
       : [];
@@ -355,6 +357,7 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
       session_id: metadata.session_id,
       content_hash: trace.content_hash,
       writer,
+      owner_basis: basis,
       ...(metadata.continuation ? { continuation: metadata.continuation } : {}),
       ...(input.replace ? { replace: true as const } : {}),
     });
@@ -432,6 +435,7 @@ export async function tombstone(input: TombstoneInput): Promise<{ removed: numbe
   const at = (input.now ?? (() => new Date()))().toISOString();
   let removedObjects: { traces: string[] } | null = null;
   let head: string | null = null;
+  let basis: OwnerBasis | undefined;
   // Mark it redacted first, so no write that races the removal can give it a new head.
   await updateMetadata(store, owner, archive, (existing) => {
     if (!existing) {
@@ -440,6 +444,7 @@ export async function tombstone(input: TombstoneInput): Promise<{ removed: numbe
     }
     removedObjects = { traces: existing.traces.map((t) => t.content_hash) };
     head = existing.head ?? null;
+    basis = existing.owner_basis;
     // What the next chunk would continue from goes too: nothing of the session is left.
     const { head: _head, normalized: _n, withheld_calls: _w, applied: _a, ...rest } = existing;
     return { ...rest, status: "redacted", traces: [], updated_at: at };
@@ -459,9 +464,58 @@ export async function tombstone(input: TombstoneInput): Promise<{ removed: numbe
     session_id: input.session_id,
     content_hash: head,
     writer: input.writer ?? localWriter(owner),
+    ...(basis ? { owner_basis: basis } : {}),
     reason: input.reason ?? "deleted",
   });
   return { removed };
+}
+
+export interface SetVisibilityInput {
+  store: Store;
+  owner: string;
+  agent: string;
+  session_id: string;
+  visibility: Visibility;
+  now?: () => Date;
+  /** Who changed it; the owner through the upload route by default. */
+  writer?: Writer;
+}
+
+/** Change who may read a session (X5.10) and append a `visibility_changed` change entry, so the
+ * search index and downstream readers update (F10.4). The session as it now is; null for one
+ * not stored. A session that is already so is returned as it is, with no entry. A redacted
+ * session refuses (`IngestRejected` `redacted`): nothing of it is left to read. */
+export async function setVisibility(input: SetVisibilityInput): Promise<SessionMetadata | null> {
+  const { store, owner } = input;
+  const archive = archiveId(owner, input.agent, input.session_id);
+  const at = (input.now ?? (() => new Date()))().toISOString();
+  let changedNow = false;
+  const result = await updateMetadata(store, owner, archive, (existing) => {
+    changedNow = false;
+    if (!existing) return null;
+    if (existing.status === "redacted") {
+      throw new IngestRejected("redacted", "session was redacted; nothing is left to read");
+    }
+    if (existing.visibility === input.visibility) return null;
+    changedNow = true;
+    return { ...existing, visibility: input.visibility, updated_at: at };
+  });
+  const session = result.value;
+  if (session === null) return null;
+  if (changedNow) {
+    await appendChange(store, {
+      kind: "visibility_changed",
+      at,
+      owner,
+      archive_id: archive,
+      session_id: input.session_id,
+      content_hash: session.head ?? null,
+      writer: input.writer ?? localWriter(owner),
+      owner_basis: session.owner_basis,
+      visibility: input.visibility,
+    });
+  }
+  return session;
 }
 
 // --- read side ----------------------------------------------------------------

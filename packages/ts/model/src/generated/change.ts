@@ -1,6 +1,6 @@
 /** Generated from spec/schemas/change.schema.json by scripts/model-types.ts (`bun run types`). Do not edit: change the schema and regenerate. */
 
-import type { Continuation, Sha256, Timestamp, Visibility, Writer } from "./common";
+import type { Continuation, OwnerBasis, Sha256, Timestamp, Visibility, Writer } from "./common";
 
 /** The `schema` value of every ChangeEntry object. */
 export const SCHEMA_ID = "seshi/change/1" as const;
@@ -20,6 +20,8 @@ export interface ChangeEntry {
   /** On `published`: the trace replaces the session's earlier traces instead of extending them (X4.6), and they were removed; a reader drops what it held of the session. Absent otherwise. */
   replace?: true;
   writer: Writer;
+  /** How the session's owner was established (X5.5), as metadata records it. */
+  owner_basis?: OwnerBasis;
   /** Why a session was tombstoned: `deleted` by its owner or an admin, `retracted` by the machine that uploaded it (F9.7), or `redacted` by an operator. */
   reason?: "deleted" | "retracted" | "redacted";
   /** On `visibility_changed`: the new visibility. */
