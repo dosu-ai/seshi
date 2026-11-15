@@ -1,0 +1,197 @@
+/** The doctor's loaders on this machine: the state file, spool and log in the capture folder,
+ * the CLI config's capture rules, the agents' own readings of their transcripts, the format
+ * registry this binary was built with, the redaction rules the uploader last fetched (or local
+ * mode's), and the server or bucket through a `Backend`. Every one only reads. */
+
+import { closeSync, openSync, readFileSync, readSync, statSync } from "node:fs";
+import {
+  type CapturePaths,
+  captureRules,
+  decide,
+  identifySafely,
+  otherFolders,
+  placeOf,
+  readHead,
+  readSpool,
+  readState,
+  stateFacts,
+  uploaderRunning,
+} from "@seshi/capture";
+import type { CaptureAgent, CaptureHost } from "@seshi/kit";
+import type { NormalizedRecord } from "@seshi/model";
+import { canonicalJson } from "@seshi/model";
+import {
+  type RuleSet,
+  redactionRules,
+  redactTranscript,
+  ruleRedactor,
+  ruleSetFromDocument,
+} from "@seshi/redact";
+import type { Account } from "../account/account";
+import { type Backend, LocalBackend } from "../backend";
+import { allCaptureAgents } from "../capture-agents";
+import { hostOf } from "../commands/capture-host";
+import type { CommandContext } from "../commands/index";
+import { buildFormats } from "../integrations";
+import type { AgentInfo, DoctorDeps, Normalizer, Redaction, Residue } from "./deps";
+import { serverView } from "./server";
+import type { Failure } from "./types";
+
+export interface RealDepsOptions {
+  host?: CaptureHost;
+  paths: CapturePaths;
+  /** The backend, when one could be opened. */
+  backend?: Backend;
+  /** Why none could be. */
+  backendError?: Failure & { exit?: number };
+  account?: Account;
+  /** The folder a session without a recorded one is judged in. */
+  cwd?: string;
+}
+
+function readFile(path: string, end: number): string {
+  if (end <= 0) return "";
+  const buffer = Buffer.alloc(end);
+  const fd = openSync(path, "r");
+  let read = 0;
+  try {
+    while (read < end) {
+      const n = readSync(fd, buffer, read, end - read, read);
+      if (n === 0) break;
+      read += n;
+    }
+  } finally {
+    closeSync(fd);
+  }
+  return buffer.subarray(0, read).toString("utf8");
+}
+
+function statFile(path: string): { size: number; mtimeMs: number } | null {
+  try {
+    const stat = statSync(path);
+    return { size: stat.size, mtimeMs: stat.mtimeMs };
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw err;
+  }
+}
+
+function agentInfo(agent: CaptureAgent, host: CaptureHost): AgentInfo {
+  return {
+    name: agent.name,
+    format: agent.format,
+    encoding: agent.encoding,
+    chunkable: agent.chunkable,
+    identify: (path) => identifySafely(agent, path, readHead(path))?.session_id,
+    ...(agent.locate ? { locate: (id: string) => agent.locate?.(id, host) } : {}),
+  };
+}
+
+/** The records a pass of `rules` would still change, record by record (withheld calls carried
+ * along, as the pipeline carries them). The rules are idempotent on what they wrote, so any
+ * change is something they would redact now. */
+export function residueOf(rules: RuleSet, records: readonly NormalizedRecord[]): Residue[] {
+  const redactor = ruleRedactor(rules);
+  const hits: Residue[] = [];
+  let carried = {};
+  records.forEach((record, index) => {
+    const out = redactor.redact([record], carried);
+    carried = out.withheld;
+    if (canonicalJson(out.records[0]) !== canonicalJson(record)) {
+      hits.push({
+        index,
+        rules: Object.entries(out.summary.counts ?? {})
+          .filter(([, n]) => (n as number) > 0)
+          .map(([rule]) => rule)
+          .sort(),
+      });
+    }
+  });
+  return hits;
+}
+
+/** A `Redaction` over a rule set. `preRedacts`: the uploader redacts each piece before sending
+ * (a server); local mode's Instance redacts on write instead. */
+export function ruleRedaction(rules: RuleSet, origin: string, preRedacts: boolean): Redaction {
+  const redactor = ruleRedactor(rules);
+  return {
+    rule_set: rules.hash,
+    origin,
+    transcript: (text, encoding) =>
+      preRedacts ? redactTranscript(rules, text, encoding).text : text,
+    records: (records) => redactor.redact(records).records,
+    residue: (records) => residueOf(rules, records),
+  };
+}
+
+/** The rules the uploader pre-redacts with: those it last fetched from `server` (kept in the
+ * capture folder), else the built-in pack. */
+function uploaderRules(paths: CapturePaths, server: string | undefined): Redaction {
+  try {
+    const cached = JSON.parse(readFileSync(paths.redactionRules, "utf8")) as {
+      server?: string;
+      document?: unknown;
+    };
+    if (cached.document && (server === undefined || cached.server === server)) {
+      const { rules } = ruleSetFromDocument(cached.document);
+      return ruleRedaction(rules, `the rules fetched from ${cached.server ?? "the server"}`, true);
+    }
+  } catch {}
+  return ruleRedaction(redactionRules(), "the built-in pack", true);
+}
+
+/** The loaders for this machine. */
+export async function realDeps(ctx: CommandContext, options: RealDepsOptions): Promise<DoctorDeps> {
+  const host = options.host ?? hostOf(ctx);
+  const { paths } = options;
+  const agents = new Map((await allCaptureAgents()).map((a) => [a.name, agentInfo(a, host)]));
+  const snapshot = await captureRules(host, paths);
+  const formats = buildFormats(await ctx.integrations());
+  const cwd = options.cwd ?? process.cwd();
+  const normalizer: Normalizer = {
+    // The adapter's records as the pipeline's stage 2 makes them: unredacted (the server's
+    // redaction stage is `Redaction.records`).
+    records: (format, text) => formats.normalize({ source: format, transcript: text }).records,
+    version: (format) => formats.versionOf(format),
+    stale: (format, builtWith) => formats.isStale(format, builtWith),
+  };
+  const backend = options.backend;
+  const redaction =
+    backend instanceof LocalBackend
+      ? ruleRedaction(backend.instance.redaction, "the local bucket's rules", false)
+      : uploaderRules(paths, backend?.where);
+  return {
+    now: () => new Date(),
+    state: () => readState(paths),
+    judge: (state, agent, entry) => {
+      const folder = entry?.cwd ?? (entry ? undefined : cwd);
+      return decide(
+        {
+          rules: snapshot.rules,
+          ...(snapshot.error ? { rulesError: snapshot.error } : {}),
+          place: placeOf(folder),
+          ...stateFacts(state, agent, entry, new Date()),
+          seen: otherFolders(state, agent, entry, folder).map(placeOf),
+        },
+        host.platform,
+      );
+    },
+    agent: (name) => agents.get(name),
+    files: { stat: statFile, read: readFile },
+    spool: () => readSpool(paths).items,
+    log: () => {
+      const lines: string[] = [];
+      for (const file of [`${paths.log}.1`, paths.log]) {
+        try {
+          lines.push(...readFileSync(file, "utf8").split("\n").filter(Boolean));
+        } catch {}
+      }
+      return lines;
+    },
+    uploaderRunning: () => uploaderRunning(paths),
+    ...(backend ? { server: serverView(backend) } : {}),
+    ...(options.backendError ? { serverError: options.backendError } : {}),
+    normalizer,
+    redaction,
+  };
+}
