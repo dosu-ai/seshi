@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig, type ServerConfig, serverConfigSchema } from "@seshi/config";
@@ -8,6 +8,7 @@ import type { Envelope } from "@seshi/model";
 import { MemoryHealthCounters } from "@seshi/pipeline";
 import {
   addHealth,
+  archiveId,
   FsStore,
   getBytes,
   keys,
@@ -19,7 +20,7 @@ import {
   writeHeartbeat,
 } from "@seshi/store";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { heartbeatFresh } from "./builtin-jobs";
+import { heartbeatFresh, SWEEP_INTERVAL_MS } from "./builtin-jobs";
 import {
   buildInstance,
   defaultInstanceId,
@@ -246,12 +247,13 @@ describe("an Instance", () => {
       "source:dd",
       "assembler",
       "search-index",
+      "sweep",
     ]);
     expect(
       make(DD)
         .jobs.list()
         .map((j) => j.name),
-    ).toEqual(["heartbeat", "retention", "assembler", "search-index"]);
+    ).toEqual(["heartbeat", "retention", "assembler", "search-index", "sweep"]);
     const extra = make("", {
       jobs: [
         () => [
@@ -353,6 +355,52 @@ describe("the worker (X7)", () => {
     const runs = connector.runs;
     await Bun.sleep(80);
     expect(connector.runs).toBe(runs);
+  });
+
+  it("sweeps unnamed trace objects over an hour old when the worker starts, then daily (F2.5)", async () => {
+    const instance = await buildInstance(config(), { formats, env: {}, id: "w1" });
+    const archive = archiveId("alice", "trajectory", "s1");
+    const old = keys.trace("alice", archive, "a".repeat(64));
+    const young = keys.trace("alice", archive, "b".repeat(64));
+    for (const key of [old, young]) {
+      await instance.store.put(key, new TextEncoder().encode("left behind"));
+    }
+    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    utimesSync(join(dir, "bucket", ...old.split("/")), twoHoursAgo, twoHoursAgo);
+
+    const job = instance.jobs.get("sweep");
+    expect(job).toMatchObject({
+      kind: "sweep",
+      placement: "worker",
+      intervalMs: SWEEP_INTERVAL_MS,
+    });
+    expect(SWEEP_INTERVAL_MS).toBe(24 * 60 * 60 * 1000);
+    instance.start();
+    try {
+      await until(() => (instance.jobs.snapshot().sweep?.runs ?? 0) >= 1);
+      const record = instance.jobs.snapshot().sweep;
+      expect(record).toMatchObject({ runs: 1, last_outcome: "ok" });
+      expect(record?.last_summary).toEqual({ sessions: 1, deleted: 1, young: 1, errors: 0 });
+      expect(await getBytes(instance.store, old)).toBeNull();
+      expect(await getBytes(instance.store, young)).not.toBeNull();
+      // The next run is a day later.
+      expect(
+        instance.jobs.delayAfter(
+          job as NonNullable<typeof job>,
+          record as NonNullable<typeof record>,
+        ),
+      ).toBe(SWEEP_INTERVAL_MS);
+      // Status reads the worker's jobs from the heartbeat.
+      await instance.jobs.runNow("heartbeat");
+      const status = await instance.status();
+      expect(status.jobs.find((j) => j.name === "sweep")).toMatchObject({
+        kind: "sweep",
+        interval_ms: SWEEP_INTERVAL_MS,
+        last: { last_summary: { deleted: 1 } },
+      });
+    } finally {
+      await instance.close();
+    }
   });
 
   it("runs no worker job on an api-only instance", async () => {

@@ -186,6 +186,7 @@ describe("POST /otlp/v1/traces", () => {
       "retention",
       "assembler",
       "search-index",
+      "sweep",
     ]);
     const search = async (query: string, token = UPLOADER) => {
       await instance.search?.catchUp();

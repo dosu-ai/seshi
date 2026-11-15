@@ -15,6 +15,8 @@ export {
   RETENTION_INTERVAL_MS,
   retentionJob,
   STALE_HEARTBEATS,
+  SWEEP_INTERVAL_MS,
+  sweepJob,
 } from "./builtin-jobs";
 export {
   type AssembleRun,

@@ -195,6 +195,7 @@ describe("a datadog source", () => {
       `source:${SOURCE}`,
       "assembler",
       "search-index",
+      "sweep",
     ]);
     const app = createApp(instance);
     const search = async (query: string) => {

@@ -1,5 +1,6 @@
 /** `seshi workers status` (X7.5): whether the worker runs, whether a second one does, each
- * job's last run, last error and backlog, and each source's drop and failure counts. It runs
+ * job's last run (and what it did: the sweep's deletions, a poller's envelopes), last error and
+ * backlog, and each source's drop and failure counts. It runs
  * where the server's config and bucket keys are, and reads the bucket (the heartbeat, the
  * checkpoints, the records); or, from a machine signed in with `seshi login` as an admin, asks
  * a server's `GET /v1/admin/jobs` (`--server`, or the CLI config's `server` when no server
@@ -76,6 +77,11 @@ export function statusLines(status: InstanceStatus, style: Style = Style.plain()
     lines.push(
       `  ${job.name.padEnd(24)} ${outcome}${last ? ` ${when}` : ""}${counts(job.backlog)}${records}`,
     );
+    // What the last run did (the sweep's deletions, a poller's envelopes), when it did anything.
+    const did = Object.entries(last?.last_summary ?? {}).filter(([, n]) => n !== 0);
+    if (did.length > 0) {
+      lines.push(`    last run: ${did.map(([k, n]) => `${k} ${n}`).join(", ")}`);
+    }
     if (last?.last_error) {
       lines.push(
         `    last error ${ago(last.last_error.at, status.at)}: ${printable(last.last_error.message)}`,

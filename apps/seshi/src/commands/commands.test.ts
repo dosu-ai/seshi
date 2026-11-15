@@ -164,7 +164,43 @@ describe("seshi workers status", () => {
       "retention",
       "source:dd",
       "assembler",
+      "sweep",
     ]);
+  });
+
+  it("shows what a job's last run did, when it did anything", async () => {
+    const store = new FsStore(bucket);
+    const now = new Date().toISOString();
+    await writeHeartbeat(store, {
+      instance: "w-1",
+      version: "0.9.0",
+      roles: ["worker"],
+      started_at: now,
+      at: now,
+      interval_ms: 60_000,
+      jobs: {
+        sweep: {
+          runs: 1,
+          failures: 0,
+          last_started: now,
+          last_finished: now,
+          last_outcome: "ok",
+          last_ok: now,
+          last_summary: { sessions: 4, deleted: 2, young: 0, errors: 0 },
+        },
+        retention: {
+          runs: 1,
+          failures: 0,
+          last_finished: now,
+          last_outcome: "ok",
+          last_summary: { dropped: 0, failed: 0, health: 0 },
+        },
+      },
+    });
+    const result = await seshi(["workers", "status"]);
+    expect(result.out).toMatch(/ {2}sweep +ok \d+s ago\n {4}last run: sessions 4, deleted 2\n/);
+    // A run that did nothing adds no line.
+    expect(result.out).toMatch(/ {2}retention +ok \d+s ago\n {2}\S/);
   });
 
   it("asks for attention when the worker stopped", async () => {

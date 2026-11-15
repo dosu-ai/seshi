@@ -143,6 +143,7 @@ describe("a team setup end to end", () => {
         { name: "retention" },
         { name: "assembler" },
         { name: "search-index" },
+        { name: "sweep" },
       ],
     });
   });

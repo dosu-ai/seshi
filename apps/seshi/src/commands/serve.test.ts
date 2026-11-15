@@ -128,7 +128,7 @@ describe("seshi serve", () => {
     try {
       expect(server.out).toContain("roles: api, worker");
       // The assembler (09) publishes before the indexer (12) reads the change feed.
-      expect(server.out).toMatch(/; jobs: heartbeat, retention, assembler, search-index$/m);
+      expect(server.out).toMatch(/; jobs: heartbeat, retention, assembler, search-index, sweep$/m);
       const heartbeat = join(dir, "bucket", "worker", "heartbeat.json");
       for (let i = 0; i < 100 && !existsSync(heartbeat); i++) await Bun.sleep(20);
       expect(JSON.parse(readFileSync(heartbeat, "utf8"))).toMatchObject({

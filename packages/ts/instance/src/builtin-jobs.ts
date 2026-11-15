@@ -16,6 +16,7 @@ import {
   type Store,
   sourcesWithHealth,
   sourcesWithRecords,
+  sweepTraces,
   writeHeartbeat,
 } from "@seshi/store";
 import type { Job, JobRunner } from "./jobs";
@@ -261,6 +262,40 @@ export function assemblerJob(host: JobHost): Job {
   };
 }
 
+/** How often the sweep runs (F2.5): once a day. */
+export const SWEEP_INTERVAL_MS = DAY_MS;
+
+/** The orphan sweep (F2.5, revised 15 Nov 2026): across every session, deletes the trace objects
+ * no metadata names that are over an hour old (`sweepTraces`), what a backfill, replace or
+ * publish that stopped partway left behind. Daily, on the worker; it also runs when the worker
+ * starts. A session it could not finish fails the run (retried with backoff) after the others
+ * are done. */
+export function sweepJob(host: Pick<JobHost, "store" | "now">): Job {
+  return {
+    name: "sweep",
+    kind: "sweep",
+    placement: "worker",
+    intervalMs: SWEEP_INTERVAL_MS,
+    async run(signal) {
+      const report = await sweepTraces(host.store, { signal, now: () => host.now() });
+      return {
+        ...(report.errors > 0
+          ? {
+              outcome: "error" as const,
+              error: `${report.errors} session(s) not swept: ${report.error ?? "unknown"}`,
+            }
+          : {}),
+        summary: {
+          sessions: report.sessions,
+          deleted: report.deleted,
+          young: report.young,
+          errors: report.errors,
+        },
+      };
+    },
+  };
+}
+
 /** The jobs every instance registers, in order. */
 export const BUILTIN_JOBS: readonly JobFactory[] = [
   (host) => [heartbeatJob(host)],
@@ -268,4 +303,5 @@ export const BUILTIN_JOBS: readonly JobFactory[] = [
   pollerJobs,
   (host) => [assemblerJob(host)],
   searchIndexJobs,
+  (host) => [sweepJob(host)],
 ];
