@@ -210,6 +210,16 @@ describe("publishObject", () => {
     expect(dec(await getBytes(store, "o"))).toBe("same");
   });
 
+  it("immutable: of writers racing with different bytes, the first wins and none fails", async () => {
+    const bodies = Array.from({ length: 6 }, (_, i) => `body-${i}`);
+    const outcomes = await Promise.all(
+      bodies.map((b) => publishObject(store, "race", enc(b), "text/plain")),
+    );
+    expect(outcomes.filter((o) => o === "written")).toHaveLength(1);
+    const winner = bodies[outcomes.indexOf("written")];
+    expect(dec(await getBytes(store, "race"))).toBe(winner);
+  });
+
   it("replace: the same bytes are a no-op, different bytes replace", async () => {
     expect(await publishObject(store, "p", enc("same"), "text/plain", "replace")).toBe("written");
     expect(await publishObject(store, "p", enc("same"), "text/plain", "replace")).toBe("exists");

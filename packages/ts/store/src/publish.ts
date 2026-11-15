@@ -8,7 +8,13 @@ import { createHash } from "node:crypto";
 import { CHANGE_SCHEMA, type ChangeEntry, type SessionMetadata } from "@seshi/model";
 import { decodeJson, encodeJson, type JsonUpdate, updateJson } from "./json";
 import { keys } from "./layout";
-import { getBytes, type Store, StoreError, type UpdateOptions } from "./store";
+import {
+  getBytes,
+  isPreconditionFailed,
+  type Store,
+  StoreError,
+  type UpdateOptions,
+} from "./store";
 
 export { decodeJson, gunzipJson, gzipJson } from "./json";
 
@@ -49,7 +55,19 @@ export async function publishObject(
       return "exists";
     }
   }
-  await store.put(key, body, { contentType });
+  if (mode === "immutable") {
+    // Created with If-None-Match (X6.5): of two writers racing on one content hash, whose
+    // objects may differ outside the hash (provenance, LLM calls), the first wins and the
+    // second sees it exists, instead of replacing it or failing verification.
+    try {
+      await store.put(key, body, { contentType, ifNoneMatch: "*" });
+    } catch (err) {
+      if (isPreconditionFailed(err)) return "exists";
+      throw err;
+    }
+  } else {
+    await store.put(key, body, { contentType });
+  }
   const after = await store.stat(key);
   if (
     !after ||

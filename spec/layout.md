@@ -71,7 +71,8 @@ worker by mistake) never silently lose each other's update:
 | `tokens/<id>.json` | Created with `If-None-Match: *`; changes (revoke) with `If-Match` |
 | `assembly/pending/<archive_id>` | Touched unconditionally; deleted with `If-Match`, so a batch that arrived meanwhile keeps it |
 | `review/<n>.json`, drop and failure records | Created with `If-None-Match: *` |
-| trace objects, change entries | Content-addressed or time-keyed; written plainly |
+| trace objects | Content-addressed; created with `If-None-Match: *`, so the first object for a hash wins |
+| change entries, raw parts | Time-keyed or part-numbered; written plainly |
 
 S3 and R2 honour `If-Match` and `If-None-Match` on PUT. The folder store (`file://`) emulates
 them with a lock file per key, taken with an exclusive create; that is safe between processes
@@ -258,7 +259,8 @@ Read and written by the binary only, so their types are code-first in `@seshi/st
 
 ## The publish protocol
 
-1. Write the trace object; skip if the key exists.
+1. Write the trace object with `If-None-Match: *`; skip if the key exists (a `412` means another
+   writer published the same content first).
 2. Verify: compare the backend's ETag to the body's MD5 when the ETag is a plain MD5
    (single-part PUT on S3, R2, MinIO, and the folder store); otherwise read it back.
 3. Update `metadata.json` with `If-Match` (retrying on `412` from a fresh read).
