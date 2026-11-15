@@ -102,6 +102,74 @@ Where the config and bucket keys are:
 
 The commands and their exit codes are in [cli.md](cli.md).
 
+### Syncing an S3 bucket
+
+Eval harnesses, ATIF exports and hook uploaders in cloud sandboxes often drop transcripts into
+a bucket. An `s3` source polls one (F6); the poller is built into every binary, so the worker
+polls it as soon as it is configured:
+
+```toml
+[[sources]]
+id = "evals"
+type = "s3"
+url = "s3://eval-runs/harness"            # or r2://bucket/prefix, or file:///path on one machine
+credentials = { access_key_id = { env = "EVALS_KEY_ID" }, secret_access_key = { env = "EVALS_SECRET" } }
+# role = { arn = "arn:aws:iam::123456789012:role/seshi-read", external_id = { env = "EVALS_EXTERNAL_ID" } }
+include = ["**/*.jsonl", "**/*.json"]
+path = "{email}/{session}.jsonl"           # optional: what a key says about its session
+interval = "5m"
+```
+
+Each run lists the prefix and compares every key's ETag and size with the manifest in the
+source's checkpoint, so an unchanged object is never read again (F6.2).
+
+- **A new object** is read whole. Its format is the source's `format`, else the object's
+  `x-amz-meta-seshi-format`, else `{format}` in `path`, else what detection finds in its start
+  (`format = "auto"`, the default). Its session is the object's `x-amz-meta-seshi-session`,
+  else `{session}` in `path`, else its key under the prefix.
+- **An append-only log that grew** (Claude Code, Codex and other JSONL formats) continues from
+  where its session ends: only the tail is read, with a `Range` request, and submitted as a
+  chunk (X4.4). The poller first checks that the up to 4 KiB before that point are unchanged.
+  Only complete lines are sent; a line still being written waits for the next run.
+- **A rewritten object**, a shrunk one, a whole document (ATIF, OpenCode) or a gzip object is
+  read whole and sent with `replace`: the pipeline extends the session when the object starts
+  with what it holds, and otherwise replaces it, since the poller is the session's original
+  writer (F6.3, X4.6).
+- **Ownership.** Every session belongs to the source's service account `svc:<id>` and is
+  marked `owner_basis: service` (X5.4); the source's `visibility` applies. What the key or the
+  object's metadata say about a person (`{email}`, `{username}`, `{name}`, `{git_email}`,
+  `{git_name}`, or `x-amz-meta-seshi-email` and the like, `-` for `_`) is recorded as claims in
+  the session's metadata (X5.5), never as its owner. `{project}` and `{branch}` (or
+  `x-amz-meta-seshi-project`, `-branch`) fill the session's project and branch.
+- **Provenance.** The session's metadata records where it came from: `s3://bucket/key` and
+  the ETag read. Each envelope's idempotency key is that location and ETag (plus the offset
+  for a chunk, X4.7), so a run repeated after a crash is answered from the session.
+- **Deletions are ignored** (F6.4). Deleting a source object never changes the session it
+  produced; its key leaves the manifest at the next complete listing. To remove a session,
+  delete it in seshi: the poller will not store it again, even when the object changes.
+- **What is not stored** is recorded under `sources/<id>/failed/` with the object's location
+  and a code, never its content, and not tried again until the object changes:
+  `unknown_format`, `too_large` (over `limits.max_upload_bytes`, checked before reading),
+  `not_utf8`, `bad_gzip`, `access_denied` (the bucket refused that one object),
+  `duplicate_session` (two keys mapping to one session), or the pipeline's own codes. A
+  failure to list, or a bucket error other than these, fails the run instead, and the worker
+  retries it with backoff without moving the checkpoint (X4.8). A session the filter removed is only counted, and sent whole again
+  once its object grows. `seshi sync failed evals` lists them.
+- **Large buckets.** A run reads at most 200 changed objects, then hands over to the next run
+  at once, resuming the listing after the last key it handled. Every run lists the whole
+  prefix; when keys sort by time, `ordered_keys = true` lists only after the key before the
+  newest one (which stays watched while it grows).
+- **Credentials.** The poller needs `s3:ListBucket` on the prefix and `s3:GetObject`, nothing
+  else; with `role` the given keys (or the `AWS_*` environment) need `sts:AssumeRole` on that
+  role, and the role's keys are renewed before they expire. `role` applies to `s3://`. Without
+  `credentials` the poller reads the standard `AWS_*` / `S3_*` (`R2_*` for `r2://`) variables,
+  like the bucket client. A source may not point at seshi's own bucket and prefix, or its own
+  folder.
+- **Reprocessing.** `seshi reprocess --source evals --since 2026-11-01 --run` forgets the
+  objects changed since then, so the next run reads them whole; one whose normalized records
+  did not change answers `unchanged`. Without `--since` the manifest is removed and every
+  object is read again.
+
 Put TLS in front of it (a reverse proxy, Cloud Run, a load balancer): transcripts arrive
 unredacted and the server is where that stops being true.
 

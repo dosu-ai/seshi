@@ -257,9 +257,19 @@ connector comes with its branch (11), and its timings are provisional until then
 |---|---|
 | `otlp` | `quiet_period` (`"10m"`): a session is published once its spans have been quiet this long (F4.4). The destination posts to `POST /otlp/v1/traces` with a service token for this source ([docs/otlp.md](otlp.md)) |
 | `datadog` | `site` (`"datadoghq.com"`), `api_url` (instead of `https://api.<site>`: a proxy; `https`, or `http` to localhost only), `api_key`, `app_key` (secrets), `ml_app`, `tags` (each `key:value`; a span must carry all), `interval` (`"5m"`), `overlap` (`"10m"`), `lag` (`"2m"`), `backfill` (`"7d"`), `page_size` (`500`, at most 5000), `quiet_period` (`"10m"`): polls Datadog LLM Observability ([docs/datadog.md](datadog.md)) |
-| `s3` | `url`, `prefix`, `credentials` or `role` (`arn`, `external_id`), `region`, `endpoint`, `account_id`, `include` globs, `format` (`"auto"`), `ordered_keys` (`false`), `interval` (`"5m"`) |
+| `s3` | `url`, `prefix`, `credentials` or `role` (`arn`, `external_id`), `region`, `endpoint`, `account_id`, `include` globs, `format` (`"auto"`), `ordered_keys` (`false`), `interval` (`"5m"`), `path` |
 
-Ids are unique, and an `s3` source may not read seshi's own bucket and prefix (F6.4).
+Ids are unique, and an `s3` source may not read seshi's own bucket and prefix, or its own
+folder (F6.4).
+
+An `s3` source is polled by the built-in S3 poller ([server.md](server.md#syncing-an-s3-bucket)).
+Its `url` is `s3://`, `r2://` or a folder (`file:///path`, for one machine). `include` globs
+(Bun's glob syntax) and `path` match the key under the URL's prefix plus `prefix`. `path` is a
+template such as `"{username}/{session}.jsonl"`: `{session}` names the session (else the key
+is), `{format}` its format, `{project}` and `{branch}` its work, and `{email}`, `{name}`,
+`{username}`, `{git_email}`, `{git_name}` identity claims recorded in metadata, never the owner
+(X5.4); `*` matches within a segment, `**` across segments, and a key that does not match is
+skipped. An object's `x-amz-meta-seshi-<field>` metadata (`-` for `_`) wins over its key.
 
 ### `[search]`, `[worker]`, `[capture]`
 

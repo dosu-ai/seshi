@@ -267,6 +267,13 @@ Read and written by the binary only, so their types are code-first in `@seshi/st
   window?: { from, to, page? }, seen? }`: the end of the last window read in full, the window
   being read and the Export API cursor of its next page, and the span ids (OTLP hex) it
   submitted inside the next window's overlap with their start in milliseconds.
+  The S3 poller's cursor is a manifest (F6.2): `v`
+  (1), `objects` keyed by object key, each with the `etag` and `size` last handled,
+  `modified`, the `format` and `session` it was submitted as, `offset` (how many of its bytes
+  the session holds), `tail` (a digest of the up to 4 KiB before `offset`), `gz`, and
+  `failed` (the code of a permanent failure of that version); plus `after` (where an
+  unfinished listing resumes), `watch_from` and `hold` (with `ordered_keys`), and
+  `listed_at`.
 - `worker/heartbeat.json` (`seshi/heartbeat/1`): the writing process (`instance`, unique per
   run) and its stable instance id (`host`), version, roles, start, when it was written (`at`)
   and its `interval_ms`, and `jobs`: each job's runs, failures, last start and finish, last
