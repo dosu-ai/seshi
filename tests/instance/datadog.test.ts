@@ -187,6 +187,52 @@ describe("a datadog source", () => {
     expect((await listPending(booted.store, {})).archives).toEqual([]);
   });
 
+  it("is searchable once published, under its service owner and format, never from spans/ (12)", async () => {
+    // The assembler runs before the indexer, so a run of both indexes what was just published.
+    expect(instance.jobs.list().map((j) => j.name)).toEqual([
+      "heartbeat",
+      "retention",
+      `source:${SOURCE}`,
+      "assembler",
+      "search-index",
+    ]);
+    const app = createApp(instance);
+    const search = async (query: string) => {
+      await instance.search?.catchUp();
+      const response = await app.fetch(
+        new Request(`http://seshi.test/v1/search?${query}`, {
+          headers: { authorization: `Bearer ${admin}` },
+        }),
+      );
+      expect(response.status).toBe(200);
+      return (await response.json()) as {
+        total: number;
+        results: { owner: string; agent: string; session_id: string; source_id?: string }[];
+        index: { sessions: number };
+      };
+    };
+    await instance.sources.run(SOURCE);
+    expect(await listSpans(booted.store, OWNER, archiveId(OWNER, AGENT, SESSION))).toHaveLength(15);
+    // The spans hold the prompt, but nothing is published yet: nothing to find.
+    expect(await search("q=failing%20auth")).toMatchObject({ total: 0, results: [] });
+
+    clock = new Date(clock.getTime() + 10 * 60_000);
+    await assemble();
+    const found = await search(
+      `q=failing%20auth&agent=${AGENT}&source=${SOURCE}&owner=${encodeURIComponent(OWNER)}`,
+    );
+    expect(found.results).toEqual([
+      expect.objectContaining({
+        owner: OWNER,
+        agent: AGENT,
+        session_id: SESSION,
+        source_id: SOURCE,
+      }),
+    ]);
+    // The minimal-capture session was filtered: its spans stay, and are never indexed.
+    expect(found.index.sessions).toBe(1);
+  });
+
   it("leaves out what it already submitted, and a rewind resubmits harmlessly (X4.7)", async () => {
     await instance.sources.run(SOURCE);
     clock = new Date(clock.getTime() + 10 * 60_000);

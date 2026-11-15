@@ -433,9 +433,13 @@ Every instance that serves the API keeps its own index, an SQLite file on local 
 (`search.path`, by default in the user cache folder; FTS5 through Bun's built-in SQLite, so
 there is no service to run), and its own cursors in each owner's change feed (F10.3). The
 `search-index` job reads the feeds: a published entry indexes the session's new traces (only
-the new ones for a continuation), a tombstone removes the session, a visibility change updates
-it (F10.2). It indexes each session as its metadata says it is now, so entries read twice, out
-of order or lost leave nothing behind. A new session is searchable within `search.interval`
+the new ones for a continuation), a replacing one (`replace: true`, including `seshi redact
+backfill`'s `reason: "redacted"`) drops everything indexed for the session and reads it again
+from the trace it names, a tombstone removes the session, a visibility change updates it
+(F10.2). It indexes each session as its metadata says it is now, so entries read twice, out
+of order or lost leave nothing behind. OTLP and poller sessions (`otlp-genai`,
+`datadog-llmobs`, owned by `svc:<source-id>`) are indexed once the assembler publishes them;
+span records under `spans/` are never read. A new session is searchable within `search.interval`
 of being stored; a new owner's first session within a minute (the list of owners is read
 again every minute). Sessions model review dropped never reach the feed, so they are never
 indexed.

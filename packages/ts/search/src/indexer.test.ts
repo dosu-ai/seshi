@@ -2,19 +2,22 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BUILTIN_FORMATS, FormatRegistry } from "@seshi/formats";
-import type { ChangeEntry } from "@seshi/model";
+import type { ChangeEntry, Trace } from "@seshi/model";
 import { StoreSessionDB, setVisibility, tombstone } from "@seshi/pipeline";
 import {
   appendChange,
   archiveId,
   FsStore,
+  getBytes,
+  gunzipJson,
+  gzipJson,
   keys,
   readChanges,
   readMetadata,
   type Store,
 } from "@seshi/store";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { currentTraces, Indexer, searchableEvents } from "./indexer";
+import { currentTraces, Indexer, searchableEvents, tracesFrom } from "./indexer";
 import { MEMORY_INDEX } from "./paths";
 import { parseQuery } from "./query";
 import { SqliteIndex } from "./sqlite";
@@ -168,6 +171,40 @@ describe("the indexer (F10.2)", () => {
     await indexer.run();
     expect(find("old")).toEqual([]);
     expect(find("brand")).toEqual(["alice/s1"]);
+  });
+
+  it("reads a session again from a replacing entry's trace, even when its trace list looks the same (07)", async () => {
+    // A redaction backfill whose new trace keeps the old hash (only what the hash leaves out
+    // changed) rewrites the object in place: the metadata's trace list is unchanged, and only
+    // the replacing entry says the index's copy is stale.
+    await db().ingest({ agent: "trajectory", session_id: "s1", transcript: log("stale words") });
+    const archive = archiveId("alice", "trajectory", "s1");
+    const { index, indexer, find } = setup();
+    await indexer.run();
+    expect(find("stale")).toEqual(["alice/s1"]);
+    const metadata = await readMetadata(store, "alice", archive);
+    const hash = metadata?.head as string;
+    const key = keys.trace("alice", archive, hash);
+    const trace = gunzipJson<Trace>((await getBytes(store, key)) as Uint8Array);
+    const first = trace.events.findIndex((e) => e.role === "user");
+    trace.events[first] = { ...(trace.events[first] as Trace["events"][number]), text: "fresh" };
+    await store.put(key, gzipJson(trace));
+    await appendChange(store, {
+      kind: "published",
+      at: tick().toISOString(),
+      owner: "alice",
+      archive_id: archive,
+      session_id: "s1",
+      content_hash: hash,
+      writer: { kind: "admin", principal: "admin", source_id: "redaction" },
+      owner_basis: "verified",
+      replace: true,
+      reason: "redacted",
+    });
+    expect(await indexer.run()).toMatchObject({ entries: 1, indexed: 1 });
+    expect(find("stale")).toEqual([]);
+    expect(find("fresh")).toEqual(["alice/s1"]);
+    expect(index.session("alice", archive)?.traces).toEqual([hash]);
   });
 
   it("removes a tombstoned session and follows visibility changes (F10.4)", async () => {
@@ -427,6 +464,21 @@ describe("currentTraces", () => {
     const metadata = { traces: [t("a"), t("b", true), t("c"), t("d", true), t("e", true)] };
     expect(currentTraces(metadata as never)).toEqual(["c", "d", "e"]);
     expect(currentTraces({ traces: [] } as never)).toEqual([]);
+  });
+});
+
+describe("tracesFrom", () => {
+  it("reads from the replacing trace on, or the session as it is now once that trace is gone", () => {
+    const t = (h: string, continuation?: boolean) => ({
+      content_hash: h,
+      created_at: ts,
+      records: 1,
+      ...(continuation ? { continuation: { from_record: 1, prefix_sha256: h } } : {}),
+    });
+    // A fork's backfilled trace keeps its continuation, and later chunks continue it.
+    const metadata = { traces: [t("r", true), t("s", true)] };
+    expect(tracesFrom(metadata as never, "r")).toEqual(["r", "s"]);
+    expect(tracesFrom({ traces: [t("c"), t("d", true)] } as never, "gone")).toEqual(["c", "d"]);
   });
 });
 

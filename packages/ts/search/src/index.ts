@@ -27,6 +27,7 @@ export {
   OWNER_REFRESH_MS,
   RUN_BUDGET,
   searchableEvents,
+  tracesFrom,
 } from "./indexer";
 export { defaultIndexPath, type IndexPathOptions, MEMORY_INDEX } from "./paths";
 export {

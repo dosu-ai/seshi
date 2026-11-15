@@ -38,7 +38,10 @@ an indexer per instance tails every owner's change feed into a local SQLite FTS5
     missing, `redacted` or headless; otherwise its traces from the last one without
     `continuation` to the head (`currentTraces`). When the file already holds the first traces
     of that list, only the new ones are read and appended (a continuation); otherwise (a replace,
-    a session read for the first time) it is read again in full. Visibility always comes from
+    a session read for the first time) it is read again in full. A `published` entry with
+    `replace: true` (an upload's replace, or a redaction backfill's `reason: "redacted"`) always
+    drops what the file held of the session and reads it again from the trace the entry names
+    (`tracesFrom`, falling back to `currentTraces` once a later replace dropped that trace). Visibility always comes from
     the metadata. The entries, the session changes and the cursor commit in one transaction per
     page. A run reads up to `RUN_BUDGET` (5000) entries and reports `more`; a run that read
     every owner to the end marks the index caught up, and the first such run makes it ready.
@@ -218,24 +221,41 @@ A review of the branch added these on top of the implementation:
 - Docs (cli.md, openapi, the model's `SearchRequest`) now say that all words must appear in one
   record.
 
-## Cross-branch wiring once the stack is linear
+## Cross-branch wiring
 
-- **09 (OTLP assembler):** adds its job factory to `BUILTIN_JOBS` next to `searchIndexJobs`
-  (trivial merge) and, like this branch, may need `JobHost` fields. Assembled sessions publish
-  normal change entries, so they are indexed with no change; their `origin_agent` is matched by
-  the `agent` filter.
-- **10/11 (Datadog, S3 pollers):** sessions owned by `svc:<source-id>` are indexed like any;
-  `source_id` comes from `metadata.provenance.source_id`, so `--source dd-prod` works. Check that
-  `listOwners` returns `svc:` owners (it should: they are folders under `owners/`).
-- **07 (rule packs) / backfill:** `seshi redact backfill` writes new traces and a change entry;
-  if it writes a `published` entry with `replace: true` (or the session's traces start over),
-  the index re-reads the session. If backfill instead rewrites traces in place under new
-  hashes without a whole trace at the start, confirm `currentTraces` still finds the right set.
+Done after the rebase onto 11 (07, 09 and 10 are below this branch now):
+
+- **07 (redaction backfill):** a `published` entry with `replace: true` (with or without
+  `reason: "redacted"`) now makes the indexer drop everything it held of the session and read
+  it again from the entry's `content_hash` on, whatever the metadata's trace list looks like.
+  The metadata alone missed one case: a backfill whose new trace keeps an old hash (only what
+  the hash leaves out changed) rewrites that object in place, so the trace list looked
+  unchanged and the stale text stayed. Tested with a hand-written in-place rewrite
+  (indexer.test.ts) and with a real `backfillRedaction` over a two-trace session
+  (tests/search/backfill.test.ts): what the new rules take out stops being found, the rest is
+  found from the one rewritten trace.
+- **09 (OTLP assembler) and 10 (Datadog):** `BUILTIN_JOBS` runs the assembler, then the
+  indexer, so one pass of the jobs indexes what was just published. The job-name lists in
+  instance.test, end-to-end.test, serve.test, otlp.test and datadog.test say so; commands.test's
+  `workers status` list stays without `search-index` (no `api` role there). OTLP and Datadog
+  sessions are searchable as ordinary sessions: agent `otlp-genai` / `datadog-llmobs`, owner
+  `svc:<source-id>` (`listOwners` returns `svc:` folders), `--source` from
+  `metadata.provenance.source_id`, and a member finds an org-visible service session.
+  `spans/` is never read: tests/api/otlp.test.ts and tests/instance/datadog.test.ts check that
+  stored, unpublished spans are not found, and that a session the filter dropped (its spans
+  kept) is not in the index.
+
+Still to wire:
+
+- **11 (S3 poller):** nothing beyond what 10 needed: its sessions are `svc:<source-id>`
+  sessions with `provenance.source_id`; no S3-specific search test was added.
 - **13 (CLI):** wire the styled output (B1.4 lilac, highlights from `SearchMatch.highlights`)
-  into `searchLines`/`resultLines`; read the stored credential in `overHttp` (or `connect()`),
-  and consider `seshi sessions show` taking a search result (`agent/session_id`, `owner`).
-  13's colour helper must respect `--json` (no change needed: JSON is printed raw).
+  into `searchLines`/`resultLines`, passing hit text through `printable()`; read the stored
+  credential in `overHttp` (or `connect()`), and consider `seshi sessions show` taking a search
+  result (`agent/session_id`, `owner`). 13's colour helper must respect `--json` (no change
+  needed: JSON is printed raw). Add `search()` to 13's Backend (ServerBackend: the client's
+  `search`; LocalBackend: the Instance's index).
 - **14 (capture):** retractions are tombstones (`reason: retracted`), removed from the index
   like deletes; nothing to wire.
 - **openapi.test route list / commands.test stub list:** this branch added `GET /v1/search` and
-  removed `search` from the stubs; siblings editing the same lists will conflict trivially.
+  removed `search` from the stubs; 13 and 14 edit the same lists, keep the union.

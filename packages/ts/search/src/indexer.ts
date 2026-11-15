@@ -6,6 +6,12 @@
  *   already holds the earlier traces of the session (a continuation), only the new ones are
  *   read; when it does not, or the publish replaced the session (X4.6), it is read again from
  *   its last whole trace.
+ * - `published` with `replace: true` (a replacing upload, X4.6, or `seshi redact backfill`'s
+ *   `reason: "redacted"`, F2.5): everything indexed for the session is dropped and it is read
+ *   again from the trace the entry names (`content_hash`), whatever the index held. The
+ *   metadata alone would miss one case: a backfill whose new trace keeps an old hash (only
+ *   what the hash leaves out changed) rewrites that object in place, and the trace list looks
+ *   unchanged.
  * - `tombstone`: the session is dropped.
  * - `visibility_changed`: the session's visibility is updated (F10.4).
  *
@@ -181,6 +187,13 @@ export function searchableEvents(
   return out;
 }
 
+/** The traces from `hash` (a replacing entry's trace) to the head. When a later replace has
+ * dropped that trace since, the session as it is now (`currentTraces`). */
+export function tracesFrom(metadata: SessionMetadata, hash: string): string[] {
+  const at = metadata.traces.findIndex((t) => t.content_hash === hash);
+  return at < 0 ? currentTraces(metadata) : metadata.traces.slice(at).map((t) => t.content_hash);
+}
+
 function startsWith(list: readonly string[], prefix: readonly string[]): boolean {
   return prefix.length <= list.length && prefix.every((h, i) => list[i] === h);
 }
@@ -189,6 +202,12 @@ function startsWith(list: readonly string[], prefix: readonly string[]): boolean
 interface ReadTrace {
   trace: Trace;
   events: IndexedEvent[];
+}
+
+/** A replacing entry's say over how a session is read (see the top of this file). */
+interface Replaced {
+  /** The trace the replacing entry named. */
+  content_hash: string;
 }
 
 /** What to do to one session, decided from its metadata before anything is written. */
@@ -339,14 +358,18 @@ export class Indexer {
       const seen = this.index.seen(owner, listed);
       const fresh = listed.filter((k) => !seen.has(k));
       const entries = await mapLimit(fresh, CONCURRENCY, (key) => this.entry(key));
-      const archives = [
-        ...new Set(
-          entries
-            .filter((e): e is ChangeEntry => e !== null && HEX64.test(e.archive_id))
-            .map((e) => e.archive_id),
-        ),
-      ];
-      const plans = await mapLimit(archives, CONCURRENCY, (a) => this.plan(owner, a));
+      const named = entries.filter((e): e is ChangeEntry => e !== null && HEX64.test(e.archive_id));
+      const archives = [...new Set(named.map((e) => e.archive_id))];
+      // The last replacing entry per session on this page (entries are read in key order).
+      const replaced = new Map<string, Replaced>();
+      for (const e of named) {
+        if (e.kind === "published" && e.replace === true && e.content_hash) {
+          replaced.set(e.archive_id, { content_hash: e.content_hash });
+        }
+      }
+      const plans = await mapLimit(archives, CONCURRENCY, (a) =>
+        this.plan(owner, a, replaced.get(a)),
+      );
       const last = page.keys.at(-1);
       const held = this.index.cursor(owner);
       const next = held === undefined || (last !== undefined && last > held) ? last : held;
@@ -371,7 +394,9 @@ export class Indexer {
       if (reset) return true;
       // An update refused because another process changed the session in between: plan it
       // again from what the index holds now.
-      for (const archive of refused) this.applyPlan(await this.plan(owner, archive), run);
+      for (const archive of refused) {
+        this.applyPlan(await this.plan(owner, archive, replaced.get(archive)), run);
+      }
       run.entries += fresh.length;
       if (!page.truncated || last === undefined) return false;
       startAfter = last;
@@ -405,8 +430,14 @@ export class Indexer {
   }
 
   /** What the index should do about one session, from its metadata and the traces the index
-   * does not hold yet. */
-  private async plan(owner: string, archive: string, attempt = 0): Promise<Plan> {
+   * does not hold yet; after a replacing entry (`replaced`), from the trace it named on, with
+   * nothing the index held kept. */
+  private async plan(
+    owner: string,
+    archive: string,
+    replaced?: Replaced,
+    attempt = 0,
+  ): Promise<Plan> {
     // Taken before the read: a read that starts later sees this state or a newer one.
     const readAt = this.now().getTime();
     const metadata = await this.metadataOf(owner, archive);
@@ -414,14 +445,14 @@ export class Indexer {
       return { kind: "remove", owner, archive, read_at: readAt };
     }
     const held = this.index.session(owner, archive);
-    const wanted = currentTraces(metadata);
-    const extends_ = held !== null && startsWith(wanted, held.traces);
+    const wanted = replaced ? tracesFrom(metadata, replaced.content_hash) : currentTraces(metadata);
+    const extends_ = !replaced && held !== null && startsWith(wanted, held.traces);
     const toRead = extends_ ? wanted.slice((held as IndexedSession).traces.length) : wanted;
     const traces = await mapLimit(toRead, 4, (hash) => this.traceOf(owner, archive, hash));
     if (traces.some((t) => t === null) && attempt === 0) {
       // The session moved on (a replace deleted a trace) between the two reads: start over
       // from its metadata as it is now.
-      return this.plan(owner, archive, 1);
+      return this.plan(owner, archive, replaced, 1);
     }
     const read = toRead
       .map((hash, i) => ({ hash, read: traces[i] ?? null }))

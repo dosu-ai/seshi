@@ -179,6 +179,47 @@ describe("POST /otlp/v1/traces", () => {
     expect(stored.records[4]).toMatchObject({ role: "tool", duration_ms: 4400 });
   });
 
+  it("is searchable once published, as the destination's session, never from its span records (12)", async () => {
+    // The assembler runs before the indexer, so a run of both indexes what was just published.
+    expect(instance.jobs.list().map((j) => j.name)).toEqual([
+      "heartbeat",
+      "retention",
+      "assembler",
+      "search-index",
+    ]);
+    const search = async (query: string, token = UPLOADER) => {
+      await instance.search?.catchUp();
+      const response = await app.fetch(
+        new Request(`http://seshi.test/v1/search?${query}`, {
+          headers: { authorization: `Bearer ${token}` },
+        }),
+      );
+      expect(response.status).toBe(200);
+      return (await response.json()) as {
+        total: number;
+        results: { owner: string; agent: string; session_id: string; source_id?: string }[];
+      };
+    };
+    expect((await send(fixture("managed-agents-session"))).status).toBe(200);
+    // Stored as span records under spans/, and not published: nothing to find.
+    expect(await listSpans(booted.store, OWNER, ARCHIVE)).toHaveLength(10);
+    expect(await search("q=regression")).toMatchObject({ total: 0, results: [] });
+
+    later(21_000);
+    expect(await assemble()).toMatchObject({ published: 1 });
+    // A member finds the org-visible session of the service account (svc:console).
+    const found = await search("q=regression&agent=otlp-genai&source=console&owner=svc%3Aconsole");
+    expect(found.results).toEqual([
+      expect.objectContaining({
+        owner: OWNER,
+        agent: "otlp-genai",
+        session_id: SESSION,
+        source_id: "console",
+      }),
+    ]);
+    expect(found.total).toBe(1);
+  });
+
   it("takes JSON, keeps a span sent twice once, and drops the SDK's copy of a response", async () => {
     const request = fixture("messages-tool-runner");
     expect((await send(request, { encoding: "json" })).status).toBe(200);
