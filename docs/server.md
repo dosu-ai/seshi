@@ -84,10 +84,17 @@ The worker's jobs:
 | `source:<id>` | the source's `interval` | Polls a source through its connector (X3.11), from its checkpoint (X7.4): Datadog LLM Observability for `type = "datadog"` ([datadog.md](datadog.md)) |
 | `assembler` | `worker.assembly_interval` (30s) | Publishes sessions whose spans (OTLP, F4; Datadog, F5) have been quiet for their source's `quiet_period`, from the pending markers (X7.4); its backlog is the sessions waiting |
 
+One job runs on every instance with the `api` role instead, worker or not:
+
+| Job | Every | What it does |
+|---|---|---|
+| `search-index` | `search.interval` (15s) | Reads every owner's change feed into this instance's own search index ([below](#search)) |
+
 A failed run is retried after 5 seconds, doubling per failure in a row up to the job's
 interval. A poll whose envelope failed transiently (the bucket) never saves its checkpoint
 past it, so the retry reads it again. A session the assembler could not publish (the bucket
-failed) keeps its marker and is tried again. A later branch adds the search indexer (12). Each poll is also a one-shot command for cron: `seshi sync run <id>`.
+failed) keeps its marker and is tried again. Each poll is also a one-shot command for cron:
+`seshi sync run <id>`.
 
 Where the config and bucket keys are:
 
@@ -413,6 +420,40 @@ was established, `verified`, `claimed` or `service`, on the session and on its c
 To host several teams, run one container per team, each with its own config and its own
 bucket or prefix. Isolation between teams comes from the deployment, not the code (X1.1).
 
+### Search
+
+`GET /v1/search` and `seshi search` find sessions by what was said and done in them (F10):
+prompts, assistant text, and tool calls (names and inputs, so file paths and commands); add
+`tool_result` to `search.events` to search tool output too. Results are sessions, best match
+first (bm25), each with its best matching records: the trace and event each is in, and a short
+excerpt with the matched words marked by offsets. Filters: owner, agent, repository, branch,
+source and time.
+
+Every instance that serves the API keeps its own index, an SQLite file on local disk
+(`search.path`, by default in the user cache folder; FTS5 through Bun's built-in SQLite, so
+there is no service to run), and its own cursors in each owner's change feed (F10.3). The
+`search-index` job reads the feeds: a published entry indexes the session's new traces (only
+the new ones for a continuation), a tombstone removes the session, a visibility change updates
+it (F10.2). It indexes each session as its metadata says it is now, so entries read twice, out
+of order or lost leave nothing behind. A new session is searchable within `search.interval`
+of being stored; a new owner's first session within a minute (the list of owners is read
+again every minute). Sessions model review dropped never reach the feed, so they are never
+indexed.
+
+A new or wiped instance builds its index from the feeds before it answers: until then search
+answers `503 index_building` with `Retry-After`. The file survives restarts, and deleting it
+only costs a rebuild; so does `seshi search --rebuild` where the config is. Changing
+`search.events`, or pointing the instance at another deployment's bucket, rebuilds it too. The
+index holds session text (redacted, but the org's): the file is created readable by its owner
+only.
+
+Who finds what follows the read rules (F10.4): a member finds their own sessions and those
+visible to the org; admins and services find everything. The server builds that filter from
+the credential, the index applies it, and each result is checked against the session's live
+metadata before it is returned, so a session made private or deleted after it was indexed is
+never shown. The `search` scope is needed: the org key, member session tokens, static tokens,
+admins and service readers have it; device tokens and writing services do not.
+
 ## Readers
 
 A reader reads through the API with a service token (`POST /v1/tokens {kind: "service",
@@ -459,6 +500,7 @@ allow.
 | `GET /v1/redaction/rules` | The operator's rule packs and the rule-set hash, for redacting before upload (F2.4). Any signed-in caller; `ETag` is the hash, `If-None-Match` gets `304` |
 | `GET /v1/sessions/:agent/:session_id/reviews?owner` | What model review decided for each stored write (`sessions:read`, F3.8): the whole audit record for admins, only `n`, `at`, `content_hash` and `decision` for anyone else who may read the session |
 | `POST /otlp/v1/traces` | OTLP/HTTP trace ingest (F4): `ExportTraceServiceRequest` as protobuf or JSON from an OTLP destination's service token. Outside `/v1`, and its errors are OTLP's (`google.rpc.Status`). See [otlp.md](otlp.md) |
+| `GET /v1/search?q&owner&agent&repo&branch&source&since&until&sort&limit&matches&cursor` | Keyword search over what the caller may read (`search`, F10; [above](#search)): `{query, total, results: [{owner, agent, session_id, …, score, hits, matches: [{content_hash, event_index, role, snippet, highlights}]}], cursor?, index}`. `400 bad_query`, `404 search_disabled`, `503 index_building` |
 
 ### `POST /v1/sessions`
 

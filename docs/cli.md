@@ -51,7 +51,7 @@ repository's code.
 | `login`, `logout`, `whoami` | Sign in to a server (F8.2) | Branch 13 |
 | `sessions ls\|show\|export\|rm`, `tokens` | Sessions and tokens through the API | Branch 13 |
 | `capture install\|uninstall\|status\|pause\|resume\|off\|on`, `hook <agent> <event>`, `upload <path>`, `daemon`, `statusline` | Capture on this machine (F9) | Branch 14 |
-| `search <query>` | Search what you may read (F10) | Branch 12 |
+| `search <words…> [filters] [--json]`, `search --status\|--rebuild` | Search what you may read (F10); see [below](#search) | Built |
 | `redact test [<file> \| -] [--pack <file>]… [--config]` | Check rule packs' test strings, and show how often each rule fires on a transcript or text and where, never what matched ([below](#redaction-rules)) | Built |
 | `redact backfill (--since <30d> \| --all) [--dry-run]` | Apply the server's current rules to stored sessions (F2.5, [below](#redaction-rules)). Exit 8 when a session changed while it ran | Built |
 
@@ -92,3 +92,49 @@ The session commands (branch 13) and the uploader (14) work against a `SessionDB
 server over HTTP when the CLI config sets `server`, or, in local mode, an Instance built
 in-process from the server config `[local] config` names, for one person who owns the bucket.
 Nothing else writes a bucket. See [config.md](config.md#the-clis-config).
+
+## Search
+
+```sh
+seshi search flaky checkout test
+seshi search '"git push --force"' --repo widget --since 7d
+seshi search deploy -staging --owner alice@acme.com --sort recent --json
+```
+
+`seshi search` finds sessions by what was said and done in them: prompts, assistant text, and
+tool calls (tool names and inputs, so file paths and commands). Words must all appear, in any
+order; `"a phrase"` must appear as written; `word*` matches words starting with it; `a OR b`
+matches either; `-word` (or `NOT word`) leaves out records with it. Case and accents are
+ignored, and punctuation separates words, so `src/app.ts` finds those words in that order.
+
+Each result is a session (agent and session id, owner, repository and branch, when it was last
+active, how many records matched) followed by its best matching records with a short excerpt.
+`seshi sessions show` (branch 13) opens one.
+
+| Flag | |
+|---|---|
+| `--owner <id>` | Only this owner's sessions |
+| `--agent <name>` | Only sessions of this format or agent (`claude-code`, `codex`, …) |
+| `--repo <name>` | Only this repository: exactly, or its last path segments (`widget`, `acme/widget`) |
+| `--branch <name>`, `--source <id>` | Only this branch; only sessions written through this source (`upload`, `datadog-prod`) |
+| `--since`, `--until` | Only records in this time range: a date (`2026-11-01`), an RFC 3339 time, or an age (`7d`, `12h`) |
+| `--sort relevance\|recent` | Best match first (the default), or most recently active first |
+| `--limit <n>`, `--matches <n>`, `--cursor <c>` | Sessions per page (20, at most 100), records shown per session (3, at most 20), the next page |
+
+Where it searches:
+
+- **A server** (`server` in the CLI config, or `--server <url>`): through `GET /v1/search`, as
+  the signed-in caller, so you find your own sessions and those visible to the org (admins and
+  services find everything). Until `seshi login` (branch 13) stores a credential, pass it with
+  `--token` (and `--user` with the org key).
+- **In-process** (`[local] config` in the CLI config, `--config <seshi.toml>`, or where the
+  server's own config is, as for `workers status`): the bucket's keys read everything, so
+  nothing is filtered by owner. The local index is brought up to date with the change feed
+  before each search, and built from scratch the first time (which reads every change entry
+  once). `seshi search --status` says where the index file is and what it holds;
+  `seshi search --rebuild` drops it and builds it again.
+
+The output is plain text; `--json` prints the API's `SearchResults`. Exit 0 also when nothing
+matches; 2 for a query with nothing to look for; 3 when nothing is configured or search is
+turned off; 5 when not signed in or not allowed (the credential lacks the `search` scope); 7
+when the server or bucket cannot answer, or the server's index is still being built.

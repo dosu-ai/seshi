@@ -385,6 +385,12 @@ lands and the other is planned again (a whole log) or told where the log now end
 - Everything new since a cursor: list `changes/` with `StartAfter`, fetch what the entries
   point at.
 - A full scan: list `sessions/`, read each `metadata.json`, skip those with no `head`.
+- An index (search, F10): tail every owner's `changes/` and, for each session an entry names,
+  index what its `metadata.json` says now (its traces from the last one without
+  `continuation` to `head`; nothing once `status` is `redacted`). Indexing from the metadata
+  rather than from the entry alone makes entries read twice, out of order or missing harmless.
+  The seshi server's search index is such a reader: an SQLite file on each instance's local
+  disk, never in the bucket, derived and rebuildable (X6.1).
 
 A reader needs `s3:ListBucket` on the prefix and `s3:GetObject` under it. A writer
 additionally needs `s3:PutObject`; tombstoning and pruning need `s3:DeleteObject`.
