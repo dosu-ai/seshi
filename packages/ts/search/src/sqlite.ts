@@ -1,0 +1,545 @@
+/** The SQLite backend (F10.3): Bun's built-in SQLite with FTS5, one file on local disk per
+ * instance, no service to run. Sessions are rows; each searchable event is a row in `events`
+ * and a document in the FTS5 table `events_text` with the same rowid. Ranking is FTS5's bm25,
+ * snippets are FTS5's `snippet()`. The feed cursors live in the same file, so wiping the file
+ * (or `reset`) forgets them too and the index is rebuilt from the change feed.
+ *
+ * Several processes may share one file (a server and a local `seshi search` on the same host):
+ * the file is in WAL mode with a busy timeout, every write is a transaction, and an update
+ * older than what the index holds (by the metadata's `updated_at`) is refused, so a slow
+ * writer never puts back what a faster one replaced. */
+
+import { Database, type SQLQueryBindings } from "bun:sqlite";
+import { chmodSync, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
+import type { EventRole, Visibility } from "@seshi/model";
+import type {
+  BackendHit,
+  BackendMatch,
+  BackendQuery,
+  BackendResults,
+  IndexedSession,
+  IndexStore,
+  SessionUpdate,
+} from "./backend";
+import { MEMORY_INDEX } from "./paths";
+import { indexText, MATCH_END, MATCH_START } from "./snippet";
+
+/** The index file's own format: a file of another format is wiped and rebuilt. */
+export const INDEX_SCHEMA = "seshi/search-index/1";
+
+/** Words of context `snippet()` keeps around a match. */
+const SNIPPET_TOKENS = 24;
+
+const TABLES = `
+CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS feeds (owner TEXT PRIMARY KEY, cursor TEXT) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS seen (
+  owner TEXT NOT NULL,
+  key TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  PRIMARY KEY (owner, key)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS sessions (
+  id INTEGER PRIMARY KEY,
+  owner TEXT NOT NULL,
+  archive_id TEXT NOT NULL,
+  agent TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  origin_agent TEXT,
+  native_session_id TEXT,
+  project TEXT,
+  branch TEXT,
+  source_id TEXT,
+  visibility TEXT NOT NULL,
+  started_at INTEGER,
+  ended_at INTEGER,
+  updated_at TEXT NOT NULL,
+  updated_ms INTEGER NOT NULL,
+  traces TEXT NOT NULL,
+  removed INTEGER NOT NULL DEFAULT 0,
+  UNIQUE (owner, archive_id)
+);
+CREATE TABLE IF NOT EXISTS events (
+  id INTEGER PRIMARY KEY,
+  session INTEGER NOT NULL,
+  content_hash TEXT NOT NULL,
+  event_index INTEGER NOT NULL,
+  role TEXT NOT NULL,
+  tool_name TEXT,
+  ts INTEGER
+);
+CREATE INDEX IF NOT EXISTS events_by_session ON events (session);
+CREATE VIRTUAL TABLE IF NOT EXISTS events_text USING fts5 (
+  text,
+  tokenize = 'unicode61 remove_diacritics 2'
+);
+`;
+
+const DROP = `
+DROP TABLE IF EXISTS events_text;
+DROP TABLE IF EXISTS events;
+DROP TABLE IF EXISTS sessions;
+DROP TABLE IF EXISTS seen;
+DROP TABLE IF EXISTS feeds;
+DROP TABLE IF EXISTS meta;
+`;
+
+interface SessionRow {
+  id: number;
+  owner: string;
+  archive_id: string;
+  agent: string;
+  session_id: string;
+  origin_agent: string | null;
+  native_session_id: string | null;
+  project: string | null;
+  branch: string | null;
+  source_id: string | null;
+  visibility: string;
+  started_at: number | null;
+  ended_at: number | null;
+  updated_at: string;
+  updated_ms: number;
+  traces: string;
+  removed: number;
+}
+
+function sessionOf(row: SessionRow): IndexedSession {
+  return {
+    owner: row.owner,
+    archive_id: row.archive_id,
+    agent: row.agent,
+    session_id: row.session_id,
+    ...(row.origin_agent !== null ? { origin_agent: row.origin_agent } : {}),
+    ...(row.native_session_id !== null ? { native_session_id: row.native_session_id } : {}),
+    ...(row.project !== null ? { project: row.project } : {}),
+    ...(row.branch !== null ? { branch: row.branch } : {}),
+    ...(row.source_id !== null ? { source_id: row.source_id } : {}),
+    visibility: row.visibility as Visibility,
+    ...(row.started_at !== null ? { started_at: row.started_at } : {}),
+    ...(row.ended_at !== null ? { ended_at: row.ended_at } : {}),
+    updated_at: row.updated_at,
+    traces: JSON.parse(row.traces) as string[],
+  };
+}
+
+/** `%`, `_` and `\` matched literally in a LIKE pattern with `ESCAPE '\'`. */
+function likeLiteral(value: string): string {
+  return value.replace(/[\\%_]/g, (c) => `\\${c}`);
+}
+
+function placeholders(n: number): string {
+  return Array.from({ length: n }, () => "?").join(", ");
+}
+
+export interface SqliteIndexOptions {
+  /** The file, or `:memory:`. Its folder is created (owner-only) when missing. */
+  path: string;
+  /** The deployment the index belongs to: a file built for another is wiped. */
+  deployment: string;
+  /** Which event roles are indexed: a file built with others is wiped (it would miss some,
+   * or hold some it should not). */
+  events: readonly EventRole[];
+}
+
+export class SqliteIndex implements IndexStore {
+  readonly path: string;
+  private readonly db: Database;
+
+  constructor(options: SqliteIndexOptions) {
+    this.path = options.path;
+    const memory = options.path === MEMORY_INDEX;
+    if (!memory) mkdirSync(dirname(options.path), { recursive: true, mode: 0o700 });
+    this.db = new Database(options.path, { create: true, strict: true });
+    // The index holds session text (redacted, but still the org's): owner-only, like the
+    // CLI's credentials file.
+    if (!memory && process.platform !== "win32") {
+      try {
+        chmodSync(options.path, 0o600);
+      } catch {
+        // A file another user owns: SQLite opened it, so it is readable; leave it.
+      }
+    }
+    this.db.run("PRAGMA busy_timeout = 5000");
+    if (!memory) {
+      this.db.run("PRAGMA journal_mode = WAL");
+      this.db.run("PRAGMA synchronous = NORMAL");
+    }
+    this.db.run(TABLES);
+    const expected: Record<string, string> = {
+      schema: INDEX_SCHEMA,
+      deployment: options.deployment,
+      events: JSON.stringify([...options.events].sort()),
+    };
+    this.transaction(() => {
+      const stored = this.metaAll();
+      const fresh = Object.keys(stored).length === 0;
+      const matches = Object.entries(expected).every(([k, v]) => stored[k] === v);
+      if (!fresh && !matches) {
+        this.db.run(DROP);
+        this.db.run(TABLES);
+      }
+      if (fresh || !matches) {
+        for (const [key, value] of Object.entries(expected)) this.setMeta(key, value);
+      }
+    });
+  }
+
+  private metaAll(): Record<string, string> {
+    const rows = this.db.query("SELECT key, value FROM meta").all() as {
+      key: string;
+      value: string;
+    }[];
+    return Object.fromEntries(rows.map((r) => [r.key, r.value]));
+  }
+
+  private meta(key: string): string | undefined {
+    const row = this.db.query("SELECT value FROM meta WHERE key = ?").get(key) as {
+      value: string;
+    } | null;
+    return row?.value;
+  }
+
+  private setMeta(key: string, value: string): void {
+    this.db
+      .query(
+        "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+      )
+      .run(key, value);
+  }
+
+  transaction<T>(fn: () => T): T {
+    return this.db.transaction(fn).immediate();
+  }
+
+  // --- SearchBackend ----------------------------------------------------------------
+
+  private row(owner: string, archive: string): SessionRow | null {
+    return this.db
+      .query("SELECT * FROM sessions WHERE owner = ? AND archive_id = ?")
+      .get(owner, archive) as SessionRow | null;
+  }
+
+  session(owner: string, archive: string): IndexedSession | null {
+    const row = this.row(owner, archive);
+    return row === null || row.removed === 1 ? null : sessionOf(row);
+  }
+
+  private dropEvents(sessionId: number): void {
+    this.db
+      .query("DELETE FROM events_text WHERE rowid IN (SELECT id FROM events WHERE session = ?)")
+      .run(sessionId);
+    this.db.query("DELETE FROM events WHERE session = ?").run(sessionId);
+  }
+
+  apply(update: SessionUpdate): boolean {
+    const { session, events } = update;
+    return this.transaction(() => {
+      const existing = this.row(session.owner, session.archive_id);
+      if (existing !== null && existing.updated_at > session.updated_at) return false;
+      if (!update.replace) {
+        const holds = existing === null || existing.removed === 1 ? "[]" : existing.traces;
+        if (holds !== JSON.stringify(update.base ?? [])) return false;
+      }
+      const values = [
+        session.agent,
+        session.session_id,
+        session.origin_agent ?? null,
+        session.native_session_id ?? null,
+        session.project ?? null,
+        session.branch ?? null,
+        session.source_id ?? null,
+        session.visibility,
+        session.started_at ?? null,
+        session.ended_at ?? null,
+        session.updated_at,
+        Date.parse(session.updated_at) || 0,
+        JSON.stringify(session.traces),
+      ];
+      let id: number;
+      if (existing === null) {
+        const row = this.db
+          .query(
+            `INSERT INTO sessions (owner, archive_id, agent, session_id, origin_agent,
+               native_session_id, project, branch, source_id, visibility, started_at, ended_at,
+               updated_at, updated_ms, traces)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+          )
+          .get(session.owner, session.archive_id, ...values) as { id: number };
+        id = row.id;
+      } else {
+        id = existing.id;
+        if (update.replace || existing.removed === 1) this.dropEvents(id);
+        this.db
+          .query(
+            `UPDATE sessions SET agent = ?, session_id = ?, origin_agent = ?,
+               native_session_id = ?, project = ?, branch = ?, source_id = ?, visibility = ?,
+               started_at = ?, ended_at = ?, updated_at = ?, updated_ms = ?, traces = ?,
+               removed = 0
+             WHERE id = ?`,
+          )
+          .run(...values, id);
+      }
+      const insertEvent = this.db.query(
+        `INSERT INTO events (session, content_hash, event_index, role, tool_name, ts)
+         VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
+      );
+      const insertText = this.db.query("INSERT INTO events_text (rowid, text) VALUES (?, ?)");
+      for (const event of events) {
+        const text = indexText(event.text);
+        if (text.trim() === "") continue;
+        const row = insertEvent.get(
+          id,
+          event.content_hash,
+          event.event_index,
+          event.role,
+          event.tool_name ?? null,
+          event.timestamp ?? null,
+        ) as { id: number };
+        insertText.run(row.id, text);
+      }
+      return true;
+    });
+  }
+
+  remove(owner: string, archive: string, updatedAt?: string): void {
+    this.transaction(() => {
+      const existing = this.row(owner, archive);
+      if (existing === null) return;
+      this.dropEvents(existing.id);
+      if (updatedAt === undefined) {
+        this.db.query("DELETE FROM sessions WHERE id = ?").run(existing.id);
+        return;
+      }
+      // Kept as a removed row, so an older update that arrives late is refused.
+      this.db
+        .query(
+          "UPDATE sessions SET removed = 1, traces = '[]', updated_at = max(updated_at, ?) WHERE id = ?",
+        )
+        .run(updatedAt, existing.id);
+    });
+  }
+
+  query(q: BackendQuery): BackendResults {
+    const where: string[] = ["events_text MATCH ?", "s.removed = 0"];
+    const params: SQLQueryBindings[] = [q.match];
+    if (!q.viewer.everything) {
+      if (q.viewer.own.length > 0) {
+        where.push(`(s.visibility = 'org' OR s.owner IN (${placeholders(q.viewer.own.length)}))`);
+        params.push(...q.viewer.own);
+      } else {
+        where.push("s.visibility = 'org'");
+      }
+    }
+    if (q.owners !== undefined) {
+      if (q.owners.length === 0) return { total: 0, hits: [] };
+      where.push(`s.owner IN (${placeholders(q.owners.length)})`);
+      params.push(...q.owners);
+    }
+    if (q.agent !== undefined) {
+      where.push("(s.agent = ? OR s.origin_agent = ?)");
+      params.push(q.agent, q.agent);
+    }
+    if (q.repo !== undefined) {
+      where.push("(s.project = ? COLLATE NOCASE OR s.project LIKE ? ESCAPE '\\')");
+      params.push(q.repo, `%/${likeLiteral(q.repo)}`);
+    }
+    if (q.branch !== undefined) {
+      where.push("s.branch = ?");
+      params.push(q.branch);
+    }
+    if (q.source !== undefined) {
+      where.push("s.source_id = ?");
+      params.push(q.source);
+    }
+    if (q.since !== undefined) {
+      where.push("coalesce(e.ts, s.updated_ms) >= ?");
+      params.push(q.since);
+    }
+    if (q.until !== undefined) {
+      where.push("coalesce(e.ts, s.updated_ms) <= ?");
+      params.push(q.until);
+    }
+    const matching = `
+      SELECT e.session AS sid, e.id AS eid, events_text.rank AS r
+      FROM events_text
+      JOIN events e ON e.id = events_text.rowid
+      JOIN sessions s ON s.id = e.session
+      WHERE ${where.join(" AND ")}`;
+    const order =
+      q.sort === "recent"
+        ? "s.updated_ms DESC, g.best ASC, s.id DESC"
+        : "g.best ASC, s.updated_ms DESC, s.id DESC";
+    const rows = this.db
+      .query(
+        `SELECT s.*, g.best AS best, g.hits AS hits, count(*) OVER () AS total
+         FROM (SELECT sid, min(r) AS best, count(*) AS hits FROM (${matching}) GROUP BY sid) g
+         JOIN sessions s ON s.id = g.sid
+         ORDER BY ${order}
+         LIMIT ? OFFSET ?`,
+      )
+      .all(...params, q.limit, q.offset) as (SessionRow & {
+      best: number;
+      hits: number;
+      total: number;
+    })[];
+    const total =
+      rows[0]?.total ??
+      (q.offset > 0
+        ? (
+            this.db.query(`SELECT count(DISTINCT sid) AS n FROM (${matching})`).get(...params) as {
+              n: number;
+            }
+          ).n
+        : 0);
+    const matches = this.matchesOf(
+      matching,
+      params,
+      rows.map((r) => r.id),
+      q.matches,
+      q.match,
+    );
+    const hits: BackendHit[] = rows.map((row) => ({
+      session: sessionOf(row),
+      score: Number((-row.best).toPrecision(6)),
+      hits: row.hits,
+      matches: matches.get(row.id) ?? [],
+    }));
+    return { total, hits };
+  }
+
+  /** The best `limit` matching events of each session, with snippets. FTS5 refuses
+   * `snippet()` beside a window function, so the events are picked first and their snippets
+   * read in a second query. */
+  private matchesOf(
+    matching: string,
+    params: readonly SQLQueryBindings[],
+    sessions: readonly number[],
+    limit: number,
+    match: string,
+  ): Map<number, BackendMatch[]> {
+    const out = new Map<number, BackendMatch[]>();
+    if (sessions.length === 0 || limit === 0) return out;
+    const picked = this.db
+      .query(
+        `SELECT sid, eid, r FROM (
+           SELECT sid, eid, r, row_number() OVER (PARTITION BY sid ORDER BY r, eid) AS n
+           FROM (${matching}) WHERE sid IN (${placeholders(sessions.length)})
+         ) WHERE n <= ? ORDER BY sid, r, eid`,
+      )
+      .all(...params, ...sessions, limit) as { sid: number; eid: number; r: number }[];
+    if (picked.length === 0) return out;
+    const ids = picked.map((p) => p.eid);
+    const details = this.db
+      .query(
+        `SELECT e.id AS id, e.content_hash, e.event_index, e.role, e.tool_name, e.ts,
+           snippet(events_text, 0, ?, ?, '…', ${SNIPPET_TOKENS}) AS marked
+         FROM events_text JOIN events e ON e.id = events_text.rowid
+         WHERE events_text MATCH ? AND events_text.rowid IN (${placeholders(ids.length)})`,
+      )
+      .all(MATCH_START, MATCH_END, match, ...ids) as {
+      id: number;
+      content_hash: string;
+      event_index: number;
+      role: string;
+      tool_name: string | null;
+      ts: number | null;
+      marked: string;
+    }[];
+    const byId = new Map(details.map((d) => [d.id, d]));
+    for (const { sid, eid } of picked) {
+      const d = byId.get(eid);
+      if (!d) continue;
+      const list = out.get(sid) ?? [];
+      list.push({
+        content_hash: d.content_hash,
+        event_index: d.event_index,
+        role: d.role as EventRole,
+        ...(d.tool_name !== null ? { tool_name: d.tool_name } : {}),
+        ...(d.ts !== null ? { timestamp: d.ts } : {}),
+        marked: d.marked,
+      });
+      out.set(sid, list);
+    }
+    return out;
+  }
+
+  counts(): { sessions: number; events: number } {
+    const sessions = this.db
+      .query("SELECT count(*) AS n FROM sessions WHERE removed = 0")
+      .get() as {
+      n: number;
+    };
+    const events = this.db.query("SELECT count(*) AS n FROM events").get() as { n: number };
+    return { sessions: sessions.n, events: events.n };
+  }
+
+  close(): void {
+    this.db.close();
+  }
+
+  // --- FeedState -----------------------------------------------------------------------
+
+  cursor(owner: string): string | undefined {
+    const row = this.db.query("SELECT cursor FROM feeds WHERE owner = ?").get(owner) as {
+      cursor: string | null;
+    } | null;
+    return row?.cursor ?? undefined;
+  }
+
+  seen(owner: string, keys: readonly string[]): Set<string> {
+    const found = new Set<string>();
+    const lookup = this.db.query("SELECT 1 AS hit FROM seen WHERE owner = ? AND key = ?");
+    for (const key of keys) if (lookup.get(owner, key) !== null) found.add(key);
+    return found;
+  }
+
+  advance(
+    owner: string,
+    cursor: string | undefined,
+    processed: readonly { key: string; at: number }[],
+    forgetBefore: number,
+  ): void {
+    this.transaction(() => {
+      const insert = this.db.query(
+        "INSERT INTO seen (owner, key, at) VALUES (?, ?, ?) ON CONFLICT DO NOTHING",
+      );
+      for (const { key, at } of processed) insert.run(owner, key, at);
+      const held = this.cursor(owner);
+      const next = held === undefined || (cursor !== undefined && cursor > held) ? cursor : held;
+      this.db
+        .query(
+          "INSERT INTO feeds (owner, cursor) VALUES (?, ?) ON CONFLICT (owner) DO UPDATE SET cursor = excluded.cursor",
+        )
+        .run(owner, next ?? null);
+      this.db.query("DELETE FROM seen WHERE owner = ? AND at < ?").run(owner, forgetBefore);
+    });
+  }
+
+  readyAt(): string | undefined {
+    return this.meta("ready_at");
+  }
+
+  caughtUpAt(): string | undefined {
+    return this.meta("caught_up_at");
+  }
+
+  caughtUp(at: string): void {
+    this.transaction(() => {
+      if (this.meta("ready_at") === undefined) this.setMeta("ready_at", at);
+      this.setMeta("caught_up_at", at);
+    });
+  }
+
+  reset(): void {
+    this.transaction(() => {
+      this.db.run("DELETE FROM events_text");
+      this.db.run("DELETE FROM events");
+      this.db.run("DELETE FROM sessions");
+      this.db.run("DELETE FROM seen");
+      this.db.run("DELETE FROM feeds");
+      this.db.run("DELETE FROM meta WHERE key IN ('ready_at', 'caught_up_at')");
+    });
+  }
+}

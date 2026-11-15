@@ -20,6 +20,7 @@
         "@seshi/pipeline": "workspace:*",
         "@seshi/redact": "workspace:*",
         "@seshi/review": "workspace:*",
+        "@seshi/search": "workspace:*",
         "@seshi/sources": "workspace:*",
         "@seshi/store": "workspace:*",
         "@types/bun": "1.4.2",
@@ -219,6 +220,15 @@
     },
     "packages/ts/search": {
       "name": "@seshi/search",
+      "dependencies": {
+        "@seshi/auth": "workspace:*",
+        "@seshi/model": "workspace:*",
+        "@seshi/pipeline": "workspace:*",
+        "@seshi/store": "workspace:*",
+      },
+      "devDependencies": {
+        "@seshi/formats": "workspace:*",
+      },
     },
     "packages/ts/sources": {
       "name": "@seshi/sources",
