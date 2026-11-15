@@ -30,6 +30,7 @@ import { NotSignedIn } from "./account/credential";
 import { allCaptureAgents } from "./capture-agents";
 import { hostOf } from "./commands/capture-host";
 import type { CommandContext } from "./commands/index";
+import { USER_AGENT } from "./user-agent";
 
 /** A sink and what to call when done with it. */
 export interface OpenedSink {
@@ -111,6 +112,7 @@ export async function serverSink(account: Account): Promise<OpenedSink> {
   }
   const sink = httpSink({
     target: server,
+    userAgent: USER_AGENT,
     credential: async () => {
       try {
         const credential = await accountCredential(account, server, "upload");
@@ -204,6 +206,7 @@ export function preRedactor(account: Account, options: PreRedactorOptions = {}):
     const db = new HttpSessionDB({
       server: credential.server,
       token: credential.token,
+      userAgent: USER_AGENT,
       ...(credential.user ? { user: credential.user } : {}),
     });
     const cached = readCachedRules(options.cacheFile, credential.server);

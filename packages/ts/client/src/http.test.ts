@@ -44,7 +44,7 @@ describe("HttpSessionDB", () => {
     expect(await db.me()).toEqual({ owner: "acme", storage: { url: "s3://b" } });
     expect(seen[0]?.url).toBe("https://seshi.example.com/v1/me");
     expect(seen[0]?.headers.authorization).toBe("Bearer tok");
-    expect(seen[0]?.headers["user-agent"]).toBe(`@dosu/sessiondb/${VERSION}`);
+    expect(seen[0]?.headers["user-agent"]).toBe(`@seshi/client/${VERSION}`);
   });
 
   it("fetches the org's redaction rules", async () => {

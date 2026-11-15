@@ -5,6 +5,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { HttpSessionDB } from "@seshi/client";
+import { VERSION } from "@seshi/model";
 import {
   archiveId,
   FsStore,
@@ -83,6 +84,18 @@ afterEach(async () => {
 });
 
 describe("seshi sessions against a server", () => {
+  it("names itself seshi/<version> to the server, not the client library's default", async () => {
+    const ingests = server.requests.filter((r) => r.path === "/v1/sessions");
+    expect(ingests[0]?.headers["user-agent"]).toBe(`@seshi/client/${VERSION}`);
+    const login = server.requests.filter((r) => r.path === "/v1/me");
+    expect(login.length).toBeGreaterThan(0);
+    const from = server.requests.length;
+    expect((await machine.seshi(["sessions", "ls"])).code).toBe(0);
+    const cli = [...login, ...server.requests.slice(from)];
+    expect(cli.length).toBeGreaterThan(login.length);
+    for (const request of cli) expect(request.headers["user-agent"]).toBe(`seshi/${VERSION}`);
+  });
+
   it("lists, as lines or one JSON document, and pages", async () => {
     const ls = await machine.seshi(["sessions", "ls"]);
     expect(ls.code, ls.err).toBe(0);

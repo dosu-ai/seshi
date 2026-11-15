@@ -147,7 +147,9 @@ lockups and the badge. It changed:
   - `@seshi/client`'s default `User-Agent` is still `@dosu/sessiondb/<version>`
     (`packages/ts/client/src/http.ts`), and the normalizer name every trace records is
     `@dosu/sessiondb` (`packages/ts/formats/src/registry.ts`). The second is pinned in
-    goldens and fixtures, so changing it is a decision, not a cleanup.
+    goldens and fixtures, so changing it is a decision, not a cleanup. *Resolved in 17 for the
+    user agent*: the default is `@seshi/client/<version>` and the CLI and uploader send
+    `seshi/<version>`; the normalizer name is unchanged.
   - `seshi --help` lists `sessions (ls|show|export|rm)` without `visibility`, which the
     command has.
   - The Docker Compose service and volume are still named `sessiondb` (kept on purpose, so an

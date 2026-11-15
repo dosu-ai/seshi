@@ -13,6 +13,7 @@ import { HttpSessionDB } from "@seshi/client";
 import { findServerConfig } from "@seshi/config";
 import { accountCredential, openAccount, serverOf } from "../account/account";
 import { expandHome } from "../connect";
+import { USER_AGENT } from "../user-agent";
 import type { CommandContext } from "./index";
 
 export type AdminTarget =
@@ -36,6 +37,7 @@ async function remote(ctx: CommandContext, server: string | undefined): Promise<
     db: new HttpSessionDB({
       server: url,
       token: credential.token,
+      userAgent: USER_AGENT,
       ...(credential.user ? { user: credential.user } : {}),
     }),
   };

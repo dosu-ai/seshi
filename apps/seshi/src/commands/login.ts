@@ -45,6 +45,7 @@ import { EXIT } from "../cli/exit";
 import { failWith, Refused } from "../cli/failures";
 import { emit, takeJson, usageError } from "../cli/output";
 import { printable, type Style, styleFor } from "../cli/style";
+import { USER_AGENT } from "../user-agent";
 import type { CommandContext } from "./index";
 
 const USAGE = `usage: seshi login [--server <url>] [--key <org key>|-] [--token <token>|-] [--user <name>]
@@ -83,7 +84,12 @@ async function secretArg(ctx: CommandContext, value: string, what: string): Prom
 /** Who a pasted credential is, as the server says; 401 means it does not accept it. */
 async function identify(server: string, token: string, user?: string): Promise<Identity> {
   try {
-    return await new HttpSessionDB({ server, token, ...(user ? { user } : {}) }).me();
+    return await new HttpSessionDB({
+      server,
+      token,
+      userAgent: USER_AGENT,
+      ...(user ? { user } : {}),
+    }).me();
   } catch (err) {
     if (err instanceof ServerError && err.status === 401) {
       throw new Refused(EXIT.auth, "unauthorized", `${server} does not accept that credential`);

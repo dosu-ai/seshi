@@ -59,7 +59,8 @@ export interface TransportOptions {
    * Default 120 s, the server's own idle timeout. 0 disables. */
   timeoutMs?: number;
   /** Sent as `User-Agent`, so a server's logs say which program called
-   * (`dosu-cli/0.68.5`). Default `@dosu/sessiondb/<version>`. */
+   * (`dosu-cli/0.68.5`). Default `@seshi/client/<version>`; the seshi CLI sends
+   * `seshi/<version>`. */
   userAgent?: string;
 }
 
@@ -129,7 +130,7 @@ async function send(
     if (value !== undefined) url.searchParams.set(key, String(value));
   }
   const headers: Record<string, string> = {
-    "user-agent": transport.userAgent ?? `@dosu/sessiondb/${VERSION}`,
+    "user-agent": transport.userAgent ?? `@seshi/client/${VERSION}`,
     ...options.headers,
   };
   let body: BodyInit | undefined;

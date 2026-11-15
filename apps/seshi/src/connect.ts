@@ -17,6 +17,7 @@ import { buildInstance, type Instance } from "@seshi/instance";
 import type { Integration } from "@seshi/kit";
 import type { SessionDB } from "@seshi/model";
 import { buildFormats } from "./integrations";
+import { USER_AGENT } from "./user-agent";
 
 /** The CLI config names neither a server nor local mode, or names one it cannot use. */
 export class NotConnected extends Error {
@@ -91,6 +92,7 @@ export async function connect(options: ConnectOptions): Promise<Connection> {
       db: new HttpSessionDB({
         server: cli.server,
         token: options.token,
+        userAgent: USER_AGENT,
         ...(options.user ? { user: options.user } : {}),
       }),
       mode: "server",

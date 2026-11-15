@@ -47,6 +47,7 @@ import { failWith } from "../cli/failures";
 import { emit, fail, takeJson, usageError } from "../cli/output";
 import { printable, Style, styleFor } from "../cli/style";
 import { NotConnected } from "../connect";
+import { USER_AGENT } from "../user-agent";
 import type { CommandContext } from "./index";
 import { openServer, serverFailure } from "./server-instance";
 
@@ -338,6 +339,7 @@ export async function run(ctx: CommandContext): Promise<number> {
           new HttpSessionDB({
             server: normalizeServer(server),
             token: values.token,
+            userAgent: USER_AGENT,
             ...(user !== undefined ? { user } : {}),
           }),
           user,

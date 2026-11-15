@@ -16,6 +16,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { VERSION } from "@seshi/model";
 import { getSession } from "@seshi/pipeline";
 import { compileRuleSet, validatePack } from "@seshi/redact";
 import { readChanges } from "@seshi/store";
@@ -773,6 +774,9 @@ describe("pre-redaction before upload (F2.4)", () => {
     expect(first?.body).toContain("[redacted:acme-key]");
     expect(rulesFetches()).toMatchObject([{ status: 200 }]);
     expect(rulesFetches()[0]?.headers["if-none-match"]).toBeUndefined();
+    // The uploader names itself as the CLI does, not as the client library's default.
+    expect(first?.headers["user-agent"]).toBe(`seshi/${VERSION}`);
+    expect(rulesFetches()[0]?.headers["user-agent"]).toBe(`seshi/${VERSION}`);
     expect(existsSync(join(stateDir(), "redaction-rules.json"))).toBe(true);
     // The withheld call stays with the session for the next piece, and the server's offset is
     // counted in redacted bytes.

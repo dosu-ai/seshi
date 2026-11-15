@@ -32,6 +32,7 @@ import { NotSignedIn } from "./account/credential";
 import { EXIT } from "./cli/exit";
 import { Refused } from "./cli/failures";
 import type { CommandContext } from "./commands/index";
+import { USER_AGENT } from "./user-agent";
 
 export interface TraceOptions extends OwnerOption {
   hash?: string;
@@ -301,6 +302,7 @@ export async function openBackend(
     new HttpSessionDB({
       server,
       token: credential.token,
+      userAgent: USER_AGENT,
       ...(credential.user ? { user: credential.user } : {}),
     }),
     credential.user,
