@@ -7,6 +7,8 @@ import { join } from "node:path";
 import { createApp } from "@seshi/api";
 import { InstanceError } from "@seshi/instance";
 import type { StoreSessionResult } from "@seshi/model";
+import { backfillRedaction } from "@seshi/pipeline";
+import { compileRuleSet, ruleRedactor, validatePack } from "@seshi/redact";
 import { type FakeServer, fakeProviderServer, KeywordModel } from "@seshi/review/testing";
 import { listRecords, listReviews, readMetadata } from "@seshi/store";
 import { afterEach, describe, expect, it } from "vitest";
@@ -225,6 +227,68 @@ describe("model review in the pipeline", () => {
     expect(reviews.map((r) => [r.decision, r.content_hash])).toEqual([
       ["allow", head.content_hash],
       ["allow", tail.content_hash],
+    ]);
+  });
+
+  it("keeps what review took out through a redaction backfill, and asks no model again (07)", async () => {
+    // `seshi redact backfill` re-redacts the stored, reviewed trace with the new rules only:
+    // review's markers and withheld results are already in it, and no session text is sent to
+    // a provider again (see docs/seshi/build/08-model-review.md).
+    const DUMP = "vault dump: hunter2-prod-root";
+    const s = server({
+      model: new KeywordModel({
+        sensitive: [
+          { text: SECRET, category: "secret" },
+          { text: DUMP, category: "secret", action: "withhold" },
+        ],
+      }),
+    });
+    const { ingest, db, store, dir } = await boot(anthropic(s));
+    const call = line({
+      role: "assistant",
+      content: null,
+      tool_calls: [{ id: "c1", name: "Read", args: JSON.stringify({ path: "notes.txt" }) }],
+      timestamp: ts,
+    });
+    const result = line({ role: "tool", tool_call_id: "c1", content: DUMP, timestamp: ts });
+    const head = stored(
+      await ingest(
+        META + user(`log in with ops / ${SECRET}`) + call + result + reply("use ACME-1234 next"),
+      ),
+    );
+    const calls = s.requests.length;
+    expect(calls).toBe(2);
+
+    const acme = validatePack(
+      { id: "acme", rules: [{ id: "acme-key", pattern: "ACME-\\d{4}" }] },
+      { source: "acme.toml" },
+    );
+    const report = await backfillRedaction({
+      store,
+      redactor: ruleRedactor(compileRuleSet({ packs: [acme] })),
+      writer: { kind: "admin", principal: "admin", source_id: "redaction" },
+    });
+    expect(report.outcomes.rewritten).toBe(1);
+    expect(report.counts).toEqual({ "acme-key": 1 });
+    expect(s.requests).toHaveLength(calls);
+
+    const trace = await db.getTrace("trajectory", "s1");
+    const text = JSON.stringify(trace);
+    expect(text).toContain("log in with ops / [redacted:secret]");
+    expect(text).toContain("use [redacted:acme-key] next");
+    const records = trace && "records" in trace ? trace.records : [];
+    expect(records.find((r) => r.role === "tool")).toMatchObject({
+      content: "[redacted:secret]",
+      withheld: "review",
+    });
+    for (const gone of [SECRET, DUMP, "ACME-1234"]) expect(bucketText(dir)).not.toContain(gone);
+
+    // The review record stays, naming the trace the write produced (now replaced).
+    const metadata = await readMetadata(store, "alice", head.archive_id);
+    expect(metadata?.head).not.toBe(head.content_hash);
+    const reviews = await listReviews(store, "alice", head.archive_id);
+    expect(reviews.map((r) => [r.decision, r.content_hash])).toEqual([
+      ["redact", head.content_hash],
     ]);
   });
 

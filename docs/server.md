@@ -239,7 +239,10 @@ on the records the upload adds (a continuation's new records only):
 A failed call, or an answer that does not fit, is retried with backoff (`retries`, 3). After the
 last, `on_failure` decides: `drop` (the default: a drop record with reason `review_failed` and
 which step failed) or `skip` (written with regex redaction only, recorded as `skipped`).
-A resend of an upload is answered from the session and not reviewed again.
+A resend of an upload is answered from the session and not reviewed again. A policy applies to
+what is written after the server restarts with it: `seshi redact backfill` applies new regex
+rules to stored sessions but does not send them to review again, and what review took out
+stays out.
 
 **What leaves the server.** Only the text of the records being judged: each record's content
 and each tool call's arguments, with the record's role and the tool's name. Never the

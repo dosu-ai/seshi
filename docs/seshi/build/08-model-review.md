@@ -209,8 +209,15 @@ anywhere. Reference: [docs/server.md](../../server.md#model-review),
   sequentially. Parallel parts and a per-call concurrency limit are possible later.
 - **Re-review of first uploads.** A dropped first envelope stores nothing (04's deviation 9),
   so the uploader resends the whole log as it grows and each resend is reviewed again, whole.
-- **`llm_calls` are not reviewed** (nor regex-redacted, 04's open item): `LlmCall.error` and
-  `parameters` are free text. 09 should keep content out of them.
+- **`llm_calls` are not reviewed.** Since 07 is below this branch, `Pipeline.commit` regex-redacts
+  their free text (`LlmCall.error` and string `parameters`, `redactLlmCalls`), and backfill
+  does too; model review still judges only the records. 09 should keep content out of them.
+- **Review records after a redaction backfill.** `review/<n>.json` names the trace its write
+  produced (`content_hash`) and indexes findings by that trace's records. A backfill that
+  rewrites the session joins its traces into one new trace and deletes the old objects, so the
+  record's `content_hash` then names a trace that is gone and its indexes are not the new
+  trace's. The decision, policy and categories still hold; `tests/review/review.test.ts` pins
+  this. Mapping findings onto the joined trace (or recording the replacement) is left open.
 - **`config check` does not read prompt files**; an unreadable one fails at `serve`/build time.
 - **No rate limiting** of provider calls; a provider's 429s are retried with backoff and then
   fall to `on_failure`.
@@ -233,10 +240,20 @@ anywhere. Reference: [docs/server.md](../../server.md#model-review),
 
 ## Cross-branch wiring once the stack is linear
 
-- **07 (rule packs)**: review runs after the `Redactor`, on its output; nothing to wire. `seshi
-  redact backfill` (F2.5) rewrites stored traces with new rules and does not re-run model review;
-  if it should, it can call `instance.pipeline`'s reviewer path or `ModelReviewer.review` on the
-  rewritten records. `scripts/check-hook.ts` and `check-layers.ts` both gained lines here.
+- **07 (rule packs), done on rebase**: review runs after the `Redactor`, on its output. The
+  additive lines in `scripts/check-hook.ts` and `check-layers.ts` merged cleanly with 07's.
+  **Decision: `seshi redact backfill` does not re-run model review.** It re-redacts the stored
+  trace, which is already the reviewed one, so review's `[redacted:<category>]` markers and
+  `withheld: "review"` results stay (a built-in `sensitive-file` or `secret-output` rule may
+  still re-mark a result it withholds; it stays withheld). Re-running review would send every
+  stored session's text to the providers again in one batch, with policies written after the
+  fact; a `drop` has no meaning for a session already stored (it would be a deletion, which
+  is `sessions rm`'s job); and model answers are not deterministic, so backfill would stop
+  being idempotent. A new policy applies to what is written after the server restarts with it,
+  as new regex rules do before a backfill. If reviewing stored sessions is wanted, it is a
+  separate, deliberate command (not built). Test: "keeps what review took out through a
+  redaction backfill" in `tests/review/review.test.ts` (no provider call, markers and the
+  withheld result kept, new rule applied).
 - **09 (OTLP / assembler)**: `Pipeline.publishAssembled` already runs review (F3.2: review on
   the assembled session before publish), judging only what extends the stored trace. Nothing
   to wire, but the drop and failure records will name the OTLP source id, and a policy scoped
