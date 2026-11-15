@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BUILTIN_FORMATS, FormatRegistry } from "@seshi/formats";
@@ -628,6 +628,88 @@ describe("backfillRedaction (F2.5)", () => {
     // An owner named on the command line is walked the same way.
     await putSpan(store, "bob", refused, span("0000000000000004", "ACME-4444"));
     expect((await run({ owners: ["bob"] })).spans).toBe(1);
+  });
+
+  it("deletes a stopped run's leftovers in the next run's sweep, and says so", async () => {
+    await store1("s1", meta() + user(`key ACME-1234 ${LONG}`) + reply("ok"));
+    const archive = archiveId("alice", "trajectory", "s1");
+    const old = (await metadata("s1"))?.head as string;
+    // The run stops after the pointer moved and the entry was appended: the old delete fails.
+    const failing: Store = new Proxy(store, {
+      get(target, prop, receiver) {
+        if (prop === "delete") {
+          return async (key: string) => {
+            if (key === keys.trace("alice", archive, old)) throw new Error("transient");
+            return target.delete(key);
+          };
+        }
+        return Reflect.get(target, prop, receiver);
+      },
+    }) as Store;
+    await expect(run({ store: failing })).rejects.toThrow("transient");
+    expect(await getTrace(store, "alice", archive, old)).not.toBeNull();
+
+    // The next run finds the session current, and its sweep deletes the old object (written
+    // long before the run's clock, so past the hour).
+    const seen: (number | undefined)[] = [];
+    const next = await run({ onSession: (s) => seen.push(s.swept) });
+    expect(next.outcomes).toMatchObject({ current: 1 });
+    expect(next.sweep).toEqual({ deleted: 1, young: 0, errors: 0 });
+    expect(seen).toEqual([1]);
+    expect(await getTrace(store, "alice", archive, old)).toBeNull();
+    const head = (await metadata("s1"))?.head as string;
+    expect(await getTrace(store, "alice", archive, head)).not.toBeNull();
+    expect((await run()).sweep.deleted).toBe(0);
+  });
+
+  it("sweeps what it looked at by the age guard, and deletes nothing in a dry run", async () => {
+    await store1("s1", meta() + user(`ACME-1234 ${LONG}`) + reply("ok"));
+    const archive = archiveId("alice", "trajectory", "s1");
+    const left = keys.trace("alice", archive, "a".repeat(64));
+    await store.put(left, new TextEncoder().encode("left behind"));
+    // On the real clock the object was written just now: under the hour, so it stays.
+    const fresh = await run({ now: () => new Date(), dryRun: true });
+    expect(fresh.sweep).toEqual({ deleted: 0, young: 1, errors: 0 });
+    // Two hours on, a dry run says it would go and leaves it.
+    const later = () => new Date(Date.now() + 2 * 60 * 60 * 1000);
+    expect((await run({ now: later, dryRun: true })).sweep.deleted).toBe(1);
+    expect(await store.stat(left)).not.toBeNull();
+    // A session the run does not look at (not written since `since`) is not swept by it.
+    const since = new Date("2100-01-01T00:00:00Z");
+    expect((await run({ now: later, since })).sweep.deleted).toBe(0);
+    expect((await run({ now: later })).sweep.deleted).toBe(1);
+    expect(await store.stat(left)).toBeNull();
+  });
+
+  it("deletes what an earlier stopped write left once it is an hour old, and keeps what is younger", async () => {
+    const first = await store1("s1", meta() + user(`hello ${LONG}`) + reply("ok"));
+    const archive = archiveId("alice", "trajectory", "s1");
+    const old = await leftover(archive, "a".repeat(64), 2 * 60 * 60 * 1000);
+    const young = await leftover(archive, "b".repeat(64), 60 * 1000);
+
+    const replaced = await store1(
+      "s1",
+      meta() + user(`rewritten ${LONG}`) + reply("ok"),
+      0,
+      "alice",
+      compileRuleSet(),
+      true,
+    );
+    expect(replaced.status).toBe("stored");
+    expect(await store.stat(old)).toBeNull();
+    expect(await store.stat(young)).not.toBeNull();
+    // What the replace replaced is gone, as before; its own trace stays.
+    const hashOf = (r: StoreSessionResult) => (r as { content_hash: string }).content_hash;
+    expect(await store.stat(keys.trace("alice", archive, hashOf(first)))).toBeNull();
+    expect(await store.stat(keys.trace("alice", archive, hashOf(replaced)))).not.toBeNull();
+  });
+
+  it("does not sweep after a write that is not a replace", async () => {
+    const first = await store1("s1", meta() + user(`hello ${LONG}`) + reply("ok"));
+    const archive = archiveId("alice", "trajectory", "s1");
+    const old = await leftover(archive, "a".repeat(64), 2 * 60 * 60 * 1000);
+    await store1("s1", user(`more ${LONG}`) + reply("done"), first.bytes_total);
+    expect(await store.stat(old)).not.toBeNull();
   });
 
   it("writes its change entry before the pointer: a run stopped between leaves the session as it was (decision 7 of 18)", async () => {

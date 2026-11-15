@@ -50,6 +50,7 @@ import {
   publishObject,
   readMetadata,
   type Store,
+  sweepTraces,
   updateMetadata,
   updateMetadataWithChange,
 } from "@seshi/store";
@@ -178,6 +179,7 @@ export interface IngestInput extends WriteContext {
   /** The trace replaces the session's traces instead of extending them (X4.6): the pointer
    * lists only it, the earlier objects are removed, the session's applied envelopes and
    * redaction counts start over from this write, and the change entry says `replace`. The
+   * session is then swept (F2.5): trace objects no metadata names, over an hour old, go. The
    * caller has checked that this writer may. */
   replace?: boolean;
   /** Runs on the stored pointer inside the conditional update, before anything changes; throws
@@ -404,6 +406,13 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
   }
   // The pointer no longer lists them, so no reader looks for them any more.
   for (const hash of replaced) await store.delete(keys.trace(owner, archive, hash));
+
+  // F2.5's sweep, scoped to this session: what an earlier replace (or backfill, or publish) that
+  // stopped partway left behind, unnamed and over an hour old. It never throws; a sweep that
+  // fails leaves them for the worker's daily one.
+  if (input.replace) {
+    await sweepTraces(store, { sessions: [{ owner, archive_id: archive }], now });
+  }
 
   return {
     status: duplicate ? "duplicate" : "stored",

@@ -36,6 +36,15 @@
  * session's records are done, every message a rewritten record stopped naming and no record
  * names any more is deleted: it holds what the new rules take out.
  *
+ * The sweep (F2.5, revised 15 Nov 2026): each session looked at (every one with a trace, whatever
+ * its outcome) is then swept: its trace objects no metadata names that are over an hour old are
+ * deleted (`sweepTraces`). That finishes what an earlier run stopped partway left behind (the
+ * old objects of a session it rewrote before it could delete them, which the next run finds
+ * `current`), and anything a stopped replace or publish left in the session. It runs session by
+ * session rather than once at the end, so a run over a large bucket keeps no list of what it
+ * touched; a run stopped by the signal skips it for the session it stopped in. A dry run reports
+ * what the sweep would delete. The report's `sweep` sums them.
+ *
  * Not touched: `normalized` (the uploader's log state). A later whole upload of such a session,
  * redacted from the transcript with the same new rules, may not hash to the stored prefix; it
  * is then a 409 `conflict`, which the uploader answers with `replace` (as after any rules
@@ -67,9 +76,11 @@ import {
   putSpan,
   SpanMessages,
   type Store,
+  type SweepReport,
   spanRecords,
   storedHashes,
   storedInputOf,
+  sweepTraces,
   updateMetadata,
   updateMetadataWithChange,
   withInput,
@@ -106,6 +117,8 @@ export interface BackfillSession {
   message?: string;
   /** Span records redacted again with the current rules (or that would be, in a dry run). */
   spans?: number;
+  /** Trace objects of the session no metadata names that the sweep deleted (or would). */
+  swept?: number;
 }
 
 export interface BackfillOptions {
@@ -142,6 +155,37 @@ export interface BackfillReport {
   spans: number;
   /** Stopped at `limit` or by the signal before every session was looked at. */
   more: boolean;
+  /** The sweep of the sessions looked at (F2.5): trace objects no metadata names, over an hour
+   * old, deleted (or that would be, in a dry run), and the sessions it could not finish. */
+  sweep: BackfillSweep;
+}
+
+export interface BackfillSweep {
+  deleted: number;
+  /** Unnamed objects kept because they are under an hour old. */
+  young: number;
+  errors: number;
+  /** The first error. */
+  error?: string;
+}
+
+/** Sweep one session the backfill looked at, adding to the report. */
+async function sweepAfter(
+  done: BackfillSession,
+  options: BackfillOptions,
+  report: BackfillReport,
+): Promise<void> {
+  const swept: SweepReport = await sweepTraces(options.store, {
+    sessions: [{ owner: done.owner, archive_id: done.archive_id }],
+    dryRun: options.dryRun === true,
+    ...(options.now ? { now: options.now } : {}),
+    ...(options.signal ? { signal: options.signal } : {}),
+  });
+  report.sweep.deleted += swept.deleted;
+  report.sweep.young += swept.young;
+  report.sweep.errors += swept.errors;
+  if (swept.error !== undefined) report.sweep.error ??= swept.error;
+  if (swept.deleted > 0) done.swept = swept.deleted;
 }
 
 /** The sessions under one owner, every page. */
@@ -431,9 +475,9 @@ async function backfillSession(
     }
     throw err;
   }
-  // The old objects go last: a run stopped before this leaves them behind, which nothing deletes
-  // later (17-review's not-fixed list), but no read serves them: the trace routes and `getTrace`
-  // serve only a hash the pointer names.
+  // The old objects go last: a run stopped before this leaves them behind, which the sweep
+  // deletes (the next run's, or the worker's daily one), and no read serves them meanwhile: the
+  // trace routes and `getTrace` serve only a hash the pointer names.
   for (const hash of old) {
     if (hash !== trace.content_hash) await store.delete(keys.trace(owner, archive, hash));
   }
@@ -505,6 +549,7 @@ export async function backfillRedaction(options: BackfillOptions): Promise<Backf
     sessions: [],
     spans: 0,
     more: false,
+    sweep: { deleted: 0, young: 0, errors: 0 },
   };
   for (const owner of options.owners ?? []) {
     if (!isOwner(owner)) throw new Error(`'${owner}' is not an owner id`);
@@ -533,6 +578,7 @@ export async function backfillRedaction(options: BackfillOptions): Promise<Backf
           done.spans = spans;
           report.spans += spans;
         }
+        if (!options.signal?.aborted) await sweepAfter(done, options, report);
       }
       report.outcomes[done.outcome]++;
       if (done.outcome === "rewritten" && done.counts) addCounts(report.counts, done.counts);
