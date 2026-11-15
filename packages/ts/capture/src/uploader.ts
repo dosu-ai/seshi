@@ -301,8 +301,12 @@ export class Uploader {
     const state = readState(this.paths);
     const keys = Object.keys(state.sessions)
       .filter((k) => !options.only || options.only.has(k))
-      .sort((a, b) =>
-        (state.sessions[a]?.last_seen ?? "").localeCompare(state.sessions[b]?.last_seen ?? ""),
+      // Oldest first; the key breaks ties, so sessions seen at the same moment go in the same
+      // order whatever order the spool entries were read in.
+      .sort(
+        (a, b) =>
+          (state.sessions[a]?.last_seen ?? "").localeCompare(state.sessions[b]?.last_seen ?? "") ||
+          (a < b ? -1 : a > b ? 1 : 0),
       );
 
     // Retractions first: a session turned off stops before anything more of it is sent.

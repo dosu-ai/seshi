@@ -183,17 +183,23 @@ function uploader(options: Partial<UploaderOptions> = {}): Uploader {
 }
 
 /** What a hook would have spooled for session `id`. */
-function hooked(id = "s1", path = transcript(id)): void {
-  appendSpool(paths, {
-    v: 1,
-    kind: "capture",
-    at: clock.toISOString(),
-    agent: "fake",
-    event: "Stop",
-    session_id: id,
-    transcript_path: path,
-    cwd: dir,
-  });
+/** A hook's spool entry, seen at `clock`. `spooledAt` names the spool file (the real time by
+ * default, as the hook does), which orders entries that share a moment. */
+function hooked(id = "s1", path = transcript(id), spooledAt?: Date): void {
+  appendSpool(
+    paths,
+    {
+      v: 1,
+      kind: "capture",
+      at: clock.toISOString(),
+      agent: "fake",
+      event: "Stop",
+      session_id: id,
+      transcript_path: path,
+      cwd: dir,
+    },
+    spooledAt,
+  );
 }
 
 const session = (id = "s1"): SessionState =>
@@ -658,6 +664,20 @@ describe("running", () => {
     const running = uploader({ pollMs: 5 }).run({ signal: stop.signal, keepAlive: true });
     stop.abort();
     await running;
+  });
+
+  it("sends sessions seen at the same moment in key order, whatever the spool order", async () => {
+    // Two hooks in the same millisecond: the spool's random suffix, not the hook, decided
+    // which entry was read first, and so which session went first.
+    for (const [id, spooledAt] of [
+      ["s2", new Date(1)],
+      ["s1", new Date(2)],
+    ] as const) {
+      writeFileSync(transcript(id), line("one", id) + line("two", id));
+      hooked(id, transcript(id), spooledAt);
+    }
+    await uploader().pass();
+    expect(server.uploads.map((u) => u.session_id)).toEqual(["s1", "s2"]);
   });
 
   it("beats between sessions, and stops mid-pass once another uploader took over", async () => {
