@@ -50,7 +50,7 @@ import {
   type RuleSet,
 } from "@seshi/redact";
 import { ReviewSetupError, reviewerFromConfig } from "@seshi/review";
-import { Sources } from "@seshi/sources";
+import { builtinConnectors, Sources } from "@seshi/sources";
 import {
   assertOwner,
   ensureLayout,
@@ -89,9 +89,12 @@ export interface InstanceParts {
   formats: FormatRegistry;
   /** The deployment the bucket belongs to (the layout marker's `deployment_id`, X1.4). */
   deployment: string;
-  /** The connectors this binary has: the integrations' (`connectorsOf`), and later the
-   * built-in S3 poller. */
+  /** The connectors this binary has: the integrations' (`connectorsOf`). The built-in S3
+   * poller (F6) is added unless one of these polls `s3` already. */
   connectors?: readonly Connector[];
+  /** Where the built-in S3 poller reads bucket keys from when a source sets none (`AWS_*`,
+   * `S3_*`, `R2_*`); `process.env` by default. */
+  env?: Readonly<Record<string, string | undefined>>;
   /** The redaction rule set: the built-in pack and the operator's packs (F2.1).
    * `buildInstance` reads `redaction.packs` into it; the built-in pack alone when omitted. */
   redaction?: RedactionRules;
@@ -238,11 +241,17 @@ export class Instance {
       visibility: parts.visibility ?? ((sourceId) => visibilityFor(config, sourceId)),
     });
 
+    const given = parts.connectors ?? [];
+    const builtin = builtinConnectors({
+      formats: this.formats,
+      maxBytes: this.limits.max_upload_bytes,
+      ...(parts.env ? { env: parts.env } : {}),
+    }).filter((c) => !given.some((g) => g.kind === c.kind));
     this.sources = new Sources({
       store: this.store,
       pipeline: this.pipeline,
       sources: config.sources,
-      connectors: parts.connectors ?? [],
+      connectors: [...given, ...builtin] as Connector[],
       ...(parts.fetch ? { fetch: parts.fetch } : {}),
       log: this.log,
       now: this.now,
@@ -490,7 +499,6 @@ export async function buildInstance(
 
   const {
     store: _store,
-    env: _env,
     integrations,
     connectors,
     probe: probed,
