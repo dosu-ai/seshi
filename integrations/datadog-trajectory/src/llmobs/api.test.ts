@@ -69,6 +69,7 @@ describe("the search request", () => {
   it("refuses a tag that is not key:value", () => {
     expect(() => tagFilter(["prod"])).toThrow(/key:value/);
     expect(() => tagFilter([":x"])).toThrow(/key:value/);
+    expect(() => tagFilter(["env:prod", "env:staging"])).toThrow(/given twice/);
     expect(tagFilter([])).toBeUndefined();
   });
 });
@@ -268,6 +269,49 @@ describe("searchPage", () => {
     });
     await expect(searchPage(unreachable, query)).rejects.toThrow(/could not reach Datadog/);
     expect(waits).toEqual([1000, 2000]);
+  });
+
+  it("does not follow a redirect, so the keys never reach another host", async () => {
+    const elsewhere: (string | null)[] = [];
+    const other = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch(request) {
+        elsewhere.push(request.headers.get("dd-api-key"));
+        return Response.json({ data: [], meta: {} });
+      },
+    });
+    try {
+      replies.push(
+        () =>
+          new Response(null, {
+            status: 307,
+            headers: { location: `http://localhost:${other.port}${SEARCH_PATH}` },
+          }),
+      );
+      const err = await searchPage(options(), query).catch((e) => e);
+      expect(err).toBeInstanceOf(DatadogApiError);
+      expect(err.status).toBe(307);
+      expect(err.message).toMatch(/redirect, not followed/);
+      expect(err.message).not.toContain("dd-api-key-secret");
+      expect(elsewhere).toEqual([]);
+    } finally {
+      other.stop(true);
+    }
+  });
+
+  it("gives up on a request that does not answer in time, and tries again", async () => {
+    replies.push(() => new Promise<Response>(() => {}), ok);
+    const page = await searchPage(options({ requestTimeoutMs: 50 }), query);
+    expect(page.spans).toHaveLength(1);
+    expect(waits).toEqual([1000]);
+    replies.push(
+      () => new Promise<Response>(() => {}),
+      () => new Promise<Response>(() => {}),
+    );
+    await expect(searchPage(options({ requestTimeoutMs: 50, attempts: 2 }), query)).rejects.toThrow(
+      /could not reach Datadog: no answer within 1s/,
+    );
   });
 
   it("stops when the run is aborted", async () => {

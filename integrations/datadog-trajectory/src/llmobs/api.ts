@@ -5,8 +5,10 @@
  *
  * 429 answers honour `Retry-After` (else `X-RateLimit-Reset`), waiting inside the run; 5xx
  * answers, a query Datadog cut short (`meta.status: timeout`) and network failures are retried
- * with backoff. Everything else is an error for the run, which leaves the checkpoint where it
- * was (X4.8). No message ever holds a key. */
+ * with backoff, and so is a request that has not answered within `requestTimeoutMs`. Everything
+ * else is an error for the run, which leaves the checkpoint where it was (X4.8). Redirects are
+ * not followed: fetch would carry the `DD-API-KEY` and `DD-APPLICATION-KEY` headers to wherever
+ * the redirect points. No message ever holds a key. */
 
 import type {
   DatadogSearchRequest,
@@ -57,7 +59,10 @@ export function tagFilter(tags: readonly string[]): Record<string, string> | und
     if (at <= 0 || at === tag.length - 1) {
       throw new Error(`tag '${tag}' is not key:value`);
     }
-    out[tag.slice(0, at)] = tag.slice(at + 1);
+    const key = tag.slice(0, at);
+    // The filter is a map: a second value for a key would silently replace the first.
+    if (key in out) throw new Error(`tag key '${key}' is given twice; a span must carry all tags`);
+    out[key] = tag.slice(at + 1);
   }
   return Object.keys(out).length > 0 ? out : undefined;
 }
@@ -161,7 +166,13 @@ export function readSearchResponse(value: unknown): SearchPage {
       continue;
     }
     const a = (item as DatadogSpanResource).attributes;
-    spans.push({ ...a, span_id: String(a.span_id), trace_id: String(a.trace_id) });
+    spans.push({
+      ...a,
+      span_id: String(a.span_id),
+      trace_id: String(a.trace_id),
+      // A number id (not the documented string) is read like span_id.
+      ...(typeof (a.parent_id as unknown) === "number" ? { parent_id: String(a.parent_id) } : {}),
+    });
   }
   if (data.length > 0 && spans.length === 0) {
     throw new DatadogShapeError(`no span in the answer could be read (${first})`);
@@ -191,6 +202,10 @@ export interface ExportApiOptions {
   maxRateLimitWaitMs?: number;
   /** Base of the exponential backoff (default 1 s). */
   backoffMs?: number;
+  /** How long one request may take, answer body included, before it counts as a network
+   * failure and is retried (default 2 minutes). The job runner has no run timeout, so a request
+   * that never answers would otherwise hold the source's run forever. */
+  requestTimeoutMs?: number;
   /** For `Retry-After` given as an HTTP date. */
   now?: () => number;
 }
@@ -259,6 +274,7 @@ export async function searchPage(
   const maxWait = options.maxRateLimitWaitMs ?? 300_000;
   const base = options.backoffMs ?? 1000;
   const now = options.now ?? Date.now;
+  const requestTimeout = options.requestTimeoutMs ?? 120_000;
   const body = JSON.stringify(searchBody(query));
   const url = `${options.baseUrl}${SEARCH_PATH}`;
   let failures = 0;
@@ -267,6 +283,20 @@ export async function searchPage(
 
   for (;;) {
     options.signal.throwIfAborted();
+    const timeout = AbortSignal.timeout(requestTimeout);
+    const signal = AbortSignal.any([options.signal, timeout]);
+    /** A failure of this attempt's request (unreachable, or no answer in time). */
+    const failed = async (err: unknown): Promise<void> => {
+      if (options.signal.aborted) throw options.signal.reason ?? err;
+      failures++;
+      const reason = timeout.aborted
+        ? `no answer within ${Math.ceil(requestTimeout / 1000)}s`
+        : err instanceof Error
+          ? err.message
+          : String(err);
+      if (failures >= attempts) throw new DatadogApiError(`could not reach Datadog: ${reason}`);
+      await sleep(backoff(), options.signal);
+    };
     let response: Response;
     try {
       response = await options.fetch(url, {
@@ -278,15 +308,21 @@ export async function searchPage(
           "dd-application-key": options.appKey,
         },
         body,
-        signal: options.signal,
+        // Never follow: the keys would go along to the redirect's host.
+        redirect: "manual",
+        signal,
       });
     } catch (err) {
-      if (options.signal.aborted) throw options.signal.reason ?? err;
-      failures++;
-      const reason = err instanceof Error ? err.message : String(err);
-      if (failures >= attempts) throw new DatadogApiError(`could not reach Datadog: ${reason}`);
-      await sleep(backoff(), options.signal);
+      await failed(err);
       continue;
+    }
+
+    if (response.status >= 300 && response.status < 400) {
+      await response.body?.cancel().catch(() => {});
+      throw new DatadogApiError(
+        `Datadog answered ${response.status} (a redirect, not followed so the keys stay with ${new URL(url).host}); check site or api_url`,
+        response.status,
+      );
     }
 
     if (response.status === 429) {
@@ -331,9 +367,16 @@ export async function searchPage(
       );
     }
 
+    let text: string;
+    try {
+      text = await response.text();
+    } catch (err) {
+      await failed(err);
+      continue;
+    }
     let json: unknown;
     try {
-      json = await response.json();
+      json = JSON.parse(text);
     } catch {
       throw new DatadogShapeError("the answer is not JSON");
     }
