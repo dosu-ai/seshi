@@ -6,8 +6,11 @@
  * The client is built so that nothing comes from the environment: the key and the endpoint are
  * the step's (the SDK would otherwise read `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL` and local
  * profiles), the SDK's own retries are off (F3.4's retries are the reviewer's), its
- * OpenTelemetry spans are off (they could carry content to a tracer), and redirects are refused
- * (content goes to the configured endpoint only). */
+ * OpenTelemetry spans are off (they could carry content to a tracer), its logging is off (it
+ * would read `ANTHROPIC_LOG`, and at `debug` log request bodies), and redirects are refused
+ * (content goes to the configured endpoint only). One environment read cannot be turned off:
+ * `ANTHROPIC_CUSTOM_HEADERS` adds headers to every request. It carries no content and is the
+ * operator's own environment. */
 
 import Anthropic, {
   APIConnectionError,
@@ -49,6 +52,9 @@ export class AnthropicProvider implements ModelProvider {
       baseURL: options.baseUrl,
       maxRetries: 0,
       openTelemetry: false,
+      // The SDK reads ANTHROPIC_LOG otherwise, and at `debug` it logs every request with its
+      // body: the session's text would land in the server's logs.
+      logLevel: "off",
       fetchOptions: { redirect: "error" },
       ...(options.fetch ? { fetch: options.fetch } : {}),
     });

@@ -1,7 +1,7 @@
 /** The real providers against a local server that imitates their APIs (`fakeProviderServer`);
  * no test reaches a real API. */
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AnthropicProvider } from "./anthropic";
 import { OpenAiCompatibleProvider } from "./openai";
 import { DECISION_SCHEMA } from "./prompts";
@@ -96,6 +96,25 @@ describe("AnthropicProvider", () => {
     }
     expect(server.requests).toHaveLength(1);
     expect(JSON.stringify(server.requests[0]?.headers)).not.toContain("sk-from-env");
+  });
+
+  it("never logs the request, whatever ANTHROPIC_LOG says (the content would reach the logs)", async () => {
+    const server = serve(() => ({ answer: { label: "allow" } }));
+    const saved = process.env.ANTHROPIC_LOG;
+    process.env.ANTHROPIC_LOG = "debug";
+    const spies = (["debug", "info", "log", "warn", "error"] as const).map((level) =>
+      vi.spyOn(console, level).mockImplementation(() => {}),
+    );
+    try {
+      await provider(server).complete({ ...REQUEST, user: '{"records":["Tangerine-Ladder"]}' });
+      const logged = spies.flatMap((spy) => spy.mock.calls);
+      expect(JSON.stringify(logged)).not.toContain("Tangerine-Ladder");
+      expect(logged).toEqual([]);
+    } finally {
+      for (const spy of spies) spy.mockRestore();
+      if (saved === undefined) delete process.env.ANTHROPIC_LOG;
+      else process.env.ANTHROPIC_LOG = saved;
+    }
   });
 
   it("maps statuses to retryable and permanent failures, and never retries itself", async () => {
