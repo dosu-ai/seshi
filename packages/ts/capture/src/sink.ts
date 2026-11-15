@@ -5,7 +5,7 @@
  * token is picked up on the next call. */
 
 import { HttpSessionDB, ServerError } from "@seshi/client";
-import type { Fetch, StoreSessionResult, Upload } from "@seshi/model";
+import type { Fetch, IngestOptions, StoreSessionResult, Upload } from "@seshi/model";
 
 /** There is no credential to upload with, or the server refused it: the person must sign in
  * (the status line's "sign in", B1.6). */
@@ -35,8 +35,9 @@ export interface SessionSink {
   /** Where uploads go, for status: the server's URL, or `local: <bucket>`. */
   readonly target: string;
   /** Store a session or a chunk of one. Throws what `SessionDB.ingest` throws, `SignInNeeded`
-   * for a missing or refused credential, and `StoreError` or `ServerError` otherwise. */
-  ingest(upload: Upload): Promise<StoreSessionResult>;
+   * for a missing or refused credential, and `StoreError` or `ServerError` otherwise. A
+   * `replace` carries the session's retraction secret (`options`), which the org key needs. */
+  ingest(upload: Upload, options?: IngestOptions): Promise<StoreSessionResult>;
   /** Retract a session this machine uploaded, with its secret (F9.7): `retracted` when the
    * server removed it, `gone` when it was already removed, `absent` when the server holds no
    * such session for this credential (never stored, or stored under another owner). */
@@ -87,10 +88,10 @@ export function httpSink(options: HttpSinkOptions): SessionSink {
     async ready() {
       await options.credential();
     },
-    async ingest(upload) {
+    async ingest(upload, ingestOptions) {
       const db = await client();
       try {
-        return await db.ingest(upload);
+        return await db.ingest(upload, ingestOptions);
       } catch (err) {
         return signIn(err);
       }

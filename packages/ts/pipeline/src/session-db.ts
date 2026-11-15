@@ -9,6 +9,7 @@ import {
   type ChangesPage,
   type Claims,
   type Identity,
+  type IngestOptions,
   type ListSessionsOptions,
   localWriter,
   type OwnerBasis,
@@ -101,8 +102,8 @@ export class StoreSessionDB implements SessionDB {
   }
 
   /** The upload as an envelope (this client's writer as the caller, under its source id),
-   * through the pipeline. */
-  async ingest(upload: Upload): Promise<StoreSessionResult> {
+   * through the pipeline; `retractSecret` goes beside it, never into it. */
+  async ingest(upload: Upload, options: IngestOptions = {}): Promise<StoreSessionResult> {
     const visibility = upload.visibility ?? this.visibility;
     const claims = { ...upload.claims, ...this.claims };
     const envelope = uploadEnvelope(
@@ -125,7 +126,10 @@ export class StoreSessionDB implements SessionDB {
         now: this.now,
       },
     );
-    return (await this.pipeline.submit(envelope, { onFailure: "throw" })) as StoreSessionResult;
+    return (await this.pipeline.submit(envelope, {
+      onFailure: "throw",
+      ...(options.retractSecret !== undefined ? { retractSecret: options.retractSecret } : {}),
+    })) as StoreSessionResult;
   }
 
   getSession(agent: string, sessionId: string): Promise<SessionMetadata | null> {

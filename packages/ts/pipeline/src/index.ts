@@ -104,6 +104,7 @@ export {
   type Reviewer,
   type ReviewInput,
   type ReviewNote,
+  retractSecretMatches,
   type SpanAssembler,
   type SpanBatch,
   type SpanBatchResult,

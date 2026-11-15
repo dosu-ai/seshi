@@ -103,6 +103,7 @@ import {
   type ReviewDecision,
   type Reviewer,
   type ReviewNote,
+  retractSecretMatches,
   type SpanAssembler,
   type SpanBatchResult,
 } from "./stages";
@@ -157,6 +158,9 @@ export interface SubmitOptions {
    * `sources/<id>/failed/` and answer `failed`. By default uploads and hooks throw and every
    * other source records (`hasCaller`). */
   onFailure?: "throw" | "record";
+  /** The session's retraction secret (F9.7), as the caller sent it with a `replace`. An org-key
+   * caller (`claimed`, X5.12) replaces a session only with it (`mayReplace`); never stored. */
+  retractSecret?: string;
 }
 
 /** What a session the server holds nothing of answers (X6.3): the next upload is the whole
@@ -289,6 +293,8 @@ function isSpanIds(part: SpanPart): boolean {
 /** How a whole session is written. */
 interface WholeOptions {
   replace: boolean;
+  /** The retraction secret sent with a `replace` (`SubmitOptions.retractSecret`). */
+  retract_secret?: string;
   /** Redacted, and counted, by `commit` (F2). */
   llm_calls?: readonly LlmCall[];
   /** For an assembled session: what redaction found in its spans when they arrived, summed over
@@ -390,7 +396,7 @@ export class Pipeline {
       checkEnvelope(envelope);
       const auth = await this.authorizer.authorize(envelope);
       if (!isLogEnvelope(envelope)) return await this.spans(envelope as SpanEnvelope, auth);
-      const { result, replay } = await this.log(envelope, auth);
+      const { result, replay } = await this.log(envelope, auth, options.retractSecret);
       this.health.count(envelope.source_id, replay ? "duplicate" : result.status);
       return result;
     } catch (err) {
@@ -526,7 +532,11 @@ export class Pipeline {
 
   // --- logs ---------------------------------------------------------------------
 
-  private async log(envelope: LogEnvelope, auth: Authorization): Promise<Outcome> {
+  private async log(
+    envelope: LogEnvelope,
+    auth: Authorization,
+    retractSecret?: string,
+  ): Promise<Outcome> {
     const { payload } = envelope;
     if (!this.formats.has(envelope.format)) this.unsupported(envelope.format);
     const max = this.limits.max_upload_bytes;
@@ -552,7 +562,10 @@ export class Pipeline {
     // The whole log's records do not depend on what is stored: normalize once.
     const records = this.normalize(envelope.format, payload.text, envelope.session_key);
     return this.planned(envelope, auth, (run) =>
-      this.whole(run, records, utf8Length(payload.text), { replace: envelope.replace === true }),
+      this.whole(run, records, utf8Length(payload.text), {
+        replace: envelope.replace === true,
+        ...(retractSecret !== undefined ? { retract_secret: retractSecret } : {}),
+      }),
     );
   }
 
@@ -742,8 +755,15 @@ export class Pipeline {
           "the upload does not extend the stored session (its records do not start with what is stored); send it with replace to rewrite the session",
         );
       }
-      if (!mayReplace(run.auth, session.writer, session.owner_basis)) {
-        throw new Forbidden("only the session's original writer or an admin may replace it");
+      const proven = retractSecretMatches(options.retract_secret, session.retract_hash);
+      if (!mayReplace(run.auth, session.writer, session.owner_basis, proven)) {
+        throw new Forbidden(
+          run.auth.owner_basis === "claimed" &&
+            (session.owner_basis ?? "claimed") === "claimed" &&
+            !proven
+            ? "with the org key, only the machine that uploaded a session may replace it: send its retraction secret (X-Seshi-Retract), or use an admin token"
+            : "only the session's original writer or an admin may replace it",
+        );
       }
       const all = this.redactor.redact(raw);
       // A rewrite of a session that passed the filter is not judged again.

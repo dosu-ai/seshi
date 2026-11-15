@@ -755,7 +755,12 @@ export class Uploader {
           // filter.
           ...(replacing ? { replace: true } : {}),
         };
-        result = await (await this.getSink()).ingest(upload);
+        // A replace proves this machine uploaded the session with its retraction secret (F9.7):
+        // with the org key a stated username is not enough (X5.12).
+        result = await (await this.getSink()).ingest(
+          upload,
+          replacing ? { retractSecret: secret } : {},
+        );
       } catch (err) {
         if (err instanceof SignInNeeded) return { uploaded, signIn: err.message };
         if (err instanceof OffsetMismatch && recoveries < 3) {

@@ -77,7 +77,8 @@ User docs: [docs/capture.md](../../capture.md) (new), docs/cli.md (rows), docs/c
     failing passes in a row). Protocol as F9.1 and 04's notes: whole log until stored;
     `filtered`/`dropped` hold until the transcript grows; complete lines only; chunks capped at
     8 MiB; `offset_mismatch` resends from `expected` (whole at 0, or when pre-redaction changed
-    lengths); `conflict` on a whole log → `replace` only for a session this machine stored;
+    lengths); `conflict` on a whole log → `replace` only for a session this machine stored,
+    sent with its secret in `X-Seshi-Retract` (the org key needs it to replace, 17);
     `forbidden`/422/4xx permanent until the file size changes; others back off (5 s doubling to
     5 min). Before every piece, whole or chunk, the agent must identify the file as that
     session's transcript (a hook payload names the path; a file it does not recognise is refused

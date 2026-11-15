@@ -194,6 +194,9 @@ paths:
           what is stored. Then only the tail is written (never filtered), or nothing when there
           is no tail (`unchanged`). Otherwise it is `409 conflict`, unless it sets `replace`,
           which only the session's original writer or an admin may (`403` for anyone else).
+          With the org key the stated username does not prove that (anyone holding the key can
+          state it, X5.12): the replace also carries the session's retraction secret in
+          `X-Seshi-Retract` (F9.7), which only the machine that uploaded it holds.
         - Every upload has an idempotency key (the `Idempotency-Key` header, or
           `idempotency_key`; by default the session, the offset and a digest of the
           transcript). A resend with a key the session recently applied gets the same answer.
@@ -207,6 +210,14 @@ paths:
           required: false
           description: Identifies this upload across resends (X4.7); wins over `idempotency_key`.
           schema: { type: string, minLength: 1, maxLength: 2048 }
+        - name: X-Seshi-Retract
+          in: header
+          required: false
+          description: |
+            With `replace`: the session's retraction secret (F9.7), whose sha256 it was first
+            uploaded with as `retract_hash`. An org-key caller needs it to replace; read only
+            with `replace` and never stored.
+          schema: { type: string, minLength: 1 }
       requestBody:
         required: true
         content:
@@ -240,7 +251,8 @@ paths:
           description: |
             `forbidden`: the credential cannot write (`sessions:write`), or a `replace` by
             someone other than the session's original writer or an admin. An org-key caller
-            never writes to, or replaces, a session whose owner was verified. Nothing is
+            never writes to, or replaces, a session whose owner was verified, and replaces one
+            the org key wrote only with its retraction secret (`X-Seshi-Retract`). Nothing is
             stored.
           content:
             application/json:
@@ -1488,7 +1500,7 @@ components:
         replace:
           type: boolean
           default: false
-          description: A whole upload that does not extend the session rewrites it instead of `409 conflict`. Only the session's original writer or an admin may.
+          description: A whole upload that does not extend the session rewrites it instead of `409 conflict`. Only the session's original writer or an admin may; with the org key, only with the session's retraction secret in `X-Seshi-Retract`.
         visibility:
           type: string
           enum: [org, owner]

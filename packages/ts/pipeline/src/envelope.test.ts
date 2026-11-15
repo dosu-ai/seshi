@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { ENVELOPE_SCHEMA, type Envelope, SessionRejected } from "@seshi/model";
 import { describe, expect, it } from "vitest";
 import {
@@ -7,7 +8,7 @@ import {
   uploadIdempotencyKey,
   writerOf,
 } from "./envelope";
-import { mayReplace, permissiveAuthorizer } from "./stages";
+import { mayReplace, permissiveAuthorizer, retractSecretMatches } from "./stages";
 
 const now = () => new Date("2026-11-14T09:00:00.000Z");
 
@@ -178,9 +179,20 @@ describe("callers and writers", () => {
       admin: false,
     });
     const original = { kind: "static" as const, principal: "alice", source_id: "upload" };
-    expect(mayReplace(auth, original)).toBe(true);
-    expect(mayReplace(auth, { ...original, principal: "bob" })).toBe(false);
-    expect(mayReplace(auth, { ...original, source_id: "s3-logs" })).toBe(false);
+    const verified = { ...auth, owner_basis: "verified" as const };
+    expect(mayReplace(verified, original)).toBe(true);
+    expect(mayReplace(verified, { ...original, principal: "bob" })).toBe(false);
+    expect(mayReplace(verified, { ...original, source_id: "s3-logs" })).toBe(false);
     expect(mayReplace({ ...auth, admin: true }, { ...original, principal: "bob" })).toBe(true);
+    // A claimed caller (the org key) states its name, so it needs the retraction secret too.
+    expect(mayReplace(auth, original, "claimed")).toBe(false);
+    expect(mayReplace(auth, original, "claimed", true)).toBe(true);
+    expect(mayReplace(auth, { ...original, principal: "bob" }, "claimed", true)).toBe(false);
+    expect(mayReplace(auth, original, "verified", true)).toBe(false);
+    const hash = createHash("sha256").update("s3cret").digest("hex");
+    expect(retractSecretMatches("s3cret", hash)).toBe(true);
+    expect(retractSecretMatches(hash, hash)).toBe(false);
+    expect(retractSecretMatches(undefined, hash)).toBe(false);
+    expect(retractSecretMatches("s3cret", undefined)).toBe(false);
   });
 });

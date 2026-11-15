@@ -38,6 +38,7 @@ import {
   type ChangesPage,
   Forbidden,
   type Identity,
+  type IngestOptions,
   IngestRejected,
   isRenderFormat,
   MAX_IDEMPOTENCY_KEY_LENGTH,
@@ -403,11 +404,16 @@ export function createApp(instance: Instance) {
    * or dropped session; 422 for a transcript it refuses; 409 `offset_mismatch` for a chunk that
    * does not start where the session's log ends (`expected` says where it does: 0 while the
    * session has no trace), 409 `conflict` for a whole upload that does not extend the session
-   * without `replace`; 403 for a `replace` by someone other than the original writer. */
-  async function stored(db: StoreSessionDB, upload: Upload): Promise<Response> {
+   * without `replace`; 403 for a `replace` by someone other than the original writer (with the
+   * org key: without the session's retraction secret). */
+  async function stored(
+    db: StoreSessionDB,
+    upload: Upload,
+    options: IngestOptions = {},
+  ): Promise<Response> {
     let result: StoreSessionResult;
     try {
-      result = await db.ingest(upload);
+      result = await db.ingest(upload, options);
     } catch (err) {
       if (err instanceof OffsetMismatch) {
         return json(
@@ -466,7 +472,10 @@ export function createApp(instance: Instance) {
         `an idempotency key must be at most ${MAX_IDEMPOTENCY_KEY_LENGTH} characters`,
       );
     }
-    return stored(writerClient(principal), {
+    // A replace proves the uploading machine with the session's retraction secret (F9.7), in
+    // the same header a retraction uses; the org key needs it (X5.12, `mayReplace`).
+    const retractSecret = replace ? (request.headers.get(RETRACT_HEADER) ?? undefined) : undefined;
+    const upload: Upload = {
       agent,
       session_id: str(body, "session_id", true) as string,
       transcript: str(body, "transcript", true) as string,
@@ -489,7 +498,8 @@ export function createApp(instance: Instance) {
             },
           }
         : {}),
-    });
+    };
+    return stored(writerClient(principal), upload, retractSecret ? { retractSecret } : {});
   });
 
   /** One owner's sessions a page at a time, across the folders aliases fold into it (up to

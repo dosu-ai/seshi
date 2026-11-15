@@ -164,7 +164,7 @@ key with `--key`, or through the IdP ([cli.md](cli.md#signing-in-f82)).
 
 | Credential | Who holds it | What it can do |
 |---|---|---|
-| Org key (no IdP) | Every member's CLI and uploader, with `X-Seshi-User: <username>` | Write as that username (lowercased; owner basis `claimed`); read and search org-wide. No deletes; never writes to, replaces or changes the visibility of a session whose owner was verified |
+| Org key (no IdP) | Every member's CLI and uploader, with `X-Seshi-User: <username>` | Write as that username (lowercased; owner basis `claimed`); read and search org-wide. No deletes; never writes to, replaces or changes the visibility of a session whose owner was verified; replaces a session it wrote only with that session's retraction secret |
 | IdP ID token | The CLI, briefly | Nothing but `POST /v1/auth/exchange` |
 | Session token | The CLI, after sign-in | Read, search; delete the person's own sessions within 10 minutes of being issued. One hour; signed, not stored. An admin's (IdP group `admin_group` or an email in `admins`) can do everything |
 | Device token | The uploader on a laptop | Write the person's own sessions. 90 days; signing in again from the machine renews it |
@@ -325,7 +325,10 @@ the pipeline. Nothing is written until every stage has run:
    past what is stored writes nothing (`200 unchanged`). A log that does not extend the
    session (the harness rewrote history, the normalizer or the rules changed) is refused with
    `409 conflict`, unless it sets `replace`: then it rewrites the session, which only the
-   session's original writer or an admin may (`403 forbidden` otherwise). A fork (`fork_of`)
+   session's original writer or an admin may (`403 forbidden` otherwise). With the org key a
+   stated username proves nothing (anyone holding the key can state it), so the replace must
+   also carry the session's [retraction secret](#retraction-f97) in `X-Seshi-Retract`: only
+   the machine that uploaded the session can rewrite it, as only it can retract it. A fork (`fork_of`)
    ships only what it added past the history it copied, when the parent is stored here; that
    is the fork's first trace, so it is judged. `shipped` (what an earlier answer said) is read
    only for a session without the server's own state.

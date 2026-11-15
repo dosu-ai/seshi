@@ -83,6 +83,16 @@ describe("HttpSessionDB", () => {
     expect(seen[0]?.url).toBe("https://seshi.example.com/v1/sessions/claude-code/a%2Fb%20c/trace");
   });
 
+  it("sends a replace's retraction secret in X-Seshi-Retract, never the body", async () => {
+    const { db, seen } = client(201, { status: "stored" });
+    const upload = { agent: "claude-code", session_id: "s1", transcript: "{}\n", replace: true };
+    await db.ingest(upload, { retractSecret: "s3cret" });
+    expect(seen[0]?.headers["x-seshi-retract"]).toBe("s3cret");
+    expect(new TextDecoder().decode(seen[0]?.body)).not.toContain("s3cret");
+    await db.ingest(upload);
+    expect(seen[1]?.headers["x-seshi-retract"]).toBeUndefined();
+  });
+
   it("turns the server's refusals back into the pipeline's errors", async () => {
     const mismatch = client(409, { error: { code: "offset_mismatch", expected: 12 } }).db;
     const err = await mismatch

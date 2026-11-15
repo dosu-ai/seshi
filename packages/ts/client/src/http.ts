@@ -15,6 +15,7 @@ import {
   type Fetch,
   Forbidden,
   type Identity,
+  type IngestOptions,
   type ListSessionsOptions,
   OffsetMismatch,
   type ReadChangesOptions,
@@ -243,8 +244,15 @@ export class HttpSessionDB implements SessionDB {
     });
   }
 
-  async ingest(upload: Upload): Promise<StoreSessionResult> {
-    const { status, body } = await this.request("POST", "/v1/sessions", { body: upload });
+  /** `POST /v1/sessions`. With `retractSecret` (for a `replace` with the org key) the secret
+   * goes in `X-Seshi-Retract`, never the body. */
+  async ingest(upload: Upload, options: IngestOptions = {}): Promise<StoreSessionResult> {
+    const { status, body } = await this.request("POST", "/v1/sessions", {
+      body: upload,
+      ...(options.retractSecret !== undefined
+        ? { headers: { [RETRACT_HEADER]: options.retractSecret } }
+        : {}),
+    });
     if (status !== 200 && status !== 201) refuse(status, body, upload.offset ?? 0);
     return body as StoreSessionResult;
   }

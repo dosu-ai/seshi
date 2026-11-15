@@ -8,6 +8,7 @@
  * - `HealthCounters`: counts how each envelope ended, per source (X4.8, X4.10).
  * - `SpanAssembler` (X4.2): takes span batches. 09 builds it and the span store. */
 
+import { createHash, timingSafeEqual } from "node:crypto";
 import type {
   Authorization,
   Authorizer,
@@ -52,22 +53,37 @@ export function permissiveAuthorizer(): Authorizer {
   };
 }
 
+/** Whether `secret` is the retraction secret whose sha256 (hex) a session keeps as
+ * `retract_hash` (F9.7). False when either is missing. */
+export function retractSecretMatches(
+  secret: string | undefined,
+  retractHash: string | undefined,
+): boolean {
+  if (secret === undefined || retractHash === undefined) return false;
+  const given = Buffer.from(createHash("sha256").update(secret, "utf8").digest("hex"), "utf8");
+  const kept = Buffer.from(retractHash, "utf8");
+  return given.length === kept.length && timingSafeEqual(given, kept);
+}
+
 /** Whether `auth` may replace a session first written by `original` (X4.6): its original writer
- * (the same person or service account, through the same source) or an admin. A caller whose
- * owner is only `claimed` (an org-key caller, X5.12) never replaces a session whose owner was
- * established otherwise: anyone holding the key can state that username (X5.3). */
+ * (the same person or service account, through the same source) or an admin.
+ *
+ * A caller whose owner is only `claimed` (an org-key caller, X5.12) states its username, and
+ * anyone holding the key can state any username (X5.3), so the name alone never proves it is
+ * the original writer: the key "cannot replace other people's sessions" (X5.12). Such a caller
+ * never replaces a session whose owner was established otherwise, and replaces a `claimed` one
+ * only with `retractProven`: it sent the session's retraction secret, which only the machine
+ * that uploaded it holds (F9.7). */
 export function mayReplace(
   auth: Authorization,
   original: Writer,
   originalBasis?: OwnerBasis,
+  retractProven = false,
 ): boolean {
   if (auth.admin) return true;
-  if (
-    auth.owner_basis === "claimed" &&
-    originalBasis !== undefined &&
-    originalBasis !== "claimed"
-  ) {
-    return false;
+  if (auth.owner_basis === "claimed") {
+    if (originalBasis !== undefined && originalBasis !== "claimed") return false;
+    if (!retractProven) return false;
   }
   return (
     auth.writer.principal === original.principal && auth.writer.source_id === original.source_id

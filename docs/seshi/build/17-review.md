@@ -75,6 +75,22 @@ what changed.
   be checked offline against guesses. It is now `static-<owner>` (one static token per owner
   in `[auth.tokens]`), never derived from the secret; 05's note says so. Test: `authenticate`
   names the static token `static-dev` and the id carries no part of the token's hash.
+- **auth, medium** (split vote, confirmed): anyone holding the org key could replace another
+  member's `claimed` session by stating that member's username: `mayReplace` compared only
+  the stated principal and source, so the rewrite was accepted and the session's earlier
+  trace objects deleted, though X5.12 says the key "cannot delete or replace other people's
+  sessions" (X5.3's reason, "anyone could claim to be the owner", applies to replace too).
+  05's deviation 8 ("trust mode can't do better") predates F9.7's retraction secret, which is
+  exactly the proof only the uploading machine holds. A `claimed` caller now replaces a
+  `claimed` session only with that secret: `POST /v1/sessions` reads `X-Seshi-Retract` with
+  `replace` (never stored), `IngestOptions.retractSecret` carries it to the pipeline, and
+  `mayReplace` takes `retractProven` (checked against `metadata.retract_hash` in constant
+  time). `HttpSessionDB.ingest` sends it as the header, and the uploader sends it with every
+  replace. Admins and verified writers are unchanged; extending a claimed session still works
+  as before. openapi.yaml, server.md, 05 and 14 say so. Tests: API (a second org-key caller
+  stating `alice` gets 403 with no, a wrong or the hashed secret, the head stays; the
+  uploading machine's secret gets 201; a session with no `retract_hash` cannot be replaced
+  with the key), pipeline, `mayReplace`, client header, uploader.
 
 ## Not fixed
 

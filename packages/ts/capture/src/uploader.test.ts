@@ -16,6 +16,7 @@ import { ServerError } from "@seshi/client";
 import type { CaptureAgent, CaptureHost } from "@seshi/kit";
 import {
   Forbidden,
+  type IngestOptions,
   OffsetMismatch,
   SessionConflict,
   SessionRejected,
@@ -35,7 +36,8 @@ import { acquireUploaderLock, type HeldUploaderLock } from "./uploader-lock";
 
 /** A server in memory that keeps the upload protocol (X6.3, X4.6): a session's whole log until
  * it holds one with `minLines` lines, then chunks at its offset; a whole log that does not
- * extend is a conflict unless it replaces; a retraction needs the secret. */
+ * extend is a conflict unless it replaces, and a replace, like a retraction, needs the secret
+ * (as the org key does, X5.12). */
 class FakeServer implements SessionSink {
   readonly target = "https://seshi.test";
   readonly uploads: Upload[] = [];
@@ -74,7 +76,7 @@ class FakeServer implements SessionSink {
     };
   }
 
-  async ingest(upload: Upload): Promise<StoreSessionResult> {
+  async ingest(upload: Upload, options: IngestOptions = {}): Promise<StoreSessionResult> {
     this.uploads.push(upload);
     if (!this.signedIn) throw new SignInNeeded("not signed in");
     const next = this.failNext.shift();
@@ -96,6 +98,12 @@ class FakeServer implements SessionSink {
         return this.answer(grew ? "stored" : "unchanged", session.text);
       }
       if (!upload.replace) throw new SessionConflict("does not extend");
+      if (
+        options.retractSecret === undefined ||
+        session.hash !== retractHash(options.retractSecret)
+      ) {
+        throw new Forbidden("only the machine that uploaded a session may replace it");
+      }
       // Model review dropped the replace: the session stays as stored.
       if (this.dropReplace) return this.answer("dropped", session.text);
       session.text = upload.transcript;

@@ -54,7 +54,7 @@ export async function localSink(ctx: CommandContext, account: Account): Promise<
   const sink: SessionSink = {
     target: `local: ${instance.storage.url}`,
     async ready() {},
-    ingest: (upload) => db.ingest(upload),
+    ingest: (upload, options) => db.ingest(upload, options),
     async retract(agent, sessionId, secret) {
       if (!instance.config.capture.allow_retract) {
         throw new RetractRefused(

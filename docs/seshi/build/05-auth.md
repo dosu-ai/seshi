@@ -69,7 +69,9 @@ authorize stage holds every write to its caller's own sessions. The shared HS256
     - `claimed` belongs to `person` callers only.
   - A `claimed` caller (the org key) never writes to a session whose basis isn't `claimed`:
     no chunk, no extension, no replace (`Forbidden` in `Pipeline.planned`, before any plan).
-    `mayReplace(auth, writer, basis)` holds the same rule for replaces.
+    `mayReplace(auth, writer, basis, retractProven)` holds the same rule for replaces, and
+    replaces a `claimed` session for a `claimed` caller only with its retraction secret
+    (`X-Seshi-Retract`, F9.7; added in 17).
   - `PipelineOptions.visibility` (`VisibilitySetting`) is the source and server fallback.
   - Change entries carry `owner_basis`.
   - `setVisibility()` writes a `visibility_changed` entry and refuses a redacted session.
@@ -177,8 +179,11 @@ authorize stage holds every write to its caller's own sessions. The shared HS256
 8. **The org key can't touch a verified session.** X5.12 says the key cannot replace other
    people's sessions. A `claimed` caller never writes to (extends, chunks or replaces) a
    session whose `owner_basis` is not `claimed`, so a session marked `verified` holds only what
-   verified writers sent. Org-key sessions under one username stay writable by any org-key
-   holder stating it: trust mode can't do better.
+   verified writers sent. Org-key sessions under one username stay extendable by any org-key
+   holder stating it: trust mode can't do better there. Replacing one (which rewrites it and
+   deletes its earlier trace objects) also needs the session's retraction secret (F9.7) in
+   `X-Seshi-Retract`, which only the uploading machine holds, so "cannot replace other
+   people's sessions" (X5.12) holds for org-key sessions too (17 review fix).
 9. **Static tokens are members with every session scope, not admins.** They can't manage
    tokens; `seshi admin init` covers that.
 10. **Visibility change needs `sessions:read` plus being the owner or an admin.** Device tokens

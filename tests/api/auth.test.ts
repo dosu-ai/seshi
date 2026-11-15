@@ -16,6 +16,7 @@ import { testApp } from "../tooling/instance";
 import { transcript } from "../tooling/testdata";
 
 const FORMATS = buildFormats();
+const sha256Hex = (text: string) => createHash("sha256").update(text).digest("hex");
 const SMALL = transcript("claude-basic.claude-code.jsonl");
 /** A Claude Code session long enough to pass the session filter. */
 const CLAUDE = (marker = "details") =>
@@ -399,14 +400,68 @@ describe("replace with real roles (X4.6)", () => {
 
   it("lets an admin token replace its own sessions, and the original writer replace theirs", async () => {
     const { admin, bob } = await setUp();
-    await upload(bob, "s1");
-    expect((await upload(bob, "s1", { transcript: CLAUDE("other"), replace: true })).status).toBe(
-      201,
-    );
+    const secret = "bob-s1-secret";
+    await upload(bob, "s1", { retract_hash: sha256Hex(secret) });
+    // With the org key the original writer proves it with the session's retraction secret.
+    expect(
+      (
+        await upload({ ...bob, headers: { "x-seshi-retract": secret } }, "s1", {
+          transcript: CLAUDE("other"),
+          replace: true,
+        })
+      ).status,
+    ).toBe(201);
     await upload(admin, "s2");
     expect((await upload(admin, "s2", { transcript: CLAUDE("x"), replace: true })).status).toBe(
       201,
     );
+  });
+
+  it("refuses another org-key holder replacing a claimed session by stating its username (X5.12)", async () => {
+    // Review finding: a stated username was all mayReplace checked, so anyone holding the key
+    // could rewrite a member's session and have its earlier trace objects deleted.
+    const { alice } = await setUp();
+    const secret = "alice-s1-secret";
+    await upload(alice, "s1", { retract_hash: sha256Hex(secret) });
+    const archive = archiveId("alice", "claude-code", "s1");
+    const head = (await readMetadata(store, "alice", archive))?.head;
+    const mallory = { token: alice.token, user: "alice" };
+    const rewrite = { transcript: CLAUDE("mallory-rewrite"), replace: true };
+
+    const bare = await upload(mallory, "s1", rewrite);
+    expect(bare.status).toBe(403);
+    expect(bare.body.error.message).toContain("retraction secret");
+    const guessed = await upload(
+      { ...mallory, headers: { "x-seshi-retract": "a-guess" } },
+      "s1",
+      rewrite,
+    );
+    expect(guessed.status).toBe(403);
+    // The hash a reader can see is not the secret.
+    const hashed = await upload(
+      { ...mallory, headers: { "x-seshi-retract": sha256Hex(secret) } },
+      "s1",
+      rewrite,
+    );
+    expect(hashed.status).toBe(403);
+    expect((await readMetadata(store, "alice", archive))?.head).toBe(head);
+
+    // The machine that uploaded it holds the secret.
+    const own = await upload({ ...alice, headers: { "x-seshi-retract": secret } }, "s1", {
+      transcript: CLAUDE("alice-rewrite"),
+      replace: true,
+    });
+    expect(own.status).toBe(201);
+  });
+
+  it("refuses an org-key replace of a claimed session uploaded without a retraction hash", async () => {
+    const { bob } = await setUp();
+    await upload(bob, "s1");
+    const res = await upload({ ...bob, headers: { "x-seshi-retract": "anything" } }, "s1", {
+      transcript: CLAUDE("other"),
+      replace: true,
+    });
+    expect(res.status).toBe(403);
   });
 });
 

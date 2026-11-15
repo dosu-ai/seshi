@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
@@ -931,11 +932,30 @@ describe("identity and visibility (X5)", () => {
     expect((await submit(p, upload(longer, 0, {}, device))).status).toBe("stored");
   });
 
-  it("lets an org-key caller replace a session the org key wrote under that username", async () => {
+  it("lets an org-key caller replace a session the org key wrote only with its retraction secret (X5.12)", async () => {
     const p = pipeline();
-    await submit(p, upload(HEAD, 0, {}, orgKey));
-    expect((await submit(p, upload(other, 0, { replace: true }, orgKey))).status).toBe("stored");
+    const secret = "machine-secret";
+    const retract_hash = createHash("sha256").update(secret).digest("hex");
+    await submit(p, upload(HEAD, 0, { retract_hash }, orgKey));
+    const head = (await session())?.head;
+    // Anyone holding the key can state "alice": the name alone is not the original writer.
+    await expect(submit(p, upload(other, 0, { replace: true }, orgKey))).rejects.toBeInstanceOf(
+      Forbidden,
+    );
+    await expect(
+      p.submit(upload(other, 0, { replace: true }, orgKey), {
+        onFailure: "throw",
+        retractSecret: "wrong",
+      }),
+    ).rejects.toBeInstanceOf(Forbidden);
+    expect((await session())?.head).toBe(head);
+    const replaced = (await p.submit(upload(other, 0, { replace: true }, orgKey), {
+      onFailure: "throw",
+      retractSecret: secret,
+    })) as StoreSessionResult;
+    expect(replaced.status).toBe("stored");
     expect((await session())?.owner_basis).toBe("claimed");
+    expect((await session())?.retract_hash).toBe(retract_hash);
   });
 
   it("gives a new session the request's visibility, else the source's setting (X5.10)", async () => {

@@ -8,6 +8,7 @@ export type {
   ChangesPage,
   Fetch,
   Identity,
+  IngestOptions,
   IngestResult,
   ListSessionsOptions,
   ReadChangesOptions,

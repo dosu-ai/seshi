@@ -69,6 +69,15 @@ export interface SessionUpload {
  * defaults to `jsonl`. */
 export type Upload = Omit<SessionUpload, "owner" | "format"> & { format?: SessionUpload["format"] };
 
+/** How an upload is sent, beside what it stores. */
+export interface IngestOptions {
+  /** The session's retraction secret (F9.7), sent with a `replace`: an org-key caller (X5.12)
+   * replaces a session only with the secret whose hash it was first uploaded with, since anyone
+   * holding the key can state the username. Over HTTP it goes in `X-Seshi-Retract`, never the
+   * body; it is never stored. */
+  retractSecret?: string;
+}
+
 export interface IngestResult {
   status: "stored" | "duplicate";
   archive_id: string;
@@ -165,8 +174,9 @@ export interface Identity {
 export interface SessionDB {
   /** Store a session, whole or as a chunk from `offset`. Throws `SessionRejected` for a
    * transcript that cannot be stored, `OffsetMismatch` for a chunk that does not start where
-   * the log ends, `StoreError` when the store fails. */
-  ingest(upload: Upload): Promise<StoreSessionResult>;
+   * the log ends, `Forbidden` for a `replace` the caller may not make, `StoreError` when the
+   * store fails. */
+  ingest(upload: Upload, options?: IngestOptions): Promise<StoreSessionResult>;
   /** The session's pointer, or null for one not stored. */
   getSession(agent: string, sessionId: string): Promise<SessionMetadata | null>;
   /** The head trace, or the one named by `hash`, as the canonical trace (`seshi`, the default)
