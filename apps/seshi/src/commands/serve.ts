@@ -16,6 +16,7 @@ import { checkServerConfig } from "@seshi/config";
 import { lineLogger } from "@seshi/instance";
 import { VERSION } from "@seshi/model";
 import { EXIT } from "../cli/exit";
+import { fail } from "../cli/output";
 import type { CommandContext } from "./index";
 import { openServer, serverFailure } from "./server-instance";
 
@@ -63,16 +64,33 @@ async function start(ctx: CommandContext, argv: string[]): Promise<number | unde
   }
 
   const app = createApp(instance);
-  const server = Bun.serve({
-    hostname: settings.hostname,
-    port: settings.port,
-    // A transcript up to limits.max_upload_bytes, as JSON; a gzipped body is held to the same
-    // cap once decoded.
-    maxRequestBodySize: maxBodyBytes(settings.limits.max_upload_bytes),
-    // A large upload or a long list against a bucket can take more than Bun's 10s default.
-    idleTimeout: 120,
-    fetch: app.fetch,
-  });
+  let server: ReturnType<typeof Bun.serve>;
+  try {
+    server = Bun.serve({
+      hostname: settings.hostname,
+      port: settings.port,
+      // A transcript up to limits.max_upload_bytes, as JSON; a gzipped body is held to the
+      // same cap once decoded.
+      maxRequestBodySize: maxBodyBytes(settings.limits.max_upload_bytes),
+      // A large upload or a long list against a bucket can take more than Bun's 10s default.
+      idleTimeout: 120,
+      fetch: app.fetch,
+    });
+  } catch (err) {
+    await instance.close(1000);
+    const code = (err as { code?: unknown }).code;
+    const why =
+      code === "EADDRINUSE"
+        ? "the address is in use (another seshi serve, or another program)"
+        : message(err);
+    return fail(
+      ctx,
+      false,
+      EXIT.config,
+      "listen",
+      `cannot listen on ${loaded.config.server.listen}: ${why}; set server.listen or --listen`,
+    );
+  }
   instance.start();
 
   const host = ["0.0.0.0", "::"].includes(settings.hostname) ? "localhost" : settings.hostname;

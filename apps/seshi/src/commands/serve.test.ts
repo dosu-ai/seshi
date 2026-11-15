@@ -254,6 +254,20 @@ describe("seshi serve", () => {
     expect(out).toContain("holds a sessiondb store");
   });
 
+  it("exits 3 (config) with a message when its address is taken", async () => {
+    const taken = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response() });
+    try {
+      const { code, out } = await boot({ SESHI_SERVER__LISTEN: `127.0.0.1:${taken.port}` });
+      expect(code).toBe(3);
+      expect(out).toContain(
+        `seshi: cannot listen on 127.0.0.1:${taken.port}: the address is in use`,
+      );
+      expect(out).not.toContain("    at ");
+    } finally {
+      taken.stop(true);
+    }
+  });
+
   it("exits 2 (usage) on an unknown flag", async () => {
     const { code, out } = await boot({}, ["--port", "1"]);
     expect(code).toBe(2);

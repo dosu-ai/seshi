@@ -48,12 +48,16 @@ async function init(ctx: CommandContext, argv: string[]): Promise<number> {
   }
   // A one-shot instance: no roles, nothing probed; the marker is still checked (X1.4).
   const { instance } = await openServer(ctx, values, { roles: [], probe: [] });
-  const auth = instance.auth;
-  const result = await auth.initAdmin({
-    owner: values.owner ?? "admin",
-    force: values.force === true,
-    rotateOrgKey: values["rotate-org-key"] === true,
-  });
+  let result: Awaited<ReturnType<typeof instance.auth.initAdmin>>;
+  try {
+    result = await instance.auth.initAdmin({
+      owner: values.owner ?? "admin",
+      force: values.force === true,
+      rotateOrgKey: values["rotate-org-key"] === true,
+    });
+  } finally {
+    await instance.close();
+  }
   for (const old of result.revoked) {
     ctx.stdout(`revoked the old org key ${old.id}`);
   }
