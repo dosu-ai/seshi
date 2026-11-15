@@ -1,0 +1,23 @@
+# Found by the scenario explorer (tests/tooling/scenario/explore.ts); see tests/scenarios/README.md.
+# seed: 40941 (bun run scenarios:explore --seed 40941 --runs 1 --max-steps 25)
+# original length: 28 steps; shrunk to 10 in 90 runs
+# failure:
+#   step 8 (settle max=40): an invariant broke
+#     claude-code:main: file_offset 3970 is past the transcript's 3146 bytes
+#     faults fired:
+#       store put owners/alice@acme.com/sessions/8953f8500d62223eeb070edfd3dd34d13ac0a023369df67a2fd371d6b69e3cb3/metadata.json: store put owners/*/sessions/*/metadata.json #1 → fail
+#     capture log (last lines):
+#       2026-09-01T09:00:00.037Z uploader: claude-code:main: will retry: storage failed: injected store failure for owners/alice@acme.com/sessions/8953f8500d62223eeb070edfd3dd34d13ac0a023369df67a2fd371d6b69e3cb3/metadata.json (store put owners…
+name: found by seed 40941
+description: "A generated scenario (seed 40941) shrunk from 28 to 10 steps; the header says how it failed."
+steps:
+  - turns: { session: main, count: 2 }
+  - pass
+  - fault: { store: put, key: "owners/*/sessions/*/metadata.json" }
+  - turns: { session: main, count: 2 }
+  - pass
+  - compact: { session: main, mode: shrink, keep: 1 }
+  - heal
+  - settle
+  - pass
+  - settle

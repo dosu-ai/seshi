@@ -208,8 +208,8 @@ export class World {
   /** Whether any turn planted the fake credentials. */
   planted = false;
   lastPass: PassSummary | undefined;
-  /** Transcripts a compaction shrank since the last pass: their offsets may run past the end
-   * until the uploader sees it. */
+  /** Transcripts a compaction shrank: their offsets may run past the end until the uploader
+   * has sent them again (a pass that skips one, waiting out a backoff, has not). */
   readonly shrunk = new Set<string>();
 
   constructor(readonly scenario: Scenario) {
@@ -387,7 +387,6 @@ export class World {
     });
     const summary = await uploader.pass({ sweep });
     this.lastPass = summary;
-    this.shrunk.clear();
     return summary;
   }
 }

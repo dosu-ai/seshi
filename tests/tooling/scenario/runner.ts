@@ -463,8 +463,10 @@ class Runner {
       const size = sizeOf(s.path);
       if (size === undefined) continue;
       // 1. The laptop's offsets never run past the transcript (a compaction that shrank it is
-      //    allowed until the uploader has looked).
-      if ((s.file_offset ?? 0) > size && !this.world.shrunk.has(s.session_id)) {
+      //    allowed until the uploader has sent it again: a pass may skip it, waiting out a
+      //    backoff, 33).
+      if ((s.file_offset ?? 0) <= size) this.world.shrunk.delete(s.session_id);
+      else if (!this.world.shrunk.has(s.session_id)) {
         problems.push(
           `${key}: file_offset ${s.file_offset} is past the transcript's ${size} bytes`,
         );
