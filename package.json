@@ -19,7 +19,8 @@
     "typecheck": "bunx tsc --noEmit",
     "lint": "bunx biome lint .",
     "format": "bunx biome format --write .",
-    "check": "bunx biome check .",
+    "check": "bunx biome check . && bun run check:layers",
+    "check:layers": "bun run scripts/check-layers.ts",
     "fixtures": "bun run tests/tooling/fixtures.ts",
     "goldens": "bun run tests/tooling/write-goldens.ts"
   },
