@@ -1,8 +1,9 @@
 /** `seshi daemon`: the background uploader and sweep (F9.1, F9.3). Hooks start it when it is not
  * running; it drains the spool, uploads, retracts, sweeps, and stops after a few idle minutes.
  * One runs per machine: a second exits at once. `--keep-alive` never stops (what the service
- * entry `seshi capture install --service` runs); `--once` makes one pass, sweep included, and
- * prints what it did.
+ * entry `seshi capture install --service` runs), and while another uploader holds the lock it
+ * waits for its turn instead of exiting; `--once` makes one pass, sweep included, and prints
+ * what it did.
  *
  *   seshi daemon [--keep-alive] [--once] [--idle <duration>] [--json]
  *
@@ -10,7 +11,12 @@
  * cannot use; 5 (`--once`) when a sign-in is needed. */
 
 import { parseArgs } from "node:util";
-import { acquireUploaderLock, appendLog, capturePaths } from "@seshi/capture";
+import {
+  acquireUploaderLock,
+  appendLog,
+  capturePaths,
+  type HeldUploaderLock,
+} from "@seshi/capture";
 import { parseDuration } from "@seshi/config";
 import { captureRuntime } from "../capture-runtime";
 import { EXIT } from "../cli/exit";
@@ -45,20 +51,28 @@ export async function run(ctx: CommandContext): Promise<number> {
 
   const paths = capturePaths(hostOf(ctx));
   const log = (line: string) => appendLog(paths.log, `uploader: ${line}`);
-  const lock = acquireUploaderLock(paths);
-  if (!lock) {
+  const keepAlive = values["keep-alive"] === true && values.once !== true;
+  let lock = acquireUploaderLock(paths);
+  // A service entry (`--keep-alive`) waits its turn instead of exiting: launchd would restart
+  // it every few seconds, and systemd (`Restart=on-failure`) never would, while an uploader a
+  // hook started is still running.
+  if (!lock && !keepAlive) {
     emit(ctx, json, { running: true, started: false }, () => [
       "seshi: an uploader is already running",
     ]);
     return EXIT.ok;
   }
   let runtime: Awaited<ReturnType<typeof captureRuntime>> | undefined;
+  const stop = new AbortController();
+  const onSignal = () => stop.abort();
+  process.once("SIGTERM", onSignal);
+  process.once("SIGINT", onSignal);
   try {
     runtime = await captureRuntime(ctx, {
       log,
       ...(idleMs !== undefined ? { idleMs } : {}),
     });
-    if (values.once) {
+    if (values.once && lock) {
       const summary = await runtime.uploader.pass({ sweep: true });
       emit(ctx, json, summary, () => [
         `taken ${summary.taken} · found ${summary.found} · uploaded ${summary.uploaded} · retracted ${summary.retracted} · failed ${summary.failed} · queued ${summary.queued}`,
@@ -66,28 +80,55 @@ export async function run(ctx: CommandContext): Promise<number> {
       ]);
       return summary.signIn ? EXIT.auth : EXIT.ok;
     }
-    log(`started (pid ${process.pid})`);
-    const stop = new AbortController();
-    const onSignal = () => stop.abort();
-    process.once("SIGTERM", onSignal);
-    process.once("SIGINT", onSignal);
-    try {
-      await runtime.uploader.run({
-        signal: stop.signal,
-        keepAlive: values["keep-alive"] === true,
-        lock,
-      });
-    } finally {
-      process.off("SIGTERM", onSignal);
-      process.off("SIGINT", onSignal);
+    for (;;) {
+      lock ??= await waitForLock(paths, stop.signal, LOCK_WAIT_MS);
+      if (!lock) break;
+      log(`started (pid ${process.pid})`);
+      try {
+        await runtime.uploader.run({ signal: stop.signal, keepAlive, lock });
+      } finally {
+        lock.release();
+        lock = null;
+      }
+      log("stopped");
+      // Taken over by another uploader: a service waits for its turn again.
+      if (!keepAlive || stop.signal.aborted) break;
     }
-    log("stopped");
     return EXIT.ok;
   } catch (err) {
     log(err instanceof Error ? err.message : String(err));
     return failWith(ctx, json, err);
   } finally {
+    process.off("SIGTERM", onSignal);
+    process.off("SIGINT", onSignal);
     await runtime?.close();
-    lock.release();
+    lock?.release();
   }
+}
+
+/** How often a waiting service entry looks whether the running uploader stopped. */
+const LOCK_WAIT_MS = 30_000;
+
+/** The uploader lock, once whoever holds it lets go (or goes stale); null when stopped. */
+export async function waitForLock(
+  paths: ReturnType<typeof capturePaths>,
+  signal: AbortSignal,
+  everyMs: number,
+): Promise<HeldUploaderLock | null> {
+  while (!signal.aborted) {
+    const lock = acquireUploaderLock(paths);
+    if (lock) return lock;
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, everyMs);
+      signal.addEventListener(
+        "abort",
+        () => {
+          clearTimeout(timer);
+          resolve();
+        },
+        { once: true },
+      );
+    });
+  }
+  return null;
 }

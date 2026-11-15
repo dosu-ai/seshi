@@ -4,6 +4,7 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { acquireUploaderLock, capturePaths } from "@seshi/capture";
 import { capturesOf } from "@seshi/kit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { allCaptureAgents, CAPTURE_AGENTS, captureAgent } from "./capture-agents";
@@ -18,6 +19,7 @@ import {
 } from "./capture-service";
 import { hookCommand, isCompiled, selfCommand } from "./cli/spawn";
 import { parseCaptureArgs, resolveSession, splitWords } from "./commands/capture";
+import { waitForLock } from "./commands/daemon";
 import { INTEGRATIONS } from "./integrations";
 
 describe("the capture agents", () => {
@@ -94,6 +96,22 @@ describe("service entries", () => {
       calls.push(words);
       return { code, output: code === 0 ? "" : "boom" };
     },
+  });
+
+  it("wait for the running uploader's lock instead of exiting (--keep-alive)", async () => {
+    const paths = capturePaths({ env: {}, home, platform: "linux" });
+    const held = acquireUploaderLock(paths);
+    expect(held).not.toBeNull();
+    const waiting = waitForLock(paths, new AbortController().signal, 5);
+    setTimeout(() => held?.release(), 30);
+    const taken = await waiting;
+    expect(taken?.held()).toBe(true);
+    // Stopped while waiting: no lock, no hang.
+    const stop = new AbortController();
+    const stopped = waitForLock(paths, stop.signal, 10_000);
+    stop.abort();
+    expect(await stopped).toBeNull();
+    taken?.release();
   });
 
   it("writes them for each OS, quoting what needs quoting", () => {
