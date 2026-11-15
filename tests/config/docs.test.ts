@@ -63,7 +63,17 @@ describe(".env.example", () => {
       settings.filter((m) => m[1] === undefined).map((m) => [m[2], m[3]]),
     );
     const { config } = loadConfig(serverConfigSchema, { env });
-    expect(config.store.url).toBe("file:///tmp/seshi");
+    expect(config.store.url).toBe("file:///data");
     expect(Object.keys(config.auth.tokens)).toEqual(["alice", "bob"]);
+  });
+
+  it("keeps a file:// store on the volume compose.yaml mounts", () => {
+    // compose passes .env to the container; a store outside the volume is lost on recreate.
+    const store = settings.find((m) => m[1] === undefined && m[2] === "SESHI_STORE__URL");
+    const path = new URL(store?.[3] as string).pathname;
+    const compose = readFileSync(join(root, "compose.yaml"), "utf8");
+    const mounts = [...compose.matchAll(/^\s*- [\w.-]+:(\/[^\s:]*)/gm)].map((m) => m[1] as string);
+    expect(mounts).toContain("/data");
+    expect(mounts.some((m) => path === m || path.startsWith(`${m}/`))).toBe(true);
   });
 });
