@@ -244,11 +244,14 @@ Done after the rebase onto 11 (07, 09 and 10 are below this branch now):
   `spans/` is never read: tests/api/otlp.test.ts and tests/instance/datadog.test.ts check that
   stored, unpublished spans are not found, and that a session the filter dropped (its spans
   kept) is not in the index.
+- **11 (S3 poller):** nothing in the indexer: its sessions are `svc:<source-id>` sessions with
+  `provenance.source_id`. tests/instance/s3-sync.test.ts checks it end to end: a polled object
+  is found under `svc:evals` with the `source` and `owner` filters (not under `source=upload`),
+  what the pipeline redacted is not, and a rewritten object (F6.3, a whole send with
+  `replace`) drops the old text from the index and makes the new text findable.
 
 Still to wire:
 
-- **11 (S3 poller):** nothing beyond what 10 needed: its sessions are `svc:<source-id>`
-  sessions with `provenance.source_id`; no S3-specific search test was added.
 - **13 (CLI):** wire the styled output (B1.4 lilac, highlights from `SearchMatch.highlights`)
   into `searchLines`/`resultLines`, passing hit text through `printable()`; read the stored
   credential in `overHttp` (or `connect()`), and consider `seshi sessions show` taking a search

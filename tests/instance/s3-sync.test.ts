@@ -4,6 +4,7 @@
 
 import { gzipSync } from "node:zlib";
 import { getTrace } from "@seshi/pipeline";
+import { LOCAL_VIEWER } from "@seshi/search";
 import { FakeS3 } from "@seshi/sources/testing";
 import { archiveId, listRecords, readChanges, readCheckpoint, readMetadata } from "@seshi/store";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -282,5 +283,39 @@ describe("S3 sync (F6)", () => {
     expect((await readMetadata(instance.store, OWNER, claudeArchive))?.head).toBeDefined();
     const status = await instance.status();
     expect(status.sources.find((s) => s.id === "evals")?.checkpoint).not.toBeNull();
+  });
+
+  it("is searchable under the source's service owner, and a rewritten object replaces what is found (12)", async () => {
+    fake.put("harness/alice@x.io/sess1.jsonl", CLAUDE);
+    const instance = await boot();
+    const search = instance.search;
+    if (!search) throw new Error("search is on by default");
+    const find = async (q: string, filters: { source?: string; owner?: string } = {}) => {
+      await search.catchUp();
+      const found = await search.search(LOCAL_VIEWER, { q, ...filters });
+      return found.results.map((r) => ({
+        owner: r.owner,
+        agent: r.agent,
+        session_id: r.session_id,
+        source_id: r.source_id,
+      }));
+    };
+    await instance.jobs.runNow("source:evals");
+    const session = { owner: OWNER, agent: "claude-code", session_id: "sess1", source_id: "evals" };
+    expect(await find("auth", { source: "evals", owner: OWNER })).toEqual([session]);
+    expect(await find("auth", { source: "upload" })).toEqual([]);
+    // What the pipeline redacted before storing was never indexed.
+    expect(await find("hunter2secretvalue42")).toEqual([]);
+
+    // F6.3: the object is rewritten, the poller sends it whole with replace, and the index
+    // drops what it held of the session.
+    fake.put(
+      "harness/alice@x.io/sess1.jsonl",
+      claudeLine("u1", "user", `A different start ${"words ".repeat(40)}`) +
+        claudeLine("a1", "assistant", `A different reply ${"words ".repeat(40)}`),
+    );
+    expect((await instance.sources.run("evals")).outcomes).toEqual({ stored: 1 });
+    expect(await find("auth")).toEqual([]);
+    expect(await find("different reply", { source: "evals" })).toEqual([session]);
   });
 });
