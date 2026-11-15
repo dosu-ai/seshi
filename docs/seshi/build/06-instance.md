@@ -36,8 +36,9 @@ command. The Docker image is built from the compiled binary.
       roles, so status can list all of them.
     - `start()` runs the jobs this instance's roles call for. Placement `worker` runs on the
       worker only; `every` runs on all instances (for the indexer, 12).
-    - A run that returns `more` runs again at once; otherwise the next run waits for the
-      interval.
+    - A run that returns `more` runs again at once. A failed run is retried after 5 s
+      (`RETRY_BASE_MS`), doubling per failure in a row up to the interval (X4.8: retries with
+      backoff); a success resets it. Otherwise the next run waits for the interval.
     - It keeps a `JobRecord` per job: runs, failures, last start and finish, last outcome
       (`ok`, `error`, `discarded`), the last error until a later run succeeds, and the last
       summary.
@@ -81,7 +82,10 @@ command. The Docker image is built from the compiled binary.
     - `submit` refuses an envelope for another `source_id`, submits with
       `onFailure: "record"`, and counts the outcomes.
     - A connector error, or a transient store error, makes the outcome `error` and leaves the
-      checkpoint where it was.
+      checkpoint where it was. Once a `submit` has thrown (transient, X4.8), `checkpoint.write`
+      refuses for the rest of the run and the outcome is `error`, even if the connector caught
+      the error and went on.
+    - When the run has been reported, its context refuses further submits and writes.
     - It refuses a disabled source (unless forced), a pushed source, and a second run of the
       same source in one process.
   - `status(id)`.
@@ -118,10 +122,16 @@ command. The Docker image is built from the compiled binary.
     (13); `capture`, `hook`, `upload`, `daemon` and `statusline` (14); `search` (12); `redact`
     (07).
   - `commands/server-instance.ts` (`openServer`, `serverFailure`) is what every command that
-    needs the server config uses.
+    needs the server config uses. Read-only commands (`workers status`, `sync status|failed|
+    dropped`, `reprocess --dry-run`) pass `initialize: false`: `buildInstance` then refuses a
+    bucket with no layout marker (exit 3) instead of writing one, so a mistyped `store.url` is
+    not claimed as a new deployment by a status check.
+  - `sync failed|dropped` also read a source that is no longer in `[[sources]]` but still has
+    records (status lists those sources).
   - `serve` builds one Instance, serves it, starts the jobs, prints
     `checkServerConfig` warnings at boot (02's open item), prints a `roles:` line, and closes
-    the Instance on SIGINT and SIGTERM.
+    the Instance on SIGINT and SIGTERM, letting requests in flight finish (bounded, 5 s). A
+    taken address exits 3 with a message.
   - `main.ts` has no top-level await, for bytecode.
   - `CommandContext.stdin` is new.
 - **Hook budget (X3.3):** `scripts/check-hook.ts`.
@@ -135,15 +145,19 @@ command. The Docker image is built from the compiled binary.
     `dist/seshi` after `bun run build`.
   - Measured locally: 15 ms from source, against 57 ms to load serve; 13 ms compiled.
 - **Build:** `bun run build` runs `scripts/build-binary.ts`: `bun build --compile --minify
-  --bytecode --conditions bun`, with `--target` and `--outfile`. A test compiles the binary
-  and runs it.
+  --bytecode --conditions bun --no-compile-autoload-dotenv --no-compile-autoload-bunfig`, with
+  `--target` and `--outfile`. A test compiles the binary and runs it. The two `no-autoload`
+  flags matter: `seshi hook` runs in whatever repository the agent is in, and by default a
+  compiled Bun binary reads that folder's `.env` and `bunfig.toml`, whose `preload` would run
+  the repository's code inside the hook (checked against the built binary).
 - **Image:** `apps/seshi/Dockerfile` is multi-stage.
   - The build stage runs on `$BUILDPLATFORM` and cross-compiles: `bun-linux-x64-baseline` for
     amd64, `bun-linux-arm64` for arm64.
   - The final image is `debian:bookworm-slim` with `ca-certificates`, user `seshi` (uid 1000,
     as the old `bun` user, so existing volumes stay writable), `ENTRYPOINT ["seshi"]`,
-    `CMD ["serve"]`, and `HEALTHCHECK seshi healthcheck`. `healthcheck` takes its port from
-    `SESHI_SERVER__LISTEN`.
+    `CMD ["serve"]`, and `HEALTHCHECK seshi healthcheck`. `healthcheck` reads `server.listen`
+    from `SESHI_SERVER__LISTEN`, else from the TOML file serve would read (only that key, no
+    secrets), else `:7200`.
   - `.dockerignore` keeps `scripts/build-binary.ts`.
   - compose: `command: ["serve"]`, and a note on splitting the roles.
   - CI's docker job also checks `--version`, `seshi healthcheck`, and a `running` worker in
@@ -240,6 +254,14 @@ command. The Docker image is built from the compiled binary.
     records redacted with the built-in rules only, not the operator's packs, and stores
     nothing.
 
+## Review fixes
+
+A review of this branch added: the transient-failure guard on checkpoints and the end-of-run
+guard (sources); job retries with backoff (X4.8); the build's `no-autoload` flags (security);
+`healthcheck` reading a mounted `seshi.toml`; `initialize: false` for read-only commands; `sync
+failed|dropped` for unconfigured sources with records; serve's message for a taken address and
+its graceful stop; `admin init` closing its instance.
+
 ## Still to check
 
 - CI has not run (no PR). The new steps are `check:hook` from source and compiled, the
@@ -255,6 +277,12 @@ command. The Docker image is built from the compiled binary.
   is fine at today's sizes.
 - Status reads every configured source's records with a full listing (`countRecords`), on each
   call of `/v1/admin/jobs`. Revisit if record counts grow large.
+- Read-only commands still let `ensureLayout` record `store.org` in a marker that has none
+  (the first config to name an org claims the prefix, 02/03 behaviour).
+- A worker that stops cleanly writes no final heartbeat, so status says `running` for up to
+  three intervals after it stops.
+- `local.config` in the CLI config is resolved against the working folder, not the CLI
+  config's folder.
 - `bun build --compile` cross-compilation downloads the target's Bun runtime at build time, so
   the image build needs network access. It always did, for `bun install`.
 - Open items carried over:

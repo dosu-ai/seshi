@@ -44,8 +44,8 @@ bun start                # http://localhost:7200
 
 Bun reads `.env` from the working directory on its own when run from source (`bun start`);
 `.env` is gitignored. The compiled binary does not (docs/cli.md), so outside a checkout set
-`SESHI_*` in the environment or use a TOML file. The same file is
-what `docker compose` hands the container (`docker compose up -d`). A TOML file works as well
+`SESHI_*` in the environment or use a TOML file. `docker compose` hands the container the same
+`.env` (`docker compose up -d`). A TOML file works as well
 (`./seshi.toml`, `/etc/seshi/seshi.toml`, or `--config`; start from
 [`seshi.example.toml`](../seshi.example.toml)), with env over it and flags over env.
 `seshi config check` validates either before you start. At boot the server writes the layout
@@ -83,8 +83,10 @@ The worker's jobs:
 | `retention` | 6h | Prunes drop and failure records and source health days past `[records]` retention |
 | `source:<id>` | the source's `interval` | Polls a source through its connector (X3.11), from its checkpoint (X7.4) |
 
-Later branches add the span assembler (09) and the search indexer (12). Each poll is also a
-one-shot command for cron: `seshi sync run <id>`.
+A failed run is retried after 5 seconds, doubling per failure in a row up to the job's
+interval. A poll whose envelope failed transiently (the bucket) never saves its checkpoint
+past it, so the retry reads it again. Later branches add the span assembler (09) and the
+search indexer (12). Each poll is also a one-shot command for cron: `seshi sync run <id>`.
 
 Where the config and bucket keys are:
 
