@@ -11,11 +11,12 @@
  *
  * A service starts with the service manager's bare environment, not the shell's that hooks
  * inherit. The variables that move seshi's own folders (`XDG_STATE_HOME`, `XDG_CONFIG_HOME`)
- * are written into the launchd and systemd entries, so the service uses the same capture folder
- * (lock, spool, state) and CLI config as the hooks; Windows keeps its folders in the user's
- * profile, which the task has. `SESHI_*` settings are never written there (an entry file is
- * readable, and the namespace also holds server secrets): installing reports each one set, so
- * it can go in the CLI config instead. */
+ * and the agents' (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`) are written into the launchd and systemd
+ * entries, so the service uses the same capture folder (lock, spool, state), CLI config and
+ * sweep folders as the hooks; Windows keeps seshi's folders in the user's profile, which the
+ * task has, and a task carries no environment, so a moved agent folder is reported. `SESHI_*`
+ * settings are never written there (an entry file is readable, and the namespace also holds
+ * server secrets): installing reports each one set, so it can go in the CLI config instead. */
 
 import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -51,8 +52,15 @@ export interface ServiceReport {
   notes?: string[];
 }
 
-/** The variables that move seshi's folders on macOS and Linux: carried into the entry. */
-export const CARRIED_ENV = ["XDG_STATE_HOME", "XDG_CONFIG_HOME"] as const;
+/** The variables that move seshi's folders (macOS and Linux only) and the agents' folders the
+ * sweep looks in: paths, carried into the entry. */
+export const CARRIED_ENV = [
+  "XDG_STATE_HOME",
+  "XDG_CONFIG_HOME",
+  "CLAUDE_CONFIG_DIR",
+  "CODEX_HOME",
+] as const;
+const XDG_ONLY = new Set(["XDG_STATE_HOME", "XDG_CONFIG_HOME"]);
 
 /** What a service entry carries from `env`, and a note per setting it does not. */
 export function serviceEnvironment(
@@ -60,19 +68,26 @@ export function serviceEnvironment(
   platform: NodeJS.Platform,
 ): { carried: Record<string, string>; notes: string[] } {
   const carried: Record<string, string> = {};
-  if (platform !== "win32") {
-    for (const name of CARRIED_ENV) {
-      const value = env[name];
-      if (value) carried[name] = value;
+  const notes: string[] = [];
+  for (const name of CARRIED_ENV) {
+    const value = env[name];
+    if (!value) continue;
+    // A Task Scheduler task carries no environment; XDG does not apply on Windows anyway.
+    if (platform !== "win32") carried[name] = value;
+    else if (!XDG_ONLY.has(name)) {
+      notes.push(
+        `${name} is set here, but the service does not see it: its sweep looks in the agent's default folder`,
+      );
     }
   }
   const settings = Object.keys(env)
     .filter((n) => n.startsWith("SESHI_") && env[n] && !NOT_SETTINGS_ENV.includes(n))
     .sort();
-  const notes = settings.map(
-    (n) =>
+  for (const n of settings) {
+    notes.push(
       `${n} is set here, but the service does not see it: put the setting in the CLI config, or the service uploads without it`,
-  );
+    );
+  }
   return { carried, notes };
 }
 

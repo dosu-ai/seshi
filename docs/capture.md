@@ -43,10 +43,11 @@ skill is in `integrations/claude-code/plugin/`, for rolling out through a plugin
 managed settings. `--service` adds a launchd agent (macOS), a systemd user unit (Linux) or a
 Task Scheduler task (Windows) that runs `seshi daemon --keep-alive`. While an uploader a hook
 started is still running, the service's uploader waits for it to stop and then takes over. A
-service does not get your shell's environment: the entry carries `XDG_STATE_HOME` and
-`XDG_CONFIG_HOME` (so it uses the same capture folder and CLI config as the hooks), and
-`install` names any `SESHI_*` setting it sees, which the service will not; put those in the CLI
-config.
+service does not get your shell's environment: the launchd and systemd entries carry
+`XDG_STATE_HOME`, `XDG_CONFIG_HOME`, `CLAUDE_CONFIG_DIR` and `CODEX_HOME` (so it uses the same
+capture folder, CLI config and agent folders as the hooks), and `install` names any `SESHI_*`
+setting it sees, which the service will not (put those in the CLI config), and on Windows a
+moved agent folder, which a Task Scheduler task cannot carry.
 
 ## What is captured
 

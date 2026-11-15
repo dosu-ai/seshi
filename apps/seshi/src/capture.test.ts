@@ -126,6 +126,7 @@ describe("service entries", () => {
     const env = {
       XDG_STATE_HOME: "/home/a/state",
       XDG_CONFIG_HOME: "/home/a/100%cfg",
+      CLAUDE_CONFIG_DIR: "/home/a/claude",
       SESHI_USER: "alice@acme.com",
       SESHI_SESSION_ID: "s1",
       PATH: "/usr/bin",
@@ -143,10 +144,17 @@ describe("service entries", () => {
     const unit = readFileSync(linux.entry, "utf8");
     expect(unit).toContain('Environment="XDG_STATE_HOME=/home/a/state"\n');
     expect(unit).toContain('Environment="XDG_CONFIG_HOME=/home/a/100%%cfg"\n');
+    // The agent's folder the sweep looks in moves with it too.
+    expect(unit).toContain('Environment="CLAUDE_CONFIG_DIR=/home/a/claude"\n');
     expect(unit).not.toContain("alice");
 
-    // Windows keeps seshi's folders in the profile the task has; nothing to carry.
-    expect((await installService({ ...context("win32"), env })).notes).toHaveLength(1);
+    // Windows keeps seshi's folders in the profile the task has, and a task carries nothing:
+    // a moved agent folder is named, as a setting is.
+    const windows = await installService({ ...context("win32"), env });
+    expect(windows.notes).toEqual([
+      expect.stringMatching(/^CLAUDE_CONFIG_DIR is set here/),
+      expect.stringMatching(/^SESHI_USER is set here/),
+    ]);
     expect(systemdUnit(["/opt/seshi"])).not.toContain("Environment=");
     expect(launchdPlist(["/opt/seshi"], "/l")).not.toContain("EnvironmentVariables");
   });
