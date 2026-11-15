@@ -210,6 +210,10 @@ service account. User docs: [docs/otlp.md](../../otlp.md).
 13. **Each span is its own object** (no batching into one object per batch). This is simple,
     and repeats overwrite. It costs one PUT per span on arrival and one GET per span per
     publish.
+14. **An OTLP/JSON export sent as a log** (`POST /v1/sessions` with `agent: otlp-genai`, an S3
+    object, `seshi normalize`) is one session without LLM calls. The `FormatAdapter` contract
+    returns records only, so the records' `llm_call` references are removed rather than left
+    dangling, which the trace would refuse. Growing that contract (03's note) would keep them.
 
 ## Still to check
 
@@ -237,6 +241,9 @@ service account. User docs: [docs/otlp.md](../../otlp.md).
   overwrite of span keys, and conditional delete of markers (03's open item).
 - **Whether workspace or API-key ids are worth more than a claim** (F4 Access): org and
   workspace ids are now recorded as `account_ids`.
+- **06's timing test** "spots a second worker from the heartbeat" failed once under full-suite
+  load during this work and passed on every rerun. Every worker now also runs the assembler job,
+  which adds a listing at start. It was flaky before (06's note); watch it in CI.
 
 ## Cross-branch wiring once the stack is linear
 

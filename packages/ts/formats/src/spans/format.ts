@@ -98,7 +98,13 @@ export function otlpGenAiFormat(options: SpanFormatOptions = {}): FormatAdapter 
         });
       }
       const { groups } = readExportRequest(value);
-      return spans.assemble(partsOf(spans, groups), { source }).records;
+      // A log carries records only (the format adapter contract), so the LLM calls the span
+      // path keeps are left out here, and with them the records' references to them.
+      return spans.assemble(partsOf(spans, groups), { source }).records.map((record) => {
+        if (!("llm_call" in record)) return record;
+        const { llm_call: _call, ...rest } = record as NormalizedRecord & { llm_call?: string };
+        return rest as NormalizedRecord;
+      });
     },
   };
 }

@@ -50,12 +50,9 @@ describe("otlpGenAiFormat", () => {
     expect(records).toEqual([
       { role: "meta", source: "otlp-genai", model: "m" },
       { role: "user", content: "q", timestamp: "2026-11-01T10:00:00.000Z" },
-      {
-        role: "assistant",
-        content: "a",
-        timestamp: "2026-11-01T10:00:01.000Z",
-        llm_call: "cd".repeat(8),
-      },
+      // A log names no LLM calls (the format adapter returns records only): the span path
+      // keeps them.
+      { role: "assistant", content: "a", timestamp: "2026-11-01T10:00:01.000Z" },
     ]);
   });
 

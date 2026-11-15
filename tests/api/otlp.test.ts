@@ -25,6 +25,7 @@ const OWNER = "svc:console";
 const ARCHIVE = archiveId(OWNER, "otlp-genai", SESSION);
 const MESSAGES_TRACE = "8f3d6b5a4c7e4f1a9b2c3d4e5f6a7b8c";
 const GITHUB_TOKEN = "ghp_abcdefghijklmnopqrstuvwx0123456789";
+const UPLOADER = "acme-token-0123456789abcdef";
 
 let booted: Awaited<ReturnType<typeof bootInstance>>;
 let instance: Instance;
@@ -37,6 +38,7 @@ beforeEach(async () => {
   clock = new Date("2026-11-01T10:03:00Z");
   booted = await bootInstance(
     [
+      `[auth.tokens]\nacme = "${UPLOADER}"`,
       // The fixtures are short conversations: the session filter (X4.10) would drop them.
       '[[sources]]\nid = "console"\ntype = "otlp"\nquiet_period = "10m"\nfilter = { min_chars = 50 }',
       '[[sources]]\nid = "private-console"\ntype = "otlp"\nvisibility = "owner"\nfilter = { min_chars = 50 }',
@@ -361,6 +363,40 @@ describe("POST /otlp/v1/traces", () => {
     });
     const archive = archiveId(OWNER, "otlp-genai", MESSAGES_TRACE);
     expect(await listSpans(booted.store, OWNER, archive)).toHaveLength(6);
+  });
+
+  it("takes an OTLP/JSON export uploaded whole as a document session", async () => {
+    // Not the receiver: POST /v1/sessions with the export as a JSON document (an S3 object, a
+    // file). It is one session, assembled the same way; a log carries no LLM calls.
+    const transcript = JSON.stringify(fixture("managed-agents-session")).replace(
+      "The guard returned",
+      `${"In detail: ".repeat(200)}The guard returned`,
+    );
+    const response = await app.fetch(
+      new Request("http://seshi.test/v1/sessions", {
+        method: "POST",
+        headers: { authorization: `Bearer ${UPLOADER}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          agent: "otlp-genai",
+          format: "json",
+          session_id: "export-1",
+          transcript,
+        }),
+      }),
+    );
+    expect(response.status).toBe(201);
+    const stored = await trace("acme", "export-1");
+    expect(stored.records.map((r) => r.role)).toEqual([
+      "meta",
+      "system",
+      "user",
+      "assistant",
+      "tool",
+      "assistant",
+      "user",
+      "assistant",
+    ]);
+    expect(stored.llm_calls).toBeUndefined();
   });
 
   it("answers garbage with 400 in the request's encoding", async () => {
