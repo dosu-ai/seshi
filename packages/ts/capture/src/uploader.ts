@@ -737,10 +737,19 @@ export class Uploader {
       if (!secret || !session.sent) {
         secret ??= newSecret();
         const kept = secret;
-        await this.save(key, (s) => {
+        let stopped = false;
+        await updateState(this.paths, (state) => {
+          const s = state.sessions[key];
+          // Turned off since the read above: `capture off` (under this same lock) saw `sent`
+          // unset, asked for no retraction and said nothing was uploaded, so nothing may go.
+          if (!s || this.off(state, s)) {
+            stopped = true;
+            return false;
+          }
           s.secret = kept;
           s.sent = true;
         });
+        if (stopped) return { uploaded };
       }
       let redacted: { text: string; carried?: Record<string, unknown> };
       let result: StoreSessionResult;

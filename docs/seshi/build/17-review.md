@@ -159,6 +159,12 @@ what changed.
   Tests: hook (both captures skipped, a subagent's own `on` wins), uploader (spooled and swept
   subagents sent nothing), end to end (two retracted, a later subagent and a grown one not
   sent).
+- **client, medium**: a session turned off between the uploader's unlocked read and its first
+  upload stayed stored for good: `capture off` saw `sent` unset, set no retraction and said
+  "Nothing of it was uploaded", then the uploader set `sent` and ingested, against F9.7. The
+  locked write that marks a session sent now checks its toggle (its parent's too) and a pending
+  retraction, and sends nothing when it is off. Test: a toggle applied from inside `identify`
+  (after the read) leaves nothing uploaded and nothing to retract.
 
 ## Not fixed
 

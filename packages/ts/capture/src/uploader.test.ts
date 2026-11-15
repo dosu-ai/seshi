@@ -563,6 +563,34 @@ describe("retraction (F9.7)", () => {
     expect(session().secret).not.toBe(secret);
   });
 
+  it("sends nothing of a session turned off just before its first upload", async () => {
+    writeFileSync(transcript(), line("one") + line("two"));
+    hooked();
+    // `capture off` lands after the uploader read the session and before it marked it sent:
+    // it sees nothing sent, so it asks for no retraction (as toggleSession does).
+    let toggled = false;
+    const racing: CaptureAgent = {
+      ...agent,
+      identify: (path, head) => {
+        if (!toggled) {
+          toggled = true;
+          const state = readState(paths);
+          const s = state.sessions["fake:s1"] as SessionState;
+          s.toggle = "off";
+          if (s.sent) s.retract = "pending";
+          writeFileSync(paths.state, JSON.stringify(state));
+        }
+        return agent.identify(path, head);
+      },
+    };
+    await uploader({ agents: [racing] }).pass();
+    expect(toggled).toBe(true);
+    expect(server.uploads).toHaveLength(0);
+    expect(session()).toMatchObject({ toggle: "off" });
+    expect(session().sent).toBeUndefined();
+    expect(session().retract).toBeUndefined();
+  });
+
   it("asks nothing of the server for a session never sent", async () => {
     writeFileSync(transcript(), line("one") + line("two"));
     await updateState(paths, (s) => {
