@@ -777,7 +777,7 @@ describe("span sets (X4.2)", () => {
     );
     const p = pipeline({ redaction: compileRuleSet({ packs: [acme] }) });
     const records = formats.normalize({ source: "trajectory", transcript: HEAD }).records;
-    const last = records.at(-1) as Record<string, unknown>;
+    const last = records.at(-1) as unknown as Record<string, unknown>;
     last.llm_call = "c1";
     const stored = await p.publishAssembled({
       envelope: spans(),
