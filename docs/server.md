@@ -81,8 +81,8 @@ The worker's jobs:
 |---|---|---|
 | `heartbeat` | `worker.heartbeat_interval` (1m) | Writes `worker/heartbeat.json`: who runs, since when, and each job's last run and error (X7.5) |
 | `retention` | 6h | Prunes drop and failure records and source health days past `[records]` retention |
-| `source:<id>` | the source's `interval` | Polls a source through its connector (X3.11), from its checkpoint (X7.4) |
-| `assembler` | `worker.assembly_interval` (30s) | Publishes sessions whose spans (OTLP, F4) have been quiet for their source's `quiet_period`, from the pending markers (X7.4); its backlog is the sessions waiting |
+| `source:<id>` | the source's `interval` | Polls a source through its connector (X3.11), from its checkpoint (X7.4): Datadog LLM Observability for `type = "datadog"` ([datadog.md](datadog.md)) |
+| `assembler` | `worker.assembly_interval` (30s) | Publishes sessions whose spans (OTLP, F4; Datadog, F5) have been quiet for their source's `quiet_period`, from the pending markers (X7.4); its backlog is the sessions waiting |
 
 A failed run is retried after 5 seconds, doubling per failure in a row up to the job's
 interval. A poll whose envelope failed transiently (the bucket) never saves its checkpoint

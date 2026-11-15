@@ -263,7 +263,10 @@ Read and written by the binary only, so their types are code-first in `@seshi/st
   `label`, `created_by`, `machine` (a device token's machine) and `claims` (what the IdP
   verified). Session tokens are signed by the server and not stored.
 - `sources/<id>/checkpoint.json` (`seshi/checkpoint/1`): the source id, when it was saved,
-  and the poller's own `cursor` object.
+  and the poller's own `cursor` object. A `datadog` source's cursor is `{ v: 1, until?,
+  window?: { from, to, page? }, seen? }`: the end of the last window read in full, the window
+  being read and the Export API cursor of its next page, and the span ids (OTLP hex) it
+  submitted inside the next window's overlap with their start in milliseconds.
 - `worker/heartbeat.json` (`seshi/heartbeat/1`): the writing process (`instance`, unique per
   run) and its stable instance id (`host`), version, roles, start, when it was written (`at`)
   and its `interval_ms`, and `jobs`: each job's runs, failures, last start and finish, last

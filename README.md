@@ -103,6 +103,13 @@ destination (or any exporter that follows the GenAI conventions) at `https://<se
 with a service token, and each Messages API request or Managed Agents session becomes a session
 of that destination's service account. Setup and what is kept: [`docs/otlp.md`](docs/otlp.md).
 
+### Datadog LLM Observability
+
+A `type = "datadog"` source polls Datadog LLM Observability's Export API with an API and an
+application key, and rebuilds each session Datadog Trajectory published there (one trace per
+turn) as a session of the source's service account. Nothing runs on laptops. Setup and what is
+kept: [`docs/datadog.md`](docs/datadog.md).
+
 ## What the server does with a session
 
 Every upload becomes an envelope that goes through one pipeline, in memory; only the trace is

@@ -250,13 +250,13 @@ What the server ingests from on its own (F4–F6). Each has an `id` (lower-case 
 digits, words joined by single `-`; not `upload`, which uploads use), a `type`, `enabled` (`true`), `visibility`, and `filter`
 overrides. Each writes as its service account `svc:<id>` (X5.4). The worker polls a source on
 its `interval` once a connector for its type is in the binary (`seshi sync status` says which
-are polled); the connectors come with their branches (10, 11), and the poller timings are
-provisional until then.
+are polled). The binary polls `datadog` sources ([docs/datadog.md](datadog.md)); the `s3`
+connector comes with its branch (11), and its timings are provisional until then.
 
 | Type | Fields |
 |---|---|
 | `otlp` | `quiet_period` (`"10m"`): a session is published once its spans have been quiet this long (F4.4). The destination posts to `POST /otlp/v1/traces` with a service token for this source ([docs/otlp.md](otlp.md)) |
-| `datadog` | `site` (`"datadoghq.com"`), `api_key`, `app_key` (secrets), `ml_app`, `tags`, `interval` (`"5m"`), `overlap` (`"10m"`), `lag` (`"2m"`), `backfill` (`"7d"`) |
+| `datadog` | `site` (`"datadoghq.com"`), `api_url` (instead of `https://api.<site>`: a proxy), `api_key`, `app_key` (secrets), `ml_app`, `tags` (each `key:value`; a span must carry all), `interval` (`"5m"`), `overlap` (`"10m"`), `lag` (`"2m"`), `backfill` (`"7d"`), `page_size` (`500`, at most 5000), `quiet_period` (`"10m"`): polls Datadog LLM Observability ([docs/datadog.md](datadog.md)) |
 | `s3` | `url`, `prefix`, `credentials` or `role` (`arn`, `external_id`), `region`, `endpoint`, `account_id`, `include` globs, `format` (`"auto"`), `ordered_keys` (`false`), `interval` (`"5m"`) |
 
 Ids are unique, and an `s3` source may not read seshi's own bucket and prefix (F6.4).
