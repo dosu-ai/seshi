@@ -498,8 +498,10 @@ export class Uploader {
           first_seen: entry.at,
         };
         // A folder a shared rule turns off names the transcript only for a session not known:
-        // never moves a known one's path.
-        if (entry.transcript_path && (entry.kind === "capture" || !session.path)) {
+        // never moves a known one's path. A hook during a pause names the agent's own
+        // transcript as a capture does: a stopped session's transcript that moved is followed,
+        // or the sweep would forget the session, its stop and its secret (33).
+        if (entry.transcript_path && (entry.kind !== "seen" || !session.path)) {
           session.path = entry.transcript_path;
         }
         if (entry.cwd) seenIn(session, entry.cwd);

@@ -77,8 +77,15 @@ export async function runHook(run: HookRun): Promise<HookOutcome> {
     if (!decision.capture) {
       outcome.skipped.push({ session_id: capture.session_id, decision });
       // A pause stops the session where it is (F9.5): the uploader records it, so it stays
-      // stopped once the pause ends. A hook writes no state itself (X3.3).
-      if (decision.frozen !== undefined && known?.frozen === undefined) {
+      // stopped once the pause ends. A hook writes no state itself (X3.3). A session already
+      // stopped whose transcript moved is told again with the new path: the uploader forgets a
+      // session whose transcript is gone, and with it the stop and the retraction secret (33).
+      const moved =
+        known?.frozen !== undefined &&
+        known.path !== undefined &&
+        capture.transcript_path !== undefined &&
+        capture.transcript_path !== known.path;
+      if (decision.frozen !== undefined && (known?.frozen === undefined || moved)) {
         appendSpool(
           run.paths,
           {

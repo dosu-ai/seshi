@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   utimesSync,
   writeFileSync,
@@ -932,6 +933,38 @@ describe("a pause stops sessions where they are (F9.5, revised 15 Nov 2026)", ()
     }
     expect(server.retractions).toEqual([]);
     expect(readState(paths).uploader?.queued).toBe(0);
+  });
+
+  it("follows a stopped session's transcript that moved, keeping its stop and its secret", async () => {
+    // Found by the scenario explorer (33): during a pause the hook named the moved transcript
+    // to nobody, and the sweep forgot the session (its old path gone), with its stop and the
+    // secret that retracts what it uploaded.
+    writeFileSync(transcript(), head);
+    hooked();
+    await uploader().pass();
+    const secret = session().secret;
+    await pauseNow();
+    const moved = join(dir, "elsewhere", "s1.jsonl");
+    mkdirSync(join(dir, "elsewhere"));
+    renameSync(transcript(), moved);
+    appendFileSync(moved, line("three"));
+    // What `seshi hook` spools for a stopped session whose transcript moved.
+    appendSpool(paths, {
+      v: 1,
+      kind: "paused",
+      at: clock.toISOString(),
+      agent: "fake",
+      session_id: "s1",
+      cwd: dir,
+      transcript_path: moved,
+    });
+    await uploader().pass({ sweep: true });
+    expect(session()).toMatchObject({
+      path: moved,
+      secret,
+      frozen: { offset: Buffer.byteLength(head) },
+    });
+    expect(server.uploads).toHaveLength(1);
   });
 
   it("is not undone by resume; turning the session on uploads all of it", async () => {

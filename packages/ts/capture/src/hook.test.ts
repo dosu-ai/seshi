@@ -146,14 +146,15 @@ describe("runHook (F9.1)", () => {
         agent: "fake",
         session_id: "old",
         first_seen: "x",
+        path: "/t/old.jsonl",
         frozen: { at: "x", offset: 10 },
       };
     });
-    const run = (id: string, at = now) =>
+    const run = (id: string, at = now, path = `/t/${id}.jsonl`) =>
       runHook({
         agent,
         event: "Stop",
-        payload: { id, cwd: dir, path: `/t/${id}.jsonl` },
+        payload: { id, cwd: dir, path },
         host,
         paths,
         now: at,
@@ -175,6 +176,17 @@ describe("runHook (F9.1)", () => {
       },
     ]);
     expect(spoolCount(paths)).toBe(0);
+    // Unless its transcript moved (33): the uploader is told the new path, or its sweep would
+    // forget the session, its stop and its retraction secret.
+    await run("old", now, "/t/moved/old.jsonl");
+    expect(
+      readSpool(paths).items.find((i) => i.entry.kind === "paused" && i.entry.session_id === "old")
+        ?.entry,
+    ).toMatchObject({
+      kind: "paused",
+      session_id: "old",
+      transcript_path: "/t/moved/old.jsonl",
+    });
     // Once the pause is over, a stopped session is still skipped; a new one is captured.
     await updateState(paths, (s) => {
       delete s.paused;
