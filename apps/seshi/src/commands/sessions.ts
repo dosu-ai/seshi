@@ -34,7 +34,7 @@ import { type Backend, openBackend } from "../backend";
 import { EXIT } from "../cli/exit";
 import { failWith, Refused } from "../cli/failures";
 import { emit, takeJson, usageError } from "../cli/output";
-import { type Style, styleFor } from "../cli/style";
+import { printable, type Style, styleFor } from "../cli/style";
 import type { CommandContext } from "./index";
 
 const USAGE = `usage: seshi sessions ls [--owner <id>] [--limit N] [--after <cursor>] [--all]
@@ -114,11 +114,11 @@ function when(iso: string): string {
 }
 
 function listLines(page: SessionsPage, owner: string, style: Style): string[] {
-  if (page.sessions.length === 0) return [`No sessions for ${owner}.`];
+  if (page.sessions.length === 0) return [`No sessions for ${printable(owner)}.`];
   const sorted = [...page.sessions].sort((a, b) => (a.updated_at < b.updated_at ? 1 : -1));
-  const refs = sorted.map((m) => `${m.agent}/${m.session_id}`);
+  const refs = sorted.map((m) => printable(`${m.agent}/${m.session_id}`));
   const width = Math.min(60, Math.max(...refs.map((r) => r.length)));
-  const lines = [style.muted(`${owner}: ${sorted.length} session(s), newest first`)];
+  const lines = [style.muted(`${printable(owner)}: ${sorted.length} session(s), newest first`)];
   sorted.forEach((m, i) => {
     const records = recordCount(m);
     // Padded before painting, so colour codes do not throw the columns out.
@@ -126,7 +126,9 @@ function listLines(page: SessionsPage, owner: string, style: Style): string[] {
       m.status === "redacted"
         ? style.status("deleted".padEnd(11), "warn")
         : `${records ?? "?"} records`.padEnd(11);
-    const where = [m.project, m.branch ? `(${m.branch})` : undefined].filter(Boolean).join(" ");
+    const where = printable(
+      [m.project, m.branch ? `(${m.branch})` : undefined].filter(Boolean).join(" "),
+    );
     lines.push(
       `${(refs[i] as string).padEnd(width)}  ${when(m.updated_at)}  ${state}  ${m.visibility.padEnd(5)}  ${style.muted(where)}`.trimEnd(),
     );
@@ -138,8 +140,10 @@ function listLines(page: SessionsPage, owner: string, style: Style): string[] {
 }
 
 function showLines(m: SessionMetadata, style: Style): string[] {
+  // `row`: the session's (other people's) text, made printable; `line`: our own.
+  const line = (label: string, value: string) => [`  ${label.padEnd(11)} ${value}`];
   const row = (label: string, value: string | undefined) =>
-    value === undefined || value === "" ? [] : [`  ${label.padEnd(11)} ${value}`];
+    value === undefined || value === "" ? [] : line(label, printable(value));
   const records = recordCount(m);
   const status =
     m.status === "redacted"
@@ -152,9 +156,9 @@ function showLines(m: SessionMetadata, style: Style): string[] {
     .map(([k, v]) => `${k} ${v}`)
     .join(", ");
   return [
-    style.bold(`${m.agent}/${m.session_id}`),
+    style.bold(printable(`${m.agent}/${m.session_id}`)),
     ...row("owner", `${m.owner} (${m.owner_basis})`),
-    ...row("status", status),
+    ...line("status", status),
     ...row("visibility", m.visibility),
     ...row("project", m.project),
     ...row("branch", m.branch),
@@ -190,7 +194,7 @@ function showLines(m: SessionMetadata, style: Style): string[] {
 /** One line per record: the role and the first line of what it says. */
 export function traceLines(trace: Trace, style: Style, width = 100): string[] {
   const clip = (text: string) => {
-    const line = text.split("\n").find((l) => l.trim() !== "") ?? "";
+    const line = printable(text.split("\n").find((l) => l.trim() !== "") ?? "");
     return line.length > width ? `${line.slice(0, width - 1)}…` : line;
   };
   const lines: string[] = [];
@@ -199,11 +203,13 @@ export function traceLines(trace: Trace, style: Style, width = 100): string[] {
     if (record.role === "assistant") {
       if (record.content) lines.push(`${style.brand("assistant")}  ${clip(record.content)}`);
       for (const call of record.tool_calls ?? []) {
-        lines.push(`${style.muted("tool call")}  ${call.name} ${style.muted(clip(call.args))}`);
+        lines.push(
+          `${style.muted("tool call")}  ${clip(call.name)} ${style.muted(clip(call.args))}`,
+        );
       }
     } else if (record.role === "tool") {
       const note = record.withheld
-        ? style.status(`withheld (${record.withheld})`, "warn")
+        ? style.status(`withheld (${printable(String(record.withheld))})`, "warn")
         : clip(record.content);
       lines.push(`${style.muted("tool")}       ${note}`);
     } else {
@@ -366,7 +372,9 @@ async function rm(
   values: Values,
   style: Style,
 ) {
-  const name = `${ref.agent}/${ref.sessionId}${values.owner ? ` of ${values.owner}` : ""}`;
+  const name = printable(
+    `${ref.agent}/${ref.sessionId}${values.owner ? ` of ${values.owner}` : ""}`,
+  );
   if (!values.yes) {
     if (!ctx.terminal || !ctx.tty?.stdin) {
       throw new UsageError(`deleting ${name} cannot be undone: add --yes`);

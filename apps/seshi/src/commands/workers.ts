@@ -15,7 +15,7 @@ import type { InstanceStatus } from "@seshi/instance";
 import { EXIT } from "../cli/exit";
 import { failWith } from "../cli/failures";
 import { emit, takeJson, usageError } from "../cli/output";
-import { type Role, Style, styleFor } from "../cli/style";
+import { printable, type Role, Style, styleFor } from "../cli/style";
 import { adminTarget } from "./admin-target";
 import type { CommandContext } from "./index";
 import { openServer, SERVER_OPTIONS, serverFailure } from "./server-instance";
@@ -78,7 +78,7 @@ export function statusLines(status: InstanceStatus, style: Style = Style.plain()
     );
     if (last?.last_error) {
       lines.push(
-        `    last error ${ago(last.last_error.at, status.at)}: ${last.last_error.message}`,
+        `    last error ${ago(last.last_error.at, status.at)}: ${printable(last.last_error.message)}`,
       );
     }
   }

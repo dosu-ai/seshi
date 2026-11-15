@@ -44,7 +44,7 @@ import { resolveUser, sendableUser } from "../account/user";
 import { EXIT } from "../cli/exit";
 import { failWith, Refused } from "../cli/failures";
 import { emit, takeJson, usageError } from "../cli/output";
-import { type Style, styleFor } from "../cli/style";
+import { printable, type Style, styleFor } from "../cli/style";
 import type { CommandContext } from "./index";
 
 const USAGE = `usage: seshi login [--server <url>] [--key <org key>|-] [--token <token>|-] [--user <name>]
@@ -122,7 +122,7 @@ async function idpSignIn(
       open: async (url) => (terminal ? terminal.openUrl(url) : false),
       prompt: (url) => {
         ctx.stderr(`Opening your browser to sign in. If it does not open, visit:`);
-        ctx.stderr(`  ${style.link(url)}`);
+        ctx.stderr(`  ${style.link(printable(url))}`);
       },
     });
     tokens = signedIn;
@@ -136,10 +136,10 @@ async function idpSignIn(
       fetch: fetchImpl,
       prompt: (code: DeviceCode) => {
         ctx.stderr(
-          `To sign in, open ${style.link(code.verification_uri)} and enter the code ${style.bold(code.user_code)}`,
+          `To sign in, open ${style.link(printable(code.verification_uri))} and enter the code ${style.bold(printable(code.user_code))}`,
         );
         if (code.verification_uri_complete) {
-          ctx.stderr(`  or open ${style.link(code.verification_uri_complete)}`);
+          ctx.stderr(`  or open ${style.link(printable(code.verification_uri_complete))}`);
         }
         ctx.stderr(style.progress("Waiting for you to sign in…"));
       },

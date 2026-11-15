@@ -196,6 +196,16 @@ export class Style {
   }
 }
 
+/** `text` safe to print on a terminal: every control character (C0, DEL, C1: escape
+ * sequences, carriage returns, bells) becomes U+FFFD, a tab a space. Stored sessions are written
+ * by other people and other programs, so a transcript, a project name or a token label could
+ * otherwise move the cursor, rewrite earlier lines, set the window title or the clipboard
+ * (OSC 52). Use it on everything a command prints that it did not write itself. */
+export function printable(text: string): string {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: matching control characters
+  return text.replace(/\t/g, " ").replace(/[\x00-\x1f\x7f-\x9f]/g, "\uFFFD");
+}
+
 /** Remove SGR sequences: what a line reads as with colour off. */
 export function stripStyle(text: string): string {
   // biome-ignore lint/suspicious/noControlCharactersInRegex: matching the escape character

@@ -32,6 +32,7 @@ import {
 import { EXIT, type ExitCode } from "../cli/exit";
 import { failWith, Refused } from "../cli/failures";
 import { emit, fail, takeJson, usageError } from "../cli/output";
+import { printable } from "../cli/style";
 import { adminTarget } from "./admin-target";
 import type { CommandContext } from "./index";
 import { openServer, SERVER_OPTIONS, serverFailure } from "./server-instance";
@@ -174,7 +175,8 @@ function recordLines(page: {
   const lines = page.records.map(({ record }) => {
     const r = record as FailedRecord | DroppedRecord;
     const why = "code" in r ? `${r.code}: ${r.message}` : `${r.reason} (${r.policy})`;
-    return `${r.at}  ${r.session_key ?? "-"}  ${why}`;
+    // Records come from the bucket (and over HTTP, from a server): made printable.
+    return printable(`${r.at}  ${r.session_key ?? "-"}  ${why}`);
   });
   if (page.truncated) {
     const last = page.records.at(-1)?.record as { at?: string } | undefined;

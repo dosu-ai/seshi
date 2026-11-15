@@ -20,7 +20,7 @@ import { type Backend, openBackend } from "../backend";
 import { EXIT } from "../cli/exit";
 import { failWith, Refused } from "../cli/failures";
 import { emit, takeJson, usageError } from "../cli/output";
-import { type Style, styleFor } from "../cli/style";
+import { printable, type Style, styleFor } from "../cli/style";
 import type { CommandContext } from "./index";
 
 const USAGE = `usage: seshi tokens ls [--owner <id>] [--kind <kind>] [--all]
@@ -105,7 +105,7 @@ function listLines(tokens: TokenInfo[], style: Style, now: Date): string[] {
     const { word, role } = tokenState(t, now);
     const expires = (t.expires_at ?? "never").slice(0, 10).padEnd(10);
     lines.push(
-      `${t.id.padEnd(20)}  ${t.kind.padEnd(7)}  ${t.owner.padEnd(24)}  ${style.status(word.padEnd(7), role)}  ${expires}  ${t.label ?? ""}`.trimEnd(),
+      `${printable(t.id).padEnd(20)}  ${t.kind.padEnd(7)}  ${printable(t.owner).padEnd(24)}  ${style.status(word.padEnd(7), role)}  ${expires}  ${printable(t.label ?? "")}`.trimEnd(),
     );
   }
   return lines;
