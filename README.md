@@ -157,15 +157,7 @@ format and can be exported as Letta trajectory-v1, OpenTelemetry spans or ATIF:
 
 ## How it works
 
-```
-agent hooks · seshi upload ──POST /v1/sessions──▶ seshi
-OTLP exporters ──POST /otlp/v1/traces──▶           normalize · redact · filter · review · write
-Datadog, S3 sources ──polled by the worker──▶                        │
-                                                                     ▼
-                                                    your bucket (s3:// r2:// file://)
-                                                                     ▲
-                                        readers: the API with a service token, or changes/
-```
+![How a session moves through seshi: agent hooks and the uploader on the developer laptop, the seshi serve API, pipeline and worker, the bucket, and the readers](docs/architecture.svg)
 
 Every upload goes through one pipeline in memory, and only its result is written. The log is
 normalized to trajectory-v1 records and redacted. A session's first trace is kept only if it

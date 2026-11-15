@@ -16,6 +16,7 @@ Start with the [README](../README.md) for what it is and a quick start; these pa
 
 | Page | For |
 |---|---|
+| [architecture.svg](architecture.svg) | One diagram of the whole system: laptop capture, the server, the bucket and its readers |
 | [server.md](server.md) | Running `seshi serve`: roles and background jobs, sources, deploying, who may call it and who sees what, the HTTP API |
 | [config.md](config.md) | Every setting, for the server (`seshi.toml`, `SESHI_*`) and for the CLI |
 | [redaction.md](redaction.md) | The built-in rules, writing your own rule packs, trying them, applying them to stored sessions |
