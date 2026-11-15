@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -63,9 +63,34 @@ describe("hook commands", () => {
       "seshi hook claude-code Stop",
     );
     expect(commandLine(["C:\\Program Files\\seshi\\seshi.exe", "hook"])).toBe(
-      '"C:\\Program Files\\seshi\\seshi.exe" hook',
+      '"C:/Program Files/seshi/seshi.exe" hook',
+    );
+    expect(commandLine(["C:\\Users\\dev\\AppData\\Local\\Programs\\seshi\\seshi.exe"])).toBe(
+      "C:/Users/dev/AppData/Local/Programs/seshi/seshi.exe",
     );
   });
+
+  it.skipIf(!existsSync("/bin/sh"))(
+    "gives sh (Git Bash on Windows) back the same words, Windows paths included",
+    () => {
+      const cases = [
+        ["C:\\Users\\dev\\AppData\\Local\\Programs\\seshi\\seshi.exe", "hook", "claude-code"],
+        ["C:\\Program Files\\seshi\\seshi.exe", "statusline"],
+        ["\\\\server\\share\\seshi.exe", "hook"],
+        ["/opt/se shi/seshi", 'say "hi"', "back\\slash", "trailing\\", 'mid\\"quote'],
+      ];
+      for (const words of cases) {
+        const line = commandLine(words);
+        const run = Bun.spawnSync(["/bin/sh", "-c", `printf '%s\\n' ${line}`]);
+        const got = run.stdout.toString().split("\n").slice(0, -1);
+        // Windows paths come back with forward slashes, which Windows takes as the same path.
+        const want = words.map((w) =>
+          /^(?:[A-Za-z]:\\|\\\\)/.test(w) ? w.replace(/\\/g, "/") : w,
+        );
+        expect(got, line).toEqual(want);
+      }
+    },
+  );
 
   it("tells seshi's own entries from everyone else's", () => {
     expect(isSeshiHook("seshi hook claude-code Stop", "claude-code")).toBe(true);

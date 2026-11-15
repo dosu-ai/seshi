@@ -58,12 +58,23 @@ export function writeJsonConfig(path: string, value: unknown): void {
   writeFileAtomic(path, `${JSON.stringify(value, null, 2)}\n`);
 }
 
-/** `words` as one command line that sh, PowerShell's call operator and cmd all split back into
- * the same words: a word with a space or a quote in it is double-quoted. */
+/** `words` as one command line that sh (Git Bash, which runs Claude Code's hooks and Bash tool
+ * on Windows), PowerShell's call operator and cmd all split back into the same words (F8.4).
+ *
+ * A Windows path (`C:\…`, `\\server\…`) is written with forward slashes, which all three take
+ * for a program or a file: sh would strip its backslashes unquoted, and quoting a program for
+ * PowerShell needs `&` in front. Any other word with a space, a quote, a backslash or another
+ * character a shell treats specially is double-quoted, the backslashes before a quote (or the
+ * closing one) doubled, which sh and Windows' argument rules both read back as one. */
 export function commandLine(words: readonly string[]): string {
-  return words
-    .map((w) => (/^[\w@%+=:,./\\-]+$/.test(w) ? w : `"${w.replace(/"/g, '\\"')}"`))
-    .join(" ");
+  return words.map(commandWord).join(" ");
+}
+
+function commandWord(word: string): string {
+  const w = /^(?:[A-Za-z]:\\|\\\\)/.test(word) ? word.replace(/\\/g, "/") : word;
+  if (/^[\w@%+=:,./-]+$/.test(w)) return w;
+  const body = w.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, "$1$1");
+  return `"${body}"`;
 }
 
 /** Whether `command` is a seshi hook command for `agent`: its program is a `seshi` binary (any

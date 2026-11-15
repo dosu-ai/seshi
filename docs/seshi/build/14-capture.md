@@ -239,9 +239,12 @@ A review of this branch against F9/B1.6 fixed, each with a test:
   `CLAUDE_ENV_FILE` on SessionStart; Cursor's payload fields and transcript location/format on
   current versions; Codex's notify argument and rollout layout. All were written from documented
   shapes; none was run against a live agent here.
-- Windows: hook command quoting in PowerShell/cmd for paths with spaces (`commandLine` quotes;
-  PowerShell needs `&` before a quoted program), `process.kill(pid, 0)` liveness, Task
-  Scheduler flags, `%LOCALAPPDATA%` permissions (0600 is not enforced on Windows).
+- Windows: hook commands in PowerShell/cmd for program paths with spaces (`commandLine` writes
+  Windows paths with forward slashes, so the default `%LOCALAPPDATA%\Programs\seshi` needs no
+  quotes and sh (Git Bash) splits it right, which a test checks with `/bin/sh`; a path with a
+  space is still double-quoted, and PowerShell needs `&` before a quoted program),
+  `process.kill(pid, 0)` liveness, Task Scheduler flags, `%LOCALAPPDATA%` permissions (0600 is
+  not enforced on Windows).
 - launchd and systemd entries were checked only as files and recorded commands; not loaded on a
   real machine.
 - PID reuse is covered by the heartbeat, but two uploaders can overlap for up to one beat after

@@ -196,6 +196,15 @@ what changed.
   failures are reported (`failed` in JSON, "not removed" in text), the others leave the state,
   the failed one stays, exit 1. 14 says so. Test: Claude Code, Codex and Cursor installed, Cursor
   broken; uninstall removes two, reports one, no stack trace.
+- **client, high**: `commandLine` left a word with backslashes unquoted, so the absolute
+  Windows path `capture install` writes (the default `%LOCALAPPDATA%\Programs\seshi\seshi.exe`)
+  reached sh as `C:Users…seshi.exe`. Claude Code runs hooks and its Bash tool through Git Bash
+  on Windows, so the hooks, the status line and the `/seshi` skill's `capture off --session`
+  failed, against F9.1/F8.4 ("hook commands work in sh, PowerShell and cmd") and F9.5. A
+  Windows path (`C:\`, `\\server\`) is now written with forward slashes, which cmd, PowerShell
+  and sh all take, and any other word with a backslash is double-quoted, backslashes before a
+  quote doubled. 14's Windows item says so. Test: `/bin/sh` splits Windows paths (with and
+  without spaces, UNC) and quoted words back into the same words.
 
 ## Not fixed
 
