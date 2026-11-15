@@ -70,6 +70,8 @@ import {
   isOwner,
   keys,
   listOwners,
+  listReviews,
+  type ReviewRecord,
   readChanges,
   readMetadata,
   type TokenKind,
@@ -544,6 +546,30 @@ export function createApp(instance: Instance) {
       "_",
     );
     return json(body, 200, { "content-disposition": `attachment; filename="${name}"` });
+  });
+
+  /** What model review decided for each stored write of a session (F3.8). Audit records are
+   * for admins: an admin gets them whole (policy, models, findings by location, failures);
+   * anyone else who may read the session sees only that each write was allowed, redacted or
+   * skipped, never the findings (F3 access). Drops are not here: nothing of them is in the
+   * session; `seshi sync dropped` lists them. */
+  route("GET", "/v1/sessions/:agent/:session_id/reviews", async ({ request, params, url }) => {
+    const principal = await caller(request, "sessions:read");
+    const { agent, sessionId } = sessionParams(params);
+    const { folder } = await readable(principal, ownerOf(url, principal), agent, sessionId);
+    const records = await listReviews(store, folder, archiveId(folder, agent, sessionId));
+    const audit = principal.role === "admin";
+    const view = (r: ReviewRecord) =>
+      audit
+        ? r
+        : {
+            schema: r.schema,
+            n: r.n,
+            at: r.at,
+            content_hash: r.content_hash,
+            decision: r.decision,
+          };
+    return json({ reviews: records.map(view) });
   });
 
   route("PATCH", "/v1/sessions/:agent/:session_id", async ({ request, params, url }) => {

@@ -700,6 +700,34 @@ paths:
           description: The packs are the ones the `If-None-Match` ETag names.
         "401": { $ref: "#/components/responses/Unauthorized" }
 
+  /v1/sessions/{agent}/{session_id}/reviews:
+    parameters:
+      - $ref: "#/components/parameters/agent"
+      - $ref: "#/components/parameters/session_id"
+      - $ref: "#/components/parameters/owner"
+    get:
+      tags: [sessions]
+      summary: What model review decided for each stored write of the session (F3.8).
+      operationId: sessionReviews
+      description: |
+        One entry per write that model review saw and that was stored, in order
+        (`review/<n>.json`). Admins get the whole audit record: the policy and its hash, both
+        models, the findings by record, field and category (never the text), and why review
+        was skipped. Anyone else who may read the session gets only `n`, `at`, `content_hash`
+        and `decision` (`allow`, `redact` or `skipped`). Writes no policy covered have no
+        entry. Envelopes review dropped left nothing in the session; they are drop records
+        (`seshi sync dropped`). Needs `sessions:read`.
+      responses:
+        "200":
+          description: The decisions, oldest first.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReviewsPage" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
 components:
   securitySchemes:
     bearer:
@@ -1578,3 +1606,60 @@ components:
       properties:
         match: { type: array, items: { type: string } }
         no_match: { type: array, items: { type: string } }
+
+    ReviewFinding:
+      type: object
+      description: Where the redactor found text to remove, and what kind; never the text (F3.8).
+      required: [record, field, category, action]
+      properties:
+        record:
+          type: integer
+          minimum: 0
+          description: The record's index in the trace the write produced.
+        field: { type: string, description: "`content`, or `tool_calls[N].args`." }
+        category: { type: string }
+        action: { type: string, enum: [redact, withhold] }
+
+    ReviewDecision:
+      type: object
+      description: |
+        One stored write's review (`seshi/review/1`). Callers who are not admins get `schema`,
+        `n`, `at`, `content_hash` and `decision` only.
+      required: [schema, n, at, content_hash, decision]
+      properties:
+        schema: { const: seshi/review/1 }
+        n: { type: integer, minimum: 0 }
+        at: { type: string, format: date-time }
+        content_hash: { type: string, pattern: "^[0-9a-f]{64}$" }
+        decision: { type: string, enum: [allow, redact, skipped] }
+        policy: { type: string }
+        policy_hash: { type: string }
+        decision_model: { type: string, description: "`<provider>/<model>`." }
+        redactor_model: { type: string }
+        findings:
+          type: array
+          items: { $ref: "#/components/schemas/ReviewFinding" }
+        unmatched:
+          type: integer
+          minimum: 0
+          description: Findings that named no text the redactor was given, so removed nothing.
+        parts:
+          type: integer
+          minimum: 0
+          description: How many parts the write was split into for the models (F3.7).
+        failure:
+          type: object
+          description: Why review was skipped (`on_failure = "skip"`, F3.4).
+          required: [step, code, attempts]
+          properties:
+            step: { type: string, enum: [decision, redactor] }
+            code: { type: string }
+            attempts: { type: integer, minimum: 1 }
+
+    ReviewsPage:
+      type: object
+      required: [reviews]
+      properties:
+        reviews:
+          type: array
+          items: { $ref: "#/components/schemas/ReviewDecision" }

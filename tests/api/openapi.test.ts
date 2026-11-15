@@ -259,6 +259,7 @@ describe("the document itself", () => {
         "GET /v1/changes",
         "GET /v1/admin/jobs",
         "GET /v1/redaction/rules",
+        "GET /v1/sessions/{agent}/{session_id}/reviews",
       ].sort(),
     );
   });
@@ -412,6 +413,10 @@ describe("the server honours it", () => {
     expect(
       (await call("GET", "/v1/sessions/claude-code/sess1/export", { token: null })).status,
     ).toBe(401);
+    expect((await call("GET", "/v1/sessions/claude-code/sess1/reviews")).status).toBe(200);
+    expect(
+      (await call("GET", "/v1/sessions/claude-code/sess1/reviews", { token: null })).status,
+    ).toBe(401);
     expect((await call("GET", "/v1/changes")).status).toBe(200);
     expect((await call("GET", "/v1/changes?since=2020-01-01T00:00:00Z&limit=10")).status).toBe(200);
     expect((await call("GET", "/v1/changes?limit=nope")).status).toBe(400);
@@ -420,6 +425,7 @@ describe("the server honours it", () => {
     expect((await call("GET", "/v1/sessions/claude-code/nope")).status).toBe(404);
     expect((await call("GET", "/v1/sessions/claude-code/nope/trace")).status).toBe(404);
     expect((await call("GET", "/v1/sessions/claude-code/nope/export")).status).toBe(404);
+    expect((await call("GET", "/v1/sessions/claude-code/nope/reviews")).status).toBe(404);
     expect((await call("DELETE", "/v1/sessions/claude-code/nope")).status).toBe(404);
     const tiny = await call("POST", "/v1/sessions", {
       body: { agent: "claude-code", session_id: "tiny", transcript: SMALL },
@@ -554,6 +560,9 @@ describe("the server honours it", () => {
       502,
     );
     expect((await call("GET", "/v1/admin/jobs", admin)).status).toBe(502);
+    expect((await call("GET", "/v1/sessions/claude-code/x/reviews", { app: down })).status).toBe(
+      502,
+    );
     expect((await call("DELETE", "/v1/sessions/claude-code/x", { app: down })).status).toBe(502);
     expect((await call("GET", "/v1/changes", { app: down })).status).toBe(502);
   });
@@ -638,6 +647,7 @@ describe("identity and access (X5)", () => {
     expect((await call("GET", "/v1/sessions/claude-code/s1", device)).status).toBe(403);
     expect((await call("GET", "/v1/sessions/claude-code/s1/trace", device)).status).toBe(403);
     expect((await call("GET", "/v1/sessions/claude-code/s1/export", device)).status).toBe(403);
+    expect((await call("GET", "/v1/sessions/claude-code/s1/reviews", device)).status).toBe(403);
     expect((await call("GET", "/v1/admin/jobs", admin)).status).toBe(200);
     expect((await call("GET", "/v1/admin/jobs", alice)).status).toBe(403);
     expect((await call("GET", "/v1/admin/jobs", { app: x5, token: null })).status).toBe(401);
