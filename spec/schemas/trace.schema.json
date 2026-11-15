@@ -1,0 +1,235 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "trace.schema.json",
+  "title": "Trace",
+  "description": "`seshi/trace/1`: the one canonical stored trace (X6.2), the immutable, content-addressed object at `owners/<owner>/sessions/<archive_id>/trace.<content_hash>.json.gz`. Evolved from trajectory-v1: `records` are trajectory-v1 records with optional fields for what raw used to keep (X6.3), `llm_calls` holds model and token usage per LLM call, and `provenance` says where the data came from. `events` and `content_hash` are derived from the records exactly as before (spec/layout.md), so hashes do not change. Letta (trajectory-v1), OTLP and ATIF are rendered from it on read.",
+  "type": "object",
+  "properties": {
+    "schema": { "const": "seshi/trace/1" },
+    "content_hash": {
+      "description": "sha256 of what was said: `source` (plus `@from_record` for a continuation), then each event's role and text (spec/layout.md).",
+      "$ref": "common.schema.json#/$defs/Sha256"
+    },
+    "source": {
+      "description": "The meta record's `source` (`claude-code`, `codex`, an ATIF document's harness, …).",
+      "type": "string",
+      "minLength": 1
+    },
+    "agent": {
+      "description": "The format the session was filed under (the archive id derives from it).",
+      "type": "string",
+      "minLength": 1
+    },
+    "project": { "type": "string" },
+    "branch": { "type": "string" },
+    "session_id": { "type": ["string", "null"] },
+    "started_at": {
+      "description": "The earliest event timestamp, as shipped; null when no event has one that parses.",
+      "type": ["string", "null"]
+    },
+    "ended_at": {
+      "description": "The latest event timestamp, as shipped; null when no event has one that parses.",
+      "type": ["string", "null"]
+    },
+    "records": {
+      "description": "The records after redaction and NUL stripping, meta record first: what `events` were derived from.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/TraceRecord" }
+    },
+    "events": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/TraceEvent" }
+    },
+    "metadata": { "$ref": "#/$defs/TraceMetadata" },
+    "llm_calls": {
+      "description": "The LLM calls the session made, referenced from records by `llm_call`. Absent when the source records none.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/LlmCall" }
+    },
+    "provenance": { "$ref": "common.schema.json#/$defs/Provenance" }
+  },
+  "required": [
+    "schema",
+    "content_hash",
+    "source",
+    "agent",
+    "session_id",
+    "started_at",
+    "ended_at",
+    "records",
+    "events",
+    "metadata"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "TraceRecord": {
+      "description": "One record: trajectory-v1, plus optional fields trajectory-v1 lacks.",
+      "oneOf": [
+        { "$ref": "#/$defs/TraceMetaRecord" },
+        { "$ref": "#/$defs/TraceTextRecord" },
+        { "$ref": "#/$defs/TraceAssistantRecord" },
+        { "$ref": "#/$defs/TraceToolResultRecord" }
+      ]
+    },
+    "TraceMetaRecord": {
+      "description": "The first record, and only the first: what the session is.",
+      "type": "object",
+      "properties": {
+        "role": { "const": "meta" },
+        "source": { "type": "string", "minLength": 1 },
+        "cwd": { "type": "string" },
+        "git_branch": { "type": "string" },
+        "model": { "description": "The session's main model, when the source names one.", "type": "string" },
+        "agent_version": {
+          "description": "The version of the agent harness that wrote the transcript.",
+          "type": "string"
+        }
+      },
+      "required": ["role", "source"],
+      "additionalProperties": false
+    },
+    "TraceTextRecord": {
+      "description": "A user prompt, a system message, an observation from the environment, or the model's reasoning.",
+      "type": "object",
+      "properties": {
+        "role": { "enum": ["user", "system", "observation", "reasoning"] },
+        "content": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "id": { "$ref": "#/$defs/RecordId" },
+        "llm_call": { "$ref": "#/$defs/LlmCallRef" }
+      },
+      "required": ["role", "content", "timestamp"],
+      "additionalProperties": false
+    },
+    "TraceAssistantRecord": {
+      "description": "What the assistant said, or the tools it called (or both).",
+      "type": "object",
+      "properties": {
+        "role": { "const": "assistant" },
+        "content": { "type": ["string", "null"] },
+        "tool_calls": { "type": "array", "items": { "$ref": "#/$defs/TraceToolCall" } },
+        "timestamp": { "type": "string" },
+        "id": { "$ref": "#/$defs/RecordId" },
+        "llm_call": { "$ref": "#/$defs/LlmCallRef" }
+      },
+      "required": ["role", "content", "timestamp"],
+      "additionalProperties": false
+    },
+    "TraceToolCall": {
+      "type": "object",
+      "properties": {
+        "id": { "description": "The tool call id the agent assigned.", "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "args": { "description": "The arguments as the agent sent them (usually JSON).", "type": "string" }
+      },
+      "required": ["id", "name", "args"],
+      "additionalProperties": false
+    },
+    "TraceToolResultRecord": {
+      "description": "A tool call's result.",
+      "type": "object",
+      "properties": {
+        "role": { "const": "tool" },
+        "tool_call_id": { "type": "string", "minLength": 1 },
+        "content": { "type": "string" },
+        "ok": { "description": "Whether the call succeeded, when the source says.", "type": "boolean" },
+        "timestamp": { "type": "string" },
+        "id": { "$ref": "#/$defs/RecordId" },
+        "withheld": {
+          "description": "Set when the result's content was replaced because the call touched a sensitive file or printed a secret (F2).",
+          "enum": ["sensitive-file", "secret-output"]
+        },
+        "duration_ms": {
+          "description": "How long the call ran, when the source says.",
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "required": ["role", "tool_call_id", "content", "timestamp"],
+      "additionalProperties": false
+    },
+    "RecordId": {
+      "description": "The record's id in its source (a message uuid, a span id), for provenance.",
+      "type": "string",
+      "minLength": 1
+    },
+    "LlmCallRef": {
+      "description": "The `id` of the entry in `llm_calls` that produced this record.",
+      "type": "string",
+      "minLength": 1
+    },
+    "LlmCall": {
+      "description": "One request to a model: which model, when, what it cost in tokens and how it ended.",
+      "type": "object",
+      "properties": {
+        "id": { "description": "Unique within the trace.", "type": "string", "minLength": 1 },
+        "model": { "description": "The model that answered.", "type": "string" },
+        "provider": { "description": "`anthropic`, `openai`, `bedrock`, …", "type": "string" },
+        "started_at": { "type": "string" },
+        "ended_at": { "type": "string" },
+        "duration_ms": { "type": "number", "minimum": 0 },
+        "usage": { "$ref": "#/$defs/TokenUsage" },
+        "stop_reason": { "description": "Why generation stopped, in the provider's words.", "type": "string" },
+        "request_id": { "description": "The provider's request or response id.", "type": "string" },
+        "parameters": {
+          "description": "Request parameters the source records (`temperature`, `max_tokens`, …).",
+          "type": "object",
+          "additionalProperties": { "type": ["string", "number", "boolean", "null"] }
+        },
+        "error": { "description": "The error the call ended with, if it failed.", "type": "string" }
+      },
+      "required": ["id"],
+      "additionalProperties": false
+    },
+    "TokenUsage": {
+      "description": "Token counts as the provider reports them.",
+      "type": "object",
+      "properties": {
+        "input_tokens": { "type": "integer", "minimum": 0 },
+        "output_tokens": { "type": "integer", "minimum": 0 },
+        "cache_read_input_tokens": { "type": "integer", "minimum": 0 },
+        "cache_creation_input_tokens": { "type": "integer", "minimum": 0 },
+        "reasoning_tokens": { "type": "integer", "minimum": 0 },
+        "total_tokens": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "EventRole": {
+      "enum": ["user", "assistant", "tool_call", "tool_result", "system", "observation", "reasoning"]
+    },
+    "TraceEvent": {
+      "description": "One unit of a trace. `index` is stable for the life of the object; `text` is the canonical string excerpts are validated against.",
+      "type": "object",
+      "properties": {
+        "index": { "type": "integer", "minimum": 0 },
+        "role": { "$ref": "#/$defs/EventRole" },
+        "text": { "type": "string" },
+        "timestamp": {
+          "description": "The record's timestamp as shipped; null when it does not parse.",
+          "type": ["string", "null"]
+        },
+        "tool_name": { "type": "string" },
+        "tool_call_id": { "type": "string" },
+        "ok": { "type": "boolean" }
+      },
+      "required": ["index", "role", "text", "timestamp"],
+      "additionalProperties": false
+    },
+    "TraceMetadata": {
+      "description": "Lineage and scope attached at ingest, plus the meta record's `cwd`, `git_branch` and `model`.",
+      "type": "object",
+      "properties": {
+        "cwd": { "type": "string" },
+        "git_branch": { "type": "string" },
+        "model": { "type": "string" },
+        "parent_session_id": {
+          "description": "The session this one was spawned by (a subagent, a fork).",
+          "type": "string"
+        },
+        "continuation": { "$ref": "common.schema.json#/$defs/Continuation" },
+        "normalizer": { "$ref": "common.schema.json#/$defs/Normalizer" }
+      },
+      "additionalProperties": true
+    }
+  }
+}

@@ -1,0 +1,150 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "common.schema.json",
+  "title": "Common",
+  "description": "Definitions the stored objects and the envelope share. Not an object of its own.",
+  "$defs": {
+    "Sha256": {
+      "description": "A SHA-256 digest as 64 lowercase hex characters.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "Timestamp": {
+      "description": "An RFC 3339 time in UTC, as seshi writes it (`2026-11-14T09:00:00.000Z`).",
+      "type": "string",
+      "format": "date-time"
+    },
+    "SourceKind": {
+      "description": "How an envelope arrived (X4.1): an upload from the CLI, a capture hook, an OTLP push, or one of the pollers.",
+      "type": "string",
+      "enum": ["upload", "hook", "otlp", "datadog", "s3", "cursor-cloud"]
+    },
+    "SourceId": {
+      "description": "A configured source's id, or `upload` for hooks and the CLI: words of lowercase letters and digits joined by single `-`.",
+      "type": "string",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+    },
+    "CallerKind": {
+      "description": "Which kind of credential made a call (X5.1, X5.9): `person` (IdP session token or org key with a stated username), `device` (write-only device token), `service` (a service account: a reader, an OTLP destination, a poller), `admin`, `static` (a token from config), `legacy` (an HS256 token minted outside the server, until X5.2 drops them) or `local` (local mode, writing a bucket it owns, X3.5).",
+      "type": "string",
+      "enum": ["person", "device", "service", "admin", "static", "legacy", "local"]
+    },
+    "Writer": {
+      "description": "Who wrote something (X5.5): the caller's kind, the person or service account, the credential it used, and the source the data came through.",
+      "type": "object",
+      "properties": {
+        "kind": { "$ref": "#/$defs/CallerKind" },
+        "principal": {
+          "description": "The owner id of the person, or `svc:<source-id>` for a service account.",
+          "type": "string",
+          "minLength": 1
+        },
+        "credential_id": {
+          "description": "The id of the token or key used, when it has one; never the secret.",
+          "type": "string",
+          "minLength": 1
+        },
+        "source_id": { "$ref": "#/$defs/SourceId" }
+      },
+      "required": ["kind", "principal", "source_id"],
+      "additionalProperties": false
+    },
+    "OwnerBasis": {
+      "description": "Why the session belongs to its owner (X5.5): `verified` (an IdP sign-in, or a credential the operator bound to the owner), `claimed` (an org-key caller stated the username, X5.12) or `service` (an org-level source's service account, X5.4).",
+      "type": "string",
+      "enum": ["verified", "claimed", "service"]
+    },
+    "Visibility": {
+      "description": "Who may read a session (X5.10): `org`, every member; `owner`, only its owner. Admins and services see everything.",
+      "type": "string",
+      "enum": ["org", "owner"]
+    },
+    "Claims": {
+      "description": "Identity the data asserts, copied from a fixed allowlist (X5.5). Never decides ownership (X5.4); with no raw stored, this is the only place it survives.",
+      "type": "object",
+      "properties": {
+        "email": { "description": "An email the data names (`trajectory.user_email`).", "type": "string" },
+        "name": { "description": "A display name the data names.", "type": "string" },
+        "username": { "description": "A username the caller stated or the data names.", "type": "string" },
+        "git_email": { "description": "The git `user.email` of the working copy.", "type": "string" },
+        "git_name": { "description": "The git `user.name` of the working copy.", "type": "string" },
+        "account_ids": {
+          "description": "Account ids by vendor (`anthropic`, `openai`, `cursor`, …), as the agent records them.",
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "SourceLocation": {
+      "description": "Where in the source the data was read (X4.1): enough to fetch it again for reprocessing (X4.9), never the content.",
+      "type": "object",
+      "properties": {
+        "object_key": { "description": "An S3 object's key.", "type": "string" },
+        "etag": { "description": "That object's ETag when it was read.", "type": "string" },
+        "cursor": { "description": "An API cursor or time window, as the poller writes it.", "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "Provenance": {
+      "description": "Which source a write came from and how it was read: the route, the configured source, the format adapter that normalized it and where in the source it was.",
+      "type": "object",
+      "properties": {
+        "source": { "$ref": "#/$defs/SourceKind" },
+        "source_id": { "$ref": "#/$defs/SourceId" },
+        "format": {
+          "description": "The format adapter the payload was normalized with (`claude-code`, `otlp-genai`, …).",
+          "type": "string",
+          "minLength": 1
+        },
+        "location": { "$ref": "#/$defs/SourceLocation" }
+      },
+      "required": ["source", "source_id"],
+      "additionalProperties": false
+    },
+    "Normalizer": {
+      "description": "Which code normalized the records, so `seshi reprocess` can pick the sessions an adapter fix affects (X4.9).",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 }
+      },
+      "required": ["name", "version"],
+      "additionalProperties": false
+    },
+    "Continuation": {
+      "description": "Marks a trace that is the tail of an already-stored session.",
+      "type": "object",
+      "properties": {
+        "from_record": {
+          "description": "Index of the first record of this trace (after its meta record) within the session's full record list.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "prefix_sha256": {
+          "description": "`prefixSha256` of the session's records before it: sha256 of their canonical JSON.",
+          "$ref": "#/$defs/Sha256"
+        }
+      },
+      "required": ["from_record", "prefix_sha256"],
+      "additionalProperties": false
+    },
+    "RedactionSummary": {
+      "description": "What redaction did, never what it matched (F2): the rule set that ran, and how many times each rule fired.",
+      "type": "object",
+      "properties": {
+        "rule_set": {
+          "description": "sha256 of the rule set that ran (built-in rules plus the operator's packs).",
+          "$ref": "#/$defs/Sha256"
+        },
+        "counts": {
+          "description": "Matches by rule id.",
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 0 }
+        }
+      },
+      "required": ["rule_set", "counts"],
+      "additionalProperties": false
+    }
+  }
+}

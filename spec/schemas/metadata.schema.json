@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "metadata.schema.json",
+  "title": "SessionMetadata",
+  "description": "`seshi/metadata/1`: one session's live pointer, `owners/<owner>/sessions/<archive_id>/metadata.json`. Mutable, so every write is conditional (If-Match, X6.5). It names the head trace and the traces the session has had, how far a chunked log has been normalized, who wrote the session and how its owner was established (X5.5), who may read it (X5.10), the identity claims the data made, what redaction did and where the data came from.",
+  "type": "object",
+  "properties": {
+    "schema": { "const": "seshi/metadata/1" },
+    "owner": { "type": "string", "minLength": 1 },
+    "archive_id": {
+      "description": "sha256(owner + \"\\n\" + agent + \"\\n\" + session_id).",
+      "$ref": "common.schema.json#/$defs/Sha256"
+    },
+    "session_id": { "type": "string" },
+    "agent": { "description": "The format the session is filed under.", "type": "string" },
+    "source": {
+      "description": "What the trace's meta record says it came from; absent until a trace is stored.",
+      "type": "string"
+    },
+    "project": { "type": "string" },
+    "branch": { "type": "string" },
+    "parent_session_id": { "type": "string" },
+    "status": {
+      "description": "`stored`, or `redacted` once tombstoned: a redacted session is never stored again.",
+      "enum": ["stored", "redacted"]
+    },
+    "head": {
+      "description": "The current trace's content hash; absent before one is stored and once redacted.",
+      "$ref": "common.schema.json#/$defs/Sha256"
+    },
+    "traces": { "type": "array", "items": { "$ref": "#/$defs/SessionTraceRef" } },
+    "raw": {
+      "description": "Raw transcript parts. Transitional: 04 stops storing raw (X6.3).",
+      "type": "array",
+      "items": { "$ref": "#/$defs/RawPart" }
+    },
+    "raw_format": { "$ref": "#/$defs/RawFormat" },
+    "normalized": { "$ref": "#/$defs/NormalizedState" },
+    "withheld_calls": {
+      "description": "Tool calls whose results are withheld, by id, so a result in a later chunk than its call is replaced too.",
+      "type": "object",
+      "additionalProperties": { "enum": ["sensitive-file", "secret-output"] }
+    },
+    "writer": {
+      "description": "Who first wrote the session: the original writer, who with an admin may replace it (X4.6). Each write's own writer is on its change entry.",
+      "$ref": "common.schema.json#/$defs/Writer"
+    },
+    "owner_basis": { "$ref": "common.schema.json#/$defs/OwnerBasis" },
+    "visibility": { "$ref": "common.schema.json#/$defs/Visibility" },
+    "claims": { "$ref": "common.schema.json#/$defs/Claims" },
+    "redaction": {
+      "description": "Redaction over the session's stored traces: the rule set that last ran and the matches by rule, summed over every write.",
+      "$ref": "common.schema.json#/$defs/RedactionSummary"
+    },
+    "provenance": {
+      "description": "Where the latest write came from.",
+      "$ref": "common.schema.json#/$defs/Provenance"
+    },
+    "origin_agent": {
+      "description": "The agent that ran the session (`claude-code`), whatever route it arrived by, so readers can collapse a session that arrived twice (X4.5).",
+      "type": "string"
+    },
+    "native_session_id": {
+      "description": "The session's id in the agent that ran it (X4.5).",
+      "type": "string"
+    },
+    "normalizer": {
+      "description": "What normalized the head trace (X4.9).",
+      "$ref": "common.schema.json#/$defs/Normalizer"
+    },
+    "retract_hash": {
+      "description": "Reserved for F9.7: the hash of the uploading machine's retraction secret.",
+      "$ref": "common.schema.json#/$defs/Sha256"
+    },
+    "created_at": { "$ref": "common.schema.json#/$defs/Timestamp" },
+    "updated_at": { "$ref": "common.schema.json#/$defs/Timestamp" }
+  },
+  "required": [
+    "schema",
+    "owner",
+    "archive_id",
+    "session_id",
+    "agent",
+    "status",
+    "traces",
+    "raw",
+    "writer",
+    "owner_basis",
+    "visibility",
+    "created_at",
+    "updated_at"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "SessionTraceRef": {
+      "type": "object",
+      "properties": {
+        "content_hash": { "$ref": "common.schema.json#/$defs/Sha256" },
+        "created_at": { "$ref": "common.schema.json#/$defs/Timestamp" },
+        "records": { "description": "Record count of the stored trace.", "type": "integer", "minimum": 0 },
+        "continuation": { "$ref": "common.schema.json#/$defs/Continuation" }
+      },
+      "required": ["content_hash", "created_at", "records"],
+      "additionalProperties": false
+    },
+    "RawFormat": {
+      "description": "How a raw transcript part is encoded: one JSON value per line, or one JSON document.",
+      "enum": ["jsonl", "json"]
+    },
+    "RawPart": {
+      "type": "object",
+      "properties": {
+        "part": { "type": "integer", "minimum": 0 },
+        "format": { "$ref": "#/$defs/RawFormat" },
+        "size": { "description": "Bytes as stored (gzip).", "type": "integer", "minimum": 0 },
+        "sha256": { "$ref": "common.schema.json#/$defs/Sha256" },
+        "created_at": { "$ref": "common.schema.json#/$defs/Timestamp" },
+        "offset": {
+          "description": "The byte offset of the part's first byte in its log.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "length": {
+          "description": "How many of the log's bytes it covers, before redaction.",
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": ["part", "format", "size", "sha256", "created_at", "offset", "length"],
+      "additionalProperties": false
+    },
+    "NormalizedState": {
+      "description": "How far a session's log has been normalized: the state the next chunk continues from.",
+      "type": "object",
+      "properties": {
+        "bytes": { "description": "Bytes of the log normalized so far.", "type": "integer", "minimum": 0 },
+        "records": {
+          "description": "How many records the whole session normalizes to, those bytes in.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "prefix_sha256": { "$ref": "common.schema.json#/$defs/Sha256" },
+        "hash_state": {
+          "description": "The prefix hash mid-stream (`PrefixHash.export()`), so the next chunk's records extend it.",
+          "type": "string"
+        }
+      },
+      "required": ["bytes", "records", "prefix_sha256", "hash_state"],
+      "additionalProperties": false
+    }
+  }
+}
