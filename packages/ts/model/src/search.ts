@@ -13,7 +13,8 @@ export const SEARCH_SORTS: readonly SearchSort[] = ["relevance", "recent"];
 /** A search (F10.1): keywords plus filters. Every filter narrows; none widens what the caller
  * may read, which the server decides (F10.4). */
 export interface SearchRequest {
-  /** The keywords. Words must all appear (in any order); `"a phrase"` must appear as written;
+  /** The keywords, matched per record (a prompt, an answer, one tool call). Words must all
+   * appear in one record (in any order); `"a phrase"` must appear as written;
    * `word*` matches words that start with it; `a OR b` matches either; `-word` excludes
    * records with it. Case and accents are ignored. */
   q: string;

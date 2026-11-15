@@ -836,7 +836,7 @@ paths:
         (F10.2, F10.3), so a session appears within the indexer's interval of being stored.
         A new or wiped instance answers `503` until its index has caught up.
 
-        `q` takes words (all must appear), `"a phrase"`, `word*` (a prefix), `a OR b`, and
+        `q` takes words (all must appear in one record), `"a phrase"`, `word*` (a prefix), `a OR b`, and
         `-word` or `NOT word` (excluded). Case and accents are ignored; punctuation separates
         words, so `src/app.ts` matches those words in that order.
       parameters:

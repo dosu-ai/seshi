@@ -3,7 +3,8 @@
  * push --force` or a stray `"` must never be a syntax error or reach FTS5 as an operator, so
  * every word becomes a quoted FTS5 string, and only these forms mean anything:
  *
- * - words: all must appear, in any order (`flaky test`);
+ * - words: all must appear in one record, in any order (`flaky test`): a record is the unit
+ *   matched, and a session is found by its matching records;
  * - `"a phrase"`: the words in that order;
  * - `word*`: words starting with `word`;
  * - `a OR b`: either (upper case `OR` between two words or phrases);

@@ -7,8 +7,8 @@ an indexer per instance tails every owner's change feed into a local SQLite FTS5
 
 ## What was built
 
-- **`@seshi/search`** (layer 3; depends on model, store, pipeline, auth; nothing new from npm:
-  `bun:sqlite`).
+- **`@seshi/search`** (layer 3; depends on model, store, auth, and pipeline for tests only;
+  nothing new from npm: `bun:sqlite`).
   - `backend.ts`: the narrow backend interface F10.3 asks for, `SearchBackend` (`session`,
     `apply` a session update, `remove`, `query` with filters and a viewer, `counts`), and
     `FeedState` (per-owner cursor, the keys seen in the lag window, readiness, `transaction`,
@@ -21,12 +21,16 @@ an indexer per instance tails every owner's change feed into a local SQLite FTS5
     are FTS5 `snippet()` with `\x01`/`\x02` markers, turned into plain text plus `[start, end)`
     offsets (`snippet.ts`); FTS5 refuses `snippet()` next to a window function, so the best
     records per session are picked first and their snippets read in a second query. Every
-    write is a transaction; an update older than what the file holds (by the metadata's
-    `updated_at`) is refused, and so is a continuation whose `base` traces are not what the
-    file holds, so two processes sharing a file (a server and a local `seshi search`) never put
-    back older content or duplicate events. A tombstone keeps a `removed` row so a late, older
-    update is refused. The file records its format (`seshi/search-index/1`), deployment and
-    indexed roles; any mismatch wipes it.
+    write is a transaction. Every update carries its read stamp (`read_at`: when the indexer
+    started reading the session's metadata, on this host's clock); an update read before what
+    the file holds is refused, and so is a continuation whose `base` traces are not what the
+    file holds, so two processes sharing a file (a server and a local `seshi search`, same host,
+    same clock) never put back older content or duplicate events. The metadata's `updated_at`
+    is deliberately not used for this: writers stamp it with clocks that disagree. A removal
+    keeps (or adds, for a session never held) a `removed` row with its stamp, so a late update
+    read earlier is refused. `reset` bumps a `generation`; a run that started before it writes
+    nothing. The file records its format (`seshi/search-index/2`), deployment and indexed
+    roles; any mismatch wipes it.
   - `indexer.ts` `Indexer` (F10.2): lists owners (`listOwners`, refreshed every minute, every
     run while there are none), and per owner lists `changes/` from its cursor minus a 5 min lag
     window (`FEED_LAG_MS`), skips keys already seen, reads the new entries, and for each session
@@ -38,7 +42,9 @@ an indexer per instance tails every owner's change feed into a local SQLite FTS5
     the metadata. The entries, the session changes and the cursor commit in one transaction per
     page. A run reads up to `RUN_BUDGET` (5000) entries and reports `more`; a run that read
     every owner to the end marks the index caught up, and the first such run makes it ready.
-    Concurrent `run()` calls share one run.
+    Concurrent `run()` calls share one run. A metadata or trace object that cannot be decoded
+    is skipped with a warning (an undecodable metadata drops the session from the index); store
+    errors fail the run, which the job retries.
   - What is indexed (`searchableEvents`): trace events whose role is in `search.events`
     (`user`, `assistant`, `tool_call` by default: prompts, assistant text, tool names and
     inputs, so paths and commands). The trace's events leave out what the assistant said
@@ -91,8 +97,9 @@ an indexer per instance tails every owner's change feed into a local SQLite FTS5
   SQLite backend incl. permission filter, filters, paging, stale and base refusals, two
   connections on one file, file wipe on mismatch, feed state; indexer over a folder store with
   real pipeline writes: continuations read only the new trace, replace, tombstone, visibility,
-  lag window with a skewed clock, a lost change entry, budgets and paging, bad entries, abort,
-  owner refresh; service: 503 until ready, viewers, live re-check after visibility change and
+  lag window with a skewed clock, a continuation from a clock behind, a lost change entry,
+  budgets and paging, bad entries, undecodable objects, a reset during a run, abort, owner
+  refresh; service: 503 until ready, viewers, live re-check after visibility change and
   delete, aliases, cursors, persistence and rebuild, request checks; default paths; viewer).
   `tests/api/search.test.ts` (org-key members, admin, service reader, filters, trace/event
   pointers, live hiding, 503/400/404, the job on an api instance through status, no job on
@@ -167,8 +174,49 @@ an indexer per instance tails every owner's change feed into a local SQLite FTS5
 - **Offset paging** is not stable while the index changes between pages, and stops at 10 000.
 - **`--token` on the command line** is visible in shell history and `ps`; it is interim until
   13 stores credentials.
-- A session tombstoned before it was ever indexed leaves no `removed` row, so a slower second
-  process sharing the file could still index its last stored state until its next change.
+- **Matching is per record.** All the words of a query must appear in one record (a prompt, an
+  answer, one tool call); `flaky app.ts` does not find a session that says `flaky` in a prompt
+  and touches `app.ts` in a tool call. That is the documented behaviour (cli.md, openapi), and
+  keeps multi-word queries like `git push --force` precise. If people expect session-level AND,
+  `parseQuery` would return its OR groups and the query would intersect the sessions matching
+  each group (one `IN (… MATCH ?)` per group); ranking and snippets need not change.
+- `search()` calls `counts()` on every query for `index.sessions`, a count over `sessions` and
+  `events`. Cheap at today's sizes; cache it if indexes reach millions of records.
+- Read stamps order updates between processes sharing a file. Two overlapping metadata reads
+  around a write can still, in theory, apply in the wrong order (a read that started earlier
+  may return the newer version); the session is right again at its next change. Within one
+  process there is no such case: runs are serialized and a refused update is planned again.
+
+## Review fixes
+
+A review of the branch added these on top of the implementation:
+
+- **Clock skew lost continuations.** The index refused any update whose metadata `updated_at`
+  was older than what it held. `updated_at` is stamped by the writer's clock (API instances
+  behind a load balancer, the worker, a laptop in local mode), so a chunk written a few hundred
+  ms "earlier" by a machine whose clock is behind was never indexed until the session changed
+  again; a session's last chunk could stay unsearchable for good. Updates are now ordered by
+  the reader's own read stamp (`SessionUpdate.read_at`, index column `read_ms`), which is what
+  the two-processes-one-file guard needs, since such processes share a host clock. Index format
+  bumped to `seshi/search-index/2`, so older files are rebuilt. New tests: an indexer test with
+  a continuation written by a clock 400 ms behind, and backend tests for read-stamp refusals.
+- **One bad object stopped indexing.** A corrupt metadata or trace object (bad JSON or gzip)
+  threw out of the run. The job retried forever without moving that owner's cursor, and on a
+  new instance the index never became ready, so search answered 503 for good. Undecodable
+  objects are now skipped with a warning; the live re-check of results treats undecodable
+  metadata as gone instead of failing the query (500). New test.
+- **A rebuild in another process could be undone.** `seshi search --rebuild` sharing the
+  server's file reset the cursors while the server's job had a page in flight; that page then
+  set the cursor past everything before it, and the rebuilt index silently missed sessions.
+  `reset` now bumps a generation, and a run that sees it change writes nothing, does not mark
+  the index caught up, and asks to run again. New test.
+- A session removed before it was ever indexed now gets a `removed` row too (it was an open
+  item), so a slower process sharing the file cannot index its last state.
+- `vitest.config.ts` uses a fresh cache folder per run and removes it at exit. The fixed
+  folder accumulated index files across runs, and `deployment: "d"` instances in instance.test
+  reopened the previous run's file.
+- Docs (cli.md, openapi, the model's `SearchRequest`) now say that all words must appear in one
+  record.
 
 ## Cross-branch wiring once the stack is linear
 

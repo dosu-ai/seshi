@@ -102,8 +102,9 @@ seshi search deploy -staging --owner alice@acme.com --sort recent --json
 ```
 
 `seshi search` finds sessions by what was said and done in them: prompts, assistant text, and
-tool calls (tool names and inputs, so file paths and commands). Words must all appear, in any
-order; `"a phrase"` must appear as written; `word*` matches words starting with it; `a OR b`
+tool calls (tool names and inputs, so file paths and commands). A record matches when all the
+words appear in it, in any order (a prompt, an answer, one tool call: words spread over two
+records of a session do not match); `"a phrase"` must appear as written; `word*` matches words starting with it; `a OR b`
 matches either; `-word` (or `NOT word`) leaves out records with it. Case and accents are
 ignored, and punctuation separates words, so `src/app.ts` finds those words in that order.
 
