@@ -20,6 +20,7 @@ import { type BackfillOptions, backfillRedaction } from "./backfill";
 import { uploadEnvelope } from "./envelope";
 import { getTrace, ingest, tombstone } from "./ingest";
 import { Pipeline } from "./pipeline";
+import { StoreSessionDB } from "./session-db";
 
 let dir: string;
 let store: FsStore;
@@ -362,6 +363,31 @@ describe("backfillRedaction (F2.5)", () => {
     expect(report.sessions[0]?.message).toMatch(/changed meanwhile/);
     const files = (await store.list(`${keys.session("alice", archive)}/`)).keys;
     expect(files.filter((k) => k.includes("trace."))).toHaveLength(1);
+  });
+
+  it("never serves an old trace a run stopped before deleting", async () => {
+    await store1("s1", meta() + user(`key ACME-1234 ${LONG}`) + reply("ok"));
+    const archive = archiveId("alice", "trajectory", "s1");
+    const old = (await metadata("s1"))?.head as string;
+    // The old object's delete fails once, after the pointer moved and the entry was appended.
+    const failing: Store = new Proxy(store, {
+      get(target, prop, receiver) {
+        if (prop === "delete") {
+          return async (key: string) => {
+            if (key === keys.trace("alice", archive, old)) throw new Error("transient");
+            return target.delete(key);
+          };
+        }
+        return Reflect.get(target, prop, receiver);
+      },
+    }) as Store;
+    await expect(run({ store: failing })).rejects.toThrow("transient");
+    expect((await metadata("s1"))?.head).not.toBe(old);
+    // The object is left behind with what the new rules take out, but no reader is given it.
+    expect(JSON.stringify(await getTrace(store, "alice", archive, old))).toContain("ACME-1234");
+    const db = new StoreSessionDB({ store, owner: "alice", formats });
+    expect(await db.getTrace("trajectory", "s1", old)).toBeNull();
+    expect(JSON.stringify(await db.getTrace("trajectory", "s1"))).not.toContain("ACME-1234");
   });
 
   it("reports a session whose trace is missing as a conflict", async () => {

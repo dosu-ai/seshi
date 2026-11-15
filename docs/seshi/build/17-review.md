@@ -119,6 +119,17 @@ what changed.
   or, when a match spans the JSON so it no longer parses, redacted string by string with no key
   exempt. Tests: the client's input equals what the server stores for the same call (same
   counts), and the fallback.
+- **dataflow, medium** (split vote, confirmed in part): a backfill stopped after the pointer
+  moved (a crash, or a transient error from `appendChange` or a delete) leaves the old trace
+  objects, holding what the new rules take out, and no later run deletes them (the session is
+  `current`). The ordering is the recorded trade-off, but the comment's "harmless, the pointer
+  no longer names them" was false: `GET …/trace?hash=`, `…/export?hash=` and
+  `SessionDB.getTrace` served any object in the session's folder, and old hashes were handed out
+  in earlier `published` entries. They now serve only a hash the session's `traces` name (404,
+  or null, otherwise), which also covers objects a stopped replace leaves. openapi.yaml,
+  server.md and 07 say so. Tests: a backfill whose delete fails, then `getTrace` of the old hash
+  is null though the object is there; the API serves the head by hash and 404s an unnamed
+  object on both routes. Deleting the leftovers is in the list below.
 
 ## Not fixed
 
@@ -146,3 +157,17 @@ what changed.
   either sign-off on the narrowed reading or work to make the suite pass there (shell-script
   fixtures, POSIX paths, file modes), which cannot be checked without a Windows host. Left for
   a decision.
+- **dataflow, medium** (split vote, confirmed): deleting the trace objects a stopped backfill
+  (or replace) leaves behind. Since this review no reader is served them (above), but they stay
+  in the bucket against F2.5's "deleted, not kept". A sweep of objects the metadata does not
+  name races a concurrent publish (its object is written before the pointer names it), so it
+  needs an age guard from the store's listing or a recorded list of pending deletions written
+  before the pointer moves (a metadata schema change). Left for that decision.
+- **dataflow, medium** (split vote, judged a documented deviation): a model-review drop of a
+  session's first envelope stores nothing, so the uploader resends the whole log as it grows;
+  each resend goes to the provider again and is reviewed whole, and a later `allow` or
+  `redact` stores the text the first review dropped. 04's deviation 9 and 08's open items
+  record this. F3.4 says the offset moves past a dropped envelope, but F3.1 says a drop writes
+  nothing; moving past it needs session state for a session with no trace (which would also
+  record that the dropped session exists), a choice between the two the decisions do not make.
+  Left for that decision.

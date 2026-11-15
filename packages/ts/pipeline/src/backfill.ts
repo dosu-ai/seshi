@@ -363,8 +363,10 @@ async function backfillSession(
     throw err;
   }
   // The change entry before the old objects go: a run stopped between the two leaves old objects
-  // behind (harmless, the pointer no longer names them). A run stopped after the pointer moved
-  // but before this entry leaves a rewritten session with no entry, which the next run finds
+  // behind, which nothing deletes later (17-review's not-fixed list), but no read serves them:
+  // the trace routes and `getTrace` serve only a hash the pointer names. A run stopped after the
+  // pointer moved but before this entry leaves a rewritten session with no entry, which the next
+  // run finds
   // current: the gap layout.md documents for any publish (steps 3-5), which the search indexer
   // heals at the session's next entry, since each entry makes it read the current metadata.
   await appendChange(store, {

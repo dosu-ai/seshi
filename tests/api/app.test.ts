@@ -130,6 +130,27 @@ describe("auth", () => {
     }
   });
 
+  it("serves only a trace the session names, not one left in its folder", async () => {
+    const stored = await call("POST", "/v1/sessions", {
+      token: TOKEN,
+      body: { agent: "claude-code", session_id: "mine", transcript: CLAUDE },
+    });
+    expect(stored.status).toBe(201);
+    const archive = archiveId("acme", "claude-code", "mine");
+    const head = (await readMetadata(store, "acme", archive))?.head as string;
+    // An object the pointer no longer names, as a backfill or replace stopped before its
+    // delete leaves behind.
+    const orphan = "e".repeat(64);
+    const bytes = await getBytes(store, keys.trace("acme", archive, head));
+    await store.put(keys.trace("acme", archive, orphan), bytes as Uint8Array);
+    const opts = { token: TOKEN };
+    for (const route of ["trace", "export"]) {
+      const base = `/v1/sessions/claude-code/mine/${route}`;
+      expect((await call("GET", `${base}?hash=${head}`, opts)).status).toBe(200);
+      expect((await call("GET", `${base}?hash=${orphan}`, opts)).status).toBe(404);
+    }
+  });
+
   it("reads its own sessions unless it names another owner", async () => {
     const stored = await call("POST", "/v1/sessions", {
       token: TOKEN,

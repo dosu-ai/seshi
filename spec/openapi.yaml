@@ -427,7 +427,7 @@ paths:
       parameters:
         - name: hash
           in: query
-          description: A specific trace's `content_hash`; the head by default.
+          description: One of the session's traces (a `traces[].content_hash`); the head by default. Any other hash is 404, even when an object a stopped backfill or replace left behind is under it.
           schema: { type: string }
         - name: format
           in: query
@@ -477,7 +477,7 @@ paths:
       parameters:
         - name: hash
           in: query
-          description: A specific trace's `content_hash`; the head by default.
+          description: One of the session's traces (a `traces[].content_hash`); the head by default. Any other hash is 404, even when an object a stopped backfill or replace left behind is under it.
           schema: { type: string }
         - name: format
           in: query

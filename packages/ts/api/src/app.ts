@@ -562,7 +562,11 @@ export function createApp(instance: Instance) {
     }
     const hash = url.searchParams.get("hash") ?? metadata.head;
     if (!hash) throw new HttpError(404, "no_trace", "session has no trace");
-    if (!/^[0-9a-f]{64}$/.test(hash)) throw new HttpError(404, "not_found", "no such trace");
+    // Only a trace the session names: an object it no longer names (one a stopped backfill or
+    // replace left behind) holds what newer rules or a rewrite took out.
+    if (!metadata.traces.some((ref) => ref.content_hash === hash)) {
+      throw new HttpError(404, "not_found", "no such trace");
+    }
     const trace = await getTrace(store, folder, archiveId(folder, agent, sessionId), hash);
     if (!trace) throw new HttpError(404, "not_found", "no such trace");
     return {

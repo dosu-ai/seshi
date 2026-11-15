@@ -145,7 +145,8 @@ export class StoreSessionDB implements SessionDB {
     const metadata = await this.getSession(agent, sessionId);
     if (!metadata || metadata.status === "redacted") return null;
     const wanted = hash ?? metadata.head;
-    if (!wanted || !/^[0-9a-f]{64}$/.test(wanted)) return null;
+    // Only a trace the session names (see the API's trace route).
+    if (!wanted || !metadata.traces.some((ref) => ref.content_hash === wanted)) return null;
     const archive = archiveId(this.owner, agent, sessionId);
     const trace = await getTrace(this.store, this.owner, archive, wanted);
     return trace === null ? null : renderTrace(trace, format);
