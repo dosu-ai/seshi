@@ -537,7 +537,8 @@ class Runner {
     const errors = report.findings.filter(
       (f) =>
         f.severity === "error" &&
-        !(f.code === "redacted_trace_object" && retracting.has(f.archive_id ?? "")),
+        !(f.code === "redacted_trace_object" && retracting.has(f.archive_id ?? "")) &&
+        !(f.code === "stub_trace_object" && this.tracePutFailed()),
     );
     if (errors.length > 0) this.fail("checkStore found errors", errors.map(findingLine));
   }
@@ -609,6 +610,11 @@ class Runner {
     return (JSON.parse(run.out) as { sessions: DoctorSession[] }).sessions[0];
   }
 
+  /** Whether a store fault failed a trace object's write (after it landed, or before). */
+  private tracePutFailed(): boolean {
+    return this.world.plan.log.some((l) => /^store put \S*\/trace\.\S+:/.test(l));
+  }
+
   private async quietChecks(extraAllow: string[]): Promise<void> {
     // The doctor: no check fails for any session the laptop knows.
     const failing: string[] = [];
@@ -635,8 +641,15 @@ class Runner {
     // sweep (F2.5) removes it once it is an hour old (32, scenario 14). Allowed once any store
     // fault fired.
     if (this.world.plan.log.some((l) => l.startsWith("store "))) allow.add("orphan_trace");
+    // The same leftover in the folder of a session that is now a stub (review dropped its next
+    // attempt) is checkStore's `stub_trace_object`, an error once it is older than the sweep's
+    // hour, because the sweep should have removed it by then (F2.5); the scenario runs no
+    // worker. Allowed only when a trace object's write failed.
+    if (this.tracePutFailed()) allow.add("stub_trace_object");
     const report = await checkStore(this.world.store, { now: this.world.clock.now });
-    const bad = report.findings.filter((f) => f.severity === "error" || !allow.has(f.code));
+    const bad = report.findings.filter(
+      (f) => !allow.has(f.code) || (f.severity === "error" && f.code !== "stub_trace_object"),
+    );
     if (bad.length > 0) this.fail("once quiet, checkStore is not clean", bad.map(findingLine));
 
     // The server matches each session's capture decision.

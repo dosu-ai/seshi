@@ -1,0 +1,23 @@
+# Found by the scenario explorer (tests/tooling/scenario/explore.ts); see tests/scenarios/README.md.
+# seed: 60224 (bun run scenarios:explore --seed 60224 --runs 1 --max-steps 25)
+# original length: 24 steps; shrunk to 9 in 232 runs
+# failure:
+#   step 9 (settle max=40): checkStore found errors
+#     error stub_trace_object: trace 6a94035dcc79… is here (written 2026-09-01T09:00:00.026Z) (owners/alice@acme.com/sessions/8953f8500d62223eeb070edfd3dd34d13ac0a023369df67a2fd371d6b69e3cb3/trace.6a94035dcc79067a9d31803172213ea6f045053a3e1a04…
+#     faults fired:
+#       store put owners/alice@acme.com/sessions/8953f8500d62223eeb070edfd3dd34d13ac0a023369df67a2fd371d6b69e3cb3/trace.6a94035dcc79067a9d31803172213ea6f045053a3e1a04109ef909adc69520aa.json.gz: store put owners/*/sessions/*/trace.* #1 → fail a…
+#     capture log (last lines):
+#       2026-09-01T09:00:00.026Z uploader: claude-code:main: will retry: storage failed: injected store failure for owners/alice@acme.com/sessions/8953f8500d62223eeb070edfd3dd34d13ac0a023369df67a2fd371d6b69e3cb3/trace.6a94035dcc79067a9d3180317…
+name: found by seed 60224
+description: "A generated scenario (seed 60224) shrunk from 24 to 9 steps; the header says how it failed."
+setup: { review: true }
+steps:
+  - fault: { store: put, key: "owners/*/sessions/*/trace.*", after: true }
+  - turns: { session: main, count: 2 }
+  - pass
+  - review: [drop]
+  - clock: +2h
+  - rules: { add: [{ id: r1, pattern: typed constant }] }
+  - heal
+  - backfill
+  - settle
