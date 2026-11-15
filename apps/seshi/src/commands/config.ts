@@ -2,7 +2,8 @@
  *
  *   seshi config check [--cli] [--config <file>] [--json] [--set path=value]…
  *       Validates the server's config (or the CLI's, with --cli) the way `seshi serve` loads it,
- *       secret references included, and prints warnings. Exit 0 when it can be used, 1 when not.
+ *       secret references included, and prints warnings. Exit 0 when it can be used, 3 (config)
+ *       when not.
  *   seshi config show [--cli] [--config <file>] [--origin] [--json] [--set path=value]…
  *       Prints every value, with --origin where it came from (flag, env, file, default).
  *       Secrets are masked and not read. */
@@ -21,6 +22,7 @@ import {
   loadCliConfig,
   loadServerConfig,
 } from "@seshi/config";
+import { EXIT } from "../cli/exit";
 import type { CommandContext } from "./index";
 import { configFlags, ServeConfigError, serveSettings } from "./serve-settings";
 
@@ -106,12 +108,12 @@ function check(ctx: CommandContext, options: Options): number {
         2,
       ),
     );
-    return errors.length === 0 ? 0 : 1;
+    return errors.length === 0 ? EXIT.ok : EXIT.config;
   }
   for (const error of errors) ctx.stderr(`error: ${error}`);
   for (const warning of warnings) ctx.stdout(`warning: ${warning}`);
   for (const notice of report.notices) ctx.stdout(`note: ${notice}`);
-  if (errors.length > 0 || !loaded) return 1;
+  if (errors.length > 0 || !loaded) return EXIT.config;
   const counted =
     warnings.length === 0 ? "" : ` (${warnings.length} warning${warnings.length === 1 ? "" : "s"})`;
   ctx.stdout(`ok: ${where(loaded)}${counted}`);
@@ -125,11 +127,11 @@ function show(ctx: CommandContext, options: Options): number {
   } catch (err) {
     if (err instanceof ConfigError) {
       for (const issue of err.issues) ctx.stderr(`error: ${issue}`);
-      return 1;
+      return EXIT.config;
     }
     if (err instanceof ServeConfigError) {
       ctx.stderr(`error: ${err.message}`);
-      return 1;
+      return EXIT.config;
     }
     throw err;
   }
@@ -188,7 +190,7 @@ export async function run(ctx: CommandContext): Promise<number> {
   } catch (err) {
     if (err instanceof ServeConfigError) {
       ctx.stderr(`error: ${err.message}`);
-      return 1;
+      return EXIT.config;
     }
     throw err;
   }

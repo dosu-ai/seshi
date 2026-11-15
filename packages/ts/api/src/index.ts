@@ -1,12 +1,5 @@
-/** `@seshi/api`: the HTTP surface, one `fetch(Request) → Response` over a bucket, with identity
- * and access from `@seshi/auth` (X5). Layer 5 (X3.2). Branch 06 makes the routes take an
- * Instance; today they take the store, the format registry and an `Auth` directly. */
+/** `@seshi/api`: the HTTP surface, one `fetch(Request) → Response` over an Instance
+ * (`@seshi/instance`), with identity and access from the instance's `Auth` (X5). Layer 5
+ * (X3.2). */
 
-export {
-  type App,
-  type AppOptions,
-  createApp,
-  maxBodyBytes,
-  type StorageView,
-  type TokenGrant,
-} from "./app";
+export { type App, createApp, maxBodyBytes, type StorageView } from "./app";

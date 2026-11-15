@@ -3,78 +3,36 @@
  * `/etc/seshi/seshi.toml`), then defaults. Bun reads `.env` on its own. Changes apply on
  * restart (F1.5). docs/config.md lists every setting.
  *
- *   seshi serve [--config <file>] [--listen <host:port>] [--roles api,worker] [--set path=value]… */
+ *   seshi serve [--config <file>] [--listen <host:port>] [--roles api,worker] [--set path=value]…
+ *
+ * It builds one Instance (X1.2) and runs the roles `server.roles` names (X7.1): `api` serves
+ * the HTTP API; `worker` runs the background jobs (pollers, retention, the heartbeat). The
+ * default runs both, which is what one container wants; exactly one instance should run the
+ * worker (X7.2). An instance without `api` still answers `/healthz`. */
 
-import { randomUUID } from "node:crypto";
 import { parseArgs } from "node:util";
 import { createApp, maxBodyBytes } from "@seshi/api";
-import { Auth } from "@seshi/auth";
-import { ConfigError, filterFor, loadServerConfig, visibilityFor } from "@seshi/config";
-import type { FormatRegistry } from "@seshi/formats";
+import { checkServerConfig } from "@seshi/config";
+import { lineLogger } from "@seshi/instance";
 import { VERSION } from "@seshi/model";
-import { StoreHealthCounters } from "@seshi/pipeline";
-import {
-  parseRedactionConfig,
-  type RedactionConfig,
-  type RedactionRules,
-  redactionRules,
-} from "@seshi/redact";
-import {
-  ensureLayout,
-  LayoutError,
-  openStore,
-  probe,
-  type StorageView,
-  type Store,
-} from "@seshi/store";
-import { buildFormats } from "../integrations";
+import { EXIT } from "../cli/exit";
 import type { CommandContext } from "./index";
-import { configFlags, ServeConfigError, serveSettings } from "./serve-settings";
+import { openServer, serverFailure } from "./server-instance";
 
 export { ServeConfigError, serveSettings } from "./serve-settings";
 
-function fail(message: string): never {
-  throw new ServeConfigError(message);
-}
+const USAGE =
+  "usage: seshi serve [--config <file>] [--listen <host:port>] [--roles api,worker] [--set path=value]…";
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
-/** The operator's rule packs, each checked on its own (so a bad pattern names its file), then
- * merged on top of the built-in rules. Today's JSON file is a pack (F2.1). */
-async function readPacks(paths: readonly string[]): Promise<RedactionRules | undefined> {
-  if (paths.length === 0) return undefined;
-  const merged: Required<RedactionConfig> = {
-    patterns: [],
-    sensitive_files: [],
-    secret_commands: [],
-  };
-  for (const path of paths) {
-    let text: string;
-    try {
-      text = await Bun.file(path).text();
-    } catch (err) {
-      fail(`cannot read redaction pack ${path}: ${message(err)}`);
-    }
-    try {
-      parseRedactionConfig(text);
-    } catch (err) {
-      fail(`${path}: ${message(err)}`);
-    }
-    const pack = JSON.parse(text) as RedactionConfig;
-    merged.patterns.push(...(pack.patterns ?? []));
-    merged.sensitive_files.push(...(pack.sensitive_files ?? []));
-    merged.secret_commands.push(...(pack.secret_commands ?? []));
-  }
-  return redactionRules(merged);
-}
-
-/** Load the config, read the rule packs, open the bucket, check it can be written, then serve
- * until a signal. Every failure before serving is a `ServeConfigError` or `ConfigError`. */
-async function start(ctx: CommandContext, formats: FormatRegistry): Promise<void> {
+/** Build the instance (config, bucket, marker), serve, and start the jobs; runs until a
+ * signal. */
+async function start(ctx: CommandContext, argv: string[]): Promise<number | undefined> {
   let values: { config?: string; listen?: string; roles?: string; set?: string[] };
   try {
     ({ values } = parseArgs({
-      args: ctx.argv,
+      args: argv,
       options: {
         config: { type: "string" },
         listen: { type: "string" },
@@ -85,83 +43,26 @@ async function start(ctx: CommandContext, formats: FormatRegistry): Promise<void
       allowPositionals: false,
     }));
   } catch (err) {
-    fail(message(err));
+    ctx.stderr(`seshi: ${message(err)}`);
+    ctx.stderr(USAGE);
+    return EXIT.usage;
   }
-  const loaded = loadServerConfig({
-    configFlag: values.config,
-    env: ctx.env,
-    flags: configFlags(values),
-  });
-  for (const warning of loaded.warnings) ctx.stderr(`seshi: warning: ${warning}`);
-  const settings = serveSettings(loaded.config);
+  const log = lineLogger(ctx.stdout, ctx.stderr);
+  const { instance, loaded, settings } = await openServer(ctx, values, { log });
+  for (const warning of checkServerConfig(loaded.config).warnings) log.warn(warning);
   const { owners, url } = settings;
-  const client = `seshi/${VERSION}`;
 
-  const redaction = await readPacks(settings.redactionPacks);
-
-  let store: Store;
-  let storage: StorageView;
-  try {
-    ({ store, storage } = openStore(url, { ...settings.store, env: ctx.env }));
-  } catch (err) {
-    fail(message(err));
-  }
-
-  // Fail at boot, not on the first session, when the bucket or its keys are wrong, or the
-  // prefix is another deployment's (X1.4) or a sessiondb store.
-  let deployment: string;
-  try {
-    const marker = await ensureLayout(store, {
-      createdBy: client,
-      deploymentId: settings.deploymentId,
-      org: settings.org,
-    });
-    deployment = marker.deployment_id;
-    for (const owner of owners) await probe(store, owner);
-  } catch (err) {
-    if (err instanceof LayoutError) fail(`cannot use ${url}: ${message(err)}`);
-    fail(`cannot write to ${url}: ${message(err)}`);
-  }
-
-  // This process's own shard of the source health counters (X4.8), flushed on shutdown.
-  const health = new StoreHealthCounters(store, {
-    instance: `serve-${randomUUID().slice(0, 8)}`,
-    onError: (err) => ctx.stderr(`seshi: warning: source health not recorded: ${message(err)}`),
-  });
-  let auth: Auth;
-  try {
-    auth = new Auth(settings.auth, {
-      store,
-      deployment,
-      sources: loaded.config.sources.map((s) => s.id),
-    });
-  } catch (err) {
-    fail(message(err));
-  }
   // Without static tokens or an IdP, only tokens in the bucket let anyone in.
-  if (owners.length === 0 && !settings.auth.oidc) {
-    const live = await auth.tokens.list().catch(() => []);
+  if (instance.api && owners.length === 0 && !settings.auth.oidc) {
+    const live = await instance.auth.tokens.list().catch(() => []);
     if (live.length === 0) {
-      ctx.stderr(
-        "seshi: warning: no token can call this server yet: run `seshi admin init` where this config is, or set auth.tokens",
+      log.warn(
+        "no token can call this server yet: run `seshi admin init` where this config is, or set auth.tokens",
       );
     }
   }
-  const app = createApp({
-    store,
-    storage,
-    formats,
-    auth,
-    client,
-    redaction,
-    // Each source's own rules over [filter] (X4.10); uploads get [filter].
-    filter: (sourceId) => filterFor(loaded.config, sourceId),
-    limits: settings.limits,
-    health,
-    // The request, then the token's default, then the source's, then default_visibility.
-    visibility: (sourceId) => visibilityFor(loaded.config, sourceId),
-  });
 
+  const app = createApp(instance);
   const server = Bun.serve({
     hostname: settings.hostname,
     port: settings.port,
@@ -172,6 +73,7 @@ async function start(ctx: CommandContext, formats: FormatRegistry): Promise<void
     idleTimeout: 120,
     fetch: app.fetch,
   });
+  instance.start();
 
   const host = ["0.0.0.0", "::"].includes(settings.hostname) ? "localhost" : settings.hostname;
   const who = [
@@ -180,39 +82,50 @@ async function start(ctx: CommandContext, formats: FormatRegistry): Promise<void
     ...(owners.length > 0 ? [`static tokens for ${owners.join(", ")}`] : []),
     "seshi tokens",
   ].join(", ");
+  const serving = instance.api ? `accepting ${who}` : "worker only: /healthz and nothing else";
+  const jobs = instance.jobs
+    .list()
+    .filter((job) => instance.jobs.runsHere(job))
+    .map((job) => job.name);
   ctx.stdout(
-    `seshi ${VERSION} listening on http://${host}:${server.port}, storing sessions in ${url} (deployment ${deployment}); accepting ${who}${
+    `roles: ${instance.roles.join(", ")} (instance ${instance.id})${
+      jobs.length > 0 ? `; jobs: ${jobs.join(", ")}` : ""
+    }`,
+  );
+  if (instance.redaction) {
+    ctx.stdout(
+      `redaction from ${settings.redactionPacks.join(", ")}: ${instance.redaction.patterns.length} pattern(s) on top of the built-in rules`,
+    );
+  }
+  // Last, so whoever waits for the address has read everything before it.
+  ctx.stdout(
+    `seshi ${VERSION} listening on http://${host}:${server.port}, storing sessions in ${url} (deployment ${instance.deployment}); ${serving}${
       loaded.file ? ` (config ${loaded.file})` : ""
     }`,
   );
-  if (redaction) {
-    ctx.stdout(
-      `redaction from ${settings.redactionPacks.join(", ")}: ${redaction.patterns.length} pattern(s) on top of the built-in rules`,
-    );
-  }
 
+  let stopping = false;
   async function shutdown(): Promise<void> {
+    if (stopping) return;
+    stopping = true;
     server.stop();
-    // Write what was counted since the last flush; best-effort, and bounded.
-    await Promise.race([health.flush(), Bun.sleep(5000)]);
+    // Stop the jobs and write what source health counted; best-effort, and bounded.
+    await instance.close(5000);
     process.exit(0);
   }
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
+  return undefined;
 }
 
-/** Serves until a signal; returns 1 when a setting stops it from starting. */
+/** Serves until a signal; returns `config` (3) when a setting stops it from starting and
+ * `usage` (2) for a bad flag. */
 export async function run(ctx: CommandContext): Promise<number | undefined> {
   try {
-    await start(ctx, buildFormats(await ctx.integrations()));
-    return undefined;
+    return await start(ctx, ctx.argv);
   } catch (err) {
-    if (err instanceof ConfigError) {
-      for (const issue of err.issues) ctx.stderr(`seshi: ${issue}`);
-      return 1;
-    }
-    if (!(err instanceof ServeConfigError)) throw err;
-    ctx.stderr(`seshi: ${err.message}`);
-    return 1;
+    const code = serverFailure(ctx, false, err);
+    if (code === undefined) throw err;
+    return code;
   }
 }

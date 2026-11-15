@@ -14,10 +14,12 @@
         "@seshi/client": "workspace:*",
         "@seshi/config": "workspace:*",
         "@seshi/formats": "workspace:*",
+        "@seshi/instance": "workspace:*",
         "@seshi/kit": "workspace:*",
         "@seshi/model": "workspace:*",
         "@seshi/pipeline": "workspace:*",
         "@seshi/redact": "workspace:*",
+        "@seshi/sources": "workspace:*",
         "@seshi/store": "workspace:*",
         "@types/bun": "1.4.2",
         "ajv": "^8.20.0",
@@ -36,8 +38,10 @@
       "dependencies": {
         "@seshi/api": "workspace:*",
         "@seshi/auth": "workspace:*",
+        "@seshi/client": "workspace:*",
         "@seshi/config": "workspace:*",
         "@seshi/formats": "workspace:*",
+        "@seshi/instance": "workspace:*",
         "@seshi/integration-claude-code": "workspace:*",
         "@seshi/integration-codex": "workspace:*",
         "@seshi/integration-cursor": "workspace:*",
@@ -49,6 +53,7 @@
         "@seshi/model": "workspace:*",
         "@seshi/pipeline": "workspace:*",
         "@seshi/redact": "workspace:*",
+        "@seshi/sources": "workspace:*",
         "@seshi/store": "workspace:*",
       },
     },
@@ -109,9 +114,9 @@
       "dependencies": {
         "@seshi/auth": "workspace:*",
         "@seshi/formats": "workspace:*",
+        "@seshi/instance": "workspace:*",
         "@seshi/model": "workspace:*",
         "@seshi/pipeline": "workspace:*",
-        "@seshi/redact": "workspace:*",
         "@seshi/store": "workspace:*",
       },
     },
@@ -148,6 +153,17 @@
     },
     "packages/ts/instance": {
       "name": "@seshi/instance",
+      "dependencies": {
+        "@seshi/auth": "workspace:*",
+        "@seshi/config": "workspace:*",
+        "@seshi/formats": "workspace:*",
+        "@seshi/kit": "workspace:*",
+        "@seshi/model": "workspace:*",
+        "@seshi/pipeline": "workspace:*",
+        "@seshi/redact": "workspace:*",
+        "@seshi/sources": "workspace:*",
+        "@seshi/store": "workspace:*",
+      },
     },
     "packages/ts/kit": {
       "name": "@seshi/kit",
@@ -165,7 +181,6 @@
     "packages/ts/pipeline": {
       "name": "@seshi/pipeline",
       "dependencies": {
-        "@seshi/client": "workspace:*",
         "@seshi/formats": "workspace:*",
         "@seshi/model": "workspace:*",
         "@seshi/redact": "workspace:*",
@@ -183,6 +198,12 @@
     },
     "packages/ts/sources": {
       "name": "@seshi/sources",
+      "dependencies": {
+        "@seshi/config": "workspace:*",
+        "@seshi/kit": "workspace:*",
+        "@seshi/model": "workspace:*",
+        "@seshi/store": "workspace:*",
+      },
     },
     "packages/ts/store": {
       "name": "@seshi/store",

@@ -5,12 +5,13 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type App, createApp } from "@seshi/api";
+import type { App } from "@seshi/api";
 import { Auth, type AuthSettings } from "@seshi/auth";
 import { FakeIdp } from "@seshi/auth/testing";
 import { archiveId, FsStore, readChanges, readMetadata } from "@seshi/store";
 import { buildFormats } from "seshi/integrations";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { testApp } from "../tooling/instance";
 import { transcript } from "../tooling/testdata";
 
 const FORMATS = buildFormats();
@@ -64,9 +65,8 @@ function build(
     },
     { store, deployment: "test", now: () => clock, oidcKeys: idp.keys, sources: ["otlp"] },
   );
-  app = createApp({
+  app = testApp({
     store,
-    storage: { url: store.url },
     formats: FORMATS,
     auth,
     now: () => clock,

@@ -7,7 +7,6 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type AppOptions, createApp as createServer } from "@seshi/api";
 import { HttpSessionDB, ServerError } from "@seshi/client";
 import {
   Forbidden,
@@ -23,12 +22,12 @@ import { StoreSessionDB } from "@seshi/pipeline";
 import { FsStore } from "@seshi/store";
 import { buildFormats } from "seshi/integrations";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { testApp } from "../tooling/instance";
 import { transcript } from "../tooling/testdata";
 
 const FORMATS = buildFormats();
-/** The server with this binary's formats, as `seshi serve` builds it. */
-const createApp = (options: Omit<AppOptions, "formats">) =>
-  createServer({ formats: FORMATS, ...options });
+/** The server over an Instance with this binary's formats, as `seshi serve` builds it. */
+const createApp = testApp;
 
 const TOKEN = "sdb_test-token-0123456789abcdef";
 const SMALL = transcript("claude-basic.claude-code.jsonl");

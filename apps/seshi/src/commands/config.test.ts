@@ -62,7 +62,7 @@ describe("seshi config check", () => {
     const { code, err } = await seshi(["config", "check", "--config", path], {
       ALICE_TOKEN: "alice-token-0123456789",
     });
-    expect(code).toBe(1);
+    expect(code).toBe(3);
     expect(err).toContain(
       "error: sources[datadog-prod].api_key: environment variable DD_API_KEY is not set",
     );
@@ -73,7 +73,7 @@ describe("seshi config check", () => {
     const { code, err } = await seshi(["config", "check", "--config", path], {
       SESHI_FILTER__MIN_CHARS: "lots",
     });
-    expect(code).toBe(1);
+    expect(code).toBe(3);
     expect(err).toContain(`error: store.urll: unknown key (in ${path})`);
     expect(err).toContain(`store.region:`);
     expect(err).toContain("filter.min_chars:");
@@ -86,7 +86,7 @@ describe("seshi config check", () => {
       `[store]\nurl = "file:///tmp/x"\n[auth.session_keys]\nk1 = "short"\n`,
     );
     const { code, err } = await seshi(["config", "check", "--config", path]);
-    expect(code).toBe(1);
+    expect(code).toBe(3);
     expect(err).toContain("error: auth.session_keys.k1 must be 32+ characters");
   });
 
@@ -118,7 +118,7 @@ decision = { provider = "anthropic", model = "claude-haiku-5-5" }
   it("answers in JSON", async () => {
     const path = file("seshi.toml", `[store]\nurl = 3\n`);
     const { code, out } = await seshi(["config", "check", "--config", path, "--json"]);
-    expect(code).toBe(1);
+    expect(code).toBe(3);
     expect(JSON.parse(out)).toMatchObject({ ok: false, file: path, warnings: [], notices: [] });
     expect(JSON.parse(out).errors[0]).toContain("store.url:");
   });
@@ -128,7 +128,7 @@ decision = { provider = "anthropic", model = "claude-haiku-5-5" }
     mkdirSync(join(home, ".config", "seshi"), { recursive: true });
     writeFileSync(join(home, ".config", "seshi", "config.toml"), `theme = "neon"\n`);
     const { code, err } = await seshi(["config", "check", "--cli"], { HOME: home });
-    expect(code).toBe(1);
+    expect(code).toBe(3);
     expect(err).toContain("theme:");
   });
 
@@ -136,7 +136,7 @@ decision = { provider = "anthropic", model = "claude-haiku-5-5" }
     const { code, err } = await seshi(["config", "check", "--cli", "--listen", ":1"], {
       HOME: dir,
     });
-    expect(code).toBe(1);
+    expect(code).toBe(3);
     expect(err).toContain("--listen and --roles are server settings");
   });
 });

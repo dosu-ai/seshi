@@ -48,6 +48,7 @@ tags:
   - name: sessions
   - name: changes
   - name: tokens
+  - name: admin
 
 paths:
   /healthz:
@@ -420,6 +421,60 @@ paths:
               schema: { $ref: "#/components/schemas/Error" }
         "502": { $ref: "#/components/responses/StorageError" }
 
+  /v1/sessions/{agent}/{session_id}/export:
+    parameters:
+      - $ref: "#/components/parameters/agent"
+      - $ref: "#/components/parameters/session_id"
+      - $ref: "#/components/parameters/owner"
+    get:
+      tags: [sessions]
+      summary: The session's trace as a download.
+      operationId: exportTrace
+      description: |
+        The same trace `…/trace` answers, with `Content-Disposition: attachment` and a file
+        name naming the agent, the session, the trace's hash and the format
+        (`claude-code-sess1-0123456789ab.letta.json`).
+      parameters:
+        - name: hash
+          in: query
+          description: A specific trace's `content_hash`; the head by default.
+          schema: { type: string }
+        - name: format
+          in: query
+          description: How to render the stored trace; `seshi`, the stored canonical trace, by default.
+          schema: { $ref: "#/components/schemas/RenderFormat" }
+      responses:
+        "200":
+          description: The trace, as `format` renders it.
+          headers:
+            Content-Disposition:
+              description: '`attachment; filename="<agent>-<session>-<hash12>.<format>.json"`'
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - { $ref: "#/components/schemas/Trace" }
+                  - { $ref: "#/components/schemas/LettaTrace" }
+                  - { $ref: "#/components/schemas/OtlpTrace" }
+                  - { $ref: "#/components/schemas/AtifDocument" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: |
+            `not_found`: no such session, or no trace with that hash. `no_trace`: the session
+            has no head.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "410":
+          description: The session was tombstoned; it has no trace and will not again.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
   /v1/changes:
     get:
       tags: [changes]
@@ -586,6 +641,28 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
+  /v1/admin/jobs:
+    get:
+      tags: [admin]
+      summary: The worker, its jobs and every source (X7.5).
+      operationId: adminJobs
+      description: |
+        Whether the worker runs (from `worker/heartbeat.json`): `running`, `stopped` (its
+        heartbeat is older than three intervals), `never`, or `several` when a second worker
+        is running (X7.3). Each job's last run, last error and backlog (checkpoint age,
+        pending markers), and each source's checkpoint, drop and failure record counts and
+        source health over the last 7 days. Any instance answers, worker or not. Needs
+        `sources:admin` (admins).
+      responses:
+        "200":
+          description: The status, read now.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JobsStatus" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "502": { $ref: "#/components/responses/StorageError" }
 
 components:
@@ -821,6 +898,107 @@ components:
       type: string
       pattern: "^[0-9a-f]{64}$"
 
+    JobRecord:
+      type: object
+      description: One job's last runs, as the process that ran it recorded them.
+      required: [runs, failures]
+      properties:
+        last_started: { type: string, format: date-time }
+        last_finished: { type: string, format: date-time }
+        last_outcome: { enum: [ok, error, discarded] }
+        last_ok: { type: string, format: date-time }
+        last_error:
+          type: object
+          required: [at, message]
+          properties:
+            at: { type: string, format: date-time }
+            message: { type: string }
+        runs: { type: integer, minimum: 0 }
+        failures: { type: integer, minimum: 0 }
+        last_summary:
+          type: object
+          additionalProperties: { type: number }
+    JobsStatus:
+      type: object
+      required: [at, deployment, instance, worker, jobs, sources, warnings]
+      properties:
+        at: { type: string, format: date-time }
+        deployment: { type: string }
+        instance:
+          type: object
+          description: The instance that answered.
+          required: [id, process, roles, version]
+          properties:
+            id: { type: string }
+            process: { type: string }
+            roles: { type: array, items: { enum: [api, worker] } }
+            version: { type: string }
+        worker:
+          type: object
+          required: [state, others]
+          properties:
+            state: { enum: [running, stopped, never, several] }
+            instance: { type: string }
+            host: { type: string }
+            version: { type: string }
+            roles: { type: array, items: { type: string } }
+            started_at: { type: string, format: date-time }
+            last_heartbeat: { type: string, format: date-time }
+            age_ms: { type: integer, minimum: 0 }
+            others:
+              type: array
+              description: Other workers seen running.
+              items:
+                type: object
+                required: [instance, at]
+                properties:
+                  instance: { type: string }
+                  at: { type: string, format: date-time }
+        jobs:
+          type: array
+          items:
+            type: object
+            required: [name, kind, placement, interval_ms]
+            properties:
+              name: { type: string, description: "`heartbeat`, `retention`, `source:<id>`…" }
+              kind: { type: string, description: "`heartbeat`, `retention`, `poller`…" }
+              placement: { enum: [worker, every] }
+              interval_ms: { type: integer, minimum: 1 }
+              source: { type: string }
+              last: { $ref: "#/components/schemas/JobRecord" }
+              backlog:
+                type: object
+                additionalProperties: { type: number }
+              dropped: { type: integer, minimum: 0 }
+              failed: { type: integer, minimum: 0 }
+        sources:
+          type: array
+          items:
+            type: object
+            required: [id, type, enabled, polled, checkpoint, dropped, failed, health]
+            properties:
+              id: { type: string }
+              type: { type: string }
+              enabled: { type: boolean }
+              polled: { type: boolean }
+              connector: { type: string }
+              interval_ms: { type: integer }
+              note: { type: string }
+              checkpoint:
+                oneOf:
+                  - type: "null"
+                  - type: object
+                    required: [updated_at, cursor]
+                    properties:
+                      updated_at: { type: string, format: date-time }
+                      cursor: { type: object }
+              dropped: { type: integer, minimum: 0 }
+              failed: { type: integer, minimum: 0 }
+              health:
+                type: object
+                description: Outcome counts over the last 7 days (X4.8).
+                additionalProperties: { type: integer }
+        warnings: { type: array, items: { type: string } }
     Error:
       type: object
       required: [error]

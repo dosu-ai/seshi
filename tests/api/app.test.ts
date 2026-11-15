@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gunzipSync } from "node:zlib";
-import { type App, type AppOptions, createApp as createServer } from "@seshi/api";
+import type { App } from "@seshi/api";
 import type { NormalizeInput } from "@seshi/formats";
 import { prefixSha256 } from "@seshi/model";
 import { getTrace, normalizeTranscript as normalize, storeSession } from "@seshi/pipeline";
@@ -10,12 +10,12 @@ import { redactionRules } from "@seshi/redact";
 import { archiveId, FsStore, getBytes, gunzipJson, keys, readMetadata } from "@seshi/store";
 import { buildFormats } from "seshi/integrations";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { testApp } from "../tooling/instance";
 import { transcript } from "../tooling/testdata";
 
 const FORMATS = buildFormats();
-/** The server with this binary's formats, as `seshi serve` builds it. */
-const createApp = (options: Omit<AppOptions, "formats">) =>
-  createServer({ formats: FORMATS, ...options });
+/** The server over an Instance with this binary's formats, as `seshi serve` builds it. */
+const createApp = testApp;
 const normalizeTranscript = (input: NormalizeInput) => normalize(FORMATS, input);
 
 const TOKEN = "sdb_test-token-0123456789abcdef";

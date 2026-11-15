@@ -7,7 +7,7 @@
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type App, type AppOptions, createApp as createServer } from "@seshi/api";
+import type { App } from "@seshi/api";
 import { Auth, CREDENTIAL_SCOPES } from "@seshi/auth";
 import { FakeIdp } from "@seshi/auth/testing";
 import { storeSession } from "@seshi/pipeline";
@@ -16,6 +16,7 @@ import { Ajv2020, type ValidateFunction } from "ajv/dist/2020";
 import addFormats from "ajv-formats";
 import { buildFormats } from "seshi/integrations";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { testApp } from "../tooling/instance";
 import { transcript } from "../tooling/testdata";
 
 // --- the document -------------------------------------------------------------------------
@@ -24,9 +25,8 @@ const SPEC_PATH = join(import.meta.dirname, "../../spec/openapi.yaml");
 const SCHEMAS = join(import.meta.dirname, "../../spec/schemas");
 
 const FORMATS = buildFormats();
-/** The server with this binary's formats, as `seshi serve` builds it. */
-const createApp = (options: Omit<AppOptions, "formats">) =>
-  createServer({ formats: FORMATS, ...options });
+/** The server over an Instance with this binary's formats, as `seshi serve` builds it. */
+const createApp = testApp;
 
 // biome-ignore lint/suspicious/noExplicitAny: a parsed document, walked by path
 const spec: any = Bun.YAML.parse(readFileSync(SPEC_PATH, "utf8"));
@@ -253,7 +253,9 @@ describe("the document itself", () => {
         "GET /v1/sessions/{agent}/{session_id}",
         "DELETE /v1/sessions/{agent}/{session_id}",
         "GET /v1/sessions/{agent}/{session_id}/trace",
+        "GET /v1/sessions/{agent}/{session_id}/export",
         "GET /v1/changes",
+        "GET /v1/admin/jobs",
       ].sort(),
     );
   });
@@ -351,6 +353,23 @@ describe("the server honours it", () => {
     expect(
       (await call("GET", `/v1/sessions/claude-code/sess1/trace?hash=${content_hash}`)).status,
     ).toBe(200);
+    const exported = await app.fetch(
+      new Request("http://sessiondb.test/v1/sessions/claude-code/sess1/export?format=letta", {
+        headers: { authorization: `Bearer ${TOKEN}` },
+      }),
+    );
+    expect(exported.headers.get("content-disposition")).toBe(
+      `attachment; filename="claude-code-sess1-${content_hash.slice(0, 12)}.letta.json"`,
+    );
+    expect((await call("GET", "/v1/sessions/claude-code/sess1/export?format=atif")).status).toBe(
+      200,
+    );
+    expect((await call("GET", "/v1/sessions/claude-code/sess1/export?format=nope")).status).toBe(
+      400,
+    );
+    expect(
+      (await call("GET", "/v1/sessions/claude-code/sess1/export", { token: null })).status,
+    ).toBe(401);
     expect((await call("GET", "/v1/changes")).status).toBe(200);
     expect((await call("GET", "/v1/changes?since=2020-01-01T00:00:00Z&limit=10")).status).toBe(200);
     expect((await call("GET", "/v1/changes?limit=nope")).status).toBe(400);
@@ -358,6 +377,7 @@ describe("the server honours it", () => {
     // Not there, no trace yet, gone.
     expect((await call("GET", "/v1/sessions/claude-code/nope")).status).toBe(404);
     expect((await call("GET", "/v1/sessions/claude-code/nope/trace")).status).toBe(404);
+    expect((await call("GET", "/v1/sessions/claude-code/nope/export")).status).toBe(404);
     expect((await call("DELETE", "/v1/sessions/claude-code/nope")).status).toBe(404);
     const tiny = await call("POST", "/v1/sessions", {
       body: { agent: "claude-code", session_id: "tiny", transcript: SMALL },
@@ -366,6 +386,7 @@ describe("the server honours it", () => {
     expect((await call("GET", "/v1/sessions/claude-code/tiny/trace")).status).toBe(404);
     expect((await call("DELETE", "/v1/sessions/claude-code/sess1")).status).toBe(200);
     expect((await call("GET", "/v1/sessions/claude-code/sess1/trace")).status).toBe(410);
+    expect((await call("GET", "/v1/sessions/claude-code/sess1/export")).status).toBe(410);
     expect(
       (
         await call("POST", "/v1/sessions", {
@@ -487,6 +508,10 @@ describe("the server honours it", () => {
     expect((await call("GET", "/v1/sessions", { app: down })).status).toBe(502);
     expect((await call("GET", "/v1/sessions/claude-code/x", { app: down })).status).toBe(502);
     expect((await call("GET", "/v1/sessions/claude-code/x/trace", { app: down })).status).toBe(502);
+    expect((await call("GET", "/v1/sessions/claude-code/x/export", { app: down })).status).toBe(
+      502,
+    );
+    expect((await call("GET", "/v1/admin/jobs", admin)).status).toBe(502);
     expect((await call("DELETE", "/v1/sessions/claude-code/x", { app: down })).status).toBe(502);
     expect((await call("GET", "/v1/changes", { app: down })).status).toBe(502);
   });
@@ -570,6 +595,10 @@ describe("identity and access (X5)", () => {
     expect((await call("GET", "/v1/sessions", device)).status).toBe(403);
     expect((await call("GET", "/v1/sessions/claude-code/s1", device)).status).toBe(403);
     expect((await call("GET", "/v1/sessions/claude-code/s1/trace", device)).status).toBe(403);
+    expect((await call("GET", "/v1/sessions/claude-code/s1/export", device)).status).toBe(403);
+    expect((await call("GET", "/v1/admin/jobs", admin)).status).toBe(200);
+    expect((await call("GET", "/v1/admin/jobs", alice)).status).toBe(403);
+    expect((await call("GET", "/v1/admin/jobs", { app: x5, token: null })).status).toBe(401);
     expect((await call("GET", "/v1/changes", device)).status).toBe(403);
     expect((await call("DELETE", "/v1/sessions/claude-code/s1", alice)).status).toBe(403);
 

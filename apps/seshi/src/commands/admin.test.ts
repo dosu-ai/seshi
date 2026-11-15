@@ -2,7 +2,8 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp } from "@seshi/api";
-import { FsStore } from "@seshi/store";
+import { loadConfig, serverConfigSchema } from "@seshi/config";
+import { buildInstance } from "@seshi/instance";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildFormats } from "../integrations";
 import { main } from "../main";
@@ -45,8 +46,10 @@ describe("seshi admin init (X5.12)", () => {
       expect(record).not.toContain(orgKey);
     }
     // The server takes both.
-    const store = new FsStore(`file://${join(dir, "bucket")}`);
-    const app = createApp({ store, storage: { url: store.url }, formats: buildFormats() });
+    const config = loadConfig(serverConfigSchema, {
+      env: { SESHI_STORE__URL: `file://${join(dir, "bucket")}` },
+    }).config;
+    const app = createApp(await buildInstance(config, { formats: buildFormats(), env: {} }));
     const me = (token: string, user?: string) =>
       app.fetch(
         new Request("http://seshi.test/v1/me", {
@@ -63,7 +66,7 @@ describe("seshi admin init (X5.12)", () => {
   it("refuses to run twice, makes another admin with --force, and rotates the org key", async () => {
     expect((await seshi(["admin", "init"])).code).toBe(0);
     const again = await seshi(["admin", "init"]);
-    expect(again.code).toBe(1);
+    expect(again.code).toBe(6);
     expect(again.err).toContain("already set up");
     const forced = await seshi(["admin", "init", "--force"]);
     expect(forced.code).toBe(0);
@@ -87,7 +90,7 @@ describe("seshi admin init (X5.12)", () => {
     expect((await seshi(["admin", "init", "--bogus"])).code).toBe(2);
     expect((await seshi(["admin", "init", "--owner", "svc:x"])).err).toContain("--owner");
     const bad = await seshi(["admin", "init"], { SESHI_STORE__URLL: "x" });
-    expect(bad.code).toBe(1);
+    expect(bad.code).toBe(3);
     expect(bad.err).toContain("SESHI_STORE__URLL: not a setting");
   });
 
@@ -96,7 +99,7 @@ describe("seshi admin init (X5.12)", () => {
     const other = await seshi(["admin", "init", "--force"], {
       SESHI_STORE__DEPLOYMENT_ID: "staging",
     });
-    expect(other.code).toBe(1);
+    expect(other.code).toBe(3);
     expect(other.err).toContain("cannot use");
   });
 });

@@ -18,8 +18,10 @@
   "dependencies": {
     "@seshi/api": "workspace:*",
     "@seshi/auth": "workspace:*",
+    "@seshi/client": "workspace:*",
     "@seshi/config": "workspace:*",
     "@seshi/formats": "workspace:*",
+    "@seshi/instance": "workspace:*",
     "@seshi/integration-claude-code": "workspace:*",
     "@seshi/integration-codex": "workspace:*",
     "@seshi/integration-cursor": "workspace:*",
@@ -31,6 +33,7 @@
     "@seshi/model": "workspace:*",
     "@seshi/pipeline": "workspace:*",
     "@seshi/redact": "workspace:*",
+    "@seshi/sources": "workspace:*",
     "@seshi/store": "workspace:*"
   }
 }

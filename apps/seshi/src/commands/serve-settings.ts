@@ -4,7 +4,7 @@
 import { type AuthSettings, AuthSettingsError, authSettings } from "@seshi/auth";
 import { type FlagValue, parseListen, type ServerConfig } from "@seshi/config";
 
-/** A setting the server cannot start with: printed as `seshi: <message>`, exit 1. */
+/** A setting the server cannot start with: printed as `seshi: <message>`, exit 3 (`config`). */
 export class ServeConfigError extends Error {
   constructor(message: string) {
     super(message);
@@ -35,6 +35,8 @@ export interface ServeSettings {
   redactionPacks: string[];
   hostname: string;
   port: number;
+  /** What this instance runs (X7.1). */
+  roles: ServerConfig["server"]["roles"];
   filter: ServerConfig["filter"];
   limits: ServerConfig["limits"];
 }
@@ -42,11 +44,6 @@ export interface ServeSettings {
 /** The settings, or `ServeConfigError` for the first one the server cannot start with. The
  * config's secrets must be resolved. */
 export function serveSettings(config: ServerConfig): ServeSettings {
-  if (!config.server.roles.includes("api")) {
-    fail(
-      `server.roles is ${config.server.roles.join(", ")}: the worker role runs no jobs yet, so an instance needs api`,
-    );
-  }
   let auth: AuthSettings;
   try {
     auth = authSettings(config);
@@ -84,6 +81,7 @@ export function serveSettings(config: ServerConfig): ServeSettings {
     redactionPacks: config.redaction.packs,
     hostname: listen.hostname,
     port: listen.port,
+    roles: config.server.roles,
     filter: config.filter,
     limits: config.limits,
   };

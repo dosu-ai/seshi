@@ -12,12 +12,10 @@
  * - Run again, it refuses: an admin token already exists. `--force` makes another one. */
 
 import { parseArgs } from "node:util";
-import { AdminInitError, Auth } from "@seshi/auth";
-import { ConfigError, loadServerConfig } from "@seshi/config";
-import { VERSION } from "@seshi/model";
-import { ensureLayout, LayoutError, openStore } from "@seshi/store";
+import { AdminInitError } from "@seshi/auth";
+import { EXIT } from "../cli/exit";
 import type { CommandContext } from "./index";
-import { configFlags, ServeConfigError, serveSettings } from "./serve-settings";
+import { openServer, SERVER_OPTIONS, serverFailure } from "./server-instance";
 
 const USAGE = `usage: seshi admin init [--config <file>] [--set path=value]… [--owner <id>] [--force] [--rotate-org-key]`;
 
@@ -35,8 +33,7 @@ async function init(ctx: CommandContext, argv: string[]): Promise<number> {
     ({ values } = parseArgs({
       args: argv,
       options: {
-        config: { type: "string" },
-        set: { type: "string", multiple: true },
+        ...SERVER_OPTIONS,
         owner: { type: "string" },
         force: { type: "boolean" },
         "rotate-org-key": { type: "boolean" },
@@ -47,40 +44,11 @@ async function init(ctx: CommandContext, argv: string[]): Promise<number> {
   } catch (err) {
     ctx.stderr(`seshi: ${message(err)}`);
     ctx.stderr(USAGE);
-    return 2;
+    return EXIT.usage;
   }
-  const loaded = loadServerConfig({
-    configFlag: values.config,
-    env: ctx.env,
-    flags: configFlags({ set: values.set }),
-  });
-  for (const warning of loaded.warnings) ctx.stderr(`seshi: warning: ${warning}`);
-  const settings = serveSettings(loaded.config);
-  let store: ReturnType<typeof openStore>["store"];
-  try {
-    ({ store } = openStore(settings.url, { ...settings.store, env: ctx.env }));
-  } catch (err) {
-    throw new ServeConfigError(message(err));
-  }
-  let deployment: string;
-  try {
-    const marker = await ensureLayout(store, {
-      createdBy: `seshi/${VERSION}`,
-      deploymentId: settings.deploymentId,
-      org: settings.org,
-    });
-    deployment = marker.deployment_id;
-  } catch (err) {
-    if (err instanceof LayoutError) {
-      throw new ServeConfigError(`cannot use ${settings.url}: ${message(err)}`);
-    }
-    throw new ServeConfigError(`cannot write to ${settings.url}: ${message(err)}`);
-  }
-  const auth = new Auth(settings.auth, {
-    store,
-    deployment,
-    sources: loaded.config.sources.map((s) => s.id),
-  });
+  // A one-shot instance: no roles, nothing probed; the marker is still checked (X1.4).
+  const { instance } = await openServer(ctx, values, { roles: [], probe: [] });
+  const auth = instance.auth;
   const result = await auth.initAdmin({
     owner: values.owner ?? "admin",
     force: values.force === true,
@@ -101,26 +69,24 @@ async function init(ctx: CommandContext, argv: string[]): Promise<number> {
     );
     ctx.stdout(`  ${result.org_key.token}`);
   }
-  return 0;
+  return EXIT.ok;
 }
 
 export async function run(ctx: CommandContext): Promise<number> {
   const [sub, ...rest] = ctx.argv;
   if (sub !== "init") {
     ctx.stderr(sub === undefined ? USAGE : `seshi: unknown admin command '${sub}'\n${USAGE}`);
-    return 2;
+    return EXIT.usage;
   }
   try {
     return await init(ctx, rest);
   } catch (err) {
-    if (err instanceof ConfigError) {
-      for (const issue of err.issues) ctx.stderr(`seshi: ${issue}`);
-      return 1;
-    }
-    if (err instanceof ServeConfigError || err instanceof AdminInitError) {
+    if (err instanceof AdminInitError) {
       ctx.stderr(`seshi: ${err.message}`);
-      return 1;
+      return EXIT.conflict;
     }
-    throw err;
+    const code = serverFailure(ctx, false, err);
+    if (code === undefined) throw err;
+    return code;
   }
 }

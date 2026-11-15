@@ -1,5 +1,6 @@
-/** The HTTP surface: one `fetch(Request) → Response` the tests call directly and `seshi serve`
- * serves, over one bucket. Every call but `/healthz`, `/v1/auth/config` and the IdP exchange
+/** The HTTP surface: one `fetch(Request) → Response` over an Instance (`@seshi/instance`), which
+ * the tests call directly and `seshi serve` serves. The instance holds the bucket, auth, the
+ * pipeline and the job status; the routes only translate HTTP. Every call but `/healthz`, `/v1/auth/config` and the IdP exchange
  * carries a credential (X5): the org key with the caller's username, a session, device, admin
  * or service token, or a static token from config. `@seshi/auth` turns it into a principal with
  * a role and scopes, and the routes check the scope a call needs and, for a session, its owner
@@ -17,10 +18,8 @@
 
 import { gunzipSync } from "node:zlib";
 import {
-  Auth,
   AuthRequestError,
   canRead,
-  ownershipAuthorizer,
   type Principal,
   pickClaims,
   requireDelete,
@@ -31,8 +30,8 @@ import {
   tokenInfo,
   USER_HEADER,
 } from "@seshi/auth";
-import type { FormatRegistry } from "@seshi/formats";
 import { renderTrace } from "@seshi/formats";
+import type { Instance } from "@seshi/instance";
 import {
   type ChangesPage,
   Forbidden,
@@ -43,6 +42,7 @@ import {
   OffsetMismatch,
   type RawFormat,
   RENDER_FORMATS,
+  type RenderFormat,
   SessionConflict,
   type SessionMetadata,
   SessionRejected,
@@ -57,21 +57,13 @@ import {
   type Writer,
 } from "@seshi/model";
 import {
-  DEFAULT_LIMITS,
-  type FilterSetting,
   getSession,
   getTrace,
-  type HealthCounters,
-  type Limits,
   listSessions,
-  Pipeline,
-  type Reviewer,
-  StoreSessionDB,
+  type StoreSessionDB,
   setVisibility,
   tombstone,
-  type VisibilitySetting,
 } from "@seshi/pipeline";
-import type { RedactionRules } from "@seshi/redact";
 import {
   archiveId,
   isOwner,
@@ -79,48 +71,10 @@ import {
   listOwners,
   readChanges,
   readMetadata,
-  type Store,
   type TokenKind,
 } from "@seshi/store";
 
 export type { StorageView };
-
-/** A static token and the owner it is bound to (`[auth.tokens]`, X5.12). */
-export interface TokenGrant {
-  token: string;
-  owner: string;
-}
-
-export interface AppOptions {
-  /** The bucket every session goes to. */
-  store: Store;
-  storage: StorageView;
-  /** The transcript formats the server accepts: `apps/seshi` builds the registry from its
-   * integrations. */
-  formats: FormatRegistry;
-  /** Identity and access (X5), built from `[auth]` (`seshi serve` builds it). Without it, an
-   * `Auth` with only `tokens` as static tokens and the org key on. */
-  auth?: Auth;
-  /** Static tokens, when no `auth` is given. */
-  tokens?: TokenGrant[];
-  /** Identifies this server in layout markers (`seshi/0.9.0`). */
-  client?: string;
-  now?: () => Date;
-  /** The operator's redaction, added to the built-in rules for every session. */
-  redaction?: RedactionRules;
-  /** The session filter (X4.10): config's `[filter]`, or the rules per source id; today's
-   * rules when omitted. */
-  filter?: FilterSetting;
-  /** Size caps, config's `[limits]`; today's when omitted. */
-  limits?: Readonly<Limits>;
-  /** Model review (F3); none when omitted. */
-  reviewer?: Reviewer;
-  /** Source health counters (X4.8); none when omitted. */
-  health?: HealthCounters;
-  /** A new session's visibility when neither the request nor the token sets one: the
-   * source's, then `default_visibility` (X5.10); `org` when omitted. */
-  visibility?: VisibilitySetting;
-}
 
 type Handler = (ctx: Context) => Promise<Response> | Response;
 
@@ -221,7 +175,7 @@ function str(body: Record<string, unknown>, key: string, required = false): stri
 
 /** `agent` is the trajectory source name (`claude-code`, not `claude`): one spelling, since the
  * archive id is derived from it. */
-function sourceOf(formats: FormatRegistry, agent: string): string {
+function sourceOf(formats: Instance["formats"], agent: string): string {
   if (!formats.has(agent)) {
     throw new HttpError(
       422,
@@ -281,41 +235,13 @@ function identityOf(principal: Principal, storage: StorageView): Identity {
 
 const TOKEN_KINDS: readonly TokenKind[] = ["org", "admin", "device", "service"];
 
-export function createApp(options: AppOptions) {
-  const { store, storage, formats } = options;
-  const client = options.client ?? `seshi/${VERSION}`;
-  const now = options.now ?? (() => new Date());
-  const auth =
-    options.auth ??
-    new Auth(
-      {
-        staticTokens: (options.tokens ?? []).filter((t) => t.token.length > 0),
-        orgKey: true,
-        admins: [],
-        aliases: {},
-        sessionKeys: {},
-      },
-      { store, deployment: "local", now },
-    );
-  for (const { owner } of auth.settings.staticTokens) {
-    if (!isOwner(owner)) throw new Error(`invalid owner: ${JSON.stringify(owner)}`);
-  }
+/** The routes over `instance`. An instance without the api role (`--roles worker`) answers
+ * `/healthz` only, so a container's health check still works (X7.1). */
+export function createApp(instance: Instance) {
+  const { store, storage, formats, auth, pipeline, now } = instance;
   const aliases = auth.aliases;
   const routes: Route[] = [];
-  const bodyLimit = maxBodyBytes((options.limits ?? DEFAULT_LIMITS).max_upload_bytes);
-  const pipeline = new Pipeline({
-    store,
-    formats,
-    client,
-    now,
-    redaction: options.redaction,
-    filter: options.filter,
-    limits: options.limits,
-    reviewer: options.reviewer,
-    health: options.health,
-    authorizer: ownershipAuthorizer(),
-    visibility: options.visibility,
-  });
+  const bodyLimit = maxBodyBytes(instance.limits.max_upload_bytes);
 
   function route(method: string, path: string, handler: Handler): void {
     const names: string[] = [];
@@ -340,17 +266,11 @@ export function createApp(options: AppOptions) {
     return principal;
   }
 
-  /** The SDK over the bucket, writing as the principal: its own sessions, its writer, its
-   * owner basis, claims and default visibility (X5.5, X5.10). */
+  /** The session API over the instance's pipeline, writing as the principal: its own sessions,
+   * its writer, its owner basis, claims and default visibility (X5.5, X5.10). */
   function writerClient(principal: Principal): StoreSessionDB {
-    return new StoreSessionDB({
-      store,
-      storage,
+    return instance.sessions({
       owner: principal.owner,
-      formats,
-      client,
-      now,
-      pipeline,
       writer: writerFor(principal),
       owner_basis: principal.owner_basis,
       claims: principal.claims,
@@ -393,6 +313,8 @@ export function createApp(options: AppOptions) {
   // --- health -----------------------------------------------------------------
 
   route("GET", "/healthz", () => json({ ok: true, version: VERSION }));
+
+  if (!instance.api) return { fetch: dispatch(routes), auth, pipeline };
 
   // --- auth (X5.2, X5.7) ------------------------------------------------------------
 
@@ -576,7 +498,9 @@ export function createApp(options: AppOptions) {
     return json(metadata);
   });
 
-  route("GET", "/v1/sessions/:agent/:session_id/trace", async ({ request, params, url }) => {
+  /** The head trace, or `?hash=`, rendered as `?format=` (`seshi` by default), of a session
+   * the principal may read. */
+  async function renderedTrace(request: Request, params: Record<string, string>, url: URL) {
     const principal = await caller(request, "sessions:read");
     const { agent, sessionId } = sessionParams(params);
     const { folder, metadata } = await readable(
@@ -597,7 +521,28 @@ export function createApp(options: AppOptions) {
     if (!/^[0-9a-f]{64}$/.test(hash)) throw new HttpError(404, "not_found", "no such trace");
     const trace = await getTrace(store, folder, archiveId(folder, agent, sessionId), hash);
     if (!trace) throw new HttpError(404, "not_found", "no such trace");
-    return json(renderTrace(trace, format));
+    return {
+      agent,
+      sessionId,
+      format: format as RenderFormat,
+      hash,
+      body: renderTrace(trace, format),
+    };
+  }
+
+  route("GET", "/v1/sessions/:agent/:session_id/trace", async ({ request, params, url }) => {
+    return json((await renderedTrace(request, params, url)).body);
+  });
+
+  /** The same trace as a download: `Content-Disposition: attachment` with a file name that
+   * says which session, which trace and which format. */
+  route("GET", "/v1/sessions/:agent/:session_id/export", async ({ request, params, url }) => {
+    const { agent, sessionId, format, hash, body } = await renderedTrace(request, params, url);
+    const name = `${agent}-${sessionId}-${hash.slice(0, 12)}.${format}.json`.replace(
+      /[^A-Za-z0-9._-]/g,
+      "_",
+    );
+    return json(body, 200, { "content-disposition": `attachment; filename="${name}"` });
   });
 
   route("PATCH", "/v1/sessions/:agent/:session_id", async ({ request, params, url }) => {
@@ -761,9 +706,22 @@ export function createApp(options: AppOptions) {
     return json({ token: tokenInfo(record) });
   });
 
-  // --- dispatch -----------------------------------------------------------------
+  // --- admin (X7.5) ----------------------------------------------------------------
 
-  async function fetch(request: Request): Promise<Response> {
+  /** The worker, its jobs and every source: last run, last error, backlog, drop and failure
+   * counts. Admin only. */
+  route("GET", "/v1/admin/jobs", async ({ request }) => {
+    await caller(request, "sources:admin");
+    return json(await instance.status());
+  });
+
+  return { fetch: dispatch(routes), auth, pipeline };
+}
+
+/** One handler for every route: the method and path pick it, and the errors the routes throw
+ * become their statuses. */
+function dispatch(routes: readonly Route[]): (request: Request) => Promise<Response> {
+  return async function fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     let pathMatched = false;
     for (const r of routes) {
@@ -792,9 +750,7 @@ export function createApp(options: AppOptions) {
     return pathMatched
       ? error(405, "method_not_allowed", `${request.method} not allowed`)
       : error(404, "not_found", `no route ${url.pathname}`);
-  }
-
-  return { fetch, auth, pipeline };
+  };
 }
 
 export type App = ReturnType<typeof createApp>;

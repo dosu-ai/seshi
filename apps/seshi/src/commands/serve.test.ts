@@ -1,5 +1,6 @@
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -81,7 +82,7 @@ describe("redaction packs", () => {
     const file = join(dir, "redaction.json");
     writeFileSync(file, JSON.stringify({ patterns: ["("] }));
     const { code, out } = await boot({ SESHI_REDACTION__PACKS: file });
-    expect(code).toBe(1);
+    expect(code).toBe(3);
     expect(out).toContain(`seshi: ${file}:`);
     expect(out).toContain("patterns '('");
   });
@@ -101,7 +102,7 @@ describe("redaction packs", () => {
 
   it("refuses a pack it cannot read", async () => {
     const { code, out } = await boot({ SESHI_REDACTION__PACKS: join(dir, "missing.json") });
-    expect(code).toBe(1);
+    expect(code).toBe(3);
     expect(out).toContain("cannot read redaction pack");
   });
 });
@@ -115,6 +116,43 @@ describe("seshi serve", () => {
       expect(server.out).toContain(`seshi ${VERSION} listening on http://127.0.0.1:`);
     } finally {
       await server.stop();
+    }
+  });
+
+  it("runs the worker's jobs in the same process by default (X7.1, X7.2)", async () => {
+    const server = await listening({ SESHI_WORKER__HEARTBEAT_INTERVAL: "50" });
+    try {
+      expect(server.out).toContain("roles: api, worker");
+      expect(server.out).toContain("jobs: heartbeat, retention");
+      const heartbeat = join(dir, "bucket", "worker", "heartbeat.json");
+      for (let i = 0; i < 100 && !existsSync(heartbeat); i++) await Bun.sleep(20);
+      expect(JSON.parse(readFileSync(heartbeat, "utf8"))).toMatchObject({
+        schema: "seshi/heartbeat/1",
+        roles: ["api", "worker"],
+      });
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it("serves /healthz only with --roles worker, and runs no jobs with --roles api", async () => {
+    const worker = await listening({}, ["--roles", "worker"]);
+    try {
+      expect(worker.out).toContain("worker only: /healthz and nothing else");
+      expect((await fetch(`http://127.0.0.1:${worker.port}/healthz`)).status).toBe(200);
+      const me = await fetch(`http://127.0.0.1:${worker.port}/v1/me`, {
+        headers: { authorization: "Bearer sdb_test-token-0123456789abcdef" },
+      });
+      expect(me.status).toBe(404);
+    } finally {
+      await worker.stop();
+    }
+    const api = await listening({}, ["--roles", "api"]);
+    try {
+      expect(api.out).toContain("roles: api (instance");
+      expect(api.out).not.toContain("jobs:");
+    } finally {
+      await api.stop();
     }
   });
 
@@ -164,17 +202,17 @@ describe("seshi serve", () => {
     expect(out).toContain("auth.tokens.bob");
   });
 
-  it("exits 1 with every config problem, and where each value came from", async () => {
+  it("exits 3 (config) with every config problem, and where each value came from", async () => {
     const { code, out } = await boot({ SESHI_FILTER__MIN_CHARS: "lots", SESHI_STORE__URLL: "x" });
-    expect(code).toBe(1);
+    expect(code).toBe(3);
     expect(out).toContain("seshi: SESHI_STORE__URLL: not a setting");
     const second = await boot({ SESHI_FILTER__MIN_CHARS: "lots" });
-    expect(second.code).toBe(1);
+    expect(second.code).toBe(3);
     expect(second.out).toContain("seshi: filter.min_chars:");
     expect(second.out).toContain("(from env SESHI_FILTER__MIN_CHARS)");
     // The per-bucket trace format is gone (X6.2): naming it is an unknown setting.
     const third = await boot({ SESHI_STORE__FORMAT: "otlp" });
-    expect(third.code).toBe(1);
+    expect(third.code).toBe(3);
     expect(third.out).toContain("seshi: SESHI_STORE__FORMAT: not a setting");
   });
 
@@ -197,10 +235,10 @@ describe("seshi serve", () => {
       created_by: `seshi/${VERSION}`,
     });
     const staging = await boot({ SESHI_STORE__DEPLOYMENT_ID: "staging" });
-    expect(staging.code).toBe(1);
+    expect(staging.code).toBe(3);
     expect(staging.out).toContain('belongs to deployment "prod-eu", not "staging"');
     const globex = await boot({ SESHI_STORE__ORG: "globex" });
-    expect(globex.code).toBe(1);
+    expect(globex.code).toBe(3);
     expect(globex.out).toContain('belongs to org "acme", not "globex"');
   });
 
@@ -211,14 +249,14 @@ describe("seshi serve", () => {
       JSON.stringify({ schema: "sessionstorage/layout/1", created_at: "x", created_by: "y" }),
     );
     const { code, out } = await boot({});
-    expect(code).toBe(1);
+    expect(code).toBe(3);
     expect(out).toContain("seshi: cannot use file://");
     expect(out).toContain("holds a sessiondb store");
   });
 
-  it("exits 1 on an unknown flag", async () => {
+  it("exits 2 (usage) on an unknown flag", async () => {
     const { code, out } = await boot({}, ["--port", "1"]);
-    expect(code).toBe(1);
+    expect(code).toBe(2);
     expect(out).toContain("seshi: Unknown option '--port'");
   });
 
@@ -294,6 +332,7 @@ describe("serveSettings", () => {
       redactionPacks: ["/etc/rules.json"],
       hostname: "::1",
       port: 8080,
+      roles: ["api", "worker"],
       filter: { enabled: true, min_chars: 10, require_user: true, require_reply: true },
       limits: {
         max_records: 50_000,
@@ -346,11 +385,11 @@ describe("serveSettings", () => {
     expect(error(config({ "auth.tokens.a/b": "token-0123456789abcdef" }))).toContain(
       "'a/b' is not a valid owner id",
     );
-    expect(
-      error(
-        config({ "server.roles": "worker" }, { SESHI_AUTH__TOKENS__A: "token-0123456789abcd" }),
-      ),
-    ).toContain("needs api");
+  });
+
+  it("takes either role alone (X7.1)", () => {
+    expect(serveSettings(config({ "server.roles": "worker" })).roles).toEqual(["worker"]);
+    expect(serveSettings(config({ "server.roles": "api" })).roles).toEqual(["api"]);
   });
 });
 
