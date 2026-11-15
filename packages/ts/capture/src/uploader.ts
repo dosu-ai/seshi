@@ -652,23 +652,25 @@ export class Uploader {
       if (!session || session.toggle === "off" || session.retract === "pending")
         return { uploaded };
       const fileOffset = session.file_offset ?? 0;
-      const whole = forceWhole || !session.stored || size < fileOffset || !agent.chunkable;
+      // A transcript that moved (a later hook named another file) is not where the offsets
+      // point: it goes whole, and the server's own state says what it extends (04).
+      const moved = session.sent_path !== undefined && session.sent_path !== path;
+      const whole = forceWhole || moved || !session.stored || size < fileOffset || !agent.chunkable;
       if (!whole && fileOffset >= size) return { uploaded };
-      if (whole) {
-        // A path comes from a hook payload: send only a file the agent itself says is this
-        // session's transcript, never whatever file a payload named.
-        const info = identifySafely(agent, path, readHead(path));
-        if (info?.session_id !== session.session_id) {
-          await this.refuse(
-            key,
-            "not_a_transcript",
-            info
-              ? `${path} is session ${info.session_id}'s transcript`
-              : `${path} is not a ${agent.name} transcript`,
-            size,
-          );
-          return { uploaded, failed: true };
-        }
+      // A path comes from a hook payload: send only a file the agent itself says is this
+      // session's transcript, never whatever file a payload named. Chunks too: a later hook
+      // can name another file for a session already stored.
+      const info = identifySafely(agent, path, readHead(path));
+      if (info?.session_id !== session.session_id) {
+        await this.refuse(
+          key,
+          "not_a_transcript",
+          info
+            ? `${path} is session ${info.session_id}'s transcript`
+            : `${path} is not a ${agent.name} transcript`,
+          size,
+        );
+        return { uploaded, failed: true };
       }
       const piece = this.piece(path, whole ? 0 : fileOffset, size, agent.encoding, whole);
       if (!piece) return { uploaded };
@@ -767,6 +769,7 @@ export class Uploader {
         delete s.failures;
         delete s.next_attempt_at;
         if (stored) {
+          s.sent_path = path;
           s.file_offset = piece.end;
           s.server_offset = result.bytes_total;
           s.aligned = (whole ? true : s.aligned !== false) && keptLength;
@@ -780,6 +783,7 @@ export class Uploader {
           s.file_offset = 0;
           s.server_offset = 0;
           s.held_at_size = size;
+          delete s.sent_path;
           delete s.shipped;
           delete s.carried;
         }
@@ -808,6 +812,7 @@ export class Uploader {
         "file_offset",
         "server_offset",
         "aligned",
+        "sent_path",
         "shipped",
         "carried",
         "held_at_size",

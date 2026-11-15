@@ -60,6 +60,9 @@ export interface SessionState {
    * when pre-redaction changed a length, F2.4). */
   file_offset?: number;
   server_offset?: number;
+  /** The transcript those offsets are positions in. A session whose path changes since (a
+   * later hook naming another file) is sent whole again, never chunked from another file. */
+  sent_path?: string;
   /** Whether every byte sent kept its length, so a server offset is also a file offset. */
   aligned?: boolean;
   shipped?: ShippedPrefix;

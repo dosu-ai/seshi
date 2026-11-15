@@ -240,6 +240,31 @@ describe("the upload protocol", () => {
     expect(session("s6").error?.message).toContain("session s1's transcript");
   });
 
+  it("never chunks from another file a later hook names for a stored session", async () => {
+    writeFileSync(transcript(), line("one") + line("two"));
+    hooked();
+    await uploader().pass();
+    expect(session().stored).toBe(true);
+    // A payload naming a longer file that is not the transcript: nothing of it past the
+    // stored offset may go as a chunk.
+    const secret = join(dir, "id_rsa");
+    writeFileSync(secret, `-----BEGIN KEY-----\n${"k".repeat(200)}\n-----END KEY-----\n`);
+    hooked("s1", secret);
+    await uploader().pass();
+    expect(server.uploads).toHaveLength(1);
+    expect(session().error).toMatchObject({ code: "not_a_transcript", permanent: true });
+
+    // The same session's transcript at a new place goes whole; the server says it extends.
+    const moved = join(dir, "sessions", "moved", "s1.jsonl");
+    mkdirSync(join(moved, ".."));
+    writeFileSync(moved, line("one") + line("two") + line("three"));
+    hooked("s1", moved);
+    await uploader().pass();
+    expect(server.uploads.map((u) => u.offset)).toEqual([0, 0]);
+    expect(session()).toMatchObject({ stored: true, sent_path: moved });
+    expect(server.sessions.get("s1")?.text).toBe(line("one") + line("two") + line("three"));
+  });
+
   it("keeps a filtered session's whole log until it grows (X4.10)", async () => {
     server.minLines = 3;
     writeFileSync(transcript(), line("one"));
