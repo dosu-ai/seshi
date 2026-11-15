@@ -1,12 +1,14 @@
 /** `@seshi/kit`: the contract an integration implements (X3.11). Each integration exports one
  * `Integration` listing what it provides; `apps/seshi` puts every integration in a static
  * registry and hands what they provide to the parts that run it: the format registry, the
- * instance's connector scheduler (`@seshi/sources`) and, later, `@seshi/capture`.
+ * instance's connector scheduler (`@seshi/sources`) and `@seshi/capture`.
  *
  * Integrations import only `@seshi/model`, `@seshi/kit` and `@seshi/formats` (X3.2). Layer 1:
  * this package imports only `@seshi/model`. */
 
 import type { Envelope, FormatAdapter, SourceLocation, StoreSessionResult } from "@seshi/model";
+
+import type { CaptureAgent } from "./capture";
 
 /** Span sets (X4.2): what a connector that submits spans builds, and the adapter a span format
  * implements. */
@@ -25,15 +27,32 @@ export type {
   SpanResource,
   SpanValue,
 } from "@seshi/model";
-
-/** Handles one kind of agent hook payload (F9): parses what the agent sends on stdin and says
- * what to capture. Declared now so integrations have a place for it; `@seshi/capture` defines
- * how it is called. */
-export interface HookHandler {
-  /** The hook event this handles, in the agent's own naming (`Stop`, `SessionEnd`, `notify`). */
-  readonly event: string;
-  handle(payload: unknown): Promise<void> | void;
-}
+export {
+  type CaptureAgent,
+  type CaptureHost,
+  expandTilde,
+  type HookCapture,
+  type HookHandler,
+  type HookResult,
+  hookHandler,
+  type InstallContext,
+  type Installer,
+  type InstallReport,
+  type InstallStatus,
+  payloadObject,
+  type SweepPath,
+  stringField,
+  type TranscriptInfo,
+} from "./capture";
+export {
+  commandLine,
+  isSeshiHook,
+  isSeshiStatusline,
+  readJsonConfig,
+  readTextFile,
+  writeFileAtomic,
+  writeJsonConfig,
+} from "./files";
 
 /** What a connector's `submit` answers: the pipeline's answer for the envelope (X4). A permanent
  * failure is recorded under `sources/<id>/failed/` and answered `failed` (X4.8); a transient one
@@ -146,15 +165,6 @@ export interface Connector<C = Readonly<Record<string, unknown>>> {
   rewind?(cursor: Cursor | null, since: Date, config: C): Cursor | null;
 }
 
-/** Wires an agent to seshi on one machine (hooks, status line, plugin manifest). Declared now;
- * `seshi install` defines how it is called. */
-export interface Installer {
-  /** The agent this installs into (`claude-code`). */
-  readonly agent: string;
-  install(): Promise<void>;
-  uninstall(): Promise<void>;
-}
-
 /** Everything one vendor or agent provides. Lists are optional: an integration provides what it
  * has. */
 export interface Integration {
@@ -162,11 +172,10 @@ export interface Integration {
   readonly name: string;
   /** Transcript formats this integration reads. */
   readonly formats?: readonly FormatAdapter[];
-  readonly hooks?: readonly HookHandler[];
-  /** Where this agent keeps its transcripts on a machine, for the sweep (F9). */
-  readonly sweepPaths?: readonly string[];
   readonly connectors?: readonly Connector[];
-  readonly installers?: readonly Installer[];
+  /** How a coding agent's sessions are captured on a machine (F9): its hook handlers, sweep
+   * folders and installer. Its own module, loaded alone by `seshi hook` (X3.3). */
+  readonly capture?: CaptureAgent;
 }
 
 const INTEGRATION_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -231,4 +240,24 @@ export function connectorsOf(integrations: readonly Integration[]): Connector[] 
     }
   }
   return connectors;
+}
+
+/** Every agent the integrations capture, in registry order. Two integrations capturing under
+ * one agent name are refused: `seshi hook <agent>` would reach whichever came first. */
+export function capturesOf(integrations: readonly Integration[]): CaptureAgent[] {
+  const owners = new Map<string, string>();
+  const agents: CaptureAgent[] = [];
+  for (const integration of integrations) {
+    const agent = integration.capture;
+    if (!agent) continue;
+    const owner = owners.get(agent.name);
+    if (owner !== undefined) {
+      throw new Error(
+        `capture agent '${agent.name}' is provided by both '${owner}' and '${integration.name}'`,
+      );
+    }
+    owners.set(agent.name, integration.name);
+    agents.push(agent);
+  }
+  return agents;
 }

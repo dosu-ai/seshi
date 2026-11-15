@@ -1,7 +1,7 @@
 {
   "name": "@seshi/kit",
   "private": true,
-  "description": "Layer 1: the interfaces integrations implement (FormatAdapter, HookHandler, Connector, Installer) and the Integration object each one exports.",
+  "description": "Layer 1: the interfaces integrations implement (FormatAdapter, Connector, and CaptureAgent with its HookHandler and Installer) and the Integration object each one exports.",
   "type": "module",
   "exports": {
     ".": {
