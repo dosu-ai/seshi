@@ -311,7 +311,6 @@ export class Pipeline {
 
   /** Run one envelope through every stage (see above). */
   async submit(envelope: Envelope, options: SubmitOptions = {}): Promise<SubmitResult> {
-    const respond = options.onFailure ?? (hasCaller(envelope) ? "throw" : "record");
     try {
       checkEnvelope(envelope);
       const auth = await this.authorizer.authorize(envelope);
@@ -320,43 +319,62 @@ export class Pipeline {
       this.health.count(envelope.source_id, replay ? "duplicate" : result.status);
       return result;
     } catch (err) {
-      if (!isPermanent(err)) throw err;
-      // Telling an uploader where its log ends is the protocol working, not a refusal.
-      if (!(err instanceof OffsetMismatch)) {
-        this.health.count(envelope.source_id, respond === "throw" ? "rejected" : "failed");
-      }
-      if (respond === "throw") throw err;
-      const record = await writeFailed(this.store, {
-        at: this.now().toISOString(),
-        source: envelope.source_id,
-        source_kind: envelope.source,
-        owner: envelope.owner,
-        session_key: envelope.session_key,
-        idempotency_key: envelope.idempotency_key,
-        ...(envelope.provenance ? { provenance: envelope.provenance } : {}),
-        code: err.code,
-        message: err.message,
-      });
-      return { status: "failed", code: err.code, message: err.message, record };
+      return this.failed(envelope, err, options);
     }
   }
 
   /** A session the span assembler rebuilt, through the filter, review and the write. The
    * assembler is the session's writer and rebuilds the whole session every time, so what does
    * not extend the stored trace replaces it. The idempotency key is the assembled records'
-   * digest, not the batch's: the same assembly published twice is applied once. */
-  async publishAssembled(input: AssembledSession): Promise<StoreSessionResult> {
+   * digest, not the batch's: the same assembly published twice is applied once. A permanent
+   * failure is recorded, as for any source with no caller to tell (X4.8). */
+  async publishAssembled(
+    input: AssembledSession,
+    options: SubmitOptions = {},
+  ): Promise<StoreSessionResult | FailedResult> {
     const envelope: Envelope = {
       ...input.envelope,
       idempotency_key: `assembled#${prefixSha256(input.records, input.records.length)}`,
     };
-    checkEnvelope(envelope);
-    const auth = await this.authorizer.authorize(envelope);
-    const outcome = await this.planned(envelope, auth, (run) =>
-      this.whole(run, input.records, 0, { replace: true, llm_calls: input.llm_calls }),
-    );
-    this.health.count(envelope.source_id, outcome.replay ? "duplicate" : outcome.result.status);
-    return outcome.result;
+    try {
+      checkEnvelope(envelope);
+      const auth = await this.authorizer.authorize(envelope);
+      const outcome = await this.planned(envelope, auth, (run) =>
+        this.whole(run, input.records, 0, { replace: true, llm_calls: input.llm_calls }),
+      );
+      this.health.count(envelope.source_id, outcome.replay ? "duplicate" : outcome.result.status);
+      return outcome.result;
+    } catch (err) {
+      return this.failed(envelope, err, options);
+    }
+  }
+
+  /** A failure: thrown when transient, or to a caller who waits; otherwise recorded under
+   * `sources/<id>/failed/` (X4.8). */
+  private async failed(
+    envelope: Envelope,
+    err: unknown,
+    options: SubmitOptions,
+  ): Promise<FailedResult> {
+    if (!isPermanent(err)) throw err;
+    const respond = options.onFailure ?? (hasCaller(envelope) ? "throw" : "record");
+    // Telling an uploader where its log ends is the protocol working, not a refusal.
+    if (!(err instanceof OffsetMismatch)) {
+      this.health.count(envelope.source_id, respond === "throw" ? "rejected" : "failed");
+    }
+    if (respond === "throw") throw err;
+    const record = await writeFailed(this.store, {
+      at: this.now().toISOString(),
+      source: envelope.source_id,
+      source_kind: envelope.source,
+      owner: envelope.owner,
+      session_key: envelope.session_key,
+      idempotency_key: envelope.idempotency_key,
+      ...(envelope.provenance ? { provenance: envelope.provenance } : {}),
+      code: err.code,
+      message: err.message,
+    });
+    return { status: "failed", code: err.code, message: err.message, record };
   }
 
   // --- spans --------------------------------------------------------------------

@@ -691,6 +691,13 @@ describe("span sets (X4.2)", () => {
     ).toEqual(rebuilt);
     const metadata = await readMetadata(store, "svc-console", archive);
     expect(metadata?.traces).toHaveLength(1);
+    // An assembled session the trace format refuses is recorded, not thrown: nobody waits.
+    const refused = await p.publishAssembled({
+      envelope: spans(),
+      records: records(META + user("z".repeat(2000)) + reply("x")).slice(0, 1),
+    });
+    expect(refused).toMatchObject({ status: "failed", code: "invalid" });
+    expect((await listRecords(store, "failed", "console")).records).toHaveLength(1);
     expect(metadata?.owner_basis).toBe("service");
     expect(keys.metadata("svc-console", archive)).toContain(archive);
   });

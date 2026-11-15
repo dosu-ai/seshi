@@ -76,7 +76,8 @@ trace objects and its change entries.
   Without an assembler, a span batch is permanent `unsupported_payload`.
   `Pipeline.publishAssembled({ envelope, records, llm_calls })` runs filter, review and write on
   a session the assembler rebuilt. It always replaces when the session no longer extends, and
-  its idempotency key is `assembled#<records digest>`, not the batch's key.
+  its idempotency key is `assembled#<records digest>`, not the batch's key. A permanent
+  failure is recorded under `failed/`, not thrown.
 - **Record redaction (F2 seam)**, `packages/ts/redact/src/redactor.ts`. `Redactor { rule_set;
   redact(records, carried) → { records, withheld, summary } }`, and `ruleRedactor(rules)`:
   - the sensitive-call rules on `tool_calls`, via `classifyCall` and `trimSensitiveInput`,
