@@ -6,7 +6,7 @@
  * Integrations import only `@seshi/model`, `@seshi/kit` and `@seshi/formats` (X3.2). Layer 1:
  * this package imports only `@seshi/model`. */
 
-import type { Envelope, FormatAdapter, StoreSessionResult } from "@seshi/model";
+import type { Envelope, FormatAdapter, SourceLocation, StoreSessionResult } from "@seshi/model";
 
 /** Span sets (X4.2): what a connector that submits spans builds, and the adapter a span format
  * implements. */
@@ -101,6 +101,26 @@ export interface ConnectorContext<C = Readonly<Record<string, unknown>>> {
   /** Aborted when the instance shuts down: stop at the next envelope boundary. */
   readonly signal: AbortSignal;
   now(): Date;
+  /** Record a permanent failure of something that never became an envelope (X4.8): an object
+   * whose format nothing detects, one over the size limit, bytes that are not text. It is
+   * written under `sources/<id>/failed/` like the pipeline's own failure records, counts as
+   * `failed` in source health, and returns the record's key. Optional so contexts built by
+   * hand (tests) need not provide it; the instance's scheduler always does. */
+  fail?(failure: ConnectorFailure): Promise<string>;
+}
+
+/** What `ConnectorContext.fail` records: where and why, never content. */
+export interface ConnectorFailure {
+  /** A stable code (`unknown_format`, `too_large`, `not_utf8`). */
+  code: string;
+  /** What went wrong, in words, without quoting the data. */
+  message: string;
+  /** The session the item would have been, when known. */
+  session_key?: string;
+  /** The key the envelope would have carried (X4.7): what `seshi reprocess` asks for again. */
+  idempotency_key: string;
+  /** Where in the source the item is (object key and ETag, API cursor). */
+  provenance?: SourceLocation;
 }
 
 /** What a run says about itself, beyond what the scheduler counts from `submit`. */

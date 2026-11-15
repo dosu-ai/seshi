@@ -14,11 +14,12 @@ import {
   CheckpointLost,
   type Connector,
   type ConnectorContext,
+  type ConnectorFailure,
   type ConnectorLogger,
   type Cursor,
   type SubmitOutcome,
 } from "@seshi/kit";
-import { type Envelope, UPLOAD_SOURCE } from "@seshi/model";
+import { type Envelope, type SourceKind, UPLOAD_SOURCE } from "@seshi/model";
 import {
   countRecords,
   deleteCheckpoint,
@@ -28,12 +29,28 @@ import {
   readHealth,
   type Store,
   writeCheckpoint,
+  writeFailed,
 } from "@seshi/store";
 
 /** The pipeline as the scheduler needs it. */
 export interface Submitter {
   submit(envelope: Envelope, options?: { onFailure?: "throw" | "record" }): Promise<unknown>;
+  /** Source health, which a connector's own failure records count in (`ConnectorContext.fail`);
+   * the pipeline's counters. */
+  readonly health?: { count(sourceId: string, outcome: "failed"): void };
 }
+
+/** The longest message a connector's failure record keeps (as the pipeline's). */
+const FAILURE_MESSAGE_LENGTH = 300;
+
+const SOURCE_KINDS: ReadonlySet<string> = new Set<SourceKind>([
+  "upload",
+  "hook",
+  "otlp",
+  "datadog",
+  "s3",
+  "cursor-cloud",
+]);
 
 /** How often a source is polled when its config does not say. */
 export const DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
@@ -335,6 +352,35 @@ export class Sources {
       },
       signal,
       now: this.now,
+      fail: async (failure: ConnectorFailure): Promise<string> => {
+        if (ended) throw new Error(`the run of source '${id}' has ended`);
+        if (lost) throw new CheckpointLost(id);
+        const text =
+          failure.message.length > FAILURE_MESSAGE_LENGTH
+            ? `${failure.message.slice(0, FAILURE_MESSAGE_LENGTH - 1)}…`
+            : failure.message;
+        let record: string;
+        try {
+          record = await writeFailed(this.store, {
+            at: this.now().toISOString(),
+            source: id,
+            ...(SOURCE_KINDS.has(config.type) ? { source_kind: config.type as SourceKind } : {}),
+            owner: `svc:${id}`,
+            ...(failure.session_key !== undefined ? { session_key: failure.session_key } : {}),
+            idempotency_key: failure.idempotency_key,
+            ...(failure.provenance ? { provenance: failure.provenance } : {}),
+            code: failure.code,
+            message: text,
+          });
+        } catch (err) {
+          // Not recorded: as transient as a submit that threw (X4.8).
+          transient ??= message(err);
+          throw err;
+        }
+        outcomes.failed = (outcomes.failed ?? 0) + 1;
+        this.pipeline.health?.count(id, "failed");
+        return record;
+      },
     };
 
     try {
