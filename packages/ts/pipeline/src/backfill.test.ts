@@ -16,7 +16,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type BackfillOptions, backfillRedaction } from "./backfill";
 import { uploadEnvelope } from "./envelope";
-import { getTrace, tombstone } from "./ingest";
+import { getTrace, ingest, tombstone } from "./ingest";
 import { Pipeline } from "./pipeline";
 
 let dir: string;
@@ -149,6 +149,7 @@ describe("backfillRedaction (F2.5)", () => {
     expect(after?.head).toBe(before?.head);
     expect(after?.traces).toEqual(before?.traces);
     expect(after?.redaction).toEqual({ rule_set: NEW_RULES.hash, counts: {} });
+    expect(after?.updated_at).toBe(before?.updated_at);
     expect((await readChanges(store, "alice", { since: "2030-01-01T00:00:00Z" })).entries).toEqual(
       [],
     );
@@ -282,6 +283,95 @@ describe("backfillRedaction (F2.5)", () => {
     const report = await run();
     expect(report.outcomes.conflict).toBe(1);
     expect(report.sessions[0]?.message).toMatch(/is missing/);
+  });
+
+  it("keeps a fork's continuation of its parent, so it still starts where the parent's copy ends", async () => {
+    const parent = meta() + user(`plan ${LONG}`) + reply("ok");
+    await store1("s0", parent);
+    const pipeline = new Pipeline({ store, formats, redaction: compileRuleSet() });
+    const fork = (await pipeline.submit(
+      uploadEnvelope(
+        {
+          owner: "alice",
+          agent: "trajectory",
+          session_id: "s1",
+          transcript: parent + user(`fork with ACME-1234 ${LONG}`) + reply("forked"),
+          format: "jsonl",
+          offset: 0,
+          fork_of: "s0",
+        },
+        { caller: { kind: "static", principal: "alice" }, owner_basis: "verified" },
+      ),
+    )) as StoreSessionResult;
+    expect(fork.status).toBe("stored");
+    const before = await metadata("s1");
+    const continuation = before?.traces[0]?.continuation;
+    expect(continuation?.from_record).toBe(3);
+
+    const report = await run({ owners: ["alice"] });
+    expect(report.outcomes).toMatchObject({ rewritten: 1, unchanged: 1, failed: 0 });
+    const after = await metadata("s1");
+    expect(after?.traces[0]?.continuation).toEqual(continuation);
+    const trace = await getTrace(
+      store,
+      "alice",
+      after?.archive_id as string,
+      after?.head as string,
+    );
+    expect(trace?.metadata.continuation).toEqual(continuation);
+    expect(trace?.records.map((r) => r.role)).toEqual(["meta", "user", "assistant"]);
+    expect(JSON.stringify(trace)).not.toContain("ACME-");
+    const { entries } = await readChanges(store, "alice", { since: "2030-01-01T00:00:00Z" });
+    expect(entries.map(({ entry: e }) => e.continuation)).toEqual([continuation]);
+  });
+
+  it("lets a chunk continue a backfilled session", async () => {
+    const first = await store1("s1", meta() + user(`key ACME-1234 ${LONG}`) + reply("ok"));
+    const second = await store1("s1", user("more") + reply("yes"), first.bytes_total);
+    await run();
+    const third = await store1(
+      "s1",
+      user("and ACME-9999") + reply("fine"),
+      second.bytes_total,
+      "alice",
+      NEW_RULES,
+    );
+    expect(third.status).toBe("stored");
+    const after = await metadata("s1");
+    expect(after?.traces).toHaveLength(2);
+    const tail = await getTrace(store, "alice", after?.archive_id as string, after?.head as string);
+    expect(JSON.stringify(tail)).not.toContain("ACME-");
+    expect(tail?.metadata.continuation?.from_record).toBe(5);
+  });
+
+  it("redacts what an LLM call's error and parameters say", async () => {
+    const archive = archiveId("alice", "trajectory", "s1");
+    await ingest({
+      store,
+      owner: "alice",
+      records: [
+        { role: "meta", source: "trajectory" },
+        { role: "user", content: LONG, timestamp: ts },
+        { role: "assistant", content: "ok", timestamp: ts, llm_call: "c1" },
+      ] as never,
+      metadata: { session_id: "s1", agent: "trajectory" },
+      llm_calls: [
+        {
+          id: "c1",
+          model: "m",
+          error: "bad key ACME-1234",
+          parameters: { user: "ACME-5678", n: 1 },
+        },
+      ],
+      redaction: { rule_set: compileRuleSet().hash, counts: {} },
+    });
+    const report = await run();
+    expect(report.outcomes).toMatchObject({ rewritten: 1 });
+    expect(report.counts).toEqual({ "acme-key": 2 });
+    const after = await readMetadata(store, "alice", archive);
+    const trace = await getTrace(store, "alice", archive, after?.head as string);
+    expect(JSON.stringify(trace)).not.toContain("ACME-");
+    expect(trace?.llm_calls?.[0]).toMatchObject({ id: "c1", model: "m", parameters: { n: 1 } });
   });
 
   it("tells each session as it is done", async () => {

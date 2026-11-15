@@ -35,7 +35,7 @@ import {
   TrajectoryError,
   type Writer,
 } from "@seshi/model";
-import type { Redactor } from "@seshi/redact";
+import { type Redactor, redactLlmCalls } from "@seshi/redact";
 import {
   appendChange,
   gzipJson,
@@ -198,10 +198,17 @@ async function backfillSession(
   }
   const head = traces[0] as Trace;
   const latest = traces.at(-1) as Trace;
-  const { records, llm_calls } = joined(traces);
+  const joinedTraces = joined(traces);
+  const { records } = joinedTraces;
   const redacted = redactor.redact(records);
-  const counts = redacted.summary.counts;
-  const changed = canonicalJson(redacted.records) !== canonicalJson(records);
+  // What an LLM call says in free text (its error, string parameters) is content too.
+  const calls = redactLlmCalls(redactor, joinedTraces.llm_calls);
+  const llm_calls = calls.calls ?? [];
+  const counts = { ...redacted.summary.counts };
+  addCounts(counts, calls.counts);
+  const changed =
+    canonicalJson(redacted.records) !== canonicalJson(records) ||
+    canonicalJson(llm_calls) !== canonicalJson(joinedTraces.llm_calls);
 
   /** The pointer as it should be, or a throw when the session moved. */
   const step = (next: (existing: SessionMetadata) => SessionMetadata) => {
@@ -229,8 +236,10 @@ async function backfillSession(
         archive,
         // A call a new rule withholds whose result has not arrived yet changes no record, but
         // its id must be kept, so the result is withheld when a later chunk brings it.
+        // `updated_at` stays: nothing anyone reads changed, so the session should not look
+        // recently written (lists sort by it, and `--since` selects by it).
         step((existing) => {
-          const next = { ...existing, redaction: redaction(existing), updated_at: at };
+          const next = { ...existing, redaction: redaction(existing) };
           const ids = withheld(existing);
           if (ids) next.withheld_calls = ids;
           return next;
@@ -246,14 +255,17 @@ async function backfillSession(
   }
 
   // What the meta record gives (cwd, branch, model) comes from the redacted meta record; the
-  // rest of the head's metadata is kept, except that the new trace continues nothing.
+  // rest of the first trace's metadata is kept. Its `continuation` is kept too: only a fork's
+  // first trace has one (it continues the copy of its parent's history, which is the parent's
+  // to store), and the new trace still starts where that copy ends. Later traces' continuations
+  // are folded into the new one.
   const {
-    continuation: _c,
     cwd: _cwd,
     git_branch: _branch,
     model: _model,
     ...metadata
   } = head.metadata as TraceMetadata;
+  const continuation = metadata.continuation;
   let trace: Trace;
   try {
     trace = parseTrace(redacted.records, {
@@ -299,7 +311,12 @@ async function backfillSession(
           ...rest,
           head: trace.content_hash,
           traces: [
-            { content_hash: trace.content_hash, created_at: at, records: trace.records.length },
+            {
+              content_hash: trace.content_hash,
+              created_at: at,
+              records: trace.records.length,
+              ...(continuation ? { continuation } : {}),
+            },
           ],
           redaction: redaction(existing),
           updated_at: at,
@@ -318,9 +335,9 @@ async function backfillSession(
     }
     throw err;
   }
-  for (const hash of old) {
-    if (hash !== trace.content_hash) await store.delete(keys.trace(owner, archive, hash));
-  }
+  // The change entry first: a run stopped between the two leaves old objects behind (harmless,
+  // the pointer no longer names them), never a rewritten session no reader is told of (the next
+  // run finds it current and would not tell them either).
   await appendChange(store, {
     kind: "published",
     at,
@@ -330,9 +347,13 @@ async function backfillSession(
     content_hash: trace.content_hash,
     writer: options.writer,
     owner_basis: basis,
+    ...(continuation ? { continuation } : {}),
     replace: true,
     reason: "redacted",
   });
+  for (const hash of old) {
+    if (hash !== trace.content_hash) await store.delete(keys.trace(owner, archive, hash));
+  }
   return { ...base, outcome: "rewritten", counts, content_hash: trace.content_hash };
 }
 
