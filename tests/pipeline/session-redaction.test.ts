@@ -68,6 +68,17 @@ const answer = line({
   message: { role: "assistant", model: "claude-x", content: [{ type: "text", text: "Done." }] },
 });
 
+// Split so no scanner reads a key in this file; the redactor sees the joined value.
+const awsKey = ["AKIA", "IOSFODNN7EXAMPLQ"].join("");
+const keyLine = line({
+  type: "user",
+  uuid: "u3",
+  parentUuid: "a2",
+  timestamp: at(4),
+  sessionId: sid,
+  message: { role: "user", content: `Now use ${awsKey} for the deploy.` },
+});
+
 /** The head trace as stored, as text. */
 async function headTrace(): Promise<string> {
   const metadata = await getSession(store, owner, "claude-code", sid);
@@ -148,6 +159,92 @@ describe("storeSession redaction", () => {
       "custom-pattern": 1,
       "sensitive-file": 1,
     });
+  });
+
+  it("redacts the tail of a whole re-upload that extends the stored session", async () => {
+    // A first whole upload with the call, then the whole log again (no offset, no replace) with
+    // its sensitive result and a secret: the tail goes through its own pass, carrying the
+    // prefix's withheld call, as `seshi upload` or an uploader's whole resend send it.
+    await storeSession(
+      {
+        owner,
+        agent: "claude-code",
+        session_id: sid,
+        transcript: prompt + readEnv,
+        format: "jsonl",
+      },
+      { store, formats },
+    );
+    // The withheld call counts once, when its call is written.
+    expect((await getSession(store, owner, "claude-code", sid))?.redaction?.counts).toEqual({
+      "sensitive-file": 1,
+    });
+    const result = await storeSession(
+      {
+        owner,
+        agent: "claude-code",
+        session_id: sid,
+        transcript: prompt + readEnv + envResult + answer + keyLine,
+        format: "jsonl",
+      },
+      { store, formats },
+    );
+    expect(result.status).toBe("stored");
+    const trace = await headTrace();
+    expect(trace).toContain("Done.");
+    expect(trace).not.toContain("plainvalue");
+    expect(trace).not.toContain(awsKey);
+    expect(trace).toContain("[redacted:sensitive-file]");
+    expect(everything(dir)).not.toContain("plainvalue");
+    expect(everything(dir)).not.toContain(awsKey);
+    // Only the tail's matches are added: the prefix was counted when it was written.
+    const metadata = await getSession(store, owner, "claude-code", sid);
+    expect(metadata?.withheld_calls).toEqual({ toolu_env: "sensitive-file" });
+    expect(metadata?.redaction?.counts).toEqual({ "sensitive-file": 1, "aws-access-key": 1 });
+  });
+
+  it("redacts a replace that rewrites the stored session", async () => {
+    await storeSession(
+      {
+        owner,
+        agent: "claude-code",
+        session_id: sid,
+        transcript: prompt + answer,
+        format: "jsonl",
+      },
+      { store, formats },
+    );
+    // A rewrite whose records do not start with what is stored, so only `replace` takes it.
+    const rewritten = line({
+      type: "user",
+      uuid: "u1",
+      timestamp: at(0),
+      sessionId: sid,
+      message: { role: "user", content: "Check the env again." },
+    });
+    const result = await storeSession(
+      {
+        owner,
+        agent: "claude-code",
+        session_id: sid,
+        transcript: rewritten + readEnv + envResult + answer + keyLine,
+        format: "jsonl",
+        replace: true,
+      },
+      { store, formats },
+    );
+    expect(result.status).toBe("stored");
+    const trace = await headTrace();
+    expect(trace).toContain("Check the env again.");
+    expect(trace).not.toContain("plainvalue");
+    expect(trace).not.toContain(awsKey);
+    expect(trace).toContain("[redacted:sensitive-file]");
+    expect(everything(dir)).not.toContain("plainvalue");
+    expect(everything(dir)).not.toContain(awsKey);
+    const metadata = await getSession(store, owner, "claude-code", sid);
+    expect(metadata?.withheld_calls).toEqual({ toolu_env: "sensitive-file" });
+    // The rewrite's own matches, counted over from nothing.
+    expect(metadata?.redaction?.counts).toEqual({ "sensitive-file": 1, "aws-access-key": 1 });
   });
 
   it("keeps no withheld_calls on a session that has none", async () => {
