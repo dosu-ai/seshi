@@ -7,7 +7,7 @@
 # @dosu/sessiondb
 
 The sessiondb SDK: coding-agent sessions as a durable, redacted, content-addressed archive in a
-bucket you own, written in the [sessionstorage layout](../../spec/layout.md).
+bucket you own, written in the [sessionstorage layout](../spec/layout.md).
 
 ```sh
 bun add @dosu/sessiondb    # or npm install

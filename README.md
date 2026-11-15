@@ -183,7 +183,7 @@ before exposing it.
 bun install
 bun run test          # the S3 store test needs SESSIONDB_TEST_S3_* and skips without them
 bun run typecheck
-bun run check         # biome lint + format
+bun run check         # biome lint + format, then the package layer check
 bun run goldens       # regenerate the goldens after a deliberate change to hashing or events
 ```
 
