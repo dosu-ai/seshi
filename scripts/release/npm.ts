@@ -104,8 +104,27 @@ export function launcherManifest(
   };
 }
 
-function readme(title: string, body: string): string {
-  return `# ${title}\n\n${body}\n\nDocs: https://github.com/${REPOSITORY}#readme\n`;
+/** The face-free glyph, mint on night ink, as npm pages show it (B1.5). It is read from the
+ * release's own tag, so a page never changes after it is published. No face below 48 px
+ * (B1.2): the glyph has none at any size. */
+export function badgeUrl(version: string): string {
+  return `https://raw.githubusercontent.com/${REPOSITORY}/v${version}/brand/glyph/seshi-glyph-badge.svg`;
+}
+
+/** A package's README: the glyph, the title, what it is, and where the docs are. */
+export function readme(title: string, body: string, version: string): string {
+  return [
+    `<img src="${badgeUrl(version)}" alt="" width="64" height="64">`,
+    "",
+    `# ${title}`,
+    "",
+    "*Every session has a thread.*",
+    "",
+    body,
+    "",
+    `Docs: https://github.com/${REPOSITORY}#readme`,
+    "",
+  ].join("\n");
 }
 
 /** Writes `target`'s platform package with `binary`. */
@@ -129,6 +148,7 @@ export function writePlatformPackage(
     readme(
       target.npm,
       `The \`seshi\` binary for ${OS_NAMES[target.os]} ${target.cpu}. It is installed by the \`seshi\` package (\`npm i -g seshi\`); you do not need to install it yourself.`,
+      version,
     ),
   );
   return { name: target.npm, dir };
@@ -172,6 +192,7 @@ export async function writeLauncherPackage(
         "",
         "npm installs the binary for your platform through one of the optional `@seshi/cli-*` packages; Node only starts it. Other ways in: the install scripts and the binaries on GitHub releases.",
       ].join("\n"),
+      version,
     ),
   );
   return { name: "seshi", dir };
@@ -288,7 +309,7 @@ export async function writeLibraryPackage(
     dependencies: libraryDependencies(workspace.dependencies, version),
   });
   writeFileSync(join(dir, "LICENSE"), license);
-  writeFileSync(join(dir, "README.md"), readme(library.name, library.description));
+  writeFileSync(join(dir, "README.md"), readme(library.name, library.description, version));
   return { name: library.name, dir };
 }
 

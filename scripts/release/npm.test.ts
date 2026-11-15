@@ -15,19 +15,36 @@ import { tarGz } from "./archive";
 import { buildRelease, repositoryVersion } from "./build";
 import {
   addDeclarationExtensions,
+  badgeUrl,
   buildNpm,
   LIBRARIES,
   launcherManifest,
   libraryDependencies,
   type NpmPackage,
   platformManifest,
+  readme,
 } from "./npm";
-import { CHECKSUMS, hostTarget, TARGETS, targetById } from "./targets";
+import { CHECKSUMS, hostTarget, REPOSITORY, TARGETS, targetById } from "./targets";
 import { exec, installPackages, standInCompile } from "./testing";
 
 const VERSION = repositoryVersion();
 const posix = process.platform !== "win32";
 const node = Bun.which("node");
+
+describe("readme (B1.5)", () => {
+  it("points at the badge in the repository at the release's tag", () => {
+    expect(badgeUrl("1.2.3")).toBe(
+      `https://raw.githubusercontent.com/${REPOSITORY}/v1.2.3/brand/glyph/seshi-glyph-badge.svg`,
+    );
+    // The file the URL names is in this checkout, so the tag a release makes from it has it.
+    expect(existsSync(join(import.meta.dirname, "../../brand/glyph/seshi-glyph-badge.svg"))).toBe(
+      true,
+    );
+    const text = readme("@seshi/model", "Types.", "1.2.3");
+    expect(text).toContain("# @seshi/model\n\n*Every session has a thread.*\n\nTypes.\n");
+    expect(text).toContain(`Docs: https://github.com/${REPOSITORY}#readme`);
+  });
+});
 
 describe("addDeclarationExtensions", () => {
   it("gives relative declaration imports the extension Node's ESM resolution needs", () => {
@@ -150,6 +167,14 @@ describe.skipIf(!posix)("buildNpm", () => {
       expect(manifest.private).toBeUndefined();
       expect(existsSync(join(p.dir, "LICENSE"))).toBe(true);
       expect(existsSync(join(p.dir, "README.md"))).toBe(true);
+    }
+  });
+
+  it("heads every README with the face-free glyph from the release's tag (B1.5)", () => {
+    for (const p of packages) {
+      const text = readFileSync(join(p.dir, "README.md"), "utf8");
+      expect(text.startsWith(`<img src="${badgeUrl(VERSION)}"`)).toBe(true);
+      expect(text).toContain(`# ${p.name}\n`);
     }
   });
 
