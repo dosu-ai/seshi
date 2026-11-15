@@ -129,18 +129,7 @@ describe("the command groups (F8.1)", () => {
   });
 
   it("stubs what later branches build: a distinct exit code, and --json", async () => {
-    for (const name of [
-      "login",
-      "logout",
-      "whoami",
-      "capture",
-      "hook",
-      "upload",
-      "sessions",
-      "tokens",
-      "daemon",
-      "statusline",
-    ]) {
+    for (const name of ["capture", "hook", "upload", "daemon", "statusline"]) {
       const result = await seshi([name]);
       expect(result.code, name).toBe(EXIT.notImplemented);
       expect(result.err).toMatch(new RegExp(`^seshi: ${name}: not implemented yet .*branch \\d+`));

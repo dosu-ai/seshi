@@ -12,6 +12,12 @@
     },
     "./connect": {
       "bun": "./src/connect.ts"
+    },
+    "./main": {
+      "bun": "./src/main.ts"
+    },
+    "./account": {
+      "bun": "./src/account/index.ts"
     }
   },
   "scripts": {
