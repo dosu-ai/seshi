@@ -18,6 +18,9 @@
     },
     "./account": {
       "bun": "./src/account/index.ts"
+    },
+    "./explore": {
+      "bun": "./src/commands/explore.ts"
     }
   },
   "scripts": {

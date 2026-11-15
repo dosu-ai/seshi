@@ -26,6 +26,7 @@ export const LAPTOP_TESTS = [
   "apps/seshi/src/cli/**/*.test.ts",
   "apps/seshi/src/capture.test.ts",
   "apps/seshi/src/doctor/**/*.test.ts",
+  "apps/seshi/src/explore/**/*.test.ts",
   "apps/seshi/src/integrations.test.ts",
   "apps/seshi/src/main.test.ts",
 ];

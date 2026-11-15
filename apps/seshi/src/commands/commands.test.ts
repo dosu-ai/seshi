@@ -112,6 +112,7 @@ describe("the command groups (F8.1)", () => {
         "config",
         "daemon",
         "doctor",
+        "explore",
         "healthcheck",
         "hook",
         "login",

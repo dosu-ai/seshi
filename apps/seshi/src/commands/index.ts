@@ -76,6 +76,11 @@ export const COMMANDS: Readonly<Record<string, CommandSpec>> = {
       "check that sessions are captured right: transcript, capture state and what was stored",
     load: () => import("./doctor"),
   },
+  explore: {
+    summary:
+      "a local, read-only web page to explore and debug captured sessions (the doctor's views)",
+    load: () => import("./explore"),
+  },
   healthcheck: {
     summary: "ask a running server's /healthz whether it is up (container health checks)",
     load: () => import("./healthcheck"),
