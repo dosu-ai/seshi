@@ -54,6 +54,10 @@
       "type": "string",
       "enum": ["verified", "claimed", "service"]
     },
+    "LogEncoding": {
+      "description": "How a log is encoded: one JSON value per line (`jsonl`), or one JSON document (`json`).",
+      "enum": ["jsonl", "json"]
+    },
     "Visibility": {
       "description": "Who may read a session (X5.10): `org`, every member; `owner`, only its owner. Admins and services see everything.",
       "type": "string",

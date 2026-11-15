@@ -19,6 +19,10 @@
       "oneOf": [{ "$ref": "common.schema.json#/$defs/Sha256" }, { "type": "null" }]
     },
     "continuation": { "$ref": "common.schema.json#/$defs/Continuation" },
+    "replace": {
+      "description": "On `published`: the trace replaces the session's earlier traces instead of extending them (X4.6), and they were removed; a reader drops what it held of the session. Absent otherwise.",
+      "const": true
+    },
     "writer": { "$ref": "common.schema.json#/$defs/Writer" },
     "reason": {
       "description": "Why a session was tombstoned: `deleted` by its owner or an admin, `retracted` by the machine that uploaded it (F9.7), or `redacted` by an operator.",

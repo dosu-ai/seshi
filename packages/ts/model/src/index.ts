@@ -10,8 +10,6 @@ export type {
   Identity,
   IngestResult,
   ListSessionsOptions,
-  NormalizeStoredResult,
-  PutRawResult,
   ReadChangesOptions,
   SessionDB,
   SessionsPage,
@@ -23,8 +21,16 @@ export type {
   StoreSessionResult,
   Upload,
 } from "./api";
+export { EMPTY_PREFIX_SHA256 } from "./api";
 export { canonicalText, stripNul } from "./canonical";
-export { IngestRejected, OffsetMismatch, SessionRejected, StoreError } from "./errors";
+export {
+  Forbidden,
+  IngestRejected,
+  OffsetMismatch,
+  SessionConflict,
+  SessionRejected,
+  StoreError,
+} from "./errors";
 export type {
   Chunk,
   DocumentHead,
@@ -62,17 +68,18 @@ export type {
 } from "./schemas/renders";
 export { isRenderFormat, LETTA_TRACE_SCHEMA, RENDER_FORMATS } from "./schemas/renders";
 export type {
+  AppliedEnvelope,
   CallerKind,
   ChangeEntry,
   ChangeKind,
   Claims,
   LayoutMarker,
+  LogEncoding,
   NormalizedState,
   Normalizer,
   OwnerBasis,
   Provenance,
   RawFormat,
-  RawPart,
   RedactionSummary,
   SessionMetadata,
   SessionStatus,

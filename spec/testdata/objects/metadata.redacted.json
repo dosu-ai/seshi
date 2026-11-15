@@ -6,7 +6,6 @@
   "agent": "claude-code",
   "status": "redacted",
   "traces": [],
-  "raw": [],
   "writer": {
     "kind": "device",
     "principal": "alice",

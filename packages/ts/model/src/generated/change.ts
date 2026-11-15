@@ -17,6 +17,8 @@ export interface ChangeEntry {
   /** The trace the entry is about; for a tombstone or a visibility change, the head at the time (null when there was none). */
   content_hash: Sha256 | null;
   continuation?: Continuation;
+  /** On `published`: the trace replaces the session's earlier traces instead of extending them (X4.6), and they were removed; a reader drops what it held of the session. Absent otherwise. */
+  replace?: true;
   writer: Writer;
   /** Why a session was tombstoned: `deleted` by its owner or an admin, `retracted` by the machine that uploaded it (F9.7), or `redacted` by an operator. */
   reason?: "deleted" | "retracted" | "redacted";

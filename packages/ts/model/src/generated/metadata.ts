@@ -16,7 +16,7 @@ import type {
 /** The `schema` value of every SessionMetadata object. */
 export const SCHEMA_ID = "seshi/metadata/1" as const;
 
-/** `seshi/metadata/1`: one session's live pointer, `owners/<owner>/sessions/<archive_id>/metadata.json`. Mutable, so every write is conditional (If-Match, X6.5). It names the head trace and the traces the session has had, how far a chunked log has been normalized, who wrote the session and how its owner was established (X5.5), who may read it (X5.10), the identity claims the data made, what redaction did and where the data came from. */
+/** `seshi/metadata/1`: one session's live pointer, `owners/<owner>/sessions/<archive_id>/metadata.json`. Mutable, so every write is conditional (If-Match, X6.5). It names the head trace and the traces the session has had, how far the session's log has been normalized and the envelopes recently applied to it, who wrote the session and how its owner was established (X5.5), who may read it (X5.10), the identity claims the data made, what redaction did and where the data came from. */
 export interface SessionMetadata {
   schema: "seshi/metadata/1";
   owner: string;
@@ -35,14 +35,13 @@ export interface SessionMetadata {
   /** The current trace's content hash; absent before one is stored and once redacted. */
   head?: Sha256;
   traces: SessionTraceRef[];
-  /** Raw transcript parts. Transitional: 04 stops storing raw (X6.3). */
-  raw: RawPart[];
-  raw_format?: RawFormat;
   normalized?: NormalizedState;
-  /** Tool calls whose results are withheld, by id, so a result in a later chunk than its call is replaced too. */
+  /** Tool calls whose results the sensitive-call rules withhold, by call id, so a result that arrives in a later chunk than its call is withheld too. With `normalized`, the small state a chunk is normalized with (X6.3). */
   withheld_calls?: {
     [key: string]: "sensitive-file" | "secret-output";
   };
+  /** The last envelopes applied to the session, oldest first, with what each answered: a resend with the same idempotency key gets the same answer and is not processed again (X4.7). Bounded; older entries fall off. */
+  applied?: AppliedEnvelope[];
   /** Who first wrote the session: the original writer, who with an admin may replace it (X4.6). Each write's own writer is on its change entry. */
   writer: Writer;
   owner_basis: OwnerBasis;
@@ -72,29 +71,30 @@ export interface SessionTraceRef {
   continuation?: Continuation;
 }
 
-/** How a raw transcript part is encoded: one JSON value per line, or one JSON document. */
-export type RawFormat = "jsonl" | "json";
-
-export interface RawPart {
-  part: number;
-  format: RawFormat;
-  /** Bytes as stored (gzip). */
-  size: number;
-  sha256: Sha256;
-  created_at: Timestamp;
-  /** The byte offset of the part's first byte in its log. */
-  offset: number;
-  /** How many of the log's bytes it covers, before redaction. */
-  length: number;
-}
-
-/** How far a session's log has been normalized: the state the next chunk continues from. */
+/** How far a session's log has been normalized: the state the next chunk continues from, and what a whole upload must extend (X4.6). Counted in the log's records as regex redaction left them, before model review, so it follows the uploader's log. */
 export interface NormalizedState {
-  /** Bytes of the log normalized so far. */
+  /** Bytes of the log normalized so far: where the next chunk starts (0 for a session assembled from spans). */
   bytes: number;
   /** How many records the whole session normalizes to, those bytes in. */
   records: number;
   prefix_sha256: Sha256;
   /** The prefix hash mid-stream (`PrefixHash.export()`), so the next chunk's records extend it. */
   hash_state: string;
+}
+
+/** One envelope applied to the session, and what it answered. */
+export interface AppliedEnvelope {
+  idempotency_key: string;
+  at: Timestamp;
+  /** `stored` (a new trace), `duplicate` (that trace was already stored), `unchanged` (nothing new in it) or `dropped` (model review dropped it). */
+  status: "stored" | "duplicate" | "unchanged" | "dropped";
+  /** The trace written, for `stored` and `duplicate`. */
+  content_hash?: Sha256;
+  /** Records in that trace. */
+  records?: number;
+  /** Events in that trace. */
+  events?: number;
+  records_total: number;
+  prefix_sha256: Sha256;
+  bytes_total: number;
 }

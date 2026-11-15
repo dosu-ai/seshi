@@ -2,8 +2,11 @@
  * HTTP client in `@seshi/client`, or the pipeline over a store in `@seshi/pipeline`). They live
  * here, the lowest layer, so the HTTP client depends on nothing but this package (X3.2). */
 
+import type { ShippedPrefix } from "./generated/envelope";
 import type { RenderedTrace, RenderFormat } from "./schemas/renders";
-import type { ChangeEntry, RawFormat, SessionMetadata } from "./schemas/store";
+import type { ChangeEntry, RawFormat, SessionMetadata, Visibility } from "./schemas/store";
+
+export type { ShippedPrefix };
 
 /** The shape of `fetch` the HTTP client and the S3 driver need: a URL string and an init to a
  * `Response`. */
@@ -15,14 +18,6 @@ export interface StorageView {
   region?: string;
   account_id?: string;
   endpoint?: string;
-}
-
-/** What earlier runs already shipped of a session. */
-export interface ShippedPrefix {
-  /** How many normalized records have shipped, from the start. */
-  records: number;
-  /** prefixSha256 of those records. */
-  prefix_sha256: string;
 }
 
 /** A session to store, as the pipeline takes it. */
@@ -41,8 +36,18 @@ export interface SessionUpload {
   branch?: string;
   parent_session_id?: string;
   fork_of?: string;
-  /** What the client stored from the last answer for this session, if it was stored before. */
+  /** What the client stored from the last answer for this session, if it was stored before.
+   * The server's own state decides whether a whole upload extends the session; this is read
+   * only for a session that has none. */
   shipped?: ShippedPrefix;
+  /** A whole upload that does not extend the session rewrites it instead of being refused
+   * (`SessionConflict`, X4.6). Only the session's original writer or an admin may. */
+  replace?: boolean;
+  /** Identifies this upload across resends (X4.7); derived from the session, the offset and
+   * the text when omitted. A resend with the same key gets the same answer. */
+  idempotency_key?: string;
+  /** Who may read a new session (X5.10); the deployment's default when omitted. */
+  visibility?: Visibility;
 }
 
 /** A session to store: `SessionUpload` without the owner, which the backend knows. `format`
@@ -58,10 +63,9 @@ export interface IngestResult {
   events: number;
 }
 
-export type PutRawResult = { status: "stored" | "exists"; part: number };
-
 /** What the client keeps after the call, whatever was written: its shipped prefix, and where
- * the next chunk starts. */
+ * the next chunk starts. A session the server holds nothing of (`filtered`, or `dropped` before
+ * it had a trace) answers zeros: the next upload is the whole log again (X6.3). */
 export interface ShippedState {
   records_total: number;
   prefix_sha256: string;
@@ -69,11 +73,22 @@ export interface ShippedState {
   bytes_total: number;
 }
 
-export type NormalizeStoredResult =
-  /** Stored, and nothing in it worth a trace: no head, or nothing new for it. */
-  ({ status: "trivial" } & ShippedState) | (IngestResult & ShippedState);
+/** `prefix_sha256` of no records: what a session the server holds nothing of answers. */
+export const EMPTY_PREFIX_SHA256 =
+  "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945" as const;
 
-export type StoreSessionResult = NormalizeStoredResult & { raw: PutRawResult };
+/** What storing a session answered.
+ *
+ * - `stored`: a new trace is the session's head. `duplicate`: that trace was already stored.
+ * - `unchanged`: the session has a trace and the upload added nothing to it (lines the adapter
+ *   drops, or a whole log with nothing past what is stored); the log position moved on.
+ * - `filtered`: the session filter judged the session's first trace not worth storing (X4.10).
+ *   Nothing is stored; send the whole log again once it has grown.
+ * - `dropped`: model review dropped it (F3). Nothing of it is stored; the log position moves
+ *   past it when the session has a trace. */
+export type StoreSessionResult =
+  | ({ status: "unchanged" | "filtered" | "dropped" } & ShippedState)
+  | (IngestResult & ShippedState);
 
 /** A stored trace as it was asked for: the canonical trace, or a rendering of it. */
 export type StoredTrace = RenderedTrace;

@@ -28,7 +28,7 @@
     },
     "owner_basis": { "$ref": "common.schema.json#/$defs/OwnerBasis" },
     "idempotency_key": {
-      "description": "Identifies the envelope across resends (X4.7): session and byte offset for a hook or upload; bucket, key and ETag for S3; trace and span ids for OTLP and Datadog; agent and run id for Cursor Cloud.",
+      "description": "Identifies the envelope across resends (X4.7): a resend with the same key gets the same answer and is processed once. Session, byte offset and a digest of the text for a hook or upload; bucket, key and ETag for S3; trace and span ids for OTLP and Datadog; agent and run id for Cursor Cloud.",
       "type": "string",
       "minLength": 1
     },
@@ -39,8 +39,12 @@
       "$ref": "common.schema.json#/$defs/Visibility"
     },
     "replace": {
-      "description": "A whole upload that may replace the session rather than extend it (X4.6).",
+      "description": "A whole upload that may replace the session rather than extend it (X4.6). Only the session's original writer or an admin may set it.",
       "type": "boolean"
+    },
+    "shipped": {
+      "description": "What the uploader says shipped of the session before, from an earlier answer. The server's own state decides whether a whole upload extends the session; this is used only for a session that has none.",
+      "$ref": "#/$defs/ShippedPrefix"
     },
     "project": { "type": "string" },
     "branch": { "type": "string" },
@@ -74,7 +78,7 @@
       "type": "object",
       "properties": {
         "kind": { "const": "log" },
-        "encoding": { "description": "How the log is encoded.", "enum": ["jsonl", "json"] },
+        "encoding": { "$ref": "common.schema.json#/$defs/LogEncoding" },
         "text": { "description": "The log's text from `offset`.", "type": "string" },
         "offset": {
           "description": "The byte offset of `text` in the session's log: 0 for the whole log.",
@@ -86,6 +90,7 @@
       "additionalProperties": false
     },
     "SpanPayload": {
+      "description": "A batch of spans for the span assembler (X4.2, F4.4): the call returns once they are in the span store, and the assembler publishes the session later.",
       "type": "object",
       "properties": {
         "kind": { "const": "spans" },
@@ -93,9 +98,27 @@
           "description": "OTLP spans in their JSON mapping, as received or as a poller built them.",
           "type": "array",
           "items": { "type": "object" }
+        },
+        "resource": {
+          "description": "The batch's OTLP resource attributes (`service.name`, …) in their JSON mapping, when the spans came with one.",
+          "type": "array",
+          "items": { "type": "object" }
         }
       },
       "required": ["kind", "spans"],
+      "additionalProperties": false
+    },
+    "ShippedPrefix": {
+      "type": "object",
+      "properties": {
+        "records": {
+          "description": "How many normalized records shipped, from the start.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "prefix_sha256": { "$ref": "common.schema.json#/$defs/Sha256" }
+      },
+      "required": ["records", "prefix_sha256"],
       "additionalProperties": false
     },
     "Caller": {

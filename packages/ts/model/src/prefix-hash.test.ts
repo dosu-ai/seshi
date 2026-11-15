@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { describe, expect, it } from "vitest";
+import { EMPTY_PREFIX_SHA256 } from "./api";
 import { PrefixHash, prefixSha256, ResumableSha256 } from "./prefix-hash";
 import type { NormalizedRecord } from "./schemas/trajectory";
 
@@ -58,5 +59,12 @@ describe("PrefixHash", () => {
     expect(second.records).toBe(10);
     expect(second.digest()).toBe(prefixSha256(records, 10));
     expect(() => PrefixHash.resume("x:nope")).toThrow("invalid prefix hash state");
+  });
+});
+
+describe("EMPTY_PREFIX_SHA256", () => {
+  it("is the prefix hash of no records, both ways", () => {
+    expect(prefixSha256([], 0)).toBe(EMPTY_PREFIX_SHA256);
+    expect(PrefixHash.empty().digest()).toBe(EMPTY_PREFIX_SHA256);
   });
 });

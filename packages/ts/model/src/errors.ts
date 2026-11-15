@@ -1,7 +1,8 @@
 /** What the write path refuses, as one vocabulary whichever backend raised it: the pipeline
  * over a store throws these directly, and the HTTP backend turns the server's responses back
  * into them, so a caller's `catch` reads the same either way. The server does the reverse:
- * `SessionRejected` is a 422 with its `code`, `OffsetMismatch` a 409 with `expected`. */
+ * `SessionRejected` is a 422 with its `code`, `OffsetMismatch` a 409 with `expected`,
+ * `SessionConflict` a 409 `conflict`, `Forbidden` a 403. */
 
 /** A transcript the pipeline refuses: nothing in it, not readable by the adapter, a chunk that
  * is not whole lines, over a cap, or a session that was redacted. Final for that upload:
@@ -37,6 +38,29 @@ export class OffsetMismatch extends Error {
   ) {
     super(`chunk starts at byte ${offset}; the session's log ends at ${expected}`);
     this.name = "OffsetMismatch";
+  }
+}
+
+/** A whole upload that does not extend the stored session (X4.6): its records do not start
+ * with what the session already holds. Nothing is stored. The session's original writer, or an
+ * admin, can send it again with `replace` to rewrite the session. The server answers 409
+ * `conflict`. */
+export class SessionConflict extends Error {
+  readonly code = "conflict";
+  constructor(message: string) {
+    super(message);
+    this.name = "SessionConflict";
+  }
+}
+
+/** The caller may not do this to the session: replace one another writer wrote (X4.6), or
+ * write for an owner its credential does not cover. Nothing is stored. The server answers 403
+ * `forbidden`. */
+export class Forbidden extends Error {
+  readonly code = "forbidden";
+  constructor(message: string) {
+    super(message);
+    this.name = "Forbidden";
   }
 }
 

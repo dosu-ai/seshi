@@ -28,6 +28,9 @@ export interface Writer {
 /** Why the session belongs to its owner (X5.5): `verified` (an IdP sign-in, or a credential the operator bound to the owner), `claimed` (an org-key caller stated the username, X5.12) or `service` (an org-level source's service account, X5.4). */
 export type OwnerBasis = "verified" | "claimed" | "service";
 
+/** How a log is encoded: one JSON value per line (`jsonl`), or one JSON document (`json`). */
+export type LogEncoding = "jsonl" | "json";
+
 /** Who may read a session (X5.10): `org`, every member; `owner`, only its owner. Admins and services see everything. */
 export type Visibility = "org" | "owner";
 

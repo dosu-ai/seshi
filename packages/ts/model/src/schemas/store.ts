@@ -4,7 +4,7 @@
  * See `spec/layout.md`. */
 
 import { SCHEMA_ID as CHANGE_SCHEMA_ID } from "../generated/change";
-import type { CallerKind, Writer } from "../generated/common";
+import type { CallerKind, LogEncoding, Writer } from "../generated/common";
 import { SCHEMA_ID as LAYOUT_SCHEMA_ID } from "../generated/layout";
 import { SCHEMA_ID as METADATA_SCHEMA_ID } from "../generated/metadata";
 
@@ -13,6 +13,7 @@ export type {
   CallerKind,
   Claims,
   Continuation,
+  LogEncoding,
   Normalizer,
   OwnerBasis,
   Provenance,
@@ -27,12 +28,15 @@ export type {
 } from "../generated/common";
 export type { LayoutMarker } from "../generated/layout";
 export type {
+  AppliedEnvelope,
   NormalizedState,
-  RawFormat,
-  RawPart,
   SessionMetadata,
   SessionTraceRef,
 } from "../generated/metadata";
+
+/** How a transcript is encoded (`jsonl` or `json`): the envelope's `LogEncoding`, by the name
+ * the raw-transcript redaction passes and the session API have always used. */
+export type RawFormat = LogEncoding;
 
 export const METADATA_SCHEMA = METADATA_SCHEMA_ID;
 export const CHANGE_SCHEMA = CHANGE_SCHEMA_ID;

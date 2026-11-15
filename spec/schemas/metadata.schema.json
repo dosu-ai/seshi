@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "metadata.schema.json",
   "title": "SessionMetadata",
-  "description": "`seshi/metadata/1`: one session's live pointer, `owners/<owner>/sessions/<archive_id>/metadata.json`. Mutable, so every write is conditional (If-Match, X6.5). It names the head trace and the traces the session has had, how far a chunked log has been normalized, who wrote the session and how its owner was established (X5.5), who may read it (X5.10), the identity claims the data made, what redaction did and where the data came from.",
+  "description": "`seshi/metadata/1`: one session's live pointer, `owners/<owner>/sessions/<archive_id>/metadata.json`. Mutable, so every write is conditional (If-Match, X6.5). It names the head trace and the traces the session has had, how far the session's log has been normalized and the envelopes recently applied to it, who wrote the session and how its owner was established (X5.5), who may read it (X5.10), the identity claims the data made, what redaction did and where the data came from.",
   "type": "object",
   "properties": {
     "schema": { "const": "seshi/metadata/1" },
@@ -29,17 +29,16 @@
       "$ref": "common.schema.json#/$defs/Sha256"
     },
     "traces": { "type": "array", "items": { "$ref": "#/$defs/SessionTraceRef" } },
-    "raw": {
-      "description": "Raw transcript parts. Transitional: 04 stops storing raw (X6.3).",
-      "type": "array",
-      "items": { "$ref": "#/$defs/RawPart" }
-    },
-    "raw_format": { "$ref": "#/$defs/RawFormat" },
     "normalized": { "$ref": "#/$defs/NormalizedState" },
     "withheld_calls": {
-      "description": "Tool calls whose results are withheld, by id, so a result in a later chunk than its call is replaced too.",
+      "description": "Tool calls whose results the sensitive-call rules withhold, by call id, so a result that arrives in a later chunk than its call is withheld too. With `normalized`, the small state a chunk is normalized with (X6.3).",
       "type": "object",
       "additionalProperties": { "enum": ["sensitive-file", "secret-output"] }
+    },
+    "applied": {
+      "description": "The last envelopes applied to the session, oldest first, with what each answered: a resend with the same idempotency key gets the same answer and is not processed again (X4.7). Bounded; older entries fall off.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/AppliedEnvelope" }
     },
     "writer": {
       "description": "Who first wrote the session: the original writer, who with an admin may replace it (X4.6). Each write's own writer is on its change entry.",
@@ -83,7 +82,6 @@
     "agent",
     "status",
     "traces",
-    "raw",
     "writer",
     "owner_basis",
     "visibility",
@@ -103,37 +101,15 @@
       "required": ["content_hash", "created_at", "records"],
       "additionalProperties": false
     },
-    "RawFormat": {
-      "description": "How a raw transcript part is encoded: one JSON value per line, or one JSON document.",
-      "enum": ["jsonl", "json"]
-    },
-    "RawPart": {
+    "NormalizedState": {
+      "description": "How far a session's log has been normalized: the state the next chunk continues from, and what a whole upload must extend (X4.6). Counted in the log's records as regex redaction left them, before model review, so it follows the uploader's log.",
       "type": "object",
       "properties": {
-        "part": { "type": "integer", "minimum": 0 },
-        "format": { "$ref": "#/$defs/RawFormat" },
-        "size": { "description": "Bytes as stored (gzip).", "type": "integer", "minimum": 0 },
-        "sha256": { "$ref": "common.schema.json#/$defs/Sha256" },
-        "created_at": { "$ref": "common.schema.json#/$defs/Timestamp" },
-        "offset": {
-          "description": "The byte offset of the part's first byte in its log.",
+        "bytes": {
+          "description": "Bytes of the log normalized so far: where the next chunk starts (0 for a session assembled from spans).",
           "type": "integer",
           "minimum": 0
         },
-        "length": {
-          "description": "How many of the log's bytes it covers, before redaction.",
-          "type": "integer",
-          "minimum": 0
-        }
-      },
-      "required": ["part", "format", "size", "sha256", "created_at", "offset", "length"],
-      "additionalProperties": false
-    },
-    "NormalizedState": {
-      "description": "How far a session's log has been normalized: the state the next chunk continues from.",
-      "type": "object",
-      "properties": {
-        "bytes": { "description": "Bytes of the log normalized so far.", "type": "integer", "minimum": 0 },
         "records": {
           "description": "How many records the whole session normalizes to, those bytes in.",
           "type": "integer",
@@ -146,6 +122,29 @@
         }
       },
       "required": ["bytes", "records", "prefix_sha256", "hash_state"],
+      "additionalProperties": false
+    },
+    "AppliedEnvelope": {
+      "description": "One envelope applied to the session, and what it answered.",
+      "type": "object",
+      "properties": {
+        "idempotency_key": { "type": "string", "minLength": 1 },
+        "at": { "$ref": "common.schema.json#/$defs/Timestamp" },
+        "status": {
+          "description": "`stored` (a new trace), `duplicate` (that trace was already stored), `unchanged` (nothing new in it) or `dropped` (model review dropped it).",
+          "enum": ["stored", "duplicate", "unchanged", "dropped"]
+        },
+        "content_hash": {
+          "description": "The trace written, for `stored` and `duplicate`.",
+          "$ref": "common.schema.json#/$defs/Sha256"
+        },
+        "records": { "description": "Records in that trace.", "type": "integer", "minimum": 0 },
+        "events": { "description": "Events in that trace.", "type": "integer", "minimum": 0 },
+        "records_total": { "type": "integer", "minimum": 0 },
+        "prefix_sha256": { "$ref": "common.schema.json#/$defs/Sha256" },
+        "bytes_total": { "type": "integer", "minimum": 0 }
+      },
+      "required": ["idempotency_key", "at", "status", "records_total", "prefix_sha256", "bytes_total"],
       "additionalProperties": false
     }
   }
