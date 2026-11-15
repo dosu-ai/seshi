@@ -1,7 +1,7 @@
 {
   "name": "@seshi/redact",
   "private": true,
-  "description": "Layer 1: the redaction rule engine over raw transcripts and trajectory-v1 records.",
+  "description": "Layer 1: the redaction rule engine over trajectory-v1 records (the pipeline's redaction stage) and raw transcripts.",
   "type": "module",
   "exports": {
     ".": {

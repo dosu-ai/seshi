@@ -402,17 +402,7 @@ class Pass {
   }
 
   private classify(input: Json): WithheldKind | null {
-    const { files } = this.rules;
-    if (
-      pathValues(input).some((p) => isSensitivePath(p, files)) ||
-      commandLines(input).some((s) => namesSensitiveFile(s, files))
-    ) {
-      return "sensitive-file";
-    }
-    if (commandLines(input).some((s) => runsSecretCommand(s, this.rules.commands))) {
-      return "secret-output";
-    }
-    return null;
+    return classifyCall(input, this.rules);
   }
 
   /** `value` with what sensitive calls returned replaced; the same value when nothing was. */
@@ -532,4 +522,33 @@ export function redactSensitive(
           .map((line) => (line.trim() ? redactDocument(line, pass) : line))
           .join("\n");
   return { text, withheld: pass.withheld };
+}
+
+/** What a tool call is, by its input: a call that names a sensitive file (`sensitive-file`), one
+ * that runs a secret command (`secret-output`), or neither (null). `input` is the call's input
+ * as the agent gave it: an object, or a string (a shell line, or JSON that encodes the input, as
+ * trajectory records keep a call's `args`). The record pass (`redactor.ts`) asks this of every
+ * tool call in a session's normalized records. */
+export function classifyCall(input: unknown, rules: SensitiveRules): WithheldKind | null {
+  const value = parsedInput(input as Json);
+  const { files } = rules;
+  if (
+    pathValues(value).some((p) => isSensitivePath(p, files)) ||
+    commandLines(value).some((s) => namesSensitiveFile(s, files))
+  ) {
+    return "sensitive-file";
+  }
+  if (commandLines(value).some((s) => runsSecretCommand(s, rules.commands))) {
+    return "secret-output";
+  }
+  return null;
+}
+
+/** A sensitive-file call's input with what does not name the file replaced (what an edit
+ * wrote into it, a heredoc's body), as the transcript pass trims it. A JSON-encoded input stays
+ * JSON-encoded. */
+export function trimSensitiveInput(input: string, files: SensitiveFiles): string {
+  const parsed = parsedInput(input);
+  const trimmed = trimInput(parsed, files);
+  return parsed !== input ? JSON.stringify(trimmed) : (trimmed as string);
 }
