@@ -188,10 +188,9 @@ describe("ingest", () => {
   });
 
   it("rejects an oversized record set", async () => {
-    const many = [
-      records("claude-basic")[0],
-      ...Array.from({ length: 50_001 }, () => records("claude-basic")[1]),
-    ];
+    // Read the fixture once: 50,001 golden reads alone came near the 30 s test timeout.
+    const [first, one] = records("claude-basic");
+    const many = [first, ...Array.from({ length: 50_001 }, () => one)];
     await expect(
       ingest({ store, owner: "acme", records: many, metadata: meta, now }),
     ).rejects.toMatchObject({
