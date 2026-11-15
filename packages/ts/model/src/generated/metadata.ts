@@ -69,6 +69,8 @@ export interface SessionTraceRef {
   /** Record count of the stored trace. */
   records: number;
   continuation?: Continuation;
+  /** sha256 of the rule set this trace was redacted with (as `RedactionSummary.rule_set`). The session's `redaction.rule_set` is the latest write's; a redaction backfill takes the session as current only when every trace was written under the current rules. Absent for a trace written before it was recorded, which counts as the session's. */
+  rule_set?: Sha256;
 }
 
 /** How far a session's log has been normalized: the state the next chunk continues from, and what a whole upload must extend (X4.6). Counted in the log's records as regex redaction left them, before model review, so it follows the uploader's log. */

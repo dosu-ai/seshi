@@ -186,8 +186,8 @@ envelope model review dropped (X6.3, X4.10). Once tombstoned it has no `head`.
   "status": "stored",                 // or "redacted"
   "head": "<content_hash>",           // absent before a trace is stored, and once redacted
   "traces": [
-    { "content_hash": "…", "created_at": "…", "records": 10 },
-    { "content_hash": "…", "created_at": "…", "records": 5,
+    { "content_hash": "…", "created_at": "…", "records": 10, "rule_set": "<sha256>" },
+    { "content_hash": "…", "created_at": "…", "records": 5, "rule_set": "<sha256>",
       "continuation": { "from_record": 6, "prefix_sha256": "…" } }
   ],
   "normalized": { "bytes": 57333, "records": 15, "prefix_sha256": "…", "hash_state": "…" },
@@ -214,8 +214,11 @@ envelope model review dropped (X6.3, X4.10). Once tombstoned it has no `head`.
 `writer` and `owner_basis` are the first write's; each later write's writer is on its change
 entry. `claims` merge over writes from a fixed allowlist (X5.5). `redaction.counts` sum over
 writes, by rule id (only what each write stored is counted), and `redaction.rule_set` is the
-hash of the rule set that last ran over the session (F2.3); `seshi redact backfill` redoes the
-sessions whose rule set is not the current one. A session that grew gets a second trace with
+hash of the rule set that last ran over the session (F2.3). Each entry of `traces` records the
+rule set its own trace was written under (`rule_set`; an entry without one counts as the
+session's), so a chunk written after the rules changed does not make the traces before it look
+current: `seshi redact backfill` redoes every session with a trace not written under the
+current rules. A session that grew gets a second trace with
 a `continuation`; a reader that wants the whole session concatenates in `traces` order. A
 replace (X4.6) leaves one trace in `traces`, removes the others' objects, and starts `applied`
 and `redaction` over from the replacing write.

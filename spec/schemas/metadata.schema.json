@@ -96,7 +96,11 @@
         "content_hash": { "$ref": "common.schema.json#/$defs/Sha256" },
         "created_at": { "$ref": "common.schema.json#/$defs/Timestamp" },
         "records": { "description": "Record count of the stored trace.", "type": "integer", "minimum": 0 },
-        "continuation": { "$ref": "common.schema.json#/$defs/Continuation" }
+        "continuation": { "$ref": "common.schema.json#/$defs/Continuation" },
+        "rule_set": {
+          "description": "sha256 of the rule set this trace was redacted with (as `RedactionSummary.rule_set`). The session's `redaction.rule_set` is the latest write's; a redaction backfill takes the session as current only when every trace was written under the current rules. Absent for a trace written before it was recorded, which counts as the session's.",
+          "$ref": "common.schema.json#/$defs/Sha256"
+        }
       },
       "required": ["content_hash", "created_at", "records"],
       "additionalProperties": false

@@ -315,7 +315,11 @@ Reference for operators: [docs/redaction.md](../../redaction.md).
   dropped, so it is left alone. Chunks continue normally.
 - **A server still running old rules during a backfill** writes new sessions with the old rule
   set. Those sessions keep the old `rule_set` and are picked up by the next backfill. The docs
-  say to restart with the new packs first.
+  say to restart with the new packs first. Resolved for the opposite order in 17: a chunk
+  written under the new rules onto a session stored under the old ones used to give the whole
+  session the new `rule_set`, so the backfill called it `current` and left the old head as it
+  was. Each `traces[]` entry now records its own `rule_set`, and a session is current only when
+  every trace was written under the current rules.
 - **Backfill on a large bucket** lists every owner and reads every session's metadata, with no
   index and no saved progress beyond the per-session rule set. `--since` narrows the sessions
   it rewrites, not the listing.

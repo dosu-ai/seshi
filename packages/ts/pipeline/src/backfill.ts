@@ -1,9 +1,10 @@
 /** Redaction backfill (F2.5): apply the current rule set to sessions already stored, so a rule
  * added today also covers what was stored before it.
  *
- * For each session whose `metadata.redaction.rule_set` is not the current one, its traces (the
- * head and its continuations, in order) are read and joined into one record list, which is
- * redacted with the current rules. Then:
+ * For each session with a trace not written under the current rule set (`traces[].rule_set`;
+ * for a trace without one, the session's `redaction.rule_set`), its traces (the head and its
+ * continuations, in order) are read and joined into one record list, which is redacted with the
+ * current rules. Then:
  *
  * - nothing changed: only the rule set is recorded on the session, so the next run skips it;
  * - something changed: one new trace object holds the whole redacted session, the pointer is
@@ -38,6 +39,7 @@ import {
   parseTrace,
   type RedactionSummary,
   type SessionMetadata,
+  type SessionTraceRef,
   type Trace,
   type TraceMetadata,
   TrajectoryError,
@@ -201,7 +203,12 @@ async function backfillSession(
   if (options.since && Date.parse(session.updated_at) < options.since.getTime()) {
     return { ...base, outcome: "skipped" };
   }
-  if (session.redaction?.rule_set === redactor.rule_set) return { ...base, outcome: "current" };
+  // Current only when every trace was written under the current rules: a chunk written after
+  // the rules changed gives the session the new rule set, but not the traces stored before it.
+  const ruleSetOf = (ref: SessionTraceRef) => ref.rule_set ?? session.redaction?.rule_set;
+  if (session.traces.every((ref) => ruleSetOf(ref) === redactor.rule_set)) {
+    return { ...base, outcome: "current" };
+  }
 
   const traces: Trace[] = [];
   for (const ref of session.traces) {
@@ -254,7 +261,11 @@ async function backfillSession(
         // `updated_at` stays: nothing anyone reads changed, so the session should not look
         // recently written (lists sort by it, and `--since` selects by it).
         step((existing) => {
-          const next = { ...existing, redaction: redaction(existing) };
+          const next = {
+            ...existing,
+            traces: existing.traces.map((ref) => ({ ...ref, rule_set: redactor.rule_set })),
+            redaction: redaction(existing),
+          };
           const ids = withheld(existing);
           if (ids) next.withheld_calls = ids;
           return next;
@@ -331,6 +342,7 @@ async function backfillSession(
               created_at: at,
               records: trace.records.length,
               ...(continuation ? { continuation } : {}),
+              rule_set: redactor.rule_set,
             },
           ],
           redaction: redaction(existing),

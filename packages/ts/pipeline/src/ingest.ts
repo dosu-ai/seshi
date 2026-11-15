@@ -129,7 +129,9 @@ function changed(a: SessionMetadata | null, b: SessionMetadata): boolean {
   );
 }
 
-/** Redaction counts summed over two writes; the later rule set is the one that last ran. */
+/** Redaction counts summed over two writes; the later rule set is the one that last ran. Which
+ * rule set each trace was written under is on its `SessionTraceRef` (`rule_set`), so a write
+ * under new rules does not make the traces stored under the old ones look current. */
 function addRedaction(
   before: RedactionSummary | undefined,
   write: RedactionSummary | undefined,
@@ -276,6 +278,7 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
       records: trace.records.length,
     };
     if (metadata.continuation) ref.continuation = metadata.continuation;
+    if (input.redaction) ref.rule_set = input.redaction.rule_set;
 
     const base =
       existing ?? newSession(owner, archive, metadata.session_id, metadata.agent, at, context);
@@ -283,6 +286,8 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
     replaced = input.replace
       ? base.traces.map((t) => t.content_hash).filter((h) => h !== trace.content_hash)
       : [];
+    // A trace already listed keeps its entry, and so the rule set its stored object was written
+    // under: that object is not rewritten, so the old rules' output stays under the hash.
     const traces = input.replace ? [listed ?? ref] : listed ? base.traces : [...base.traces, ref];
     const next: SessionMetadata = withContext(
       {

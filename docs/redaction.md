@@ -130,5 +130,7 @@ true` and `reason: "redacted"`, written as `--as <owner>` (default `admin`, sour
 its rule set recorded. An OTLP or poller session's span records (`spans/`) that an earlier
 rule set redacted are redacted again in place, and the summary says how many. Redaction cannot
 be undone; `--dry-run` writes nothing and lists what would change. It is safe to stop and run
-again: sessions already redacted with the current rules are skipped. Restart the server with
-the new packs first, or it keeps writing with the old rules. Exit 8 when a session changed while it ran (run it again).
+again: sessions already redacted with the current rules are skipped. Each stored trace records
+the rule set it was written under, so a session that got a chunk under the new rules before the
+backfill ran is still redone as a whole. Restart the server with the new packs first, or it
+keeps writing with the old rules. Exit 8 when a session changed while it ran (run it again).

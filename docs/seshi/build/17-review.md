@@ -40,6 +40,13 @@ what changed.
 - **ops, low**: `docs/config.md`, the `serve.ts` header and `.env.example` said seshi reads
   `.env`, but the compiled binary is built not to. They now say only `bun start` from a
   checkout and compose's `env_file` supply `.env`.
+- **ingest, high**: a write under a new rule set gave the whole session that `rule_set`, so a
+  chunk landing between a rules change and `seshi redact backfill` made the backfill report the
+  session `current` and leave the head stored under the old rules (secret included). Each
+  `traces[]` entry now records the `rule_set` it was written under (schema, generated types,
+  layout.md); backfill takes a session as current only when every trace is under the current
+  rules, and stamps the traces it checks or rewrites. Test: head under the old rules, a chunk
+  under the new, backfill rewrites it.
 
 ## Not fixed
 

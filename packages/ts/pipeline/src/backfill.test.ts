@@ -105,7 +105,12 @@ describe("backfillRedaction (F2.5)", () => {
     const hash = report.sessions[0]?.content_hash as string;
     expect(after?.head).toBe(hash);
     expect(after?.traces).toEqual([
-      { content_hash: hash, created_at: "2030-01-01T12:00:00.000Z", records: 5 },
+      {
+        content_hash: hash,
+        created_at: "2030-01-01T12:00:00.000Z",
+        records: 5,
+        rule_set: NEW_RULES.hash,
+      },
     ]);
     expect(after?.redaction).toEqual({ rule_set: NEW_RULES.hash, counts: { "acme-key": 2 } });
     expect(after?.applied).toBeUndefined();
@@ -142,6 +147,38 @@ describe("backfillRedaction (F2.5)", () => {
     expect(again.sessions).toEqual([]);
   });
 
+  it("redoes a session whose head was stored under the old rules when a chunk came under the new", async () => {
+    // Review finding: a chunk written after the rules changed gave the whole session the new
+    // rule set, so the backfill took it as current and left the old head's secret stored.
+    const first = await store1("s1", meta() + user(`key ACME-1234 ${LONG}`) + reply("ok"));
+    const chunk = await store1(
+      "s1",
+      user("more") + reply("done"),
+      first.bytes_total,
+      "alice",
+      NEW_RULES,
+    );
+    expect(chunk.status).toBe("stored");
+    const before = await metadata("s1");
+    expect(before?.redaction?.rule_set).toBe(NEW_RULES.hash);
+    expect(before?.traces.map((t) => t.rule_set)).toEqual([compileRuleSet().hash, NEW_RULES.hash]);
+
+    const report = await run();
+    expect(report.outcomes).toMatchObject({ rewritten: 1, current: 0 });
+    const after = await metadata("s1");
+    expect(after?.traces).toHaveLength(1);
+    expect(after?.traces[0]?.rule_set).toBe(NEW_RULES.hash);
+    const trace = await getTrace(
+      store,
+      "alice",
+      after?.archive_id as string,
+      after?.head as string,
+    );
+    expect(JSON.stringify(trace)).not.toContain("ACME-1234");
+    expect(JSON.stringify(trace)).toContain("more");
+    expect((await run()).outcomes).toMatchObject({ current: 1 });
+  });
+
   it("only records the rule set on a session with nothing new to take out", async () => {
     await store1("s1", meta() + user(LONG) + reply("ok"));
     const before = await metadata("s1");
@@ -149,7 +186,7 @@ describe("backfillRedaction (F2.5)", () => {
     expect(report.outcomes).toMatchObject({ unchanged: 1 });
     const after = await metadata("s1");
     expect(after?.head).toBe(before?.head);
-    expect(after?.traces).toEqual(before?.traces);
+    expect(after?.traces).toEqual(before?.traces.map((t) => ({ ...t, rule_set: NEW_RULES.hash })));
     expect(after?.redaction).toEqual({ rule_set: NEW_RULES.hash, counts: {} });
     expect(after?.updated_at).toBe(before?.updated_at);
     expect((await readChanges(store, "alice", { since: "2030-01-01T00:00:00Z" })).entries).toEqual(
