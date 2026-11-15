@@ -328,6 +328,11 @@ describe("a datadog session goes through the same redaction and review as OTLP (
           session_key: SESSION,
         }),
       );
+      // The drop counts in the datadog source's health, beside the filtered minimal session.
+      await instance.health.flush();
+      expect((await readHealth(booted.store, SOURCE)).map((d) => d.counts)).toEqual([
+        expect.objectContaining({ dropped: 1, filtered: 1 }),
+      ]);
     } finally {
       await provider.close();
     }
