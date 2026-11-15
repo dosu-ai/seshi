@@ -6,14 +6,17 @@ Open a [private security advisory](https://github.com/dosu-ai/sessiondb/security
 on GitHub. Do not open a public issue for anything that could expose a session transcript or a
 credential.
 
-## What the server protects, and what it does not
+## What seshi protects, and what it does not
 
-**Transcripts arrive unredacted.** The client posts the native log verbatim; redaction happens
-on the server before anything is written. The server process and the network path to it see
+**Transcripts arrive unredacted, unless the client redacted them.** The capture uploader
+redacts each piece with the server's rules before sending it (below), but any other client may
+post the native log verbatim, and the server redacts everything again before anything is
+written. The server process and the network path to it see
 secrets. Run it behind TLS (a reverse proxy or a load balancer that terminates HTTPS) and keep
 the host as locked down as anything else that handles credentials.
 
-**Redaction is best-effort.** The pass (`packages/ts/redact/src/secrets.ts`) is biased toward
+**Redaction is best-effort.** The built-in pack (`packages/ts/redact/packs/builtin.toml` and
+`packages/ts/redact/src/secrets.ts`, [docs/redaction.md](docs/redaction.md)) is biased toward
 over-redaction and covers the shapes secrets usually take: provider token prefixes, key/value
 credential assignments, bearer headers, JWTs, connection URLs, private-key blocks, and a
 Shannon-entropy pass for anything long and random in a secret-shaped position. A secret in a
@@ -61,6 +64,32 @@ reports a key.
 **Readers are outside this server's control.** Anything with a read key on the bucket reads
 every owner's folder and skips visibility. Prefer a service token through the API; scope any
 bucket reader credential to the prefix you intend to share.
+
+**The laptop keeps little, and only for its user (F9).** Hooks write one small file per agent
+event to a spool: paths and ids, never transcript text. The capture folder (`~/.local/state/seshi`,
+`%LOCALAPPDATA%\seshi` on Windows) is readable only by its user. Credentials from `seshi login`
+go in the OS keychain, or a mode-0600 `credentials.json` where there is none, and never in
+environment variables. Before each upload the uploader redacts with the server's rule packs and
+the built-in pack, so nothing a rule knows leaves the machine; the server does not trust that
+and redacts again. Each session has a random retraction secret that stays on the machine (only
+its hash is sent), so a leaked device token or org key cannot delete anyone's sessions.
+
+**Local mode puts the bucket key on the laptop.** One person who owns a bucket can skip the
+server (`[local]` in the CLI config). The pipeline, redaction included, then runs in the CLI, and
+that person's machine holds the bucket credential. Use it for a bucket only that person reads;
+a team should run a server.
+
+**Sources hold credentials of their own.** A Datadog source's API and application keys are
+sent only to `https://api.<site>` (or an `https` `api_url`), and redirects are never followed.
+An S3 source needs only `s3:ListBucket` and `s3:GetObject` on its prefix, and may not point at
+seshi's own bucket. An OTLP destination writes with a service token of its own, which can write
+only as that source's service account. Keys in `seshi.toml` can be secret references (`{ env =
+… }`, `{ file = … }`), and `seshi config check` warns about a literal secret in a file others can
+read.
+
+**The search index holds session text.** Each API instance keeps an SQLite index of redacted
+session text on local disk (`search.path`), created readable by its owner only. Treat it like
+the bucket; deleting it costs only a rebuild.
 
 **Tombstones delete objects, not history.** `DELETE /v1/sessions/…` removes the trace
 objects (no raw transcript is stored) and appends a tombstone to the change feed; a reader that already copied the trace
