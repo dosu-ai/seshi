@@ -342,7 +342,9 @@ the pipeline. Nothing is written until every stage has run:
    drop record says why, never what). A dropped chunk or tail still moves the log past it; a
    dropped `replace` leaves the session as stored and answers with its state, so the next
    upload of that history must replace again. See [model-review.md](model-review.md).
-6. **Write** the trace, the session's `metadata.json` and the change entry.
+6. **Write** the trace, the change entry, then the session's `metadata.json` (the entry goes
+   first, so no change goes unannounced; a write that fails after it leaves an entry readers
+   find already answered by the metadata).
 
 **Which branch?** The one the transcript recorded as it began (Claude Code's `gitBranch`,
 Codex's `session_meta`), else the client's `branch`.

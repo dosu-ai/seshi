@@ -217,9 +217,6 @@ authorize stage holds every write to its caller's own sessions. The shared HS256
   large.
 - The cache means a revocation reaches other instances within 30 s (X7.2 has one worker; API
   instances may be several).
-- Change-entry keys collide in one millisecond: two tombstones or two visibility changes of one
-  owner, or two sessions with identical content. This comes from 03's layout and is documented
-  in layout.md now. A key with the archive id would fix it (layout change).
 - `/v1/auth/exchange` and token verification have no rate limiting. Unknown token ids are
   negatively cached, but a flood of random ids still reads the bucket once each.
 - `X-Seshi-User` must be ASCII (HTTP header). The CLI should refuse or transliterate a

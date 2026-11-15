@@ -368,23 +368,10 @@ Run at `seshi-17-review` after the fixes above:
 
 ## Not fixed
 
-- **ingest, medium** (split vote, judged a documented deviation): a change entry is lost when
-  the write fails after the pointer update (a resend is answered from `applied`; backfill's
-  next run says `current`). spec/layout.md (publish steps 3-5) records exactly this, 04 lists
-  it, and 12's indexer is built for it (each entry makes it read current metadata, so a
-  session is right again at its next entry; search verifies hits against live metadata).
-  Moving the entry before the pointer, or appending a missing entry on replay, is a change to
-  the publish protocol, left for a decision. Only backfill's comment, which claimed the order
-  prevents it, was corrected.
 - **ingest, low** (split vote, reported medium): reading or exporting a chunked session returns
   only its head trace. That is the documented contract (`GET …/trace` "the head by default",
   `sessions show --trace` "adds its head trace"), inherited from sessiondb main; the trace
   carries `continuation`. A joined export is a feature, not a defect against any decision.
-- **ingest, low** (split vote): tombstone and visibility change entries of one owner collide
-  within a millisecond (keys have no archive id). Confirmed, but search checks every hit
-  against live metadata (deleted or private sessions are never returned), layout.md documents
-  the collision and 05's "Still to check" names the fix, which changes the change-key layout
-  every feed reader parses. Left for that layout decision.
 
 - **ops, low** (split vote): F8.4's "Windows in the CI test matrix" is read as Windows
   binaries with a smoke test and `install.ps1` under both PowerShells (15-distribution

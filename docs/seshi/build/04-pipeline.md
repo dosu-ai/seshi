@@ -228,5 +228,3 @@ A review of the branch added these commits on top of the implementation:
 - `recordedMessage` is a heuristic: it removes double-quoted text only. A Letta adapter error
   that echoes data unquoted would still be recorded; 10/11 should check their adapters'
   messages.
-- A crash between the pointer update and the change entry leaves that entry missing (see
-  layout.md). 06's indexer should not rely on `changes/` alone to find every trace.

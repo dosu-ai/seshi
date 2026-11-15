@@ -71,7 +71,9 @@ the new ones for a continuation), a replacing one (`replace: true`, including `s
 backfill`'s `reason: "redacted"`) drops everything indexed for the session and reads it again
 from the trace it names, a tombstone removes the session, a visibility change updates it
 (F10.2). It indexes each session as its metadata says it is now, so entries read twice, out
-of order or lost leave nothing behind. OTLP and poller sessions (`otlp-genai`,
+of order or lost leave nothing behind. Writers append an entry before they move the session's
+pointer, so an entry whose change the metadata does not show yet is read again on the next
+run, until it is the lag window (5 minutes) old. OTLP and poller sessions (`otlp-genai`,
 `datadog-llmobs`, owned by `svc:<source-id>`) are indexed once the assembler publishes them;
 span records under `spans/` are never read. A new session is searchable within `search.interval`
 of being stored; a new owner's first session within a minute (the list of owners is read

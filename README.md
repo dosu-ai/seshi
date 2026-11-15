@@ -172,7 +172,7 @@ normalized to trajectory-v1 records and redacted. A session's first trace is kep
 holds a real exchange (by default, a prompt, a reply, and 2,000 characters of text and tool
 traffic). Only what is new is written: a log that
 grew adds its tail. Model review runs if a policy applies. Then the trace is written under its
-content hash, the session's pointer moves to it, and an entry is appended to the change feed.
+content hash, an entry is appended to the change feed, and the session's pointer moves to it.
 
 ## Docs
 
