@@ -802,7 +802,7 @@ describe("span sets (X4.2)", () => {
       ],
     });
     expect(stored.status).toBe("stored");
-    const archive = archiveId("svc-console", "trajectory", "sesn_1");
+    const archive = archiveId("svc-console", "otlp-genai", "sesn_1");
     const metadata = await readMetadata(store, "svc-console", archive);
     expect(metadata?.redaction?.counts).toEqual({ "acme-key": 2 });
     const trace = await getTrace(store, "svc-console", archive, metadata?.head as string);
