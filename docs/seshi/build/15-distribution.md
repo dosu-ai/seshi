@@ -271,7 +271,10 @@ Done when 15 was rebased onto 14 (the stack is now linear through 15):
   - CI: the test job already timed `check:hook --binary dist/seshi` (14). The `binaries` job now
     times a real hook with each platform's release binary too, and `check:hook` sets
     `USERPROFILE`, `LOCALAPPDATA` and `APPDATA` so it works on Windows, and fails when the hook
-    spooled nothing (a hook that dies at once is fast as well).
+    spooled nothing (a hook that dies at once is fast as well). The timed runs get the caller's
+    environment minus every `SESHI_*` variable (`hookEnv`): the config loader refuses unknown
+    names, so `SESHI_HOOK_BUDGET_MS`, the check's own knob, used to turn capture off in the hook
+    it timed, and with the spool check it failed the check.
 - **07 (redaction)**: `re2js` is pure JavaScript, so it bundles into the compiled binary like any
   module, for every target. The smoke test now uploads a session with an RE2 rule and checks the
   stored trace is redacted, so the `binaries` job proves it on all six targets.

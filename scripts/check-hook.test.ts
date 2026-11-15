@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { importGraph, loadTimeImports, spoolEntries } from "./check-hook";
+import { hookEnv, importGraph, loadTimeImports, spoolEntries } from "./check-hook";
 
 let root: string;
 beforeEach(() => {
@@ -90,5 +90,27 @@ describe("spoolEntries", () => {
     write("spool/1.json", "{}");
     write("spool/2.json.tmp", "{");
     expect(spoolEntries(join(root, "spool"))).toBe(1);
+  });
+});
+
+describe("hookEnv", () => {
+  it("drops the caller's SESHI_* variables and points every home and state folder at home", () => {
+    const env = hookEnv(
+      {
+        PATH: "/usr/bin",
+        HOME: "/home/me",
+        SESHI_HOOK_BUDGET_MS: "500",
+        SESHI_CAPTURE__ENABLED: "false",
+      },
+      "/tmp/h",
+    );
+    expect(env.PATH).toBe("/usr/bin");
+    expect(Object.keys(env).filter((k) => k.startsWith("SESHI_"))).toEqual(["SESHI_NO_UPLOADER"]);
+    expect(env.HOME).toBe("/tmp/h");
+    expect(env.USERPROFILE).toBe("/tmp/h");
+    expect(env.XDG_STATE_HOME).toBe(join("/tmp/h", "state"));
+    expect(env.LOCALAPPDATA).toBe(join("/tmp/h", "state"));
+    expect(env.XDG_CONFIG_HOME).toBe(join("/tmp/h", "config"));
+    expect(env.APPDATA).toBe(join("/tmp/h", "config"));
   });
 });

@@ -195,6 +195,29 @@ export function importGraph(
   };
 }
 
+/** The environment the timed runs get: the caller's, minus every `SESHI_*` variable, then the
+ * temporary folders under `home` (XDG_* on macOS and Linux; %USERPROFILE%, %LOCALAPPDATA% and
+ * %APPDATA% on Windows, so the compiled check also runs on a Windows runner). The config loader
+ * refuses `SESHI_*` names it does not know, and a hook that meets one turns capture off and
+ * spools nothing: `SESHI_HOOK_BUDGET_MS`, this script's own knob, is one. A caller's real
+ * settings (`SESHI_CAPTURE__ENABLED=false`) would change what is timed as well. */
+export function hookEnv(
+  base: Record<string, string | undefined>,
+  home: string,
+): Record<string, string | undefined> {
+  const env = Object.fromEntries(Object.entries(base).filter(([k]) => !k.startsWith("SESHI_")));
+  return {
+    ...env,
+    HOME: home,
+    USERPROFILE: home,
+    XDG_STATE_HOME: join(home, "state"),
+    LOCALAPPDATA: join(home, "state"),
+    XDG_CONFIG_HOME: join(home, "config"),
+    APPDATA: join(home, "config"),
+    SESHI_NO_UPLOADER: "1",
+  };
+}
+
 /** How many entries a spool folder holds; 0 when there is none. */
 export function spoolEntries(dir: string): number {
   try {
@@ -267,28 +290,17 @@ if (import.meta.main) {
     transcript,
     `${JSON.stringify({ type: "user", uuid: "u1", sessionId: "s1", message: { role: "user", content: "hi" } })}\n`,
   );
-  // The same folders on every OS: XDG_* on macOS and Linux, %USERPROFILE%, %LOCALAPPDATA% and
-  // %APPDATA% on Windows, so the compiled check also runs on a Windows runner (15).
-  const hookEnv = {
-    ...process.env,
-    HOME: home,
-    USERPROFILE: home,
-    XDG_STATE_HOME: join(home, "state"),
-    LOCALAPPDATA: join(home, "state"),
-    XDG_CONFIG_HOME: join(home, "config"),
-    APPDATA: join(home, "config"),
-    SESHI_NO_UPLOADER: "1",
-  };
   const payload = JSON.stringify({
     session_id: "s1",
     transcript_path: transcript,
     cwd: home,
     hook_event_name: "Stop",
   });
-  const hookRun = { stdin: payload, env: hookEnv };
+  const env = hookEnv(process.env, home);
+  const hookRun = { stdin: payload, env };
   // Warm the file cache and capture's rules cache once, so the first measured run is neither
   // the disk's nor the config loader's.
-  await medianMs([...seshi, "--version"], 1, root);
+  await medianMs([...seshi, "--version"], 1, root, { env });
   await medianMs([...seshi, "hook", "claude-code", "Stop"], 1, root, hookRun);
   const hook = await medianMs([...seshi, "hook", "claude-code", "Stop"], runs, root, hookRun);
   // A hook that failed at once would be fast too: it must have spooled the Stop. (Hooks print
@@ -296,9 +308,10 @@ if (import.meta.main) {
   const spooled = spoolEntries(join(home, "state", "seshi", "spool"));
   const captureLog = join(home, "state", "seshi", "capture.log");
   const hookLog = existsSync(captureLog) ? readFileSync(captureLog, "utf8") : "";
+  // `serve --bogus` loads the whole server, then stops at the flag; in the same environment, so
+  // a stray SESHI_* variable cannot stop it early and skew the comparison.
+  const serve = await medianMs([...seshi, "serve", "--bogus-flag"], runs, root, { env });
   rmSync(home, { recursive: true, force: true });
-  // `serve --bogus` loads the whole server, then stops at the flag.
-  const serve = await medianMs([...seshi, "serve", "--bogus-flag"], runs, root);
   console.log(
     `hook: seshi hook ${hook.toFixed(1)} ms (median of ${runs}); loading serve ${serve.toFixed(1)} ms; budget ${budget} ms`,
   );
