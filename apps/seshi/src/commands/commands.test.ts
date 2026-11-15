@@ -70,8 +70,14 @@ const connector: Connector = {
   rewind: (cursor, since) => ({ ...cursor, from: since.toISOString() }),
 };
 
+/** The binary's integrations without its own Datadog poller, so a fake one can stand in. */
+const NO_DATADOG_POLLER: Integration[] = INTEGRATIONS.map((integration) => ({
+  ...integration,
+  connectors: (integration.connectors ?? []).filter((c) => c.kind !== "datadog"),
+}));
+
 const WITH_CONNECTOR: Integration[] = [
-  ...INTEGRATIONS,
+  ...NO_DATADOG_POLLER,
   defineIntegration({ name: "fake-vendor", connectors: [connector] }),
 ];
 
@@ -170,9 +176,11 @@ describe("seshi workers status", () => {
     const json = await seshi(["workers", "status", "--json"], { toml: SOURCES });
     const status = JSON.parse(json.out);
     expect(status.worker.state).toBe("never");
+    // The datadog source is polled by the binary's own connector (F5).
     expect(status.jobs.map((j: { name: string }) => j.name)).toEqual([
       "heartbeat",
       "retention",
+      "source:dd",
       "assembler",
     ]);
   });
@@ -247,7 +255,10 @@ describe("seshi sync", () => {
     const pushed = await seshi(["sync", "run", "claude"], { toml: SOURCES });
     expect(pushed.code).toBe(EXIT.failure);
     expect(pushed.err).toContain("pushed to POST /otlp/v1/traces");
-    const noConnector = await seshi(["sync", "run", "dd"], { toml: SOURCES });
+    const noConnector = await seshi(["sync", "run", "dd"], {
+      toml: SOURCES,
+      integrations: NO_DATADOG_POLLER,
+    });
     expect(noConnector.err).toContain("no connector for type 'datadog'");
     expect((await seshi(["sync", "run"], { toml: SOURCES })).code).toBe(EXIT.usage);
     expect((await seshi(["sync", "bogus"])).code).toBe(EXIT.usage);
