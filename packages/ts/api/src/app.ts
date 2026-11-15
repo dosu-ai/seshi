@@ -66,6 +66,7 @@ import {
   tombstone,
 } from "@seshi/pipeline";
 import { rulesDocument } from "@seshi/redact";
+import { SearchQueryError, SearchUnavailable, viewerFor } from "@seshi/search";
 import {
   archiveId,
   isOwner,
@@ -78,8 +79,12 @@ import {
   type TokenKind,
 } from "@seshi/store";
 import { otlpTraces } from "./otlp/receiver";
+import { searchRequestOf } from "./search";
 
 export type { StorageView };
+
+/** How long a client is told to wait while the search index is being built. */
+const SEARCH_RETRY_AFTER_S = 5;
 
 type Handler = (ctx: Context) => Promise<Response> | Response;
 
@@ -654,6 +659,31 @@ export function createApp(instance: Instance) {
       if (ok) entries.push(item);
     }
     return json({ ...page, entries });
+  });
+
+  // --- search (F10) -----------------------------------------------------------------
+
+  /** Keyword search over the sessions the caller may read (F10.4): the server adds the
+   * permission filter from the verified principal; nothing in the request widens it. 503 while
+   * this instance's index is first built from the change feed (F10.3). */
+  route("GET", "/v1/search", async ({ request, url }) => {
+    const principal = await caller(request, "search");
+    if (!instance.search) {
+      throw new HttpError(404, "search_disabled", "search is turned off on this server");
+    }
+    try {
+      return json(
+        await instance.search.search(viewerFor(principal, aliases), searchRequestOf(url)),
+      );
+    } catch (err) {
+      if (err instanceof SearchQueryError) throw new HttpError(400, err.code, err.message);
+      if (err instanceof SearchUnavailable) {
+        return json({ error: { code: err.code, message: err.message } }, 503, {
+          "retry-after": String(SEARCH_RETRY_AFTER_S),
+        });
+      }
+      throw err;
+    }
   });
 
   // --- tokens (X5.9, X5.11) -------------------------------------------------------

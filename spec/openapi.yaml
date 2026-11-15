@@ -51,6 +51,7 @@ tags:
   - name: admin
   - name: redaction
   - name: otlp
+  - name: search
 
 paths:
   /healthz:
@@ -813,6 +814,117 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/OtlpStatus" }
+
+  /v1/search:
+    get:
+      tags: [search]
+      summary: Keyword search over the sessions the caller may read (F10).
+      operationId: search
+      description: |
+        Finds sessions by what was said and done in them: prompts, assistant text, and tool
+        calls (names and inputs, so file paths and commands) by default (`search.events`).
+        Each result is a session with its best matching records, each with the trace and
+        event it is in (`GET …/trace?hash=` holds it at `events[event_index]`) and a short
+        snippet with the matched words' offsets.
+
+        Needs the `search` scope. A member finds their own sessions and those visible to the
+        org; admins and services find everything (X5.10). The server adds that filter from
+        the credential; no parameter widens it (F10.4), and every result is checked against
+        the session's current visibility before it is returned.
+
+        Every instance that serves search keeps its own index, built from the change feed
+        (F10.2, F10.3), so a session appears within the indexer's interval of being stored.
+        A new or wiped instance answers `503` until its index has caught up.
+
+        `q` takes words (all must appear), `"a phrase"`, `word*` (a prefix), `a OR b`, and
+        `-word` or `NOT word` (excluded). Case and accents are ignored; punctuation separates
+        words, so `src/app.ts` matches those words in that order.
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: What to search for (up to 1000 characters, 32 words and phrases).
+          schema: { type: string, minLength: 1, maxLength: 1000 }
+        - name: owner
+          in: query
+          description: Only this owner's sessions (`[auth.owner_aliases]` folded in).
+          schema: { $ref: "#/components/schemas/Owner" }
+        - name: agent
+          in: query
+          description: Only sessions filed under this format or run by this agent (`origin_agent`).
+          schema: { type: string, maxLength: 512 }
+        - name: repo
+          in: query
+          description: |
+            Only sessions of this repository: the session's `project`, exactly (ignoring case) or
+            as its last path segments (`widget` matches `github.com/acme/widget`).
+          schema: { type: string, maxLength: 512 }
+        - name: branch
+          in: query
+          schema: { type: string, maxLength: 512 }
+        - name: source
+          in: query
+          description: Only sessions written through this source (`upload`, or a configured source id).
+          schema: { type: string, maxLength: 512 }
+        - name: since
+          in: query
+          description: |
+            Only records at or after this time. A record without a timestamp counts at its
+            session's last update.
+          schema: { type: string, format: date-time }
+        - name: until
+          in: query
+          description: Only records at or before this time.
+          schema: { type: string, format: date-time }
+        - name: sort
+          in: query
+          description: "`relevance` (bm25 over the matching records, best first) or `recent` (most recently updated sessions first)."
+          schema: { type: string, enum: [relevance, recent], default: relevance }
+        - name: limit
+          in: query
+          description: Sessions per page; larger values are capped at 100.
+          schema: { type: integer, minimum: 1, default: 20 }
+        - name: matches
+          in: query
+          description: Matching records per session; larger values are capped at 20.
+          schema: { type: integer, minimum: 0, default: 3 }
+        - name: cursor
+          in: query
+          description: The previous page's `cursor`.
+          schema: { type: string }
+      responses:
+        "200":
+          description: The sessions that match, best first.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SearchResults" }
+        "400":
+          description: |
+            `bad_query`: no words to look for, an unknown or repeated parameter, a value that is
+            not one (an owner id, a time, a number), `since` after `until`, a cursor this server
+            did not give.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: "`search_disabled`: this server has `search.enabled = false`."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "502": { $ref: "#/components/responses/StorageError" }
+        "503":
+          description: |
+            `index_building`: this instance's index has not caught up with the change feed yet
+            (it was just started, or wiped). `Retry-After` says when to ask again.
+          headers:
+            Retry-After:
+              description: Seconds to wait.
+              schema: { type: integer }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
 components:
   securitySchemes:
@@ -1770,3 +1882,91 @@ components:
       properties:
         code: { type: integer, description: "A google.rpc.Code (3 invalid argument, 7 permission denied, 14 unavailable, 16 unauthenticated)." }
         message: { type: string }
+
+    SearchResults:
+      type: object
+      required: [query, total, results, index]
+      properties:
+        query: { type: string }
+        total:
+          type: integer
+          minimum: 0
+          description: |
+            Sessions that match, as the index holds them. A page can hold fewer than it
+            promises: a session deleted or made private since it was indexed is left out.
+        results:
+          type: array
+          items: { $ref: "#/components/schemas/SearchResult" }
+        cursor:
+          type: string
+          description: Pass as `cursor` for the next page; absent on the last.
+        index:
+          type: object
+          required: [ready_at, sessions]
+          properties:
+            ready_at:
+              type: string
+              format: date-time
+              description: When this instance's index first caught up with the change feed.
+            caught_up_at:
+              type: string
+              format: date-time
+              description: When it last finished reading the change feed.
+            sessions: { type: integer, minimum: 0 }
+
+    SearchResult:
+      type: object
+      description: A session with records that match.
+      required:
+        [owner, agent, session_id, archive_id, visibility, updated_at, score, hits, matches]
+      properties:
+        owner: { $ref: "#/components/schemas/Owner" }
+        agent: { type: string }
+        session_id: { type: string }
+        archive_id: { type: string, pattern: "^[0-9a-f]{64}$" }
+        origin_agent: { type: string }
+        native_session_id: { type: string }
+        project: { type: string }
+        branch: { type: string }
+        source_id: { type: string }
+        visibility: { type: string, enum: [org, owner] }
+        started_at: { type: string, format: date-time }
+        ended_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        score:
+          type: number
+          description: How well it matched; higher is better, comparable within one answer only.
+        hits:
+          type: integer
+          minimum: 1
+          description: How many of its records matched.
+        matches:
+          type: array
+          items: { $ref: "#/components/schemas/SearchMatch" }
+
+    SearchMatch:
+      type: object
+      description: |
+        One matching record: the trace and event it is in, and a snippet. For what the assistant
+        said alongside tool calls (which the trace's events leave out), `event_index` is the
+        record's first `tool_call` event.
+      required: [content_hash, event_index, role, snippet, highlights]
+      properties:
+        content_hash: { type: string, pattern: "^[0-9a-f]{64}$" }
+        event_index: { type: integer, minimum: 0 }
+        role:
+          type: string
+          enum: [user, assistant, tool_call, tool_result, system, observation, reasoning]
+        tool_name: { type: string }
+        timestamp: { type: string, format: date-time }
+        snippet:
+          type: string
+          description: Up to a few dozen words around the match; `…` marks text left out.
+        highlights:
+          type: array
+          description: "The matched words in `snippet`: `[start, end)` offsets in UTF-16 code units."
+          items:
+            type: array
+            items: { type: integer, minimum: 0 }
+            minItems: 2
+            maxItems: 2

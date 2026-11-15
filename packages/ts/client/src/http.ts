@@ -16,6 +16,8 @@ import {
   OffsetMismatch,
   type ReadChangesOptions,
   type RenderFormat,
+  type SearchRequest,
+  type SearchResults,
   SessionConflict,
   type SessionDB,
   type SessionMetadata,
@@ -208,6 +210,31 @@ export class HttpSessionDB implements SessionDB {
     });
     if (status !== 200) HttpSessionDB.refuse(status, body);
     return body as ChangesPage;
+  }
+
+  /** Keyword search over the sessions this credential may read (F10, `GET /v1/search`). A
+   * request the server cannot run is a `ServerError` with status 400 (`bad_query`); while the
+   * server's index is first being built, status 503 (`index_building`), and 404
+   * (`search_disabled`) when the server has search turned off. */
+  async search(request: SearchRequest): Promise<SearchResults> {
+    const { status, body } = await this.request("GET", "/v1/search", {
+      query: {
+        q: request.q,
+        owner: request.owner,
+        agent: request.agent,
+        repo: request.repo,
+        branch: request.branch,
+        source: request.source,
+        since: request.since,
+        until: request.until,
+        sort: request.sort,
+        limit: request.limit,
+        matches: request.matches,
+        cursor: request.cursor,
+      },
+    });
+    if (status !== 200) HttpSessionDB.refuse(status, body);
+    return body as SearchResults;
   }
 
   async me(): Promise<Identity> {

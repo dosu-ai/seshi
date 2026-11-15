@@ -7,7 +7,7 @@
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { App } from "@seshi/api";
+import { type App, createApp as appOver } from "@seshi/api";
 import { Auth, CREDENTIAL_SCOPES } from "@seshi/auth";
 import { FakeIdp } from "@seshi/auth/testing";
 import { storeSession } from "@seshi/pipeline";
@@ -17,7 +17,7 @@ import { Ajv2020, type ValidateFunction } from "ajv/dist/2020";
 import addFormats from "ajv-formats";
 import { buildFormats } from "seshi/integrations";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { testApp } from "../tooling/instance";
+import { testApp, testInstance } from "../tooling/instance";
 import { transcript } from "../tooling/testdata";
 
 // --- the document -------------------------------------------------------------------------
@@ -262,6 +262,7 @@ describe("the document itself", () => {
         "GET /v1/redaction/rules",
         "GET /v1/sessions/{agent}/{session_id}/reviews",
         "POST /otlp/v1/traces",
+        "GET /v1/search",
       ].sort(),
     );
   });
@@ -818,6 +819,70 @@ describe("identity and access (X5)", () => {
       (await call("POST", "/otlp/v1/traces", { app: down, token: issued.token, raw: content }))
         .status,
     ).toBe(503);
+  });
+});
+
+describe("search (F10)", () => {
+  it("answers, refuses and waits as documented", async () => {
+    let down = false;
+    const flaky: Store = {
+      url: store.url,
+      get: (key) => (down ? Promise.reject(new StoreError("down")) : store.get(key)),
+      put: (key, body, options) => store.put(key, body, options),
+      stat: (key) => store.stat(key),
+      delete: (key, options) => store.delete(key, options),
+      list: (prefix, options) => store.list(prefix, options),
+    };
+    const auth = new Auth(
+      {
+        staticTokens: [{ token: TOKEN, owner: "acme" }],
+        orgKey: true,
+        admins: [],
+        aliases: {},
+        sessionKeys: { k1: "k".repeat(32) },
+      },
+      { store: flaky, deployment: "test" },
+    );
+    const instance = testInstance({ store: flaky, storage: { url: store.url }, auth });
+    const searching = appOver(instance);
+    const as = { app: searching };
+
+    // Until the index has caught up once, it says so (F10.3).
+    expect((await call("GET", "/v1/search?q=auth", as)).status).toBe(503);
+    const body = { agent: "claude-code", session_id: "sess1", transcript: CLAUDE };
+    expect((await call("POST", "/v1/sessions", { ...as, body })).status).toBe(201);
+    await instance.search?.catchUp();
+
+    const found = await call("GET", "/v1/search?q=auth%20flow&limit=5&matches=2&sort=recent", as);
+    expect(found.status).toBe(200);
+    expect(found.body).toMatchObject({
+      total: 1,
+      results: [{ owner: "acme", session_id: "sess1" }],
+    });
+    for (const bad of ["q=", "q=x&limit=two", "q=x&q=y", "q=x&page=2", "q=x&owner=a/b", "q=--"]) {
+      expect((await call("GET", `/v1/search?${bad}`, as)).status, bad).toBe(400);
+    }
+    expect((await call("GET", "/v1/search?q=auth", { ...as, token: null })).status).toBe(401);
+    const reader = await auth.sessions?.sign({
+      owner: "acme",
+      role: "member",
+      scopes: ["sessions:read"],
+    });
+    expect((await call("GET", "/v1/search?q=auth", { ...as, token: reader?.token })).status).toBe(
+      403,
+    );
+    const off = appOver(
+      testInstance({
+        store,
+        storage: { url: store.url },
+        auth,
+        config: "[search]\nenabled = false\n",
+      }),
+    );
+    expect((await call("GET", "/v1/search?q=auth", { app: off })).status).toBe(404);
+    down = true;
+    expect((await call("GET", "/v1/search?q=auth", as)).status).toBe(502);
+    await instance.close();
   });
 });
 

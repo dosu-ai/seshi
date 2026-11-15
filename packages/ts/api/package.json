@@ -15,6 +15,7 @@
     "@seshi/model": "workspace:*",
     "@seshi/pipeline": "workspace:*",
     "@seshi/redact": "workspace:*",
+    "@seshi/search": "workspace:*",
     "@seshi/store": "workspace:*"
   }
 }
