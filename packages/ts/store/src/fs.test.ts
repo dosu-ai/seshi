@@ -1,8 +1,11 @@
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FsStore, STALE_LOCK_MS } from "./fs";
 import { keys } from "./layout";
@@ -109,6 +112,44 @@ describe("conditional writes", () => {
       ),
     );
     expect(dec(await getBytes(store, "counter"))).toBe("12");
+  });
+
+  it("serializes read-modify-write across processes on one machine (X6.1)", async () => {
+    // Each child is its own process with its own FsStore: only the lock files keep them apart.
+    const here = fileURLToPath(new URL(".", import.meta.url));
+    const script = `
+      import { FsStore } from ${JSON.stringify(join(here, "fs.ts"))};
+      import { updateObject } from ${JSON.stringify(join(here, "store.ts"))};
+      const store = new FsStore(process.argv[1]);
+      const dec = (b) => (b ? new TextDecoder().decode(b) : "0");
+      for (let i = 0; i < 10; i++) {
+        await updateObject(store, "counter", (c) => new TextEncoder().encode(String(Number(dec(c?.body)) + 1)),
+          { retries: 200, sleep: (ms) => new Promise((r) => setTimeout(r, Math.random() * 4)) });
+      }
+    `;
+    const run = promisify(execFile);
+    // The children run TypeScript, so they need Bun whatever runs the tests.
+    const bun = process.versions.bun ? process.execPath : "bun";
+    await Promise.all(
+      Array.from({ length: 4 }, () => run(bun, ["-e", script, dir], { timeout: 30_000 })),
+    );
+    expect(dec(await getBytes(store, "counter"))).toBe("40");
+    expect(await readdir(dir)).toEqual(["counter"]);
+  }, 40_000);
+
+  it("never deletes a lock it does not hold", async () => {
+    await store.put("k", enc("one"));
+    // Another writer's fresh lock: a put waits for it rather than removing it, and gives up
+    // with the lock still in place once it has waited long enough.
+    const lock = join(dir, "k.~lock");
+    writeFileSync(lock, "999 other\n");
+    const waiting = store.put("k", enc("two"));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(dec(await getBytes(store, "k"))).toBe("one");
+    rmSync(lock);
+    await waiting;
+    expect(dec(await getBytes(store, "k"))).toBe("two");
+    expect(await readdir(dir)).toEqual(["k"]);
   });
 
   it("waits for a held lock, and takes over one left by a dead writer", async () => {

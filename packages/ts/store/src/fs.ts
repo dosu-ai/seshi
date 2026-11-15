@@ -12,6 +12,7 @@
 
 import { createHash, randomBytes } from "node:crypto";
 import {
+  link,
   mkdir,
   open,
   readdir,
@@ -99,22 +100,26 @@ export class FsStore implements Store {
     }
   }
 
-  /** Run `fn` holding the key's lock file. */
+  /** Run `fn` holding the key's lock file. The lock holds a random token, so release removes
+   * only this writer's own lock, never one another writer took over. */
   private async locked<T>(key: string, path: string, fn: () => Promise<T>): Promise<T> {
     const lock = `${path}${LOCK_SUFFIX}`;
+    const token = `${process.pid} ${randomBytes(8).toString("hex")} ${new Date().toISOString()}\n`;
     await mkdir(dirname(path), { recursive: true });
     const deadline = Date.now() + LOCK_WAIT_MS;
     for (let wait = 2; ; wait = Math.min(wait * 2, 50)) {
       try {
         const handle = await open(lock, "wx");
-        await handle.writeFile(`${process.pid} ${new Date().toISOString()}\n`);
-        await handle.close();
+        try {
+          await handle.writeFile(token);
+        } finally {
+          await handle.close();
+        }
         break;
       } catch (err) {
         if (!isCode(err, "EEXIST")) throw err;
         const info = await stat(lock).catch(() => null);
-        if (info && Date.now() - info.mtimeMs > STALE_LOCK_MS) {
-          await rm(lock, { force: true });
+        if (info && Date.now() - info.mtimeMs > STALE_LOCK_MS && (await this.takeOver(lock))) {
           continue;
         }
         if (Date.now() > deadline) throw new StoreError(`${key} is locked (${lock})`);
@@ -124,8 +129,42 @@ export class FsStore implements Store {
     try {
       return await fn();
     } finally {
-      await rm(lock, { force: true });
+      await this.release(lock, token);
     }
+  }
+
+  /** Remove a lock left by a writer that died. The lock is moved aside first: a rename is
+   * atomic, so of several writers that judged it stale only one moves it, and none can delete a
+   * fresh lock another writer created meanwhile (the old `rm`-then-create could, letting two
+   * writers hold the key). What was moved is checked again: a lock that turns out fresh was
+   * taken by a live writer between the `stat` and the rename, and is put back. */
+  private async takeOver(lock: string): Promise<boolean> {
+    const aside = `${lock}.${randomBytes(6).toString("hex")}${TMP_SUFFIX}`;
+    try {
+      await rename(lock, aside);
+    } catch (err) {
+      if (isCode(err, "ENOENT")) return true; // someone else moved it; try to take it
+      throw err;
+    }
+    const info = await stat(aside).catch(() => null);
+    if (info && Date.now() - info.mtimeMs <= STALE_LOCK_MS) {
+      // A live writer's lock: put it back unless a new lock is already in place.
+      try {
+        await link(aside, lock);
+      } catch (err) {
+        if (!isCode(err, "EEXIST")) throw err;
+      }
+      await rm(aside, { force: true });
+      return false;
+    }
+    await rm(aside, { force: true });
+    return true;
+  }
+
+  /** Remove the lock if it is still this writer's. */
+  private async release(lock: string, token: string): Promise<void> {
+    const held = await readFile(lock, "utf8").catch(() => null);
+    if (held === token) await rm(lock, { force: true });
   }
 
   private check(
