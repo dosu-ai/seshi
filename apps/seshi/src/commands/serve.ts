@@ -1,149 +1,100 @@
-/** `seshi serve` (`bun start`): the server from the environment (Bun reads `.env` on its own).
- * The environment is today's sessiondb one, unchanged; branch 02 replaces it with the config
- * loader (F1).
+/** `seshi serve` (`bun start`): the server, configured by `@seshi/config` (F1): flags, then
+ * `SESHI_*` env, then the TOML file (`--config`, `SESHI_CONFIG`, `./seshi.toml`,
+ * `/etc/seshi/seshi.toml`), then defaults. Bun reads `.env` on its own. Changes apply on
+ * restart (F1.5). docs/config.md lists every setting.
  *
- * - `SESSIONDB_TOKENS`     who may use the server: `name:token` pairs separated by commas, one
- *                          per person (`alice:…,bob:…`). Each person's sessions are
- *                          filed under `owners/<name>/` and a token reads only its own. 16+ chars
- * - `SESSIONDB_TOKEN`      one token for a one-person install; its sessions file under
- *                          `owners/default/`
- * - `SESSIONDB_TOKEN_SECRET`
- *                          for a hosted server: tokens signed with this secret (HS256 JWT,
- *                          `sub` the owner, `exp` required) are accepted too, so an issuer
- *                          that shares it (Dosu's backend) mints one per person and the
- *                          list above can be empty. 32+ characters
- * - `SESSIONDB_STORE_URL`  where sessions go: `s3://bucket/prefix`, `r2://bucket/prefix`, or
- *                          `file:///path` for one box
- * - bucket credentials     `s3://`: `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` (or `S3_*`),
- *                          `AWS_REGION`; `r2://`: `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`,
- *                          `R2_SECRET_ACCESS_KEY`; S3-compatible: `S3_ENDPOINT` with the `AWS_*` keys
- * - `SESSIONDB_REDACTION_FILE`
- *                          optional: a JSON file of the operator's own redaction, added to the
- *                          built-in rules (`patterns`, `sensitive_files`, `secret_commands`;
- *                          see docs/server.md). The server refuses to start on a bad pattern
- * - `SESSIONDB_FORMAT`     how traces are written: `letta` (default; trajectory-v1 records) or
- *                          `otlp` (OTLP/HTTP JSON GenAI spans). A bucket holds one format, set
- *                          by its first writer; the server refuses to start on the other
- * - `PORT`                 default 7200
- */
+ *   seshi serve [--config <file>] [--listen <host:port>] [--roles api,worker] [--set path=value]… */
 
-import { createApp, type TokenGrant } from "@seshi/api";
-import { MIN_SECRET_LENGTH } from "@seshi/auth";
+import { parseArgs } from "node:util";
+import { createApp } from "@seshi/api";
+import { ConfigError, loadServerConfig } from "@seshi/config";
 import type { FormatRegistry } from "@seshi/formats";
-import { isTraceFormat, TRACE_FORMATS, type TraceFormat, VERSION } from "@seshi/model";
-import { parseRedactionConfig, type RedactionRules } from "@seshi/redact";
+import { VERSION } from "@seshi/model";
 import {
-  assertOwner,
-  ensureLayout,
-  openStore,
-  probe,
-  type StorageView,
-  type Store,
-} from "@seshi/store";
+  parseRedactionConfig,
+  type RedactionConfig,
+  type RedactionRules,
+  redactionRules,
+} from "@seshi/redact";
+import { ensureLayout, openStore, probe, type StorageView, type Store } from "@seshi/store";
 import { buildFormats } from "../integrations";
 import type { CommandContext } from "./index";
+import { configFlags, ServeConfigError, serveSettings } from "./serve-settings";
 
-/** A setting the server cannot start with: printed as `sessiondb: <message>`, exit 1. */
-export class ServeConfigError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "ServeConfigError";
-  }
-}
+export { ServeConfigError, serveSettings } from "./serve-settings";
 
 function fail(message: string): never {
   throw new ServeConfigError(message);
 }
 
-/** What the environment says, checked; nothing is read or opened yet. */
-export interface ServeSettings {
-  tokens: TokenGrant[];
-  tokenSecret: string | undefined;
-  owners: string[];
-  url: string;
-  format: TraceFormat;
-  redactionFile: string | undefined;
-  port: number;
-}
+const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
-/** The environment's settings, or `ServeConfigError` for the first one that is wrong. */
-export function readServeEnv(env: Record<string, string | undefined>): ServeSettings {
-  const tokens: TokenGrant[] = [];
-  const single = env.SESSIONDB_TOKEN?.trim();
-  if (single) tokens.push({ token: single, owner: "default" });
-  for (const entry of (env.SESSIONDB_TOKENS ?? "").split(",")) {
-    const pair = entry.trim();
-    if (!pair) continue;
-    const at = pair.indexOf(":");
-    if (at < 1) fail(`SESSIONDB_TOKENS entries are name:token, got '${pair.slice(0, 8)}…'`);
-    const owner = pair.slice(0, at).trim();
-    try {
-      assertOwner(owner);
-    } catch {
-      fail(`'${owner}' is not a valid name: letters, digits, . _ - (up to 128)`);
-    }
-    tokens.push({ token: pair.slice(at + 1).trim(), owner });
-  }
-  const tokenSecret = env.SESSIONDB_TOKEN_SECRET?.trim() || undefined;
-  if (tokens.length === 0 && tokenSecret === undefined) {
-    fail("SESSIONDB_TOKENS (name:token,…), SESSIONDB_TOKEN or SESSIONDB_TOKEN_SECRET is required");
-  }
-  if (tokenSecret !== undefined && tokenSecret.length < MIN_SECRET_LENGTH) {
-    fail(
-      `SESSIONDB_TOKEN_SECRET must be ${MIN_SECRET_LENGTH}+ characters (try: openssl rand -hex 32)`,
-    );
-  }
-  for (const { token } of tokens) {
-    if (token.length < 16) fail("every token must be 16+ characters (try: openssl rand -hex 24)");
-  }
-  if (new Set(tokens.map((t) => t.token)).size !== tokens.length) {
-    fail("the same token is listed twice");
-  }
-  const owners = [...new Set(tokens.map((t) => t.owner))];
-
-  const url = env.SESSIONDB_STORE_URL;
-  if (!url)
-    fail("SESSIONDB_STORE_URL is required (s3://bucket/prefix, r2://bucket/prefix, file:///path)");
-
-  const formatSetting = env.SESSIONDB_FORMAT?.trim().toLowerCase() || "letta";
-  if (!isTraceFormat(formatSetting)) {
-    fail(`SESSIONDB_FORMAT must be one of ${TRACE_FORMATS.join(", ")}, got '${formatSetting}'`);
-  }
-  const format: TraceFormat = formatSetting;
-  const redactionFile = env.SESSIONDB_REDACTION_FILE?.trim() || undefined;
-  const port = Number.parseInt(env.PORT ?? "7200", 10);
-  return { tokens, tokenSecret, owners, url, format, redactionFile, port };
-}
-
-/** Read the redaction file, open the bucket, check it can be written, then serve until a
- * signal. Every failure before serving is a `ServeConfigError`. */
-async function start(ctx: CommandContext, formats: FormatRegistry): Promise<void> {
-  const { tokens, tokenSecret, owners, url, format, redactionFile, port } = readServeEnv(ctx.env);
-  const client = `sessiondb-server/${VERSION}`;
-
-  let redaction: RedactionRules | undefined;
-  if (redactionFile) {
+/** The operator's rule packs, each checked on its own (so a bad pattern names its file), then
+ * merged on top of the built-in rules. Today's JSON file is a pack (F2.1). */
+async function readPacks(paths: readonly string[]): Promise<RedactionRules | undefined> {
+  if (paths.length === 0) return undefined;
+  const merged: Required<RedactionConfig> = {
+    patterns: [],
+    sensitive_files: [],
+    secret_commands: [],
+  };
+  for (const path of paths) {
     let text: string;
     try {
-      text = await Bun.file(redactionFile).text();
+      text = await Bun.file(path).text();
     } catch (err) {
-      fail(
-        `cannot read SESSIONDB_REDACTION_FILE: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      fail(`cannot read redaction pack ${path}: ${message(err)}`);
     }
     try {
-      redaction = parseRedactionConfig(text);
+      parseRedactionConfig(text);
     } catch (err) {
-      fail(`${redactionFile}: ${err instanceof Error ? err.message : String(err)}`);
+      fail(`${path}: ${message(err)}`);
     }
+    const pack = JSON.parse(text) as RedactionConfig;
+    merged.patterns.push(...(pack.patterns ?? []));
+    merged.sensitive_files.push(...(pack.sensitive_files ?? []));
+    merged.secret_commands.push(...(pack.secret_commands ?? []));
   }
+  return redactionRules(merged);
+}
+
+/** Load the config, read the rule packs, open the bucket, check it can be written, then serve
+ * until a signal. Every failure before serving is a `ServeConfigError` or `ConfigError`. */
+async function start(ctx: CommandContext, formats: FormatRegistry): Promise<void> {
+  let values: { config?: string; listen?: string; roles?: string; set?: string[] };
+  try {
+    ({ values } = parseArgs({
+      args: ctx.argv,
+      options: {
+        config: { type: "string" },
+        listen: { type: "string" },
+        roles: { type: "string" },
+        set: { type: "string", multiple: true },
+      },
+      strict: true,
+      allowPositionals: false,
+    }));
+  } catch (err) {
+    fail(message(err));
+  }
+  const loaded = loadServerConfig({
+    configFlag: values.config,
+    env: ctx.env,
+    flags: configFlags(values),
+  });
+  for (const warning of loaded.warnings) ctx.stderr(`seshi: warning: ${warning}`);
+  const settings = serveSettings(loaded.config);
+  const { tokens, tokenSecret, owners, url, format } = settings;
+  const client = `sessiondb-server/${VERSION}`;
+
+  const redaction = await readPacks(settings.redactionPacks);
 
   let store: Store;
   let storage: StorageView;
   try {
-    ({ store, storage } = openStore(url));
+    ({ store, storage } = openStore(url, { ...settings.store, env: ctx.env }));
   } catch (err) {
-    fail(err instanceof Error ? err.message : String(err));
+    fail(message(err));
   }
 
   // Fail at boot, not on the first session, when the bucket or its keys are wrong.
@@ -151,7 +102,7 @@ async function start(ctx: CommandContext, formats: FormatRegistry): Promise<void
     await ensureLayout(store, client, format);
     for (const owner of owners) await probe(store, owner);
   } catch (err) {
-    fail(`cannot write to ${url}: ${err instanceof Error ? err.message : String(err)}`);
+    fail(`cannot write to ${url}: ${message(err)}`);
   }
 
   const app = createApp({
@@ -163,24 +114,30 @@ async function start(ctx: CommandContext, formats: FormatRegistry): Promise<void
     client,
     redaction,
     format,
+    filter: settings.filter,
+    limits: settings.limits,
   });
 
   const server = Bun.serve({
-    port,
+    hostname: settings.hostname,
+    port: settings.port,
     // A raw transcript can be large; gzipped uploads are decoded after this check.
-    maxRequestBodySize: 256 * 1024 * 1024,
+    maxRequestBodySize: Math.max(256 * 1024 * 1024, settings.limits.max_upload_bytes),
     // A large upload or a long list against a bucket can take more than Bun's 10s default.
     idleTimeout: 120,
     fetch: app.fetch,
   });
 
+  const host = ["0.0.0.0", "::"].includes(settings.hostname) ? "localhost" : settings.hostname;
   const who = [...owners, ...(tokenSecret ? ["whoever holds a signed token"] : [])].join(", ");
   ctx.stdout(
-    `sessiondb-server ${VERSION} listening on http://localhost:${server.port}, writing ${format} traces to ${url} for ${who}`,
+    `seshi ${VERSION} listening on http://${host}:${server.port}, writing ${format} traces to ${url} for ${who}${
+      loaded.file ? ` (config ${loaded.file})` : ""
+    }`,
   );
   if (redaction) {
     ctx.stdout(
-      `redaction from ${redactionFile}: ${redaction.patterns.length} pattern(s) on top of the built-in rules`,
+      `redaction from ${settings.redactionPacks.join(", ")}: ${redaction.patterns.length} pattern(s) on top of the built-in rules`,
     );
   }
 
@@ -198,8 +155,12 @@ export async function run(ctx: CommandContext): Promise<number | undefined> {
     await start(ctx, buildFormats(await ctx.integrations()));
     return undefined;
   } catch (err) {
+    if (err instanceof ConfigError) {
+      for (const issue of err.issues) ctx.stderr(`seshi: ${issue}`);
+      return 1;
+    }
     if (!(err instanceof ServeConfigError)) throw err;
-    ctx.stderr(`sessiondb: ${err.message}`);
+    ctx.stderr(`seshi: ${err.message}`);
     return 1;
   }
 }

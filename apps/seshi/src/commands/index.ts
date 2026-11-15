@@ -31,6 +31,10 @@ export interface CommandSpec {
 }
 
 export const COMMANDS: Readonly<Record<string, CommandSpec>> = {
+  config: {
+    summary: "check the config, or show every value and where it came from",
+    load: () => import("./config"),
+  },
   serve: {
     summary: "run the server: the HTTP API over one bucket",
     load: () => import("./serve"),

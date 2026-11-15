@@ -18,6 +18,7 @@
   "dependencies": {
     "@seshi/api": "workspace:*",
     "@seshi/auth": "workspace:*",
+    "@seshi/config": "workspace:*",
     "@seshi/formats": "workspace:*",
     "@seshi/integration-claude-code": "workspace:*",
     "@seshi/integration-codex": "workspace:*",

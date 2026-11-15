@@ -17,8 +17,9 @@ COPY packages ./packages
 COPY integrations ./integrations
 RUN bun install --frozen-lockfile --production
 
-ENV PORT=7200
-# Only for SESSIONDB_STORE_URL=file:///data; a bucket needs no volume.
+# Settings come from SESHI_* env or a mounted /etc/seshi/seshi.toml (docs/config.md); the
+# server listens on :7200 unless server.listen says otherwise.
+# Only for SESHI_STORE__URL=file:///data; a bucket needs no volume.
 RUN mkdir -p /data && chown bun:bun /data
 VOLUME ["/data"]
 EXPOSE 7200
