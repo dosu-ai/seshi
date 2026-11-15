@@ -522,9 +522,10 @@ paths:
       operationId: changes
       description: |
         One entry per publish, tombstone or visibility change, in key order; keys are
-        time-stamped, so the feed is a listing after a cursor. Stamps come from the clocks of
-        the machines that uploaded, so a consumer re-reads a lag window behind its cursor and
-        dedupes by key. Another owner's feed shows the entries of sessions the caller may
+        time-stamped and unique, so the feed is a listing after a cursor. Stamps come from the
+        clocks of the machines that uploaded, so a consumer re-reads a lag window behind its
+        cursor and dedupes by key. An entry is written before the session changes, so it may
+        name a change not made yet, or one that failed: read the session for what it is now. Another owner's feed shows the entries of sessions the caller may
         read now (X5.10).
       parameters:
         - $ref: "#/components/parameters/owner"
@@ -1855,7 +1856,7 @@ components:
             message: { type: string }
 
     ChangeEntry:
-      description: One `changes/<stamp>-<hash|tombstone|visibility>.json`, as in `layout.md`.
+      description: One `changes/<stamp>-<archive_id>-<suffix>-<hash|tombstone|visibility>.json`, as in `layout.md`.
       $ref: "./schemas/change.schema.json"
 
     ChangesPage:

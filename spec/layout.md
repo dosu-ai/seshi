@@ -27,9 +27,9 @@ any other writer must follow the rules below.
       spans/<trace_id>-<span_id>.json                     normalized, redacted span records (F4)
       review/<n>.json                                     model review decisions (F3)
     changes/
-      <stamp>-<content_hash>.json                         a publish
-      <stamp>-tombstone.json                              a tombstone
-      <stamp>-visibility.json                             a visibility change
+      <stamp>-<archive_id>-<suffix>-<content_hash>.json   a publish
+      <stamp>-<archive_id>-<suffix>-tombstone.json        a tombstone
+      <stamp>-<archive_id>-<suffix>-visibility.json       a visibility change
 ```
 
 The layout's own objects are exactly the keys named above; a reader ignores anything else
@@ -55,6 +55,8 @@ through the API (X5.6).
   pinned by the goldens in [`testdata/goldens/`](testdata/goldens/).
 - **stamp** in a change or record key is RFC 3339 UTC to the millisecond with `-` and `:`
   removed (`20261021T210405.123Z`), so keys sort by time and are valid file names everywhere.
+- **suffix** in a change key is 8 random hex characters, drawn for each entry, so two changes
+  of one session in one millisecond still get keys of their own.
 - **source_id** is a configured source's id, or `upload` for hooks and the CLI: words of
   lowercase letters and digits joined by single `-`.
 - **key_hash** is the first 24 hex characters of `sha256(idempotency_key)`: the idempotency key
@@ -75,7 +77,7 @@ worker by mistake) never silently lose each other's update:
 | `review/<n>.json`, drop and failure records | Created with `If-None-Match: *` |
 | trace objects | Content-addressed; created with `If-None-Match: *`, so the first object for a hash wins |
 | `sources/<id>/health/<day>/<instance>.json` | `If-Match`, by the one process that owns the shard |
-| change entries | Time-keyed; written plainly |
+| change entries | Unique keys (stamp, archive id, random suffix); written plainly, before the pointer |
 
 S3 and R2 honour `If-Match` and `If-None-Match` on PUT. The folder store (`file://`) emulates
 them with a lock file per key, taken with an exclusive create; that is safe between processes
@@ -233,7 +235,7 @@ before model review, so they follow the uploader's log: a record model review re
 envelope it dropped still counts, and `continuation.from_record` is in the same terms.
 `applied` keeps the last 16 envelopes (X4.7).
 
-### `changes/<stamp>-<hash|tombstone|visibility>.json` — `seshi/change/1` ([schema](schemas/change.schema.json))
+### `changes/<stamp>-<archive_id>-<suffix>-<hash|tombstone|visibility>.json` — `seshi/change/1` ([schema](schemas/change.schema.json))
 
 One per publish, tombstone or visibility change, append-only. The feed a consumer tails with a
 cursor (the last key processed) and a lag window.
@@ -247,9 +249,21 @@ cursor (the last key processed) and a lag window.
 
 `kind` is `published`, `tombstone` (with `reason`: `deleted`, `retracted` or `redacted`) or
 `visibility_changed` (with the new `visibility`). Every entry names its `writer` and the
-session's `owner_basis` (X5.5), never content. The change feed is per owner, so two entries of
-one kind for one owner in the same millisecond share a key (`<stamp>-tombstone`,
-`<stamp>-visibility`) and the second replaces the first.
+session's `owner_basis` (X5.5), never content.
+
+The key is the entry's stamp (its `at`), the session's archive id, a random suffix and what
+changed: the published trace's hash, `tombstone` or `visibility`. The stamp leads, so keys sort
+by time and a listing with `StartAfter` a cursor (a key, or a bare stamp for "since") is the
+feed; within one millisecond they sort by session and suffix. No two entries share a key: a
+bulk delete or two changes of one session in one millisecond each keep their own, and a reader
+can tell an entry's session and kind from its key alone. A reader ignores keys of any other
+shape.
+
+An entry is written before the session's pointer moves (see the publish protocol), so it may be
+read before its change is in `metadata.json`, and a write that fails between the two leaves an
+entry for a change that did not happen. Entries are therefore notices: a reader acts on what the
+session's metadata says now, never on the entry alone (see Reading).
+
 A `published` entry with `replace: true` replaced the session's earlier traces (X4.6): a reader
 drops what it held of the session and takes this trace as the whole of it. With `reason:
 "redacted"` it was a redaction backfill (F2.5): new rules were applied to the stored session,
@@ -370,31 +384,42 @@ Deleting a session deletes its span records and marker too.
    with different bytes (see `traces` above).
 2. Verify: compare the backend's ETag to the body's MD5 when the ETag is a plain MD5
    (single-part PUT on S3, R2, MinIO, and the folder store); otherwise read it back.
-3. Update `metadata.json` with `If-Match` (retrying on `412` from a fresh read). If the
+3. Append the change entry, unless the pointer already lists the trace and its object was there
+   (a duplicate: nothing changes).
+4. Update `metadata.json` with `If-Match` (retrying on `412` from a fresh read). If the
    session is no longer as the envelope was planned against (another chunk landed, it was
-   tombstoned), give up and delete the object written in step 1 unless the pointer lists it.
-4. For a replace, delete the trace objects the pointer no longer lists.
-5. Append the change entry.
+   tombstoned), give up and delete the object written in step 1 unless the pointer lists it;
+   the entry stays. If a retry finds the pointer needs an entry after all (step 3 skipped one
+   for a duplicate that is not one any more), it is appended before the update is tried again.
+5. For a replace, delete the trace objects the pointer no longer lists.
 
-A writer that dies between steps leaves either an unlisted object (before 3; the next publish
-of the same content lists it and appends its change entry) or a listed trace without a change
-entry (between 3 and 5). The pointer already records the envelope in `applied`, so a resend is
-answered from there and does not append the missing entry; the session's next published entry
-names it again. Each
-envelope is planned against the session as it read it, so of two racing on one session one
-lands and the other is planned again (a whole log) or told where the log now ends (a chunk).
+Every other write under `changes/` keeps the same order, entry first: a tombstone appends its
+entry, marks the session `redacted`, then deletes its objects; a visibility change appends its
+entry, then updates the pointer; a redaction backfill writes its new trace, appends its
+`replace` entry, moves the pointer, then deletes the old objects.
+
+So no change is ever made without its entry (at least once). A writer that dies between steps
+leaves an unlisted object (before 3 or 4; the next publish of the same content lists it and
+appends its own entry), or an entry for a change the pointer does not show (between 3 and 4),
+which a reader that reads the current metadata takes for no change, and which a retry follows
+with an entry of its own. Each envelope is planned against the session as it read it, so of two
+racing on one session one lands and the other is planned again (a whole log) or told where the
+log now ends (a chunk).
 
 ## Reading
 
 - One session: `metadata.json`, then `trace.<head>.json.gz`; no `head` means nothing to read
   yet.
-- Everything new since a cursor: list `changes/` with `StartAfter`, fetch what the entries
-  point at.
+- Everything new since a cursor: list `changes/` with `StartAfter`, and read the metadata of
+  each session the entries name for what it is now. An entry whose change that metadata does
+  not show yet (its writer is between the entry and the pointer, or failed there) is read again
+  later, within the reader's lag window, until it does or it ages out.
 - A full scan: list `sessions/`, read each `metadata.json`, skip those with no `head`.
 - An index (search, F10): tail every owner's `changes/` and, for each session an entry names,
   index what its `metadata.json` says now (its traces from the last one without
   `continuation` to `head`; nothing once `status` is `redacted`). Indexing from the metadata
-  rather than from the entry alone makes entries read twice, out of order or missing harmless.
+  rather than from the entry alone makes entries read twice, out of order, early, for a change
+  that failed, or missing harmless.
   The seshi server's search index is such a reader: an SQLite file on each instance's local
   disk, never in the bucket, derived and rebuildable (X6.1).
 

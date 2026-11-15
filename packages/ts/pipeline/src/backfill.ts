@@ -7,11 +7,12 @@
  * current rules. Then:
  *
  * - nothing changed: only the rule set is recorded on the session, so the next run skips it;
- * - something changed: one new trace object holds the whole redacted session, the pointer is
- *   moved to it (If-Match, X6.5; a session another write changed meanwhile is left for the next
- *   run), every earlier trace object is deleted (they hold what the new rules take out, F2.5's
- *   "deleted, not kept"), and a `published` change entry with `replace: true` and `reason:
- *   "redacted"` tells readers to drop what they held of the session and take the new trace.
+ * - something changed: one new trace object holds the whole redacted session; a `published`
+ *   change entry with `replace: true` and `reason: "redacted"` tells readers to drop what they
+ *   held of the session and take the new trace (written before the pointer moves, decision 7 of
+ *   18); the pointer is moved to it (If-Match, X6.5; a session another write changed meanwhile
+ *   is left for the next run); and every earlier trace object is deleted (they hold what the
+ *   new rules take out, F2.5's "deleted, not kept").
  *
  * Redaction cannot be undone: unredacted data is never stored, so there is nothing to restore
  * from. The counts the new rules found are added to the session's (F2.3). Idempotent: a session
@@ -49,7 +50,6 @@ import {
 } from "@seshi/model";
 import { type Redactor, redactLlmCalls } from "@seshi/redact";
 import {
-  appendChange,
   gzipJson,
   isOwner,
   keys,
@@ -59,6 +59,7 @@ import {
   putSpan,
   type Store,
   updateMetadata,
+  updateMetadataWithChange,
 } from "@seshi/store";
 import { getTrace, listSessions, type WithheldCallIds } from "./ingest";
 import { redactSpanPart } from "./spans";
@@ -358,34 +359,55 @@ async function backfillSession(
     "application/gzip",
     reused ? "replace" : "immutable",
   );
-  let basis: SessionMetadata["owner_basis"] = session.owner_basis;
+  // The change entry goes before the pointer (decision 7 of 18): a run stopped between the two
+  // leaves an entry for a rewrite that did not happen, which readers take as "read the session
+  // again" and find it as it was; the next run rewrites it and writes another.
+  const rewrite = step((existing) => {
+    const { applied: _applied, withheld_calls: _withheld, ...rest } = existing;
+    const next: SessionMetadata = {
+      ...rest,
+      head: trace.content_hash,
+      traces: [
+        {
+          content_hash: trace.content_hash,
+          created_at: at,
+          records: trace.records.length,
+          ...(continuation ? { continuation } : {}),
+          rule_set: redactor.rule_set,
+        },
+      ],
+      redaction: redaction(existing),
+      updated_at: at,
+    };
+    const ids = withheld(existing);
+    if (ids) next.withheld_calls = ids;
+    return next;
+  });
   try {
-    await updateMetadata(
+    await updateMetadataWithChange(
       store,
       owner,
       archive,
-      step((existing) => {
-        basis = existing.owner_basis;
-        const { applied: _applied, withheld_calls: _withheld, ...rest } = existing;
-        const next: SessionMetadata = {
-          ...rest,
-          head: trace.content_hash,
-          traces: [
-            {
-              content_hash: trace.content_hash,
-              created_at: at,
-              records: trace.records.length,
-              ...(continuation ? { continuation } : {}),
-              rule_set: redactor.rule_set,
-            },
-          ],
-          redaction: redaction(existing),
-          updated_at: at,
+      (existing) => {
+        const next = rewrite(existing);
+        return {
+          next,
+          change: {
+            kind: "published",
+            at,
+            owner,
+            archive_id: archive,
+            session_id: session.session_id,
+            content_hash: trace.content_hash,
+            writer: options.writer,
+            owner_basis: next.owner_basis,
+            ...(continuation ? { continuation } : {}),
+            replace: true,
+            reason: "redacted",
+          },
         };
-        const ids = withheld(existing);
-        if (ids) next.withheld_calls = ids;
-        return next;
-      }),
+      },
+      { expected: session },
     );
   } catch (err) {
     if (written === "written" && !reused) {
@@ -396,26 +418,9 @@ async function backfillSession(
     }
     throw err;
   }
-  // The change entry before the old objects go: a run stopped between the two leaves old objects
-  // behind, which nothing deletes later (17-review's not-fixed list), but no read serves them:
-  // the trace routes and `getTrace` serve only a hash the pointer names. A run stopped after the
-  // pointer moved but before this entry leaves a rewritten session with no entry, which the next
-  // run finds
-  // current: the gap layout.md documents for any publish (steps 3-5), which the search indexer
-  // heals at the session's next entry, since each entry makes it read the current metadata.
-  await appendChange(store, {
-    kind: "published",
-    at,
-    owner,
-    archive_id: archive,
-    session_id: session.session_id,
-    content_hash: trace.content_hash,
-    writer: options.writer,
-    owner_basis: basis,
-    ...(continuation ? { continuation } : {}),
-    replace: true,
-    reason: "redacted",
-  });
+  // The old objects go last: a run stopped before this leaves them behind, which nothing deletes
+  // later (17-review's not-fixed list), but no read serves them: the trace routes and `getTrace`
+  // serve only a hash the pointer names.
   for (const hash of old) {
     if (hash !== trace.content_hash) await store.delete(keys.trace(owner, archive, hash));
   }

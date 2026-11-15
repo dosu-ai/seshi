@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "change.schema.json",
   "title": "ChangeEntry",
-  "description": "`seshi/change/1`: one entry of an owner's change feed, `owners/<owner>/changes/<stamp>-<content_hash|tombstone|visibility>.json`. Append-only; readers tail the feed by key. Every entry records its writer (X5.5).",
+  "description": "`seshi/change/1`: one entry of an owner's change feed, `owners/<owner>/changes/<stamp>-<archive_id>-<suffix>-<content_hash|tombstone|visibility>.json` (unique: a random suffix). Append-only; written before the session pointer moves, so an entry may name a change that did not happen (readers read the current metadata). Readers tail the feed by key. Every entry records its writer (X5.5).",
   "type": "object",
   "properties": {
     "schema": { "const": "seshi/change/1" },

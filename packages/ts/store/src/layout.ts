@@ -14,12 +14,13 @@
  * owners/<owner>/sessions/<archive_id>/trace.<content_hash>.json.gz   seshi/trace/1
  * owners/<owner>/sessions/<archive_id>/spans/<trace_id>-<span_id>.json   span records (F4)
  * owners/<owner>/sessions/<archive_id>/review/<n>.json         model review decisions (F3)
- * owners/<owner>/changes/<stamp>-<content_hash|tombstone|visibility>.json   change feed
+ * owners/<owner>/changes/<stamp>-<archive_id>-<suffix>-<content_hash|tombstone|visibility>.json
+ *                                                              change feed
  * ```
  *
  * Every segment a caller supplies is checked here, so no key can escape its folder. */
 
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import type { ChangeKind } from "@seshi/model";
 import { StoreError } from "./store";
 
@@ -35,6 +36,8 @@ const INSTANCE_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const HEX64 = /^[0-9a-f]{64}$/;
 const HEX = /^[0-9a-f]+$/;
+/** A change key's random part: 8 hex characters. */
+const CHANGE_SUFFIX = /^[0-9a-f]{8}$/;
 
 /** An owner id is one path segment (X5.8): letters, digits and `.`, `_`, `-`, `@`, `+`,
  * starting with a letter or digit, up to 128 characters (a username or an email); or a service
@@ -146,16 +149,72 @@ export const keys = {
     return `${keys.reviews(owner, archive)}${String(n).padStart(REVIEW_DIGITS, "0")}.json`;
   },
   changes: (owner: string) => `${keys.owner(owner)}/changes/`,
-  change: (owner: string, at: string, kind: ChangeKind, hash: string | null) =>
-    `${keys.changes(owner)}${changeStamp(at)}-${changeSuffix(kind, hash)}.json`,
+  /** One change entry's key (decision 8 of 18): the stamp first, so keys sort by time and a
+   * `StartAfter` cursor works; then the session's archive id and a random `suffix`
+   * (`changeSuffix()`), so two changes in one millisecond (a bulk delete) never share a key;
+   * then what changed. */
+  change: (
+    owner: string,
+    at: string,
+    archive: string,
+    suffix: string,
+    kind: ChangeKind,
+    hash: string | null,
+  ) =>
+    `${keys.changes(owner)}${changeStamp(at)}-${assertHash(archive, "archive id")}-${assertChangeSuffix(suffix)}-${changeWhat(kind, hash)}.json`,
 } as const;
 
 /** A change key's last segment: the trace's hash for a publish, else the kind. */
-function changeSuffix(kind: ChangeKind, hash: string | null): string {
+function changeWhat(kind: ChangeKind, hash: string | null): string {
   if (kind === "tombstone") return "tombstone";
   if (kind === "visibility_changed") return "visibility";
   if (hash === null) throw new StoreError("a published change names its trace");
   return assertHash(hash, "content hash");
+}
+
+function assertChangeSuffix(suffix: string): string {
+  if (!CHANGE_SUFFIX.test(suffix)) {
+    throw new StoreError(`invalid change suffix: ${JSON.stringify(suffix)}`);
+  }
+  return suffix;
+}
+
+/** A fresh random part for a change key: 8 hex characters (32 bits). Only changes of one
+ * session in one millisecond need it to differ. */
+export function changeSuffix(): string {
+  return randomBytes(4).toString("hex");
+}
+
+/** What a change key (its name under `changes/`) says. */
+export interface ChangeKeyParts {
+  /** The stamp, in epoch ms. */
+  at: number;
+  archive_id: string;
+  suffix: string;
+  kind: ChangeKind;
+  /** The published trace; null for a tombstone or visibility change. */
+  content_hash: string | null;
+}
+
+const CHANGE_NAME =
+  /^(\d{8}T\d{6}\.\d{3}Z)-([0-9a-f]{64})-([0-9a-f]{8})-([0-9a-f]{64}|tombstone|visibility)\.json$/;
+
+/** A change key's parts, from its name under `changes/` (or the whole key); null for anything
+ * that is not a change key. */
+export function parseChangeKey(key: string): ChangeKeyParts | null {
+  const name = key.slice(key.lastIndexOf("/") + 1);
+  const m = CHANGE_NAME.exec(name);
+  if (!m) return null;
+  const [, stamp, archive, suffix, what] = m as unknown as [string, string, string, string, string];
+  const at = stampTime(stamp);
+  if (at === null) return null;
+  if (what === "tombstone") {
+    return { at, archive_id: archive, suffix, kind: "tombstone", content_hash: null };
+  }
+  if (what === "visibility") {
+    return { at, archive_id: archive, suffix, kind: "visibility_changed", content_hash: null };
+  }
+  return { at, archive_id: archive, suffix, kind: "published", content_hash: what };
 }
 
 /** The change-key timestamp: RFC 3339 UTC to the millisecond with `:` dropped, so keys sort by

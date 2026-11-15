@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HttpSessionDB, ServerError } from "@seshi/client";
 import {
+  type ChangesPage,
   Forbidden,
   OffsetMismatch,
   SessionConflict,
@@ -100,6 +101,22 @@ async function both<T>(call: (db: SessionDB) => Promise<T>): Promise<T> {
   return a;
 }
 
+/** A change key ends in a random suffix (decision 8 of 18), so the two stores never share one:
+ * pages are compared with it masked. */
+const masked = (page: ChangesPage): unknown =>
+  JSON.parse(
+    JSON.stringify(page).replace(/(\d{8}T\d{6}\.\d{3}Z-[0-9a-f]{64}-)[0-9a-f]{8}-/g, "$1********-"),
+  );
+
+/** The same feed call through both backends; `side` says whose store, for its own cursor. */
+async function bothFeeds(
+  call: (db: SessionDB, side: 0 | 1) => Promise<ChangesPage>,
+): Promise<[ChangesPage, ChangesPage]> {
+  const [a, b] = await Promise.all([call(direct, 0), call(http, 1)]);
+  expect(masked(b)).toEqual(masked(a));
+  return [a, b];
+}
+
 describe("the two backends agree", () => {
   it("on identity", async () => {
     // The server also says what the credential is (X5.1); local mode has no credential.
@@ -156,10 +173,10 @@ describe("the two backends agree", () => {
     const page = await both((db) => db.listSessions({ limit: 10 }));
     expect(page.sessions).toHaveLength(1);
 
-    const changes = await both((db) => db.changes());
-    expect(changes.entries).toHaveLength(1);
-    await both((db) => db.changes({ after: changes.cursor }));
-    await both((db) => db.changes({ since: "2026-10-30T16:00:00.000Z" }));
+    const changes = await bothFeeds((db) => db.changes());
+    expect(changes[0].entries).toHaveLength(1);
+    await bothFeeds((db, side) => db.changes({ after: changes[side].cursor }));
+    await bothFeeds((db) => db.changes({ since: "2026-10-30T16:00:00.000Z" }));
 
     expect(await both((db) => db.tombstone("claude-code", "sess1"))).toEqual({ removed: 1 });
     await both((db) => db.getTrace("claude-code", "sess1"));

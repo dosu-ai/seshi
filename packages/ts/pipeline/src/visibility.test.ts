@@ -50,9 +50,11 @@ describe("setVisibility (X5.10)", () => {
     expect(changed?.visibility).toBe("owner");
     const stored = await readMetadata(store, "alice", archiveId("alice", "trajectory", "s1"));
     expect(stored?.visibility).toBe("owner");
+    // Both entries share a millisecond here, so key order is not write order: find it by kind.
     const { entries } = await readChanges(store, "alice");
-    expect(entries.at(-1)?.key).toMatch(/-visibility\.json$/);
-    expect(entries.at(-1)?.entry).toMatchObject({
+    const entry = entries.find((e) => e.entry.kind === "visibility_changed");
+    expect(entry?.key).toMatch(/-visibility\.json$/);
+    expect(entry?.entry).toMatchObject({
       kind: "visibility_changed",
       visibility: "owner",
       writer,

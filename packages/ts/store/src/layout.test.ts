@@ -3,9 +3,11 @@ import {
   archiveId,
   assertSourceId,
   changeStamp,
+  changeSuffix,
   keys,
   LAYOUT_KEY,
   LEGACY_LAYOUT_KEY,
+  parseChangeKey,
   recordKeyHash,
   stampTime,
 } from "./layout";
@@ -87,19 +89,68 @@ describe("layout", () => {
     expect(() => recordKeyHash("")).toThrow(/idempotency key/);
   });
 
-  it("makes sortable change keys", () => {
+  it("makes sortable, unique change keys (decision 8 of 18)", () => {
     const at = "2026-10-21T21:04:05.123Z";
     expect(changeStamp(at)).toBe("20261021T210405.123Z");
-    const key = keys.change("acme", at, "published", hash);
-    expect(key).toBe(`owners/acme/changes/20261021T210405.123Z-${hash}.json`);
-    expect(keys.change("acme", at, "tombstone", hash)).toBe(
-      "owners/acme/changes/20261021T210405.123Z-tombstone.json",
+    const key = keys.change("acme", at, archive, "0a1b2c3d", "published", hash);
+    expect(key).toBe(`owners/acme/changes/20261021T210405.123Z-${archive}-0a1b2c3d-${hash}.json`);
+    expect(keys.change("acme", at, archive, "0a1b2c3d", "tombstone", hash)).toBe(
+      `owners/acme/changes/20261021T210405.123Z-${archive}-0a1b2c3d-tombstone.json`,
     );
-    expect(keys.change("acme", at, "visibility_changed", null)).toBe(
-      "owners/acme/changes/20261021T210405.123Z-visibility.json",
+    expect(keys.change("acme", at, archive, "0a1b2c3d", "visibility_changed", null)).toBe(
+      `owners/acme/changes/20261021T210405.123Z-${archive}-0a1b2c3d-visibility.json`,
     );
-    expect(() => keys.change("acme", at, "published", null)).toThrow(StoreError);
-    expect(keys.change("acme", "2026-10-21T21:04:06.000Z", "published", hash) > key).toBe(true);
+    expect(() => keys.change("acme", at, archive, "0a1b2c3d", "published", null)).toThrow(
+      StoreError,
+    );
+    expect(() => keys.change("acme", at, "s1", "0a1b2c3d", "tombstone", null)).toThrow(
+      /archive id/,
+    );
+    expect(() => keys.change("acme", at, archive, "../x", "tombstone", null)).toThrow(/suffix/);
+    // The stamp leads, so a later change sorts after, whatever its session or suffix, and a
+    // cursor at a stamp (`since`) sorts before every key with it.
+    const later = keys.change(
+      "acme",
+      "2026-10-21T21:04:05.124Z",
+      "0".repeat(64),
+      "00000000",
+      "tombstone",
+      null,
+    );
+    expect(later > keys.change("acme", at, "f".repeat(64), "ffffffff", "published", hash)).toBe(
+      true,
+    );
+    expect(key > `owners/acme/changes/${changeStamp(at)}`).toBe(true);
+  });
+
+  it("draws a fresh suffix for every change", () => {
+    const suffixes = new Set(Array.from({ length: 64 }, () => changeSuffix()));
+    expect(suffixes.size).toBe(64);
+    for (const s of suffixes) expect(s).toMatch(/^[0-9a-f]{8}$/);
+  });
+
+  it("parses a change key back", () => {
+    const at = "2026-10-21T21:04:05.123Z";
+    const key = keys.change("acme", at, archive, "0a1b2c3d", "published", hash);
+    expect(parseChangeKey(key)).toEqual({
+      at: Date.parse(at),
+      archive_id: archive,
+      suffix: "0a1b2c3d",
+      kind: "published",
+      content_hash: hash,
+    });
+    const name = key.slice("owners/acme/changes/".length);
+    expect(parseChangeKey(name)?.kind).toBe("published");
+    expect(
+      parseChangeKey(keys.change("acme", at, archive, "0a1b2c3d", "tombstone", null)),
+    ).toMatchObject({ kind: "tombstone", content_hash: null });
+    expect(
+      parseChangeKey(keys.change("acme", at, archive, "0a1b2c3d", "visibility_changed", null)),
+    ).toMatchObject({ kind: "visibility_changed", content_hash: null });
+    // The old layout's keys, and anything else, are not change keys.
+    expect(parseChangeKey("20261021T210405.123Z-tombstone.json")).toBeNull();
+    expect(parseChangeKey(`20261021T210405.123Z-${hash}.json`)).toBeNull();
+    expect(parseChangeKey("notes.txt")).toBeNull();
   });
 
   it("reads a stamp back as a time", () => {

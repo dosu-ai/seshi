@@ -38,11 +38,14 @@ export {
   assertOwner,
   assertSourceId,
   assertTokenId,
+  type ChangeKeyParts,
   changeStamp,
+  changeSuffix,
   isOwner,
   keys,
   LAYOUT_KEY,
   LEGACY_LAYOUT_KEY,
+  parseChangeKey,
   type RecordKind,
   recordKeyHash,
   stampTime,
@@ -85,6 +88,8 @@ export { isStoreUrl, type OpenStoreOptions, openStore, type StorageView } from "
 export { listOwners, type OwnersPage } from "./owners";
 export {
   appendChange,
+  type ChangeUpdate,
+  type PointerWithChange,
   type PublishMode,
   type PublishOutcome,
   probe,
@@ -92,6 +97,7 @@ export {
   readMetadata,
   sha256,
   updateMetadata,
+  updateMetadataWithChange,
 } from "./publish";
 export {
   countRecords,

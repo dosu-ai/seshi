@@ -339,8 +339,9 @@ describe("the IdP exchange (X5.2) and deletes (X5.3)", () => {
     expect((await call("DELETE", "/v1/sessions/claude-code/s1?owner=alice", admin)).status).toBe(
       200,
     );
+    // Within one millisecond keys sort by session and random suffix, not by write order.
     const { entries } = await readChanges(store, "alice");
-    expect(entries.at(-1)?.entry).toMatchObject({
+    expect(entries.find((e) => e.entry.kind === "tombstone")?.entry).toMatchObject({
       kind: "tombstone",
       writer: { kind: "admin", principal: "ops" },
     });

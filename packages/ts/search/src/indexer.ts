@@ -16,10 +16,16 @@
  * - `visibility_changed`: the session's visibility is updated (F10.4).
  *
  * Indexing from the metadata rather than from the entry alone makes every step idempotent and
- * order-free: an entry read twice, entries out of order, or a session whose later entry is lost
- * (a crash between the pointer update and the change entry) still end with the index matching
- * the session as it is. Sessions dropped by model review never reach the feed, so they are
- * never indexed.
+ * order-free: an entry read twice, entries out of order, or a session whose entry is missing
+ * still end with the index matching the session as it is. Sessions dropped by model review never
+ * reach the feed, so they are never indexed.
+ *
+ * Writers append the change entry before they move the session's pointer (decision 7 of 18), so
+ * an entry can be read before the change it announces is in the metadata, and a write that
+ * failed between the two leaves an entry for a change that never happened. An entry whose change
+ * the metadata does not show yet (`shows`) is indexed as the session is and not marked seen, so
+ * the next run reads it again; once its stamp is `lagMs` behind this host's clock it is marked
+ * seen whatever the metadata says (its write failed, or a later one superseded it).
  *
  * Every update carries when its metadata was read (`SessionUpdate.read_at`), and the index
  * refuses one read before what it holds, so processes sharing one index file never undo each
@@ -50,6 +56,7 @@ import {
   gunzipJson,
   keys,
   listOwners,
+  parseChangeKey,
   type Store,
   stampTime,
 } from "@seshi/store";
@@ -194,6 +201,21 @@ export function tracesFrom(metadata: SessionMetadata, hash: string): string[] {
   return at < 0 ? currentTraces(metadata) : metadata.traces.slice(at).map((t) => t.content_hash);
 }
 
+/** Whether `metadata` (null: no session) shows the change `entry` announces. Entries are
+ * written before the pointer moves, so one may be read before its change is in the metadata,
+ * or name a change that failed. Only a yes is acted on: a no is read again later. */
+export function shows(metadata: SessionMetadata | null, entry: ChangeEntry): boolean {
+  if (metadata === null) return entry.kind === "tombstone";
+  // Nothing more happens to a redacted session.
+  if (metadata.status === "redacted") return true;
+  if (entry.kind === "tombstone") return false;
+  if (entry.kind === "visibility_changed") return metadata.visibility === entry.visibility;
+  if (entry.content_hash === null) return true;
+  // A replace leaves its trace first in the list (continuations may follow).
+  if (entry.replace === true) return metadata.traces[0]?.content_hash === entry.content_hash;
+  return metadata.traces.some((t) => t.content_hash === entry.content_hash);
+}
+
 function startsWith(list: readonly string[], prefix: readonly string[]): boolean {
   return prefix.length <= list.length && prefix.every((h, i) => list[i] === h);
 }
@@ -210,11 +232,17 @@ interface Replaced {
   content_hash: string;
 }
 
-/** What to do to one session, decided from its metadata before anything is written. */
+/** What to do to one session, decided from its metadata (kept: `shows` reads it) before
+ * anything is written. */
 type Plan =
-  | { kind: "remove"; owner: string; archive: string; read_at: number }
-  | { kind: "apply"; update: SessionUpdate }
-  | { kind: "none" };
+  | {
+      kind: "remove";
+      owner: string;
+      archive: string;
+      read_at: number;
+      metadata: SessionMetadata | null;
+    }
+  | { kind: "apply"; update: SessionUpdate; metadata: SessionMetadata };
 
 export class Indexer {
   private readonly store: Store;
@@ -352,9 +380,7 @@ export class Indexer {
     for (;;) {
       if (signal.aborted) return false;
       const page = await this.store.list(prefix, { startAfter, limit: this.pageSize });
-      const listed = page.keys.filter(
-        (k) => k.endsWith(".json") && stampTime(k.slice(prefix.length)) !== null,
-      );
+      const listed = page.keys.filter((k) => parseChangeKey(k.slice(prefix.length)) !== null);
       const seen = this.index.seen(owner, listed);
       const fresh = listed.filter((k) => !seen.has(k));
       const entries = await mapLimit(fresh, CONCURRENCY, (key) => this.entry(key));
@@ -374,6 +400,17 @@ export class Indexer {
       const held = this.index.cursor(owner);
       const next = held === undefined || (last !== undefined && last > held) ? last : held;
       const nextAt = next === undefined ? undefined : stampTime(next.slice(prefix.length));
+      // Entries whose change is in the metadata, or that are too old to wait for, are done;
+      // the rest are read again by the next run (see the top of this file).
+      const metadata = new Map(archives.map((a, i) => [a, plans[i]?.metadata ?? null]));
+      const nowMs = this.now().getTime();
+      const done = fresh.filter((key, i) => {
+        const entry = entries[i];
+        if (!entry || !HEX64.test(entry.archive_id)) return true;
+        const at = parseChangeKey(key.slice(prefix.length))?.at ?? 0;
+        if (nowMs - at >= this.lagMs) return true;
+        return shows(metadata.get(entry.archive_id) ?? null, entry);
+      });
       const refused: string[] = [];
       const reset = this.index.transaction(() => {
         if (this.index.generation() !== generation) return true;
@@ -385,7 +422,7 @@ export class Indexer {
         this.index.advance(
           owner,
           next,
-          fresh.map((key) => ({ key, at: stampTime(key.slice(prefix.length)) ?? 0 })),
+          done.map((key) => ({ key, at: stampTime(key.slice(prefix.length)) ?? 0 })),
           nextAt === null || nextAt === undefined ? 0 : nextAt - this.lagMs,
         );
         return false;
@@ -417,7 +454,6 @@ export class Indexer {
 
   /** Apply a plan to the index; false when the index refused it. */
   private applyPlan(plan: Plan, run: IndexerRun): boolean {
-    if (plan.kind === "none") return true;
     if (plan.kind === "remove") {
       const held = this.index.session(plan.owner, plan.archive) !== null;
       // Refused only when another process read the session later; its view stands.
@@ -442,7 +478,7 @@ export class Indexer {
     const readAt = this.now().getTime();
     const metadata = await this.metadataOf(owner, archive);
     if (metadata === null || metadata.status === "redacted" || metadata.head === undefined) {
-      return { kind: "remove", owner, archive, read_at: readAt };
+      return { kind: "remove", owner, archive, read_at: readAt, metadata };
     }
     const held = this.index.session(owner, archive);
     const wanted = replaced ? tracesFrom(metadata, replaced.content_hash) : currentTraces(metadata);
@@ -469,6 +505,7 @@ export class Indexer {
     const events = read.flatMap((t) => t.events);
     return {
       kind: "apply",
+      metadata,
       update: {
         session,
         events,

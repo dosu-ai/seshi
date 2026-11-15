@@ -15,6 +15,7 @@ import {
   readChanges,
   readMetadata,
   type Store,
+  StoreError,
 } from "@seshi/store";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { currentTraces, Indexer, searchableEvents, tracesFrom } from "./indexer";
@@ -61,6 +62,27 @@ function tick(ms = 1000): Date {
 
 function db(owner = "alice", now = () => tick()) {
   return new StoreSessionDB({ store, owner, formats, now });
+}
+
+/** `store`, running `hook` before the next write of a session pointer once `arm` is called:
+ * after the change entry landed, before the pointer moves (a hook that throws fails the write). */
+function beforePointer(hook: () => void | Promise<void>): { store: Store; arm: () => void } {
+  let armed = false;
+  const wrapped = new Proxy(store, {
+    get(target, prop, receiver) {
+      if (prop === "put") {
+        return async (key: string, body: Uint8Array, options?: Parameters<Store["put"]>[2]) => {
+          if (armed && key.endsWith("/metadata.json")) {
+            armed = false;
+            await hook();
+          }
+          return target.put(key, body, options);
+        };
+      }
+      return Reflect.get(target, prop, receiver);
+    },
+  }) as Store;
+  return { store: wrapped, arm: () => (armed = true) };
 }
 
 function setup(options: { lagMs?: number; pageSize?: number; budget?: number } = {}) {
@@ -279,7 +301,8 @@ describe("the indexer (F10.2)", () => {
       transcript: line({ role: "user", content: "appended later", timestamp: ts }),
       offset: first.bytes_total,
     });
-    // A crash between the pointer update and the change entry: the entry is gone.
+    // An entry lost some other way (writers no longer lose one: decision 7 of 18 writes it
+    // before the pointer moves): deleted by hand.
     const listed = await store.list(keys.changes("alice"));
     await store.delete(listed.keys.at(-1) as string);
     await indexer.run();
@@ -295,6 +318,161 @@ describe("the indexer (F10.2)", () => {
     });
     await indexer.run();
     expect(find("appended")).toEqual(["alice/s1"]);
+  });
+
+  it("reads an entry again until the session's pointer shows its change (decision 7 of 18)", async () => {
+    const first = await db().ingest({
+      agent: "trajectory",
+      session_id: "s1",
+      transcript: log("original"),
+    });
+    await db().ingest({ agent: "trajectory", session_id: "s2", transcript: log("hidden") });
+    const { index, indexer, find } = setup();
+    await indexer.run();
+    // Each write's pointer update lets the indexer run first: it reads the change entry before
+    // the change is in the metadata.
+    const seenBetween: string[][] = [];
+    let query = "";
+    const between = beforePointer(async () => {
+      tick();
+      await indexer.run();
+      seenBetween.push(find(query));
+    });
+    const through = (now = () => tick()) =>
+      new StoreSessionDB({ store: between.store, owner: "alice", formats, now });
+    const archive = (id: string) => archiveId("alice", "trajectory", id);
+
+    query = "appended";
+    between.arm();
+    await through().ingest({
+      agent: "trajectory",
+      session_id: "s1",
+      transcript: line({ role: "user", content: "appended later", timestamp: ts }),
+      offset: first.bytes_total,
+    });
+    tick();
+    await indexer.run();
+    expect(seenBetween.at(-1)).toEqual([]);
+    expect(find("appended")).toEqual(["alice/s1"]);
+
+    query = "newcomer";
+    between.arm();
+    await through().ingest({ agent: "trajectory", session_id: "s3", transcript: log("newcomer") });
+    tick();
+    await indexer.run();
+    expect(seenBetween.at(-1)).toEqual([]);
+    expect(find("newcomer")).toEqual(["alice/s3"]);
+
+    query = "hidden";
+    between.arm();
+    await tombstone({
+      store: between.store,
+      owner: "alice",
+      agent: "trajectory",
+      session_id: "s2",
+      now: () => tick(),
+    });
+    tick();
+    await indexer.run();
+    expect(seenBetween.at(-1)).toEqual(["alice/s2"]);
+    expect(find("hidden")).toEqual([]);
+
+    between.arm();
+    await setVisibility({
+      store: between.store,
+      owner: "alice",
+      agent: "trajectory",
+      session_id: "s1",
+      visibility: "owner",
+      now: () => tick(),
+    });
+    expect(index.session("alice", archive("s1"))?.visibility).toBe("org");
+    tick();
+    await indexer.run();
+    expect(index.session("alice", archive("s1"))?.visibility).toBe("owner");
+    // Every entry is now shown by its session's metadata: nothing is read again.
+    expect((await indexer.run()).entries).toBe(0);
+  });
+
+  it("indexes correctly after a write failed between its entry and its pointer (decision 7 of 18)", async () => {
+    const first = await db().ingest({
+      agent: "trajectory",
+      session_id: "s1",
+      transcript: log("original"),
+    });
+    const { indexer, find, warnings } = setup({ lagMs: 60_000 });
+    await indexer.run();
+    const failing = beforePointer(() => {
+      throw new StoreError("injected: the pointer update failed");
+    });
+    const through = () =>
+      new StoreSessionDB({ store: failing.store, owner: "alice", formats, now: () => tick() });
+    const chunk = line({ role: "user", content: "appended later", timestamp: ts });
+
+    failing.arm();
+    await expect(
+      through().ingest({
+        agent: "trajectory",
+        session_id: "s1",
+        transcript: chunk,
+        offset: first.bytes_total,
+      }),
+    ).rejects.toThrow(/injected/);
+    // The entry names a trace the session does not list: the session is indexed as it is.
+    expect(await indexer.run()).toMatchObject({ entries: 1, caught_up: true });
+    expect(find("appended")).toEqual([]);
+    expect(find("original")).toEqual(["alice/s1"]);
+    // While the entry is young it is read again (its pointer may still move); once it is the
+    // lag window behind the clock it is read a last time and settled.
+    expect((await indexer.run()).entries).toBe(1);
+    tick(61_000);
+    expect((await indexer.run()).entries).toBe(1);
+    expect((await indexer.run()).entries).toBe(0);
+    expect(find("original")).toEqual(["alice/s1"]);
+
+    // A first publish that failed: an entry for a session with no metadata. Nothing is indexed.
+    failing.arm();
+    await expect(
+      through().ingest({ agent: "trajectory", session_id: "s2", transcript: log("ghostly") }),
+    ).rejects.toThrow(/injected/);
+    expect((await indexer.run()).caught_up).toBe(true);
+    expect(find("ghostly")).toEqual([]);
+
+    // The resends land and are indexed.
+    await db().ingest({
+      agent: "trajectory",
+      session_id: "s1",
+      transcript: chunk,
+      offset: first.bytes_total,
+    });
+    await db().ingest({ agent: "trajectory", session_id: "s2", transcript: log("ghostly") });
+    await indexer.run();
+    expect(find("appended")).toEqual(["alice/s1"]);
+    expect(find("ghostly")).toEqual(["alice/s2"]);
+    expect(warnings).toEqual([]);
+  });
+
+  it("sees two tombstones and two visibility changes made in one millisecond (decision 8 of 18)", async () => {
+    for (const id of ["s1", "s2", "s3", "s4"]) {
+      await db().ingest({ agent: "trajectory", session_id: id, transcript: log(`topic${id}`) });
+    }
+    const { index, indexer, find } = setup();
+    await indexer.run();
+    const instant = new Date(clock.getTime() + 1000);
+    const base = { store, owner: "alice", agent: "trajectory", now: () => instant };
+    await tombstone({ ...base, session_id: "s1" });
+    await tombstone({ ...base, session_id: "s2" });
+    await setVisibility({ ...base, session_id: "s3", visibility: "owner" });
+    await setVisibility({ ...base, session_id: "s4", visibility: "owner" });
+    tick(2000);
+    expect(await indexer.run()).toMatchObject({ entries: 4, removed: 2, indexed: 2 });
+    expect(find("topics1 OR topics2")).toEqual([]);
+    for (const id of ["s3", "s4"]) {
+      expect(index.session("alice", archiveId("alice", "trajectory", id))?.visibility).toBe(
+        "owner",
+      );
+    }
+    expect((await indexer.run()).entries).toBe(0);
   });
 
   it("pages through a long feed within a budget, and is ready only once caught up", async () => {
@@ -395,9 +573,19 @@ describe("the indexer (F10.2)", () => {
 
   it("skips entries it cannot read or that name no session", async () => {
     await db().ingest({ agent: "trajectory", session_id: "s1", transcript: log("alpha") });
+    const unreadable = keys.change(
+      "alice",
+      "2026-11-14T09:01:00.000Z",
+      archiveId("alice", "trajectory", "s1"),
+      "00000000",
+      "tombstone",
+      null,
+    );
+    await store.put(unreadable, new TextEncoder().encode("{not json"));
+    // A key of the old layout (no archive id or suffix) is not a change key: never read.
     await store.put(
       `${keys.changes("alice")}20261114T090100.000Z-tombstone.json`,
-      new TextEncoder().encode("{not json"),
+      new TextEncoder().encode("{not json either"),
     );
     const bogus: Omit<ChangeEntry, "schema"> = {
       kind: "published",

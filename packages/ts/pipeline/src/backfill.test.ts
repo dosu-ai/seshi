@@ -390,6 +390,45 @@ describe("backfillRedaction (F2.5)", () => {
     expect(JSON.stringify(await db.getTrace("trajectory", "s1"))).not.toContain("ACME-1234");
   });
 
+  it("writes its change entry before the pointer: a run stopped between leaves the session as it was (decision 7 of 18)", async () => {
+    await store1("s1", meta() + user(`key ACME-1234 ${LONG}`) + reply("ok"));
+    const archive = archiveId("alice", "trajectory", "s1");
+    const before = await metadata("s1");
+    // The pointer update fails once, after the change entry landed.
+    let armed = true;
+    const failing: Store = new Proxy(store, {
+      get(target, prop, receiver) {
+        if (prop === "put") {
+          return async (key: string, body: Uint8Array, options?: Parameters<Store["put"]>[2]) => {
+            if (armed && key === keys.metadata("alice", archive)) {
+              armed = false;
+              throw new Error("stopped");
+            }
+            return target.put(key, body, options);
+          };
+        }
+        return Reflect.get(target, prop, receiver);
+      },
+    }) as Store;
+    await expect(run({ store: failing })).rejects.toThrow("stopped");
+    const since = { since: "2030-01-01T00:00:00Z" };
+    const { entries } = await readChanges(store, "alice", since);
+    expect(entries.map(({ entry: e }) => [e.kind, e.replace, e.reason])).toEqual([
+      ["published", true, "redacted"],
+    ]);
+    // The session is as it was: its pointer, and its old trace, which the entry's does not
+    // replace (the new object went again).
+    expect(await metadata("s1")).toEqual(before);
+    const old = await getTrace(store, "alice", archive, before?.head as string);
+    expect(JSON.stringify(old)).toContain("ACME-1234");
+    const named = entries[0]?.entry.content_hash as string;
+    expect(await getTrace(store, "alice", archive, named)).toBeNull();
+    // The next run rewrites it, with an entry of its own.
+    expect((await run()).outcomes).toMatchObject({ rewritten: 1 });
+    expect((await readChanges(store, "alice", since)).entries).toHaveLength(2);
+    expect((await metadata("s1"))?.head).toBe(named);
+  });
+
   it("reports a session whose trace is missing as a conflict", async () => {
     const stored = await store1("s1", meta() + user(`ACME-1234 ${LONG}`) + reply("ok"));
     const archive = archiveId("alice", "trajectory", "s1");

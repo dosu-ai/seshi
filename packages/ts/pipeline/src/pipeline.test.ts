@@ -136,7 +136,11 @@ describe("stages and the write (X4.3, X6.3)", () => {
     expect(answer.bytes_total).toBe(bytes(HEAD));
     const base = `owners/alice/sessions/${ARCHIVE}`;
     expect(objects().filter((k) => k.startsWith("owners/"))).toEqual([
-      expect.stringMatching(/^owners\/alice\/changes\/\d{8}T\d{6}\.\d{3}Z-[0-9a-f]{64}\.json$/),
+      expect.stringMatching(
+        new RegExp(
+          `^owners/alice/changes/\\d{8}T\\d{6}\\.\\d{3}Z-${ARCHIVE}-[0-9a-f]{8}-[0-9a-f]{64}\\.json$`,
+        ),
+      ),
       `${base}/metadata.json`,
       `${base}/trace.${(answer as { content_hash: string }).content_hash}.json.gz`,
     ]);

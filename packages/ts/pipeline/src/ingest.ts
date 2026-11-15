@@ -1,8 +1,8 @@
 /** The write stage: the decided records in, objects in the store out. The pipeline
  * (`pipeline.ts`) runs every other stage in memory first (X4.3) and calls `ingest` last, so this
  * is the only place a session's objects are written: cap → parse (validate, strip NUL, events,
- * hash) → publish the canonical trace (`seshi/trace/1`, X6.2) → update `metadata.json` → change
- * entry. Nothing raw is stored (X6.3): a session is its pointer, its traces and its change
+ * hash) → publish the canonical trace (`seshi/trace/1`, X6.2) → change entry → update
+ * `metadata.json` (the entry first: decision 7 of 18). Nothing raw is stored (X6.3): a session is its pointer, its traces and its change
  * entries. `tombstone` removes them.
  *
  * `metadata.json` is updated with If-Match and retried on 412 (X6.5), so two writers on one
@@ -36,8 +36,8 @@ import {
   type Writer,
 } from "@seshi/model";
 import {
-  appendChange,
   archiveId,
+  type ChangeUpdate,
   decodeJson,
   deleteSpans,
   ensureLayout,
@@ -49,6 +49,7 @@ import {
   readMetadata,
   type Store,
   updateMetadata,
+  updateMetadataWithChange,
 } from "@seshi/store";
 import { DEFAULT_LIMITS, type Limits } from "./limits";
 
@@ -270,7 +271,7 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
   let already = false;
   let replaced: string[] = [];
   let basis: OwnerBasis = input.owner_basis ?? "verified";
-  const pointer = updateMetadata(store, owner, archive, (existing) => {
+  const nextPointer = (existing: SessionMetadata | null): SessionMetadata | null => {
     if (existing?.status === "redacted") {
       throw new IngestRejected("redacted", "session was redacted; it will not be stored again");
     }
@@ -342,15 +343,42 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
     if (redaction) next.redaction = redaction;
     else delete next.redaction;
     return changed(existing, next) ? next : null;
-  });
+  };
+  // A duplicate is one the pointer already lists and whose object was there: nothing new to say.
+  // An object that exists without a pointer entry (an interrupted earlier publish) is completed
+  // here, pointer and change entry included.
+  let duplicate = false;
+  // The change entry is written before the pointer moves (decision 7 of 18): a failure between
+  // the two leaves an entry for a publish that did not happen, never a publish with no entry.
+  const step = (existing: SessionMetadata | null): ChangeUpdate => {
+    const next = nextPointer(existing);
+    duplicate = already && outcome === "exists" && replaced.length === 0;
+    return {
+      next,
+      change: duplicate
+        ? null
+        : {
+            kind: "published",
+            at,
+            owner,
+            archive_id: archive,
+            session_id: metadata.session_id,
+            content_hash: trace.content_hash,
+            writer,
+            owner_basis: basis,
+            ...(metadata.continuation ? { continuation: metadata.continuation } : {}),
+            ...(input.replace ? { replace: true as const } : {}),
+          },
+    };
+  };
   try {
-    await pointer;
+    await updateMetadataWithChange(store, owner, archive, step, { expected: before });
   } catch (err) {
     // Tombstoned between the check above and now, or the guard refused a session another write
     // changed: the object this write just created would be left behind (a tombstone already
     // removed the objects it knew of). Remove it too, unless the pointer already lists it (a
     // replace that rewrote a listed object leaves it rewritten: the write planned again puts the
-    // same there).
+    // same there). A change entry already written stays: readers find the session unchanged.
     if (outcome === "written") {
       const now = await readMetadata(store, owner, archive);
       if (!now?.traces.some((t) => t.content_hash === trace.content_hash)) {
@@ -361,25 +389,6 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
   }
   // The pointer no longer lists them, so no reader looks for them any more.
   for (const hash of replaced) await store.delete(keys.trace(owner, archive, hash));
-
-  // A duplicate is one the pointer already lists and whose object was there: nothing new to say.
-  // An object that exists without a pointer entry (an interrupted earlier publish) is completed
-  // here, pointer and change entry included.
-  const duplicate = already && outcome === "exists" && replaced.length === 0;
-  if (!duplicate) {
-    await appendChange(store, {
-      kind: "published",
-      at,
-      owner,
-      archive_id: archive,
-      session_id: metadata.session_id,
-      content_hash: trace.content_hash,
-      writer,
-      owner_basis: basis,
-      ...(metadata.continuation ? { continuation: metadata.continuation } : {}),
-      ...(input.replace ? { replace: true as const } : {}),
-    });
-  }
 
   return {
     status: duplicate ? "duplicate" : "stored",
@@ -453,20 +462,30 @@ export async function tombstone(input: TombstoneInput): Promise<{ removed: numbe
   const archive = archiveId(owner, input.agent, input.session_id);
   const at = (input.now ?? (() => new Date()))().toISOString();
   let removedObjects: { traces: string[] } | null = null;
-  let head: string | null = null;
-  let basis: OwnerBasis | undefined;
-  // Mark it redacted first, so no write that races the removal can give it a new head.
-  await updateMetadata(store, owner, archive, (existing) => {
+  // Mark it redacted first, so no write that races the removal can give it a new head; the
+  // change entry goes before that (decision 7 of 18), naming the head as it was.
+  await updateMetadataWithChange(store, owner, archive, (existing) => {
     if (!existing) {
       removedObjects = null;
-      return null;
+      return { next: null, change: null };
     }
     removedObjects = { traces: existing.traces.map((t) => t.content_hash) };
-    head = existing.head ?? null;
-    basis = existing.owner_basis;
     // What the next chunk would continue from goes too: nothing of the session is left.
     const { head: _head, normalized: _n, withheld_calls: _w, applied: _a, ...rest } = existing;
-    return { ...rest, status: "redacted", traces: [], updated_at: at };
+    return {
+      next: { ...rest, status: "redacted", traces: [], updated_at: at },
+      change: {
+        kind: "tombstone",
+        at,
+        owner,
+        archive_id: archive,
+        session_id: input.session_id,
+        content_hash: existing.head ?? null,
+        writer: input.writer ?? localWriter(owner),
+        owner_basis: existing.owner_basis,
+        reason: input.reason ?? "deleted",
+      },
+    };
   });
   const gone = removedObjects as { traces: string[] } | null;
   if (gone === null) {
@@ -486,17 +505,6 @@ export async function tombstone(input: TombstoneInput): Promise<{ removed: numbe
   // the assembler find them again.
   await deleteSpans(store, owner, archive);
   await store.delete(keys.pending(archive));
-  await appendChange(store, {
-    kind: "tombstone",
-    at,
-    owner,
-    archive_id: archive,
-    session_id: input.session_id,
-    content_hash: head,
-    writer: input.writer ?? localWriter(owner),
-    ...(basis ? { owner_basis: basis } : {}),
-    reason: input.reason ?? "deleted",
-  });
   return { removed };
 }
 
@@ -519,32 +527,30 @@ export async function setVisibility(input: SetVisibilityInput): Promise<SessionM
   const { store, owner } = input;
   const archive = archiveId(owner, input.agent, input.session_id);
   const at = (input.now ?? (() => new Date()))().toISOString();
-  let changedNow = false;
-  const result = await updateMetadata(store, owner, archive, (existing) => {
-    changedNow = false;
-    if (!existing) return null;
+  // The change entry goes before the pointer (decision 7 of 18).
+  const result = await updateMetadataWithChange(store, owner, archive, (existing) => {
+    if (!existing) return { next: null, change: null };
     if (existing.status === "redacted") {
       throw new IngestRejected("redacted", "session was redacted; nothing is left to read");
     }
-    if (existing.visibility === input.visibility) return null;
-    changedNow = true;
-    return { ...existing, visibility: input.visibility, updated_at: at };
+    if (existing.visibility === input.visibility) return { next: null, change: null };
+    return {
+      next: { ...existing, visibility: input.visibility, updated_at: at },
+      change: {
+        kind: "visibility_changed",
+        at,
+        owner,
+        archive_id: archive,
+        session_id: input.session_id,
+        content_hash: existing.head ?? null,
+        writer: input.writer ?? localWriter(owner),
+        owner_basis: existing.owner_basis,
+        visibility: input.visibility,
+      },
+    };
   });
   const session = result.value;
   if (session === null) return null;
-  if (changedNow) {
-    await appendChange(store, {
-      kind: "visibility_changed",
-      at,
-      owner,
-      archive_id: archive,
-      session_id: input.session_id,
-      content_hash: session.head ?? null,
-      writer: input.writer ?? localWriter(owner),
-      owner_basis: session.owner_basis,
-      visibility: input.visibility,
-    });
-  }
   return session;
 }
 
