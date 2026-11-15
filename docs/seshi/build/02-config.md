@@ -22,7 +22,8 @@ check|show` validate and print it. Reference: [docs/config.md](../../config.md).
   are coerced by the field's type (numbers, booleans, comma lists or JSON arrays, durations,
   sizes); empty values are unset. Map keys (`[auth.tokens]`) match the file's keys written the
   env way or are added lower-cased. `[[sources]]` are file-only; env overrides a field by id
-  (`SESHI_SOURCES__DATADOG_PROD__API_KEY`). A secret can be set as a reference from env
+  (`SESHI_SOURCES__DATADOG_PROD__API_KEY`; ids are words joined by single `-`, so the env
+  form never holds `__`). A secret can be set as a reference from env
   (`…__API_KEY__FILE=/path`). The server skips names the CLI schema owns (`SESHI_USER`,
   `SESHI_THEME`, `SESHI_SERVER`) and the CLI skips the server's (`foreign` option);
   `SESHI_CONFIG` is never a setting.
@@ -62,7 +63,10 @@ check|show` validate and print it. Reference: [docs/config.md](../../config.md).
   `max_records_bytes`, `max_upload_bytes`; replaces `LIMITS`) and `DEFAULT_FILTER` /
   `FilterRules` (`enabled`, `min_chars`, `require_user`, `require_reply`), taken by `ingest`,
   `putRaw`, `storeSession` (`SessionOptions.filter`/`limits`), `StoreSessionDB` and
-  `createApp`. Continuation chunks still bypass the filter (tested).
+  `createApp`. The filter judges a session's first trace only: chunks that continue a head,
+  and (since review) a whole upload's tail past `shipped` when the session has a head, are
+  never filtered; `shipped` is ignored until the session has a head, so a session that was
+  `trivial` is judged whole again (tested in `session.test.ts`).
 - **`seshi serve`**: `--config`, `--listen`, `--roles`, `--set path=value` (node `parseArgs`,
   strict). `serve-settings.ts` holds the pure checks (`serveSettings(config)`: owner names,
   16+ char tokens, no duplicate tokens, 32+ char legacy secret, at least one way in, `api` in
@@ -124,9 +128,12 @@ check|show` validate and print it. Reference: [docs/config.md](../../config.md).
 - **`store.format`** (letta|otlp) is kept, transitional, because the server still writes one of
   the two; 03 replaces it with the canonical format.
 - **`redaction.packs` are today's JSON files** (any number, merged); TOML packs are F2.1 (07).
-- **Unknown env names fail, except the other config's.** A shared environment holds both the
-  CLI's and the server's `SESHI_*` names, so each loader skips names only the other schema
-  knows, rather than failing on them.
+- **Unknown env names fail, except the other config's and secret targets.** A shared
+  environment holds both the CLI's and the server's `SESHI_*` names, so each loader skips
+  names only the other schema knows, rather than failing on them. A `SESHI_*` variable that a
+  secret reads (`{ env = "SESHI_DD_KEY" }` in the file, or the value of a `…__ENV` variable)
+  is skipped too; the CLI does not see the server file's references, so such a variable in a
+  shared environment would still trip the CLI's loader.
 - **`import * as z from "zod"`, not `import { z }`.** Under Vitest with the `bun` condition the
   named `z` export of zod 4.6 is `undefined`; the namespace import works everywhere.
 - **The CLI config honours `XDG_CONFIG_HOME`** when set, beyond the decision's
@@ -147,3 +154,14 @@ check|show` validate and print it. Reference: [docs/config.md](../../config.md).
   validated but unused until their branches.
 - CI has not run on this branch (no PR); the docker job's new env names were checked by
   building and booting the image locally.
+
+## Review fixes
+
+- Whole uploads with `shipped` filtered their fresh tail, so an agent-only or short tail past
+  a stored head came back `trivial` while the answer said it shipped: lost for good (the team's
+  known gotcha). Fixed in `wholeStored`; docs/server.md and spec/openapi.yaml say so.
+- `{ env = "SESHI_…" }` secret references stopped start-up as unknown settings; now skipped.
+- `--set` flags are named with their path (`--set store.url`) in errors and origins.
+- Source ids with `--` or a leading/trailing `-` are refused (unreachable from env).
+- docs/sdk.md suggested a `SESHI_TOKEN` variable, which is not a setting and would stop a
+  server sharing that environment.
