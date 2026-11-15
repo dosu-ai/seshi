@@ -482,8 +482,14 @@ async function backfillSpans(
     for (const hash of after) named.add(hash);
     for (const hash of before) if (!after.has(hash)) replaced.add(hash);
   }
-  for (const hash of replaced) {
-    if (!named.has(hash)) await store.delete(keys.spanMessage(owner, archive, hash));
+  for (const hash of named) replaced.delete(hash);
+  if (replaced.size > 0) {
+    // Read the records again just before deleting: a span that arrived during the pass from a
+    // server still on the old rules may name an old message, which then stays.
+    for await (const record of spanRecords(store, owner, archive)) {
+      for (const hash of storedHashes(record.input)) replaced.delete(hash);
+    }
+    for (const hash of replaced) await store.delete(keys.spanMessage(owner, archive, hash));
   }
   return done;
 }

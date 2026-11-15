@@ -785,6 +785,57 @@ describe("backfillRedaction (F2.5)", () => {
     expect((await run()).spans).toBe(0);
   });
 
+  it("keeps a replaced message that a span arriving during the pass still names (22)", async () => {
+    const oldRules = compileRuleSet();
+    const archive = archiveId("alice", "otlp-genai", "sesn_race");
+    const secret = { role: "user", content: "the key is ACME-1234", timestamp: ts };
+    const span = (n: number) => ({
+      received_at: ts,
+      source_id: "console",
+      format: "otlp-genai",
+      part: {
+        trace_id: "ef".repeat(16),
+        span_id: n.toString(16).padStart(16, "0"),
+        name: "chat m",
+        started_at: ts,
+        content: true,
+        input: [secret],
+      } as never,
+      redaction: { rule_set: oldRules.hash, counts: {} },
+    });
+    await putSpan(store, "alice", archive, span(1));
+    // While backfill rewrites the first record, a server still on the old rules stores another
+    // span naming the same (old) message.
+    let raced = false;
+    const racing: Store = {
+      url: store.url,
+      get: (k) => store.get(k),
+      stat: (k) => store.stat(k),
+      delete: (k, o) => store.delete(k, o),
+      list: (p, o) => store.list(p, o),
+      put: async (k, b, o) => {
+        const done = await store.put(k, b, o);
+        if (!raced && k.endsWith("0000000000000001.json")) {
+          raced = true;
+          await putSpan(store, "alice", archive, span(2));
+        }
+        return done;
+      },
+    };
+    expect((await run({ store: racing })).spans).toBe(1);
+    expect(raced).toBe(true);
+    // The late record still reads: its message was not deleted under it.
+    const records = await listSpans(store, "alice", archive);
+    expect(
+      records.map((r) => (r.part.input ?? [])[0]).map((m) => (m as { content?: string }).content),
+    ).toEqual(["the key is [redacted:acme-key]", "the key is ACME-1234"]);
+    // The next run redacts it, and then nothing names the old message.
+    expect((await run()).spans).toBe(1);
+    const page = await store.list(keys.spanMessages("alice", archive));
+    expect(page.keys).toHaveLength(1);
+    expect(JSON.stringify(await listSpans(store, "alice", archive))).not.toContain("ACME-");
+  });
+
   it("tells each session as it is done", async () => {
     await store1("s1", meta() + user(`ACME-1234 ${LONG}`) + reply("ok"));
     await store1("s2", meta() + user(LONG) + reply("ok"));
