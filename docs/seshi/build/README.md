@@ -38,6 +38,7 @@ Branch names use a hyphen (`seshi-01-restructure`), not a slash: git cannot hold
 | 26 | `seshi-26-resend-spread` | Stale rebuilds spread over a day, at most two a pass | X4.9 | Built |
 | 27 | `seshi-27-security-fixes` | Fixes for 13 findings of a security review of the whole stack | X5, X5.10, F2, F4, F9.5, F9.7, F10 | Built |
 | 28 | `seshi-28-doctor` | `seshi doctor`: gathers a session's evidence (laptop, transcript, server) and checks it end to end | F9, X4, X6 | Built |
+| 29 | `seshi-29-explore` | `seshi explore`: a local, read-only web page over the doctor's engine (sessions, checks, pipeline, records side by side, timeline) | F9, X4, X6 | Built |
 
 F7 (Cursor Cloud sync) is deferred and is not built. Agreed but not built, found in 17's review
 and left for a decision (see [17](17-review.md#not-fixed)): the first-run notice for Cursor and
@@ -61,11 +62,11 @@ Each branch has its notes here: [01](01-restructure.md), [02](02-config.md), [03
 [12](12-search.md), [13](13-cli.md), [14](14-capture.md), [15](15-distribution.md),
 [16](16-readme.md), [17](17-review.md), [18](18-decisions.md), [19](19-change-feed.md),
 [20](20-review-drop.md), [21](21-resend.md), [22](22-otlp.md), [23](23-orphan-sweep.md),
-[24](24-capture.md), [25](25-desktop-mod.md), [26](26-resend-spread.md), [27](27-security-fixes.md), [28](28-doctor.md).
+[24](24-capture.md), [25](25-desktop-mod.md), [26](26-resend-spread.md), [27](27-security-fixes.md), [28](28-doctor.md), [29](29-explore.md).
 
 ## How the stack was built
 
-The stack is linear, in the order of the table: `seshi` ← 01 ← 02 ← … ← 15 ← 16 ← 17 ← 18 ← 19 ← … ← 24 ← 25 ← 26 ← 27 ← 28. Each
+The stack is linear, in the order of the table: `seshi` ← 01 ← 02 ← … ← 15 ← 16 ← 17 ← 18 ← 19 ← … ← 24 ← 25 ← 26 ← 27 ← 28 ← 29. Each
 branch is pushed; there are no PRs yet.
 
 Branches 01–06 were built one after another. Branches 07–15 were then built in parallel, each
