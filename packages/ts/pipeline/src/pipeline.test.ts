@@ -13,7 +13,7 @@ import {
   StoreError,
   type StoreSessionResult,
 } from "@seshi/model";
-import { redactionRules } from "@seshi/redact";
+import { compileRuleSet, redactionRules, validatePack } from "@seshi/redact";
 import {
   archiveId,
   FsStore,
@@ -187,6 +187,25 @@ describe("stages and the write (X4.3, X6.3)", () => {
       "github-token": 1,
     });
     expect(metadata?.withheld_calls).toEqual({ t1: "sensitive-file" });
+  });
+
+  it("records the rule set and counts by rule id on every stored session (F2.3)", async () => {
+    const acme = validatePack(
+      { id: "acme", rules: [{ id: "acme-key", pattern: "ACME-\\d{4}" }] },
+      { source: "acme.toml" },
+    );
+    const rules = compileRuleSet({ packs: [acme] });
+    const p = pipeline({ redaction: rules });
+    // Nothing to redact: the rule set is still recorded, with no counts.
+    const first = await submit(p, upload(HEAD));
+    expect((await session())?.redaction).toEqual({ rule_set: rules.hash, counts: {} });
+    // A chunk's counts are added to the session's.
+    await submit(p, upload(user("key ACME-1234 and ACME-5678"), first.bytes_total));
+    expect((await session())?.redaction).toEqual({
+      rule_set: rules.hash,
+      counts: { "acme-key": 2 },
+    });
+    expect(rules.hash).not.toBe(compileRuleSet().hash);
   });
 
   it("withholds a sensitive result in a later chunk than its call", async () => {
