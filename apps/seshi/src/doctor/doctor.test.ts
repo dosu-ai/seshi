@@ -665,6 +665,38 @@ describe("records and the prefix hash", () => {
     expectStatus(prefixCheck(after([backfill, change("published", T1)]), deps()), "fail");
   });
 
+  it("warn, not fail, while a replace review dropped waits for the transcript to grow", () => {
+    // Compacted shorter (3 records), replaced, and review dropped the replace: the server kept
+    // its 4 records and answered with them (uploader.ts, `replace_next`).
+    const shorter = Buffer.byteLength("meta\nfirst\nsecond\n");
+    const dropped = (replace_next: boolean) =>
+      evidence((ev) => {
+        ev.local = {
+          ...(ev.local as SessionState),
+          file_offset: shorter,
+          server_offset: SIZE,
+          last_status: "dropped",
+          ...(replace_next ? { replace_next } : {}),
+        } as SessionEvidence["local"];
+        ev.transcript.size = shorter;
+      });
+    for (const check of [offsetsCheck(dropped(true)), recordsCheck(dropped(true), deps())]) {
+      expectStatus(check, "warn");
+      expect(check.summary).toContain("review dropped the last replace");
+    }
+    // The same offsets and counts without the dropped replace still fail.
+    expectStatus(offsetsCheck(dropped(false)), "fail");
+    expectStatus(recordsCheck(dropped(false), deps()), "fail");
+    // Same count, other records (a rewrite the length of the original): the prefix warns too.
+    const rewritten = evidence((ev) => {
+      ev.local = { ...(ev.local as SessionState), replace_next: true } as SessionEvidence["local"];
+      ev.server.metadata = metadata({
+        normalized: { bytes: SIZE, records: 4, prefix_sha256: "e".repeat(64), hash_state: "x" },
+      });
+    });
+    expectStatus(prefixCheck(rewritten, deps()), "warn");
+  });
+
   it("count the records review dropped on both sides", () => {
     const check = recordsCheck(
       evidence((ev) => {

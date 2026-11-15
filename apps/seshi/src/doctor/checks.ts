@@ -442,6 +442,20 @@ export function secretCheck(ev: SessionEvidence): CheckResult {
   return result(id, title, "ok", "the secret here matches the stored hash");
 }
 
+// --- a dropped replace ------------------------------------------------------------------------
+
+/** Model review dropped this machine's last replace (or rebuild) of the session: the server kept
+ * the session it had, which this transcript no longer extends, and the uploader sends it whole
+ * as a replace again once the transcript grows (`replace_next`, uploader.ts; 20 × 21). Until
+ * then the offsets, the record count and the prefix differ by design: a warning, not a fault. */
+function replaceDropped(ev: SessionEvidence): boolean {
+  return ev.local?.replace_next === true;
+}
+
+const REPLACE_DROPPED =
+  "review dropped the last replace: the server keeps the session it had, which this transcript no longer extends";
+const REPLACE_HINT = "the uploader sends it whole, as a replace, once the transcript grows";
+
 // --- offsets --------------------------------------------------------------------------------
 
 export function offsetsCheck(ev: SessionEvidence): CheckResult {
@@ -468,7 +482,10 @@ export function offsetsCheck(ev: SessionEvidence): CheckResult {
       `the server's log ends at ${bytes(n.bytes)}; this machine thinks ${bytes(s.server_offset ?? 0)}`,
     );
   }
-  if (s.aligned !== false && s.file_offset !== s.server_offset) {
+  // A dropped replace is answered with what the server kept: the offsets wait for the
+  // transcript to grow, and then it goes whole (uploader.ts).
+  const waiting = replaceDropped(ev) && s.file_offset !== s.server_offset;
+  if (s.aligned !== false && s.file_offset !== s.server_offset && !waiting) {
     fails.push(
       `pre-redaction kept every length, yet ${bytes(s.file_offset ?? 0)} of the transcript map to ${bytes(s.server_offset ?? 0)} on the server`,
     );
@@ -495,6 +512,9 @@ export function offsetsCheck(ev: SessionEvidence): CheckResult {
       detail: [...fails.slice(1), summary],
       hint: "another machine wrote the session, or an answer was lost; the next upload is told 409 offset_mismatch and goes on from the server's offset",
     });
+  }
+  if (waiting) {
+    return result(id, title, "warn", REPLACE_DROPPED, { detail: [summary], hint: REPLACE_HINT });
   }
   return result(id, title, "ok", summary);
 }
@@ -573,6 +593,15 @@ export function recordsCheck(
       "fail",
       `the dropped start (${dropped.records}) is longer than the log (${n.records})`,
     );
+  }
+  if (count !== n.records && replaceDropped(ev)) {
+    return result(id, title, "warn", REPLACE_DROPPED, {
+      detail: [
+        ...detail,
+        `the transcript's first ${bytes(local.end)} normalize to ${plural(count, "record")}; the server counts ${n.records}`,
+      ],
+      hint: REPLACE_HINT,
+    });
   }
   if (count !== n.records) {
     return result(
@@ -660,6 +689,14 @@ export function prefixCheck(
       "a redaction backfill rewrote the stored records after this prefix was recorded; the prefix keeps the earlier rules' hash, so it cannot be compared",
       { hint: "the next whole upload is a 409 conflict, answered with replace" },
     );
+  }
+  if (hash !== n.prefix_sha256 && replaceDropped(ev)) {
+    return result(id, title, "warn", REPLACE_DROPPED, {
+      detail: [
+        `the transcript's records hash to ${short(hash)}; the server's prefix is ${short(n.prefix_sha256)}`,
+      ],
+      hint: REPLACE_HINT,
+    });
   }
   if (hash !== n.prefix_sha256) {
     const stale = deps.normalizer.stale(ev.capture?.format as string, m.normalizer?.format_version);
