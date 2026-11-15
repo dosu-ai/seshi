@@ -1,0 +1,419 @@
+{
+  "data": [
+    {
+      "id": "4823117000000000103",
+      "type": "span",
+      "attributes": {
+        "span_id": "4823117000000000103",
+        "trace_id": "6916fe3800000000b2c3d4e5f6071829",
+        "parent_id": "4823117000000000102",
+        "tags": [
+          "ml_app:coding-agents",
+          "service:coding-agents",
+          "trajectory.version:0.14.2",
+          "host:dev-laptop-7",
+          "trajectory.client_source:claude-code",
+          "trajectory.client_version:2.1.40",
+          "project_dir:payments-api",
+          "trajectory.capture_level:full",
+          "env:prod",
+          "trajectory.user:jdoe",
+          "trajectory.user_email:jdoe@example.com",
+          "git.email:jdoe@users.noreply.example.com",
+          "github.username:jdoe-dev",
+          "gen_ai.request.model:claude-sonnet-4-5",
+          "source:llm-observability",
+          "trajectory.session_id:8f14e45f-ceea-4e7a-9d1b-2b6a1f0c3d11",
+          "trajectory.llm_call:true",
+          "trajectory.cost_source:native"
+        ],
+        "name": "llm-call-0",
+        "status": "ok",
+        "start_ns": 1794650521100000000,
+        "duration": 2800000000,
+        "ml_app": "coding-agents",
+        "span_kind": "llm",
+        "model_name": "claude-sonnet-4-5",
+        "model_provider": "anthropic",
+        "input": {
+          "messages": [
+            {
+              "role": "system",
+              "content": "You are Claude Code."
+            },
+            {
+              "role": "user",
+              "content": "Fix the failing auth test in src/auth.ts"
+            },
+            {
+              "role": "assistant",
+              "content": "Fixed: the expiry check was inverted, and the auth tests pass."
+            },
+            {
+              "role": "user",
+              "content": "Now add a test for the refresh path"
+            }
+          ]
+        },
+        "output": {
+          "messages": [
+            {
+              "role": "assistant",
+              "content": "Adding a test for token refresh.",
+              "tool_calls": [
+                {
+                  "name": "Write",
+                  "arguments": {
+                    "file_path": "src/refresh.test.ts"
+                  },
+                  "tool_id": "toolu_02A",
+                  "type": "function"
+                }
+              ]
+            }
+          ]
+        },
+        "metadata": {
+          "finish_reason": "tool_use",
+          "temperature": 1,
+          "max_tokens": 32000
+        },
+        "metrics": {
+          "input_tokens": 6100,
+          "output_tokens": 220,
+          "total_tokens": 6320,
+          "cache_read_input_tokens": 5400
+        }
+      }
+    },
+    {
+      "id": "4823117000000000104",
+      "type": "span",
+      "attributes": {
+        "span_id": "4823117000000000104",
+        "trace_id": "6916fe3800000000b2c3d4e5f6071829",
+        "parent_id": "4823117000000000102",
+        "tags": [
+          "ml_app:coding-agents",
+          "service:coding-agents",
+          "trajectory.version:0.14.2",
+          "host:dev-laptop-7",
+          "trajectory.client_source:claude-code",
+          "trajectory.client_version:2.1.40",
+          "project_dir:payments-api",
+          "trajectory.capture_level:full",
+          "env:prod",
+          "trajectory.user:jdoe",
+          "trajectory.user_email:jdoe@example.com",
+          "git.email:jdoe@users.noreply.example.com",
+          "github.username:jdoe-dev",
+          "gen_ai.request.model:claude-sonnet-4-5",
+          "source:llm-observability",
+          "trajectory.session_id:8f14e45f-ceea-4e7a-9d1b-2b6a1f0c3d11",
+          "trajectory.trace_type:turn"
+        ],
+        "name": "Write",
+        "status": "ok",
+        "start_ns": 1794650525000000000,
+        "duration": 1000000000,
+        "ml_app": "coding-agents",
+        "span_kind": "tool",
+        "input": {
+          "value": "{\"file_path\":\"src/refresh.test.ts\",\"content\":\"test('refresh', ...)\"}"
+        },
+        "output": {
+          "value": "File created successfully at: src/refresh.test.ts"
+        },
+        "metadata": {
+          "tool_use_id": "toolu_02A"
+        }
+      }
+    },
+    {
+      "id": "4823117000000000105",
+      "type": "span",
+      "attributes": {
+        "span_id": "4823117000000000105",
+        "trace_id": "6916fe3800000000b2c3d4e5f6071829",
+        "parent_id": "4823117000000000102",
+        "tags": [
+          "ml_app:coding-agents",
+          "service:coding-agents",
+          "trajectory.version:0.14.2",
+          "host:dev-laptop-7",
+          "trajectory.client_source:claude-code",
+          "trajectory.client_version:2.1.40",
+          "project_dir:payments-api",
+          "trajectory.capture_level:full",
+          "env:prod",
+          "trajectory.user:jdoe",
+          "trajectory.user_email:jdoe@example.com",
+          "git.email:jdoe@users.noreply.example.com",
+          "github.username:jdoe-dev",
+          "gen_ai.request.model:claude-sonnet-4-5",
+          "source:llm-observability",
+          "trajectory.session_id:8f14e45f-ceea-4e7a-9d1b-2b6a1f0c3d11",
+          "trajectory.trace_type:turn"
+        ],
+        "name": "Bash",
+        "status": "error",
+        "start_ns": 1794650527000000000,
+        "duration": 3000000000,
+        "ml_app": "coding-agents",
+        "span_kind": "tool",
+        "input": {
+          "value": "{\"command\":\"bun test src/refresh.test.ts\"}"
+        },
+        "output": {
+          "value": "TypeError: refresh is not a function"
+        },
+        "metadata": {
+          "tool_use_id": "toolu_02B"
+        }
+      }
+    },
+    {
+      "id": "4823117000000000106",
+      "type": "span",
+      "attributes": {
+        "span_id": "4823117000000000106",
+        "trace_id": "6916fe3800000000b2c3d4e5f6071829",
+        "parent_id": "4823117000000000101",
+        "tags": [
+          "ml_app:coding-agents",
+          "service:coding-agents",
+          "trajectory.version:0.14.2",
+          "host:dev-laptop-7",
+          "trajectory.client_source:claude-code",
+          "trajectory.client_version:2.1.40",
+          "project_dir:payments-api",
+          "trajectory.capture_level:full",
+          "env:prod",
+          "trajectory.user:jdoe",
+          "trajectory.user_email:jdoe@example.com",
+          "git.email:jdoe@users.noreply.example.com",
+          "github.username:jdoe-dev",
+          "gen_ai.request.model:claude-sonnet-4-5",
+          "source:llm-observability",
+          "trajectory.session_id:8f14e45f-ceea-4e7a-9d1b-2b6a1f0c3d11",
+          "trajectory.trace_type:turn",
+          "trajectory.semantic_type:agent_message"
+        ],
+        "name": "inference-1",
+        "status": "ok",
+        "start_ns": 1794650532000000000,
+        "duration": 5000000000,
+        "ml_app": "coding-agents",
+        "span_kind": "llm",
+        "output": {
+          "value": "Added src/refresh.test.ts; it found a missing export, which I fixed."
+        }
+      }
+    },
+    {
+      "id": "4823117000000000107",
+      "type": "span",
+      "attributes": {
+        "span_id": "4823117000000000107",
+        "trace_id": "6916fe3800000000b2c3d4e5f6071829",
+        "parent_id": "4823117000000000106",
+        "tags": [
+          "ml_app:coding-agents",
+          "service:coding-agents",
+          "trajectory.version:0.14.2",
+          "host:dev-laptop-7",
+          "trajectory.client_source:claude-code",
+          "trajectory.client_version:2.1.40",
+          "project_dir:payments-api",
+          "trajectory.capture_level:full",
+          "env:prod",
+          "trajectory.user:jdoe",
+          "trajectory.user_email:jdoe@example.com",
+          "git.email:jdoe@users.noreply.example.com",
+          "github.username:jdoe-dev",
+          "gen_ai.request.model:claude-sonnet-4-5",
+          "source:llm-observability",
+          "trajectory.session_id:8f14e45f-ceea-4e7a-9d1b-2b6a1f0c3d11",
+          "trajectory.llm_call:true"
+        ],
+        "name": "llm-call-1",
+        "status": "ok",
+        "start_ns": 1794650532100000000,
+        "duration": 4800000000,
+        "ml_app": "coding-agents",
+        "span_kind": "llm",
+        "model_name": "claude-sonnet-4-5",
+        "model_provider": "anthropic",
+        "input": {
+          "messages": [
+            {
+              "role": "user",
+              "content": "Fix the failing auth test in src/auth.ts"
+            },
+            {
+              "role": "assistant",
+              "content": "Fixed: the expiry check was inverted, and the auth tests pass."
+            },
+            {
+              "role": "user",
+              "content": "Now add a test for the refresh path"
+            },
+            {
+              "role": "assistant",
+              "content": "Adding a test for token refresh."
+            }
+          ]
+        },
+        "output": {
+          "messages": [
+            {
+              "role": "assistant",
+              "content": "Added src/refresh.test.ts; it found a missing export, which I fixed."
+            }
+          ]
+        },
+        "metadata": {
+          "finish_reason": "end_turn"
+        },
+        "metrics": {
+          "input_tokens": 6900,
+          "output_tokens": 130,
+          "total_tokens": 7030
+        }
+      }
+    },
+    {
+      "id": "4823117000000000108",
+      "type": "span",
+      "attributes": {
+        "span_id": "4823117000000000108",
+        "trace_id": "6916fe3800000000b2c3d4e5f6071829",
+        "parent_id": "4823117000000000101",
+        "tags": [
+          "ml_app:coding-agents",
+          "service:coding-agents",
+          "trajectory.version:0.14.2",
+          "host:dev-laptop-7",
+          "trajectory.client_source:claude-code",
+          "trajectory.client_version:2.1.40",
+          "project_dir:payments-api",
+          "trajectory.capture_level:full",
+          "env:prod",
+          "trajectory.user:jdoe",
+          "trajectory.user_email:jdoe@example.com",
+          "git.email:jdoe@users.noreply.example.com",
+          "github.username:jdoe-dev",
+          "gen_ai.request.model:claude-sonnet-4-5",
+          "source:llm-observability",
+          "trajectory.trace_correlation.session_id:8f14e45f-ceea-4e7a-9d1b-2b6a1f0c3d11",
+          "trajectory.semantic_type:compaction"
+        ],
+        "name": "compaction",
+        "status": "ok",
+        "start_ns": 1794650540000000000,
+        "duration": 1000000000,
+        "ml_app": "coding-agents",
+        "span_kind": "task",
+        "output": {
+          "value": "Earlier: fixed the inverted expiry check in src/auth.ts."
+        }
+      }
+    },
+    {
+      "id": "4823117000000000007",
+      "type": "span",
+      "attributes": {
+        "span_id": "4823117000000000007",
+        "trace_id": "6916fdc000000000a1b2c3d4e5f60718",
+        "parent_id": "4823117000000000001",
+        "tags": [
+          "ml_app:coding-agents",
+          "service:coding-agents",
+          "trajectory.version:0.14.2",
+          "host:dev-laptop-7",
+          "trajectory.client_source:claude-code",
+          "trajectory.client_version:2.1.40",
+          "project_dir:payments-api",
+          "trajectory.capture_level:full",
+          "env:prod",
+          "trajectory.user:jdoe",
+          "trajectory.user_email:jdoe@example.com",
+          "git.email:jdoe@users.noreply.example.com",
+          "github.username:jdoe-dev",
+          "gen_ai.request.model:claude-sonnet-4-5",
+          "source:llm-observability",
+          "trajectory.session_id:8f14e45f-ceea-4e7a-9d1b-2b6a1f0c3d11",
+          "trajectory.placeholder_llm_span:true",
+          "trajectory.llm_span_role:turn_usage_carrier",
+          "trajectory.service_tier:standard"
+        ],
+        "name": "turn-usage",
+        "status": "ok",
+        "start_ns": 1794650400000000000,
+        "duration": 30000000000,
+        "ml_app": "coding-agents",
+        "span_kind": "llm",
+        "model_name": "claude-sonnet-4-5",
+        "model_provider": "anthropic",
+        "input": {
+          "value": "Fix the failing auth test in src/auth.ts"
+        },
+        "output": {
+          "value": "Fixed: the expiry check was inverted, and the auth tests pass."
+        },
+        "metrics": {
+          "input_tokens": 5200,
+          "output_tokens": 410,
+          "total_tokens": 5610,
+          "cache_read_input_tokens": 3900,
+          "cache_write_input_tokens": 600,
+          "estimated_total_cost": 21000
+        }
+      }
+    },
+    {
+      "id": "4823117000000000301",
+      "type": "span",
+      "attributes": {
+        "span_id": "4823117000000000301",
+        "trace_id": "6916fe9000000000d4e5f60718293a4b",
+        "parent_id": "undefined",
+        "tags": [
+          "ml_app:coding-agents",
+          "service:coding-agents",
+          "trajectory.version:0.14.2",
+          "host:dev-laptop-7",
+          "trajectory.client_source:claude-code",
+          "trajectory.client_version:2.1.40",
+          "project_dir:payments-api",
+          "trajectory.capture_level:full",
+          "env:prod",
+          "trajectory.user:jdoe",
+          "trajectory.user_email:jdoe@example.com",
+          "git.email:jdoe@users.noreply.example.com",
+          "github.username:jdoe-dev",
+          "gen_ai.request.model:claude-sonnet-4-5",
+          "source:llm-observability"
+        ],
+        "name": "nightly-eval",
+        "status": "ok",
+        "start_ns": 1794650551000000000,
+        "duration": 200000000,
+        "ml_app": "coding-agents",
+        "span_kind": "workflow",
+        "input": {
+          "value": "eval"
+        },
+        "output": {
+          "value": "ok"
+        }
+      }
+    }
+  ],
+  "meta": {
+    "elapsed": 120,
+    "request_id": "pddv1-fixture",
+    "status": "done",
+    "page": null
+  }
+}

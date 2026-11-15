@@ -1,0 +1,283 @@
+{
+  "data": [
+    {
+      "id": "4823117900000000001",
+      "type": "span",
+      "attributes": {
+        "span_id": "4823117900000000001",
+        "trace_id": "6916ff2000000000a7b8c9d0e1f20314",
+        "parent_id": "undefined",
+        "tags": [
+          "ml_app:coding-agents",
+          "service:coding-agents",
+          "trajectory.version:0.14.2",
+          "host:dev-laptop-7",
+          "trajectory.client_source:claude-code",
+          "trajectory.client_version:2.1.40",
+          "project_dir:payments-api",
+          "trajectory.capture_level:minimal",
+          "env:prod",
+          "trajectory.user:jdoe",
+          "trajectory.user_email:jdoe@example.com",
+          "git.email:jdoe@users.noreply.example.com",
+          "github.username:jdoe-dev",
+          "gen_ai.request.model:claude-sonnet-4-5",
+          "source:llm-observability",
+          "trajectory.trace_type:turn",
+          "trajectory.semantic_type:turn",
+          "trajectory.session_id:sess-minimal-01"
+        ],
+        "name": "turn",
+        "status": "ok",
+        "start_ns": 1794650400000000000,
+        "duration": 30000000000,
+        "ml_app": "coding-agents",
+        "span_kind": "agent",
+        "metadata": {
+          "turn_index": 1
+        },
+        "metrics": {
+          "input_tokens": 5200,
+          "output_tokens": 410,
+          "total_tokens": 5610
+        }
+      }
+    },
+    {
+      "id": "4823117900000000002",
+      "type": "span",
+      "attributes": {
+        "span_id": "4823117900000000002",
+        "trace_id": "6916ff2000000000a7b8c9d0e1f20314",
+        "parent_id": "4823117900000000001",
+        "tags": [
+          "ml_app:coding-agents",
+          "service:coding-agents",
+          "trajectory.version:0.14.2",
+          "host:dev-laptop-7",
+          "trajectory.client_source:claude-code",
+          "trajectory.client_version:2.1.40",
+          "project_dir:payments-api",
+          "trajectory.capture_level:minimal",
+          "env:prod",
+          "trajectory.user:jdoe",
+          "trajectory.user_email:jdoe@example.com",
+          "git.email:jdoe@users.noreply.example.com",
+          "github.username:jdoe-dev",
+          "gen_ai.request.model:claude-sonnet-4-5",
+          "source:llm-observability",
+          "trajectory.trace_type:turn",
+          "trajectory.semantic_type:agent_message",
+          "trajectory.session_id:sess-minimal-01"
+        ],
+        "name": "inference-0",
+        "status": "ok",
+        "start_ns": 1794650401000000000,
+        "duration": 3000000000,
+        "ml_app": "coding-agents",
+        "span_kind": "llm",
+        "metadata": {}
+      }
+    },
+    {
+      "id": "4823117900000000003",
+      "type": "span",
+      "attributes": {
+        "span_id": "4823117900000000003",
+        "trace_id": "6916ff2000000000a7b8c9d0e1f20314",
+        "parent_id": "4823117900000000002",
+        "tags": [
+          "ml_app:coding-agents",
+          "service:coding-agents",
+          "trajectory.version:0.14.2",
+          "host:dev-laptop-7",
+          "trajectory.client_source:claude-code",
+          "trajectory.client_version:2.1.40",
+          "project_dir:payments-api",
+          "trajectory.capture_level:minimal",
+          "env:prod",
+          "trajectory.user:jdoe",
+          "trajectory.user_email:jdoe@example.com",
+          "git.email:jdoe@users.noreply.example.com",
+          "github.username:jdoe-dev",
+          "gen_ai.request.model:claude-sonnet-4-5",
+          "source:llm-observability",
+          "trajectory.trace_type:turn",
+          "trajectory.session_id:sess-minimal-01"
+        ],
+        "name": "Bash",
+        "status": "ok",
+        "start_ns": 1794650405000000000,
+        "duration": 4000000000,
+        "ml_app": "coding-agents",
+        "span_kind": "tool",
+        "metadata": {
+          "tool_use_id": "toolu_01A",
+          "permission_decision": "accept"
+        }
+      }
+    },
+    {
+      "id": "4823117900000000004",
+      "type": "span",
+      "attributes": {
+        "span_id": "4823117900000000004",
+        "trace_id": "6916ff2000000000a7b8c9d0e1f20314",
+        "parent_id": "4823117900000000001",
+        "tags": [
+          "ml_app:coding-agents",
+          "service:coding-agents",
+          "trajectory.version:0.14.2",
+          "host:dev-laptop-7",
+          "trajectory.client_source:claude-code",
+          "trajectory.client_version:2.1.40",
+          "project_dir:payments-api",
+          "trajectory.capture_level:minimal",
+          "env:prod",
+          "trajectory.user:jdoe",
+          "trajectory.user_email:jdoe@example.com",
+          "git.email:jdoe@users.noreply.example.com",
+          "github.username:jdoe-dev",
+          "gen_ai.request.model:claude-sonnet-4-5",
+          "source:llm-observability",
+          "trajectory.trace_type:turn",
+          "trajectory.semantic_type:agent_message",
+          "trajectory.session_id:sess-minimal-01"
+        ],
+        "name": "inference-1",
+        "status": "ok",
+        "start_ns": 1794650410000000000,
+        "duration": 4000000000,
+        "ml_app": "coding-agents",
+        "span_kind": "llm",
+        "metadata": {}
+      }
+    },
+    {
+      "id": "4823117900000000005",
+      "type": "span",
+      "attributes": {
+        "span_id": "4823117900000000005",
+        "trace_id": "6916ff2000000000a7b8c9d0e1f20314",
+        "parent_id": "4823117900000000004",
+        "tags": [
+          "ml_app:coding-agents",
+          "service:coding-agents",
+          "trajectory.version:0.14.2",
+          "host:dev-laptop-7",
+          "trajectory.client_source:claude-code",
+          "trajectory.client_version:2.1.40",
+          "project_dir:payments-api",
+          "trajectory.capture_level:minimal",
+          "env:prod",
+          "trajectory.user:jdoe",
+          "trajectory.user_email:jdoe@example.com",
+          "git.email:jdoe@users.noreply.example.com",
+          "github.username:jdoe-dev",
+          "gen_ai.request.model:claude-sonnet-4-5",
+          "source:llm-observability",
+          "trajectory.trace_type:turn",
+          "trajectory.session_id:sess-minimal-01"
+        ],
+        "name": "Edit",
+        "status": "ok",
+        "start_ns": 1794650415000000000,
+        "duration": 1000000000,
+        "ml_app": "coding-agents",
+        "span_kind": "tool",
+        "metadata": {
+          "tool_use_id": "toolu_01B"
+        }
+      }
+    },
+    {
+      "id": "4823117900000000006",
+      "type": "span",
+      "attributes": {
+        "span_id": "4823117900000000006",
+        "trace_id": "6916ff2000000000a7b8c9d0e1f20314",
+        "parent_id": "4823117900000000001",
+        "tags": [
+          "ml_app:coding-agents",
+          "service:coding-agents",
+          "trajectory.version:0.14.2",
+          "host:dev-laptop-7",
+          "trajectory.client_source:claude-code",
+          "trajectory.client_version:2.1.40",
+          "project_dir:payments-api",
+          "trajectory.capture_level:minimal",
+          "env:prod",
+          "trajectory.user:jdoe",
+          "trajectory.user_email:jdoe@example.com",
+          "git.email:jdoe@users.noreply.example.com",
+          "github.username:jdoe-dev",
+          "gen_ai.request.model:claude-sonnet-4-5",
+          "source:llm-observability",
+          "trajectory.trace_type:turn",
+          "trajectory.semantic_type:agent_message",
+          "trajectory.session_id:sess-minimal-01"
+        ],
+        "name": "inference-2",
+        "status": "ok",
+        "start_ns": 1794650420000000000,
+        "duration": 4000000000,
+        "ml_app": "coding-agents",
+        "span_kind": "llm",
+        "metadata": {}
+      }
+    },
+    {
+      "id": "4823117900000000007",
+      "type": "span",
+      "attributes": {
+        "span_id": "4823117900000000007",
+        "trace_id": "6916ff2000000000a7b8c9d0e1f20314",
+        "parent_id": "4823117900000000001",
+        "tags": [
+          "ml_app:coding-agents",
+          "service:coding-agents",
+          "trajectory.version:0.14.2",
+          "host:dev-laptop-7",
+          "trajectory.client_source:claude-code",
+          "trajectory.client_version:2.1.40",
+          "project_dir:payments-api",
+          "trajectory.capture_level:minimal",
+          "env:prod",
+          "trajectory.user:jdoe",
+          "trajectory.user_email:jdoe@example.com",
+          "git.email:jdoe@users.noreply.example.com",
+          "github.username:jdoe-dev",
+          "gen_ai.request.model:claude-sonnet-4-5",
+          "source:llm-observability",
+          "trajectory.placeholder_llm_span:true",
+          "trajectory.llm_span_role:turn_usage_carrier",
+          "trajectory.service_tier:standard",
+          "trajectory.session_id:sess-minimal-01"
+        ],
+        "name": "turn-usage",
+        "status": "ok",
+        "start_ns": 1794650400000000000,
+        "duration": 30000000000,
+        "ml_app": "coding-agents",
+        "span_kind": "llm",
+        "model_name": "claude-sonnet-4-5",
+        "model_provider": "anthropic",
+        "metrics": {
+          "input_tokens": 5200,
+          "output_tokens": 410,
+          "total_tokens": 5610,
+          "cache_read_input_tokens": 3900,
+          "cache_write_input_tokens": 600,
+          "estimated_total_cost": 21000
+        },
+        "metadata": {}
+      }
+    }
+  ],
+  "meta": {
+    "elapsed": 120,
+    "request_id": "pddv1-fixture",
+    "status": "done",
+    "page": null
+  }
+}

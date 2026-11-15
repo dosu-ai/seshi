@@ -1,0 +1,320 @@
+{
+  "data": [
+    {
+      "id": "9100000000000000001",
+      "type": "span",
+      "attributes": {
+        "span_id": "9100000000000000001",
+        "trace_id": "6916fdc000000000e5f60718293a4b5c",
+        "parent_id": "undefined",
+        "tags": [
+          "service:support-bot",
+          "env:prod",
+          "ml_app:support-bot",
+          "session_id:chat-42",
+          "source:integration"
+        ],
+        "name": "chat",
+        "status": "ok",
+        "start_ns": 1794650400000,
+        "duration": 4000000000,
+        "ml_app": "support-bot",
+        "span_kind": "workflow",
+        "input": {
+          "value": "Where is my order 1234?"
+        },
+        "output": {
+          "value": "Order 1234 shipped yesterday."
+        },
+        "metrics": {
+          "input_tokens": 900,
+          "output_tokens": 60,
+          "total_tokens": 960
+        }
+      }
+    },
+    {
+      "id": "9100000000000000002",
+      "type": "span",
+      "attributes": {
+        "span_id": "9100000000000000002",
+        "trace_id": "6916fdc000000000e5f60718293a4b5c",
+        "parent_id": "9100000000000000001",
+        "tags": [
+          "service:support-bot",
+          "env:prod",
+          "ml_app:support-bot",
+          "session_id:chat-42",
+          "source:integration"
+        ],
+        "name": "openai.request",
+        "status": "ok",
+        "start_ns": 1794650400100,
+        "duration": 1500000000,
+        "ml_app": "support-bot",
+        "span_kind": "llm",
+        "model_name": "gpt-4o-mini",
+        "model_provider": "openai",
+        "input": {
+          "messages": [
+            {
+              "role": "system",
+              "content": "You are a support agent."
+            },
+            {
+              "role": "user",
+              "content": "Where is my order 1234?"
+            }
+          ]
+        },
+        "output": {
+          "messages": [
+            {
+              "role": "assistant",
+              "content": "",
+              "tool_calls": [
+                {
+                  "name": "lookup_order",
+                  "arguments": {
+                    "id": "1234"
+                  },
+                  "tool_id": "call_1",
+                  "type": "function"
+                }
+              ]
+            }
+          ]
+        },
+        "metadata": {
+          "temperature": 0.2
+        },
+        "metrics": {
+          "input_tokens": 400,
+          "output_tokens": 20,
+          "total_tokens": 420
+        }
+      }
+    },
+    {
+      "id": "9100000000000000003",
+      "type": "span",
+      "attributes": {
+        "span_id": "9100000000000000003",
+        "trace_id": "6916fdc000000000e5f60718293a4b5c",
+        "parent_id": "9100000000000000001",
+        "tags": [
+          "service:support-bot",
+          "env:prod",
+          "ml_app:support-bot",
+          "session_id:chat-42",
+          "source:integration"
+        ],
+        "name": "lookup_order",
+        "status": "ok",
+        "start_ns": 1794650401700,
+        "duration": 300000000,
+        "ml_app": "support-bot",
+        "span_kind": "tool",
+        "input": {
+          "value": "{\"id\":\"1234\"}"
+        },
+        "output": {
+          "value": "{\"status\":\"shipped\"}"
+        },
+        "metadata": {
+          "tool_id": "call_1"
+        }
+      }
+    },
+    {
+      "id": "9100000000000000004",
+      "type": "span",
+      "attributes": {
+        "span_id": "9100000000000000004",
+        "trace_id": "6916fdc000000000e5f60718293a4b5c",
+        "parent_id": "9100000000000000001",
+        "tags": [
+          "service:support-bot",
+          "env:prod",
+          "ml_app:support-bot",
+          "session_id:chat-42",
+          "source:integration"
+        ],
+        "name": "openai.request",
+        "status": "ok",
+        "start_ns": 1794650402100,
+        "duration": 1800000000,
+        "ml_app": "support-bot",
+        "span_kind": "llm",
+        "model_name": "gpt-4o-mini",
+        "model_provider": "openai",
+        "input": {
+          "messages": [
+            {
+              "role": "system",
+              "content": "You are a support agent."
+            },
+            {
+              "role": "user",
+              "content": "Where is my order 1234?"
+            },
+            {
+              "role": "assistant",
+              "content": "",
+              "tool_calls": [
+                {
+                  "name": "lookup_order",
+                  "arguments": {
+                    "id": "1234"
+                  },
+                  "tool_id": "call_1",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "tool_results": [
+                {
+                  "name": "lookup_order",
+                  "result": "{\"status\":\"shipped\"}",
+                  "tool_id": "call_1",
+                  "type": "function"
+                }
+              ]
+            }
+          ]
+        },
+        "output": {
+          "messages": [
+            {
+              "role": "assistant",
+              "content": "Order 1234 shipped yesterday."
+            }
+          ]
+        },
+        "metrics": {
+          "input_tokens": 500,
+          "output_tokens": 40,
+          "total_tokens": 540
+        }
+      }
+    },
+    {
+      "id": "9100000000000000011",
+      "type": "span",
+      "attributes": {
+        "span_id": "9100000000000000011",
+        "trace_id": "6916fdfc00000000f60718293a4b5c6d",
+        "parent_id": "undefined",
+        "tags": [
+          "service:support-bot",
+          "env:prod",
+          "ml_app:support-bot",
+          "session_id:chat-42",
+          "source:integration"
+        ],
+        "name": "chat",
+        "status": "ok",
+        "start_ns": 1794650460000,
+        "duration": 2000000000,
+        "ml_app": "support-bot",
+        "span_kind": "workflow",
+        "input": {
+          "value": "Thanks! Can I change the address?"
+        },
+        "output": {
+          "value": "Not once it has shipped, sorry."
+        }
+      }
+    },
+    {
+      "id": "9100000000000000012",
+      "type": "span",
+      "attributes": {
+        "span_id": "9100000000000000012",
+        "trace_id": "6916fdfc00000000f60718293a4b5c6d",
+        "parent_id": "9100000000000000011",
+        "tags": [
+          "service:support-bot",
+          "env:prod",
+          "ml_app:support-bot",
+          "session_id:chat-42",
+          "source:integration"
+        ],
+        "name": "openai.request",
+        "status": "ok",
+        "start_ns": 1794650460100,
+        "duration": 1800000000,
+        "ml_app": "support-bot",
+        "span_kind": "llm",
+        "model_name": "gpt-4o-mini",
+        "model_provider": "openai",
+        "input": {
+          "messages": [
+            {
+              "role": "system",
+              "content": "You are a support agent."
+            },
+            {
+              "role": "user",
+              "content": "Where is my order 1234?"
+            },
+            {
+              "role": "assistant",
+              "content": "",
+              "tool_calls": [
+                {
+                  "name": "lookup_order",
+                  "arguments": {
+                    "id": "1234"
+                  },
+                  "tool_id": "call_1",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "tool_results": [
+                {
+                  "name": "lookup_order",
+                  "result": "{\"status\":\"shipped\"}",
+                  "tool_id": "call_1",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "role": "assistant",
+              "content": "Order 1234 shipped yesterday."
+            },
+            {
+              "role": "user",
+              "content": "Thanks! Can I change the address?"
+            }
+          ]
+        },
+        "output": {
+          "messages": [
+            {
+              "role": "assistant",
+              "content": "Not once it has shipped, sorry."
+            }
+          ]
+        },
+        "metrics": {
+          "input_tokens": 700,
+          "output_tokens": 15,
+          "total_tokens": 715
+        }
+      }
+    }
+  ],
+  "meta": {
+    "elapsed": 120,
+    "request_id": "pddv1-fixture",
+    "status": "done",
+    "page": null
+  }
+}
