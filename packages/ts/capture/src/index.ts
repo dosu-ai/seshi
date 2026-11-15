@@ -45,6 +45,7 @@ export { captureRules, loadRules, type RulesSnapshot } from "./rules-cache";
 export {
   type HttpSinkOptions,
   httpSink,
+  type RetractOutcome,
   RetractRefused,
   type SessionSink,
   SignInNeeded,

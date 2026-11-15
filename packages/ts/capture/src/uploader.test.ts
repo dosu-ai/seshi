@@ -26,7 +26,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type CapturePaths, capturePaths } from "./paths";
 import { DEFAULT_RULES } from "./rules";
 import type { RulesSnapshot } from "./rules-cache";
-import { RetractRefused, type SessionSink, SignInNeeded } from "./sink";
+import { type RetractOutcome, RetractRefused, type SessionSink, SignInNeeded } from "./sink";
 import { appendSpool } from "./spool";
 import { readState, type SessionState, updateState } from "./state";
 import { type PreRedactor, retractHash, Uploader, type UploaderOptions } from "./uploader";
@@ -105,13 +105,14 @@ class FakeServer implements SessionSink {
     return this.answer("stored", upload.transcript);
   }
 
-  async retract(_agent: string, id: string, secret: string): Promise<"retracted" | "absent"> {
+  async retract(_agent: string, id: string, secret: string): Promise<RetractOutcome> {
     this.retractions.push({ id, secret });
     const next = this.failNext.shift();
     if (next) throw next;
     if (!this.allowRetract) throw new RetractRefused("retract_disabled", "off");
     const session = this.sessions.get(id);
-    if (!session || session.gone) return "absent";
+    if (!session) return "absent";
+    if (session.gone) return "gone";
     if (session.hash !== retractHash(secret)) throw new RetractRefused("bad_retract_secret", "no");
     session.gone = true;
     return "retracted";
@@ -501,6 +502,28 @@ describe("retraction (F9.7)", () => {
     server.allowRetract = false;
     await uploader().pass();
     expect(session()).toMatchObject({ retract: "failed", retract_error: "off" });
+  });
+
+  it("never reports as retracted a stored session the server cannot find for this owner", async () => {
+    writeFileSync(transcript(), line("one") + line("two"));
+    hooked();
+    await uploader().pass();
+    // Stored under another owner since (another username, a sign-in that changed the owner).
+    server.sessions.delete("s1");
+    await turnOff();
+    await uploader().pass();
+    expect(session()).toMatchObject({ retract: "failed", stored: true });
+    expect(session().retract_error).toContain("no such session");
+    expect(session().secret).toBeDefined();
+
+    // Already removed (an admin's delete): that is done.
+    writeFileSync(transcript("s2"), line("one", "s2") + line("two", "s2"));
+    hooked("s2");
+    await uploader().pass();
+    (server.sessions.get("s2") as { gone?: boolean }).gone = true;
+    await turnOff("s2");
+    await uploader().pass();
+    expect(session("s2")).toMatchObject({ retract: "done", generation: 1 });
   });
 });
 

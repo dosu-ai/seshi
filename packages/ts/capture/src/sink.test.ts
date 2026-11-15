@@ -69,7 +69,7 @@ describe("httpSink", () => {
     answer = () => error(404, "not_found");
     expect(await sink().retract("a", "s", "x")).toBe("absent");
     answer = () => error(410, "redacted");
-    expect(await sink().retract("a", "s", "x")).toBe("absent");
+    expect(await sink().retract("a", "s", "x")).toBe("gone");
   });
 
   it("says why a retraction was refused", async () => {

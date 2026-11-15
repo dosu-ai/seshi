@@ -835,8 +835,20 @@ export class Uploader {
         uploadId(session),
         session.secret,
       );
+      if (outcome === "absent" && session.stored) {
+        // The server stored it for this machine, yet has no such session for this credential's
+        // owner (uploaded under another username, before a sign-in that changed the owner):
+        // never report that as retracted. Turning it off again tries again.
+        const text = `${uploadId(session)} was stored from here, but the server has no such session for this credential's owner (was it uploaded under another username?); remove it with seshi sessions rm, or ask an admin`;
+        this.log(`${key}: retraction found nothing: ${text}`);
+        await this.save(key, (s) => {
+          s.retract = "failed";
+          s.retract_error = text;
+        });
+        return {};
+      }
       this.log(
-        `${key}: ${outcome === "retracted" ? "retracted" : "nothing to retract on the server"}`,
+        `${key}: ${outcome === "retracted" ? "retracted" : outcome === "gone" ? "already removed on the server" : "nothing to retract on the server"}`,
       );
       await this.save(key, reset);
       return { ok: true };

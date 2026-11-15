@@ -28,6 +28,9 @@ export class RetractRefused extends Error {
   }
 }
 
+/** What a retraction found on the server. */
+export type RetractOutcome = "retracted" | "gone" | "absent";
+
 export interface SessionSink {
   /** Where uploads go, for status: the server's URL, or `local: <bucket>`. */
   readonly target: string;
@@ -35,8 +38,9 @@ export interface SessionSink {
    * for a missing or refused credential, and `StoreError` or `ServerError` otherwise. */
   ingest(upload: Upload): Promise<StoreSessionResult>;
   /** Retract a session this machine uploaded, with its secret (F9.7): `retracted` when the
-   * server removed it, `absent` when it holds nothing of it (never stored, or already gone). */
-  retract(agent: string, sessionId: string, secret: string): Promise<"retracted" | "absent">;
+   * server removed it, `gone` when it was already removed, `absent` when the server holds no
+   * such session for this credential (never stored, or stored under another owner). */
+  retract(agent: string, sessionId: string, secret: string): Promise<RetractOutcome>;
   /** Whether there is a credential to send with now, without a request: throws
    * `SignInNeeded` when there is none. Lets the status line drop "sign in" once the person
    * signed in, before anything is uploaded. */
@@ -98,7 +102,7 @@ export function httpSink(options: HttpSinkOptions): SessionSink {
         return removed === null ? "absent" : "retracted";
       } catch (err) {
         if (err instanceof ServerError) {
-          if (err.status === 410) return "absent";
+          if (err.status === 410) return "gone";
           if (
             err.status === 403 &&
             (err.code === "retract_disabled" || err.code === "bad_retract_secret")
