@@ -242,6 +242,8 @@ async function upload(
     if (lock) {
       try {
         for (let i = 0; i < 50; i++) {
+          // Held like the background uploader's, so a hook meanwhile does not start another.
+          if (!lock.beat()) break;
           const summary = await runtime.uploader.pass({ only });
           if (summary.signIn) {
             signIn = summary.signIn;

@@ -305,6 +305,18 @@ describe("turning a session off (F9.5, F9.7)", () => {
     await daemon();
     expect(state().sessions["claude-code:never-seen"]).toMatchObject({ toggle: "off" });
   });
+
+  it("keeps the transcript of a session turned off before any hook, so a later hook skips it", async () => {
+    const off = await machine.seshi(["capture", "off", "--session", SESSION], {
+      env: { SESHI_AGENT: "claude-code" },
+    });
+    expect(off.code, off.err).toBe(0);
+    expect(state().sessions[`claude-code:${SESSION}`]).toMatchObject({ toggle: "off", path: file });
+    await hook();
+    expect(spooled()).toBe(1); // the retract entry only
+    await daemon();
+    expect(await stored()).toBeNull();
+  });
 });
 
 describe("the status line (F9.4, B1.6)", () => {

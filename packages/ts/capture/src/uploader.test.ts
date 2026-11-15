@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   appendFileSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -599,6 +600,38 @@ describe("the spool and the sweep", () => {
     await uploader({ agents: [locating] }).pass();
     expect(server.sessions.has("late")).toBe(true);
     expect(session("late").path).toBe(transcript("late"));
+  });
+
+  it("keeps a toggle set before any hook named the transcript while the transcript exists", async () => {
+    await updateState(paths, (s) => {
+      s.agents.fake = { installed_at: "2026-10-01T00:00:00Z" };
+      s.sessions["fake:early"] = {
+        agent: "fake",
+        session_id: "early",
+        cwd: dir,
+        first_seen: "2026-10-20T00:00:00Z",
+        toggle: "off",
+      };
+    });
+    writeFileSync(transcript("early"), line("one", "early") + line("two", "early"));
+    const locating = {
+      ...agent,
+      locate: (id: string) => (existsSync(transcript(id)) ? transcript(id) : undefined),
+    };
+    await uploader({ agents: [locating] }).pass({ sweep: true });
+    expect(session("early")).toMatchObject({ toggle: "off", path: transcript("early") });
+    expect(server.uploads).toHaveLength(0);
+    // Without a transcript to find it is forgotten after a day, as any session without one.
+    await updateState(paths, (s) => {
+      s.sessions["fake:gone"] = {
+        agent: "fake",
+        session_id: "gone",
+        first_seen: "2026-10-20T00:00:00Z",
+        toggle: "off",
+      };
+    });
+    await uploader({ agents: [locating] }).pass({ sweep: true });
+    expect(readState(paths).sessions["fake:gone"]).toBeUndefined();
   });
 });
 

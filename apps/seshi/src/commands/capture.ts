@@ -45,7 +45,7 @@ import { parseDuration } from "@seshi/config";
 import type { CaptureAgent, InstallStatus } from "@seshi/kit";
 import { expandTilde } from "@seshi/kit";
 import { type Account, openAccount } from "../account/account";
-import { allCaptureAgents, CAPTURE_AGENTS } from "../capture-agents";
+import { allCaptureAgents, CAPTURE_AGENTS, captureAgent } from "../capture-agents";
 import {
   readCliText,
   rulePath,
@@ -591,6 +591,11 @@ async function toggleSession(
   const key = sessionKey(agent, id);
   let retracting = false;
   let fresh = false;
+  // A session turned off before any hook named its transcript (`/seshi capture off` as the
+  // first prompt): find it now, so the toggle is kept as long as the transcript exists (F9.3)
+  // and not forgotten as a session with nothing to show for it.
+  const known = readState(paths).sessions[key];
+  const located = known?.path ? undefined : (await captureAgent(agent))?.locate?.(id, hostOf(ctx));
   await updateState(paths, (state) => {
     const session: SessionState = state.sessions[key] ?? {
       agent,
@@ -598,6 +603,7 @@ async function toggleSession(
       first_seen: now.toISOString(),
       ...(process.cwd() ? { cwd: process.cwd() } : {}),
     };
+    if (located && !session.path) session.path = located;
     session.toggle = which;
     session.toggled_at = now.toISOString();
     if (which === "off") {

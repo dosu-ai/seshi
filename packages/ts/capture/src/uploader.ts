@@ -456,6 +456,15 @@ export class Uploader {
       }
       for (const [key, session] of Object.entries(st.sessions)) {
         if (session.retract === "pending") continue;
+        if (!session.path && session.toggle) {
+          // A toggle set before any hook named the transcript stays while the transcript
+          // exists (F9.3): forgetting it would let a later hook or sweep capture the session.
+          const found = this.agents.get(session.agent)?.locate?.(session.session_id, this.host);
+          if (found) {
+            session.path = found;
+            continue;
+          }
+        }
         const gone = session.path
           ? !existsSync(session.path)
           : now.getTime() - Date.parse(session.first_seen) > 24 * 3600 * SECOND;
