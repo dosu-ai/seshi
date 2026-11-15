@@ -3,23 +3,27 @@
  * `name:token` pairs, a secret that signed tokens are checked against (`signed-token.ts`), or
  * both. Each token names a person, and that person's sessions live under `owners/<name>/`: a
  * token writes there and reads only there, so teammates never see each other's transcripts. A
- * client with a token posts raw transcripts; the server stores them redacted, normalizes them
- * and writes the traces to the bucket in the layout, so the laptop never holds a bucket
- * credential and the bucket never holds an unredacted byte.
+ * client with a token posts transcripts; the server turns each into an envelope and runs it
+ * through the pipeline inline (X4.4): normalized, redacted, filtered and reviewed in memory, and
+ * only the trace written (X6.3), so the laptop never holds a bucket credential and the bucket
+ * never holds an unredacted byte.
  *
- * Every route is a `StoreSessionDB` call (the SDK's client over the bucket, one per owner) with
- * the request read off the wire and the result or error mapped to a status. The SDK's HTTP
- * backend does the reverse on the other side, so the two are one API with a network in it. */
+ * Every route is a `StoreSessionDB` call (the SDK's client over the bucket, one per owner, all
+ * submitting to one `Pipeline`) with the request read off the wire and the result or error
+ * mapped to a status. The SDK's HTTP backend does the reverse on the other side, so the two are
+ * one API with a network in it. */
 
 import { timingSafeEqual } from "node:crypto";
 import { MIN_SECRET_LENGTH, verifyToken } from "@seshi/auth";
 import type { FormatRegistry } from "@seshi/formats";
 import {
   type CallerKind,
+  Forbidden,
   isRenderFormat,
   OffsetMismatch,
   type RawFormat,
   RENDER_FORMATS,
+  SessionConflict,
   SessionRejected,
   type StorageView,
   StoreError,
@@ -28,7 +32,14 @@ import {
   type Upload,
   VERSION,
 } from "@seshi/model";
-import { type FilterRules, type Limits, StoreSessionDB } from "@seshi/pipeline";
+import {
+  type FilterSetting,
+  type HealthCounters,
+  type Limits,
+  Pipeline,
+  type Reviewer,
+  StoreSessionDB,
+} from "@seshi/pipeline";
 import type { RedactionRules } from "@seshi/redact";
 import { assertOwner, type Store } from "@seshi/store";
 
@@ -57,10 +68,15 @@ export interface AppOptions {
   now?: () => Date;
   /** The operator's redaction, added to the built-in rules for every session. */
   redaction?: RedactionRules;
-  /** The session filter (X4.10), config's `[filter]`; today's rules when omitted. */
-  filter?: Readonly<FilterRules>;
+  /** The session filter (X4.10): config's `[filter]`, or the rules per source id; today's
+   * rules when omitted. */
+  filter?: FilterSetting;
   /** Size caps, config's `[limits]`; today's when omitted. */
   limits?: Readonly<Limits>;
+  /** Model review (F3); none when omitted. */
+  reviewer?: Reviewer;
+  /** Source health counters (X4.8); none when omitted. */
+  health?: HealthCounters;
 }
 
 type Handler = (ctx: Context) => Promise<Response> | Response;
@@ -187,6 +203,17 @@ export function createApp(options: AppOptions) {
   const client = options.client ?? `seshi/${VERSION}`;
   const now = options.now ?? (() => new Date());
   const routes: Route[] = [];
+  const pipeline = new Pipeline({
+    store,
+    formats,
+    client,
+    now,
+    redaction: options.redaction,
+    filter: options.filter,
+    limits: options.limits,
+    reviewer: options.reviewer,
+    health: options.health,
+  });
 
   /** The SDK over the bucket, scoped to each owner a token names and to the kind of token it
    * was (a static token from config, or a legacy signed token), which every write records as
@@ -204,9 +231,7 @@ export function createApp(options: AppOptions) {
         formats,
         client,
         now,
-        redaction: options.redaction,
-        filter: options.filter,
-        limits: options.limits,
+        pipeline,
         writer: { kind, principal: owner, source_id: UPLOAD_SOURCE },
         owner_basis: "verified",
       });
@@ -252,9 +277,11 @@ export function createApp(options: AppOptions) {
 
   // --- sessions ---------------------------------------------------------
 
-  /** `ingest` as a response: 201 for a new trace, 200 for a duplicate or a trivial session,
-   * 422 for a transcript it refuses, 409 for a chunk that does not start where the session's
-   * log ends (`expected` says where it does). */
+  /** `ingest` as a response: 201 for a new trace; 200 for a duplicate, an unchanged, filtered
+   * or dropped session; 422 for a transcript it refuses; 409 `offset_mismatch` for a chunk that
+   * does not start where the session's log ends (`expected` says where it does: 0 while the
+   * session has no trace), 409 `conflict` for a whole upload that does not extend the session
+   * without `replace`; 403 for a `replace` by someone other than the original writer. */
   async function stored(db: StoreSessionDB, upload: Upload): Promise<Response> {
     let result: StoreSessionResult;
     try {
@@ -266,6 +293,8 @@ export function createApp(options: AppOptions) {
           409,
         );
       }
+      if (err instanceof SessionConflict) throw new HttpError(409, err.code, err.message);
+      if (err instanceof Forbidden) throw new HttpError(403, err.code, err.message);
       if (err instanceof SessionRejected) throw new HttpError(422, err.code, err.message);
       throw err;
     }
@@ -294,6 +323,18 @@ export function createApp(options: AppOptions) {
     ) {
       throw new HttpError(400, "bad_field", "shipped needs records and prefix_sha256");
     }
+    const replace = body.replace ?? false;
+    if (typeof replace !== "boolean")
+      throw new HttpError(400, "bad_field", "replace must be a boolean");
+    const visibility = str(body, "visibility");
+    if (visibility !== undefined && visibility !== "org" && visibility !== "owner") {
+      throw new HttpError(400, "bad_field", "visibility must be org or owner");
+    }
+    const idempotencyKey =
+      request.headers.get("idempotency-key") ?? str(body, "idempotency_key") ?? undefined;
+    if (idempotencyKey === "") {
+      throw new HttpError(400, "bad_field", "an idempotency key must not be empty");
+    }
     return stored(db, {
       agent,
       session_id: str(body, "session_id", true) as string,
@@ -304,6 +345,9 @@ export function createApp(options: AppOptions) {
       branch: str(body, "branch"),
       parent_session_id: str(body, "parent_session_id"),
       fork_of: str(body, "fork_of"),
+      ...(replace ? { replace } : {}),
+      ...(visibility ? { visibility } : {}),
+      ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
       ...(shipped
         ? {
             shipped: {
@@ -349,7 +393,7 @@ export function createApp(options: AppOptions) {
       throw new HttpError(400, "bad_query", `format must be one of ${RENDER_FORMATS.join(", ")}`);
     }
     const hash = url.searchParams.get("hash") ?? metadata.head;
-    if (!hash) throw new HttpError(404, "no_trace", "session is stored raw only; no trace yet");
+    if (!hash) throw new HttpError(404, "no_trace", "session has no trace");
     const trace = await db.getTrace(agent, sessionId, hash, format);
     if (!trace) throw new HttpError(404, "not_found", "no such trace");
     return json(trace);

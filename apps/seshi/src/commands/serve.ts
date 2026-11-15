@@ -5,11 +5,13 @@
  *
  *   seshi serve [--config <file>] [--listen <host:port>] [--roles api,worker] [--set path=value]… */
 
+import { randomUUID } from "node:crypto";
 import { parseArgs } from "node:util";
 import { createApp } from "@seshi/api";
-import { ConfigError, loadServerConfig } from "@seshi/config";
+import { ConfigError, filterFor, loadServerConfig } from "@seshi/config";
 import type { FormatRegistry } from "@seshi/formats";
 import { VERSION } from "@seshi/model";
+import { StoreHealthCounters } from "@seshi/pipeline";
 import {
   parseRedactionConfig,
   type RedactionConfig,
@@ -128,8 +130,14 @@ async function start(ctx: CommandContext, formats: FormatRegistry): Promise<void
     tokenSecret,
     client,
     redaction,
-    filter: settings.filter,
+    // Each source's own rules over [filter] (X4.10); uploads get [filter].
+    filter: (sourceId) => filterFor(loaded.config, sourceId),
     limits: settings.limits,
+    // This process's own shard of the source health counters (X4.8).
+    health: new StoreHealthCounters(store, {
+      instance: `serve-${randomUUID().slice(0, 8)}`,
+      onError: (err) => ctx.stderr(`seshi: warning: source health not recorded: ${message(err)}`),
+    }),
   });
 
   const server = Bun.serve({

@@ -10,11 +10,13 @@ import { gzipSync } from "node:zlib";
 import {
   type ChangesPage,
   type Fetch,
+  Forbidden,
   type Identity,
   type ListSessionsOptions,
   OffsetMismatch,
   type ReadChangesOptions,
   type RenderFormat,
+  SessionConflict,
   type SessionDB,
   type SessionMetadata,
   SessionRejected,
@@ -138,6 +140,8 @@ export class HttpSessionDB implements SessionDB {
     if (status === 409 && code === "offset_mismatch") {
       throw new OffsetMismatch(offset, error.expected ?? 0);
     }
+    if (status === 409 && code === "conflict") throw new SessionConflict(message);
+    if (status === 403 && code === "forbidden") throw new Forbidden(message);
     if (status === 422) throw new SessionRejected(code, message);
     if (status === 502) throw new StoreError(message);
     throw new ServerError(status, code, message);

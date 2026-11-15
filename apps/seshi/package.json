@@ -29,6 +29,7 @@
     "@seshi/integration-pi": "workspace:*",
     "@seshi/kit": "workspace:*",
     "@seshi/model": "workspace:*",
+    "@seshi/pipeline": "workspace:*",
     "@seshi/redact": "workspace:*",
     "@seshi/store": "workspace:*"
   }
