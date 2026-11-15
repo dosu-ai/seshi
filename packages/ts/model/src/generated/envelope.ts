@@ -84,3 +84,90 @@ export interface Caller {
   principal: string;
   credential_id?: string;
 }
+
+/** envelope.schema.json as data, without its annotations: what `schemaProblems` checks against. */
+export const JSON_SCHEMA = {
+  $id: "envelope.schema.json",
+  type: "object",
+  properties: {
+    schema: { const: "seshi/envelope/1" },
+    source: { $ref: "common.schema.json#/$defs/SourceKind" },
+    source_id: { $ref: "common.schema.json#/$defs/SourceId" },
+    format: { type: "string", minLength: 1 },
+    session_key: { type: "string", minLength: 1 },
+    payload: { $ref: "#/$defs/Payload" },
+    caller: { $ref: "#/$defs/Caller" },
+    claims: { $ref: "common.schema.json#/$defs/Claims" },
+    owner: { type: "string", minLength: 1 },
+    owner_basis: { $ref: "common.schema.json#/$defs/OwnerBasis" },
+    idempotency_key: { type: "string", minLength: 1, maxLength: 2048 },
+    provenance: { $ref: "common.schema.json#/$defs/SourceLocation" },
+    received_at: { $ref: "common.schema.json#/$defs/Timestamp" },
+    visibility: { $ref: "common.schema.json#/$defs/Visibility" },
+    replace: { type: "boolean" },
+    rebuild: { type: "boolean" },
+    shipped: { $ref: "#/$defs/ShippedPrefix" },
+    project: { type: "string" },
+    branch: { type: "string" },
+    parent_session_id: { type: "string" },
+    fork_of: { type: "string" },
+    retract_hash: { $ref: "common.schema.json#/$defs/Sha256" },
+  },
+  required: [
+    "schema",
+    "source",
+    "source_id",
+    "format",
+    "session_key",
+    "payload",
+    "caller",
+    "owner",
+    "owner_basis",
+    "idempotency_key",
+    "received_at",
+  ],
+  additionalProperties: false,
+  $defs: {
+    Payload: { oneOf: [{ $ref: "#/$defs/LogPayload" }, { $ref: "#/$defs/SpanPayload" }] },
+    LogPayload: {
+      type: "object",
+      properties: {
+        kind: { const: "log" },
+        encoding: { $ref: "common.schema.json#/$defs/LogEncoding" },
+        text: { type: "string" },
+        offset: { type: "integer", minimum: 0 },
+      },
+      required: ["kind", "encoding", "text", "offset"],
+      additionalProperties: false,
+    },
+    SpanPayload: {
+      type: "object",
+      properties: {
+        kind: { const: "spans" },
+        spans: { type: "array", items: { type: "object" } },
+        resource: { type: "array", items: { type: "object" } },
+      },
+      required: ["kind", "spans"],
+      additionalProperties: false,
+    },
+    ShippedPrefix: {
+      type: "object",
+      properties: {
+        records: { type: "integer", minimum: 0 },
+        prefix_sha256: { $ref: "common.schema.json#/$defs/Sha256" },
+      },
+      required: ["records", "prefix_sha256"],
+      additionalProperties: false,
+    },
+    Caller: {
+      type: "object",
+      properties: {
+        kind: { $ref: "common.schema.json#/$defs/CallerKind" },
+        principal: { type: "string", minLength: 1 },
+        credential_id: { type: "string", minLength: 1 },
+      },
+      required: ["kind", "principal"],
+      additionalProperties: false,
+    },
+  },
+};

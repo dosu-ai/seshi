@@ -7,7 +7,11 @@
  * `required`, `additionalProperties`), `type` (one or a list), `const`, `enum`, `oneOf` /
  * `anyOf`, `items`, and `$ref` to a `$defs` entry in the same file or in another file of
  * `spec/schemas/`. Anything else fails loudly rather than generating a looser type. Output is
- * formatted with Biome so it passes `bun run check` as written. */
+ * formatted with Biome so it passes `bun run check` as written.
+ *
+ * Each module also carries its schema as data (`JSON_SCHEMA`, annotations left out), which
+ * `@seshi/model`'s `schemaProblems` checks a stored object against at run time (the store
+ * checker reads a bucket with it), so that check follows the contract too. */
 
 import { readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
@@ -61,6 +65,10 @@ const HANDLED = new Set([
   "required",
   "additionalProperties",
 ]);
+
+/** Annotations: left out of the `JSON_SCHEMA` a module carries, since they say nothing a check
+ * needs. */
+const ANNOTATIONS = new Set(["$schema", "title", "description", "examples", "default"]);
 
 const SCHEMA_DIR = "spec/schemas";
 const OUT_DIR = "packages/ts/model/src/generated";
@@ -175,6 +183,27 @@ class Generator {
   }
 }
 
+/** A schema without its annotations, walking only the keywords that hold schemas (so a property
+ * named `description` or `format` is kept). */
+function stripped(schema: Schema): Schema {
+  const out: Schema = {};
+  for (const [k, v] of Object.entries(schema)) {
+    if (ANNOTATIONS.has(k)) continue;
+    if ((k === "properties" || k === "$defs") && v && typeof v === "object") {
+      out[k] = Object.fromEntries(
+        Object.entries(v as Record<string, Schema>).map(([name, s]) => [name, stripped(s)]),
+      );
+    } else if ((k === "items" || k === "additionalProperties") && v && typeof v === "object") {
+      out[k] = stripped(v as Schema);
+    } else if ((k === "oneOf" || k === "anyOf") && Array.isArray(v)) {
+      out[k] = (v as Schema[]).map(stripped);
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
 /** Every generated file: its path and content, before formatting. */
 export function generate(root: string): Array<{ path: string; text: string }> {
   const files = readdirSync(join(root, SCHEMA_DIR))
@@ -201,6 +230,9 @@ export function generate(root: string): Array<{ path: string; text: string }> {
     for (const [name, def] of Object.entries(schema.$defs ?? {})) {
       body.push(gen.declaration(name, def));
     }
+    body.push(
+      `/** ${file} as data, without its annotations: what \`schemaProblems\` checks against. */\nexport const JSON_SCHEMA = ${JSON.stringify(stripped(schema))};\n`,
+    );
     const imports = [...gen.imports.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([mod, names]) => `import type { ${[...names].sort().join(", ")} } from "./${mod}";\n`)

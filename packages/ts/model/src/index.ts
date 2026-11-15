@@ -142,6 +142,7 @@ export {
   validateRecords,
   validateTraceRecords,
 } from "./schemas/trajectory";
+export { type SchemaFile, schemaProblems } from "./schemas/validate";
 export {
   SEARCH_SORTS,
   type SearchIndexState,

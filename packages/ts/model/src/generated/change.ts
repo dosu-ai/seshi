@@ -27,3 +27,26 @@ export interface ChangeEntry {
   /** On `visibility_changed`: the new visibility. */
   visibility?: Visibility;
 }
+
+/** change.schema.json as data, without its annotations: what `schemaProblems` checks against. */
+export const JSON_SCHEMA = {
+  $id: "change.schema.json",
+  type: "object",
+  properties: {
+    schema: { const: "seshi/change/1" },
+    kind: { enum: ["published", "tombstone", "visibility_changed"] },
+    at: { $ref: "common.schema.json#/$defs/Timestamp" },
+    owner: { type: "string", minLength: 1 },
+    archive_id: { $ref: "common.schema.json#/$defs/Sha256" },
+    session_id: { type: "string" },
+    content_hash: { oneOf: [{ $ref: "common.schema.json#/$defs/Sha256" }, { type: "null" }] },
+    continuation: { $ref: "common.schema.json#/$defs/Continuation" },
+    replace: { const: true },
+    writer: { $ref: "common.schema.json#/$defs/Writer" },
+    owner_basis: { $ref: "common.schema.json#/$defs/OwnerBasis" },
+    reason: { enum: ["deleted", "retracted", "redacted"] },
+    visibility: { $ref: "common.schema.json#/$defs/Visibility" },
+  },
+  required: ["schema", "kind", "at", "owner", "archive_id", "session_id", "content_hash", "writer"],
+  additionalProperties: false,
+};

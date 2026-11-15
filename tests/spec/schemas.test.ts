@@ -12,6 +12,8 @@ import {
   LAYOUT_SCHEMA,
   METADATA_SCHEMA,
   parseTrace,
+  type SchemaFile,
+  schemaProblems,
   TRACE_SCHEMA,
   type Trace,
 } from "@seshi/model";
@@ -91,6 +93,67 @@ describe("spec/testdata/objects", () => {
       false,
     );
   });
+});
+
+describe("schemaProblems (@seshi/model) agrees with ajv", () => {
+  const dir = join(SPEC, "testdata/objects");
+  const objects = readdirSync(dir).filter((f) => f.endsWith(".json"));
+  const fileOf = (name: string) => `${name.split(".")[0]}.schema.json` as SchemaFile;
+
+  it.each(objects)("finds nothing wrong with %s", (file) => {
+    expect(schemaProblems(fileOf(file), read(join(dir, file)))).toEqual([]);
+  });
+
+  /** Every way of breaking an object one field at a time that the contract refuses or allows. */
+  function mutations(value: Record<string, unknown>): Array<[string, unknown]> {
+    const out: Array<[string, unknown]> = [
+      ["no schema", { ...value, schema: undefined }],
+      ["an extra field", { ...value, extra: 1 }],
+      ["an array", [value]],
+      ["null", null],
+    ];
+    for (const [key, field] of Object.entries(value)) {
+      const { [key]: _gone, ...without } = value;
+      out.push([`without ${key}`, without]);
+      out.push([`${key} as a number`, { ...value, [key]: 7 }]);
+      out.push([`${key} as -1`, { ...value, [key]: -1 }]);
+      out.push([`${key} as text`, { ...value, [key]: "not-a-hash" }]);
+      out.push([`${key} as a hash`, { ...value, [key]: "a".repeat(64) }]);
+      out.push([`${key} as null`, { ...value, [key]: null }]);
+      out.push([`${key} as a date`, { ...value, [key]: "2026-11-14T09:00:00.000Z" }]);
+      out.push([`${key} as a bad date`, { ...value, [key]: "2026-13-45T99:00:00Z" }]);
+      if (Array.isArray(field) && field.length > 0 && typeof field[0] === "object") {
+        const first = field[0] as Record<string, unknown>;
+        for (const inner of Object.keys(first)) {
+          const { [inner]: _x, ...rest } = first;
+          out.push([`${key}[0] without ${inner}`, { ...value, [key]: [rest, ...field.slice(1)] }]);
+          out.push([`${key}[0].${inner} as -1`, { ...value, [key]: [{ ...first, [inner]: -1 }] }]);
+        }
+      } else if (field && typeof field === "object" && !Array.isArray(field)) {
+        for (const inner of Object.keys(field)) {
+          const { [inner]: _x, ...rest } = field as Record<string, unknown>;
+          out.push([`${key} without ${inner}`, { ...value, [key]: rest }]);
+          out.push([`${key}.${inner} as 7`, { ...value, [key]: { ...field, [inner]: 7 } }]);
+          out.push([`${key}.extra`, { ...value, [key]: { ...field, extra: "x" } }]);
+        }
+      }
+    }
+    return out;
+  }
+
+  it.each(objects.filter((f) => !f.startsWith("trace.") && !f.startsWith("envelope.")))(
+    "says the same as ajv of every one-field change to %s",
+    (file) => {
+      const schema = fileOf(file);
+      const validate = ajv.getSchema(schema);
+      if (!validate) throw new Error(`no schema ${schema}`);
+      for (const [what, value] of mutations(read(join(dir, file)))) {
+        const ours = schemaProblems(schema, JSON.parse(JSON.stringify(value) ?? "null"));
+        const theirs = validate(JSON.parse(JSON.stringify(value) ?? "null"));
+        expect(ours.length === 0, `${file}, ${what}: ${ours.join("; ")}`).toBe(theirs === true);
+      }
+    },
+  );
 });
 
 describe("what the pipeline writes", () => {

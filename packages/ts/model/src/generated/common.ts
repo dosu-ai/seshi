@@ -96,3 +96,95 @@ export interface RedactionSummary {
     [key: string]: number;
   };
 }
+
+/** common.schema.json as data, without its annotations: what `schemaProblems` checks against. */
+export const JSON_SCHEMA = {
+  $id: "common.schema.json",
+  $defs: {
+    Sha256: { type: "string", pattern: "^[0-9a-f]{64}$" },
+    Timestamp: { type: "string", format: "date-time" },
+    SourceKind: {
+      type: "string",
+      enum: ["upload", "hook", "otlp", "datadog", "s3", "cursor-cloud"],
+    },
+    SourceId: { type: "string", pattern: "^[a-z0-9]+(-[a-z0-9]+)*$" },
+    CallerKind: {
+      type: "string",
+      enum: ["person", "device", "service", "admin", "static", "local"],
+    },
+    Writer: {
+      type: "object",
+      properties: {
+        kind: { $ref: "#/$defs/CallerKind" },
+        principal: { type: "string", minLength: 1 },
+        credential_id: { type: "string", minLength: 1 },
+        source_id: { $ref: "#/$defs/SourceId" },
+      },
+      required: ["kind", "principal", "source_id"],
+      additionalProperties: false,
+    },
+    OwnerBasis: { type: "string", enum: ["verified", "claimed", "service"] },
+    LogEncoding: { enum: ["jsonl", "json"] },
+    Visibility: { type: "string", enum: ["org", "owner"] },
+    Claims: {
+      type: "object",
+      properties: {
+        email: { type: "string" },
+        name: { type: "string" },
+        username: { type: "string" },
+        git_email: { type: "string" },
+        git_name: { type: "string" },
+        account_ids: { type: "object", additionalProperties: { type: "string" } },
+      },
+      additionalProperties: false,
+    },
+    SourceLocation: {
+      type: "object",
+      properties: {
+        object_key: { type: "string" },
+        etag: { type: "string" },
+        cursor: { type: "string" },
+      },
+      additionalProperties: false,
+    },
+    Provenance: {
+      type: "object",
+      properties: {
+        source: { $ref: "#/$defs/SourceKind" },
+        source_id: { $ref: "#/$defs/SourceId" },
+        format: { type: "string", minLength: 1 },
+        location: { $ref: "#/$defs/SourceLocation" },
+      },
+      required: ["source", "source_id"],
+      additionalProperties: false,
+    },
+    Normalizer: {
+      type: "object",
+      properties: {
+        name: { type: "string", minLength: 1 },
+        version: { type: "string", minLength: 1 },
+        format_version: { type: "string", minLength: 1 },
+      },
+      required: ["name", "version"],
+      additionalProperties: false,
+    },
+    Continuation: {
+      type: "object",
+      properties: {
+        from_record: { type: "integer", minimum: 0 },
+        prefix_sha256: { $ref: "#/$defs/Sha256" },
+      },
+      required: ["from_record", "prefix_sha256"],
+      additionalProperties: false,
+    },
+    RedactionSummary: {
+      type: "object",
+      properties: {
+        rule_set: { $ref: "#/$defs/Sha256" },
+        counts: { type: "object", additionalProperties: { type: "integer", minimum: 0 } },
+      },
+      required: ["rule_set", "counts"],
+      additionalProperties: false,
+    },
+  },
+};

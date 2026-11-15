@@ -18,3 +18,19 @@ export interface LayoutMarker {
   /** The program that wrote the marker (`seshi/0.9.0`). */
   created_by: string;
 }
+
+/** layout.schema.json as data, without its annotations: what `schemaProblems` checks against. */
+export const JSON_SCHEMA = {
+  $id: "layout.schema.json",
+  type: "object",
+  properties: {
+    schema: { const: "seshi/layout/1" },
+    trace_schema: { const: "seshi/trace/1" },
+    deployment_id: { type: "string", minLength: 1 },
+    org: { type: "string", minLength: 1 },
+    created_at: { $ref: "common.schema.json#/$defs/Timestamp" },
+    created_by: { type: "string" },
+  },
+  required: ["schema", "trace_schema", "deployment_id", "created_at", "created_by"],
+  additionalProperties: false,
+};
