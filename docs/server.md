@@ -527,7 +527,8 @@ To retract, the machine sends `DELETE /v1/sessions/:agent/:session_id` with its 
 credential (`sessions:write`) and the secret in `X-Seshi-Retract`. The server compares the
 secret's hash with the stored one (in constant time) and runs the normal delete: trace objects
 removed, the session marked redacted, a tombstone with reason `retracted` and the caller as its
-writer. It acts on the caller's own sessions only (`?owner` is ignored).
+writer. It acts on the caller's own sessions only (`?owner` is ignored), including those stored
+under an old owner id that `[auth.owner_aliases]` folds into the caller's (X5.8).
 
 | Answer | When |
 |---|---|

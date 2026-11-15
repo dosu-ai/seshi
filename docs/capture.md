@@ -119,6 +119,11 @@ from the start as a new session (`<id>~1`). If the state file is lost, the secre
 the session with `seshi sessions rm` (with an IdP) or ask an admin. A server can turn retraction
 off with `capture.allow_retract = false`.
 
+If the server holds no such session for your credential although this machine stored it (it was
+uploaded under another username, say), the retraction is not reported as done: `seshi capture
+status` and the status line say `retraction refused`, and turning the session off again tries
+again.
+
 ## Uploading by hand
 
 ```sh

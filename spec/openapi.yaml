@@ -365,8 +365,9 @@ paths:
         With `X-Seshi-Retract` it is a retraction instead (F9.7): the machine that uploaded the
         session sends the retraction secret whose sha256 it sent as `retract_hash`, with its
         normal upload credential (`sessions:write`: a device token, or the org key with its
-        username). It acts on the caller's own sessions only (`owner` is ignored), and the
-        tombstone's reason is `retracted`. The server's `capture.allow_retract` turns it off.
+        username). It acts on the caller's own sessions only (`owner` is ignored; old owner ids
+        that `[auth.owner_aliases]` folds into the caller's count), and the tombstone's reason is
+        `retracted`. The server's `capture.allow_retract` turns it off.
       parameters:
         - name: X-Seshi-Retract
           in: header
