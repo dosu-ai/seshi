@@ -46,6 +46,8 @@ class FakeServer implements SessionSink {
   failNext: unknown[] = [];
   allowRetract = true;
   signedIn = true;
+  /** Review drops every replace. */
+  dropReplace = false;
 
   async ready() {
     if (!this.signedIn) throw new SignInNeeded("not signed in");
@@ -94,6 +96,8 @@ class FakeServer implements SessionSink {
         return this.answer(grew ? "stored" : "unchanged", session.text);
       }
       if (!upload.replace) throw new SessionConflict("does not extend");
+      // Model review dropped the replace: the session stays as stored.
+      if (this.dropReplace) return this.answer("dropped", session.text);
       session.text = upload.transcript;
       return this.answer("stored", session.text);
     }
@@ -335,6 +339,35 @@ describe("the upload protocol", () => {
     const before = server.uploads.length;
     await uploader().pass();
     expect(server.uploads).toHaveLength(before);
+  });
+
+  it("replaces again after review dropped a replace, never chunking onto the kept session", async () => {
+    // Review finding: a dropped replace left the server holding the old session, and the next
+    // chunk of this log went at the server's offset, splicing it onto that session.
+    writeFileSync(transcript(), line("one") + line("two"));
+    hooked();
+    await uploader().pass();
+    writeFileSync(transcript(), line("uno"));
+    server.dropReplace = true;
+    await uploader().pass();
+    expect(server.uploads.at(-1)).toMatchObject({ offset: 0, replace: true });
+    expect(server.sessions.get("s1")?.text).toBe(line("one") + line("two"));
+    expect(session().replace_next).toBe(true);
+    // Nothing more until the transcript grows.
+    const sent = server.uploads.length;
+    await uploader().pass();
+    expect(server.uploads).toHaveLength(sent);
+    server.dropReplace = false;
+    appendFileSync(transcript(), line("dos"));
+    await uploader().pass();
+    expect(server.uploads.at(-1)).toMatchObject({ offset: 0, replace: true });
+    expect(server.sessions.get("s1")?.text).toBe(line("uno") + line("dos"));
+    expect(session().replace_next).toBeUndefined();
+    // Then chunks as usual.
+    appendFileSync(transcript(), line("tres"));
+    await uploader().pass();
+    expect(server.uploads.at(-1)?.offset).toBe(Buffer.byteLength(line("uno") + line("dos")));
+    expect(server.sessions.get("s1")?.text).toBe(line("uno") + line("dos") + line("tres"));
   });
 
   it("treats forbidden and 422 as permanent, the network and 5xx as worth retrying", async () => {

@@ -11,7 +11,9 @@
  *   session filter never judges a chunk (X4.10), so an agent-only tail is never lost.
  * - 409 `offset_mismatch`: resend from `expected` (from the start when it is 0).
  * - 409 `conflict` on a whole log (rules or the normalizer changed, X4.6): resend with
- *   `replace` when this machine stored the session; otherwise it is a permanent refusal.
+ *   `replace` when this machine stored the session; otherwise it is a permanent refusal. A
+ *   replace model review drops leaves the server's session as it was, which this log no
+ *   longer extends: once the transcript grows it goes whole with `replace` again.
  * - 403 `forbidden`, 422: permanent until the transcript changes. 401 or no credential: "sign
  *   in" (B1.6), nothing more is tried this pass. Anything else is retried with backoff, and
  *   three passes in a row of that is "upload failing".
@@ -690,7 +692,16 @@ export class Uploader {
       // A transcript that moved (a later hook named another file) is not where the offsets
       // point: it goes whole, and the server's own state says what it extends (04).
       const moved = session.sent_path !== undefined && session.sent_path !== path;
-      const whole = forceWhole || moved || !session.stored || size < fileOffset || !agent.chunkable;
+      // A replace that review dropped left the server's session as it was: replace it again.
+      const replaceAgain = session.stored === true && session.replace_next === true;
+      const whole =
+        forceWhole ||
+        moved ||
+        !session.stored ||
+        size < fileOffset ||
+        !agent.chunkable ||
+        replaceAgain;
+      const replacing = replace || replaceAgain;
       if (!whole && fileOffset >= size) return { uploaded };
       // A path comes from a hook payload: send only a file the agent itself says is this
       // session's transcript, never whatever file a payload named. Chunks too: a later hook
@@ -742,7 +753,7 @@ export class Uploader {
           // No `shipped`: the server's own state decides whether a whole log extends the
           // session (04), and a client's prefix once let a fresh tail be judged by the session
           // filter.
-          ...(replace ? { replace: true } : {}),
+          ...(replacing ? { replace: true } : {}),
         };
         result = await (await this.getSink()).ingest(upload);
       } catch (err) {
@@ -769,7 +780,7 @@ export class Uploader {
           }
           continue;
         }
-        if (err instanceof SessionConflict && whole && session.stored && !replace) {
+        if (err instanceof SessionConflict && whole && session.stored && !replacing) {
           // This machine stored the session and its log no longer extends it (rules or the
           // normalizer changed, X4.6): only its original writer may replace it, and that is us.
           replace = true;
@@ -815,6 +826,10 @@ export class Uploader {
           if (redacted.carried) s.carried = redacted.carried;
           else delete s.carried;
           delete s.held_at_size;
+          // A dropped replace answers with what the server kept, which this log does not
+          // extend: the offsets only wait for the transcript to grow, and then it goes whole.
+          if (replacing && result.status === "dropped") s.replace_next = true;
+          else delete s.replace_next;
         } else {
           // Nothing kept (filtered, or dropped before it had a trace): the whole log goes again
           // once the transcript grows.
@@ -824,6 +839,7 @@ export class Uploader {
           delete s.sent_path;
           delete s.shipped;
           delete s.carried;
+          delete s.replace_next;
         }
       });
       if (!stored || piece.end >= size) return { uploaded };
@@ -854,6 +870,7 @@ export class Uploader {
         "shipped",
         "carried",
         "held_at_size",
+        "replace_next",
         "error",
         "failures",
         "next_attempt_at",

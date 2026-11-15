@@ -330,7 +330,9 @@ the pipeline. Nothing is written until every stage has run:
    is the fork's first trace, so it is judged. `shipped` (what an earlier answer said) is read
    only for a session without the server's own state.
 5. **Model review**, when a review policy applies: allow, redact, or drop (`200 dropped`; a
-   drop record says why, never what). See [model-review.md](model-review.md).
+   drop record says why, never what). A dropped chunk or tail still moves the log past it; a
+   dropped `replace` leaves the session as stored and answers with its state, so the next
+   upload of that history must replace again. See [model-review.md](model-review.md).
 6. **Write** the trace, the session's `metadata.json` and the change entry.
 
 **Which branch?** The one the transcript recorded as it began (Claude Code's `gitBranch`,

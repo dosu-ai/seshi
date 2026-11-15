@@ -60,7 +60,9 @@ trace objects and its change entries.
   and caps it at 300 characters. A transient failure
   (`StoreError`, a reviewer that throws) is always thrown. A review drop goes to `writeDropped`.
   For a session with a trace, a drop also moves the log past the envelope (`recordProgress`),
-  so later chunks continue.
+  so later chunks continue. A dropped replace does not (17): the log state stays the stored
+  history's and the answer says so, so the next upload of the dropped history must replace
+  again and is reviewed again (the uploader sends it whole with `replace`, 14).
 - **Source health** (`@seshi/store` `health.ts`). Each process writes its own shard,
   `sources/<id>/health/<yyyy-mm-dd>/<instance>.json` (`seshi/source-health/1`). The outcomes
   are `stored`, `duplicate`, `unchanged`, `filtered`, `dropped`, `failed` and `rejected`.

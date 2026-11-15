@@ -55,6 +55,14 @@ what changed.
   `replace` mode (as backfill does), its trace entry is the new write's, and the rewrite gets a
   `published` entry with `replace: true`. Test: secret in an assistant record with tool calls,
   pre-redacted resend, 409, replace rewrites the object.
+- **ingest, medium**: a replace that model review dropped moved the session's log state to the
+  dropped history B while the head stayed on A, so B plus a follow-up (a later whole upload, a
+  span-assembler rebuild, or the uploader's next chunk) was written as a continuation of A: two
+  histories spliced. A dropped replace now keeps the stored log state and answers with it
+  (F3.4's "move past it" only for envelopes that extend what is stored), so the next upload of
+  B does not extend and must replace again. The uploader marks such a session `replace_next`
+  and, once the transcript grows, sends it whole with `replace` instead of chunking at the
+  server's offset. Tests: pipeline (drop, conflict, reviewed replace) and uploader.
 
 ## Not fixed
 

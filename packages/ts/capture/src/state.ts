@@ -71,6 +71,10 @@ export interface SessionState {
   /** The transcript size when the server last kept nothing (filtered, or dropped before it had
    * a trace): the whole log is sent again only once it grows (X4.10). */
   held_at_size?: number;
+  /** Model review dropped a replace: the server kept the session it had, which this log no
+   * longer extends, so the next upload goes whole and replaces again (never a chunk at the
+   * server's offset, which would splice this log onto that session). */
+  replace_next?: boolean;
   uploaded_at?: string;
   /** The last answer's status (`stored`, `filtered`, `unchanged`, …). */
   last_status?: string;

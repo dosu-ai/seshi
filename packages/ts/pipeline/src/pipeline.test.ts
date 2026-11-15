@@ -568,6 +568,51 @@ describe("model review (F3 seam)", () => {
     expect((await session())?.traces[1]?.continuation?.from_record).toBe(5);
   });
 
+  it("keeps the stored log state when a replace is dropped, so the dropped history is never spliced on", async () => {
+    // Review finding: a dropped replace moved the log state to the dropped history B while the
+    // head stayed on A, so B plus a follow-up was written as a continuation of A.
+    let dropNext = false;
+    const r = reviewer(() =>
+      dropNext
+        ? {
+            action: "drop",
+            reason: "review_drop",
+            policy: "p",
+            policy_hash: "e".repeat(64),
+            decision_model: "m",
+          }
+        : { action: "allow" },
+    );
+    const p = pipeline({ reviewer: r });
+    const first = await submit(p, upload(HEAD));
+    const before = await session();
+    const other = META + user("A".repeat(2000)) + reply("old answer");
+    dropNext = true;
+    const dropped = await submit(p, upload(other, 0, { replace: true }));
+    expect(dropped).toMatchObject({
+      status: "dropped",
+      records_total: first.records_total,
+      prefix_sha256: first.prefix_sha256,
+      bytes_total: first.bytes_total,
+    });
+    const after = await session();
+    expect(after?.normalized).toEqual(before?.normalized);
+    expect(after?.traces).toEqual(before?.traces);
+    // A resend gets the same answer.
+    expect(await submit(p, upload(other, 0, { replace: true }))).toEqual(dropped);
+    dropNext = false;
+    // The dropped history with a follow-up does not extend what is stored: a conflict, and
+    // with replace it is reviewed and written as a rewrite, never spliced onto the stored one.
+    const grown = other + user("follow up") + reply("more");
+    await expect(submit(p, upload(grown))).rejects.toBeInstanceOf(SessionConflict);
+    const rewritten = await submit(p, upload(grown, 0, { replace: true }));
+    expect(rewritten.status).toBe("stored");
+    const final = await session();
+    expect(final?.traces).toHaveLength(1);
+    expect(final?.traces[0]?.continuation).toBeUndefined();
+    expect(r.seen.at(-1)?.records).toHaveLength(4);
+  });
+
   it("writes what a redact decision returns, and keeps the decision beside the session", async () => {
     const r = reviewer((input) => ({
       action: "redact",

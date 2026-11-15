@@ -838,6 +838,21 @@ export class Pipeline {
       });
       // Nothing of a session without a trace is stored, so there is no log position to move.
       if (!session?.head) return { status: "dropped", ...NOTHING };
+      // A dropped replace leaves the session as stored: its log state stays the stored
+      // history's, never the dropped one's, or a later upload extending the dropped history
+      // would be written as a continuation of the stored one (two histories spliced). The next
+      // upload of that history does not extend what is stored, so it must replace again and is
+      // reviewed again. The answer says what is stored.
+      if (plan.replace) {
+        if (!session.normalized) return { status: "dropped", ...NOTHING };
+        return this.progress(
+          run,
+          session.normalized,
+          session.withheld_calls ?? {},
+          "dropped",
+          plan.guard,
+        );
+      }
       // The envelope counts as handled (F3.4): the log moves past it.
       return this.progress(run, plan.normalized, plan.withheld, "dropped", plan.guard);
     }
