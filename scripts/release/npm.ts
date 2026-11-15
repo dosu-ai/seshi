@@ -13,9 +13,18 @@
  *
  * Every archive is checked against `SHA256SUMS` before its binary is taken. */
 
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { parseChecksums, readArchive, sha256 } from "./archive";
 import { CHECKSUMS, REPOSITORY, TARGETS, type Target } from "./targets";
@@ -260,6 +269,7 @@ export async function writeLibraryPackage(
   } finally {
     rmSync(temp, { recursive: true, force: true });
   }
+  addDeclarationExtensions(join(dir, "types"));
 
   writeJson(join(dir, "package.json"), {
     name: library.name,
@@ -280,6 +290,34 @@ export async function writeLibraryPackage(
   writeFileSync(join(dir, "LICENSE"), license);
   writeFileSync(join(dir, "README.md"), readme(library.name, library.description));
   return { name: library.name, dir };
+}
+
+const RELATIVE_SPECIFIER = /(\bfrom\s*|\bimport\s*\(\s*)(["'])(\.{1,2}\/[^"']*)\2/g;
+
+/** Gives the declarations' relative imports the `.js` extension Node's ESM resolution needs.
+ * tsc copies the sources' extensionless specifiers (`from "./api"`) into the `.d.ts` files, and
+ * a TypeScript project resolving the package as Node does (`module: "NodeNext"`, the usual
+ * setting for a Node ESM project) cannot follow them: the re-exported types silently become
+ * `any`. Each specifier becomes `./api.js` or `./schemas/index.js`, whichever `.d.ts` exists. */
+export function addDeclarationExtensions(types: string): void {
+  for (const entry of readdirSync(types, { recursive: true, encoding: "utf8" })) {
+    if (!entry.endsWith(".d.ts")) continue;
+    const file = join(types, entry);
+    const text = readFileSync(file, "utf8");
+    const fixed = text.replace(
+      RELATIVE_SPECIFIER,
+      (_all, lead: string, quote: string, spec: string) => {
+        if (/\.(?:[cm]?js|json)$/.test(spec)) return `${lead}${quote}${spec}${quote}`;
+        const from = dirname(file);
+        let next: string;
+        if (existsSync(join(from, `${spec}.d.ts`))) next = `${spec}.js`;
+        else if (existsSync(join(from, spec, "index.d.ts"))) next = `${spec}/index.js`;
+        else throw new Error(`${file}: ${spec} matches no declaration file`);
+        return `${lead}${quote}${next}${quote}`;
+      },
+    );
+    if (fixed !== text) writeFileSync(file, fixed);
+  }
 }
 
 export interface BuildNpmOptions {

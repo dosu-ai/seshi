@@ -1,6 +1,7 @@
 import {
   chmodSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -13,6 +14,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { tarGz } from "./archive";
 import { buildRelease, repositoryVersion } from "./build";
 import {
+  addDeclarationExtensions,
   buildNpm,
   LIBRARIES,
   launcherManifest,
@@ -26,6 +28,50 @@ import { exec, installPackages, standInCompile } from "./testing";
 const VERSION = repositoryVersion();
 const posix = process.platform !== "win32";
 const node = Bun.which("node");
+
+describe("addDeclarationExtensions", () => {
+  it("gives relative declaration imports the extension Node's ESM resolution needs", () => {
+    const types = mkdtempSync(join(tmpdir(), "seshi-dts-"));
+    try {
+      mkdirSync(join(types, "schemas"));
+      writeFileSync(join(types, "api.d.ts"), "export type A = 1;\n");
+      writeFileSync(join(types, "schemas/index.d.ts"), "export type S = 2;\n");
+      writeFileSync(
+        join(types, "schemas/store.d.ts"),
+        'import type { A } from "../api";\nexport type T = A | import("./index").S;\n',
+      );
+      writeFileSync(
+        join(types, "index.d.ts"),
+        [
+          'export type { A } from "./api";',
+          "export * from './schemas';",
+          'export type { T } from "./schemas/store";',
+          'export { x } from "./already.js";',
+          'export type { Ext } from "@seshi/model";',
+          "",
+        ].join("\n"),
+      );
+      addDeclarationExtensions(types);
+      expect(readFileSync(join(types, "index.d.ts"), "utf8")).toBe(
+        [
+          'export type { A } from "./api.js";',
+          "export * from './schemas/index.js';",
+          'export type { T } from "./schemas/store.js";',
+          'export { x } from "./already.js";',
+          'export type { Ext } from "@seshi/model";',
+          "",
+        ].join("\n"),
+      );
+      expect(readFileSync(join(types, "schemas/store.d.ts"), "utf8")).toBe(
+        'import type { A } from "../api.js";\nexport type T = A | import("./index.js").S;\n',
+      );
+      writeFileSync(join(types, "broken.d.ts"), 'export * from "./missing";\n');
+      expect(() => addDeclarationExtensions(types)).toThrow(/\.\/missing matches no declaration/);
+    } finally {
+      rmSync(types, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("manifests", () => {
   it("platform packages install only on their own os, cpu and libc", () => {
@@ -226,6 +272,10 @@ describe.skipIf(!posix)("buildNpm", () => {
           'import type { Visibility } from "@seshi/model";',
           "const db: HttpSessionDB = new HttpSessionDB({ server: 'http://x', token: 't' });",
           "const v: Visibility = 'org';",
+          // Proves the types are real: an unresolved declaration import makes them `any`, and
+          // then this line is no error and the directive itself fails.
+          "// @ts-expect-error not a visibility",
+          "export const wrong: Visibility = 'not-a-visibility';",
           "export async function f(): Promise<StoredTrace | null> { return db.getTrace('claude-code', 's'); }",
           "export { v };",
         ].join("\n"),
@@ -239,7 +289,8 @@ describe.skipIf(!posix)("buildNpm", () => {
             moduleResolution: "NodeNext",
             strict: true,
             noEmit: true,
-            skipLibCheck: true,
+            // The published declarations are checked too, as a consumer's strict build would.
+            skipLibCheck: false,
             lib: ["ES2023", "DOM"],
             types: [],
           },
