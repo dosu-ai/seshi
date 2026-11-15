@@ -344,6 +344,51 @@ describe("backfillRedaction (F2.5)", () => {
     expect(tail?.metadata.continuation?.from_record).toBe(5);
   });
 
+  it("makes a chunk that raced it plan again, so the old head's meta record is not written", async () => {
+    const first = await store1("s1", meta({ cwd: "/work/ACME-1234" }) + user(LONG) + reply("ok"));
+    const archive = archiveId("alice", "trajectory", "s1");
+    const oldHead = keys.trace("alice", archive, (first as { content_hash: string }).content_hash);
+    let raced = false;
+    // The backfill lands just after the chunk read the old head for its meta record.
+    const racing: Store = new Proxy(store, {
+      get(target, prop, receiver) {
+        if (prop === "get") {
+          return async (key: string) => {
+            const value = await target.get(key);
+            if (key === oldHead && !raced) {
+              raced = true;
+              await run({ store: target });
+            }
+            return value;
+          };
+        }
+        return Reflect.get(target, prop, receiver);
+      },
+    }) as Store;
+    const pipeline = new Pipeline({ store: racing, formats, redaction: NEW_RULES });
+    const chunk = (await pipeline.submit(
+      uploadEnvelope(
+        {
+          owner: "alice",
+          agent: "trajectory",
+          session_id: "s1",
+          transcript: user("more") + reply("yes"),
+          format: "jsonl",
+          offset: first.bytes_total,
+        },
+        { caller: { kind: "static", principal: "alice" }, owner_basis: "verified" },
+      ),
+    )) as StoreSessionResult;
+    expect(raced).toBe(true);
+    expect(chunk.status).toBe("stored");
+    const after = await metadata("s1");
+    expect(after?.traces).toHaveLength(2);
+    for (const ref of after?.traces ?? []) {
+      const trace = await getTrace(store, "alice", archive, ref.content_hash);
+      expect(JSON.stringify(trace)).not.toContain("ACME-");
+    }
+  });
+
   it("redacts what an LLM call's error and parameters say", async () => {
     const archive = archiveId("alice", "trajectory", "s1");
     await ingest({

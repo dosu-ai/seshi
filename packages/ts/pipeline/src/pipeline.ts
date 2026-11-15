@@ -547,6 +547,15 @@ export class Pipeline {
     const guard = (existing: SessionMetadata | null) => {
       const at = existing?.head ? (existing.normalized?.bytes ?? 0) : 0;
       if (at !== offset) throw new OffsetMismatch(offset, at);
+      // The log did not move but a redaction backfill rewrote the session (a new head, or the
+      // same hash with what it leaves out redacted, and always a new rule set): the meta record
+      // read from the old head may hold what the new rules take out. Plan again.
+      if (
+        existing?.head !== session.head ||
+        existing?.redaction?.rule_set !== session.redaction?.rule_set
+      ) {
+        throw new StalePlan();
+      }
     };
     const raw = this.normalize(envelope.format, text, envelope.session_key, offset);
     const redacted = this.redactor.redact(raw, session.withheld_calls ?? {});
@@ -566,6 +575,12 @@ export class Pipeline {
     };
     // The session's meta record is the head's: a chunk has none of its own.
     const head = await getTrace(this.store, run.owner, run.archive, session.head);
+    // Gone because the session moved since it was read (a backfill or a replace removed it):
+    // plan again on the session as it is now, rather than write a continuation with no meta.
+    if (head === null) {
+      const now = await readMetadata(this.store, run.owner, run.archive);
+      if (now?.head !== session.head) throw new StalePlan();
+    }
     const meta = head ? metaOf(head.records as NormalizedRecord[]) : undefined;
     return this.commit(run, {
       write: [...(meta ? [meta] : []), ...redacted.records],
