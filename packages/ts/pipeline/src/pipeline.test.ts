@@ -305,6 +305,14 @@ describe("extend or replace (X4.6)", () => {
     });
   });
 
+  it("never judges a whole log's tail, however small or agent-only", async () => {
+    const strict = { enabled: true, min_chars: 1_000_000, require_user: true, require_reply: true };
+    await submit(pipeline(), upload(HEAD));
+    const tail = await submit(pipeline({ filter: strict }), upload(HEAD + reply("ok")));
+    expect(tail).toMatchObject({ status: "stored", records: 2, records_total: 4 });
+    expect((await session())?.traces).toHaveLength(2);
+  });
+
   it("refuses a whole upload that does not extend the session, without replace", async () => {
     const p = pipeline();
     await submit(p, upload(HEAD));
