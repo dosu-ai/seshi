@@ -39,7 +39,7 @@ reports a key.
 **Readers are outside this server's control.** Anything with a read key on the bucket reads
 every owner's folder. Scope reader credentials to the prefix you intend to share.
 
-**Tombstones delete objects, not history.** `DELETE /v1/sessions/…` removes the trace and raw
-objects and appends a tombstone to the change feed; a reader that already copied the trace
+**Tombstones delete objects, not history.** `DELETE /v1/sessions/…` removes the trace
+objects (no raw transcript is stored) and appends a tombstone to the change feed; a reader that already copied the trace
 still has it. Object versioning or replication on the bucket, if enabled, keeps the deleted
 bytes under the bucket's own retention rules.

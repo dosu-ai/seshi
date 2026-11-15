@@ -12,8 +12,8 @@ decides whether it is worth keeping, and writes it to S3, Cloudflare R2, any S3-
 store, or a folder, under a documented layout that anything can read.
 
 ```
-client ──POST /v1/sessions (raw transcript, bearer token)──▶ sessiondb
-                                                               store raw · normalize · trace
+client ──POST /v1/sessions (transcript, bearer token)──▶ seshi
+                                    normalize · redact · filter · review · write the trace
                                                                     │
                                                                     ▼
                                                    your bucket (s3:// r2:// file://)
@@ -58,8 +58,7 @@ curl -sS http://localhost:7200/v1/sessions \
 
 ```json
 { "status": "stored", "archive_id": "…", "content_hash": "…", "session_id": "8f1c…",
-  "records": 41, "events": 38, "records_total": 41, "prefix_sha256": "…", "bytes_total": 48213,
-  "raw": { "status": "stored", "part": 0 } }
+  "records": 41, "events": 38, "records_total": 41, "prefix_sha256": "…", "bytes_total": 48213 }
 ```
 
 As the session goes on, send only what the log gained since, as a chunk from `bytes_total`:
@@ -99,39 +98,38 @@ own session with `parent_session_id`. The rules are in
 
 ## What the server does with a session
 
-Storage first, then normalize, then the trace. The trace is always made from what is in the
-bucket, so the second step can run again on its own.
+Every upload becomes an envelope that goes through one pipeline, in memory; only the trace is
+written, at the end, and never the transcript itself (a trace is rebuilt by sending the
+transcript again while the client still has it).
 
-1. **Store.** The native log passes through redaction and is written as the session's raw
-   part. What a tool call returned is withheld when the call read a secrets file (`.env`, keys,
-   cloud credentials) or ran a command that prints one (`printenv`, `gh auth token`); then your
-   own patterns, if you set any; then the built-in ones (provider tokens, key/value credentials
-   in several languages, bearer headers, JWTs, connection URLs, PEM blocks, and a
-   Shannon-entropy pass for what no pattern knows).
-   That creates the session; nothing else has happened yet.
-2. **Normalize.** The stored log becomes trajectory-v1 records via
+1. **Normalize.** The log becomes trajectory-v1 records via
    [`@letta-ai/trajectory`](https://github.com/letta-ai/trajectory), plus the fixups its
    adapters need (Claude Code's queued and background-task input, Codex's inherited history and
    subagent reports, an ATIF document's harness name and tool errors). `agent` is the adapter
    name, one of `claude-code`, `codex`, `cursor`, `opencode`, `pi`, `gemini-cli`, `atif`,
    `datadog-trajectory`, the server's own adapter that turns a Trajectory session file into the
    same Letta records as everything else, or `trajectory`, records already in trajectory-v1
-   that pass through checked. The SDK's `detectSource` names the format from a file's first
-   bytes. The records get the
-   redaction pass too, with identifiers that link a tool call to its result left alone so they
-   stay coherent.
-3. **Decide what is new.** A conversation under 2000 characters, or with no user turn, or with
-   nothing answering it, is reported as `trivial`: the raw part stays, no trace is written. A
-   session uploaded before writes only its tail (the client sends back `records_total` and
-   `prefix_sha256` from the last answer); a fork writes only what it added past the history it
-   copied.
-4. **Hash and publish.** `content_hash` is a hash of what was said, independent of timestamps,
+   that pass through checked. A chunk is normalized on its own, with the little state the
+   session keeps.
+2. **Redact.** What a tool call returned is withheld when the call read a secrets file
+   (`.env`, keys, cloud credentials) or ran a command that prints one (`printenv`, `gh auth
+   token`); then your own patterns, if you set any; then the built-in ones (provider tokens,
+   key/value credentials in several languages, bearer headers, JWTs, connection URLs, PEM
+   blocks, and a Shannon-entropy pass for what no pattern knows), with identifiers that link a
+   tool call to its result left alone.
+3. **Filter.** A session's first trace under 2000 characters of conversation, or with no user
+   turn, or with nothing answering it, is `filtered`: nothing of it is stored. Whatever extends
+   a stored session (a chunk, the tail of a grown log) is never filtered.
+4. **Decide what is new.** A grown log writes only its tail; a fork writes only what it added
+   past the history it copied. A log that no longer extends the stored session is refused
+   (`409 conflict`) unless its original writer sends it with `replace`.
+5. **Review** (when a review policy applies): allow, redact, or drop.
+6. **Hash and publish.** `content_hash` is a hash of what was said, independent of timestamps,
    so re-exporting the same conversation writes nothing. The trace is written under its hash,
    the session's pointer gets it as head, and an entry is appended to the change feed.
 
-The layout is the contract, documented in [`spec/layout.md`](spec/layout.md): raw transcript
-parts, immutable content-addressed traces made from them, one mutable pointer per session, and
-an append-only change feed.
+The layout is the contract, documented in [`spec/layout.md`](spec/layout.md): immutable
+content-addressed traces, one mutable pointer per session, and an append-only change feed.
 
 ## Storage
 

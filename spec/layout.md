@@ -16,6 +16,7 @@ any other writer must follow the rules below.
     checkpoint.json                                       a poller's cursor (X7)
     dropped/<stamp>-<key_hash>.json                       an envelope model review dropped (X6.4)
     failed/<stamp>-<key_hash>.json                        an envelope that failed (X4.8)
+    health/<yyyy-mm-dd>/<instance>.json                   outcome counters, per process (X4.8)
   worker/heartbeat.json                                   the worker's last run (X7.5)
   assembly/pending/<archive_id>                           a session with spans to assemble (X7.4)
   owners/<owner>/
@@ -23,7 +24,6 @@ any other writer must follow the rules below.
     sessions/<archive_id>/
       metadata.json                                       the session's pointer (mutable)
       trace.<content_hash>.json.gz                        seshi/trace/1, one per distinct content
-      raw.<n>.<jsonl|json>.gz                             the redacted transcript (until 04, X6.3)
       spans/<trace_id>-<span_id>.json                     normalized, redacted span records (F4)
       review/<n>.json                                     model review decisions (F3)
     changes/
@@ -72,7 +72,8 @@ worker by mistake) never silently lose each other's update:
 | `assembly/pending/<archive_id>` | Touched unconditionally; deleted with `If-Match`, so a batch that arrived meanwhile keeps it |
 | `review/<n>.json`, drop and failure records | Created with `If-None-Match: *` |
 | trace objects | Content-addressed; created with `If-None-Match: *`, so the first object for a hash wins |
-| change entries, raw parts | Time-keyed or part-numbered; written plainly |
+| `sources/<id>/health/<day>/<instance>.json` | `If-Match`, by the one process that owns the shard |
+| change entries | Time-keyed; written plainly |
 
 S3 and R2 honour `If-Match` and `If-None-Match` on PUT. The folder store (`file://`) emulates
 them with a lock file per key, taken with an exclusive create; that is safe between processes
@@ -96,15 +97,16 @@ time a config names one. A server whose config names another deployment or org r
 start (X1.4), as does one that finds a marker schema or trace format it cannot read.
 
 A prefix that holds sessiondb's marker, `sessionstorage.json` (`sessionstorage/layout/1`),
-is refused: its traces are `letta` or `otlp` objects beside raw parts, and there is no
+is refused: its traces are `letta` or `otlp` objects beside raw transcripts, and there is no
 migration (X1.5). Point seshi at a new prefix.
 
 ### `trace.<content_hash>.json.gz` — `seshi/trace/1` ([schema](schemas/trace.schema.json))
 
 The one canonical stored trace (X6.2). Immutable and content-addressed: if the key exists, a
 later publish does not overwrite it, whatever differs outside the hash. Evolved from
-trajectory-v1: its records are trajectory-v1 records with optional fields for what raw used to
-keep (X6.3), and the trace adds the session's LLM calls and where it came from.
+trajectory-v1: its records are trajectory-v1 records with optional fields for what the raw
+transcript used to keep, and the trace adds the session's LLM calls and where it came from.
+Nothing else of a session's content is stored (X6.3): no raw transcript, no payload.
 
 ```jsonc
 {
@@ -169,8 +171,8 @@ Other formats are rendered from it on read, never stored (`GET …/trace?format=
 ### `metadata.json` — `seshi/metadata/1` ([schema](schemas/metadata.schema.json))
 
 The live pointer, written with `If-Match` on every change. A session exists from its first
-write: one whose transcript normalized to nothing worth a trace has an empty `traces` and no
-`head` or `source`, and never appears in `changes/`.
+trace: nothing is written for a session the session filter keeps out, or one whose first
+envelope model review dropped (X6.3, X4.10). Once tombstoned it has no `head`.
 
 ```jsonc
 {
@@ -185,11 +187,12 @@ write: one whose transcript normalized to nothing worth a trace has an empty `tr
     { "content_hash": "…", "created_at": "…", "records": 5,
       "continuation": { "from_record": 6, "prefix_sha256": "…" } }
   ],
-  "raw": [ { "part": 0, "format": "jsonl", "size": 1234, "sha256": "…", "created_at": "…",
-             "offset": 0, "length": 48213 } ],   // until 04 stops storing raw (X6.3)
-  "raw_format": "jsonl",
   "normalized": { "bytes": 57333, "records": 15, "prefix_sha256": "…", "hash_state": "…" },
   "withheld_calls": { "toolu_01…": "sensitive-file" },
+  "applied": [                        // the last envelopes applied, with their answers (X4.7)
+    { "idempotency_key": "…@48213#…", "at": "…", "status": "stored", "content_hash": "…",
+      "records": 5, "events": 4, "records_total": 15, "prefix_sha256": "…", "bytes_total": 57333 }
+  ],
   "writer": { "kind": "device", "principal": "alice", "credential_id": "tok_…",
               "source_id": "upload" },        // the original writer (X4.6, X5.5)
   "owner_basis": "verified",          // verified | claimed | service
@@ -207,13 +210,17 @@ write: one whose transcript normalized to nothing worth a trace has an empty `tr
 
 `writer` and `owner_basis` are the first write's; each later write's writer is on its change
 entry. `claims` merge over writes from a fixed allowlist (X5.5). `redaction.counts` sum over
-writes. A session that grew gets a second trace with a `continuation`; a reader that wants
-the whole session concatenates in `traces` order.
+writes (only what each write stored is counted). A session that grew gets a second trace with
+a `continuation`; a reader that wants the whole session concatenates in `traces` order. A
+replace (X4.6) leaves one trace in `traces` and removes the others' objects.
 
-### `raw.<n>.<format>.gz`
-
-Transitional: the redacted native transcript, which today's pipeline normalizes from. 04
-stops storing it (X6.3); the trace is then the only copy of the content.
+`normalized` and `withheld_calls` are the small state the next chunk of the session's log is
+normalized with: where the log ends (`bytes`), how many records it normalizes to and their
+prefix hash (resumable mid-stream as `hash_state`), and the tool calls whose results the
+sensitive-call rules withhold. Both count the log's records as regex redaction left them,
+before model review, so they follow the uploader's log: a record model review redacted or an
+envelope it dropped still counts, and `continuation.from_record` is in the same terms.
+`applied` keeps the last 16 envelopes (X4.7).
 
 ### `changes/<stamp>-<hash|tombstone|visibility>.json` — `seshi/change/1` ([schema](schemas/change.schema.json))
 
@@ -229,6 +236,8 @@ cursor (the last key processed) and a lag window.
 
 `kind` is `published`, `tombstone` (with `reason`: `deleted`, `retracted` or `redacted`) or
 `visibility_changed` (with the new `visibility`). Every entry names its `writer`, never content.
+A `published` entry with `replace: true` replaced the session's earlier traces (X4.6): a reader
+drops what it held of the session and takes this trace as the whole of it.
 
 ### Server state
 
@@ -257,6 +266,35 @@ Read and written by the binary only, so their types are code-first in `@seshi/st
   `code` and `message`. Never content. Kept 30 days by default (`[records]
   dropped_retention`, `failed_retention`); keys are in time order, so pruning stops at the
   first record to keep.
+- `sources/<id>/health/<yyyy-mm-dd>/<instance>.json` (`seshi/source-health/1`): how many
+  envelopes from the source ended `stored`, `duplicate`, `unchanged`, `filtered`, `dropped`,
+  `failed` or `rejected` that UTC day, counted by one process (`instance`); a reader sums a
+  day's shards. A filtered session is only counted here, never recorded (X4.10).
+
+## The ingest pipeline (X4)
+
+Every write of a session is one envelope through one pipeline, decided in memory and written
+last (X4.3): authorize and resolve the owner, normalize, regex redaction on the normalized
+records, the session filter (first trace only), model review, then the publish below. Nothing
+is written before every stage has run, and no payload is ever stored (X6.3).
+
+A log arrives whole (`offset` 0) or as a chunk from where the session's log ends:
+
+- Until a session has a trace nothing of it is stored, and only the whole log is taken. A
+  chunk for such a session is refused with `expected: 0`.
+- A chunk is normalized on its own (each adapter's partial mode) with `normalized` and
+  `withheld_calls`, and published as a continuation of the head with the head's meta record.
+  It is never filtered.
+- A whole log for a session with a trace must extend it: its first `normalized.records`
+  records must hash to `normalized.prefix_sha256`. Its tail is published as a continuation
+  (never filtered); nothing past what is stored moves the log on and publishes nothing. One
+  that does not extend the session is refused, unless it is sent as a replace by the session's
+  original `writer` or an admin (X4.6).
+- A resend of an envelope in `applied` gets the recorded answer and runs no stage (X4.7).
+
+A permanent failure is answered to a caller that waits (an upload, a hook) and otherwise
+recorded under `sources/<id>/failed/`; a model review drop is recorded under
+`sources/<id>/dropped/` and, for a session with a trace, moves the log on past the envelope.
 
 ## The publish protocol
 
@@ -264,13 +302,16 @@ Read and written by the binary only, so their types are code-first in `@seshi/st
    writer published the same content first).
 2. Verify: compare the backend's ETag to the body's MD5 when the ETag is a plain MD5
    (single-part PUT on S3, R2, MinIO, and the folder store); otherwise read it back.
-3. Update `metadata.json` with `If-Match` (retrying on `412` from a fresh read).
-4. Append the change entry.
+3. Update `metadata.json` with `If-Match` (retrying on `412` from a fresh read). If the
+   session is no longer as the envelope was planned against (another chunk landed, it was
+   tombstoned), give up and delete the object written in step 1 unless the pointer lists it.
+4. For a replace, delete the trace objects the pointer no longer lists.
+5. Append the change entry.
 
 A writer that dies between steps leaves either nothing visible (before 3) or an object without
-a change entry (between 3 and 4); the next publish of the same content completes it. Two
-writers publishing different content for one session both land in `traces`; the head is
-whichever updated the pointer last.
+a change entry (between 3 and 5); the next publish of the same content completes it. Each
+envelope is planned against the session as it read it, so of two racing on one session one
+lands and the other is planned again (a whole log) or told where the log now ends (a chunk).
 
 ## Reading
 
