@@ -24,6 +24,7 @@
       "*.json",
       "!spec/testdata",
       "!**/testdata",
+      "!packages/ts/review/src/labelled-fixtures.json",
       "!**/*.md"
     ]
   },

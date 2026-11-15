@@ -1,6 +1,10 @@
 # Model review test data
 
-## `labelled/fixtures.json`: the eval set (F3.8)
+## `../src/labelled-fixtures.json`: the eval set (F3.8)
+
+The eval set lives under `src/`, not here, because `seshi review eval` ships it inside the binary:
+`.dockerignore` leaves every `testdata/` folder out of the image build, so a runtime import from
+here breaks `docker build` (scripts/docker-context.test.ts checks this).
 
 Hand-written sessions, each labelled with what the decision model should answer (`allow`,
 `redact` or `drop`) and the exact text (`sensitive`) that must not be stored. None of it is

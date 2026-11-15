@@ -75,7 +75,7 @@ anywhere. Reference: [docs/model-review.md](../../model-review.md),
     `ModelReviewer` (scope cleared) and reports `label_accuracy`, `false_drops`,
     `missed_drops`, `redactor_recall` (sensitive strings removed, over fixtures the redactor
     saw), `leaked`, `failures`, per-fixture results; never the sensitive text.
-    `BUILTIN_FIXTURES` are `testdata/labelled/fixtures.json` (10 hand-written, made-up
+    `BUILTIN_FIXTURES` are `src/labelled-fixtures.json` (10 hand-written, made-up
     sessions; imported, so they are in the compiled binary). `parseFixtures`, `FixtureError`.
   - `@seshi/review/testing`: `KeywordModel` (a deterministic model answering from the JSON
     the providers send), `FakeProvider` (scripted answers, errors, functions; keeps requests),
@@ -146,7 +146,7 @@ anywhere. Reference: [docs/model-review.md](../../model-review.md),
   `decision = { api_key = "sk-test", base_url = "<fake url>" }` and `retries = 0` for boots.
 - **Reading decisions**: `listReviews(store, owner, archive)`; the API route above; drop
   records via `listRecords(store, "dropped", source)` (`seshi sync dropped`).
-- **Eval fixtures**: add cases to `packages/ts/review/testdata/labelled/fixtures.json`
+- **Eval fixtures**: add cases to `packages/ts/review/src/labelled-fixtures.json`
   (`{name, label, sensitive, records}`); `BUILTIN_FIXTURES` tests check each sensitive string is
   in its records.
 
@@ -186,8 +186,10 @@ anywhere. Reference: [docs/model-review.md](../../model-review.md),
 9. **`withheld: "review"`** is a new value in the trace schema (additive) for a tool result
    the redactor withheld; its content is `[redacted:<category>]`, as the rules' withheld results
    are `[redacted:<kind>]`.
-10. **Eval fixtures live in the review package's `testdata/`**, not an "integration's" (F3.8):
-    review is not vendor-specific.
+10. **Eval fixtures live in the review package** (`src/labelled-fixtures.json`), not an
+    "integration's" (F3.8): review is not vendor-specific. They sat in `testdata/` at first;
+    17-review moved them under `src/` because `.dockerignore` leaves `testdata/` out of the
+    image build and the binary imports them (scripts/docker-context.test.ts now checks it).
 11. **Review records also carry `parts`, `unmatched` and `failure`**, beyond F3.8's list, so
     evals and audits can see splitting, redactor noise and why a write was skipped. All are
     codes and counts, never content.

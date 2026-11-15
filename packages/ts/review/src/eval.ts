@@ -8,7 +8,7 @@
 
 import type { NormalizedRecord } from "@seshi/model";
 import type { ReviewDecision, ReviewInput } from "@seshi/pipeline";
-import BUILTIN from "../testdata/labelled/fixtures.json";
+import BUILTIN from "./labelled-fixtures.json";
 import type { Policy } from "./policy";
 import { entriesOf } from "./render";
 import { ModelReviewer, type ModelReviewerOptions } from "./reviewer";
@@ -22,7 +22,7 @@ export interface Fixture {
   records: NormalizedRecord[];
 }
 
-/** The fixtures shipped with seshi (`testdata/labelled/fixtures.json`). */
+/** The fixtures shipped with seshi (`src/labelled-fixtures.json`). */
 export const BUILTIN_FIXTURES: readonly Fixture[] = BUILTIN as unknown as Fixture[];
 
 /** Why a fixture file was refused. */
