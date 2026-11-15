@@ -554,6 +554,14 @@ export class Uploader {
             ...(snapshot.error ? { rulesError: snapshot.error } : {}),
             place: placeOf(found.info.cwd),
             ...stateFacts(state, agent.name, undefined, now, found.info.parent_session_id),
+            // A subagent found this way is judged by its parent's folders too.
+            seen: otherFolders(
+              state,
+              agent.name,
+              undefined,
+              found.info.cwd,
+              found.info.parent_session_id,
+            ).map(placeOf),
             started,
           },
           this.host.platform,
@@ -678,7 +686,7 @@ export class Uploader {
         ...(snapshot.error ? { rulesError: snapshot.error } : {}),
         place,
         ...stateFacts(state, session.agent, session, this.now()),
-        seen: otherFolders(session, place.cwd).map(placeOf),
+        seen: otherFolders(state, session.agent, session, place.cwd).map(placeOf),
       },
       this.host.platform,
     );

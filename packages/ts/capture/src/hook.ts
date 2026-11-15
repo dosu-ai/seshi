@@ -68,7 +68,9 @@ export async function runHook(run: HookRun): Promise<HookOutcome> {
         place: placeOf(cwd),
         // A subagent has no toggle of its own until someone sets one: its parent's covers it.
         ...stateFacts(state, run.agent.name, known, now, capture.parent_session_id),
-        seen: otherFolders(known, cwd).map(placeOf),
+        seen: otherFolders(state, run.agent.name, known, cwd, capture.parent_session_id).map(
+          placeOf,
+        ),
       },
       run.host.platform,
     );

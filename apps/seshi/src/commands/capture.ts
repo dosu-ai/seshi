@@ -468,7 +468,7 @@ async function status(ctx: CommandContext, json: boolean, args: Args): Promise<n
       decision: judge(
         known?.cwd ?? cwd,
         stateFacts(state, which.agent, known, now),
-        otherFolders(known, known?.cwd ?? cwd),
+        otherFolders(state, which.agent, known, known?.cwd ?? cwd),
       ),
     };
   }

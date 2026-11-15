@@ -57,6 +57,10 @@ User docs: [docs/capture.md](../../capture.md) (new), docs/cli.md (rows), docs/c
     off; org rule (`capture.remotes`) → off; repo `.seshi/config.toml` unreadable or
     `capture = false` → off; pause → off; session toggle; longest folder rule; global.
     `normalizeRemote`, `remoteMatches`, `within` (segment-wise, case-insensitive on Windows).
+    `seen` (the other folders whose shared rules count) comes from `state.ts` `otherFolders`
+    for every caller: the session's own folders plus those of every ancestor in the state file
+    (`parent_session_id`, up the chain), so a subagent of a parent that visited an excluded repo
+    is off too.
   - `place.ts`: the repo around a folder from the files alone (no `git` process): `.git` dir or
     worktree file + `commondir`, remotes, branch, `.seshi/config.toml` (`capture`,
     `visibility`; unknown keys ignored, wrong types make it unreadable). Each of these files is

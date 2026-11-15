@@ -277,12 +277,33 @@ export function stateFacts(
   };
 }
 
-/** The folders `session` was seen in other than `cwd` (the one being judged). */
+/** The folders a session is judged by besides `cwd` (the one being judged, F9.5): every folder
+ * it was seen in, and every folder of each session above it in the state file (its parent, the
+ * parent's parent, …). A subagent's transcript carries what its parent gave it, so a parent that
+ * worked in an excluded repo keeps its subagents off too, wherever they run. `parentId` names
+ * the parent of a session not in the state yet (a hook's capture, a sweep's find). Every caller
+ * of `decide` builds `seen` from here, so hooks, the sweep, the uploader and the status line
+ * agree (F9.3). */
 export function otherFolders(
-  session: Pick<SessionState, "cwd" | "folders"> | undefined,
+  state: CaptureState | undefined,
+  agent: string,
+  session: Pick<SessionState, "cwd" | "folders" | "parent_session_id"> | undefined,
   cwd: string | undefined,
+  parentId?: string,
 ): string[] {
-  const all = new Set([...(session?.folders ?? []), ...(session?.cwd ? [session.cwd] : [])]);
+  const foldersOf = (s: Pick<SessionState, "cwd" | "folders"> | undefined) => [
+    ...(s?.folders ?? []),
+    ...(s?.cwd ? [s.cwd] : []),
+  ];
+  const all = new Set(foldersOf(session));
+  const visited = new Set<string>();
+  let parent = session?.parent_session_id ?? parentId;
+  while (state && parent !== undefined && !visited.has(parent)) {
+    visited.add(parent);
+    const above = state.sessions[sessionKey(agent, parent)];
+    for (const folder of foldersOf(above)) all.add(folder);
+    parent = above?.parent_session_id;
+  }
   if (cwd !== undefined) all.delete(cwd);
   return [...all];
 }

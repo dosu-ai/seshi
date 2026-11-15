@@ -209,7 +209,7 @@ async function upload(
         place: placeOf(cwd),
         ...stateFacts(state, agent.name, known, now, info.parent_session_id),
         ...(info.started_at ? { started: info.started_at } : {}),
-        seen: otherFolders(known, cwd).map(placeOf),
+        seen: otherFolders(state, agent.name, known, cwd, info.parent_session_id).map(placeOf),
       },
       host.platform,
     );

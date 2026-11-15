@@ -207,6 +207,30 @@ describe("runHook (F9.1)", () => {
     expect(moved.spooled).toEqual([]);
   });
 
+  it("skips a subagent whose parent worked in an excluded repo, wherever the subagent runs", async () => {
+    // The parent visited excluded repo A, then cd'd to B and started a subagent there.
+    mkdirSync(join(dir, "a", ".git"), { recursive: true });
+    mkdirSync(join(dir, "a", ".seshi"));
+    writeFileSync(join(dir, "a", ".seshi", "config.toml"), "capture = false\n");
+    mkdirSync(join(dir, "b", ".git"), { recursive: true });
+    await updateState(paths, (s) => {
+      s.sessions["fake:main1"] = {
+        agent: "fake",
+        session_id: "main1",
+        first_seen: "x",
+        cwd: join(dir, "b"),
+        folders: [join(dir, "a"), join(dir, "b")],
+      };
+    });
+    const payload = { id: "main1", cwd: join(dir, "b"), sub: "agent-abc" };
+    const outcome = await runHook({ agent, event: "SubagentStop", payload, host, paths });
+    expect(outcome.spooled).toEqual([]);
+    expect(outcome.skipped.map((s) => [s.session_id, s.decision.level])).toEqual([
+      ["main1", "repo"],
+      ["agent-abc", "repo"],
+    ]);
+  });
+
   it("skips a subagent of a session turned off, unless the subagent is turned on itself", async () => {
     await updateState(paths, (s) => {
       s.sessions["fake:main1"] = {

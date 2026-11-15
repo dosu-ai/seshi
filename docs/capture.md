@@ -59,8 +59,10 @@ One decision function judges every session, the same for hooks, the sweep, the s
    `.seshi/config.toml` with `capture = false`. They hold for every folder a session was seen
    in: a session that worked in an excluded repo and then moved into a captured one (a nested
    repo, `--add-dir`) carries that work in its transcript, so it is not uploaded, and nothing
-   more of a captured session is sent once it works in an excluded repo. What it uploaded
-   before stays (rule changes do not retract).
+   more of a captured session is sent once it works in an excluded repo. A subagent is judged
+   by its parent's folders too (and the parent's parent's): what the parent did in an excluded
+   repo reaches the subagent through its task, so it is not uploaded, wherever it runs. What
+   it uploaded before stays (rule changes do not retract).
 2. **A pause** (`seshi capture pause 2h`, or until `seshi capture resume`) stops sessions where
    they are. Every session running when it starts, or seen while it lasts, keeps what it has
    uploaded and uploads nothing more, ever: not after the pause ends either. A session started

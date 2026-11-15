@@ -89,7 +89,7 @@ export async function run(ctx: CommandContext): Promise<number> {
       // The toggle, pause and folders the uploader judges the session by too, so the two never
       // disagree: a session a pause stopped shows ⏸ after the pause ends.
       ...(state ? stateFacts(state, agent, known, new Date()) : {}),
-      seen: otherFolders(known, cwd).map(placeOf),
+      seen: otherFolders(state, agent, known, cwd).map(placeOf),
     },
     host.platform,
   );

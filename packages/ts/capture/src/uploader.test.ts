@@ -665,6 +665,46 @@ describe("the rules apply to the uploader too (F9.3)", () => {
     await uploader().pass();
     expect(server.uploads.map((u) => u.session_id)).toEqual(["agent-a"]);
   });
+
+  it("sends nothing of a subagent whose parent worked in an excluded repo, by hook or sweep", async () => {
+    // The parent visited excluded repo A, then cd'd to B and started subagents there.
+    mkdirSync(join(dir, "a", ".git"), { recursive: true });
+    mkdirSync(join(dir, "a", ".seshi"));
+    writeFileSync(join(dir, "a", ".seshi", "config.toml"), "capture = false\n");
+    const b = join(dir, "b");
+    mkdirSync(join(b, ".git"), { recursive: true });
+    await updateState(paths, (s) => {
+      s.agents.fake = { installed_at: "2026-10-01T00:00:00Z" };
+      s.sessions["fake:main1"] = {
+        agent: "fake",
+        session_id: "main1",
+        first_seen: "x",
+        cwd: b,
+        folders: [join(dir, "a"), b],
+      };
+    });
+    const sub = (id: string) =>
+      `${JSON.stringify({ id, cwd: b, parent: "main1" })}\n${JSON.stringify({ id })}\n`;
+    // Spooled by a hook that did not know (or an older one): the uploader holds it.
+    writeFileSync(transcript("agent-a"), sub("agent-a"));
+    appendSpool(paths, {
+      v: 1,
+      kind: "capture",
+      at: clock.toISOString(),
+      agent: "fake",
+      event: "SubagentStop",
+      session_id: "agent-a",
+      transcript_path: transcript("agent-a"),
+      cwd: b,
+      parent_session_id: "main1",
+    });
+    // Found only by the sweep.
+    writeFileSync(transcript("agent-b"), sub("agent-b"));
+    const pass = await uploader().pass({ sweep: true });
+    expect(server.uploads).toHaveLength(0);
+    expect(pass.queued).toBe(0);
+    expect(Object.keys(readState(paths).sessions)).not.toContain("fake:agent-b");
+  });
 });
 
 describe("a pause stops sessions where they are (F9.5, revised 15 Nov 2026)", () => {
