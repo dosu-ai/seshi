@@ -1,6 +1,7 @@
-/** `@seshi/formats`: vendor-neutral transcript formats (ATIF, trajectory-v1), the OTLP GenAI
- * renderer, the `@letta-ai/trajectory` adapter builder integrations use, and the format
- * registry that detection and normalization go through. Layer 1: it imports only
+/** `@seshi/formats`: vendor-neutral transcript formats (ATIF, trajectory-v1), the renderers
+ * that turn the canonical trace into Letta, OTLP GenAI spans and ATIF on read (X6.2), the
+ * `@letta-ai/trajectory` adapter builder integrations use, and the format registry that
+ * detection and normalization go through. Layer 1: it imports only
  * `@seshi/model`, never an integration (X3.2). */
 
 import { ATIF_FORMAT } from "./atif";
@@ -21,7 +22,6 @@ export {
   lettaAdapter,
   TRAJECTORY_VERSION,
 } from "./letta";
-export { fromOtlp, isOtlpTrace, otlpMeta, otlpResource, toOtlp } from "./otlp";
 export {
   FormatRegistry,
   NORMALIZER,
@@ -30,6 +30,18 @@ export {
   type NormalizeOptions,
   type NormalizeOutcome,
 } from "./registry";
+export {
+  fromOtlp,
+  isOtlpTrace,
+  lettaRecord,
+  lettaRecords,
+  otlpMeta,
+  otlpResource,
+  renderTrace,
+  toAtif,
+  toLetta,
+  toOtlp,
+} from "./render";
 export { TRAJECTORY, TRAJECTORY_FORMAT, trajectoryRecords } from "./trajectory";
 
 /** The formats every deployment reads whatever integrations it has, in the order the registry

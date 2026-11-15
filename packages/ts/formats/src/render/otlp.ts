@@ -1,36 +1,39 @@
-/** A `Trace` as OTLP: the session as GenAI spans (OpenTelemetry's `gen_ai.*` semantic
- * conventions), for a store whose format is `otlp`. The trace is made the same way in both
- * formats (normalize, redact, derive events, hash); this is only how it is written.
+/** The canonical trace as OTLP (X6.2): the session as GenAI spans (OpenTelemetry's
+ * `gen_ai.*` semantic conventions), rendered on read (`?format=otlp`). Nothing is stored in
+ * this format.
  *
- * One stored object is one OTLP trace, its id taken from `content_hash`; the session's objects
- * share `gen_ai.conversation.id`. Under an `invoke_agent` root:
+ * One rendering is one OTLP trace, its id taken from `content_hash`; a session's traces share
+ * `gen_ai.conversation.id`. Under an `invoke_agent` root:
  *
- * - a `chat` span per assistant record, from the record before it to the record itself, with
- *   the messages that arrived since the last one as `gen_ai.input.messages` (never the whole
- *   history) and what the assistant said, reasoned and called as `gen_ai.output.messages`;
+ * - a `chat` span per assistant record, from the record before it to the record itself (or
+ *   over its LLM call's own times when the trace has them), with the messages that arrived
+ *   since the last one as `gen_ai.input.messages` (never the whole history) and what the
+ *   assistant said, reasoned and called as `gen_ai.output.messages`. Its LLM call's model,
+ *   provider, response id and token usage (`gen_ai.usage.*`) go on the first chat span of
+ *   that call, so a call split over several records is counted once;
  * - an `execute_tool` span per tool call, from the call to its result, with the arguments and
  *   the result, `ERROR` status when the result says it failed.
  *
- * trajectory-v1 has no token usage, so the spans carry none. Every id is derived from the
- * content hash, so the same trace always converts to the same bytes.
- *
- * Nothing is lost: each `chat` span carries the records it was made from verbatim
- * (`sessiondb.records`, from index `sessiondb.record_start`), the root the records after the
- * last assistant turn, and the resource the meta record and `metadata` whole, so `fromOtlp`
- * gives back the `letta` trace, same records and same `content_hash`. That is how a reader
- * that only knows `letta` (Dosu's backend) reads an `otlp` store. */
+ * Every id is derived from the content hash, so the same trace always renders to the same
+ * bytes. Nothing is lost: each `chat` span carries the canonical records it was made from
+ * verbatim (`seshi.records`, from index `seshi.record_start`), the root the records after the
+ * last assistant turn, and the resource the meta record, `metadata`, `llm_calls` and
+ * `provenance` whole, so `fromOtlp` gives back the canonical trace, same records and same
+ * `content_hash`. */
 
 import { createHash } from "node:crypto";
 import {
-  type MetaRecord,
-  type NormalizedRecord,
+  type LlmCall,
   OTLP_TRACE_SCHEMA,
   type OtlpKeyValue,
   type OtlpSpan,
   type OtlpTrace,
-  parseTrajectory,
+  type Provenance,
+  parseTrace,
   type Trace,
   type TraceMetadata,
+  type TraceMetaRecord,
+  type TraceRecord,
   TrajectoryError,
   VERSION,
 } from "@seshi/model";
@@ -85,15 +88,30 @@ interface Message {
   finish_reason?: "stop" | "tool_call";
 }
 
+/** A call's usage as `gen_ai.usage.*` attributes. */
+function usageAttributes(call: LlmCall | undefined): [string, Scalar][] {
+  const usage = call?.usage;
+  if (!usage) return [];
+  return [
+    ["gen_ai.usage.input_tokens", usage.input_tokens],
+    ["gen_ai.usage.output_tokens", usage.output_tokens],
+    ["gen_ai.usage.cache_read.input_tokens", usage.cache_read_input_tokens],
+    ["gen_ai.usage.cache_creation.input_tokens", usage.cache_creation_input_tokens],
+    ["gen_ai.usage.reasoning_tokens", usage.reasoning_tokens],
+  ];
+}
+
 export function toOtlp(trace: Trace): OtlpTrace {
-  const traceId = idFrom(`sessiondb\n${trace.content_hash}`, 32);
-  const spanId = (key: string) => idFrom(`sessiondb\n${trace.content_hash}\n${key}`, 16);
+  const traceId = idFrom(`seshi\n${trace.content_hash}`, 32);
+  const spanId = (key: string) => idFrom(`seshi\n${trace.content_hash}\n${key}`, 16);
   const rootId = spanId("root");
   const model = typeof trace.metadata.model === "string" ? trace.metadata.model : undefined;
   const conversation = trace.session_id ?? undefined;
+  const calls = new Map((trace.llm_calls ?? []).map((call) => [call.id, call]));
+  const counted = new Set<string>();
 
   const records = trace.records;
-  const meta = records[0]?.role === "meta" ? (records[0] as MetaRecord) : undefined;
+  const meta = records[0]?.role === "meta" ? (records[0] as TraceMetaRecord) : undefined;
   const firstKnown = records
     .map((r) => (r.role === "meta" ? null : epochOf(r.timestamp)))
     .find((ms): ms is number => ms !== null);
@@ -107,7 +125,7 @@ export function toOtlp(trace: Trace): OtlpTrace {
   // The first record not yet on a span: what the next `chat` span (or the root) carries.
   let chunkStart = meta ? 1 : 0;
 
-  records.forEach((record: NormalizedRecord, index) => {
+  records.forEach((record: TraceRecord, index) => {
     if (record.role === "meta") return;
     const at = epochOf(record.timestamp) ?? clock;
     switch (record.role) {
@@ -138,10 +156,10 @@ export function toOtlp(trace: Trace): OtlpTrace {
         break;
       }
       case "assistant": {
-        const calls = "tool_calls" in record ? (record.tool_calls ?? []) : [];
+        const toolCalls = record.tool_calls ?? [];
         const parts: Part[] = [...reasoning];
         if (record.content) parts.push({ type: "text", content: record.content });
-        for (const call of calls) {
+        for (const call of toolCalls) {
           parts.push({
             type: "tool_call",
             id: call.id,
@@ -152,28 +170,40 @@ export function toOtlp(trace: Trace): OtlpTrace {
         const output: Message = {
           role: "assistant",
           parts,
-          finish_reason: calls.length > 0 ? "tool_call" : "stop",
+          finish_reason: toolCalls.length > 0 ? "tool_call" : "stop",
         };
+        const callId = record.llm_call;
+        const call = callId === undefined ? undefined : calls.get(callId);
+        const first = callId !== undefined && !counted.has(callId);
+        if (callId !== undefined) counted.add(callId);
+        const callModel = call?.model ?? model;
+        const callStart = epochOf(call?.started_at);
+        const callEnd = epochOf(call?.ended_at);
         spans.push({
           traceId,
           spanId: spanId(`chat:${index}`),
           parentSpanId: rootId,
-          name: model ? `chat ${model}` : "chat",
+          name: callModel ? `chat ${callModel}` : "chat",
           kind: 3,
-          startTimeUnixNano: nanos(Math.min(clock, at)),
-          endTimeUnixNano: nanos(at),
+          startTimeUnixNano: nanos(callStart ?? Math.min(clock, at)),
+          endTimeUnixNano: nanos(Math.max(callEnd ?? at, callStart ?? 0)),
           attributes: attributes([
             ["gen_ai.operation.name", "chat"],
             ["gen_ai.conversation.id", conversation],
-            ["gen_ai.request.model", model],
+            ["gen_ai.request.model", callModel],
+            ["gen_ai.response.model", call?.model],
+            ["gen_ai.provider.name", call?.provider],
+            ["gen_ai.response.id", call?.request_id],
+            ...(first ? usageAttributes(call) : []),
             ["gen_ai.input.messages", JSON.stringify(pending)],
             ["gen_ai.output.messages", JSON.stringify([output])],
-            ["sessiondb.record_start", chunkStart],
-            ["sessiondb.records", JSON.stringify(records.slice(chunkStart, index + 1))],
+            ["seshi.llm_call", callId],
+            ["seshi.record_start", chunkStart],
+            ["seshi.records", JSON.stringify(records.slice(chunkStart, index + 1))],
           ]),
-          status: { code: 0 },
+          status: call?.error ? { code: 2, message: call.error } : { code: 0 },
         });
-        calls.forEach((call, at_) => {
+        toolCalls.forEach((call, at_) => {
           const span: OtlpSpan = {
             traceId,
             spanId: spanId(`tool:${index}:${at_}`),
@@ -221,10 +251,10 @@ export function toOtlp(trace: Trace): OtlpTrace {
       ["gen_ai.agent.name", trace.source],
       ["gen_ai.conversation.id", conversation],
       ["gen_ai.request.model", model],
-      ["sessiondb.unanswered_messages", left.length > 0 ? JSON.stringify(left) : undefined],
-      ["sessiondb.record_start", chunkStart < records.length ? chunkStart : undefined],
+      ["seshi.unanswered_messages", left.length > 0 ? JSON.stringify(left) : undefined],
+      ["seshi.record_start", chunkStart < records.length ? chunkStart : undefined],
       [
-        "sessiondb.records",
+        "seshi.records",
         chunkStart < records.length ? JSON.stringify(records.slice(chunkStart)) : undefined,
       ],
     ]),
@@ -233,43 +263,43 @@ export function toOtlp(trace: Trace): OtlpTrace {
 
   const { continuation, normalizer, parent_session_id } = trace.metadata;
   const resource = attributes([
-    ["service.name", "sessiondb"],
-    ["sessiondb.schema", OTLP_TRACE_SCHEMA],
-    ["sessiondb.content_hash", trace.content_hash],
-    ["sessiondb.agent", trace.agent],
-    ["sessiondb.source", trace.source],
-    ["sessiondb.session_id", trace.session_id],
-    ["sessiondb.project", trace.project],
-    ["sessiondb.branch", trace.branch],
-    ["sessiondb.started_at", trace.started_at],
-    ["sessiondb.ended_at", trace.ended_at],
-    ["sessiondb.cwd", typeof trace.metadata.cwd === "string" ? trace.metadata.cwd : undefined],
-    ["sessiondb.git_branch", trace.metadata.git_branch],
-    ["sessiondb.model", model],
-    ["sessiondb.parent_session_id", parent_session_id],
-    ["sessiondb.continuation.from_record", continuation?.from_record],
-    ["sessiondb.continuation.prefix_sha256", continuation?.prefix_sha256],
-    ["sessiondb.normalizer.name", normalizer?.name],
-    ["sessiondb.normalizer.version", normalizer?.version],
-    ["sessiondb.records", records.length],
-    ["sessiondb.events", trace.events.length],
-    ["sessiondb.meta", meta ? JSON.stringify(meta) : undefined],
-    ["sessiondb.metadata", JSON.stringify(trace.metadata)],
+    ["service.name", "seshi"],
+    ["seshi.schema", OTLP_TRACE_SCHEMA],
+    ["seshi.content_hash", trace.content_hash],
+    ["seshi.agent", trace.agent],
+    ["seshi.source", trace.source],
+    ["seshi.session_id", trace.session_id],
+    ["seshi.project", trace.project],
+    ["seshi.branch", trace.branch],
+    ["seshi.started_at", trace.started_at],
+    ["seshi.ended_at", trace.ended_at],
+    ["seshi.cwd", typeof trace.metadata.cwd === "string" ? trace.metadata.cwd : undefined],
+    ["seshi.git_branch", trace.metadata.git_branch],
+    ["seshi.model", model],
+    ["seshi.parent_session_id", parent_session_id],
+    ["seshi.continuation.from_record", continuation?.from_record],
+    ["seshi.continuation.prefix_sha256", continuation?.prefix_sha256],
+    ["seshi.normalizer.name", normalizer?.name],
+    ["seshi.normalizer.version", normalizer?.version],
+    ["seshi.records", records.length],
+    ["seshi.events", trace.events.length],
+    ["seshi.meta", meta ? JSON.stringify(meta) : undefined],
+    ["seshi.metadata", JSON.stringify(trace.metadata)],
+    ["seshi.llm_calls", trace.llm_calls ? JSON.stringify(trace.llm_calls) : undefined],
+    ["seshi.provenance", trace.provenance ? JSON.stringify(trace.provenance) : undefined],
   ]);
 
   return {
     resourceSpans: [
       {
         resource: { attributes: resource },
-        scopeSpans: [
-          { scope: { name: "@dosu/sessiondb", version: VERSION }, spans: [root, ...spans] },
-        ],
+        scopeSpans: [{ scope: { name: "seshi", version: VERSION }, spans: [root, ...spans] }],
       },
     ],
   };
 }
 
-/** Whether a stored trace object is the `otlp` format's. */
+/** Whether a trace is an OTLP rendering. */
 export function isOtlpTrace(value: unknown): value is OtlpTrace {
   return (
     typeof value === "object" &&
@@ -289,11 +319,11 @@ export function otlpResource(trace: OtlpTrace, key: string): string | number | b
   return v.doubleValue;
 }
 
-/** The meta record an OTLP trace object was made with, for continuing its session. */
-export function otlpMeta(trace: OtlpTrace): MetaRecord | undefined {
-  const raw = otlpResource(trace, "sessiondb.meta");
+/** The meta record an OTLP rendering was made with. */
+export function otlpMeta(trace: OtlpTrace): TraceMetaRecord | undefined {
+  const raw = otlpResource(trace, "seshi.meta");
   if (typeof raw !== "string") return undefined;
-  const meta = JSON.parse(raw) as MetaRecord;
+  const meta = JSON.parse(raw) as TraceMetaRecord;
   return meta.role === "meta" ? meta : undefined;
 }
 
@@ -305,24 +335,25 @@ function spanAttribute(span: OtlpSpan, key: string): string | number | undefined
   return undefined;
 }
 
-/** The `letta` trace an OTLP trace object was made from: the meta record and every span's
- * `sessiondb.records` in record order, parsed again, its `content_hash` checked against the one
- * the object names. Throws `TrajectoryError` for an object this SDK did not write (no records
- * on its spans, a gap between them) or whose records hash to something else. */
+/** The canonical trace an OTLP rendering was made from: the meta record and every span's
+ * `seshi.records` in record order, parsed again with the resource's metadata, LLM calls and
+ * provenance, its `content_hash` checked against the one the rendering names. Throws
+ * `TrajectoryError` for a rendering seshi did not make (no records on its spans, a gap between
+ * them) or whose records hash to something else. */
 export function fromOtlp(otlp: OtlpTrace): Trace {
-  const hash = otlpResource(otlp, "sessiondb.content_hash");
-  if (typeof hash !== "string") throw new TrajectoryError("not a sessiondb OTLP trace");
-  const chunks: { start: number; records: NormalizedRecord[] }[] = [];
+  const hash = otlpResource(otlp, "seshi.content_hash");
+  if (typeof hash !== "string") throw new TrajectoryError("not a seshi OTLP rendering");
+  const chunks: { start: number; records: TraceRecord[] }[] = [];
   for (const span of otlp.resourceSpans.flatMap((r) => r.scopeSpans.flatMap((s) => s.spans))) {
-    const start = spanAttribute(span, "sessiondb.record_start");
-    const raw = spanAttribute(span, "sessiondb.records");
+    const start = spanAttribute(span, "seshi.record_start");
+    const raw = spanAttribute(span, "seshi.records");
     if (typeof start === "number" && typeof raw === "string") {
-      chunks.push({ start, records: JSON.parse(raw) as NormalizedRecord[] });
+      chunks.push({ start, records: JSON.parse(raw) as TraceRecord[] });
     }
   }
   chunks.sort((a, b) => a.start - b.start);
   const meta = otlpMeta(otlp);
-  const records: NormalizedRecord[] = meta ? [meta] : [];
+  const records: TraceRecord[] = meta ? [meta] : [];
   for (const chunk of chunks) {
     if (chunk.start !== records.length) {
       throw new TrajectoryError(`records ${records.length}..${chunk.start} are on no span`);
@@ -333,13 +364,18 @@ export function fromOtlp(otlp: OtlpTrace): Trace {
     const v = otlpResource(otlp, key);
     return typeof v === "string" ? v : undefined;
   };
-  const metadataJson = str("sessiondb.metadata");
-  const trace = parseTrajectory(records, {
-    agent: str("sessiondb.agent"),
-    session_id: str("sessiondb.session_id"),
-    project: str("sessiondb.project"),
-    branch: str("sessiondb.branch"),
-    metadata: metadataJson ? (JSON.parse(metadataJson) as TraceMetadata) : undefined,
+  const json = <T>(key: string): T | undefined => {
+    const text = str(key);
+    return text === undefined ? undefined : (JSON.parse(text) as T);
+  };
+  const trace = parseTrace(records, {
+    agent: str("seshi.agent"),
+    session_id: str("seshi.session_id"),
+    project: str("seshi.project"),
+    branch: str("seshi.branch"),
+    metadata: json<TraceMetadata>("seshi.metadata"),
+    llm_calls: json<LlmCall[]>("seshi.llm_calls"),
+    provenance: json<Provenance>("seshi.provenance"),
   });
   if (trace.content_hash !== hash) {
     throw new TrajectoryError(
