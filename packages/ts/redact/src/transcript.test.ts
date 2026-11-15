@@ -1,5 +1,7 @@
+import type { NormalizedRecord } from "@seshi/model";
 import { describe, expect, it } from "vitest";
 import { validatePack } from "./pack";
+import { ruleRedactor } from "./redactor";
 import { compileRuleSet } from "./ruleset";
 import { redactTranscript } from "./transcript";
 
@@ -77,6 +79,49 @@ describe("redactTranscript (client pre-redaction, F2.4)", () => {
     const row = JSON.parse(redactTranscript(rules, line, "jsonl").text);
     expect([row.sessionId, row.uuid, row.gitBranch]).toEqual([id, id, id]);
     expect(row.message.content).toBe("[redacted:entropy]");
+  });
+
+  it("redacts a tool call's input as the server redacts its args, framing keys included", () => {
+    const input = {
+      name: "AKIAIOSFODNN7EXAMPLQ",
+      type: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+      source: GITHUB,
+      password: "hunter2hunter2hunter2",
+    };
+    const line = JSON.stringify({
+      type: "assistant",
+      uuid: "u1",
+      message: { content: [{ type: "tool_use", id: "toolu_1", name: "mcp__db", input }] },
+    });
+    const out = redactTranscript(compileRuleSet(), line, "jsonl");
+    const block = JSON.parse(out.text).message.content[0];
+    // The call's own framing still links and names it.
+    expect([block.id, block.name, block.type]).toEqual(["toolu_1", "mcp__db", "tool_use"]);
+    // What the server stores for the same call: its input as one string, redacted whole.
+    const server = ruleRedactor(compileRuleSet()).redact([
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [{ id: "toolu_1", name: "mcp__db", args: JSON.stringify(input) }],
+      } as unknown as NormalizedRecord,
+    ]);
+    const stored = (server.records[0] as { tool_calls: { args: string }[] }).tool_calls[0];
+    expect(JSON.stringify(block.input)).toBe(stored?.args);
+    for (const secret of Object.values(input)) expect(out.text).not.toContain(secret);
+    expect(out.summary.counts).toEqual(server.summary.counts);
+  });
+
+  it("redacts each string of an input when a match spans its JSON", () => {
+    // The URL-credential password runs to the last '@', across quotes and a closing brace, so
+    // the redacted JSON no longer parses; every string, `name` included, is redacted on its own.
+    const input = { a: { url: "http://u:p" }, name: GITHUB, b: "x@y" };
+    const line = JSON.stringify({ type: "assistant", message: { content: [{ input }] } });
+    const block = JSON.parse(redactTranscript(rules, line, "jsonl").text).message.content[0];
+    expect(block.input).toEqual({
+      a: { url: "http://u:p" },
+      name: "[redacted:github-token]",
+      b: "x@y",
+    });
   });
 
   it("keeps the bytes of lines with nothing to redact, and blank lines and the last newline", () => {

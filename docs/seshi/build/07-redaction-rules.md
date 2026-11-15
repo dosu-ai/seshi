@@ -260,7 +260,11 @@ Reference for operators: [docs/redaction.md](../../redaction.md).
   told of (the next run would find it current). A session with nothing new to take out keeps
   its `updated_at`: only the rule set is recorded.
 - **Pre-redaction left fewer keys alone than the server.** `gitBranch`, `git_branch` and
-  `source` are now structural in `redactTranscript`, as in the record redaction.
+  `source` are now structural in `redactTranscript`, as in the record redaction. Since 17 the
+  skip stops at a tool call's input: the server redacts a call's `args` as one string, so
+  `redactTranscript` serializes an input object, redacts it whole and reads it back (each
+  string on its own, none exempt, when the result does not parse). An input's own `name`,
+  `type` or `source`, and a value a rule finds only with its key, used to reach the server.
 - **A client refused a newer server's rules.** `ruleSetFromDocument` threw when a pack disabled
   a built-in rule the client's (older) built-in pack lacks. Such disables are dropped on the
   client; `same` still reports the difference.

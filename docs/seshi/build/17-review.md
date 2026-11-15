@@ -110,6 +110,15 @@ what changed.
   Same matches (a differential fuzz of 400,000 strings against the old code found no
   difference). Tests: those inputs and larger ones under 1 s together, and cases pinning where
   a key ends and where credentials split.
+- **dataflow, medium**: client pre-redaction (`redactTranscript`) left every string under a
+  structural key (`name`, `type`, `id`, `source`, …) alone at any depth, tool inputs included,
+  and redacted an input's other values one by one; the server redacts a call's `args` as one
+  JSON string. So a tool input's `name: AKIA…` and `password: "…"` (found only with its key)
+  were sent to the server unredacted, against F2.4. A tool call's input (an object under
+  `input`, `arguments`, `args`, `parameters`) is now serialized, redacted whole and read back,
+  or, when a match spans the JSON so it no longer parses, redacted string by string with no key
+  exempt. Tests: the client's input equals what the server stores for the same call (same
+  counts), and the fallback.
 
 ## Not fixed
 
