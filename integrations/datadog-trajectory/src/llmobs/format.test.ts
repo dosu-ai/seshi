@@ -20,6 +20,8 @@ const fixture = (name: string) => readFileSync(join(FIXTURES, name), "utf8");
 const spansOf = (...names: string[]) =>
   names.flatMap((name) => spansOfDocument(JSON.parse(fixture(name))));
 const SESSION = "8f14e45f-ceea-4e7a-9d1b-2b6a1f0c3d11";
+/** The session's first turn (its own trace) in the two-page fixture. */
+const TURN_1 = "6916fdc000000000a1b2c3d4e5f60718";
 
 const TRACE = "6916fdc000000000a1b2c3d4e5f60718";
 let n = 0;
@@ -323,6 +325,19 @@ describe("assembling a Trajectory session", () => {
     const parts = spans.map((s) => DATADOG_SPANS.normalize(s, []));
     const shuffled = [...parts.slice().reverse(), ...parts.slice(0, 5)];
     expect(DATADOG_SPANS.assemble(shuffled, { source: DATADOG_LLMOBS })).toEqual(result());
+  });
+
+  it("extends what earlier turns wrote when a later turn arrives (a tail, not a replace)", () => {
+    // Each publish re-assembles every span of the session; a later turn must leave the earlier
+    // turns' records and calls as they were, so the pipeline stores it as a continuation.
+    const first = spans.filter((s) => s.traceId === TURN_1);
+    const early = DATADOG_SPANS.assemble(
+      first.map((s) => DATADOG_SPANS.normalize(s, [])),
+      { source: DATADOG_LLMOBS },
+    );
+    const full = result();
+    expect(full.records.slice(0, early.records.length)).toEqual(early.records);
+    expect(full.llm_calls.slice(0, early.llm_calls.length)).toEqual(early.llm_calls);
   });
 
   it("keeps a prompt that repeats the previous turn's", () => {
