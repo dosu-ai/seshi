@@ -1,0 +1,84 @@
+{
+  "records": [
+    {
+      "role": "meta",
+      "source": "claude-code",
+      "git_branch": "feat/ABC-1234-x7Kq9aB3xY7pQ9zK2mN8"
+    },
+    {
+      "role": "user",
+      "content": "deploy with AWS_SECRET_ACCESS_KEY=[redacted:aws-secret] and the db at postgres://admin:[redacted:url-credentials]@db.internal:5432/app",
+      "timestamp": "2026-11-14T09:00:00Z"
+    },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "toolu_01AbCdEfGhJkLmNpQrStUvWx",
+          "name": "Read",
+          "args": "{\"file_path\":\"/repo/.env\"}"
+        }
+      ],
+      "timestamp": "2026-11-14T09:00:01Z"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_01AbCdEfGhJkLmNpQrStUvWx",
+      "content": "[redacted:sensitive-file]",
+      "timestamp": "2026-11-14T09:00:02Z",
+      "withheld": "sensitive-file"
+    },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_gh",
+          "name": "Bash",
+          "args": "{\"command\":\"gh auth token\"}"
+        },
+        {
+          "id": "call_curl",
+          "name": "Bash",
+          "args": "{\"command\":\"curl -H 'Authorization: Bearer [redacted:bearer-token]' https://api.example.com\"}"
+        }
+      ],
+      "timestamp": "2026-11-14T09:00:03Z"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_gh",
+      "content": "[redacted:secret-output]",
+      "timestamp": "2026-11-14T09:00:04Z",
+      "withheld": "secret-output"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_curl",
+      "content": "{\"ok\": true, \"token\": \"[redacted:jwt]\"}",
+      "timestamp": "2026-11-14T09:00:05Z"
+    },
+    {
+      "role": "assistant",
+      "content": "Done. The key [redacted:aws-access-key] is now rotated; the commit is d3b07384d113edec49eaa6238ad5ff00d3b07384.",
+      "timestamp": "2026-11-14T09:00:06Z"
+    }
+  ],
+  "withheld": {
+    "toolu_01AbCdEfGhJkLmNpQrStUvWx": "sensitive-file",
+    "call_gh": "secret-output"
+  },
+  "summary": {
+    "rule_set": "4b199d7974b2bb3a4fc61da2c5a563429faf8b161f612ccabd5531794fdb4534",
+    "counts": {
+      "url-credentials": 1,
+      "aws-secret": 1,
+      "sensitive-file": 1,
+      "secret-output": 1,
+      "bearer-token": 1,
+      "jwt": 1,
+      "aws-access-key": 1
+    }
+  }
+}

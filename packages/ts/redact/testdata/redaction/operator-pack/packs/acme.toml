@@ -1,0 +1,41 @@
+# An operator's pack: text rules limited by applies_to, a secret group, a custom replacement,
+# a sensitive file, a secret command, and a built-in rule turned off.
+id = "acme"
+version = "2026-11-14"
+description = "Acme's own secrets"
+disable = ["entropy"]
+
+[[rules]]
+id = "acme-key"
+description = "Acme API keys"
+pattern = 'ACME-[0-9A-F]{16}'
+tests.match = ["key ACME-0123456789ABCDEF"]
+tests.no_match = ["ACME-1234"]
+
+[[rules]]
+id = "customer-row"
+description = "Customer rows are only secret where a tool printed them"
+pattern = 'cust_[a-z0-9]{6}'
+applies_to = ["tool_output"]
+
+[[rules]]
+id = "deploy-flag"
+description = "The value of --deploy-key on a command line"
+pattern = '--deploy-key[= ](?P<secret>\S+)'
+replacement = "<deploy-key>"
+applies_to = ["tool_input"]
+tests.match = ["acme deploy --deploy-key=abc123"]
+
+[[sensitive_files]]
+id = "acme-master-key"
+description = "The app's master key"
+globs = ["config/master.key"]
+tests.match = ["app/config/master.key"]
+tests.no_match = ["config/master.key.example"]
+
+[[secret_commands]]
+id = "acme-token"
+description = "acme-cli prints a session token"
+pattern = 'acme-cli\s+token\b'
+tests.match = ["acme-cli token --org x"]
+tests.no_match = ["acme-cli tokens-list"]

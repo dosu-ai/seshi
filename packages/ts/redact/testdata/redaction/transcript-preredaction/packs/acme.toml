@@ -1,0 +1,12 @@
+# Pre-redaction on a laptop (F2.4) does not know where a string sits, so this rule, limited
+# to tool output on the server, runs on every string of the transcript.
+id = "acme"
+
+[[rules]]
+id = "customer-row"
+pattern = 'cust_[a-z0-9]{6}'
+applies_to = ["tool_output"]
+
+[[sensitive_files]]
+id = "acme-master-key"
+globs = ["config/master.key"]

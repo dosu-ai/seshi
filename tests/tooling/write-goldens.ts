@@ -8,6 +8,9 @@
  * 2. each record set is parsed and what came out (`content_hash`, events, the rest of the trace,
  *    or the rejection) is written to `<name>.expected.json` beside it.
  *
+ * 3. every redaction case (`packages/ts/redact/testdata/redaction/`, see `redaction-goldens.ts`)
+ *    is redacted with its packs and what came out written to its `expected.json`.
+ *
  * `tests/goldens.test.ts` asserts `parseTrace` still reproduces every expected file, so a
  * change to the hash or the event derivation is a visible diff, never an accident. Commit the
  * outputs. */
@@ -18,6 +21,7 @@ import { parseTrace, TrajectoryError } from "@seshi/model";
 import { normalizeTranscript } from "@seshi/pipeline";
 import { buildFormats } from "seshi/integrations";
 import { expectedOf } from "./goldens";
+import { computeCase, redactionCases } from "./redaction-goldens";
 import { testdataDirs } from "./testdata";
 
 const formats = buildFormats();
@@ -66,4 +70,9 @@ for (const testdata of testdataDirs()) {
       console.log(`${name}: rejected (${err.message})`);
     }
   }
+}
+
+for (const { name, dir } of redactionCases()) {
+  writeJson(dir, "expected.json", computeCase(dir));
+  console.log(`redaction ${name}: written`);
 }

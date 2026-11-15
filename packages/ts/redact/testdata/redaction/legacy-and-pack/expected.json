@@ -1,0 +1,79 @@
+{
+  "records": [
+    {
+      "role": "meta",
+      "source": "claude-code"
+    },
+    {
+      "role": "user",
+      "content": "Ticket [redacted:custom-pattern] from [redacted:ticket-email]: our internal-key: [redacted:custom-pattern] leaked",
+      "timestamp": "2026-11-14T11:00:00Z"
+    },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "r1",
+          "name": "Read",
+          "args": "{\"file_path\":\"secrets/prod/db.yaml\"}"
+        },
+        {
+          "id": "r2",
+          "name": "Read",
+          "args": "{\"file_path\":\"secrets/README.md\"}"
+        },
+        {
+          "id": "r3",
+          "name": "Read",
+          "args": "{\"file_path\":\".env.dev\"}"
+        },
+        {
+          "id": "r4",
+          "name": "Bash",
+          "args": "{\"command\":\"vaultctl read db/prod\"}"
+        }
+      ],
+      "timestamp": "2026-11-14T11:00:01Z"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "r1",
+      "content": "[redacted:sensitive-file]",
+      "timestamp": "2026-11-14T11:00:02Z",
+      "withheld": "sensitive-file"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "r2",
+      "content": "How we keep secrets.",
+      "timestamp": "2026-11-14T11:00:03Z"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "r3",
+      "content": "LOG_LEVEL=debug",
+      "timestamp": "2026-11-14T11:00:04Z"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "r4",
+      "content": "[redacted:secret-output]",
+      "timestamp": "2026-11-14T11:00:05Z",
+      "withheld": "secret-output"
+    }
+  ],
+  "withheld": {
+    "r1": "sensitive-file",
+    "r4": "secret-output"
+  },
+  "summary": {
+    "rule_set": "762bef04e1aaec79de2b9f4f0e6762f889f1abbe64e0fa0b8a1e3d1cb1d7eb05",
+    "counts": {
+      "custom-pattern": 2,
+      "ticket-email": 1,
+      "custom-sensitive-files": 1,
+      "custom-secret-commands": 1
+    }
+  }
+}
