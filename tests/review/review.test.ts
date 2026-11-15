@@ -448,7 +448,7 @@ describe("model review of assembled OTLP sessions (08 with 09)", () => {
     expect(s.requests.map((r) => r.api)).toEqual(["anthropic", "anthropic"]);
   });
 
-  it("drops an assembled session review drops, under the OTLP source", async () => {
+  it("drops an assembled session that review drops, under the OTLP source", async () => {
     const s = server();
     const { publish, store, archive } = await bootOtlp(anthropic(s));
     expect(await publish("here is the CUSTOMER TABLE: ana, 41 rua", "ok")).toMatchObject({

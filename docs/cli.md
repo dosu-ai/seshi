@@ -82,9 +82,9 @@ true` and `reason: "redacted"`, written as `--as <owner>` (default `admin`, sour
 `redaction`), tells readers to take the new trace. A session the rules do not change only has
 its rule set recorded. An OTLP or poller session's span records (`spans/`) that an earlier
 rule set redacted are redacted again in place, and the summary says how many. Redaction cannot
-be undone; `--dry-run` writes nothing and lists what would change. It is safe to stop and run again: sessions already redacted with the current
-rules are skipped. Restart the server with the new packs first, or it keeps writing with the
-old rules. Exit 8 when a session changed while it ran (run it again).
+be undone; `--dry-run` writes nothing and lists what would change. It is safe to stop and run
+again: sessions already redacted with the current rules are skipped. Restart the server with
+the new packs first, or it keeps writing with the old rules. Exit 8 when a session changed while it ran (run it again).
 
 ## Talking to a server, or to your own bucket (F8.3, X3.5)
 
