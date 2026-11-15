@@ -57,7 +57,7 @@ export interface SessionMetadata {
   native_session_id?: string;
   /** What normalized the head trace (X4.9). */
   normalizer?: Normalizer;
-  /** Reserved for F9.7: the hash of the uploading machine's retraction secret. */
+  /** The hash of the uploader's retraction secret (F9.7), kept from the session's first upload. The secret sent in X-Seshi-Retract (a retraction, or an org-key replace) is checked against it. */
   retract_hash?: Sha256;
   created_at: Timestamp;
   updated_at: Timestamp;

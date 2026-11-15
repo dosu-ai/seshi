@@ -206,7 +206,7 @@ envelope model review dropped (X6.3, X4.10). Once tombstoned it has no `head`.
   "origin_agent": "claude-code",      // with native_session_id, collapses a session that
   "native_session_id": "…",           // arrived by two routes (X4.5)
   "normalizer": { "name": "…", "version": "…" },
-  "retract_hash": "<sha256>",         // reserved for F9.7
+  "retract_hash": "<sha256>",         // F9.7: first upload's retraction secret, hashed
   "created_at": "…", "updated_at": "…"
 }
 ```

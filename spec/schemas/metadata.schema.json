@@ -68,7 +68,7 @@
       "$ref": "common.schema.json#/$defs/Normalizer"
     },
     "retract_hash": {
-      "description": "Reserved for F9.7: the hash of the uploading machine's retraction secret.",
+      "description": "The hash of the uploader's retraction secret (F9.7), kept from the session's first upload. The secret sent in X-Seshi-Retract (a retraction, or an org-key replace) is checked against it.",
       "$ref": "common.schema.json#/$defs/Sha256"
     },
     "created_at": { "$ref": "common.schema.json#/$defs/Timestamp" },
