@@ -288,6 +288,29 @@ what changed.
   turns capture off" spooled two entries in one millisecond, which the spool orders by a
   random suffix, so it failed about one run in six. Its entries are now spooled a millisecond
   apart.
+- **tests, medium**: no test covered redaction on the whole path that extends a stored session
+  (offset 0, no replace: `seshi upload`, S3 sync re-reading a grown object, a whole resend);
+  its tail pass could let records through unredacted with the suite green, since every
+  extension test used chunk offsets. `tests/pipeline/session-redaction.test.ts` now re-uploads
+  a grown log whole with a sensitive-file result and an AWS key and checks the head trace, the
+  whole bucket, `withheld_calls` and that only the tail's matches are counted. Test only.
+- **tests, medium**: no test covered redaction on the replace path; the replace tests sent
+  clean text, so its own redaction pass could store a whole rewrite unredacted. The same file
+  now replaces a session with a transcript holding both and checks the trace, the bucket and
+  counts started over. Both tests fail under the mutants the review used. Test only.
+- **tests, low**: CLI capture tests ran git for claims (and the org key's username) with the
+  process's environment, not the command's, so they sent the developer's real `~/.gitconfig`
+  identity and "nothing touches the real home folder" did not hold. `gitIdentityIn(env)` and
+  `gitUserEmail(env)` lay the command's environment over the process's (`captureRuntime` and
+  `resolveUser` pass it; in production that is the same environment), and the test `Machine`
+  sets `GIT_CONFIG_GLOBAL` to its own home and `GIT_CONFIG_NOSYSTEM`. Tests: claims carry the
+  machine home's identity; `resolveUser` reads the command home's `user.email`.
+- **tests, low**: "rejects an oversized record set" read and parsed a golden file 50,001 times
+  (8-35 s against the 30 s timeout under load); it now reads the record once (milliseconds).
+- **tests** (re-checked, already fixed above): the "beats between sessions" flake and the smoke
+  test's 1 s step timeout are the "ops, medium" flaky-suite entry; transcripts dropping token
+  usage and the per-turn model, with no fixture to notice, is the "coverage, high" entry
+  (`claude-usage` and `codex-usage` goldens).
 
 ## Not fixed
 

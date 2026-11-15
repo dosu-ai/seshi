@@ -143,7 +143,8 @@ User docs: [docs/capture.md](../../capture.md) (new), docs/cli.md (rows), docs/c
   entries, and forbids `zod`, `@seshi/client`, `@seshi/formats` and `@letta-ai/trajectory` at
   start-up. Measured: 22 ms against 60 ms to load serve (budget 250 ms). The compiled-binary
   test now runs a real hook.
-- **Tests** (no network, no real home, keychain or service manager): kit contract; each
+- **Tests** (no network, no real home, keychain or service manager; git reads the test
+  machine's own config, since commands pass their environment to git): kit contract; each
   integration's payloads, transcripts and installer in temporary homes; capture's rules, place,
   state, spool, locks, cache, sink (a stand-in server on 127.0.0.1), sweep and the uploader
   against an in-memory protocol server; pipeline/API retraction; `tests/capture/` end to end
