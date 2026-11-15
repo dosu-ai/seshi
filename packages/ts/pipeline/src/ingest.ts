@@ -547,14 +547,16 @@ export async function getSession(
 }
 
 /** Every session's metadata under an owner, by walking `sessions/`. A full listing, paged by
- * key; a reader that wants an index builds its own from `changes/`. */
+ * key; a reader that wants an index builds its own from `changes/`. A session's span records
+ * (`spans/`, F4.4: thousands for a long OTLP session) are stepped over rather than listed, so
+ * they neither fill pages nor count toward `limit`. */
 export async function listSessions(
   store: Store,
   owner: string,
   options: { startAfter?: string; limit?: number } = {},
 ): Promise<{ sessions: SessionMetadata[]; cursor: string | undefined; truncated: boolean }> {
   const prefix = keys.sessions(owner);
-  const page = await store.list(prefix, { startAfter: options.startAfter, limit: options.limit });
+  const page = await listSessionKeys(store, prefix, options);
   const metadataKeys = page.keys.filter((k) => k.endsWith("/metadata.json"));
   const sessions = (
     await Promise.all(
@@ -564,5 +566,39 @@ export async function listSessions(
       }),
     )
   ).filter((m): m is SessionMetadata => m !== null);
-  return { sessions, cursor: page.keys.at(-1), truncated: page.truncated };
+  return { sessions, cursor: page.cursor, truncated: page.truncated };
+}
+
+/** Up to `limit` keys under `prefix` after `startAfter`, stepping over each session's `spans/`:
+ * on reaching one, listing starts again just past it (`…/spans0`; `0` sorts right after `/`).
+ * The cursor is the last key looked at, or such a step, so the next page never walks the
+ * spans again. */
+async function listSessionKeys(
+  store: Store,
+  prefix: string,
+  options: { startAfter?: string; limit?: number },
+): Promise<{ keys: string[]; cursor: string | undefined; truncated: boolean }> {
+  const out: string[] = [];
+  let after = options.startAfter;
+  let cursor: string | undefined;
+  for (;;) {
+    const left = options.limit === undefined ? undefined : options.limit - out.length;
+    const page = await store.list(prefix, { startAfter: after, limit: left });
+    let past: string | undefined;
+    for (const key of page.keys) {
+      const at = key.indexOf("/spans/", prefix.length);
+      if (at >= 0) {
+        past = `${key.slice(0, at)}/spans0`;
+        break;
+      }
+      out.push(key);
+      cursor = key;
+    }
+    if (past === undefined) return { keys: out, cursor, truncated: page.truncated };
+    cursor = past;
+    if (left !== undefined && out.length >= (options.limit ?? 0)) {
+      return { keys: out, cursor, truncated: true };
+    }
+    after = past;
+  }
 }

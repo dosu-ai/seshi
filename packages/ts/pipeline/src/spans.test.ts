@@ -23,7 +23,7 @@ import {
   touchPending,
 } from "@seshi/store";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { getTrace, tombstone } from "./ingest";
+import { getTrace, listSessions, tombstone } from "./ingest";
 import { Pipeline } from "./pipeline";
 import {
   assemblePending,
@@ -457,5 +457,31 @@ describe("publishing an assembled session", () => {
     expect((await readMetadata(store, OWNER, ARCHIVE))?.redaction?.counts).toEqual({
       "github-token": 1,
     });
+  });
+});
+
+describe("listing a service account's sessions", () => {
+  it("steps over span records instead of paging through them", async () => {
+    const { pipeline, assemble } = setup();
+    // Session A has many spans; session B a few. Neither may hide behind A's span records.
+    const many = Array.from({ length: 40 }, (_, i) => chat(`question ${i}`, `answer ${i}`));
+    await pipeline.submit(envelope(many, { session_key: "s-a" }));
+    await pipeline.submit(envelope([chat("question b", "answer b")], { session_key: "s-b" }));
+    later(QUIET);
+    await assemble();
+    const found: string[] = [];
+    let after: string | undefined;
+    let pages = 0;
+    for (;;) {
+      const page = await listSessions(store, OWNER, { startAfter: after, limit: 2 });
+      pages++;
+      found.push(...page.sessions.map((m) => m.session_id));
+      if (!page.truncated) break;
+      after = page.cursor;
+    }
+    expect(found.sort()).toEqual(["s-a", "s-b"]);
+    // Each session's metadata and trace: a handful of pages, not one per two span records.
+    expect(pages).toBeLessThan(8);
+    expect(await listSpans(store, OWNER, archiveId(OWNER, "otlp-genai", "s-a"))).toHaveLength(40);
   });
 });
