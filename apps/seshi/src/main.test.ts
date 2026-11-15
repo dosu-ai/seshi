@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { VERSION } from "@seshi/model";
 import { describe, expect, it } from "vitest";
 import type { CommandContext, CommandSpec } from "./commands/index";
@@ -68,5 +70,17 @@ describe("seshi", () => {
   it("registers every command lazily", () => {
     expect(Object.keys(COMMANDS)).toContain("serve");
     for (const spec of Object.values(COMMANDS)) expect(typeof spec.load).toBe("function");
+  });
+
+  it("runs as the package's bin, with no `bun` in front", async () => {
+    // `bin.seshi` points at main.ts, so the file itself must be executable by its shebang.
+    const entry = join(import.meta.dirname, "main.ts");
+    expect(readFileSync(entry, "utf8").startsWith("#!/usr/bin/env bun\n")).toBe(true);
+    const proc = Bun.spawn([entry, "--version"], {
+      env: { PATH: process.env.PATH ?? "" },
+      stdout: "pipe",
+    });
+    expect(await proc.exited).toBe(0);
+    expect((await new Response(proc.stdout).text()).trim()).toBe(`seshi ${VERSION}`);
   });
 });

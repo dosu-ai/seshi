@@ -1,3 +1,4 @@
+#!/usr/bin/env bun
 /** `seshi`: the one binary (X2.2). The router reads the command name and imports that command's
  * module only then (X3.3); everything else stays unevaluated.
  *
