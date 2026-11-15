@@ -135,8 +135,10 @@ service account. User docs: [docs/otlp.md](../../otlp.md).
   `ctx.submit(envelope)`:
   `{ schema: ENVELOPE_SCHEMA, source: "datadog", source_id, format, session_key, payload: { kind: "spans", spans, resource? }, ...serviceIdentity(source_id), idempotency_key, received_at, provenance?, claims? }`.
   - `spans` are `ReceivedSpan`s: OTLP's JSON mapping with lowercase hex ids (32 and 16 chars)
-    and `startTimeUnixNano` as a decimal string. The pipeline validates nothing more, so build
-    them with care, or run them through `readSpan` from `@seshi/formats`.
+    and `startTimeUnixNano` as a decimal string. The pipeline leaves out (counts in
+    `rejected`) a span the format cannot normalize or whose ids are not that hex, and checks
+    nothing more, so build them with care, or run them through `readSpan` from
+    `@seshi/formats`.
   - `format` names a format whose `FormatAdapter` has `spans`:
     - either `otlpGenAiFormat({ name: "datadog-llmobs", mappers: [datadogMapper] })`, when
       the poller maps Datadog fields to `gen_ai.*` attributes;
@@ -230,7 +232,9 @@ service account. User docs: [docs/otlp.md](../../otlp.md).
   pays that on every republish.
 - **Span records are never pruned** while their session lives: they duplicate the trace's
   content at rest (regex-redacted, not model-reviewed: X6.3 says so). A retention for published
-  sessions' spans may be wanted.
+  sessions' spans may be wanted. The same holds for a session the filter refused or model
+  review dropped: nothing of it is published (X4.10), but its span records stay so that later
+  spans can make it pass. A retention would cover those too.
 - **Size limits.** `limits.max_records_bytes` (32 MiB) can refuse a long session with
   full-content spans (0.75 MB each by default); the refusal is a failure record and the spans
   stay. The OTLP body cap is the upload's (`maxBodyBytes(max_upload_bytes)`, about 513 MiB);
@@ -241,9 +245,29 @@ service account. User docs: [docs/otlp.md](../../otlp.md).
   overwrite of span keys, and conditional delete of markers (03's open item).
 - **Whether workspace or API-key ids are worth more than a claim** (F4 Access): org and
   workspace ids are now recorded as `account_ids`.
-- **06's timing test** "spots a second worker from the heartbeat" failed once under full-suite
-  load during this work and passed on every rerun. Every worker now also runs the assembler job,
-  which adds a listing at start. It was flaky before (06's note); watch it in CI.
+- **06's timing test** "spots a second worker from the heartbeat" was racy: it read the worker
+  state and the warning from two status calls, and a heartbeat rewritten in between flips the
+  state back. Review made it read both from one call (it failed in the review's first run).
+
+## Review fixes
+
+A review of the branch against F4, X4.2 and the build rules found and fixed:
+
+1. **A connector's span with ids that are not OTLP hex failed the whole batch as a store
+   error.** The ids name the span's record (`keys.span` refuses them with `StoreError`), and a
+   `StoreError` is transient, so a poller (10) would have retried the batch forever. The
+   pipeline now leaves such a span out and counts it in `rejected`, like a span the format
+   cannot read. The receiver never hit this (`readSpan` checks ids), a connector could.
+2. **`GET /v1/sessions` paged through span records.** They live under each session's folder
+   and `listSessions` walked every key, so a service account with a long OTLP session answered
+   page after empty page (5000 spans at `limit=100`: fifty round trips before the next
+   session). `listSessions` (`@seshi/pipeline` `ingest.ts`) now steps over a session's
+   `spans/` and resumes just past it (`…/spans0`); the cursor says so. Behaviour without span
+   records is unchanged.
+3. **`SubmitOutcome` (kit)** gains `rejected?` on its `accepted` variant, which the pipeline
+   already answered.
+4. **The partial_success message** for left-out spans names both reasons (no start time, ids).
+5. **06's racy heartbeat test**, as above.
 
 ## Cross-branch wiring once the stack is linear
 
@@ -272,6 +296,9 @@ service account. User docs: [docs/otlp.md](../../otlp.md).
     owner `svc:<id>`) with change entries.
 - **13 (CLI)**: OTLP sessions are `otlp-genai` sessions of `svc:<source-id>`. `seshi tokens
   create --kind service --service <id> --scope sessions:write` is the destination's token.
+- **Any branch touching `listSessions`** (`packages/ts/pipeline/src/ingest.ts`, e.g. 12 or 13
+  listing sessions): keep the `spans/` step-over (`listSessionKeys`), or span records fill the
+  pages again.
 - **Any branch adding routes or config**: these lists conflict on rebase and should be merged
   as unions:
   - the route list in `tests/api/openapi.test.ts` ("names every route");
