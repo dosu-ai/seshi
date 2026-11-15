@@ -290,7 +290,7 @@ describe("serveSettings", () => {
 describe("configFlags", () => {
   it("maps --listen, --roles and --set to config paths", () => {
     expect(configFlags({ listen: ":1", roles: "api", set: ["store.url=s3://b/p=q"] })).toEqual([
-      { name: "--set", path: "store.url", value: "s3://b/p=q" },
+      { name: "--set store.url", path: "store.url", value: "s3://b/p=q" },
       { name: "--listen", path: "server.listen", value: ":1" },
       { name: "--roles", path: "server.roles", value: "api" },
     ]);

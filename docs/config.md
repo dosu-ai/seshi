@@ -57,6 +57,9 @@ and `--set`, and `--cli` for the CLI's own config (below).
   one by its id (upper case, `-` as `_`).
 - A secret can be given as a reference from env too: `SESHI_AUTH__LEGACY_TOKEN_SECRET__FILE=/run/secrets/jwt`.
 - Only `SESHI_*` names are read. Today's `SESSIONDB_*` names are not.
+- A `SESHI_*` name that is not a setting stops the server, except the ones below and a
+  variable a secret reads (`{ env = "SESHI_DD_KEY" }`, or the value of a `…__ENV` variable),
+  which holds a value, not a setting.
 - `SESHI_CONFIG` names the file and is not a setting. Names that belong to the CLI's config
   (`SESHI_USER`, `SESHI_THEME`, `SESHI_SERVER`) are skipped by the server, and the server's by
   the CLI.

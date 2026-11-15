@@ -121,7 +121,9 @@ export function configFlags(values: {
   for (const item of values.set ?? []) {
     const at = item.indexOf("=");
     if (at < 1) fail(`--set takes path=value, got '${item}'`);
-    flags.push({ name: "--set", path: item.slice(0, at).trim(), value: item.slice(at + 1) });
+    const path = item.slice(0, at).trim();
+    // Named with its path, so a message or an origin says which --set it was.
+    flags.push({ name: `--set ${path}`, path, value: item.slice(at + 1) });
   }
   if (values.listen !== undefined) {
     flags.push({ name: "--listen", path: "server.listen", value: values.listen });

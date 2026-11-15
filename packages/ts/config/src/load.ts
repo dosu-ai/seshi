@@ -11,6 +11,7 @@ import * as z from "zod";
 import {
   type Assignment,
   applyAssignment,
+  ENV_PREFIX,
   envAssignments,
   namesSetting,
   PlacementError,
@@ -47,7 +48,7 @@ export const nodeFs: ConfigFs = {
 };
 
 /** A value set by a flag: `--listen :8080` is `{ name: "--listen", path: "server.listen",
- * value: ":8080" }`; `--set a.b=c` is `{ name: "--set", path: "a.b", value: "c" }`. */
+ * value: ":8080" }`; `--set a.b=c` is `{ name: "--set a.b", path: "a.b", value: "c" }`. */
 export interface FlagValue {
   name: string;
   path: string;
@@ -203,6 +204,34 @@ function parseToml(file: string, text: string): PlainObject {
   }
 }
 
+/** The env variables secrets read: `{ env = "NAME" }` at a secret field of the file's tree, and
+ * the value of every `…__ENV` variable (a reference set from env). */
+function referencedEnv(
+  shape: JsonSchema,
+  tree: PlainObject,
+  env: Record<string, string | undefined>,
+): string[] {
+  const names: string[] = [];
+  const visit = (value: unknown, path: PathSegment[]): void => {
+    if (isPlainObject(value)) {
+      if (typeof value.env === "string" && isSecret(nodeAt(shape, tree, path))) {
+        names.push(value.env);
+        return;
+      }
+      for (const [key, child] of Object.entries(value)) visit(child, [...path, key]);
+    } else if (Array.isArray(value)) {
+      value.forEach((child, i) => {
+        visit(child, [...path, i]);
+      });
+    }
+  };
+  visit(tree, []);
+  for (const [name, value] of Object.entries(env)) {
+    if (name.startsWith(ENV_PREFIX) && name.endsWith("__ENV") && value) names.push(value);
+  }
+  return names;
+}
+
 /** Loads one config against `schema`. Throws `ConfigError` listing every problem. */
 export function loadConfig<S extends z.ZodType>(
   schema: S,
@@ -238,8 +267,11 @@ function load<S extends z.ZodType>(schema: S, options: LoadOptions): Loaded<z.ou
     recordFile(shape, tree, { source: "file", path: options.file }, origins);
   }
 
+  // A variable a secret reads (`{ env = "SESHI_DD_KEY" }`) holds a value, not a setting, so it
+  // is not refused as an unknown `SESHI_*` name.
+  const ignore = new Set([...(options.ignoreEnv ?? []), ...referencedEnv(shape, tree, env)]);
   const assignments: Assignment[] = [
-    ...envAssignments(env, new Set(options.ignoreEnv ?? [])),
+    ...envAssignments(env, ignore),
     ...(options.flags ?? []).map((flag) => ({
       name: flag.name,
       source: "flag" as const,

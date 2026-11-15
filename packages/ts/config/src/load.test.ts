@@ -279,6 +279,32 @@ describe("env names (F1.2)", () => {
     expect(secret.reveal()).toBe("from-file");
   });
 
+  it("skip a SESHI_* variable that a secret reads, from the file or from env", () => {
+    const loaded = server(
+      {
+        "/work/seshi.toml": `[store]\nurl = "file:///f"\n[auth.tokens]\nalice = { env = "SESHI_ALICE_TOKEN" }\n`,
+      },
+      {
+        env: {
+          SESHI_ALICE_TOKEN: "alice-token-0123456789",
+          SESHI_AUTH__LEGACY_TOKEN_SECRET__ENV: "SESHI_JWT_SECRET",
+          SESHI_JWT_SECRET: "j".repeat(32),
+        },
+      },
+    );
+    expect(loaded.config.auth.tokens.alice?.reveal()).toBe("alice-token-0123456789");
+    expect(loaded.config.auth.legacy_token_secret?.reveal()).toBe("j".repeat(32));
+    // Only at a secret field: `{ env = … }` elsewhere is not a reference.
+    expect(
+      issues(() =>
+        server(
+          { "/work/seshi.toml": `[store]\nurl = "file:///f"\n` },
+          { env: { SESHI_ALICE_TOKEN: "x" } },
+        ),
+      ),
+    ).toEqual(["SESHI_ALICE_TOKEN: not a setting ('ALICE_TOKEN' is not a setting here)"]);
+  });
+
   it("fail on a name that is not a setting, or that names a table", () => {
     expect(issues(() => server({}, { env: { ...STORE, SESHI_STORE__URLL: "x" } }))).toEqual([
       "SESHI_STORE__URLL: not a setting ('URLL' is not a setting here)",

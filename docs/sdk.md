@@ -22,7 +22,7 @@ import { connect } from "@dosu/sessiondb";
 const db = connect({ store: "s3://acme-sessions/archive", owner: "alice" });
 
 // Or through a sessiondb server, which runs the same pipeline against its own bucket.
-const db = connect({ server: "https://sessiondb.acme.internal", token: process.env.SESHI_TOKEN });
+const db = connect({ server: "https://sessiondb.acme.internal", token: process.env.API_TOKEN });
 ```
 
 The calls are the same either way:
