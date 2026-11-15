@@ -5,19 +5,30 @@ on:
     branches: [main]
   pull_request:
 
+# Every job's GITHUB_TOKEN can read the repository and nothing more, unless the job grants
+# itself more: release, image and npm do, each only what it uses. Checkouts keep no
+# credentials in .git/config (persist-credentials: false): no job pushes with the checkout's
+# token; semantic-release pushes the release commit and tag with the GitHub App token it is
+# handed. Actions are pinned to commit SHAs, the release in the comment; Dependabot
+# (.github/dependabot.yml) proposes the updates.
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
     services:
       s3:
-        image: rustfs/rustfs:latest
+        image: rustfs/rustfs:1.0.5@sha256:b81d16a90ee25bd9511280127ca1471788c6e874cf0f0da759645f46b2dc1d74
         ports: ["9000:9000"]
         env:
           RUSTFS_ACCESS_KEY: rustfsadmin
           RUSTFS_SECRET_KEY: rustfsadmin
     steps:
-      - uses: actions/checkout@v5
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: .bun-version
       - run: bun install --frozen-lockfile
@@ -34,7 +45,7 @@ jobs:
           bun run check:hook --binary dist/seshi
       - name: Create the S3 test bucket
         run: |
-          pip install --quiet awscli
+          pip install --quiet awscli==1.46.3
           AWS_ACCESS_KEY_ID=rustfsadmin AWS_SECRET_ACCESS_KEY=rustfsadmin AWS_DEFAULT_REGION=us-east-1 \
             aws --endpoint-url http://127.0.0.1:9000 s3 mb s3://sessiondb-test
       - name: S3 store test against a live endpoint
@@ -54,8 +65,10 @@ jobs:
     runs-on: windows-latest
     steps:
       - run: git config --global core.autocrlf false
-      - uses: actions/checkout@v5
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: .bun-version
       - run: bun install --frozen-lockfile
@@ -64,7 +77,9 @@ jobs:
   docker:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
       - run: docker build -f apps/seshi/Dockerfile -t sessiondb .
       - name: Boot against a file store and hit /healthz
         run: |
@@ -104,8 +119,10 @@ jobs:
           - { target: windows-arm64, runner: windows-11-arm, keychain: required }
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: .bun-version
       - run: bun install --frozen-lockfile
@@ -158,13 +175,15 @@ jobs:
   darwin-cross:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: .bun-version
       - run: bun install --frozen-lockfile
       - run: bun run release:build --target darwin-arm64 --target darwin-x64 --out dist/cross
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: darwin-cross
           path: dist/cross/seshi-darwin-*.tar.gz
@@ -173,8 +192,10 @@ jobs:
   darwin-cross-check:
     needs: darwin-cross
     runs-on: macos-latest
+    # No checkout; the artifact comes from this run, which needs no token scope.
+    permissions: {}
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: darwin-cross
           path: cross
@@ -210,7 +231,7 @@ jobs:
       version: ${{ steps.release.outputs.version }}
     steps:
       - id: app-token
-        uses: actions/create-github-app-token@v3
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           client-id: ${{ secrets.ABBS_BOT_CLIENT_ID }}
           private-key: ${{ secrets.ABBS_BOT_PRIVATE_KEY }}
@@ -219,15 +240,17 @@ jobs:
           permission-contents: write
           permission-issues: write
           permission-pull-requests: write
-      - uses: actions/checkout@v5
+      # semantic-release pushes with the app token above (GITHUB_TOKEN below), not with the
+      # checkout's, so the checkout keeps no credentials.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: .bun-version
       # semantic-release runs on Node.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
       - run: bun install --frozen-lockfile
@@ -246,9 +269,10 @@ jobs:
     steps:
       # The release commit, not the push that triggered the run: it carries the version
       # packages/ts/model/package.json holds, which /healthz reports.
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           ref: v${{ needs.release.outputs.version }}
+          persist-credentials: false
       # The image ships the release's own Linux binaries (X2.2: one binary, every channel),
       # checked against SHA256SUMS, rather than compiling again.
       - name: Fetch the release's Linux binaries
@@ -263,22 +287,22 @@ jobs:
             mkdir -p "dist/docker/linux-${pair%%:*}"
             tar -xzf "dist/release/seshi-linux-${pair##*:}.tar.gz" -C "dist/docker/linux-${pair%%:*}" seshi
           done
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
             type=semver,pattern={{version}},value=v${{ needs.release.outputs.version }}
             type=semver,pattern={{major}}.{{minor}},value=v${{ needs.release.outputs.version }}
             type=raw,value=latest
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           file: apps/seshi/Dockerfile
@@ -303,13 +327,14 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           ref: v${{ needs.release.outputs.version }}
-      - uses: oven-sh/setup-bun@v2
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: .bun-version
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
@@ -330,6 +355,9 @@ jobs:
   verify:
     needs: [release, npm]
     if: needs.release.outputs.released == 'true'
+    # It runs what was just published (npm i -g, npx, curl | sh): read access, nothing else.
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -344,13 +372,14 @@ jobs:
     env:
       VERSION: ${{ needs.release.outputs.version }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           ref: v${{ needs.release.outputs.version }}
-      - uses: oven-sh/setup-bun@v2
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: .bun-version
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
       - run: bun install --frozen-lockfile
