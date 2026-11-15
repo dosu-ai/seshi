@@ -11,10 +11,11 @@ bun --bun vitest run tests/scenarios           # every scenario (part of bun run
 bun --bun vitest run tests/scenarios -t 07     # the ones whose file name or title has "07"
 ```
 
-Each `*.yaml` file is one test in `scenarios.test.ts`. The runner is `tests/tooling/scenario/`
-(`schema.ts` the format, `runner.ts` the steps and checks, `world.ts` the in-process world,
-`faults.ts` the fault wrappers, `clock.ts` the clock, `transcript.ts` the turns). Build note:
-`docs/seshi/build/32-scenarios.md`.
+Each `*.yaml` file here and in `found/` is one test in `scenarios.test.ts`. The runner is
+`tests/tooling/scenario/` (`schema.ts` the format, `runner.ts` the steps and checks, `world.ts`
+the in-process world, `faults.ts` the fault wrappers, `clock.ts` the clock, `transcript.ts` the
+turns; `generate.ts` and `explore.ts` the generated scenarios, [below](#generated-scenarios)).
+Build notes: `docs/seshi/build/32-scenarios.md`, `docs/seshi/build/33-scenario-gen.md`.
 
 ## The world
 
@@ -164,15 +165,23 @@ After every step:
    after an answer was lost.
 3. No planted credential is anywhere in the bucket, gzipped trace objects included, nor in
    anything sent to review.
-4. `checkStore` finds no errors. Warnings are allowed mid-scenario.
+4. `checkStore` finds no errors. Warnings are allowed mid-scenario, and so is
+   `redacted_trace_object` for a session whose retraction this machine is still retrying (a
+   tombstone that landed but answered as failed leaves its traces until the retry removes them).
 
 Once quiet (at `settle` and at the end):
 
 1. `seshi doctor` fails no check for any session the laptop knows.
-2. `checkStore` finds no errors, and no warnings but `setup.allow` and `settle.allow`.
+2. `checkStore` finds no errors, and no warnings but `setup.allow` and `settle.allow`. Once a
+   store fault fired on a change entry or a session pointer, `change_orphan` and
+   `change_not_applied` are allowed too: the entry of a failed write stays for good, by design
+   (19, X6.4 decision 7). Once any store fault fired, `orphan_trace` is allowed (the orphan
+   sweep removes it, F2.5), and once a trace object's write failed, `stub_trace_object` (the
+   same leftover in a session that became a stub).
 3. The server matches each session's capture decision: a session turned off is tombstoned or
    absent (its earlier generation tombstoned), one stored from here is stored, one never stored
-   from here is not.
+   from here is not (unless a pause stopped it after it sent a piece whose answer was lost: the
+   server holds that piece, and check 2 above bounds it).
 
 ## Writing one
 
@@ -187,6 +196,89 @@ Once quiet (at `settle` and at the end):
   `residue` on them: add a `backfill`.
 - When a scenario fails, the message names the step and carries the evidence: the findings, the
   faults that fired and the capture log's last lines.
+
+## Generated scenarios
+
+The hand-written scenarios cover the combinations someone thought of. The generator
+(`tests/tooling/scenario/generate.ts`) writes the others: from a seed, a random step list of up
+to 25 steps from the same vocabulary, weighted toward turns, passes and faults, across one to
+three sessions and their subagents, in server mode mostly and local mode about one time in
+seven, with review on about two times in five. It only writes valid scenarios: a step that
+needs a session comes after the session's first turns, HTTP faults only in server mode,
+`review` only with review on, `heal` before a `backfill` or `sweep` while a store fault is
+armed, a `backfill` after a rule change and before any `settle`, a `shrink` compaction only
+where it really shortens the transcript and settled at once (build note 32: an in-place rewrite
+that leaves the transcript longer is not detected, by design), no injected `409 conflict` and no
+`PreconditionFailed` a store would never give, and every scenario ends with
+`heal` (when a fault is armed) and `settle`, so the quiet checks run. The scenario passes the
+same validator a hand-written one does. The weights and every precondition are in the build
+note.
+
+```sh
+bun run scenarios:explore                          # 200 runs from a random seed (printed)
+bun run scenarios:explore --runs 5000 --seed 1     # longer, from a fixed seed
+bun run scenarios:explore --seed 60224 --runs 1    # one seed again, as a found file says
+bun run scenarios:explore --max-steps 40 --shrink-runs 500
+```
+
+Each run is one seed. When its scenario fails (an invariant breaks, a quiet check fails, or
+anything throws), fast-check shrinks it: fewer steps and plainer ones, as long as it still fails
+the same way (the same headline, and its first finding still among the findings), up to
+`--shrink-runs` scenario runs (300). The minimal scenario is written to
+`tests/scenarios/found/<seed>-<hash>.yaml`. The summary lists the runs, steps, passes and faults,
+each failure and its file, grouped by kind, and the command exits 1 when anything failed. The
+same seed and `--max-steps` always generate, and shrink to, the same scenario, with the generator
+as it is: when the generator changes, an old seed makes another scenario, and the found file's
+YAML is what counts.
+
+`bun run test` runs a small fixed budget of the same (`generated.test.ts`: 40 seeds of up to 25
+steps, about 3 s); a failure there writes its found file too and names it. CONTRIBUTING.md
+suggests a nightly `scenarios:explore` with fresh seeds.
+
+### Reading a found file
+
+```yaml
+# Found by the scenario explorer (tests/tooling/scenario/explore.ts); see tests/scenarios/README.md.
+# seed: 1169 (bun run scenarios:explore --seed 1169 --runs 1 --max-steps 25)
+# original length: 18 steps; shrunk to 7 in 50 runs
+# failure:
+#   step 7 (settle max=40): once quiet, seshi doctor fails a check
+#     main: queue: refused (conflict): the upload does not extend the stored session …
+#     faults fired:
+#       store put owners/me/sessions/…/metadata.json: … → fail after the write
+name: found by seed 1169
+description: "A generated scenario (seed 1169) shrunk from 18 to 7 steps; …"
+setup: { mode: local }
+steps:
+  - turns: { session: main, count: 2 }
+  - fault: { store: put, key: "owners/*/sessions/*/metadata.json", after: true }
+  - pass
+  - compact: { session: main, mode: shrink, keep: 1 }
+  …
+```
+
+The header holds the seed (and the command that generates it again), how long the scenario
+was before shrinking, and the failure as the runner reported it on the minimal scenario (the
+run's temporary folders written `<home>` and `<world>`, its server `<server>`). The
+body is an ordinary scenario: run it with `bun --bun vitest run tests/scenarios -t <seed>`.
+Shrinking keeps steps the failure does not need when removing them changes what the generator
+makes (a `heal` belongs to the fault it heals), so read it with the failure in mind.
+
+### What to do with one
+
+Decide what it is: a seshi bug, a runner or generator bug, or an invariant stated more strictly
+than the design (the build note lists every one found so far and why). Then:
+
+- **A seshi bug**: fix it with a unit test, and keep the scenario as a regression. Either leave
+  it in `found/` (it runs as a test there), or promote it: rename it to the next number here
+  (`22-what-it-guards.yaml`), give it a real `name`, `description`, `guards` and header comment
+  saying what it guards and which seed found it, and add `expect` steps for the outcome, the
+  way the hand-written ones do.
+- **A runner or generator bug**: fix it; keep the file only if it now passes and guards the fix.
+- **An invariant too strict**: adjust it in `runner.ts` with the reason (the decision or build
+  note) beside it, and here under [What is checked](#what-is-checked).
+
+`found/` only ever holds scenarios that pass: a failing one is never committed.
 
 ## A full example
 

@@ -71,6 +71,14 @@ pause, no planted secret in the bucket, `checkStore` errors) and the doctor and 
 the system is quiet. Each file is a test in `bun run test`; the whole set takes a few seconds and
 no tokens. Name the bug or decision a scenario guards in its header comment.
 
+Generated scenarios find the combinations nobody wrote down: `bun run scenarios:explore` runs
+random step lists from the same vocabulary, shrinks each one that fails to a minimal step list
+and writes it to `tests/scenarios/found/` (`bun run test` runs 40 fixed seeds of it). For CI, a
+nightly job is suggested (not set up yet): `bun run scenarios:explore --runs 3000` with a fresh
+seed each night (it prints the seed), uploading `tests/scenarios/found/` as an artifact and
+failing the job when anything is found. About 3,000 runs take five minutes on a laptop. A found
+file is triaged as the scenarios README says, and kept under `found/` only once it passes.
+
 ## Verifying a change end to end
 
 Unit and integration tests run seshi in-process. To show a change working the way a user meets

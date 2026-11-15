@@ -243,10 +243,10 @@ and what the server, or your local bucket, stored. Each check says `ok`, `warn`,
 | Decision | What the capture rules say now, and which rule said it (information) |
 | Transcript | The file is there and is this session's, and is no shorter than what was sent |
 | Queue | Hook entries, bytes not yet uploaded, retries, refusals, a retraction or rebuild waiting |
-| Server presence | Stored when sent and stored; gone or tombstoned when turned off and retracted; nothing when filtered; a stub when review dropped the first upload |
+| Server presence | Stored when sent and stored; gone or tombstoned when turned off and retracted; nothing when filtered; a stub when review dropped the first upload (also after a resend answered `unchanged`) |
 | Retraction secret | The secret kept here is the one the session was stored with |
-| Offsets | Where the server's log ends agrees with what this machine sent (and a pause's stop) |
-| Records, Prefix hash | The transcript, normalized again up to the server's offset, has as many records as the server counts, and the same prefix hash (compared only under the same redaction rules, and not after a redaction backfill rewrote the session, which leaves the prefix hash of the earlier rules) |
+| Offsets | Where the server's log ends agrees with what this machine sent (and a pause's stop); a warning, not a failure, while a replace review dropped waits for the transcript to grow, or when a pause stopped the session after a piece whose answer was lost |
+| Records, Prefix hash | The transcript, normalized again up to the server's offset, has as many records as the server counts, and the same prefix hash (compared only under the same redaction rules; not after a redaction backfill rewrote the session, which leaves the prefix hash of the earlier rules, nor when the stored records keep an earlier rule's markers or a stub's dropped start was hashed under earlier rules; not when the server holds a piece this machine heard no answer for; a warning while a dropped replace waits) |
 | Trace chain | Every trace can be fetched, continuations follow on, the total is the metadata's |
 | Redaction residue | No redaction rule matches anything stored; a match names the rule and record, never the text |
 | Staleness | The session was built by the current normalizer, or a rebuild is on its way |
