@@ -56,7 +56,10 @@ anywhere. Reference: [docs/server.md](../../server.md#model-review),
     model. The client is built so nothing comes from the environment: explicit `apiKey` and
     `baseURL` (the SDK would otherwise read `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL` and local
     profiles), `maxRetries: 0`, `openTelemetry: false` (spans could carry content to a tracer),
-    `fetchOptions.redirect = "error"`. `refusal` is permanent; `max_tokens` is `truncated`
+    `logLevel: "off"` (the SDK would read `ANTHROPIC_LOG`, and at `debug` it logs request
+    bodies), `fetchOptions.redirect = "error"`. The one env read left is
+    `ANTHROPIC_CUSTOM_HEADERS` (extra headers, no content), which the SDK offers no way to
+    turn off. `refusal` is permanent; `max_tokens` is `truncated`
     (retryable).
   - `openai.ts` `OpenAiCompatibleProvider`: `POST <base_url>/chat/completions` with
     `response_format: json_schema` (strict), `Authorization: Bearer` only with a key,
@@ -86,8 +89,9 @@ anywhere. Reference: [docs/server.md](../../server.md#model-review),
   - `resolveSteps(policy)`: defaults (`anthropic`, `claude-haiku-5-5`,
     `https://api.anthropic.com` / `https://api.openai.com/v1`, 4096 / 16000 tokens, 60 s), and
     the redactor's inheritance: with no provider of its own, or the decision step's, it takes
-    the decision step's provider, model, key, endpoint, effort and timeout; naming another
-    provider it takes none of them (so a key never follows content to another provider).
+    the decision step's provider, model, endpoint, effort and timeout, and the key only when it
+    sends to that same endpoint; naming another provider it takes none of them (so a key never
+    goes to an endpoint it was not configured for).
   - Validation (F3.5 "off until a key"): `anthropic` needs a key; `openai-compatible` needs a
     key or a `base_url`, and a model; `effort` is anthropic-only; `bedrock` and `vertex` are
     refused as not built. A redactor that inherits the decision step's problem is not reported
@@ -165,8 +169,9 @@ anywhere. Reference: [docs/server.md](../../server.md#model-review),
    F3.5 says review is off until a key is given; with `on_failure = "drop"` a keyless policy
    would have dropped every envelope, and with `skip` silently stored everything unreviewed.
 5. **The redactor inherits the decision step's connection**, so a one-key policy works. It
-   inherits nothing when it names another provider, so a key is never sent to a different
-   endpoint than the one it was configured for.
+   inherits nothing when it names another provider, and the decision step's key only when its
+   endpoint is the decision step's, so a key is never sent to a different endpoint than the
+   one it was configured for.
 6. **Parts by turn, and labels combined.** F3.1 labels "each envelope"; F3.7 splits long ones.
    A part's `drop` drops the envelope, any `redact` makes it `redact`, and only `redact` parts
    go to the redactor (F3.7's cost note).
@@ -209,6 +214,20 @@ anywhere. Reference: [docs/server.md](../../server.md#model-review),
 - **`config check` does not read prompt files**; an unreadable one fails at `serve`/build time.
 - **No rate limiting** of provider calls; a provider's 429s are retried with backoff and then
   fall to `on_failure`.
+- **Upload latency against the server's idle timeout.** `seshi serve` sets Bun's
+  `idleTimeout` to 120 s (06). The default policy's worst case for one call is four attempts of
+  60 s plus backoff (about 247 s), and a `redact` envelope makes two calls per part. An upload
+  that waits longer has its connection closed; the pipeline still finishes and writes, and the
+  uploader's resend is answered from the session by its idempotency key, but a resend that
+  arrives while the first is still under review is reviewed again (and one of the two then
+  loses to `StalePlan`). Either lower `timeout`/`retries`, or have the upload routes call
+  `server.timeout(request, 0)` (a change to 06's serve and 05/06's API, not made here).
+- **OpenAI's own API and `max_tokens`.** The OpenAI-compatible provider sends `max_tokens`,
+  which vLLM, Ollama and LiteLLM take; OpenAI's reasoning models refuse it in favour of
+  `max_completion_tokens` (a 400, which is permanent, so `on_failure` decides every envelope).
+  Check against the endpoints in use before pointing a policy at `api.openai.com`.
+- **`config check` prints each step's full `base_url`** in its notices (02's wording, kept). A
+  base URL that carries a token in its query string would be shown; keys belong in `api_key`.
 - The SDK is pinned to 1.3.0 (the newest at least two weeks old); its default
   `anthropic-version` is `2026-10-21`.
 
@@ -236,3 +255,29 @@ anywhere. Reference: [docs/server.md](../../server.md#model-review),
   `packages/ts/config/src/server/review.ts` and `index.ts` exports, `spec/config.schema.json`
   (regenerate on rebase), root and `apps/seshi` `package.json` (one dependency each),
   `bun.lock` (run `bun install`).
+
+## Review fixes
+
+A review of the branch against F3 and the rules found and fixed:
+
+- **fix(review): the Anthropic SDK could log request bodies.** With no `logLevel` the SDK reads
+  `ANTHROPIC_LOG`; at `debug` it logs every request with its body, so a server started with
+  that variable wrote the session text sent for review into its logs (the data-flow rule). The
+  client now passes `logLevel: "off"`; `providers.test.ts` checks nothing is logged with
+  `ANTHROPIC_LOG=debug` (it failed before the fix).
+- **fix(config): the decision step's key went to a redactor's own endpoint.** `resolveSteps`
+  handed a same-provider redactor the decision step's `api_key` even when the redactor set its
+  own `base_url`, so the key was sent to an endpoint it was not configured for, against what
+  this note and docs/config.md said. The key is now inherited only for the same endpoint; an
+  `anthropic` redactor with its own `base_url` and no key fails validation. Test in
+  `server.test.ts`; docs/config.md and docs/server.md updated.
+- **test(review): two missing pipeline tests.** What reaches the provider has been through
+  regex redaction (a GitHub token never leaves the server), and a dropped continuation moves the
+  session's log past it, so the next upload continues after the dropped records and none of
+  their text is stored (F3.4).
+
+Checked and left as built: the decision flow and on_failure paths, splitting and the
+findings applier, the policy hash, scope matching (the reviewer's project is the same one the
+write records), idempotent resends not re-reviewed, the API's admin/owner views, no
+module-level state, the layer and hook checks, no network in tests (the fake server binds
+127.0.0.1, and every test policy names its `base_url`).
