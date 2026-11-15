@@ -741,6 +741,26 @@ export function prefixCheck(
       { hint: "the next whole upload is a 409 conflict, answered with replace" },
     );
   }
+  // The dropped start of a stub (F3.4) is hashed into the prefix as the rules of its day made
+  // it, and is not stored, so no backfill can redo it under rules that change it (33).
+  const dropped = m.dropped_prefix;
+  if (
+    hash !== n.prefix_sha256 &&
+    dropped &&
+    dropped.records > 0 &&
+    dropped.records <= local.records.length &&
+    prefixSha256(
+      deps.redaction.records(local.records.slice(0, dropped.records)),
+      dropped.records,
+    ) !== dropped.prefix_sha256
+  ) {
+    return result(
+      id,
+      title,
+      "skip",
+      `review dropped the first ${plural(dropped.records, "record")}, hashed under earlier rules and not stored to redact again; the hashes cannot agree`,
+    );
+  }
   // A rule set that dropped or renamed a rule: a backfill that found nothing more to redact
   // records the new rule set without rewriting (backfill.ts), and an earlier rule's markers stay
   // as they are (ruleset.ts), so the stored records keep markers this machine's rules never

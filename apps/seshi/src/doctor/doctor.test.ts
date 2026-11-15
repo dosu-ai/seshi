@@ -817,6 +817,24 @@ describe("records and the prefix hash", () => {
     expectStatus(prefixCheck(unanswered, deps()), "skip");
   });
 
+  it("skip the prefix when a stub's dropped start no longer hashes as it did", () => {
+    // Found by the scenario explorer (33): review dropped the first envelope, a rule added later
+    // changes what was in it, and that part is not stored for a backfill to redo: the prefix
+    // keeps the earlier rules' hash of it.
+    const stub = (dropped: string) =>
+      evidence((ev) => {
+        ev.server.metadata = metadata({
+          normalized: { bytes: SIZE, records: 4, prefix_sha256: "e".repeat(64), hash_state: "x" },
+          dropped_prefix: { bytes: 5, records: 1, prefix_sha256: dropped },
+        });
+      });
+    const check = prefixCheck(stub("f".repeat(64)), deps());
+    expectStatus(check, "skip");
+    expect(check.summary).toContain("review dropped the first 1 record");
+    // The dropped start still hashes as recorded: the mismatch is elsewhere, a fault.
+    expectStatus(prefixCheck(stub(prefixSha256(RECORDS, 1)), deps()), "fail");
+  });
+
   it("count the records review dropped on both sides", () => {
     const check = recordsCheck(
       evidence((ev) => {
