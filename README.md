@@ -125,7 +125,8 @@ transcript again while the client still has it).
 4. **Decide what is new.** A grown log writes only its tail; a fork writes only what it added
    past the history it copied. A log that no longer extends the stored session is refused
    (`409 conflict`) unless its original writer sends it with `replace`.
-5. **Review** (when a review policy applies): allow, redact, or drop.
+5. **Review** (when a review policy applies): a decision model allows, redacts or drops; for
+   redact, a redactor LLM finds the text and code removes it ([model review](docs/server.md#model-review)).
 6. **Hash and publish.** `content_hash` is a hash of what was said, independent of timestamps,
    so re-exporting the same conversation writes nothing. The trace is written under its hash,
    the session's pointer gets it as head, and an entry is appended to the change feed.

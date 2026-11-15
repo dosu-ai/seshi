@@ -194,11 +194,54 @@ restart; `seshi redact backfill` applies it to stored sessions.
 
 ### `[review]`
 
-`[[review.policies]]` (F3), none by default, so nothing is sent anywhere. *Later*. Each has
-`id`, scope lists `sources`, `agents`, `repos` (empty is all), `on_failure` (`"drop"` or
-`"skip"`), `retries` (`3`), and `decision` and `redactor` steps: `provider` (`anthropic`,
-`bedrock`, `vertex`, `openai-compatible`), `model`, `prompt` or `prompt_file`, `api_key`
-(secret), `base_url`; the redactor also takes `categories` (`name`, `description`, `examples`).
+`[[review.policies]]`: model review (F3), none by default, so review is off and nothing is sent
+anywhere. A policy has two steps: the decision model labels each envelope `allow`, `redact` or
+`drop`, and for `redact` the redactor LLM finds the text to remove (see
+[server.md](server.md#model-review)). The smallest policy is an id and a key; everything else
+has a default:
+
+```toml
+[[review.policies]]
+id = "default"
+decision = { api_key = { env = "ANTHROPIC_API_KEY" } }
+```
+
+The first policy whose scope names an envelope reviews it.
+
+| Key | Default | |
+|---|---|---|
+| `id` | | The policy's name; recorded with every decision |
+| `sources` | `[]` (all) | Source ids it applies to (`upload` for hooks and uploads) |
+| `agents` | `[]` (all) | Agents (formats) it applies to |
+| `repos` | `[]` (all) | Globs over the session's project; a session without one matches only a policy with no `repos` |
+| `on_failure` | `"drop"` | After the last retry: `drop` the envelope (a drop record, `review_failed`), or `skip` (store it with regex redaction only, recorded as `skipped`) (F3.4) |
+| `retries` | `3` | Retries of a failed call, or of an answer that does not fit, with backoff (up to 10) |
+| `max_input_chars` | `100000` | Record text per model call; a longer envelope is split by turn (F3.7) |
+| `decision`, `redactor` | | The two steps (below) |
+
+Each step takes:
+
+| Key | Default | |
+|---|---|---|
+| `provider` | `anthropic`; the redactor takes the decision step's | `anthropic` or `openai-compatible`. `bedrock` and `vertex` are refused until built; reach them through an OpenAI-compatible gateway |
+| `model` | `claude-haiku-5-5` on `anthropic` | Required for `openai-compatible` |
+| `api_key` | | Secret. Required for `anthropic`, and for `openai-compatible` without a `base_url` |
+| `base_url` | `https://api.anthropic.com`, `https://api.openai.com/v1` | A proxy, an OpenAI-compatible server, or a local model |
+| `prompt`, `prompt_file` | seshi's default prompt | One or the other; the file is read at start |
+| `max_tokens` | `4096` (decision), `16000` (redactor) | Output cap of one call, the model's thinking included |
+| `effort` | the model's own | `anthropic` only: `low`, `medium`, `high`, `xhigh` or `max` |
+| `timeout` | `"60s"` | How long one call may take |
+
+The redactor also takes `categories` (`name`, `description`, `examples`): what it looks for, and
+the name redacted text is marked with (`[redacted:<name>]`). Seshi's defaults are `secret`,
+`personal` and `customer-data`.
+
+A redactor that names no `provider`, or the decision step's, inherits the decision step's
+`provider`, `model`, `api_key`, `base_url`, `effort` and `timeout`; one that names another
+provider inherits none of them. A policy that could not send (no key) or names a provider this
+binary lacks stops start-up rather than drop every envelope. `seshi config check` names every
+provider and endpoint a policy sends envelopes to, and `seshi review eval` measures a policy on
+labelled fixtures before you change it.
 
 ### `[[sources]]`
 

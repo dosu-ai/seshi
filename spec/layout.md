@@ -153,7 +153,8 @@ Nothing else of a session's content is stored (X6.3): no raw transcript, no payl
 ```
 
 Records may carry `id` (the record's id in its source), `llm_call` (the call in `llm_calls`
-that produced it), and on tool results `withheld` and `duration_ms`; the meta record may carry
+that produced it), and on tool results `withheld` (`sensitive-file` or `secret-output` from the
+rules, `review` when model review withheld it) and `duration_ms`; the meta record may carry
 `agent_version`. Every `llm_call` must name an entry of `llm_calls`. `events[i].index` is
 stable for the object's lifetime; anything that addresses a span of a session does so by event
 index range.
@@ -276,13 +277,18 @@ Read and written by the binary only, so their types are code-first in `@seshi/st
 - `owners/<o>/sessions/<a>/spans/<trace_id>-<span_id>.json`: one normalized, redacted span
   record each, for the assembler (F4); never readable through the API.
 - `owners/<o>/sessions/<a>/review/<n>.json` (`seshi/review/1`): for the `n`th stored write,
-  the policy and its hash, the decision (`allow`, `redact`, `skipped`), both models, and the
-  findings by record, field and category, never the matched text (F3.8). `n` is zero-padded to
-  8 digits so a listing is in order.
+  the policy and its hash, the decision (`allow`, `redact`, `skipped`), both models
+  (`<provider>/<model>`), and the findings by record (the index in the trace that write
+  produced), field and category, never the matched text (F3.8). Optional: `unmatched` (findings
+  that named no text the redactor was given), `parts` (how many parts the write was split into
+  for the models), and for `skipped`, `failure` (`step`, `code`, `attempts`). A write no policy
+  covered has none. `n` is zero-padded to 8 digits so a listing is in order.
 - `sources/<id>/dropped/` (`seshi/dropped/1`) and `sources/<id>/failed/` (`seshi/failed/1`):
   one record per envelope that was not stored, with the base fields `at`, `source`,
   `source_kind`, `owner`, `session_key`, `idempotency_key`, `provenance`; drops add `reason`
-  (`review_drop`, `review_failed`), `policy`, `policy_hash`, `decision_model`; failures add
+  (`review_drop`, `review_failed`), `policy`, `policy_hash`, `decision_model`, and for
+  `review_failed` the `failure` (`step`, `code`, `attempts`) and, when the redactor failed,
+  `redactor_model`; failures add
   `code` and `message`. Never content. Kept 30 days by default (`[records]
   dropped_retention`, `failed_retention`); keys are in time order, so pruning stops at the
   first record to keep.

@@ -27,6 +27,16 @@ review packs like code. Matched values are never stored or logged, only counts b
 narrow audience, not as a public artifact. If you find a secret shape the pass misses, report
 it as a vulnerability.
 
+**Model review sends records to a model provider, when you turn it on (F3).** It is off until
+a `[[review.policies]]` entry names a provider key. Then the regex-redacted text of each
+upload's new records (content and tool call arguments, never the uploaded transcript, the meta
+record, ids or timestamps) goes to the endpoint each step names, and nowhere else: keys and
+endpoints come only from the config, redirects are refused, and provider error text is never
+recorded. `seshi config check` names every endpoint. Model review is a second net, not a
+guarantee: a model can miss text or remove too much, and the redactor's findings are applied
+by exact match only. Point both steps at a local OpenAI-compatible model if transcripts may
+not leave your network.
+
 **Every credential is scoped and revocable (X5).** A caller writes only its own sessions
 (`owners/<owner>/`), and reads its own plus those whose visibility is `org`; admins and
 service readers read everything. Seshi tokens (`seshi_…`: org key, admin, device, service) are

@@ -45,6 +45,7 @@ repository's code.
 | `sync status [<id>] [--days N]` | Checkpoints, record counts and source health | Built |
 | `sync failed <id>`, `sync dropped <id>` `[--since] [--limit]` | Envelopes that failed or that model review dropped, and why; never their content (X6.4). `upload` is the source of hooks and uploads | Built |
 | `reprocess --source <id> [--since <time>] [--dry-run] [--run]` | Rewind a source so its sessions are read again (X4.9). Uploads are resent by the capture uploader (14) | Built |
+| `review eval [--policy <id>] [--fixtures <file or folder>]` | Score a model review policy on labelled fixtures, through its real providers: label accuracy, false and missed drops, redactor recall, leaks (F3.8; [server.md](server.md#model-review)). Seshi's own fixtures by default. Exit 8 when any fixture came out other than labelled | Built |
 | `normalize [--agent <format>] [<file> \| -]` | A transcript as canonical, redacted records, one per line (`--json`: one document). For tools in other languages (X3.10) | Built |
 | `healthcheck [--url] [--config]` | Ask a running server's `/healthz` where `server.listen` says it listens (the container's health check) | Built |
 | `login`, `logout`, `whoami` | Sign in to a server (F8.2) | Branch 13 |
@@ -54,9 +55,9 @@ repository's code.
 | `redact test [<file> \| -] [--pack <file>]… [--config]` | Check rule packs' test strings, and show how often each rule fires on a transcript or text and where, never what matched ([below](#redaction-rules)) | Built |
 | `redact backfill (--since <30d> \| --all) [--dry-run]` | Apply the server's current rules to stored sessions (F2.5, [below](#redaction-rules)). Exit 8 when a session changed while it ran | Built |
 
-`serve`, `admin`, `workers`, `sync`, `reprocess` and `redact backfill` run where the server's
-config and bucket keys are: they load the server config the way `serve` does (`--config`, `SESHI_CONFIG`,
-`./seshi.toml`, `/etc/seshi/seshi.toml`, then `SESHI_*` env and `--set`).
+`serve`, `admin`, `workers`, `sync`, `reprocess`, `redact backfill` and `review` run where the
+server's config and bucket keys are: they load the server config the way `serve` does
+(`--config`, `SESHI_CONFIG`, `./seshi.toml`, `/etc/seshi/seshi.toml`, then `SESHI_*` env and `--set`).
 
 ## Redaction rules
 
