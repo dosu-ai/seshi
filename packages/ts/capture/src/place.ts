@@ -67,7 +67,9 @@ export function headBranch(headText: string | undefined): string | undefined {
 }
 
 /** A repo's `.seshi/config.toml`: `capture = false` turns capture off for everyone who works in
- * the repo; `visibility = "owner"` keeps its sessions private (X5.10). Unknown keys are left
+ * the repo; `visibility = "owner"` keeps its sessions private (X5.10). A repo can only narrow:
+ * `visibility = "org"` is accepted but never sent, so it cannot make anyone's sessions wider
+ * than their token's default (the uploader's `details`). Unknown keys are left
  * for other tools; a value of the wrong type makes the file unreadable, which turns capture off
  * there (fail closed). */
 export function parseRepoConfig(text: string | undefined): RepoConfig {

@@ -292,6 +292,25 @@ describe("the upload protocol", () => {
     expect(server.uploads).toHaveLength(2);
   });
 
+  it("sends a repo's visibility only when it narrows to owner, never org (X5.10)", async () => {
+    // The session's folder is a repo whose committed .seshi/config.toml names a visibility.
+    mkdirSync(join(dir, ".git"));
+    writeFileSync(join(dir, ".git", "HEAD"), "ref: refs/heads/main\n");
+    mkdirSync(join(dir, ".seshi"));
+    writeFileSync(join(dir, ".seshi", "config.toml"), 'visibility = "org"\n');
+    writeFileSync(transcript("s1"), line("one") + line("two"));
+    hooked("s1");
+    await uploader().pass();
+    expect(server.uploads[0]).toMatchObject({ session_id: "s1", branch: "main" });
+    expect(server.uploads[0]).not.toHaveProperty("visibility");
+
+    writeFileSync(join(dir, ".seshi", "config.toml"), 'visibility = "owner"\n');
+    writeFileSync(transcript("s2"), line("one", "s2") + line("two", "s2"));
+    hooked("s2");
+    await uploader().pass();
+    expect(server.uploads[1]).toMatchObject({ session_id: "s2", visibility: "owner" });
+  });
+
   it("sends only a file the agent says is that session's transcript", async () => {
     writeFileSync(join(dir, "id_rsa"), "-----BEGIN KEY-----\n");
     hooked("s1", join(dir, "id_rsa"));

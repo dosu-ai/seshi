@@ -904,7 +904,10 @@ export class Uploader {
     return {
       ...(folder ? { project: basename(folder) } : {}),
       ...(repo?.branch ? { branch: repo.branch } : {}),
-      ...(repo?.config.visibility ? { visibility: repo.config.visibility } : {}),
+      // A repo's config may only narrow who reads its sessions (X5.10): a committed
+      // `visibility = "org"` (a cloned repo, a PR branch checked out for review) must not widen
+      // the sessions of someone whose token keeps them private, so only `owner` is sent.
+      ...(repo?.config.visibility === "owner" ? { visibility: "owner" as const } : {}),
       ...(session.parent_session_id ? { parent_session_id: session.parent_session_id } : {}),
       ...(Object.keys(claims).length > 0 ? { claims } : {}),
     };

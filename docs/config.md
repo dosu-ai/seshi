@@ -331,6 +331,12 @@ capture = false        # no session in this repo is captured, whatever anyone's 
 visibility = "owner"   # sessions uploaded from this repo are private to their owner (X5.10)
 ```
 
+A repo config can only narrow who reads a session. `visibility = "owner"` is sent with every
+upload from the repo and beats the token's default; `visibility = "org"` is accepted but never
+sent, so a repo you clone or a branch you check out for review cannot make sessions readable
+by the team when your token keeps them private (the token's default, then the server's
+`default_visibility`, decides instead).
+
 A repo config that cannot be read (a wrong type, bad TOML) turns capture off in that repo until
 it is fixed. Hooks read the CLI config through a cache (`rules.json` in the capture folder),
 loaded again whenever the file or a `SESHI_CAPTURE__*` variable changes.

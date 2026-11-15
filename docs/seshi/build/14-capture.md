@@ -59,7 +59,9 @@ User docs: [docs/capture.md](../../capture.md) (new), docs/cli.md (rows), docs/c
     `normalizeRemote`, `remoteMatches`, `within` (segment-wise, case-insensitive on Windows).
   - `place.ts`: the repo around a folder from the files alone (no `git` process): `.git` dir or
     worktree file + `commondir`, remotes, branch, `.seshi/config.toml` (`capture`,
-    `visibility`; unknown keys ignored, wrong types make it unreadable).
+    `visibility`; unknown keys ignored, wrong types make it unreadable). A repo config only
+    narrows: the uploader sends its `visibility` when it is `owner` and ignores `org`, since a
+    request's visibility beats the token's default.
   - `rules-cache.ts`: the CLI config's capture rules through the real loader, cached in
     `rules.json` keyed by the file's path, size, mtime and every `SESHI_*` setting variable
     (not capture's own `NOT_SETTINGS_ENV`; a bad one is a loader error, cached only for that env), so a hook skips the schema library (~20 ms) unless the config changed.
