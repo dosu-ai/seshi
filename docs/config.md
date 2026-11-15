@@ -3,7 +3,10 @@
 `seshi serve` reads one config, built from four layers (F1.1). A higher layer wins:
 
 1. **Flags**: `--listen`, `--roles`, and `--set path=value` for any setting.
-2. **Environment**: `SESHI_*` variables (Bun also reads `.env` from the working directory).
+2. **Environment**: `SESHI_*` variables. Only `bun start` from a checkout also reads `.env`
+   from the working directory (Bun loads it), and `docker compose` passes `.env` to the
+   container; the installed `seshi` binary never reads `.env`, so export the variables or use
+   the TOML file there.
 3. **The TOML file**: `--config <file>`, else `SESHI_CONFIG`, else `./seshi.toml`, else
    `/etc/seshi/seshi.toml`. A file named by `--config` or `SESHI_CONFIG` must exist; the
    other two are used when present. With no file, the config is env and defaults.

@@ -1,7 +1,8 @@
 /** `seshi serve` (`bun start`): the server, configured by `@seshi/config` (F1): flags, then
  * `SESHI_*` env, then the TOML file (`--config`, `SESHI_CONFIG`, `./seshi.toml`,
- * `/etc/seshi/seshi.toml`), then defaults. Bun reads `.env` on its own. Changes apply on
- * restart (F1.5). docs/config.md lists every setting.
+ * `/etc/seshi/seshi.toml`), then defaults. From a checkout (`bun start`) Bun reads `.env` on its
+ * own; the compiled binary does not (scripts/build-binary.ts). Changes apply on restart (F1.5).
+ * docs/config.md lists every setting.
  *
  *   seshi serve [--config <file>] [--listen <host:port>] [--roles api,worker] [--set path=value]…
  *
