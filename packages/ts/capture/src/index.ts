@@ -71,6 +71,8 @@ export {
   STATE_SCHEMA,
   StateUnreadable,
   sessionKey,
+  sessionToggle,
+  subsessionKeys,
   type Toggle,
   updateState,
   uploadId,

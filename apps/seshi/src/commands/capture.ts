@@ -34,8 +34,10 @@ import {
   type SessionState,
   StateUnreadable,
   sessionKey,
+  sessionToggle,
   sessionWord,
   spoolCount,
+  subsessionKeys,
   updateState,
   uploaderRunning,
   uploadId,
@@ -395,7 +397,7 @@ async function status(ctx: CommandContext, json: boolean, args: Args): Promise<n
     session = {
       ...which,
       ...(known ? { state: known } : {}),
-      decision: judge(known?.cwd ?? cwd, known?.toggle),
+      decision: judge(known?.cwd ?? cwd, sessionToggle(state, which.agent, known)),
     };
   }
   const agents = await allCaptureAgents();
@@ -611,19 +613,26 @@ async function toggleSession(
     if (located && !session.path) session.path = located;
     session.toggle = which;
     session.toggled_at = now.toISOString();
-    if (which === "off") {
-      if (session.sent) session.retract = "pending";
-      retracting = session.sent === true;
-    } else {
-      // A retraction not yet done (waiting, or refused) is called off: nothing was removed,
-      // capture goes on.
-      if (session.retract === "pending" || session.retract === "failed") {
-        delete session.retract;
-        delete session.retract_error;
-      }
-      fresh = (session.generation ?? 0) > 0 && !session.stored;
-    }
     state.sessions[key] = session;
+    // The session's subagents with no toggle of their own go with it: their transcripts hold
+    // its task prompts and tool output (F9.5), so what they uploaded is retracted too.
+    for (const s of [session, ...subsessionKeys(state, agent, id).map((k) => state.sessions[k])]) {
+      if (!s) continue;
+      if (which === "off") {
+        if (s.sent) {
+          s.retract = "pending";
+          retracting = true;
+        }
+      } else {
+        // A retraction not yet done (waiting, or refused) is called off: nothing was removed,
+        // capture goes on.
+        if (s.retract === "pending" || s.retract === "failed") {
+          delete s.retract;
+          delete s.retract_error;
+        }
+        if ((s.generation ?? 0) > 0 && !s.stored) fresh = true;
+      }
+    }
   });
   appendSpool(
     paths,

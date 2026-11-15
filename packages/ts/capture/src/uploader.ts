@@ -51,6 +51,7 @@ import {
   readState,
   type SessionState,
   sessionKey,
+  sessionToggle,
   updateState,
   uploadId,
 } from "./state";
@@ -333,7 +334,7 @@ export class Uploader {
       // The pass's snapshot is enough to tell what is due; `sync` reads the session afresh
       // before each piece, so a toggle set meanwhile still stops it.
       const session = state.sessions[key];
-      if (!session || session.toggle === "off" || session.retract === "pending") continue;
+      if (!session || this.off(state, session)) continue;
       const agent = this.agents.get(session.agent);
       if (!agent || !this.due(session)) continue;
       const path = await this.transcriptOf(key, session, agent);
@@ -428,11 +429,14 @@ export class Uploader {
           if (known.path !== found.path) paths.set(key, found.path);
           continue;
         }
+        // A subagent's transcript found before any hook named it goes by its parent's toggle.
+        const toggle = sessionToggle(state, agent.name, undefined, found.info.parent_session_id);
         const decision = decide(
           {
             rules: snapshot.rules,
             ...(snapshot.error ? { rulesError: snapshot.error } : {}),
             place: placeOf(found.info.cwd),
+            ...(toggle ? { toggle } : {}),
             paused,
           },
           this.host.platform,
@@ -490,16 +494,23 @@ export class Uploader {
     place: Place,
     state: CaptureState,
   ): Decision {
+    const toggle = sessionToggle(state, session.agent, session);
     return decide(
       {
         rules: snapshot.rules,
         ...(snapshot.error ? { rulesError: snapshot.error } : {}),
         place,
-        ...(session.toggle ? { toggle: session.toggle } : {}),
+        ...(toggle ? { toggle } : {}),
         paused: isPaused(state, this.now()),
       },
       this.host.platform,
     );
+  }
+
+  /** Turned off, by its own toggle or its parent's, or waiting for its retraction: nothing more
+   * of it is sent (F9.5). */
+  private off(state: CaptureState, session: SessionState): boolean {
+    return session.retract === "pending" || sessionToggle(state, session.agent, session) === "off";
   }
 
   /** Not waiting for a retry. */
@@ -549,7 +560,7 @@ export class Uploader {
         n++;
         continue;
       }
-      if (session.toggle === "off" || !session.path) continue;
+      if (this.off(state, session) || !session.path) continue;
       const size = this.sizeOf(session.path);
       if (size === undefined || !this.pending(session, size)) continue;
       if (this.decision(snapshot, session, placeOf(session.cwd), state).capture) n++;
@@ -684,10 +695,10 @@ export class Uploader {
     let recoveries = 0;
     let forceWhole = false;
     for (;;) {
-      const session = readState(this.paths).sessions[key];
+      const current = readState(this.paths);
+      const session = current.sessions[key];
       // Turned off (or forgotten) while it was being sent: stop; the retraction comes next.
-      if (!session || session.toggle === "off" || session.retract === "pending")
-        return { uploaded };
+      if (!session || this.off(current, session)) return { uploaded };
       const fileOffset = session.file_offset ?? 0;
       // A transcript that moved (a later hook named another file) is not where the offsets
       // point: it goes whole, and the server's own state says what it extends (04).

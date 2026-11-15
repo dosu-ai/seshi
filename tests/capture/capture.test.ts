@@ -262,6 +262,36 @@ describe("turning a session off (F9.5, F9.7)", () => {
     expect((await stored(`${SESSION}~1`))?.status).toBe("stored");
   });
 
+  it("covers the session's subagents: retracts what they uploaded and sends nothing more", async () => {
+    const sub = join(file.replace(/\.jsonl$/, ""), "subagents", "agent-abc.jsonl");
+    mkdirSync(join(sub, ".."), { recursive: true });
+    writeFileSync(sub, HEAD);
+    const subagentStop = () =>
+      hook("SubagentStop", { agent_id: "abc", agent_transcript_path: sub });
+    await subagentStop();
+    await daemon();
+    expect((await stored("agent-abc"))?.status).toBe("stored");
+
+    const off = await machine.seshi(["capture", "off", "--session", SESSION, "--json"]);
+    expect(JSON.parse(off.out)).toMatchObject({ capture: false, retracting: true });
+    const { summary } = await daemon();
+    expect(summary).toMatchObject({ retracted: 2, uploaded: 0 });
+    expect((await stored())?.status).toBe("redacted");
+    expect((await stored("agent-abc"))?.status).toBe("redacted");
+
+    // A later subagent, and the old one growing: neither hooks nor the sweep send them.
+    appendFileSync(sub, TAIL);
+    const later = join(sub, "..", "agent-def.jsonl");
+    writeFileSync(later, HEAD);
+    await subagentStop();
+    await hook("SubagentStop", { agent_id: "def", agent_transcript_path: later });
+    expect(spooled()).toBe(0);
+    // `--once` sweeps too.
+    expect((await daemon()).summary).toMatchObject({ uploaded: 0 });
+    expect(await stored("agent-def")).toBeNull();
+    expect(state().sessions["claude-code:agent-abc"]).toMatchObject({ retract: "done" });
+  });
+
   it("records a retraction the server refuses, and the status line says so", async () => {
     await server.stop();
     server = await startServer({ config: "[capture]\nallow_retract = false\n" });

@@ -45,6 +45,19 @@ const agent: CaptureAgent = {
       },
     },
     {
+      // A subagent's stop: the parent and the subagent, as Claude Code's SubagentStop.
+      event: "SubagentStop",
+      parse: (p) => {
+        const { id, cwd, sub } = p as { id: string; cwd: string; sub: string };
+        return {
+          captures: [
+            { session_id: id, cwd },
+            { session_id: sub, cwd, transcript_path: `/t/${sub}.jsonl`, parent_session_id: id },
+          ],
+        };
+      },
+    },
+    {
       event: "Start",
       parse: (p, h) => ({
         captures: [],
@@ -112,6 +125,37 @@ describe("runHook (F9.1)", () => {
     const unknown = await runHook({ agent, event: "Stop", payload: { id: "c" }, host, paths });
     expect(unknown.skipped[0]?.decision.level).toBe("unknown");
     expect(readSpool(paths).items).toHaveLength(0);
+  });
+
+  it("skips a subagent of a session turned off, unless the subagent is turned on itself", async () => {
+    await updateState(paths, (s) => {
+      s.sessions["fake:main1"] = {
+        agent: "fake",
+        session_id: "main1",
+        first_seen: "x",
+        toggle: "off",
+      };
+    });
+    const payload = { id: "main1", cwd: dir, sub: "agent-abc" };
+    const off = await runHook({ agent, event: "SubagentStop", payload, host, paths });
+    expect(off.spooled).toEqual([]);
+    expect(off.skipped.map((s) => [s.session_id, s.decision.level])).toEqual([
+      ["main1", "session"],
+      ["agent-abc", "session"],
+    ]);
+    expect(readSpool(paths).items).toHaveLength(0);
+
+    await updateState(paths, (s) => {
+      s.sessions["fake:agent-abc"] = {
+        agent: "fake",
+        session_id: "agent-abc",
+        parent_session_id: "main1",
+        first_seen: "x",
+        toggle: "on",
+      };
+    });
+    const own = await runHook({ agent, event: "SubagentStop", payload, host, paths });
+    expect(own.spooled.map((c) => c.session_id)).toEqual(["agent-abc"]);
   });
 
   it("uses the folder a session was seen in before, when the payload has none", async () => {

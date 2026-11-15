@@ -10,6 +10,13 @@ export { placeOf } from "./place";
 export { type Decision, decide } from "./rules";
 export { captureRules, type RulesSnapshot } from "./rules-cache";
 export { appendSpool, spoolCount } from "./spool";
-export { type CaptureState, isPaused, readState, StateUnreadable, sessionKey } from "./state";
+export {
+  type CaptureState,
+  isPaused,
+  readState,
+  StateUnreadable,
+  sessionKey,
+  sessionToggle,
+} from "./state";
 export { MAX_PROBLEMS, type StatusLine, type StatusProblem, statusLine } from "./status";
 export { uploaderRunning } from "./uploader-lock";

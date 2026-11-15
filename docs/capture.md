@@ -136,7 +136,10 @@ Turning a session off stops its uploads and removes what was uploaded. Each sess
 secret that only its hash ever leaves this machine with; turning the session off sends the
 secret, and the server deletes the session (a tombstone with reason `retracted`). A retraction
 waits in the spool while the uploader is not running. Turning the session on again uploads it
-from the start as a new session (`<id>~1`). If the state file is lost, the secret is gone: delete
+from the start as a new session (`<id>~1`). A session's subagents (Claude Code's `agent-<id>`
+sessions, which hold its task prompts and their tool output) go with it unless they were toggled
+themselves: turning the session off retracts what they uploaded and keeps later ones from being
+sent, by hooks or the sweep. If the state file is lost, the secret is gone: delete
 the session with `seshi sessions rm` (with an IdP) or ask an admin. A server can turn retraction
 off with `capture.allow_retract = false`.
 

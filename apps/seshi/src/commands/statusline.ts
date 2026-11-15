@@ -18,6 +18,7 @@ import {
   readState,
   type StatusLine,
   sessionKey,
+  sessionToggle,
   spoolCount,
   statusLine,
 } from "@seshi/capture/fast";
@@ -79,12 +80,14 @@ export async function run(ctx: CommandContext): Promise<number> {
     state = undefined;
   }
   const snapshot = await captureRules(host, paths);
+  const known = key ? state?.sessions[key] : undefined;
+  const toggle = state && known ? sessionToggle(state, agent, known) : undefined;
   const decision = decide(
     {
       rules: snapshot.rules,
       ...(snapshot.error ? { rulesError: snapshot.error } : {}),
       place: placeOf(cwd),
-      ...(key && state?.sessions[key]?.toggle ? { toggle: state.sessions[key]?.toggle } : {}),
+      ...(toggle ? { toggle } : {}),
       paused: state ? isPaused(state, new Date()) : false,
     },
     host.platform,

@@ -155,11 +155,12 @@ const agent: CaptureAgent = {
   identify: (_path, head) => {
     const first = head.split("\n")[0];
     if (!first) return null;
-    const row = JSON.parse(first) as { id: string; cwd?: string; at?: string };
+    const row = JSON.parse(first) as { id: string; cwd?: string; at?: string; parent?: string };
     return {
       session_id: row.id,
       ...(row.cwd ? { cwd: row.cwd } : {}),
       ...(row.at ? { started_at: row.at } : {}),
+      ...(row.parent ? { parent_session_id: row.parent } : {}),
     };
   },
   accountIds: () => ({ anthropic: "acct-1" }),
@@ -489,6 +490,46 @@ describe("the rules apply to the uploader too (F9.3)", () => {
     });
     await uploader().pass();
     expect(server.uploads).toHaveLength(0);
+  });
+
+  it("sends nothing of a subagent whose parent is turned off, by hook or sweep", async () => {
+    await updateState(paths, (s) => {
+      s.agents.fake = { installed_at: "2026-10-01T00:00:00Z" };
+      s.sessions["fake:main1"] = {
+        agent: "fake",
+        session_id: "main1",
+        first_seen: "x",
+        toggle: "off",
+      };
+    });
+    const sub = (id: string) =>
+      `${JSON.stringify({ id, cwd: dir, parent: "main1" })}\n${JSON.stringify({ id })}\n`;
+    // Spooled before the parent was turned off (or by an older hook): the uploader holds it.
+    writeFileSync(transcript("agent-a"), sub("agent-a"));
+    appendSpool(paths, {
+      v: 1,
+      kind: "capture",
+      at: clock.toISOString(),
+      agent: "fake",
+      event: "SubagentStop",
+      session_id: "agent-a",
+      transcript_path: transcript("agent-a"),
+      cwd: dir,
+      parent_session_id: "main1",
+    });
+    // Found only by the sweep.
+    writeFileSync(transcript("agent-b"), sub("agent-b"));
+    const pass = await uploader().pass({ sweep: true });
+    expect(server.uploads).toHaveLength(0);
+    expect(pass.queued).toBe(0);
+    expect(Object.keys(readState(paths).sessions).sort()).toEqual(["fake:agent-a", "fake:main1"]);
+
+    // Its own toggle wins over the parent's.
+    await updateState(paths, (s) => {
+      (s.sessions["fake:agent-a"] as SessionState).toggle = "on";
+    });
+    await uploader().pass();
+    expect(server.uploads.map((u) => u.session_id)).toEqual(["agent-a"]);
   });
 });
 

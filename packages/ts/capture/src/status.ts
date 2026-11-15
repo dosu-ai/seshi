@@ -49,11 +49,10 @@ export function statusLine(input: StatusLineInput): StatusLine {
 
 /** What a session's state says, in a few words, for `seshi capture status` and `seshi upload`. */
 export function sessionWord(s: SessionState): string {
-  if (s.toggle === "off") {
-    if (s.retract === "pending") return "retracting";
-    if (s.retract === "failed") return "retraction refused";
-    return s.retract === "done" ? "off (retracted)" : "off";
-  }
+  // A subagent's retraction comes from its parent's toggle, not its own.
+  if (s.retract === "pending") return "retracting";
+  if (s.retract === "failed") return "retraction refused";
+  if (s.toggle === "off") return s.retract === "done" ? "off (retracted)" : "off";
   if (s.error?.permanent) return `refused (${s.error.code})`;
   if (s.error) return "retrying";
   if (s.stored) return "uploaded";

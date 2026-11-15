@@ -173,3 +173,44 @@ export function isPaused(state: CaptureState, now: Date): boolean {
   if (!paused) return false;
   return paused.until === undefined || Date.parse(paused.until) > now.getTime();
 }
+
+/** The toggle that applies to a session: its own, else its parent's, and so on up (F9.5). A
+ * subagent's transcript is part of the session that started it (the parent's task prompt, its
+ * tool output), so turning the parent off covers it; its own toggle, when it has one, wins.
+ * `parentId` names the parent of a session not in the state yet (a hook's capture). */
+export function sessionToggle(
+  state: CaptureState,
+  agent: string,
+  session: Pick<SessionState, "toggle" | "parent_session_id"> | undefined,
+  parentId?: string,
+): Toggle | undefined {
+  if (session?.toggle) return session.toggle;
+  const seen = new Set<string>();
+  let parent = session?.parent_session_id ?? parentId;
+  while (parent !== undefined && !seen.has(parent)) {
+    seen.add(parent);
+    const above = state.sessions[sessionKey(agent, parent)];
+    if (above?.toggle) return above.toggle;
+    parent = above?.parent_session_id;
+  }
+  return undefined;
+}
+
+/** The keys of the sessions `id` started (its subagents), and theirs in turn, that have no
+ * toggle of their own: the ones a toggle of `id` covers. */
+export function subsessionKeys(state: CaptureState, agent: string, id: string): string[] {
+  const keys: string[] = [];
+  const parents = new Set([id]);
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const [key, session] of Object.entries(state.sessions)) {
+      if (session.agent !== agent || session.toggle || parents.has(session.session_id)) continue;
+      if (session.parent_session_id !== undefined && parents.has(session.parent_session_id)) {
+        parents.add(session.session_id);
+        keys.push(key);
+        grew = true;
+      }
+    }
+  }
+  return keys;
+}

@@ -10,7 +10,7 @@ import { placeOf } from "./place";
 import { type Decision, decide } from "./rules";
 import { captureRules } from "./rules-cache";
 import { appendSpool } from "./spool";
-import { isPaused, readState, sessionKey } from "./state";
+import { isPaused, readState, sessionKey, sessionToggle } from "./state";
 
 export interface HookRun {
   agent: CaptureAgent;
@@ -61,12 +61,14 @@ export async function runHook(run: HookRun): Promise<HookOutcome> {
   const paused = isPaused(state, now);
   for (const capture of result.captures) {
     const known = state.sessions[sessionKey(run.agent.name, capture.session_id)];
+    // A subagent has no toggle of its own until someone sets one: its parent's covers it.
+    const toggle = sessionToggle(state, run.agent.name, known, capture.parent_session_id);
     const decision = decide(
       {
         rules,
         ...(error !== undefined ? { rulesError: error } : {}),
         place: placeOf(capture.cwd ?? known?.cwd),
-        ...(known?.toggle ? { toggle: known.toggle } : {}),
+        ...(toggle ? { toggle } : {}),
         paused,
       },
       run.host.platform,

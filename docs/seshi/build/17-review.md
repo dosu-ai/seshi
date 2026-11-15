@@ -147,6 +147,19 @@ what changed.
   datadog.md and 10 say so. Tests: connector (back, forward, future, first window, bad cursor)
   and the command (future refused, checkpoint kept).
 
+- **client, high** (reported critical): turning a session off did not cover its subagents.
+  Claude Code's SubagentStop captures `agent-<id>` with `parent_session_id`, and the hook, the
+  sweep, the uploader's pass, due check and in-flight stop, and `capture off` all read only the
+  subagent's own toggle, so after `/seshi capture off` its transcripts (the parent's task
+  prompt, their tool output) were still uploaded, and those uploaded before were never
+  retracted, against F9.5's "nothing more of this session is uploaded". `sessionToggle` now
+  gives a session its own toggle, else its parent's (up the chain), and every one of those
+  places uses it; `capture off|on --session` also marks (or calls off) the retraction of the
+  session's subagents with no toggle of their own (`subsessionKeys`). capture.md says so.
+  Tests: hook (both captures skipped, a subagent's own `on` wins), uploader (spooled and swept
+  subagents sent nothing), end to end (two retracted, a later subagent and a grown one not
+  sent).
+
 ## Not fixed
 
 - **ingest, medium** (split vote, judged a documented deviation): a change entry is lost when
