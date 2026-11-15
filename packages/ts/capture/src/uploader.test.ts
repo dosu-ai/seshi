@@ -433,6 +433,51 @@ describe("the upload protocol", () => {
     expect(server.uploads).toHaveLength(before);
   });
 
+  it("replaces on conflict a session whose first answer was lost", async () => {
+    // Found by the scenario explorer (33): the first upload landed but its answer was lost, so
+    // `stored` was never set; the transcript was then compacted shorter, the retry (whole) was
+    // a conflict, and the session was refused for good although this machine had stored it.
+    writeFileSync(transcript(), line("one") + line("two"));
+    hooked();
+    let lose = true;
+    const losing: SessionSink = {
+      target: server.target,
+      ready: () => server.ready(),
+      stale: () => server.stale(),
+      retract: (agent, id, secret) => server.retract(agent, id, secret),
+      async ingest(upload, options) {
+        const result = await server.ingest(upload, options);
+        if (lose) {
+          lose = false;
+          throw new TypeError("fetch failed: the connection closed before the response");
+        }
+        return result;
+      },
+    };
+    await uploader({ sink: async () => losing }).pass();
+    expect(server.sessions.get("s1")?.text).toBe(line("one") + line("two"));
+    expect(session()).toMatchObject({ sent: true });
+    expect(session().stored).toBeUndefined();
+    writeFileSync(transcript(), line("uno"));
+    clock = new Date(clock.getTime() + 60_000);
+    const pass = await uploader().pass();
+    expect(pass.failed).toBe(0);
+    expect(server.uploads.at(-1)).toMatchObject({ offset: 0, replace: true });
+    expect(server.sessions.get("s1")?.text).toBe(line("uno"));
+    expect(session()).toMatchObject({ stored: true });
+
+    // Sent before, but another machine's session (another secret): still a refusal for good.
+    server.sessions.set("s2", { text: "other\n", hash: "not-ours" });
+    writeFileSync(transcript("s2"), line("one", "s2") + line("two", "s2"));
+    hooked("s2");
+    await uploader().pass();
+    appendFileSync(transcript("s2"), line("three", "s2"));
+    await uploader().pass();
+    expect(server.uploads.at(-1)).toMatchObject({ session_id: "s2", replace: true });
+    expect(session("s2").error).toMatchObject({ permanent: true });
+    expect(server.sessions.get("s2")?.text).toBe("other\n");
+  });
+
   it("replaces again after review dropped a replace, never chunking onto the kept session", async () => {
     // Review finding: a dropped replace left the server holding the old session, and the next
     // chunk of this log went at the server's offset, splicing it onto that session.

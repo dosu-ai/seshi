@@ -1067,9 +1067,18 @@ export class Uploader {
           }
           continue;
         }
-        if (err instanceof SessionConflict && whole && session.stored && !replacing) {
+        if (
+          err instanceof SessionConflict &&
+          whole &&
+          (session.stored || session.sent) &&
+          !replacing
+        ) {
           // This machine stored the session and its log no longer extends it (rules or the
           // normalizer changed, X4.6): only its original writer may replace it, and that is us.
+          // `sent` too: an earlier upload whose answer was lost may have stored it (`stored` is
+          // only set from an answer), and a rewrite since (a compaction) makes this whole log a
+          // conflict. The replace carries the secret, which the server checks against the
+          // stored session's hash, so one another machine stored still refuses it (403).
           replace = true;
           recoveries++;
           continue;
