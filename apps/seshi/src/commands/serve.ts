@@ -23,6 +23,17 @@ import { openServer, serverFailure } from "./server-instance";
 
 export { ServeConfigError, serveSettings } from "./serve-settings";
 
+/** The largest request body the listener takes: a transcript up to `limits.max_upload_bytes`,
+ * as JSON (a gzipped body is held to the same cap once decoded), or an OTLP body up to
+ * `limits.max_otlp_bytes`, whichever is larger, so the OTLP route's own 413 (which names the
+ * key) is the one an exporter sees. */
+export function requestBodyCap(limits: {
+  max_upload_bytes: number;
+  max_otlp_bytes: number;
+}): number {
+  return Math.max(maxBodyBytes(limits.max_upload_bytes), limits.max_otlp_bytes);
+}
+
 const USAGE =
   "usage: seshi serve [--config <file>] [--listen <host:port>] [--roles api,worker] [--set path=value]…";
 
@@ -68,9 +79,7 @@ async function start(ctx: CommandContext, argv: string[]): Promise<number | unde
     server = Bun.serve({
       hostname: settings.hostname,
       port: settings.port,
-      // A transcript up to limits.max_upload_bytes, as JSON; a gzipped body is held to the
-      // same cap once decoded.
-      maxRequestBodySize: maxBodyBytes(settings.limits.max_upload_bytes),
+      maxRequestBodySize: requestBodyCap(settings.limits),
       // A large upload or a long list against a bucket can take more than Bun's 10s default.
       idleTimeout: 120,
       fetch: app.fetch,

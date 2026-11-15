@@ -61,6 +61,7 @@ import {
   type Writer,
 } from "@seshi/model";
 import {
+  DEFAULT_LIMITS,
   getSession,
   getTrace,
   listSessions,
@@ -921,7 +922,15 @@ export function createApp(instance: Instance) {
 
   // --- OTLP ingest (F4), outside /v1: OTLP's own v1 follows ----------------------
 
-  const traces = otlpTraces(instance, { bearer, readBody, maxBodyBytes: bodyLimit });
+  const traces = otlpTraces(instance, {
+    bearer,
+    caps: {
+      wire: instance.limits.max_otlp_bytes ?? (DEFAULT_LIMITS.max_otlp_bytes as number),
+      inflated:
+        instance.limits.max_otlp_inflated_bytes ??
+        (DEFAULT_LIMITS.max_otlp_inflated_bytes as number),
+    },
+  });
   route("POST", "/otlp/v1/traces", ({ request }) => traces(request));
 
   // --- admin: sources (X4.8, X6.4) ------------------------------------------------------

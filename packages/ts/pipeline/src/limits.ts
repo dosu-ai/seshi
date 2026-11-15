@@ -10,10 +10,17 @@ export interface Limits {
   /** Bytes of one upload's transcript (the envelope's log text), uncompressed. Nothing of it is
    * stored (X6.3); the cap bounds what is normalized in memory. */
   max_upload_bytes: number;
+  /** Bytes of one `POST /otlp/v1/traces` body as sent, gzipped or not (F4.1); past it the
+   * request is answered 413. `DEFAULT_LIMITS`' when absent. */
+  max_otlp_bytes?: number;
+  /** Bytes of a gzipped OTLP body once inflated; inflating stops there and answers 413. */
+  max_otlp_inflated_bytes?: number;
 }
 
 export const DEFAULT_LIMITS: Readonly<Limits> = Object.freeze({
   max_records: 50_000,
   max_records_bytes: 32 * 1024 * 1024,
   max_upload_bytes: 256 * 1024 * 1024,
+  max_otlp_bytes: 64 * 1024 * 1024,
+  max_otlp_inflated_bytes: 256 * 1024 * 1024,
 });

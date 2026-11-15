@@ -7,7 +7,8 @@
  *   scope `sessions:write`, F4.2). Its sessions belong to `svc:<source-id>` and take the
  *   source's visibility (X5.4, X5.10).
  * - The body is `ExportTraceServiceRequest` as protobuf (`application/x-protobuf`, what the
- *   Console sends) or JSON (`application/json`), optionally gzipped. The answer is
+ *   Console sends) or JSON (`application/json`), optionally gzipped, within the OTLP caps
+ *   (`limits.max_otlp_bytes` sent, `limits.max_otlp_inflated_bytes` inflated, `body.ts`). The answer is
  *   `ExportTraceServiceResponse` in the same encoding, with `partial_success` for spans that
  *   were not accepted; a failed request is a `google.rpc.Status` with the HTTP status OTLP
  *   gives it (400, 401, 403, 413, 415; 502 and 503 are retried by exporters).
@@ -34,6 +35,7 @@ import {
   StoreError,
   Unauthorized,
 } from "@seshi/model";
+import { type OtlpBodyCaps, readOtlpBody } from "./body";
 import { decodeExportRequest, encodeExportResponse, encodeStatus } from "./protobuf";
 
 /** The message a metadata-only batch is rejected with (F4.5). */
@@ -54,10 +56,8 @@ type Encoding = "protobuf" | "json";
 export interface ReceiverDeps {
   /** The request's bearer token. */
   bearer(request: Request): string | undefined;
-  /** The body, gunzipped, capped at `max` bytes (throws an error with `status` and `code`). */
-  readBody(request: Request, max: number): Promise<Uint8Array>;
-  /** The largest body accepted. */
-  maxBodyBytes: number;
+  /** The OTLP caps: `[limits]` `max_otlp_bytes` and `max_otlp_inflated_bytes` (F4.1). */
+  caps: OtlpBodyCaps;
 }
 
 /** The encoding a `Content-Type` names, or null for one OTLP/HTTP does not define. */
@@ -178,7 +178,7 @@ export function otlpTraces(instance: Instance, deps: ReceiverDeps) {
     let rejected: number;
     let reason: string | undefined;
     try {
-      const body = await deps.readBody(request, deps.maxBodyBytes);
+      const body = await readOtlpBody(request, deps.caps);
       const value =
         encoding === "protobuf"
           ? decodeExportRequest(body)

@@ -459,3 +459,103 @@ describe("POST /otlp/v1/traces", () => {
     expect(new TextDecoder().decode(await response.arrayBuffer())).toContain("past the end");
   });
 });
+
+describe("the OTLP body caps (F4.1, [limits])", () => {
+  /** A server with `[limits]` `limits`, its destination's token, and a POST of `body`. */
+  async function capped(limits: string) {
+    const server = await bootInstance(
+      `[limits]\n${limits}\n[[sources]]\nid = "console"\ntype = "otlp"\nfilter = { min_chars = 50 }`,
+      { now: () => clock, roles: ["api", "worker"] },
+    );
+    const served = createApp(server.instance);
+    const init = await server.instance.auth.initAdmin({ owner: "ops" });
+    const minted = await served.fetch(
+      new Request("http://seshi.test/v1/tokens", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${init.admin?.token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ kind: "service", service: "console", scopes: ["sessions:write"] }),
+      }),
+    );
+    const { token } = (await minted.json()) as { token: string };
+    const post = (body: Uint8Array, gzip: boolean) =>
+      served.fetch(
+        new Request("http://seshi.test/otlp/v1/traces", {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${token}`,
+            "content-type": "application/x-protobuf",
+            ...(gzip ? { "content-encoding": "gzip" } : {}),
+          },
+          body: body as Uint8Array<ArrayBuffer>,
+        }),
+      );
+    return { server, post };
+  }
+
+  const raw = () => encodeExportRequest(fixture("managed-agents-session"));
+  const message = async (response: Response) =>
+    new TextDecoder().decode(await response.arrayBuffer());
+
+  it("defaults to 64 MiB sent and 256 MiB inflated", () => {
+    expect(instance.config.limits.max_otlp_bytes).toBe(64 * 1024 * 1024);
+    expect(instance.config.limits.max_otlp_inflated_bytes).toBe(256 * 1024 * 1024);
+  });
+
+  it("takes a body of exactly limits.max_otlp_bytes and answers 413 naming the key one byte past it", async () => {
+    const body = raw();
+    for (const [cap, status] of [
+      [body.length, 200],
+      [body.length - 1, 413],
+    ] as const) {
+      const { server, post } = await capped(`max_otlp_bytes = ${cap}`);
+      try {
+        const response = await post(body, false);
+        expect(response.status).toBe(status);
+        if (status === 413) {
+          expect(response.headers.get("content-type")).toBe("application/x-protobuf");
+          expect(await message(response)).toContain("limits.max_otlp_bytes");
+          expect(await listSpans(server.store, OWNER, ARCHIVE)).toEqual([]);
+        } else {
+          expect(await listSpans(server.store, OWNER, ARCHIVE)).toHaveLength(10);
+        }
+      } finally {
+        await server.cleanup();
+      }
+    }
+  });
+
+  it("holds a gzipped body to max_otlp_bytes as sent and max_otlp_inflated_bytes inflated", async () => {
+    const body = raw();
+    const sent = gzipSync(body);
+    for (const [limits, status, key] of [
+      [`max_otlp_bytes = ${sent.length}\nmax_otlp_inflated_bytes = ${body.length}`, 200, ""],
+      [`max_otlp_bytes = ${sent.length - 1}`, 413, "limits.max_otlp_bytes"],
+      [`max_otlp_inflated_bytes = ${body.length - 1}`, 413, "limits.max_otlp_inflated_bytes"],
+    ] as const) {
+      const { server, post } = await capped(limits);
+      try {
+        const response = await post(sent, true);
+        expect(response.status).toBe(status);
+        if (key) expect(await message(response)).toContain(key);
+      } finally {
+        await server.cleanup();
+      }
+    }
+  });
+
+  it("answers a gzip bomb 413 at the inflated cap", async () => {
+    // 32 MiB of zeros in about 32 KB, far under the wire cap.
+    const bomb = gzipSync(new Uint8Array(32 * 1024 * 1024));
+    const { server, post } = await capped(`max_otlp_inflated_bytes = "1MiB"`);
+    try {
+      const response = await post(bomb, true);
+      expect(response.status).toBe(413);
+      expect(await message(response)).toContain("limits.max_otlp_inflated_bytes");
+    } finally {
+      await server.cleanup();
+    }
+  });
+});

@@ -93,6 +93,8 @@ describe("precedence (F1.1)", () => {
       max_records: 50_000,
       max_records_bytes: 32 * 1024 * 1024,
       max_upload_bytes: 256 * 1024 * 1024,
+      max_otlp_bytes: 64 * 1024 * 1024,
+      max_otlp_inflated_bytes: 256 * 1024 * 1024,
     });
     expect(config.records).toEqual({
       dropped_retention: 30 * 86_400_000,

@@ -894,9 +894,10 @@ paths:
               schema: { $ref: "#/components/schemas/OtlpStatus" }
         "413":
           description: |
-            The request body, decoded, is larger than any upload under
-            `limits.max_upload_bytes` can need (twice that, plus 1 MiB), the same bound as
-            `POST /v1/sessions`, so it was not read.
+            The request body is over an OTLP cap (F4.1): `limits.max_otlp_bytes` as sent (64 MiB
+            by default; a larger `Content-Length` is refused before reading), or, gzipped,
+            `limits.max_otlp_inflated_bytes` once inflated (256 MiB; inflating stops there). The
+            message names the key. Nothing of the request is stored; send smaller batches.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/OtlpStatus" }

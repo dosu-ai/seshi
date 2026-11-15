@@ -895,7 +895,7 @@ describe("identity and access (X5)", () => {
     const otlp = createApp({
       store,
       auth: otlpAuth,
-      config: `${sources}[[sources]]\nid = "idle"\ntype = "otlp"\nenabled = false\n[limits]\nmax_upload_bytes = 2048\n`,
+      config: `${sources}[[sources]]\nid = "idle"\ntype = "otlp"\nenabled = false\n[limits]\nmax_upload_bytes = 2048\nmax_otlp_bytes = "1MiB"\n`,
     });
     const { admin } = await otlpAuth.initAdmin({ owner: "ops" });
     const by = await otlpAuth.authenticate(admin?.token, undefined);

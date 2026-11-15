@@ -171,8 +171,12 @@ and a reply, so `require_user = false` and `require_reply = false` have no effec
 | `max_records` | `50000` | Records in one trace |
 | `max_records_bytes` | `"32MiB"` | JSON bytes of one trace's records |
 | `max_upload_bytes` | `"256MiB"` | Bytes of one upload's transcript as sent (before any gzip of the request); nothing of it is stored. A request body, decoded, is refused (`413`) past twice this plus 1 MiB |
+| `max_otlp_bytes` | `"64MiB"` | Bytes of one `POST /otlp/v1/traces` body as sent, gzipped or not (F4.1). A larger `Content-Length` is refused before the body is read; a chunked body is refused at the first chunk past it |
+| `max_otlp_inflated_bytes` | `"256MiB"` | Bytes of a gzipped OTLP body once inflated. Inflating stops at the cap, so a small body that would inflate to far more is refused at this size |
 
-Past a limit the session is refused with 422 `too_large`.
+Past a limit the session is refused with 422 `too_large`. Past an OTLP cap the request is
+answered `413` with a message naming the key, and nothing of it is stored; exporters should send
+small batches (see [otlp.md](otlp.md#batch-size)).
 
 ### `[records]`
 

@@ -51,6 +51,19 @@ Any other OTLP/HTTP exporter is set up the same way: endpoint `https://<seshi>/o
 full `https://<seshi>/otlp/v1/traces` where the exporter wants the traces URL), header
 `Authorization: Bearer <service token>`, protobuf or JSON, gzip or not.
 
+### Batch size
+
+A request body may be up to 64 MiB as sent (`limits.max_otlp_bytes`) and, when gzipped, up to
+256 MiB once inflated (`limits.max_otlp_inflated_bytes`) (F4.1). A larger request is answered
+`413` with a message naming the key it is over, and none of its spans are stored; inflating
+stops at the cap, so a small body that would inflate to far more costs no more than the cap.
+
+Keep batches small: a few hundred spans or a few MiB per request. A span with full content
+carries the whole conversation so far, so a batch of a long session's spans grows quickly, and
+the server decodes each request in memory. With the OpenTelemetry SDK's batch span processor,
+lower `OTEL_BSP_MAX_EXPORT_BATCH_SIZE` (512 by default) if requests come back `413`. Raise the
+caps in `[limits]` only for a sender whose batches you cannot split.
+
 ## Metadata only is refused
 
 seshi stores conversations. A batch in which no span carries prompt or response content, what
@@ -117,6 +130,7 @@ own usage inside a Messages API request is not counted separately yet.
 | `401` | The token is unknown, revoked or expired |
 | `403 … is not an otlp source in [[sources]]` | The token is not a service token for a configured `otlp` source, or it reads instead of writes |
 | `403 … is disabled` | The source has `enabled = false` |
+| `413 … limits.max_otlp_bytes` or `… limits.max_otlp_inflated_bytes` | The request is over the [batch size](#batch-size) caps: send smaller batches, or raise the key named |
 | `415` | The exporter sent a `Content-Type` other than `application/x-protobuf` or `application/json` |
 | `partial_success` with "Full content" | The destination is in Metadata only mode |
 | Sessions appear after ten minutes | The quiet period; lower `quiet_period` for the source |

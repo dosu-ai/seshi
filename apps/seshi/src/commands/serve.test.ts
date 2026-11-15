@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { loadConfig, type ServerConfig, serverConfigSchema } from "@seshi/config";
 import { VERSION } from "@seshi/model";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { requestBodyCap } from "./serve";
 import { configFlags, ServeConfigError, serveSettings } from "./serve-settings";
 
 let dir: string;
@@ -358,6 +359,8 @@ describe("serveSettings", () => {
         max_records: 50_000,
         max_records_bytes: 32 * 1024 * 1024,
         max_upload_bytes: 1024 * 1024,
+        max_otlp_bytes: 64 * 1024 * 1024,
+        max_otlp_inflated_bytes: 256 * 1024 * 1024,
       },
     });
   });
@@ -410,6 +413,18 @@ describe("serveSettings", () => {
   it("takes either role alone (X7.1)", () => {
     expect(serveSettings(config({ "server.roles": "worker" })).roles).toEqual(["worker"]);
     expect(serveSettings(config({ "server.roles": "api" })).roles).toEqual(["api"]);
+  });
+});
+
+describe("requestBodyCap", () => {
+  it("takes an upload's body, or an OTLP body up to limits.max_otlp_bytes when that is larger", () => {
+    const MiB = 1024 * 1024;
+    // The defaults: an upload's 513 MiB is larger than OTLP's 64 MiB.
+    expect(requestBodyCap({ max_upload_bytes: 256 * MiB, max_otlp_bytes: 64 * MiB })).toBe(
+      513 * MiB,
+    );
+    // A raised OTLP cap is not cut by the listener, so the route's 413 names the key.
+    expect(requestBodyCap({ max_upload_bytes: MiB, max_otlp_bytes: 64 * MiB })).toBe(64 * MiB);
   });
 });
 

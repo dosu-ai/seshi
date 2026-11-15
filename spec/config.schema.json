@@ -430,7 +430,7 @@
       "additionalProperties": false
     },
     "limits": {
-      "description": "Size caps; past them a session is refused (422).",
+      "description": "Size caps; past them a session is refused (422), or an OTLP request (413).",
       "default": {},
       "type": "object",
       "properties": {
@@ -459,6 +459,38 @@
         },
         "max_upload_bytes": {
           "description": "Bytes of one upload's transcript as sent, before any gzip of the request.",
+          "default": "256MiB",
+          "x-seshi-format": "bytes",
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(\\d+)\\s*(B|KB|MB|GB|KiB|MiB|GiB)$"
+            },
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          ]
+        },
+        "max_otlp_bytes": {
+          "description": "Bytes of one OTLP request body as sent (gzipped or not); past it, 413.",
+          "default": "64MiB",
+          "x-seshi-format": "bytes",
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(\\d+)\\s*(B|KB|MB|GB|KiB|MiB|GiB)$"
+            },
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          ]
+        },
+        "max_otlp_inflated_bytes": {
+          "description": "Bytes of one gzipped OTLP request body once inflated; past it, 413.",
           "default": "256MiB",
           "x-seshi-format": "bytes",
           "anyOf": [
