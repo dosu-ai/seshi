@@ -30,6 +30,8 @@ export const FORBIDDEN: readonly (string | RegExp)[] = [
   "@seshi/auth",
   "@seshi/store",
   "jose",
+  "@seshi/review",
+  "@anthropic-ai/sdk",
   /protobuf|@bufbuild\//,
 ];
 

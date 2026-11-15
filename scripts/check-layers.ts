@@ -5,7 +5,7 @@
  *   0  ts/model
  *   1  ts/kit, ts/formats, ts/redact, ts/config, ts/store, ts/client
  *   2  ts/pipeline, ts/auth, integrations/*
- *   3  ts/sources, ts/search
+ *   3  ts/sources, ts/search, ts/review
  *   4  ts/instance
  *   5  ts/api, ts/capture
  *   6  apps/seshi
@@ -36,6 +36,7 @@ export const PACKAGE_LAYERS: Readonly<Record<string, number>> = {
   pipeline: 2,
   auth: 2,
   sources: 3,
+  review: 3,
   search: 3,
   instance: 4,
   api: 5,

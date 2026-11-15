@@ -1,0 +1,101 @@
+[
+  {
+    "name": "ordinary-refactor",
+    "label": "allow",
+    "sensitive": [],
+    "records": [
+      { "role": "user", "content": "Rename parseConfig to loadConfig across the repo and fix the imports.", "timestamp": "2026-11-01T10:00:00Z" },
+      { "role": "assistant", "content": "I'll search for every use first.", "tool_calls": [{ "id": "c1", "name": "Bash", "args": "{\"command\":\"rg -n parseConfig src\"}" }], "timestamp": "2026-11-01T10:00:02Z" },
+      { "role": "tool", "tool_call_id": "c1", "content": "src/cli.ts:4:import { parseConfig } from './config'\nsrc/config.ts:12:export function parseConfig(text: string) {", "timestamp": "2026-11-01T10:00:03Z" },
+      { "role": "assistant", "content": "Two places use it. Renaming both now.", "timestamp": "2026-11-01T10:00:05Z" }
+    ]
+  },
+  {
+    "name": "failing-test-output",
+    "label": "allow",
+    "sensitive": [],
+    "records": [
+      { "role": "user", "content": "Why does the retry test fail on CI?", "timestamp": "2026-11-01T11:00:00Z" },
+      { "role": "assistant", "content": null, "tool_calls": [{ "id": "c1", "name": "Bash", "args": "{\"command\":\"bun test retry\"}" }], "timestamp": "2026-11-01T11:00:01Z" },
+      { "role": "tool", "tool_call_id": "c1", "content": "FAIL retry.test.ts > backs off\nExpected: 3 calls\nReceived: 2 calls\n  at retry.test.ts:41:18", "timestamp": "2026-11-01T11:00:04Z" },
+      { "role": "assistant", "content": "The fake clock is advanced before the second timer is set, so the third call never fires.", "timestamp": "2026-11-01T11:00:09Z" }
+    ]
+  },
+  {
+    "name": "password-in-prose",
+    "label": "redact",
+    "sensitive": ["Tangerine-Ladder-1987"],
+    "records": [
+      { "role": "user", "content": "The staging admin login is ops / Tangerine-Ladder-1987, use it to check the dashboard loads.", "timestamp": "2026-11-02T09:00:00Z" },
+      { "role": "assistant", "content": "Logging in to staging to check the dashboard.", "timestamp": "2026-11-02T09:00:03Z" }
+    ]
+  },
+  {
+    "name": "connection-string-in-tool-output",
+    "label": "redact",
+    "sensitive": ["pg-Wq81!zz"],
+    "records": [
+      { "role": "user", "content": "What database does the worker connect to?", "timestamp": "2026-11-02T10:00:00Z" },
+      { "role": "assistant", "content": null, "tool_calls": [{ "id": "c1", "name": "Bash", "args": "{\"command\":\"cat deploy/worker.env\"}" }], "timestamp": "2026-11-02T10:00:01Z" },
+      { "role": "tool", "tool_call_id": "c1", "content": "QUEUE=jobs\nDATABASE=postgresql://worker:pg-Wq81!zz@10.2.0.15:5432/jobs\nLOG_LEVEL=info", "timestamp": "2026-11-02T10:00:02Z" },
+      { "role": "assistant", "content": "It connects to the jobs database on 10.2.0.15.", "timestamp": "2026-11-02T10:00:04Z" }
+    ]
+  },
+  {
+    "name": "customer-email-in-debugging",
+    "label": "redact",
+    "sensitive": ["maria.gonzalez@customer-example.org", "+1 415 555 0136"],
+    "records": [
+      { "role": "user", "content": "Support says invoices fail for maria.gonzalez@customer-example.org (phone +1 415 555 0136). Find out why.", "timestamp": "2026-11-03T14:00:00Z" },
+      { "role": "assistant", "content": "I'll look up the invoice job for that account.", "tool_calls": [{ "id": "c1", "name": "Bash", "args": "{\"command\":\"grep -n 'maria.gonzalez@customer-example.org' logs/invoices.log\"}" }], "timestamp": "2026-11-03T14:00:02Z" },
+      { "role": "tool", "tool_call_id": "c1", "content": "1823: invoice 99812 failed: tax region missing", "timestamp": "2026-11-03T14:00:03Z" }
+    ]
+  },
+  {
+    "name": "personal-id-number",
+    "label": "redact",
+    "sensitive": ["078-05-1120"],
+    "records": [
+      { "role": "user", "content": "Add a validation test with a realistic SSN like my own, 078-05-1120.", "timestamp": "2026-11-03T15:00:00Z" },
+      { "role": "assistant", "content": "I'll use a clearly fake value in the test instead.", "timestamp": "2026-11-03T15:00:02Z" }
+    ]
+  },
+  {
+    "name": "customer-table-dump",
+    "label": "drop",
+    "sensitive": ["Ana Pereira", "Rua das Flores 41"],
+    "records": [
+      { "role": "user", "content": "Export the first rows of the customers table so I can see the format.", "timestamp": "2026-11-04T08:00:00Z" },
+      { "role": "assistant", "content": null, "tool_calls": [{ "id": "c1", "name": "Bash", "args": "{\"command\":\"psql -c 'select * from customers limit 5'\"}" }], "timestamp": "2026-11-04T08:00:01Z" },
+      { "role": "tool", "tool_call_id": "c1", "content": "id | name | address | card_last4 | dob\n1 | Ana Pereira | Rua das Flores 41, Lisboa | 4242 | 1984-03-02\n2 | Tom Becker | Hauptstr. 7, Bremen | 1881 | 1990-11-23\n3 | Li Wei | 88 Nanjing Rd, Shanghai | 0005 | 1979-07-14", "timestamp": "2026-11-04T08:00:02Z" }
+    ]
+  },
+  {
+    "name": "private-hr-conversation",
+    "label": "drop",
+    "sensitive": ["performance improvement plan"],
+    "records": [
+      { "role": "user", "content": "Help me write a note to HR about putting Sam on a performance improvement plan; mention his medical leave last spring and the divorce.", "timestamp": "2026-11-04T17:00:00Z" },
+      { "role": "assistant", "content": "Here is a draft that keeps to the work concerns.", "timestamp": "2026-11-04T17:00:05Z" }
+    ]
+  },
+  {
+    "name": "public-docs-urls",
+    "label": "allow",
+    "sensitive": [],
+    "records": [
+      { "role": "user", "content": "Use the retry settings from https://docs.example.com/client#retries.", "timestamp": "2026-11-05T09:00:00Z" },
+      { "role": "assistant", "content": "Setting max_retries to 3 with exponential backoff as the docs suggest.", "timestamp": "2026-11-05T09:00:02Z" }
+    ]
+  },
+  {
+    "name": "secret-in-command-args",
+    "label": "redact",
+    "sensitive": ["Zr9-hush-Bellows"],
+    "records": [
+      { "role": "user", "content": "Run the migration against the dev database.", "timestamp": "2026-11-05T12:00:00Z" },
+      { "role": "assistant", "content": null, "tool_calls": [{ "id": "c1", "name": "Bash", "args": "{\"command\":\"PGPASSWORD='Zr9-hush-Bellows' psql -h dev-db -U app -f migrate.sql\"}" }], "timestamp": "2026-11-05T12:00:01Z" },
+      { "role": "tool", "tool_call_id": "c1", "content": "ALTER TABLE\nCREATE INDEX", "timestamp": "2026-11-05T12:00:03Z" }
+    ]
+  }
+]
