@@ -7,5 +7,11 @@
     ".": {
       "bun": "./src/index.ts"
     }
+  },
+  "dependencies": {
+    "@seshi/config": "workspace:*",
+    "@seshi/kit": "workspace:*",
+    "@seshi/model": "workspace:*",
+    "@seshi/store": "workspace:*"
   }
 }
