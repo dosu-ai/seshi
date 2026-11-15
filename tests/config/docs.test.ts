@@ -2,6 +2,7 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { authSettings } from "@seshi/auth";
 import {
   configJsonSchemas,
   isSettingName,
@@ -65,6 +66,16 @@ describe(".env.example", () => {
     const { config } = loadConfig(serverConfigSchema, { env });
     expect(config.store.url).toBe("file:///data");
     expect(Object.keys(config.auth.tokens)).toEqual(["alice", "bob"]);
+  });
+
+  it("cannot be served unedited: its placeholder tokens are refused", () => {
+    // The values are public in the repository; serve and `config check` read auth through
+    // authSettings, so an unedited copy stops with a message instead of accepting them.
+    const env = Object.fromEntries(
+      settings.filter((m) => m[1] === undefined).map((m) => [m[2], m[3]]),
+    );
+    const { config } = loadConfig(serverConfigSchema, { env });
+    expect(() => authSettings(config)).toThrow(/auth\.tokens\.alice is still the placeholder/);
   });
 
   it("keeps a file:// store on the volume compose.yaml mounts", () => {

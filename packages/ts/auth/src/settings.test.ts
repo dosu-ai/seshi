@@ -44,6 +44,10 @@ describe("authSettings", () => {
     };
     fails({ SESHI_AUTH__TOKENS__ALICE: "short" }, "auth.tokens.alice must be 16+");
     fails(
+      { SESHI_AUTH__TOKENS__ALICE: "replace-with-openssl-rand-hex-24" },
+      "auth.tokens.alice is still the placeholder from .env.example",
+    );
+    fails(
       {
         SESHI_AUTH__TOKENS__A: "same-token-0123456789",
         SESHI_AUTH__TOKENS__B: "same-token-0123456789",

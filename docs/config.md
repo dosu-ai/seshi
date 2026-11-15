@@ -119,7 +119,7 @@ Traces are always stored in seshi's one canonical format (`seshi/trace/1`, X6.2)
 
 | Key | Default | |
 |---|---|---|
-| `tokens` | `{}` | Static tokens: `owner = token` (secrets, 16+ characters), each everything for that owner. For one person and development (X5.12). `owners/<owner>/` is where their sessions go |
+| `tokens` | `{}` | Static tokens: `owner = token` (secrets, 16+ characters; `.env.example`'s `replace-with-…` placeholders are refused), each everything for that owner. For one person and development (X5.12). `owners/<owner>/` is where their sessions go |
 | `org_key.enabled` | `true` | Accept the trusted org key (X5.12): members write as the username they state in `X-Seshi-User`, lowercased, and read org-wide; it cannot delete. `seshi admin init` makes the key; `false` turns trust off once everyone signs in through the IdP |
 | `oidc.issuer` | | The IdP (X5.2). Its keys are read from its discovery document. Setting `oidc` needs a key in `session_keys` |
 | `oidc.client_id` | | The CLI's client id, registered as a public client (X5.7) |

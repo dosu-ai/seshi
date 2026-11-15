@@ -10,6 +10,10 @@ import { MIN_SESSION_KEY_LENGTH } from "./session-token";
 /** The least a static token may be. */
 export const MIN_STATIC_TOKEN_LENGTH = 16;
 
+/** How `.env.example`'s token values begin. They are long enough to pass the length check and
+ * public in the repository, so a server started from the unedited file would accept them. */
+export const PLACEHOLDER_TOKEN_PREFIX = "replace-with";
+
 export interface OidcSettings {
   issuer: string;
   client_id: string;
@@ -59,6 +63,11 @@ export function authSettings(config: ServerConfig): AuthSettings {
     if (token.length < MIN_STATIC_TOKEN_LENGTH) {
       fail(
         `auth.tokens.${owner} must be ${MIN_STATIC_TOKEN_LENGTH}+ characters (try: openssl rand -hex 24)`,
+      );
+    }
+    if (token.toLowerCase().startsWith(PLACEHOLDER_TOKEN_PREFIX)) {
+      fail(
+        `auth.tokens.${owner} is still the placeholder from .env.example: set a real token (try: openssl rand -hex 24)`,
       );
     }
     return { token, owner };
