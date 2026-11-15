@@ -65,6 +65,47 @@ describe("discovery", () => {
     await expect(discover(ISSUER, down)).rejects.toMatchObject({ code: "idp_unreachable" });
   });
 
+  it("refuses an endpoint that is not https (or http on this machine), and opens nothing", async () => {
+    const keys = ["authorization_endpoint", "token_endpoint", "device_authorization_endpoint"];
+    for (const bad of [
+      "file:///etc/passwd",
+      "smb://evil.test/share",
+      "x-evil:run",
+      "http://idp.test/a",
+    ]) {
+      for (const key of keys) {
+        const doc = fakeFetch(() => [200, { ...DISCOVERY, [key]: bad }]);
+        const opened: string[] = [];
+        const signIn = discover(ISSUER, doc).then((discovery) =>
+          browserFlow({
+            discovery,
+            clientId: "seshi-cli",
+            scopes: ["openid"],
+            fetch: doc,
+            open: async (url) => {
+              opened.push(url);
+              return true;
+            },
+            prompt: () => {},
+            timeoutMs: 10,
+          }),
+        );
+        await expect(signIn).rejects.toThrow(new RegExp(`${key} that is not https`));
+        expect(opened).toEqual([]);
+      }
+    }
+    // An IdP on this machine may answer on plain http (development).
+    const local = {
+      ...DISCOVERY,
+      issuer: "http://127.0.0.1:8080",
+      authorization_endpoint: "http://127.0.0.1:8080/authorize",
+      token_endpoint: "http://localhost:8080/token",
+      device_authorization_endpoint: "http://[::1]:8080/device",
+    };
+    const ok = fakeFetch(() => [200, local]);
+    expect(await discover("http://127.0.0.1:8080", ok)).toEqual(local);
+  });
+
   it("asks for offline_access only where the IdP lists it", () => {
     const base = ["openid", "email", "profile"];
     expect(signInScopes(base, DISCOVERY)).toEqual([...base, "offline_access"]);

@@ -54,6 +54,17 @@ export function browserCommand(platform: NodeJS.Platform, url: string): string[]
   return ["xdg-open", url];
 }
 
+/** Whether `openUrl` may hand `url` to the OS opener: `http:` and `https:` only, never `file:`,
+ * `smb:` or a custom scheme a server or IdP named (X5.7). */
+export function openable(url: string): boolean {
+  try {
+    const { protocol } = new URL(url);
+    return protocol === "https:" || protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
 /** The process's own terminal. */
 export function processTerminal(): Terminal {
   const stdin = process.stdin;
@@ -126,6 +137,8 @@ export function processTerminal(): Terminal {
     },
 
     async openUrl(url) {
+      // The OS opener launches whatever handles a scheme: only a web page is opened.
+      if (!openable(url)) return false;
       const [command, ...args] = browserCommand(process.platform, url);
       try {
         const child = spawn(command as string, args, { stdio: "ignore", detached: true });

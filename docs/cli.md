@@ -132,7 +132,11 @@ records (for a server that will later serve it).
   (it can only write). The IdP's refresh token renews the session token without signing in
   again; `offline_access` is asked for when the IdP lists it, which is how Okta and Entra give
   one. A delete needs a session token from the last 10 minutes (X5.3), so `sessions rm` renews
-  it first. `--visibility owner` makes everything the device token uploads private.
+  it first. `--visibility owner` makes everything the device token uploads private. The IdP's
+  authorization, token and device endpoints must be `https:` (or `http:` on `localhost` or
+  `127.0.0.1`, for an IdP on the same machine): a discovery document that names any other
+  scheme (`file:`, `smb:`, a custom one) is refused, and seshi never opens anything but an
+  `http:` or `https:` page.
 - **Without one** (X5.12): `--key -` reads the org key from stdin (on a terminal, plain
   `seshi login` asks for it without echo). The username stated with it is resolved on every
   call: `SESHI_USER`, then `user` in the CLI config (`--user` writes it), then `git config

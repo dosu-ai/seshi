@@ -35,7 +35,8 @@ User docs: [docs/cli.md](../../cli.md) (conventions, commands, signing in), docs
   `--help` names `--json` and `--no-color`.
 - **`cli/terminal.ts`**: `ask` (with echo off for `hidden`, raw mode, Ctrl-C cancels),
   `background` (OSC 11, BEL or ST, 1–4 hex digits per channel, relative luminance), `openUrl`
-  (`open`, `xdg-open`, `rundll32 url.dll,FileProtocolHandler`: never a shell).
+  (`open`, `xdg-open`, `rundll32 url.dll,FileProtocolHandler`: never a shell; `http:` and
+  `https:` URLs only, so a `file:`, `smb:` or custom scheme is never handed to the opener).
 - **`@seshi/client`** (05's and 06's gaps). The request code is one `send()`; `HttpSessionDB`
   gains `getSession/getTrace/tombstone(..., { owner })`, `setVisibility`, `owners`,
   `createToken`, `listTokens`, `revokeToken`, `revokeOwnerTokens`, `jobs`, `sources`, `source`,
@@ -56,7 +57,8 @@ User docs: [docs/cli.md](../../cli.md) (conventions, commands, signing in), docs
     IdP's token endpoint, session and device token times, `stored_in`, and this machine's
     stable id) and one secret entry per kind (`org_key`, `token`, `session`, `refresh`,
     `device`) named `"<server> <kind>"`.
-  - `oidc.ts`: discovery (issuer checked), `signInScopes` (the server's scopes plus
+  - `oidc.ts`: discovery (issuer checked; the authorization, token and device endpoints must
+    be `https:`, or `http:` on a loopback host, `webUrl`), `signInScopes` (the server's scopes plus
     `offline_access` when the IdP lists it), `deviceFlow` (RFC 8628: pending, `slow_down` +5 s,
     denied, expired; Google's `verification_url`), `browserFlow` (PKCE S256, state, nonce, a
     one-shot server on 127.0.0.1, a stray redirect ignored, 5-minute timeout),

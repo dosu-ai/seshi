@@ -112,7 +112,33 @@ export async function discover(issuer: string, fetchImpl: Fetch): Promise<Discov
   if (typeof doc.token_endpoint !== "string") {
     throw new SignInError("the IdP's discovery document has no token_endpoint");
   }
+  // The authorization endpoint is opened in the OS's URL handler: a `file:`, `smb:` or custom
+  // scheme named by a malicious server or IdP would launch whatever handles it.
+  for (const key of ["authorization_endpoint", "token_endpoint", "device_authorization_endpoint"]) {
+    const value = doc[key];
+    if (value !== undefined && !webUrl(value)) {
+      throw new SignInError(
+        `the IdP's discovery document names a ${key} that is not https (or http on this machine)`,
+      );
+    }
+  }
   return doc as unknown as Discovery;
+}
+
+/** Whether `url` is one sign-in may open or call: `https:`, or `http:` on a loopback host (an
+ * IdP on this machine, in development). */
+export function webUrl(url: unknown): boolean {
+  if (typeof url !== "string") return false;
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol === "https:") return true;
+  if (parsed.protocol !== "http:") return false;
+  const host = parsed.hostname;
+  return host === "localhost" || host === "[::1]" || /^127(?:\.\d{1,3}){3}$/.test(host);
 }
 
 /** The scopes to ask for: the server's (`openid email profile`), plus `offline_access` where
