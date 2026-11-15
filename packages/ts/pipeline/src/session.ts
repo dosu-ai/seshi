@@ -346,6 +346,15 @@ export async function storeSession(
   sessionOptions: SessionOptions,
 ): Promise<StoreSessionResult> {
   const { store, client, now } = sessionOptions;
+  // `agent` names a format of the registry. The type no longer says so (it was a closed union
+  // before the registry), so check it before anything is written: the raw part is stored first
+  // and would otherwise be filed under an archive no adapter can read.
+  if (!sessionOptions.formats.has(upload.agent)) {
+    throw new SessionRejected(
+      "unsupported_agent",
+      `no normalizer for '${upload.agent}' (one of ${sessionOptions.formats.sources.join(", ")})`,
+    );
+  }
   const traceFormat = markerFormat(
     await ensureLayout(store, client ?? "sessionstorage", sessionOptions.format ?? "letta"),
   );
