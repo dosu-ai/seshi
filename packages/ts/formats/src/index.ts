@@ -1,4 +1,4 @@
-/** `@seshi/formats`: vendor-neutral transcript formats (ATIF, trajectory-v1), the renderers
+/** `@seshi/formats`: vendor-neutral transcript formats (ATIF, trajectory-v1, OTel GenAI spans), the renderers
  * that turn the canonical trace into Letta, OTLP GenAI spans and ATIF on read (X6.2), the
  * `@letta-ai/trajectory` adapter builder integrations use, and the format registry that
  * detection and normalization go through. Layer 1: it imports only
@@ -42,6 +42,34 @@ export {
   toLetta,
   toOtlp,
 } from "./render";
+export { assembleSpanParts, newInput } from "./spans/assemble";
+export { Attributes, durationMs, isoFromNanos, type Plain, plainValue } from "./spans/attributes";
+export {
+  genAiSpanAdapter,
+  OTLP_GENAI,
+  otlpGenAiFormat,
+  type SpanFormatOptions,
+} from "./spans/format";
+export {
+  errorOf,
+  genAiHasContent,
+  genAiPart,
+  genAiSessionKey,
+  type SpanAttributeMapper,
+  type SpanView,
+  viewOf,
+} from "./spans/genai";
+export { argsOf, jsonAttribute, messagesRecords, systemRecords, textOf } from "./spans/messages";
+export {
+  hexId,
+  nanosString,
+  type ReadSpans,
+  readAttributes,
+  readExportRequest,
+  readSpan,
+  readValue,
+  type SpanGroup,
+} from "./spans/request";
 export { TRAJECTORY, TRAJECTORY_FORMAT, trajectoryRecords } from "./trajectory";
 
 /** The formats every deployment reads whatever integrations it has, in the order the registry
