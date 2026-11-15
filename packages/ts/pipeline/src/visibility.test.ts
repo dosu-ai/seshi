@@ -6,7 +6,7 @@ import { IngestRejected } from "@seshi/model";
 import { archiveId, FsStore, readChanges, readMetadata } from "@seshi/store";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { setVisibility, tombstone } from "./ingest";
-import { StoreSessionDB } from "./local";
+import { StoreSessionDB } from "./session-db";
 
 let dir: string;
 let store: FsStore;

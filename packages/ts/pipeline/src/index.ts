@@ -1,7 +1,8 @@
 /** `@seshi/pipeline`: one ingest pipeline (X4). An envelope in (`Pipeline.submit`); authorize,
  * normalize in memory, regex redaction, the session filter, model review; then the trace, the
- * head and the change entry out, and nothing raw (X6.3). Also the reads over a store and the
- * direct-to-bucket client until local mode (06) replaces it. Layer 2 (X3.2). */
+ * head and the change entry out, and nothing raw (X6.3). Also the reads over a store and
+ * `StoreSessionDB`, the session API over a pipeline (the HTTP routes' and local mode's).
+ * Layer 2 (X3.2). */
 
 export {
   Forbidden,
@@ -56,7 +57,6 @@ export {
   withApplied,
 } from "./ingest";
 export { DEFAULT_LIMITS, type Limits } from "./limits";
-export { type ConnectOptions, connect, type StoreClientOptions, StoreSessionDB } from "./local";
 export { normalizeTranscript } from "./normalize";
 export {
   type FailedResult,
@@ -72,6 +72,7 @@ export {
   type StoreSessionResult,
   storeSession,
 } from "./session";
+export { type StoreClientOptions, StoreSessionDB } from "./session-db";
 export {
   type AssembledSession,
   type Authorization,

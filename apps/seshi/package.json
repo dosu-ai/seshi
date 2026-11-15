@@ -9,6 +9,9 @@
   "exports": {
     "./integrations": {
       "bun": "./src/integrations.ts"
+    },
+    "./connect": {
+      "bun": "./src/connect.ts"
     }
   },
   "scripts": {

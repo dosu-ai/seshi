@@ -1,7 +1,7 @@
 {
   "name": "@seshi/pipeline",
   "private": true,
-  "description": "Layer 2: the ingest pipeline (envelope, normalize, regex redaction, session filter, model review, write) and the reads over a store; the direct-to-bucket client until local mode replaces it.",
+  "description": "Layer 2: the ingest pipeline (envelope, normalize, regex redaction, session filter, model review, write) the reads over a store, and the session API over a pipeline.",
   "type": "module",
   "exports": {
     ".": {
@@ -9,7 +9,6 @@
     }
   },
   "dependencies": {
-    "@seshi/client": "workspace:*",
     "@seshi/formats": "workspace:*",
     "@seshi/model": "workspace:*",
     "@seshi/redact": "workspace:*",

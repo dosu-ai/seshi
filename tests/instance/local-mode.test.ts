@@ -1,23 +1,27 @@
-import { mkdtempSync, rmSync } from "node:fs";
+/** Local mode (X3.5): the CLI builds an Instance in-process from its config, for one person
+ * who owns the bucket, and gets the same session API the HTTP client gives. */
+
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { HttpSessionDB } from "@seshi/client";
+import { cliConfigSchema } from "@seshi/config";
+import { InstanceError } from "@seshi/instance";
 import {
   IngestRejected,
   OffsetMismatch,
   SessionConflict,
   type SessionDB,
   SessionRejected,
-  StoreError,
   type StoreSessionResult,
   type Trace,
 } from "@seshi/model";
-import { connect, StoreSessionDB } from "@seshi/pipeline";
-import { FsStore } from "@seshi/store";
-import { buildFormats } from "seshi/integrations";
+import { StoreSessionDB } from "@seshi/pipeline";
+import { type Connection, connect, expandHome, localOwner, NotConnected } from "seshi/connect";
+import { INTEGRATIONS } from "seshi/integrations";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { transcript } from "../tooling/testdata";
 
-const formats = buildFormats();
 const SMALL = transcript("claude-basic.claude-code.jsonl");
 /** The greeting-sized fixture with an answer long enough to be worth a trace. */
 const CLAUDE = `${SMALL.trim()}\n${JSON.stringify({
@@ -39,43 +43,105 @@ function stored(result: StoreSessionResult): Extract<StoreSessionResult, { conte
 }
 
 let dir: string;
+let connection: Connection;
 let db: SessionDB;
 
-beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), "sessiondb-client-"));
-  db = connect({ store: `file://${join(dir, "bucket")}`, owner: "acme", formats });
+/** The CLI config, as the loader parses it. */
+const cli = (tree: unknown) => cliConfigSchema.parse(tree);
+
+/** A server config naming a folder bucket, written where local mode reads it. */
+function serverToml(extra = ""): string {
+  const file = join(dir, "seshi.toml");
+  writeFileSync(file, `[store]\nurl = "file://${join(dir, "bucket")}"\n${extra}`, { mode: 0o600 });
+  return file;
+}
+
+beforeEach(async () => {
+  dir = mkdtempSync(join(tmpdir(), "seshi-local-"));
+  connection = await connect({
+    cli: cli({ local: { config: serverToml(), owner: "acme" } }),
+    env: {},
+    integrations: INTEGRATIONS,
+  });
+  db = connection.db;
 });
 
-afterEach(() => {
+afterEach(async () => {
+  await connection.close();
   rmSync(dir, { recursive: true, force: true });
 });
 
 describe("connect", () => {
-  it("opens a store from its URL, scoped to the owner", async () => {
+  it("builds an instance from the local config, scoped to the owner", async () => {
+    expect(connection.mode).toBe("local");
     expect(db).toBeInstanceOf(StoreSessionDB);
+    expect(connection.instance?.roles).toEqual([]);
     const me = await db.me();
     expect(me.owner).toBe("acme");
     expect(me.storage.url).toMatch(/^file:\/\//);
   });
 
-  it("takes a Store instance", async () => {
-    const store = new FsStore(join(dir, "other"));
-    const other = connect({ store, owner: "globex", formats });
-    expect((await other.me()).storage).toEqual({ url: store.url });
+  it("writes as the owner, a local writer with a verified owner", async () => {
+    await db.ingest({ agent: "claude-code", session_id: "sess1", transcript: CLAUDE });
+    expect(await db.getSession("claude-code", "sess1")).toMatchObject({
+      owner: "acme",
+      owner_basis: "verified",
+      writer: { kind: "local", principal: "acme", source_id: "upload" },
+    });
   });
 
-  it("refuses a URL that is not a store", () => {
-    expect(() => connect({ store: "ftp://nope", owner: "acme", formats })).toThrow(StoreError);
+  it("names the owner from local.owner, then user, then the OS user, as an owner id", () => {
+    const config = (tree: unknown) => cli({ local: { config: "x" }, ...(tree as object) });
+    expect(localOwner(config({ local: { config: "x", owner: "Ops@Acme.com" } }), {})).toBe(
+      "ops@acme.com",
+    );
+    expect(localOwner(config({ user: "Bob" }), { USER: "os" })).toBe("bob");
+    expect(localOwner(config({}), { USER: "os" })).toBe("os");
+    expect(localOwner(config({}), {})).toBe("local");
+    expect(localOwner(config({}), { USER: "no/slashes" })).toMatch(/^h-[0-9a-f]{20}$/);
   });
 
-  it("refuses an invalid owner", () => {
-    expect(() => connect({ store: join(dir, "x"), owner: "no/slashes", formats })).toThrow();
+  it("expands ~ in the local config path", () => {
+    expect(expandHome("~/.config/seshi/seshi.toml", "/home/a")).toBe(
+      "/home/a/.config/seshi/seshi.toml",
+    );
+    expect(expandHome("~", "/home/a")).toBe("/home/a");
+    expect(expandHome("/etc/seshi.toml", "/home/a")).toBe("/etc/seshi.toml");
+  });
+
+  it("refuses another deployment's bucket (X1.4)", async () => {
+    const file = serverToml('deployment_id = "staging"\n');
+    await expect(
+      connect({ cli: cli({ local: { config: file } }), env: {}, integrations: INTEGRATIONS }),
+    ).rejects.toBeInstanceOf(InstanceError);
+  });
+
+  it("talks to a server over HTTP when the config names one", async () => {
+    const remote = await connect({
+      cli: cli({ server: "https://seshi.example" }),
+      env: {},
+      token: "t",
+      integrations: INTEGRATIONS,
+    });
+    expect(remote.mode).toBe("server");
+    expect(remote.db).toBeInstanceOf(HttpSessionDB);
+    await expect(
+      connect({ cli: cli({ server: "https://seshi.example" }), env: {}, integrations: [] }),
+    ).rejects.toThrow(/run seshi login/);
+    await expect(connect({ cli: cli({}), env: {}, integrations: [] })).rejects.toBeInstanceOf(
+      NotConnected,
+    );
+  });
+
+  it("refuses a CLI config that names both a server and a local bucket", () => {
+    expect(() =>
+      cli({ server: "https://seshi.example", local: { config: "~/seshi.toml" } }),
+    ).toThrow(/not both/);
   });
 });
 
 describe("over a store", () => {
   it("stores, reads back, lists, and feeds changes", async () => {
-    await (db as StoreSessionDB).check();
     const result = stored(
       await db.ingest({
         agent: "claude-code",

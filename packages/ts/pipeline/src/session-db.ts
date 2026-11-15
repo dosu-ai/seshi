@@ -1,16 +1,9 @@
-/** One client API, two backends, as `@dosu/sessiondb` offered it.
- *
- * `connect({ store, owner, formats })` writes a store directly: the transcript goes through the
- * pipeline here, on the machine that calls, and the bucket is written with that machine's
- * credential. `connect({ server, token })` is the HTTP client (`@seshi/client`), which posts the
- * transcript to a server that runs the same pipeline against the bucket it owns. Either way the
- * calls, their results and what they throw are the same.
- *
- * This is the direct-to-bucket client of today, kept here because it runs the pipeline and
- * `@seshi/client` may depend only on `@seshi/model` (X3.2). Local mode (X3.5, branch 06)
- * replaces it with an Instance built in-process. */
+/** The session API (`SessionDB`) over the pipeline and a `Store`, scoped to one owner and one
+ * writer. The HTTP routes build one per principal over the instance's shared `Pipeline`; local
+ * mode (X3.5) builds one for the person who owns the bucket, through an Instance built
+ * in-process (`@seshi/instance`). The calls, their results and what they throw are those of
+ * the HTTP client (`@seshi/client`), so a caller cannot tell the two apart. */
 
-import { type HttpClientOptions, HttpSessionDB } from "@seshi/client";
 import { type FormatRegistry, renderTrace } from "@seshi/formats";
 import {
   type ChangesPage,
@@ -34,16 +27,7 @@ import {
   type Writer,
 } from "@seshi/model";
 import type { RedactionRules } from "@seshi/redact";
-import {
-  archiveId,
-  assertOwner,
-  ensureLayout,
-  type OpenStoreOptions,
-  openStore,
-  probe,
-  readChanges,
-  type Store,
-} from "@seshi/store";
+import { archiveId, assertOwner, readChanges, type Store } from "@seshi/store";
 import { uploadEnvelope } from "./envelope";
 import type { FilterSetting } from "./filter";
 import { getSession, getTrace, listSessions, setVisibility, tombstone } from "./ingest";
@@ -114,13 +98,6 @@ export class StoreSessionDB implements SessionDB {
     this.ownerBasis = options.owner_basis ?? "verified";
     this.claims = options.claims;
     this.visibility = options.visibility;
-  }
-
-  /** Write the layout marker and this owner's probe, so a wrong bucket or key fails here and
-   * not on the first session. */
-  async check(): Promise<void> {
-    await ensureLayout(this.store, { createdBy: this.client });
-    await probe(this.store, this.owner);
   }
 
   /** The upload as an envelope (source id `upload`, this client's writer as the caller),
@@ -216,30 +193,4 @@ export class StoreSessionDB implements SessionDB {
   async me(): Promise<Identity> {
     return { owner: this.owner, storage: this.storage };
   }
-}
-
-export type ConnectOptions =
-  | HttpClientOptions
-  | ({
-      /** A `Store`, or its URL: `s3://bucket/prefix`, `r2://bucket/prefix`, `file:///path`. */
-      store: Store | string;
-      owner: string;
-      /** The transcript formats to read; see `StoreClientOptions.formats`. */
-      formats: FormatRegistry;
-      client?: string;
-      /** Redaction added to the built-in rules (`redactionRules`). */
-      redaction?: RedactionRules;
-    } & OpenStoreOptions);
-
-/** A client from its configuration: a server and a token, or a store and an owner. */
-export function connect(options: ConnectOptions): SessionDB {
-  if ("server" in options) {
-    return new HttpSessionDB(options);
-  }
-  const { store: target, owner, formats, client, redaction, ...open } = options;
-  if (typeof target === "string") {
-    const { store, storage } = openStore(target, open);
-    return new StoreSessionDB({ store, storage, owner, formats, client, redaction });
-  }
-  return new StoreSessionDB({ store: target, owner, formats, client, redaction });
 }
