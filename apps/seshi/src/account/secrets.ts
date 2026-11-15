@@ -7,6 +7,7 @@
 
 import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { ConfigError } from "@seshi/config";
 
 /** The keychain service every seshi entry is filed under. */
 export const KEYCHAIN_SERVICE = "seshi";
@@ -51,6 +52,24 @@ export function writePrivateFile(path: string, text: string): void {
   }
 }
 
+/** The JSON object in one of the CLI's own files (`logins.json`, `credentials.json`). A file
+ * that is not one (cut short, edited by hand) is a `ConfigError` that names it, rather than a
+ * crash; the way out is to remove it and sign in again. */
+export function parseJsonFile(path: string, text: string): Record<string, unknown> {
+  const refuse = (why: string) =>
+    new ConfigError([`${path} is not a JSON object (${why}); remove it and run seshi login again`]);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (err) {
+    throw refuse(err instanceof Error ? err.message : String(err));
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw refuse(parsed === null ? "null" : Array.isArray(parsed) ? "an array" : typeof parsed);
+  }
+  return parsed as Record<string, unknown>;
+}
+
 /** A JSON file of name → secret, mode 0600. On Windows the mode is not enforced; the file is
  * under the user's own `%APPDATA%`. */
 export class FileSecrets implements SecretBackend {
@@ -66,7 +85,7 @@ export class FileSecrets implements SecretBackend {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") return {};
       throw err;
     }
-    const parsed = JSON.parse(text) as { secrets?: Record<string, string> };
+    const parsed = parseJsonFile(this.path, text) as { secrets?: Record<string, string> };
     return parsed.secrets ?? {};
   }
 

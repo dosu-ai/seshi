@@ -86,6 +86,11 @@ export function classify(
   if (err instanceof SessionRejected) {
     return { exit: EXIT.failure, code: err.code, message: err.message };
   }
+  // A file this machine could not read or write: an export's target, the CLI config, the
+  // logins or the credentials file (a missing folder, no permission, a full disk).
+  if (err instanceof Error && typeof (err as NodeJS.ErrnoException).syscall === "string") {
+    return { exit: EXIT.failure, code: "io", message: err.message };
+  }
   return undefined;
 }
 

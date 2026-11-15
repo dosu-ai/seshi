@@ -14,7 +14,7 @@
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { type SecretBackend, writePrivateFile } from "./secrets";
+import { parseJsonFile, type SecretBackend, writePrivateFile } from "./secrets";
 
 export const LOGINS_FILE = "logins.json";
 export const SECRETS_FILE = "credentials.json";
@@ -99,7 +99,7 @@ export class Logins {
       }
       throw err;
     }
-    const parsed = JSON.parse(text) as Partial<LoginsFile>;
+    const parsed = parseJsonFile(this.file, text) as Partial<LoginsFile>;
     return {
       schema: "seshi/logins/1",
       ...(parsed.machine_id ? { machine_id: parsed.machine_id } : {}),
