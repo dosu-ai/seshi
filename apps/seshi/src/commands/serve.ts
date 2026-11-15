@@ -110,9 +110,10 @@ async function start(ctx: CommandContext, argv: string[]): Promise<number | unde
       jobs.length > 0 ? `; jobs: ${jobs.join(", ")}` : ""
     }`,
   );
-  if (instance.redaction) {
+  if (instance.redaction.packs.length > 0) {
+    const packs = instance.redaction.packs.map((p) => p.id).join(", ");
     ctx.stdout(
-      `redaction from ${settings.redactionPacks.join(", ")}: ${instance.redaction.patterns.length} pattern(s) on top of the built-in rules`,
+      `redaction: packs ${packs} (from ${settings.redactionPacks.join(", ")}) on top of the built-in rules ${instance.redaction.builtinVersion}; rule set ${instance.redaction.hash.slice(0, 12)}`,
     );
   }
   // Last, so whoever waits for the address has read everything before it.

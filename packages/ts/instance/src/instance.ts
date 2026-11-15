@@ -42,10 +42,11 @@ import {
   type VisibilitySetting,
 } from "@seshi/pipeline";
 import {
-  parseRedactionConfig,
-  type RedactionConfig,
+  compileRuleSet,
+  loadPacks,
   type RedactionRules,
-  redactionRules,
+  RulePackError,
+  type RuleSet,
 } from "@seshi/redact";
 import { Sources } from "@seshi/sources";
 import {
@@ -89,8 +90,8 @@ export interface InstanceParts {
   /** The connectors this binary has: the integrations' (`connectorsOf`), and later the
    * built-in S3 poller. */
   connectors?: readonly Connector[];
-  /** The operator's redaction on top of the built-in rules; `buildInstance` reads
-   * `redaction.packs` into it. */
+  /** The redaction rule set: the built-in pack and the operator's packs (F2.1).
+   * `buildInstance` reads `redaction.packs` into it; the built-in pack alone when omitted. */
   redaction?: RedactionRules;
   /** Model review (F3); none until 08 builds one from `[review]`. */
   reviewer?: Reviewer;
@@ -160,7 +161,9 @@ export class Instance {
   readonly process: string;
   readonly client: string;
   readonly limits: Readonly<Limits>;
-  readonly redaction: RedactionRules | undefined;
+  /** The rule set every write is redacted with (F2): what `GET /v1/redaction/rules` serves
+   * and `seshi redact backfill` applies. */
+  readonly redaction: RuleSet;
   readonly log: Logger;
   readonly startedAt: Date;
   readonly now: () => Date;
@@ -181,7 +184,7 @@ export class Instance {
     this.id = parts.id ?? config.server.instance_id ?? defaultInstanceId();
     this.process = `${this.id}-${randomBytes(4).toString("hex")}`;
     this.limits = parts.limits ?? config.limits;
-    this.redaction = parts.redaction;
+    this.redaction = parts.redaction ?? compileRuleSet();
 
     if (parts.auth) {
       this.auth = parts.auth;
@@ -376,36 +379,30 @@ export function storeOptions(config: ServerConfig): {
   };
 }
 
-/** The operator's rule packs (`redaction.packs`), each checked on its own so a bad pattern
- * names its file, merged on top of the built-in rules. Today's JSON rule file is a pack
- * (F2.1). Undefined when there are none. */
-export async function readRedactionPacks(
-  paths: readonly string[],
-): Promise<RedactionRules | undefined> {
-  if (paths.length === 0) return undefined;
-  const merged: Required<RedactionConfig> = {
-    patterns: [],
-    sensitive_files: [],
-    secret_commands: [],
-  };
+/** The rule set `redaction.packs` names (F2.1): each file read and validated, TOML packs as
+ * they are and JSON rule files merged into the `legacy` pack, then compiled on top of the
+ * built-in pack with every operator rule checked against its own test strings. A problem names
+ * its file. With no packs, the built-in pack alone. */
+export async function readRedactionPacks(paths: readonly string[]): Promise<RuleSet> {
+  const files: { path: string; text: string }[] = [];
   for (const path of paths) {
-    let text: string;
     try {
-      text = await Bun.file(path).text();
+      files.push({ path, text: await Bun.file(path).text() });
     } catch (err) {
       throw new InstanceError(`cannot read redaction pack ${path}: ${message(err)}`);
     }
-    try {
-      parseRedactionConfig(text);
-    } catch (err) {
-      throw new InstanceError(`${path}: ${message(err)}`);
-    }
-    const pack = JSON.parse(text) as RedactionConfig;
-    merged.patterns.push(...(pack.patterns ?? []));
-    merged.sensitive_files.push(...(pack.sensitive_files ?? []));
-    merged.secret_commands.push(...(pack.secret_commands ?? []));
   }
-  return redactionRules(merged);
+  try {
+    const loaded = loadPacks(files);
+    return compileRuleSet({
+      packs: loaded.map((l) => l.pack),
+      sources: Object.fromEntries(loaded.map((l) => [l.pack.id, l.source])),
+      runTests: true,
+    });
+  } catch (err) {
+    if (err instanceof RulePackError) throw new InstanceError(err.message, { cause: err });
+    throw err;
+  }
 }
 
 /** Build an Instance from a loaded config: open the bucket, read the redaction packs, check

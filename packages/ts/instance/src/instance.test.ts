@@ -146,14 +146,24 @@ describe("buildInstance", () => {
     ).rejects.toThrow(/r2:\/\/ needs an account id/);
     const pack = join(dir, "bad.json");
     writeFileSync(pack, JSON.stringify({ patterns: ["("] }));
-    await expect(readRedactionPacks([pack])).rejects.toThrow(`${pack}:`);
+    await expect(readRedactionPacks([pack])).rejects.toThrow(`${pack} (pack legacy): `);
     await expect(readRedactionPacks([join(dir, "missing.json")])).rejects.toThrow(
       /cannot read redaction pack/,
     );
-    expect(await readRedactionPacks([])).toBeUndefined();
+    expect((await readRedactionPacks([])).packs).toEqual([]);
     const good = join(dir, "good.json");
     writeFileSync(good, JSON.stringify({ patterns: ["ACME-\\d+"] }));
-    expect((await readRedactionPacks([good, good]))?.patterns).toHaveLength(2);
+    const merged = await readRedactionPacks([good, good]);
+    expect(merged.packs.map((p) => p.id)).toEqual(["legacy"]);
+    expect(merged.text[0]?.matchers).toHaveLength(2);
+    const toml = join(dir, "acme.toml");
+    writeFileSync(
+      toml,
+      'id = "acme"\n[[rules]]\nid = "acme-key"\npattern = "ACME-[0-9]{4}"\ntests.match = ["ACME-12"]\n',
+    );
+    await expect(readRedactionPacks([toml])).rejects.toThrow(
+      `${toml} (pack acme): acme-key: does not match its test string "ACME-12"`,
+    );
   });
 
   it("refuses auth settings serve would refuse", () => {

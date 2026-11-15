@@ -83,8 +83,8 @@ describe("redaction packs", () => {
     writeFileSync(file, JSON.stringify({ patterns: ["("] }));
     const { code, out } = await boot({ SESHI_REDACTION__PACKS: file });
     expect(code).toBe(3);
-    expect(out).toContain(`seshi: ${file}:`);
-    expect(out).toContain("patterns '('");
+    expect(out).toContain(`seshi: ${file} (pack legacy): `);
+    expect(out).toContain("pattern '(' is not a usable RE2 pattern");
   });
 
   it("starts with usable packs and says what they added", async () => {
@@ -94,7 +94,9 @@ describe("redaction packs", () => {
     writeFileSync(b, JSON.stringify({ patterns: ["INTERNAL-\\d+"] }));
     const server = await listening({ SESHI_REDACTION__PACKS: `${a},${b}` });
     try {
-      expect(server.out).toContain("2 pattern(s) on top of the built-in rules");
+      expect(server.out).toMatch(
+        /redaction: packs legacy \(from .*a\.json, .*b\.json\) on top of the built-in rules seshi\/rules\/3; rule set [0-9a-f]{12}/,
+      );
     } finally {
       await server.stop();
     }
