@@ -33,6 +33,7 @@ export {
   type HttpClientOptions,
   HttpSessionDB,
   type OwnerOption,
+  RETRACT_HEADER,
   ServerError,
   type TransportOptions,
 } from "./http";

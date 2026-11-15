@@ -4,6 +4,7 @@
  * seen. A route that drifts from the document fails here, and so does a response the
  * document describes that the server never gives. */
 
+import { createHash } from "node:crypto";
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -696,6 +697,43 @@ describe("identity and access (X5)", () => {
     expect(
       (await patch({ ...admin }, "org", "/v1/sessions/claude-code/s1?owner=alice")).status,
     ).toBe(410);
+  });
+
+  it("retraction (F9.7)", async () => {
+    const { org_key } = await auth.initAdmin({ owner: "ops" });
+    const alice = { app: x5, token: org_key?.token, user: "alice" };
+    const secret = "s".repeat(43);
+    const retract_hash = createHash("sha256").update(secret).digest("hex");
+    const body = { agent: "claude-code", session_id: "r1", transcript: CLAUDE, retract_hash };
+    expect((await call("POST", "/v1/sessions", { ...alice, body })).status).toBe(201);
+    const retract = (as: object, value: string, path = "/v1/sessions/claude-code/r1") =>
+      call("DELETE", path, { ...as, headers: { "x-seshi-retract": value } });
+    expect((await retract(alice, "wrong")).status).toBe(403);
+    expect((await retract(alice, secret, "/v1/sessions/claude-code/nope")).status).toBe(404);
+    expect((await retract({ app: x5, token: null }, secret)).status).toBe(401);
+    const removed = await retract(alice, secret);
+    expect(removed.status).toBe(200);
+    expect((await retract(alice, secret)).status).toBe(410);
+    // A server that does not allow retraction refuses before it looks.
+    const closed = createApp({
+      store,
+      storage: { url: store.url },
+      auth,
+      config: "[capture]\nallow_retract = false\n",
+    });
+    const bob = { app: closed, token: org_key?.token, user: "bob" };
+    expect((await call("POST", "/v1/sessions", { ...bob, body })).status).toBe(201);
+    const refused = await retract(bob, secret);
+    expect(refused.status).toBe(403);
+    expect((refused.body as { error: { code: string } }).error.code).toBe("retract_disabled");
+    expect(
+      (
+        await call("POST", "/v1/sessions", {
+          ...alice,
+          raw: JSON.stringify({ ...body, session_id: "r2", retract_hash: "not-hex" }),
+        })
+      ).status,
+    ).toBe(400);
   });
 
   it("the admin source routes", async () => {

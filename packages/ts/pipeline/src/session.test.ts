@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BUILTIN_FORMATS, FormatRegistry } from "@seshi/formats";
 import { EMPTY_PREFIX_SHA256, SessionRejected } from "@seshi/model";
-import { FsStore } from "@seshi/store";
+import { archiveId, FsStore, readMetadata } from "@seshi/store";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { storeSession } from "./session";
 
@@ -31,6 +31,41 @@ describe("storeSession", () => {
       message: "no normalizer for 'claude' (one of atif, trajectory)",
     });
     expect(readdirSync(dir)).toEqual([]);
+  });
+});
+
+describe("the retraction hash (F9.7)", () => {
+  const ts = "2026-09-01T00:00:00Z";
+  const line = (record: Record<string, unknown>) => `${JSON.stringify(record)}
+`;
+  const head =
+    line({ role: "meta", source: "trajectory" }) +
+    line({ role: "user", content: "x".repeat(2000), timestamp: ts }) +
+    line({ role: "assistant", content: "done", timestamp: ts });
+
+  it("keeps the first hash a session gets, whoever writes later", async () => {
+    const store = new FsStore(dir);
+    const formats = new FormatRegistry(BUILTIN_FORMATS);
+    const first = "a".repeat(64);
+    const upload = (transcript: string, retract_hash: string, offset = 0) =>
+      storeSession(
+        {
+          owner: "alice",
+          agent: "trajectory",
+          session_id: "s1",
+          transcript,
+          format: "jsonl",
+          offset,
+          retract_hash,
+        },
+        { store, formats },
+      );
+    const stored = await upload(head, first);
+    expect(stored.status).toBe("stored");
+    const tail = line({ role: "assistant", content: "more", timestamp: ts });
+    await upload(tail, "b".repeat(64), stored.bytes_total);
+    const metadata = await readMetadata(store, "alice", archiveId("alice", "trajectory", "s1"));
+    expect(metadata?.retract_hash).toBe(first);
   });
 });
 

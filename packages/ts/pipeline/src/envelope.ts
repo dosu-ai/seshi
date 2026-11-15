@@ -106,6 +106,12 @@ export function checkEnvelope(envelope: Envelope): void {
     refuse("caller needs a kind");
   }
   nonEmpty(caller.principal, "caller.principal");
+  if (
+    envelope.retract_hash !== undefined &&
+    !/^[0-9a-f]{64}$/.test(String(envelope.retract_hash))
+  ) {
+    refuse("retract_hash must be a sha256 in lowercase hex");
+  }
   const payload = envelope.payload as LogPayload | SpanPayload | undefined;
   if (payload?.kind === "log") {
     if (typeof payload.text !== "string") refuse("payload.text must be a string");
@@ -172,5 +178,6 @@ export function uploadEnvelope(upload: SessionUpload, options: UploadEnvelopeOpt
   if (upload.branch !== undefined) envelope.branch = upload.branch;
   if (upload.parent_session_id !== undefined) envelope.parent_session_id = upload.parent_session_id;
   if (upload.fork_of !== undefined) envelope.fork_of = upload.fork_of;
+  if (upload.retract_hash !== undefined) envelope.retract_hash = upload.retract_hash;
   return envelope;
 }

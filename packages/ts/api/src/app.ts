@@ -16,6 +16,7 @@
  * Reads take `?owner=` to read another owner's sessions; without it a caller reads its own, and
  * `[auth.owner_aliases]` folds an old owner id into its new one (X5.8). */
 
+import { createHash, timingSafeEqual } from "node:crypto";
 import { gunzipSync } from "node:zlib";
 import {
   AuthRequestError,
@@ -122,6 +123,20 @@ function json(body: unknown, status = 200, headers: Record<string, string> = {})
 
 function error(status: number, code: string, message: string): Response {
   return json({ error: { code, message } }, status);
+}
+
+/** The header a retraction carries its secret in (F9.7); the same name as the client's. */
+const RETRACT_HEADER = "x-seshi-retract";
+
+/** The hash a retraction secret is kept as: sha256 of its text, in hex. */
+function retractHashOf(secret: string): string {
+  return createHash("sha256").update(secret, "utf8").digest("hex");
+}
+
+function sameHash(a: string, b: string): boolean {
+  const left = Buffer.from(a, "utf8");
+  const right = Buffer.from(b, "utf8");
+  return left.length === right.length && timingSafeEqual(left, right);
 }
 
 function bearer(request: Request): string | undefined {
@@ -435,6 +450,10 @@ export function createApp(instance: Instance) {
       throw new HttpError(400, "bad_field", "claims must be an object");
     }
     const claims = pickClaims(body.claims);
+    const retractHash = str(body, "retract_hash");
+    if (retractHash !== undefined && !/^[0-9a-f]{64}$/.test(retractHash)) {
+      throw new HttpError(400, "bad_field", "retract_hash must be a sha256 in lowercase hex");
+    }
     const idempotencyKey =
       request.headers.get("idempotency-key") ?? str(body, "idempotency_key") ?? undefined;
     if (idempotencyKey === "") {
@@ -461,6 +480,7 @@ export function createApp(instance: Instance) {
       ...(visibility ? { visibility } : {}),
       ...(claims ? { claims } : {}),
       ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
+      ...(retractHash ? { retract_hash: retractHash } : {}),
       ...(shipped
         ? {
             shipped: {
@@ -619,7 +639,49 @@ export function createApp(instance: Instance) {
     return json(metadata);
   });
 
+  /** A retraction (F9.7): the machine that uploaded a session removes it with the secret whose
+   * hash it sent, using its normal upload credential. It works only on the caller's own
+   * sessions, only while `capture.allow_retract` is on, and only with the right secret; the
+   * tombstone says `retracted`. */
+  async function retracted(request: Request, params: Record<string, string>, secret: string) {
+    const principal = await caller(request, "sessions:write");
+    const { agent, sessionId } = sessionParams(params);
+    if (!instance.config.capture.allow_retract) {
+      throw new HttpError(
+        403,
+        "retract_disabled",
+        "this server does not allow retraction (capture.allow_retract)",
+      );
+    }
+    const folder = principal.owner;
+    const metadata = await getSession(store, folder, agent, sessionId);
+    if (metadata === null) throw new HttpError(404, "not_found", "no such session");
+    if (metadata.status === "redacted") {
+      throw new HttpError(410, "redacted", "session was already removed");
+    }
+    if (!metadata.retract_hash || !sameHash(retractHashOf(secret), metadata.retract_hash)) {
+      throw new HttpError(
+        403,
+        "bad_retract_secret",
+        "the retraction secret is not the one this session was uploaded with",
+      );
+    }
+    const result = await tombstone({
+      store,
+      owner: folder,
+      agent,
+      session_id: sessionId,
+      now,
+      reason: "retracted",
+      writer: writerFor(principal),
+    });
+    if (!result) throw new HttpError(404, "not_found", "no such session");
+    return json(result);
+  }
+
   route("DELETE", "/v1/sessions/:agent/:session_id", async ({ request, params, url }) => {
+    const secret = request.headers.get(RETRACT_HEADER);
+    if (secret !== null) return retracted(request, params, secret);
     const principal = await caller(request, "sessions:delete");
     const { agent, sessionId } = sessionParams(params);
     const { folder } = await readable(principal, ownerOf(url, principal), agent, sessionId);

@@ -59,6 +59,10 @@ export interface SessionUpload {
   /** Identity the data asserts (X5.5): git email and name, account ids. Kept from a fixed
    * allowlist; never decides ownership (X5.4). */
   claims?: Claims;
+  /** The sha256 (hex) of the uploading machine's retraction secret for this session (F9.7).
+   * Kept on the session the first time one is sent; the machine that holds the secret can
+   * then retract the session with its normal upload credential. */
+  retract_hash?: string;
 }
 
 /** A session to store: `SessionUpload` without the owner, which the backend knows. `format`

@@ -72,6 +72,9 @@ export interface HttpClientOptions extends TransportOptions {
   gzipFrom?: number;
 }
 
+/** The header a retraction carries its secret in (F9.7). */
+export const RETRACT_HEADER = "x-seshi-retract";
+
 /** Whose session a read or change is about: the caller's own when `owner` is omitted. A member
  * reads another owner's sessions as far as visibility allows (X5.10). */
 export interface OwnerOption {
@@ -230,6 +233,7 @@ export class HttpSessionDB implements SessionDB {
       ...options,
       gzipFrom: this.gzipFrom,
       headers: {
+        ...options.headers,
         authorization: `Bearer ${this.token}`,
         ...(this.user !== undefined ? { "x-seshi-user": this.user } : {}),
       },
@@ -288,14 +292,21 @@ export class HttpSessionDB implements SessionDB {
   }
 
   /** Delete the session: a tombstone in its owner's change feed (X5.3); null for one not
-   * stored. Needs `sessions:delete`, and with an IdP a session token under 10 minutes old. */
+   * stored. Needs `sessions:delete`, and with an IdP a session token under 10 minutes old.
+   * With `retractSecret` it is a retraction instead (F9.7): the machine that uploaded the
+   * session proves it with the secret whose hash it sent, using its normal upload credential
+   * (`sessions:write`), and the tombstone says `retracted`. A refused retraction is
+   * `ServerError` 403 `bad_retract_secret` or `retract_disabled`. */
   async tombstone(
     agent: string,
     sessionId: string,
-    options: OwnerOption = {},
+    options: OwnerOption & { retractSecret?: string } = {},
   ): Promise<{ removed: number } | null> {
     const { status, body } = await this.request("DELETE", this.sessionPath(agent, sessionId), {
       query: { owner: options.owner },
+      ...(options.retractSecret !== undefined
+        ? { headers: { [RETRACT_HEADER]: options.retractSecret } }
+        : {}),
     });
     if (status === 404) return null;
     if (status !== 200) refuse(status, body);

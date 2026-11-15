@@ -878,6 +878,7 @@ export class Pipeline {
       limits: this.limits,
       llm_calls: calls.calls,
       redaction: summary,
+      ...(envelope.retract_hash ? { retract_hash: envelope.retract_hash } : {}),
       ...this.context(run),
     });
     const note = "note" in decision ? decision.note : undefined;

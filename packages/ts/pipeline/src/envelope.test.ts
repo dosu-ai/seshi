@@ -141,6 +141,9 @@ describe("checkEnvelope", () => {
       (e: Record<string, unknown>) => {
         e.payload = { kind: "blob" };
       },
+      (e: Record<string, unknown>) => {
+        e.retract_hash = "not-a-sha256";
+      },
     ]) {
       expect(bad(change)).toThrow(SessionRejected);
       expect(bad(change)).toThrow(expect.objectContaining({ code: "bad_envelope" }));

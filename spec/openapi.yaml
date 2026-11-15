@@ -361,6 +361,18 @@ paths:
         refused with `422 redacted`. A reader that already copied the trace still has it.
         Needs `sessions:delete` (X5.3): an admin token; the owner's session token issued in
         the last 10 minutes; or a static token for its owner. The org key cannot delete.
+
+        With `X-Seshi-Retract` it is a retraction instead (F9.7): the machine that uploaded the
+        session sends the retraction secret whose sha256 it sent as `retract_hash`, with its
+        normal upload credential (`sessions:write`: a device token, or the org key with its
+        username). It acts on the caller's own sessions only (`owner` is ignored), and the
+        tombstone's reason is `retracted`. The server's `capture.allow_retract` turns it off.
+      parameters:
+        - name: X-Seshi-Retract
+          in: header
+          required: false
+          description: The session's retraction secret (F9.7); only its hash was ever sent.
+          schema: { type: string, minLength: 1 }
       responses:
         "200":
           description: Removed.
@@ -374,8 +386,20 @@ paths:
                     type: integer
                     description: How many objects were deleted.
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403":
+          description: |
+            As `Forbidden`; for a retraction, `code` is `bad_retract_secret` (not the secret the
+            session was uploaded with, or it was uploaded with none) or `retract_disabled`
+            (`capture.allow_retract = false`).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "410":
+          description: A retraction of a session already removed. `code` is `redacted`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
         "502": { $ref: "#/components/responses/StorageError" }
 
   /v1/sessions/{agent}/{session_id}/trace:
@@ -1480,6 +1504,13 @@ components:
           minLength: 1
           maxLength: 2048
           description: Identifies this upload across resends; the `Idempotency-Key` header wins.
+        retract_hash:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+          description: |
+            The sha256 (lowercase hex) of the uploading machine's retraction secret for this
+            session (F9.7). The first one a session gets is kept in its metadata; that machine
+            can later retract the session with `DELETE` and `X-Seshi-Retract`.
       example:
         agent: claude-code
         session_id: 8f1c2d3e-…

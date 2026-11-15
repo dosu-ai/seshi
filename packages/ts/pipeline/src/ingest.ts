@@ -189,6 +189,9 @@ export interface IngestInput extends WriteContext {
   origin_agent?: string;
   /** The session's id in that agent (X4.5); `session_id` by default. */
   native_session_id?: string;
+  /** The uploading machine's retraction hash (F9.7). The first one a session gets is kept:
+   * only the machine that first uploaded it can retract it, whoever writes later. */
+  retract_hash?: string;
 }
 
 function byteLength(value: unknown): number {
@@ -323,6 +326,7 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
       });
     }
     if (metadata.normalizer) next.normalizer = metadata.normalizer;
+    if (input.retract_hash && !base.retract_hash) next.retract_hash = input.retract_hash;
     const redaction = addRedaction(input.replace ? undefined : base.redaction, input.redaction);
     if (redaction) next.redaction = redaction;
     else delete next.redaction;
