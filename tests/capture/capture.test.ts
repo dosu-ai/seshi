@@ -424,6 +424,22 @@ describe("capture rules from the CLI (F9.5)", () => {
     expect(spooled()).toBe(2); // the resume's wake-up, and the hook
   });
 
+  it("reports a pause that ran out as over", async () => {
+    await machine.seshi(["capture", "pause", "30m"]);
+    const st = state();
+    st.paused.until = "2026-01-01T00:00:00.000Z";
+    writeFileSync(join(stateDir(), "state.json"), JSON.stringify(st));
+    const human = await machine.seshi(["capture", "status"], { env: { NO_COLOR: "1" } });
+    expect(human.out).toContain("Session Capture: capturing");
+    expect(human.out).not.toContain("paused");
+    const json = JSON.parse((await machine.seshi(["capture", "status", "--json"])).out);
+    expect(json.paused).toBeNull();
+    await machine.seshi(["capture", "pause"]);
+    expect(JSON.parse((await machine.seshi(["capture", "status", "--json"])).out).paused).toEqual({
+      at: expect.any(String),
+    });
+  });
+
   it("says a pause holds uploads back, and that what is written meanwhile goes up after", async () => {
     const pause = await machine.seshi(["capture", "pause", "1h"]);
     expect(pause.out).toContain("nothing is uploaded until");

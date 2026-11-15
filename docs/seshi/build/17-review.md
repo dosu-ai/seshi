@@ -184,6 +184,10 @@ what changed.
   ends, and that `capture off --session` keeps a session out; capture.md, cli.md and the rules
   header say the same. Test: the message, and a session written during a pause uploaded by the
   first hook after resume. Making a pause keep content out is under "Not fixed".
+- **client, low**: `seshi capture status` printed an expired pause ("paused until <a past
+  time>" beside "capturing") and kept it in `--json` as `paused`, since only `resume` clears
+  the record. Both now show the pause only while `isPaused` holds. Test: a pause whose `until`
+  has passed is absent from both; an open-ended one is shown.
 
 ## Not fixed
 

@@ -452,7 +452,8 @@ async function status(ctx: CommandContext, json: boolean, args: Args): Promise<n
             },
           }
         : {}),
-      paused: state.paused ?? null,
+      // A pause that ran out is still in the file until `resume`: it no longer applies.
+      paused: paused && state.paused ? state.paused : null,
       agents: installs,
       target: target ?? null,
       uploader: { running, queued, service, last_run: state.uploader?.last_run ?? null },
@@ -471,7 +472,7 @@ async function status(ctx: CommandContext, json: boolean, args: Args): Promise<n
           ]
         : []),
       `  here (${printable(cwd)}): ${here.reason} (${here.level})`,
-      ...(state.paused
+      ...(paused && state.paused
         ? [
             `  ${style.warn("paused")} ${state.paused.until ? `until ${state.paused.until}` : "until seshi capture resume"}`,
           ]
