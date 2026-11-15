@@ -221,7 +221,9 @@ current: `seshi redact backfill` redoes every session with a trace not written u
 current rules. A session that grew gets a second trace with
 a `continuation`; a reader that wants the whole session concatenates in `traces` order. A
 replace (X4.6) leaves one trace in `traces`, removes the others' objects, and starts `applied`
-and `redaction` over from the replacing write.
+and `redaction` over from the replacing write. Its object replaces one already under the same
+hash (the hash leaves some content out, which new rules or review may have changed), and its
+change entry then says `replace` so readers read it again.
 
 `normalized` and `withheld_calls` are the small state the next chunk of the session's log is
 normalized with: where the log ends (`bytes`), how many records it normalizes to and their

@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BUILTIN_FORMATS, FormatRegistry } from "@seshi/formats";
-import type { StoreSessionResult, Writer } from "@seshi/model";
+import { SessionConflict, type StoreSessionResult, type Writer } from "@seshi/model";
 import { compileRuleSet, type RuleSet, ruleRedactor, validatePack } from "@seshi/redact";
 import {
   archiveId,
@@ -65,11 +65,20 @@ async function store1(
   offset = 0,
   owner = "alice",
   rules: RuleSet = compileRuleSet(),
+  replace = false,
 ): Promise<StoreSessionResult> {
   const pipeline = new Pipeline({ store, formats, redaction: rules });
   return (await pipeline.submit(
     uploadEnvelope(
-      { owner, agent: "trajectory", session_id: sessionId, transcript, format: "jsonl", offset },
+      {
+        owner,
+        agent: "trajectory",
+        session_id: sessionId,
+        transcript,
+        format: "jsonl",
+        offset,
+        ...(replace ? { replace: true } : {}),
+      },
       { caller: { kind: "static", principal: owner }, owner_basis: "verified" },
     ),
   )) as StoreSessionResult;
@@ -233,6 +242,48 @@ describe("backfillRedaction (F2.5)", () => {
     );
     expect(JSON.stringify(trace)).not.toContain("ACME-1234");
     expect((await metadata("s1"))?.traces.map((t) => t.content_hash)).toEqual([before?.head]);
+  });
+
+  it("lets a replace under new rules rewrite an object that keeps its hash", async () => {
+    // Review finding: the hash leaves out an assistant record's text beside its tool calls, so a
+    // replace under the new rules hashed the same, kept the old object (secret included), and
+    // recorded the new rule set, so backfill then took the session as current.
+    const withCall = line({
+      role: "assistant",
+      content: "here is ACME-1234",
+      tool_calls: [{ id: "c1", name: "Read", args: JSON.stringify({ file_path: "a.txt" }) }],
+      timestamp: ts,
+    });
+    const transcript = meta() + user(LONG) + withCall + result("c1", "fine");
+    const first = (await store1("s1", transcript)) as { status: string; content_hash: string };
+    expect(first.status).toBe("stored");
+    // The uploader pre-redacts with the org's new rules (F2.4); the server's prefix no longer
+    // matches, and it resends with replace after the 409.
+    const preRedacted = transcript.replace("ACME-1234", "[redacted:acme-key]");
+    await expect(store1("s1", preRedacted, 0, "alice", NEW_RULES)).rejects.toBeInstanceOf(
+      SessionConflict,
+    );
+    const again = await store1("s1", preRedacted, 0, "alice", NEW_RULES, true);
+    expect(again.status).toBe("stored");
+    expect((again as { content_hash: string }).content_hash).toBe(first.content_hash);
+    const after = await metadata("s1");
+    expect(after?.traces).toHaveLength(1);
+    expect(after?.traces[0]?.rule_set).toBe(NEW_RULES.hash);
+    const trace = await getTrace(
+      store,
+      "alice",
+      after?.archive_id as string,
+      after?.head as string,
+    );
+    expect(JSON.stringify(trace)).not.toContain("ACME-1234");
+    // Readers are told to read it again.
+    const { entries } = await readChanges(store, "alice");
+    expect(entries.at(-1)?.entry).toMatchObject({
+      kind: "published",
+      content_hash: first.content_hash,
+      replace: true,
+    });
+    expect((await run()).outcomes).toMatchObject({ current: 1 });
   });
 
   it("writes nothing in a dry run, and says what it would do", async () => {

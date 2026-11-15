@@ -252,11 +252,16 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
   }
   input.guard?.(before);
 
+  // A replace rewrites an object already under its hash: the content hash leaves things out (an
+  // assistant record's text beside its tool calls, the meta record, LLM calls), so a session
+  // redacted again under new rules, or reviewed again, can keep its hash while those differ, and
+  // keeping the first object would leave what the new write took out (as backfill does).
   const outcome = await publishObject(
     store,
     keys.trace(owner, archive, trace.content_hash),
     gzipJson(trace),
     "application/gzip",
+    input.replace ? "replace" : "immutable",
   );
 
   const context: WriteContext = { ...input, writer, provenance };
@@ -286,9 +291,10 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
     replaced = input.replace
       ? base.traces.map((t) => t.content_hash).filter((h) => h !== trace.content_hash)
       : [];
-    // A trace already listed keeps its entry, and so the rule set its stored object was written
-    // under: that object is not rewritten, so the old rules' output stays under the hash.
-    const traces = input.replace ? [listed ?? ref] : listed ? base.traces : [...base.traces, ref];
+    // Outside a replace, a trace already listed keeps its entry, and so the rule set its stored
+    // object was written under: that object is not rewritten, so the old rules' output stays
+    // under the hash. A replace rewrote it (above), so its entry is this write's.
+    const traces = input.replace ? [ref] : listed ? base.traces : [...base.traces, ref];
     const next: SessionMetadata = withContext(
       {
         ...base,
@@ -342,7 +348,9 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
   } catch (err) {
     // Tombstoned between the check above and now, or the guard refused a session another write
     // changed: the object this write just created would be left behind (a tombstone already
-    // removed the objects it knew of). Remove it too, unless the pointer already lists it.
+    // removed the objects it knew of). Remove it too, unless the pointer already lists it (a
+    // replace that rewrote a listed object leaves it rewritten: the write planned again puts the
+    // same there).
     if (outcome === "written") {
       const now = await readMetadata(store, owner, archive);
       if (!now?.traces.some((t) => t.content_hash === trace.content_hash)) {

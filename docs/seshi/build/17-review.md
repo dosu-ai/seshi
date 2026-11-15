@@ -47,6 +47,14 @@ what changed.
   layout.md); backfill takes a session as current only when every trace is under the current
   rules, and stamps the traces it checks or rewrites. Test: head under the old rules, a chunk
   under the new, backfill rewrites it.
+- **ingest, high**: a replace (an uploader's resend after a 409, every span-assembler rebuild)
+  whose trace kept its content hash left the old object in place, because `ingest` published
+  `immutable`. The hash leaves out an assistant record's text beside tool calls, the meta
+  record and LLM calls, so what new rules (or review) took out there stayed stored, while the
+  pointer recorded the new rule set and backfill then skipped it. A replace now publishes in
+  `replace` mode (as backfill does), its trace entry is the new write's, and the rewrite gets a
+  `published` entry with `replace: true`. Test: secret in an assistant record with tool calls,
+  pre-redacted resend, 409, replace rewrites the object.
 
 ## Not fixed
 
