@@ -4,7 +4,7 @@ import { VERSION } from "@seshi/model";
 import { describe, expect, it } from "vitest";
 import type { CommandContext, CommandSpec } from "./commands/index";
 import { COMMANDS } from "./commands/index";
-import { main } from "./main";
+import { main, takeNoColor } from "./main";
 
 /** Runs `main` with captured output and the given registry. */
 async function run(argv: string[], commands?: Record<string, CommandSpec>) {
@@ -65,6 +65,28 @@ describe("seshi", () => {
     expect(seen?.argv).toEqual(["--flag", "x"]);
     expect(seen?.env).toEqual({ HOME: "/nowhere" });
     expect(await seen?.integrations()).toEqual([]);
+  });
+
+  it("takes --no-color out of argv for every command, and says so in the context", async () => {
+    let seen: CommandContext | undefined;
+    const spec: CommandSpec = {
+      summary: "x",
+      load: async () => ({
+        run: async (ctx) => {
+          seen = ctx;
+          return 0;
+        },
+      }),
+    };
+    await run(["x", "a", "--no-color", "b", "--", "--no-color"], { x: spec });
+    expect(seen?.argv).toEqual(["a", "b", "--", "--no-color"]);
+    expect(seen?.noColor).toBe(true);
+    // Output a caller captures is not a terminal: no colour, no questions.
+    expect(seen?.tty).toEqual({ stdout: false, stdin: false });
+    expect(seen?.terminal).toBeUndefined();
+    await run(["x"], { x: spec });
+    expect(seen?.noColor).toBeUndefined();
+    expect(takeNoColor(["--no-color"])).toEqual({ noColor: true, rest: [] });
   });
 
   it("registers every command lazily", () => {

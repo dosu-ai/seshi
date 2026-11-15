@@ -19,6 +19,20 @@ export interface MainOptions {
   commands?: Readonly<Record<string, CommandSpec>>;
   integrations?: CommandContext["integrations"];
   stdin?: CommandContext["stdin"];
+  /** Whether output and input are terminals: this process's own when `stdout` is not given,
+   * else neither. */
+  tty?: CommandContext["tty"];
+  terminal?: CommandContext["terminal"];
+  secrets?: CommandContext["secrets"];
+}
+
+/** `argv` without `--no-color` (before a `--`), and whether it was there (B1.4). */
+export function takeNoColor(argv: readonly string[]): { noColor: boolean; rest: string[] } {
+  const end = argv.indexOf("--");
+  const head = end === -1 ? argv : argv.slice(0, end);
+  const tail = end === -1 ? [] : argv.slice(end);
+  const kept = head.filter((a) => a !== "--no-color");
+  return { noColor: kept.length !== head.length, rest: [...kept, ...tail] };
 }
 
 function usage(commands: Readonly<Record<string, CommandSpec>>): string {
@@ -33,6 +47,8 @@ function usage(commands: Readonly<Record<string, CommandSpec>>): string {
     "",
     `  ${"--version".padEnd(width)}  print the version`,
     `  ${"--help".padEnd(width)}  show this help`,
+    "",
+    "every command takes --json (one JSON document on stdout) and --no-color (also NO_COLOR)",
   ].join("\n");
 }
 
@@ -58,14 +74,29 @@ export async function main(argv: string[], options: MainOptions = {}): Promise<n
     return 2;
   }
   const command = await spec.load();
+  const { noColor, rest: args } = takeNoColor(rest);
+  const tty =
+    options.tty ??
+    (options.stdout === undefined
+      ? { stdout: process.stdout.isTTY === true, stdin: process.stdin.isTTY === true }
+      : { stdout: false, stdin: false });
+  const terminal =
+    options.terminal ??
+    (options.stdout === undefined && tty.stdout && tty.stdin
+      ? () => import("./cli/terminal").then((m) => m.processTerminal())
+      : undefined);
   return command.run({
-    argv: rest,
+    argv: args,
     env: options.env ?? process.env,
     stdout,
     stderr,
     integrations:
       options.integrations ?? (() => import("./integrations").then((m) => m.INTEGRATIONS)),
     stdin: options.stdin ?? (() => Bun.stdin.text()),
+    tty,
+    ...(noColor ? { noColor } : {}),
+    ...(terminal ? { terminal } : {}),
+    ...(options.secrets ? { secrets: options.secrets } : {}),
   });
 }
 

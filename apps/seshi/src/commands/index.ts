@@ -10,6 +10,8 @@
  * stable exit codes in `../cli/exit.ts`. */
 
 import type { Integration } from "@seshi/kit";
+import type { SecretBackend } from "../account/secrets";
+import type { Terminal } from "../cli/terminal";
 
 /** What a command gets from the router. */
 export interface CommandContext {
@@ -22,6 +24,16 @@ export interface CommandContext {
   integrations(): Promise<readonly Integration[]>;
   /** All of standard input, for commands that read `-`; absent where there is none. */
   stdin?(): Promise<string>;
+  /** Whether standard output and input are terminals: colour, glyphs and questions need them
+   * (B1.4). Neither is, when absent. */
+  tty?: { stdout: boolean; stdin: boolean };
+  /** `--no-color` was on the command line; the router takes it out of `argv` (B1.4). */
+  noColor?: boolean;
+  /** The terminal, for questions, the background colour and opening a browser; absent when
+   * standard input or output is not one. Loaded on demand. */
+  terminal?(): Promise<Terminal>;
+  /** Where credentials are kept (F8.2); the OS keychain with a file fallback when absent. */
+  secrets?: SecretBackend;
 }
 
 export interface CommandModule {
