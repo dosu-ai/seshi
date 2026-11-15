@@ -114,6 +114,22 @@ describe("S3 sync (F6)", () => {
     expect(JSON.stringify(trace?.records)).toContain("Done.");
   });
 
+  it("takes a log that grew by a newline only, and continues once a line follows", async () => {
+    fake.put("harness/alice@x.io/sess1.jsonl", CLAUDE); // no final newline
+    const instance = await boot();
+    await instance.sources.run("evals");
+    fake.append("harness/alice@x.io/sess1.jsonl", "\n");
+    const report = await instance.sources.run("evals");
+    expect(report.outcomes).toEqual({ unchanged: 1 });
+    expect((await listRecords(instance.store, "failed", "evals")).records).toEqual([]);
+    fake.append("harness/alice@x.io/sess1.jsonl", claudeLine("a9", "assistant", "Done."));
+    expect((await instance.sources.run("evals")).outcomes).toEqual({ stored: 1 });
+    const meta = await readMetadata(instance.store, OWNER, claudeArchive);
+    expect(meta?.normalized?.bytes).toBe(
+      fake.objects.get("harness/alice@x.io/sess1.jsonl")?.body.length,
+    );
+  });
+
   it("reads only the tail of a long log over HTTP (Range)", async () => {
     const long = `${CLAUDE}\n${claudeLine("a2", "assistant", `Long answer ${"text ".repeat(1200)}`)}`;
     fake.put("harness/alice@x.io/sess1.jsonl", long);
