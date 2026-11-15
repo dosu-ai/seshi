@@ -68,10 +68,15 @@ would go along to the other host): it fails the run, naming the status. A failed
    Trajectory). Spans that name no session, and Trajectory's automated oversight traces, are
    skipped and counted in the run's log line.
 2. **Normalized and redacted on arrival** into the span store, as for OTLP
-   ([otlp.md](otlp.md#what-happens-to-spans)).
+   ([otlp.md](otlp.md#what-happens-to-spans)): the server's rule set (built-in and operator
+   packs) runs over each span's text, tool calls and LLM call error, and each span record keeps
+   its rule counts. Nothing unredacted is stored.
 3. **Assembled and published** by the worker's `assembler` job once the session has had no new
    spans for the source's `quiet_period`. It belongs to `svc:<source-id>` (X5.4) with
-   `owner_basis: service`, and takes the source's `visibility`.
+   `owner_basis: service`, and takes the source's `visibility`. The session's
+   `metadata.redaction` counts each match once, and model review runs before the write: a
+   `[[review.policies]]` entry whose `sources` names the datadog source applies, and a session
+   review drops is recorded under `sources/<source-id>/dropped/`.
 
 Sessions are filed under the format `datadog-llmobs`:
 `GET /v1/sessions/datadog-llmobs/<session id>?owner=svc:datadog-prod`.

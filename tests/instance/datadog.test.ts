@@ -10,9 +10,12 @@ import { join } from "node:path";
 import { createApp } from "@seshi/api";
 import type { Instance } from "@seshi/instance";
 import type { Trace } from "@seshi/model";
+import { type FakeServer, fakeProviderServer, KeywordModel } from "@seshi/review/testing";
 import {
   archiveId,
   listPending,
+  listRecords,
+  listReviews,
   listSpans,
   readCheckpoint,
   readHealth,
@@ -39,13 +42,42 @@ let instance: Instance;
 let clock: Date;
 let admin: string;
 let keys: { api: string | null; app: string | null }[];
+/** What the local Export API answers, by page cursor. */
+let answers: Record<string, unknown>;
+
+/** Boot the Instance: the datadog source's config, then `extra` (more tables). */
+async function start(extra = "") {
+  booted = await bootInstance(
+    [
+      "[[sources]]",
+      `id = "${SOURCE}"`,
+      'type = "datadog"',
+      `api_url = "http://127.0.0.1:${server.port}"`,
+      'api_key = "dd-api-0123"',
+      'app_key = "dd-app-4567"',
+      'ml_app = "coding-agents"',
+      'quiet_period = "5m"',
+      'visibility = "owner"',
+      // The fixtures are short conversations: the default filter (X4.10) would drop them.
+      "filter = { min_chars = 50 }",
+      extra,
+    ].join("\n"),
+    {
+      integrations: INTEGRATIONS,
+      now: () => clock,
+      roles: ["api", "worker"],
+    },
+  );
+  instance = booted.instance;
+  admin = (await instance.auth.initAdmin({ owner: "ops" })).admin?.token as string;
+}
 
 beforeEach(async () => {
   keys = [];
   // Page 1 → page 2 → the minimal-capture session, then nothing more.
   const page2 = fixture("trajectory-session.page2.json");
   page2.meta.page = { after: "minimal" };
-  const answers: Record<string, unknown> = {
+  answers = {
     first: fixture("trajectory-session.page1.json"),
     eyJhZnRlciI6InBhZ2UtMiJ9: page2,
     minimal: fixture("trajectory-minimal.json"),
@@ -66,28 +98,7 @@ beforeEach(async () => {
     },
   });
   clock = new Date("2026-11-14T10:07:00Z");
-  booted = await bootInstance(
-    [
-      "[[sources]]",
-      `id = "${SOURCE}"`,
-      'type = "datadog"',
-      `api_url = "http://127.0.0.1:${server.port}"`,
-      'api_key = "dd-api-0123"',
-      'app_key = "dd-app-4567"',
-      'ml_app = "coding-agents"',
-      'quiet_period = "5m"',
-      'visibility = "owner"',
-      // The fixtures are short conversations: the default filter (X4.10) would drop them.
-      "filter = { min_chars = 50 }",
-    ].join("\n"),
-    {
-      integrations: INTEGRATIONS,
-      now: () => clock,
-      roles: ["api", "worker"],
-    },
-  );
-  instance = booted.instance;
-  admin = (await instance.auth.initAdmin({ owner: "ops" })).admin?.token as string;
+  await start();
 });
 
 afterEach(async () => {
@@ -199,5 +210,126 @@ describe("a datadog source", () => {
     await assemble();
     const after = await readMetadata(booted.store, OWNER, archiveId(OWNER, AGENT, SESSION));
     expect(after?.traces).toEqual(before?.traces);
+  });
+});
+
+// A GitHub token, matched by the built-in `github-token` rule.
+const GH = `ghp_${"A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6"}`;
+
+/** One span of the first page's answer, by Datadog span id. */
+// biome-ignore lint/suspicious/noExplicitAny: fixtures are Export API answers, walked by path
+function pageSpan(id: string): any {
+  // biome-ignore lint/suspicious/noExplicitAny: as above
+  return (answers.first as any).data.find((s: { id: string }) => s.id === id).attributes;
+}
+
+describe("a datadog session goes through the same redaction and review as OTLP (07, 08)", () => {
+  it("is redacted by the rule set on arrival, and the session counts each match once", async () => {
+    // The first turn's prompt, a tool's output and the turn's LLM call error carry the token.
+    pageSpan("4823117000000000001").input.value += ` (the CI token is ${GH})`;
+    pageSpan("4823117000000000003").output.value += ` while using ${GH}`;
+    const usage = pageSpan("4823117000000000007");
+    usage.status = "error";
+    usage.metadata = { "error.type": "auth", "error.message": `401 for ${GH}` };
+
+    expect(await instance.sources.run(SOURCE)).toMatchObject({ outcome: "ok", submitted: 3 });
+    const archive = archiveId(OWNER, AGENT, SESSION);
+    // The span records are the rule set's work already: nothing raw waits in the bucket.
+    const spans = await listSpans(booted.store, OWNER, archive);
+    expect(JSON.stringify(spans)).not.toContain(GH);
+    for (const record of spans) expect(record.redaction?.rule_set).toBe(instance.redaction.hash);
+    const counted = spans.filter((s) => (s.redaction?.counts["github-token"] ?? 0) > 0);
+    expect(counted.map((s) => s.part.span_id).sort()).toEqual(
+      // Datadog's decimal span ids, stored as OTLP hex.
+      ["4823117000000000001", "4823117000000000003", "4823117000000000007"]
+        .map((id) => BigInt(id).toString(16).padStart(16, "0"))
+        .sort(),
+    );
+
+    clock = new Date(clock.getTime() + 10 * 60_000);
+    expect(await assemble()).toMatchObject({ published: 2, stored: 1 });
+    const metadata = await readMetadata(booted.store, OWNER, archive);
+    expect(metadata?.redaction).toEqual({
+      rule_set: instance.redaction.hash,
+      counts: { "github-token": 3 },
+    });
+    const stored = await trace();
+    expect(JSON.stringify(stored)).not.toContain(GH);
+    expect(stored.records[1]).toMatchObject({
+      role: "user",
+      content: expect.stringContaining("(the CI token is [redacted:github-token])"),
+    });
+    expect(stored.llm_calls?.[0]?.error).toBe("auth: 401 for [redacted:github-token]");
+  });
+
+  /** Reboot with a review policy scoped to the datadog source, against a local provider. */
+  async function withReview(): Promise<FakeServer> {
+    const provider = fakeProviderServer({
+      model: new KeywordModel({
+        drop: ["CUSTOMER TABLE"],
+        sensitive: [{ text: "Tangerine-Ladder-1987", category: "secret" }],
+      }),
+    });
+    await booted.cleanup();
+    await start(
+      [
+        "[[review.policies]]",
+        'id = "default"',
+        `decision = { api_key = "sk-test", base_url = "${provider.url}" }`,
+        `sources = ["${SOURCE}"]`,
+      ].join("\n"),
+    );
+    return provider;
+  }
+
+  it("is reviewed under a policy naming the datadog source, and the decision recorded", async () => {
+    const provider = await withReview();
+    try {
+      pageSpan("4823117000000000001").input.value += " (log in with ops / Tangerine-Ladder-1987)";
+      await instance.sources.run(SOURCE);
+      clock = new Date(clock.getTime() + 10 * 60_000);
+      expect(await assemble()).toMatchObject({ published: 2, stored: 1 });
+
+      const archive = archiveId(OWNER, AGENT, SESSION);
+      const metadata = await readMetadata(booted.store, OWNER, archive);
+      expect(metadata?.status).toBe("stored");
+      const stored = await trace();
+      expect(JSON.stringify(stored)).not.toContain("Tangerine-Ladder-1987");
+      expect(JSON.stringify(stored)).toContain("log in with ops / [redacted:secret]");
+      expect(await listReviews(booted.store, OWNER, archive)).toEqual([
+        expect.objectContaining({
+          n: 0,
+          content_hash: metadata?.head,
+          decision: "redact",
+          policy: "default",
+        }),
+      ]);
+      expect(provider.requests.map((r) => r.api)).toContain("anthropic");
+    } finally {
+      await provider.close();
+    }
+  });
+
+  it("is dropped when review drops it, under the datadog source", async () => {
+    const provider = await withReview();
+    try {
+      pageSpan("4823117000000000001").input.value += " and here is the CUSTOMER TABLE: ana, 41 rua";
+      await instance.sources.run(SOURCE);
+      clock = new Date(clock.getTime() + 10 * 60_000);
+      await assemble();
+
+      expect(await readMetadata(booted.store, OWNER, archiveId(OWNER, AGENT, SESSION))).toBeNull();
+      const { records } = await listRecords(booted.store, "dropped", SOURCE);
+      expect(records.map((r) => r.record)).toContainEqual(
+        expect.objectContaining({
+          reason: "review_drop",
+          policy: "default",
+          source_kind: "datadog",
+          session_key: SESSION,
+        }),
+      );
+    } finally {
+      await provider.close();
+    }
   });
 });

@@ -231,11 +231,21 @@ with no Datadog poller); span records hold redacted parts, not the raw `datadog.
 
 ## Cross-branch wiring once the stack is linear
 
-- **07 (redaction rules)**: Datadog span records are under `owners/svc:<id>/sessions/*/spans/`
-  like OTLP's; the backfill note in 09 applies to them too.
-- **08 (model review)**: assembled Datadog sessions reach the reviewer through
-  `publishAssembled` with the marker's envelope (`source: "datadog"`, no payload). Review
-  policies naming a datadog source id apply.
+- **07 (redaction rules), done in the linear stack**: Datadog spans take the OTLP path
+  unchanged. `ctx.submit` hands a span batch to `Pipeline.spans`, which runs `redactSpanPart`
+  with the Instance's rule set and stores each record's counts; `publishAssembled` → `commit`
+  redacts the LLM calls and adds the arrival counts once. `seshi redact backfill` (09's wiring)
+  re-redacts span records under `owners/svc:<id>/sessions/*/spans/` for Datadog sessions too,
+  since it walks every published session. `tests/instance/datadog.test.ts` now checks that a
+  polled session with a GitHub token in a prompt, a tool output and an LLM call error stores
+  no token, in span records or trace, and that `metadata.redaction.counts` is
+  `{ "github-token": 3 }`.
+- **08 (model review), done in the linear stack**: assembled Datadog sessions reach the reviewer
+  through `publishAssembled` with the marker's envelope (`source: "datadog"`, no payload). The
+  same test file boots an Instance with a `[[review.policies]]` entry scoped to the datadog
+  source against the local fake provider: a sensitive phrase is redacted and the review record
+  written, and a drop lands under `sources/<id>/dropped/` with `source_kind: "datadog"`.
+  Still open (as for OTLP): `seshi redact backfill` does not re-run review.
 - **11 (S3 sync)**: `[[sources]]` edits are in `datadogSource` only; merge `sources.ts` by
   taking both sides' fields, then `bun run schema`. If 11 adds a second built-in connector list
   in `openServer`, the datadog connector stays in its integration (`connectorsOf(INTEGRATIONS)`).
