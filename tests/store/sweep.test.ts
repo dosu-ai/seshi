@@ -16,6 +16,7 @@ import {
   FsStore,
   getBytes,
   keys,
+  publishObject,
   readMetadata,
   S3Store,
   type Store,
@@ -137,6 +138,36 @@ describe.each([
     ]);
     expect(await exists(old)).toBe(false);
     expect(await exists(fresh)).toBe(true);
+  });
+
+  it("a publish that reuses an object writes it again, so its age is now", async () => {
+    await upload("s1", meta() + user("hello") + reply("hi"));
+    const key = await orphan("s1", "c".repeat(64), 2 * HOUR);
+    const outcome = await publishObject(store, key, new TextEncoder().encode("other"), "x/y");
+    expect(outcome).toBe("exists");
+    expect(new TextDecoder().decode((await getBytes(store, key)) as Uint8Array)).toBe(
+      "left behind",
+    );
+    const modified = Date.parse((await store.stat(key))?.modified as string);
+    expect(Date.now() - modified).toBeLessThan(60_000);
+    const report = await sweepTraces(store);
+    expect(report).toMatchObject({ deleted: 0, young: 1 });
+    expect(await exists(key)).toBe(true);
+  });
+
+  it("keeps an old object a publish reuses between the listing and the delete", async () => {
+    await upload("s1", meta() + user("hello") + reply("hi"));
+    const key = await orphan("s1", "d".repeat(64), 2 * HOUR);
+    // A publish of the same content lands just after the sweep listed the session.
+    const racing: Store = Object.create(store);
+    racing.list = async (prefix, options) => {
+      const page = await store.list(prefix, options);
+      if (options?.details) await publishObject(store, key, new Uint8Array([1]), "x/y");
+      return page;
+    };
+    const report = await sweepTraces(racing);
+    expect(report).toMatchObject({ deleted: 0, young: 1, errors: 0 });
+    expect(await exists(key)).toBe(true);
   });
 
   it("keeps a named head and a named continuation chunk, however old", async () => {

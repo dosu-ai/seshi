@@ -16,6 +16,10 @@ export interface ObjectStat {
    * `publish` uses to verify without reading the object back. Absent only when a backend
    * reports none. */
   etag?: string;
+  /** When the object was last written, ISO 8601 (S3's `Last-Modified`, the file's mtime).
+   * Absent when the backend does not say. The orphan sweep (F2.5) checks it again just before
+   * it deletes. */
+  modified?: string;
 }
 
 /** An object and the version it was read at: pass `etag` as `ifMatch` to replace exactly

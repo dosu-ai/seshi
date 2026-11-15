@@ -28,7 +28,11 @@ describe("FsStore", () => {
   it("round-trips objects with the MD5 of their bytes as the etag", async () => {
     expect(await store.put("a/b/c.txt", enc("hello"))).toEqual({ etag: md5("hello") });
     expect(await store.get("a/b/c.txt")).toEqual({ body: enc("hello"), etag: md5("hello") });
-    expect(await store.stat("a/b/c.txt")).toEqual({ size: 5, etag: md5("hello") });
+    expect(await store.stat("a/b/c.txt")).toEqual({
+      size: 5,
+      etag: md5("hello"),
+      modified: expect.any(String),
+    });
     await store.put("a/b/c.txt", enc("hello!"));
     expect((await store.stat("a/b/c.txt"))?.etag).toBe(md5("hello!"));
     expect(await store.get("a/b/missing")).toBeNull();

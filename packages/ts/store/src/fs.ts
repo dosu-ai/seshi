@@ -213,7 +213,7 @@ export class FsStore implements Store {
       if (!info.isFile()) return null;
       const body = await this.read(path);
       if (body === null) return null;
-      return { size: body.length, etag: md5(body) };
+      return { size: body.length, etag: md5(body), modified: info.mtime.toISOString() };
     } catch (err) {
       if (isCode(err, "ENOENT")) return null;
       throw new StoreError(`stat ${key}`, err);

@@ -148,14 +148,16 @@ export class FetchS3Client {
     return etag ? { etag } : {};
   }
 
-  async head(key: string): Promise<{ size: number; etag?: string } | null> {
+  async head(key: string): Promise<{ size: number; etag?: string; modified?: string } | null> {
     const response = await this.send("HEAD", this.url(key));
     if (response.status === 404) return null;
     if (!response.ok) return FetchS3Client.fail("HEAD", key, response);
     const etag = unquote(response.headers.get("etag"));
+    const at = Date.parse(response.headers.get("last-modified") ?? "");
     return {
       size: Number(response.headers.get("content-length") ?? 0),
       ...(etag ? { etag } : {}),
+      ...(Number.isFinite(at) ? { modified: new Date(at).toISOString() } : {}),
     };
   }
 

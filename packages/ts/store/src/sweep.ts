@@ -202,7 +202,20 @@ async function sweepSession(
   for (const trace of old) {
     if (options.signal?.aborted) return;
     if (still.has(trace.hash)) continue;
-    if (!options.dryRun) await store.delete(keys.trace(owner, archive, trace.hash));
+    if (!options.dryRun) {
+      // And its age again: a publish that found the object already there writes it again
+      // (`publishObject`), so an object about to be named is young here even when the listing
+      // said old. Gone already, or young now: keep counting it as not deleted.
+      const key = keys.trace(owner, archive, trace.hash);
+      const now = await store.stat(key);
+      if (now === null) continue;
+      const at = now.modified === undefined ? Number.NaN : Date.parse(now.modified);
+      if (!Number.isFinite(at) || at >= cutoff) {
+        report.young++;
+        continue;
+      }
+      await store.delete(key, now.etag ? { ifMatch: now.etag } : {});
+    }
     const swept: SweptObject = {
       owner,
       archive_id: archive,

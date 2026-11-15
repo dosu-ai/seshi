@@ -53,10 +53,13 @@ export async function publishObject(
   const want = md5(body);
   const before = await store.stat(key);
   if (before) {
-    if (mode === "immutable") return "exists";
-    if (before.size === body.length && (await matches(store, key, before.etag, want, body))) {
-      return "exists";
-    }
+    const kept =
+      mode === "immutable" ||
+      (before.size === body.length && (await matches(store, key, before.etag, want, body)));
+    // An object kept is about to be named, so it is written again with its own bytes: its age
+    // then says a publish is in flight, and the orphan sweep (F2.5), which deletes only unnamed
+    // objects over an hour old, leaves it. Gone meanwhile (swept): write ours below.
+    if (kept && (await refresh(store, key, contentType))) return "exists";
   }
   if (mode === "immutable") {
     // Created with If-None-Match (X6.5): of two writers racing on one content hash, whose
@@ -80,6 +83,21 @@ export async function publishObject(
     throw new StoreError(`verification failed after writing ${key}`);
   }
   return "written";
+}
+
+/** Write the object at `key` again with its own bytes, so its last-modified time is now; false
+ * when it is gone. Conditional on the version read: a writer that replaced it meanwhile wrote it
+ * recently anyway. */
+async function refresh(store: Store, key: string, contentType: string): Promise<boolean> {
+  const current = await store.get(key);
+  if (current === null) return false;
+  try {
+    await store.put(key, current.body, { contentType, ifMatch: current.etag });
+  } catch (err) {
+    if (!isPreconditionFailed(err)) throw err;
+    return (await store.stat(key)) !== null;
+  }
+  return true;
 }
 
 async function matches(

@@ -138,16 +138,14 @@ they go too). No schema or config change.
 
 ## Still to check
 
-- **A publish that reuses an old unnamed object can still lose it, in a narrow window.** A
-  publish whose trace object already exists (an earlier publish of the same content stopped
-  before its pointer, over an hour ago) does not rewrite it, so its age stays old. The sweep
-  re-reads the metadata just before deleting, but a pointer update landing between that read
-  and the DELETE leaves the pointer naming a deleted object (served as 404 until a later publish
-  of the same content writes it again, or a replace or backfill rewrites the session; backfill
-  reports it as `conflict: trace … is missing`). It needs an orphan over an hour old whose
-  content a new publish repeats exactly, in that window. Closing it fully needs the publish to
-  rewrite (touch) a reused unnamed object, or a pending-deletions record written before the
-  pointer moves (a metadata schema change); neither is in the decision.
+- **A reused object, closed at integration.** A publish whose trace object already exists (an
+  earlier publish of the same content stopped before its pointer) now writes it again with its
+  own bytes (`publishObject`, conditional on the version it read), so its age says a publish is
+  in flight. The sweep also stats each object just before deleting it and keeps any that is
+  young by then. What is left is the time between that stat and the DELETE: a publish would have
+  to rewrite the object, append its change entry and move the pointer inside it. Tests:
+  `tests/store/sweep.test.ts` ("a publish that reuses an object…", "…between the listing and
+  the delete").
 - **Clock skew.** Ages come from the store's clock (S3's `LastModified`, the file's mtime) and are
   compared with the worker's clock. A worker clock ahead of the store's by most of an hour eats
   the guard. Not checked against a real bucket.
