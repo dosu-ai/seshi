@@ -77,7 +77,14 @@ describe("ci.yml", () => {
   it("checks the Linux-built macOS binaries on a Mac before releasing", () => {
     expect(CI).toContain("bun run release:build --target darwin-arm64 --target darwin-x64");
     expect(CI).toContain('codesign --verify --verbose "cross/$id/seshi"');
-    expect(CI).toMatch(/needs: \[test, docker, binaries, darwin-cross-check\]/);
+    expect(CI).toMatch(/needs: \[test, test-windows, docker, binaries, darwin-cross-check\]/);
+  });
+
+  it("runs the laptop packages' tests on Windows before releasing (F8.4, decision 9)", () => {
+    const job = CI.slice(CI.indexOf("  test-windows:"), CI.indexOf("  docker:"));
+    expect(job).toContain("runs-on: windows-latest");
+    expect(job).toContain("bun install --frozen-lockfile");
+    expect(job).toContain("bun run test:laptop");
   });
 
   it("calls only scripts that exist", () => {

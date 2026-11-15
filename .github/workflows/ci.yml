@@ -45,6 +45,22 @@ jobs:
           SESSIONDB_TEST_S3_SECRET_KEY: rustfsadmin
         run: bun --bun vitest run tests/store/s3-live.test.ts
 
+  # F8.4 (revised 15 Nov 2026): the tests of what runs on laptops (capture's hooks, spool,
+  # uploader, sweep and state; the agents' hook handlers and installers; the CLI config; the
+  # client; the CLI's wiring) on Windows. vitest.laptop.config.ts lists them. The server's tests
+  # stay on Linux (the test job). Line endings are kept as committed: transcripts, hook payloads
+  # and the plugin's files are compared byte for byte.
+  test-windows:
+    runs-on: windows-latest
+    steps:
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - run: bun install --frozen-lockfile
+      - run: bun run test:laptop
+
   docker:
     runs-on: ubuntu-latest
     steps:
@@ -181,7 +197,7 @@ jobs:
   # release bot (its credentials are the org-wide ABBS_BOT_* secrets): main only takes pull
   # requests, and that app is the ruleset's one bypass actor.
   release:
-    needs: [test, docker, binaries, darwin-cross-check]
+    needs: [test, test-windows, docker, binaries, darwin-cross-check]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:

@@ -34,6 +34,7 @@ describe("the org key's username (X5.7)", () => {
       const env = {
         HOME: home,
         XDG_CONFIG_HOME: join(home, "config"),
+        APPDATA: join(home, "config"),
         GIT_CONFIG_GLOBAL: join(home, ".gitconfig"),
         GIT_CONFIG_NOSYSTEM: "1",
       };

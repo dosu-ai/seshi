@@ -15,7 +15,14 @@ let host: CaptureHost;
 let paths: CapturePaths;
 beforeEach(() => {
   dir = realpathSync(mkdtempSync(join(tmpdir(), "seshi-hook-")));
-  host = { env: { XDG_CONFIG_HOME: join(dir, "config") }, home: dir, platform: "linux" };
+  // The CLI config under dir/config on every platform (%APPDATA% on Windows, else XDG), and
+  // this machine's platform, so folder rules compare paths as they are written here.
+  const config = join(dir, "config");
+  host = {
+    env: { XDG_CONFIG_HOME: config, APPDATA: config },
+    home: dir,
+    platform: process.platform,
+  };
   paths = capturePaths(host);
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));

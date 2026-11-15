@@ -21,6 +21,7 @@
     "release:smoke": "bun run scripts/release/smoke.ts",
     "test": "bun --bun vitest run",
     "test:watch": "bun --bun vitest",
+    "test:laptop": "bun --bun vitest run --config vitest.laptop.config.ts",
     "typecheck": "bunx tsc --noEmit",
     "lint": "bunx biome lint .",
     "format": "bunx biome format --write .",

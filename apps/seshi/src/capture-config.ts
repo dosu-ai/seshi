@@ -5,7 +5,7 @@
  * change never leaves a config the CLI cannot read. */
 
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { posix, win32 } from "node:path";
 import { type CliConfig, loadCliConfig } from "@seshi/config";
 import { writePrivateFile } from "./account/secrets";
 
@@ -44,11 +44,22 @@ export function setTableKey(text: string, table: string, key: string, literal: s
   return `${lines.join("\n")}\n`;
 }
 
-/** `path` as the rule writes it: `~/…` under the home folder, else absolute. */
-export function rulePath(path: string, home: string): string {
-  const absolute = resolve(path);
-  if (absolute === home) return "~";
-  return absolute.startsWith(`${home}/`) ? `~${absolute.slice(home.length)}` : absolute;
+/** `path` as the rule writes it: `~/…` under the home folder (with `/`, which every platform
+ * takes), else absolute. Folders are compared as the platform does: either slash and any case
+ * on Windows. */
+export function rulePath(
+  path: string,
+  home: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  const paths = platform === "win32" ? win32 : posix;
+  const absolute = paths.resolve(path);
+  const relative = paths.relative(paths.resolve(home), absolute);
+  if (relative === "") return "~";
+  if (relative === ".." || relative.startsWith(`..${paths.sep}`) || paths.isAbsolute(relative)) {
+    return absolute;
+  }
+  return `~/${relative.split(paths.sep).join("/")}`;
 }
 
 /** `text` with the folder rule for `path` set to `capture`: the `[[capture.paths]]` entry for

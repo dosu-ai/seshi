@@ -73,9 +73,14 @@ describe("editing the CLI config", () => {
     expect(setCapturePath("", "/c", true, same)).toBe(
       '[[capture.paths]]\npath = "/c"\ncapture = true\n',
     );
-    expect(rulePath("/home/me/code", "/home/me")).toBe("~/code");
-    expect(rulePath("/home/me", "/home/me")).toBe("~");
-    expect(rulePath("/srv/x", "/home/me")).toBe("/srv/x");
+    expect(rulePath("/home/me/code", "/home/me", "linux")).toBe("~/code");
+    expect(rulePath("/home/me", "/home/me", "linux")).toBe("~");
+    expect(rulePath("/srv/x", "/home/me", "linux")).toBe("/srv/x");
+    expect(rulePath("/home/mexico", "/home/me", "linux")).toBe("/home/mexico");
+    // Windows: either slash, any case, and `~/` with forward slashes, which expandTilde takes.
+    expect(rulePath("C:\\Users\\Me\\code\\app", "C:\\Users\\me", "win32")).toBe("~/code/app");
+    expect(rulePath("c:/users/me", "C:\\Users\\Me", "win32")).toBe("~");
+    expect(rulePath("D:\\work", "C:\\Users\\me", "win32")).toBe("D:\\work");
   });
 });
 

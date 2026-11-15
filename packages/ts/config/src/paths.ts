@@ -1,7 +1,7 @@
 /** Where the config files are (F1.1, F1.4, F8.4). Pure: the environment, working directory
  * and platform come in as arguments. */
 
-import { join, resolve, win32 } from "node:path";
+import { join, posix, resolve, win32 } from "node:path";
 
 /** The env variable naming the server's config file. */
 export const CONFIG_ENV = "SESHI_CONFIG";
@@ -58,6 +58,7 @@ export function cliConfigPath(options: {
     const appData = env.APPDATA || win32.join(home, "AppData", "Roaming");
     return win32.join(appData, "seshi", "config.toml");
   }
-  const base = env.XDG_CONFIG_HOME || join(home, ".config");
-  return join(base, "seshi", "config.toml");
+  // Joined as the platform named does, whatever this process runs on.
+  const base = env.XDG_CONFIG_HOME || posix.join(home, ".config");
+  return posix.join(base, "seshi", "config.toml");
 }

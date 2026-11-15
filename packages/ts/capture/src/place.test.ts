@@ -86,7 +86,12 @@ describe("placeOf", () => {
 
   it("resolves a symbolic link to the real folder", () => {
     mkdirSync(join(dir, "real"));
-    symlinkSync(join(dir, "real"), join(dir, "link"));
+    // A junction on Windows: a directory symlink there needs a privilege CI runners lack.
+    symlinkSync(
+      join(dir, "real"),
+      join(dir, "link"),
+      process.platform === "win32" ? "junction" : "dir",
+    );
     expect(placeOf(join(dir, "link"))).toEqual({ cwd: join(dir, "link"), real: join(dir, "real") });
   });
 });

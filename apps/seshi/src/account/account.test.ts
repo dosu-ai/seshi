@@ -15,7 +15,13 @@ describe("openAccount: where secrets go", () => {
 
   const ctx = (env: Record<string, string> = {}, secrets?: MemorySecrets): CommandContext => ({
     argv: [],
-    env: { HOME: home, XDG_CONFIG_HOME: join(home, "config"), ...env },
+    // The CLI config folder under home/config whatever the platform (%APPDATA% on Windows).
+    env: {
+      HOME: home,
+      XDG_CONFIG_HOME: join(home, "config"),
+      APPDATA: join(home, "config"),
+      ...env,
+    },
     stdout: () => {},
     stderr: () => {},
     integrations: async () => [],

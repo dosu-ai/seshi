@@ -115,15 +115,19 @@ describe("seshi", () => {
     for (const spec of Object.values(COMMANDS)) expect(typeof spec.load).toBe("function");
   });
 
-  it("runs as the package's bin, with no `bun` in front", async () => {
-    // `bin.seshi` points at main.ts, so the file itself must be executable by its shebang.
-    const entry = join(import.meta.dirname, "main.ts");
-    expect(readFileSync(entry, "utf8").startsWith("#!/usr/bin/env bun\n")).toBe(true);
-    const proc = Bun.spawn([entry, "--version"], {
-      env: { PATH: process.env.PATH ?? "" },
-      stdout: "pipe",
-    });
-    expect(await proc.exited).toBe(0);
-    expect((await new Response(proc.stdout).text()).trim()).toBe(`seshi ${VERSION}`);
-  });
+  // A shebang runs only on macOS and Linux; on Windows npm puts a .cmd shim in front instead.
+  it.skipIf(process.platform === "win32")(
+    "runs as the package's bin, with no `bun` in front",
+    async () => {
+      // `bin.seshi` points at main.ts, so the file itself must be executable by its shebang.
+      const entry = join(import.meta.dirname, "main.ts");
+      expect(readFileSync(entry, "utf8").startsWith("#!/usr/bin/env bun\n")).toBe(true);
+      const proc = Bun.spawn([entry, "--version"], {
+        env: { PATH: process.env.PATH ?? "" },
+        stdout: "pipe",
+      });
+      expect(await proc.exited).toBe(0);
+      expect((await new Response(proc.stdout).text()).trim()).toBe(`seshi ${VERSION}`);
+    },
+  );
 });

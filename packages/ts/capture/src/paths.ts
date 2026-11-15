@@ -3,7 +3,7 @@
  * state file, the spool, the uploader's lock and the logs. Pure: the environment, home folder
  * and platform come in as arguments. */
 
-import { join, win32 } from "node:path";
+import { posix, win32 } from "node:path";
 import type { CaptureHost } from "@seshi/kit";
 
 export interface CapturePaths {
@@ -31,13 +31,15 @@ export function captureDir(host: CaptureHost): string {
     const local = host.env.LOCALAPPDATA || win32.join(host.home, "AppData", "Local");
     return win32.join(local, "seshi");
   }
-  const base = host.env.XDG_STATE_HOME || join(host.home, ".local", "state");
-  return join(base, "seshi");
+  // Joined as the platform named does, whatever this process runs on (tests judge macOS and
+  // Linux paths on Windows too).
+  const base = host.env.XDG_STATE_HOME || posix.join(host.home, ".local", "state");
+  return posix.join(base, "seshi");
 }
 
 export function capturePaths(host: CaptureHost): CapturePaths {
   const dir = captureDir(host);
-  const at = host.platform === "win32" ? win32.join : join;
+  const at = host.platform === "win32" ? win32.join : posix.join;
   return {
     dir,
     state: at(dir, "state.json"),

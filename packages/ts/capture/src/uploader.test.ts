@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { ServerError } from "@seshi/client";
 import type { CaptureAgent, CaptureHost } from "@seshi/kit";
 import {
@@ -209,7 +209,7 @@ const agent: CaptureAgent = {
 
 beforeEach(() => {
   dir = realpathSync(mkdtempSync(join(tmpdir(), "seshi-uploader-")));
-  host = { env: {}, home: dir, platform: "linux" };
+  host = { env: {}, home: dir, platform: process.platform };
   paths = capturePaths(host);
   server = new FakeServer();
   clock = new Date("2026-11-01T00:00:00Z");
@@ -270,7 +270,7 @@ describe("the upload protocol", () => {
       session_id: "s1",
       offset: 0,
       format: "jsonl",
-      project: dir.split("/").at(-1),
+      project: basename(dir),
       claims: { git_email: "me@acme.com", account_ids: { anthropic: "acct-1" } },
     });
     const secret = session().secret as string;
