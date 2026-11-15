@@ -571,7 +571,15 @@ describe("failures (X4.8)", () => {
       session_key: "s1",
     });
     expect(JSON.stringify(records[0]?.record)).not.toContain("not json at all");
-    expect(health.counts).toEqual({ "logs-bucket": { failed: 1 } });
+    // An adapter's message that quotes the data is kept without the quote.
+    const quoted = await p.submit(
+      s3({ ...upload(line({ role: "hunter2-secret", content: "x" })), format: "trajectory" }),
+    );
+    expect(quoted).toMatchObject({ status: "failed", message: expect.stringContaining('"…"') });
+    expect(JSON.stringify(await listRecords(store, "failed", "logs-bucket"))).not.toContain(
+      "hunter2",
+    );
+    expect(health.counts).toEqual({ "logs-bucket": { failed: 2 } });
     // An unknown format is permanent too.
     expect(await p.submit(s3({ ...upload(HEAD), format: "nope" }))).toMatchObject({
       status: "failed",

@@ -171,6 +171,19 @@ function isPermanent(err: unknown): err is { code: string; message: string } {
   );
 }
 
+/** The longest failure message a failure record keeps. */
+const RECORDED_MESSAGE_LENGTH = 300;
+
+/** A failure's message as a failure record keeps it: never content (X4.8). An adapter's or the
+ * trace validator's message can quote what it could not read (`unknown role "…"`, a JSON parse
+ * error naming the token), so double-quoted text is elided and the message is capped. */
+export function recordedMessage(message: string): string {
+  const scrubbed = message.replace(/"(?:[^"\\]|\\.)*"/g, '"…"');
+  return scrubbed.length > RECORDED_MESSAGE_LENGTH
+    ? `${scrubbed.slice(0, RECORDED_MESSAGE_LENGTH - 1)}…`
+    : scrubbed;
+}
+
 function utf8Length(text: string): number {
   return Buffer.byteLength(text, "utf8");
 }
@@ -363,6 +376,7 @@ export class Pipeline {
       this.health.count(envelope.source_id, respond === "throw" ? "rejected" : "failed");
     }
     if (respond === "throw") throw err;
+    const message = recordedMessage(err.message);
     const record = await writeFailed(this.store, {
       at: this.now().toISOString(),
       source: envelope.source_id,
@@ -372,9 +386,9 @@ export class Pipeline {
       idempotency_key: envelope.idempotency_key,
       ...(envelope.provenance ? { provenance: envelope.provenance } : {}),
       code: err.code,
-      message: err.message,
+      message,
     });
-    return { status: "failed", code: err.code, message: err.message, record };
+    return { status: "failed", code: err.code, message, record };
   }
 
   // --- spans --------------------------------------------------------------------
