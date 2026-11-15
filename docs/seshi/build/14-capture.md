@@ -251,17 +251,6 @@ A review of this branch against F9/B1.6 fixed, each with a test:
   channel (a desktop notification on the first hook, the first `seshi` command after
   install, or the MDM rollout's own message), which the decisions do not choose. Left for that
   decision (17-review "Not fixed").
-- **Reprocessing uploads (X4.9, F3.4) is not built.** 06 handed 14 the uploader resend
-  ("the uploader resends laptop transcripts", filtered by agent, normalizer version or date);
-  nothing here does it. `seshi upload` sends only bytes past `file_offset`, and `replace` goes
-  only after a 409. A resend that sets a session whole with `replace` (and a fresh idempotency
-  key) would rebuild sessions whose records an adapter fix changed, since their log no longer
-  extends the stored prefix. It would not re-review review-skipped or dropped envelopes: an
-  identical log extends what is stored and is answered `unchanged`, so that needs a server-side
-  "rebuild even when it extends" signal (a new envelope field). Where the command lives (on the
-  laptop, `seshi upload --resend` or `seshi capture reprocess`, since `seshi reprocess` runs
-  where the server config is) and how a laptop learns a stored session's normalizer version
-  are not decided either. Left for that decision (17-review "Not fixed").
 - Real agents: Claude Code's `agent_id`/`agent_transcript_path` on SubagentStop and
   `CLAUDE_ENV_FILE` on SessionStart; Cursor's payload fields and transcript location/format on
   current versions; Codex's notify argument and rollout layout. All were written from documented

@@ -123,6 +123,16 @@ normalizer changed) resends it with `replace`; `403` and `422` wait until the tr
 anything else is retried with backoff. Every 15 minutes it sweeps the agents' transcript folders
 for sessions the hooks missed, never reaching back past when capture was installed.
 
+The server keeps no raw transcripts, so when seshi's reading of an agent's format improves, it
+cannot rebuild what it already stored: the machine that uploaded a session sends it again. At
+most once an hour the uploader asks the server which of your sessions an older version of the
+format's normalizer built (`GET /v1/sessions/stale`), and on its next pass sends each one it
+still has the transcript of again, whole, marked `rebuild`: the server builds the session from
+the whole log and reviews it again, replacing what it held. Each session goes once per
+normalizer version, even if the server still lists it afterwards (model review dropped the
+rebuild, say). A session turned off is never sent again, and one whose transcript is gone
+cannot be.
+
 Uploads use the credential `seshi login` stored: the device token (with an IdP) or the org key
 and your username. In local mode they go to your own bucket.
 
@@ -175,6 +185,18 @@ seshi upload --since 30d             # backfill the installed agents' recent ses
 retracted the same way. If the background uploader is running it does the work, and this
 command waits for it.
 
+```sh
+seshi capture resend --session 1f2e…   # one session (no id: the one this agent runs)
+seshi capture resend --all             # every session uploaded from this machine
+```
+
+`seshi capture resend` sends sessions this machine uploaded again, whole, with `rebuild`, as the
+uploader does by itself for stale ones: the server builds each from the whole log and reviews it
+again, even when nothing in the log is new. Use it after an outage of the review provider, to
+have envelopes that review skipped or dropped reviewed again. Sessions turned off, never
+uploaded from here, or whose transcript is gone are left out and listed. It marks the sessions
+and wakes the uploader; `seshi capture status` shows them as `resending` until they are sent.
+
 ## Files
 
 | Where | What |
@@ -192,6 +214,6 @@ command waits for it.
 ## Not yet
 
 The Claude desktop app's Session Capture chip and `/session-capture` (a mod), a first-run
-notice inside Cursor and Codex that capture is on, resending uploaded sessions so the server
-can rebuild them, and Datadog Trajectory's local files are later. In the desktop app, the
+notice inside Cursor and Codex that capture is on, and Datadog Trajectory's local files are
+later. In the desktop app, the
 `/seshi` skill's `capture off|on|status --session` covers one session meanwhile.

@@ -425,15 +425,6 @@ Run at `seshi-17-review` after the fixes above:
   state) and the status line keeps saying "N queued". Lingering while retries are pending needs
   a cap value and changes that choice. Left for a decision.
 
-- **coverage, medium**: `seshi reprocess` cannot rebuild uploaded sessions; the uploader has
-  no resend mode (X4.9, F3.4). A resend whole with `replace` and a fresh idempotency key would
-  rebuild sessions an adapter fix changed (their log no longer extends the stored prefix), but
-  not re-review review-skipped or dropped envelopes: an identical log extends what is stored
-  and is answered `unchanged`, so that needs a new "rebuild even when it extends" envelope
-  field. Where the command lives on a laptop (`seshi reprocess` runs where the server config
-  is) and how a laptop learns a stored session's normalizer version are not decided. Fixed
-  here: reprocess's refusal, its header, cli.md and 06 no longer say the uploader resends;
-  14's "Still to check" records the gap.
 - **coverage, medium**: the Claude desktop mod (F9.4–F9.6: the Session Capture chip, its
   toggle and `/session-capture`, shipped in the plugin) is not built. It is a mod for the
   desktop app's own extension surface, which nothing here targets and no test here can run;

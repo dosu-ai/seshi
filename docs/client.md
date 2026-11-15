@@ -65,6 +65,7 @@ answer back.
 | `getSession(agent, id, {owner})` | `GET /v1/sessions/:agent/:id`; null when not stored or not readable |
 | `getTrace(agent, id, hash?, format?, {owner})` | `GET …/trace`, as `seshi` (default), `letta`, `otlp` or `atif` ([formats.md](formats.md#what-seshi-writes)); null when not stored or redacted |
 | `listSessions({owner, limit, after})` | `GET /v1/sessions` |
+| `staleSessions({limit, after})` | `GET /v1/sessions/stale`: the caller's sessions an older normalizer built, to resend with `rebuild` |
 | `tombstone(agent, id, {owner, retractSecret})` | `DELETE /v1/sessions/:agent/:id`, or a retraction with the uploading machine's secret |
 | `setVisibility(agent, id, visibility, {owner})` | `PATCH /v1/sessions/:agent/:id` |
 | `reviews(agent, id, {owner})` | `GET …/reviews`: what model review decided for each write |

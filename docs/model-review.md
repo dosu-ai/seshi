@@ -37,7 +37,9 @@ A failed call, or an answer that does not fit, is retried with backoff (`retries
 last, `on_failure` decides: `drop` (the default: a drop record with reason `review_failed` and
 which step failed, and the log moves past it as for any drop, a first upload leaving a stub) or
 `skip` (written with regex redaction only, recorded as `skipped`).
-A resend of an upload is answered from the session and not reviewed again. A policy applies to
+A resend of an upload is answered from the session and not reviewed again; a `rebuild`
+(`seshi capture resend`, or the uploader resending a stale session) is reviewed again whole,
+which is how envelopes skipped or dropped during an outage get reviewed. A policy applies to
 what is written after the server restarts with it: `seshi redact backfill` applies new regex
 rules to stored sessions but does not send them to review again, and what review took out
 stays out.

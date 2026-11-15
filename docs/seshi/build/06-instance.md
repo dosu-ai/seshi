@@ -217,9 +217,9 @@ command. The Docker image is built from the compiled binary.
     `bootInstance(toml, options)` (the full `buildInstance` path on a temp folder store);
     and `tempStore()`.
   - Package-local tests build `new Instance({...})` with `new FormatRegistry([...BUILTIN_FORMATS])`.
-- **Reprocessing uploads (14):** `Sources.rewind("upload")` refuses. The uploader resend,
-  filtered by agent, normalizer version or date, from the machines that hold the transcripts,
-  was handed to 14 and is not built (17-review "Not fixed"; 14's "Still to check").
+- **Reprocessing uploads (14):** `Sources.rewind("upload")` refuses. The machines that hold
+  the transcripts resend them: the uploader resends sessions the server marks stale, and
+  `seshi capture resend` does it by hand (built in 21).
 
 ## Deviations and why
 
