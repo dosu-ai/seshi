@@ -1,27 +1,93 @@
 /** `@seshi/store`: the bucket layout (`spec/layout.md`) and the drivers behind one `Store`
- * interface: a folder (`file://`) and S3-compatible buckets (`s3://`, `r2://`). Layer 1: it
- * imports only `@seshi/model` (X3.2). Branch 03 adds conditional writes (X6.5). */
+ * interface: a folder (`file://`) and S3-compatible buckets (`s3://`, `r2://`). Conditional
+ * writes for mutable objects (X6.5), the layout marker (X1.4), and typed accessors for every
+ * object X6.4 adds. Layer 1: it imports only `@seshi/model` (X3.2). */
 
 export { type ChangesPage, type ReadChangesOptions, readChanges } from "./changes";
-export { FsStore } from "./fs";
-export { archiveId, assertOwner, changeStamp, keys, LAYOUT_KEY } from "./layout";
+export { FsStore, STALE_LOCK_MS } from "./fs";
+export {
+  createJson,
+  decodeJson,
+  encodeJson,
+  gunzipJson,
+  gzipJson,
+  type JsonUpdate,
+  putJson,
+  readJson,
+  replaceJson,
+  updateJson,
+  type Versioned,
+} from "./json";
+export {
+  archiveId,
+  assertHash,
+  assertOwner,
+  assertSourceId,
+  assertTokenId,
+  changeStamp,
+  keys,
+  LAYOUT_KEY,
+  LEGACY_LAYOUT_KEY,
+  type RecordKind,
+  recordKeyHash,
+  stampTime,
+} from "./layout";
+export { ensureLayout, LayoutError, type LayoutOptions, readLayout } from "./marker";
+export {
+  CHECKPOINT_SCHEMA,
+  type Checkpoint,
+  clearPending,
+  createToken,
+  HEARTBEAT_SCHEMA,
+  type Heartbeat,
+  listPending,
+  listReviews,
+  listTokens,
+  PENDING_SCHEMA,
+  type PendingMarker,
+  REVIEW_SCHEMA,
+  type ReviewFinding,
+  type ReviewRecord,
+  readCheckpoint,
+  readHeartbeat,
+  readPending,
+  readToken,
+  TOKEN_SCHEMA,
+  type TokenRecord,
+  touchPending,
+  updateToken,
+  writeCheckpoint,
+  writeHeartbeat,
+  writeReview,
+} from "./objects";
 export { isStoreUrl, type OpenStoreOptions, openStore, type StorageView } from "./open";
 export {
   appendChange,
-  decodeJson,
-  ensureLayout,
-  gunzipJson,
-  gzipJson,
-  layoutFormat,
-  markerFormat,
   type PublishMode,
   type PublishOutcome,
   probe,
   publishObject,
   readMetadata,
   sha256,
-  swapMetadata,
+  updateMetadata,
 } from "./publish";
+export {
+  countRecords,
+  DEFAULT_RECORD_RETENTION_MS,
+  DROPPED_SCHEMA,
+  type DropOrFailure,
+  type DroppedRecord,
+  FAILED_SCHEMA,
+  type FailedRecord,
+  type ListRecordsOptions,
+  listRecords,
+  pruneRecords,
+  type RecordBase,
+  type RecordsPage,
+  sourcesWithRecords,
+  writeDropped,
+  writeFailed,
+} from "./records";
 export {
   parseS3Url,
   type S3Credentials,
@@ -29,10 +95,20 @@ export {
   type S3StoreOptions,
 } from "./s3";
 export {
+  type DeleteOptions,
+  getBytes,
+  isPreconditionFailed,
   type ListOptions,
   type ListResult,
   type ObjectStat,
+  PreconditionFailed,
   type PutOptions,
+  type PutResult,
   type Store,
+  type StoredObject,
   StoreError,
+  type UpdateOptions,
+  type UpdateResult,
+  type UpdateStep,
+  updateObject,
 } from "./store";

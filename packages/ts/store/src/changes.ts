@@ -4,9 +4,9 @@
  * dedupes by key rather than trusting strict order. */
 
 import type { ChangeEntry, ChangesPage, ReadChangesOptions } from "@seshi/model";
+import { decodeJson } from "./json";
 import { changeStamp, keys } from "./layout";
-import { decodeJson } from "./publish";
-import type { Store } from "./store";
+import { getBytes, type Store } from "./store";
 
 export type { ChangesPage, ReadChangesOptions };
 
@@ -22,7 +22,7 @@ export async function readChanges(
   const page = await store.list(prefix, { startAfter, limit: options.limit });
   const entries = await Promise.all(
     page.keys.map(async (key) => {
-      const bytes = await store.get(key);
+      const bytes = await getBytes(store, key);
       if (bytes === null) return null;
       return { key, entry: decodeJson<ChangeEntry>(bytes) };
     }),

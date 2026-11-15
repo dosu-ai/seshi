@@ -1,0 +1,26 @@
+{
+  "schema": "seshi/envelope/1",
+  "source": "otlp",
+  "source_id": "console-prod",
+  "format": "otlp-genai",
+  "session_key": "sesn_01AbC",
+  "payload": {
+    "kind": "spans",
+    "spans": [
+      {
+        "traceId": "0af7651916cd43dd8448eb211c80319c",
+        "spanId": "b7ad6b7169203331",
+        "name": "chat claude-sonnet-4-5",
+        "kind": 3,
+        "startTimeUnixNano": "1794646800000000000",
+        "endTimeUnixNano": "1794646803000000000",
+        "attributes": [{ "key": "anthropic.session.id", "value": { "stringValue": "sesn_01AbC" } }]
+      }
+    ]
+  },
+  "caller": { "kind": "service", "principal": "svc:console-prod", "credential_id": "tok_svc0001" },
+  "owner": "svc:console-prod",
+  "owner_basis": "service",
+  "idempotency_key": "0af7651916cd43dd8448eb211c80319c/b7ad6b7169203331",
+  "received_at": "2026-11-14T09:00:04.000Z"
+}

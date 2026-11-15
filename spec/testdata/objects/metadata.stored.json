@@ -1,0 +1,50 @@
+{
+  "schema": "seshi/metadata/1",
+  "owner": "alice",
+  "archive_id": "22e85bf4ed59ee51d9b2f7937ae00e91ef0e9c433f524c847402ea459d2d4779",
+  "session_id": "0b1c7e9a-5f2d-4b8e-9a61-3c0f5e2d7a14",
+  "agent": "claude-code",
+  "status": "stored",
+  "traces": [
+    {
+      "content_hash": "02c00844e3840c6ba88c3e000805f52881ec34a7db8156e1d55ead27a302d8af",
+      "created_at": "2026-11-14T09:00:00.000Z",
+      "records": 5
+    }
+  ],
+  "raw": [],
+  "writer": {
+    "kind": "device",
+    "principal": "alice",
+    "credential_id": "tok_7fJ2kQ9x",
+    "source_id": "upload"
+  },
+  "owner_basis": "claimed",
+  "visibility": "org",
+  "created_at": "2026-11-14T09:00:00.000Z",
+  "updated_at": "2026-11-14T09:00:00.000Z",
+  "source": "claude-code",
+  "head": "02c00844e3840c6ba88c3e000805f52881ec34a7db8156e1d55ead27a302d8af",
+  "origin_agent": "claude-code",
+  "native_session_id": "0b1c7e9a-5f2d-4b8e-9a61-3c0f5e2d7a14",
+  "claims": {
+    "git_email": "alice@example.com"
+  },
+  "provenance": {
+    "source": "hook",
+    "source_id": "upload",
+    "format": "claude-code"
+  },
+  "project": "github.com/acme/widget",
+  "branch": "main",
+  "normalizer": {
+    "name": "@dosu/sessiondb",
+    "version": "0.9.0+trajectory.0.3.0"
+  },
+  "redaction": {
+    "rule_set": "3333333333333333333333333333333333333333333333333333333333333333",
+    "counts": {
+      "github-token": 1
+    }
+  }
+}

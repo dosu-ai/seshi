@@ -1,0 +1,15 @@
+{
+  "schema": "seshi/change/1",
+  "kind": "published",
+  "at": "2026-11-14T09:00:00.000Z",
+  "owner": "alice",
+  "archive_id": "22e85bf4ed59ee51d9b2f7937ae00e91ef0e9c433f524c847402ea459d2d4779",
+  "session_id": "0b1c7e9a-5f2d-4b8e-9a61-3c0f5e2d7a14",
+  "content_hash": "02c00844e3840c6ba88c3e000805f52881ec34a7db8156e1d55ead27a302d8af",
+  "writer": {
+    "kind": "device",
+    "principal": "alice",
+    "credential_id": "tok_7fJ2kQ9x",
+    "source_id": "upload"
+  }
+}
