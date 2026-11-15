@@ -27,7 +27,7 @@ import { FormatRegistry as Registry } from "@seshi/formats";
 import { buildInstance, type Instance } from "@seshi/instance";
 import type { CaptureHost } from "@seshi/kit";
 import { type FormatAdapter, localWriter } from "@seshi/model";
-import { getSession, tombstone } from "@seshi/pipeline";
+import { finishTombstone, getSession, tombstone } from "@seshi/pipeline";
 import { compileRuleSet, type RuleSet, validatePack } from "@seshi/redact";
 import { reviewerFromConfig } from "@seshi/review";
 import { KeywordModel } from "@seshi/review/testing";
@@ -348,7 +348,10 @@ export class World {
         }
         const metadata = await getSession(inst.store, owner, agent, sessionId);
         if (!metadata) return "absent";
-        if (metadata.status === "redacted") return "gone";
+        if (metadata.status === "redacted") {
+          await finishTombstone({ store: inst.store, owner, agent, session_id: sessionId });
+          return "gone";
+        }
         if (metadata.retract_hash !== retractHash(secret)) {
           throw new RetractRefused("bad_retract_secret", "not the session's retraction secret");
         }

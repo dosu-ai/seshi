@@ -537,7 +537,13 @@ export async function tombstone(input: TombstoneInput): Promise<{ removed: numbe
       removedObjects = null;
       return { next: null, change: null };
     }
-    removedObjects = { traces: existing.traces.map((t) => t.content_hash) };
+    // Kept across attempts: a pointer write that landed but answered `PreconditionFailed` is
+    // tried again on the redacted pointer it wrote, which names no trace, and the traces the
+    // first attempt read must still go (33).
+    const earlier = (removedObjects as { traces: string[] } | null)?.traces ?? [];
+    removedObjects = {
+      traces: [...new Set([...earlier, ...existing.traces.map((t) => t.content_hash)])],
+    };
     // What the next chunk would continue from goes too: nothing of the session is left.
     const {
       head: _head,
@@ -581,6 +587,38 @@ export async function tombstone(input: TombstoneInput): Promise<{ removed: numbe
   await deleteSpans(store, owner, archive);
   await store.delete(keys.pending(archive));
   return { removed };
+}
+
+/** Remove what a tombstone of an already tombstoned session left behind: trace objects still in
+ * its folder, span records, the pending marker; how many trace objects went. A tombstone marks
+ * the session redacted before it deletes, so one whose pointer write landed but whose answer
+ * was lost (or whose deletes failed) is found redacted by the retry, which used to answer
+ * "already removed" and leave the retracted content in the bucket until the orphan sweep (33).
+ * Callers that find a session redacted call this before they say so. A session not redacted is
+ * left alone. */
+export async function finishTombstone(input: {
+  store: Store;
+  owner: string;
+  agent: string;
+  session_id: string;
+}): Promise<number> {
+  const { store, owner } = input;
+  const archive = archiveId(owner, input.agent, input.session_id);
+  const metadata = await readMetadata(store, owner, archive);
+  if (metadata?.status !== "redacted") return 0;
+  const prefix = `${keys.session(owner, archive)}/trace.`;
+  const found: string[] = [];
+  let after: string | undefined;
+  for (;;) {
+    const page = await store.list(prefix, { startAfter: after, limit: 1000 });
+    found.push(...page.keys);
+    if (!page.truncated || page.keys.length === 0) break;
+    after = page.keys.at(-1);
+  }
+  for (const key of found) await store.delete(key);
+  await deleteSpans(store, owner, archive);
+  await store.delete(keys.pending(archive));
+  return found.length;
 }
 
 export interface SetVisibilityInput {

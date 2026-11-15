@@ -521,9 +521,22 @@ class Runner {
       }
     }
 
-    // 4. checkStore finds no errors (warnings may be transient mid-scenario).
+    // 4. checkStore finds no errors (warnings may be transient mid-scenario). One error is
+    //    transient too: trace objects of a session whose tombstone landed but answered as failed
+    //    stay until the retraction's retry removes them (`finishTombstone`, 33), so while this
+    //    machine's retraction of that session is pending they are not yet a finding; once
+    //    quiet they are.
+    const retracting = new Set(
+      Object.values(state.sessions)
+        .filter((s) => s.retract === "pending")
+        .map((s) => archiveId(this.world.owner, AGENT, uploadId(s))),
+    );
     const report = await checkStore(this.world.store, { now: this.world.clock.now });
-    const errors = report.findings.filter((f) => f.severity === "error");
+    const errors = report.findings.filter(
+      (f) =>
+        f.severity === "error" &&
+        !(f.code === "redacted_trace_object" && retracting.has(f.archive_id ?? "")),
+    );
     if (errors.length > 0) this.fail("checkStore found errors", errors.map(findingLine));
   }
 

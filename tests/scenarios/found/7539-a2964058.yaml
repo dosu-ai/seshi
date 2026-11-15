@@ -1,0 +1,23 @@
+# Found by the scenario explorer (tests/tooling/scenario/explore.ts); see tests/scenarios/README.md.
+# seed: 7539 (bun run scenarios:explore --seed 7539 --runs 1 --max-steps 25)
+# original length: 26 steps; shrunk to 9 in 109 runs
+# failure:
+#   step 6 (clock ms=7200000): checkStore found errors
+#     error redacted_trace_object: trace 1319918d0ae7… is still here (written 2026-09-01T09:00:00.011Z) (owners/me/sessions/a40d5f79786facfbb0389dcac9dbb5f3a92980bed8517574779723b503b81808/trace.1319918d0ae72077a180fe41fa71d74505689d2925c3ca8ef3eb…
+#     faults fired:
+#       store put owners/me/sessions/a40d5f79786facfbb0389dcac9dbb5f3a92980bed8517574779723b503b81808/metadata.json: store put owners/*/sessions/*/metadata.json #1 → fail after the write
+#     capture log (last lines):
+#       2026-09-01T09:00:00.020Z uploader: claude-code:main: retraction will retry: injected store failure for owners/me/sessions/a40d5f79786facfbb0389dcac9dbb5f3a92980bed8517574779723b503b81808/metadata.json (store put owners/*/sessions/*/metadat…
+name: found by seed 7539
+description: "A generated scenario (seed 7539) shrunk from 26 to 9 steps; the header says how it failed."
+setup: { mode: local }
+steps:
+  - turns: { session: main, count: 2 }
+  - pass
+  - capture: off --session main
+  - fault: { store: put, key: "owners/*/sessions/*/metadata.json", after: true }
+  - pass
+  - clock: +2h
+  - capture: off --path code/other
+  - heal
+  - settle

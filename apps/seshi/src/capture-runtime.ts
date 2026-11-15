@@ -66,10 +66,14 @@ export async function localSink(ctx: CommandContext, account: Account): Promise<
           "retraction is turned off (capture.allow_retract)",
         );
       }
-      const { getSession, tombstone } = await import("@seshi/pipeline");
+      const { finishTombstone, getSession, tombstone } = await import("@seshi/pipeline");
       const metadata = await getSession(instance.store, owner, agent, sessionId);
       if (!metadata) return "absent";
-      if (metadata.status === "redacted") return "gone";
+      if (metadata.status === "redacted") {
+        // An earlier tombstone whose answer was lost may have left objects: remove them.
+        await finishTombstone({ store: instance.store, owner, agent, session_id: sessionId });
+        return "gone";
+      }
       if (metadata.retract_hash !== retractHash(secret)) {
         throw new RetractRefused(
           "bad_retract_secret",

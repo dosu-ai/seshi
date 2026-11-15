@@ -10,6 +10,7 @@ import {
   archiveId,
   FsStore,
   keys,
+  PreconditionFailed,
   parseChangeKey,
   readChanges,
   readMetadata,
@@ -17,7 +18,7 @@ import {
   StoreError,
 } from "@seshi/store";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { setVisibility, tombstone } from "./ingest";
+import { finishTombstone, setVisibility, tombstone } from "./ingest";
 import { StoreSessionDB } from "./session-db";
 
 const formats = new FormatRegistry(BUILTIN_FORMATS);
@@ -161,6 +162,76 @@ describe("change entries before the pointer (decision 7 of 18)", () => {
       "tombstone",
       "tombstone",
     ]);
+  });
+
+  it("finishes a tombstone whose pointer write landed but answered as failed", async () => {
+    // Found by the scenario explorer (33): the redacted pointer landed, the caller saw an error
+    // before the deletes, and its retry found the session already redacted, so the trace
+    // objects of a retracted session stayed in the bucket.
+    await db().ingest({ agent: "trajectory", session_id: "s1", transcript: log("a") });
+    const head = (await metadata("s1"))?.head as string;
+    let armed = true;
+    const lost = new Proxy(store, {
+      get(target, prop, receiver) {
+        if (prop === "put") {
+          return async (key: string, body: Uint8Array, options?: Parameters<Store["put"]>[2]) => {
+            const put = await target.put(key, body, options);
+            if (armed && key.endsWith("/metadata.json")) {
+              armed = false;
+              throw new StoreError("injected: the answer was lost");
+            }
+            return put;
+          };
+        }
+        return Reflect.get(target, prop, receiver);
+      },
+    }) as Store;
+    const input = { owner: "alice", agent: "trajectory", session_id: "s1", now: tick };
+    await expect(tombstone({ store: lost, ...input })).rejects.toThrow(/injected/);
+    expect((await metadata("s1"))?.status).toBe("redacted");
+    const trace = keys.trace("alice", archive("s1"), head);
+    expect(await store.stat(trace)).not.toBe(null);
+    expect(await finishTombstone({ store, ...input })).toBe(1);
+    expect(await store.stat(trace)).toBe(null);
+    // Nothing more to do, and nothing done to a session that is not redacted.
+    expect(await finishTombstone({ store, ...input })).toBe(0);
+    await db().ingest({ agent: "trajectory", session_id: "s2", transcript: log("b") });
+    expect(await finishTombstone({ store, ...input, session_id: "s2" })).toBe(0);
+    expect((await metadata("s2"))?.traces).toHaveLength(1);
+  });
+
+  it("removes the traces when the redacted pointer landed but answered PreconditionFailed", async () => {
+    // Found by the scenario explorer (33): the compare-and-swap was tried again on the redacted
+    // pointer it had written, which names no trace, so nothing was deleted, and the retraction
+    // reported success.
+    await db().ingest({ agent: "trajectory", session_id: "s1", transcript: log("a") });
+    const head = (await metadata("s1"))?.head as string;
+    let armed = true;
+    const racing = new Proxy(store, {
+      get(target, prop, receiver) {
+        if (prop === "put") {
+          return async (key: string, body: Uint8Array, options?: Parameters<Store["put"]>[2]) => {
+            const put = await target.put(key, body, options);
+            if (armed && key.endsWith("/metadata.json")) {
+              armed = false;
+              throw new PreconditionFailed(key, "injected: the write landed");
+            }
+            return put;
+          };
+        }
+        return Reflect.get(target, prop, receiver);
+      },
+    }) as Store;
+    const removed = await tombstone({
+      store: racing,
+      owner: "alice",
+      agent: "trajectory",
+      session_id: "s1",
+      now: tick,
+    });
+    expect(removed).toEqual({ removed: 1 });
+    expect((await metadata("s1"))?.status).toBe("redacted");
+    expect(await store.stat(keys.trace("alice", archive("s1"), head))).toBe(null);
   });
 
   it("leaves a visibility change's entry, and the visibility as it was, when the pointer update fails", async () => {

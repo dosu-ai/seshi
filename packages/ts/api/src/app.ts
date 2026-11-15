@@ -61,6 +61,7 @@ import {
 } from "@seshi/model";
 import {
   DEFAULT_LIMITS,
+  finishTombstone,
   getSession,
   getTrace,
   listSessions,
@@ -724,6 +725,8 @@ export function createApp(instance: Instance) {
       throw new HttpError(404, "not_found", "no such session");
     }
     if (metadata.status === "redacted") {
+      // An earlier tombstone whose answer was lost may have left objects: remove them first.
+      await finishTombstone({ store, owner: folder, agent, session_id: sessionId });
       throw new HttpError(410, "redacted", "session was already removed");
     }
     if (!metadata.retract_hash || !sameHash(retractHashOf(secret), metadata.retract_hash)) {

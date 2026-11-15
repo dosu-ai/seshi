@@ -46,6 +46,7 @@ export {
 } from "./filter";
 export {
   APPLIED_KEPT,
+  finishTombstone,
   getSession,
   getTrace,
   type IngestInput,
