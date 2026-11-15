@@ -1,0 +1,46 @@
+# Guards 19 (X6.4, decision 7): every write appends its change entry before the pointer moves.
+# When the pointer write then fails, the entry is left behind with nothing applied. Readers and
+# checkers must tolerate it (checkStore warns, never errors) and the next pass must converge.
+name: the pointer write fails after the change entry
+description: >
+  The store fails the metadata write of a chunk, after its trace object and change entry are
+  written; then the same for a new session's first publish. The uploader retries; checkStore
+  sees a warning at most in between, and the sessions converge with no errors.
+guards: "19: entry before pointer; a failed pointer write leaves a tolerated entry"
+steps:
+  - turns: { session: main, count: 2 }
+  - pass
+  - turns: { session: main, count: 1 }
+  - fault: { store: put, key: "owners/*/sessions/*/metadata.json", error: fail }
+  - pass
+  - expect:
+      pass: { uploaded: 0, failed: 1 }
+      sessions:
+        main: { traces: 1 }
+      store-check: { warn: [change_not_applied] }
+  - clock: +1m
+  - pass
+  - expect:
+      pass: { uploaded: 1, failed: 0 }
+      sessions:
+        main: { server: present, traces: 2, matches-transcript: true }
+  # A first publish whose pointer is never created: its entry names a session with no metadata.
+  - turns: { session: other, count: 2 }
+  - fault: { store: put, key: "owners/*/sessions/*/metadata.json", error: fail }
+  - pass
+  - expect:
+      pass: { failed: 1 }
+      sessions:
+        other: { server: absent }
+      store-check: { warn: [change_orphan] }
+  # A precondition failure is retried inside the server and never seen by the uploader.
+  - turns: { session: main, count: 1 }
+  - fault: { store: put, key: "owners/*/sessions/*/metadata.json", error: precondition }
+  - clock: +1m
+  - pass
+  - expect:
+      pass: { uploaded: 2, failed: 0 }
+      sessions:
+        main: { traces: 3, matches-transcript: true }
+        other: { server: present, matches-transcript: true }
+  - settle

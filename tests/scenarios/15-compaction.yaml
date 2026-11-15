@@ -1,0 +1,32 @@
+# Guards the offset protocol under compaction (X6.3, 14): Claude Code appends a summary after
+# /compact, and an agent may also rewrite its log shorter. Appended, it goes as a chunk;
+# shrunk below what was uploaded, the uploader resends the whole log and replaces. Either way
+# the server ends with exactly the transcript's records: none lost, none twice.
+name: compaction appends, or shrinks the transcript
+description: >
+  A session is compacted twice: a summary appended (a chunk), then the log rewritten shorter
+  than what was uploaded (a whole resend with replace). After each pass the stored records are
+  exactly the transcript's, and later turns go on as chunks.
+guards: "X6.3: a compaction that appends or shrinks converges, no records lost or twice"
+steps:
+  - turns: { session: main, count: 3 }
+  - pass
+  - compact: { session: main, mode: append }
+  - pass
+  - expect:
+      pass: { uploaded: 1, failed: 0 }
+      sessions:
+        main: { traces: 2, matches-transcript: true, sent-all: true }
+  - turns: { session: main, count: 1 }
+  - compact: { session: main, mode: shrink, keep: 2 }
+  - pass
+  - expect:
+      pass: { failed: 0 }
+      sessions:
+        main: { server: present, traces: 1, matches-transcript: true, sent-all: true }
+  - turns: { session: main, count: 2 }
+  - pass
+  - expect:
+      sessions:
+        main: { traces: 2, matches-transcript: true, sent-all: true }
+  - settle

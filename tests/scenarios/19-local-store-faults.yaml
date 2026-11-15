@@ -1,0 +1,53 @@
+# Guards 19 (X6.4) and F9.7 in local mode (X3.5), where the uploader writes through an Instance
+# in its own process: a change entry that cannot be written, a trace object written but
+# answered as failed, and a tombstone whose pointer write fails each leave the bucket without
+# errors, and the next pass finishes the job. A subagent of a session turned off is never sent.
+name: store faults in local mode
+description: >
+  In local mode the bucket fails a change entry, then a trace object (after it landed), then
+  the pointer write of a retraction. Each pass that failed is retried and the bucket checks
+  clean throughout; the session ends tombstoned and its subagent was never stored.
+guards: "19 × F9.7 in local mode: store failures mid-write converge"
+setup:
+  mode: local
+steps:
+  - turns: { session: main, count: 3 }
+  - pass
+  - compact: { session: main, mode: shrink, keep: 1 }
+  - pass
+  - expect:
+      sessions:
+        main: { traces: 1, matches-transcript: true }
+  - turns: { session: main, count: 1 }
+  - fault: { store: put, key: "owners/*/changes/*", error: fail }
+  - pass
+  - expect:
+      pass: { failed: 1 }
+  - clock: +1m
+  - pass
+  - fault: { store: put, key: "owners/*/sessions/*/trace.*", error: fail, after: true }
+  - turns: { session: main, count: 1 }
+  - pass
+  - expect:
+      pass: { failed: 1 }
+  - clock: +1m
+  - pass
+  - expect:
+      sessions:
+        main: { traces: 3, matches-transcript: true, sent-all: true }
+  - subagent: { parent: main, id: x, turns: 2 }
+  - capture: off --session main
+  - fault: { store: put, key: "owners/*/sessions/*/metadata.json", error: fail }
+  - pass
+  - expect:
+      pass: { retracted: 0, failed: 1 }
+      sessions:
+        main: { server: present, retract: pending }
+  - clock: +1m
+  - pass
+  - expect:
+      pass: { retracted: 1 }
+      sessions:
+        main: { server: redacted, retract: done }
+        agent-x: { server: absent }
+  - settle

@@ -1,0 +1,46 @@
+# Guards 24 (F9.1, decision 10) and F9.7: a session turned off during an outage keeps its
+# retraction pending while the server answers 503; the uploader keeps retrying (it stays up
+# while retries wait), and the retraction lands once the server is back. Nothing the session
+# wrote, before or after it was turned off, is on the server afterwards.
+name: a retraction during an outage
+description: >
+  A stored session is turned off while every retraction gets 503. The uploader backs off and
+  retries across passes, sending nothing more of the session. After recovery the retraction
+  lands: the session is tombstoned and none of its text is in the bucket.
+guards: "24 × F9.7: retraction retries through an outage; turned-off content never reappears"
+steps:
+  - turns: { session: main, count: 2, mark: before-off }
+  - pass
+  - fault: { http: "DELETE /v1/sessions/*", status: 503, times: always }
+  - capture: off --session main
+  - turns: { session: main, count: 1, mark: while-off }
+  - pass
+  - expect:
+      pass: { retracted: 0, uploaded: 0, failed: 1, retrying: 1 }
+      sessions:
+        main: { server: present, toggle: off, retract: pending }
+  - clock: +10m
+  - pass
+  - expect:
+      pass: { retracted: 0, failed: 1, retrying: 1 }
+  - clock: +30m
+  - turns: { session: main, count: 1, mark: still-off }
+  - pass
+  - expect:
+      pass: { uploaded: 0, failed: 1 }
+  - heal
+  - clock: +10m
+  - pass
+  - expect:
+      pass: { retracted: 1, uploaded: 0, failed: 0 }
+      sessions:
+        main: { server: redacted, retract: done, toggle: off }
+      bucket:
+        lacks: [before-off, while-off, still-off]
+  - turns: { session: main, count: 1, mark: after-recovery }
+  - settle
+  - expect:
+      sessions:
+        main: { server: redacted }
+      bucket:
+        lacks: [before-off, while-off, still-off, after-recovery]

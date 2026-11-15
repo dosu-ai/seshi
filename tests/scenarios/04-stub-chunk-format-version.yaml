@@ -1,0 +1,42 @@
+# Guards the fix on 31: a chunk continuing a stub takes the current format version. A stub has
+# no version and a chunk used to keep the session's, so the session counted as stale for ever
+# and its uploader resent it whole at every stale check (and every format bump).
+name: a stub continued by a chunk is not stale
+description: >
+  Review drops the first envelope; the next turns continue the stub as a chunk. The session
+  must record the current format version, so the hourly stale check does not mark it. Only a
+  real format bump does, once, and after that rebuild it is current again.
+guards: "31: a chunk continuing a stub records the current format version"
+setup:
+  review: true
+steps:
+  - review: [drop]
+  - turns: { session: main, count: 2 }
+  - pass
+  - turns: { session: main, count: 1 }
+  - pass
+  - expect:
+      sessions:
+        main: { server: present, traces: 1 }
+  - clock: +2h
+  - pass
+  - expect:
+      pass: { uploaded: 0 }
+      sessions:
+        main: { rebuild: none }
+  - format-bump: claude-code
+  - clock: +2h
+  - pass
+  - expect:
+      sessions:
+        main: { rebuild: waiting }
+  - settle
+  - expect:
+      sessions:
+        main: { rebuild: none, server: present }
+  - clock: +2h
+  - pass
+  - expect:
+      pass: { uploaded: 0 }
+      sessions:
+        main: { rebuild: none }

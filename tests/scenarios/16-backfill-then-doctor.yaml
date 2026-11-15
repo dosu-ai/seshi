@@ -1,0 +1,38 @@
+# Guards the doctor against a redaction backfill (found by this runner, fixed on 32). A
+# backfill rewrites stored traces with new rules but leaves `normalized` (the prefix hash the
+# uploader's log is checked against) as the old rules made it, by design (F2.5). `seshi doctor`
+# then compared that old hash with the transcript under the new rules and failed `prefix` for a
+# session nothing was wrong with.
+name: a redaction backfill, then the doctor
+description: >
+  Two sessions are stored, the org adds a rule, and a backfill rewrites both. The machine
+  fetches the new rules with its next upload. One session goes on with a chunk, the other is
+  finished. The doctor must not fail either; the next whole upload of either one is a 409
+  conflict answered with replace, as after any rule change.
+guards: "32: the doctor's prefix check after a redaction backfill"
+steps:
+  - turns: { session: going-on, count: 2 }
+  - turns: { session: finished, count: 2 }
+  - pass
+  - rules:
+      add: [{ id: typed-constant, pattern: "typed constant" }]
+  - backfill
+  - expect:
+      bucket:
+        has: ["[redacted:typed-constant]"]
+        lacks: [typed constant]
+  - turns: { session: going-on, count: 1 }
+  - pass
+  - expect:
+      pass: { uploaded: 1, failed: 0 }
+      sessions:
+        going-on: { traces: 2, doctor: ok }
+        finished: { traces: 1, doctor: ok }
+  - move-transcript: { session: finished, to: code/moved, hook: none }
+  - turns: { session: finished, count: 1 }
+  - pass
+  - expect:
+      pass: { uploaded: 1, failed: 0 }
+      sessions:
+        finished: { traces: 1, matches-transcript: true, doctor: ok }
+  - settle

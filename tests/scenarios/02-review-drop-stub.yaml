@@ -1,0 +1,42 @@
+# Guards 20 (F3.4, decision 3): model review dropping a session's first envelope leaves a
+# content-free stub, so the log moves past the dropped part. What follows is reviewed alone and
+# stored; the dropped text is never stored, nor sent to review again.
+name: a review-dropped first envelope leaves a stub
+description: >
+  Review drops the first upload of a session. The server keeps a stub (no trace, no content),
+  the uploader moves past the drop, and the next turns go as a chunk that review allows and
+  the server stores as the session's first trace.
+guards: "20: a dropped first envelope leaves a stub; later turns are stored"
+setup:
+  review: true
+steps:
+  - review: [drop]
+  - turns: { session: main, count: 2, mark: dropped-part }
+  - pass
+  - expect:
+      pass: { uploaded: 1, failed: 0 }
+      sessions:
+        main: { server: stub, last-status: dropped }
+      bucket:
+        lacks: [dropped-part]
+  - turns: { session: main, count: 2, mark: kept-part }
+  - pass
+  - expect:
+      pass: { uploaded: 1, failed: 0 }
+      sessions:
+        main: { server: present, traces: 1, sent-all: true, matches-transcript: true }
+      bucket:
+        has: [kept-part]
+        lacks: [dropped-part]
+      reviewed:
+        - { text: dropped-part, times: 1 }
+        - { text: kept-part, times: 1 }
+  - turns: { session: main, count: 1, mark: later-part }
+  - settle
+  - expect:
+      sessions:
+        main: { server: present, traces: 2, doctor: ok }
+      bucket:
+        lacks: [dropped-part]
+      reviewed:
+        - { text: dropped-part, times: 1 }
