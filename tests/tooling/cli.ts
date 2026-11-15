@@ -12,7 +12,7 @@ import { gunzipSync } from "node:zlib";
 import { createApp } from "@seshi/api";
 import { Auth, type AuthSettings } from "@seshi/auth";
 import { FakeIdp } from "@seshi/auth/testing";
-import type { Instance } from "@seshi/instance";
+import type { Instance, InstanceParts } from "@seshi/instance";
 import type { Integration } from "@seshi/kit";
 import type { RuleSet } from "@seshi/redact";
 import { FsStore } from "@seshi/store";
@@ -131,6 +131,8 @@ export async function startServer(
     config?: string;
     /** The rule set the server redacts with and serves (F2.4); the built-in pack by default. */
     redaction?: RuleSet;
+    /** Model review (F3); none by default. */
+    reviewer?: InstanceParts["reviewer"];
   } = {},
 ): Promise<TestServer> {
   const dir = mkdtempSync(join(tmpdir(), "seshi-server-"));
@@ -151,6 +153,7 @@ export async function startServer(
     auth,
     ...(options.config ? { config: options.config } : {}),
     ...(options.redaction ? { redaction: options.redaction } : {}),
+    ...(options.reviewer ? { reviewer: options.reviewer } : {}),
   });
   const app = createApp(instance);
   const requests: SeenRequest[] = [];
