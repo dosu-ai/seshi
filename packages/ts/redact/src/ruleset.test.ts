@@ -364,6 +364,20 @@ describe("the rules document (F2.4)", () => {
     expect(ruleSetFromDocument(rulesDocument(set)).same).toBe(false);
   });
 
+  it("ignores a disable naming a built-in rule this client does not have", () => {
+    const set = compileRuleSet({ packs });
+    const doc = rulesDocument(set);
+    const newer = {
+      ...doc,
+      packs: [{ ...doc.packs[0], disable: ["entropy", "rule-from-a-newer-server"] }],
+    };
+    const { rules, same } = ruleSetFromDocument(JSON.parse(JSON.stringify(newer)));
+    // The fixture already turns entropy off, so what is left is the server's rule set.
+    expect(same).toBe(true);
+    expect(rules.secretsOff.has("entropy")).toBe(true);
+    expect(rules.packs[0]?.disable).toEqual(["entropy"]);
+  });
+
   it("validates what the server sent like any other pack", () => {
     expect(() => ruleSetFromDocument(null)).toThrow(/must be an object/);
     expect(() => ruleSetFromDocument({ schema: "x", packs: [] })).toThrow(

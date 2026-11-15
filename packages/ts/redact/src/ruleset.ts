@@ -591,11 +591,19 @@ export function ruleSetFromDocument(document: unknown): { rules: RuleSet; same: 
       { where: "redaction rules", message: `is not a ${REDACTION_RULES_SCHEMA} document` },
     ]);
   }
+  const builtin = builtinPack();
+  const known = new Set(
+    [...builtin.rules, ...builtin.sensitive_files, ...builtin.secret_commands].map((r) => r.id),
+  );
   const packs = doc.packs.map((p, i) => {
     const id = typeof p === "object" && p !== null && typeof (p as RulePack).id === "string";
-    return validatePack(p, { source: `server pack ${id ? (p as RulePack).id : i}` });
+    const pack = validatePack(p, { source: `server pack ${id ? (p as RulePack).id : i}` });
+    // A built-in rule a newer server knows and this client does not cannot be turned off
+    // here; the client simply has no such rule. Refusing the whole document over it would
+    // leave the client redacting nothing but its built-ins.
+    return { ...pack, disable: pack.disable.filter((rule) => known.has(rule)) };
   });
-  const rules = compileRuleSet({ packs });
+  const rules = compileRuleSet({ packs, builtin });
   return { rules, same: rules.hash === doc.rule_set };
 }
 
