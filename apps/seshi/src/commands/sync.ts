@@ -185,7 +185,12 @@ export async function run(ctx: CommandContext): Promise<number> {
     return usageError(ctx, json, `sync ${sub} takes one source id`, USAGE);
   }
   try {
-    const { instance } = await openServer(ctx, values, { roles: [], probe: [] });
+    // Only `run` writes; the others refuse a bucket no server has used rather than claim it.
+    const { instance } = await openServer(ctx, values, {
+      roles: [],
+      probe: [],
+      initialize: sub === "run",
+    });
     try {
       if (sub === "run") return await runSource(ctx, json, instance, id as string, values);
       if (sub === "status") return await status(ctx, json, instance, id, values);

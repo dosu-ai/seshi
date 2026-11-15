@@ -48,7 +48,15 @@ import {
   redactionRules,
 } from "@seshi/redact";
 import { Sources } from "@seshi/sources";
-import { assertOwner, ensureLayout, LayoutError, openStore, probe, type Store } from "@seshi/store";
+import {
+  assertOwner,
+  ensureLayout,
+  LayoutError,
+  openStore,
+  probe,
+  readLayout,
+  type Store,
+} from "@seshi/store";
 import { BUILTIN_JOBS, type JobFactory, type JobHost } from "./builtin-jobs";
 import { JobRunner } from "./jobs";
 import { type Logger, quietLogger } from "./log";
@@ -336,6 +344,10 @@ export interface BuildOptions
   probe?: readonly string[];
   /** For tests: the deployment id a new prefix gets. */
   newDeploymentId?: () => string;
+  /** Write the layout marker when the bucket has none (true by default). Read-only commands
+   * pass false: they refuse a bucket no seshi server has used rather than claim it, so a
+   * mistyped `store.url` is not turned into a new deployment by a status check. */
+  initialize?: boolean;
 }
 
 /** The bucket options `[store]` gives, secrets revealed. */
@@ -421,6 +433,20 @@ export async function buildInstance(
   const redaction = options.redaction ?? (await readRedactionPacks(config.redaction.packs));
   const client = options.client ?? `seshi/${VERSION}`;
 
+  if (options.initialize === false) {
+    let existing: LayoutMarker | null;
+    try {
+      existing = await readLayout(opened.store);
+    } catch (err) {
+      throw new InstanceError(`cannot read ${url}: ${message(err)}`, { cause: err });
+    }
+    if (existing === null) {
+      throw new InstanceError(
+        `no seshi deployment at ${url}: check store.url, or start seshi serve (or seshi admin init) against it first`,
+      );
+    }
+  }
+
   let marker: LayoutMarker;
   try {
     marker = await ensureLayout(opened.store, {
@@ -444,6 +470,7 @@ export async function buildInstance(
     connectors,
     probe: probed,
     newDeploymentId: _newDeploymentId,
+    initialize: _initialize,
     ...rest
   } = options;
   let instanceConnectors: Connector[];

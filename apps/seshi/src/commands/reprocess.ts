@@ -59,7 +59,11 @@ export async function run(ctx: CommandContext): Promise<number> {
   const dryRun = values["dry-run"] === true;
   if (dryRun && values.run) return usageError(ctx, json, "--dry-run and --run conflict", USAGE);
   try {
-    const { instance } = await openServer(ctx, values, { roles: [], probe: [] });
+    const { instance } = await openServer(ctx, values, {
+      roles: [],
+      probe: [],
+      initialize: !dryRun,
+    });
     try {
       const rewind = await instance.sources.rewind(id, { ...(since ? { since } : {}), dryRun });
       const report = values.run ? await instance.sources.run(id) : undefined;

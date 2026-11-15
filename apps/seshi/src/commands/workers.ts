@@ -106,7 +106,11 @@ export async function run(ctx: CommandContext): Promise<number> {
     return usageError(ctx, json, (err as Error).message, USAGE);
   }
   try {
-    const { instance } = await openServer(ctx, values, { roles: [], probe: [] });
+    const { instance } = await openServer(ctx, values, {
+      roles: [],
+      probe: [],
+      initialize: false,
+    });
     try {
       const status = await instance.status();
       emit(ctx, json, status, () => statusLines(status));

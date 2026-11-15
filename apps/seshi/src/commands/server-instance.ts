@@ -36,6 +36,8 @@ export interface OpenServerOptions {
   /** Owners to probe; none for a one-shot command, the static tokens' owners for serve. */
   probe?: readonly string[];
   log?: Logger;
+  /** False for a read-only command: a bucket with no layout marker is refused, not claimed. */
+  initialize?: boolean;
 }
 
 export interface OpenedServer {
@@ -66,6 +68,7 @@ export async function openServer(
     ...(options.roles ? { roles: options.roles } : {}),
     ...(options.probe ? { probe: options.probe } : {}),
     ...(options.log ? { log: options.log } : {}),
+    ...(options.initialize === false ? { initialize: false } : {}),
   });
   return { instance, loaded, settings };
 }

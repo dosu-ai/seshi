@@ -2,12 +2,13 @@
  * F8.1 conventions every command shares: the full command list, `--json`, stable exit codes,
  * and the stubs for commands later branches build. */
 
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type Connector, defineIntegration, type Integration } from "@seshi/kit";
 import type { Envelope } from "@seshi/model";
 import {
+  ensureLayout,
   FsStore,
   readCheckpoint,
   writeCheckpoint,
@@ -24,9 +25,11 @@ import { COMMANDS } from "./index";
 
 let dir: string;
 let bucket: string;
-beforeEach(() => {
+beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "seshi-commands-"));
   bucket = `file://${join(dir, "bucket")}`;
+  // A bucket a server has used: read-only commands refuse one with no layout marker.
+  await ensureLayout(new FsStore(bucket), { createdBy: "test" });
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
@@ -183,6 +186,21 @@ describe("seshi workers status", () => {
     expect(result.code).toBe(EXIT.attention);
     expect(result.out).toContain("worker: stopped, w-1");
     expect(result.out).toMatch(/warning: the worker \(w-1\) last wrote its heartbeat/);
+  });
+
+  it("refuses a bucket no server has used, and does not claim it", async () => {
+    rmSync(join(dir, "bucket"), { recursive: true, force: true });
+    for (const argv of [
+      ["workers", "status"],
+      ["sync", "status"],
+      ["sync", "failed", "upload"],
+      ["reprocess", "--source", "dd", "--dry-run"],
+    ]) {
+      const result = await seshi(argv, { toml: SOURCES, integrations: WITH_CONNECTOR });
+      expect(result.code).toBe(EXIT.config);
+      expect(result.err).toContain("no seshi deployment at");
+    }
+    expect(existsSync(join(dir, "bucket"))).toBe(false);
   });
 
   it("refuses a bad config with exit 3 and bad usage with exit 2", async () => {
