@@ -19,8 +19,13 @@ export const storeUrl = z
 /** An `http(s)://` URL. */
 export const httpUrl = z.url({ protocol: /^https?$/, error: "an http:// or https:// URL" });
 
-/** A source id: lower-case letters, digits and `-`, as in `datadog-prod`. Its service account
- * is `svc:<id>` (X5.4). */
+/** A source id: lower-case letters and digits in words joined by single `-`, as in
+ * `datadog-prod`. Its service account is `svc:<id>` (X5.4). No `--` and no `-` at either end,
+ * so its env form (`DATADOG_PROD`) never holds the `__` that separates env levels. */
 export const sourceId = z
   .string()
-  .regex(/^[a-z0-9][a-z0-9-]{0,62}$/, "lower-case letters, digits and -, up to 63 characters");
+  .max(63)
+  .regex(
+    /^[a-z0-9]+(?:-[a-z0-9]+)*$/,
+    "lower-case letters and digits, words joined by single -, up to 63 characters",
+  );

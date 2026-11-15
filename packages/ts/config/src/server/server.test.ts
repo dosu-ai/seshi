@@ -145,6 +145,11 @@ describe("sources", () => {
     expect(messages({ sources: [{ ...datadog, id: "Datadog Prod" }] })[0]).toContain(
       "sources.0.id",
     );
+    // Its env form must not hold the `__` that separates env levels.
+    for (const id of ["dd--prod", "dd-", "-dd", "x".repeat(64)]) {
+      expect(messages({ sources: [{ ...datadog, id }] })[0]).toContain("sources.0.id");
+    }
+    expect(ok({ sources: [{ ...datadog, id: "dd-prod-2" }] }).sources[0]?.id).toBe("dd-prod-2");
   });
 
   it("refuse fields of another type", () => {

@@ -179,8 +179,8 @@ The server refuses to start on a pattern that is not usable, naming the file.
 
 ### `[[sources]]`
 
-What the server ingests from on its own (F4–F6). Each has an `id` (lower case, digits, `-`;
-not `upload`, which uploads use), a `type`, `enabled` (`true`), `visibility`, and `filter`
+What the server ingests from on its own (F4–F6). Each has an `id` (lower-case letters and
+digits, words joined by single `-`; not `upload`, which uploads use), a `type`, `enabled` (`true`), `visibility`, and `filter`
 overrides. Each writes as its service account `svc:<id>` (X5.4). *Later*; the poller timings
 are provisional until their branches confirm them.
 
