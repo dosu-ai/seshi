@@ -299,6 +299,9 @@ export function systemRecords(value: unknown, timestamp: string): NormalizedReco
  * `.tool_calls.<j>.{id,name,arguments}` → messages, in index order. */
 export function flattenedMessages(attrs: Attributes, prefix: string): Json[] {
   const byIndex = new Map<number, Json>();
+  // Each message's tool calls by their index. The indexes are the sender's: an array indexed
+  // by one (`tool_calls.4294967294`) is 2^32 long, and walking it stalls the receiver.
+  const callsOf = new Map<Json, Map<number, Json>>();
   const lead = `${prefix}.`;
   for (const key of attrs.keysWith(lead)) {
     const rest = key.slice(lead.length);
@@ -311,10 +314,10 @@ export function flattenedMessages(attrs: Attributes, prefix: string): Json[] {
     const value = attrs.get(key);
     const call = /^tool_calls\.(\d+)\.(id|name|arguments)$/.exec(field);
     if (call) {
-      const calls = (message.tool_calls as Json[] | undefined) ?? [];
-      message.tool_calls = calls;
+      const calls = callsOf.get(message) ?? new Map<number, Json>();
+      callsOf.set(message, calls);
       const at = Number(call[1]);
-      calls[at] = { ...(calls[at] ?? {}), [call[2] as string]: value };
+      calls.set(at, { ...(calls.get(at) ?? {}), [call[2] as string]: value });
     } else if (field === "role" || field === "content" || field === "tool_call_id") {
       message[field] = value;
     }
@@ -322,8 +325,10 @@ export function flattenedMessages(attrs: Attributes, prefix: string): Json[] {
   return [...byIndex.entries()]
     .sort((a, b) => a[0] - b[0])
     .map(([, message]) => {
-      if (Array.isArray(message.tool_calls))
-        message.tool_calls = message.tool_calls.filter(Boolean);
+      const calls = callsOf.get(message);
+      if (calls) {
+        message.tool_calls = [...calls.entries()].sort((a, b) => a[0] - b[0]).map(([, c]) => c);
+      }
       if (typeof message.content === "string") {
         // A content that is itself JSON (a list of blocks) is read as blocks.
         const parsed = jsonAttribute(message.content);

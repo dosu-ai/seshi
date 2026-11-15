@@ -168,6 +168,23 @@ describe("GenAI messages → records", () => {
       { role: "tool", tool_call_id: "c9", content: "out", timestamp: ts },
     ]);
   });
+
+  it("reads a sender-chosen tool call index without building an array that long", () => {
+    // `calls[4294967294] = …` made a 2^32-long array, and filtering it took about 80 s.
+    const attrs = new Attributes([
+      { key: "gen_ai.prompt.0.role", value: { stringValue: "assistant" } },
+      { key: "gen_ai.prompt.0.tool_calls.4294967294.name", value: { stringValue: "x" } },
+      { key: "gen_ai.prompt.0.tool_calls.10.name", value: { stringValue: "b" } },
+      { key: "gen_ai.prompt.0.tool_calls.2.name", value: { stringValue: "a" } },
+    ]);
+    const started = performance.now();
+    const messages = flattenedMessages(attrs, "gen_ai.prompt");
+    expect(performance.now() - started).toBeLessThan(500);
+    // Ordinary indexes keep their order, numerically.
+    expect(messages).toEqual([
+      { role: "assistant", tool_calls: [{ name: "a" }, { name: "b" }, { name: "x" }] },
+    ]);
+  });
 });
 
 describe("helpers", () => {
