@@ -30,6 +30,7 @@ export {
   type JobResult,
   JobRunner,
   type JobRunnerOptions,
+  RETRY_BASE_MS,
 } from "./jobs";
 export { type Logger, lineLogger, quietLogger } from "./log";
 export {

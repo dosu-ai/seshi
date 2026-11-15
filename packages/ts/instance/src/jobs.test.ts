@@ -95,6 +95,50 @@ describe("JobRunner", () => {
     expect(runs).toBe(4);
   });
 
+  it("retries a failed run with backoff, never past the interval (X4.8)", async () => {
+    const runner = new JobRunner({ worker: true, retryBaseMs: 1_000 });
+    let fail = true;
+    const j = job(
+      "flaky",
+      async () => {
+        if (fail) throw new Error("the store is down");
+        return undefined;
+      },
+      { intervalMs: 5_000 },
+    );
+    runner.register(j);
+    const delays: number[] = [];
+    for (let i = 0; i < 5; i++) delays.push(runner.delayAfter(j, await runner.runNow("flaky")));
+    expect(delays).toEqual([1_000, 2_000, 4_000, 5_000, 5_000]);
+    fail = false;
+    expect(runner.delayAfter(j, await runner.runNow("flaky"))).toBe(5_000);
+    fail = true;
+    // A success resets the backoff.
+    expect(runner.delayAfter(j, await runner.runNow("flaky"))).toBe(1_000);
+  });
+
+  it("retries soon after a failure when started", async () => {
+    let runs = 0;
+    const runner = new JobRunner({ worker: true, retryBaseMs: 10 });
+    runner.register(
+      job(
+        "flaky",
+        async () => {
+          runs++;
+          if (runs < 3) throw new Error("not yet");
+          return undefined;
+        },
+        { intervalMs: 60_000 },
+      ),
+    );
+    runner.start();
+    await until(() => runs >= 3);
+    await Bun.sleep(30);
+    await runner.stop();
+    // Two failures retried within milliseconds; the success waits the minute.
+    expect(runs).toBe(3);
+  });
+
   it("joins a run already in progress instead of starting another", async () => {
     let runs = 0;
     let release: () => void = () => {};

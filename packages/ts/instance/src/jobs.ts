@@ -48,6 +48,10 @@ export interface Job {
 /** How soon a job whose run said `more` runs again. */
 const MORE_DELAY_MS = 10;
 
+/** The first retry after a failed run; each further failure in a row doubles it, up to the
+ * job's interval (X4.8: a transient failure retries with backoff). */
+export const RETRY_BASE_MS = 5_000;
+
 const ERROR_LENGTH = 500;
 
 function message(err: unknown): string {
@@ -60,6 +64,8 @@ export interface JobRunnerOptions {
   worker: boolean;
   now?: () => Date;
   log?: Logger;
+  /** The first retry after a failed run (`RETRY_BASE_MS`); tests shorten it. */
+  retryBaseMs?: number;
 }
 
 /** Runs an instance's jobs. `register` every job the instance knows (status lists them all,
@@ -74,11 +80,27 @@ export class JobRunner {
   private readonly worker: boolean;
   private readonly now: () => Date;
   private readonly log: Logger | undefined;
+  private readonly retryBaseMs: number;
+  /** Failed runs in a row, by job: how far the next retry backs off. */
+  private readonly failing = new Map<string, number>();
 
   constructor(options: JobRunnerOptions) {
     this.worker = options.worker;
     this.now = options.now ?? (() => new Date());
     this.log = options.log;
+    this.retryBaseMs = options.retryBaseMs ?? RETRY_BASE_MS;
+  }
+
+  /** How long after a run ends the next starts: at once when it said more is waiting; after
+   * a failure, `retryBaseMs` doubled per failure in a row, never past the interval; otherwise
+   * the interval. */
+  delayAfter(job: Job, record: JobRecord): number {
+    if (record.last_outcome === "error") {
+      const n = this.failing.get(job.name) ?? 1;
+      return Math.min(job.intervalMs, this.retryBaseMs * 2 ** Math.min(n - 1, 30));
+    }
+    if (record.last_outcome === "ok" && this.moreWaiting.has(job.name)) return MORE_DELAY_MS;
+    return job.intervalMs;
   }
 
   /** Add a job. Names are unique. A job registered after `start` is scheduled at once if this
@@ -153,8 +175,7 @@ export class JobRunner {
       if (!this.started) return;
       void this.execute(job).then((record) => {
         if (!this.started) return;
-        const more = record.last_outcome === "ok" && this.moreWaiting.has(job.name);
-        this.schedule(job, more ? MORE_DELAY_MS : job.intervalMs);
+        this.schedule(job, this.delayAfter(job, record));
       });
     }, delayMs);
     // A timer alone never keeps the process alive: the server or the command does.
@@ -191,11 +212,13 @@ export class JobRunner {
     if (result?.more) this.moreWaiting.add(job.name);
     else this.moreWaiting.delete(job.name);
     if (error !== undefined) {
+      this.failing.set(job.name, (this.failing.get(job.name) ?? 0) + 1);
       record.failures += 1;
       record.last_outcome = "error";
       record.last_error = { at: finished, message: error };
       this.log?.warn(`job ${job.name}: ${error}`);
     } else {
+      this.failing.delete(job.name);
       record.last_outcome = result?.outcome === "discarded" ? "discarded" : "ok";
       record.last_ok = finished;
       if (record.last_outcome === "discarded" && result?.error) {
