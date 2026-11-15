@@ -227,6 +227,22 @@ describe("span batches through the pipeline", () => {
     expect((await listRecords(store, "failed", "console")).records).toHaveLength(1);
   });
 
+  it("leaves out a connector's span whose ids are not OTLP hex, rather than failing the batch", async () => {
+    const { pipeline } = setup();
+    // A poller builds ReceivedSpans itself (no readSpan): a bad id must not become a store
+    // error, which the scheduler would retry forever.
+    const bad = chat("q", "a", { traceId: "../../escape", spanId: "ZZZZ" });
+    const upper = chat("q", "a", { traceId: "AB".repeat(16) });
+    const result = await pipeline.submit(envelope([bad, upper, chat("hello", "there")]), {
+      onFailure: "throw",
+    });
+    expect(result).toEqual({ status: "accepted", archive_id: ARCHIVE, spans: 1, rejected: 2 });
+    expect(await listSpans(store, OWNER, ARCHIVE)).toHaveLength(1);
+    await expect(pipeline.submit(envelope([bad]), { onFailure: "throw" })).rejects.toMatchObject({
+      code: "bad_spans",
+    });
+  });
+
   it("marks the batch final when it holds the root span of a one-trace session", async () => {
     const { pipeline } = setup();
     const root = chat("q", "a");

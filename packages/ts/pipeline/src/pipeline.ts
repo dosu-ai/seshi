@@ -281,6 +281,11 @@ function withCounts(
   return { ...summary, counts };
 }
 
+/** Whether a part's ids are OTLP's: lowercase hex, 16 bytes of trace id and 8 of span id. */
+function isSpanIds(part: SpanPart): boolean {
+  return /^[0-9a-f]{32}$/.test(part.trace_id) && /^[0-9a-f]{16}$/.test(part.span_id);
+}
+
 /** How a whole session is written. */
 interface WholeOptions {
   replace: boolean;
@@ -484,6 +489,14 @@ export class Pipeline {
       try {
         part = adapter.normalize(span, resource as unknown as SpanResource);
       } catch {
+        rejected++;
+        continue;
+      }
+      // The ids name the span's record in the bucket: a connector's span with ids that are not
+      // OTLP's hex is the sender's fault, not the store's, so it is left out like any span the
+      // format cannot read (a bad key would otherwise fail the batch as a store error, which a
+      // poller retries forever).
+      if (!isSpanIds(part)) {
         rejected++;
         continue;
       }
