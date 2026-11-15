@@ -653,9 +653,21 @@ export function createApp(instance: Instance) {
         "this server does not allow retraction (capture.allow_retract)",
       );
     }
-    const folder = principal.owner;
-    const metadata = await getSession(store, folder, agent, sessionId);
-    if (metadata === null) throw new HttpError(404, "not_found", "no such session");
+    // The caller's own folders only (`owner` is ignored), aliases applied: a session uploaded
+    // under an owner id that `[auth.owner_aliases]` folds into the caller's (an org-key
+    // username before an IdP sign-in, X5.8) is still the caller's to retract.
+    let folder: string | undefined;
+    let metadata: SessionMetadata | null = null;
+    for (const candidate of aliases.storedAs(principal.owner)) {
+      metadata = await getSession(store, candidate, agent, sessionId);
+      if (metadata !== null) {
+        folder = candidate;
+        break;
+      }
+    }
+    if (metadata === null || folder === undefined) {
+      throw new HttpError(404, "not_found", "no such session");
+    }
     if (metadata.status === "redacted") {
       throw new HttpError(410, "redacted", "session was already removed");
     }

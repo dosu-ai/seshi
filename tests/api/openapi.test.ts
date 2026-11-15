@@ -711,6 +711,12 @@ describe("identity and access (X5)", () => {
     expect((await retract(alice, "wrong")).status).toBe(403);
     expect((await retract(alice, secret, "/v1/sessions/claude-code/nope")).status).toBe(404);
     expect((await retract({ app: x5, token: null }, secret)).status).toBe(401);
+    // Another member with the secret still reaches only their own sessions, `owner` or not.
+    const mallory = { app: x5, token: org_key?.token, user: "mallory" };
+    expect((await retract(mallory, secret)).status).toBe(404);
+    expect((await retract(mallory, secret, "/v1/sessions/claude-code/r1?owner=alice")).status).toBe(
+      404,
+    );
     const removed = await retract(alice, secret);
     expect(removed.status).toBe(200);
     expect((await retract(alice, secret)).status).toBe(410);

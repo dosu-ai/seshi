@@ -2,6 +2,7 @@
  * and service tokens, visibility, deletes and replaces, owner aliases and the token admin API,
  * against the real routes and a folder bucket. The IdP is `@seshi/auth/testing`'s stand-in. */
 
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -86,10 +87,11 @@ interface Call {
   token?: string;
   user?: string;
   body?: unknown;
+  headers?: Record<string, string>;
 }
 
 async function call(method: string, path: string, options: Call = {}) {
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { ...options.headers };
   if (options.token) headers.authorization = `Bearer ${options.token}`;
   if (options.user !== undefined) headers["x-seshi-user"] = options.user;
   let body: string | undefined;
@@ -446,6 +448,26 @@ describe("owner aliases (X5.8)", () => {
     expect((await call("GET", "/v1/sessions/claude-code/old", alice)).status).toBe(200);
     expect((await call("GET", "/v1/sessions/claude-code/old/trace", alice)).status).toBe(200);
     expect((await call("GET", "/v1/sessions/claude-code/old?owner=alice", bob)).status).toBe(404);
+  });
+
+  it("let the new owner id retract what was uploaded under the old one (F9.7)", async () => {
+    const { alice, bob } = await setUp();
+    const secret = "retraction-secret-of-this-machine";
+    const retract_hash = createHash("sha256").update(secret).digest("hex");
+    await upload({ ...bob, user: "alice-old" }, "old", { retract_hash });
+    const retract = (as: Call) =>
+      call("DELETE", "/v1/sessions/claude-code/old", {
+        ...as,
+        headers: { "x-seshi-retract": secret },
+      });
+    expect((await retract(bob)).status).toBe(404);
+    expect((await retract(alice)).status).toBe(200);
+    const metadata = await readMetadata(
+      store,
+      "alice-old",
+      archiveId("alice-old", "claude-code", "old"),
+    );
+    expect(metadata?.status).toBe("redacted");
   });
 });
 
