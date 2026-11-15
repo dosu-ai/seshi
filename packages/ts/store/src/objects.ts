@@ -9,7 +9,7 @@
  * `PreconditionFailed` instead of overwriting (X7.3). */
 
 import { randomBytes } from "node:crypto";
-import type { OwnerBasis, Visibility } from "@seshi/model";
+import type { Claims, OwnerBasis, Visibility } from "@seshi/model";
 import { createJson, putJson, readJson, replaceJson, updateJson, type Versioned } from "./json";
 import { assertOwner, keys } from "./layout";
 import type { Store } from "./store";
@@ -18,18 +18,32 @@ import type { Store } from "./store";
 
 export const TOKEN_SCHEMA = "seshi/token/1" as const;
 
+/** The kinds of stored token (X5.9). Session tokens are signed, not stored, and static tokens
+ * live in config. */
+export type TokenKind = "org" | "admin" | "device" | "service";
+
 /** One seshi token (X5.9), stored by id and never in clear: `hash` is what the server compares
- * a presented token's hash with. */
+ * a presented token's hash with (`sha256:<hex>` of the whole token, `@seshi/auth`). */
 export interface TokenRecord {
   schema: typeof TOKEN_SCHEMA;
   id: string;
-  /** The token's hash (the hashing scheme is 05's). */
   hash: string;
-  /** `device`, `service`, `admin`, `org` (the org key), as X5.9 lists them. */
-  kind: string;
-  /** The person's owner id or `svc:<source-id>`. */
+  /** `device`, `service`, `admin` or `org` (the org key). */
+  kind: TokenKind;
+  /** The person's owner id or `svc:<source-id>`; `*` for the org key, which has no owner (its
+   * caller states one, X5.12). */
   owner: string;
   scopes: string[];
+  /** A note for people listing tokens (`laptop`, `otlp destination`). */
+  label?: string;
+  /** Who created it: the admin, the exchange (X5.2) or `seshi admin init`. */
+  created_by?: { kind: string; principal: string; credential_id?: string };
+  /** A device token's machine, as the CLI names it (X5.2): signing in again from it renews the
+   * token and revokes the old one. */
+  machine?: { id: string; name?: string };
+  /** Identity the IdP verified when the token was issued (email, name), copied into what the
+   * token writes (X5.5). */
+  claims?: Claims;
   /** The default visibility for what the token writes (X5.10). */
   visibility?: Visibility;
   owner_basis?: OwnerBasis;

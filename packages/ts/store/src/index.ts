@@ -38,6 +38,7 @@ export {
   assertSourceId,
   assertTokenId,
   changeStamp,
+  isOwner,
   keys,
   LAYOUT_KEY,
   LEGACY_LAYOUT_KEY,
@@ -66,6 +67,7 @@ export {
   readPending,
   readToken,
   TOKEN_SCHEMA,
+  type TokenKind,
   type TokenRecord,
   touchPending,
   updateToken,
@@ -74,6 +76,7 @@ export {
   writeReview,
 } from "./objects";
 export { isStoreUrl, type OpenStoreOptions, openStore, type StorageView } from "./open";
+export { listOwners, type OwnersPage } from "./owners";
 export {
   appendChange,
   type PublishMode,

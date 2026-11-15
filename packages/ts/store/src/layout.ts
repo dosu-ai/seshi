@@ -23,7 +23,10 @@ import { createHash } from "node:crypto";
 import type { ChangeKind } from "@seshi/model";
 import { StoreError } from "./store";
 
-const OWNER = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+/** A person's owner id (X5.8): a username, an email or an IdP subject. */
+const PERSON_OWNER = /^[A-Za-z0-9][A-Za-z0-9._@+-]{0,127}$/;
+/** A service account (X5.4): `svc:` and a source id. */
+const SERVICE_OWNER = /^svc:[a-z0-9]+(?:-[a-z0-9]+)*$/;
 /** A configured source's id, as `@seshi/config` accepts them, or `upload`. */
 const SOURCE_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const TOKEN_ID = /^[A-Za-z0-9_-]{8,64}$/;
@@ -33,10 +36,23 @@ const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const HEX64 = /^[0-9a-f]{64}$/;
 const HEX = /^[0-9a-f]+$/;
 
-/** An owner name is one path segment: letters, digits, `.`, `_`, `-`. */
+/** An owner id is one path segment (X5.8): letters, digits and `.`, `_`, `-`, `@`, `+`,
+ * starting with a letter or digit, up to 128 characters (a username or an email); or a service
+ * account, `svc:<source-id>` (X5.4). `@seshi/auth` derives ids that always fit. */
 export function assertOwner(owner: string): string {
-  if (!OWNER.test(owner)) throw new StoreError(`invalid owner: ${JSON.stringify(owner)}`);
+  const ok = PERSON_OWNER.test(owner) || (SERVICE_OWNER.test(owner) && owner.length <= 4 + 64);
+  if (!ok) throw new StoreError(`invalid owner: ${JSON.stringify(owner)}`);
   return owner;
+}
+
+/** Whether `owner` is a valid owner id (`assertOwner`). */
+export function isOwner(owner: string): boolean {
+  try {
+    assertOwner(owner);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function assertSourceId(id: string): string {
@@ -110,6 +126,7 @@ export const keys = {
   heartbeat: () => "worker/heartbeat.json",
   pendingAll: () => "assembly/pending/",
   pending: (archive: string) => `assembly/pending/${assertHash(archive, "archive id")}`,
+  owners: () => "owners/",
   owner: (owner: string) => `owners/${assertOwner(owner)}`,
   probe: (owner: string) => `${keys.owner(owner)}/.probe`,
   session: (owner: string, archive: string) =>
