@@ -1,10 +1,10 @@
 openapi: 3.1.0
 info:
-  title: sessiondb
+  title: seshi
   version: "1"
   summary: Coding-agent sessions as a durable, redacted, content-addressed archive.
   description: |
-    The HTTP contract of a sessiondb server, and of the `http` backend in every SDK.
+    The HTTP contract of a seshi server, and of the `http` backend in every SDK.
 
     A client posts the transcript of a coding-agent session, whole or in chunks as it grows.
     The server turns it into an envelope and runs it through one pipeline, in memory: it
@@ -837,7 +837,10 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/OtlpStatus" }
         "413":
-          description: The body is larger than the server takes (`limits.max_upload_bytes`).
+          description: |
+            The request body, decoded, is larger than any upload under
+            `limits.max_upload_bytes` can need (twice that, plus 1 MiB), the same bound as
+            `POST /v1/sessions`, so it was not read.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/OtlpStatus" }
@@ -1157,7 +1160,7 @@ components:
       description: |
         A transcript format, by its trajectory source name: one spelling, since the archive id
         derives from it. `datadog-trajectory` is a Datadog Trajectory session file, whichever
-        client the daemon captured. `atif` is an ATIF-v1.0 through ATIF-v1.7 document (Harbor's
+        client the daemon captured. `atif` is an ATIF-v1.0 through ATIF-v1.8 document (Harbor's
         Agent Trajectory Interchange Format), whichever harness exported it; it is sent whole,
         as `json`, and its trace's `source` is the document's `agent.name`. `trajectory` is
         JSONL of records already in Letta trajectory-v1, checked and redacted, not normalized.
