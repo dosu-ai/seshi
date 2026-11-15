@@ -111,7 +111,9 @@ a few milliseconds (X3.3). The uploader (`seshi daemon`) is started by a hook wh
 running and stops after five idle minutes; one runs per machine. For each session it sends:
 
 - the whole log until the server holds a trace of it (a short session the session filter skips
-  stays on the machine and is sent whole again once it grows);
+  stays on the machine and is sent whole again once it grows; one whose first upload model
+  review dropped is held on the server as a stub of where its log ends, so what follows goes as
+  a chunk and the dropped part is not sent again);
 - then only the new complete lines, as a chunk at the server's offset, which the session filter
   never judges, so an agent-only tail is never lost.
 

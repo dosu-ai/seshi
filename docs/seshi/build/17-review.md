@@ -385,14 +385,6 @@ Run at `seshi-17-review` after the fixes above:
   name races a concurrent publish (its object is written before the pointer names it), so it
   needs an age guard from the store's listing or a recorded list of pending deletions written
   before the pointer moves (a metadata schema change). Left for that decision.
-- **dataflow, medium** (split vote, judged a documented deviation): a model-review drop of a
-  session's first envelope stores nothing, so the uploader resends the whole log as it grows;
-  each resend goes to the provider again and is reviewed whole, and a later `allow` or
-  `redact` stores the text the first review dropped. 04's deviation 9 and 08's open items
-  record this. F3.4 says the offset moves past a dropped envelope, but F3.1 says a drop writes
-  nothing; moving past it needs session state for a session with no trace (which would also
-  record that the dropped session exists), a choice between the two the decisions do not make.
-  Left for that decision.
 - **background, medium** (split vote, confirmed, not fixed): span records keep every chat
   span's whole input history and the assembler loads all of a session's records on each
   publish, so storage and worker memory grow with the square of the calls (400 calls: 341 MB

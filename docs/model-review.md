@@ -25,12 +25,18 @@ on the records the upload adds (a continuation's new records only):
    never removed on its own.
 3. `allow` and `redact` are written; `drop` writes nothing and leaves a drop record under
    `sources/<id>/dropped/` with the policy, its hash and the decision model
-   (`seshi sync dropped <id>`). A first upload that is dropped answers zeros, so the next one is
-   the whole log again; a later one still moves the session's log past it.
+   (`seshi sync dropped <id>`). Either way the session's log moves past what was dropped. A
+   dropped first upload leaves a stub: a session with no trace that holds only where its log
+   ends and a hash of what came before, never the text. The next upload continues from there
+   and is reviewed on its own, so the session's stored trace starts after the dropped part,
+   and the dropped text is never stored or sent to a model again, even when a client sends the
+   whole log again. A stub is not listed or shown, and its owner can still delete or retract
+   it.
 
 A failed call, or an answer that does not fit, is retried with backoff (`retries`, 3). After the
 last, `on_failure` decides: `drop` (the default: a drop record with reason `review_failed` and
-which step failed) or `skip` (written with regex redaction only, recorded as `skipped`).
+which step failed, and the log moves past it as for any drop, a first upload leaving a stub) or
+`skip` (written with regex redaction only, recorded as `skipped`).
 A resend of an upload is answered from the session and not reviewed again. A policy applies to
 what is written after the server restarts with it: `seshi redact backfill` applies new regex
 rules to stored sessions but does not send them to review again, and what review took out

@@ -239,8 +239,8 @@ allow.
 | `GET /v1/me` | `{owner, storage, kind, role, scopes, owner_basis, credential_id, visibility?, expires_at?}`: who the credential is, and which bucket this server writes, so a client can point a reader at it. Never a secret |
 | `GET /v1/owners?limit&after` | The owners the bucket holds sessions for (`sessions:read`) |
 | `POST /v1/sessions` | Store a session (`sessions:write`); see below |
-| `GET /v1/sessions?owner&limit&after` | List an owner's sessions (the caller's own by default), as far as visibility allows |
-| `GET /v1/sessions/:agent/:session_id?owner` | The session's `metadata.json` |
+| `GET /v1/sessions?owner&limit&after` | List an owner's sessions (the caller's own by default), as far as visibility allows; never a stub (F3.4) |
+| `GET /v1/sessions/:agent/:session_id?owner` | The session's `metadata.json`; `404` for a stub |
 | `PATCH /v1/sessions/:agent/:session_id?owner` | `{visibility}`: change who may read it. The owner or an admin |
 | `GET /v1/sessions/:agent/:session_id/trace?hash&format` | The head trace (or another of the session's `traces`, by hash; `404` for a hash it does not name) as the stored canonical trace (`format=seshi`, the default) or rendered as `letta`, `otlp` or `atif`; `400 bad_query` for another format, `404` for a session not stored (a filtered one included), `410` once redacted |
 | `GET /v1/sessions/:agent/:session_id/export?hash&format` | The same trace as a download: `Content-Disposition: attachment; filename="<agent>-<session>-<hash>.<format>.json"` |
@@ -339,9 +339,16 @@ the pipeline. Nothing is written until every stage has run:
    is the fork's first trace, so it is judged. `shipped` (what an earlier answer said) is read
    only for a session without the server's own state.
 5. **Model review**, when a review policy applies: allow, redact, or drop (`200 dropped`; a
-   drop record says why, never what). A dropped chunk or tail still moves the log past it; a
-   dropped `replace` leaves the session as stored and answers with its state, so the next
-   upload of that history must replace again. See [model-review.md](model-review.md).
+   drop record says why, never what). A drop moves the log past it, a chunk's, a tail's or a
+   first upload's; a dropped `replace` leaves the session as stored and answers with its
+   state, so the next upload of that history must replace again. A dropped first upload
+   leaves a **stub** (F3.4): the session's pointer with no trace, holding who wrote it, where
+   its log ends and a hash of the records before that, never their text. The next upload
+   continues from there like any session's (a chunk from `bytes_total`, or a whole log that
+   extends it, of which only the tail is reviewed and stored), so the stored trace starts after
+   the dropped part. A stub is not listed or served (`404`), is not on another reader's change
+   feed and is not searched; its owner or an admin can delete it or change its visibility, and
+   the uploading machine can retract it. See [model-review.md](model-review.md).
 6. **Write** the trace, the change entry, then the session's `metadata.json` (the entry goes
    first, so no change goes unannounced; a write that fails after it leaves an entry readers
    find already answered by the metadata).
@@ -358,8 +365,9 @@ Codex's `session_meta`), else the client's `branch`.
 
 `records` is what this upload wrote; `records_total` and `prefix_sha256` describe the whole
 normalized session; `bytes_total` is how much of the log the server now holds, where the next
-chunk starts. Every status returns them; a session the server holds nothing of (`filtered`,
-or `dropped` before it had a trace) answers zeros. The statuses are `stored`, `duplicate`
+chunk starts. Every status returns them; a session the server holds nothing of (`filtered`)
+answers zeros, and a dropped first upload answers its stub's offset. The statuses are
+`stored`, `duplicate`
 (that trace was already stored), `unchanged`, `filtered` and `dropped`.
 
 **Resends.** Every upload has an idempotency key: the `Idempotency-Key` header, else
@@ -398,7 +406,9 @@ otherwise.
 Until a session has a trace, the server stores nothing of it and takes only the whole log
 (X6.3): the first upload of a session is the whole log (`offset` 0), and a chunk for a session
 without a trace (never sent, or filtered so far) gets `409` with `expected: 0`. An uploader
-resends the whole log from the start; once the session passes the filter, it sends chunks.
+resends the whole log from the start; once the session passes the filter, it sends chunks. A
+session whose first upload model review dropped has a stub instead, and takes chunks from
+the stub's offset as a session with a trace does.
 
 A chunk is normalized on its own (the records those lines stand for), redacted with the
 session's withheld calls (a result can come in a later chunk than its call), and written as a

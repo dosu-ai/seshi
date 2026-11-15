@@ -185,6 +185,12 @@ paths:
           stored, and the answer's `bytes_total` is 0: send the whole log again once it grows.
         - Until the session has a trace, the server takes only the whole log (`offset` 0). A
           chunk for a session without one is `409 offset_mismatch` with `expected: 0`.
+        - Model review dropping the session's first upload (`dropped`, or review failed with
+          `on_failure = "drop"`) leaves a stub (F3.4): no trace, only where the log ends and
+          its prefix hash. The answer's `bytes_total` is that offset, and the session is then
+          continued as one with a trace: the next chunk, or a whole log that extends it, is
+          reviewed on its own and stored as the session's first trace. The dropped part is
+          never reviewed or stored again; a whole log of nothing more answers `unchanged`.
         - A chunk (`offset` > 0) is the log's bytes from where the session's log ends (the
           `bytes_total` of the last answer), whole lines of a `jsonl` log. It is normalized on
           its own, with the small state the session keeps (`normalized`, `withheld_calls`),
@@ -233,7 +239,7 @@ paths:
           description: |
             No new trace: the trace was already there (`duplicate`), nothing in the upload was
             new (`unchanged`), the session filter kept the session out (`filtered`), or model
-            review dropped it (`dropped`).
+            review dropped it (`dropped`; the log moves past it, a first upload's included).
           content:
             application/json:
               schema: { $ref: "#/components/schemas/IngestResult" }
@@ -288,7 +294,8 @@ paths:
         Every session's `metadata.json` under the owner (the caller's own by default, with
         the old owner IDs `auth.owner_aliases` folds into it), paged by key, as far as the
         caller may read them (X5.10). A full listing; a reader that wants an index builds its
-        own from the change feed.
+        own from the change feed. A stub (a session whose first upload model review dropped,
+        with no trace yet, F3.4) is not listed.
       parameters:
         - $ref: "#/components/parameters/owner"
         - name: after
@@ -318,6 +325,9 @@ paths:
       tags: [sessions]
       summary: The session's pointer.
       operationId: getSession
+      description: |
+        `404` for a stub (F3.4: no trace yet, its first upload dropped by model review), as for
+        its trace, export and reviews.
       responses:
         "200":
           description: The session's `metadata.json`.
@@ -337,7 +347,8 @@ paths:
         that can read (not a write-only device token). An org-key caller cannot change a
         session whose owner was verified (X5.12). A change appends a
         `visibility_changed` entry to the change feed; setting what it already is writes
-        nothing.
+        nothing. It works on a stub (F3.4) too, for its owner or an admin: the session's
+        first trace then has that visibility.
       requestBody:
         required: true
         content:
@@ -372,7 +383,8 @@ paths:
         tombstone to the change feed. Irreversible: a later upload of the same session is
         refused with `422 redacted`. A reader that already copied the trace still has it.
         Needs `sessions:delete` (X5.3): an admin token; the owner's session token issued in
-        the last 10 minutes; or a static token for its owner. The org key cannot delete.
+        the last 10 minutes; or a static token for its owner. The org key cannot delete. A
+        stub (F3.4) is tombstoned the same way, by its owner or an admin, and `removed` is 0.
 
         With `X-Seshi-Retract` it is a retraction instead (F9.7): the machine that uploaded the
         session sends the retraction secret whose sha256 it sent as `retract_hash`, with its
@@ -525,8 +537,9 @@ paths:
         time-stamped and unique, so the feed is a listing after a cursor. Stamps come from the
         clocks of the machines that uploaded, so a consumer re-reads a lag window behind its
         cursor and dedupes by key. An entry is written before the session changes, so it may
-        name a change not made yet, or one that failed: read the session for what it is now. Another owner's feed shows the entries of sessions the caller may
-        read now (X5.10).
+        name a change not made yet, or one that failed: read the session for what it is now.
+        Another owner's feed shows the entries of sessions the caller may read now (X5.10), and
+        none of a stub's (F3.4). A stub's first trace is its first `published` entry.
       parameters:
         - $ref: "#/components/parameters/owner"
         - name: after
@@ -755,8 +768,9 @@ paths:
         models, the findings by record, field and category (never the text), and why review
         was skipped. Anyone else who may read the session gets only `n`, `at`, `content_hash`
         and `decision` (`allow`, `redact` or `skipped`). Writes no policy covered have no
-        entry. Envelopes review dropped left nothing in the session; they are drop records
-        (`seshi sync dropped`). Needs `sessions:read`.
+        entry. Envelopes review dropped left nothing in the session (a dropped first upload
+        only a stub, which is `404` here); they are drop records (`seshi sync dropped`). Needs
+        `sessions:read`.
       responses:
         "200":
           description: The decisions, oldest first.

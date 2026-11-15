@@ -31,8 +31,9 @@ trace objects and its change entries.
 - **No raw (X6.3).** `putRaw`, `keys.raw`, `RawPart`, `metadata.raw` and `raw_format` are gone,
   and so is `raw` in the session API's result. Until a session has a trace, nothing of it is
   stored. A chunk (`offset` > 0) for such a session is `OffsetMismatch` with `expected: 0`. A
-  filtered session, and a dropped first envelope, answer zeros (`bytes_total: 0`,
-  `EMPTY_PREFIX_SHA256`), so the next upload is the whole log.
+  filtered session answers zeros (`bytes_total: 0`, `EMPTY_PREFIX_SHA256`), so the next upload
+  is the whole log. (A dropped first envelope did too until [20](20-review-drop.md), which
+  keeps a stub for it.)
 - **Extend or replace (X4.6).** A whole upload for a session that has a trace is checked
   against the server's own `normalized` state. If its records start with the stored prefix,
   its tail ships as a continuation and is never filtered; with no tail the answer is
@@ -151,8 +152,8 @@ trace objects and its change entries.
    offset. But a whole log is resent at offset 0 every time it grows, so the offset alone would
    replay an old answer for new content.
 2. **New statuses `unchanged` and `dropped`, beside `filtered`.** "Nothing new for a session
-   with a trace" is not "filtered", so it gets its own status. Filtered and first-dropped
-   answers carry zeros, telling the client to send the whole log again.
+   with a trace" is not "filtered", so it gets its own status. Filtered answers carry zeros,
+   telling the client to send the whole log again (first-dropped ones did until 20).
 3. **The server's own state decides extension, not the client's `shipped`.** `shipped` is
    still accepted and is read only for a session without `normalized`. Without raw, the server
    knows exactly what it holds.
@@ -174,9 +175,9 @@ trace objects and its change entries.
 8. **`limits.max_upload_bytes` now measures the uncompressed transcript**, with nothing
    gzipped to store. The default went from 64MiB (gzipped) to 256MiB (uncompressed) to stay
    roughly equivalent; config tests, the schema and docs are updated.
-9. **A review drop of a session's first envelope cannot "move the offset past it" (F3.4).**
-   Nothing is stored for a session without a trace. The drop is recorded, and the next whole
-   upload is reviewed again.
+9. *(Removed: a review drop of a session's first envelope now moves the offset past it, by
+   writing a content-free stub. Decided in [18](18-decisions.md) (3), built in
+   [20](20-review-drop.md).)*
 10. **Health counters are per-process shards and best-effort** (a failed write is reported,
     not retried). This avoids a hot object every upload would contend on. OffsetMismatch is not
     counted, since it is the protocol working. `rejected` was added for refusals answered to a

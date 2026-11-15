@@ -176,8 +176,18 @@ Other formats are rendered from it on read, never stored (`GET …/trace?format=
 ### `metadata.json` — `seshi/metadata/1` ([schema](schemas/metadata.schema.json))
 
 The live pointer, written with `If-Match` on every change. A session exists from its first
-trace: nothing is written for a session the session filter keeps out, or one whose first
-envelope model review dropped (X6.3, X4.10). Once tombstoned it has no `head`.
+trace: nothing is written for a session the session filter keeps out (X6.3, X4.10). Once
+tombstoned it has no `head`.
+
+A session whose first envelope model review dropped (F3.4) has a **stub**: a pointer with
+`status: "stored"`, no `head`, no `traces`, and nothing of the dropped content. It holds the
+session's identity (`owner`, `session_id`, `agent`, `archive_id`), its `writer`,
+`owner_basis` and `visibility`, the `retract_hash`, and where its log ends: `normalized` (the
+byte offset past the dropped envelope and the prefix hash) and `applied` (the drop's answer).
+No change entry is written for it. The next envelope continues from there and is reviewed on
+its own; once stored, it is the session's first trace, a `continuation` from the dropped
+records whose meta record names only the format (`{ "role": "meta", "source": "<agent>" }`).
+Readers neither list nor serve a stub: no `head`, nothing to read.
 
 ```jsonc
 {
@@ -186,7 +196,7 @@ envelope model review dropped (X6.3, X4.10). Once tombstoned it has no `head`.
   "agent": "claude-code", "source": "claude-code",
   "project": "github.com/acme/widget", "branch": "main", "parent_session_id": "…",
   "status": "stored",                 // or "redacted"
-  "head": "<content_hash>",           // absent before a trace is stored, and once redacted
+  "head": "<content_hash>",           // absent before a trace is stored (a stub), and once redacted
   "traces": [
     { "content_hash": "…", "created_at": "…", "records": 10, "rule_set": "<sha256>" },
     { "content_hash": "…", "created_at": "…", "records": 5, "rule_set": "<sha256>",
@@ -349,8 +359,13 @@ is written before every stage has run, and no payload is ever stored (X6.3).
 
 A log arrives whole (`offset` 0) or as a chunk from where the session's log ends:
 
-- Until a session has a trace nothing of it is stored, and only the whole log is taken. A
-  chunk for such a session is refused with `expected: 0`.
+- Until a session has a trace (or a stub) nothing of it is stored, and only the whole log is
+  taken. A chunk for such a session is refused with `expected: 0`.
+- A stub is continued as a session with a trace is: a chunk from where its log ends, or a
+  whole log whose first `normalized.records` records hash to its prefix, ships only what is
+  past the stub, reviewed on its own. A whole log with nothing past it publishes nothing
+  (`unchanged`); one that does not extend it is refused unless it is a replace by the stub's
+  `writer` or an admin.
 - A chunk is normalized on its own (each adapter's partial mode) with `normalized` and
   `withheld_calls`, and published as a continuation of the head with the head's meta record.
   It is never filtered.
@@ -363,7 +378,8 @@ A log arrives whole (`offset` 0) or as a chunk from where the session's log ends
 
 A permanent failure is answered to a caller that waits (an upload, a hook) and otherwise
 recorded under `sources/<id>/failed/`; a model review drop is recorded under
-`sources/<id>/dropped/` and, for a session with a trace, moves the log on past the envelope.
+`sources/<id>/dropped/` and moves the log on past the envelope: for a session with no trace
+yet, by writing its stub (F3.4). A dropped replace leaves the session's log as it was.
 
 A span set (OTLP, Datadog: X4.2) is not a log. Each span is normalized by its format's span
 adapter and regex-redacted on arrival, written to the session's `spans/` (a repeat lands on the

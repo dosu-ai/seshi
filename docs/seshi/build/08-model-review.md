@@ -209,8 +209,6 @@ anywhere. Reference: [docs/model-review.md](../../model-review.md),
 - **Latency.** Review adds one call per part (two for `redact`) to every upload a policy
   covers; an upload waits for it (X4.4). A long session split into many parts is reviewed
   sequentially. Parallel parts and a per-call concurrency limit are possible later.
-- **Re-review of first uploads.** A dropped first envelope stores nothing (04's deviation 9),
-  so the uploader resends the whole log as it grows and each resend is reviewed again, whole.
 - **`llm_calls` are not reviewed.** Since 07 is below this branch, `Pipeline.commit` regex-redacts
   their free text (`LlmCall.error` and string `parameters`, `redactLlmCalls`), and backfill
   does too; model review still judges only the records. 09 should keep content out of them.
