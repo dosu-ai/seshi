@@ -464,6 +464,49 @@ describe("replace with real roles (X4.6)", () => {
     });
     expect(res.status).toBe(403);
   });
+
+  it("keeps a session's retraction hash to its first write: a later writer cannot plant one", async () => {
+    // Review finding: any write could set the hash of a session that had none, so another
+    // org-key holder could extend it with their own hash and then replace or retract it.
+    const { bob } = await setUp();
+    await upload(bob, "s1");
+    const archive = archiveId("bob", "claude-code", "s1");
+    const secret = "mallory-secret";
+    const extended = `${CLAUDE("s1")}${JSON.stringify({
+      type: "user",
+      uuid: "u9",
+      timestamp: "2026-09-01T00:00:09.000Z",
+      sessionId: "sess1",
+      message: { role: "user", content: "and one more thing" },
+    })}\n`;
+    const mallory = { token: bob.token, user: "bob" };
+    const extend = await upload(mallory, "s1", {
+      transcript: extended,
+      retract_hash: sha256Hex(secret),
+    });
+    expect(extend.status).toBe(201);
+    const stored = await readMetadata(store, "bob", archive);
+    expect(stored?.traces.length).toBe(2);
+    expect(stored?.retract_hash).toBeUndefined();
+
+    const replaced = await upload({ ...mallory, headers: { "x-seshi-retract": secret } }, "s1", {
+      transcript: CLAUDE("mallory-rewrite"),
+      replace: true,
+    });
+    expect(replaced.status).toBe(403);
+    const retracted = await call("DELETE", "/v1/sessions/claude-code/s1", {
+      ...mallory,
+      headers: { "x-seshi-retract": secret },
+    });
+    expect(retracted.status).toBe(403);
+    expect((await readMetadata(store, "bob", archive))?.status).toBe("stored");
+
+    // A session's first write still records its hash.
+    await upload(bob, "s2", { retract_hash: sha256Hex("bob-s2-secret") });
+    expect(
+      (await readMetadata(store, "bob", archiveId("bob", "claude-code", "s2")))?.retract_hash,
+    ).toBe(sha256Hex("bob-s2-secret"));
+  });
 });
 
 describe("service accounts (X5.4)", () => {

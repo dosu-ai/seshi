@@ -270,7 +270,9 @@ A person can turn capture off in the middle of a session (`seshi capture off --s
 delete (a device token is write-only, the org key cannot delete at all), so each session carries
 a retraction secret instead. Before a session's first upload, the uploading machine makes a
 random secret and keeps it in its capture state file; every upload sends only its sha256 as
-`retract_hash`, and the server keeps the first hash a session gets in its `metadata.json`.
+`retract_hash`, and the server keeps the hash the session's first upload carries in its
+`metadata.json`. A later upload never sets one: a session first uploaded without a hash cannot
+be retracted, or replaced with the org key.
 
 To retract, the machine sends `DELETE /v1/sessions/:agent/:session_id` with its normal upload
 credential (`sessions:write`) and the secret in `X-Seshi-Retract`. The server compares the

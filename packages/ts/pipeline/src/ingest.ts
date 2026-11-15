@@ -355,7 +355,10 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
     }
     const normalizer = input.session_normalizer ?? metadata.normalizer;
     if (normalizer) next.normalizer = normalizer;
-    if (input.retract_hash && !base.retract_hash) next.retract_hash = input.retract_hash;
+    // Only the write that creates the pointer sets the retraction hash (F9.7). A later write
+    // never adds one, or another holder of the org key could extend a claimed session that has
+    // none with a hash of their own, then replace or retract it with their secret.
+    if (input.retract_hash && existing === null) next.retract_hash = input.retract_hash;
     const redaction = addRedaction(input.replace ? undefined : base.redaction, input.redaction);
     if (redaction) next.redaction = redaction;
     else delete next.redaction;

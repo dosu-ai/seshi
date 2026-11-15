@@ -96,7 +96,8 @@ User docs: [docs/capture.md](../../capture.md) (new), docs/cli.md (rows), docs/c
   - `fast.ts` (`@seshi/capture/fast`): what hook and statusline load; no client, no zod.
 - **Retraction on the server (F9.7)**: `POST /v1/sessions` takes `retract_hash` (64 hex,
   400 otherwise) → `SessionUpload.retract_hash` → envelope (`checkEnvelope` checks it) →
-  `ingest` keeps the first hash a session gets (`metadata.retract_hash`, reserved by 03).
+  `ingest` keeps the hash of the write that creates the pointer (`metadata.retract_hash`,
+  reserved by 03); a later write never sets one, or an org-key holder could plant their own.
   `DELETE /v1/sessions/:agent/:id` with `X-Seshi-Retract: <secret>` needs only
   `sessions:write`, acts on the caller's own folder, checks `capture.allow_retract` (403
   `retract_disabled`), the hash in constant time (403 `bad_retract_secret`), 404 / 410

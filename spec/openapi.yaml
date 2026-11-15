@@ -1586,8 +1586,9 @@ components:
           pattern: "^[0-9a-f]{64}$"
           description: |
             The sha256 (lowercase hex) of the uploading machine's retraction secret for this
-            session (F9.7). The first one a session gets is kept in its metadata; that machine
-            can later retract the session with `DELETE` and `X-Seshi-Retract`.
+            session (F9.7). The one a session's first upload carries is kept in its metadata;
+            a later upload never sets one. That machine can later retract the session with
+            `DELETE` and `X-Seshi-Retract`.
       example:
         agent: claude-code
         session_id: 8f1c2d3e-…
