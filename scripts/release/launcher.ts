@@ -118,6 +118,12 @@ export function ensureExecutable(path: string, platform: string = process.platfo
 
 /** The launcher's entry point. */
 export function main(): void {
+  // The report is read only for its glibc version; its network section (interfaces, and DNS
+  // lookups on some Node versions) would only slow every start.
+  // (Node 20.13+; bun-types does not declare it yet, and older Node ignores it.)
+  if (process.platform === "linux" && process.report) {
+    (process.report as { excludeNetwork?: boolean }).excludeNetwork = true;
+  }
   const located = locate({
     platform: process.platform,
     arch: process.arch,
