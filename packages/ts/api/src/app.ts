@@ -17,7 +17,6 @@
  * `[auth.owner_aliases]` folds an old owner id into its new one (X5.8). */
 
 import { createHash, timingSafeEqual } from "node:crypto";
-import { gunzipSync } from "node:zlib";
 import {
   AuthRequestError,
   canRead,
@@ -85,7 +84,7 @@ import {
   sourcesWithRecords,
   type TokenKind,
 } from "@seshi/store";
-import { readCapped } from "./otlp/body";
+import { inflateCapped, readCapped } from "./otlp/body";
 import { otlpTraces } from "./otlp/receiver";
 import { searchRequestOf } from "./search";
 
@@ -174,14 +173,19 @@ async function readBody(request: Request, max: number): Promise<Uint8Array> {
     throw new HttpError(415, "unsupported_encoding", `Content-Encoding ${encoding} not supported`);
   }
   const stream = request.body;
-  const bytes = stream ? await readCapped(stream, max, () => tooLarge(max)) : new Uint8Array();
-  if (!encoding || encoding === "identity") return bytes;
-  try {
-    return new Uint8Array(gunzipSync(bytes, { maxOutputLength: max }));
-  } catch (err) {
-    if ((err as { code?: unknown }).code === "ERR_BUFFER_TOO_LARGE") throw tooLarge(max);
-    throw new HttpError(400, "bad_encoding", "body is not valid gzip");
-  }
+  if (!stream) return new Uint8Array();
+  if (!encoding || encoding === "identity") return readCapped(stream, max, () => tooLarge(max));
+  // Inflated as a stream while it arrives and stopped at the first chunk past `max`, so a gzip
+  // bomb costs the cap and never blocks the event loop inflating.
+  return inflateCapped(
+    stream,
+    { wire: max, inflated: max },
+    {
+      wire: () => tooLarge(max),
+      inflated: () => tooLarge(max),
+      invalid: () => new HttpError(400, "bad_encoding", "body is not valid gzip"),
+    },
+  );
 }
 
 async function readJson(request: Request, max: number): Promise<Record<string, unknown>> {

@@ -162,6 +162,37 @@ describe("request bodies", () => {
     expect(early.status).toBe(413);
     expect(declared.pulled.bytes).toBe(0);
   });
+
+  it("inflates a gzipped upload as it arrives: a gzip bomb stops at the cap (413)", async () => {
+    // An ordinary gzipped upload, sent chunked, is stored.
+    const payload = JSON.stringify({ agent: "claude-code", session_id: "gz", transcript: CLAUDE });
+    const ok = await post("/v1/sessions", streamed(Bun.gzipSync(payload), 256).stream, {
+      authorization: `Bearer ${TOKEN}`,
+      "content-encoding": "gzip",
+    });
+    expect(ok.status).toBe(201);
+    expect(
+      (await readMetadata(store, "acme", archiveId("acme", "claude-code", "gz")))?.traces,
+    ).toHaveLength(1);
+
+    app = createApp({
+      store,
+      storage: { url: store.url },
+      tokens: [{ token: TOKEN, owner: "acme" }],
+      limits: { max_records: 50_000, max_records_bytes: 32 << 20, max_upload_bytes: 1024 },
+    });
+    // About 64 KiB of gzip that would inflate to 64 MiB, past the ~1 MiB this app takes.
+    const bomb = Bun.gzipSync(new Uint8Array(64 << 20).fill(32));
+    const chunked = streamed(bomb);
+    const res = await post("/v1/sessions", chunked.stream, {
+      authorization: `Bearer ${TOKEN}`,
+      "content-encoding": "gzip",
+    });
+    expect(res.status).toBe(413);
+    expect((await res.json()).error.code).toBe("too_large");
+    // Inflating stopped at the cap: most of the gzip was never read.
+    expect(chunked.pulled.bytes).toBeLessThan(bomb.length / 4);
+  });
 });
 
 describe("auth", () => {

@@ -68,29 +68,42 @@ export async function readCapped(
   return out;
 }
 
+/** How `inflateCapped` refuses a body: past the wire cap, past the inflated cap, not gzip. */
+export interface InflateRefusals {
+  wire: () => Error;
+  inflated: () => Error;
+  invalid: () => Error;
+}
+
 /** `stream` gunzipped, read a chunk at a time and each chunk inflated before the next is read.
  * Refused at the first chunk sent past `caps.wire` or inflated past `caps.inflated`: inflating
- * stops there, and the rest of the body is never read. */
-async function inflateCapped(
+ * stops there, and the rest of the body is never read. The JSON routes use it too. */
+export async function inflateCapped(
   stream: ReadableStream<Uint8Array>,
   caps: OtlpBodyCaps,
+  refuse: InflateRefusals,
 ): Promise<Uint8Array> {
   const gunzip = createGunzip();
   const chunks: Buffer[] = [];
   let length = 0;
-  let failed: Error | undefined;
+  // A cap passed (`refused`), or the gzip stream broken: either stops reading.
+  let refused: Error | undefined;
+  let broken = false;
+  let failed = false;
   gunzip.on("data", (chunk: Buffer) => {
     if (failed) return;
     length += chunk.length;
     if (length > caps.inflated) {
-      failed = tooLarge("max_otlp_inflated_bytes", caps.inflated, "inflated request body");
+      refused = refuse.inflated();
+      failed = true;
       gunzip.destroy();
     } else {
       chunks.push(chunk);
     }
   });
-  gunzip.on("error", (err) => {
-    failed ??= err;
+  gunzip.on("error", () => {
+    broken = true;
+    failed = true;
   });
   const closed = new Promise<void>((resolve) => gunzip.on("close", () => resolve()));
   const reader = stream.getReader();
@@ -101,7 +114,8 @@ async function inflateCapped(
     if (done) break;
     sent += value.byteLength;
     if (sent > caps.wire) {
-      failed = tooLarge("max_otlp_bytes", caps.wire, "request body");
+      refused = refuse.wire();
+      failed = true;
       break;
     }
     // Inflated, and counted, before the next chunk is read. A destroyed stream never calls
@@ -115,8 +129,8 @@ async function inflateCapped(
     gunzip.end();
   }
   await closed;
-  if (failed instanceof OtlpBodyError) throw failed;
-  if (failed) throw new OtlpBodyError(400, "bad_encoding", "body is not valid gzip");
+  if (refused) throw refused;
+  if (broken) throw refuse.invalid();
   return new Uint8Array(Buffer.concat(chunks, length));
 }
 
@@ -142,5 +156,9 @@ export async function readOtlpBody(request: Request, caps: OtlpBodyCaps): Promis
   if (!gzip) {
     return readCapped(body, caps.wire, () => tooLarge("max_otlp_bytes", caps.wire, "request body"));
   }
-  return inflateCapped(body, caps);
+  return inflateCapped(body, caps, {
+    wire: () => tooLarge("max_otlp_bytes", caps.wire, "request body"),
+    inflated: () => tooLarge("max_otlp_inflated_bytes", caps.inflated, "inflated request body"),
+    invalid: () => new OtlpBodyError(400, "bad_encoding", "body is not valid gzip"),
+  });
 }
