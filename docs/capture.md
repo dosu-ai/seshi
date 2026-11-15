@@ -223,6 +223,39 @@ out: it is never sent to review again). Sessions turned off, never
 uploaded from here, or whose transcript is gone are left out and listed. It marks the sessions
 and wakes the uploader; `seshi capture status` shows them as `resending` until they are sent.
 
+## Checking a session
+
+```sh
+seshi doctor --session            # the session this agent runs (or the one seen in this folder)
+seshi doctor --session 1f2e… --deep
+seshi doctor                      # every session seen in the past day; --since 7d for more
+```
+
+`seshi doctor` reads the three views of a session that only this machine has together: the
+transcript, the capture state (the decision and why, offsets, a pause's stop, the toggle and
+retraction, a waiting rebuild, the spool, errors and retries, the uploader's log lines for it)
+and what the server, or your local bucket, stored. Each check says `ok`, `warn`, `fail` or
+`skip`, with a hint when something needs doing:
+
+| Check | What it looks at |
+|---|---|
+| Decision | What the capture rules say now, and which rule said it (information) |
+| Transcript | The file is there and is this session's, and is no shorter than what was sent |
+| Queue | Hook entries, bytes not yet uploaded, retries, refusals, a retraction or rebuild waiting |
+| Server presence | Stored when sent and stored; gone or tombstoned when turned off and retracted; nothing when filtered; a stub when review dropped the first upload |
+| Retraction secret | The secret kept here is the one the session was stored with |
+| Offsets | Where the server's log ends agrees with what this machine sent (and a pause's stop) |
+| Records, Prefix hash | The transcript, normalized again up to the server's offset, has as many records as the server counts, and the same prefix hash (compared only under the same redaction rules) |
+| Trace chain | Every trace can be fetched, continuations follow on, the total is the metadata's |
+| Redaction residue | No redaction rule matches anything stored; a match names the rule and record, never the text |
+| Staleness | The session was built by the current normalizer, or a rebuild is on its way |
+| Change feed | The latest trace (or the tombstone) is in the change feed readers follow |
+| Search | With `--deep`: found by a word of its last record; a deleted session is not |
+
+It changes nothing (no uploads, state or spool entries) and exits 8 when a check failed. A server
+never shows a stub, so against a server a dropped first upload is checked from this machine's
+side only; local mode reads the bucket itself.
+
 ## Files
 
 | Where | What |
