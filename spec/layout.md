@@ -5,7 +5,7 @@ own routes, another service, `aws s3 sync`, a reader in another language) can re
 store. The stored objects other languages read are defined by JSON Schemas in
 [`schemas/`](schemas/) (X3.10); ts/model's types are generated from them
 (`bun run types`), and [`testdata/objects/`](testdata/objects/) holds conformance examples
-every reader should parse. The writer is the `seshi` binary (`seshi serve`, or local mode);
+every reader should parse. The writer is the `seshi` binary (`seshi serve`, or a laptop in serverless mode, which writes only `owners/<owner>/`);
 any other writer must follow the rules below.
 
 ```

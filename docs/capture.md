@@ -1,7 +1,8 @@
 # Capturing sessions (F9)
 
 seshi captures coding-agent sessions as they happen. Hooks in each agent hand every turn to
-seshi; a background uploader sends what is new to the team's server; a sweep catches whatever
+seshi; a background uploader sends what is new to the team's server (or, in serverless mode,
+runs the pipeline and writes the bucket itself); a sweep catches whatever
 the hooks missed; and a status line says whether this session is being captured. Capture can be
 turned off for everything, a repo, a folder, or one session, and a session turned off is
 retracted from the server.
@@ -17,8 +18,9 @@ agent turn ──▶ seshi hook ──▶ spool ──▶ seshi daemon (uploader
 
 ## Installing
 
-Sign in to your team's server first (`seshi login`, [cli.md](cli.md#signing-in-f82)), or point
-the CLI at your own bucket ([local mode](config.md#the-clis-config)), then:
+Sign in to your team's server first (`seshi login`, [cli.md](cli.md#signing-in-f82)), or set
+this machine up to write a bucket directly (`seshi init --serverless`,
+[serverless.md](serverless.md)), then:
 
 ```sh
 seshi capture install            # every agent found on this machine
@@ -108,6 +110,7 @@ Session Capture ◉
 Session Capture ◉ · 3 queued
 Session Capture ◉ · sign in
 Session Capture ◉ · upload failing
+Session Capture ◉ · needs review key
 Session Capture ⏸
 ```
 
@@ -159,7 +162,27 @@ rebuild, say). A session turned off is never sent again, and one whose transcrip
 cannot be.
 
 Uploads use the credential `seshi login` stored: the device token (with an IdP) or the org key
-and your username. In local mode they go to your own bucket.
+and your username. In serverless mode the uploader runs the pipeline itself and writes the
+bucket with the key `seshi init --serverless` stored; uploads can then wait for reasons of their
+own ([below](#uploads-that-wait)).
+
+### Uploads that wait
+
+Some problems stop every upload until you act. The sessions stay on this machine, in the spool,
+with their place kept; nothing is lost, and the uploader sends them once the problem is gone.
+The status line names the problem after the separator, and `seshi capture status`,
+`seshi upload` and `seshi doctor` print it with what to do:
+
+| Word | Why | What to do |
+|---|---|---|
+| `sign in` | No credential for the server, or it was refused | `seshi login --server <url>` |
+| `needs review key` | Serverless mode: the team requires model review (`review.required = true`), and no key for a policy's provider is set on this machine. Nothing has been uploaded unreviewed | `seshi review key set <provider>`, or set the variable the policy names (such as `ANTHROPIC_API_KEY`) where the uploader runs (a `--service` uploader does not see your shell's variables); then `seshi doctor` |
+| `needs update` | Serverless mode: the bucket needs a newer seshi to write (`seshi admin layout --min-version`) | Update seshi ([install.md](install.md)) |
+| `bucket refused` | Serverless mode: the bucket key can't write this owner's folder, the bucket has no seshi marker, or the store fails the storage test | `seshi doctor` says which. Check the key's permissions and that `serverless.owner` is the folder it may write (`seshi whoami`); run `seshi init --serverless` on a bucket with no marker; use a store with conditional writes ([serverless.md](serverless.md#credentials)) |
+
+`seshi upload` exits 3 while uploads wait for a review key or an update, and 5 for `sign in` and
+`bucket refused`. A refusal of one session only (the bucket refused that session's write) is
+not a hold: that session waits until its transcript changes, as for a `403` from a server.
 
 ### Redacting before upload (F2.4)
 
@@ -177,8 +200,9 @@ rules, the ones fetched before are used; with none, nothing is sent until it can
 any upload). Redacting changes line lengths, so the uploader keeps its place in your file and
 the server's offset (in redacted bytes) apart. After the server's rules change, the next whole
 upload of a session this machine stored may get `409 conflict`, and is sent again with
-`replace`. In local mode the Instance in the same process redacts before it writes, so nothing
-is fetched.
+`replace`. In serverless mode the pipeline in the same process redacts before it writes, with
+the rule packs its settings name (the bucket's shared settings and this machine's own), so
+nothing is fetched.
 
 ## Retraction (F9.7)
 
@@ -235,7 +259,7 @@ seshi doctor                      # every session seen in the past day; --since 
 `seshi doctor` reads the three views of a session that only this machine has together: the
 transcript, the capture state (the decision and why, offsets, a pause's stop, the toggle and
 retraction, a waiting rebuild, the spool, errors and retries, the uploader's log lines for it)
-and what the server, or your local bucket, stored. Each check says `ok`, `warn`, `fail` or
+and what the server, or the bucket in serverless mode, stored. Each check says `ok`, `warn`, `fail` or
 `skip`, with a hint when something needs doing:
 
 | Check | What it looks at |
@@ -255,7 +279,7 @@ and what the server, or your local bucket, stored. Each check says `ok`, `warn`,
 
 It changes nothing (no uploads, state or spool entries) and exits 8 when a check failed. A server
 never shows a stub, so against a server a dropped first upload is checked from this machine's
-side only; local mode reads the bucket itself.
+side only; serverless mode reads the bucket itself.
 
 ### Exploring sessions in a browser
 
@@ -300,6 +324,7 @@ the server stored them.
 | `rules.json` | the capture rules as last read from the CLI config |
 | `redaction-rules.json` | your server's redaction rules as last fetched, with their ETag |
 | `capture.log` | errors from hooks and the uploader (hooks never print) |
+| `serverless/<id>/` | serverless mode, per bucket: the cached shared settings, the storage test's result, this machine's drop and failure records, the daemon's upkeep times ([serverless.md](serverless.md#what-a-laptop-writes-and-keeps)) |
 
 `SESHI_NO_UPLOADER=1` makes hooks spool without starting an uploader (CI, tests).
 

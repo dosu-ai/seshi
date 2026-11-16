@@ -9,7 +9,8 @@ Start with the [README](../README.md) for what it is and a quick start; these pa
 |---|---|
 | [install.md](install.md) | Installing `seshi`: the install scripts, npm, release archives, checksums, platforms |
 | [capture.md](capture.md) | Capturing sessions from Claude Code, Codex and Cursor: hooks, the uploader, the status line, turning capture off, retraction |
-| [cli.md](cli.md) | Every command, its flags and exit codes; signing in; local mode |
+| [cli.md](cli.md) | Every command, its flags and exit codes; signing in; serverless mode |
+| [serverless.md](serverless.md) | Running with no server: each laptop writes the shared bucket; setup, permissions, example policies, switching modes |
 | [search.md](search.md) | `seshi search` and `GET /v1/search`: queries, filters, the index |
 
 ## Running a server
