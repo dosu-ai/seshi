@@ -4,10 +4,10 @@ import { type Claims, ENVELOPE_SCHEMA, type Envelope, type ReceivedSpan } from "
 import {
   abortableSleep,
   apiBase,
+  assertValidTags,
   DatadogApiError,
   type SearchPage,
   searchPage,
-  tagFilter,
 } from "./api";
 import { DATADOG_LLMOBS, datadogClaims } from "./format";
 import { sessionOf, tagsOf, tagValue, toReceivedSpan } from "./spans";
@@ -80,7 +80,7 @@ export function readDatadogConfig(raw: Readonly<Record<string, unknown>>): Datad
   if (!Number.isInteger(page) || page < 1 || page > 5000) {
     throw new Error("the datadog source's page_size must be 1 to 5000");
   }
-  tagFilter(tags);
+  assertValidTags(tags);
   const api_url = apiUrl(raw.api_url);
   return {
     site,
@@ -285,7 +285,10 @@ export function datadogConnector(options: DatadogConnectorOptions = {}): Connect
     return tally;
   }
 
-  function prune(seen: Map<string, number>, keep: (ms: number) => boolean): Record<string, number> {
+  function checkpointSeen(
+    seen: Map<string, number>,
+    keep: (ms: number) => boolean,
+  ): Record<string, number> {
     let entries = [...seen.entries()].filter(([, ms]) => keep(ms));
     if (entries.length > maxSeen) {
       entries.sort((a, b) => b[1] - a[1]);
@@ -303,7 +306,7 @@ export function datadogConnector(options: DatadogConnectorOptions = {}): Connect
       const now = ctx.now();
       const lagOf = (c: DatadogCursor) =>
         c.until ? Math.max(0, now.getTime() - Date.parse(c.until)) : undefined;
-      const resumed = cursor.window !== undefined;
+      const resumedUnfinishedWindow = cursor.window !== undefined;
       let window: { from: string; to: string; page?: string } | undefined =
         cursor.window ?? nextWindow(cursor, config, now);
       if (!window) {
@@ -372,10 +375,9 @@ export function datadogConnector(options: DatadogConnectorOptions = {}): Connect
         const nextFrom = Date.parse(window.to) - config.overlap;
         const windowFrom = Date.parse(window.from);
         const overlapEnd = windowFrom + config.overlap;
-        const kept = prune(
-          seen,
-          (ms) => ms >= nextFrom || (!done && ms >= windowFrom && ms < overlapEnd),
-        );
+        const mayBeReadAgain = (ms: number) =>
+          ms >= nextFrom || (!done && ms >= windowFrom && ms < overlapEnd);
+        const kept = checkpointSeen(seen, mayBeReadAgain);
         if (Object.keys(kept).length > 0) next.seen = kept;
         await ctx.checkpoint.write(next as unknown as Cursor);
         cursor = next;
@@ -396,7 +398,7 @@ export function datadogConnector(options: DatadogConnectorOptions = {}): Connect
           if (totals.failed) parts.push(`${totals.failed} batch(es) failed (see sync failed)`);
           ctx.log.info(parts.join("; "));
           const lag = lagOf(cursor) ?? now.getTime() - Date.parse(window.from);
-          if (done) return { lag_ms: lag, ...(resumed ? { more: true } : {}) };
+          if (done) return { lag_ms: lag, ...(resumedUnfinishedWindow ? { more: true } : {}) };
           return { more: true, lag_ms: lag };
         }
         window = next.window as { from: string; to: string; page?: string };

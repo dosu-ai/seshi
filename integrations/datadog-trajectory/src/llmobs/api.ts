@@ -53,6 +53,10 @@ export function tagFilter(tags: readonly string[]): Record<string, string> | und
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
+export function assertValidTags(tags: readonly string[]): void {
+  tagFilter(tags);
+}
+
 export interface SearchQuery {
   from: Date;
   to: Date;
@@ -220,6 +224,14 @@ export function retryAfterMs(headers: Headers, now: number): number | undefined 
   return undefined;
 }
 
+function tryParseJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
 async function errorText(response: Response): Promise<string> {
   let body = "";
   try {
@@ -227,15 +239,13 @@ async function errorText(response: Response): Promise<string> {
   } catch {
     return "";
   }
-  try {
-    const parsed = JSON.parse(body) as { errors?: unknown };
-    if (Array.isArray(parsed.errors)) {
-      const parts = parsed.errors.map((e) =>
-        typeof e === "string" ? e : isObject(e) ? String(e.detail ?? e.title ?? "") : "",
-      );
-      body = parts.filter((p) => p !== "").join("; ");
-    }
-  } catch {}
+  const parsed = tryParseJson(body) as { errors?: unknown } | null | undefined;
+  if (Array.isArray(parsed?.errors)) {
+    const parts = parsed.errors.map((e) =>
+      typeof e === "string" ? e : isObject(e) ? String(e.detail ?? e.title ?? "") : "",
+    );
+    body = parts.filter((p) => p !== "").join("; ");
+  }
   body = body.replace(/\s+/g, " ").trim();
   return body.length > 300 ? `${body.slice(0, 300)}…` : body;
 }

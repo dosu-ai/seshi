@@ -24,16 +24,22 @@ class DatadogTrajectoryError extends Error {
   }
 }
 
+function tryParseJsonLine(line: string): unknown {
+  try {
+    return JSON.parse(line);
+  } catch {
+    return undefined;
+  }
+}
+
 function parseEvents(transcript: string): Event[] {
   const events: Event[] = [];
   for (const line of transcript.split("\n")) {
     if (line.trim() === "") continue;
-    try {
-      const value = JSON.parse(line) as unknown;
-      if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-        events.push(value as Event);
-      }
-    } catch {}
+    const value = tryParseJsonLine(line);
+    if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+      events.push(value as Event);
+    }
   }
   return events;
 }
@@ -132,8 +138,8 @@ export function normalizeDatadogTrajectory(
           called.add(id);
           records.push(call);
         } else if (event.phase === "post") {
-          const orphan = !options.partial || event._backfilled === true;
-          if (!called.has(id) && orphan) {
+          const synthesizesMissingCall = !options.partial || event._backfilled === true;
+          if (!called.has(id) && synthesizesMissingCall) {
             const call = toolCall(event, id, timestamp);
             if (call === null) break;
             answered = true;

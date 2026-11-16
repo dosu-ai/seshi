@@ -486,13 +486,15 @@ function genericParts(trace: readonly SpanPart[]): SpanPart[] {
         }
       }
     }
+    const includesTool = (tool: SpanTool) =>
+      held.size === 0 || (!!tool.call_id && held.has(tool.call_id));
     return parts.map((p) => {
       if (llm(p)) {
         const out = keep(p, { input: p.input, output: p.output });
         if (p.llm_call) out.llm_call = p.llm_call;
         return out;
       }
-      if (p.tool && (held.size === 0 || (p.tool.call_id && held.has(p.tool.call_id)))) {
+      if (p.tool && includesTool(p.tool)) {
         return keep(p, { tool: p.tool });
       }
       return keep(p, {});
@@ -561,6 +563,22 @@ export const DATADOG_SPANS: SpanAdapter = {
   assemble: (parts, session) => assembleDatadogParts(parts, session),
 };
 
+function tryReceivedSpan(attributes: DatadogSpanResource["attributes"]): ReceivedSpan | undefined {
+  try {
+    return toReceivedSpan(attributes);
+  } catch {
+    return undefined;
+  }
+}
+
+function tryDatadogPart(span: ReceivedSpan): SpanPart | undefined {
+  try {
+    return datadogPart(span);
+  } catch {
+    return undefined;
+  }
+}
+
 /** Spans of a saved Export API answer (`{ data: [...] }`, or the list itself). */
 export function spansOfDocument(value: unknown): ReceivedSpan[] {
   const list = Array.isArray(value) ? value : isObject(value) ? value.data : undefined;
@@ -572,9 +590,8 @@ export function spansOfDocument(value: unknown): ReceivedSpan[] {
   const spans: ReceivedSpan[] = [];
   for (const item of list as DatadogSpanResource[]) {
     if (!isObject(item) || !isObject(item.attributes)) continue;
-    try {
-      spans.push(toReceivedSpan(item.attributes));
-    } catch {}
+    const span = tryReceivedSpan(item.attributes);
+    if (span !== undefined) spans.push(span);
   }
   return spans;
 }
@@ -610,9 +627,8 @@ export const DATADOG_LLMOBS_FORMAT: FormatAdapter = {
     }
     const parts: SpanPart[] = [];
     for (const span of sessions.size === 1 ? spans.filter((s) => sessionOf(s)) : spans) {
-      try {
-        parts.push(datadogPart(span));
-      } catch {}
+      const part = tryDatadogPart(span);
+      if (part !== undefined) parts.push(part);
     }
     const { records, llm_calls } = assembleDatadogParts(parts, { source: DATADOG_LLMOBS });
     return llm_calls.length > 0 ? { records, llm_calls } : { records };
