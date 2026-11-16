@@ -1,48 +1,7 @@
-/** Rule packs (F2.1): the one place a redaction rule is defined, as data. The built-in pack
- * ships in the repository (`packs/builtin.toml`); an operator lists their own in config
- * (`[redaction] packs`). Every pack, whatever it came from (a TOML file, today's JSON rule file,
- * or the JSON `GET /v1/redaction/rules` serves a client), goes through one validator,
- * `validatePack`, so a rule means the same on the server and on a laptop.
- *
- * A pack in TOML:
- *
- * ```toml
- * id = "acme"                      # the pack's id
- * version = "2026-11-01"           # optional, free text
- * description = "Acme's secrets"   # optional
- * disable = ["entropy"]            # built-in rules this pack turns off, by id
- *
- * [[rules]]                        # text rules: a regular expression over strings
- * id = "acme-key"                  # stable: it names the rule in redaction counts
- * description = "Acme API keys"
- * pattern = 'ACME-[0-9A-F]{32}'    # or patterns = [...]; RE2 syntax for operator packs
- * replacement = "[redacted:acme-key]"   # the default is [redacted:<id>]
- * applies_to = ["text", "tool_input", "tool_output"]   # the default is all three
- * tests.match = ["key ACME-0123456789ABCDEF0123456789ABCDEF"]
- * tests.no_match = ["ACME-1234"]
- *
- * [[sensitive_files]]              # a call that names one of these files has its result withheld
- * id = "acme-master-key"
- * globs = ["config/master.key", "!config/README.md"]
- * tests.match = ["app/config/master.key"]
- *
- * [[secret_commands]]              # a call that runs one of these has its output withheld
- * id = "acme-token"
- * pattern = 'acme-cli\s+token\b'
- * tests.match = ["acme-cli token --org x"]
- * ```
- *
- * A text rule's match is replaced whole, or only the part a named group `secret` matched
- * (`api-key: (?P<secret>\S+)` keeps `api-key: `). Rule ids are lowercase words joined by `-`
- * and unique in a rule set; the counts stored with every session are by rule id (F2.3). */
-
-/** Where in a record a text rule runs: message text, a tool call's input, a tool's output. */
 export type AppliesTo = "text" | "tool_input" | "tool_output";
 
 export const APPLIES_TO: readonly AppliesTo[] = ["text", "tool_input", "tool_output"];
 
-/** Strings a rule must redact (`match`) and leave alone (`no_match`); checked when the pack
- * loads, so a rule that does not do what its author meant stops start-up. */
 export interface RuleTests {
   match: string[];
   no_match: string[];
@@ -51,12 +10,8 @@ export interface RuleTests {
 export interface TextRuleSpec {
   id: string;
   description?: string;
-  /** Regular expressions; any of them matching is the rule matching. Empty for a built-in
-   * rule implemented in code. */
   patterns: string[];
-  /** Built-in pack only: the rule is matched by reviewed code (`secrets.ts`), not a pattern. */
   implementation?: "builtin";
-  /** What a match becomes; `[redacted:<id>]` when absent. */
   replacement?: string;
   applies_to: AppliesTo[];
   tests?: RuleTests;
@@ -65,28 +20,21 @@ export interface TextRuleSpec {
 export interface FileRuleSpec {
   id: string;
   description?: string;
-  /** `.gitignore`-style globs; `!` makes an exception, which holds for the whole rule set. */
   globs: string[];
-  /** Paths that must (`match`) and must not (`no_match`) count as one of these files. */
   tests?: RuleTests;
 }
 
 export interface CommandRuleSpec {
   id: string;
   description?: string;
-  /** Regular expressions matched at the start of each command of a shell line. */
   patterns: string[];
-  /** Shell lines that must (`match`) and must not (`no_match`) run one of these commands. */
   tests?: RuleTests;
 }
 
-/** A validated pack: plain data, safe to serialize (it is what `GET /v1/redaction/rules`
- * serves) and to validate again. */
 export interface RulePack {
   id: string;
   version?: string;
   description?: string;
-  /** Built-in rule ids this pack turns off. */
   disable: string[];
   rules: TextRuleSpec[];
   sensitive_files: FileRuleSpec[];
@@ -94,12 +42,10 @@ export interface RulePack {
 }
 
 export interface PackProblem {
-  /** Where: the pack's source and the field (`acme.toml: rules[2].pattern`). */
   where: string;
   message: string;
 }
 
-/** A pack that cannot be used. Names every problem, each with where it is. */
 export class RulePackError extends Error {
   constructor(readonly problems: readonly PackProblem[]) {
     super(
@@ -111,7 +57,6 @@ export class RulePackError extends Error {
   }
 }
 
-/** A rule or pack id: lowercase letters and digits, words joined by single `-`, up to 64. */
 export const RULE_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const MAX_ID = 64;
 const MAX_PATTERN = 4096;
@@ -121,9 +66,7 @@ const MAX_RULES = 1000;
 const MAX_TESTS = 100;
 
 export interface ValidateOptions {
-  /** Names the pack in messages (a file path, `server`). */
   source: string;
-  /** The built-in pack: rules may be `implementation = "builtin"`. */
   builtin?: boolean;
 }
 
@@ -131,7 +74,6 @@ type Obj = Record<string, unknown>;
 
 const isObject = (v: unknown): v is Obj => typeof v === "object" && v !== null && !Array.isArray(v);
 
-/** Collects problems while reading one pack. */
 class Reader {
   readonly problems: PackProblem[] = [];
   constructor(readonly source: string) {}
@@ -196,7 +138,6 @@ class Reader {
     return value as string[];
   }
 
-  /** `pattern` (one) or `patterns` (several): exactly one of them, every entry non-empty. */
   patterns(value: Obj, field: string): string[] | undefined {
     const one = value.pattern;
     const many = value.patterns;
@@ -250,7 +191,6 @@ class Reader {
     return { match, no_match: noMatch };
   }
 
-  /** The entries of a list of tables. */
   tables(value: unknown, at: string): Obj[] {
     if (value === undefined) return [];
     if (!Array.isArray(value)) {
@@ -383,9 +323,6 @@ function commandRule(r: Reader, value: Obj, field: string): CommandRuleSpec | nu
   };
 }
 
-/** Check a pack read from anywhere (parsed TOML, JSON) and return it as plain data. Throws
- * `RulePackError` naming every problem. Patterns are not compiled here: whether a pattern is
- * valid depends on the engine it runs on, which the rule set decides (`compileRuleSet`). */
 export function validatePack(value: unknown, options: ValidateOptions): RulePack {
   const r = new Reader(options.source);
   const builtin = options.builtin === true;
@@ -421,7 +358,6 @@ export function validatePack(value: unknown, options: ValidateOptions): RulePack
     .tables(value.secret_commands, "secret_commands")
     .map((t, i) => commandRule(r, t, `secret_commands[${i}]`));
 
-  // Rule ids are unique across the three kinds: redaction counts are by id alone.
   const seen = new Map<string, string>();
   const all: [string, { id: string } | null][] = [
     ...rules.map((x, i) => [`rules[${i}]`, x] as [string, { id: string } | null]),
@@ -454,7 +390,6 @@ export function validatePack(value: unknown, options: ValidateOptions): RulePack
   };
 }
 
-/** A pack written in TOML. */
 export function parsePackToml(text: string, options: ValidateOptions): RulePack {
   let parsed: unknown;
   try {
@@ -475,26 +410,19 @@ export function parsePackToml(text: string, options: ValidateOptions): RulePack 
   return validatePack(parsed, options);
 }
 
-/** The id of the pack today's JSON rule files load as (F2.1). */
 export const LEGACY_PACK_ID = "legacy";
-/** The rule ids a JSON rule file's three lists become. The pattern rule keeps the kind every
- * custom pattern was counted and marked as before (`[redacted:custom-pattern]`). */
 export const LEGACY_RULE_IDS = {
   patterns: "custom-pattern",
   sensitive_files: "custom-sensitive-files",
   secret_commands: "custom-secret-commands",
 } as const;
 
-/** The shape of today's JSON rule file (Dosu's CLI writes the same for an org's rules). */
 export interface LegacyRules {
   patterns?: string[];
   sensitive_files?: string[];
   secret_commands?: string[];
 }
 
-/** The fields a JSON rule file may hold. The last three are what Dosu's CLI also keeps in it
- * (where an org's sessions do not ship, when it was fetched): about the client's machine, not
- * rules, so they are ignored. */
 const LEGACY_FIELDS = [
   "patterns",
   "sensitive_files",
@@ -504,7 +432,6 @@ const LEGACY_FIELDS = [
   "fetched_at",
 ];
 
-/** Read today's JSON rule file into its three lists. */
 export function readLegacyRules(text: string, source: string): LegacyRules {
   let parsed: unknown;
   try {
@@ -520,7 +447,6 @@ export function readLegacyRules(text: string, source: string): LegacyRules {
   return checkLegacyRules(parsed, source);
 }
 
-/** Today's rule lists from a value of unknown shape (a parsed JSON file, a caller's object). */
 export function checkLegacyRules(value: unknown, source: string): LegacyRules {
   if (!isObject(value)) {
     throw new RulePackError([{ where: source, message: "a JSON rule file must be an object" }]);
@@ -538,9 +464,6 @@ export function checkLegacyRules(value: unknown, source: string): LegacyRules {
   return out;
 }
 
-/** Today's JSON rule lists as one pack, `legacy`: the patterns as one rule, `custom-pattern`;
- * the files and commands as rules of their own kinds. Several JSON files are merged into one
- * such pack before it is validated, as they were merged before. */
 export function legacyPack(rules: LegacyRules, source: string): RulePack {
   const patterns = (rules.patterns ?? []).filter((p) => p.trim() !== "");
   const globs = (rules.sensitive_files ?? [])
@@ -562,15 +485,11 @@ export function legacyPack(rules: LegacyRules, source: string): RulePack {
   );
 }
 
-/** A pack file's text, by its name: `.json` is today's JSON rule file, anything else TOML. */
 export function parsePackFile(path: string, text: string): RulePack {
   if (path.toLowerCase().endsWith(".json")) return legacyPack(readLegacyRules(text, path), path);
   return parsePackToml(text, { source: path });
 }
 
-/** The packs `[redaction] packs` names, in order, from their files' text. JSON rule files are
- * merged into one `legacy` pack, placed where the first of them is listed, as they were merged
- * before packs existed. */
 export function loadPacks(files: readonly { path: string; text: string }[]): LoadedPack[] {
   const out: (LoadedPack | null)[] = [];
   const legacy: Required<LegacyRules> = { patterns: [], sensitive_files: [], secret_commands: [] };
@@ -598,7 +517,6 @@ export function loadPacks(files: readonly { path: string; text: string }[]): Loa
   return out.map((p) => p ?? { pack: legacyPack(legacy, source), source });
 }
 
-/** A pack and the file (or files, for the merged JSON pack) it came from. */
 export interface LoadedPack {
   pack: RulePack;
   source: string;

@@ -54,7 +54,6 @@ export class ResumableSha256 {
   private h = new Uint32Array(H0);
   private readonly block = new Uint8Array(64);
   private pending = 0;
-  /** Bytes hashed so far, pending ones included. */
   private total = 0;
   private readonly w = new Uint32Array(64);
 

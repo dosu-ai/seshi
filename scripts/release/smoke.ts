@@ -1,30 +1,3 @@
-/** Runs a compiled `seshi` binary through what a person does first, on the machine it is
- * built for (F8.4, and 13's open item: `Bun.secrets` inside the compiled binary):
- *
- * 1. `--version`;
- * 2. `admin init` and `serve` on a temporary folder store, on 127.0.0.1;
- * 3. `login --key -` with the org key, which stores it in the OS keychain (or the 0600 file);
- * 4. `whoami`, which reads it back;
- * 5. `upload` of a transcript holding a secret that only the server's own rule pack knows: the
- *    uploader fetches the pack, compiles it with RE2 (`re2js`, which must be inside the binary)
- *    and redacts before sending (F2.4); `sessions export` must show the redacted text;
- * 6. `explore --no-open`: it prints its address, serves the page bundled into the binary and its
- *    files with the token (401 without), answers the API, and stops on SIGINT;
- * 7. `capture install claude-code` in a temporary home: the hook and status-line commands it
- *    writes must name this binary by its absolute path, not `seshi` from the PATH (so an npm
- *    install never starts Node on an agent's turn);
- * 8. `logout`, which removes the key; `whoami` again, which must now say "not signed in".
- *
- *   bun run scripts/release/smoke.ts <binary> [--version <X.Y.Z>] [--keychain required|allowed|off]
- *
- * `--keychain required` fails unless the key went to the keychain (macOS, Windows);
- * `allowed` (the default) accepts the file fallback (Linux without a secret service);
- * `off` sets `keychain = false` (SESHI_KEYCHAIN), so nothing touches the real keychain: what
- * the repository's own tests use. With the keychain in play the real home folder is kept,
- * since that is where macOS looks for the login keychain; the CLI config goes to a temporary
- * folder either way, and so do capture's state and the agent home `capture install` writes
- * into. Nothing leaves 127.0.0.1. */
-
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -39,9 +12,7 @@ export interface SmokeOptions {
   version?: string;
   keychain?: KeychainMode;
   log?: (line: string) => void;
-  /** Per command, in ms. */
   timeout?: number;
-  /** How long the server has to answer /healthz, in ms; `timeout` by default. */
   readyTimeout?: number;
 }
 
@@ -67,8 +38,6 @@ async function freePort(): Promise<number> {
   });
 }
 
-/** The environment the binary runs with: only what it needs, so nothing of the caller's
- * seshi setup (SESHI_* variables, its CLI config) leaks in. */
 export function smokeEnv(
   base: Record<string, string | undefined>,
   dir: string,
@@ -97,10 +66,8 @@ export function smokeEnv(
   if (base.USERPROFILE !== undefined || process.platform === "win32") {
     env.USERPROFILE = keychain === "off" ? home : (base.USERPROFILE ?? home);
   }
-  // The CLI config folder: XDG_CONFIG_HOME on macOS and Linux, %APPDATA% on Windows.
   env.XDG_CONFIG_HOME = join(dir, "config");
   env.APPDATA = join(dir, "appdata");
-  // Capture's state (spool, upload positions): XDG_STATE_HOME, or %LOCALAPPDATA% on Windows.
   env.XDG_STATE_HOME = join(dir, "state");
   env.LOCALAPPDATA = join(dir, "localappdata");
   env.NO_COLOR = "1";
@@ -108,13 +75,10 @@ export function smokeEnv(
   return env;
 }
 
-/** The id of the smoke test's own rule, which only the server's rule pack knows. */
 const SMOKE_RULE = "smoke-key";
 const SMOKE_SECRET = "SMOKE-314159";
 const SMOKE_SESSION = "5e551000-0000-4000-8000-00000000c0de";
 
-/** A rule pack with one operator rule: RE2 syntax, compiled by `re2js` on the server and again
- * in the uploader. */
 export const SMOKE_PACK = [
   'id = "smoke"',
   "[[rules]]",
@@ -125,8 +89,6 @@ export const SMOKE_PACK = [
   "",
 ].join("\n");
 
-/** A Claude Code transcript that ran in `cwd`, with the pack's secret in its prompt, long
- * enough to pass the session filter. */
 export function smokeTranscript(cwd: string): string {
   const records = [
     {
@@ -153,7 +115,6 @@ export function smokeTranscript(cwd: string): string {
   return records.map((r) => `${JSON.stringify(r)}\n`).join("");
 }
 
-/** Every `command` string in an agent's settings (hooks and the status line). */
 export function commandsIn(value: unknown): string[] {
   if (Array.isArray(value)) return value.flatMap(commandsIn);
   if (value === null || typeof value !== "object") return [];
@@ -162,13 +123,10 @@ export function commandsIn(value: unknown): string[] {
   );
 }
 
-/** Whether `command` starts with the program `binary`, by its absolute path (quoted or not). */
 export function startsWithProgram(command: string, binary: string): boolean {
   return command.startsWith(`${binary} `) || command.startsWith(`"${binary}" `);
 }
 
-/** `explore --no-open`: the address it prints, the page and its files (the HTML import the binary
- * carries), the API, and SIGINT stopping it. */
 export async function smokeExplore(
   binary: string,
   cwd: string,
@@ -306,9 +264,7 @@ export async function smoke(options: SmokeOptions): Promise<SmokeResult> {
     for (;;) {
       try {
         if ((await fetch(`${url}/healthz`)).ok) break;
-      } catch {
-        // Not listening yet.
-      }
+      } catch {}
       if (server.exitCode !== null || Date.now() > deadline) {
         // Its stderr ends only when it exits: stop a server that is still running first.
         server.kill();
@@ -341,7 +297,6 @@ export async function smoke(options: SmokeOptions): Promise<SmokeResult> {
       throw new Error(`whoami says ${JSON.stringify(who)}`);
     }
 
-    // Upload, redacted by the client with the server's own pack (F2.4): RE2 inside the binary.
     const project = join(dir, "code");
     mkdirSync(project, { recursive: true });
     const transcript = join(dir, "transcripts", `${SMOKE_SESSION}.jsonl`);
@@ -365,7 +320,6 @@ export async function smoke(options: SmokeOptions): Promise<SmokeResult> {
     await smokeExplore(options.binary, dir, env, timeout);
     log("ok: explore serves its page");
 
-    // Hooks name this binary, in a home of their own (never the real ~/.claude).
     const agentHome = join(dir, "agent-home");
     mkdirSync(agentHome, { recursive: true });
     const installEnv = {

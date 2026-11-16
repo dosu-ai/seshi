@@ -1,7 +1,3 @@
-/** Session search (F10): what a search asks and what it answers, the same over HTTP
- * (`GET /v1/search`, `@seshi/client`) and in local mode (`@seshi/search` over an Instance). The
- * HTTP contract is `spec/openapi.yaml` (`SearchResults`); these types follow it. */
-
 import type { EventRole } from "./schemas/trace";
 
 /** How results are ordered: best match first (bm25 over the matching records, the default),

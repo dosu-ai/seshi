@@ -1,14 +1,3 @@
-/** The session API over HTTP: `HttpSessionDB` posts transcripts to a seshi server, which runs
- * the pipeline against the bucket it holds, under the owner the token names. Every refusal the
- * server maps to a status comes back as the error the pipeline would have thrown, so a caller's
- * `catch` reads the same as over a store. Beyond the session API it reads other owners'
- * sessions (`?owner=`, X5.10), changes a session's visibility, manages tokens (X5.9) and reads
- * the worker's and the sources' status (X7.5); `authConfig` and `exchangeIdToken` are the two
- * calls made before there is a token (X5.7).
- *
- * Depends on `@seshi/model` only (X3.2): the server's keys and the pipeline never reach a
- * machine that only holds a token. */
-
 import { gzipSync } from "node:zlib";
 import {
   type ChangesPage,
@@ -108,15 +97,12 @@ interface RequestOptions {
   gzipFrom?: number;
 }
 
-/** What one request answered: its status, its JSON body, and its headers. */
 interface Answer {
   status: number;
   body: unknown;
   headers: Headers;
 }
 
-/** One request to the server, its JSON answer and status. Network failures are `StoreError`
- * ("cannot reach"); a 2xx that is not JSON is `ServerError` `bad_response`. */
 async function send(
   transport: TransportOptions,
   method: string,
@@ -163,8 +149,6 @@ async function send(
     try {
       parsed = JSON.parse(text);
     } catch {
-      // A proxy's own error page is a refusal with no envelope, reported by status alone; a
-      // 2xx that is not JSON is not the server at all.
       if (response.ok) {
         throw new ServerError(response.status, "bad_response", `not JSON: ${text.slice(0, 200)}`);
       }
@@ -177,7 +161,6 @@ function errorCode(body: unknown): string | undefined {
   return (body as ErrorBody | null)?.error?.code;
 }
 
-/** A non-2xx response as the error it stands for; `offset` is the chunk's, for a 409. */
 function refuse(status: number, body: unknown, offset = 0): never {
   const error = (body as ErrorBody | null)?.error ?? {};
   const code = error.code ?? "unknown";
@@ -444,8 +427,6 @@ export class HttpSessionDB implements SessionDB {
     return body as OwnersPage;
   }
 
-  // --- tokens (X5.9, X5.11): `tokens:admin` -------------------------------------------
-
   /** Issue a token; its secret is in the answer only. */
   async createToken(request: TokenRequest): Promise<{ token: string; record: TokenInfo }> {
     const { status, body } = await this.request("POST", "/v1/tokens", { body: request });
@@ -480,8 +461,6 @@ export class HttpSessionDB implements SessionDB {
     if (status !== 200) refuse(status, body);
     return (body as { revoked: TokenInfo[] }).revoked;
   }
-
-  // --- admin (X7.5): `sources:admin` ---------------------------------------------------
 
   /** The worker, its jobs and every source. */
   async jobs(): Promise<JobsStatus> {

@@ -1,9 +1,3 @@
-/** `@seshi/review`: model review (F3). A decision model labels each envelope allow, redact or
- * drop; for redact, a redactor LLM finds the text to remove and deterministic code removes it.
- * `ModelReviewer` is the pipeline's review stage (`Reviewer` from `@seshi/pipeline`), built from
- * `[review]` by `reviewerFromConfig`. Providers: the Anthropic Messages API and any
- * OpenAI-compatible endpoint. */
-
 export { AnthropicProvider, type AnthropicProviderOptions } from "./anthropic";
 export {
   type Applied,

@@ -1,12 +1,3 @@
-/** Review policies as the reviewer runs them (F3.3): `[[review.policies]]` with the defaults
- * applied (`resolveSteps`), prompt files read, a provider per step, and the policy's hash.
- *
- * The hash covers everything that changes what is judged or how: scope, retries and failure
- * mode, each step's provider, model, endpoint, prompt text, output cap, effort and timeout, the
- * redactor's categories, and seshi's prompt wrapping (`WRAPPER_VERSION`). Never the keys. Every
- * review record and drop record carries it, so a policy change is visible in the audit trail
- * and in evals (F3.8). */
-
 import { createHash } from "node:crypto";
 import {
   type ResolvedStep,
@@ -26,8 +17,6 @@ import {
 } from "./prompts";
 import type { ModelProvider } from "./provider";
 
-/** A policy that cannot be run as configured (a prompt file that cannot be read, a provider
- * this binary lacks). The message is for the operator. */
 export class ReviewSetupError extends Error {
   constructor(message: string) {
     super(message);
@@ -37,7 +26,6 @@ export class ReviewSetupError extends Error {
 
 export interface PolicyStep {
   provider: ModelProvider;
-  /** The operator's prompt (or the default), before seshi's wrapping. */
   prompt: string;
   maxTokens: number;
   timeoutMs: number;
@@ -45,7 +33,6 @@ export interface PolicyStep {
 
 export interface Policy {
   id: string;
-  /** sha256 (hex) of the policy as run; see above. */
   hash: string;
   sources: readonly string[];
   agents: readonly string[];
@@ -57,17 +44,12 @@ export interface Policy {
   redactor: PolicyStep & { categories: readonly ReviewCategory[] };
 }
 
-/** What a policy is matched against. */
 export interface PolicyScope {
   source_id: string;
-  /** The envelope's format (the agent). */
   format: string;
-  /** The session's project (repository), when known. */
   project?: string;
 }
 
-/** Whether `policy` applies: every scope list it sets names the envelope (empty is all).
- * `repos` are globs; a session without a project matches only a policy with no repos. */
 export function matches(policy: Policy, scope: PolicyScope): boolean {
   if (policy.sources.length > 0 && !policy.sources.includes(scope.source_id)) return false;
   if (policy.agents.length > 0 && !policy.agents.includes(scope.format)) return false;
@@ -79,10 +61,8 @@ export function matches(policy: Policy, scope: PolicyScope): boolean {
   return true;
 }
 
-/** Builds the provider a step names. Tests pass their own. */
 export type ProviderFactory = (step: ResolvedStep, role: "decision" | "redactor") => ModelProvider;
 
-/** The real providers, reaching their endpoints through `fetch`. */
 export function providerFactory(fetcher?: typeof fetch): ProviderFactory {
   return (step) => {
     const provider: ReviewProvider = step.provider;
@@ -112,10 +92,8 @@ export function providerFactory(fetcher?: typeof fetch): ProviderFactory {
 }
 
 export interface LoadOptions {
-  /** Builds each step's provider; the real ones over `fetch` by default. */
   providers?: ProviderFactory;
   fetch?: typeof fetch;
-  /** Reads a `prompt_file`; `Bun.file(path).text()` by default. */
   readFile?: (path: string) => Promise<string>;
 }
 
@@ -157,7 +135,6 @@ function stepIdentity(step: ResolvedStep, prompt: string) {
   };
 }
 
-/** The hash of a policy as run (see above). */
 export function policyHash(
   policy: ReviewPolicy,
   steps: { decision: ResolvedStep; redactor: ResolvedStep },
@@ -179,7 +156,6 @@ export function policyHash(
   return createHash("sha256").update(canonicalJson(identity)).digest("hex");
 }
 
-/** One configured policy, ready to run. */
 export async function loadPolicy(policy: ReviewPolicy, options: LoadOptions = {}): Promise<Policy> {
   const steps = resolveSteps(policy);
   const readFile = options.readFile ?? ((path: string) => Bun.file(path).text());
@@ -235,7 +211,6 @@ export async function loadPolicy(policy: ReviewPolicy, options: LoadOptions = {}
   };
 }
 
-/** Every configured policy, in order (the first that matches an envelope reviews it). */
 export async function loadPolicies(
   policies: readonly ReviewPolicy[],
   options: LoadOptions = {},

@@ -1,7 +1,3 @@
-/** Text canonicalization before hashing. `content_hash` is computed over the result, so these
- * follow Python's string semantics (`str.rstrip`, `str.splitlines`) on purpose: a reader in any
- * language can reproduce the hash from the documented rule without matching ECMAScript quirks. */
-
 /** The characters Python's `str.rstrip()` strips with no argument: those for which
  * `str.isspace()` is true (bidirectional class WS, B or S, or category Zs). Not the same set as
  * ECMAScript's `trimEnd()`, which strips U+FEFF and not U+001C–U+001F. */
@@ -11,7 +7,6 @@ const PY_WHITESPACE = new Set([
   0x205f, 0x3000,
 ]);
 
-/** Python's `str.rstrip()`. */
 function pyRstrip(s: string): string {
   let end = s.length;
   while (end > 0 && PY_WHITESPACE.has(s.charCodeAt(end - 1))) end--;

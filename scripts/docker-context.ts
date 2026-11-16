@@ -43,7 +43,6 @@ function toRegex(pattern: string): RegExp {
   return new RegExp(`^${out}(?:/.*)?$`);
 }
 
-/** The rules of a `.dockerignore` file's text. */
 export function parseDockerignore(text: string): Rule[] {
   const rules: Rule[] = [];
   for (const raw of text.split(/\r?\n/)) {
@@ -58,7 +57,6 @@ export function parseDockerignore(text: string): Rule[] {
   return rules;
 }
 
-/** Whether `path` (relative to the context root, `/`-separated) is left out of the context. */
 export function isIgnored(rules: readonly Rule[], path: string): boolean {
   let ignored = false;
   for (const rule of rules) {
@@ -67,7 +65,6 @@ export function isIgnored(rules: readonly Rule[], path: string): boolean {
   return ignored;
 }
 
-/** The repository's own `.dockerignore` rules. */
 export function repositoryRules(root: string): Rule[] {
   return parseDockerignore(readFileSync(join(root, ".dockerignore"), "utf8"));
 }

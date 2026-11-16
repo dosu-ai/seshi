@@ -1,22 +1,3 @@
-/** The hook budget (X3.3), run by `bun run check:hook` in CI. `seshi hook` runs on every agent
- * turn, so it must start fast and must never evaluate the server, protobuf or search code. Two
- * checks:
- *
- * 1. The static import graph. From the binary's entry point and the `hook` and `statusline`
- *    command modules, every import that runs at load time is followed (`import type` and
- *    `import()` are not: types are erased and dynamic imports are lazy). Reaching a package on
- *    the forbidden list fails, with the chain of files that got there.
- * 2. The time. `seshi hook claude-code Stop` runs several times, with a Stop payload on stdin in
- *    a temporary home (rules judged, spool written, no uploader started; a hook that spooled
- *    nothing fails the check), and its median must stay under
- *    a fixed budget (`--budget-ms`, `SESHI_HOOK_BUDGET_MS`, 250 ms by default). Run from source
- *    it must also take under half of what loading `seshi serve` takes, measured the same way,
- *    so a slow CI machine moves both. `--binary dist/seshi` times the compiled binary instead;
- *    there the bundle is loaded whole, so only the budget applies (the graph check still
- *    guarantees the server code is not evaluated).
- *
- *   bun run scripts/check-hook.ts [--static-only] [--binary <path>] [--budget-ms <n>] [--runs <n>] */
-
 import {
   existsSync,
   mkdtempSync,
@@ -31,7 +12,6 @@ import { dirname, join, relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import ts from "typescript";
 
-/** What `seshi hook` and `seshi statusline` may never load at start-up. */
 export const FORBIDDEN: readonly (string | RegExp)[] = [
   "@seshi/api",
   "@seshi/instance",
@@ -44,20 +24,14 @@ export const FORBIDDEN: readonly (string | RegExp)[] = [
   "@seshi/review",
   "@anthropic-ai/sdk",
   /protobuf|@bufbuild\//,
-  // Capture's fast path (14): the config schema library, the HTTP client and the transcript
-  // adapters stay out of a hook; the rules come from capture's cache.
   "zod",
   "@seshi/client",
   "@seshi/formats",
   "@letta-ai/trajectory",
-  // Pre-redaction (07 wired in 14) runs in the uploader only: rule packs and RE2 never load in
-  // a hook.
   "@seshi/redact",
   "re2js",
 ];
 
-/** The modules a hook evaluates first: the router, the two fast commands, and the agents'
- * capture modules (a hook loads the one it is called for, with `import()`). */
 export const HOOK_ENTRIES = [
   "apps/seshi/src/main.ts",
   "apps/seshi/src/commands/hook.ts",
@@ -67,8 +41,6 @@ export const HOOK_ENTRIES = [
   "integrations/cursor/src/local/capture.ts",
 ];
 
-/** The specifiers a file imports at load time: static imports and re-exports, never
- * `import type`, `export type` or `import()`. */
 export function loadTimeImports(text: string, fileName = "x.ts"): string[] {
   const source = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, false);
   const out: string[] = [];
@@ -89,7 +61,6 @@ export function loadTimeImports(text: string, fileName = "x.ts"): string[] {
   return out;
 }
 
-/** Workspace packages by name: their folder and their `exports` map. */
 function workspacePackages(root: string): Map<string, { dir: string; exports: unknown }> {
   const found = new Map<string, { dir: string; exports: unknown }>();
   const scan = (parent: string) => {
@@ -109,7 +80,6 @@ function workspacePackages(root: string): Map<string, { dir: string; exports: un
   return found;
 }
 
-/** The file a relative import names: as written, with `.ts`, or its folder's `index.ts`. */
 function withExtension(path: string): string | undefined {
   for (const candidate of [path, `${path}.ts`, `${path}.tsx`, join(path, "index.ts")]) {
     try {
@@ -120,15 +90,11 @@ function withExtension(path: string): string | undefined {
 }
 
 export interface GraphResult {
-  /** Files reached, relative to the root. */
   files: string[];
-  /** Bare specifiers reached that are not workspace packages (npm packages, `node:` modules). */
   external: string[];
-  /** Forbidden packages reached, each with the chain of files that imports it. */
   violations: { specifier: string; chain: string[] }[];
 }
 
-/** Walk the load-time import graph from `entries` (relative to `root`). */
 export function importGraph(
   root: string,
   entries: readonly string[] = HOOK_ENTRIES,
@@ -195,12 +161,6 @@ export function importGraph(
   };
 }
 
-/** The environment the timed runs get: the caller's, minus every `SESHI_*` variable, then the
- * temporary folders under `home` (XDG_* on macOS and Linux; %USERPROFILE%, %LOCALAPPDATA% and
- * %APPDATA% on Windows, so the compiled check also runs on a Windows runner). The config loader
- * refuses `SESHI_*` names it does not know, and a hook that meets one turns capture off and
- * spools nothing: `SESHI_HOOK_BUDGET_MS`, this script's own knob, is one. A caller's real
- * settings (`SESHI_CAPTURE__ENABLED=false`) would change what is timed as well. */
 export function hookEnv(
   base: Record<string, string | undefined>,
   home: string,
@@ -218,7 +178,6 @@ export function hookEnv(
   };
 }
 
-/** How many entries a spool folder holds; 0 when there is none. */
 export function spoolEntries(dir: string): number {
   try {
     return readdirSync(dir).filter((name) => name.endsWith(".json")).length;
@@ -227,8 +186,6 @@ export function spoolEntries(dir: string): number {
   }
 }
 
-/** The median wall time of `runs` runs of `command`, in milliseconds, with `stdin` as its input
- * and `env` as its environment when given. */
 export async function medianMs(
   command: string[],
   runs: number,
@@ -282,8 +239,6 @@ if (import.meta.main) {
   const seshi = values.binary
     ? [resolve(values.binary)]
     : ["bun", join(root, "apps/seshi/src/main.ts")];
-  // A real hook's work: a temporary home with a transcript, a Stop payload on stdin, the rules
-  // judged and the spool written; no uploader is started.
   const home = mkdtempSync(join(tmpdir(), "seshi-hook-budget-"));
   const transcript = join(home, "session.jsonl");
   writeFileSync(
@@ -298,18 +253,12 @@ if (import.meta.main) {
   });
   const env = hookEnv(process.env, home);
   const hookRun = { stdin: payload, env };
-  // Warm the file cache and capture's rules cache once, so the first measured run is neither
-  // the disk's nor the config loader's.
   await medianMs([...seshi, "--version"], 1, root, { env });
   await medianMs([...seshi, "hook", "claude-code", "Stop"], 1, root, hookRun);
   const hook = await medianMs([...seshi, "hook", "claude-code", "Stop"], runs, root, hookRun);
-  // A hook that failed at once would be fast too: it must have spooled the Stop. (Hooks print
-  // nothing and exit 0 whatever happens; their errors go to capture.log.)
   const spooled = spoolEntries(join(home, "state", "seshi", "spool"));
   const captureLog = join(home, "state", "seshi", "capture.log");
   const hookLog = existsSync(captureLog) ? readFileSync(captureLog, "utf8") : "";
-  // `serve --bogus` loads the whole server, then stops at the flag; in the same environment, so
-  // a stray SESHI_* variable cannot stop it early and skew the comparison.
   const serve = await medianMs([...seshi, "serve", "--bogus-flag"], runs, root, { env });
   rmSync(home, { recursive: true, force: true });
   console.log(

@@ -1,12 +1,3 @@
-/** Secrets are references, not values (F1.3). A secret field accepts a literal string,
- * `{ env = "NAME" }` (read from that environment variable) or `{ file = "/path" }` (read from
- * that file, trailing newline removed), so a TOML file can be committed. The loader resolves
- * every reference at start-up, so a missing variable or file stops the process there and not
- * on first use.
- *
- * The parsed value is a `Secret`: it never prints its value (`String`, JSON and `inspect` all
- * give `[secret]`), and code reads it with `reveal()`. */
-
 import * as z from "zod";
 
 export type SecretRef =
@@ -14,7 +5,6 @@ export type SecretRef =
   | { kind: "env"; name: string }
   | { kind: "file"; path: string };
 
-/** What resolving a reference reads: the environment and files, injectable for tests. */
 export interface SecretSources {
   env: Record<string, string | undefined>;
   readFile(path: string): string;
@@ -29,7 +19,6 @@ export class Secret {
     if (ref.kind === "literal") this.#value = ref.value;
   }
 
-  /** A secret with a known value (tests, and values set from env or flags). */
   static of(value: string): Secret {
     return new Secret({ kind: "literal", value });
   }
@@ -38,7 +27,6 @@ export class Secret {
     return this.#value !== undefined;
   }
 
-  /** Reads the reference. Throws an `Error` saying what is missing. */
   resolve(sources: SecretSources): void {
     const { ref } = this;
     if (ref.kind === "literal") return;
@@ -61,7 +49,6 @@ export class Secret {
     this.#value = value;
   }
 
-  /** The value. Throws when the reference was never resolved. */
   reveal(): string {
     if (this.#value === undefined) {
       throw new Error(`secret ${describeSecret(this)} was not resolved`);
@@ -82,7 +69,6 @@ export class Secret {
   }
 }
 
-/** Where a secret comes from, for messages and `config show`: never its value. */
 export function describeSecret(secret: Secret): string {
   const { ref } = secret;
   if (ref.kind === "env") return `from env ${ref.name}`;
@@ -90,10 +76,8 @@ export function describeSecret(secret: Secret): string {
   return "literal";
 }
 
-/** Marks a secret field in the JSON Schema, so tools can mask it. */
 export const SECRET_KEY = "x-seshi-secret";
 
-/** A secret field: a literal, `{ env = "NAME" }` or `{ file = "/path" }`. */
 export function secret() {
   return z
     .union([

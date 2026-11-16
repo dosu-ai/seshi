@@ -1,5 +1,3 @@
-/** `[server]`: how the HTTP server listens and which roles this instance runs (X7.1). */
-
 import * as z from "zod";
 import { httpUrl } from "./common";
 
@@ -7,8 +5,6 @@ export const ROLES = ["api", "worker"] as const;
 
 const LISTEN = /^(?:(\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9.-]*):)?(\d{1,5})$/;
 
-/** `host:port`, `:port` or `port` as a hostname and a port; `[::1]:7200` for IPv6. An empty
- * host means every interface. `undefined` when it is none of these. */
 export function parseListen(listen: string): { hostname: string; port: number } | undefined {
   const match = LISTEN.exec(listen.trim());
   if (!match) return undefined;

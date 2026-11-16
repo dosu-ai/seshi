@@ -1,15 +1,3 @@
-/** Redaction of a native transcript before it is stored as a session's raw part, the first
- * object written for a session and what its trace is normalized from. Two passes, by
- * `RawFormat`:
- *
- * - `jsonl` (Claude Code, Cursor, Codex, pi): each line parsed, every string value redacted, keys
- *   and non-string values untouched; a line that is not JSON is redacted whole.
- * - `json` (OpenCode's export document, the folded Gemini session): every string value in the
- *   document, keys untouched.
- *
- * Unlike the record pass there is no structural-key allowlist: nothing downstream links raw
- * values by identity, and over-redacting a raw id costs nothing. */
-
 import type { RawFormat } from "@seshi/model";
 import { redactSecrets } from "./secrets";
 
@@ -26,7 +14,6 @@ function redactStrings(value: unknown): unknown {
   return value;
 }
 
-/** The line pass. Line endings are preserved (`\n`; a trailing newline stays). */
 function redactJsonl(text: string): string {
   return text
     .split("\n")
@@ -41,8 +28,6 @@ function redactJsonl(text: string): string {
     .join("\n");
 }
 
-/** The document pass. Output is re-serialized compact JSON; a document that does not parse is
- * redacted as one string. */
 function redactJsonDocument(text: string): string {
   try {
     return JSON.stringify(redactStrings(JSON.parse(text)));

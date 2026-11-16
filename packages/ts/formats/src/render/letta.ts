@@ -1,9 +1,3 @@
-/** The canonical trace as Letta trajectory-v1 (X6.2): the `sessionstorage/trace/1` object
- * sessiondb stored before seshi, so a reader of those objects reads this one unchanged. The
- * records lose the fields the canonical trace added to trajectory-v1; the trace loses
- * `llm_calls` and `provenance`. Events, `content_hash` and metadata stay as they are: the hash
- * never read the added fields. */
-
 import {
   LETTA_TRACE_SCHEMA,
   type LettaTrace,
@@ -12,7 +6,6 @@ import {
   type TraceRecord,
 } from "@seshi/model";
 
-/** One canonical record as plain trajectory-v1, field order as `validateRecords` writes it. */
 export function lettaRecord(record: TraceRecord): NormalizedRecord {
   switch (record.role) {
     case "meta": {
@@ -51,12 +44,10 @@ export function lettaRecord(record: TraceRecord): NormalizedRecord {
   }
 }
 
-/** Canonical records as plain trajectory-v1. */
 export function lettaRecords(records: readonly TraceRecord[]): NormalizedRecord[] {
   return records.map(lettaRecord);
 }
 
-/** The trace as Letta trajectory-v1, keys in the order sessiondb wrote them. */
 export function toLetta(trace: Trace): LettaTrace {
   return {
     schema: LETTA_TRACE_SCHEMA,

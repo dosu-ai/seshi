@@ -1,6 +1,3 @@
-/** `[records]`: how long drop and failure records, and source health counters, are kept (X6.4,
- * X4.8). The worker's retention job prunes them. */
-
 import * as z from "zod";
 import { duration } from "../units";
 

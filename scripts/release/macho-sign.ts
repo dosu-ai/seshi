@@ -41,7 +41,6 @@ const SUPERBLOB_HEADER = 12 + 8;
 const VM_PAGE = 0x4000;
 
 interface Segment {
-  /** Offset of the load command in the file. */
   cmd: number;
   name: string;
   vmaddr: bigint;
@@ -52,7 +51,6 @@ interface Segment {
 
 interface Layout {
   filetype: number;
-  /** Offset of the LC_CODE_SIGNATURE load command, and the area it names. */
   sigCmd: number;
   sigOffset: number;
   sigSize: number;
@@ -95,7 +93,6 @@ function layout(data: Uint8Array): Layout {
   return { filetype, sigCmd: sig.cmd, sigOffset: sig.offset, sigSize: sig.size, segments };
 }
 
-/** The embedded signature (superblob) for `data`, whose code ends at `codeLimit`. */
 export function adhocSignature(
   data: Uint8Array,
   codeLimit: number,
@@ -140,7 +137,6 @@ export function adhocSignature(
   return out;
 }
 
-/** `data` with a fresh ad-hoc signature in place of the one it carries. */
 export function adhocSign(data: Uint8Array, identifier: string): Uint8Array {
   const { filetype, sigCmd, sigOffset, sigSize, segments } = layout(data);
   const text = segments.find((s) => s.name === "__TEXT");
@@ -181,7 +177,6 @@ export function adhocSign(data: Uint8Array, identifier: string): Uint8Array {
     if (vmNeeded > linkedit.vmsize) view.setBigUint64(linkedit.cmd + 32, vmNeeded, true);
     view.setUint32(sigCmd + 12, size, true);
   }
-  // The header changed (when it grew) before any page is hashed.
   const signature = adhocSignature(out, sigOffset, identifier, {
     offset: text.fileoff,
     size: text.filesize,

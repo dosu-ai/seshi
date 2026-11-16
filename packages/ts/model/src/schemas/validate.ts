@@ -1,14 +1,3 @@
-/** A run-time check of a stored object against its JSON Schema in `spec/schemas/` (X3.10). The
- * schemas travel as data in the generated modules (`JSON_SCHEMA`, `bun run types`), so this
- * follows the contract as the generated types do, with no schema library in the binary.
- *
- * It covers the subset the contract uses: `type`, `const`, `enum`, `oneOf`, `anyOf`, `items`,
- * `properties`, `required`, `additionalProperties`, `pattern`, `format: date-time`,
- * `minLength`, `maxLength`, `minimum`, `maximum`, `minItems`, `maxItems`, and `$ref` to a
- * `$defs` entry in the same file or another. Anything else throws, as the generator does, so a
- * schema that grows a keyword is noticed here rather than checked loosely.
- * `tests/spec/schemas.test.ts` holds it to ajv's answers. */
-
 import { JSON_SCHEMA as CHANGE } from "../generated/change";
 import { JSON_SCHEMA as COMMON } from "../generated/common";
 import { JSON_SCHEMA as ENVELOPE } from "../generated/envelope";
@@ -62,7 +51,6 @@ const KNOWN = new Set([
   "maxItems",
 ]);
 
-/** The schema files, by `$id`. */
 const FILES: ReadonlyMap<string, Schema> = new Map(
   [CHANGE, COMMON, ENVELOPE, LAYOUT, METADATA, TRACE].map((s) => [s.$id, s as Schema]),
 );
@@ -75,7 +63,6 @@ export type SchemaFile =
   | "metadata.schema.json"
   | "trace.schema.json";
 
-/** How many problems are reported at most: enough to say what is wrong. */
 const MAX_PROBLEMS = 20;
 
 /** RFC 3339 date-time, as ajv-formats reads `date-time`. */
@@ -100,7 +87,6 @@ function hasType(value: unknown, type: string): boolean {
   }
 }
 
-/** JSON equality, for `const` and `enum`. */
 function same(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   if (typeOf(a) !== typeOf(b) || typeof a !== "object" || a === null) return false;
@@ -116,7 +102,6 @@ function same(a: unknown, b: unknown): boolean {
   );
 }
 
-/** A JSON pointer segment. */
 function segment(key: string | number): string {
   return `/${String(key).replaceAll("~", "~0").replaceAll("/", "~1")}`;
 }
@@ -124,7 +109,6 @@ function segment(key: string | number): string {
 class Checker {
   readonly problems: string[] = [];
 
-  /** Resolve `$ref` against the file the schema is in; the file the target is in. */
   private resolve(ref: string, file: string): { schema: Schema; file: string } {
     const match = /^([a-z-]+\.schema\.json)?#\/\$defs\/([A-Za-z0-9]+)$/.exec(ref);
     const target = match?.[1] ?? file;
@@ -137,7 +121,6 @@ class Checker {
     if (this.problems.length < MAX_PROBLEMS) this.problems.push(`${path || "/"}: ${message}`);
   }
 
-  /** Whether `value` matches, without recording why not (for `oneOf` and `anyOf`). */
   private matches(value: unknown, schema: Schema, file: string): boolean {
     const probe = new Checker();
     probe.check(value, schema, file, "");

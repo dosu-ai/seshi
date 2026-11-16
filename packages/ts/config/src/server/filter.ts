@@ -1,6 +1,3 @@
-/** `[filter]`: the session filter (X4.10), today's worthiness rules with today's values. A
- * source can override any of them (`[sources.filter]`). */
-
 import * as z from "zod";
 
 export const filterSection = z
@@ -29,7 +26,6 @@ export const filterSection = z
   .prefault({})
   .describe("Which sessions are worth storing (X4.10). It judges a session's first trace only.");
 
-/** A source's override: any of the rules, the rest from `[filter]`. */
 export const filterOverride = z
   .strictObject({
     enabled: z.boolean().optional(),

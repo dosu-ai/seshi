@@ -1,11 +1,3 @@
-/** The contract between a transcript format and the code that runs it: one adapter per format
- * name (`claude-code`, `codex`, `atif`, …). Integrations implement it (through `@seshi/kit`,
- * which re-exports these types as part of the integration contract), `@seshi/formats` holds the
- * registry that detects and normalizes through it, and the pipeline asks that registry.
- *
- * The types live here, in the lowest layer, because `@seshi/kit` and `@seshi/formats` sit on
- * the same layer and may not import each other (X3.2). */
-
 import type { LlmCall } from "./schemas/trace";
 import type { NormalizedRecord } from "./schemas/trajectory";
 import type { SpanAdapter } from "./spans";

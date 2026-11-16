@@ -1,10 +1,3 @@
-/** Letta trajectory-v1: the record format every adapter normalizes to, and the core of the
- * canonical trace's records (`seshi/trace/1`). The types are `@letta-ai/trajectory`'s.
- * `validateRecords` is the runtime check on trajectory-v1 (unknown fields dropped);
- * `validateTraceRecords` also keeps and checks the optional fields the canonical trace adds
- * (`id`, `llm_call`, `withheld`, `duration_ms`, `agent_version`), so nothing that is not a
- * trace reaches the bucket. */
-
 import type {
   AssistantMessageRecord,
   AssistantToolCallRecord,
@@ -40,8 +33,6 @@ export class TrajectoryError extends Error {
   }
 }
 
-/** A scope coordinate (`source`, `git_branch`, `project`): any string without control characters
- * or line separators, so it can be a key segment and a log line. */
 // biome-ignore lint/suspicious/noControlCharactersInRegex: the control range is the point
 const SCOPE_COORDINATE = /^[^\x00-\x1f\x7f\u0085\u2028\u2029]*$/;
 
@@ -97,7 +88,6 @@ function nonEmptyOptional(
 
 const WITHHELD = new Set(["sensitive-file", "secret-output", "review"]);
 
-/** The canonical trace's optional fields on one record, checked; `{}` for trajectory-v1. */
 function extensions(
   index: number,
   record: Record<string, unknown>,
@@ -177,8 +167,6 @@ function validateCore(index: number, value: unknown): NormalizedRecord {
       if (content !== null && content !== undefined && typeof content !== "string") {
         fail(index, "content must be a string or null");
       }
-      // Content beside tool calls is allowed; event derivation uses the calls when there are
-      // any, else the content. Keep both as they came.
       return {
         role,
         content: content ?? null,
@@ -188,8 +176,6 @@ function validateCore(index: number, value: unknown): NormalizedRecord {
     }
     const content = record.content;
     if (content === null || content === undefined) {
-      // `content: null` with no tool calls is allowed: a record that yields no event, kept as it
-      // came so the stored records are what the adapter produced.
       return { role, content: null, timestamp } as unknown as AssistantMessageRecord;
     }
     if (typeof content !== "string") fail(index, "content must be a string or null");

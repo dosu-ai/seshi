@@ -1,7 +1,3 @@
-/** What a stored trace can be read as (X6.2): the canonical trace itself, or one of the formats
- * `@seshi/formats` renders from it. The rendered shapes are defined here, in the lowest layer,
- * so the HTTP client can type what a server answers without depending on the renderers. */
-
 import type { OtlpTrace } from "./otlp";
 import type { Continuation, Trace, TraceEvent } from "./trace";
 import type { NormalizedRecord } from "./trajectory";

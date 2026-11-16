@@ -1,7 +1,3 @@
-/** `@seshi/config` (layer 1, F1): the TOML and env loader, the server's and the CLI's schemas,
- * value provenance and secret references. Nothing here keeps state between calls: each load
- * returns its own config. */
-
 export { type CheckReport, checkServerConfig } from "./check";
 export { type CapturePath, type CliConfig, cliConfigSchema, THEMES } from "./cli";
 export {
@@ -41,8 +37,6 @@ import { toJSONSchema } from "zod";
 import { cliConfigSchema } from "./cli";
 import { serverConfigSchema } from "./server/index";
 
-/** The JSON Schemas for editors (F1.4): `spec/config.schema.json` and
- * `spec/cli-config.schema.json` are these, written by `bun run schema`. */
 export function configJsonSchemas(): { server: object; cli: object } {
   const generate = (schema: typeof serverConfigSchema | typeof cliConfigSchema, id: string) => ({
     $id: id,

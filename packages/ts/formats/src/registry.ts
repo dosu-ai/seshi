@@ -1,37 +1,16 @@
-/** The format registry: every transcript format a deployment reads, by name, built from the
- * adapters the integrations provide plus the built-in vendor-neutral ones (ATIF,
- * trajectory-v1). `apps/seshi` builds it from its static integration registry and passes it
- * down (X3.11); nothing below the app imports an integration.
- *
- * A transcript comes in whole or as a chunk: the bytes of a log past a point already
- * normalized. A chunk is normalized on its own and yields the records those lines stand for,
- * without the meta record (the session's meta was made from its first chunk) and without the
- * demand that it hold a conversation. Cut at a line boundary, a log's chunks normalize to
- * exactly the records the whole log does, in order.
- *
- * Redaction is not this layer's: the pipeline passes it as `postprocess`, so that the registry
- * reports a chunk empty by what is left after it, as it always has. */
-
 import type { Chunk, FormatAdapter, LlmCall, NormalizedRecord, Normalizer } from "@seshi/model";
 import { VERSION } from "@seshi/model";
 import { asTranscript } from "./calls";
 import { detectFormat } from "./detect";
 import { TRAJECTORY_VERSION } from "./letta";
 
-/** What a stored trace records as its normalizer: this release plus the `@letta-ai/trajectory`
- * it ran, as semver build metadata. Either changing can change the records a transcript
- * normalizes to, so a reader can tell which traces a change affected. The name is the one
- * traces have always recorded, kept so a reader's filters still match. */
 export const NORMALIZER = {
   name: "@dosu/sessiondb",
   version: `${VERSION}+trajectory.${TRAJECTORY_VERSION}`,
 } as const;
 
-/** An adapter's normalizer version when it declares none. */
 const FIRST_VERSION = "1";
 
-/** Two normalizer versions compared number by number (`1+trajectory.0.3.0` is 1, 0, 3, 0; a
- * missing number is 0): negative when `a` is older, 0 when the same, positive when newer. */
 export function compareNormalizerVersions(a: string, b: string): number {
   const numbers = (v: string) => (v.match(/\d+/g) ?? []).map((n) => Number.parseInt(n, 10));
   const x = numbers(a);
@@ -43,18 +22,12 @@ export function compareNormalizerVersions(a: string, b: string): number {
   return 0;
 }
 
-/** The adapter's refusals that only mean "no conversation here": the session is trivial, not
- * unsupported. */
 const EMPTY_CONVERSATION_CODES = new Set(["missing_user_records", "missing_assistant_records"]);
 
 export type NormalizeOutcome =
-  /** `llm_calls`: the model calls the records' `llm_call` fields name, when the log records
-   * them. */
   | { records: NormalizedRecord[]; llm_calls?: LlmCall[]; empty?: false }
-  /** A log with no conversation in it. */
   | { records: []; empty: true };
 
-/** Thrown when a transcript cannot be normalized (unsupported source, unparseable transcript). */
 export class NormalizeError extends Error {
   readonly code: string;
   constructor(code: string, message: string) {
@@ -71,14 +44,12 @@ export interface NormalizeInput {
 }
 
 export interface NormalizeOptions {
-  /** Runs on the adapter's records before the outcome is decided (the pipeline's redaction). */
   postprocess?: (records: NormalizedRecord[]) => NormalizedRecord[];
 }
 
 export class FormatRegistry {
   private readonly adapters: ReadonlyMap<string, FormatAdapter>;
 
-  /** `adapters` in the order `sources` lists them; two adapters for one name are refused. */
   constructor(adapters: readonly FormatAdapter[]) {
     const byName = new Map<string, FormatAdapter>();
     for (const adapter of adapters) {
@@ -90,7 +61,6 @@ export class FormatRegistry {
     this.adapters = byName;
   }
 
-  /** Every format name, in registration order: the `agent` values a client may send. */
   get sources(): string[] {
     return [...this.adapters.keys()];
   }
@@ -99,24 +69,16 @@ export class FormatRegistry {
     return this.adapters.has(source);
   }
 
-  /** A format's current normalizer version (`FormatAdapter.version`, `1` when it declares
-   * none); undefined for a format this registry does not know. */
   versionOf(source: string): string | undefined {
     const adapter = this.adapters.get(source);
     return adapter ? (adapter.version ?? FIRST_VERSION) : undefined;
   }
 
-  /** What a trace of `source` records as its normalizer: the release, and the format's own
-   * version (X4.9). */
   normalizerFor(source: string): Normalizer {
     const format_version = this.versionOf(source);
     return format_version ? { ...NORMALIZER, format_version } : { ...NORMALIZER };
   }
 
-  /** Whether a session of `source` built by `builtWith` (its `normalizer.format_version`) was
-   * built by an older normalizer than the format's current one (X4.9). A session with none
-   * recorded is stale; one of a format this registry does not know is not (nothing here could
-   * rebuild it). */
   isStale(source: string, builtWith: string | undefined): boolean {
     const current = this.versionOf(source);
     if (current === undefined) return false;
@@ -127,22 +89,14 @@ export class FormatRegistry {
     return this.adapters.get(source);
   }
 
-  /** Whether a format's transcript can arrive in chunks. An ATIF document is one JSON value, so
-   * it is always sent whole, whatever `format` the client says. */
   isChunkable(source: string): boolean {
     return this.adapters.get(source)?.chunkable !== false;
   }
 
-  /** The format whose distinctive shape `sample` (the start of one file) matches, or `null` when
-   * it matches none or more than one. */
   detect(sample: string): string | null {
     return detectFormat([...this.adapters.values()], sample);
   }
 
-  /** Normalize one transcript to trajectory-v1 records. `empty` for a transcript the adapter
-   * reads but finds no conversation in; throws `NormalizeError` for one it cannot read or a
-   * format it does not know. With `chunk`, the transcript is a chunk of a log and the records are
-   * the chunk's own: no meta record, and `empty` only when it holds no records at all. */
   normalize(input: NormalizeInput, options: NormalizeOptions = {}): NormalizeOutcome {
     const { source, transcript, chunk } = input;
     if (transcript.trim() === "") return { records: [], empty: true };

@@ -1,6 +1,3 @@
-/** `seshi config show`: every value with where it came from (F1.4), secrets masked. Values are
- * printed the way they are written in TOML: durations as `"30d"`, sizes as `"32MiB"`. */
-
 import type { Loaded } from "./load";
 import { formatPath, type Origin, type PathSegment } from "./origins";
 import { describeSecret, Secret } from "./secret";
@@ -9,9 +6,7 @@ import { formatBytes, formatDuration } from "./units";
 
 export interface ConfigEntry {
   path: PathSegment[];
-  /** `store.url`, `sources[datadog-prod].api_key`. */
   name: string;
-  /** What to print: secrets as `<secret: env NAME>`, durations and sizes in units. */
   value: unknown;
   origin: Origin;
 }
@@ -29,7 +24,6 @@ function display(value: unknown, node: JsonSchema | undefined): unknown {
   return value;
 }
 
-/** Every value of a loaded config, in schema order (the order the parsed config holds). */
 export function configEntries<T>(loaded: Loaded<T>): ConfigEntry[] {
   const entries: ConfigEntry[] = [];
   const root = loaded.config as unknown;
@@ -62,7 +56,6 @@ export function configEntries<T>(loaded: Loaded<T>): ConfigEntry[] {
   return entries;
 }
 
-/** The entries as a nested object of printed values, for `config show --json`. */
 export function displayTree<T>(loaded: Loaded<T>): unknown {
   const tree: Record<string, unknown> = {};
   for (const entry of configEntries(loaded)) {

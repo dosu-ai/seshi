@@ -1,12 +1,3 @@
-/** Writes `apps/seshi/src/cli/brand-tokens.ts` from `brand/tokens.json` (B1.1): the brand's
- * colour tokens with what each becomes on a terminal that cannot show it exactly (B1.4): the
- * nearest xterm 256-colour value, and the nearest of the terminal's own sixteen. The CLI reads
- * colours only from the generated module, so a palette change is one edit to the tokens and
- * `bun run brand`. `--check` writes nothing and fails when the module is stale; `bun run check`
- * runs it.
- *
- *   bun run scripts/brand-tokens.ts [--check] */
-
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -25,8 +16,6 @@ export function hexToRgb(hex: string): Rgb {
   ];
 }
 
-/** The "redmean" distance: plain RGB distance weighted the way the eye weighs red and blue,
- * cheap and close enough to pick a terminal colour. */
 export function distance(a: Rgb, b: Rgb): number {
   const rMean = (a[0] + b[0]) / 2;
   const dr = a[0] - b[0];
@@ -64,7 +53,6 @@ export function nearest256(rgb: Rgb): number {
   return best;
 }
 
-/** Hue (degrees), saturation and lightness (0–1). */
 export function hsl(rgb: Rgb): { h: number; s: number; l: number; chroma: number } {
   const [r, g, b] = rgb.map((v) => v / 255) as [number, number, number];
   const max = Math.max(r, g, b);
@@ -116,7 +104,6 @@ interface Tokens {
   color_tokens: Record<string, string>;
 }
 
-/** The generated module's text for the tokens file's content. */
 export function brandModule(tokensJson: string): string {
   const tokens = JSON.parse(tokensJson) as Tokens;
   if (typeof tokens.version !== "string" || typeof tokens.color_tokens !== "object") {
@@ -150,7 +137,6 @@ export type BrandColourName = keyof typeof BRAND_COLOURS;
 `;
 }
 
-/** Whether the module under `root` is what the tokens generate. */
 export function isStale(root: string): boolean {
   const expected = brandModule(readFileSync(join(root, TOKENS_PATH), "utf8"));
   try {

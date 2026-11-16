@@ -1,30 +1,15 @@
-/** Stand-ins for model providers, so no test calls a real API (`@seshi/review/testing`).
- *
- * - `KeywordModel`: a deterministic "model" that labels and finds by fixed strings. It answers
- *   from the same JSON the real providers are sent, so tests check what leaves the server too.
- * - `FakeProvider`: a `ModelProvider` in memory, answering from a script, a `KeywordModel` or a
- *   function, and keeping every request.
- * - `fakeProviderServer`: a local HTTP server that imitates the Anthropic Messages API
- *   (`POST /v1/messages`) and an OpenAI-compatible Chat Completions API
- *   (`POST /v1/chat/completions`), so the real providers are exercised over HTTP. Its response
- *   bodies are hand-written from the vendors' documented shapes (see `testdata/README.md`). */
-
 import type { CompletionRequest, ModelProvider } from "./provider";
 import { ProviderError } from "./provider";
 import type { Entry } from "./render";
 
 export interface KeywordRules {
-  /** Text whose presence labels a part `drop`. */
   drop?: readonly string[];
-  /** Text to find, with its category: labels a part `redact`, and the redactor reports it. */
   sensitive?: readonly { text: string; category: string; action?: "redact" | "withhold" }[];
 }
 
-/** Answers like a model that knows exactly which strings matter. */
 export class KeywordModel {
   constructor(readonly rules: KeywordRules) {}
 
-  /** The answer to a request for `schemaName` (`decision` or `findings`) over `user`. */
   answer(schemaName: string, user: string): unknown {
     const entries = (JSON.parse(user) as { records: Entry[] }).records;
     if (schemaName === "decision") {
@@ -51,7 +36,6 @@ export class KeywordModel {
   }
 }
 
-/** One scripted step of a `FakeProvider`: an answer, an error to throw, or a function. */
 export type Scripted =
   | { answer: unknown }
   | { error: ProviderError }
@@ -60,14 +44,10 @@ export type Scripted =
 export interface FakeProviderOptions {
   model?: string;
   kind?: string;
-  /** Answers every request (after `script` runs out). */
   keywords?: KeywordModel;
-  /** Answers to give in order; each is used once. */
   script?: Scripted[];
 }
 
-/** A provider in memory: answers from its script, then from its `KeywordModel`; with neither,
- * every call fails with `http_500`. */
 export class FakeProvider implements ModelProvider {
   readonly kind: string;
   readonly model: string;
@@ -83,7 +63,6 @@ export class FakeProvider implements ModelProvider {
     this.keywords = options.keywords;
   }
 
-  /** Requests whose schema is `name`. */
   calls(name: "decision" | "findings"): CompletionRequest[] {
     return this.requests.filter((r) => r.schemaName === name);
   }
@@ -101,23 +80,18 @@ export class FakeProvider implements ModelProvider {
   }
 }
 
-/** A request the fake server received. */
 export interface ReceivedRequest {
-  /** Which API the path is; `other` for any other path (answered 404). */
   api: "anthropic" | "openai" | "other";
   path: string;
   headers: Record<string, string>;
   body: Record<string, unknown>;
 }
 
-/** What the fake server answers a request with: a model answer (serialized as the API's text),
- * or a raw HTTP status and body. */
 export type ServerReply =
   | { answer: unknown; stop?: "end_turn" | "max_tokens" | "refusal" | "length" }
   | { status: number; body?: unknown; headers?: Record<string, string>; delayMs?: number };
 
 export interface FakeServerOptions {
-  /** Decides each reply; by default answers from `model`. */
   reply?: (
     request: ReceivedRequest,
     schemaName: string,
@@ -127,7 +101,6 @@ export interface FakeServerOptions {
 }
 
 export interface FakeServer {
-  /** `http://127.0.0.1:<port>`: the base URL for `anthropic`; add `/v1` for OpenAI. */
   url: string;
   requests: ReceivedRequest[];
   close(): Promise<void>;
@@ -145,7 +118,6 @@ function userText(messages: unknown): string {
   return typeof user?.content === "string" ? user.content : "";
 }
 
-/** A local server that imitates both APIs well enough for the providers (see above). */
 export function fakeProviderServer(options: FakeServerOptions = {}): FakeServer {
   const requests: ReceivedRequest[] = [];
   const decide =

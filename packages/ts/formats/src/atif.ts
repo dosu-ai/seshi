@@ -24,15 +24,10 @@
 import { type FormatAdapter, isScopeCoordinate, type NormalizedRecord } from "@seshi/model";
 import { lettaAdapter } from "./letta";
 
-/** The `agent` these sessions are filed under, and their trace `source` when the document does
- * not name a usable harness. */
 export const ATIF = "atif" as const;
 
-/** The schema versions this normalizer reads: the adapter's v1.0 through v1.7, and v1.8 through
- * `asAdapterVersion`. */
 const SUPPORTED_VERSION = /^ATIF-v1\.[0-8]$/;
 
-/** The one version the adapter does not read itself. */
 const AUDIO_VERSION = "ATIF-v1.8";
 
 type Json = Record<string, unknown>;
@@ -49,16 +44,12 @@ function parseDocument(transcript: string): Json | null {
   }
 }
 
-/** Why a document's `schema_version` cannot be read, in words a client can act on; null when it
- * can (or when the document is unreadable for another reason, which the adapter reports). */
 export function unsupportedAtifVersion(transcript: string): string | null {
   const version = parseDocument(transcript)?.schema_version;
   if (typeof version !== "string" || SUPPORTED_VERSION.test(version)) return null;
   return `${version} is not supported: this normalizer reads ATIF-v1.0 through ATIF-v1.8`;
 }
 
-/** A content value (a `message` or a result's `content`) with each audio part as the text
- * `[audio]`. */
 function withoutAudio(content: unknown): unknown {
   if (!Array.isArray(content)) return content;
   return content.map((part) =>
@@ -66,8 +57,6 @@ function withoutAudio(content: unknown): unknown {
   );
 }
 
-/** The transcript the adapter is given: an ATIF-v1.8 document as v1.7, its audio parts as text;
- * any other transcript as it is. */
 export function asAdapterVersion(transcript: string): string {
   const document = parseDocument(transcript);
   if (document?.schema_version !== AUDIO_VERSION || !Array.isArray(document.steps)) {
@@ -95,15 +84,12 @@ export function asAdapterVersion(transcript: string): string {
   return JSON.stringify({ ...document, schema_version: "ATIF-v1.7", steps });
 }
 
-/** The trace source for a document: its `agent.name` when that is a non-blank scope
- * coordinate, else `atif`. */
 export function atifSource(document: Json | null): string {
   const agent = document?.agent;
   const name = isObject(agent) ? agent.name : undefined;
   return typeof name === "string" && name.trim() !== "" && isScopeCoordinate(name) ? name : ATIF;
 }
 
-/** A non-empty string, else undefined: the adapter's test for an id. */
 const nonEmpty = (value: unknown): string | undefined =>
   typeof value === "string" && value.length > 0 ? value : undefined;
 
@@ -127,7 +113,7 @@ function errorFlags(document: Json | null): Map<string, boolean> {
   let event = 0;
   for (const step of steps) {
     if (!isObject(step)) continue;
-    event += 1; // the step's message
+    event += 1;
     if (step.source === "user") continue;
     if (step.source === "agent") {
       if (typeof step.reasoning_content === "string") event += 1;
@@ -159,8 +145,6 @@ function errorFlags(document: Json | null): Map<string, boolean> {
   return flags;
 }
 
-/** The adapter's records with the harness as the meta record's `source` and `ok` on each tool
- * record whose result says whether it failed. */
 export function withAtifDetails(
   transcript: string,
   records: NormalizedRecord[],
@@ -188,15 +172,12 @@ class AtifVersionError extends Error {
 
 const atifLetta = lettaAdapter({
   source: ATIF,
-  // One JSON value: always sent whole, whatever `format` the client says.
   chunkable: false,
   detect: { document: (head) => head.get("schema_version")?.text?.startsWith("ATIF-v") === true },
   prepare: asAdapterVersion,
   finish: (records, transcript) => withAtifDetails(transcript, records),
 });
 
-/** ATIF documents from any harness: a vendor-neutral format, so it is built in rather than an
- * integration (X3.11). */
 export const ATIF_FORMAT: FormatAdapter = {
   ...atifLetta,
   normalize(transcript, chunk) {

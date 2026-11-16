@@ -1,14 +1,7 @@
-/** Where the config files are (F1.1, F1.4, F8.4). Pure: the environment, working directory
- * and platform come in as arguments. */
-
 import { join, posix, resolve, win32 } from "node:path";
 
-/** The env variable naming the server's config file. */
 export const CONFIG_ENV = "SESHI_CONFIG";
 
-/** `SESHI_*` variables that are not settings, which both loaders pass over: the config file's
- * name, and capture's own (F9): `SESHI_SESSION_ID` and `SESHI_AGENT`, which an agent's
- * SessionStart hook sets for every command the agent runs, and `SESHI_NO_UPLOADER`. */
 export const NOT_SETTINGS_ENV: readonly string[] = [
   CONFIG_ENV,
   "SESHI_SESSION_ID",
@@ -19,24 +12,14 @@ export const SERVER_CONFIG_NAME = "seshi.toml";
 export const SYSTEM_CONFIG_PATH = "/etc/seshi/seshi.toml";
 
 export interface ServerConfigLookup {
-  /** `--config`. */
   flag?: string;
   env: Record<string, string | undefined>;
   cwd: string;
   exists(path: string): boolean;
-  /** Overrides `/etc/seshi/seshi.toml` (tests). */
   systemPath?: string;
-  /** Look for `./seshi.toml` too. Only `seshi serve` does: any other command may run in a
-   * checkout someone else wrote, whose `seshi.toml` could name a bucket of theirs and secret
-   * references (`{ env = … }`, `{ file = … }`) that would send this machine's to it. */
   cwdFile?: boolean;
 }
 
-/** The server's config file: `--config`, else `SESHI_CONFIG`, else `./seshi.toml` (with
- * `cwdFile` only), else `/etc/seshi/seshi.toml` (F1.1). A file named by the flag or env must
- * exist (`explicit`); the other two are used when present, and with neither the config is env
- * and defaults. `skipped` is a `./seshi.toml` that is there but was not read, because nothing
- * named it and `cwdFile` is off: the command can say how to use it (`--config`). */
 export function findServerConfig(lookup: ServerConfigLookup): {
   path?: string;
   explicit: boolean;
@@ -52,8 +35,6 @@ export function findServerConfig(lookup: ServerConfigLookup): {
   return { explicit: false, ...skipped };
 }
 
-/** The CLI's config file: `%APPDATA%\seshi\config.toml` on Windows, else
- * `$XDG_CONFIG_HOME/seshi/config.toml`, else `~/.config/seshi/config.toml`. */
 export function cliConfigPath(options: {
   env: Record<string, string | undefined>;
   home: string;
@@ -64,7 +45,6 @@ export function cliConfigPath(options: {
     const appData = env.APPDATA || win32.join(home, "AppData", "Roaming");
     return win32.join(appData, "seshi", "config.toml");
   }
-  // Joined as the platform named does, whatever this process runs on.
   const base = env.XDG_CONFIG_HOME || posix.join(home, ".config");
   return posix.join(base, "seshi", "config.toml");
 }

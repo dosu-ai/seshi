@@ -1,12 +1,7 @@
-/** `[store]`: the bucket every session goes to (X6.1), and what the deployment it belongs to
- * is called (X1.4). */
-
 import * as z from "zod";
 import { secret } from "../secret";
 import { storeUrl } from "./common";
 
-/** Static bucket keys. Without them the bucket client falls back to the standard
- * `AWS_*` / `S3_*` (and `R2_*` for `r2://`) variables, like any S3 tool. */
 export const bucketCredentials = z
   .strictObject({
     access_key_id: secret().describe("The access key id."),

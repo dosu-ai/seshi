@@ -1,10 +1,3 @@
-/** Records → a canonical `Trace` (`seshi/trace/1`): validate, derive events, hash. The
- * derivation is pinned by `spec/testdata/goldens/` (`goldens.test.ts`), since `content_hash` is
- * a layout contract: it reads only each record's role, text and tool fields, never the fields
- * the canonical trace added to trajectory-v1, so a trace hashes as it always did. One assistant
- * record carrying N `tool_calls` fans out into N `tool_call` events so an excerpt can point at a
- * single call. */
-
 import { createHash } from "node:crypto";
 import { canonicalText, stripNul } from "./canonical";
 import type { Provenance } from "./schemas/store";
@@ -20,10 +13,6 @@ import {
 } from "./schemas/trace";
 import { TrajectoryError, validateTraceRecords } from "./schemas/trajectory";
 
-/** Hash of what was said, independent of timestamps, so re-exports dedupe.
- * `sha256(source + "\n" + "\x1e".join(role + "\x1f" + text))`, UTF-8. A continuation hashes
- * where in the session it starts too (`source + "@" + from_record`): the same words at two
- * places in one session are two pieces of it, not one re-exported. */
 function contentHash(
   source: string,
   events: readonly TraceEvent[],
@@ -34,8 +23,6 @@ function contentHash(
   return createHash("sha256").update(`${head}\n${body}`, "utf8").digest("hex");
 }
 
-/** The epoch milliseconds of an ISO 8601 timestamp, or null when it does not parse; what
- * `started_at` / `ended_at` are chosen by. */
 function epochOf(value: string): number | null {
   const ms = Date.parse(value);
   return Number.isNaN(ms) ? null : ms;
@@ -74,9 +61,6 @@ const CALL_STRINGS = [
   "error",
 ] as const;
 
-/** One LLM call as `trace.schema.json` defines it: known fields kept and type-checked, unknown
- * ones dropped (as `validateTraceRecords` drops them from records), so nothing outside the
- * contract reaches the bucket. */
 function checkLlmCall(value: unknown, index: number): LlmCall {
   const bad = (what: string): never => {
     throw new TrajectoryError(`llm call ${index}: ${what}`);
@@ -131,8 +115,6 @@ function checkLlmCall(value: unknown, index: number): LlmCall {
   return out;
 }
 
-/** The LLM calls, checked (`checkLlmCall`): unique ids, and every record's `llm_call` naming
- * one of them. */
 function checkLlmCalls(input: readonly unknown[], records: readonly TraceRecord[]): LlmCall[] {
   const calls = input.map(checkLlmCall);
   const ids = new Set<string>();
@@ -149,7 +131,6 @@ function checkLlmCalls(input: readonly unknown[], records: readonly TraceRecord[
   return calls;
 }
 
-/** The events of a validated record list (meta first), with stable indices. */
 function eventsOf(records: readonly TraceRecord[]): TraceEvent[] {
   const events: TraceEvent[] = [];
   const toolNames = new Map<string, string>();
@@ -204,10 +185,6 @@ function eventsOf(records: readonly TraceRecord[]): TraceEvent[] {
   return events;
 }
 
-/** Whether the events are a usable conversation: a user record, and (unless the source is a
- * human chat, `chat:<origin>`) the agent acting. Anything else is not a trajectory. Judged on
- * a whole session only: a continuation is the tail of one already judged, and a tail is often
- * all tool traffic. */
 function conversationError(source: string, events: readonly TraceEvent[]): string | null {
   const roles = new Set(events.map((e) => e.role));
   if (!roles.has("user")) return "trajectory has no user records";

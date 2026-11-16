@@ -1,26 +1,3 @@
-/** The canonical trace as OTLP (X6.2): the session as GenAI spans (OpenTelemetry's
- * `gen_ai.*` semantic conventions), rendered on read (`?format=otlp`). Nothing is stored in
- * this format.
- *
- * One rendering is one OTLP trace, its id taken from `content_hash`; a session's traces share
- * `gen_ai.conversation.id`. Under an `invoke_agent` root:
- *
- * - a `chat` span per assistant record, from the record before it to the record itself (or
- *   over its LLM call's own times when the trace has them), with the messages that arrived
- *   since the last one as `gen_ai.input.messages` (never the whole history) and what the
- *   assistant said, reasoned and called as `gen_ai.output.messages`. Its LLM call's model,
- *   provider, response id and token usage (`gen_ai.usage.*`) go on the first chat span of
- *   that call, so a call split over several records is counted once;
- * - an `execute_tool` span per tool call, from the call to its result, with the arguments and
- *   the result, `ERROR` status when the result says it failed.
- *
- * Every id is derived from the content hash, so the same trace always renders to the same
- * bytes. Nothing is lost: each `chat` span carries the canonical records it was made from
- * verbatim (`seshi.records`, from index `seshi.record_start`), the root the records after the
- * last assistant turn, and the resource the meta record, `metadata`, `llm_calls` and
- * `provenance` whole, so `fromOtlp` gives back the canonical trace, same records and same
- * `content_hash`. */
-
 import { createHash } from "node:crypto";
 import {
   type LlmCall,
@@ -66,8 +43,6 @@ function epochOf(value: string | null | undefined): number | null {
   return Number.isNaN(ms) ? null : ms;
 }
 
-/** A tool call's arguments as a message part wants them: the JSON value when they are JSON,
- * else the string. */
 function argumentsOf(args: string): unknown {
   try {
     return JSON.parse(args);
@@ -88,7 +63,6 @@ interface Message {
   finish_reason?: "stop" | "tool_call";
 }
 
-/** A call's usage as `gen_ai.usage.*` attributes. */
 function usageAttributes(call: LlmCall | undefined): [string, Scalar][] {
   const usage = call?.usage;
   if (!usage) return [];
@@ -122,7 +96,6 @@ export function toOtlp(trace: Trace): OtlpTrace {
   const tools = new Map<string, { span: OtlpSpan; startMs: number }>();
   let pending: Message[] = [];
   let reasoning: Part[] = [];
-  // The first record not yet on a span: what the next `chat` span (or the root) carries.
   let chunkStart = meta ? 1 : 0;
 
   records.forEach((record: TraceRecord, index) => {
@@ -234,8 +207,6 @@ export function toOtlp(trace: Trace): OtlpTrace {
     clock = Math.max(clock, at);
   });
 
-  // What arrived after the last assistant turn (a question never answered, a result the
-  // session ended on) has no `chat` span to belong to; it stays on the root.
   const left =
     reasoning.length > 0 ? [...pending, { role: "assistant", parts: reasoning }] : pending;
   const endMs = Math.max(epochOf(trace.ended_at) ?? clock, startMs);
@@ -299,7 +270,6 @@ export function toOtlp(trace: Trace): OtlpTrace {
   };
 }
 
-/** Whether a trace is an OTLP rendering. */
 export function isOtlpTrace(value: unknown): value is OtlpTrace {
   return (
     typeof value === "object" &&
@@ -308,7 +278,6 @@ export function isOtlpTrace(value: unknown): value is OtlpTrace {
   );
 }
 
-/** A resource attribute of an OTLP trace object, as a string or number; undefined when absent. */
 export function otlpResource(trace: OtlpTrace, key: string): string | number | boolean | undefined {
   const kv = trace.resourceSpans[0]?.resource.attributes.find((a) => a.key === key);
   if (!kv) return undefined;
@@ -319,7 +288,6 @@ export function otlpResource(trace: OtlpTrace, key: string): string | number | b
   return v.doubleValue;
 }
 
-/** The meta record an OTLP rendering was made with. */
 export function otlpMeta(trace: OtlpTrace): TraceMetaRecord | undefined {
   const raw = otlpResource(trace, "seshi.meta");
   if (typeof raw !== "string") return undefined;
@@ -335,11 +303,6 @@ function spanAttribute(span: OtlpSpan, key: string): string | number | undefined
   return undefined;
 }
 
-/** The canonical trace an OTLP rendering was made from: the meta record and every span's
- * `seshi.records` in record order, parsed again with the resource's metadata, LLM calls and
- * provenance, its `content_hash` checked against the one the rendering names. Throws
- * `TrajectoryError` for a rendering seshi did not make (no records on its spans, a gap between
- * them) or whose records hash to something else. */
 export function fromOtlp(otlp: OtlpTrace): Trace {
   const hash = otlpResource(otlp, "seshi.content_hash");
   if (typeof hash !== "string") throw new TrajectoryError("not a seshi OTLP rendering");

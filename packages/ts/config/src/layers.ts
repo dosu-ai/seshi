@@ -1,17 +1,3 @@
-/** The layers above the file (F1.1, F1.2): env variables and flags, each a path and a string,
- * placed into the file's tree by the schema's shape.
- *
- * Env names are `SESHI_` plus the TOML path in upper case with `__` between levels:
- * `[store] url` is `SESHI_STORE__URL`, `[auth.oidc] issuer` is `SESHI_AUTH__OIDC__ISSUER`. A
- * key of a map (`[auth.tokens] alice`) is matched against the keys the file already has
- * (upper-cased, anything but letters and digits as `_`), else added in lower case. Lists of
- * tables (`[[sources]]`) are defined in the file only; env names a field of one by its `id`
- * (`SESHI_SOURCES__DATADOG_PROD__API_KEY` for `id = "datadog-prod"`). A secret can also be set
- * as a reference (`SESHI_AUTH__ORG_KEY__SECRET__FILE=/run/secrets/key`).
- *
- * Flags use the TOML path as written (`--set store.url=…`, `--set sources.datadog-prod.lag=2m`)
- * or a command's named flag (`--listen`), mapped to a path by the command. */
-
 import type { Origin, Origins, PathSegment } from "./origins";
 import {
   childOf,
@@ -26,19 +12,15 @@ import {
   scalarTypes,
 } from "./shape";
 
-/** One value from above the file. */
 export interface Assignment {
-  /** The env variable or flag, for messages and provenance. */
   name: string;
   source: "env" | "flag";
-  /** The path's segments as given: `["STORE", "URL"]` from env, `["store", "url"]` from a flag. */
   segments: string[];
   value: string;
 }
 
 export const ENV_PREFIX = "SESHI_";
 
-/** An env name's form of a key: `datadog-prod` → `DATADOG_PROD`. */
 export function envKey(key: string): string {
   return key.toUpperCase().replace(/[^A-Z0-9]/g, "_");
 }
@@ -46,7 +28,6 @@ export function envKey(key: string): string {
 export class PlacementError extends Error {
   constructor(
     message: string,
-    /** The name is not a setting at all (as opposed to a setting given a bad shape). */
     readonly unknown: boolean,
   ) {
     super(message);
@@ -55,17 +36,11 @@ export class PlacementError extends Error {
 }
 
 export interface Placed {
-  /** Where the value goes in the tree. */
   path: PathSegment[];
-  /** The setting it belongs to: `path` itself, or the secret above it when a reference field
-   * (`…__FILE`) was set. Provenance is recorded here. */
   setting: PathSegment[];
-  /** The schema of where it goes. */
   node: JsonSchema;
 }
 
-/** Finds where `segments` lead in `tree` by `shape`. `source` decides how keys match: env names
- * are upper case, flags are exact. */
 export function place(
   shape: JsonSchema,
   tree: PlainObject,
@@ -126,8 +101,6 @@ export function place(
   return { path, setting: setting ?? path, node };
 }
 
-/** An env or flag string as the type the field takes: a number, a boolean, a comma-separated
- * list. What does not fit stays a string, for the schema to refuse with its own message. */
 export function coerce(node: JsonSchema, value: string): unknown {
   const types = scalarTypes(node);
   if (types.has("array") && node.items) {
@@ -180,7 +153,6 @@ function setAt(tree: PlainObject, path: readonly PathSegment[], value: unknown):
   });
 }
 
-/** Records `origin` for every setting in the file's tree. */
 export function recordFile(
   shape: JsonSchema,
   tree: PlainObject,
@@ -209,8 +181,6 @@ export function recordFile(
   visit(shape, tree, []);
 }
 
-/** Applies one assignment onto `tree` and records its origin. Throws `PlacementError` when it
- * does not fit the shape. */
 export function applyAssignment(
   shape: JsonSchema,
   tree: PlainObject,
@@ -220,8 +190,6 @@ export function applyAssignment(
   const placed = place(shape, tree, assignment.segments, assignment.source);
   const value = coerce(placed.node, assignment.value);
   if (placed.setting.length < placed.path.length) {
-    // A reference field (`…__FILE`) replaces whatever the secret was before, rather than
-    // merging into it: `{ env, file }` is not a reference.
     setAt(tree, placed.setting, { [placed.path.at(-1) as string]: value });
   } else {
     setAt(tree, placed.path, value);
@@ -229,8 +197,6 @@ export function applyAssignment(
   origins.set(placed.setting, { source: assignment.source, name: assignment.name });
 }
 
-/** The `SESHI_*` variables of `env` as assignments, sorted by name. Empty values count as
- * unset. `ignore` names variables that are not settings (`SESHI_CONFIG`). */
 export function envAssignments(
   env: Record<string, string | undefined>,
   ignore: ReadonlySet<string>,
@@ -247,8 +213,6 @@ export function envAssignments(
     }));
 }
 
-/** Whether `assignment` names a setting of `shape` (used to skip, silently, env variables that
- * belong to the other config: the CLI's `SESHI_USER` when the server loads). */
 export function namesSetting(shape: JsonSchema, assignment: Assignment): boolean {
   if (assignment.segments.some((s) => s === "")) return false;
   try {
@@ -259,8 +223,6 @@ export function namesSetting(shape: JsonSchema, assignment: Assignment): boolean
   }
 }
 
-/** Whether `name` (`SESHI_STORE__URL`) is a setting of `shape`: the check `.env.example` and the
- * docs are tested with. A field of a `[[sources]]` entry counts, whatever its id. */
 export function isSettingName(shape: JsonSchema, name: string): boolean {
   if (!name.startsWith(ENV_PREFIX)) return false;
   return namesSetting(shape, {

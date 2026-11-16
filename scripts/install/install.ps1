@@ -120,7 +120,6 @@ param(
         Copy-Item -LiteralPath $exe -Destination $target -Force
       }
       catch {
-        # Put the previous seshi back rather than leave none.
         if (Test-Path -LiteralPath $old) { Move-Item -LiteralPath $old -Destination $target -Force }
         throw
       }
@@ -150,7 +149,6 @@ param(
   function Add-ToPath {
     param([string]$Dir, [bool]$NoModifyPath)
 
-    # This session first, so seshi works at once.
     if (-not (Test-InPath $env:Path $Dir)) { $env:Path = "$Dir;$env:Path" }
 
     # The user PATH lives in the registry as an expandable string (%USERPROFILE%\…);

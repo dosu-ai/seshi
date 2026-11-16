@@ -1,5 +1,3 @@
-/** `[worker]`: the worker role's jobs (X7). */
-
 import * as z from "zod";
 import { duration } from "../units";
 

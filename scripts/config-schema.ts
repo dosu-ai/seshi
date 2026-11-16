@@ -1,13 +1,7 @@
-/** Writes the config JSON Schemas for editors (F1.4) from the one schema in packages/ts/config:
- * spec/config.schema.json (the server's seshi.toml) and spec/cli-config.schema.json (the CLI's
- * config.toml). `--check` writes nothing and fails when either file is stale; `bun run check`
- * runs it, so a schema change without `bun run schema` does not pass. */
-
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { configJsonSchemas } from "@seshi/config";
 
-/** Each generated file, relative to the repository root, and its content. */
 export function schemaFiles(): Array<{ path: string; text: string }> {
   const { server, cli } = configJsonSchemas();
   return [
@@ -16,7 +10,6 @@ export function schemaFiles(): Array<{ path: string; text: string }> {
   ];
 }
 
-/** The files under `root` that differ from what the schema generates. */
 export function staleFiles(root: string): string[] {
   return schemaFiles()
     .filter(({ path, text }) => {

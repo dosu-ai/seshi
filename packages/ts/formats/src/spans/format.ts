@@ -1,8 +1,3 @@
-/** The `otlp-genai` format (F4.6): spans that follow the OpenTelemetry GenAI conventions, from
- * any producer, refined by vendor mappers (the Claude Platform integration adds `anthropic.*`).
- * It takes span sets (the OTLP receiver, X4.2) through `spans`, and also reads a whole OTLP/JSON
- * export as one session (`seshi normalize trace.json`, an S3 object), assembled the same way. */
-
 import type {
   FormatAdapter,
   NormalizedTranscript,
@@ -21,17 +16,13 @@ import {
 } from "./genai";
 import { readExportRequest } from "./request";
 
-/** The format name OTLP spans are filed under: archive ids derive from it. */
 export const OTLP_GENAI = "otlp-genai";
 
 export interface SpanFormatOptions {
-  /** The format's name; `otlp-genai` by default. */
   name?: string;
-  /** Vendor refinements, applied in order after the conventions. */
   mappers?: readonly SpanAttributeMapper[];
 }
 
-/** The span adapter of a GenAI-conventions format with `mappers`. */
 export function genAiSpanAdapter(mappers: readonly SpanAttributeMapper[] = []): SpanAdapter {
   return {
     sessionKey: (span, resource) => genAiSessionKey(span, resource, mappers),
@@ -60,7 +51,6 @@ export function genAiSpanAdapter(mappers: readonly SpanAttributeMapper[] = []): 
   };
 }
 
-/** Normalize every span of a document's groups, skipping spans that cannot be read. */
 function partsOf(
   adapter: SpanAdapter,
   groups: readonly { resource: SpanResource; spans: readonly ReceivedSpan[] }[],
@@ -70,21 +60,17 @@ function partsOf(
     for (const span of group.spans) {
       try {
         parts.push(adapter.normalize(span, group.resource));
-      } catch {
-        // A span without a start time cannot be placed; the rest of the session still reads.
-      }
+      } catch {}
     }
   }
   return parts;
 }
 
-/** The `otlp-genai` format adapter (or one named otherwise, with other mappers). */
 export function otlpGenAiFormat(options: SpanFormatOptions = {}): FormatAdapter {
   const source = options.name ?? OTLP_GENAI;
   const spans = genAiSpanAdapter(options.mappers);
   return {
     source,
-    // An export is one JSON document: always whole.
     chunkable: false,
     detect: { document: (head) => head.has("resourceSpans") || head.has("resource_spans") },
     spans,
@@ -98,7 +84,6 @@ export function otlpGenAiFormat(options: SpanFormatOptions = {}): FormatAdapter 
         });
       }
       const { groups } = readExportRequest(value);
-      // The LLM calls the span path keeps, kept here too.
       const { records, llm_calls } = spans.assemble(partsOf(spans, groups), { source });
       return llm_calls.length > 0 ? { records, llm_calls } : { records };
     },

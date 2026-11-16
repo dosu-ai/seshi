@@ -1,5 +1,3 @@
-/** `[capture]`: server-side settings for capture integrations (F9). */
-
 import * as z from "zod";
 
 export const captureSection = z

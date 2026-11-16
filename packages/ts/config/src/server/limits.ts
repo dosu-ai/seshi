@@ -1,7 +1,3 @@
-/** `[limits]`: size caps that were fixed in code (F1, data notes), with today's values. Past
- * them a session is refused with a 422, which is final. The OTLP caps (F4.1) bound one request
- * to `POST /otlp/v1/traces` instead: past them it is answered 413 naming the key. */
-
 import * as z from "zod";
 import { bytes } from "../units";
 

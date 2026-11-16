@@ -1,15 +1,3 @@
-/** A rule set: the built-in pack plus the operator's packs, compiled once and used for every
- * string redaction touches (F2). Building one checks everything that spans packs: rule ids are
- * unique across all of them (counts are by id), a pack turns off only built-in rules that
- * exist, every operator pattern compiles under RE2 (F2.2), no rule matches what another rule
- * replaces text with (so redacting twice changes nothing), and, when asked, every rule passes
- * its own test strings.
- *
- * `hash` is what `metadata.redaction.rule_set` records (F2.3): sha256 over what the rules do
- * (ids, patterns, replacements, where they apply, globs, what is turned off, the built-in
- * version), not over descriptions or test strings, so editing a description does not make
- * every stored session look out of date to `seshi redact backfill`. */
-
 import { createHash } from "node:crypto";
 import { canonicalJson } from "@seshi/model";
 import { BUILTIN_PACK_ID, builtinPack } from "./builtin";
@@ -35,7 +23,6 @@ import {
   type WithheldKind,
 } from "./sensitive";
 
-/** A rule set that cannot be built; names every problem with where it is. */
 export class RuleSetError extends RulePackError {
   constructor(problems: readonly PackProblem[]) {
     super(problems);
@@ -45,20 +32,14 @@ export class RuleSetError extends RulePackError {
 
 export type RuleKind = "text" | "file" | "command";
 
-/** One rule as the catalogue shows it (`seshi redact test`, docs). */
 export interface RuleInfo {
   id: string;
   kind: RuleKind;
-  /** The pack that defines it. */
   pack: string;
   builtin: boolean;
-  /** `re2` for an operator's pattern, `js` for a built-in pattern, `code` for a built-in rule
-   * implemented in `secrets.ts`, `glob` for sensitive files. */
   engine: Engine | "code" | "glob";
   description?: string;
-  /** Text rules: where they run. */
   applies_to?: AppliesTo[];
-  /** False when a pack turned it off (by `disable`), and which pack did. */
   enabled: boolean;
   disabled_by?: string;
 }
@@ -74,7 +55,6 @@ export interface CompiledTextRule {
 export interface CompiledFileRule {
   id: string;
   pack: string;
-  /** This rule's own globs: its includes and its exceptions. */
   files: SensitiveFiles;
 }
 
@@ -90,34 +70,23 @@ export function bump(counts: Counts, rule: string, n = 1): void {
   if (n > 0) counts[rule] = (counts[rule] ?? 0) + n;
 }
 
-/** The shape every replacement made by the built-in rules has; a region that already is one
- * is never replaced again, so an earlier rule set's markers survive a backfill as they are. */
 const MARKER = /^\[redacted:[a-z0-9]+(?:-[a-z0-9]+)*\]$/;
 
 export const markerOf = (id: string) => `[redacted:${id}]`;
 
 export class RuleSet {
-  /** sha256 of what the rules do, as `RedactionSummary.rule_set`. */
   readonly hash: string;
-  /** The built-in pack's version (`seshi/rules/3`). */
   readonly builtinVersion: string;
   readonly builtin: RulePack;
-  /** The operator's packs, as given: what `GET /v1/redaction/rules` serves. */
   readonly packs: readonly RulePack[];
   readonly catalogue: readonly RuleInfo[];
-  /** Text rules with patterns, in the order they run: every operator pack's in order, then the
-   * built-in pack's (it has none today; its rules run in code). */
   readonly text: readonly CompiledTextRule[];
-  /** Built-in rules implemented in code that a pack turned off. */
   readonly secretsOff: ReadonlySet<string>;
   readonly files: readonly CompiledFileRule[];
   readonly commands: readonly CompiledCommandRule[];
-  /** Every enabled file and command rule as one set, for the sensitive-call pass. */
   readonly sensitive: SensitiveRules;
-  /** What any rule replaces text with. */
   private readonly markers: ReadonlySet<string>;
 
-  /** Use `compileRuleSet`. */
   constructor(parts: {
     builtin: RulePack;
     packs: readonly RulePack[];
@@ -160,15 +129,10 @@ export class RuleSet {
       .digest("hex");
   }
 
-  /** Whether `region` is already what some rule replaces text with. */
   isMarker(region: string): boolean {
     return this.markers.has(region) || MARKER.test(region);
   }
 
-  /** `text` as the rules treat a string in `field`: the text rules that apply there, in order,
-   * then the built-in secret patterns. Counts what fired into `counts`. `anywhere` runs every
-   * text rule, whatever its `applies_to` (a native transcript, where a string's place is not
-   * known yet). */
   redactString(text: string, field: AppliesTo | "anywhere", counts: Counts): string {
     let out = text;
     for (const rule of this.text) {
@@ -181,8 +145,6 @@ export class RuleSet {
     return secrets.text;
   }
 
-  /** The rule a withheld call is counted under: the first enabled rule of its kind that the
-   * call's input meets. */
   withholdingRule(input: unknown, kind: WithheldKind): string {
     if (kind === "sensitive-file") {
       for (const rule of this.files) {
@@ -202,7 +164,6 @@ export class RuleSet {
   }
 }
 
-/** What a pack's rules do, for the hash: no descriptions, no tests. */
 function behaviour(pack: RulePack): unknown {
   return {
     id: pack.id,
@@ -219,9 +180,6 @@ function behaviour(pack: RulePack): unknown {
   };
 }
 
-/** One text rule over `text`: each of its patterns in turn, every match (or its `secret`
- * group) replaced. A region that already is a marker or this rule's replacement is left, and
- * not counted, so redacting redacted text changes nothing and counts nothing. */
 export function applyTextRule(
   text: string,
   rule: CompiledTextRule,
@@ -253,18 +211,12 @@ export function applyTextRule(
 }
 
 export interface CompileOptions {
-  /** The operator's packs, in the order config lists them. */
   packs?: readonly RulePack[];
-  /** The built-in pack; this binary's by default. */
   builtin?: RulePack;
-  /** Check every operator rule against its own test strings, and refuse the set if one fails.
-   * The built-in pack's tests run in this package's tests, not at every start. */
   runTests?: boolean;
-  /** Where each operator pack came from, by pack id, for messages (`acme.toml (pack acme)`). */
   sources?: Readonly<Record<string, string>>;
 }
 
-/** Build a rule set. Throws `RuleSetError` naming every problem. */
 export function compileRuleSet(options: CompileOptions = {}): RuleSet {
   const builtin = options.builtin ?? builtinPack();
   const packs = [...(options.packs ?? [])];
@@ -276,7 +228,6 @@ export function compileRuleSet(options: CompileOptions = {}): RuleSet {
   const problem = (pack: string, where: string, message: string) =>
     problems.push({ where: `${named(pack)}${where ? `: ${where}` : ""}`, message });
 
-  // Built-in rules implemented in code are exactly the ones `secrets.ts` counts.
   const coded = builtin.rules.filter((r) => r.implementation === "builtin").map((r) => r.id);
   for (const id of coded) {
     if (!BUILTIN_SECRET_KINDS.includes(id)) problem(builtin.id, id, "no code implements this rule");
@@ -291,7 +242,6 @@ export function compileRuleSet(options: CompileOptions = {}): RuleSet {
     packIds.add(pack.id);
   }
 
-  // Rule ids, unique across every pack and kind.
   const owner = new Map<string, string>();
   const ruleIds = (pack: RulePack) => [
     ...pack.rules.map((r) => r.id),
@@ -314,7 +264,6 @@ export function compileRuleSet(options: CompileOptions = {}): RuleSet {
     }
   }
 
-  // What packs turn off: built-in rules only.
   const builtinIds = new Set(ruleIds(builtin));
   const disabledBy = new Map<string, string>();
   for (const pack of packs) {
@@ -437,8 +386,6 @@ export function compileRuleSet(options: CompileOptions = {}): RuleSet {
     commands,
   });
 
-  // Redacting twice must change nothing: no text rule may find something to replace in what
-  // any rule replaces text with, and no replacement may look like a secret to the built-ins.
   const markers = new Set([
     ...set.text.map((r) => r.replacement),
     ...BUILTIN_SECRET_KINDS.map(markerOf),
@@ -488,7 +435,6 @@ function describe(err: PatternError, engine: Engine): string {
     : `does not compile: ${err.message}`;
 }
 
-/** One test string checked. */
 export interface RuleTestResult {
   pack: string;
   rule: string;
@@ -497,8 +443,6 @@ export interface RuleTestResult {
   ok: boolean;
 }
 
-/** Every rule's test strings against the rule alone (other rules off), for the built-in pack,
- * the operator's, or both. A disabled rule's tests still run: they say what it would do. */
 export function runRuleTests(
   set: RuleSet,
   options: { builtin?: boolean; operator?: boolean } = {},
@@ -554,14 +498,9 @@ export function runRuleTests(
   return out;
 }
 
-/** The document `GET /v1/redaction/rules` serves (F2.4): the operator's packs, for a client
- * that applies them before upload. The built-in pack is not sent; the client has its own, and
- * `rule_set` lets it tell whether its built-ins are the server's. */
 export interface RedactionRulesDocument {
   schema: "seshi/redaction-rules/1";
-  /** The server's rule-set hash. */
   rule_set: string;
-  /** The server's built-in pack version. */
   builtin: string;
   packs: RulePack[];
 }
@@ -577,10 +516,6 @@ export function rulesDocument(set: RuleSet): RedactionRulesDocument {
   };
 }
 
-/** A client's rule set from the server's document: its packs validated again (they are input
- * like any other) on top of this binary's built-in pack. `same` says whether the result is the
- * server's rule set; when it is not, the client's built-ins differ from the server's (another
- * seshi version) and pre-redaction is best effort, which is fine: the server redacts again. */
 export function ruleSetFromDocument(document: unknown): { rules: RuleSet; same: boolean } {
   if (typeof document !== "object" || document === null) {
     throw new RulePackError([{ where: "redaction rules", message: "must be an object" }]);
@@ -598,9 +533,6 @@ export function ruleSetFromDocument(document: unknown): { rules: RuleSet; same: 
   const packs = doc.packs.map((p, i) => {
     const id = typeof p === "object" && p !== null && typeof (p as RulePack).id === "string";
     const pack = validatePack(p, { source: `server pack ${id ? (p as RulePack).id : i}` });
-    // A built-in rule a newer server knows and this client does not cannot be turned off
-    // here; the client simply has no such rule. Refusing the whole document over it would
-    // leave the client redacting nothing but its built-ins.
     return { ...pack, disable: pack.disable.filter((rule) => known.has(rule)) };
   });
   const rules = compileRuleSet({ packs, builtin });

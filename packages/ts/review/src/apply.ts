@@ -1,12 +1,3 @@
-/** The models' answers, checked, and the redactor's findings applied by deterministic code
- * (F3.1). The redactor never rewrites content: a finding names a record, a field and the exact
- * text to remove, and this code replaces every occurrence of that text in that field with
- * `[redacted:<category>]`, or replaces a whole tool result (`withhold`). A wrong answer can
- * therefore remove too much, but cannot add or change anything.
- *
- * What is applied comes back as `ReviewFinding`s: record, field, category and action, never the
- * text (F3.8). The text itself is dropped as soon as it has been applied. */
-
 import type { NormalizedRecord } from "@seshi/model";
 import type { ReviewFinding } from "@seshi/store";
 import { ProviderError } from "./provider";
@@ -16,8 +7,6 @@ export type Label = "allow" | "redact" | "drop";
 
 const LABELS: ReadonlySet<string> = new Set(["allow", "redact", "drop"]);
 
-/** The decision model's answer: exactly one label and nothing else (F3.1). Anything else does
- * not fit and is retried (F3.4). */
 export function checkLabel(answer: unknown): Label {
   if (typeof answer === "object" && answer !== null && !Array.isArray(answer)) {
     const keys = Object.keys(answer);
@@ -27,7 +16,6 @@ export function checkLabel(answer: unknown): Label {
   throw new ProviderError("invalid_answer", true, "the decision model's answer is not one label");
 }
 
-/** One finding as the redactor answered it. */
 export interface RawFinding {
   record: number;
   field: string;
@@ -36,9 +24,6 @@ export interface RawFinding {
   action: "redact" | "withhold";
 }
 
-/** The redactor's answer, checked for shape. A finding of the wrong shape makes the whole
- * answer not fit (retried); one of the right shape that names nothing it was given is counted as
- * unmatched when applied. */
 export function checkFindings(answer: unknown): RawFinding[] {
   const bad = () =>
     new ProviderError("invalid_answer", true, "the redactor's answer does not fit its schema");
@@ -68,11 +53,8 @@ export function checkFindings(answer: unknown): RawFinding[] {
   });
 }
 
-/** Text shorter than this is never removed on its own: a finding of one or two characters
- * would strip them from the whole field. */
 export const MIN_FINDING_CHARS = 4;
 
-/** What a category is recorded and marked as: one of the policy's, else `other`. */
 function categoryOf(name: string, known: ReadonlySet<string>): string {
   return known.has(name) ? name : "other";
 }
@@ -83,9 +65,7 @@ export function marker(category: string): string {
 
 export interface Applied {
   records: NormalizedRecord[];
-  /** What was applied, by location (deduplicated), with record indexes offset by `lead`. */
   findings: ReviewFinding[];
-  /** Findings that named nothing they were given. */
   unmatched: number;
 }
 
@@ -94,9 +74,6 @@ interface FieldPlan {
   spans: { start: number; end: number; category: string }[];
 }
 
-/** Apply `findings` (from every part of the envelope; each with the entries its part showed)
- * to `records`. `lead` is how many records precede these in the written trace (its meta
- * record), so recorded indexes are the trace's. */
 export function applyFindings(
   records: readonly NormalizedRecord[],
   answers: readonly { findings: readonly RawFinding[]; shown: readonly Entry[] }[],
@@ -124,7 +101,6 @@ export function applyFindings(
       if (withhold) {
         plan.withhold ??= category;
       } else {
-        // `withhold` elsewhere is taken as removing the text it names.
         if (finding.text.length < MIN_FINDING_CHARS || !text.includes(finding.text)) {
           unmatched++;
           continue;
@@ -168,8 +144,6 @@ export function applyFindings(
   return { records: out, findings, unmatched };
 }
 
-/** `text` with each span replaced by its category's marker; overlapping spans merge into one,
- * marked with the category of the span that starts first. */
 export function removeSpans(
   text: string,
   spans: readonly { start: number; end: number; category: string }[],

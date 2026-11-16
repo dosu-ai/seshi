@@ -1,17 +1,3 @@
-/** Span sets (X4.2): what OTLP pushes (F4) and pollers such as Datadog (F5) submit for the span
- * assembler, and the contract a span format implements. Spans arrive out of order and repeat,
- * so they are not a log: each span is normalized and regex-redacted on arrival into a
- * `SpanPart`, kept under its session's `spans/`, and the assembler later orders a session's
- * parts into the canonical trace's records (F4.4).
- *
- * Spans travel in OTLP's JSON mapping (`opentelemetry-proto`), whatever they arrived as: the
- * OTLP receiver decodes protobuf into it, and a poller builds it from its vendor's API. Ids are
- * lowercase hex, times are decimal strings of Unix nanoseconds, enums are integers.
- *
- * The types live in the lowest layer because the formats that read spans (`@seshi/formats`,
- * integrations through `@seshi/kit`) and the pipeline that stores them sit on different
- * layers. */
-
 import type { Claims } from "./generated/common";
 import type { LlmCall } from "./schemas/trace";
 import type { NormalizedRecord } from "./schemas/trajectory";

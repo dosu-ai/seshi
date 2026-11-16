@@ -4,12 +4,10 @@
 
 import { join } from "node:path";
 
-/** Where the version lives, relative to the repository root. */
 export const VERSIONED = ["packages/ts/model"] as const;
 
 const SEMVER = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
 
-/** `lock` with each versioned workspace's `version` set to `version`. */
 export function syncLock(lock: string, names: readonly string[], version: string): string {
   let synced = lock;
   for (const name of names) {

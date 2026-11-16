@@ -1,13 +1,3 @@
-/** Publishes the packages scripts/release/npm.ts built, in its order (platform packages, the
- * libraries, the launcher last), so `npm i seshi` never resolves a platform package that is
- * not on the registry yet.
- *
- *   bun run release:publish-npm [--dir dist/npm] [--provenance] [--dry-run]
- *
- * A package whose version is already on the registry is skipped, so a failed run can simply be
- * run again. A prerelease version (`1.2.0-rc.1`) is published under the `next` tag, never
- * `latest`. Every package is public (scoped packages default to restricted). */
-
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
@@ -38,7 +28,6 @@ export const spawnNpm: Exec = async (argv) => {
   return { code, out, err };
 };
 
-/** The dist-tag for `version`: `next` for a prerelease. */
 export function distTag(version: string): string {
   return version.includes("-") ? "next" : "latest";
 }

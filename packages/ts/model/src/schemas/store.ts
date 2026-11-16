@@ -1,8 +1,3 @@
-/** The stored objects other languages read (X3.10): the layout marker, a session's
- * `metadata.json` and its change entries. Their types are generated from `spec/schemas/`
- * (`src/generated/`); this module names them and adds the constants and helpers code needs.
- * See `spec/layout.md`. */
-
 import { SCHEMA_ID as CHANGE_SCHEMA_ID } from "../generated/change";
 import type { CallerKind, LogEncoding, Writer } from "../generated/common";
 import { SCHEMA_ID as LAYOUT_SCHEMA_ID } from "../generated/layout";

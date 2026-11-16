@@ -1,18 +1,9 @@
-/** Release archives without depending on the build machine's `tar` or `zip`: `.tar.gz` (ustar)
- * for macOS and Linux, `.zip` for Windows, which `tar -xzf` and PowerShell's `Expand-Archive`
- * read. Output is deterministic for the same entries and `mtime`. Readers for both formats
- * check what was written and let the npm packages be built from the release's own archives.
- *
- * Only what releases need: regular files, names under 100 bytes, sizes under 4 GiB. */
-
 import { createHash } from "node:crypto";
 import { deflateRawSync, gunzipSync, gzipSync, inflateRawSync } from "node:zlib";
 
 export interface ArchiveEntry {
-  /** A relative path with `/` separators. */
   name: string;
   data: Uint8Array;
-  /** Unix permission bits; 0o644 unless given (0o755 for an executable). */
   mode?: number;
 }
 
@@ -60,7 +51,6 @@ function tarHeader(entry: ArchiveEntry, mtime: number): Buffer {
   return header;
 }
 
-/** A gzipped ustar archive of `entries`. */
 export function tarGz(entries: readonly ArchiveEntry[], mtime = 0): Uint8Array {
   const parts: Buffer[] = [];
   for (const entry of entries) {
@@ -82,7 +72,6 @@ function readOctal(block: Buffer, offset: number, width: number): number {
   return text === "" ? 0 : Number.parseInt(text, 8);
 }
 
-/** The regular files in a gzipped tar archive. */
 export function readTarGz(archive: Uint8Array): ArchiveEntry[] {
   const tar = gunzipSync(archive);
   const entries: ArchiveEntry[] = [];
@@ -123,7 +112,6 @@ function dosTime(mtime: number): { time: number; date: number } {
 
 const crc32 = (data: Uint8Array) => Bun.hash.crc32(data) >>> 0;
 
-/** A zip archive of `entries`, deflated. Unix modes go in the external attributes. */
 export function zip(entries: readonly ArchiveEntry[], mtime = 0): Uint8Array {
   const { time, date } = dosTime(mtime);
   const locals: Buffer[] = [];
@@ -175,7 +163,6 @@ export function zip(entries: readonly ArchiveEntry[], mtime = 0): Uint8Array {
   return Buffer.concat([...locals, directory, end]);
 }
 
-/** The files in a zip archive (stored or deflated), each checked against its CRC. */
 export function readZip(archive: Uint8Array): ArchiveEntry[] {
   const buf = Buffer.from(archive.buffer, archive.byteOffset, archive.byteLength);
   let end = -1;
@@ -217,7 +204,6 @@ export function readZip(archive: Uint8Array): ArchiveEntry[] {
   return entries;
 }
 
-/** Reads either kind, by file name. */
 export function readArchive(name: string, archive: Uint8Array): ArchiveEntry[] {
   if (name.endsWith(".tar.gz") || name.endsWith(".tgz")) return readTarGz(archive);
   if (name.endsWith(".zip")) return readZip(archive);
@@ -228,7 +214,6 @@ export function sha256(data: Uint8Array): string {
   return createHash("sha256").update(data).digest("hex");
 }
 
-/** A `sha256sum`-format checksum file: `<hex>  <name>` per line, sorted by name. */
 export function checksumFile(files: ReadonlyMap<string, Uint8Array>): string {
   return [...files.keys()]
     .sort()
@@ -236,7 +221,6 @@ export function checksumFile(files: ReadonlyMap<string, Uint8Array>): string {
     .join("");
 }
 
-/** The checksums in a `sha256sum`-format file, by file name (`*name`, binary mode, too). */
 export function parseChecksums(text: string): Map<string, string> {
   const sums = new Map<string, string>();
   for (const line of text.split(/\r?\n/)) {

@@ -1,11 +1,3 @@
-/** The loader (F1.1–F1.4): defaults, then the TOML file, then `SESHI_*` env, then flags, checked
- * against one strict schema. Every value keeps where it came from, unknown keys fail, and
- * secret references are resolved before anything starts.
- *
- * Both configs use it: the server's (`seshi.toml`) and the CLI's own
- * (`~/.config/seshi/config.toml`), each with its own schema. Nothing here reads the process's
- * state on its own: env, files and the clock-free file system come in through `LoadOptions`. */
-
 import { readFileSync, statSync } from "node:fs";
 import * as z from "zod";
 import {
@@ -29,10 +21,8 @@ import {
   type PlainObject,
 } from "./shape";
 
-/** A file system, injectable for tests. */
 export interface ConfigFs {
   readFile(path: string): string;
-  /** The file's permission bits, or `undefined` when it does not exist. */
   mode(path: string): number | undefined;
 }
 
@@ -47,8 +37,6 @@ export const nodeFs: ConfigFs = {
   },
 };
 
-/** A value set by a flag: `--listen :8080` is `{ name: "--listen", path: "server.listen",
- * value: ":8080" }`; `--set a.b=c` is `{ name: "--set a.b", path: "a.b", value: "c" }`. */
 export interface FlagValue {
   name: string;
   path: string;
@@ -56,36 +44,25 @@ export interface FlagValue {
 }
 
 export interface LoadOptions {
-  /** The config file, or none (env and defaults only). */
   file?: string;
   env?: Record<string, string | undefined>;
   flags?: readonly FlagValue[];
-  /** Env variables that are not settings of this config (`SESHI_CONFIG`). */
   ignoreEnv?: readonly string[];
-  /** Shapes of the other configs: an env name one of them knows is skipped here, silently,
-   * instead of failing as unknown (the CLI's `SESHI_USER` when the server loads). */
   foreign?: readonly JsonSchema[];
-  /** Read `{ env }` and `{ file }` secrets now (default). `config show` turns it off, to print
-   * a config whose secrets are not reachable from where it runs. */
   resolveSecrets?: boolean;
-  /** Which platform's file permissions to check; `process.platform` by default. */
   platform?: NodeJS.Platform;
   fs?: ConfigFs;
 }
 
 export interface Loaded<T> {
   config: T;
-  /** The file read, if any. */
   file?: string;
   origins: Origins;
   warnings: string[];
-  /** The schema's shape (its input JSON Schema). */
   shape: JsonSchema;
 }
 
-/** The config cannot be used: every problem found, one line each. */
 export class ConfigError extends Error {
-  /** The config file it was loading, if any. */
   file?: string;
 
   constructor(readonly issues: string[]) {
@@ -94,7 +71,6 @@ export class ConfigError extends Error {
   }
 }
 
-/** The input-side JSON Schema of a config schema: its shape. */
 export function shapeOf(schema: z.ZodType): JsonSchema {
   return z.toJSONSchema(schema, { io: "input", unrepresentable: "any" }) as JsonSchema;
 }
@@ -112,7 +88,6 @@ function suffix(origin: Origin): string {
   }
 }
 
-/** The `id` of each element of a list of tables, to name it in paths. */
 function idLookup(tree: unknown) {
   return (prefix: readonly PathSegment[]): string | undefined => {
     let value: unknown = tree;
@@ -135,8 +110,6 @@ function valueAt(tree: unknown, path: readonly PathSegment[]): unknown {
   return value;
 }
 
-/** A zod issue as one line: the path people read, a message that says what to write, and
- * where the value came from. */
 function describeIssue(
   issue: z.core.$ZodIssue,
   shape: JsonSchema,
@@ -168,7 +141,6 @@ function describeIssue(
   } else if (formatOf(node) === "bytes") {
     message = 'expected a size such as "512KiB", "32MiB", "1GiB", or bytes';
   }
-  // A missing table: name what it needs (`store.url`), which is what env sets.
   const required = node && isTable(node) && Array.isArray(node.required) ? node.required : [];
   if (message === "required" && required.length > 0) {
     return required.map(
@@ -179,7 +151,6 @@ function describeIssue(
   return [`${where}: ${message}${suffix(origins.get(path))}`];
 }
 
-/** Every `Secret` in a parsed config, with its path. */
 export function secretsIn(value: unknown): Array<{ path: PathSegment[]; secret: Secret }> {
   const found: Array<{ path: PathSegment[]; secret: Secret }> = [];
   const visit = (v: unknown, path: PathSegment[]): void => {
@@ -204,8 +175,6 @@ function parseToml(file: string, text: string): PlainObject {
   }
 }
 
-/** The env variables secrets read: `{ env = "NAME" }` at a secret field of the file's tree, and
- * the value of every `…__ENV` variable (a reference set from env). */
 function referencedEnv(
   shape: JsonSchema,
   tree: PlainObject,
@@ -232,7 +201,6 @@ function referencedEnv(
   return names;
 }
 
-/** Loads one config against `schema`. Throws `ConfigError` listing every problem. */
 export function loadConfig<S extends z.ZodType>(
   schema: S,
   options: LoadOptions = {},
@@ -267,8 +235,6 @@ function load<S extends z.ZodType>(schema: S, options: LoadOptions): Loaded<z.ou
     recordFile(shape, tree, { source: "file", path: options.file }, origins);
   }
 
-  // A variable a secret reads (`{ env = "SESHI_DD_KEY" }`) holds a value, not a setting, so it
-  // is not refused as an unknown `SESHI_*` name.
   const ignore = new Set([...(options.ignoreEnv ?? []), ...referencedEnv(shape, tree, env)]);
   const assignments: Assignment[] = [
     ...envAssignments(env, ignore),
@@ -288,8 +254,6 @@ function load<S extends z.ZodType>(schema: S, options: LoadOptions): Loaded<z.ou
       applyAssignment(shape, tree, assignment, origins);
     } catch (err) {
       if (!(err instanceof PlacementError)) throw err;
-      // A name the other config knows (the CLI's `SESHI_USER` while the server loads) is not
-      // this config's to refuse.
       const foreign =
         assignment.source === "env" &&
         (options.foreign ?? []).some((other) => namesSetting(other, assignment));
@@ -327,7 +291,6 @@ function load<S extends z.ZodType>(schema: S, options: LoadOptions): Loaded<z.ou
     if (issues.length > 0) throw new ConfigError(issues);
   }
 
-  // A literal secret in a file others can read (F1.3).
   if (options.file !== undefined && (options.platform ?? process.platform) !== "win32") {
     const literal = secrets.filter(({ path, secret }) => {
       const origin = origins.get(path);
@@ -348,7 +311,6 @@ function load<S extends z.ZodType>(schema: S, options: LoadOptions): Loaded<z.ou
   return { config, file: options.file, origins, warnings, shape };
 }
 
-/** `describeOrigin` for a path of a loaded config. */
 export function originOf<T>(loaded: Loaded<T>, path: readonly PathSegment[]): string {
   return describeOrigin(loaded.origins.get(path));
 }

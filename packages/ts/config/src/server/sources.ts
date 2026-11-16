@@ -1,8 +1,3 @@
-/** `[[sources]]`: what the server ingests from on its own (F4–F6), each with an `id` and a
- * `type`. Defined in the config file only; env overrides a field of one by its id
- * (`SESHI_SOURCES__DATADOG_PROD__API_KEY`). Each writes as its service account `svc:<id>`
- * (X5.4). Pollers' timing defaults are provisional until their branches confirm them. */
-
 import * as z from "zod";
 import { secret } from "../secret";
 import { duration } from "../units";
@@ -10,7 +5,6 @@ import { httpUrl, sourceId, storeUrl, visibility } from "./common";
 import { filterOverride } from "./filter";
 import { bucketCredentials } from "./store";
 
-/** The source id hooks and the CLI upload under (X6.4); no `[[sources]]` entry may take it. */
 export const UPLOAD_SOURCE_ID = "upload";
 
 const base = {
@@ -77,8 +71,6 @@ export const datadogSource = z
   })
   .describe("Datadog LLM Observability (F5), polled.");
 
-/** The placeholders an S3 source's `path` template may name (F6): the session, its format and
- * work, and the identity claims the key carries (X5.5). */
 export const S3_PATH_PLACEHOLDERS = [
   "session",
   "format",

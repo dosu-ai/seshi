@@ -1,5 +1,3 @@
-/** `[redaction]`: the operator's rule packs (F2.1), added to the built-in rules. */
-
 import * as z from "zod";
 
 export const redactionSection = z

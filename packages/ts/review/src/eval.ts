@@ -1,11 +1,3 @@
-/** Measuring a policy against labelled fixtures before it changes (F3.8): label accuracy and
- * false drops for the decision model, recall for the redactor. `seshi review eval` runs it with
- * a policy's real providers; tests run it with a fake one.
- *
- * Each fixture runs through the same `ModelReviewer` the pipeline uses, with the policy's scope
- * cleared so every fixture is reviewed. The report names fixtures and counts, never the
- * sensitive strings themselves. */
-
 import type { NormalizedRecord } from "@seshi/model";
 import type { ReviewDecision, ReviewInput } from "@seshi/pipeline";
 import BUILTIN from "./labelled-fixtures.json";
@@ -16,16 +8,12 @@ import { ModelReviewer, type ModelReviewerOptions } from "./reviewer";
 export interface Fixture {
   name: string;
   label: "allow" | "redact" | "drop";
-  /** Exact text that must not be stored. */
   sensitive: string[];
-  /** Canonical trace records, without the meta record. */
   records: NormalizedRecord[];
 }
 
-/** The fixtures shipped with seshi (`src/labelled-fixtures.json`). */
 export const BUILTIN_FIXTURES: readonly Fixture[] = BUILTIN as unknown as Fixture[];
 
-/** Why a fixture file was refused. */
 export class FixtureError extends Error {
   constructor(message: string) {
     super(message);
@@ -33,7 +21,6 @@ export class FixtureError extends Error {
   }
 }
 
-/** Checks parsed JSON as a list of fixtures (one fixture or an array of them). */
 export function parseFixtures(value: unknown, where: string): Fixture[] {
   const list = Array.isArray(value) ? value : [value];
   return list.map((item, i) => {
@@ -63,13 +50,9 @@ export function parseFixtures(value: unknown, where: string): Fixture[] {
 export interface FixtureResult {
   name: string;
   expected: Fixture["label"];
-  /** What review decided: a label, or `failed` when the policy's calls failed. */
   got: "allow" | "redact" | "drop" | "failed";
-  /** Findings applied, for `redact`. */
   findings: number;
-  /** Sensitive strings that would have been stored. */
   leaked: number;
-  /** For `failed`: the step and code. */
   failure?: string;
 }
 
@@ -79,17 +62,10 @@ export interface EvalReport {
   decision_model: string;
   redactor_model: string;
   fixtures: number;
-  /** Fixtures labelled as expected, over all (failures count as wrong). */
   label_accuracy: number;
-  /** Dropped though they should have been stored. */
   false_drops: number;
-  /** Stored though they should have been dropped. */
   missed_drops: number;
-  /** Of the sensitive strings in fixtures the redactor saw, the share it removed; null when it
-   * saw none. */
   redactor_recall: number | null;
-  /** Sensitive strings that would have been stored, by any route (allowed, or missed by the
-   * redactor). */
   leaked: number;
   failures: number;
   results: FixtureResult[];
@@ -105,7 +81,6 @@ function survivors(records: readonly NormalizedRecord[], sensitive: readonly str
   return sensitive.filter((s) => texts.some((t) => t.includes(s))).length;
 }
 
-/** Run `policy` over `fixtures` and score it. */
 export async function evaluate(
   policy: Policy,
   fixtures: readonly Fixture[],

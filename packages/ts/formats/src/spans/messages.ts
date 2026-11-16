@@ -1,17 +1,3 @@
-/** GenAI messages → trajectory-v1 records. The OpenTelemetry GenAI conventions carry a span's
- * prompt and response as JSON strings (`gen_ai.input.messages`, `gen_ai.output.messages`,
- * `gen_ai.system_instructions`): messages with a `role` and a list of typed `parts` (`text`,
- * `tool_call`, `tool_call_response`, `reasoning`, `blob`, `file`, `uri`, or a producer's own
- * type). Older producers flatten them into indexed attributes (`gen_ai.prompt.0.role`,
- * `gen_ai.prompt.0.content`, `gen_ai.completion.0.tool_calls.0.name`), and some write
- * OpenAI-style messages (`content` as a string) or Anthropic content blocks; all are read.
- *
- * Each message becomes the records it stands for: a user message's text a `user` record and its
- * tool results `tool` records; an assistant message's reasoning `reasoning` records, then one
- * `assistant` record with its text and tool calls; a system message a `system` record. A part
- * that is not text (an image, a file) is written as its type in brackets, so the conversation
- * still reads where it was. */
-
 import type { NormalizedRecord } from "@seshi/model";
 import type { Attributes, Plain } from "./attributes";
 
@@ -20,8 +6,6 @@ type Json = { [key: string]: unknown };
 const isObject = (value: unknown): value is Json =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** A JSON string attribute's value parsed, or the value itself when it is already structured
- * (an `arrayValue`/`kvlistValue`). Undefined when absent or unreadable. */
 export function jsonAttribute(value: Plain | undefined): unknown {
   if (value === undefined || value === null) return undefined;
   if (typeof value !== "string") return value;
@@ -35,8 +19,6 @@ export function jsonAttribute(value: Plain | undefined): unknown {
   }
 }
 
-/** A tool result or argument value as text: strings as they are; content blocks as their
- * text; anything else as JSON. */
 export function textOf(value: unknown): string {
   if (value === undefined || value === null) return "";
   if (typeof value === "string") return value;
@@ -56,14 +38,11 @@ export function textOf(value: unknown): string {
   return JSON.stringify(value);
 }
 
-/** Tool call arguments as the string a trajectory-v1 call records. */
 export function argsOf(value: unknown): string {
   if (value === undefined || value === null) return "{}";
   return typeof value === "string" ? value : JSON.stringify(value);
 }
 
-/** One part, read loosely: the conventions' parts, Anthropic content blocks, OpenAI tool
- * calls. */
 type Part =
   | { kind: "text"; text: string }
   | { kind: "reasoning"; text: string }
@@ -128,8 +107,6 @@ function partOf(raw: unknown): Part | undefined {
   }
 }
 
-/** A message's parts: `parts` (the conventions), else `content` as a string or a list of
- * blocks, plus OpenAI's `tool_calls`. */
 function partsOf(message: Json): Part[] {
   const out: Part[] = [];
   const raw = Array.isArray(message.parts)
@@ -150,7 +127,6 @@ function partsOf(message: Json): Part[] {
     }
   }
   if (out.length === 0 && typeof message.tool_call_id === "string") {
-    // An OpenAI-style tool message: { role: "tool", tool_call_id, content }.
     out.push({ kind: "result", id: message.tool_call_id, text: textOf(message.content) });
   } else if (typeof message.tool_call_id === "string") {
     for (const [i, part] of out.entries()) {
@@ -168,19 +144,15 @@ const joinText = (parts: Part[]) =>
     .filter((t) => t !== "")
     .join("\n");
 
-/** A tool call id for a call or result the message gives none: unique per span, so a result
- * without an id is still written. */
 function anonymousId(prefix: string, n: number): string {
   return `${prefix}#${n}`;
 }
 
 export interface MessageContext {
   timestamp: string;
-  /** Prefixes the ids made up for calls and results that have none (the span id). */
   idPrefix: string;
 }
 
-/** One message → its records (see the module comment). */
 export function messageRecords(message: unknown, ctx: MessageContext, counter: { n: number }) {
   const records: NormalizedRecord[] = [];
   if (!isObject(message)) return records;
@@ -227,7 +199,6 @@ export function messageRecords(message: unknown, ctx: MessageContext, counter: {
     for (const part of parts) if (part.kind === "result") records.push(resultRecord(part));
     return records;
   }
-  // user, tool and anything else: text and results in the order they came.
   let pending: Part[] = [];
   const flush = () => {
     const text = joinText(pending);
@@ -269,7 +240,6 @@ export function messageRecords(message: unknown, ctx: MessageContext, counter: {
   return records;
 }
 
-/** A list of messages (or one, or a JSON string of either) → records. */
 export function messagesRecords(value: unknown, ctx: MessageContext, counter = { n: 0 }) {
   const parsed = jsonAttribute(value as Plain);
   if (parsed === undefined) return [];
@@ -282,7 +252,6 @@ export function messagesRecords(value: unknown, ctx: MessageContext, counter = {
   return list.flatMap((message) => messageRecords(message, ctx, counter));
 }
 
-/** `gen_ai.system_instructions`: a list of parts (or a string) → one `system` record. */
 export function systemRecords(value: unknown, timestamp: string): NormalizedRecord[] {
   const parsed = jsonAttribute(value as Plain);
   if (parsed === undefined) return [];
@@ -295,12 +264,8 @@ export function systemRecords(value: unknown, timestamp: string): NormalizedReco
   return text.trim() === "" ? [] : [{ role: "system", content: text, timestamp }];
 }
 
-/** The legacy flattened form: `<prefix>.<i>.role`, `.content`, `.tool_call_id`,
- * `.tool_calls.<j>.{id,name,arguments}` → messages, in index order. */
 export function flattenedMessages(attrs: Attributes, prefix: string): Json[] {
   const byIndex = new Map<number, Json>();
-  // Each message's tool calls by their index. The indexes are the sender's: an array indexed
-  // by one (`tool_calls.4294967294`) is 2^32 long, and walking it stalls the receiver.
   const callsOf = new Map<Json, Map<number, Json>>();
   const lead = `${prefix}.`;
   for (const key of attrs.keysWith(lead)) {
@@ -330,7 +295,6 @@ export function flattenedMessages(attrs: Attributes, prefix: string): Json[] {
         message.tool_calls = [...calls.entries()].sort((a, b) => a[0] - b[0]).map(([, c]) => c);
       }
       if (typeof message.content === "string") {
-        // A content that is itself JSON (a list of blocks) is read as blocks.
         const parsed = jsonAttribute(message.content);
         if (Array.isArray(parsed)) message.content = parsed;
       }

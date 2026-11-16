@@ -1,8 +1,3 @@
-/** The pipeline's authorize stage (X4.3 stage 1), as a contract between the layers: the
- * pipeline (`@seshi/pipeline`) calls an `Authorizer`, and the auth package (`@seshi/auth`)
- * supplies the real one. Both are on layer 2 and may not import each other, so the types live
- * here (X3.2). */
-
 import type { Envelope } from "./generated/envelope";
 import type { OwnerBasis, Writer } from "./schemas/store";
 

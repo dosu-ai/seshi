@@ -1,9 +1,6 @@
-/** `[search]`: the local search index (F10.3). */
-
 import * as z from "zod";
 import { duration } from "../units";
 
-/** The roles of a trace's events (`seshi/trace/1`), which `search.events` picks from. */
 export const SEARCH_EVENT_ROLES = [
   "user",
   "assistant",

@@ -1,18 +1,3 @@
-/** Builds a release's GitHub assets (F8.4): the `seshi` binary for every target, each in its
- * archive with the licence, the two install scripts, and `SHA256SUMS` over all of them.
- *
- *   bun run release:build [--version <X.Y.Z>] [--target <id>]… [--out <dir>]
- *
- * - `--target darwin-arm64` (repeatable, or `host`) limits the build; every target by default.
- *   Cross-compiling downloads the target's Bun runtime, so a full build needs the network.
- * - `--version` is checked against the repository's version (`@seshi/model`'s package.json,
- *   which `scripts/release-version.ts` set), because each binary embeds it.
- * - The output is `dist/release/` unless `--out` says otherwise: the assets at its top, the bare
- *   binaries under `bin/<id>/` (not uploaded).
- *
- * Every archive is read back and its binary compared with what was compiled, and the host's
- * binary, when built, must print `seshi <version>`. */
-
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
@@ -34,7 +19,6 @@ export interface ReleaseAsset {
   name: string;
   sha256: string;
   size: number;
-  /** The target whose binary the archive holds; none for an install script. */
   target?: string;
 }
 
@@ -42,11 +26,8 @@ export interface BuildReleaseOptions {
   root?: string;
   out: string;
   targets?: readonly Target[];
-  /** Must equal the repository's version when given. */
   version?: string;
-  /** Archive timestamps; the build's start by default. */
   mtime?: number;
-  /** Compiles one target to `outfile`. Bun's compiler by default; tests may pass a stand-in. */
   compile?: (target: Target, outfile: string) => Promise<void>;
   log?: (line: string) => void;
 }
@@ -64,7 +45,6 @@ export function finishBinary(target: Target, outfile: string): void {
   writeFileSync(outfile, adhocSign(readFileSync(outfile), "seshi"));
 }
 
-/** Compiles `target` with the same flags as `bun run build`, then finishes it. */
 export async function compileTarget(target: Target, outfile: string, root = ROOT): Promise<void> {
   const { argv } = buildCommand({ root, target: target.bun, outfile });
   mkdirSync(dirname(outfile), { recursive: true });
@@ -78,7 +58,6 @@ export async function compileTarget(target: Target, outfile: string, root = ROOT
   finishBinary(target, outfile);
 }
 
-/** The archive for one target: the binary (executable) and the licence. */
 export function archiveFor(target: Target, binary: Uint8Array, license: Uint8Array, mtime = 0) {
   const entries = [
     { name: target.binary, data: binary, mode: 0o755 },
@@ -167,7 +146,6 @@ async function checkRuns(binary: string, version: string): Promise<void> {
   }
 }
 
-/** `--target` values to targets: ids, or `host`. */
 export function selectTargets(names: readonly string[]): Target[] {
   if (names.length === 0) return [...TARGETS];
   const picked = names.map((name) => (name === "host" ? hostTarget() : targetById(name)));

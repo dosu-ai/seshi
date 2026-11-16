@@ -1,22 +1,3 @@
-/** `[review]`: model review policies (F3). None by default, so review is off and nothing is sent
- * anywhere until an operator writes a policy with a provider key (F3.5).
- *
- * A policy has two steps, the decision model and the redactor LLM (F3.1). Each step names a
- * provider, a model and a prompt; anything it leaves out has a default, so the smallest policy
- * is an id and a key:
- *
- * ```toml
- * [[review.policies]]
- * id = "default"
- * decision.api_key = { env = "ANTHROPIC_API_KEY" }
- * ```
- *
- * which reviews every envelope with Claude Haiku 5.5 on the Anthropic API for both steps, with
- * seshi's default prompts and categories (F3.5). `resolveSteps` applies the defaults: the
- * redactor takes the decision step's provider, model and endpoint unless it names another
- * provider, and its key only for that same endpoint. The review package (`@seshi/review`)
- * builds the providers from what it returns. */
-
 import * as z from "zod";
 import { type Secret, secret } from "../secret";
 import { duration } from "../units";
@@ -25,16 +6,10 @@ import { httpUrl } from "./common";
 export const PROVIDERS = ["anthropic", "bedrock", "vertex", "openai-compatible"] as const;
 export type ReviewProvider = (typeof PROVIDERS)[number];
 
-/** The providers this binary can call. Bedrock and Vertex are named by F3.5 and accepted by
- * the schema's enum, but refused until they are built; an OpenAI-compatible gateway in front
- * of them works today. */
 export const BUILT_PROVIDERS: readonly ReviewProvider[] = ["anthropic", "openai-compatible"];
 
-/** The model both steps use when a policy names none: Claude Haiku 5.5 on the Anthropic API
- * (F3.5 names it for the redactor; seshi picks it for the decision model too). */
 export const DEFAULT_REVIEW_MODEL = "claude-haiku-5-5";
 
-/** Where each provider is reached when `base_url` is not set. */
 export const DEFAULT_BASE_URLS: Readonly<Partial<Record<ReviewProvider, string>>> = {
   anthropic: "https://api.anthropic.com",
   "openai-compatible": "https://api.openai.com/v1",
@@ -42,13 +17,9 @@ export const DEFAULT_BASE_URLS: Readonly<Partial<Record<ReviewProvider, string>>
 
 export const EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 
-/** How long one model call may take, when a step does not say. */
 export const DEFAULT_REVIEW_TIMEOUT_MS = 60_000;
-/** The output cap of a decision call: a one-word label, with room for the model's thinking. */
 export const DEFAULT_DECISION_MAX_TOKENS = 4_096;
-/** The output cap of a redactor call: a list of findings. */
 export const DEFAULT_REDACTOR_MAX_TOKENS = 16_000;
-/** How much record text one model call is given before an envelope is split by turn (F3.7). */
 export const DEFAULT_MAX_INPUT_CHARS = 100_000;
 
 const modelStep = z.strictObject({
@@ -165,7 +136,6 @@ export type ReviewPolicy = z.output<typeof policyBase>;
 export type ReviewStepConfig = ReviewPolicy["decision"];
 export type ReviewCategory = ReviewPolicy["redactor"]["categories"][number];
 
-/** One step with every default applied. */
 export interface ResolvedStep {
   provider: ReviewProvider;
   model: string;
@@ -178,10 +148,6 @@ export interface ResolvedStep {
   timeout_ms: number;
 }
 
-/** A policy's two steps with every default applied: the redactor takes the decision step's
- * provider, and with it the model, endpoint, effort and timeout, unless it names a provider of
- * its own. It takes the decision step's key only when it also sends to the decision step's
- * endpoint, so a key never goes to an endpoint it was not configured for. */
 export function resolveSteps(policy: ReviewPolicy): {
   decision: ResolvedStep;
   redactor: ResolvedStep;
@@ -204,8 +170,6 @@ export function resolveSteps(policy: ReviewPolicy): {
   const redactorProvider = r.provider ?? decisionProvider;
   const base_url =
     r.base_url ?? (inherits ? decision.base_url : DEFAULT_BASE_URLS[redactorProvider]);
-  // The decision step's key goes only where the decision step sends it: a redactor with an
-  // endpoint of its own needs its own key.
   const sameEndpoint = inherits && base_url === decision.base_url;
   const redactor: ResolvedStep = {
     provider: redactorProvider,
@@ -221,9 +185,6 @@ export function resolveSteps(policy: ReviewPolicy): {
   return { decision, redactor };
 }
 
-/** Why a step cannot be used as resolved, or undefined. Review is off until an operator gives
- * a provider key (F3.5): a policy that would send nothing, or would be refused on every call,
- * stops start-up rather than drop every envelope. */
 function stepProblem(step: ResolvedStep, own: ReviewStepConfig): string | undefined {
   if (!BUILT_PROVIDERS.includes(step.provider)) {
     return `provider ${step.provider} is not built yet (F3.5): use anthropic, or reach it through an openai-compatible gateway`;
@@ -257,7 +218,6 @@ export const reviewPolicy = policyBase
     const decision = stepProblem(steps.decision, policy.decision);
     if (decision) ctx.addIssue({ code: "custom", path: ["decision"], message: decision });
     const redactor = stepProblem(steps.redactor, policy.redactor);
-    // A redactor that inherits the decision step's problem is not reported twice.
     if (redactor && redactor !== decision) {
       ctx.addIssue({ code: "custom", path: ["redactor"], message: redactor });
     }

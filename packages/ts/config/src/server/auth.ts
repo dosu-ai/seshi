@@ -1,7 +1,3 @@
-/** `[auth]`: who may call the server (X5). Static tokens for one person and development,
- * the trusted org key, an optional IdP, admins, owner aliases and the keys session tokens are
- * signed with. */
-
 import * as z from "zod";
 import { secret } from "../secret";
 import { httpUrl } from "./common";

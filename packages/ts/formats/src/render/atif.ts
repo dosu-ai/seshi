@@ -1,24 +1,3 @@
-/** The canonical trace as an ATIF-v1.7 document (Harbor's Agent Trajectory Interchange
- * Format), rendered on read (`?format=atif`, X6.2).
- *
- * Steps follow the records in order, numbered from 1:
- *
- * - a user or system record is a `user` or `system` step;
- * - an assistant record is an `agent` step: its text as `message` (empty when it only calls
- *   tools), its calls as `tool_calls` (arguments as JSON when they parse), the reasoning
- *   records just before it as `reasoning_content`, and its LLM call's model as `model_name`;
- * - a tool result joins the latest agent or system step's `observation.results` with
- *   `source_call_id` (and `extra.is_error` when the result says whether it failed); an
- *   observation record joins it without one. When the latest step is a user step, an empty
- *   agent step holds them;
- * - reasoning with no assistant record after it is an agent step with an empty message.
- *
- * Token usage goes on the first step of each LLM call as `metrics` (`prompt_tokens` counts the
- * input including cache reads and writes, `cached_tokens` the cache reads), and the totals as
- * `final_metrics`. `agent.name` is the trace's `source`, so ATIF's own adapter files it under
- * the same harness. What ATIF cannot hold is left out: record ids, tool durations, withheld
- * markers, and an observation's place before a tool result in the same step. */
-
 import type {
   AtifDocument,
   AtifStep,
@@ -28,7 +7,6 @@ import type {
   TraceRecord,
 } from "@seshi/model";
 
-/** Arguments as ATIF wants them: the JSON value when they are JSON, else the string. */
 function argumentsOf(args: string): unknown {
   try {
     return JSON.parse(args);
@@ -61,7 +39,6 @@ export function toAtif(trace: Trace): AtifDocument {
   const calls = new Map((trace.llm_calls ?? []).map((call) => [call.id, call]));
   const counted = new Set<string>();
   const steps: AtifStep[] = [];
-  /** The step later results and observations join; none after a user step. */
   let open: AtifStep | undefined;
   let reasoning: { text: string[]; timestamp: string } | undefined;
 

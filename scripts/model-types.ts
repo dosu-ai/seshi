@@ -1,18 +1,3 @@
-/** Generates `packages/ts/model/src/generated/*.ts` from the JSON Schemas in `spec/schemas/`
- * (X3.10): spec/ is the contract other languages read, and ts/model's types for the stored
- * objects and the envelope are generated from it like every other language's. `--check` writes
- * nothing and fails when a generated file is stale or one is left over; `bun run check` runs it.
- *
- * The generator covers the subset of JSON Schema the contract uses: objects (`properties`,
- * `required`, `additionalProperties`), `type` (one or a list), `const`, `enum`, `oneOf` /
- * `anyOf`, `items`, and `$ref` to a `$defs` entry in the same file or in another file of
- * `spec/schemas/`. Anything else fails loudly rather than generating a looser type. Output is
- * formatted with Biome so it passes `bun run check` as written.
- *
- * Each module also carries its schema as data (`JSON_SCHEMA`, annotations left out), which
- * `@seshi/model`'s `schemaProblems` checks a stored object against at run time (the store
- * checker reads a bucket with it), so that check follows the contract too. */
-
 import { readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 
@@ -35,7 +20,6 @@ type Schema = {
   [key: string]: unknown;
 };
 
-/** Keywords that only constrain values (not their TypeScript shape), or are annotations. */
 const IGNORED = new Set([
   "$schema",
   "$id",
@@ -66,14 +50,11 @@ const HANDLED = new Set([
   "additionalProperties",
 ]);
 
-/** Annotations: left out of the `JSON_SCHEMA` a module carries, since they say nothing a check
- * needs. */
 const ANNOTATIONS = new Set(["$schema", "title", "description", "examples", "default"]);
 
 const SCHEMA_DIR = "spec/schemas";
 const OUT_DIR = "packages/ts/model/src/generated";
 
-/** The module a schema file generates: `trace.schema.json` → `trace`. */
 function moduleOf(file: string): string {
   return basename(file).replace(/\.schema\.json$/, "");
 }
@@ -90,7 +71,6 @@ function key(name: string): string {
 }
 
 class Generator {
-  /** Types imported from other modules, by module. */
   readonly imports = new Map<string, Set<string>>();
 
   constructor(
@@ -114,7 +94,6 @@ class Generator {
     return name;
   }
 
-  /** The TypeScript type for a schema, inline. */
   type(schema: Schema, indent: string): string {
     for (const k of Object.keys(schema)) {
       if (!IGNORED.has(k) && !HANDLED.has(k)) throw new Error(`${this.file}: unsupported ${k}`);
@@ -154,7 +133,6 @@ class Generator {
       .join(" | ");
   }
 
-  /** An object type literal. */
   object(schema: Schema, indent: string): string {
     const props = schema.properties ?? {};
     const required = new Set(schema.required ?? []);
@@ -173,7 +151,6 @@ class Generator {
     return `{\n${lines.join("\n")}\n${indent}}`;
   }
 
-  /** One named declaration: an interface for an object with properties, a type otherwise. */
   declaration(name: string, schema: Schema): string {
     const isObject = schema.type === "object" && schema.properties !== undefined && !schema.oneOf;
     if (isObject) {
@@ -183,8 +160,6 @@ class Generator {
   }
 }
 
-/** A schema without its annotations, walking only the keywords that hold schemas (so a property
- * named `description` or `format` is kept). */
 function stripped(schema: Schema): Schema {
   const out: Schema = {};
   for (const [k, v] of Object.entries(schema)) {
@@ -204,7 +179,6 @@ function stripped(schema: Schema): Schema {
   return out;
 }
 
-/** Every generated file: its path and content, before formatting. */
 export function generate(root: string): Array<{ path: string; text: string }> {
   const files = readdirSync(join(root, SCHEMA_DIR))
     .filter((f) => f.endsWith(".schema.json"))
@@ -246,10 +220,8 @@ export function generate(root: string): Array<{ path: string; text: string }> {
   return out;
 }
 
-/** This repository: Biome runs here, with its config, whatever root the schemas are read from. */
 const REPO = join(import.meta.dirname, "..");
 
-/** Biome's formatting of `text` as the file at `path`. */
 function format(path: string, text: string): string {
   const result = Bun.spawnSync(["bunx", "biome", "format", `--stdin-file-path=${path}`], {
     cwd: REPO,
@@ -263,12 +235,10 @@ function format(path: string, text: string): string {
   return result.stdout.toString();
 }
 
-/** The generated files, formatted. */
 export function generatedFiles(root: string): Array<{ path: string; text: string }> {
   return generate(root).map(({ path, text }) => ({ path, text: format(path, text) }));
 }
 
-/** Files that differ from what the schemas generate, plus generated files no schema makes. */
 export function staleFiles(root: string): string[] {
   const files = generatedFiles(root);
   const stale = files
@@ -284,9 +254,7 @@ export function staleFiles(root: string): string[] {
   let present: string[] = [];
   try {
     present = readdirSync(join(root, OUT_DIR)).map((f) => `${OUT_DIR}/${f}`);
-  } catch {
-    // No generated folder yet: every file is stale.
-  }
+  } catch {}
   return [...stale, ...present.filter((p) => !wanted.has(p))];
 }
 

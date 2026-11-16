@@ -1,7 +1,3 @@
-/** The CLI's own config (`~/.config/seshi/config.toml`, `%APPDATA%\seshi\config.toml` on
- * Windows; F1.4): which server it talks to, who the user says they are, personal capture
- * rules (F9.5) and the colour theme (B1.4). Same loader as the server's, its own schema. */
-
 import * as z from "zod";
 import { httpUrl } from "./server/common";
 

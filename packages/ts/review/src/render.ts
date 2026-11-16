@@ -1,36 +1,16 @@
-/** What the models are shown of an envelope, and how a long one is split (F3.6, F3.7).
- *
- * Only the text a reviewer judges leaves the server: each record's `content` and each tool
- * call's arguments, with the record's role and, for tool calls and their results, the tool's
- * name. Ids, timestamps, the meta record, LLM call details and everything else stay behind.
- *
- * Each field becomes one entry `{record, role, field, text}`; `record` is the record's index in
- * the envelope's records, which is what findings name. An envelope whose text is longer than the
- * policy's `max_input_chars` is split by turn (a turn starts at each user record): turns are
- * packed into parts that fit, a turn that alone does not fit is packed field by field, and a
- * field that alone does not fit is cut into overlapping windows that share its name and carry a
- * part number. Findings always apply to the whole field, so a window boundary changes nothing
- * about how text is removed; the overlap keeps a value cut at a boundary whole in one window. */
-
 import type { NormalizedRecord } from "@seshi/model";
 
 export interface Entry {
-  /** The record's index in the envelope's records. */
   record: number;
   role: string;
-  /** `content`, or `tool_calls[N].args`. */
   field: string;
   text: string;
-  /** The tool's name, for a call's arguments and for a tool result. */
   tool?: string;
-  /** `k/n` when the field was cut into windows. */
   part?: string;
 }
 
-/** Bytes of JSON around each entry's text, counted against the budget. */
 const ENTRY_OVERHEAD = 120;
 
-/** Every field the models judge, in record order. */
 export function entriesOf(records: readonly NormalizedRecord[]): Entry[] {
   const toolNames = new Map<string, string>();
   const out: Entry[] = [];
@@ -76,7 +56,6 @@ function size(entry: Entry): number {
   return entry.text.length + ENTRY_OVERHEAD;
 }
 
-/** `entry` cut into windows of at most `budget` (with overhead), overlapping by a little. */
 function windows(entry: Entry, budget: number): Entry[] {
   const width = Math.max(1, budget - ENTRY_OVERHEAD);
   if (entry.text.length <= width) return [entry];
@@ -90,10 +69,8 @@ function windows(entry: Entry, budget: number): Entry[] {
   return pieces.map((text, i) => ({ ...entry, text, part: `${i + 1}/${pieces.length}` }));
 }
 
-/** The entries split into parts of at most `budget` characters each, by turn. */
 export function partsOf(records: readonly NormalizedRecord[], budget: number): Entry[][] {
   const entries = entriesOf(records);
-  // Turns: a new one starts at each user record.
   const turns: Entry[][] = [];
   let lastRecord = -1;
   for (const entry of entries) {
@@ -119,7 +96,6 @@ export function partsOf(records: readonly NormalizedRecord[], budget: number): E
       used += turnSize;
       continue;
     }
-    // A turn that alone does not fit: pack its fields on their own.
     flush();
     for (const entry of turn) {
       if (used + size(entry) > budget) flush();
@@ -132,7 +108,6 @@ export function partsOf(records: readonly NormalizedRecord[], budget: number): E
   return parts;
 }
 
-/** A field's text by record index and name, as the findings name them. */
 export function fieldText(record: NormalizedRecord, field: string): string | undefined {
   const r = record as unknown as Record<string, unknown>;
   if (field === "content") return typeof r.content === "string" ? r.content : undefined;

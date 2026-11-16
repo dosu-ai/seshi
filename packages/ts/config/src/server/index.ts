@@ -1,7 +1,3 @@
-/** The server's config (`seshi.toml`, F1.4): one strict schema from its sections. This file is
- * the schema index: a later branch adds or refines its section in its own file and adds one
- * line here. `spec/config.schema.json` is generated from it (`bun run schema`). */
-
 import { posix } from "node:path";
 import * as z from "zod";
 import { authSection } from "./auth";
@@ -36,11 +32,8 @@ const sections = z.strictObject({
   capture: captureSection,
 });
 
-/** `scheme`, `bucket` and key prefix of a bucket URL; a folder (`file:///path`, `/path`) is
- * `file` with its path as the prefix. */
 function bucketOf(url: string, extra = ""): { at: string; prefix: string } | undefined {
   const folder = /^(?:file:\/\/)?(\/.*)$/.exec(url);
-  // A folder's `.` and `..` segments are resolved: `/data/x/../seshi` is `/data/seshi`.
   const match = folder
     ? ["", "file", "", posix.normalize(folder[1] as string)]
     : /^(s3|r2):\/\/([^/]+)\/?(.*)$/.exec(url);
@@ -133,8 +126,6 @@ export const serverConfigSchema = sections
 
 export type ServerConfig = z.output<typeof serverConfigSchema>;
 
-/** The session filter for `sourceId`: `[filter]` with the source's overrides. Uploads, and
- * any id not in `[[sources]]`, get `[filter]` itself. */
 export function filterFor(config: ServerConfig, sourceId: string): ServerConfig["filter"] {
   const source = config.sources.find((s) => s.id === sourceId);
   const override = Object.fromEntries(
@@ -143,13 +134,10 @@ export function filterFor(config: ServerConfig, sourceId: string): ServerConfig[
   return { ...config.filter, ...override };
 }
 
-/** The visibility of a new session from `sourceId` when its request and token set none
- * (X5.10): the source's own setting, else `default_visibility`. */
 export function visibilityFor(config: ServerConfig, sourceId: string): Visibility {
   return config.sources.find((s) => s.id === sourceId)?.visibility ?? config.default_visibility;
 }
 
-/** Which key signs new session tokens: `session_key_id`, else the only key. */
 export function signingKeyId(config: ServerConfig): string | undefined {
   return config.auth.session_key_id ?? Object.keys(config.auth.session_keys)[0];
 }

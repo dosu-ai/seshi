@@ -1,7 +1,3 @@
-/** The session API's types: what a client sends and gets back, whichever backend answers it (the
- * HTTP client in `@seshi/client`, or the pipeline over a store in `@seshi/pipeline`). They live
- * here, the lowest layer, so the HTTP client depends on nothing but this package (X3.2). */
-
 import type { ShippedPrefix } from "./generated/envelope";
 import type { RenderedTrace, RenderFormat } from "./schemas/renders";
 import type {

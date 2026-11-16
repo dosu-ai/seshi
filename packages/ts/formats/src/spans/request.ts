@@ -13,7 +13,6 @@ import type {
   SpanValue,
 } from "@seshi/model";
 
-/** The spans of one `ResourceSpans`, with the resource's attributes. */
 export interface SpanGroup {
   resource: SpanAttribute[];
   spans: ReceivedSpan[];
@@ -21,9 +20,7 @@ export interface SpanGroup {
 
 export interface ReadSpans {
   groups: SpanGroup[];
-  /** Spans that could not be read (bad ids, no start time). */
   rejected: number;
-  /** Why, for the first one: never content. */
   reason?: string;
 }
 
@@ -32,7 +29,6 @@ type Json = Record<string, unknown>;
 const isObject = (value: unknown): value is Json =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** `value[camel] ?? value[snake]`. */
 function field(value: Json, camel: string): unknown {
   if (camel in value) return value[camel];
   const snake = camel.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
@@ -41,8 +37,6 @@ function field(value: Json, camel: string): unknown {
 
 const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
 
-/** An id as lowercase hex of `bytes` bytes: hex as the JSON mapping writes it, or base64. Null
- * when it is neither, or all zero (OTLP's invalid id). */
 export function hexId(value: unknown, bytes: number): string | null {
   if (typeof value !== "string" || value === "") return null;
   let hex: string | null = null;
@@ -56,7 +50,6 @@ export function hexId(value: unknown, bytes: number): string | null {
   return hex;
 }
 
-/** A Unix-nanosecond time as a decimal string, or undefined. */
 export function nanosString(value: unknown): string | undefined {
   if (typeof value === "number" && Number.isFinite(value) && value > 0) {
     return BigInt(Math.trunc(value)).toString();
@@ -67,7 +60,6 @@ export function nanosString(value: unknown): string | undefined {
   return undefined;
 }
 
-/** An `AnyValue` in its JSON mapping (either spelling), normalized; undefined when empty. */
 export function readValue(raw: unknown, depth = 0): SpanValue | undefined {
   if (!isObject(raw) || depth > 16) return undefined;
   const s = field(raw, "stringValue");
@@ -157,7 +149,6 @@ function enumValue(value: unknown, names: Readonly<Record<string, number>>): num
   return undefined;
 }
 
-/** One span, checked; a string saying why when its ids or start time are unusable. */
 export function readSpan(
   raw: unknown,
   scope?: { name?: string; version?: string },
@@ -203,8 +194,6 @@ export function readSpan(
   return span;
 }
 
-/** A whole `ExportTraceServiceRequest` (parsed JSON) → its spans by resource. Throws when the
- * value is not a request at all. */
 export function readExportRequest(value: unknown): ReadSpans {
   if (!isObject(value)) throw new Error("an ExportTraceServiceRequest is a JSON object");
   const groups: SpanGroup[] = [];

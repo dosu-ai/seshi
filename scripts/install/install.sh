@@ -70,7 +70,6 @@ case "$version" in
 esac
 base_url=${base_url%/}
 
-# This machine's release target.
 case "$(uname -s)" in
   Darwin) os=darwin ;;
   Linux) os=linux ;;
@@ -169,7 +168,6 @@ if [ -z "$dir" ]; then
   dir=${XDG_BIN_HOME:-$HOME/.local/bin}
 fi
 mkdir -p "$dir" || fail "could not create $dir"
-# An absolute path, so the PATH check and the startup-file line mean the same from any folder.
 case "$dir" in
   /*) ;;
   *) dir=$(cd "$dir" && pwd) || fail "could not resolve $dir" ;;

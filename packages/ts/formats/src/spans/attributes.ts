@@ -1,12 +1,7 @@
-/** Reading OTLP attributes (`KeyValue` lists in their JSON mapping) as plain values, and OTLP
- * times as ISO 8601. */
-
 import type { SpanAttribute, SpanValue } from "@seshi/model";
 
 export type Plain = string | number | boolean | null | Plain[] | { [key: string]: Plain };
 
-/** An `AnyValue` as a plain value: strings, numbers, booleans, arrays and objects. An int64
- * that does not fit a double exactly stays a string; bytes stay base64. */
 export function plainValue(value: SpanValue | undefined): Plain {
   if (value === undefined || value === null || typeof value !== "object") return null;
   if ("stringValue" in value) return value.stringValue;
@@ -26,8 +21,6 @@ export function plainValue(value: SpanValue | undefined): Plain {
   return null;
 }
 
-/** A span's (or resource's, or event's) attributes by key. A key repeated in the list keeps its
- * last value, as OTLP's SDKs do. */
 export class Attributes {
   private readonly values = new Map<string, Plain>();
 
@@ -48,7 +41,6 @@ export class Attributes {
     return this.values.get(key);
   }
 
-  /** A non-empty string, or undefined. Numbers and booleans are written as strings. */
   string(key: string): string | undefined {
     const value = this.values.get(key);
     if (typeof value === "string") return value === "" ? undefined : value;
@@ -56,7 +48,6 @@ export class Attributes {
     return undefined;
   }
 
-  /** The first of `keys` that has a non-empty string. */
   first(...keys: string[]): string | undefined {
     for (const key of keys) {
       const value = this.string(key);
@@ -65,7 +56,6 @@ export class Attributes {
     return undefined;
   }
 
-  /** A whole number ≥ 0, or undefined. */
   count(...keys: string[]): number | undefined {
     for (const key of keys) {
       const value = this.values.get(key);
@@ -89,7 +79,6 @@ export class Attributes {
     return undefined;
   }
 
-  /** A list of strings (an array attribute, or one string). */
   strings(key: string): string[] {
     const value = this.values.get(key);
     if (typeof value === "string") return value === "" ? [] : [value];
@@ -97,7 +86,6 @@ export class Attributes {
     return [];
   }
 
-  /** Keys with a prefix, in insertion order. */
   keysWith(prefix: string): string[] {
     return [...this.values.keys()].filter((key) => key.startsWith(prefix));
   }
@@ -105,8 +93,6 @@ export class Attributes {
 
 const NANOS_PER_MS = 1_000_000n;
 
-/** Unix nanoseconds (a decimal string or number) as ISO 8601 with millisecond precision, or
- * undefined for a missing, zero or unreadable time. */
 export function isoFromNanos(nanos: string | number | undefined): string | undefined {
   if (nanos === undefined || nanos === null) return undefined;
   let ms: number;
@@ -121,7 +107,6 @@ export function isoFromNanos(nanos: string | number | undefined): string | undef
   return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
 }
 
-/** Milliseconds between two Unix-nanosecond times, or undefined. */
 export function durationMs(
   start: string | number | undefined,
   end: string | number | undefined,
@@ -136,7 +121,6 @@ export function durationMs(
   }
 }
 
-/** Compare two Unix-nanosecond times (decimal strings), for sorting. */
 export function compareNanos(a: string | undefined, b: string | undefined): number {
   const x = a ?? "0";
   const y = b ?? "0";

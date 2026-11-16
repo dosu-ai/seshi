@@ -1,18 +1,3 @@
-/** Builds the npm packages of a release (F8.4, X3.8) from its GitHub assets, so npm ships the
- * very binaries the release does:
- *
- * - `@seshi/cli-<id>`: one per target, holding `bin/seshi` (`bin/seshi.exe`), with `os`, `cpu`
- *   and (Linux) `libc` set so npm installs only the one for the machine.
- * - `seshi`: the launcher (`bin/seshi.js`, scripts/release/launcher.ts) with every platform
- *   package as an optional dependency at the same version. `npm i -g seshi`, `npx seshi`.
- * - `@seshi/model` and `@seshi/client`: the libraries, bundled to ESM for Node and Bun with
- *   their declarations. The workspaces themselves stay private and source-only (X3.4); these
- *   are built copies.
- *
- *   bun run release:npm --version <X.Y.Z> [--from dist/release] [--out dist/npm]
- *
- * Every archive is checked against `SHA256SUMS` before its binary is taken. */
-
 import {
   chmodSync,
   existsSync,
@@ -33,7 +18,6 @@ export const ROOT = resolve(import.meta.dirname, "../..");
 
 const SEMVER = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
 
-/** The libraries published from the workspace, in publish order (a dependency first). */
 export const LIBRARIES = [
   {
     name: "@seshi/model",
@@ -52,7 +36,6 @@ export const LIBRARIES = [
 
 export interface NpmPackage {
   name: string;
-  /** The folder holding its package.json. */
   dir: string;
 }
 
@@ -72,7 +55,6 @@ function writeJson(path: string, value: unknown): void {
 
 const OS_NAMES = { darwin: "macOS", linux: "Linux", windows: "Windows" } as const;
 
-/** The manifest of `target`'s platform package. */
 export function platformManifest(target: Target, version: string): Record<string, unknown> {
   return {
     name: target.npm,
@@ -86,7 +68,6 @@ export function platformManifest(target: Target, version: string): Record<string
   };
 }
 
-/** The `seshi` launcher's manifest. */
 export function launcherManifest(
   version: string,
   targets: readonly Target[] = TARGETS,
@@ -104,14 +85,10 @@ export function launcherManifest(
   };
 }
 
-/** The face-free glyph, mint on night ink, as npm pages show it (B1.5). It is read from the
- * release's own tag, so a page never changes after it is published. No face below 48 px
- * (B1.2): the glyph has none at any size. */
 export function badgeUrl(version: string): string {
   return `https://raw.githubusercontent.com/${REPOSITORY}/v${version}/brand/glyph/seshi-glyph-badge.svg`;
 }
 
-/** A package's README: the glyph, the title, what it is, and where the docs are. */
 export function readme(title: string, body: string, version: string): string {
   return [
     `<img src="${badgeUrl(version)}" alt="" width="64" height="64">`,
@@ -127,7 +104,6 @@ export function readme(title: string, body: string, version: string): string {
   ].join("\n");
 }
 
-/** Writes `target`'s platform package with `binary`. */
 export function writePlatformPackage(
   out: string,
   target: Target,
@@ -154,7 +130,6 @@ export function writePlatformPackage(
   return { name: target.npm, dir };
 }
 
-/** Writes the `seshi` launcher package. */
 export async function writeLauncherPackage(
   out: string,
   version: string,
@@ -208,8 +183,6 @@ async function run(argv: string[], cwd: string): Promise<void> {
   if (code !== 0) throw new Error(`${argv.join(" ")} failed (${code}):\n${out}${err}`);
 }
 
-/** A library's dependencies for npm: workspace packages at the release's exact version (each
- * must itself be published), the rest as the workspace declares them. */
 export function libraryDependencies(
   declared: Record<string, string> | undefined,
   version: string,
@@ -229,9 +202,6 @@ export function libraryDependencies(
   return deps;
 }
 
-/** Builds one library: an ESM bundle of its sources (dependencies left as imports) and its
- * declarations, which tsc writes from the sources. `@seshi/model`'s declarations come from the
- * built model package, so the client's refer to the published name. */
 export async function writeLibraryPackage(
   out: string,
   library: (typeof LIBRARIES)[number],
@@ -273,7 +243,6 @@ export async function writeLibraryPackage(
         strict: true,
         skipLibCheck: true,
         resolveJsonModule: true,
-        // Node's built-in modules' types, through bun-types (the repository's only @types).
         types: ["bun"],
         typeRoots: [join(root, "node_modules/@types")],
         customConditions: ["bun"],
@@ -343,17 +312,13 @@ export function addDeclarationExtensions(types: string): void {
 
 export interface BuildNpmOptions {
   version: string;
-  /** The release assets: archives and `SHA256SUMS`. */
   from: string;
   out: string;
   root?: string;
   targets?: readonly Target[];
-  /** Build `@seshi/model` and `@seshi/client` too (the default). */
   libraries?: boolean;
 }
 
-/** Every npm package of the release, in publish order: platform packages, libraries, then
- * the launcher (so it never names a platform package that is not yet on the registry). */
 export async function buildNpm(options: BuildNpmOptions): Promise<NpmPackage[]> {
   if (!SEMVER.test(options.version)) {
     throw new Error(`not a version: ${JSON.stringify(options.version)}`);
@@ -361,8 +326,6 @@ export async function buildNpm(options: BuildNpmOptions): Promise<NpmPackage[]> 
   const root = options.root ?? ROOT;
   const targets = options.targets ?? TARGETS;
   if (options.libraries !== false) {
-    // The libraries are built from the sources, and @seshi/model's VERSION is read from its
-    // package.json: building them at another version would publish a mismatch.
     const manifest = JSON.parse(readFileSync(join(root, "packages/ts/model/package.json"), "utf8"));
     if (manifest.version !== options.version) {
       throw new Error(

@@ -1,13 +1,6 @@
-/** A config schema's shape, read from its JSON Schema (the input side, as `z.toJSONSchema`
- * writes it). The loader uses it to place env and flag values (which key a `SESHI_…` name
- * means, whether a field takes a number, a list or a secret) and `config show` uses it to
- * print durations, sizes and secrets. Reading the generated JSON Schema rather than zod's
- * internals keeps this on a public, stable format. */
-
 import { SECRET_KEY } from "./secret";
 import { FORMAT_KEY } from "./units";
 
-/** The part of JSON Schema that `z.toJSONSchema` writes for config schemas. */
 export interface JsonSchema {
   type?: string | string[];
   properties?: Record<string, JsonSchema>;
@@ -46,12 +39,10 @@ export function formatOf(node: JsonSchema | undefined): "duration" | "bytes" | u
   return node?.[FORMAT_KEY];
 }
 
-/** A table with named fields. */
 export function isTable(node: JsonSchema): boolean {
   return hasType(node, "object") && node.properties !== undefined;
 }
 
-/** A table whose keys are the user's (`[auth.tokens]`, `[auth.owner_aliases]`). */
 export function isMap(node: JsonSchema): boolean {
   return (
     hasType(node, "object") &&
@@ -60,7 +51,6 @@ export function isMap(node: JsonSchema): boolean {
   );
 }
 
-/** A list of tables (`[[sources]]`). */
 export function isTableList(node: JsonSchema): boolean {
   if (!hasType(node, "array") || !node.items) return false;
   const items = node.items;
@@ -69,8 +59,6 @@ export function isTableList(node: JsonSchema): boolean {
   return options.length > 0 && options.every(isTable);
 }
 
-/** A value the user sets as one thing: a scalar, a list of scalars, a secret reference, a
- * duration. Everything but tables, maps and lists of tables. */
 export function isLeaf(node: JsonSchema | undefined): boolean {
   if (node === undefined) return true;
   if (isSecret(node) || formatOf(node)) return true;
@@ -80,8 +68,6 @@ export function isLeaf(node: JsonSchema | undefined): boolean {
   return true;
 }
 
-/** The schema of `key` inside a table or map node, given the value there so far (which picks
- * the branch of a union of tables). `undefined` when the key is not part of the schema. */
 export function childOf(node: JsonSchema, key: string, value?: unknown): JsonSchema | undefined {
   if (isTable(node)) return node.properties?.[key];
   if (isMap(node)) return node.additionalProperties as JsonSchema;
@@ -96,7 +82,6 @@ export function childOf(node: JsonSchema, key: string, value?: unknown): JsonSch
   return undefined;
 }
 
-/** The union branch a table value belongs to, by its constant field (`type = "datadog"`). */
 export function pickBranch(options: JsonSchema[], value: unknown): JsonSchema | undefined {
   if (!isPlainObject(value)) return undefined;
   return options.find((option) =>
@@ -106,7 +91,6 @@ export function pickBranch(options: JsonSchema[], value: unknown): JsonSchema | 
   );
 }
 
-/** The element schema of a list of tables, for one element's value. */
 export function elementOf(node: JsonSchema, value: unknown): JsonSchema | undefined {
   const items = node.items;
   if (!items) return undefined;
@@ -114,7 +98,6 @@ export function elementOf(node: JsonSchema, value: unknown): JsonSchema | undefi
   return pickBranch(branches(items), value) ?? items;
 }
 
-/** The scalar types a leaf accepts, branches included. */
 export function scalarTypes(node: JsonSchema): Set<string> {
   const types = new Set<string>();
   const visit = (n: JsonSchema): void => {
@@ -128,7 +111,6 @@ export function scalarTypes(node: JsonSchema): Set<string> {
   return types;
 }
 
-/** The schema at a concrete path (`["sources", 0, "api_key"]`) of `tree`. */
 export function nodeAt(
   shape: JsonSchema,
   tree: unknown,

@@ -1,8 +1,3 @@
-/** What the server's auth, token and admin routes take and answer, as `spec/openapi.yaml`
- * documents them. The client depends only on `@seshi/model` (X3.2), and these objects are not
- * stored ones, so they are written here from the document rather than imported from the
- * packages that produce them. */
-
 import type { OwnerBasis, Visibility } from "@seshi/model";
 
 export type Scope =

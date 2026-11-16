@@ -17,7 +17,6 @@ import { RE2JS } from "re2js";
 
 export type Engine = "re2" | "js";
 
-/** One match: the whole span, and the `secret` group's when it took part. */
 export interface Match {
   start: number;
   end: number;
@@ -27,13 +26,10 @@ export interface Match {
 export interface PatternMatcher {
   readonly source: string;
   readonly engine: Engine;
-  /** Every non-empty match in `text`, left to right, not overlapping. */
   matches(text: string): Match[];
-  /** Whether the pattern matches somewhere in `text`. */
   test(text: string): boolean;
 }
 
-/** A pattern that does not compile, with why. */
 export class PatternError extends Error {
   constructor(
     readonly pattern: string,
@@ -44,8 +40,6 @@ export class PatternError extends Error {
   }
 }
 
-/** RE2's program size past which a pattern is refused: a bound on the memory and per-character
- * work one pattern costs (`a{1000}` style blow-ups). Generous for any secret pattern. */
 export const MAX_PROGRAM_SIZE = 20_000;
 
 function re2Message(err: unknown): string {
@@ -127,13 +121,9 @@ class JsMatcher implements PatternMatcher {
 }
 
 export interface CompileOptions {
-  /** Anchor the pattern at the start of the text (secret commands match a command's start). */
   anchored?: boolean;
 }
 
-/** Compile `source` on `engine`. Throws `PatternError` for a pattern that does not compile,
- * that matches empty text (it would mark every position of every string), or, on RE2, whose
- * program is too large. */
 export function compilePattern(
   source: string,
   engine: Engine,

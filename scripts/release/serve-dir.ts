@@ -9,7 +9,6 @@
 import { existsSync, statSync } from "node:fs";
 import { join, normalize, resolve, sep } from "node:path";
 
-/** A fetch handler serving files under `root`; anything outside it, or missing, is a 404. */
 export function serveDir(root: string): (req: Request) => Response {
   const base = resolve(root);
   return (req) => {

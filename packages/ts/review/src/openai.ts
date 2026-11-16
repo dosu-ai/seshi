@@ -1,12 +1,3 @@
-/** The OpenAI-compatible provider: any endpoint that speaks Chat Completions
- * (`POST <base_url>/chat/completions`), such as vLLM, Ollama, LiteLLM or a gateway in front of
- * another cloud, so an org that cannot send transcripts out can run a local model (F3.5).
- *
- * The answer is asked for with `response_format: json_schema` (strict), and the text is still
- * parsed and checked by the reviewer, since not every server enforces the schema. The key, when
- * set, goes in `Authorization: Bearer`; nothing is read from the environment, and redirects are
- * refused, so content goes to the configured endpoint only. */
-
 import {
   type CompletionRequest,
   isTimeout,
@@ -79,7 +70,6 @@ export class OpenAiCompatibleProvider implements ModelProvider {
       throw new ProviderError("network", true, "the provider could not be reached");
     }
     if (!response.ok) {
-      // The body may echo the request; it is read and dropped, never recorded.
       await response.body?.cancel().catch(() => {});
       throw statusError(response.status);
     }

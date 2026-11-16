@@ -1,11 +1,3 @@
-/** One OTLP span → its part of a session, by the OpenTelemetry GenAI semantic conventions
- * (`gen_ai.*`, F4.6). Which conversation thread it belongs to, what went in and came out (as
- * records), the tool call an `execute_tool` span ran, and the model request a `chat` span stands
- * for (model, token usage, stop reason, request parameters, error).
- *
- * A vendor's own attributes (`anthropic.*`) refine this through a `SpanAttributeMapper`: the
- * Claude Platform integration supplies one. */
-
 import type {
   Claims,
   LlmCall,
@@ -26,29 +18,20 @@ import {
   textOf,
 } from "./messages";
 
-/** A span as a mapper sees it: the span, its attributes, its resource's. */
 export interface SpanView {
   span: ReceivedSpan;
   attributes: Attributes;
   resource: Attributes;
 }
 
-/** A vendor's refinements of the GenAI reading. Every hook is optional. */
 export interface SpanAttributeMapper {
-  /** The vendor (`anthropic`), for error messages. */
   readonly name: string;
-  /** The session key, ahead of `gen_ai.conversation.id` and the trace id (F4.3). */
   sessionKey?(view: SpanView): string | undefined;
-  /** Whether the span carries content in attributes the conventions do not name. */
   hasContent?(view: SpanView): boolean;
   claims?(view: SpanView): Claims | undefined;
-  /** The part the conventions made, refined: a tool result in a vendor attribute, a stop
-   * reason, a final span. Returns the part to keep. */
   refine?(part: SpanPart, view: SpanView): SpanPart;
 }
 
-/** The content attributes of the conventions (F4.5): a span with none of them, in its
- * attributes or its events, has no prompt or response. */
 const CONTENT_KEYS = [
   "gen_ai.input.messages",
   "gen_ai.output.messages",
@@ -61,10 +44,8 @@ const CONTENT_KEYS = [
 
 const FLATTENED_PREFIXES = ["gen_ai.prompt.", "gen_ai.completion."] as const;
 
-/** Operations that are one request to a model. */
 const MODEL_OPERATIONS = new Set(["chat", "text_completion", "generate_content", "completion"]);
 
-/** Request parameters a call records (`LlmCall.parameters`), by attribute. */
 const PARAMETERS: readonly [string, string][] = [
   ["gen_ai.request.max_tokens", "max_tokens"],
   ["gen_ai.request.temperature", "temperature"],
@@ -84,8 +65,6 @@ function attributesWith(view: SpanView, key: string): boolean {
   return (view.span.events ?? []).some((event) => new Attributes(event.attributes).has(key));
 }
 
-/** A content attribute's value: on the span, else on one of its events (the conventions' event
- * form, `gen_ai.client.inference.operation.details`). */
 function contentValue(view: SpanView, key: string) {
   if (view.attributes.has(key)) return view.attributes.get(key);
   for (const event of view.span.events ?? []) {
@@ -95,7 +74,6 @@ function contentValue(view: SpanView, key: string) {
   return undefined;
 }
 
-/** Whether a span carries prompt or response content by the conventions (F4.5). */
 export function genAiHasContent(view: SpanView): boolean {
   if (CONTENT_KEYS.some((key) => attributesWith(view, key))) return true;
   return FLATTENED_PREFIXES.some((prefix) =>
@@ -103,8 +81,6 @@ export function genAiHasContent(view: SpanView): boolean {
   );
 }
 
-/** The span's operation: `gen_ai.operation.name`, else the first word of its name when the
- * conventions name spans `<operation> <target>`. */
 function operationOf(view: SpanView): string | undefined {
   const named = view.attributes.string("gen_ai.operation.name");
   if (named) return named;
@@ -120,7 +96,6 @@ function statusOf(span: ReceivedSpan): SpanPart["status"] {
   return code === 1 ? "ok" : code === 2 ? "error" : "unset";
 }
 
-/** The error a failed span reports: `error.type`, and the status message. */
 export function errorOf(view: SpanView): string | undefined {
   const type = view.attributes.string("error.type");
   const message = view.span.status?.code === 2 ? view.span.status.message : undefined;
@@ -165,8 +140,6 @@ function parametersOf(attrs: Attributes): LlmCall["parameters"] {
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
-/** The model request a span stands for, when it is one: a model operation, or any span that
- * reports token usage. */
 function llmCallOf(view: SpanView, operation: string | undefined): LlmCall | undefined {
   const { attributes: attrs, span } = view;
   const usage = usageOf(attrs);
@@ -194,7 +167,6 @@ function llmCallOf(view: SpanView, operation: string | undefined): LlmCall | und
   return call;
 }
 
-/** The tool call an `execute_tool` span ran. */
 function toolOf(view: SpanView, operation: string | undefined): SpanTool | undefined {
   const { attributes: attrs, span } = view;
   if (operation !== "execute_tool") return undefined;
@@ -211,8 +183,6 @@ function toolOf(view: SpanView, operation: string | undefined): SpanTool | undef
   return tool;
 }
 
-/** The records of the span's input: system instructions, then input messages (or the
- * flattened `gen_ai.prompt.<i>.*`). */
 function inputOf(view: SpanView, timestamp: string): NormalizedRecord[] {
   const idPrefix = view.span.spanId;
   const records: NormalizedRecord[] = [];
@@ -237,7 +207,6 @@ function outputOf(view: SpanView, timestamp: string): NormalizedRecord[] {
     contentValue(view, "gen_ai.output.messages") ?? contentValue(view, "gen_ai.completion");
   if (messages !== undefined) {
     const parsed = jsonAttribute(messages);
-    // A completion given as a bare string is the assistant's.
     if (typeof parsed === "string") {
       return parsed.trim() === "" ? [] : [{ role: "assistant", content: parsed, timestamp }];
     }
@@ -255,7 +224,6 @@ function outputOf(view: SpanView, timestamp: string): NormalizedRecord[] {
   return flat.length > 0 ? messagesRecords(flat, { timestamp, idPrefix }) : [];
 }
 
-/** One span → its part, by the conventions and then each mapper's `refine`. */
 export function genAiPart(
   span: ReceivedSpan,
   resource: SpanResource = [],
@@ -305,8 +273,6 @@ export function genAiPart(
   return refined;
 }
 
-/** The session a span belongs to (F4.3): each mapper's key, else `gen_ai.conversation.id`,
- * else the trace id. */
 export function genAiSessionKey(
   span: ReceivedSpan,
   resource: SpanResource = [],

@@ -1,30 +1,7 @@
-/** The layer check (X3.2), run by `bun run check`. Declaring dependencies in each package.json is
- * not enough on its own, so every import in the repository is read and checked against the
- * layers:
- *
- *   0  ts/model
- *   1  ts/kit, ts/formats, ts/redact, ts/config, ts/store, ts/client
- *   2  ts/pipeline, ts/auth, integrations/*
- *   3  ts/sources, ts/search, ts/review
- *   4  ts/instance
- *   5  ts/api, ts/capture
- *   6  apps/seshi
- *
- * A package imports only from lower layers. On top of that: an integration imports only
- * ts/model, ts/kit and ts/formats; ts/client only ts/model; ts/capture only ts/model, ts/kit,
- * ts/redact, ts/config and ts/client (never ts/instance); only an app imports an integration
- * (it builds the static registry and passes it down, X3.11); nothing imports tests/ or
- * scripts/; an import between packages goes through the package name, never a relative path;
- * and every workspace package imported is declared in the importer's package.json, so the
- * isolated install resolves it. tests/ and scripts/ may import any package.
- *
- * A new package under packages/ts must be given a layer here before it passes. */
-
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import ts from "typescript";
 
-/** Layers of the packages under packages/ts, by folder name. */
 export const PACKAGE_LAYERS: Readonly<Record<string, number>> = {
   model: 0,
   kit: 1,
@@ -46,7 +23,6 @@ export const PACKAGE_LAYERS: Readonly<Record<string, number>> = {
 export const INTEGRATION_LAYER = 2;
 export const APP_LAYER = 6;
 
-/** Packages that may import only these, whatever their layer allows (by unit id). */
 const ONLY: Readonly<Record<string, readonly string[]>> = {
   "packages/ts/client": ["packages/ts/model"],
   "packages/ts/capture": [
@@ -63,15 +39,11 @@ const INTEGRATION_MAY_IMPORT = ["packages/ts/model", "packages/ts/kit", "package
 export type UnitKind = "package" | "integration" | "app" | "tests" | "scripts";
 
 export interface Unit {
-  /** The folder, relative to the root (`packages/ts/model`, `tests`). */
   id: string;
   kind: UnitKind;
-  /** The package name, for units with a package.json. */
   name?: string;
-  /** Undefined for tests and scripts, which sit outside the layers. */
   layer?: number;
   dir: string;
-  /** Workspace packages this unit declares (dependencies and devDependencies). */
   declared: Set<string>;
 }
 
@@ -101,7 +73,6 @@ function subdirs(dir: string): string[] {
     .sort();
 }
 
-/** Every unit in the repository at `root`, and problems with the units themselves. */
 export function discoverUnits(root: string): { units: Unit[]; problems: string[] } {
   const units: Unit[] = [];
   const problems: string[] = [];
@@ -145,7 +116,6 @@ export function discoverUnits(root: string): { units: Unit[]; problems: string[]
   return { units, problems };
 }
 
-/** The TypeScript files of a unit, test files included; never node_modules or testdata. */
 function sourceFiles(dir: string): string[] {
   const files: string[] = [];
   const walk = (at: string) => {
@@ -160,8 +130,6 @@ function sourceFiles(dir: string): string[] {
   return files;
 }
 
-/** Every module specifier a file imports: static imports and re-exports (types included),
- * `import()` and `require()`. */
 export function importsOf(text: string): string[] {
   return ts.preProcessFile(text, true, true).importedFiles.map((ref) => ref.fileName);
 }
@@ -170,14 +138,12 @@ function unitOfPath(units: readonly Unit[], path: string): Unit | undefined {
   return units.find((unit) => path === unit.dir || path.startsWith(unit.dir + sep));
 }
 
-/** The workspace unit a bare specifier names (`@seshi/model`, `seshi/integrations`), if any. */
 function unitOfName(units: readonly Unit[], specifier: string): Unit | undefined {
   const parts = specifier.split("/");
   const name = specifier.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0];
   return units.find((unit) => unit.name !== undefined && unit.name === name);
 }
 
-/** Why `from` may not import `to`, or undefined when it may. */
 export function refusal(from: Unit, to: Unit): string | undefined {
   if (from.kind === "tests" || from.kind === "scripts") return undefined;
   if (to.kind === "tests" || to.kind === "scripts") return `nothing may import ${to.id}/`;

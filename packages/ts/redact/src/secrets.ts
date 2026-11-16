@@ -1,14 +1,7 @@
-/** Secret redaction over free text: pattern passes for the shapes credentials take, then an
- * entropy pass for what no pattern knows. Biased toward over-redaction; deliberately no disable
- * switch. */
-
-/** Every replacement is `[redacted:<kind>]`, the kind naming what was matched. */
 const REDACTION_MARKER = "[redacted:";
 
 type RedactionCounts = Record<string, number>;
 
-/** Every rule id `redactSecrets` can count, in the order its passes run. The built-in pack
- * (`packs/builtin.toml`) lists each of them, so an operator pack can turn one off by id (F2.1). */
 export const BUILTIN_SECRET_KINDS: readonly string[] = [
   "private-key",
   "url-credentials",
@@ -39,9 +32,7 @@ export const BUILTIN_SECRET_KINDS: readonly string[] = [
 
 export interface RedactionResult {
   text: string;
-  /** Total replacements across all kinds. */
   count: number;
-  /** Replacements per kind, e.g. `{ "github-token": 2, entropy: 1 }`. */
   counts: RedactionCounts;
 }
 
@@ -67,63 +58,25 @@ const authTokenKVRE = new RegExp(
   String.raw`(?:${keyStart})([\w.-]{0,64}?(?:access|refresh|id)[_-]?token)(\\*['"]?\s*[:=]\s*)(\\*['"]?)([A-Za-z0-9/+=._-]{8,})((?:\\*['"])?)`,
   "gi",
 );
-// Credential env vars can end in plain _KEY (GROQ_KEY) or _KEY_ID (R2_ACCESS_KEY_ID, AWS's
-// AKIA… when it is not in that shape); case-sensitive on purpose so lowercase `cache_key:`
-// never matches.
 const envKeyRE = new RegExp(
   String.raw`(?:${keyStart})([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*_KEY(?:_ID)?)(\\*['"]?\s*[:=]\s*)(\\*['"]?)([A-Za-z0-9/+=._-]{16,})((?:\\*['"])?)`,
   "g",
 );
-// The same shape in the languages people actually type in — an English-only
-// list left "пароль: …" in the clear.
 const genericKVIntlRE =
   /(парол[ьяею]|токен[ауы]?|секрет[ауы]?|ключ[аеиуом]?|contraseña|senha|passwort|密码|密碼|パスワード|비밀번호)(\\*['"]?\s*[:=]\s*)(\\*['"]?)([A-Za-z0-9/+=._-]{16,})((?:\\*['"])?)/gi;
-// A credential shown the way a console shows it: the label on one line, the value alone on
-// the next ("Secret Access Key\n93b6…"), no assignment anywhere. The value is one token on its
-// own line, so prose under a heading ("API key\nThe key lives in …") never matches; hex is
-// allowed, since that is what access keys are and nothing else here would catch them.
-// The separator after the label is `[ \t]*(?::[ \t]*)?`, not `[ \t]*:?[ \t]*`: with the colon
-// optional, two runs of blanks side by side split a long run every possible way before failing,
-// quadratic in it (a label and 240k tabs took 54 s). Both match the same text.
 const labeledLineRE =
   /((?:^|\n|\\n)[ \t]*(?:secret[ _-]?access[ _-]?key|access[ _-]?key[ _-]?id|secret[ _-]?key|api[ _-]?key|token[ _-]?value|access[ _-]?token|client[ _-]?secret|password|secret|token)[ \t]*(?::[ \t]*)?(?:\n|\\n)+[ \t]*)([A-Za-z0-9/+=._-]{16,})(?=[ \t]*(?:\n|\\n|$|["']))/gi;
 const bearerRE = /\b(Bearer|Basic)(\s+)([A-Za-z0-9._~+/=-]{16,})/gi;
-// A secret named in prose and quoted rather than assigned; the required quotes make it
-// safe to be this loose, since an unquoted mention matches nothing.
 const quotedSecretRE =
   /\b(password|passwd|pwd|secret|token|api[_-]?key)(\s+(?:is\s+|was\s+|for\s+)?)(\\*["'`])([^"'`\n]{6,80})(\\*["'`])/gi;
 const pemPrivateRE =
   /-----BEGIN [A-Z0-9 ]*PRIVATE KEY[A-Z0-9 ]*-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY[A-Z0-9 ]*-----/g;
-// Provider prefixes. sk- allows internal hyphens/underscores so hyphenated
-// formats (sk-ant-…, sk-proj-…) are covered. `sk_user_` is a per-user key shape whose tail is
-// `secrets.token_urlsafe` output, so it spans '-' and '_'.
-// seshi's own opaque tokens (X5.9): `seshi_<20 hex>_<43 base64url>`. The secret can end in `-`,
-// so the end is "no token character next", not `\b`.
 const seshiTokenRE = /(?<![A-Za-z0-9_-])seshi_[0-9a-f]{20}_[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])/g;
-// An `sk-` key is `sk-`, then `[A-Za-z0-9_-]*[A-Za-z0-9]{20,}\b`: as written, that rescans the
-// rest of the token run from every way of splitting it, quadratic on `sk-` and a long run that
-// does not end in 20 alphanumerics (and again from every `sk-` inside one). So the expression
-// only finds where an `sk-` starts (the last alternative, not subject to the closing `\b`), and
-// `skKeyEnd` finds where the key ends, the same end the pattern gives, in one pass per run.
 const providerRE =
   /\b(?:(gh[opsur]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{20,}|(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}|sk_user_[A-Za-z0-9_-]{8,}|gsk_[A-Za-z0-9]{20,}|xai-[A-Za-z0-9]{20,}|hf_[A-Za-z0-9]{20,}|npm_[A-Za-z0-9]{30,}|xox[bpcs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{30,}|pul-[0-9a-f]{40}|sbp_[0-9a-f]{40})\b|sk-)/g;
-// The second alternative drops the leading \b, which would miss a JWT glued to a
-// word character: the `n` of an escaped `\n` in JSON-in-a-string, or URL-encoding's `%3D`.
-// Without the boundary it requires the payload to open with `eyJ` too (both segments are JSON
-// objects), so an identifier like `keyJsonSchema.properties.name` stays. The lookbehind allows
-// at most 8 glued characters: an unbounded start would rescan a long run of base64url from
-// every `eyJ` inside it, which is quadratic.
 const jwtRE =
   /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\b|(?<=(?:^|[^A-Za-z0-9_-])[A-Za-z0-9_-]{1,8})eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}/g;
-// A URL with credentials is what `\b([A-Za-z][A-Za-z0-9+.-]*:\/\/)([^\s/@:]*):([^\s]+)@([^\s]+)`
-// matches; `replaceConnUrls` finds exactly those matches without the expression. The password
-// is greedy, so one containing '@' (user:p@ss@host) splits on the last '@' and is redacted
-// whole. As an expression that rescanned the rest of a run without whitespace from every `://`
-// in it (`a://:b` repeated, or a minified bundle full of URLs), which is quadratic.
 
-// Cheap substring hints checked first, keeping the regexes off the vast majority
-// of messages, which contain no credentials at all.
-// Labels the labeled-line rule can start from; checked as substrings before the regex runs.
 const labelHints = ["key", "secret", "token", "password"];
 const kvHints = [
   "key",
@@ -169,12 +122,12 @@ const providerHints = [
 
 function isWordChar(code: number): boolean {
   return (
-    (code >= 97 && code <= 122) || // a-z
-    (code >= 65 && code <= 90) || // A-Z
-    (code >= 48 && code <= 57) || // 0-9
-    code === 95 || // _
-    code === 45 || // -
-    code === 46 // .
+    (code >= 97 && code <= 122) ||
+    (code >= 65 && code <= 90) ||
+    (code >= 48 && code <= 57) ||
+    code === 95 ||
+    code === 45 ||
+    code === 46
   );
 }
 
@@ -182,8 +135,6 @@ function isSpaceChar(c: string): boolean {
   return c === " " || c === "\t" || c === "\n" || c === "\r" || c === "\f" || c === "\v";
 }
 
-/** Reports whether any key-ish word is followed by an assignment; genericKVRE cannot match
- * otherwise, so skipping on a negative cannot change what is redacted. */
 function kvAssignmentNearby(lower: string): boolean {
   for (const hint of kvHints) {
     let at = 0;
@@ -197,8 +148,6 @@ function kvAssignmentNearby(lower: string): boolean {
   return false;
 }
 
-/** Skips what genericKVRE allows between name and value, looking for the required ':' or '=';
- * chars >= 0x80 continue a non-ASCII word so "парол" reaches the ':' behind "пароля". */
 function assignmentFollows(s: string, start: number): boolean {
   let i = start;
   while (i < s.length && (isWordChar(s.charCodeAt(i)) || s.charCodeAt(i) >= 0x80)) i++;
@@ -236,9 +185,6 @@ function replaceSubmatch(
     // args = [match, ...captures, offset, whole string]
     const groups = args.slice(0, -2) as string[];
     const next = repl(groups);
-    // A match whose secret is already a marker (`user:[redacted:url-credentials]@host`) comes
-    // out as it went in: nothing was redacted, so nothing is counted, and redacting redacted
-    // text counts nothing (backfill and a whole upload's prefix rely on it).
     if (next !== groups[0]) n += 1;
     return next;
   });
@@ -246,22 +192,16 @@ function replaceSubmatch(
   return out;
 }
 
-/** Emit the closing quote only when an opening quote was captured. */
 function closingQuote(open: string, close: string): string {
   return open === "" ? "" : close;
 }
 
 const isAlnum = (code: number) =>
   (code >= 97 && code <= 122) || (code >= 65 && code <= 90) || (code >= 48 && code <= 57);
-const isTokenChar = (code: number) => isAlnum(code) || code === 95 || code === 45; // _ -
+const isTokenChar = (code: number) => isAlnum(code) || code === 95 || code === 45;
 /** What `\b` counts as a word character (no `u` flag): `[A-Za-z0-9_]`. */
 const isRegexWord = (code: number) => isAlnum(code) || code === 95;
 
-/** For an `sk-` at `at`: where its run of `[A-Za-z0-9_-]` ends, and where the key ends, or -1
- * when it has none. The key ends where `sk-[A-Za-z0-9_-]*[A-Za-z0-9]{20,}\b` would end it: at
- * the last end of a `-`-separated part of the run, after the `sk-`, whose last 20 characters
- * are alphanumeric. Any later `sk-` in the same run (one just after a `-`) ends at the same
- * place, or has no key when that place is not past its own `sk-`. */
 function skKeyEnd(s: string, at: number): { runEnd: number; keyEnd: number } {
   let keyEnd = -1;
   let alnum = 0;
@@ -283,7 +223,6 @@ function skKeyEnd(s: string, at: number): { runEnd: number; keyEnd: number } {
 function replaceProvider(s: string, counts: RedactionCounts, off: Off): string {
   let out = "";
   let last = 0;
-  // The `sk-` key end of the token run being read, kept while the run lasts.
   let run = { runEnd: -1, keyEnd: -1 };
   const re = new RegExp(providerRE.source, "g");
   for (let m = re.exec(s); m; m = re.exec(s)) {
@@ -292,7 +231,6 @@ function replaceProvider(s: string, counts: RedactionCounts, off: Off): string {
     if (m[1] === undefined) {
       if (at >= run.runEnd) run = skKeyEnd(s, at);
       if (run.keyEnd <= at + 3) {
-        // No key here; the pattern moves on to the next position, as it would.
         re.lastIndex = at + 1;
         continue;
       }
@@ -308,9 +246,8 @@ function replaceProvider(s: string, counts: RedactionCounts, off: Off): string {
   return last === 0 ? s : out + s.slice(last);
 }
 
-const isSchemeChar = (code: number) => isAlnum(code) || code === 43 || code === 46 || code === 45; // + . -
+const isSchemeChar = (code: number) => isAlnum(code) || code === 43 || code === 46 || code === 45;
 const isLetter = (code: number) => (code >= 97 && code <= 122) || (code >= 65 && code <= 90);
-/** What `\s` matches. */
 const isRegexSpace = (code: number) =>
   (code >= 9 && code <= 13) ||
   code === 32 ||
@@ -324,21 +261,15 @@ const isRegexSpace = (code: number) =>
   code === 0x3000 ||
   code === 0xfeff;
 
-/** Every URL with credentials in `s` (see `url-credentials` above) with its password replaced,
- * the matches `\b([A-Za-z][A-Za-z0-9+.-]*:\/\/)([^\s/@:]*):([^\s]+)@([^\s]+)` finds, found in
- * time linear in `s`: each scan below covers a stretch no other `://` scans again. */
 function replaceConnUrls(s: string, counts: RedactionCounts): string {
   let out = "";
   let last = 0;
   let n = 0;
-  // The run without whitespace being read: where it ends, and its last '@' with a character
-  // after it (-1 when none).
   let runEnd = -1;
   let lastAt = -1;
   let from = 0;
   for (let c = s.indexOf("://", from); c >= 0; c = s.indexOf("://", from)) {
     from = c + 3;
-    // The scheme: the leftmost letter at a word boundary in the scheme characters before `://`.
     let b = c;
     while (b > last && isSchemeChar(s.charCodeAt(b - 1))) b--;
     let start = -1;
@@ -349,11 +280,10 @@ function replaceConnUrls(s: string, counts: RedactionCounts): string {
       }
     }
     if (start < 0) continue;
-    // The user, up to the ':' that must follow it.
     let user = c + 3;
     for (; user < s.length; user++) {
       const code = s.charCodeAt(user);
-      if (code === 47 || code === 64 || code === 58 || isRegexSpace(code)) break; // / @ :
+      if (code === 47 || code === 64 || code === 58 || isRegexSpace(code)) break;
     }
     if (s.charCodeAt(user) !== 58) continue;
     const pass = user + 1;
@@ -368,10 +298,8 @@ function replaceConnUrls(s: string, counts: RedactionCounts): string {
         }
       }
       runEnd = i;
-      // A trailing '@' has no host after it; the one before it, if any, is the split.
       lastAt = at === runEnd - 1 ? before : at;
     }
-    // The password is at least one character.
     if (lastAt < pass + 1) continue;
     const whole = s.slice(start, runEnd);
     const next = `${s.slice(start, user)}:[redacted:url-credentials]@${s.slice(lastAt + 1, runEnd)}`;
@@ -384,7 +312,6 @@ function replaceConnUrls(s: string, counts: RedactionCounts): string {
   return last === 0 ? s : out + s.slice(last);
 }
 
-/** Which provider's token `v` (a provider-pattern match) is: the rule id it counts under. */
 function providerKind(v: string): string {
   if (/^(gh[opsur]_|github_pat_)/.test(v)) return "github-token";
   if (/^(?:sk|rk)_(?:live|test)_/.test(v)) return "stripe-key";
@@ -403,11 +330,8 @@ function providerKind(v: string): string {
   return "provider-token";
 }
 
-/** Rule ids turned off; none when absent. */
 type Off = ReadonlySet<string> | undefined;
 
-/** `text` with every built-in secret pattern applied, except the rules in `off` (an operator
- * pack turned them off by id, F2.1). */
 export function redactSecrets(text: string, off?: ReadonlySet<string>): RedactionResult {
   const counts: RedactionCounts = {};
   if (text === "") return { text, count: 0, counts };
@@ -494,15 +418,10 @@ export function redactSecrets(text: string, off?: ReadonlySet<string>): Redactio
   return { text: s, count, counts };
 }
 
-// Entropy pass: catches bare high-entropy strings no pattern knows, but only in a secret-shaped
-// context (the value side of an assignment, or alone on its own line) to avoid identifier noise.
-
 const entropyMinBits = 4.5;
 const entropyMinAssign = 20;
 const entropyMinStandalone = 28;
 
-/** Stop words rejecting assignment keys that are ordinary prose ("moved to: <blob>"); only the
- * English list can ever match ASCII keys. */
 const stopWords = new Set([
   "a",
   "an",
@@ -573,7 +492,6 @@ function isHexish(s: string): boolean {
   return /^[0-9a-fA-F-]+$/.test(s);
 }
 
-/** A filesystem path is not a blob: rooted, multiple separators, no credential punctuation. */
 function looksLikePath(tok: string): boolean {
   if (
     !tok.startsWith("/") &&
@@ -584,22 +502,16 @@ function looksLikePath(tok: string): boolean {
     return false;
   }
   if ((tok.match(/\//g) ?? []).length < 2) return false;
-  // '=' is base64 padding and the assignment a secret arrives in; ':' is a
-  // scheme or a key. Either one means this is not a bare path.
   return !tok.includes("=") && !tok.includes(":");
 }
 
 function entropyCandidate(tok: string): boolean {
   if (tok.length > 256 || isHexish(tok) || charClasses(tok) < 3) return false;
-  // Lowercase-only path segments sneak into the charset via '/' and '-';
-  // real secrets with slashes (base64) mix cases.
   if (tok.includes("/") && tok.toLowerCase() === tok) return false;
   if (looksLikePath(tok)) return false;
   return shannonBits(tok) >= entropyMinBits;
 }
 
-/** Reports whether s[start] begins the value side of an assignment; a key that is an English
- * stop word ("moved to: <blob>") does not count. */
 function assignmentValue(s: string, start: number): boolean {
   let i = start - 1;
   while (i >= 0 && (s[i] === '"' || s[i] === "'" || s[i] === " " || s[i] === "\t")) i--;
@@ -616,7 +528,6 @@ function assignmentValue(s: string, start: number): boolean {
   return !stopWords.has(key.toLowerCase());
 }
 
-/** Reports whether the token is the only content on its line, the shape of a pasted credential. */
 function standaloneLine(s: string, start: number, end: number): boolean {
   for (let i = start - 1; i >= 0 && s[i] !== "\n"; i--) {
     if (s[i] !== " " && s[i] !== "\t" && s[i] !== "\r") return false;
@@ -632,14 +543,13 @@ function isEntropyChar(code: number): boolean {
     (code >= 65 && code <= 90) ||
     (code >= 97 && code <= 122) ||
     (code >= 48 && code <= 57) ||
-    code === 43 || // +
-    code === 47 || // /
-    code === 95 || // _
-    code === 45 // -
+    code === 43 ||
+    code === 47 ||
+    code === 95 ||
+    code === 45
   );
 }
 
-/** Finds runs of 20+ chars from [A-Za-z0-9+/_-], plus up to two trailing '=' of base64 padding. */
 function entropySpans(s: string): [number, number][] {
   const out: [number, number][] = [];
   for (let i = 0; i < s.length; ) {

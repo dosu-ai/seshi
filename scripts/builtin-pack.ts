@@ -1,22 +1,11 @@
-/** Writes `packages/ts/redact/src/generated/builtin-pack.ts` from the built-in rule pack,
- * `packages/ts/redact/packs/builtin.toml` (F2.1), so the binary carries the pack without
- * reading a file at run time: `bun run packs`. With `--check` it writes nothing and exits 1
- * when the generated file is stale; `scripts/builtin-pack.test.ts` runs the same check, so a
- * TOML edit without `bun run packs` fails the tests.
- *
- * The TOML stays the source of truth: the generated module holds its exact text, which
- * `@seshi/redact` parses with the same parser and validator as every operator pack. */
-
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 export const PACK_PATH = "packages/ts/redact/packs/builtin.toml";
 export const GENERATED_PATH = "packages/ts/redact/src/generated/builtin-pack.ts";
 
-/** This repository: Biome runs here, with its config. */
 const REPO = join(import.meta.dirname, "..");
 
-/** Biome's formatting of `text` as the generated file. */
 function format(text: string): string {
   const result = Bun.spawnSync(["bunx", "biome", "format", `--stdin-file-path=${GENERATED_PATH}`], {
     cwd: REPO,
@@ -30,7 +19,6 @@ function format(text: string): string {
   return result.stdout.toString();
 }
 
-/** The generated module for the pack's `text`, formatted. */
 export function generated(text: string): string {
   return format(
     [
@@ -44,7 +32,6 @@ export function generated(text: string): string {
   );
 }
 
-/** Whether the generated module under `root` is missing or differs from the pack there. */
 export function isStale(root: string): boolean {
   const want = generated(readFileSync(join(root, PACK_PATH), "utf8"));
   const path = join(root, GENERATED_PATH);

@@ -1,9 +1,3 @@
-/** `@seshi/model`: the types every layer shares (the canonical trace, the stored objects, the
- * envelope, the session API, the format adapter contract), the canonical text and hashing
- * rules, and trace validation. The types of what other languages read are generated from
- * `spec/schemas/` into `src/generated/` (`bun run types`, X3.10). Layer 0: it imports no other
- * `@seshi` package (X3.2). */
-
 export type {
   ChangesPage,
   Fetch,

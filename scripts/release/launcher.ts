@@ -1,12 +1,3 @@
-/** The `seshi` npm package's `bin` (F8.4): `npm i -g seshi` and `npx seshi` install it with the
- * one optional dependency npm picks for this machine (`@seshi/cli-darwin-arm64`…, by their `os`,
- * `cpu` and `libc` fields), and this launcher runs that package's binary with the same
- * arguments, standard streams and exit status. The binary itself needs neither Node nor Bun.
- *
- * Built into `bin/seshi.js` (CommonJS, for every Node npm supports) by scripts/release/npm.ts.
- * It is a thin wrapper: hook commands written by `seshi capture install` name the binary's own
- * path (`process.execPath` inside it), so agents never pay for Node on every turn. */
-
 import { spawn } from "node:child_process";
 import { accessSync, chmodSync, constants } from "node:fs";
 import { dirname, join } from "node:path";
@@ -16,7 +7,6 @@ export type Resolve = (request: string) => string;
 
 export type Libc = "glibc" | "musl";
 
-/** The C library of this Linux process: glibc when Node reports a glibc version, else musl. */
 export function detectLibc(
   report: { header?: { glibcVersionRuntime?: string } } | undefined,
 ): Libc {
@@ -25,7 +15,6 @@ export function detectLibc(
 
 export type Choice = { target: Target } | { error: string };
 
-/** The release target for this platform, or why there is none. */
 export function chooseTarget(platform: string, arch: string, libc?: Libc): Choice {
   const target = TARGETS.find((t) => t.nodePlatform === platform && t.cpu === arch);
   const supported = TARGETS.map((t) => t.id).join(", ");
@@ -40,7 +29,6 @@ export function chooseTarget(platform: string, arch: string, libc?: Libc): Choic
   return { target };
 }
 
-/** The binary inside `target`'s npm package, resolved from the launcher's own location. */
 export function binaryPath(target: Target, resolve: Resolve): { path: string } | { error: string } {
   try {
     const manifest = resolve(`${target.npm}/package.json`);
@@ -59,7 +47,6 @@ export interface LaunchEnv {
   resolve: Resolve;
 }
 
-/** Where the binary for this machine is, or a message saying why there is none. */
 export function locate(env: LaunchEnv): { path: string } | { error: string } {
   const choice = chooseTarget(env.platform, env.arch, env.libc);
   if ("error" in choice) return choice;
@@ -68,9 +55,6 @@ export function locate(env: LaunchEnv): { path: string } | { error: string } {
 
 const FORWARDED = ["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT", "SIGBREAK"] as const;
 
-/** Runs the binary and leaves with its status. A signal meant for the whole terminal (Ctrl-C)
- * reaches the binary directly; one sent to this process alone is passed on. When the binary
- * is ended by a signal, so is this process, so a caller sees the same outcome. */
 export function launch(path: string, args: readonly string[]): void {
   const child = spawn(path, args, { stdio: "inherit", windowsHide: false });
   const handlers = new Map<string, () => void>();
@@ -110,13 +94,10 @@ export function ensureExecutable(path: string, platform: string = process.platfo
   } catch {
     try {
       chmodSync(path, 0o755);
-    } catch {
-      // Not ours to change (a root-owned global install); spawn reports the failure.
-    }
+    } catch {}
   }
 }
 
-/** The launcher's entry point. */
 export function main(): void {
   // The report is read only for its glibc version; its network section (interfaces, and DNS
   // lookups on some Node versions) would only slow every start.

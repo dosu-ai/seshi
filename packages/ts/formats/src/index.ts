@@ -1,9 +1,3 @@
-/** `@seshi/formats`: vendor-neutral transcript formats (ATIF, trajectory-v1, OTel GenAI spans), the renderers
- * that turn the canonical trace into Letta, OTLP GenAI spans and ATIF on read (X6.2), the
- * `@letta-ai/trajectory` adapter builder integrations use, and the format registry that
- * detection and normalization go through. Layer 1: it imports only
- * `@seshi/model`, never an integration (X3.2). */
-
 import { ATIF_FORMAT } from "./atif";
 import { TRAJECTORY_FORMAT } from "./trajectory";
 
@@ -74,6 +68,4 @@ export {
 } from "./spans/request";
 export { TRAJECTORY, TRAJECTORY_FORMAT, trajectoryRecords } from "./trajectory";
 
-/** The formats every deployment reads whatever integrations it has, in the order the registry
- * lists them after the integrations' own. */
 export const BUILTIN_FORMATS = [ATIF_FORMAT, TRAJECTORY_FORMAT] as const;
