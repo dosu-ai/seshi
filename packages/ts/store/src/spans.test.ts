@@ -3,8 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { NormalizedRecord, SpanPart } from "@seshi/model";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { checkStore } from "./check";
 import { FsStore } from "./fs";
 import { archiveId, keys } from "./layout";
+import { ensureLayout } from "./marker";
 import {
   deleteSpans,
   listSpanKeys,
@@ -14,6 +16,7 @@ import {
   putSpan,
   putSpans,
   type SpanRecord,
+  storedInputOf,
 } from "./spans";
 import { getBytes, type Store } from "./store";
 
@@ -209,5 +212,119 @@ describe("span history stored once (F4.4)", () => {
     const [read] = await listSpans(store, OWNER, ARCHIVE);
     expect(read?.part).toEqual(part);
     expect(Object.hasOwn(read?.part ?? {}, "input")).toBe(false);
+  });
+});
+
+describe("the store's hidden ordering", () => {
+  const HEX = "0123456789abcdef";
+  /** A span record at `traceId`/`spanId` whose input is one stored message. */
+  const at_ = (traceId: string, spanId: string, n: number): Omit<SpanRecord, "schema"> => ({
+    received_at: at(n),
+    source_id: "console",
+    format: "otlp-genai",
+    part: {
+      trace_id: traceId,
+      span_id: spanId,
+      name: "chat m",
+      started_at: at(n),
+      content: true,
+      input: [user(n)],
+    },
+  });
+  /** `store`, listing at most `limit` keys a page. */
+  const paging = (limit: number): Store => ({
+    url: store.url,
+    get: (k) => store.get(k),
+    stat: (k) => store.stat(k),
+    delete: (k, o) => store.delete(k, o),
+    put: (k, b, o) => store.put(k, b, o),
+    list: (p, o) => store.list(p, { ...o, limit: Math.min(o?.limit ?? limit, limit) }),
+  });
+
+  it("keeps messages/ after every span id, lowest to highest, so listing spans/ stops there", async () => {
+    const ids: [string, string][] = [
+      ["0", "0"],
+      ...[...HEX].map((c): [string, string] => [c.repeat(32), c.repeat(16)]),
+      ["f".repeat(32), "f".repeat(16)],
+    ];
+    for (const [traceId, spanId] of ids) {
+      expect(keys.span(OWNER, ARCHIVE, traceId, spanId) < keys.spanMessages(OWNER, ARCHIVE)).toBe(
+        true,
+      );
+    }
+    await putSpans(
+      store,
+      OWNER,
+      ARCHIVE,
+      ids.slice(0, -1).map(([t, s], n) => at_(t, s, n)),
+    );
+    const wanted = [...new Set(ids.map(([t, s]) => keys.span(OWNER, ARCHIVE, t, s)))].sort();
+    expect((await listSpanMessages(store, OWNER, ARCHIVE)).size).toBe(ids.length - 1);
+    const small = paging(2);
+    expect(await listSpanKeys(small, OWNER, ARCHIVE)).toEqual(wanted);
+    expect(await listSpans(small, OWNER, ARCHIVE)).toHaveLength(wanted.length);
+    expect(await deleteSpans(small, OWNER, ARCHIVE)).toBe(wanted.length);
+    expect(await objects(keys.spans(OWNER, ARCHIVE))).toEqual([]);
+  });
+
+  it("names a message by its content, not its time", () => {
+    const hashOf = (record: NormalizedRecord) => {
+      const { input } = storedInputOf([record]);
+      const [ref] = input.messages;
+      return typeof ref === "string" ? ref : ref?.[0];
+    };
+    const early = hashOf(user(1, at(1)));
+    expect(hashOf(user(1, at(50)))).toBe(early);
+    expect(hashOf(user(2, at(1)))).not.toBe(early);
+    expect(hashOf({ role: "user", content: "q", timestamp: at(1) })).toBe(
+      hashOf({ role: "user", content: "q", timestamp: at(2) }),
+    );
+    // The stored bytes keep the time in its place, emptied: the same bytes, and so the same
+    // key, as every message already stored.
+    const { messages } = storedInputOf([
+      { role: "user", timestamp: at(1), content: "q" } as unknown as NormalizedRecord,
+    ]);
+    const [[hash, bytes]] = [...messages] as [[string, Uint8Array]];
+    expect(new TextDecoder().decode(bytes)).toBe('{"role":"user","timestamp":"","content":"q"}');
+    expect(hash).toBe("4df24278f06639ba7123255f732445456a52f847beec1c2732a4921418a26f11");
+  });
+
+  it("deletes span records before their messages, so a crash between leaves nothing live broken", async () => {
+    await ensureLayout(store, { createdBy: "test" });
+    await putSpans(store, OWNER, ARCHIVE, conversation(4));
+    const messagesPrefix = keys.spanMessages(OWNER, ARCHIVE);
+    // The first delete of the second kind (records or messages, whichever goes second) fails.
+    let first: boolean | undefined;
+    const crashing: Store = {
+      url: store.url,
+      get: (k) => store.get(k),
+      stat: (k) => store.stat(k),
+      list: (p, o) => store.list(p, o),
+      put: (k, b, o) => store.put(k, b, o),
+      delete: async (k, o) => {
+        const isMessage = k.startsWith(messagesPrefix);
+        first ??= isMessage;
+        if (isMessage !== first) throw new Error("crashed between the two kinds");
+        return store.delete(k, o);
+      },
+    };
+    await expect(deleteSpans(crashing, OWNER, ARCHIVE)).rejects.toThrow(/crashed/);
+    // What is left is messages no record names: a reader sees no spans, and the check calls
+    // nothing missing.
+    expect(await listSpanKeys(store, OWNER, ARCHIVE)).toEqual([]);
+    expect(await listSpans(store, OWNER, ARCHIVE)).toEqual([]);
+    const report = await checkStore(store, { sessions: [{ owner: OWNER, archive_id: ARCHIVE }] });
+    expect(report.findings.filter((f) => f.code === "span_message_missing")).toEqual([]);
+    expect(report.findings.filter((f) => f.severity === "error")).toEqual([]);
+  });
+
+  it("would leave records naming messages that are gone, had it deleted the messages first", async () => {
+    await putSpans(store, OWNER, ARCHIVE, conversation(4));
+    for (const hash of await listSpanMessages(store, OWNER, ARCHIVE)) {
+      await store.delete(keys.spanMessage(OWNER, ARCHIVE, hash));
+    }
+    await expect(listSpans(store, OWNER, ARCHIVE)).rejects.toBeInstanceOf(MissingSpanMessage);
+    const report = await checkStore(store, { sessions: [{ owner: OWNER, archive_id: ARCHIVE }] });
+    expect(report.findings.map((f) => f.code)).toContain("span_message_missing");
   });
 });

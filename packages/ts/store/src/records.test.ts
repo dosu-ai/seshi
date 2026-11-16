@@ -94,6 +94,19 @@ describe("drop and failure records", () => {
     expect(since.records.map((r) => r.record.at.slice(8, 10))).toEqual(["02", "03"]);
   });
 
+  it("lists from a time including the records stamped at it, not the millisecond before", async () => {
+    const boundary = "2026-11-02T09:00:00.000Z";
+    for (const [at, key] of [
+      ["2026-11-02T08:59:59.999Z", "before"],
+      [boundary, "at"],
+      ["2026-11-02T09:00:00.001Z", "after"],
+    ] as const) {
+      await writeFailed(store, { ...failure("01", key), at });
+    }
+    const since = await listRecords(store, "failed", "s3-archive", { since: boundary });
+    expect(since.records.map((r) => r.record.idempotency_key)).toEqual(["at", "after"]);
+  });
+
   it("prunes what is older than the retention, by default 30 days, per kind", async () => {
     expect(DEFAULT_RECORD_RETENTION_MS).toBe(30 * 86_400_000);
     for (const day of ["01", "10", "20"]) await writeFailed(store, failure(day, `k${day}`));
