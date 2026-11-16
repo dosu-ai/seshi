@@ -439,12 +439,23 @@ async function backfillSpans(
   }
   for (const hash of named) orphanCandidates.delete(hash);
   if (orphanCandidates.size > 0) {
-    for await (const record of spanRecords(store, owner, archive)) {
-      for (const hash of storedHashes(record.input)) orphanCandidates.delete(hash);
-    }
-    for (const hash of orphanCandidates) await store.delete(keys.spanMessage(owner, archive, hash));
+    const orphans = await namedByNoRecordNow(store, owner, archive, orphanCandidates);
+    for (const hash of orphans) await store.delete(keys.spanMessage(owner, archive, hash));
   }
   return done;
+}
+
+async function namedByNoRecordNow(
+  store: Store,
+  owner: string,
+  archive: string,
+  candidates: ReadonlySet<string>,
+): Promise<Set<string>> {
+  const unnamed = new Set(candidates);
+  for await (const record of spanRecords(store, owner, archive)) {
+    for (const hash of storedHashes(record.input)) unnamed.delete(hash);
+  }
+  return unnamed;
 }
 
 export async function backfillRedaction(options: BackfillOptions): Promise<BackfillReport> {
