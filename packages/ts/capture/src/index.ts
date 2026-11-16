@@ -35,6 +35,7 @@ export {
 export { captureRules, loadRules, type RulesSnapshot } from "./rules-cache";
 export {
   allStale,
+  type HoldWord,
   type HttpSinkOptions,
   httpSink,
   type RetractOutcome,

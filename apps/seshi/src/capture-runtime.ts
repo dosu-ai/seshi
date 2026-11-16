@@ -15,13 +15,16 @@ import {
   writePrivateFile,
 } from "@seshi/capture";
 import type { CaptureHost } from "@seshi/kit";
-import { localWriter } from "@seshi/model";
+import { localWriter, SessionRejected } from "@seshi/model";
 import type { RuleSet, redactTranscript, WithheldCalls } from "@seshi/redact";
 import { type Account, accountCredential, openAccount, serverOf } from "./account/account";
 import { NotSignedIn } from "./account/credential";
 import { allCaptureAgents } from "./capture-agents";
+import { Refused } from "./cli/failures";
 import { hostOf } from "./commands/capture-host";
 import type { CommandContext } from "./commands/index";
+import type { ServerlessBucket } from "./serverless/open";
+import { isServerless, serverlessOf } from "./serverless/settings";
 import { USER_AGENT } from "./user-agent";
 
 export interface OpenedSink {
@@ -29,24 +32,73 @@ export interface OpenedSink {
   close(): Promise<void>;
 }
 
-export async function localSink(ctx: CommandContext, account: Account): Promise<OpenedSink> {
-  const { connect, localOwner } = await import("./connect");
-  const connection = await connect({
-    cli: account.cli,
-    env: account.env,
-    home: account.home,
-    integrations: await ctx.integrations(),
-  });
-  const instance = connection.instance;
-  if (!instance) throw new Error("local mode built no instance");
-  const owner = localOwner(account.cli, account.env);
-  const db = instance.localSessions(owner);
+/** What a refusal to open the bucket for writing means for uploads: they wait, with the
+ * status line saying why (F11). Other errors are thrown as they are. */
+function holdOf(err: unknown): unknown {
+  if (!(err instanceof Refused)) return err;
+  switch (err.code) {
+    case "needs_review_key":
+      return new SignInNeeded(err.message, "needs review key");
+    case "needs_update":
+      return new SignInNeeded(err.message, "needs update");
+    case "access_denied":
+    case "no_bucket":
+    case "store_unsupported":
+      return new SignInNeeded(err.message, "bucket refused");
+    default:
+      return err;
+  }
+}
+
+/** Serverless mode (F11): this machine runs the pipeline and writes its owner's folder. */
+export async function serverlessSink(ctx: CommandContext, account: Account): Promise<OpenedSink> {
+  const { openServerless, refusalOf, SERVERLESS_BASIS } = await import("./serverless/open");
+  let bucket: ServerlessBucket | undefined;
+  const open = async (): Promise<ServerlessBucket> => {
+    if (bucket) return bucket;
+    try {
+      bucket = await openServerless({
+        cli: account.cli,
+        env: account.env,
+        home: account.home,
+        integrations: await ctx.integrations(),
+        secrets: account.secrets,
+        write: true,
+        search: false,
+      });
+    } catch (err) {
+      throw holdOf(err);
+    }
+    return bucket;
+  };
+  const refusedIngest = (err: unknown): never => {
+    const refused = refusalOf(err, bucket?.owner);
+    if (refused instanceof Refused) throw new SessionRejected("access_denied", refused.message);
+    throw err;
+  };
+  const db = async () => {
+    const opened = await open();
+    return opened.instance.localSessions(opened.owner, SERVERLESS_BASIS);
+  };
   const sink: SessionSink = {
-    target: `local: ${instance.storage.url}`,
-    async ready() {},
-    ingest: (upload, options) => db.ingest(upload, options),
-    stale: () => allStale((after) => db.staleSessions(after !== undefined ? { after } : {})),
+    target: `serverless: ${serverlessOf(account.cli)?.url ?? "the bucket"}`,
+    async ready() {
+      await open();
+    },
+    ingest: async (upload, options) => {
+      const sessions = await db();
+      try {
+        return await sessions.ingest(upload, options);
+      } catch (err) {
+        return refusedIngest(err);
+      }
+    },
+    stale: async () => {
+      const sessions = await db();
+      return allStale((after) => sessions.staleSessions(after !== undefined ? { after } : {}));
+    },
     async retract(agent, sessionId, secret) {
+      const { instance, owner } = await open();
       if (!instance.config.capture.allow_retract) {
         throw new RetractRefused(
           "retract_disabled",
@@ -78,7 +130,12 @@ export async function localSink(ctx: CommandContext, account: Account): Promise<
       return "retracted";
     },
   };
-  return { sink, close: () => connection.close() };
+  return {
+    sink,
+    close: async () => {
+      await bucket?.close();
+    },
+  };
 }
 
 export async function serverSink(account: Account): Promise<OpenedSink> {
@@ -120,7 +177,7 @@ export async function serverSink(account: Account): Promise<OpenedSink> {
 }
 
 export async function openSink(ctx: CommandContext, account: Account): Promise<OpenedSink> {
-  return account.cli.local ? localSink(ctx, account) : serverSink(account);
+  return isServerless(account.cli) ? serverlessSink(ctx, account) : serverSink(account);
 }
 
 interface CachedRules {
@@ -155,7 +212,7 @@ export interface PreRedactorOptions {
 }
 
 export function preRedactor(account: Account, options: PreRedactorOptions = {}): PreRedactor {
-  if (account.cli.local) return NO_PREREDACTION;
+  if (isServerless(account.cli)) return NO_PREREDACTION;
   const log = options.log ?? (() => {});
   let loading: Promise<{ rules: RuleSet; redact: typeof redactTranscript }> | undefined;
 

@@ -10,6 +10,7 @@ import {
   CHANGE_SCHEMA,
   ENVELOPE_SCHEMA,
   LAYOUT_SCHEMA,
+  LAYOUT_SCHEMA_V1,
   METADATA_SCHEMA,
   parseTrace,
   type SchemaFile,
@@ -54,7 +55,10 @@ describe("spec/schemas", () => {
     expect(id("trace.schema.json")).toBe(TRACE_SCHEMA);
     expect(id("metadata.schema.json")).toBe(METADATA_SCHEMA);
     expect(id("change.schema.json")).toBe(CHANGE_SCHEMA);
-    expect(id("layout.schema.json")).toBe(LAYOUT_SCHEMA);
+    expect(read(join(SPEC, "schemas", "layout.schema.json")).properties.schema.enum).toEqual([
+      LAYOUT_SCHEMA_V1,
+      LAYOUT_SCHEMA,
+    ]);
     expect(id("envelope.schema.json")).toBe(ENVELOPE_SCHEMA);
   });
 });

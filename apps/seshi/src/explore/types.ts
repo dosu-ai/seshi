@@ -17,7 +17,7 @@ export interface SessionSummary {
 
 export interface SessionList {
   since: string;
-  server: { mode: "server" | "local" | "none"; where?: string; error?: string };
+  server: { mode: "server" | "serverless" | "none"; where?: string; error?: string };
   sessions: SessionSummary[];
   pending: number;
   state_error?: string;

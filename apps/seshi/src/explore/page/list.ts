@@ -124,7 +124,7 @@ export function renderList(root: HTMLElement, isCurrent: () => boolean): void {
       `Sessions seen since ${when(list.since)}. Stored sessions: `,
       server.mode === "none"
         ? `none can be read (${server.error ?? "no server"}).`
-        : `${server.mode === "local" ? "local bucket" : "server"} ${server.where ?? ""}.`,
+        : `${server.mode === "serverless" ? "bucket" : "server"} ${server.where ?? ""}.`,
       list.state_error ? ` The state file cannot be read: ${list.state_error}` : "",
     );
     const shown = list.sessions.filter(visible);

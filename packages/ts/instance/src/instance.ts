@@ -92,6 +92,12 @@ export interface InstanceParts {
   auth?: Auth;
   /** Source health; this instance's own shard in the bucket when omitted. */
   health?: HealthCounters;
+  /** Where drop and failure records go; the bucket when omitted. A serverless laptop keeps
+   * them in its own state folder (F11.10). */
+  records?: Store;
+  /** The pipeline writes the layout marker when the bucket has none (true). Serverless
+   * laptops never do (F11.11). */
+  createLayout?: boolean;
   /** The session filter; `[filter]` with each source's overrides when omitted. */
   filter?: FilterSetting;
   /** Size caps; `[limits]` when omitted. */
@@ -213,6 +219,8 @@ export class Instance {
       health: this.health,
       authorizer: ownershipAuthorizer(),
       visibility: parts.visibility ?? ((sourceId) => visibilityFor(config, sourceId)),
+      ...(parts.records ? { records: parts.records } : {}),
+      ...(parts.createLayout !== undefined ? { createLayout: parts.createLayout } : {}),
     });
 
     const given = parts.connectors ?? [];
@@ -324,9 +332,12 @@ export class Instance {
     });
   }
 
-  localSessions(owner: string): StoreSessionDB {
+  /** The session API as `owner` itself, through the upload route. `basis` is how the owner
+   * was established: `claimed` in serverless mode, where nothing seshi controls checked the
+   * name (F11.4). */
+  localSessions(owner: string, basis: OwnerBasis = "verified"): StoreSessionDB {
     assertOwner(owner);
-    return this.sessions({ owner, writer: localWriter(owner), owner_basis: "verified" });
+    return this.sessions({ owner, writer: localWriter(owner), owner_basis: basis });
   }
 
   source(id: string): SourceConfig | undefined {

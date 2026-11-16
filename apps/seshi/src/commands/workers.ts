@@ -2,7 +2,7 @@ import { parseArgs } from "node:util";
 import type { InstanceStatus } from "@seshi/instance";
 import { EXIT } from "../cli/exit";
 import { failWith } from "../cli/failures";
-import { emit, helpOrUsageError, takeJson } from "../cli/output";
+import { emit, fail, helpOrUsageError, takeJson } from "../cli/output";
 import { printable, type Role, Style, styleFor } from "../cli/style";
 import { adminTarget } from "./admin-target";
 import type { CommandContext } from "./index";
@@ -123,6 +123,15 @@ export async function run(ctx: CommandContext): Promise<number> {
   const style = await styleFor(ctx, { json });
   try {
     const target = await adminTarget(ctx, values);
+    if (target.kind === "serverless") {
+      return fail(
+        ctx,
+        json,
+        EXIT.config,
+        "needs_server",
+        "serverless mode runs no workers: see seshi capture status and seshi doctor on each laptop",
+      );
+    }
     if (target.kind === "remote") {
       const status = (await target.db.jobs()) as unknown as InstanceStatus;
       emit(ctx, json, status, () => statusLines(status, style));

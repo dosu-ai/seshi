@@ -1,11 +1,13 @@
 import { ServerError } from "@seshi/client";
 import { ConfigError } from "@seshi/config";
 import { Forbidden, SessionRejected, StoreError, Unauthorized } from "@seshi/model";
+import { accessDeniedIn } from "@seshi/store";
 import { NotSignedIn } from "../account/credential";
 import { BadServerUrl } from "../account/logins";
 import { SignInError } from "../account/oidc";
 import { BadUsername } from "../account/user";
 import type { CommandContext } from "../commands/index";
+import { refusedMessage } from "../serverless/refusal";
 import { EXIT, type ExitCode } from "./exit";
 import { fail } from "./output";
 import { Cancelled } from "./terminal";
@@ -32,6 +34,10 @@ export function classify(
   err: unknown,
 ): { exit: ExitCode; code: string; message: string } | undefined {
   if (err instanceof Refused) return { exit: err.exit, code: err.code, message: err.message };
+  const denied = accessDeniedIn(err);
+  if (denied) {
+    return { exit: EXIT.auth, code: "access_denied", message: refusedMessage(denied) };
+  }
   if (err instanceof NotSignedIn)
     return { exit: EXIT.auth, code: "not_signed_in", message: err.message };
   if (err instanceof ConfigError) {

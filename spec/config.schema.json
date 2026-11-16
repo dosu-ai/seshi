@@ -904,6 +904,11 @@
             "additionalProperties": false,
             "description": "A review policy (F3.3). The first policy that matches an envelope reviews it."
           }
+        },
+        "required": {
+          "default": false,
+          "description": "Serverless mode (F11): when a policy's key cannot be found on a laptop, keep its sessions there until one is set. false stores them with regex redaction only, recorded as skipped.",
+          "type": "boolean"
         }
       },
       "additionalProperties": false

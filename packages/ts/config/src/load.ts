@@ -43,8 +43,21 @@ export interface FlagValue {
   value: string;
 }
 
+/** A config document below the file: another file's settings, already parsed (F11.6, the
+ * bucket's shared `config/seshi.toml`). Its tables are merged under the file's, value by
+ * value; a list in the file replaces the base's. */
+export interface BaseLayer {
+  /** Where it came from, for origins and messages (`s3://acme/seshi/config/seshi.toml`). */
+  path: string;
+  tree: Record<string, unknown>;
+}
+
 export interface LoadOptions {
+  /** Lowest layer above the built-in defaults. */
+  base?: BaseLayer;
   file?: string;
+  /** Top-level tables the file's own settings are read without. */
+  omit?: readonly string[];
   env?: Record<string, string | undefined>;
   flags?: readonly FlagValue[];
   ignoreEnv?: readonly string[];
@@ -166,6 +179,19 @@ export function secretsIn(value: unknown): Array<{ path: PathSegment[]; secret: 
   return found;
 }
 
+export function parseConfigToml(file: string, text: string): PlainObject {
+  return parseToml(file, text);
+}
+
+function mergeTables(under: PlainObject, over: PlainObject): PlainObject {
+  const merged: PlainObject = { ...under };
+  for (const [key, value] of Object.entries(over)) {
+    const below = merged[key];
+    merged[key] = isPlainObject(below) && isPlainObject(value) ? mergeTables(below, value) : value;
+  }
+  return merged;
+}
+
 function parseToml(file: string, text: string): PlainObject {
   try {
     const parsed: unknown = Bun.TOML.parse(text);
@@ -222,6 +248,10 @@ function load<S extends z.ZodType>(schema: S, options: LoadOptions): Loaded<z.ou
   const warnings: string[] = [];
 
   let tree: PlainObject = {};
+  if (options.base !== undefined) {
+    tree = structuredClone(options.base.tree) as PlainObject;
+    recordFile(shape, tree, { source: "file", path: options.base.path }, origins);
+  }
   if (options.file !== undefined) {
     let text: string;
     try {
@@ -231,8 +261,10 @@ function load<S extends z.ZodType>(schema: S, options: LoadOptions): Loaded<z.ou
         `cannot read ${options.file}: ${err instanceof Error ? err.message : err}`,
       ]);
     }
-    tree = parseToml(options.file, text);
-    recordFile(shape, tree, { source: "file", path: options.file }, origins);
+    const own = parseToml(options.file, text);
+    for (const key of options.omit ?? []) delete own[key];
+    recordFile(shape, own, { source: "file", path: options.file }, origins);
+    tree = mergeTables(tree, own);
   }
 
   const ignore = new Set([...(options.ignoreEnv ?? []), ...referencedEnv(shape, tree, env)]);

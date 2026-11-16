@@ -104,7 +104,7 @@ describe("precedence (F1.1)", () => {
       health_retention: 90 * 86_400_000,
     });
     expect(config.redaction).toEqual({ packs: [] });
-    expect(config.review).toEqual({ policies: [] });
+    expect(config.review).toEqual({ policies: [], required: false });
     expect(config.sources).toEqual([]);
     expect(config.search).toEqual({
       enabled: true,

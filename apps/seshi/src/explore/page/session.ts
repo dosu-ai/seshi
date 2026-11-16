@@ -65,7 +65,7 @@ function header(d: SessionDetail, onRefresh: () => void): HTMLElement {
         null,
         server.mode === "none"
           ? `nowhere: ${server.error?.message ?? "no server"}`
-          : `${server.mode === "local" ? "local bucket" : "server"} ${server.where ?? ""}`,
+          : `${server.mode === "serverless" ? "bucket" : "server"} ${server.where ?? ""}`,
         server.upload_id && server.upload_id !== ev.session_id ? ` (as ${server.upload_id})` : "",
       ),
     ),

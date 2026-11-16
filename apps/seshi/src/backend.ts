@@ -1,4 +1,4 @@
-import type { TokenRequest as AuthTokenRequest, Principal } from "@seshi/auth";
+import type { Principal } from "@seshi/auth";
 import {
   HttpSessionDB,
   type OwnerOption,
@@ -17,15 +17,19 @@ import {
   type SessionMetadata,
   type SessionsPage,
   type StoredTrace,
+  VERSION,
   type Visibility,
 } from "@seshi/model";
 import type { StoreSessionDB } from "@seshi/pipeline";
+import { LOCAL_VIEWER, type Viewer, viewerFor } from "@seshi/search";
 import { type Account, accountCredential, serverOf } from "./account/account";
 import type { Purpose } from "./account/credential";
 import { NotSignedIn } from "./account/credential";
 import { EXIT } from "./cli/exit";
 import { Refused } from "./cli/failures";
 import type { CommandContext } from "./commands/index";
+import { refusalOf, SERVERLESS_BASIS, type ServerlessBucket } from "./serverless/open";
+import { isServerless } from "./serverless/settings";
 import { USER_AGENT } from "./user-agent";
 
 export interface TraceOptions extends OwnerOption {
@@ -38,7 +42,7 @@ export interface SearchHooks {
 }
 
 export interface Backend {
-  mode: "server" | "local";
+  mode: "server" | "serverless";
   where: string;
   me(): Promise<Identity>;
   listSessions(options: { owner?: string; after?: string; limit?: number }): Promise<SessionsPage>;
@@ -129,69 +133,120 @@ export class ServerBackend implements Backend {
   async close(): Promise<void> {}
 }
 
-export class LocalBackend implements Backend {
-  readonly mode = "local";
+/** Serverless mode (F11): this machine reads and writes the bucket as a member of its owner.
+ * The visibility rule is applied here (F11.5); what the key may do is the bucket's to decide
+ * (F11.4), and a refusal becomes a message. */
+export class ServerlessBackend implements Backend {
+  readonly mode = "serverless";
 
   constructor(
-    readonly instance: Instance,
-    readonly owner: string,
+    readonly bucket: ServerlessBucket,
+    /** `--include-private`: read every session the key can, owner-only ones included. Not a
+     * permission: a key that can read the bucket can read every session. */
+    readonly includePrivate = false,
   ) {}
+
+  get instance(): Instance {
+    return this.bucket.instance;
+  }
+
+  get owner(): string {
+    return this.bucket.owner;
+  }
 
   get where(): string {
     return this.instance.storage.url;
   }
 
-  private sessionsAsLocalOwner(owner?: string): StoreSessionDB {
-    if (owner === undefined || owner === this.owner) return this.instance.localSessions(this.owner);
+  private sessionsAs(owner?: string): StoreSessionDB {
+    if (owner === undefined || owner === this.owner) {
+      return this.instance.localSessions(this.owner, SERVERLESS_BASIS);
+    }
     return this.instance.sessions({
       owner,
       writer: localWriter(this.owner),
-      owner_basis: "verified",
+      owner_basis: SERVERLESS_BASIS,
     });
   }
 
-  private principal(): Principal {
+  principal(): Principal {
     return {
       kind: "local",
       owner: this.owner,
-      owner_basis: "verified",
-      role: "admin",
-      scopes: new Set([
-        "sessions:write",
-        "sessions:read",
-        "sessions:delete",
-        "search",
-        "sources:admin",
-        "tokens:admin",
-      ]),
+      owner_basis: SERVERLESS_BASIS,
+      role: "member",
+      scopes: new Set(["sessions:write", "sessions:read", "sessions:delete", "search"]),
       credential: "static",
-      credential_id: "local",
+      credential_id: "serverless",
       claims: {},
     };
   }
 
+  viewer(): Viewer {
+    return this.includePrivate
+      ? LOCAL_VIEWER
+      : viewerFor(this.principal(), this.instance.auth.aliases);
+  }
+
+  private readable(metadata: SessionMetadata | null): SessionMetadata | null {
+    if (metadata === null) return null;
+    return this.viewer().canRead({
+      owner: metadata.owner,
+      ...(metadata.visibility ? { visibility: metadata.visibility } : {}),
+    })
+      ? metadata
+      : null;
+  }
+
+  private async refused<T>(work: () => Promise<T>): Promise<T> {
+    try {
+      return await work();
+    } catch (err) {
+      throw refusalOf(err, this.owner);
+    }
+  }
+
+  private writable(): void {
+    if (this.bucket.writable) return;
+    throw new Refused(
+      EXIT.config,
+      "needs_update",
+      `this bucket needs seshi ${this.bucket.marker.min_version} or newer; you have ${VERSION}. Update seshi, then try again.`,
+    );
+  }
+
   async me(): Promise<Identity> {
-    return { owner: this.owner, storage: this.instance.storage, kind: "local", role: "admin" };
+    return {
+      owner: this.owner,
+      storage: this.instance.storage,
+      kind: "local",
+      role: "member",
+      owner_basis: SERVERLESS_BASIS,
+    };
   }
   listSessions(options: { owner?: string; after?: string; limit?: number }) {
-    return this.sessionsAsLocalOwner(options.owner).listSessions({
-      ...(options.after ? { after: options.after } : {}),
-      ...(options.limit ? { limit: options.limit } : {}),
+    return this.refused(async () => {
+      const page = await this.sessionsAs(options.owner).listSessions({
+        ...(options.after ? { after: options.after } : {}),
+        ...(options.limit ? { limit: options.limit } : {}),
+      });
+      return { ...page, sessions: page.sessions.filter((s) => this.readable(s) !== null) };
     });
   }
   getSession(agent: string, sessionId: string, options: OwnerOption = {}) {
-    return this.sessionsAsLocalOwner(options.owner).getSession(agent, sessionId);
+    return this.refused(async () =>
+      this.readable(await this.sessionsAs(options.owner).getSession(agent, sessionId)),
+    );
   }
-  getTrace(agent: string, sessionId: string, options: TraceOptions = {}) {
-    return this.sessionsAsLocalOwner(options.owner).getTrace(
-      agent,
-      sessionId,
-      options.hash,
-      options.format,
+  async getTrace(agent: string, sessionId: string, options: TraceOptions = {}) {
+    if (!(await this.getSession(agent, sessionId, options))) return null;
+    return this.refused(() =>
+      this.sessionsAs(options.owner).getTrace(agent, sessionId, options.hash, options.format),
     );
   }
   tombstone(agent: string, sessionId: string, options: OwnerOption = {}) {
-    return this.sessionsAsLocalOwner(options.owner).tombstone(agent, sessionId);
+    this.writable();
+    return this.refused(() => this.sessionsAs(options.owner).tombstone(agent, sessionId));
   }
   setVisibility(
     agent: string,
@@ -199,16 +254,17 @@ export class LocalBackend implements Backend {
     visibility: Visibility,
     options: OwnerOption = {},
   ) {
-    return this.sessionsAsLocalOwner(options.owner).setVisibility(agent, sessionId, visibility);
+    this.writable();
+    return this.refused(() =>
+      this.sessionsAs(options.owner).setVisibility(agent, sessionId, visibility),
+    );
   }
   async reviews(agent: string, sessionId: string, options: OwnerOption = {}) {
     if (!(await this.getSession(agent, sessionId, options))) return null;
     const { archiveId, listReviews } = await import("@seshi/store");
     const owner = options.owner ?? this.owner;
-    const records = await listReviews(
-      this.instance.store,
-      owner,
-      archiveId(owner, agent, sessionId),
+    const records = await this.refused(() =>
+      listReviews(this.instance.store, owner, archiveId(owner, agent, sessionId)),
     );
     return records as ReviewDecision[];
   }
@@ -218,43 +274,38 @@ export class LocalBackend implements Backend {
       throw new Refused(
         EXIT.config,
         "search_disabled",
-        "search is turned off in this config ([search] enabled = false)",
+        "search is off on this machine: set [search] enabled = true in the CLI config",
       );
     }
     if (!search.ready()) hooks.building?.();
-    await search.catchUp();
-    const { LOCAL_VIEWER } = await import("@seshi/search");
-    return search.search(LOCAL_VIEWER, request);
+    const caughtUp = search.status().caught_up_at;
+    const fresh =
+      caughtUp !== undefined &&
+      Date.now() - Date.parse(caughtUp) < 2 * this.instance.config.search.interval;
+    if (!fresh) await this.refused(() => search.catchUp());
+    return search.search(this.viewer(), request);
   }
-  async listTokens(filter: { owner?: string; kind?: TokenKind; all?: boolean }) {
-    const { tokenInfo } = await import("@seshi/auth");
-    const records = await this.instance.auth.tokens.list(filter);
-    return records.map((r) => tokenInfo(r) as unknown as TokenInfo);
-  }
-  async createToken(request: TokenRequest) {
-    const { tokenInfo } = await import("@seshi/auth");
-    const { expires_at, ...rest } = request;
-    const issued = await this.instance.auth.issue(
-      {
-        ...rest,
-        ...(expires_at !== undefined ? { expires_at: new Date(expires_at) } : {}),
-      } as AuthTokenRequest,
-      this.principal(),
+  private noTokens(): never {
+    throw new Refused(
+      EXIT.config,
+      "needs_server",
+      "tokens need a server: in serverless mode the bucket's keys are the only credentials",
     );
-    return { token: issued.token, record: tokenInfo(issued.record) as unknown as TokenInfo };
   }
-  async revokeToken(id: string) {
-    const { tokenInfo } = await import("@seshi/auth");
-    const record = await this.instance.auth.tokens.revoke(id);
-    return record ? (tokenInfo(record) as unknown as TokenInfo) : null;
+  async listTokens(): Promise<TokenInfo[]> {
+    return this.noTokens();
   }
-  async revokeOwnerTokens(owner: string, kind?: TokenKind) {
-    const { tokenInfo } = await import("@seshi/auth");
-    const records = await this.instance.auth.tokens.revokeOwner(owner, kind);
-    return records.map((r) => tokenInfo(r) as unknown as TokenInfo);
+  async createToken(): Promise<{ token: string; record: TokenInfo }> {
+    return this.noTokens();
+  }
+  async revokeToken(): Promise<TokenInfo | null> {
+    return this.noTokens();
+  }
+  async revokeOwnerTokens(): Promise<TokenInfo[]> {
+    return this.noTokens();
   }
   close(): Promise<void> {
-    return this.instance.close();
+    return this.bucket.close();
   }
 }
 
@@ -264,7 +315,11 @@ export interface DeleteConfirmation {
   readonly [deleteConfirmed]: true;
 }
 
-export type OpenBackendOptions = { server?: string } & (
+export type OpenBackendOptions = {
+  server?: string;
+  /** Serverless mode: read owner-only sessions too (`--include-private`). */
+  includePrivate?: boolean;
+} & (
   | { purpose?: Exclude<Purpose, "delete"> }
   | { purpose: "delete"; confirmed: DeleteConfirmation }
 );
@@ -274,15 +329,18 @@ export async function openBackend(
   account: Account,
   options: OpenBackendOptions = {},
 ): Promise<Backend> {
-  if (options.server === undefined && account.cli.local) {
-    const { connect, localOwner } = await import("./connect");
-    const connection = await connect({
+  if (options.server === undefined && isServerless(account.cli)) {
+    const { openServerless } = await import("./serverless/open");
+    const bucket = await openServerless({
       cli: account.cli,
       env: account.env,
       home: account.home,
       integrations: await ctx.integrations(),
+      secrets: account.secrets,
+      write: false,
     });
-    return new LocalBackend(connection.instance as Instance, localOwner(account.cli, account.env));
+    for (const warning of bucket.warnings) ctx.stderr(`seshi: warning: ${warning}`);
+    return new ServerlessBackend(bucket, options.includePrivate ?? false);
   }
   const server = serverOf(account, options.server);
   if (server === undefined) throw new NotSignedIn(undefined);

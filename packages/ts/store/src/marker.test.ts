@@ -5,7 +5,14 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FsStore } from "./fs";
 import { decodeJson, encodeJson } from "./json";
 import { LAYOUT_KEY, LEGACY_LAYOUT_KEY } from "./layout";
-import { ensureLayout, LayoutError, readLayout } from "./marker";
+import {
+  ensureLayout,
+  LayoutError,
+  NoLayout,
+  readLayout,
+  setLayout,
+  versionAtLeast,
+} from "./marker";
 import { getBytes } from "./store";
 
 let dir: string;
@@ -102,13 +109,80 @@ describe("ensureLayout", () => {
   it("refuses a marker this version cannot read", async () => {
     await store.put(
       LAYOUT_KEY,
-      encodeJson({ schema: "seshi/layout/2", trace_schema: "seshi/trace/2" }),
+      encodeJson({ schema: "seshi/layout/3", trace_schema: "seshi/trace/2" }),
     );
-    await expect(readLayout(store)).rejects.toThrow(/this seshi reads seshi\/layout\/1/);
+    await expect(readLayout(store)).rejects.toThrow(
+      /this seshi reads seshi\/layout\/1 and seshi\/layout\/2/,
+    );
     await store.put(
       LAYOUT_KEY,
       encodeJson({ schema: "seshi/layout/1", trace_schema: "seshi/trace/2", deployment_id: "d" }),
     );
     await expect(readLayout(store)).rejects.toThrow(/this seshi writes seshi\/trace\/1/);
+  });
+});
+
+describe("layout schema 2 (F11.7)", () => {
+  it("writes schema 1 for a new prefix, and schema 2 when a mode is given", async () => {
+    expect((await ensureLayout(store, { createdBy: "seshi/1" })).schema).toBe("seshi/layout/1");
+    const other = new FsStore(mkdtempSync(join(tmpdir(), "marker2-")));
+    const marker = await ensureLayout(other, {
+      createdBy: "seshi/1",
+      mode: "serverless",
+      now: () => new Date("2026-11-16T00:00:00Z"),
+    });
+    expect(marker).toMatchObject({
+      schema: "seshi/layout/2",
+      mode: "serverless",
+      mode_changed_at: "2026-11-16T00:00:00.000Z",
+      mode_changed_by: "seshi/1",
+    });
+    expect(await readLayout(other)).toEqual(marker);
+  });
+
+  it("refuses to create a marker when the caller may not (NoLayout)", async () => {
+    await expect(ensureLayout(store, { createdBy: "t", create: false })).rejects.toBeInstanceOf(
+      NoLayout,
+    );
+    expect(await getBytes(store, LAYOUT_KEY)).toBeNull();
+  });
+
+  it("upgrades schema 1 to 2 when a field is set, and clears min_version", async () => {
+    const first = await ensureLayout(store, { createdBy: "seshi/1", deploymentId: "d" });
+    const set = await setLayout(
+      store,
+      { mode: "serverless", min_version: "0.10.0" },
+      { by: "seshi/2", now: () => new Date("2026-11-16T00:00:00Z") },
+    );
+    expect(set).toEqual({
+      ...first,
+      schema: "seshi/layout/2",
+      mode: "serverless",
+      min_version: "0.10.0",
+      mode_changed_at: "2026-11-16T00:00:00.000Z",
+      mode_changed_by: "seshi/2",
+    });
+    const cleared = await setLayout(store, { min_version: null }, { by: "seshi/2" });
+    expect(cleared.min_version).toBeUndefined();
+    expect(cleared.mode).toBe("serverless");
+    const same = await setLayout(store, { mode: "serverless" }, { by: "seshi/3" });
+    expect(same.mode_changed_by).toBe("seshi/2");
+  });
+
+  it("refuses setLayout without a marker, and a version that is not one", async () => {
+    await expect(setLayout(store, { mode: "server" }, { by: "t" })).rejects.toBeInstanceOf(
+      NoLayout,
+    );
+    await ensureLayout(store, { createdBy: "t" });
+    await expect(setLayout(store, { min_version: "ten" }, { by: "t" })).rejects.toThrow(
+      /not a version/,
+    );
+  });
+
+  it("compares versions by number", () => {
+    expect(versionAtLeast("0.10.0", "0.9.9")).toBe(true);
+    expect(versionAtLeast("0.9.0", "0.10.0")).toBe(false);
+    expect(versionAtLeast("1.0.0-rc.1", "1.0.0")).toBe(true);
+    expect(versionAtLeast("1.2.3", "1.2.3")).toBe(true);
   });
 });

@@ -5,7 +5,7 @@ import { ModelReviewer, type ModelReviewerOptions } from "./reviewer";
 export interface ReviewerOptions extends LoadOptions, Omit<ModelReviewerOptions, "policies"> {}
 
 export async function reviewerFromConfig(
-  config: Pick<ServerConfig, "review">,
+  config: { review: Pick<ServerConfig["review"], "policies"> },
   options: ReviewerOptions = {},
 ): Promise<ModelReviewer | undefined> {
   if (config.review.policies.length === 0) return undefined;

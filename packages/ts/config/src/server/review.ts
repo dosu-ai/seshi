@@ -241,6 +241,12 @@ export const reviewSection = z
       .array(reviewPolicy)
       .default([])
       .describe("Review policies, first match wins; none means no model review."),
+    required: z
+      .boolean()
+      .default(false)
+      .describe(
+        "Serverless mode (F11): when a policy's key cannot be found on a laptop, keep its sessions there until one is set. false stores them with regex redaction only, recorded as skipped.",
+      ),
   })
   .prefault({})
   .describe("Model review (F3).");

@@ -110,6 +110,12 @@ export interface PipelineOptions {
    * then the server's `default_visibility` (`(id) => visibilityFor(config, id)`); `org` when
    * omitted. The request and the token's default are the envelope's `visibility`. */
   visibility?: VisibilitySetting;
+  /** Where drop and failure records go (`sources/<id>/{dropped,failed}/`); `store` when
+   * omitted. A serverless laptop keeps them in a folder of its own (F11.10). */
+  records?: Store;
+  /** Write the bucket's layout marker on the first write when there is none (true). A
+   * serverless laptop never claims a bucket: without a marker its writes fail (F11.11). */
+  createLayout?: boolean;
 }
 
 export type VisibilitySetting = Visibility | ((sourceId: string) => Visibility);
@@ -365,8 +371,10 @@ interface Outcome {
 
 export class Pipeline {
   readonly store: Store;
+  readonly records: Store;
   readonly formats: FormatRegistry;
   private readonly client: string;
+  private readonly createLayout: boolean;
   private readonly now: () => Date;
   private readonly redactor: Redactor;
   private readonly filter: FilterSetting | undefined;
@@ -380,6 +388,8 @@ export class Pipeline {
 
   constructor(options: PipelineOptions) {
     this.store = options.store;
+    this.records = options.records ?? options.store;
+    this.createLayout = options.createLayout ?? true;
     this.formats = options.formats;
     this.client = options.client ?? `seshi/${VERSION}`;
     this.now = options.now ?? (() => new Date());
@@ -394,7 +404,10 @@ export class Pipeline {
   }
 
   private layout(): Promise<unknown> {
-    this.layoutChecked ??= ensureLayout(this.store, { createdBy: this.client }).catch((err) => {
+    this.layoutChecked ??= ensureLayout(this.store, {
+      createdBy: this.client,
+      create: this.createLayout,
+    }).catch((err) => {
       this.layoutChecked = undefined;
       throw err;
     });
@@ -456,7 +469,7 @@ export class Pipeline {
     }
     if (respond === "throw") throw err;
     const message = recordedMessage(err.message);
-    const record = await writeFailed(this.store, {
+    const record = await writeFailed(this.records, {
       at: this.now().toISOString(),
       source: envelope.source_id,
       source_kind: envelope.source,
@@ -910,7 +923,7 @@ export class Pipeline {
       records: judged,
     });
     if (decision.action === "drop") {
-      await writeDropped(this.store, {
+      await writeDropped(this.records, {
         at: this.now().toISOString(),
         source: envelope.source_id,
         source_kind: envelope.source,

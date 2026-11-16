@@ -252,7 +252,7 @@ export function presenceCheck(ev: SessionEvidence): CheckResult {
   const s = ev.local;
   const m = ev.server.metadata ?? null;
   const pointer = ev.server.pointer;
-  const where = ev.server.mode === "local" ? "the local bucket" : "the server";
+  const where = ev.server.mode === "serverless" ? "the bucket" : "the server";
   const uid = ev.server.upload_id ?? ev.session_id;
   const has = (x: SessionMetadata | null | undefined) =>
     x !== null && x !== undefined && x.status === "stored" && x.head !== undefined;

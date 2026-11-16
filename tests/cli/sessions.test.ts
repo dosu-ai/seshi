@@ -8,6 +8,7 @@ import { HttpSessionDB } from "@seshi/client";
 import { VERSION } from "@seshi/model";
 import {
   archiveId,
+  ensureLayout,
   FsStore,
   type Store,
   writeDropped,
@@ -469,8 +470,8 @@ describe("seshi tokens", () => {
   });
 });
 
-describe("local mode (F8.3, X3.5)", () => {
-  it("lists, shows, exports, deletes and manages tokens on your own bucket", async () => {
+describe("serverless mode, by its old name [local] (F11.1)", () => {
+  it("lists, shows, exports and deletes on the bucket, and leaves tokens to a server", async () => {
     const local = new Machine();
     try {
       const toml = join(local.dir, "seshi.toml");
@@ -478,27 +479,36 @@ describe("local mode (F8.3, X3.5)", () => {
         mode: 0o600,
       });
       local.cliConfig(`[local]\nconfig = "${toml}"\nowner = "me"\n`);
+      await ensureLayout(new FsStore(join(local.dir, "bucket")), {
+        createdBy: "test",
+        mode: "serverless",
+      });
       const connection = await connect({
         cli: {
           local: { config: toml, owner: "me" },
+          search: { scope: "visible" },
           theme: "auto",
           keychain: true,
           capture: { enabled: true, paths: [], remotes: [] },
         },
         env: {},
+        home: local.dir,
         integrations: INTEGRATIONS,
       });
       await connection.db.ingest({ agent: "claude-code", session_id: "s1", transcript: CLAUDE });
       await connection.close();
 
       const who = JSON.parse((await local.seshi(["whoami", "--json"])).out);
-      expect(who).toMatchObject({ mode: "local", identity: { owner: "me", kind: "local" } });
-      expect((await local.seshi(["whoami"])).out).toContain("me in local mode");
+      expect(who).toMatchObject({
+        mode: "serverless",
+        identity: { owner: "me", kind: "local", role: "member", owner_basis: "claimed" },
+      });
+      expect((await local.seshi(["whoami"])).out).toContain("me in serverless mode");
       const ls = await local.seshi(["sessions", "ls"]);
       expect(ls.code, ls.err).toBe(0);
       expect(ls.out).toContain("claude-code/s1");
       expect((await local.seshi(["sessions", "show", "claude-code/s1"])).out).toContain(
-        "owner       me (verified)",
+        "owner       me (claimed)",
       );
       await review(new FsStore(`file://${join(local.dir, "bucket")}`), "me", "s1", 0, "skipped");
       expect((await local.seshi(["sessions", "show", "claude-code/s1"])).out).toContain(
@@ -515,16 +525,9 @@ describe("local mode (F8.3, X3.5)", () => {
         0,
       );
 
-      const created = JSON.parse(
-        (await local.seshi(["tokens", "create", "admin", "--owner", "ops", "--json"])).out,
-      );
-      expect(created.record).toMatchObject({
-        kind: "admin",
-        owner: "ops",
-        created_by: { kind: "local", principal: "me" },
-      });
-      expect((await local.seshi(["tokens", "ls"])).out).toContain(created.record.id);
-      expect((await local.seshi(["tokens", "revoke", created.record.id])).code).toBe(0);
+      const tokens = await local.seshi(["tokens", "create", "admin", "--owner", "ops"]);
+      expect(tokens.code).toBe(3);
+      expect(tokens.err).toContain("tokens need a server");
 
       const rm = await local.seshi(["sessions", "rm", "claude-code/s1", "--yes"]);
       expect(rm.code, rm.err).toBe(0);

@@ -19,7 +19,7 @@ import { join } from "node:path";
 import { VERSION } from "@seshi/model";
 import { getSession } from "@seshi/pipeline";
 import { compileRuleSet, validatePack } from "@seshi/redact";
-import { archiveId, FsStore, keys, readChanges } from "@seshi/store";
+import { archiveId, ensureLayout, FsStore, keys, readChanges } from "@seshi/store";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Machine, startServer, type TestServer } from "../tooling/cli";
 import { transcript } from "../tooling/testdata";
@@ -796,7 +796,7 @@ describe("seshi upload (F8.1)", () => {
   });
 });
 
-describe("local mode (X3.5)", () => {
+describe("serverless mode, by its old name [local] (F11)", () => {
   it("uploads to your own bucket and retracts there", async () => {
     const local = new Machine();
     try {
@@ -805,6 +805,10 @@ describe("local mode (X3.5)", () => {
         mode: 0o600,
       });
       local.cliConfig(`[local]\nconfig = "${toml}"\nowner = "me"\n`);
+      await ensureLayout(new FsStore(join(local.dir, "bucket")), {
+        createdBy: "test",
+        mode: "serverless",
+      });
       const code = join(local.dir, "code");
       mkdirSync(code);
       const localFile = join(local.dir, "l1.jsonl");
@@ -966,6 +970,10 @@ describe("pre-redaction before upload (F2.4)", () => {
       const toml = join(local.dir, "seshi.toml");
       writeFileSync(toml, `[store]\nurl = "file://${join(local.dir, "bucket")}"\n`);
       local.cliConfig(`[local]\nconfig = "${toml}"\nowner = "me"\n`);
+      await ensureLayout(new FsStore(join(local.dir, "bucket")), {
+        createdBy: "test",
+        mode: "serverless",
+      });
       const localFile = join(local.dir, "l1.jsonl");
       writeFileSync(localFile, head);
       await local.seshi(["hook", "claude-code", "Stop"], {

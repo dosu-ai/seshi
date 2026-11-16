@@ -10,7 +10,7 @@ import {
 } from "@seshi/model";
 import { decodeJson, getBytes, isOwner, keys, type Store } from "@seshi/store";
 import type { BackendHit, BackendQuery, IndexStore } from "./backend";
-import { Indexer, type IndexerLogger, type IndexerRun } from "./indexer";
+import { Indexer, type IndexerLogger, type IndexerOptions, type IndexerRun } from "./indexer";
 import { defaultIndexPath } from "./paths";
 import { parseQuery, SearchQueryError } from "./query";
 import { highlights } from "./snippet";
@@ -47,7 +47,14 @@ export interface SearchServiceOptions {
   log?: IndexerLogger;
   /** Check each result against the session's live metadata (true). */
   verify?: boolean;
-  indexer?: { lagMs?: number; pageSize?: number; budget?: number; ownerRefreshMs?: number };
+  indexer?: {
+    lagMs?: number;
+    pageSize?: number;
+    budget?: number;
+    ownerRefreshMs?: number;
+    owners?: IndexerOptions["owners"];
+    admit?: IndexerOptions["admit"];
+  };
 }
 
 export interface SearchStatus {

@@ -12,16 +12,18 @@ const USAGE = "usage: seshi whoami [--server <url>] [--json]";
 
 function lines(
   identity: Identity,
-  mode: "server" | "local",
+  mode: "server" | "serverless",
   where: string,
   login: { mode: string; user?: string; stored_in: string } | undefined,
   style: Style,
 ): string[] {
   const out: string[] = [];
-  if (mode === "local") {
+  if (mode === "serverless") {
     out.push(
-      `${style.bold(identity.owner)} in local mode: sessions go straight to ${style.link(where)}`,
+      `${style.bold(identity.owner)} in serverless mode: sessions go straight to ${style.link(where)}`,
     );
+    out.push(`  owner       ${identity.owner_basis ?? "claimed"} (from the CLI config)`);
+    out.push("  access      the bucket key's permissions decide what this machine may do");
     return out;
   }
   out.push(`${style.bold(identity.owner)} on ${style.link(where)}`);

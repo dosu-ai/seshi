@@ -1,6 +1,7 @@
 import type { Fetch } from "@seshi/model";
 import { FetchS3Client, S3HttpError } from "./s3-fetch";
 import {
+  AccessDenied,
   type DeleteOptions,
   type ListedKey,
   type ListOptions,
@@ -42,6 +43,10 @@ export function parseS3Url(url: string): { scheme: "s3" | "r2"; bucket: string; 
   const [, scheme, bucket, rawPrefix] = match;
   const prefix = (rawPrefix ?? "").replace(/^\/+|\/+$/g, "");
   return { scheme: scheme as "s3" | "r2", bucket: bucket as string, prefix };
+}
+
+function denied(err: unknown): boolean {
+  return err instanceof S3HttpError && err.status === 403;
 }
 
 function conditionFailed(err: unknown): boolean {
@@ -115,6 +120,7 @@ export class S3Store implements Store {
     try {
       return await this.client.get(this.keyOf(key));
     } catch (err) {
+      if (denied(err)) throw new AccessDenied("read", key, err);
       throw new StoreError(`read ${key}`, err);
     }
   }
@@ -139,6 +145,7 @@ export class S3Store implements Store {
       if (options.ifMatch !== undefined && err instanceof S3HttpError && err.status === 404) {
         throw new PreconditionFailed(key, "no object to replace");
       }
+      if (denied(err)) throw new AccessDenied("write", key, err);
       throw new StoreError(`write ${key}`, err);
     }
   }
@@ -147,6 +154,7 @@ export class S3Store implements Store {
     try {
       return await this.client.head(this.keyOf(key));
     } catch (err) {
+      if (denied(err)) throw new AccessDenied("stat", key, err);
       throw new StoreError(`stat ${key}`, err);
     }
   }
@@ -158,6 +166,7 @@ export class S3Store implements Store {
       if (conditionFailed(err)) {
         throw new PreconditionFailed(key, "the object changed since it was read");
       }
+      if (denied(err)) throw new AccessDenied("delete", key, err);
       throw new StoreError(`delete ${key}`, err);
     }
   }
@@ -173,6 +182,7 @@ export class S3Store implements Store {
       const strip = this.prefix ? this.prefix.length + 1 : 0;
       return { keys: response.keys.map((k) => k.slice(strip)), truncated: response.truncated };
     } catch (err) {
+      if (denied(err)) throw new AccessDenied("list", prefix, err);
       throw new StoreError(`list ${prefix}`, err);
     }
   }
@@ -195,6 +205,7 @@ export class S3Store implements Store {
       });
       return { keys: objects.map((o) => o.key), truncated: response.truncated, objects };
     } catch (err) {
+      if (denied(err)) throw new AccessDenied("list", prefix, err);
       throw new StoreError(`list ${prefix}`, err);
     }
   }

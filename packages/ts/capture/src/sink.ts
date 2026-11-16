@@ -1,14 +1,20 @@
 import { HttpSessionDB, ServerError } from "@seshi/client";
 import type { Fetch, IngestOptions, StaleSession, StoreSessionResult, Upload } from "@seshi/model";
 
-/** There is no credential to upload with, or the server refused it: the person must sign in
- * (the status line's "sign in", B1.6). */
+/** Uploads wait until the person does something: sign in (the status line's "sign in",
+ * B1.6), or, in serverless mode, set a review key, update seshi, or get a key the bucket
+ * accepts (F11). `word` is what the status line shows. */
 export class SignInNeeded extends Error {
-  constructor(message: string) {
+  constructor(
+    message: string,
+    readonly word: HoldWord = "sign in",
+  ) {
     super(message);
     this.name = "SignInNeeded";
   }
 }
+
+export type HoldWord = "sign in" | "needs review key" | "needs update" | "bucket refused";
 
 /** The server would not retract (F9.7): retraction is turned off there (`retract_disabled`), or
  * the secret is not the one the session was uploaded with (`bad_retract_secret`). */

@@ -1,5 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { LAYOUT_SCHEMA, type LayoutMarker, LEGACY_LAYOUT_SCHEMA, TRACE_SCHEMA } from "@seshi/model";
+import {
+  type BucketMode,
+  LAYOUT_SCHEMA,
+  LAYOUT_SCHEMA_V1,
+  LAYOUT_SCHEMAS,
+  type LayoutMarker,
+  LEGACY_LAYOUT_SCHEMA,
+  TRACE_SCHEMA,
+} from "@seshi/model";
 import { createJson, readJson, tryDecodeJson, updateJson } from "./json";
 import { LAYOUT_KEY, LEGACY_LAYOUT_KEY } from "./layout";
 import { getBytes, isPreconditionFailed, type Store, StoreError } from "./store";
@@ -21,12 +29,26 @@ export interface LayoutOptions {
   org?: string;
   now?: () => Date;
   newDeploymentId?: () => string;
+  /** Write a marker when the prefix has none (true). False: a missing marker is a
+   * `NoLayout` error, for serverless laptops, which never claim a bucket by writing to it
+   * (F11.11). */
+  create?: boolean;
+  /** For a new marker: the mode to record, which makes it schema 2. */
+  mode?: BucketMode;
+}
+
+/** The prefix has no marker and the caller may not write one. */
+export class NoLayout extends LayoutError {
+  constructor(readonly url: string) {
+    super(`no seshi bucket at ${url}`);
+    this.name = "NoLayout";
+  }
 }
 
 function check(marker: LayoutMarker): LayoutMarker {
-  if (marker.schema !== LAYOUT_SCHEMA) {
+  if (!LAYOUT_SCHEMAS.includes(marker.schema)) {
     throw new LayoutError(
-      `${LAYOUT_KEY} is ${JSON.stringify(marker.schema)}; this seshi reads ${LAYOUT_SCHEMA} (written by a newer seshi?)`,
+      `${LAYOUT_KEY} is ${JSON.stringify(marker.schema)}; this seshi reads ${LAYOUT_SCHEMAS.join(" and ")} (written by a newer seshi?)`,
     );
   }
   if (marker.trace_schema !== TRACE_SCHEMA) {
@@ -62,13 +84,18 @@ export async function ensureLayout(store: Store, options: LayoutOptions): Promis
   for (let attempt = 0; ; attempt++) {
     const existing = await readLayout(store);
     if (existing) return agree(store, existing, options);
+    if (options.create === false) throw new NoLayout(store.url);
+    const at = now().toISOString();
     const marker: LayoutMarker = {
-      schema: LAYOUT_SCHEMA,
+      schema: options.mode !== undefined ? LAYOUT_SCHEMA : LAYOUT_SCHEMA_V1,
       trace_schema: TRACE_SCHEMA,
       deployment_id: options.deploymentId ?? (options.newDeploymentId ?? randomUUID)(),
       ...(options.org !== undefined ? { org: options.org } : {}),
-      created_at: now().toISOString(),
+      created_at: at,
       created_by: options.createdBy,
+      ...(options.mode !== undefined
+        ? { mode: options.mode, mode_changed_at: at, mode_changed_by: options.createdBy }
+        : {}),
     };
     try {
       await createJson(store, LAYOUT_KEY, marker);
@@ -114,4 +141,56 @@ async function agree(
     );
   }
   return result;
+}
+
+/** What `setLayout` changes. `min_version: null` clears it. */
+export interface LayoutPatch {
+  mode?: BucketMode;
+  min_version?: string | null;
+}
+
+/** Set schema 2's fields on the prefix's marker, upgrading a schema 1 marker (If-Match, so a
+ * concurrent change is read again, not overwritten). Throws `NoLayout` when there is none. */
+export async function setLayout(
+  store: Store,
+  patch: LayoutPatch,
+  options: { by: string; now?: () => Date },
+): Promise<LayoutMarker> {
+  if (patch.min_version !== undefined && patch.min_version !== null) {
+    parseVersion(patch.min_version);
+  }
+  const at = (options.now ?? (() => new Date()))().toISOString();
+  const updated = await updateJson<LayoutMarker>(store, LAYOUT_KEY, (current) => {
+    if (current === null) throw new NoLayout(store.url);
+    const marker = check(current);
+    const next: LayoutMarker = { ...marker, schema: LAYOUT_SCHEMA };
+    if (patch.mode !== undefined && patch.mode !== marker.mode) {
+      next.mode = patch.mode;
+      next.mode_changed_at = at;
+      next.mode_changed_by = options.by;
+    }
+    if (patch.min_version === null) delete next.min_version;
+    else if (patch.min_version !== undefined) next.min_version = patch.min_version;
+    const same = JSON.stringify(next) === JSON.stringify(marker);
+    return same ? null : next;
+  });
+  return check(updated.value as LayoutMarker);
+}
+
+/** A `major.minor.patch` version as three numbers; anything after the patch (`-rc.1`, `+sha`)
+ * is ignored. */
+export function parseVersion(version: string): [number, number, number] {
+  const match = /^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/.exec(version.trim());
+  if (!match) throw new LayoutError(`not a version: ${JSON.stringify(version)} (use 0.10.0)`);
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+/** Whether `version` is `min` or newer. */
+export function versionAtLeast(version: string, min: string): boolean {
+  const a = parseVersion(version);
+  const b = parseVersion(min);
+  for (let i = 0; i < 3; i++) {
+    if ((a[i] as number) !== (b[i] as number)) return (a[i] as number) > (b[i] as number);
+  }
+  return true;
 }
