@@ -320,7 +320,7 @@ describe("seshi sessions against a server", () => {
   it("changes visibility, and deletes only with --yes or a terminal's yes", async () => {
     const vis = await machine.seshi(["sessions", "visibility", "claude-code/sess1", "owner"]);
     expect(vis.code, vis.err).toBe(0);
-    expect(vis.out).toContain("is owner");
+    expect(vis.out).toContain("is owner: only its owner (and admins) may read it");
     expect((await machine.seshi(["sessions", "visibility", "claude-code/sess1", "all"])).code).toBe(
       2,
     );
@@ -521,9 +521,10 @@ describe("serverless mode, by its old name [local] (F11.1)", () => {
       expect(found.out).toContain("claude-code/s1  me");
       const atif = await local.seshi(["sessions", "export", "claude-code/s1", "--format", "atif"]);
       expect(JSON.parse(atif.out)).toMatchObject({ schema_version: "ATIF-v1.7" });
-      expect((await local.seshi(["sessions", "visibility", "claude-code/s1", "owner"])).code).toBe(
-        0,
-      );
+      const vis = await local.seshi(["sessions", "visibility", "claude-code/s1", "owner"]);
+      expect(vis.code, vis.err).toBe(0);
+      expect(vis.out).toContain("any key that can read the bucket can read it");
+      expect(vis.out).not.toContain("admins");
 
       const tokens = await local.seshi(["tokens", "create", "admin", "--owner", "ops"]);
       expect(tokens.code).toBe(3);

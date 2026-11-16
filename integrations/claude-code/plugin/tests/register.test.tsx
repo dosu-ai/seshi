@@ -195,7 +195,7 @@ test("/session-capture flips, sets, reports and refuses anything else", async ($
   const run = (args: string) => typed($, args);
 
   expect((await run("")).text).toBe(
-    "Session Capture is now OFF. What was uploaded is being retracted from the server.",
+    "Session Capture is now OFF. What was uploaded is being retracted from the session store.",
   );
   expect((await run("ON")).text).toBe("Session Capture is now ON.");
   expect((await run("status")).text).toBe("Session Capture is ON: captured.");

@@ -430,8 +430,14 @@ async function visibility(
   if (!metadata) {
     throw new Refused(EXIT.notFound, "not_found", `no session ${ref.agent}/${ref.sessionId}`);
   }
+  const who =
+    value === "org"
+      ? "every member may read it"
+      : backend.mode === "serverless"
+        ? "seshi shows it only to its owner, but any key that can read the bucket can read it"
+        : "only its owner (and admins) may read it";
   emit(ctx, json, metadata, () => [
-    `${style.status("Visibility", "success")} of ${ref.agent}/${ref.sessionId} is ${value}: ${value === "org" ? "every member may read it" : "only its owner (and admins) may read it"}.`,
+    `${style.status("Visibility", "success")} of ${ref.agent}/${ref.sessionId} is ${value}: ${who}.`,
   ]);
   return EXIT.ok;
 }

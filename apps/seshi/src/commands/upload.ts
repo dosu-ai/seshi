@@ -294,10 +294,13 @@ async function upload(
   let unreachable = false;
   for (const [key, path] of keys) {
     const s = after.sessions[key];
-    const word = s ? sessionWord(s) : "forgotten";
+    const was = state.sessions[key];
+    const sentNothing = was?.stored === true && s?.file_offset === was.file_offset;
+    const word = !s ? "forgotten" : sessionWord(s);
+    const result = word === "uploaded" && sentNothing ? "up to date" : word;
     if (s?.error?.permanent) refused = true;
     else if (s?.error) unreachable = true;
-    outcomes.push({ path, key, result: word, ...(s?.error ? { reason: s.error.message } : {}) });
+    outcomes.push({ path, key, result, ...(s?.error ? { reason: s.error.message } : {}) });
   }
   const style = await styleFor(ctx, { json });
   const collected = outcomes.filter((o) => o.result === "uploaded").length;
@@ -311,7 +314,7 @@ async function upload(
         : []),
       ...outcomes.map((o) => {
         const role =
-          o.result === "uploaded"
+          o.result === "uploaded" || o.result === "up to date"
             ? "success"
             : o.result === "skipped"
               ? "warn"

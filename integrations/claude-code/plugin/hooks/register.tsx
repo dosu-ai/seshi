@@ -137,7 +137,7 @@ async function setCapture(
       $,
       `${NOT_CAPTURING} ${LABEL} is off${retracting ? " · retracting what was uploaded" : ""}`,
     );
-    return `${LABEL} is now OFF.${retracting ? " What was uploaded is being retracted from the server." : " Nothing of this session was uploaded."}`;
+    return `${LABEL} is now OFF.${retracting ? " What was uploaded is being retracted from the session store." : " Nothing of this session was uploaded."}`;
   }
   if (!now.capturing) {
     await flash($, `${NOT_CAPTURING} ${LABEL} is still off: ${now.reason}`);

@@ -736,7 +736,7 @@ async function toggleSession(
       ? [
           `${style.status("off", "warn")}: Session Capture is off for this session (${printable(agent)} ${printable(id)}).`,
           retracting
-            ? "What was uploaded is being retracted from the server."
+            ? "What was uploaded is being retracted from the session store."
             : "Nothing of it was uploaded.",
         ]
       : [

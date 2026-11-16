@@ -747,6 +747,14 @@ describe("seshi upload (F8.1)", () => {
       { path: file, key: `claude-code:${SESSION}`, result: "uploaded" },
     ]);
     expect((await stored())?.status).toBe("stored");
+    const again = await machine.seshi(["upload", file]);
+    expect(again.out).toContain(`up to date claude-code:${SESSION}`);
+    expect(again.out).not.toContain("Collected");
+    appendFileSync(file, TAIL);
+    const grown = await machine.seshi(["upload", file, "--json"]);
+    expect(JSON.parse(grown.out).sessions).toEqual([
+      { path: file, key: `claude-code:${SESSION}`, result: "uploaded" },
+    ]);
     // It can be retracted like a hooked one.
     await machine.seshi(["capture", "off", "--session", SESSION]);
     await daemon();

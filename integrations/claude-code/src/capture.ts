@@ -225,7 +225,7 @@ ${SKILL_MARKER}
 seshi uploads this session to the team's session store as it happens. The user controls it:
 
 - \`/seshi capture off\`: run \`${seshi} capture off --session\`. Nothing more of this session is
-  uploaded, and what was already uploaded is retracted from the server.
+  uploaded, and what was already uploaded is retracted from the session store.
 - \`/seshi capture on\`: run \`${seshi} capture on --session\`. The session is uploaded again
   from its start.
 - \`/seshi capture status\` or \`/seshi\`: run \`${seshi} capture status --session\` and tell the
