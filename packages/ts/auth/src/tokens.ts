@@ -48,8 +48,33 @@ export function isLive(record: TokenRecord, now: Date): boolean {
   return record.expires_at === null || Date.parse(record.expires_at) > now.getTime();
 }
 
+class RecentlyStoredCache<V> {
+  private readonly entries = new Map<string, V>();
+
+  constructor(private readonly capacity: number) {}
+
+  get(key: string): V | undefined {
+    return this.entries.get(key);
+  }
+
+  set(key: string, value: V): void {
+    this.entries.delete(key);
+    this.entries.set(key, value);
+    while (this.entries.size > this.capacity) {
+      const oldest = this.entries.keys().next().value as string;
+      this.entries.delete(oldest);
+    }
+  }
+
+  delete(key: string): void {
+    this.entries.delete(key);
+  }
+}
+
 export class TokenService {
-  private readonly cache = new Map<string, { record: TokenRecord | null; at: number }>();
+  private readonly cache = new RecentlyStoredCache<{ record: TokenRecord | null; at: number }>(
+    CACHE_ENTRIES,
+  );
   private readonly now: () => Date;
   private readonly cacheMs: number;
 
@@ -108,12 +133,7 @@ export class TokenService {
   }
 
   private remember(id: string, record: TokenRecord | null): void {
-    this.cache.delete(id);
     this.cache.set(id, { record, at: this.now().getTime() });
-    while (this.cache.size > CACHE_ENTRIES) {
-      const oldest = this.cache.keys().next().value as string;
-      this.cache.delete(oldest);
-    }
   }
 
   /** One record, read from the bucket; null for an unknown id. */

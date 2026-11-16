@@ -19,6 +19,7 @@ export {
   type ExchangeResult,
   OIDC_SCOPES,
   ORG_KEY_OWNER,
+  type OrgKeyOwner,
   type TokenRequest,
   USER_HEADER,
 } from "./auth";

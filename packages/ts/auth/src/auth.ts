@@ -14,10 +14,15 @@ import { type IssueOptions, TokenService } from "./tokens";
 export const DEVICE_TOKEN_DAYS = 90;
 export const USER_HEADER = "x-seshi-user";
 export const OIDC_SCOPES = ["openid", "email", "profile"] as const;
-export const ORG_KEY_OWNER = "*";
+export type OrgKeyOwner = "*";
+export const ORG_KEY_OWNER: OrgKeyOwner = "*";
 
 const MACHINE_ID = /^[A-Za-z0-9._:-]{1,128}$/;
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+function staticCredentialId(owner: string): string {
+  return `static-${owner}`;
+}
 
 export interface AuthOptions {
   store: Store;
@@ -192,7 +197,7 @@ export class Auth {
       role: "member",
       scopes: new Set(CREDENTIAL_SCOPES.static),
       credential: "static",
-      credential_id: `static-${owner}`,
+      credential_id: staticCredentialId(owner),
       claims: {},
     };
   }
