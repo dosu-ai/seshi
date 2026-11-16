@@ -196,6 +196,10 @@ Once quiet (at `settle` and at the end):
   `residue` on them: add a `backfill`.
 - When a scenario fails, the message names the step and carries the evidence: the findings, the
   faults that fired and the capture log's last lines.
+- To look at what a scenario left (the bucket, the laptop's state, the transcripts), run it with
+  `SCENARIO_KEEP=1`: the folder is kept and its path printed, for example
+  `SCENARIO_KEEP=1 bun --bun vitest run tests/scenarios/scenarios.test.ts -t '24-'`. Delete the
+  folder when done.
 
 ## Generated scenarios
 
