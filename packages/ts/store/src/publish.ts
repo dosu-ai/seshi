@@ -157,11 +157,9 @@ export interface PointerWithChange<U extends ChangeUpdate = ChangeUpdate>
   attempts: U[];
 }
 
-class ChangeFirst extends Error {
-  constructor(readonly entry: Omit<ChangeEntry, "schema">) {
-    super("the change entry is written before the pointer moves");
-  }
-}
+type PointerPass =
+  | { kind: "entry_first"; entry: Omit<ChangeEntry, "schema"> }
+  | { kind: "pointer"; result: JsonUpdate<SessionMetadata> };
 
 /** Update a session's pointer as `updateMetadata` does, writing the change entry the update
  * needs first (decision 7 of 18: at least once). `step` gets the pointer as it is and returns
@@ -193,24 +191,39 @@ export async function updateMetadataWithChange<U extends ChangeUpdate>(
     if (wanted) change = await appendChange(store, wanted);
   }
   for (;;) {
-    try {
-      const result = await updateMetadata(
-        store,
-        owner,
-        archive,
-        (current) => {
-          const decided = decide(current);
-          if (decided.change && change === null) throw new ChangeFirst(decided.change);
-          return decided.next;
-        },
-        update,
-      );
-      return { ...result, change, decided: attempts.at(-1) as U, attempts };
-    } catch (err) {
-      if (!(err instanceof ChangeFirst)) throw err;
-      change = await appendChange(store, err.entry);
+    const pass = await movePointerUnlessEntryFirst(store, owner, archive, decide, {
+      ...update,
+      entryWritten: change !== null,
+    });
+    if (pass.kind === "pointer") {
+      return { ...pass.result, change, decided: attempts.at(-1) as U, attempts };
     }
+    change = await appendChange(store, pass.entry);
   }
+}
+
+async function movePointerUnlessEntryFirst<U extends ChangeUpdate>(
+  store: Store,
+  owner: string,
+  archive: string,
+  decide: (current: SessionMetadata | null) => U,
+  options: Omit<UpdateOptions, "contentType"> & { entryWritten: boolean },
+): Promise<PointerPass> {
+  const { entryWritten, ...update } = options;
+  const entryFirst = (decided: U) => (entryWritten ? null : decided.change);
+  let last: U | undefined;
+  const result = await updateMetadata(
+    store,
+    owner,
+    archive,
+    (current) => {
+      last = decide(current);
+      return entryFirst(last) ? null : last.next;
+    },
+    update,
+  );
+  const entry = last === undefined ? null : entryFirst(last);
+  return entry ? { kind: "entry_first", entry } : { kind: "pointer", result };
 }
 
 /** The boot-time write check: PUT then GET a fixed key, so a write-only policy without Delete
