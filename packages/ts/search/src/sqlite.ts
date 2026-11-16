@@ -1,5 +1,5 @@
 import { Database, type SQLQueryBindings } from "bun:sqlite";
-import { chmodSync, mkdirSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type { EventRole, Visibility } from "@seshi/model";
 import type {
@@ -11,7 +11,7 @@ import type {
   IndexStore,
   SessionUpdate,
 } from "./backend";
-import { MEMORY_INDEX } from "./paths";
+import { MEMORY_INDEX, tryRestrictToOwner } from "./paths";
 import { indexText, MATCH_END, MATCH_START } from "./snippet";
 
 export const INDEX_SCHEMA = "seshi/search-index/2";
@@ -151,11 +151,7 @@ export class SqliteIndex implements IndexStore {
     const memory = options.path === MEMORY_INDEX;
     if (!memory) mkdirSync(dirname(options.path), { recursive: true, mode: 0o700 });
     this.db = new Database(options.path, { create: true, strict: true });
-    if (!memory && process.platform !== "win32") {
-      try {
-        chmodSync(options.path, 0o600);
-      } catch {}
-    }
+    if (!memory && process.platform !== "win32") tryRestrictToOwner(options.path);
     this.db.run("PRAGMA busy_timeout = 5000");
     if (!memory) {
       this.db.run("PRAGMA journal_mode = WAL");

@@ -32,6 +32,11 @@ function quoted(item: Item): string {
   return item.prefix ? `${body} *` : body;
 }
 
+function startsNegation(text: string, at: number): boolean {
+  const after = text[at + 1];
+  return text[at] === "-" && after !== undefined && (after === '"' || TOKEN_CHAR.test(after));
+}
+
 function lex(text: string): (Item | "OR" | "NOT")[] {
   const out: (Item | "OR" | "NOT")[] = [];
   let i = 0;
@@ -41,12 +46,8 @@ function lex(text: string): (Item | "OR" | "NOT")[] {
       i++;
       continue;
     }
-    let negated = false;
-    const after = text[i + 1];
-    if (ch === "-" && after !== undefined && (after === '"' || TOKEN_CHAR.test(after))) {
-      negated = true;
-      i++;
-    }
+    const negated = startsNegation(text, i);
+    if (negated) i++;
     if (text[i] === '"') {
       const end = text.indexOf('"', i + 1);
       const body = end === -1 ? text.slice(i + 1) : text.slice(i + 1, end);

@@ -1,3 +1,4 @@
+import { chmodSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, win32 } from "node:path";
 
@@ -23,4 +24,13 @@ export function defaultIndexPath(options: IndexPathOptions): string {
     return join(home, "Library", "Caches", "seshi", "search", file);
   }
   return join(env.XDG_CACHE_HOME || join(home, ".cache"), "seshi", "search", file);
+}
+
+export function tryRestrictToOwner(path: string): boolean {
+  try {
+    chmodSync(path, 0o600);
+    return true;
+  } catch {
+    return false;
+  }
 }
