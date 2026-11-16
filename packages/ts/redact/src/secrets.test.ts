@@ -1,6 +1,28 @@
 import { describe, expect, it } from "vitest";
 import { redactSecrets } from "./secrets";
 
+/** Fails when redacting grows faster than linearly: the inputs are timed at size `n` and `4n`
+ * (best of three each, after a warm-up). Linear work takes about 4 times as long at `4n`, the
+ * backtracking these tests guard against about 16 times, so the line is drawn at 10. A ratio, not a fixed budget, so a slow
+ * or busy machine does not fail it; under 50 ms at `4n` passes outright, where noise dominates. */
+function expectLinear(inputsOf: (n: number) => string[], n: number): void {
+  const time = (size: number) => {
+    const inputs = inputsOf(size);
+    let best = Number.POSITIVE_INFINITY;
+    for (let run = 0; run < 3; run++) {
+      const started = performance.now();
+      for (const input of inputs) redactSecrets(input);
+      best = Math.min(best, performance.now() - started);
+    }
+    return best;
+  };
+  time(n);
+  const small = time(n);
+  const large = time(4 * n);
+  if (large < 50) return;
+  expect(large / Math.max(small, 1)).toBeLessThan(10);
+}
+
 describe("redactSecrets", () => {
   it("returns clean text unchanged with a zero count", () => {
     const input = "The watermark gate advanced to 2026-08-27; nothing secret here.";
@@ -105,28 +127,24 @@ describe("redactSecrets", () => {
 
   it("scans a long run of repeated eyJ in linear time", () => {
     // An unbounded glued-JWT start rescanned the run from every inner `eyJ`: seconds, not ms.
-    const input = "eyJ".repeat(64_000);
-    const started = performance.now();
-    const { text } = redactSecrets(input);
-
-    expect(performance.now() - started).toBeLessThan(1_000);
-    expect(text).not.toContain("[redacted:jwt]");
+    expectLinear((n) => ["eyJ".repeat(n)], 16_000);
+    expect(redactSecrets("eyJ".repeat(64_000)).text).not.toContain("[redacted:jwt]");
   });
 
   it("scans crafted sk- and URL strings in linear time", () => {
     // Each took seconds (and grew quadratically) when the sk- and URL-credential rules were
     // backtracking expressions: 20,000 characters of sk- took about 0.5 s, 120 KB of `a://:b`
     // about 1.6 s. These are larger.
-    const inputs = [
-      `sk-${"a".repeat(100_000)}_`,
-      "sk-".repeat(100_000),
-      "a://:b".repeat(50_000),
-      `${"a.".repeat(100_000)}://`,
-      'fetch("http://localhost:3000/api/v1/x");'.repeat(8_000),
-    ];
-    const started = performance.now();
-    for (const input of inputs) redactSecrets(input);
-    expect(performance.now() - started).toBeLessThan(1_000);
+    expectLinear(
+      (n) => [
+        `sk-${"a".repeat(n)}_`,
+        "sk-".repeat(n),
+        "a://:b".repeat(n / 2),
+        `${"a.".repeat(n)}://`,
+        'fetch("http://localhost:3000/api/v1/x");'.repeat(n / 12),
+      ],
+      12_000,
+    );
   });
 
   it("ends an sk- key and splits URL credentials where the patterns did", () => {
@@ -233,17 +251,15 @@ describe("redactSecrets", () => {
     it("scans a label followed by a long run of blanks in linear time", () => {
       // `[ \t]*:?[ \t]*` after the label split the run every possible way before failing: a
       // label and 240k tabs took 54 s.
-      const blanks = 200_000;
-      const inputs = [
+      const inputsOf = (blanks: number) => [
         `password${"\t".repeat(blanks)}x`,
         `secret key${" ".repeat(blanks)}x`,
         `token${"\t".repeat(blanks)}:x`,
         `api key:${" ".repeat(blanks)}x`,
         `\\nclient secret${" \t".repeat(blanks / 2)}:${"\t".repeat(blanks)}`,
       ];
-      const started = performance.now();
-      for (const input of inputs) expect(redactSecrets(input).text).toBe(input);
-      expect(performance.now() - started).toBeLessThan(1_000);
+      expectLinear(inputsOf, 10_000);
+      for (const input of inputsOf(200_000)) expect(redactSecrets(input).text).toBe(input);
       // The same separators still match: blanks, a colon, blanks, the value on the next line.
       const value = "19bee4000000000000000000009309aa";
       for (const sep of ["", " \t ", ":", " : ", "\t:"]) {
