@@ -222,6 +222,15 @@ export async function smoke(options: SmokeOptions): Promise<SmokeResult> {
       clearTimeout(timer);
     }
   };
+  const jsonOf = (step: string, ran: Ran) => {
+    try {
+      return JSON.parse(ran.out);
+    } catch (err) {
+      throw new Error(
+        `${step} printed no JSON (${(err as Error).message}):\nstdout: ${ran.out}\nstderr: ${ran.err}`,
+      );
+    }
+  };
   const expectOk = (step: string, ran: Ran): Ran => {
     if (ran.code !== 0) {
       throw new Error(`${step} exited ${ran.code}:\n${ran.out}${ran.err}`);
@@ -289,7 +298,7 @@ export async function smoke(options: SmokeOptions): Promise<SmokeResult> {
         `${orgKey}\n`,
       ),
     );
-    const storedIn = JSON.parse(login.out).stored_in as string;
+    const storedIn = jsonOf("login --key", login).stored_in as string;
     log(`credentials stored in: ${storedIn}`);
     if (keychain === "required" && storedIn !== "keychain") {
       throw new Error(`the org key went to ${storedIn}, not the OS keychain:\n${login.err}`);
@@ -298,7 +307,7 @@ export async function smoke(options: SmokeOptions): Promise<SmokeResult> {
       throw new Error(`keychain = false, yet the org key went to ${storedIn}`);
     }
 
-    const who = JSON.parse(expectOk("whoami", await run(["whoami", "--json"])).out);
+    const who = jsonOf("whoami", expectOk("whoami", await run(["whoami", "--json"])));
     if (who.login?.user !== "smoke@example.com" || who.login?.stored_in !== storedIn) {
       throw new Error(`whoami says ${JSON.stringify(who)}`);
     }
@@ -308,8 +317,9 @@ export async function smoke(options: SmokeOptions): Promise<SmokeResult> {
     const transcript = join(dir, "transcripts", `${SMOKE_SESSION}.jsonl`);
     mkdirSync(join(dir, "transcripts"), { recursive: true });
     writeFileSync(transcript, smokeTranscript(project));
-    const uploaded = JSON.parse(
-      expectOk("upload", await run(["upload", transcript, "--json"])).out,
+    const uploaded = jsonOf(
+      "upload",
+      expectOk("upload", await run(["upload", transcript, "--json"])),
     ) as { sessions: { result: string }[] };
     if (uploaded.sessions[0]?.result !== "uploaded") {
       throw new Error(`upload did not upload: ${JSON.stringify(uploaded)}`);

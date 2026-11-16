@@ -49,8 +49,8 @@ function usage(commands: Readonly<Record<string, CommandSpec>>): string {
  * command keeps the process running. */
 export async function main(argv: string[], options: MainOptions = {}): Promise<number | undefined> {
   const commands = options.commands ?? COMMANDS;
-  const stdout = options.stdout ?? ((line: string) => console.log(line));
-  const stderr = options.stderr ?? ((line: string) => console.error(line));
+  const stdout = options.stdout ?? ((line: string) => process.stdout.write(`${line}\n`));
+  const stderr = options.stderr ?? ((line: string) => process.stderr.write(`${line}\n`));
   const [name, ...rest] = argv;
 
   if (name === "--version" || name === "-v" || name === "version") {
@@ -107,9 +107,16 @@ export async function main(argv: string[], options: MainOptions = {}): Promise<n
   });
 }
 
+// On Windows a write to a pipe can still be pending when process.exit runs, and is then lost.
+function flushed(stream: NodeJS.WriteStream): Promise<void> {
+  return new Promise((resolve) => stream.write("", () => resolve()));
+}
+
 if (import.meta.main) {
   // No top-level await: the compiled binary is bytecode, which needs a CommonJS-shaped entry.
-  void main(process.argv.slice(2)).then((code) => {
-    if (code !== undefined) process.exit(code);
+  void main(process.argv.slice(2)).then(async (code) => {
+    if (code === undefined) return;
+    await Promise.all([flushed(process.stdout), flushed(process.stderr)]);
+    process.exit(code);
   });
 }
