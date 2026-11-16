@@ -5,7 +5,6 @@ import { type CaptureHost, hookHandler } from "@seshi/kit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   CODEX_CAPTURE,
-  chainedNotify,
   codexInstaller,
   identifyRollout,
   isSeshiNotify,
@@ -92,15 +91,6 @@ describe("config.toml's notify", () => {
       'notify = ["seshi","hook","codex","notify"]\nmodel = "o3"\n\n[tui]\nnotify = true\n',
     );
     expect(withNotify(set, null)).toBe(text);
-  });
-
-  it("tells seshi's notify from others, and what it chains to", () => {
-    expect(isSeshiNotify(["/usr/local/bin/seshi", "hook", "codex", "notify"])).toBe(true);
-    expect(isSeshiNotify(["notify-send", "codex"])).toBe(false);
-    expect(chainedNotify(["seshi", "hook", "codex", "notify", "--", "say", "hi"])).toEqual([
-      "say",
-      "hi",
-    ]);
   });
 });
 

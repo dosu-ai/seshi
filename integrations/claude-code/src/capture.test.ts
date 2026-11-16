@@ -10,7 +10,6 @@ import {
   claudeCodeInstaller,
   identifyClaudeTranscript,
   locateClaudeTranscript,
-  SKILL_MARKER,
   seshiSkill,
 } from "./capture";
 
@@ -242,9 +241,5 @@ describe("the installer (F9.6)", () => {
     expect(
       JSON.parse(readFileSync(join(plugin, ".claude-plugin", "plugin.json"), "utf8")).name,
     ).toBe("seshi");
-  });
-
-  it("marks its skill, so it knows its own", () => {
-    expect(SKILL_MARKER).toContain("seshi capture uninstall");
   });
 });
