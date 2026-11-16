@@ -156,10 +156,18 @@ export function queueCheck(ev: SessionEvidence): CheckResult {
   const items: { status: CheckStatus; text: string; hint?: string }[] = [];
   const problems = ev.machine.problems ?? {};
   if (problems.sign_in) {
+    const word = problems.sign_in.word ?? "sign in";
     items.push({
       status: "warn",
-      text: `sign in: ${problems.sign_in.message}`,
-      hint: "seshi login --server <url>",
+      text: `${word}: ${problems.sign_in.message.split("\n")[0]}`,
+      hint:
+        word === "needs review key"
+          ? "seshi review key set <provider>"
+          : word === "needs update"
+            ? "update seshi"
+            : word === "bucket refused"
+              ? "check the bucket key's permissions (seshi doctor)"
+              : "seshi login --server <url>",
     });
   }
   if (problems.upload)

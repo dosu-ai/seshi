@@ -28,7 +28,8 @@ export interface CommandSpec {
 
 export const COMMANDS: Readonly<Record<string, CommandSpec>> = {
   admin: {
-    summary: "set up the server: the first admin token and the org key (admin init)",
+    summary:
+      "set up the server (admin init) or the bucket (admin mode|layout|config): tokens, the org key, mode, minimum version, shared settings",
     load: () => import("./admin"),
   },
   capture: {
@@ -61,6 +62,10 @@ export const COMMANDS: Readonly<Record<string, CommandSpec>> = {
   hook: {
     summary: "internal: called by agents on their events (hook <agent> <event>)",
     load: () => import("./hook"),
+  },
+  init: {
+    summary: "set this machine up to write a shared bucket directly, with no server (--serverless)",
+    load: () => import("./init"),
   },
   login: {
     summary: "sign in to a seshi server",

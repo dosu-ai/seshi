@@ -12,7 +12,7 @@ import {
 } from "@seshi/config";
 import { buildInstance, type Instance, readRedactionPacks } from "@seshi/instance";
 import type { Integration } from "@seshi/kit";
-import { type LayoutMarker, type OwnerBasis, VERSION } from "@seshi/model";
+import { type LayoutMarker, type OwnerBasis, type StorageView, VERSION } from "@seshi/model";
 import { noHealth, type Reviewer } from "@seshi/pipeline";
 import { ProviderError, providerFactory, reviewerFromConfig } from "@seshi/review";
 import { SearchService } from "@seshi/search";
@@ -289,6 +289,78 @@ export function storageRefusal(url: string, result: StorageTestResult): Refused 
   );
 }
 
+/** The bucket a server config's `[store]` names, with the key `[store].credentials` gives,
+ * else the one `seshi init --serverless` stored, else the store's environment fallbacks. */
+export async function openBucketStore(
+  config: Pick<ServerConfig, "store">,
+  secrets: SecretBackend | undefined,
+  env: Record<string, string | undefined>,
+): Promise<{ store: Store; storage: StorageView }> {
+  const { url } = config.store;
+  const key = secrets ? await readBucketKey(secrets, url) : undefined;
+  const fromConfig = config.store.credentials;
+  const credentials = fromConfig
+    ? {
+        accessKeyId: fromConfig.access_key_id.reveal(),
+        secretAccessKey: fromConfig.secret_access_key.reveal(),
+        ...(fromConfig.session_token ? { sessionToken: fromConfig.session_token.reveal() } : {}),
+      }
+    : key
+      ? {
+          accessKeyId: key.access_key_id,
+          secretAccessKey: key.secret_access_key,
+          ...(key.session_token ? { sessionToken: key.session_token } : {}),
+        }
+      : undefined;
+  try {
+    return openStore(url, {
+      ...(config.store.region ? { region: config.store.region } : {}),
+      ...(config.store.endpoint ? { endpoint: config.store.endpoint } : {}),
+      ...(config.store.account_id ? { accountId: config.store.account_id } : {}),
+      ...(credentials ? { credentials } : {}),
+      env,
+    });
+  } catch (err) {
+    throw new Refused(EXIT.config, "config", message(err));
+  }
+}
+
+/** The CLI config's serverless bucket, opened with its key, without reading anything in it:
+ * for `seshi admin` and `seshi init --serverless`. */
+export async function openServerlessStore(options: {
+  cli: CliConfig;
+  env: Record<string, string | undefined>;
+  home?: string;
+  secrets?: SecretBackend;
+  flags?: readonly FlagValue[];
+}): Promise<{ store: Store; storage: StorageView; owner: string; paths: ServerlessPaths }> {
+  const settings = serverlessOf(options.cli);
+  if (!settings) {
+    throw new Refused(EXIT.config, "not_configured", "no [serverless] bucket in the CLI config");
+  }
+  const home = homeFor(options.env, options.home);
+  const file = settings.config !== undefined ? expandHome(settings.config, home) : undefined;
+  const loaded = loadServerlessConfig({
+    ...(file !== undefined ? { file } : {}),
+    env: options.env,
+    flags: [...storeFlags(settings), ...(options.flags ?? [])],
+    resolveSecrets: false,
+  });
+  for (const { path, secret } of secretsIn(loaded.config.store)) {
+    try {
+      secret.resolve({ env: options.env, readFile: (p) => readFileSync(p, "utf8") });
+    } catch (err) {
+      throw new ConfigError([`store.${formatPath(path)}: ${message(err)}`]);
+    }
+  }
+  const opened = await openBucketStore(loaded.config, options.secrets, options.env);
+  return {
+    ...opened,
+    owner: serverlessOwner(options.cli, options.env),
+    paths: serverlessPaths(options.env, home, loaded.config.store.url),
+  };
+}
+
 /** Open a serverless bucket (F11, "Opening the bucket"): read its marker, compare the minimum
  * version and the mode, load the shared settings, and build the instance this machine runs
  * the pipeline in. */
@@ -312,41 +384,9 @@ export async function openServerless(options: ServerlessOpenOptions): Promise<Se
   const url = local.config.store.url;
   const paths = serverlessPaths(options.env, home, url);
 
-  let store: Store;
-  let storage: { url: string };
-  if (options.store) {
-    store = options.store;
-    storage = { url: store.url };
-  } else {
-    const key = options.secrets ? await readBucketKey(options.secrets, url) : undefined;
-    const fromConfig = local.config.store.credentials;
-    const credentials = fromConfig
-      ? {
-          accessKeyId: fromConfig.access_key_id.reveal(),
-          secretAccessKey: fromConfig.secret_access_key.reveal(),
-          ...(fromConfig.session_token ? { sessionToken: fromConfig.session_token.reveal() } : {}),
-        }
-      : key
-        ? {
-            accessKeyId: key.access_key_id,
-            secretAccessKey: key.secret_access_key,
-            ...(key.session_token ? { sessionToken: key.session_token } : {}),
-          }
-        : undefined;
-    try {
-      const opened = openStore(url, {
-        ...(local.config.store.region ? { region: local.config.store.region } : {}),
-        ...(local.config.store.endpoint ? { endpoint: local.config.store.endpoint } : {}),
-        ...(local.config.store.account_id ? { accountId: local.config.store.account_id } : {}),
-        ...(credentials ? { credentials } : {}),
-        env: options.env,
-      });
-      store = opened.store;
-      storage = opened.storage;
-    } catch (err) {
-      throw new Refused(EXIT.config, "config", message(err));
-    }
-  }
+  const { store, storage } = options.store
+    ? { store: options.store, storage: { url: options.store.url } }
+    : await openBucketStore(local.config, options.secrets, options.env);
 
   let marker: LayoutMarker | null;
   try {

@@ -61,13 +61,12 @@ describe("where admin status is read from", () => {
     expect(await adminTarget(quiet, {}, here)).toEqual({ kind: "local" });
   });
 
-  it("is local mode's bucket config, else the signed-in server, else env alone", async () => {
+  it("is the serverless bucket, else the signed-in server, else env alone", async () => {
     expect(await adminTarget(ctx(), {}, none)).toEqual({ kind: "local" });
     cliConfig('[local]\nconfig = "~/seshi.toml"\n');
-    expect(await adminTarget(ctx(), {}, none)).toEqual({
-      kind: "local",
-      config: join(dir, "seshi.toml"),
-    });
+    expect(await adminTarget(ctx(), {}, none)).toEqual({ kind: "serverless" });
+    cliConfig('[serverless]\nurl = "s3://acme/seshi"\n');
+    expect(await adminTarget(ctx(), {}, none)).toEqual({ kind: "serverless" });
     cliConfig('server = "https://seshi.acme.com"\n');
     await expect(adminTarget(ctx(), {}, none)).rejects.toThrow(/not signed in/);
     await new Logins(join(dir, "config", "seshi"), secrets).save(

@@ -18,8 +18,68 @@ import type { CommandContext } from "./index";
 import { configFlags } from "./serve-settings";
 import { cwdConfigHint, SERVER_OPTIONS, serverFailure } from "./server-instance";
 
-const USAGE =
-  "usage: seshi review eval [--policy <id>] [--fixtures <file or folder>] [--config <file>] [--set path=value]… [--json]";
+const USAGE = [
+  "usage: seshi review eval [--policy <id>] [--fixtures <file or folder>] [--config <file>] [--set path=value]… [--json]",
+  "       seshi review key set <provider> [--key -]   store a model review key on this machine (serverless mode)",
+].join("\n");
+
+const PROVIDER = /^[a-z][a-z0-9-]{0,39}$/;
+
+/** `seshi review key set <provider>` (F11): keep a review key in the keychain. It fills a
+ * policy's `api_key = { env = "…" }` for that provider when the variable is unset. */
+async function keySet(ctx: CommandContext, json: boolean, args: string[]): Promise<number> {
+  let values: { key?: string };
+  let positionals: string[];
+  try {
+    ({ values, positionals } = parseArgs({
+      args,
+      options: { key: { type: "string" } },
+      strict: true,
+      allowPositionals: true,
+    }));
+  } catch (err) {
+    return helpOrUsageError(ctx, json, (err as Error).message, USAGE);
+  }
+  const [verb, provider, ...extra] = positionals;
+  if (verb !== "set" || provider === undefined || extra.length > 0) {
+    return helpOrUsageError(ctx, json, "review key set takes one provider", USAGE);
+  }
+  if (!PROVIDER.test(provider)) {
+    return helpOrUsageError(ctx, json, `'${provider}' is not a provider name (anthropic)`, USAGE);
+  }
+  let key: string;
+  if (values.key !== undefined && values.key !== "-") {
+    return helpOrUsageError(
+      ctx,
+      json,
+      "pass the key on standard input (--key -), not on the command line",
+      USAGE,
+    );
+  }
+  if (values.key === "-") {
+    if (!ctx.stdin) return fail(ctx, json, EXIT.usage, "usage", "no standard input to read from");
+    key = (await ctx.stdin()).trim();
+  } else if (ctx.terminal && ctx.tty?.stdin) {
+    key = (await (await ctx.terminal()).ask(`${provider} key: `, { hidden: true })).trim();
+  } else {
+    return helpOrUsageError(
+      ctx,
+      json,
+      "no terminal to ask in: use --key - and pipe the key",
+      USAGE,
+    );
+  }
+  if (!key) return fail(ctx, json, EXIT.usage, "usage", "no key given");
+  const { openAccount } = await import("../account/account");
+  const { saveReviewKey } = await import("../serverless/keys");
+  const account = openAccount(ctx);
+  await saveReviewKey(account.secrets, provider, key);
+  emit(ctx, json, { provider, stored_in: account.secrets.kind }, () => [
+    `Stored the ${provider} review key in the ${account.secrets.kind}.`,
+    "Review policies for it use this key when their api_key's variable is unset. Check with: seshi doctor",
+  ]);
+  return EXIT.ok;
+}
 
 const pct = (n: number) => `${Math.round(n * 1000) / 10}%`;
 
@@ -72,6 +132,7 @@ export function readFixtures(path: string): Fixture[] {
 export async function run(ctx: CommandContext): Promise<number> {
   const { json, rest } = takeJson(ctx.argv);
   const [sub, ...args] = rest;
+  if (sub === "key") return keySet(ctx, json, args);
   if (sub !== "eval") {
     return helpOrUsageError(
       ctx,

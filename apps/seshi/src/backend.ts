@@ -244,11 +244,11 @@ export class ServerlessBackend implements Backend {
       this.sessionsAs(options.owner).getTrace(agent, sessionId, options.hash, options.format),
     );
   }
-  tombstone(agent: string, sessionId: string, options: OwnerOption = {}) {
+  async tombstone(agent: string, sessionId: string, options: OwnerOption = {}) {
     this.writable();
     return this.refused(() => this.sessionsAs(options.owner).tombstone(agent, sessionId));
   }
-  setVisibility(
+  async setVisibility(
     agent: string,
     sessionId: string,
     visibility: Visibility,

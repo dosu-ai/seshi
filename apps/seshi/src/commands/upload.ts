@@ -289,6 +289,7 @@ async function upload(
   }
 
   const after = readState(paths);
+  const held = signIn ? (after.problems?.sign_in?.word ?? "sign in") : undefined;
   let refused = false;
   let unreachable = false;
   for (const [key, path] of keys) {
@@ -300,26 +301,42 @@ async function upload(
   }
   const style = await styleFor(ctx, { json });
   const collected = outcomes.filter((o) => o.result === "uploaded").length;
-  emit(ctx, json, { sessions: outcomes, ...(signIn ? { sign_in: signIn } : {}) }, () => [
-    ...(outcomes.length === 0 ? [`${style.status("All done", "success")}: nothing to upload`] : []),
-    ...outcomes.map((o) => {
-      const role =
-        o.result === "uploaded"
-          ? "success"
-          : o.result === "skipped"
-            ? "warn"
-            : o.result.startsWith("refused")
-              ? "error"
-              : "progress";
-      return `${style.status(o.result, role)} ${printable(o.key ?? o.path)}${o.reason ? `: ${printable(o.reason)}` : ""}`;
-    }),
-    ...(signIn ? [`${style.status("sign in", "warn")}: ${printable(signIn)}`] : []),
-    ...(collected > 0
-      ? [
-          `${style.status("Collected", "success")} ${collected} session${collected === 1 ? "" : "s"}`,
-        ]
-      : []),
-  ]);
+  emit(
+    ctx,
+    json,
+    { sessions: outcomes, ...(signIn ? { sign_in: signIn, held: held as string } : {}) },
+    () => [
+      ...(outcomes.length === 0
+        ? [`${style.status("All done", "success")}: nothing to upload`]
+        : []),
+      ...outcomes.map((o) => {
+        const role =
+          o.result === "uploaded"
+            ? "success"
+            : o.result === "skipped"
+              ? "warn"
+              : o.result.startsWith("refused")
+                ? "error"
+                : "progress";
+        return `${style.status(o.result, role)} ${printable(o.key ?? o.path)}${o.reason ? `: ${printable(o.reason)}` : ""}`;
+      }),
+      ...(signIn
+        ? signIn
+            .split("\n")
+            .map((line, i) =>
+              i === 0
+                ? `${style.status(held as string, "warn")}: ${printable(line)}`
+                : printable(line),
+            )
+        : []),
+      ...(collected > 0
+        ? [
+            `${style.status("Collected", "success")} ${collected} session${collected === 1 ? "" : "s"}`,
+          ]
+        : []),
+    ],
+  );
+  if (held === "needs update" || held === "needs review key") return EXIT.config;
   if (signIn) return EXIT.auth;
   if (refused) return EXIT.failure;
   if (unreachable) return EXIT.unavailable;

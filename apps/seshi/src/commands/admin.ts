@@ -1,11 +1,14 @@
 import { parseArgs } from "node:util";
 import { AdminInitError } from "@seshi/auth";
 import { EXIT } from "../cli/exit";
+import { failWith } from "../cli/failures";
 import { emit, fail, helpOrUsageError, takeJson } from "../cli/output";
+import { BUCKET_USAGE, bucketAdmin } from "./admin-bucket";
 import type { CommandContext } from "./index";
 import { openServer, SERVER_OPTIONS, serverFailure } from "./server-instance";
 
-const USAGE = `usage: seshi admin init [--config <file>] [--set path=value]… [--owner <id>] [--force] [--rotate-org-key] [--json]`;
+const USAGE = `usage: seshi admin init [--config <file>] [--set path=value]… [--owner <id>] [--force] [--rotate-org-key] [--json]
+${BUCKET_USAGE}`;
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
@@ -72,6 +75,15 @@ async function init(ctx: CommandContext, argv: string[], json: boolean): Promise
 export async function run(ctx: CommandContext): Promise<number> {
   const { json, rest: argv } = takeJson(ctx.argv);
   const [sub, ...rest] = argv;
+  if (sub === "mode" || sub === "layout" || sub === "config") {
+    try {
+      return (await bucketAdmin(ctx, json, sub, rest, USAGE)) as number;
+    } catch (err) {
+      const code = serverFailure(ctx, json, err);
+      if (code !== undefined) return code;
+      return failWith(ctx, json, err);
+    }
+  }
   if (sub !== "init") {
     return helpOrUsageError(
       ctx,

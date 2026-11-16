@@ -29,8 +29,14 @@ import { USER_AGENT } from "./user-agent";
 
 export interface OpenedSink {
   sink: SessionSink;
+  /** Serverless mode: run the daemon's due upkeep jobs (F11). */
+  upkeep?(log: (line: string) => void): Promise<void>;
   close(): Promise<void>;
 }
+
+/** How long a serverless sink keeps the bucket it opened before opening it again, which reads
+ * the shared settings, the minimum version and the mode again (F11.6). */
+export const SERVERLESS_REOPEN_MS = 5 * 60 * 1000;
 
 /** What a refusal to open the bucket for writing means for uploads: they wait, with the
  * status line saying why (F11). Other errors are thrown as they are. */
@@ -54,8 +60,12 @@ function holdOf(err: unknown): unknown {
 export async function serverlessSink(ctx: CommandContext, account: Account): Promise<OpenedSink> {
   const { openServerless, refusalOf, SERVERLESS_BASIS } = await import("./serverless/open");
   let bucket: ServerlessBucket | undefined;
+  let openedAt = 0;
   const open = async (): Promise<ServerlessBucket> => {
-    if (bucket) return bucket;
+    if (bucket && Date.now() - openedAt < SERVERLESS_REOPEN_MS) return bucket;
+    const old = bucket;
+    bucket = undefined;
+    await old?.close();
     try {
       bucket = await openServerless({
         cli: account.cli,
@@ -64,8 +74,8 @@ export async function serverlessSink(ctx: CommandContext, account: Account): Pro
         integrations: await ctx.integrations(),
         secrets: account.secrets,
         write: true,
-        search: false,
       });
+      openedAt = Date.now();
     } catch (err) {
       throw holdOf(err);
     }
@@ -132,6 +142,10 @@ export async function serverlessSink(ctx: CommandContext, account: Account): Pro
   };
   return {
     sink,
+    upkeep: async (log) => {
+      const { runUpkeep } = await import("./serverless/upkeep");
+      await runUpkeep(await open(), { log });
+    },
     close: async () => {
       await bucket?.close();
     },
@@ -297,6 +311,9 @@ export interface CaptureRuntime {
   paths: ReturnType<typeof capturePaths>;
   account: Account;
   uploader: Uploader;
+  /** Serverless mode: run the daemon's due upkeep jobs; nothing in server mode. Errors are
+   * logged, not thrown. */
+  upkeep(): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -325,11 +342,21 @@ export async function captureRuntime(
     git: gitIdentityIn(ctx.env),
     ...options,
   });
+  const log = options.log ?? ((line: string) => appendLog(paths.log, `uploader: ${line}`));
   return {
     host,
     paths,
     account,
     uploader,
+    upkeep: async () => {
+      if (!isServerless(account.cli)) return;
+      try {
+        opened ??= await openSink(ctx, account);
+        await opened.upkeep?.(log);
+      } catch (err) {
+        log(`upkeep: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    },
     close: async () => {
       await opened?.close();
     },
