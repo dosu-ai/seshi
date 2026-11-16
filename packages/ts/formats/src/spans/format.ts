@@ -51,6 +51,18 @@ export function genAiSpanAdapter(mappers: readonly SpanAttributeMapper[] = []): 
   };
 }
 
+function tryNormalize(
+  adapter: SpanAdapter,
+  span: ReceivedSpan,
+  resource: SpanResource,
+): SpanPart | undefined {
+  try {
+    return adapter.normalize(span, resource);
+  } catch {
+    return undefined;
+  }
+}
+
 function partsOf(
   adapter: SpanAdapter,
   groups: readonly { resource: SpanResource; spans: readonly ReceivedSpan[] }[],
@@ -58,9 +70,8 @@ function partsOf(
   const parts: SpanPart[] = [];
   for (const group of groups) {
     for (const span of group.spans) {
-      try {
-        parts.push(adapter.normalize(span, group.resource));
-      } catch {}
+      const part = tryNormalize(adapter, span, group.resource);
+      if (part !== undefined) parts.push(part);
     }
   }
   return parts;

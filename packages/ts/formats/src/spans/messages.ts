@@ -264,9 +264,15 @@ export function systemRecords(value: unknown, timestamp: string): NormalizedReco
   return text.trim() === "" ? [] : [{ role: "system", content: text, timestamp }];
 }
 
+type SparseIndex<T> = Map<number, T>;
+
+function inIndexOrder<T>(index: SparseIndex<T>): T[] {
+  return [...index.entries()].sort((a, b) => a[0] - b[0]).map(([, value]) => value);
+}
+
 export function flattenedMessages(attrs: Attributes, prefix: string): Json[] {
-  const byIndex = new Map<number, Json>();
-  const callsOf = new Map<Json, Map<number, Json>>();
+  const byIndex: SparseIndex<Json> = new Map();
+  const callsOf = new Map<Json, SparseIndex<Json>>();
   const lead = `${prefix}.`;
   for (const key of attrs.keysWith(lead)) {
     const rest = key.slice(lead.length);
@@ -279,7 +285,7 @@ export function flattenedMessages(attrs: Attributes, prefix: string): Json[] {
     const value = attrs.get(key);
     const call = /^tool_calls\.(\d+)\.(id|name|arguments)$/.exec(field);
     if (call) {
-      const calls = callsOf.get(message) ?? new Map<number, Json>();
+      const calls: SparseIndex<Json> = callsOf.get(message) ?? new Map();
       callsOf.set(message, calls);
       const at = Number(call[1]);
       calls.set(at, { ...(calls.get(at) ?? {}), [call[2] as string]: value });
@@ -287,17 +293,13 @@ export function flattenedMessages(attrs: Attributes, prefix: string): Json[] {
       message[field] = value;
     }
   }
-  return [...byIndex.entries()]
-    .sort((a, b) => a[0] - b[0])
-    .map(([, message]) => {
-      const calls = callsOf.get(message);
-      if (calls) {
-        message.tool_calls = [...calls.entries()].sort((a, b) => a[0] - b[0]).map(([, c]) => c);
-      }
-      if (typeof message.content === "string") {
-        const parsed = jsonAttribute(message.content);
-        if (Array.isArray(parsed)) message.content = parsed;
-      }
-      return message;
-    });
+  return inIndexOrder(byIndex).map((message) => {
+    const calls = callsOf.get(message);
+    if (calls) message.tool_calls = inIndexOrder(calls);
+    if (typeof message.content === "string") {
+      const parsed = jsonAttribute(message.content);
+      if (Array.isArray(parsed)) message.content = parsed;
+    }
+    return message;
+  });
 }
