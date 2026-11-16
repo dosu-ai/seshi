@@ -42,7 +42,9 @@ Where it searches:
   the signed-in caller, so you find your own sessions and those visible to the org (admins and
   services find everything), with the credential `seshi login` stored. `--token` (and `--user`
   with the org key) uses that token for this one search instead.
-- **In-process** (`[local] config` in the CLI config, `--config <seshi.toml>`, or where the
+- **In-process** (`[serverless]` in the CLI config, which reads as its owner with the
+  visibility rule unless `--include-private` is given; [serverless.md](serverless.md)); or with a
+  server config (`--config <seshi.toml>`, or where the
   server's own config is, as for `workers status`: `SESHI_CONFIG` or `/etc/seshi/seshi.toml`,
   never a `./seshi.toml` it is not told about): the bucket's keys read everything, so
   nothing is filtered by owner. The local index is brought up to date with the change feed

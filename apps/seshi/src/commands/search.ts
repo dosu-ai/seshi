@@ -11,15 +11,21 @@ import {
   type SearchSort,
   StoreError,
 } from "@seshi/model";
-import { SearchQueryError, type SearchStatus, SearchUnavailable } from "@seshi/search";
+import {
+  LOCAL_VIEWER,
+  SearchQueryError,
+  type SearchStatus,
+  SearchUnavailable,
+} from "@seshi/search";
 import { openAccount } from "../account/account";
 import { normalizeServer } from "../account/logins";
-import { type Backend, LocalBackend, openBackend, ServerBackend } from "../backend";
+import { type Backend, openBackend, ServerBackend, type ServerlessBackend } from "../backend";
 import { EXIT } from "../cli/exit";
 import { failWith } from "../cli/failures";
 import { emit, fail, helpOrUsageError, takeJson } from "../cli/output";
 import { printable, Style, styleFor } from "../cli/style";
 import { NotConnected } from "../connect";
+import { isServerless } from "../serverless/settings";
 import { USER_AGENT } from "../user-agent";
 import type { CommandContext } from "./index";
 import { cwdConfigHint, openServer, serverFailure } from "./server-instance";
@@ -29,6 +35,7 @@ const USAGE = [
   "                    [--since <time|7d>] [--until <time|7d>] [--sort relevance|recent]",
   "                    [--limit <n>] [--matches <n>] [--cursor <c>]",
   "                    [--server <url>] [--token <t> [--user <name>]] [--config <file>] [--set path=value]… [--json]",
+  "                    [--include-private]   serverless mode: owner-only sessions too",
   "       seshi search --status | --rebuild [--config <file>] [--set path=value]… [--json]",
 ].join("\n");
 
@@ -51,6 +58,7 @@ const OPTIONS = {
   set: { type: "string", multiple: true },
   status: { type: "boolean" },
   rebuild: { type: "boolean" },
+  "include-private": { type: "boolean" },
 } as const;
 
 type Values = {
@@ -158,11 +166,14 @@ export function searchLines(results: SearchResults, style: Style = Style.plain()
   }
   lines.push("");
   const shown = results.results.length;
+  const caughtUp = results.index?.caught_up_at;
   lines.push(
     style.muted(
-      results.cursor
-        ? `${shown} of ${results.total} sessions shown; more with --cursor ${results.cursor}`
-        : `${results.total} ${results.total === 1 ? "session" : "sessions"} match.`,
+      `${
+        results.cursor
+          ? `${shown} of ${results.total} sessions shown; more with --cursor ${results.cursor}`
+          : `${results.total} ${results.total === 1 ? "session" : "sessions"} match.`
+      }${caughtUp ? ` Index caught up ${when(caughtUp)}.` : ""}`,
     ),
   );
   return lines;
@@ -194,9 +205,6 @@ async function inProcess(
   request: SearchRequest | undefined,
   style: Style,
 ): Promise<number> {
-  if (mode === "query") {
-    return query(ctx, json, new LocalBackend(instance, ""), request as SearchRequest, style);
-  }
   const search = instance.search;
   if (!search) {
     return fail(
@@ -206,6 +214,15 @@ async function inProcess(
       "search_disabled",
       "search is turned off in this config ([search] enabled = false)",
     );
+  }
+  if (mode === "query") {
+    if (!search.ready() && !json) {
+      ctx.stderr("seshi: building the search index from the change feed (first use)…");
+    }
+    await search.catchUp();
+    const results = await search.search(LOCAL_VIEWER, request as SearchRequest);
+    emit(ctx, json, results, () => searchLines(results, style));
+    return EXIT.ok;
   }
   if (mode === "status") {
     const status = search.status();
@@ -281,7 +298,7 @@ export async function run(ctx: CommandContext): Promise<number> {
     const cli = account.cli;
     const style = await styleFor(ctx, { json, theme: cli.theme });
     const server = values.server ?? cli.server;
-    if (server !== undefined && (values.server !== undefined || cli.local === undefined)) {
+    if (server !== undefined && (values.server !== undefined || !isServerless(cli))) {
       if (mode !== "query") {
         return helpOrUsageError(
           ctx,
@@ -306,10 +323,19 @@ export async function run(ctx: CommandContext): Promise<number> {
       }
       return await query(ctx, json, backend, request as SearchRequest, style);
     }
-    if (cli.local !== undefined) {
-      backend = await openBackend(ctx, account);
+    if (isServerless(cli)) {
+      backend = await openBackend(ctx, account, {
+        includePrivate: values["include-private"] === true,
+      });
       if (mode === "query") return await query(ctx, json, backend, request as SearchRequest, style);
-      return await inProcess(ctx, json, (backend as LocalBackend).instance, mode, request, style);
+      return await inProcess(
+        ctx,
+        json,
+        (backend as ServerlessBackend).instance,
+        mode,
+        request,
+        style,
+      );
     }
     if (serverConfigHere(ctx)) {
       return await withServer(ctx, json, values, mode, request, style);
@@ -320,7 +346,7 @@ export async function run(ctx: CommandContext): Promise<number> {
       json,
       EXIT.config,
       "not_configured",
-      "no server or local bucket configured: run seshi login --server <url> (or pass --server and --token), or set [local] config in the CLI config",
+      "no server or bucket configured: run seshi login --server <url> (or pass --server and --token), or seshi init --serverless",
     );
   } catch (err) {
     return failure(ctx, json, err);

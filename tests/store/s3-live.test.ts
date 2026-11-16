@@ -9,7 +9,14 @@
 
 import type { NormalizedRecord } from "@seshi/model";
 import { getSession, getTrace, ingest, tombstone } from "@seshi/pipeline";
-import { getBytes, PreconditionFailed, readChanges, S3Store, updateObject } from "@seshi/store";
+import {
+  getBytes,
+  PreconditionFailed,
+  readChanges,
+  S3Store,
+  storageTest,
+  updateObject,
+} from "@seshi/store";
 import { describe, expect, it } from "vitest";
 import { golden } from "../tooling/testdata";
 
@@ -42,6 +49,13 @@ describe.skipIf(!configured).each(clients)(
         },
         fetch: client.fetch,
       });
+
+    it("passes the serverless storage test (F11): conditional uploads and deletes", async () => {
+      const result = await storageTest(store(), "alice");
+      expect(result.steps.filter((step) => !step.ok)).toEqual([]);
+      expect(result).toMatchObject({ conditionalWrites: true, conditionalDelete: true });
+      expect((await store().list("owners/alice/")).keys).toEqual([]);
+    });
 
     it("round-trips objects, stats with an MD5 etag, lists and deletes", async () => {
       const s = store();

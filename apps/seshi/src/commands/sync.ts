@@ -194,6 +194,46 @@ function recordLines(page: {
   return lines;
 }
 
+/** `sync` in serverless mode (F11.10): drop and failure records are on this machine, and
+ * there are no sources or span assembly to run. */
+async function serverlessSync(
+  ctx: CommandContext,
+  json: boolean,
+  sub: string,
+  id: string | undefined,
+  values: Values,
+): Promise<number> {
+  if (sub !== "failed" && sub !== "dropped" && sub !== "prune") {
+    return fail(
+      ctx,
+      json,
+      EXIT.config,
+      "needs_server",
+      `sync ${sub} needs a server: serverless mode has no sources or span assembly (F11.3)`,
+    );
+  }
+  const { openAccount } = await import("../account/account");
+  const { serverlessRecords } = await import("../serverless/open");
+  const account = openAccount(ctx);
+  const records = serverlessRecords(account.cli, account.env, account.home);
+  if (sub === "prune") {
+    const { pruneRecords } = await import("@seshi/store");
+    const dropped = await pruneRecords(records, "dropped", UPLOAD_SOURCE);
+    const failed = await pruneRecords(records, "failed", UPLOAD_SOURCE);
+    emit(ctx, json, { dropped, failed, health: 0 }, () => [
+      `retention: ${dropped} drop record(s) and ${failed} failure record(s) removed from this machine`,
+    ]);
+    return EXIT.ok;
+  }
+  const source = id as string;
+  const limit = positiveInt(values.limit, "limit", 50);
+  const since = sinceOf(values);
+  const page = await listRecords(records, sub, source, { limit, ...(since ? { since } : {}) });
+  const result = { source, kind: sub as "failed" | "dropped", ...page };
+  emit(ctx, json, result, () => recordLines(result));
+  return EXIT.ok;
+}
+
 async function remoteSync(
   ctx: CommandContext,
   json: boolean,
@@ -272,6 +312,9 @@ export async function run(ctx: CommandContext): Promise<number> {
   }
   try {
     const target = await adminTarget(ctx, values);
+    if (target.kind === "serverless") {
+      return await serverlessSync(ctx, json, sub, id, values);
+    }
     if (target.kind === "remote") {
       if (sub === "run" || ONE_SHOTS.has(sub)) {
         const does = { run: "polls", assemble: "assembles", prune: "prunes" }[sub];

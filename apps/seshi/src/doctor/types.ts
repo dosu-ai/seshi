@@ -43,7 +43,7 @@ export interface TraceEvidence {
 }
 
 export interface ServerEvidence {
-  mode: "server" | "local" | "none";
+  mode: "server" | "serverless" | "none";
   where?: string;
   error?: Failure & { exit?: number };
   upload_id?: string;

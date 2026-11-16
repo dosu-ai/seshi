@@ -1,7 +1,7 @@
 import { type CaptureState, readState, StateUnreadable } from "@seshi/capture";
 import { parseDuration } from "@seshi/config";
 import { type Account, openAccount } from "../account/account";
-import { type Backend, openBackend } from "../backend";
+import { type Backend, openBackend, ServerlessBackend } from "../backend";
 import { EXIT, type ExitCode } from "../cli/exit";
 import { emit, fail, helpOrUsageError, takeJson } from "../cli/output";
 import { printable, type Role, type Style, styleFor } from "../cli/style";
@@ -16,6 +16,7 @@ import {
   type Target,
   worst,
 } from "../doctor/index";
+import { serverlessChecks } from "../doctor/serverless";
 import { resolveSession } from "./capture";
 import { pathsOf } from "./capture-host";
 import type { CommandContext } from "./index";
@@ -118,6 +119,27 @@ function sessionLines(report: SessionReport, style: Style): string[] {
         );
     }
   }
+  return lines;
+}
+
+function bucketLines(checks: readonly CheckResult[], style: Style): string[] {
+  if (checks.length === 0) return [];
+  const width = Math.max(...checks.map((c) => c.title.length));
+  const lines = [style.bold("Serverless bucket")];
+  for (const check of checks) {
+    lines.push(
+      `  ${word(style, check.status)}  ${check.title.padEnd(width)}  ${printable(check.summary)}`,
+    );
+    if (check.status === "warn" || check.status === "fail") {
+      for (const d of check.detail ?? [])
+        lines.push(`        ${" ".repeat(width)}  ${style.muted(`· ${printable(d)}`)}`);
+      if (check.hint)
+        lines.push(
+          `        ${" ".repeat(width)}  ${style.muted(`hint: ${printable(check.hint)}`)}`,
+        );
+    }
+  }
+  lines.push("");
   return lines;
 }
 
@@ -230,6 +252,10 @@ export async function run(ctx: CommandContext): Promise<number> {
       ...(backendError ? { backendError } : {}),
       ...(account ? { account } : {}),
     });
+    const bucket =
+      backend instanceof ServerlessBackend && account
+        ? await serverlessChecks(backend.bucket, account.cli.search.scope, now)
+        : [];
     const reports: SessionReport[] = [];
     for (const target of targets) {
       const evidence = await gatherEvidence(target, deps, { deep: args.deep === true });
@@ -244,20 +270,29 @@ export async function run(ctx: CommandContext): Promise<number> {
     emit(
       ctx,
       json,
-      { sessions: reports.map((r) => ({ ...r, evidence: forJson(r.evidence) })) },
+      {
+        ...(bucket.length > 0 ? { bucket } : {}),
+        sessions: reports.map((r) => ({ ...r, evidence: forJson(r.evidence) })),
+      },
       () => {
+        const head = bucketLines(bucket, style);
         if (reports.length === 0) {
           return [
+            ...head,
             `No sessions seen since ${since.toISOString()}${args.agent ? ` for ${printable(args.agent)}` : ""}.`,
           ];
         }
-        if (args.session !== undefined) return sessionLines(reports[0] as SessionReport, style);
-        return overviewLines(reports, since, where, style);
+        if (args.session !== undefined) {
+          return [...head, ...sessionLines(reports[0] as SessionReport, style)];
+        }
+        return [...head, ...overviewLines(reports, since, where, style)];
       },
     );
     if (!json && backendError)
       ctx.stderr(`seshi: could not ask the server: ${backendError.message}`);
-    return exitCode(reports, backendError);
+    const code = exitCode(reports, backendError);
+    if (code === EXIT.ok && bucket.some((c) => c.status === "fail")) return EXIT.attention;
+    return code;
   } finally {
     await backend?.close();
   }

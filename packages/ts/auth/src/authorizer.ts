@@ -39,8 +39,10 @@ export function ownershipAuthorizer(): Authorizer {
         if (owner !== caller.principal && !admin) {
           throw new Forbidden("a caller writes only its own sessions");
         }
-        if (owner_basis === "claimed" && caller.kind !== "person") {
-          throw new Forbidden("only an org-key caller's owner is claimed (X5.12)");
+        if (owner_basis === "claimed" && caller.kind !== "person" && caller.kind !== "local") {
+          throw new Forbidden(
+            "only an org-key caller's or a serverless laptop's owner is claimed (X5.12, F11.4)",
+          );
         }
       }
       return { owner, owner_basis, writer: writerOf(envelope), admin };

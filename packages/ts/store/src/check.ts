@@ -1,7 +1,7 @@
 import {
   type ChangeEntry,
   isStub,
-  LAYOUT_SCHEMA,
+  LAYOUT_SCHEMAS,
   parseTrace,
   type SessionMetadata,
   type SessionTraceRef,
@@ -355,10 +355,14 @@ class Check {
       return;
     }
     const marker = (value ?? {}) as { schema?: unknown; trace_schema?: unknown };
-    if (marker.schema !== LAYOUT_SCHEMA || marker.trace_schema !== TRACE_SCHEMA) {
+    if (
+      typeof marker.schema !== "string" ||
+      !LAYOUT_SCHEMAS.includes(marker.schema) ||
+      marker.trace_schema !== TRACE_SCHEMA
+    ) {
       this.add(
         "marker_version",
-        `${LAYOUT_KEY} is ${JSON.stringify(marker.schema)} with traces ${JSON.stringify(marker.trace_schema)}; this seshi reads ${LAYOUT_SCHEMA} with ${TRACE_SCHEMA}`,
+        `${LAYOUT_KEY} is ${JSON.stringify(marker.schema)} with traces ${JSON.stringify(marker.trace_schema)}; this seshi reads ${LAYOUT_SCHEMAS.join(" or ")} with ${TRACE_SCHEMA}`,
         { key: LAYOUT_KEY },
       );
       return;

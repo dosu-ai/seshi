@@ -62,38 +62,43 @@ repository's code.
 | `serve [--config] [--listen] [--roles api,worker] [--set path=value]…` | Run the server: the HTTP API and the worker's jobs ([server.md](server.md#roles-and-background-work)) |
 | `config check\|show [--cli] [--origin] [--json]` | Validate the config, or show every value and where it came from ([config.md](config.md)) |
 | `admin init [--owner] [--force] [--rotate-org-key] [--json]` | The first admin token and the org key ([server.md](server.md#setting-up-who-may-call-it)); `--json`: `{admin: {id, owner, token}, org_key: {id, token}, revoked}`, for a deployment script |
-| `workers status [--server <url>] [--json]` | The worker, its jobs' last runs, errors and backlog, each source's drop and failure counts (X7.5). Exit 8 when something needs a look |
+| `init --serverless --url <url> [--owner <id>] [--key-from-env] [--admin] [--region] [--endpoint] [--account-id]` | Set this machine up to write a shared bucket directly, with no server (F11, [serverless.md](serverless.md#setting-it-up)). Runs the storage test (exit 3 when the store lacks conditional writes), checks the layout marker or creates it (schema `seshi/layout/2`, mode `serverless`; only a key that can write `seshi.json` can), stores the bucket key in the keychain as `bucket <url>` (asked for on a terminal; `--key-from-env` takes `AWS_*`, `S3_*` or `R2_*`), and writes `[serverless]` and `[search]` to the CLI config, dropping `server` and `[local]`. `--admin` also writes a starter `config/seshi.toml` when the bucket has none. `--owner` is lowercased; without it, `user`, else the OS user |
+| `admin mode server\|serverless` | Set which mode the bucket is used in, in its marker (F11.8, [serverless.md](serverless.md#switching-modes)). Needs a key that can write `seshi.json` |
+| `admin layout --min-version <v> \| --clear-min-version` | Set or clear the oldest seshi that may write the bucket. Older ones read with a warning, and their writes are refused (exit 3) |
+| `admin config pull [<dir>]`, `admin config push [<dir>] [--dry-run]` | The bucket's shared settings, `config/` ([serverless.md](serverless.md#shared-settings)), into and from a folder (`seshi-config` by default). `push` runs the checks `serve` runs at start, refuses literal secrets, and writes with `If-Match` on the ETags `pull` recorded in `.seshi-pulled.json`: exit 6 when the bucket's copy changed since. `admin mode`, `layout` and `config` take `--config` and `--set` to use a server config's `[store]`; otherwise the CLI config's `[serverless]` bucket |
+| `workers status [--server <url>] [--json]` | The worker, its jobs' last runs, errors and backlog, each source's drop and failure counts (X7.5). Exit 8 when something needs a look. Warns when the bucket is marked serverless. In serverless mode there is no worker: exit 3 |
 | `sync run <id> [--force]` | Poll a source once, for cron (X7.1). Exit 6 when another worker moved the checkpoint |
 | `sync assemble` | Run the span assembler once, for cron (X7.1): publish the OTLP and Datadog sessions whose spans went quiet. Exit 1 when a session could not be assembled (it is tried again next run) |
 | `sync prune` | Run the retention job once, for cron (X7.1): remove drop and failure records and source health shards past `[records]` retention |
 | `sync status [<id>] [--days N] [--server <url>]` | Checkpoints, record counts and source health |
-| `sync failed <id>`, `sync dropped <id>` `[--since] [--limit] [--server <url>]` | Envelopes that failed or that model review dropped, and why; never their content (X6.4). `upload` is the source of hooks and uploads |
+| `sync failed <id>`, `sync dropped <id>` `[--since] [--limit] [--server <url>]` | Envelopes that failed or that model review dropped, and why; never their content (X6.4). `upload` is the source of hooks and uploads. In serverless mode, `sync failed upload`, `sync dropped upload` and `sync prune` read this machine's own records (F11.10); `sync run`, `assemble` and `status` need a server (exit 3) |
 | `reprocess --source <id> [--since <time>] [--dry-run] [--run]` | Rewind a polled source so its sessions are read again (X4.9). Not for uploads (`upload`): the server keeps no raw logs, so the machines that uploaded them resend them: their uploaders resend stale sessions by themselves, and `capture resend` does it by hand |
 | `review eval [--policy <id>] [--fixtures <file or folder>]` | Score a model review policy on labelled fixtures, through its real providers: label accuracy, false and missed drops, redactor recall, leaks (F3.8; [model-review.md](model-review.md)). Seshi's own fixtures by default. Exit 8 when any fixture came out other than labelled |
+| `review key set <provider> [--key -]` | Store a model review key on this machine, in the keychain (serverless mode, [serverless.md](serverless.md#model-review-keys)). It fills a review policy's `api_key = { env = "NAME" }` for that provider while `NAME` is unset. Asks on a terminal; `--key -` reads it from stdin. Never on the command line |
 | `normalize [--agent <format>] [<file> \| -]` | A transcript as canonical, redacted records, one per line (`--json`: one document, with the `llm_calls` the records name: model and token usage per call). For tools in other languages (X3.10) |
 | `healthcheck [--url] [--config] [--json]` | Ask a running server's `/healthz` where `server.listen` says it listens (the container's health check); `--json`: `{ok, url, version}` |
 | `login [--server <url>] [--key <key>\|-] [--token <token>\|-] [--user <name>] [--browser\|--device] [--visibility org\|owner]` | Sign in to a server (F8.2), [below](#signing-in-f82) |
 | `logout [--server <url>] [--all]` | Forget the stored credentials |
-| `whoami [--server <url>]` | Who the CLI is signed in as, and whether the credential still works |
-| `sessions ls [--owner] [--limit N] [--after] [--all]` | An owner's sessions, newest first |
-| `sessions show <agent> <id> [--owner] [--trace]` | A session's metadata and, with model review on, each stored write's decision (`allow`, `redact`, `skipped`; F3.8); `--trace` adds its head trace, a line per record |
-| `sessions export <agent> <id> [--format seshi\|letta\|otlp\|atif] [--hash] [-o <file\|dir>]` | The trace itself, on stdout or into a file |
+| `whoami [--server <url>]` | Who the CLI is signed in as, and whether the credential still works. In serverless mode: the owner (claimed) and the bucket |
+| `sessions ls [--owner] [--limit N] [--after] [--all] [--include-private]` | An owner's sessions, newest first. `--include-private`: serverless mode, [below](#talking-to-a-server-or-to-a-bucket-f83-f11) |
+| `sessions show <agent> <id> [--owner] [--trace] [--include-private]` | A session's metadata and, with model review on, each stored write's decision (`allow`, `redact`, `skipped`; F3.8); `--trace` adds its head trace, a line per record |
+| `sessions export <agent> <id> [--format seshi\|letta\|otlp\|atif] [--hash] [-o <file\|dir>] [--include-private]` | The trace itself, on stdout or into a file |
 | `sessions rm <agent> <id> [--owner] [--yes]` | Delete a session (a tombstone; it cannot be undone). Asks on a terminal, needs `--yes` elsewhere |
 | `sessions visibility <agent> <id> org\|owner [--owner]` | Change who may read a session (X5.10) |
-| `tokens ls [--owner] [--kind] [--all]`, `tokens create <kind> [--owner] [--service] [--scope]… [--visibility] [--expires 30d\|date] [--label]`, `tokens revoke <id>\|--owner <id> [--kind]` | Manage tokens (X5.9, X5.11; admins). A new token is printed once |
+| `tokens ls [--owner] [--kind] [--all]`, `tokens create <kind> [--owner] [--service] [--scope]… [--visibility] [--expires 30d\|date] [--label]`, `tokens revoke <id>\|--owner <id> [--kind]` | Manage tokens (X5.9, X5.11; admins). A new token is printed once. Tokens need a server: in serverless mode they exit 3 |
 | `capture install [<agent>…] [--service] [--command <program>]` | Wire seshi into Claude Code, Codex and Cursor on this machine (F9.6); with no agent, every one found. Merges into each agent's own config and keeps every hook there ([capture.md](capture.md#installing)) |
 | `capture uninstall [<agent>…] [--service] [--command <program>]` | Take out only seshi's entries (`--command`: the program an install was given, when it is not named `seshi`) |
-| `capture status [--session [<id>]] [--agent <a>]` | Whether this folder (or session) is captured and which rule decided, where uploads go, the queue, problems, agents, recent sessions. Exit 8 when something needs action |
+| `capture status [--session [<id>]] [--agent <a>]` | Whether this folder (or session) is captured and which rule decided, where uploads go, the queue, problems (in serverless mode also `needs review key`, `needs update` and `bucket refused`, [capture.md](capture.md#uploads-that-wait)), agents, recent sessions. Exit 8 when something needs action |
 | `capture pause [<duration>]`, `capture resume` | Stop every session where it is for a while (`2h`), or until resumed: running sessions keep what they uploaded and send nothing more, even after the pause; sessions started during it are not captured; nothing is retracted. `capture on --session <id>` uploads a stopped session in full ([capture.md](capture.md#what-is-captured)) |
 | `capture off\|on [--session [<id>]] [--agent <a>]`, `capture off\|on --path <folder>`, `capture off\|on` | Turn capture off or on for one session (off retracts what was uploaded, F9.7), a folder, or everything (F9.5) |
 | `capture resend --all \| --session [<id>] [--agent <a>]` | Send sessions uploaded from this machine again, whole, to be rebuilt and reviewed again (X4.9), as the uploader does by itself for sessions an older normalizer built. Leaves out sessions turned off, never uploaded or whose transcript is gone; exit 6 when the one session named is one of them ([capture.md](capture.md#uploading-by-hand)) |
 | `hook <agent> <event>` | Internal: agents call it on their events (F9.1). Reads the payload, applies the rules, spools, starts the uploader. Always exits 0 and prints nothing |
 | `daemon [--keep-alive] [--once] [--idle <duration>]` | The background uploader and sweep (F9.1, F9.3); hooks start it. One per machine; `--keep-alive` (the service entry) waits for its turn instead of exiting |
-| `upload <path>… \| --since <duration>` `[--agent <a>]` | Send transcripts by hand, or backfill the installed agents' recent sessions, through the same rules and state as hooks |
+| `upload <path>… \| --since <duration>` `[--agent <a>]` | Send transcripts by hand, or backfill the installed agents' recent sessions, through the same rules and state as hooks. Exit 3 when uploads wait for a review key or a newer seshi, 5 when they wait to sign in or the bucket refused the key |
 | `statusline [--agent <a>]` | One line for an agent's status bar: `Session Capture ◉` or `⏸`, problems after a separator (B1.6). Local state only, no network |
-| `doctor [--session [<id>]] [--agent <a>] [--since <duration>] [--deep] [--server <url>]` | Check that sessions are captured right, end to end: each session's transcript, this machine's capture state and what the server (or local bucket) stored, as ok, warn, fail or skip per check. `--session`: one session (no id: the one this agent runs, else the one seen in this folder); without it, every session seen in the past day (`--since 7d` widens it), a line each, then the failed checks. `--deep` also searches for each session. `--json`: `{sessions: [{agent, session_id, evidence, checks}]}`. Changes nothing. Exit 8 when a check failed; 5 or 7 when the server could not be asked ([capture.md](capture.md#checking-a-session)) |
-| `explore [--port <n>] [--no-open] [--server <url>] [--since <duration>]` | A local, read-only web page for the same three views as `doctor`, side by side: every session seen in the past 7 days (`--since`), and for one session its checks, the pipeline (transcript bytes → records → redacted → sent → stored), the local transcript (re-normalized and redacted with this machine's rules, never raw) beside the stored records, a timeline and the raw evidence. Serves on 127.0.0.1 only and prints the address with a one-time token (open it as printed); opens the browser unless `--no-open`; runs until Ctrl-C. Changes nothing ([capture.md](capture.md#exploring-sessions-in-a-browser)) |
-| `search <words…> [filters] [--json]`, `search --status\|--rebuild` | Search what you may read (F10); see [search.md](search.md) |
+| `doctor [--session [<id>]] [--agent <a>] [--since <duration>] [--deep] [--server <url>]` | Check that sessions are captured right, end to end: each session's transcript, this machine's capture state and what the server (or serverless bucket) stored, as ok, warn, fail or skip per check. In serverless mode it also checks the bucket first: marker, owner, storage test, read access, shared settings, review keys, search, server-only settings ([serverless.md](serverless.md#uploads-that-wait)). `--session`: one session (no id: the one this agent runs, else the one seen in this folder); without it, every session seen in the past day (`--since 7d` widens it), a line each, then the failed checks. `--deep` also searches for each session. `--json`: `{sessions: [{agent, session_id, evidence, checks}]}`. Changes nothing. Exit 8 when a check failed; 5 or 7 when the server could not be asked ([capture.md](capture.md#checking-a-session)) |
+| `explore [--port <n>] [--no-open] [--server <url>] [--since <duration>] [--include-private]` | A local, read-only web page for the same three views as `doctor`, side by side: every session seen in the past 7 days (`--since`), and for one session its checks, the pipeline (transcript bytes → records → redacted → sent → stored), the local transcript (re-normalized and redacted with this machine's rules, never raw) beside the stored records, a timeline and the raw evidence. Serves on 127.0.0.1 only and prints the address with a one-time token (open it as printed); opens the browser unless `--no-open`; runs until Ctrl-C. Changes nothing ([capture.md](capture.md#exploring-sessions-in-a-browser)) |
+| `search <words…> [filters] [--include-private] [--json]`, `search --status\|--rebuild` | Search what you may read (F10); see [search.md](search.md). In serverless mode it searches this machine's index ([serverless.md](serverless.md#search)) |
 | `redact test [<file> \| -] [--pack <file>]… [--config]` | Check rule packs' test strings, and show how often each rule fires on a transcript or text and where, never what matched ([redaction.md](redaction.md#trying-and-applying-rules)) |
 | `redact backfill (--since <30d> \| --all) [--dry-run]` | Apply the server's current rules to stored sessions (F2.5, [redaction.md](redaction.md#trying-and-applying-rules)). Exit 8 when a session changed while it ran |
 | `redact sweep [--owner <id>]… [--dry-run]` | Delete the trace objects no session names that are over an hour old, as the worker does daily (F2.5, [redaction.md](redaction.md#trying-and-applying-rules)). Exit 1 when a session could not be swept |
@@ -107,22 +112,38 @@ someone else wrote, whose secret references would send your env or files to its 
 the others (and `config check`, and `search` with no server configured) say so in a one-line
 hint instead: pass `--config ./seshi.toml`. `workers status` and `sync status|failed|dropped`
 also run from an admin's laptop through the server's admin routes: with `--server <url>`, or,
-when no server config is found, the CLI config's `server` (its `[local] config` is read as the
-server config instead). `sync run` and `reprocess` stay where the config is. `store check` reads
-the bucket itself, so it has no `--server`: with no server config found it checks local mode's
-bucket (the CLI config's `[local] config`), else the one `SESHI_*` env names.
+when no server config is found, the CLI config's `server`. `sync run` and `reprocess` stay where
+the config is. `store check` reads the bucket itself, so it has no `--server`: with no server
+config found it checks the CLI config's `[serverless]` bucket, else the one `SESHI_*` env names.
+`admin mode`, `admin layout` and `admin config` work the same way: a server config's `[store]`
+when one is named, else the `[serverless]` bucket.
 
-## Talking to a server, or to your own bucket (F8.3, X3.5)
+## Talking to a server, or to a bucket (F8.3, F11)
 
 The session commands and the uploader (14) talk to a seshi server over HTTP
-(`@seshi/client`) when the CLI config sets `server`, with the credential `seshi login` stored;
-or, in local mode, to an Instance built in-process from the server config `[local] config`
-names, for one person who owns the bucket. `--server <url>` on any of them talks to that
-server instead. Nothing else writes a bucket. See [config.md](config.md#the-clis-config).
+(`@seshi/client`) when the CLI config sets `server`, with the credential `seshi login` stored.
+In serverless mode (`[serverless]`, or its old name `[local]`) they run the pipeline in-process
+and read and write the bucket directly, with the key `seshi init --serverless` stored
+([serverless.md](serverless.md)). `--server <url>` on any of them talks to that server instead.
+See [config.md](config.md#the-clis-config).
 
-In local mode the bucket's owner acts as its admin: `sessions --owner` reads any owner's
-folder, `sessions rm` needs no fresh sign-in, and `tokens` work on the bucket's own token
-records (for a server that will later serve it).
+In serverless mode the CLI acts as a member of its owner, and the bucket's permissions decide
+the rest (F11.4):
+
+- Reads (`sessions ls`, `show`, `export`, `search`, `explore`, `doctor`) apply the server's
+  rule: your own sessions and every `org` session. `sessions --owner bob` shows bob's `org`
+  sessions. `--include-private` on `sessions`, `search` and `explore` shows owner-only sessions
+  too. It is not a permission: a key that can read the bucket can read every session.
+- Writes and deletes of your own sessions need no sign-in. For another owner's session
+  (`sessions rm --owner bob`, `sessions visibility --owner bob`) the CLI tries, and a bucket
+  refusal is exit 5 with a message that says which key it takes: `this key can't change
+  owners/bob/…: that takes a key that can write every owner's folder`.
+- Sessions are recorded with `owner_basis: "claimed"`.
+- A bucket with no layout marker is exit 3, `no seshi bucket at <url>: run seshi init
+  --serverless`; a bucket whose minimum version is newer than this seshi refuses writes
+  (exit 3) and warns on reads; a bucket in server mode warns.
+- `tokens`, `workers status` and `sync run|assemble|status` need a server (exit 3).
+  `seshi login` refuses while the CLI config has `[serverless]`.
 
 ## Signing in (F8.2)
 

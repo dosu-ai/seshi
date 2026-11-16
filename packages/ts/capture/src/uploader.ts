@@ -18,7 +18,7 @@ import type { CapturePaths } from "./paths";
 import { placeOf } from "./place";
 import { type Decision, decide, type Place, type RepoConfig, turnedOnSince } from "./rules";
 import { captureRules, type RulesSnapshot } from "./rules-cache";
-import { RetractRefused, type SessionSink, SignInNeeded } from "./sink";
+import { type HoldWord, RetractRefused, type SessionSink, SignInNeeded } from "./sink";
 import { readSpool, removeSpool, type SpoolEntry } from "./spool";
 import {
   type CaptureState,
@@ -345,6 +345,8 @@ export class Uploader {
   private readonly host: CaptureHost;
   private readonly agents: Map<string, CaptureAgent>;
   private readonly sinkFactory: () => Promise<SessionSink>;
+  /** The status word of the last hold this pass met (`SignInNeeded.word`). */
+  private holdWord: HoldWord = "sign in";
   private readonly rulesOf: () => Promise<RulesSnapshot>;
   private readonly preRedact: PreRedactor;
   private readonly git: GitIdentity;
@@ -580,7 +582,7 @@ export class Uploader {
         await (await this.getSink()).ready();
         signedIn = true;
       } catch (err) {
-        if (err instanceof SignInNeeded) summary.signIn = err.message;
+        if (err instanceof SignInNeeded) summary.signIn = this.held(err);
         else this.log(`could not check the credential: ${message(err)}`);
       }
     }
@@ -1153,6 +1155,11 @@ export class Uploader {
     };
   }
 
+  private held(err: SignInNeeded): string {
+    this.holdWord = err.word;
+    return err.message;
+  }
+
   private onError(
     key: string,
     err: unknown,
@@ -1160,7 +1167,9 @@ export class Uploader {
     retry: Retry,
     size: number,
   ): Handled {
-    if (err instanceof SignInNeeded) return { saves: [], next: { stop: { signIn: err.message } } };
+    if (err instanceof SignInNeeded) {
+      return { saves: [], next: { stop: { signIn: this.held(err) } } };
+    }
     if (err instanceof OffsetMismatch && retry.recoveries < 3) {
       return onOffsetMismatch(err.expected, attempt, retry, size);
     }
@@ -1255,7 +1264,7 @@ export class Uploader {
       await this.save(key, reset);
       return { ok: true };
     } catch (err) {
-      if (err instanceof SignInNeeded) return { signIn: err.message };
+      if (err instanceof SignInNeeded) return { signIn: this.held(err) };
       if (err instanceof RetractRefused) {
         this.log(`${key}: retraction refused: ${err.message}`);
         await this.save(key, (s) => {
@@ -1285,10 +1294,11 @@ export class Uploader {
           : (state.uploader?.failures ?? 0);
       const problems = { ...state.problems };
       if (summary.signIn) {
+        const word = this.holdWord !== "sign in" ? { word: this.holdWord } : {};
         problems.sign_in =
           state.problems?.sign_in?.message === summary.signIn
-            ? state.problems.sign_in
-            : { message: summary.signIn, at: now };
+            ? { ...state.problems.sign_in, ...word }
+            : { message: summary.signIn, at: now, ...word };
       } else if (outcome.signedIn) delete problems.sign_in;
       if (failures >= 3 && outcome.transientFailure) {
         problems.upload = { message: outcome.transientFailure, at: now };

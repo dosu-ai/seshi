@@ -28,7 +28,8 @@ export function statusLine(input: StatusLineInput): StatusLine {
     return { capturing: false, problems: [{ text: "state unreadable", kind: "error" }] };
   }
   if (decision.level === "config") problems.push({ text: "config error", kind: "error" });
-  if (state.problems?.sign_in) problems.push({ text: "sign in", kind: "warn" });
+  const held = state.problems?.sign_in;
+  if (held) problems.push({ text: held.word ?? "sign in", kind: "warn" });
   if (state.problems?.upload) problems.push({ text: "upload failing", kind: "error" });
   const session = input.session ? state.sessions[input.session] : undefined;
   if (session?.retract === "failed") problems.push({ text: "retraction refused", kind: "error" });

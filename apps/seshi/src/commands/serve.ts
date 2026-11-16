@@ -1,8 +1,9 @@
 import { parseArgs } from "node:util";
 import { createApp, maxBodyBytes } from "@seshi/api";
 import { checkServerConfig } from "@seshi/config";
-import { lineLogger } from "@seshi/instance";
+import { lineLogger, SERVERLESS_BUCKET_WARNING } from "@seshi/instance";
 import { VERSION } from "@seshi/model";
+import { readLayout } from "@seshi/store";
 import { EXIT } from "../cli/exit";
 import { fail, helpOrUsageError } from "../cli/output";
 import type { CommandContext } from "./index";
@@ -86,6 +87,8 @@ async function start(ctx: CommandContext, argv: string[]): Promise<number | unde
     );
   }
   instance.start();
+  const marker = await readLayout(instance.store).catch(() => null);
+  if (marker?.mode === "serverless") log.warn(SERVERLESS_BUCKET_WARNING);
 
   const host = ["0.0.0.0", "::"].includes(settings.hostname) ? "localhost" : settings.hostname;
   const who = [

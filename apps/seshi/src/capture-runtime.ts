@@ -20,65 +20,165 @@ import type { RuleSet, redactTranscript, WithheldCalls } from "@seshi/redact";
 import { type Account, accountCredential, openAccount, serverOf } from "./account/account";
 import { NotSignedIn } from "./account/credential";
 import { allCaptureAgents } from "./capture-agents";
+import { Refused } from "./cli/failures";
 import { hostOf } from "./commands/capture-host";
 import type { CommandContext } from "./commands/index";
+import type { ServerlessBucket } from "./serverless/open";
+import { isServerless, serverlessOf } from "./serverless/settings";
 import { USER_AGENT } from "./user-agent";
 
 export interface OpenedSink {
   sink: SessionSink;
+  /** Serverless mode: run the daemon's due upkeep jobs (F11). */
+  upkeep?(log: (line: string) => void): Promise<void>;
   close(): Promise<void>;
 }
 
-export async function localSink(ctx: CommandContext, account: Account): Promise<OpenedSink> {
-  const { connect, localOwner } = await import("./connect");
-  const connection = await connect({
-    cli: account.cli,
-    env: account.env,
-    home: account.home,
-    integrations: await ctx.integrations(),
-  });
-  const instance = connection.instance;
-  if (!instance) throw new Error("local mode built no instance");
-  const owner = localOwner(account.cli, account.env);
-  const db = instance.localSessions(owner);
-  const sink: SessionSink = {
-    target: `local: ${instance.storage.url}`,
-    async ready() {},
-    ingest: (upload, options) => db.ingest(upload, options),
-    stale: () => allStale((after) => db.staleSessions(after !== undefined ? { after } : {})),
-    async retract(agent, sessionId, secret) {
-      if (!instance.config.capture.allow_retract) {
-        throw new RetractRefused(
-          "retract_disabled",
-          "retraction is turned off (capture.allow_retract)",
-        );
-      }
-      const { finishTombstone, getSession, tombstone } = await import("@seshi/pipeline");
-      const metadata = await getSession(instance.store, owner, agent, sessionId);
-      if (!metadata) return "absent";
-      if (metadata.status === "redacted") {
-        await finishTombstone({ store: instance.store, owner, agent, session_id: sessionId });
-        return "gone";
-      }
-      if (metadata.retract_hash !== retractHash(secret)) {
-        throw new RetractRefused(
-          "bad_retract_secret",
-          "the retraction secret is not the one this session was uploaded with",
-        );
-      }
-      await tombstone({
-        store: instance.store,
-        owner,
-        agent,
-        session_id: sessionId,
-        now: instance.now,
-        reason: "retracted",
-        writer: localWriter(owner),
+/** How long a serverless sink keeps the bucket it opened before opening it again, which reads
+ * the shared settings, the minimum version and the mode again (F11.6). */
+export const SERVERLESS_REOPEN_MS = 5 * 60 * 1000;
+
+/** What a refusal to open the bucket for writing means for uploads: they wait, with the
+ * status line saying why (F11). Other errors are thrown as they are. */
+function holdOf(err: unknown): unknown {
+  if (!(err instanceof Refused)) return err;
+  switch (err.code) {
+    case "needs_review_key":
+      return new SignInNeeded(err.message, "needs review key");
+    case "needs_update":
+      return new SignInNeeded(err.message, "needs update");
+    case "access_denied":
+    case "no_bucket":
+    case "store_unsupported":
+      return new SignInNeeded(err.message, "bucket refused");
+    case "shared_settings":
+      return new SignInNeeded(err.message, "bad shared settings");
+    default:
+      return err;
+  }
+}
+
+/** Serverless mode (F11): this machine runs the pipeline and writes its owner's folder. */
+export async function serverlessSink(ctx: CommandContext, account: Account): Promise<OpenedSink> {
+  const { openServerless, refusalOf, SERVERLESS_BASIS } = await import("./serverless/open");
+  const { Reopening } = await import("./serverless/reopening");
+  /** The bucket opened for writing, shared by the uploader and the upkeep timer. */
+  const bucket = new Reopening(async () => {
+    try {
+      return await openServerless({
+        cli: account.cli,
+        env: account.env,
+        home: account.home,
+        integrations: await ctx.integrations(),
+        secrets: account.secrets,
+        write: true,
       });
-      return "retracted";
+    } catch (err) {
+      throw holdOf(err);
+    }
+  }, SERVERLESS_REOPEN_MS);
+  /** A refusal during a write is about the key, not the session (rotated, expired, a clock
+   * off): uploads wait, as when opening the bucket is refused. */
+  const refusedIngest = (err: unknown, owner: string): never => {
+    const refused = refusalOf(err, owner);
+    if (refused instanceof Refused) {
+      bucket.expire();
+      throw new SignInNeeded(refused.message, "bucket refused");
+    }
+    throw err;
+  };
+  const sink: SessionSink = {
+    target: `serverless: ${serverlessOf(account.cli)?.url ?? "the bucket"}`,
+    async ready() {
+      await bucket.open();
+    },
+    ingest: (upload, options) =>
+      bucket.use(async (opened) => {
+        try {
+          return await opened.instance
+            .localSessions(opened.owner, SERVERLESS_BASIS)
+            .ingest(upload, options);
+        } catch (err) {
+          return refusedIngest(err, opened.owner);
+        }
+      }),
+    stale: () =>
+      bucket.use((opened) => {
+        const sessions = opened.instance.localSessions(opened.owner, SERVERLESS_BASIS);
+        return allStale((after) => sessions.staleSessions(after !== undefined ? { after } : {}));
+      }),
+    async retract(agent, sessionId, secret) {
+      // Retraction does not wait on a review key or a newer seshi: open the bucket for it alone.
+      let opened: ServerlessBucket;
+      try {
+        opened = await openServerless({
+          cli: account.cli,
+          env: account.env,
+          home: account.home,
+          integrations: await ctx.integrations(),
+          secrets: account.secrets,
+          write: false,
+          search: false,
+        });
+      } catch (err) {
+        throw holdOf(err);
+      }
+      try {
+        return await retractIn(opened, agent, sessionId, secret);
+      } catch (err) {
+        const refused = refusalOf(err, opened.owner);
+        if (refused instanceof Refused) throw new SignInNeeded(refused.message, "bucket refused");
+        throw err;
+      } finally {
+        await opened.close();
+      }
     },
   };
-  return { sink, close: () => connection.close() };
+  async function retractIn(
+    opened: ServerlessBucket,
+    agent: string,
+    sessionId: string,
+    secret: string,
+  ): Promise<"retracted" | "gone" | "absent"> {
+    const { instance, owner } = opened;
+    if (!instance.config.capture.allow_retract) {
+      throw new RetractRefused(
+        "retract_disabled",
+        "retraction is turned off (capture.allow_retract)",
+      );
+    }
+    const { finishTombstone, getSession, tombstone } = await import("@seshi/pipeline");
+    const metadata = await getSession(instance.store, owner, agent, sessionId);
+    if (!metadata) return "absent";
+    if (metadata.status === "redacted") {
+      await finishTombstone({ store: instance.store, owner, agent, session_id: sessionId });
+      return "gone";
+    }
+    if (metadata.retract_hash !== retractHash(secret)) {
+      throw new RetractRefused(
+        "bad_retract_secret",
+        "the retraction secret is not the one this session was uploaded with",
+      );
+    }
+    await tombstone({
+      store: instance.store,
+      owner,
+      agent,
+      session_id: sessionId,
+      now: instance.now,
+      reason: "retracted",
+      writer: localWriter(owner),
+    });
+    return "retracted";
+  }
+  return {
+    sink,
+    upkeep: async (log) => {
+      const { runUpkeep } = await import("./serverless/upkeep");
+      await bucket.use((opened) => runUpkeep(opened, { log }));
+    },
+    close: () => bucket.close(),
+  };
 }
 
 export async function serverSink(account: Account): Promise<OpenedSink> {
@@ -120,7 +220,7 @@ export async function serverSink(account: Account): Promise<OpenedSink> {
 }
 
 export async function openSink(ctx: CommandContext, account: Account): Promise<OpenedSink> {
-  return account.cli.local ? localSink(ctx, account) : serverSink(account);
+  return isServerless(account.cli) ? serverlessSink(ctx, account) : serverSink(account);
 }
 
 interface CachedRules {
@@ -155,7 +255,7 @@ export interface PreRedactorOptions {
 }
 
 export function preRedactor(account: Account, options: PreRedactorOptions = {}): PreRedactor {
-  if (account.cli.local) return NO_PREREDACTION;
+  if (isServerless(account.cli)) return NO_PREREDACTION;
   const log = options.log ?? (() => {});
   let loading: Promise<{ rules: RuleSet; redact: typeof redactTranscript }> | undefined;
 
@@ -240,6 +340,9 @@ export interface CaptureRuntime {
   paths: ReturnType<typeof capturePaths>;
   account: Account;
   uploader: Uploader;
+  /** Serverless mode: run the daemon's due upkeep jobs; nothing in server mode. Errors are
+   * logged, not thrown. */
+  upkeep(): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -253,14 +356,26 @@ export async function captureRuntime(
   const paths = capturePaths(host);
   const account = openAccount(ctx);
   let opened: OpenedSink | undefined;
+  let opening: Promise<OpenedSink> | undefined;
+  /** The one sink, shared by the uploader and the upkeep timer. */
+  const sinkOnce = (): Promise<OpenedSink> => {
+    opening ??= openSink(ctx, account).then(
+      (s) => {
+        opened = s;
+        return s;
+      },
+      (err: unknown) => {
+        opening = undefined;
+        throw err;
+      },
+    );
+    return opening;
+  };
   const uploader = new Uploader({
     paths,
     host,
     agents: await allCaptureAgents(),
-    sink: async () => {
-      opened ??= await openSink(ctx, account);
-      return opened.sink;
-    },
+    sink: async () => (await sinkOnce()).sink,
     preRedact: preRedactor(account, {
       cacheFile: paths.redactionRules,
       log: options.log ?? ((line) => appendLog(paths.log, `uploader: ${line}`)),
@@ -268,12 +383,22 @@ export async function captureRuntime(
     git: gitIdentityIn(ctx.env),
     ...options,
   });
+  const log = options.log ?? ((line: string) => appendLog(paths.log, `uploader: ${line}`));
   return {
     host,
     paths,
     account,
     uploader,
+    upkeep: async () => {
+      if (!isServerless(account.cli)) return;
+      try {
+        await (await sinkOnce()).upkeep?.(log);
+      } catch (err) {
+        log(`upkeep: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    },
     close: async () => {
+      await opening?.catch(() => undefined);
       await opened?.close();
     },
   };

@@ -156,10 +156,20 @@ export function queueCheck(ev: SessionEvidence): CheckResult {
   const items: { status: CheckStatus; text: string; hint?: string }[] = [];
   const problems = ev.machine.problems ?? {};
   if (problems.sign_in) {
+    const word = problems.sign_in.word ?? "sign in";
     items.push({
       status: "warn",
-      text: `sign in: ${problems.sign_in.message}`,
-      hint: "seshi login --server <url>",
+      text: `${word}: ${problems.sign_in.message.split("\n")[0]}`,
+      hint:
+        word === "needs review key"
+          ? "seshi review key set <provider>"
+          : word === "needs update"
+            ? "update seshi"
+            : word === "bucket refused"
+              ? "check the bucket key's permissions (seshi doctor)"
+              : word === "bad shared settings"
+                ? "seshi admin config pull, fix, seshi admin config push"
+                : "seshi login --server <url>",
     });
   }
   if (problems.upload)
@@ -252,7 +262,7 @@ export function presenceCheck(ev: SessionEvidence): CheckResult {
   const s = ev.local;
   const m = ev.server.metadata ?? null;
   const pointer = ev.server.pointer;
-  const where = ev.server.mode === "local" ? "the local bucket" : "the server";
+  const where = ev.server.mode === "serverless" ? "the bucket" : "the server";
   const uid = ev.server.upload_id ?? ev.session_id;
   const has = (x: SessionMetadata | null | undefined) =>
     x !== null && x !== undefined && x.status === "stored" && x.head !== undefined;

@@ -3,6 +3,11 @@ import { httpUrl } from "./server/common";
 
 export const THEMES = ["auto", "dark", "light"] as const;
 
+/** What a laptop's search index holds (F11.9): only your sessions, yours and the org's, or
+ * also others' owner-only sessions. */
+export const SEARCH_SCOPES = ["mine", "visible", "all"] as const;
+export type SearchScope = (typeof SEARCH_SCOPES)[number];
+
 export const capturePath = z
   .strictObject({
     path: z.string().min(1).describe("A folder; ~ is the home folder. Matched by path prefix."),
@@ -31,8 +36,58 @@ export const cliConfigSchema = z
       })
       .optional()
       .describe(
-        "Local mode (X3.5): run the pipeline in-process against a bucket you own, instead of talking to a server. Set server or local, not both.",
+        "The old name of [serverless] (F11.1): config names a server config whose [store] gives the bucket. Still read; seshi config check prints the new table.",
       ),
+    serverless: z
+      .strictObject({
+        url: z
+          .string()
+          .regex(/^(s3|r2|file):\/\//, "s3://, r2:// or file://")
+          .optional()
+          .describe(
+            "The bucket and prefix sessions are written to: s3://bucket/prefix, r2://bucket/prefix or file:///path. Required unless config names a server config with a [store].",
+          ),
+        region: z.string().min(1).optional().describe("The bucket's region, as [store] region."),
+        endpoint: httpUrl.optional().describe("An S3-compatible endpoint, as [store] endpoint."),
+        account_id: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("Cloudflare account id for r2://, as [store] account_id."),
+        owner: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("The owner id sessions are stored under; user, else the OS user, when unset."),
+        config: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            "A local server config (seshi.toml) layered over the bucket's shared config/seshi.toml; ~ is the home folder.",
+          ),
+      })
+      .optional()
+      .describe(
+        "Serverless mode (F11): this machine runs the pipeline and writes its owner's folder of a shared bucket directly; the bucket's permissions decide what it may do. Set server or serverless, not both.",
+      ),
+    search: z
+      .strictObject({
+        enabled: z
+          .boolean()
+          .optional()
+          .describe(
+            "Serverless mode: whether this machine keeps a search index (F11.9); the shared config's search.enabled when unset.",
+          ),
+        scope: z
+          .enum(SEARCH_SCOPES)
+          .default("visible")
+          .describe(
+            "Serverless mode: which sessions the index holds: mine, visible (yours and the org's) or all (also others' owner-only sessions).",
+          ),
+      })
+      .prefault({})
+      .describe("This machine's search index in serverless mode (F11.9)."),
     user: z
       .string()
       .min(1)
@@ -73,6 +128,28 @@ export const cliConfigSchema = z
         code: "custom",
         path: ["local"],
         message: "set server (a seshi server) or local (a bucket you own), not both",
+      });
+    }
+    if (config.server !== undefined && config.serverless !== undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["serverless"],
+        message: "set server (a seshi server) or serverless (a shared bucket), not both",
+      });
+    }
+    if (config.local !== undefined && config.serverless !== undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["local"],
+        message: "local is the old name of serverless: keep [serverless] and remove [local]",
+      });
+    }
+    const serverless = config.serverless;
+    if (serverless && serverless.url === undefined && serverless.config === undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["serverless", "url"],
+        message: "set url (the bucket), or config (a server config with a [store])",
       });
     }
   })

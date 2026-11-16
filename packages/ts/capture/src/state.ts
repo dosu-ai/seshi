@@ -11,6 +11,8 @@ export type Toggle = "on" | "off";
 export interface Problem {
   message: string;
   at: string;
+  /** For `sign_in`: what the status line says when it is not "sign in" (F11). */
+  word?: string;
 }
 
 export interface SessionState {

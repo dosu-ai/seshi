@@ -11,7 +11,7 @@ import { classify } from "../cli/failures";
 import type { Failure } from "./types";
 
 export interface ServerView {
-  mode: "server" | "local";
+  mode: "server" | "serverless";
   where: string;
   getSession(agent: string, sessionId: string): Promise<SessionMetadata | null>;
   pointer?(agent: string, sessionId: string): Promise<SessionMetadata | null>;

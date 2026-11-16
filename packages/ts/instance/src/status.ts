@@ -5,11 +5,16 @@ import {
   type Heartbeat,
   type JobRecord,
   readHeartbeat,
+  readLayout,
   sourcesWithRecords,
 } from "@seshi/store";
 import { heartbeatFresh, STALE_HEARTBEATS } from "./builtin-jobs";
 import type { Instance } from "./instance";
 import type { JobPlacement } from "./jobs";
+
+/** What a server says about a bucket marked serverless (F11.8): it still runs. */
+export const SERVERLESS_BUCKET_WARNING =
+  "the bucket is marked serverless: laptops may be writing it directly (seshi admin mode server when they have moved to this server)";
 
 export interface WorkerView {
   state: "running" | "stopped" | "never" | "several";
@@ -107,6 +112,9 @@ export async function instanceStatus(instance: Instance): Promise<InstanceStatus
     now,
     instance.config.worker.heartbeat_interval,
   );
+
+  const marker = await readLayout(instance.store).catch(() => null);
+  if (marker?.mode === "serverless") warnings.push(SERVERLESS_BUCKET_WARNING);
 
   const configured = instance.config.sources.map((s) => s.id);
   const recorded = await sourcesWithRecords(instance.store);

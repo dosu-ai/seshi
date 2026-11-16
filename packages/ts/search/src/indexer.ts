@@ -40,6 +40,12 @@ export interface IndexerOptions {
   pageSize?: number;
   budget?: number;
   ownerRefreshMs?: number;
+  /** Only these owners' feeds are read, without listing `owners/` (F11.9, scope `mine`: a key
+   * limited to its own folder may not list the others); every owner's when omitted. */
+  owners?: readonly string[];
+  /** Only sessions this admits are indexed; one it stops admitting is removed (F11.9, scope
+   * `visible`: others' owner-only sessions are left out). */
+  admit?: (session: { owner: string; visibility?: SessionMetadata["visibility"] }) => boolean;
 }
 
 export interface IndexerRun {
@@ -179,6 +185,8 @@ export class Indexer {
   private readonly pageSize: number;
   private readonly budget: number;
   private readonly ownerRefreshMs: number;
+  private readonly fixedOwners: readonly string[] | undefined;
+  private readonly admit: IndexerOptions["admit"];
   private owners: { list: string[]; at: number } | undefined;
   private running: Promise<IndexerRun> | undefined;
 
@@ -192,6 +200,8 @@ export class Indexer {
     this.pageSize = options.pageSize ?? FEED_PAGE;
     this.budget = options.budget ?? RUN_BUDGET;
     this.ownerRefreshMs = options.ownerRefreshMs ?? OWNER_REFRESH_MS;
+    this.fixedOwners = options.owners;
+    this.admit = options.admit;
   }
 
   /** One pass over every owner's feed, up to the run's budget. A second call while one runs
@@ -231,6 +241,7 @@ export class Indexer {
   }
 
   private async ownerList(): Promise<string[]> {
+    if (this.fixedOwners) return [...this.fixedOwners];
     const now = this.now().getTime();
     const cached = this.owners;
     if (cached && cached.list.length > 0 && now - cached.at < this.ownerRefreshMs) {
@@ -381,7 +392,12 @@ export class Indexer {
     attempt = 0,
   ): Promise<Plan> {
     const { readAt, metadata } = await this.stampedMetadata(owner, archive);
-    if (metadata === null || metadata.status === "redacted" || metadata.head === undefined) {
+    if (
+      metadata === null ||
+      metadata.status === "redacted" ||
+      metadata.head === undefined ||
+      (this.admit !== undefined && !this.admit({ owner, visibility: metadata.visibility }))
+    ) {
       return { kind: "remove", owner, archive, read_at: readAt, metadata };
     }
     const held = this.index.session(owner, archive);

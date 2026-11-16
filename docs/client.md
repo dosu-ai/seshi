@@ -11,9 +11,9 @@ declarations:
 
 They are for programs that talk to a server: an uploader of your own, a reader that tails the
 change feed, a tool that searches. To capture sessions on a laptop, use the `seshi` binary
-([capture.md](capture.md)); to write your own bucket without a server, use the CLI's local mode
-([config.md](config.md#the-clis-config)). There is no library that writes a bucket directly
-(X3.5): the server, or the in-process Instance local mode builds, is the only writer, so
+([capture.md](capture.md)); to write a bucket without a server, use the CLI's serverless mode
+([serverless.md](serverless.md)). There is no library that writes a bucket directly
+(X3.5): the server, or the in-process Instance serverless mode builds, is the only writer, so
 redaction always runs.
 
 ## `@seshi/client`

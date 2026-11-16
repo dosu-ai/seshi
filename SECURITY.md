@@ -75,10 +75,13 @@ the built-in pack, so nothing a rule knows leaves the machine; the server does n
 and redacts again. Each session has a random retraction secret that stays on the machine (only
 its hash is sent), so a leaked device token or org key cannot delete anyone's sessions.
 
-**Local mode puts the bucket key on the laptop.** One person who owns a bucket can skip the
-server (`[local]` in the CLI config). The pipeline, redaction included, then runs in the CLI, and
-that person's machine holds the bucket credential. Use it for a bucket only that person reads;
-a team should run a server.
+**Serverless mode puts a bucket key on every laptop.** A person or a team can skip the server
+(`seshi init --serverless`, [docs/serverless.md](docs/serverless.md)). The pipeline, redaction
+and model review included, then runs in each CLI, and each machine holds a bucket credential:
+the bucket's permissions are the only roles. Redaction and review are trusted to the laptops,
+and "visible only to its owner" is kept by the CLI, not enforced, unless the keys are limited
+to each owner's folder. A team that needs redaction a laptop cannot skip, enforced owner-only
+sessions, or company sign-in should run a server.
 
 **Sources hold credentials of their own.** A Datadog source's API and application keys are
 sent only to `https://api.<site>` (or an `https` `api_url`), and redirects are never followed.

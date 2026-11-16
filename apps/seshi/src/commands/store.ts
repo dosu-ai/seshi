@@ -2,12 +2,20 @@ import { existsSync } from "node:fs";
 import { type ParseArgsConfig, parseArgs } from "node:util";
 import { ConfigError, findServerConfig, loadServerConfig } from "@seshi/config";
 import { storeOptions } from "@seshi/instance";
-import { type CheckReport, checkStore, type Finding, isOwner, openStore } from "@seshi/store";
+import {
+  type CheckReport,
+  checkStore,
+  type Finding,
+  isOwner,
+  openStore,
+  type Store,
+} from "@seshi/store";
 import { openAccount } from "../account/account";
 import { EXIT } from "../cli/exit";
 import { emit, fail, helpOrUsageError, takeJson } from "../cli/output";
 import { printable, type Style, styleFor } from "../cli/style";
-import { expandHome } from "../connect";
+import { openServerlessStore } from "../serverless/open";
+import { isServerless } from "../serverless/settings";
 import type { CommandContext } from "./index";
 import { configFlags } from "./serve-settings";
 import { cwdConfigHint, SERVER_OPTIONS, serverFailure } from "./server-instance";
@@ -55,13 +63,13 @@ function parse(args: string[], options: NonNullable<ParseArgsConfig["options"]>)
   }
 }
 
-function configFile(ctx: CommandContext, values: CheckValues): string | undefined {
-  if (values.config !== undefined || (values.set?.length ?? 0) > 0) return values.config;
+/** The serverless bucket the CLI config names, when no server config is given or found. */
+function serverlessHere(ctx: CommandContext, values: CheckValues): boolean {
+  if (values.config !== undefined || (values.set?.length ?? 0) > 0) return false;
   const found = findServerConfig({ env: ctx.env, cwd: process.cwd(), exists: existsSync });
-  if (found.path !== undefined) return undefined;
+  if (found.path !== undefined) return false;
   cwdConfigHint(ctx, undefined);
-  const account = openAccount(ctx);
-  return account.cli.local ? expandHome(account.cli.local.config, account.home) : undefined;
+  return isServerless(openAccount(ctx).cli);
 }
 
 async function check(ctx: CommandContext, json: boolean, args: string[]): Promise<number> {
@@ -73,17 +81,32 @@ async function check(ctx: CommandContext, json: boolean, args: string[]): Promis
   for (const owner of values.owner ?? []) {
     if (!isOwner(owner)) throw new UsageError(`'${owner}' is not an owner id`);
   }
-  const file = configFile(ctx, values);
-  const loaded = loadServerConfig({ configFlag: file, env: ctx.env, flags: configFlags(values) });
-  for (const warning of loaded.warnings) ctx.stderr(`seshi: warning: ${warning}`);
-  let opened: ReturnType<typeof openStore>;
-  try {
-    opened = openStore(loaded.config.store.url, { ...storeOptions(loaded.config), env: ctx.env });
-  } catch (err) {
-    if (err instanceof ConfigError) throw err;
-    return fail(ctx, json, EXIT.config, "config", (err as Error).message);
+  let store: Store;
+  if (serverlessHere(ctx, values)) {
+    const account = openAccount(ctx);
+    ({ store } = await openServerlessStore({
+      cli: account.cli,
+      env: ctx.env,
+      home: account.home,
+      secrets: account.secrets,
+    }));
+  } else {
+    const loaded = loadServerConfig({
+      configFlag: values.config,
+      env: ctx.env,
+      flags: configFlags(values),
+    });
+    for (const warning of loaded.warnings) ctx.stderr(`seshi: warning: ${warning}`);
+    try {
+      store = openStore(loaded.config.store.url, {
+        ...storeOptions(loaded.config),
+        env: ctx.env,
+      }).store;
+    } catch (err) {
+      if (err instanceof ConfigError) throw err;
+      return fail(ctx, json, EXIT.config, "config", (err as Error).message);
+    }
   }
-  const { store } = opened;
   const report = await checkStore(store, values.owner ? { owners: values.owner } : {});
   const style = await styleFor(ctx, { json });
   emit(ctx, json, { store: store.url, ...report }, () => lines(store.url, report, style));

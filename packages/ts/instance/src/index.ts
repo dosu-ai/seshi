@@ -44,5 +44,6 @@ export {
   type InstanceStatus,
   instanceStatus,
   type JobStatus,
+  SERVERLESS_BUCKET_WARNING,
   type WorkerView,
 } from "./status";

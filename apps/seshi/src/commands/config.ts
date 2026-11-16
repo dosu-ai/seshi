@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { parseArgs } from "node:util";
 import {
   type CheckReport,
+  type CliConfig,
   type ConfigEntry,
   ConfigError,
   checkServerConfig,
@@ -99,7 +100,19 @@ function check(ctx: CommandContext, options: Options): number {
   let report: CheckReport = { warnings: [], notices: [] };
   try {
     if (options.cli) {
-      loaded = loadCli(ctx, options, true);
+      const cli = loadCli(ctx, options, true);
+      loaded = cli;
+      const old = (cli.config as CliConfig).local;
+      if (old) {
+        report.notices.push(
+          [
+            "[local] is the old name of [serverless] (F11.1); it still works. The new table:",
+            "  [serverless]",
+            `  config = ${JSON.stringify(old.config)}`,
+            ...(old.owner !== undefined ? [`  owner = ${JSON.stringify(old.owner)}`] : []),
+          ].join("\n"),
+        );
+      }
     } else {
       const server = loadServer(ctx, options, true);
       loaded = server;

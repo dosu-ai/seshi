@@ -25,7 +25,7 @@ and writes the result to S3, Cloudflare R2, any S3-compatible store or a folder,
 
 - **The bucket never holds an unredacted byte.** Redaction runs before anything is written,
   and there is no switch to turn it off. The raw transcript is never stored.
-- **In a team, laptops never hold a bucket credential.** Each machine holds a revocable seshi
+- **With a server, laptops never hold a bucket credential.** Each machine holds a revocable seshi
   credential instead: with an identity provider, a device token that can only write its
   person's sessions; without one, the org key every member shares.
 - **The archive does not depend on the server.** Traces are content-addressed files with a
@@ -44,39 +44,32 @@ options and checksums.
 
 ## Quick start: just you
 
-With no server, the CLI writes your own bucket directly. This is local mode: the same pipeline,
-redaction included, running in the CLI.
-
-Name the bucket in a server config, and point the CLI's config at it:
-
-```toml
-# ~/.config/seshi/seshi.toml
-[store]
-url = "file:///Users/alice/seshi"      # or s3://bucket/prefix (with region), r2://bucket/prefix (with account_id)
-```
-
-```toml
-# ~/.config/seshi/config.toml (on Windows, %APPDATA%\seshi\config.toml)
-[local]
-config = "~/.config/seshi/seshi.toml"
-```
-
-Then capture, backfill, and search:
+With no server, the CLI writes your own bucket directly. This is serverless mode: the same
+pipeline, redaction included, running in the CLI.
 
 ```sh
-seshi whoami                       # alice in local mode: sessions go straight to file:///Users/alice/seshi
+seshi init --serverless --url file:///Users/alice/seshi   # or s3://bucket/prefix (with --region), r2://bucket/prefix (with --account-id)
 seshi capture install              # hooks into every agent found on this machine
 seshi upload --since 30d           # the last 30 days of those agents' sessions
 seshi sessions ls
 seshi search flaky checkout test
 ```
 
+`init` tests the bucket, marks it as a seshi bucket, keeps the bucket's key (it asks for one for
+`s3://` and `r2://`) in your keychain, and writes `[serverless]` to the CLI config.
+`seshi whoami` says where sessions go.
+
 From now on each agent session is uploaded as it goes. In Claude Code the status line says
 `Session Capture ◉` while the session is captured and `Session Capture ⏸` when it is not.
 
 ## Quick start: a team
 
-One server holds the bucket's keys; everyone's laptop talks to it.
+A team can share one bucket with no server: an admin runs `seshi init --serverless --admin`,
+and each member runs `seshi init --serverless` with a key that can write their own folder. Each
+laptop then runs the pipeline and writes the bucket itself
+([docs/serverless.md](docs/serverless.md), which also says what needs a server).
+
+With a server, it holds the bucket's keys and everyone's laptop talks to it.
 
 On the server, write `seshi.toml`, then set up the first credentials and start it:
 

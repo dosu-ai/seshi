@@ -87,6 +87,7 @@ describe("the CLI's config", () => {
       user: "alice@acme.com",
       theme: "dark",
       keychain: true,
+      search: { scope: "visible" },
       capture: { enabled: false, paths: [{ path: "~/clients/acme", capture: false }], remotes: [] },
     });
   });
@@ -97,6 +98,7 @@ describe("the CLI's config", () => {
     expect(loaded.config).toEqual({
       theme: "auto",
       keychain: true,
+      search: { scope: "visible" },
       capture: { enabled: true, paths: [], remotes: [] },
     });
   });

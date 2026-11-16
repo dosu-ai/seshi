@@ -23,7 +23,8 @@ const USAGE = `usage: seshi sessions ls [--owner <id>] [--limit N] [--after <cur
        seshi sessions export <agent> <session-id> [--format seshi|letta|otlp|atif] [--hash <h>] [-o <file>] [--owner <id>]
        seshi sessions rm <agent> <session-id> [--owner <id>] [--yes]
        seshi sessions visibility <agent> <session-id> org|owner [--owner <id>]
-       (each also takes --server <url> and --json)`;
+       (each also takes --server <url> and --json; in serverless mode, ls, show and export
+        take --include-private to read others' owner-only sessions too)`;
 
 const OPTIONS = {
   server: { type: "string" },
@@ -36,9 +37,11 @@ const OPTIONS = {
   hash: { type: "string" },
   output: { type: "string", short: "o" },
   yes: { type: "boolean", short: "y" },
+  "include-private": { type: "boolean" },
 } as const;
 
 interface Values {
+  "include-private"?: boolean;
   server?: string;
   owner?: string;
   limit?: string;
@@ -480,7 +483,10 @@ export async function run(ctx: CommandContext): Promise<number> {
     }
     account = openAccount(ctx);
     const style = await styleFor(ctx, { json, theme: account.cli.theme });
-    const server = values.server ? { server: values.server } : {};
+    const server = {
+      ...(values.server ? { server: values.server } : {}),
+      ...(values["include-private"] ? { includePrivate: true } : {}),
+    };
     backend = await openBackend(
       ctx,
       account,

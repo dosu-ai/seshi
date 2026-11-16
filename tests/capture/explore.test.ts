@@ -8,6 +8,7 @@
 
 import { appendFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { ensureLayout, FsStore } from "@seshi/store";
 import { type Assets, buildAssets, startExplore } from "seshi/explore";
 import { INTEGRATIONS } from "seshi/integrations";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -239,7 +240,7 @@ describe("seshi explore (29)", () => {
   });
 });
 
-describe("seshi explore in local mode (X3.5)", () => {
+describe("seshi explore in serverless mode (F11)", () => {
   beforeEach(async () => {
     server = await startServer();
   });
@@ -251,6 +252,10 @@ describe("seshi explore in local mode (X3.5)", () => {
       mode: 0o600,
     });
     machine.cliConfig(`[local]\nconfig = "${toml}"\nowner = "me"\n`);
+    await ensureLayout(new FsStore(join(machine.dir, "bucket")), {
+      createdBy: "test",
+      mode: "serverless",
+    });
     const code = join(machine.dir, "code");
     mkdirSync(code);
     const localFile = join(machine.dir, "l1.jsonl");
@@ -261,7 +266,7 @@ describe("seshi explore in local mode (X3.5)", () => {
     const x = await explore(machine);
     cleanups.push(() => x.close());
     const list = await x.json<{ server: { mode: string } }>("/api/sessions");
-    expect(list.server.mode).toBe("local");
+    expect(list.server.mode).toBe("serverless");
     const view = await x.json<{ rows: Row[] }>("/api/sessions/claude-code/l1/records?limit=500");
     expect(view.rows.length).toBeGreaterThan(1);
     expect(view.rows.every((r) => r.state === "same")).toBe(true);

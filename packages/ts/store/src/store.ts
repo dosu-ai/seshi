@@ -55,6 +55,8 @@ export interface ListedKey {
    * between the listing and the look. */
   modified?: string;
   size?: number;
+  /** The object's ETag, when the listing says (S3 does; the folder store does not). */
+  etag?: string;
 }
 
 export interface ListResult {
@@ -91,6 +93,29 @@ export class PreconditionFailed extends StoreError {
 
 export function isPreconditionFailed(err: unknown): err is PreconditionFailed {
   return err instanceof PreconditionFailed;
+}
+
+/** The bucket refused the request (S3's `403 AccessDenied`): the key in use may not do this
+ * to this object. In serverless mode the bucket's permissions are the only roles (F11.4), so
+ * this is how "not allowed" arrives. */
+export class AccessDenied extends StoreError {
+  constructor(
+    readonly operation: "read" | "write" | "stat" | "delete" | "list",
+    readonly key: string,
+    cause?: unknown,
+  ) {
+    super(`${operation} ${key || "/"}: access denied`, cause);
+    this.name = "AccessDenied";
+  }
+}
+
+/** The `AccessDenied` behind `err`, following `cause`s; undefined when there is none. */
+export function accessDeniedIn(err: unknown): AccessDenied | undefined {
+  for (let at: unknown = err, depth = 0; at instanceof Error && depth < 8; depth++) {
+    if (at instanceof AccessDenied) return at;
+    at = (at as { cause?: unknown }).cause;
+  }
+  return undefined;
 }
 
 export async function getBytes(store: Store, key: string): Promise<Uint8Array | null> {

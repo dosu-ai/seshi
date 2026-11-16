@@ -24,6 +24,7 @@ import { EXIT } from "../cli/exit";
 import { failWith, Refused } from "../cli/failures";
 import { emit, helpOrUsageError, takeJson } from "../cli/output";
 import { printable, type Style, styleFor } from "../cli/style";
+import { isServerless } from "../serverless/settings";
 import { USER_AGENT } from "../user-agent";
 import type { CommandContext } from "./index";
 
@@ -226,11 +227,11 @@ export async function run(ctx: CommandContext): Promise<number> {
   try {
     const account = openAccount(ctx);
     const style = await styleFor(ctx, { json, theme: account.cli.theme });
-    if (account.cli.local) {
+    if (isServerless(account.cli)) {
       throw new Refused(
         EXIT.config,
-        "local_mode",
-        `the CLI config (${account.cliFile}) uses local mode ([local]): sessions go straight to your bucket and need no sign-in. Remove [local] to use a server.`,
+        "serverless_mode",
+        `the CLI config (${account.cliFile}) uses serverless mode ([${account.cli.serverless ? "serverless" : "local"}]): sessions go straight to the bucket and need no sign-in. Remove it to use a server.`,
       );
     }
     const server = serverOf(account, values.server);

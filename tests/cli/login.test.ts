@@ -307,7 +307,7 @@ describe("signing in without an IdP (X5.12)", () => {
 });
 
 describe("what login refuses", () => {
-  it("needs a server, refuses local mode, a bad URL and a server that is not seshi", async () => {
+  it("needs a server, refuses serverless mode, a bad URL and a server that is not seshi", async () => {
     const none = await machine.seshi(["login"]);
     expect(none.code).toBe(2);
     expect(none.err).toContain("seshi login --server <url>");
@@ -321,7 +321,7 @@ describe("what login refuses", () => {
     machine.cliConfig('[local]\nconfig = "~/seshi.toml"\n');
     const local = await machine.seshi(["login", "--server", server.url]);
     expect(local.code).toBe(3);
-    expect(local.err).toContain("local mode");
+    expect(local.err).toContain("serverless mode ([local])");
   });
 
   it("is not signed in before login", async () => {

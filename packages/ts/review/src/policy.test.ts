@@ -118,6 +118,7 @@ describe("providerFactory", () => {
           timeout_ms: 1,
         },
         "decision",
+        "p",
       ),
     ).toThrow(ReviewSetupError);
   });

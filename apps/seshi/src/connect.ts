@@ -1,12 +1,11 @@
-import { homedir } from "node:os";
-import { join } from "node:path";
-import { usernameOwner } from "@seshi/auth";
 import { HttpSessionDB } from "@seshi/client";
-import { type CliConfig, loadServerConfig } from "@seshi/config";
-import { buildInstance, type Instance } from "@seshi/instance";
+import type { CliConfig } from "@seshi/config";
+import type { Instance } from "@seshi/instance";
 import type { Integration } from "@seshi/kit";
 import type { SessionDB } from "@seshi/model";
-import { buildFormats } from "./integrations";
+import type { SecretBackend } from "./account/secrets";
+import { openServerless, SERVERLESS_BASIS, type ServerlessBucket } from "./serverless/open";
+import { isServerless, serverlessOwner } from "./serverless/settings";
 import { USER_AGENT } from "./user-agent";
 
 /** The CLI config names neither a server nor local mode, or names one it cannot use. */
@@ -19,54 +18,59 @@ export class NotConnected extends Error {
 
 export interface Connection {
   db: SessionDB;
-  mode: "server" | "local";
-  /** Local mode's instance, for commands that need more than the session API. */
+  mode: "server" | "serverless";
+  /** Serverless mode's instance, for commands that need more than the session API. */
   instance?: Instance;
-  /** Write what is pending (local mode's source health) and let go. */
+  /** Serverless mode: the bucket as this machine opened it. */
+  bucket?: ServerlessBucket;
+  /** Let go of what was opened. */
   close(): Promise<void>;
 }
 
 export interface ConnectOptions {
   cli: CliConfig;
   env: Record<string, string | undefined>;
-  /** The home folder, for `~` in `local.config`. */
+  /** The home folder, for `~` in `serverless.config`. */
   home?: string;
   /** For a server: the credential `seshi login` stored. */
   token?: string;
   user?: string;
   integrations: readonly Integration[];
+  /** Serverless mode: where the bucket key and review keys are kept. */
+  secrets?: SecretBackend;
+  /** Serverless mode: the command writes (see `openServerless`). */
+  write?: boolean;
+  /** Serverless mode: keep a search index; the CLI config's `[search] enabled` when unset. */
+  search?: boolean;
+  log?: (line: string) => void;
 }
 
-/** `~` and `~/…` as the home folder. */
-export function expandHome(path: string, home: string): string {
-  if (path === "~") return home;
-  return path.startsWith("~/") ? join(home, path.slice(2)) : path;
-}
+export { expandHome } from "./serverless/settings";
 
+/** The owner a serverless laptop writes as. */
 export function localOwner(cli: CliConfig, env: Record<string, string | undefined>): string {
-  const named = cli.local?.owner ?? cli.user ?? env.USER ?? env.USERNAME ?? "local";
-  return usernameOwner(named) ?? "local";
+  return serverlessOwner(cli, env);
 }
 
 export async function connect(options: ConnectOptions): Promise<Connection> {
   const { cli, env } = options;
-  if (cli.local) {
-    const home = options.home ?? env.HOME ?? env.USERPROFILE ?? homedir();
-    const file = expandHome(cli.local.config, home);
-    const loaded = loadServerConfig({ configFlag: file, env });
-    const owner = localOwner(cli, env);
-    const instance = await buildInstance(loaded.config, {
-      formats: buildFormats(options.integrations),
-      integrations: options.integrations,
+  if (isServerless(cli)) {
+    const bucket = await openServerless({
+      cli,
       env,
-      roles: [],
-      probe: [owner],
+      ...(options.home !== undefined ? { home: options.home } : {}),
+      integrations: options.integrations,
+      ...(options.secrets ? { secrets: options.secrets } : {}),
+      write: options.write ?? false,
+      ...(options.search !== undefined ? { search: options.search } : {}),
+      ...(options.log ? { log: options.log } : {}),
     });
     return {
-      db: instance.localSessions(owner),
-      mode: "local",
-      instance,
-      close: () => instance.close(),
+      db: bucket.instance.localSessions(bucket.owner, SERVERLESS_BASIS),
+      mode: "serverless",
+      instance: bucket.instance,
+      bucket,
+      close: () => bucket.close(),
     };
   }
   if (cli.server) {
@@ -85,6 +89,6 @@ export async function connect(options: ConnectOptions): Promise<Connection> {
     };
   }
   throw new NotConnected(
-    "no server or local bucket configured: run seshi login --server <url>, or set [local] config in the CLI config",
+    "no server or bucket configured: run seshi login --server <url>, or seshi init --serverless",
   );
 }

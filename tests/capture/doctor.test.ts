@@ -10,7 +10,14 @@ import { join } from "node:path";
 import { getSession } from "@seshi/pipeline";
 import { reviewerFromConfig } from "@seshi/review";
 import { type FakeServer, fakeProviderServer, KeywordModel } from "@seshi/review/testing";
-import { archiveId, gunzipJson, gzipJsonDeterministic, keys } from "@seshi/store";
+import {
+  archiveId,
+  ensureLayout,
+  FsStore,
+  gunzipJson,
+  gzipJsonDeterministic,
+  keys,
+} from "@seshi/store";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Machine, startServer, type TestServer } from "../tooling/cli";
 import { serverConfig } from "../tooling/instance";
@@ -286,7 +293,7 @@ describe("seshi doctor on a stub (F3.4)", () => {
   });
 });
 
-describe("seshi doctor in local mode (X3.5)", () => {
+describe("seshi doctor in serverless mode (F11)", () => {
   beforeEach(async () => {
     await boot();
   });
@@ -297,6 +304,10 @@ describe("seshi doctor in local mode (X3.5)", () => {
     const toml = join(local.dir, "seshi.toml");
     writeFileSync(toml, `[store]\nurl = "file://${join(local.dir, "bucket")}"\n`, { mode: 0o600 });
     local.cliConfig(`[local]\nconfig = "${toml}"\nowner = "me"\n`);
+    await ensureLayout(new FsStore(join(local.dir, "bucket")), {
+      createdBy: "test",
+      mode: "serverless",
+    });
     const code = join(local.dir, "code");
     mkdirSync(code);
     const localFile = join(local.dir, "l1.jsonl");
@@ -322,7 +333,7 @@ describe("seshi doctor in local mode (X3.5)", () => {
     expect(run.code, run.out).toBe(0);
     const [session] = JSON.parse(run.out).sessions;
     const by = Object.fromEntries(session.checks.map((c: Check) => [c.id, c]));
-    expect(session.evidence.server).toMatchObject({ mode: "local", sees_stubs: true });
+    expect(session.evidence.server).toMatchObject({ mode: "serverless", sees_stubs: true });
     for (const id of ["presence", "records", "prefix", "chain", "residue", "changes"]) {
       expect(by[id]?.status, `${id}: ${by[id]?.summary}`).toBe("ok");
     }

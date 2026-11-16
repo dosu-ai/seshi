@@ -55,7 +55,17 @@ export {
   recordKeyHash,
   stampTime,
 } from "./layout";
-export { ensureLayout, LayoutError, type LayoutOptions, readLayout } from "./marker";
+export {
+  ensureLayout,
+  LayoutError,
+  type LayoutOptions,
+  type LayoutPatch,
+  NoLayout,
+  parseVersion,
+  readLayout,
+  setLayout,
+  versionAtLeast,
+} from "./marker";
 export {
   CHECKPOINT_SCHEMA,
   type Checkpoint,
@@ -155,6 +165,14 @@ export {
   withInput,
 } from "./spans";
 export {
+  type StorageStep,
+  type StorageTestResult,
+  storageTest,
+  storageTestKey,
+} from "./storage-test";
+export {
+  AccessDenied,
+  accessDeniedIn,
   type DeleteOptions,
   getBytes,
   isPreconditionFailed,

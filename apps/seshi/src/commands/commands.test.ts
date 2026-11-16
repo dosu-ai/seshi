@@ -115,6 +115,7 @@ describe("the command groups (F8.1)", () => {
         "explore",
         "healthcheck",
         "hook",
+        "init",
         "login",
         "logout",
         "normalize",

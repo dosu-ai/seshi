@@ -51,6 +51,7 @@ import { failWith } from "../cli/failures";
 import { emit, fail, helpOrUsageError, takeJson } from "../cli/output";
 import { hookCommand, inNpxCache, isCompiled } from "../cli/spawn";
 import { printable, type Style, styleFor } from "../cli/style";
+import { isServerless } from "../serverless/settings";
 import { hostOf, pathsOf, startUploader } from "./capture-host";
 import type { CommandContext } from "./index";
 
@@ -299,7 +300,7 @@ async function install(ctx: CommandContext, json: boolean, args: Args): Promise<
     ? await installService(serviceContext(ctx, serviceCommand(command)))
     : undefined;
   const account = accountOrNone(ctx);
-  const target = account?.cli.local ? "local" : account?.cli.server;
+  const target = account && isServerless(account.cli) ? "serverless" : account?.cli.server;
   const style = await styleFor(ctx, { json, ...(account ? { theme: account.cli.theme } : {}) });
   emit(
     ctx,
@@ -324,7 +325,7 @@ async function install(ctx: CommandContext, json: boolean, args: Args): Promise<
           ]
         : []),
       target
-        ? `Sessions from now on are uploaded to ${target === "local" ? "the local bucket" : target}.`
+        ? `Sessions from now on are uploaded to ${target === "serverless" ? "the bucket in [serverless], directly" : target}.`
         : `Not signed in yet: run ${style.bold("seshi login --server <url>")}; sessions wait until then.`,
     ],
   );
@@ -439,7 +440,9 @@ async function status(ctx: CommandContext, json: boolean, args: Args): Promise<n
     });
   }
   const account = accountOrNone(ctx);
-  const target = state.uploader?.target ?? (account?.cli.local ? "local" : account?.cli.server);
+  const target =
+    state.uploader?.target ??
+    (account && isServerless(account.cli) ? "serverless" : account?.cli.server);
   const service = await serviceInstalled(serviceContext(ctx, hookCommand())).catch(() => false);
   const queued = (state.uploader?.queued ?? 0) + spoolCount(paths);
   const running = uploaderRunning(paths, now);
@@ -500,10 +503,16 @@ async function status(ctx: CommandContext, json: boolean, args: Args): Promise<n
             `  ${style.warn("stopped")}: ${stopped} session${stopped === 1 ? "" : "s"} stopped by a pause send nothing more; seshi capture on --session <id> uploads one in full`,
           ]
         : []),
-      `  uploads go to: ${target ? printable(target) : "nowhere yet (seshi login --server <url>)"}`,
+      `  uploads go to: ${target ? printable(target) : "nowhere yet (seshi login --server <url>, or seshi init --serverless)"}`,
       `  uploader: ${running ? "running" : "not running"}${service ? " (service)" : ""} · ${queued} queued${state.uploader?.last_run ? ` · last ran ${state.uploader.last_run}` : ""}`,
       ...(problems.sign_in
-        ? [`  ${style.status("sign in", "warn")}: ${printable(problems.sign_in.message)}`]
+        ? problems.sign_in.message
+            .split("\n")
+            .map((line, i) =>
+              i === 0
+                ? `  ${style.status(problems.sign_in?.word ?? "sign in", "warn")}: ${printable(line)}`
+                : `    ${printable(line)}`,
+            )
         : []),
       ...(problems.upload
         ? [`  ${style.status("upload failing", "error")}: ${printable(problems.upload.message)}`]

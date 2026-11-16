@@ -67,9 +67,10 @@ export async function run(ctx: CommandContext): Promise<number> {
     });
     if (values.once && lock) {
       const summary = await runtime.uploader.pass({ sweep: true });
+      await runtime.upkeep();
       emit(ctx, json, summary, () => [
         `taken ${summary.taken} · found ${summary.found} · uploaded ${summary.uploaded} · retracted ${summary.retracted} · failed ${summary.failed} · queued ${summary.queued}`,
-        ...(summary.signIn ? [`sign in: ${summary.signIn}`] : []),
+        ...(summary.signIn ? [`held: ${summary.signIn.split("\n")[0]}`] : []),
       ]);
       return summary.signIn ? EXIT.auth : EXIT.ok;
     }
@@ -77,9 +78,11 @@ export async function run(ctx: CommandContext): Promise<number> {
       lock ??= await waitForLock(paths, stop.signal, LOCK_WAIT_MS);
       if (!lock) break;
       log(`started (pid ${process.pid})`);
+      const upkeep = upkeepEvery(runtime, UPKEEP_TICK_MS);
       try {
         await runtime.uploader.run({ signal: stop.signal, keepAlive, lock });
       } finally {
+        upkeep.stop();
         lock.release();
         lock = null;
       }
@@ -99,6 +102,25 @@ export async function run(ctx: CommandContext): Promise<number> {
 }
 
 const LOCK_WAIT_MS = 30_000;
+
+/** How often the daemon looks for due upkeep jobs (serverless mode); each job has its own
+ * period. */
+export const UPKEEP_TICK_MS = 60_000;
+
+function upkeepEvery(runtime: { upkeep(): Promise<void> }, everyMs: number): { stop(): void } {
+  let running = false;
+  const tick = () => {
+    if (running) return;
+    running = true;
+    void runtime.upkeep().finally(() => {
+      running = false;
+    });
+  };
+  const timer = setInterval(tick, everyMs);
+  timer.unref?.();
+  tick();
+  return { stop: () => clearInterval(timer) };
+}
 
 export async function waitForLock(
   paths: ReturnType<typeof capturePaths>,

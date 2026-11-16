@@ -14,7 +14,8 @@ import { type ExploreServer, startExploreServer } from "../explore/server";
 import { pathsOf } from "./capture-host";
 import type { CommandContext } from "./index";
 
-const USAGE = "usage: seshi explore [--port <n>] [--no-open] [--server <url>] [--since <duration>]";
+const USAGE =
+  "usage: seshi explore [--port <n>] [--no-open] [--server <url>] [--since <duration>] [--include-private]";
 
 export const DEFAULT_SINCE_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -23,6 +24,8 @@ export interface ExploreArgs {
   open: boolean;
   server?: string;
   since?: string;
+  /** Serverless mode: read others' owner-only sessions too. */
+  includePrivate?: boolean;
 }
 
 export function parseExploreArgs(argv: readonly string[]): ExploreArgs | string {
@@ -32,6 +35,9 @@ export function parseExploreArgs(argv: readonly string[]): ExploreArgs | string 
     switch (word) {
       case "--no-open":
         args.open = false;
+        break;
+      case "--include-private":
+        args.includePrivate = true;
         break;
       case "--port":
       case "--server":
@@ -77,6 +83,7 @@ export async function startExplore(
     account = openAccount(ctx);
     backend = await openBackend(ctx, account, {
       ...(args.server ? { server: args.server } : {}),
+      ...(args.includePrivate ? { includePrivate: true } : {}),
       purpose: "read",
     });
   } catch (err) {

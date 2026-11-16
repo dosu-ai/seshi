@@ -23,7 +23,7 @@ import {
   ruleSetFromDocument,
 } from "@seshi/redact";
 import type { Account } from "../account/account";
-import { type Backend, LocalBackend } from "../backend";
+import { type Backend, ServerlessBackend } from "../backend";
 import { allCaptureAgents } from "../capture-agents";
 import { hostOf } from "../commands/capture-host";
 import type { CommandContext } from "../commands/index";
@@ -145,7 +145,7 @@ export async function realDeps(ctx: CommandContext, options: RealDepsOptions): P
   };
   const backend = options.backend;
   const redaction =
-    backend instanceof LocalBackend
+    backend instanceof ServerlessBackend
       ? ruleRedaction(backend.instance.redaction, "the local bucket's rules", "redact-on-write")
       : uploaderRules(paths, backend?.where);
   return {

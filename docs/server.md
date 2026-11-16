@@ -9,9 +9,11 @@ spans, Datadog, an S3 bucket) through the same pipeline. The transcript itself i
 (X6.3): the redacted trace is the only copy. Anything that reads the layout can read the bucket
 directly: the server is a writer, and no reader depends on it.
 
-For one person who owns a bucket, the server is optional: the CLI's local mode (X3.5) builds
-the same pipeline in-process ([config.md](config.md#the-clis-config)). For a team, the server
-is the point: laptops hold no bucket credential, and redaction is not a laptop's to skip.
+The server is optional. In serverless mode ([serverless.md](serverless.md), F11) each
+laptop's CLI builds the same pipeline in-process and writes its owner's folder of a shared
+bucket, for one person or a team. Run a server when laptops should hold no bucket credential,
+when redaction must not be a laptop's to skip, or for what only a server does: sources, OTLP
+intake, sign-in through an IdP, enforced owner-only sessions and one shared search index.
 
 ```
 capture uploader, seshi upload, any client ──POST /v1/sessions──▶ seshi serve
@@ -58,7 +60,10 @@ source and Bun reads `.env` (copy [`.env.example`](../.env.example)); `docker co
 hands the container the same `.env`.
 
 At boot the server writes the layout marker and a probe object, so a wrong bucket or key fails
-there and not on the first session. Put TLS in front of it (a reverse proxy, a load balancer,
+there and not on the first session. On a bucket whose marker says it is used in serverless mode
+(F11.8), the server still starts: it logs, and `seshi workers status` reports, that laptops may
+be writing the bucket directly. Run `seshi admin mode server` once they have moved to the server
+([serverless.md](serverless.md#switching-modes)). Put TLS in front of it (a reverse proxy, a load balancer,
 Cloud Run): transcripts arrive unredacted, and the server is where that stops being true.
 
 The settings most servers need ([config.md](config.md) has all of them):
@@ -135,7 +140,7 @@ The commands and their exit codes are in [cli.md](cli.md).
 ### Checking the bucket
 
 `seshi store check [--owner <id>]… [--json]`, where the config and bucket keys are (or against
-local mode's bucket), reads the whole bucket and reports where it breaks the invariants of
+the CLI config's serverless bucket), reads the whole bucket and reports where it breaks the invariants of
 [spec/layout.md](../spec/layout.md): a missing or foreign layout marker; metadata that does not
 parse, match its schema or name its own key; a head or listed trace with no object, or an
 object whose records do not hash to its key; a continuation chain that does not join up from
@@ -240,7 +245,9 @@ bucket or prefix. Isolation between teams comes from the deployment, not the cod
 A reader reads through the API with a service token (`seshi tokens create service --service
 <name>`, or `POST /v1/tokens {kind: "service", service: "<name>"}`) and
 [`@seshi/client`](client.md): it reads and searches every session, and tails each owner's
-`/v1/changes`. Bucket keys stay on the server (X5.6). A read-only bucket credential
+`/v1/changes`. With a server, bucket keys stay on the server (X5.6); in serverless mode each
+laptop holds one, and the bucket's permissions decide what it may do
+([serverless.md](serverless.md#credentials)). A read-only bucket credential
 (`s3:ListBucket` on the prefix, `s3:GetObject` under it) still works for a reader that tails
 `changes/` itself, but it skips every check, so it counts as org-wide read; `GET /v1/me` tells a
 client which bucket that is.

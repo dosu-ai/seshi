@@ -1,6 +1,7 @@
 import type { Fetch } from "@seshi/model";
 import { FetchS3Client, S3HttpError } from "./s3-fetch";
 import {
+  AccessDenied,
   type DeleteOptions,
   type ListedKey,
   type ListOptions,
@@ -42,6 +43,10 @@ export function parseS3Url(url: string): { scheme: "s3" | "r2"; bucket: string; 
   const [, scheme, bucket, rawPrefix] = match;
   const prefix = (rawPrefix ?? "").replace(/^\/+|\/+$/g, "");
   return { scheme: scheme as "s3" | "r2", bucket: bucket as string, prefix };
+}
+
+function denied(err: unknown): boolean {
+  return err instanceof S3HttpError && err.status === 403;
 }
 
 function conditionFailed(err: unknown): boolean {
@@ -111,10 +116,29 @@ export class S3Store implements Store {
     return this.prefix ? `${this.prefix}/${key}` : key;
   }
 
+  /** S3 answers a read of an object that is not there with 403, not 404, when the key's
+   * `s3:ListBucket` does not cover the read: no grant at all, or one limited by an `s3:prefix`
+   * condition, which a GET or HEAD does not carry (F11). A listing of exactly that key does
+   * carry it: when the listing is allowed and finds nothing, the object is missing; otherwise
+   * the 403 stands. */
+  private async missing(key: string): Promise<boolean> {
+    const full = this.keyOf(key);
+    try {
+      const listed = await this.client.list({ prefix: full, maxKeys: 1 });
+      return !listed.keys.includes(full);
+    } catch {
+      return false;
+    }
+  }
+
   async get(key: string): Promise<StoredObject | null> {
     try {
       return await this.client.get(this.keyOf(key));
     } catch (err) {
+      if (denied(err)) {
+        if (await this.missing(key)) return null;
+        throw new AccessDenied("read", key, err);
+      }
       throw new StoreError(`read ${key}`, err);
     }
   }
@@ -139,6 +163,7 @@ export class S3Store implements Store {
       if (options.ifMatch !== undefined && err instanceof S3HttpError && err.status === 404) {
         throw new PreconditionFailed(key, "no object to replace");
       }
+      if (denied(err)) throw new AccessDenied("write", key, err);
       throw new StoreError(`write ${key}`, err);
     }
   }
@@ -147,6 +172,10 @@ export class S3Store implements Store {
     try {
       return await this.client.head(this.keyOf(key));
     } catch (err) {
+      if (denied(err)) {
+        if (await this.missing(key)) return null;
+        throw new AccessDenied("stat", key, err);
+      }
       throw new StoreError(`stat ${key}`, err);
     }
   }
@@ -158,6 +187,7 @@ export class S3Store implements Store {
       if (conditionFailed(err)) {
         throw new PreconditionFailed(key, "the object changed since it was read");
       }
+      if (denied(err)) throw new AccessDenied("delete", key, err);
       throw new StoreError(`delete ${key}`, err);
     }
   }
@@ -173,6 +203,7 @@ export class S3Store implements Store {
       const strip = this.prefix ? this.prefix.length + 1 : 0;
       return { keys: response.keys.map((k) => k.slice(strip)), truncated: response.truncated };
     } catch (err) {
+      if (denied(err)) throw new AccessDenied("list", prefix, err);
       throw new StoreError(`list ${prefix}`, err);
     }
   }
@@ -190,11 +221,13 @@ export class S3Store implements Store {
         return {
           key: o.key.slice(strip),
           size: o.size,
+          ...(o.etag ? { etag: o.etag } : {}),
           ...(Number.isFinite(at) ? { modified: new Date(at).toISOString() } : {}),
         };
       });
       return { keys: objects.map((o) => o.key), truncated: response.truncated, objects };
     } catch (err) {
+      if (denied(err)) throw new AccessDenied("list", prefix, err);
       throw new StoreError(`list ${prefix}`, err);
     }
   }

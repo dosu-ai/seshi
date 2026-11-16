@@ -1,5 +1,5 @@
 import type { ChangeEntry } from "@seshi/model";
-import { type Backend, LocalBackend, ServerBackend } from "../backend";
+import { type Backend, ServerBackend, ServerlessBackend } from "../backend";
 import type { ServerView } from "./deps";
 
 const CHANGE_PAGE = 1000;
@@ -21,7 +21,7 @@ export function serverView(backend: Backend): ServerView {
         limit,
       );
   }
-  if (backend instanceof LocalBackend) {
+  if (backend instanceof ServerlessBackend) {
     const { instance, owner } = backend;
     view.pointer = async (agent, id) => {
       const { getSession } = await import("@seshi/pipeline");

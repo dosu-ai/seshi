@@ -2,14 +2,16 @@ import { existsSync } from "node:fs";
 import { HttpSessionDB } from "@seshi/client";
 import { findServerConfig } from "@seshi/config";
 import { accountCredential, openAccount, serverOf } from "../account/account";
-import { expandHome } from "../connect";
+import { isServerless } from "../serverless/settings";
 import { USER_AGENT } from "../user-agent";
 import type { CommandContext } from "./index";
 import { SKIPPED_CONFIG_HINT } from "./server-instance";
 
 export type AdminTarget =
   | { kind: "local"; config?: string }
-  | { kind: "remote"; server: string; db: HttpSessionDB };
+  | { kind: "remote"; server: string; db: HttpSessionDB }
+  /** The CLI config names a serverless bucket (F11): there is no server or worker to ask. */
+  | { kind: "serverless" };
 
 export interface AdminTargetArgs {
   config?: string;
@@ -50,9 +52,9 @@ export async function adminTarget(
     if (found.skipped !== undefined) ctx.stderr(SKIPPED_CONFIG_HINT);
   };
   const account = openAccount(ctx);
-  if (account.cli.local) {
+  if (isServerless(account.cli)) {
     hint();
-    return { kind: "local", config: expandHome(account.cli.local.config, account.home) };
+    return { kind: "serverless" };
   }
   if (account.cli.server) {
     hint();

@@ -25,6 +25,7 @@ import {
   type Writer,
 } from "@seshi/model";
 import {
+  accessDeniedIn,
   archiveId,
   type ChangeUpdate,
   decodeJson,
@@ -539,7 +540,7 @@ export async function tombstone(input: TombstoneInput): Promise<{ removed: numbe
   const gone = tracesEveryAttemptRead(attempts);
   if (gone === null) {
     const spans = await deleteSpans(store, owner, archive);
-    await store.delete(keys.pending(archive));
+    await deletePending(store, archive);
     return spans > 0 ? { removed: spans } : null;
   }
   let removed = 0;
@@ -548,8 +549,19 @@ export async function tombstone(input: TombstoneInput): Promise<{ removed: numbe
     removed++;
   }
   await deleteSpans(store, owner, archive);
-  await store.delete(keys.pending(archive));
+  await deletePending(store, archive);
   return { removed };
+}
+
+/** Delete a session's span-assembly marker (`assembly/pending/`), which only a server's OTLP
+ * intake writes. A key limited to its owner's folder may not touch `assembly/` (F11.11): there
+ * is no marker to delete then, so a refusal is not an error. */
+async function deletePending(store: Store, archive: string): Promise<void> {
+  try {
+    await store.delete(keys.pending(archive));
+  } catch (err) {
+    if (!accessDeniedIn(err)) throw err;
+  }
 }
 
 /** Remove what a tombstone of an already tombstoned session left behind: trace objects still in
@@ -576,7 +588,7 @@ export async function finishTombstone(input: {
   }
   for (const key of found) await store.delete(key);
   await deleteSpans(store, owner, archive);
-  await store.delete(keys.pending(archive));
+  await deletePending(store, archive);
   return found.length;
 }
 

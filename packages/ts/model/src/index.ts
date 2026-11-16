@@ -69,6 +69,7 @@ export type {
 export { isRenderFormat, LETTA_TRACE_SCHEMA, RENDER_FORMATS } from "./schemas/renders";
 export type {
   AppliedEnvelope,
+  BucketMode,
   CallerKind,
   ChangeEntry,
   ChangeKind,
@@ -97,6 +98,8 @@ export type {
 export {
   CHANGE_SCHEMA,
   LAYOUT_SCHEMA,
+  LAYOUT_SCHEMA_V1,
+  LAYOUT_SCHEMAS,
   LEGACY_LAYOUT_SCHEMA,
   localWriter,
   METADATA_SCHEMA,

@@ -1,13 +1,24 @@
 export { type CheckReport, checkServerConfig } from "./check";
-export { type CapturePath, type CliConfig, cliConfigSchema, THEMES } from "./cli";
+export {
+  type CapturePath,
+  type CliConfig,
+  cliConfigSchema,
+  SEARCH_SCOPES,
+  type SearchScope,
+  THEMES,
+} from "./cli";
 export {
   type CliLoadOptions,
   loadCliConfig,
   loadServerConfig,
+  loadServerlessConfig,
+  SERVER_ONLY_SECTIONS,
   type ServerLoadOptions,
+  type ServerlessLoadOptions,
 } from "./configs";
 export { ENV_PREFIX, envKey, isSettingName } from "./layers";
 export {
+  type BaseLayer,
   ConfigError,
   type ConfigFs,
   type FlagValue,
@@ -15,6 +26,7 @@ export {
   type LoadOptions,
   loadConfig,
   nodeFs,
+  parseConfigToml,
   secretsIn,
   shapeOf,
 } from "./load";

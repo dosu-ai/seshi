@@ -8,9 +8,9 @@ import {
   type SearchSort,
   type SessionMetadata,
 } from "@seshi/model";
-import { decodeJson, getBytes, isOwner, keys, type Store } from "@seshi/store";
+import { accessDeniedIn, decodeJson, getBytes, isOwner, keys, type Store } from "@seshi/store";
 import type { BackendHit, BackendQuery, IndexStore } from "./backend";
-import { Indexer, type IndexerLogger, type IndexerRun } from "./indexer";
+import { Indexer, type IndexerLogger, type IndexerOptions, type IndexerRun } from "./indexer";
 import { defaultIndexPath } from "./paths";
 import { parseQuery, SearchQueryError } from "./query";
 import { highlights } from "./snippet";
@@ -47,7 +47,17 @@ export interface SearchServiceOptions {
   log?: IndexerLogger;
   /** Check each result against the session's live metadata (true). */
   verify?: boolean;
-  indexer?: { lagMs?: number; pageSize?: number; budget?: number; ownerRefreshMs?: number };
+  /** What `indexer.owners` and `indexer.admit` let in, named: an index file built under
+   * another scope is wiped and built again (F11.9). */
+  scope?: string;
+  indexer?: {
+    lagMs?: number;
+    pageSize?: number;
+    budget?: number;
+    ownerRefreshMs?: number;
+    owners?: IndexerOptions["owners"];
+    admit?: IndexerOptions["admit"];
+  };
 }
 
 export interface SearchStatus {
@@ -209,6 +219,7 @@ export class SearchService {
         path: this.path,
         deployment: this.options.deployment,
         events: this.options.settings.events,
+        ...(this.options.scope !== undefined ? { scope: this.options.scope } : {}),
       });
       const indexer = new Indexer({
         store: this.options.store,
@@ -275,11 +286,18 @@ export class SearchService {
         : (
             await Promise.all(
               found.hits.map(async (hit) => {
-                const live = await liveMetadata(
-                  this.options.store,
-                  hit.session.owner,
-                  hit.session.archive_id,
-                );
+                let live: Awaited<ReturnType<typeof liveMetadata>>;
+                try {
+                  live = await liveMetadata(
+                    this.options.store,
+                    hit.session.owner,
+                    hit.session.archive_id,
+                  );
+                } catch (err) {
+                  // The key in use may not read this owner's folder (F11.5): not a result.
+                  if (accessDeniedIn(err)) return null;
+                  throw err;
+                }
                 if (live === null || live.status === "redacted" || live.head === undefined) {
                   return null;
                 }

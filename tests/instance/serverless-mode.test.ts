@@ -1,5 +1,5 @@
-/** Local mode (X3.5): the CLI builds an Instance in-process from its config, for one person
- * who owns the bucket, and gets the same session API the HTTP client gives. */
+/** Serverless mode (F11, which local mode became): the CLI builds an Instance in-process over
+ * a bucket that was set up for it, and gets the same session API the HTTP client gives. */
 
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -15,6 +15,7 @@ import {
   type Trace,
 } from "@seshi/model";
 import { StoreSessionDB } from "@seshi/pipeline";
+import { ensureLayout, FsStore, getBytes, LAYOUT_KEY } from "@seshi/store";
 import { type Connection, connect, expandHome, localOwner, NotConnected } from "seshi/connect";
 import { INTEGRATIONS } from "seshi/integrations";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -56,9 +57,11 @@ function serverToml(extra = ""): string {
 
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "seshi-local-"));
+  await ensureLayout(new FsStore(join(dir, "bucket")), { createdBy: "test", mode: "serverless" });
   connection = await connect({
     cli: cli({ local: { config: serverToml(), owner: "acme" } }),
     env: {},
+    home: dir,
     integrations: INTEGRATIONS,
   });
   db = connection.db;
@@ -71,7 +74,7 @@ afterEach(async () => {
 
 describe("connect", () => {
   it("builds an instance from the local config, scoped to the owner", async () => {
-    expect(connection.mode).toBe("local");
+    expect(connection.mode).toBe("serverless");
     expect(db).toBeInstanceOf(StoreSessionDB);
     expect(connection.instance?.roles).toEqual([]);
     const me = await db.me();
@@ -79,11 +82,11 @@ describe("connect", () => {
     expect(me.storage.url).toMatch(/^file:\/\//);
   });
 
-  it("writes as the owner, a local writer with a verified owner", async () => {
+  it("writes as the owner, a local writer with a claimed owner (F11.4)", async () => {
     await db.ingest({ agent: "claude-code", session_id: "sess1", transcript: CLAUDE });
     expect(await db.getSession("claude-code", "sess1")).toMatchObject({
       owner: "acme",
-      owner_basis: "verified",
+      owner_basis: "claimed",
       writer: { kind: "local", principal: "acme", source_id: "upload" },
     });
   });
@@ -110,8 +113,27 @@ describe("connect", () => {
   it("refuses another deployment's bucket (X1.4)", async () => {
     const file = serverToml('deployment_id = "staging"\n');
     await expect(
-      connect({ cli: cli({ local: { config: file } }), env: {}, integrations: INTEGRATIONS }),
+      connect({
+        cli: cli({ local: { config: file } }),
+        env: {},
+        home: dir,
+        integrations: INTEGRATIONS,
+      }),
     ).rejects.toBeInstanceOf(InstanceError);
+  });
+
+  it("refuses a bucket nobody set up, and never writes its marker (F11.11)", async () => {
+    const empty = join(dir, "empty");
+    await expect(
+      connect({
+        cli: cli({ serverless: { url: `file://${empty}`, owner: "acme" } }),
+        env: {},
+        home: dir,
+        integrations: INTEGRATIONS,
+        write: true,
+      }),
+    ).rejects.toThrow(/no seshi bucket at .*: run seshi init --serverless/);
+    expect(await getBytes(new FsStore(empty), LAYOUT_KEY)).toBeNull();
   });
 
   it("talks to a server over HTTP when the config names one", async () => {

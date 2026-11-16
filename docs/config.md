@@ -20,7 +20,8 @@
 The schema is strict: an unknown key, in the file or as a `SESHI_*` name, stops the server
 from starting, and every problem is reported at once with where its value came from. Changes
 apply on restart (F1.5). The config is the operator's: nothing in it can be set over the API,
-and it is not stored in the bucket.
+and a server never reads it from the bucket. (In serverless mode, laptops read shared settings
+in this same format from the bucket's `config/`; see [serverless.md](serverless.md#shared-settings).)
 
 [`seshi.example.toml`](../seshi.example.toml) is a commented example.
 `spec/config.schema.json` is the JSON Schema for editors (Taplo / Even Better TOML: add
@@ -253,6 +254,14 @@ binary lacks stops start-up rather than drop every envelope. `seshi config check
 provider and endpoint a policy sends envelopes to, and `seshi review eval` measures a policy on
 labelled fixtures before you change it.
 
+`review.required`, default `false`, applies in serverless mode only
+([serverless.md](serverless.md#model-review-keys)), where a laptop runs review with its own
+key. When a policy's key can't be found on a laptop (its variable is unset and no key was
+stored with `seshi review key set <provider>`): `true` keeps that laptop's sessions there until
+one is set, so nothing is uploaded unreviewed, and the status line says `needs review key`;
+`false` stores them with regex redaction only, recorded as `skipped`, and `seshi doctor` warns.
+A server never starts without its policies' keys, so it ignores this.
+
 ### `[[sources]]`
 
 What the server ingests from on its own (F4–F6). Each has an `id` (lower-case letters and
@@ -362,12 +371,56 @@ container or a headless machine whose keychain prompts or hangs instead of refus
 `seshi logout` before turning it off: a login made with the keychain cannot be read with
 `keychain = false`, and every command warns about it until it is removed.
 
-**Local mode** (X3.5): instead of `server`, a person who owns a bucket can point the CLI at a
-server config (the same `seshi.toml` format, with `[store]` and its keys), and the CLI runs the
-pipeline in-process against that bucket. Set `server` or `local`, not both.
+### Serverless mode
+
+Instead of `server`, the CLI can write a shared bucket directly: it runs the pipeline itself and
+writes its owner's folder (F11, [serverless.md](serverless.md)). `seshi init --serverless`
+writes these tables. Set `server` or `serverless`, not both.
+
+```toml
+[serverless]
+url = "s3://acme-seshi/seshi"          # SESHI_SERVERLESS__URL
+region = "us-east-1"
+owner = "alice"                        # SESHI_SERVERLESS__OWNER
+
+[search]
+enabled = true
+scope = "visible"
+```
+
+`[serverless]`:
+
+| Key | Default | |
+|---|---|---|
+| `url` | | The bucket and prefix: `s3://bucket/prefix`, `r2://bucket/prefix` or `file:///path`. Required unless `config` names a server config with a `[store]`; with both, `url` wins |
+| `region` | | As `[store] region`, for `s3://`. Falls back to `AWS_REGION` |
+| `endpoint` | | As `[store] endpoint`, for other S3-compatible stores. Falls back to `S3_ENDPOINT` |
+| `account_id` | | As `[store] account_id`, the Cloudflare account for `r2://`. Falls back to `R2_ACCOUNT_ID` |
+| `owner` | `user`, else the OS user | The owner sessions are written under, `owners/<owner>/`. Lowercased; a name that can't be a folder becomes a hashed `h-…` id. `seshi whoami` prints it |
+| `config` | | A server config (`seshi.toml`; `~` is the home folder) layered over the bucket's shared `config/seshi.toml`, for this machine's own settings. Its `[store].credentials`, when set, are the bucket key |
+
+The bucket key is not in this file: `seshi init --serverless` keeps it in the keychain, or in
+`credentials.json` with `keychain = false`; without one, the `AWS_*`, `S3_*` and `R2_*` variables
+apply ([serverless.md](serverless.md#credentials)). The server config this machine uses is,
+lowest first: built-in defaults, the bucket's `config/seshi.toml`, the file `config` names,
+`SESHI_*` env, `--set`; `[[sources]]` (OTLP intake included), `[auth]`, `[server]` and `[worker]` are ignored
+in any of them.
+
+`[search]`, this machine's search index in serverless mode (F11.9):
+
+| Key | Default | |
+|---|---|---|
+| `enabled` | the shared config's `search.enabled` | Keep a search index on this machine. `seshi init --serverless` writes the shared config's value here |
+| `scope` | `"visible"` | What the index holds: `"mine"` (your sessions only; the scope for a key that reads only its own folder), `"visible"` (yours and every `org` session), or `"all"` (owner-only sessions too, as `--include-private` on every search) |
+
+**`[local]`** is the old name of `[serverless]` (F11.1), from local mode, and is still read:
+`local.config` (`SESHI_LOCAL__CONFIG`) names a server config whose `[store]` gives the bucket,
+and `local.owner` (`SESHI_LOCAL__OWNER`) is `serverless.owner`. `seshi config check --cli`
+prints the new table. Set one of the two, not both; `seshi init --serverless` replaces `[local]`
+with `[serverless]`.
 
 ```toml
 [local]
-config = "~/.config/seshi/seshi.toml"    # SESHI_LOCAL__CONFIG: names the bucket and its keys
-owner = "alice"                          # SESHI_LOCAL__OWNER: else user, else the OS user
+config = "~/.config/seshi/seshi.toml"    # names the bucket and its keys
+owner = "alice"
 ```

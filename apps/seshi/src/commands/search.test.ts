@@ -164,7 +164,7 @@ describe("seshi search, in-process", () => {
   it("says when nothing is configured", async () => {
     const result = await seshi(["anything"]);
     expect(result.code).toBe(EXIT.config);
-    expect(result.err).toContain("no server or local bucket configured");
+    expect(result.err).toContain("no server or bucket configured");
   });
 });
 

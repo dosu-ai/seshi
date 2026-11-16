@@ -9,7 +9,7 @@
       "format": "uri"
     },
     "local": {
-      "description": "Local mode (X3.5): run the pipeline in-process against a bucket you own, instead of talking to a server. Set server or local, not both.",
+      "description": "The old name of [serverless] (F11.1): config names a server config whose [store] gives the bucket. Still read; seshi config check prints the new table.",
       "type": "object",
       "properties": {
         "config": {
@@ -26,6 +26,65 @@
       "required": [
         "config"
       ],
+      "additionalProperties": false
+    },
+    "serverless": {
+      "description": "Serverless mode (F11): this machine runs the pipeline and writes its owner's folder of a shared bucket directly; the bucket's permissions decide what it may do. Set server or serverless, not both.",
+      "type": "object",
+      "properties": {
+        "url": {
+          "description": "The bucket and prefix sessions are written to: s3://bucket/prefix, r2://bucket/prefix or file:///path. Required unless config names a server config with a [store].",
+          "type": "string",
+          "pattern": "^(s3|r2|file):\\/\\/"
+        },
+        "region": {
+          "description": "The bucket's region, as [store] region.",
+          "type": "string",
+          "minLength": 1
+        },
+        "endpoint": {
+          "description": "An S3-compatible endpoint, as [store] endpoint.",
+          "type": "string",
+          "format": "uri"
+        },
+        "account_id": {
+          "description": "Cloudflare account id for r2://, as [store] account_id.",
+          "type": "string",
+          "minLength": 1
+        },
+        "owner": {
+          "description": "The owner id sessions are stored under; user, else the OS user, when unset.",
+          "type": "string",
+          "minLength": 1
+        },
+        "config": {
+          "description": "A local server config (seshi.toml) layered over the bucket's shared config/seshi.toml; ~ is the home folder.",
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "search": {
+      "description": "This machine's search index in serverless mode (F11.9).",
+      "default": {},
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Serverless mode: whether this machine keeps a search index (F11.9); the shared config's search.enabled when unset.",
+          "type": "boolean"
+        },
+        "scope": {
+          "default": "visible",
+          "description": "Serverless mode: which sessions the index holds: mine, visible (yours and the org's) or all (also others' owner-only sessions).",
+          "type": "string",
+          "enum": [
+            "mine",
+            "visible",
+            "all"
+          ]
+        }
+      },
       "additionalProperties": false
     },
     "user": {
