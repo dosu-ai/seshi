@@ -47,7 +47,7 @@ export async function publishObject(
     const kept =
       mode === "immutable" ||
       (before.size === body.length && (await matches(store, key, before.etag, want, body)));
-    if (kept && (await resetAgeSoSweepSkips(store, key, contentType))) return "exists";
+    if (kept && (await makeYoungEnoughToKeep(store, key, contentType))) return "exists";
   }
   if (mode === "immutable") {
     try {
@@ -70,7 +70,7 @@ export async function publishObject(
   return "written";
 }
 
-async function resetAgeSoSweepSkips(
+async function makeYoungEnoughToKeep(
   store: Store,
   key: string,
   contentType: string,

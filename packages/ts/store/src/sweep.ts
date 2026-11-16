@@ -159,6 +159,39 @@ async function* ownersOf(store: Store): AsyncGenerator<string> {
   }
 }
 
+function youngEnoughToKeep(modified: string | undefined, cutoff: number): boolean {
+  const at = modified === undefined ? Number.NaN : Date.parse(modified);
+  return !Number.isFinite(at) || at >= cutoff;
+}
+
+function oldAndUnnamed(
+  traces: readonly ListedTrace[],
+  named: Set<string>,
+  cutoff: number,
+): { old: ListedTrace[]; young: number } {
+  const unnamed = traces.filter((t) => !named.has(t.hash));
+  const old = unnamed.filter((t) => !youngEnoughToKeep(t.modified, cutoff));
+  return { old, young: unnamed.length - old.length };
+}
+
+async function deleteUnlessYoungNow(
+  store: Store,
+  key: string,
+  cutoff: number,
+): Promise<"gone" | "young" | "deleted"> {
+  const now = await store.stat(key);
+  if (now === null) return "gone";
+  if (youngEnoughToKeep(now.modified, cutoff)) return "young";
+  await store.delete(key, now.etag ? { ifMatch: now.etag } : {});
+  return "deleted";
+}
+
+function recordSwept(report: SweepReport, options: SweepOptions, swept: SweptObject): void {
+  report.deleted++;
+  if (report.swept.length < SWEPT_SHOWN) report.swept.push(swept);
+  options.onSwept?.(swept);
+}
+
 async function sweepSession(
   store: Store,
   owner: string,
@@ -172,37 +205,31 @@ async function sweepSession(
   const now = (options.now ?? (() => new Date()))().getTime();
   const cutoff = now - (options.minAgeMs ?? SWEEP_MIN_AGE_MS);
   const named = namedTraces(await readMetadata(store, owner, archive));
-  const unnamed = traces.filter((t) => !named.has(t.hash));
-  const old = unnamed.filter((t) => {
-    const at = t.modified === undefined ? Number.NaN : Date.parse(t.modified);
-    return Number.isFinite(at) && at < cutoff;
-  });
-  report.young += unnamed.length - old.length;
+  const { old, young } = oldAndUnnamed(traces, named, cutoff);
+  report.young += young;
   if (old.length === 0) return;
-  const still = options.dryRun ? named : namedTraces(await readMetadata(store, owner, archive));
+  const namedNow = options.dryRun ? named : namedTraces(await readMetadata(store, owner, archive));
   for (const trace of old) {
     if (options.signal?.aborted) return;
-    if (still.has(trace.hash)) continue;
+    if (namedNow.has(trace.hash)) continue;
     if (!options.dryRun) {
-      const key = keys.trace(owner, archive, trace.hash);
-      const now = await store.stat(key);
-      if (now === null) continue;
-      const at = now.modified === undefined ? Number.NaN : Date.parse(now.modified);
-      if (!Number.isFinite(at) || at >= cutoff) {
+      const outcome = await deleteUnlessYoungNow(
+        store,
+        keys.trace(owner, archive, trace.hash),
+        cutoff,
+      );
+      if (outcome === "gone") continue;
+      if (outcome === "young") {
         report.young++;
         continue;
       }
-      await store.delete(key, now.etag ? { ifMatch: now.etag } : {});
     }
-    const swept: SweptObject = {
+    recordSwept(report, options, {
       owner,
       archive_id: archive,
       content_hash: trace.hash,
       modified: trace.modified as string,
-    };
-    report.deleted++;
-    if (report.swept.length < SWEPT_SHOWN) report.swept.push(swept);
-    options.onSwept?.(swept);
+    });
   }
 }
 

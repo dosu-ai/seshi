@@ -22,6 +22,7 @@ import {
   type Store,
   SWEEP_MIN_AGE_MS,
   sweepTraces,
+  updateMetadata,
 } from "@seshi/store";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -167,6 +168,33 @@ describe.each([
     };
     const report = await sweepTraces(racing);
     expect(report).toMatchObject({ deleted: 0, young: 1, errors: 0 });
+    expect(await exists(key)).toBe(true);
+  });
+
+  it("keeps an old object the pointer comes to name between its first look and the delete", async () => {
+    await upload("s1", meta() + user("hello") + reply("hi"));
+    const hash = "e".repeat(64);
+    const key = await orphan("s1", hash, 2 * HOUR);
+    // The pointer names the object, which is not written again, just after the sweep first
+    // read the pointer.
+    const metadataKey = keys.metadata("alice", archive("s1"));
+    let named = false;
+    const racing: Store = Object.create(store);
+    racing.get = async (k) => {
+      const read = await store.get(k);
+      if (k === metadataKey && !named) {
+        named = true;
+        await updateMetadata(store, "alice", archive("s1"), (m) =>
+          m
+            ? { ...m, traces: [...m.traces, { content_hash: hash, created_at: ts, records: 1 }] }
+            : null,
+        );
+      }
+      return read;
+    };
+    const report = await sweepTraces(racing);
+    expect(named).toBe(true);
+    expect(report).toMatchObject({ deleted: 0, errors: 0 });
     expect(await exists(key)).toBe(true);
   });
 
