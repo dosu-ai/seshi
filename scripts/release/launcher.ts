@@ -92,9 +92,16 @@ export function ensureExecutable(path: string, platform: string = process.platfo
   try {
     accessSync(path, constants.X_OK);
   } catch {
-    try {
-      chmodSync(path, 0o755);
-    } catch {}
+    tryChmod(path, 0o755);
+  }
+}
+
+function tryChmod(path: string, mode: number): boolean {
+  try {
+    chmodSync(path, mode);
+    return true;
+  } catch {
+    return false;
   }
 }
 

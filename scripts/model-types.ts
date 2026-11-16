@@ -239,6 +239,14 @@ export function generatedFiles(root: string): Array<{ path: string; text: string
   return generate(root).map(({ path, text }) => ({ path, text: format(path, text) }));
 }
 
+function tryReadDir(path: string): string[] | undefined {
+  try {
+    return readdirSync(path);
+  } catch {
+    return undefined;
+  }
+}
+
 export function staleFiles(root: string): string[] {
   const files = generatedFiles(root);
   const stale = files
@@ -251,10 +259,7 @@ export function staleFiles(root: string): string[] {
     })
     .map(({ path }) => path);
   const wanted = new Set(files.map((f) => f.path));
-  let present: string[] = [];
-  try {
-    present = readdirSync(join(root, OUT_DIR)).map((f) => `${OUT_DIR}/${f}`);
-  } catch {}
+  const present = (tryReadDir(join(root, OUT_DIR)) ?? []).map((f) => `${OUT_DIR}/${f}`);
   return [...stale, ...present.filter((p) => !wanted.has(p))];
 }
 

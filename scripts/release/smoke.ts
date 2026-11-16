@@ -27,6 +27,14 @@ interface Ran {
   err: string;
 }
 
+async function tryHealthz(url: string): Promise<boolean> {
+  try {
+    return (await fetch(`${url}/healthz`)).ok;
+  } catch {
+    return false;
+  }
+}
+
 async function freePort(): Promise<number> {
   return new Promise((done, fail) => {
     const server = createServer();
@@ -262,9 +270,7 @@ export async function smoke(options: SmokeOptions): Promise<SmokeResult> {
     const url = `http://127.0.0.1:${port}`;
     const deadline = Date.now() + (options.readyTimeout ?? timeout);
     for (;;) {
-      try {
-        if ((await fetch(`${url}/healthz`)).ok) break;
-      } catch {}
+      if (await tryHealthz(url)) break;
       if (server.exitCode !== null || Date.now() > deadline) {
         // Its stderr ends only when it exits: stop a server that is still running first.
         server.kill();
