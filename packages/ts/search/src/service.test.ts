@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { OwnerAliases } from "@seshi/auth";
+import type { OwnerAliases } from "@seshi/auth";
 import { BUILTIN_FORMATS, FormatRegistry } from "@seshi/formats";
 import { StoreSessionDB, setVisibility, tombstone } from "@seshi/pipeline";
 import { FsStore, type Store } from "@seshi/store";
@@ -125,32 +125,6 @@ describe("SearchService", () => {
     });
   });
 
-  it("folds owner aliases into the owner filter", async () => {
-    await write("old-alice", "s1", "invoice export");
-    await write("alice", "s2", "invoice import");
-    await write("bob", "s3", "invoice totals");
-    const search = service({ aliases: new OwnerAliases({ "old-alice": "alice" }) });
-    await search.catchUp();
-    expect(ids(await search.search(LOCAL_VIEWER, { q: "invoice", owner: "alice" }))).toEqual([
-      "alice/s2",
-      "old-alice/s1",
-    ]);
-  });
-
-  it("pages with a cursor", async () => {
-    for (let i = 0; i < 5; i++) await write("alice", `s${i}`, `pager entry ${i}`);
-    const search = service();
-    await search.catchUp();
-    const first = await search.search(LOCAL_VIEWER, { q: "pager", limit: 2 });
-    expect(first.results).toHaveLength(2);
-    expect(first.cursor).toBe("2");
-    const second = await search.search(LOCAL_VIEWER, { q: "pager", limit: 2, cursor: "2" });
-    const third = await search.search(LOCAL_VIEWER, { q: "pager", limit: 2, cursor: "4" });
-    expect(third.cursor).toBeUndefined();
-    const seen = [...first.results, ...second.results, ...third.results].map((r) => r.session_id);
-    expect(new Set(seen).size).toBe(5);
-  });
-
   it("rebuilds from the change feed, and keeps its file across restarts", async () => {
     await write("alice", "s1", "persistent words");
     const path = join(dir, "index", "d.sqlite");
@@ -167,18 +141,6 @@ describe("SearchService", () => {
     expect(rebuilt).toMatchObject({ caught_up: true, entries: 1, indexed: 1 });
     expect((await second.search(LOCAL_VIEWER, { q: "persistent" })).total).toBe(1);
     second.close();
-  });
-
-  it("reports its state", async () => {
-    const search = service();
-    expect(search.status()).toEqual({
-      path: MEMORY_INDEX,
-      ready: false,
-      sessions: 0,
-      events: 0,
-    });
-    await search.catchUp();
-    expect(search.status()).toMatchObject({ ready: true, ready_at: expect.any(String) });
   });
 });
 

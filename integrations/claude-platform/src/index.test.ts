@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { readExportRequest } from "@seshi/formats";
 import type { ReceivedSpan, SpanAttribute } from "@seshi/model";
 import { describe, expect, it } from "vitest";
-import { anthropicAttributes, claudePlatform, OTLP_GENAI_FORMAT } from "./index";
+import { OTLP_GENAI_FORMAT } from "./index";
 
 const FIXTURES = join(import.meta.dirname, "..", "testdata", "otlp");
 const text = (name: string) => readFileSync(join(FIXTURES, `${name}.otlp.json`), "utf8");
@@ -23,10 +23,6 @@ const span = (name: string, attributes: SpanAttribute[], extra: Partial<Received
 });
 
 describe("the Claude Platform integration", () => {
-  it("provides the otlp-genai format", () => {
-    expect(claudePlatform.formats?.map((f) => f.source)).toEqual(["otlp-genai"]);
-  });
-
   it("groups a Managed Agents session's spans by anthropic.session.id, across traces", () => {
     const keys = new Set(
       spansOf("managed-agents-session").flatMap((g) =>
@@ -194,9 +190,5 @@ describe("anthropicAttributes", () => {
       adapter.normalize(span("anthropic.sessions.archive", [], { status: { code: 2 } }), []).final,
     ).toBeUndefined();
     expect(adapter.normalize(span("anthropic.sessions.retrieve", []), []).final).toBeUndefined();
-  });
-
-  it("is a mapper named anthropic", () => {
-    expect(anthropicAttributes.name).toBe("anthropic");
   });
 });

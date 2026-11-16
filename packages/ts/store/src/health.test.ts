@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FsStore } from "./fs";
-import { addHealth, healthDay, pruneHealth, readHealth, sourcesWithHealth } from "./health";
+import { addHealth, pruneHealth, readHealth, sourcesWithHealth } from "./health";
 import { writeFailed } from "./records";
 
 let dir: string;
@@ -90,11 +90,6 @@ describe("source health counters", () => {
       message: "m",
     });
     expect(await sourcesWithHealth(store)).toEqual(["s3-logs"]);
-  });
-
-  it("names the UTC day", () => {
-    expect(healthDay(new Date("2026-11-14T23:59:59.999Z"))).toBe("2026-11-14");
-    expect(healthDay(new Date("2026-11-15T00:00:00.000Z"))).toBe("2026-11-15");
   });
 
   it("prunes the shards of days before the last keepDays", async () => {

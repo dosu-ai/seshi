@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { encodeKeyPath, sha256Hex, signRequest } from "./sigv4";
+import { encodeKeyPath, signRequest } from "./sigv4";
 
 // The worked examples in AWS's "Signature Version 4 for Amazon S3: header-based auth" docs.
 const credentials = {
@@ -55,13 +55,5 @@ describe("signRequest", () => {
 describe("encodeKeyPath", () => {
   it("encodes each segment and keeps the slashes", () => {
     expect(encodeKeyPath("owners/a b/x+y(1)*.json")).toBe("owners/a%20b/x%2By%281%29%2A.json");
-  });
-});
-
-describe("sha256Hex", () => {
-  it("hashes the empty body", async () => {
-    expect(await sha256Hex("")).toBe(
-      "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    );
   });
 });

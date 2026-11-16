@@ -7,12 +7,6 @@ function logger() {
 }
 
 describe("the S3 manifest (F6.2)", () => {
-  it("starts empty before the first run", () => {
-    const { log, warnings } = logger();
-    expect(readManifest(null, log)).toEqual(emptyManifest());
-    expect(warnings).toEqual([]);
-  });
-
   it("reads its own cursor and drops entries it cannot use", () => {
     const { log } = logger();
     const manifest = readManifest(

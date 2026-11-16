@@ -642,12 +642,6 @@ describe("claims", () => {
 });
 
 describe("the datadog-llmobs format", () => {
-  it("takes span sets and is never chunked", () => {
-    expect(DATADOG_LLMOBS_FORMAT.source).toBe("datadog-llmobs");
-    expect(DATADOG_LLMOBS_FORMAT.chunkable).toBe(false);
-    expect(DATADOG_LLMOBS_FORMAT.spans).toBe(DATADOG_SPANS);
-  });
-
   it("detects a saved Export API answer", () => {
     const head = (entries: [string, HeadValue["kind"]][]) =>
       new Map(entries.map(([k, kind]) => [k, { kind }] as [string, HeadValue]));

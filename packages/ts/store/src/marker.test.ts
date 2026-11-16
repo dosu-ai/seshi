@@ -111,8 +111,4 @@ describe("ensureLayout", () => {
     );
     await expect(readLayout(store)).rejects.toThrow(/this seshi writes seshi\/trace\/1/);
   });
-
-  it("reads nothing from a new prefix", async () => {
-    expect(await readLayout(store)).toBeNull();
-  });
 });

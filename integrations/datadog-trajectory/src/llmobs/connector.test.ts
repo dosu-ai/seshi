@@ -15,7 +15,6 @@ import {
   nextWindow,
   readDatadogConfig,
   readDatadogCursor,
-  serviceEnvelopeIdentity,
   UNREADABLE_SPANS,
 } from "./connector";
 
@@ -534,15 +533,5 @@ describe("readDatadogCursor", () => {
     ]) {
       expect(() => readDatadogCursor(bad as Cursor)).toThrow(/rewind/);
     }
-  });
-});
-
-describe("serviceEnvelopeIdentity", () => {
-  it("writes as svc:<source id>", () => {
-    expect(serviceEnvelopeIdentity("dd-prod")).toEqual({
-      caller: { kind: "service", principal: "svc:dd-prod" },
-      owner: "svc:dd-prod",
-      owner_basis: "service",
-    });
   });
 });

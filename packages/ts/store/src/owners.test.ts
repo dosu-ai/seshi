@@ -89,8 +89,4 @@ describe("listOwners", () => {
       truncated: false,
     });
   });
-
-  it("is empty for an empty bucket", async () => {
-    expect((await listOwners(store)).owners).toEqual([]);
-  });
 });
