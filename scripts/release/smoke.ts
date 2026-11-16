@@ -388,7 +388,11 @@ export async function smoke(options: SmokeOptions): Promise<SmokeResult> {
     );
     const settings = JSON.parse(readFileSync(join(agentHome, ".claude", "settings.json"), "utf8"));
     const commands = commandsIn(settings);
-    const programs = [...new Set([options.binary, realpathSync(options.binary)])];
+    // A Windows path is written with forward slashes (kit's commandLine: Git Bash runs the hooks).
+    const programs = [options.binary, realpathSync(options.binary)].flatMap((p) => [
+      p,
+      p.replace(/\\/g, "/"),
+    ]);
     const stray = commands.filter((c) => !programs.some((p) => startsWithProgram(c, p)));
     if (commands.length === 0 || stray.length > 0) {
       throw new Error(
