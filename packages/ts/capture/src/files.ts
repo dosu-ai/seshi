@@ -171,55 +171,77 @@ export class LockTimeout extends Error {
   }
 }
 
-/** Run `fn` holding `<path>.~lock`, a file created exclusively with a random token in it. A lock
- * left by a process that died is taken over after `staleMs`, by renaming it aside (only one
- * waiter wins the rename); a holder removes only a lock that still holds its token. */
+/** A lock file created exclusively, holding `token`. One whose holder died is judged by its age
+ * and cleared; a holder removes it only while it still holds its token. */
+export class LocalLock {
+  constructor(
+    readonly path: string,
+    readonly token: string = randomBytes(8).toString("hex"),
+  ) {}
+
+  /** Create the lock; false when it exists. */
+  tryTake(): boolean {
+    let fd: number;
+    try {
+      fd = openSync(this.path, "wx", 0o600);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      return false;
+    }
+    try {
+      writeFileSync(fd, this.token);
+    } catch (err) {
+      closeSync(fd);
+      rmSync(this.path, { force: true });
+      throw err;
+    }
+    closeSync(fd);
+    return true;
+  }
+
+  /** Clear a lock last written more than `staleMs` before `now`. "held" when it is younger; "gone"
+   * when it was cleared, or went or changed meanwhile (try again). */
+  clearIfStale(staleMs: number, now: number): "held" | "gone" {
+    try {
+      if (now - statSync(this.path).mtimeMs <= staleMs) return "held";
+      const aside = `${this.path}.${this.token}`;
+      renameSync(this.path, aside);
+      rmSync(aside, { force: true });
+    } catch {}
+    return "gone";
+  }
+
+  release(): boolean {
+    try {
+      if (readFileSync(this.path, "utf8") !== this.token) return false;
+      rmSync(this.path, { force: true });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
+/** Run `fn` holding `<path>.~lock` (a `LocalLock`), waiting up to `timeoutMs` for another holder
+ * and taking over one older than `staleMs`. */
 export async function withLock<T>(
   path: string,
   fn: () => Promise<T> | T,
   options: LockOptions = {},
 ): Promise<T> {
-  const lock = `${path}.~lock`;
-  const token = randomBytes(8).toString("hex");
+  const lock = new LocalLock(`${path}.~lock`);
   const timeout = options.timeoutMs ?? 5000;
   const stale = options.staleMs ?? 10_000;
   const started = Date.now();
   ensurePrivateDir(dirname(path));
-  for (;;) {
-    try {
-      const fd = openSync(lock, "wx", 0o600);
-      writeFileSync(fd, token);
-      closeSync(fd);
-      break;
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
-    }
-    try {
-      if (Date.now() - statSync(lock).mtimeMs > stale) {
-        const aside = `${lock}.${token}`;
-        renameSync(lock, aside);
-        rmSync(aside, { force: true });
-        continue;
-      }
-    } catch {
-      continue;
-    }
+  while (!lock.tryTake()) {
+    if (lock.clearIfStale(stale, Date.now()) === "gone") continue;
     if (Date.now() - started > timeout) throw new LockTimeout(path);
     await Bun.sleep(5 + Math.floor(Math.random() * 20));
   }
   try {
     return await fn();
   } finally {
-    tryReleaseLock(lock, token);
-  }
-}
-
-function tryReleaseLock(lock: string, token: string): boolean {
-  try {
-    if (readFileSync(lock, "utf8") !== token) return false;
-    rmSync(lock, { force: true });
-    return true;
-  } catch {
-    return false;
+    lock.release();
   }
 }

@@ -1,5 +1,5 @@
 import { mkdirSync, mkdtempSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { appendLog, LOG_MAX_BYTES, LockTimeout, withLock, writePrivateFile } from "./files";
@@ -26,6 +26,7 @@ import {
   readUploaderLock,
   STALE_MS,
   TAKEOVER_STALE_MS,
+  takeOverStaleLock,
   uploaderRunning,
 } from "./uploader-lock";
 
@@ -271,5 +272,22 @@ describe("one uploader per machine", () => {
     // Taken over, the lock is live: a second taker finds it so.
     expect(acquireUploaderLock(paths, now)).toBeNull();
     expect(next?.held()).toBe(true);
+  });
+
+  it("judges the lock again under the guard: a taker that found it stale too late gives way", () => {
+    const now = new Date();
+    acquireUploaderLock(paths, now, 2 ** 30);
+    const next = acquireUploaderLock(paths, now);
+    expect(next?.held()).toBe(true);
+    const late = {
+      pid: process.pid,
+      host: hostname(),
+      token: "late",
+      started_at: now.toISOString(),
+      beat: now.toISOString(),
+    };
+    expect(takeOverStaleLock(paths, late, now)).toBe(false);
+    expect(next?.held()).toBe(true);
+    expect(() => statSync(`${paths.uploaderLock}.takeover`)).toThrow();
   });
 });
