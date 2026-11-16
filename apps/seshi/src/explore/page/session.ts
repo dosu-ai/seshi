@@ -1,6 +1,6 @@
 import type { CheckResult } from "../../doctor/types";
 import type { Pipeline, RecordsView, SessionDetail } from "../types";
-import { api } from "./api";
+import { api, type ReadRecords } from "./api";
 import { badge, h, replace } from "./dom";
 import { sessionHref } from "./list";
 import { renderRaw } from "./raw";
@@ -198,10 +198,13 @@ export function renderSession(
   const load = async (fresh: boolean) => {
     replace(status, fresh ? "Checking again…" : "Gathering evidence…");
     let detail: SessionDetail;
+    let records: ReadRecords;
     let first: RecordsView;
     try {
-      detail = await api.detail(agent, id, fresh);
-      first = await api.records(agent, id, 0, 0, "all");
+      const opened = await api.open(agent, id, fresh);
+      detail = opened.detail;
+      records = opened.records;
+      first = await records(0, 0, "all");
     } catch (err) {
       replace(
         root,
@@ -245,7 +248,7 @@ export function renderSession(
       tabs,
       panel,
     );
-    if (tab === "records") renderRecords(panel, agent, id, first);
+    if (tab === "records") renderRecords(panel, records, first);
     else if (tab === "timeline") renderTimeline(panel, detail.timeline);
     else renderRaw(panel, detail.evidence);
   };

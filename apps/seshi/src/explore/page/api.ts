@@ -35,12 +35,24 @@ async function get<T>(path: string): Promise<T> {
 const sessionPath = (agent: string, id: string) =>
   `/api/sessions/${encodeURIComponent(agent)}/${encodeURIComponent(id)}`;
 
+export type ReadRecords = (
+  offset: number,
+  limit: number,
+  filter: RowFilter,
+) => Promise<RecordsView>;
+
+export interface OpenedSession {
+  detail: SessionDetail;
+  records: ReadRecords;
+}
+
 export const api = {
   list: (refresh = false) => get<SessionList>(`/api/sessions${refresh ? "?refresh=1" : ""}`),
-  detail: (agent: string, id: string, fresh = false) =>
-    get<SessionDetail>(`${sessionPath(agent, id)}${fresh ? "?fresh=1" : ""}`),
-  records: (agent: string, id: string, offset: number, limit: number, filter: RowFilter) =>
-    get<RecordsView>(
-      `${sessionPath(agent, id)}/records?offset=${offset}&limit=${limit}&filter=${filter}`,
-    ),
+  open: async (agent: string, id: string, fresh = false): Promise<OpenedSession> => {
+    const path = sessionPath(agent, id);
+    const detail = await get<SessionDetail>(`${path}${fresh ? "?fresh=1" : ""}`);
+    const records: ReadRecords = (offset, limit, filter) =>
+      get<RecordsView>(`${path}/records?offset=${offset}&limit=${limit}&filter=${filter}`);
+    return { detail, records };
+  },
 };

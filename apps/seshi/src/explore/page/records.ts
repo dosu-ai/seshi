@@ -1,5 +1,5 @@
 import type { RecordRow, RecordsView, RowFilter, RowState } from "../types";
-import { api } from "./api";
+import type { ReadRecords } from "./api";
 import { h, replace, withMarkers } from "./dom";
 import { fold, plural, ROW_STATE } from "./text";
 
@@ -50,12 +50,7 @@ function divider(text: string): HTMLElement {
   return h("tr", { class: "divider" }, h("td", { colspan: 3 }, text));
 }
 
-export function renderRecords(
-  root: HTMLElement,
-  agent: string,
-  id: string,
-  first: RecordsView,
-): void {
+export function renderRecords(root: HTMLElement, records: ReadRecords, first: RecordsView): void {
   let filter: RowFilter = "all";
   let loaded = 0;
   let matching = 0;
@@ -137,7 +132,7 @@ export function renderRecords(
   async function next(): Promise<void> {
     more.disabled = true;
     try {
-      const view = await api.records(agent, id, loaded, PAGE, filter);
+      const view = await records(loaded, PAGE, filter);
       matching = view.matching;
       for (const r of view.rows) body.append(...row(r));
       loaded += view.rows.length;
