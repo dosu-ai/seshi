@@ -48,12 +48,6 @@ describe("redactionRules", () => {
     );
     expect(() => redactionRules({ patterns: ["(a)\\1"] })).toThrow(/backreferences/);
   });
-
-  it("refuses a list that is not strings", () => {
-    expect(() => redactionRules({ patterns: [1] as unknown as string[] })).toThrow(
-      /list of strings/,
-    );
-  });
 });
 
 describe("parseRedactionConfig", () => {

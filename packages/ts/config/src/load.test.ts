@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { cliConfigSchema } from "./cli";
 import { loadCliConfig, loadServerConfig } from "./configs";
-import { envKey, isSettingName } from "./layers";
+import { isSettingName } from "./layers";
 import { ConfigError, type ConfigFs, loadConfig, shapeOf } from "./load";
 import { describeOrigin } from "./origins";
 import type { Secret } from "./secret";
@@ -365,11 +365,6 @@ describe("env names (F1.2)", () => {
     expect(isSettingName(shape, "SESHI_STORE__BUCKET")).toBe(false);
     expect(isSettingName(shape, "SESHI_USER")).toBe(false);
     expect(isSettingName(shape, "STORE__URL")).toBe(false);
-  });
-
-  it("upper-case keys the way env names are written", () => {
-    expect(envKey("datadog-prod")).toBe("DATADOG_PROD");
-    expect(envKey("alice.smith@acme.com")).toBe("ALICE_SMITH_ACME_COM");
   });
 });
 

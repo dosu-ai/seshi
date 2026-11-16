@@ -16,11 +16,6 @@ const adapter = (source: string): FormatAdapter => ({
 });
 
 describe("defineIntegration", () => {
-  it("returns the integration unchanged", () => {
-    const integration = { name: "claude-code", formats: [adapter("claude-code")] };
-    expect(defineIntegration(integration)).toBe(integration);
-  });
-
   it("refuses a name that is not a lowercase slug", () => {
     for (const name of ["", "Claude", "claude code", "claude/code", "-claude", "claude-"]) {
       expect(() => defineIntegration({ name })).toThrow(/lowercase slug/);

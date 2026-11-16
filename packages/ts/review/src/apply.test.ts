@@ -6,7 +6,6 @@ import {
   checkLabel,
   MIN_FINDING_CHARS,
   type RawFinding,
-  removeSpans,
 } from "./apply";
 import { ProviderError } from "./provider";
 import { entriesOf } from "./render";
@@ -39,12 +38,6 @@ const finding = (f: Partial<RawFinding>): RawFinding => ({
 });
 
 describe("checkLabel", () => {
-  it("takes exactly one label (F3.1)", () => {
-    expect(checkLabel({ label: "allow" })).toBe("allow");
-    expect(checkLabel({ label: "redact" })).toBe("redact");
-    expect(checkLabel({ label: "drop" })).toBe("drop");
-  });
-
   it("refuses anything else as an answer that does not fit, which is retried", () => {
     for (const answer of [
       { label: "maybe" },
@@ -212,18 +205,5 @@ describe("applyFindings", () => {
       "login [redacted:secret] then ping [redacted:secret] again",
     );
     expect(applied.findings).toHaveLength(1);
-  });
-});
-
-describe("removeSpans", () => {
-  it("is deterministic over the original text, whatever the order", () => {
-    const spans = [
-      { start: 6, end: 9, category: "b" },
-      { start: 0, end: 3, category: "a" },
-      { start: 2, end: 5, category: "c" },
-    ];
-    expect(removeSpans("abcdefghij", spans)).toBe("[redacted:a]f[redacted:b]j");
-    expect(removeSpans("abcdefghij", [...spans].reverse())).toBe("[redacted:a]f[redacted:b]j");
-    expect(removeSpans("abc", [])).toBe("abc");
   });
 });

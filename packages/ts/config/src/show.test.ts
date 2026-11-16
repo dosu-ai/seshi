@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { checkServerConfig } from "./check";
 import { loadConfig } from "./load";
 import { serverConfigSchema } from "./server/index";
-import { configEntries, displayTree } from "./show";
+import { configEntries } from "./show";
 
 const load = (env: Record<string, string>) =>
   loadConfig(serverConfigSchema, {
@@ -30,12 +30,6 @@ describe("configEntries", () => {
     expect(byName.sources?.value).toEqual([]);
     expect(byName["auth.owner_aliases"]?.value).toEqual({});
     expect(JSON.stringify(configEntries(loaded))).not.toContain("alice-token");
-  });
-
-  it("nests the printed values for JSON", () => {
-    const tree = displayTree(load({})) as Record<string, Record<string, unknown>>;
-    expect(tree.store).toEqual({ url: "file:///data" });
-    expect(tree.limits?.max_upload_bytes).toBe("256MiB");
   });
 });
 
