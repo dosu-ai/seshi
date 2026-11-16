@@ -49,7 +49,10 @@ Where it searches:
   never a `./seshi.toml` it is not told about): the bucket's keys read everything, so
   nothing is filtered by owner. The local index is brought up to date with the change feed
   before each search, and built from scratch the first time (which reads every change entry
-  once). `seshi search --status` says where the index file is and what it holds;
+  once). In serverless mode the index holds what `[search] scope` lets in, the daemon keeps it
+  caught up, and a search reuses it when it caught up within twice `search.interval`; a change
+  of scope or owner empties it and builds it again
+  ([serverless.md](serverless.md#search)). `seshi search --status` says where the index file is and what it holds;
   `seshi search --rebuild` drops it and builds it again.
 
 The output is plain text; `--json` prints the API's `SearchResults`. Exit 0 also when nothing

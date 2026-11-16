@@ -1,6 +1,6 @@
 # 39 · Serverless mode (F11)
 
-Branch `seshi-39-serverless`, on `seshi-mvp`. The spec is [`../serverless.md`](../serverless.md);
+Branch `seshi-39-serverless`, merged into `seshi-mvp` (dosu-ai/sessiondb#21). The spec is [`../serverless.md`](../serverless.md);
 this note says what was built, where the build differs from the spec, what was checked and what
 is still open. The spec's eight build steps landed as commits on this one branch, not as eight
 branches.
@@ -62,10 +62,11 @@ turns into a hold. Not required: the policy's model calls fail at once (`no_key`
 `on_failure = "skip"` and no retries, so the session is stored and recorded as `skipped`.
 `seshi review key set <provider>` stores a key that fills the provider's `{ env = "…" }`.
 
-**Held uploads.** `SignInNeeded` carries a status word: `needs review key`, `needs update` or
-`bucket refused` (no bucket, a key that cannot write its folder, a store that fails the storage
-test). The status line, the desktop chip (through the status line), `capture status`, `upload`
-(exit 3 for the first two) and `doctor` show it. The serverless sink reopens the bucket every 5
+**Held uploads.** `SignInNeeded` carries a status word: `needs review key`, `needs update`,
+`bad shared settings` (no usable copy of `config/`) or `bucket refused` (no bucket, a key that
+cannot write its folder or read `config/`, a refusal during an upload, a store that fails the
+storage test). The status line, the desktop chip (through the status line), `capture status`, `upload`
+(exit 3 for the first three) and `doctor` show it. The serverless sink reopens the bucket every 5
 minutes, so a new shared config, minimum version or mode reaches a running daemon.
 
 **The storage test** (`packages/ts/store/src/storage-test.ts`): the spec's six steps on

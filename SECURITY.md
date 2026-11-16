@@ -80,8 +80,10 @@ its hash is sent), so a leaked device token or org key cannot delete anyone's se
 and model review included, then runs in each CLI, and each machine holds a bucket credential:
 the bucket's permissions are the only roles. Redaction and review are trusted to the laptops,
 and "visible only to its owner" is kept by the CLI, not enforced, unless the keys are limited
-to each owner's folder. A team that needs redaction a laptop cannot skip, enforced owner-only
-sessions, or company sign-in should run a server.
+to each owner's folder. Whoever can write the bucket's `config/` sets the redaction and review
+every laptop runs; a shared config may not name files on the laptops, hold a literal secret,
+or send a laptop's key to an endpoint other than its provider's. A team that needs redaction a
+laptop cannot skip, enforced owner-only sessions, or company sign-in should run a server.
 
 **Sources hold credentials of their own.** A Datadog source's API and application keys are
 sent only to `https://api.<site>` (or an `https` `api_url`), and redirects are never followed.

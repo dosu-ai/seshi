@@ -224,7 +224,7 @@ export async function gatherEvidence(
   if (!server) {
     evidence.server.error = deps.serverError ?? {
       code: "no_server",
-      message: "no server to ask (not signed in, and no local mode)",
+      message: "no server to ask (not signed in, and no serverless bucket)",
     };
     return evidence;
   }

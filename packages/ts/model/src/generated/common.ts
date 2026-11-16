@@ -12,7 +12,7 @@ export type SourceKind = "upload" | "hook" | "otlp" | "datadog" | "s3" | "cursor
 /** A configured source's id, or `upload` for hooks and the CLI: words of lowercase letters and digits joined by single `-`. */
 export type SourceId = string;
 
-/** Which kind of credential made a call (X5.1, X5.9): `person` (IdP session token or org key with a stated username), `device` (write-only device token), `service` (a service account: a reader, an OTLP destination, a poller), `admin` (an admin token, or the session token of a person with the admin role), `static` (a token from config) or `local` (local mode, writing a bucket it owns, X3.5). */
+/** Which kind of credential made a call (X5.1, X5.9): `person` (IdP session token or org key with a stated username), `device` (write-only device token), `service` (a service account: a reader, an OTLP destination, a poller), `admin` (an admin token, or the session token of a person with the admin role), `static` (a token from config) or `local` (a serverless laptop writing its owner's folder of the bucket directly, F11.4). */
 export type CallerKind = "person" | "device" | "service" | "admin" | "static" | "local";
 
 /** Who wrote something (X5.5): the caller's kind, the person or service account, the credential it used, and the source the data came through. */

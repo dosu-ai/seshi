@@ -99,7 +99,8 @@ On each laptop, `init`:
 3. stores the bucket key in the OS keychain, under the service `seshi` and the name
    `bucket <url>` (in `credentials.json` with `keychain = false`);
 4. writes `[serverless]` and `[search]` to the CLI config, and removes `server` and `[local]`
-   from it. `[search] enabled` is taken from the shared config's `search.enabled`.
+   from it. `[search] enabled` is taken from the shared config's `search.enabled`, and
+   `scope` is `"mine"` when the key can't list other owners' folders.
 
 It does not run `doctor`; it ends by suggesting it. `seshi whoami` prints the mode, the owner
 and the bucket.
@@ -222,9 +223,9 @@ What most teams want: everyone searches everyone's `org` sessions.
 
 ### A member who reads and writes only their own folder
 
-Others' sessions are then out of reach of the key, not only hidden by the CLI. Set
-`[search] scope = "mine"` on these laptops: the other scopes list every owner's folder, which
-this key may not. `doctor` reports the key as read-own.
+Others' sessions are then out of reach of the key, not only hidden by the CLI. These laptops
+need `[search] scope = "mine"`: the other scopes list every owner's folder, which this key may
+not. `init` sets it when the key can't list `owners/`, and `doctor` reports the key as read-own.
 
 ```json
 {
@@ -322,7 +323,7 @@ The bucket holds the team's settings, in the server config format:
 ```
 
 Paths in `config/seshi.toml` (`redaction.packs`, a review policy's `prompt_file`) are relative to
-`config/`. Any server config key may be there. Laptops ignore `[store]` and `search.path` in it
+`config/` and must stay inside it. Any server config key may be there. Laptops ignore `[store]` and `search.path` in it
 (they know where the bucket is, and where their own index goes), and `[[sources]]` (OTLP intake
 included), `[auth]`, `[server]` and `[worker]` wherever they are set, since those need a server; a bucket
 that switches modes may keep them. `doctor` lists what was ignored.
@@ -330,8 +331,21 @@ that switches modes may keep them. `doctor` lists what was ignored.
 Each laptop's settings, lowest first: built-in defaults, `config/seshi.toml`, the local file
 `serverless.config` names, `SESHI_*` env, `--set`.
 
-Secrets in the shared file are references only (`api_key = { env = "ANTHROPIC_API_KEY" }`), so
-each laptop supplies its own; `seshi admin config push` refuses a literal secret.
+Secrets in the shared file are environment references only (`api_key = { env =
+"ANTHROPIC_API_KEY" }`), so each laptop supplies its own. Because every laptop resolves them, the
+shared file is held to more than a server's config:
+
+- no literal secret, in any section (laptops ignore some sections, but every key that can read
+  `config/` can read the file);
+- no `{ file = "…" }` secret: that names a path on each laptop;
+- a review policy with a key names no `base_url` but its provider's own
+  (`https://api.anthropic.com`, `https://api.openai.com/v1`). Otherwise the shared file could send
+  any variable on every laptop to an address of its choosing. A team that reviews through a proxy
+  or its own model server sets that policy in each laptop's `serverless.config` instead (a
+  `review.policies` list there replaces the shared one); a policy with no key may name any
+  endpoint.
+
+`seshi admin config push` refuses a file that breaks these, and a laptop does not use one.
 
 **Changing them:**
 
@@ -351,8 +365,12 @@ redo the change, push. `push` does not delete files you removed from the folder.
 bucket again at most every 5 minutes: it lists `config/`, compares ETags, and downloads only what
 changed. The running uploader reopens the bucket that often, so a change reaches every laptop
 within about 5 minutes. A copy that fails the checks is not used: the last good copy stays in
-use, and `doctor` says why. When the bucket can't be reached, the cache is used; with no cache,
-commands that write fail and uploads wait.
+use, and `doctor` says why. With no good copy (the first copy fails, or the cache is gone),
+uploads wait with the status word `bad shared settings`. A rejected copy is checked again when
+the bucket's copy changes, when seshi is updated, or when this laptop's own settings change (the
+`serverless.config` file, `SESHI_*`, `--set`). When the bucket can't be reached, the cache is
+used; with no cache, commands that write fail and uploads wait. A key that may not read
+`config/` holds uploads (`bucket refused`).
 
 ## Model review keys
 
@@ -365,7 +383,8 @@ echo "$KEY" | seshi review key set anthropic --key -
 ```
 
 It is kept in the keychain (or `credentials.json`) and fills the `{ env = "…" }` of every
-policy step for that provider while the variable is unset.
+policy step for that provider while the variable is unset, for steps that call the provider's
+own endpoint only: a stored key is never sent to a `base_url` a config names.
 
 What happens on a laptop with no key for a policy depends on `review.required` in the shared
 settings ([config.md](config.md#review)):
@@ -385,8 +404,11 @@ sessions too, as `--include-private` on every search).
 
 The daemon catches the index up every `search.interval`. `seshi search` uses the index as it is
 when it caught up within twice that interval, catches up first otherwise, and says
-`Index caught up <time>.` With search off, `seshi search` exits 3 and says how to turn it on.
-Turning it off does not delete the index file yet. See [search.md](search.md).
+`Index caught up <time>.` The index records the scope and owner it was built for; when either
+changes, it is emptied and built again, so it never holds sessions the new scope leaves out.
+A result whose session the key may not read is left out. With search off, `seshi search` exits 3
+and says how to turn it on. Turning it off does not delete the index file yet. See
+[search.md](search.md).
 
 ## What a laptop writes and keeps
 
@@ -441,9 +463,11 @@ a bucket with a minimum version either.
 
 ## Uploads that wait
 
-In serverless mode an upload can wait on the laptop for three reasons, each with its own status
-word: `needs review key`, `needs update` and `bucket refused` (the key can't write its folder,
-the bucket has no marker, or the store fails the storage test). See
+In serverless mode an upload can wait on the laptop for four reasons, each with its own status
+word: `needs review key`, `needs update`, `bad shared settings` (no usable copy of the shared
+settings) and `bucket refused` (the key can't write its folder or read `config/`, the bucket
+refused a write during an upload, the bucket has no marker, or the store fails the storage
+test). See
 [capture.md](capture.md#uploads-that-wait) for what to do about each. `seshi doctor` has a
 **Serverless bucket** section that checks the marker, the owner (a probe write), the storage
 test, read access (read-all or read-own), the shared settings, model review keys, search, and

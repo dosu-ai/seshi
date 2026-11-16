@@ -260,6 +260,10 @@ key. When a policy's key can't be found on a laptop (its variable is unset and n
 stored with `seshi review key set <provider>`): `true` keeps that laptop's sessions there until
 one is set, so nothing is uploaded unreviewed, and the status line says `needs review key`;
 `false` stores them with regex redaction only, recorded as `skipped`, and `seshi doctor` warns.
+In the bucket's shared config (`config/seshi.toml`), a policy with a key may name no `base_url`
+but its provider's own, so no laptop's key is sent where the shared file chooses; set such a
+policy in each laptop's `serverless.config` instead
+([serverless.md](serverless.md#shared-settings)).
 A server never starts without its policies' keys, so it ignores this.
 
 ### `[[sources]]`
@@ -411,7 +415,7 @@ in any of them.
 | Key | Default | |
 |---|---|---|
 | `enabled` | the shared config's `search.enabled` | Keep a search index on this machine. `seshi init --serverless` writes the shared config's value here |
-| `scope` | `"visible"` | What the index holds: `"mine"` (your sessions only; the scope for a key that reads only its own folder), `"visible"` (yours and every `org` session), or `"all"` (owner-only sessions too, as `--include-private` on every search) |
+| `scope` | `"visible"` | What the index holds: `"mine"` (your sessions only; the scope for a key that reads only its own folder, which `seshi init --serverless` sets for such a key), `"visible"` (yours and every `org` session), or `"all"` (owner-only sessions too, as `--include-private` on every search). Changing it (or the owner) empties the index and builds it again |
 
 **`[local]`** is the old name of `[serverless]` (F11.1), from local mode, and is still read:
 `local.config` (`SESHI_LOCAL__CONFIG`) names a server config whose `[store]` gives the bucket,
