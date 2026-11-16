@@ -284,7 +284,9 @@ export class World {
     } finally {
       this.clock.restore();
       this.machine.cleanup();
-      rmSync(this.dir, { recursive: true, force: true });
+      // SCENARIO_KEEP=1 keeps the scenario's folder (bucket, server state) to look at afterwards.
+      if (process.env.SCENARIO_KEEP) console.error(`scenario folder kept: ${this.dir}`);
+      else rmSync(this.dir, { recursive: true, force: true });
     }
   }
 
