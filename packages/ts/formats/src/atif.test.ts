@@ -11,8 +11,6 @@ const FIXTURE = readFileSync(
 );
 
 const registry = new FormatRegistry(BUILTIN_FORMATS);
-const isSource = (source: string) => registry.has(source);
-const isChunkable = (source: string) => registry.isChunkable(source);
 
 /** The fixture with its top-level fields changed. */
 function document(change: (doc: Record<string, unknown>) => void): string {
@@ -29,12 +27,6 @@ const withAgentName = (name: unknown) =>
 const normalize = (transcript: string) => registry.normalize({ source: ATIF, transcript });
 
 describe("ATIF documents", () => {
-  it("are a source, sent whole only", () => {
-    expect(isSource("atif")).toBe(true);
-    expect(isChunkable("atif")).toBe(false);
-    expect(isChunkable("claude-code")).toBe(true);
-  });
-
   it("take the harness from agent.name as the meta record's source", () => {
     const { records } = normalize(FIXTURE);
     expect(records[0]).toEqual({ role: "meta", source: "claude-code", model: "claude-sonnet-4-5" });

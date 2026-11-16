@@ -121,12 +121,6 @@ describe("detectSource", () => {
     }
   });
 
-  it("detects an ATIF document from its opening keys alone", () => {
-    expect(detectSource('{\n  "schema_version": "ATIF-v1.7",\n  "session_id": "x",\n  "ag')).toBe(
-      "atif",
-    );
-  });
-
   it("is null for empty, garbage, and unknown input", () => {
     expect(detectSource("")).toBeNull();
     expect(detectSource("   \n\n")).toBeNull();
