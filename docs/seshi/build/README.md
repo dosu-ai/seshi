@@ -55,8 +55,9 @@ Codex (F9.4). The Claude desktop mod (F9.4–F9.6) is built in 25, and the uploa
 are used on the search empty state and `seshi upload`'s lines (17); the rest of B1.3 (the other
 commands' lines, poses in the docs) is not applied.
 
-Status: every branch is built and pushed; nothing is merged and CI has not run on any of them
-(no PRs). `seshi-17-review` is the tip to review or merge. Its final check (see
+Status: every branch is built and pushed. All 38 are combined, history kept, as `seshi-mvp`,
+open for review as [dosu-ai/sessiondb#20](https://github.com/dosu-ai/sessiondb/pull/20); that PR is
+the first CI run on any of them. What follows describes the check made at 17. Its final check (see
 [17](17-review.md#final-check)) passed `check`, `typecheck`, `test`, the generators, the
 compiled binary's smoke test, `check:hook` and the Docker build there, and `check` and
 `typecheck` at every tip below it. `test` also passed at every tip but 14 and 16, which still
