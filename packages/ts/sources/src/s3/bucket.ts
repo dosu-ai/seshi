@@ -199,18 +199,16 @@ export class S3SourceBucket implements SourceBucket {
         throw new ObjectChanged(key);
       }
       if (err instanceof S3HttpError && err.status === 403) throw new ObjectDenied(key);
-      if (
-        err instanceof S3HttpError &&
-        err.status >= 400 &&
-        err.status < 500 &&
-        err.status !== 408 &&
-        err.status !== 429
-      ) {
+      if (err instanceof S3HttpError && isFinalRefusal(err.status)) {
         throw new ObjectDenied(key, err.status, err.code);
       }
       throw err;
     }
   }
+}
+
+function isFinalRefusal(status: number): boolean {
+  return status >= 400 && status < 500 && status !== 408 && status !== 429;
 }
 
 export class FolderSourceBucket implements SourceBucket {
@@ -227,7 +225,7 @@ export class FolderSourceBucket implements SourceBucket {
     return `file://${join(this.root, key)}`;
   }
 
-  private static etag(info: { mtimeMs: number; size: number }): string {
+  private static fingerprint(info: { mtimeMs: number; size: number }): string {
     return `${Math.floor(info.mtimeMs).toString(16)}-${info.size.toString(16)}`;
   }
 
@@ -262,7 +260,7 @@ export class FolderSourceBucket implements SourceBucket {
       objects.push({
         key,
         size: info.size,
-        etag: FolderSourceBucket.etag(info),
+        etag: FolderSourceBucket.fingerprint(info),
         last_modified: info.mtime.toISOString(),
       });
     }
@@ -282,7 +280,7 @@ export class FolderSourceBucket implements SourceBucket {
     }
     try {
       const info = await handle.stat();
-      if (FolderSourceBucket.etag(info) !== options.etag) throw new ObjectChanged(key);
+      if (FolderSourceBucket.fingerprint(info) !== options.etag) throw new ObjectChanged(key);
       const start = Math.min(options.start ?? 0, info.size);
       const body = new Uint8Array(info.size - start);
       let read = 0;

@@ -2,6 +2,11 @@ import type { ConnectorLogger, Cursor } from "@seshi/kit";
 
 export const MANIFEST_VERSION = 1;
 
+export const SESSION_REDACTED = "redacted";
+export type ObjectFailure = typeof SESSION_REDACTED | (string & {});
+
+export const HOLD_BEFORE_ANY_KEY = "";
+
 export interface ObjectEntry {
   etag: string;
   size: number;
@@ -14,7 +19,7 @@ export interface ObjectEntry {
   offset: number;
   tail?: string;
   gz?: boolean;
-  failed?: string;
+  failed?: ObjectFailure;
 }
 
 export interface Manifest {
@@ -82,7 +87,10 @@ export function rewindManifest(manifest: Manifest, since: Date): Manifest {
   const objects = objectMap();
   for (const [key, entry] of Object.entries(manifest.objects)) {
     const modified = entry.modified ? Date.parse(entry.modified) : Number.NaN;
-    if (entry.failed === "redacted" || (Number.isFinite(modified) && modified < since.getTime())) {
+    if (
+      entry.failed === SESSION_REDACTED ||
+      (Number.isFinite(modified) && modified < since.getTime())
+    ) {
       objects[key] = entry;
     }
   }

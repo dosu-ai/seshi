@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { loadConfig, type SourceConfig, serverConfigSchema } from "@seshi/config";
 import { BUILTIN_FORMATS, FormatRegistry } from "@seshi/formats";
+import type { SubmitOutcome } from "@seshi/kit";
 import type { Envelope, FormatAdapter, LogPayload } from "@seshi/model";
 import {
   type FailedRecord,
@@ -62,7 +63,11 @@ class LogPipeline implements Submitter {
     count: (id: string) => this.health.counted.push(id),
   };
 
-  async submit(envelope: Envelope): Promise<unknown> {
+  async submit(envelope: Envelope): Promise<SubmitOutcome> {
+    return this.answer(envelope) as SubmitOutcome;
+  }
+
+  private answer(envelope: Envelope): unknown {
     this.envelopes.push(envelope);
     const override = this.override;
     if (override) {

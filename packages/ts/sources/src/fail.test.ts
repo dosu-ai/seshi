@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig, serverConfigSchema } from "@seshi/config";
-import type { Connector, ConnectorContext } from "@seshi/kit";
+import type { Connector, ConnectorContext, SubmitOutcome } from "@seshi/kit";
 import { FsStore, listRecords, readCheckpoint, type Store } from "@seshi/store";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Sources } from "./sources";
@@ -34,7 +34,7 @@ function sources(run: (ctx: ConnectorContext) => Promise<unknown>, over: Store =
   const s = new Sources({
     store: over,
     pipeline: {
-      submit: async () => ({ status: "stored" }),
+      submit: async () => ({ status: "stored" }) as SubmitOutcome,
       health: { count: (id) => counted.push(id) },
     },
     sources: config.sources,

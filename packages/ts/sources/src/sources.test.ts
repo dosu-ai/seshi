@@ -2,7 +2,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig, type SourceConfig, serverConfigSchema } from "@seshi/config";
-import { CheckpointLost, type Connector, type ConnectorContext } from "@seshi/kit";
+import {
+  CheckpointLost,
+  type Connector,
+  type ConnectorContext,
+  type SubmitOutcome,
+} from "@seshi/kit";
 import type { Envelope } from "@seshi/model";
 import {
   addHealth,
@@ -72,10 +77,10 @@ function envelope(sourceId: string, key: string): Envelope {
 class FakePipeline implements Submitter {
   readonly envelopes: Envelope[] = [];
   answer: (e: Envelope) => unknown = () => ({ status: "stored" });
-  async submit(envelope: Envelope, options?: { onFailure?: string }): Promise<unknown> {
+  async submit(envelope: Envelope, options?: { onFailure?: string }): Promise<SubmitOutcome> {
     expect(options?.onFailure).toBe("record");
     this.envelopes.push(envelope);
-    return this.answer(envelope);
+    return this.answer(envelope) as SubmitOutcome;
   }
 }
 

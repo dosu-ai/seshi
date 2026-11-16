@@ -22,7 +22,7 @@ import {
 } from "@seshi/store";
 
 export interface Submitter {
-  submit(envelope: Envelope, options?: { onFailure?: "throw" | "record" }): Promise<unknown>;
+  submit(envelope: Envelope, options?: { onFailure?: "throw" | "record" }): Promise<SubmitOutcome>;
   readonly health?: { count(sourceId: string, outcome: "failed"): void };
 }
 
@@ -229,8 +229,11 @@ export class Sources {
     let submitted = 0;
     let saved = false;
     let lost = false;
-    let transient: string | undefined;
-    let ended = false;
+    let checkpointBlockedBy: string | undefined;
+    let runEnded = false;
+    const assertRunOpen = () => {
+      if (runEnded) throw new Error(`the run of source '${id}' has ended`);
+    };
     const controller = new AbortController();
     const signal = outer ? AbortSignal.any([outer, controller.signal]) : controller.signal;
     const report = (outcome: RunReport["outcome"], extra: Partial<RunReport> = {}): RunReport => ({
@@ -263,14 +266,14 @@ export class Sources {
             `a connector for source '${id}' submitted an envelope for '${envelope.source_id}'`,
           );
         }
-        if (ended) throw new Error(`the run of source '${id}' has ended`);
+        assertRunOpen();
         if (lost) throw new CheckpointLost(id);
         submitted++;
         let result: SubmitOutcome;
         try {
-          result = (await this.pipeline.submit(envelope, { onFailure: "record" })) as SubmitOutcome;
+          result = await this.pipeline.submit(envelope, { onFailure: "record" });
         } catch (err) {
-          transient ??= message(err);
+          checkpointBlockedBy ??= message(err);
           throw err;
         }
         outcomes[result.status] = (outcomes[result.status] ?? 0) + 1;
@@ -279,11 +282,11 @@ export class Sources {
       checkpoint: {
         read: () => (current ? structuredClone(current.cursor) : null),
         write: async (cursor: Cursor) => {
-          if (ended) throw new Error(`the run of source '${id}' has ended`);
+          assertRunOpen();
           if (lost) throw new CheckpointLost(id);
-          if (transient !== undefined) {
+          if (checkpointBlockedBy !== undefined) {
             throw new Error(
-              `not saving the checkpoint of source '${id}': an envelope failed transiently (${transient}); the next run reads it again`,
+              `not saving the checkpoint of source '${id}': an envelope failed transiently (${checkpointBlockedBy}); the next run reads it again`,
             );
           }
           try {
@@ -309,7 +312,7 @@ export class Sources {
       signal,
       now: this.now,
       fail: async (failure: ConnectorFailure): Promise<string> => {
-        if (ended) throw new Error(`the run of source '${id}' has ended`);
+        assertRunOpen();
         if (lost) throw new CheckpointLost(id);
         const text =
           failure.message.length > FAILURE_MESSAGE_LENGTH
@@ -329,7 +332,7 @@ export class Sources {
             message: text,
           });
         } catch (err) {
-          transient ??= message(err);
+          checkpointBlockedBy ??= message(err);
           throw err;
         }
         outcomes.failed = (outcomes.failed ?? 0) + 1;
@@ -341,8 +344,8 @@ export class Sources {
     try {
       const result = await connector.run(context);
       if (lost) return report("discarded", { error: new CheckpointLost(id).message });
-      if (transient !== undefined) {
-        return report("error", { error: `an envelope failed transiently: ${transient}` });
+      if (checkpointBlockedBy !== undefined) {
+        return report("error", { error: `an envelope failed transiently: ${checkpointBlockedBy}` });
       }
       return report("ok", {
         more: result?.more === true,
@@ -354,7 +357,7 @@ export class Sources {
       }
       return report("error", { error: message(err) });
     } finally {
-      ended = true;
+      runEnded = true;
       controller.abort();
     }
   }

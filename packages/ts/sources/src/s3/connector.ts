@@ -23,7 +23,14 @@ import {
   type SourceRead,
 } from "./bucket";
 import { type KeyFields, KeyFilter, metadataFields, PathTemplate } from "./keys";
-import { type Manifest, type ObjectEntry, readManifest, rewindManifest } from "./manifest";
+import {
+  HOLD_BEFORE_ANY_KEY,
+  type Manifest,
+  type ObjectEntry,
+  readManifest,
+  rewindManifest,
+  SESSION_REDACTED,
+} from "./manifest";
 
 export type S3SourceConfig = Extract<SourceConfig, { type: "s3" }>;
 
@@ -88,6 +95,15 @@ export function sourcePrefix(config: Pick<S3SourceConfig, "url" | "prefix">): st
 }
 
 type Handled = ObjectEntry | "changed" | "gone";
+type AppendResult = Handled | "rewritten";
+
+interface CompletedPass {
+  listsEveryKey: boolean;
+  from: string | undefined;
+  seen: ReadonlySet<string>;
+  beforeLast: string | undefined;
+  last: string | undefined;
+}
 
 export class S3Connector implements Connector<S3SourceConfig> {
   readonly kind = "s3";
@@ -152,7 +168,7 @@ class S3Run {
   private readonly batch: number;
   private readonly pageSize: number;
   private readonly saveEvery: number;
-  private sessions: Map<string, string> | undefined;
+  private sessionHolders: Map<string, string> | undefined;
   private processed = 0;
   private unsaved = 0;
   private listed = 0;
@@ -183,11 +199,11 @@ class S3Run {
       );
     }
     const ordered = config.ordered_keys;
-    const fresh = manifest.after === undefined;
+    const listsEveryKey = manifest.after === undefined;
     const from = manifest.after ?? (ordered ? manifest.watch_from : undefined);
     const seen = new Set<string>();
     let startAfter = from;
-    let previous: string | undefined;
+    let beforeLast: string | undefined;
     let last: string | undefined;
 
     for (;;) {
@@ -209,12 +225,14 @@ class S3Run {
             this.unsaved++;
             if (handled === "gone") delete manifest.objects[object.key];
             else if (handled === "changed") {
-              if (ordered && manifest.hold === undefined) manifest.hold = last ?? from ?? "";
+              if (ordered && manifest.hold === undefined) {
+                manifest.hold = last ?? from ?? HOLD_BEFORE_ANY_KEY;
+              }
             } else manifest.objects[object.key] = handled;
           }
         }
         this.listed++;
-        previous = last;
+        beforeLast = last;
         last = object.key;
         manifest.after = object.key;
         if (this.unsaved >= this.saveEvery) await this.save();
@@ -222,18 +240,12 @@ class S3Run {
       if (!page.truncated || page.objects.length === 0) break;
       startAfter = page.objects.at(-1)?.key;
     }
-    return this.complete({ fresh, from, seen, previous, last });
+    return this.complete({ listsEveryKey, from, seen, beforeLast, last });
   }
 
-  private async complete(pass: {
-    fresh: boolean;
-    from: string | undefined;
-    seen: ReadonlySet<string>;
-    previous: string | undefined;
-    last: string | undefined;
-  }): Promise<ConnectorRunResult> {
+  private async complete(pass: CompletedPass): Promise<ConnectorRunResult> {
     const { manifest } = this;
-    if (pass.fresh) {
+    if (pass.listsEveryKey) {
       for (const key of Object.keys(manifest.objects)) {
         if ((pass.from === undefined || key > pass.from) && !pass.seen.has(key)) {
           delete manifest.objects[key];
@@ -241,11 +253,7 @@ class S3Run {
       }
     }
     if (this.config.ordered_keys) {
-      let watch = pass.last !== undefined ? (pass.previous ?? pass.from) : manifest.watch_from;
-      if (manifest.hold !== undefined) {
-        const hold = manifest.hold === "" ? undefined : manifest.hold;
-        watch = hold === undefined || (watch !== undefined && hold < watch) ? hold : watch;
-      }
+      const watch = this.watchFrom(pass);
       if (watch === undefined) delete manifest.watch_from;
       else {
         manifest.watch_from = watch;
@@ -267,6 +275,16 @@ class S3Run {
       );
     }
     return { lag_ms: 0 };
+  }
+
+  private watchFrom(pass: CompletedPass): string | undefined {
+    const { manifest } = this;
+    let watch = pass.last !== undefined ? (pass.beforeLast ?? pass.from) : manifest.watch_from;
+    if (manifest.hold !== undefined) {
+      const hold = manifest.hold === HOLD_BEFORE_ANY_KEY ? undefined : manifest.hold;
+      watch = hold === undefined || (watch !== undefined && hold < watch) ? hold : watch;
+    }
+    return watch;
   }
 
   private async stop(result: ConnectorRunResult = {}): Promise<ConnectorRunResult> {
@@ -300,7 +318,7 @@ class S3Run {
       ...(entry?.session !== undefined ? { session: entry.session } : {}),
       ...(entry?.gz ? { gz: true } : {}),
     };
-    if (entry?.failed === "redacted") return { ...base, failed: "redacted" };
+    if (entry?.failed === SESSION_REDACTED) return { ...base, failed: SESSION_REDACTED };
     if (object.size === 0) return base;
     const { format, session, tail } = entry ?? {};
     if (
@@ -323,7 +341,7 @@ class S3Run {
     object: SourceObject,
     entry: ObjectEntry & { format: string; session: string; tail: string },
     base: ObjectEntry,
-  ): Promise<Handled | "rewritten"> {
+  ): Promise<AppendResult> {
     const location = this.bucket.locate(object.key);
     const provenance: SourceLocation = { object_key: location, etag: object.etag };
     const idempotency = `${location}#${object.etag}@${entry.offset}`;
@@ -359,10 +377,10 @@ class S3Run {
     if (skip < 0 || read.body.length < skip + window || isGzip(read.body)) return "rewritten";
     const known = read.body.subarray(skip, skip + window);
     if (digest(known) !== entry.tail) return "rewritten";
-    const fresh = read.body.subarray(skip + window);
-    const cut = fresh.lastIndexOf(0x0a) + 1;
+    const newBytes = read.body.subarray(skip + window);
+    const cut = newBytes.lastIndexOf(0x0a) + 1;
     if (cut === 0) return base;
-    const chunk = fresh.subarray(0, cut);
+    const chunk = newBytes.subarray(0, cut);
     let text: string;
     try {
       text = decoder.decode(chunk);
@@ -515,7 +533,7 @@ class S3Run {
     });
     const result = await this.ctx.submit(envelope);
     if (result.status === "failed") return { ...named, failed: result.code };
-    this.sessions?.set(`${format.name}\n${session}`, object.key);
+    this.sessionHolders?.set(`${format.name}\n${session}`, object.key);
     const offset = bytesOf(result);
     const next: ObjectEntry = { ...named, offset };
     delete next.failed;
@@ -548,15 +566,15 @@ class S3Run {
   }
 
   private sessionHolder(format: string, session: string): string | undefined {
-    if (!this.sessions) {
-      this.sessions = new Map();
+    if (!this.sessionHolders) {
+      this.sessionHolders = new Map();
       for (const [key, entry] of Object.entries(this.manifest.objects)) {
         if (entry.format !== undefined && entry.session !== undefined && entry.offset > 0) {
-          this.sessions.set(`${entry.format}\n${entry.session}`, key);
+          this.sessionHolders.set(`${entry.format}\n${entry.session}`, key);
         }
       }
     }
-    return this.sessions.get(`${format}\n${session}`);
+    return this.sessionHolders.get(`${format}\n${session}`);
   }
 
   private envelope(input: {
@@ -623,6 +641,6 @@ function refusal(err: ObjectDenied): { code: string; message: string } {
 }
 
 function bytesOf(result: SubmitOutcome): number {
-  const bytes = (result as { bytes_total?: unknown }).bytes_total;
+  const bytes = "bytes_total" in result ? result.bytes_total : undefined;
   return typeof bytes === "number" && bytes >= 0 ? bytes : 0;
 }
