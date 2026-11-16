@@ -182,7 +182,11 @@ export async function smokeExplore(
     }
     proc.kill("SIGINT");
     const code = await proc.exited;
-    if (code !== 0) throw new Error(`explore exited ${code} on SIGINT`);
+    // Windows has no signals between processes: the kill ends explore outright, its handler
+    // unrun, so there a clean exit cannot be asked for, only that it stopped.
+    if (code !== 0 && process.platform !== "win32") {
+      throw new Error(`explore exited ${code} on SIGINT`);
+    }
   } finally {
     clearTimeout(timer);
     if (proc.exitCode === null) proc.kill();
