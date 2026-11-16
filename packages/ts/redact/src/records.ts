@@ -1,19 +1,10 @@
 import type { NormalizedRecord } from "@seshi/model";
 import { redactSecrets } from "./secrets";
-
-const STRUCTURAL_KEYS: ReadonlySet<string> = new Set([
-  "id",
-  "tool_call_id",
-  "role",
-  "timestamp",
-  "source",
-  "name",
-  "git_branch",
-]);
+import { RECORD_UNREDACTED_KEYS } from "./structural-keys";
 
 function redactValue(value: unknown, key?: string): unknown {
   if (typeof value === "string") {
-    return key !== undefined && STRUCTURAL_KEYS.has(key) ? value : redactSecrets(value).text;
+    return key !== undefined && RECORD_UNREDACTED_KEYS.has(key) ? value : redactSecrets(value).text;
   }
   if (Array.isArray(value)) return value.map((item) => redactValue(item));
   if (typeof value === "object" && value !== null) {

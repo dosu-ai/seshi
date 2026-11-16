@@ -516,6 +516,13 @@ export function rulesDocument(set: RuleSet): RedactionRulesDocument {
   };
 }
 
+function ignoreDisablesOfUnknownBuiltins(pack: RulePack, builtin: RulePack): RulePack {
+  const known = new Set(
+    [...builtin.rules, ...builtin.sensitive_files, ...builtin.secret_commands].map((r) => r.id),
+  );
+  return { ...pack, disable: pack.disable.filter((rule) => known.has(rule)) };
+}
+
 export function ruleSetFromDocument(document: unknown): { rules: RuleSet; same: boolean } {
   if (typeof document !== "object" || document === null) {
     throw new RulePackError([{ where: "redaction rules", message: "must be an object" }]);
@@ -527,13 +534,10 @@ export function ruleSetFromDocument(document: unknown): { rules: RuleSet; same: 
     ]);
   }
   const builtin = builtinPack();
-  const known = new Set(
-    [...builtin.rules, ...builtin.sensitive_files, ...builtin.secret_commands].map((r) => r.id),
-  );
   const packs = doc.packs.map((p, i) => {
     const id = typeof p === "object" && p !== null && typeof (p as RulePack).id === "string";
     const pack = validatePack(p, { source: `server pack ${id ? (p as RulePack).id : i}` });
-    return { ...pack, disable: pack.disable.filter((rule) => known.has(rule)) };
+    return ignoreDisablesOfUnknownBuiltins(pack, builtin);
   });
   const rules = compileRuleSet({ packs, builtin });
   return { rules, same: rules.hash === doc.rule_set };

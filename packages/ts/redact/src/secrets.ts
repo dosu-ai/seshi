@@ -120,15 +120,27 @@ const providerHints = [
   "sbp_",
 ];
 
+const charCode = (char: string) => char.charCodeAt(0);
+const LOWER_A = charCode("a");
+const LOWER_Z = charCode("z");
+const UPPER_A = charCode("A");
+const UPPER_Z = charCode("Z");
+const DIGIT_0 = charCode("0");
+const DIGIT_9 = charCode("9");
+const UNDERSCORE = charCode("_");
+const HYPHEN = charCode("-");
+const DOT = charCode(".");
+const PLUS = charCode("+");
+const SLASH = charCode("/");
+const COLON = charCode(":");
+const AT_SIGN = charCode("@");
+
+const isLetter = (code: number) =>
+  (code >= LOWER_A && code <= LOWER_Z) || (code >= UPPER_A && code <= UPPER_Z);
+const isAlnum = (code: number) => isLetter(code) || (code >= DIGIT_0 && code <= DIGIT_9);
+
 function isWordChar(code: number): boolean {
-  return (
-    (code >= 97 && code <= 122) ||
-    (code >= 65 && code <= 90) ||
-    (code >= 48 && code <= 57) ||
-    code === 95 ||
-    code === 45 ||
-    code === 46
-  );
+  return isAlnum(code) || code === UNDERSCORE || code === HYPHEN || code === DOT;
 }
 
 function isSpaceChar(c: string): boolean {
@@ -196,11 +208,9 @@ function closingQuote(open: string, close: string): string {
   return open === "" ? "" : close;
 }
 
-const isAlnum = (code: number) =>
-  (code >= 97 && code <= 122) || (code >= 65 && code <= 90) || (code >= 48 && code <= 57);
-const isTokenChar = (code: number) => isAlnum(code) || code === 95 || code === 45;
+const isTokenChar = (code: number) => isAlnum(code) || code === UNDERSCORE || code === HYPHEN;
 /** What `\b` counts as a word character (no `u` flag): `[A-Za-z0-9_]`. */
-const isRegexWord = (code: number) => isAlnum(code) || code === 95;
+const isRegexWord = (code: number) => isAlnum(code) || code === UNDERSCORE;
 
 function skKeyEnd(s: string, at: number): { runEnd: number; keyEnd: number } {
   let keyEnd = -1;
@@ -246,8 +256,8 @@ function replaceProvider(s: string, counts: RedactionCounts, off: Off): string {
   return last === 0 ? s : out + s.slice(last);
 }
 
-const isSchemeChar = (code: number) => isAlnum(code) || code === 43 || code === 46 || code === 45;
-const isLetter = (code: number) => (code >= 97 && code <= 122) || (code >= 65 && code <= 90);
+const isSchemeChar = (code: number) =>
+  isAlnum(code) || code === PLUS || code === DOT || code === HYPHEN;
 const isRegexSpace = (code: number) =>
   (code >= 9 && code <= 13) ||
   code === 32 ||
@@ -283,16 +293,16 @@ function replaceConnUrls(s: string, counts: RedactionCounts): string {
     let user = c + 3;
     for (; user < s.length; user++) {
       const code = s.charCodeAt(user);
-      if (code === 47 || code === 64 || code === 58 || isRegexSpace(code)) break;
+      if (code === SLASH || code === AT_SIGN || code === COLON || isRegexSpace(code)) break;
     }
-    if (s.charCodeAt(user) !== 58) continue;
+    if (s.charCodeAt(user) !== COLON) continue;
     const pass = user + 1;
     if (pass >= runEnd) {
       let at = -1;
       let before = -1;
       let i = pass;
       for (; i < s.length && !isRegexSpace(s.charCodeAt(i)); i++) {
-        if (s.charCodeAt(i) === 64) {
+        if (s.charCodeAt(i) === AT_SIGN) {
           before = at;
           at = i;
         }
@@ -539,15 +549,7 @@ function standaloneLine(s: string, start: number, end: number): boolean {
 }
 
 function isEntropyChar(code: number): boolean {
-  return (
-    (code >= 65 && code <= 90) ||
-    (code >= 97 && code <= 122) ||
-    (code >= 48 && code <= 57) ||
-    code === 43 ||
-    code === 47 ||
-    code === 95 ||
-    code === 45
-  );
+  return isAlnum(code) || code === PLUS || code === SLASH || code === UNDERSCORE || code === HYPHEN;
 }
 
 function entropySpans(s: string): [number, number][] {

@@ -1,38 +1,12 @@
 import type { RawFormat, RedactionSummary } from "@seshi/model";
 import { bump, type Counts, type RuleSet } from "./ruleset";
 import { redactSensitive, type WithheldCalls } from "./sensitive";
-
-const STRUCTURAL_KEYS: ReadonlySet<string> = new Set([
-  "id",
-  "uuid",
-  "type",
-  "role",
-  "timestamp",
-  "name",
-  "tool_use_id",
-  "tool_call_id",
-  "toolCallId",
-  "call_id",
-  "callID",
-  "parentUuid",
-  "parent_id",
-  "parentId",
-  "sessionId",
-  "session_id",
-  "sessionID",
-  "messageID",
-  "messageId",
-  "requestId",
-  "request_id",
-  "source",
-  "gitBranch",
-  "git_branch",
-]);
+import { NATIVE_UNREDACTED_KEYS } from "./structural-keys";
 
 const INPUT_KEYS: ReadonlySet<string> = new Set(["input", "arguments", "args", "parameters"]);
 
 function isStructural(key: string | undefined): boolean {
-  return key !== undefined && STRUCTURAL_KEYS.has(key);
+  return key !== undefined && NATIVE_UNREDACTED_KEYS.has(key);
 }
 
 type Redacted = { value: unknown; changed: boolean };
