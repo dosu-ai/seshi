@@ -23,7 +23,7 @@ dropped text is never stored or sent to review again. This closes 04's deviation
   `redacted`).
 - **One drop path.** `Pipeline.commit` no longer answers zeros for a session without a trace:
   every drop that is not a replace goes through `progress` → `recordProgress`, which moves the
-  log to the plan's `normalized` state. `recordProgress` takes an optional `stub`
+  log to the plan's `normalized` state. `recordProgress` takes an optional `createStubIfMissing`
   (`StubInput`: session id, agent, writer, owner basis, visibility, retraction hash) and
   creates the pointer from it when the session has none; without it, a session with no
   pointer is still left alone. Drops of later envelopes already moved the offset (04); they
@@ -103,8 +103,8 @@ dropped text is never stored or sent to review again. This closes 04's deviation
 
 - `isStub(metadata)` (`@seshi/model`) for any reader of pointers: a stub is not a session to
   show.
-- `recordProgress({ …, stub })` and `StubInput` (`@seshi/pipeline` `ingest.ts`) write one; the
-  pipeline's `progress(…, stub)` is the only caller.
+- `recordProgress({ …, createStubIfMissing })` and `StubInput` (`@seshi/pipeline` `ingest.ts`) write one; the
+  pipeline's `progress(…, createStubIfMissing)` is the only caller.
 
 ## Deviations and why
 

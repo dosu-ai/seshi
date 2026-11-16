@@ -6,6 +6,7 @@ import {
   type Envelope,
   Forbidden,
   IngestRejected,
+  isStub,
   type LlmCall,
   type NormalizedRecord,
   type NormalizedState,
@@ -69,6 +70,7 @@ import {
   type Authorization,
   type Authorizer,
   type HealthCounters,
+  mayAddToSession,
   mayReplace,
   noHealth,
   noReview,
@@ -146,6 +148,12 @@ class StalePlan extends Error {
   }
 }
 
+function rewrittenByBackfill(existing: SessionMetadata | null, planned: SessionMetadata): boolean {
+  return (
+    existing?.head !== planned.head || existing?.redaction?.rule_set !== planned.redaction?.rule_set
+  );
+}
+
 function isPermanent(err: unknown): err is { code: string; message: string } {
   return (
     err instanceof SessionRejected ||
@@ -153,6 +161,10 @@ function isPermanent(err: unknown): err is { code: string; message: string } {
     err instanceof SessionConflict ||
     err instanceof Forbidden
   );
+}
+
+function isProtocolAnswer(err: unknown): boolean {
+  return err instanceof OffsetMismatch;
 }
 
 const RECORDED_MESSAGE_LENGTH = 300;
@@ -248,8 +260,13 @@ function withCounts(
 }
 
 /** Whether a part's ids are OTLP's: lowercase hex, 16 bytes of trace id and 8 of span id. */
-function isSpanIds(part: SpanPart): boolean {
+function hasBucketSafeSpanIds(part: SpanPart): boolean {
   return /^[0-9a-f]{32}$/.test(part.trace_id) && /^[0-9a-f]{16}$/.test(part.span_id);
+}
+
+interface LogCut {
+  records: number;
+  bytes: number;
 }
 
 interface WholeOptions {
@@ -258,7 +275,7 @@ interface WholeOptions {
   retract_secret?: string;
   llm_calls?: readonly LlmCall[];
   arrived?: RedactionSummary;
-  recordsIn?: (bytes: number) => { records: number; bytes: number } | undefined;
+  recordsBeforeCut?: (bytes: number) => LogCut | undefined;
 }
 
 function countsNotIn(
@@ -390,7 +407,7 @@ export class Pipeline {
   ): Promise<FailedResult> {
     if (!isPermanent(err)) throw err;
     const respond = options.onFailure ?? (hasCaller(envelope) ? "throw" : "record");
-    if (!(err instanceof OffsetMismatch)) {
+    if (!isProtocolAnswer(err)) {
       this.health.count(envelope.source_id, respond === "throw" ? "rejected" : "failed");
     }
     if (respond === "throw") throw err;
@@ -435,7 +452,7 @@ export class Pipeline {
         rejected++;
         continue;
       }
-      if (!isSpanIds(part)) {
+      if (!hasBucketSafeSpanIds(part)) {
         rejected++;
         continue;
       }
@@ -507,15 +524,12 @@ export class Pipeline {
         ...(envelope.rebuild === true ? { rebuild: true } : {}),
         ...(retractSecret !== undefined ? { retract_secret: retractSecret } : {}),
         ...(llm_calls ? { llm_calls } : {}),
-        recordsIn: (bytes) => this.recordsIn(envelope, bytes),
+        recordsBeforeCut: (bytes) => this.recordsBeforeCut(envelope, bytes),
       }),
     );
   }
 
-  private recordsIn(
-    envelope: LogEnvelope,
-    bytes: number,
-  ): { records: number; bytes: number } | undefined {
+  private recordsBeforeCut(envelope: LogEnvelope, bytes: number): LogCut | undefined {
     const { payload } = envelope;
     const cuttable = payload.encoding === "jsonl" && this.formats.isChunkable(envelope.format);
     if (!cuttable) return undefined;
@@ -548,12 +562,7 @@ export class Pipeline {
       }
       const applied = session?.applied?.find((a) => a.idempotency_key === envelope.idempotency_key);
       if (session && applied) return { result: replayed(applied, session), replay: true };
-      if (
-        session &&
-        !auth.admin &&
-        auth.owner_basis === "claimed" &&
-        session.owner_basis !== "claimed"
-      ) {
+      if (session && !mayAddToSession(auth, session.owner_basis)) {
         throw new Forbidden(
           "an org-key caller cannot write to a session whose owner was verified; that person's own token can",
         );
@@ -602,12 +611,7 @@ export class Pipeline {
     const guard = (existing: SessionMetadata | null) => {
       const at = existing?.normalized?.bytes ?? 0;
       if (at !== offset) throw new OffsetMismatch(offset, at);
-      if (
-        existing?.head !== session.head ||
-        existing?.redaction?.rule_set !== session.redaction?.rule_set
-      ) {
-        throw new StalePlan();
-      }
+      if (rewrittenByBackfill(existing, session)) throw new StalePlan();
     };
     const { records: raw, llm_calls } = this.normalize(
       envelope.format,
@@ -630,16 +634,7 @@ export class Pipeline {
       hash_state: hash.export(),
     };
     const meta = session.head ? await this.headMeta(run, session.head) : stubMeta(envelope);
-    const current = this.formats.normalizerFor(envelope.format);
-    const builtWith = session.normalizer?.format_version;
-    const sessionNormalizer: Normalizer =
-      session.head !== undefined && this.formats.isStale(envelope.format, builtWith)
-        ? {
-            name: current.name,
-            version: current.version,
-            ...(builtWith ? { format_version: builtWith } : {}),
-          }
-        : current;
+    const sessionNormalizer = this.chunkSessionNormalizer(session, envelope.format);
     return this.commit(run, {
       sessionNormalizer,
       write: [...(meta ? [meta] : []), ...redacted.records],
@@ -652,6 +647,19 @@ export class Pipeline {
       branch: envelope.branch ?? session.branch,
       guard,
     });
+  }
+
+  private chunkSessionNormalizer(session: SessionMetadata, format: string): Normalizer {
+    const current = this.formats.normalizerFor(format);
+    const builtWith = session.normalizer?.format_version;
+    const prefixStaysStale = session.head !== undefined && this.formats.isStale(format, builtWith);
+    return prefixStaysStale
+      ? {
+          name: current.name,
+          version: current.version,
+          ...(builtWith ? { format_version: builtWith } : {}),
+        }
+      : current;
   }
 
   private async headMeta(run: Run, head: string): Promise<NormalizedRecord | undefined> {
@@ -690,7 +698,7 @@ export class Pipeline {
       guard,
     };
 
-    const stub = session !== null && session.head === undefined && session.normalized !== undefined;
+    const stub = session !== null && isStub(session) && session.normalized !== undefined;
     if (session && (session.head || stub)) {
       const base =
         session.normalized ??
@@ -791,7 +799,7 @@ export class Pipeline {
       prefixSha256(this.redactor.redact(raw.slice(0, dropped.records)).records, dropped.records) ===
         dropped.prefix_sha256;
     if (!same && dropped.bytes > 0) {
-      const now = options.recordsIn?.(dropped.bytes);
+      const now = options.recordsBeforeCut?.(dropped.bytes);
       if (now) {
         skip = Math.min(now.records, raw.length);
         cut = now.bytes;
@@ -949,7 +957,7 @@ export class Pipeline {
     withheld: WithheldCallIds,
     status: "unchanged" | "dropped",
     guard: (existing: SessionMetadata | null) => void,
-    stub?: StubInput,
+    createStubIfMissing?: StubInput,
   ): Promise<StoreSessionResult> {
     await recordProgress({
       store: this.store,
@@ -960,7 +968,7 @@ export class Pipeline {
       applied: { idempotency_key: run.envelope.idempotency_key, status },
       guard,
       now: this.now,
-      ...(stub ? { stub } : {}),
+      ...(createStubIfMissing ? { createStubIfMissing } : {}),
     });
     return { status, ...shippedOf(normalized) };
   }

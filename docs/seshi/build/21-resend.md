@@ -153,7 +153,7 @@ stored or sent to review again.
   dropped), the number of leading records to leave out is:
   1. `records`, when the first `records` records, regex-redacted, still hash to
      `prefix_sha256`;
-  2. else, for an uploaded `jsonl` log of a chunkable format (`WholeOptions.recordsIn`, from
+  2. else, for an uploaded `jsonl` log of a chunkable format (`WholeOptions.recordsBeforeCut`, from
      the upload path, which has the text), what the current adapter makes of the log's first
      `bytes` bytes, cut at the line boundary at or past them (a cut inside a line takes the
      whole line: more left out rather than less). This covers a rebuild after an adapter

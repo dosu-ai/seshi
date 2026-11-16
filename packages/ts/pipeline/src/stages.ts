@@ -48,6 +48,15 @@ export function retractSecretMatches(
   return given.length === kept.length && timingSafeEqual(given, kept);
 }
 
+function isOrgKeyCaller(auth: Authorization): boolean {
+  return auth.owner_basis === "claimed";
+}
+
+function orgKeyMayReplace(originalBasis: OwnerBasis | undefined, retractProven: boolean): boolean {
+  const originalClaimed = originalBasis === undefined || originalBasis === "claimed";
+  return originalClaimed && retractProven;
+}
+
 /** Whether `auth` may replace a session first written by `original` (X4.6): its original writer
  * (the same person or service account, through the same source) or an admin. */
 export function mayReplace(
@@ -57,13 +66,18 @@ export function mayReplace(
   retractProven = false,
 ): boolean {
   if (auth.admin) return true;
-  if (auth.owner_basis === "claimed") {
-    if (originalBasis !== undefined && originalBasis !== "claimed") return false;
-    if (!retractProven) return false;
-  }
+  if (isOrgKeyCaller(auth) && !orgKeyMayReplace(originalBasis, retractProven)) return false;
   return (
     auth.writer.principal === original.principal && auth.writer.source_id === original.source_id
   );
+}
+
+export function mayAddToSession(
+  auth: Authorization,
+  sessionBasis: OwnerBasis | undefined,
+): boolean {
+  if (auth.admin) return true;
+  return !isOrgKeyCaller(auth) || sessionBasis === "claimed";
 }
 
 /** What a review decided, as kept beside the session (`review/<n>.json`, F3.8): never the

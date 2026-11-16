@@ -122,6 +122,10 @@ export function uploadIdempotencyKey(sessionKey: string, offset: number, text: s
   return `${sessionKey}@${offset}#${digest}`;
 }
 
+function freshRebuildKeySuffix(): string {
+  return `#rebuild-${randomUUID()}`;
+}
+
 export interface UploadEnvelopeOptions {
   caller: Caller;
   owner_basis: OwnerBasis;
@@ -147,7 +151,7 @@ export function uploadEnvelope(upload: SessionUpload, options: UploadEnvelopeOpt
     owner_basis: options.owner_basis,
     idempotency_key:
       upload.idempotency_key ??
-      `${uploadIdempotencyKey(upload.session_id, offset, upload.transcript)}${upload.rebuild ? `#rebuild-${randomUUID()}` : ""}`,
+      `${uploadIdempotencyKey(upload.session_id, offset, upload.transcript)}${upload.rebuild ? freshRebuildKeySuffix() : ""}`,
     received_at: (options.now ?? (() => new Date()))().toISOString(),
   };
   if (options.claims && Object.keys(options.claims).length > 0) envelope.claims = options.claims;

@@ -32,7 +32,7 @@ import {
   updateMetadataWithChange,
   withInput,
 } from "@seshi/store";
-import { getTrace, listSessions, type WithheldCallIds } from "./ingest";
+import { getTrace, keyPastSpansOf, listSessions, type WithheldCallIds } from "./ingest";
 import { redactSpanPart } from "./spans";
 
 export type BackfillOutcome =
@@ -155,7 +155,7 @@ async function* unpublishedSpanArchives(store: Store, owner: string): AsyncGener
       if (name === "metadata.json") published = archive;
       else if (name.startsWith("spans/")) {
         if (published !== archive) yield archive;
-        after = `${prefix}${archive}/spans0`;
+        after = keyPastSpansOf(`${prefix}${archive}`);
         stepped = true;
         break;
       }
@@ -197,6 +197,15 @@ function joined(traces: readonly Trace[]): {
     for (const call of trace.llm_calls ?? []) if (!calls.has(call.id)) calls.set(call.id, call);
   });
   return { records, llm_calls: [...calls.values()] };
+}
+
+function withoutMetaRecordFields(metadata: TraceMetadata) {
+  const { cwd: _cwd, git_branch: _branch, model: _model, ...rest } = metadata;
+  return rest;
+}
+
+function shouldBackfillSpans(done: BackfillSession, session: SessionMetadata): boolean {
+  return done.outcome !== "skipped" || isStub(session);
 }
 
 class Moved extends Error {}
@@ -295,12 +304,7 @@ async function backfillSession(
     return { ...base, outcome: "unchanged", counts };
   }
 
-  const {
-    cwd: _cwd,
-    git_branch: _branch,
-    model: _model,
-    ...metadata
-  } = head.metadata as TraceMetadata;
+  const metadata = withoutMetaRecordFields(head.metadata as TraceMetadata);
   const continuation = metadata.continuation;
   let trace: Trace;
   try {
@@ -407,7 +411,7 @@ async function backfillSpans(
   const messages = new SpanMessages(store, owner, archive);
   let stored: Set<string> | undefined;
   const named = new Set<string>();
-  const replaced = new Set<string>();
+  const orphanCandidates = new Set<string>();
   for await (const record of spanRecords(store, owner, archive)) {
     const before = storedHashes(record.input);
     if (record.redaction?.rule_set === redactor.rule_set) {
@@ -431,14 +435,14 @@ async function backfillSpans(
     );
     const after = new Set(part.input ? storedHashes(storedInputOf(part.input).input) : []);
     for (const hash of after) named.add(hash);
-    for (const hash of before) if (!after.has(hash)) replaced.add(hash);
+    for (const hash of before) if (!after.has(hash)) orphanCandidates.add(hash);
   }
-  for (const hash of named) replaced.delete(hash);
-  if (replaced.size > 0) {
+  for (const hash of named) orphanCandidates.delete(hash);
+  if (orphanCandidates.size > 0) {
     for await (const record of spanRecords(store, owner, archive)) {
-      for (const hash of storedHashes(record.input)) replaced.delete(hash);
+      for (const hash of storedHashes(record.input)) orphanCandidates.delete(hash);
     }
-    for (const hash of replaced) await store.delete(keys.spanMessage(owner, archive, hash));
+    for (const hash of orphanCandidates) await store.delete(keys.spanMessage(owner, archive, hash));
   }
   return done;
 }
@@ -468,7 +472,7 @@ export async function backfillRedaction(options: BackfillOptions): Promise<Backf
         return report;
       }
       const done = await backfillSession(session, options, now().toISOString());
-      if (done.outcome !== "skipped" || isStub(session)) {
+      if (shouldBackfillSpans(done, session)) {
         const spans = await backfillSpans(
           options.store,
           session.owner,

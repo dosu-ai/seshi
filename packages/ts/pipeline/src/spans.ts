@@ -5,6 +5,7 @@ import type {
   NormalizedRecord,
   RedactionSummary,
   SpanPart,
+  SpanTool,
   StoreSessionResult,
 } from "@seshi/model";
 import { SessionRejected } from "@seshi/model";
@@ -16,6 +17,7 @@ import {
   listPending,
   listSpans,
   type PendingEnvelope,
+  type PendingMarker,
   putSpans,
   readMetadata,
   readPending,
@@ -32,6 +34,36 @@ function addCounts(into: Counts, from: Readonly<Counts> | undefined): Counts {
   return into;
 }
 
+function toolAsCallRecords(part: SpanPart, tool: SpanTool): NormalizedRecord[] {
+  const id = tool.call_id ?? `span:${part.span_id}`;
+  return [
+    {
+      role: "assistant",
+      content: null,
+      tool_calls: [{ id, name: tool.name, args: tool.args ?? "" }],
+      timestamp: part.started_at,
+    },
+    {
+      role: "tool",
+      tool_call_id: id,
+      content: tool.result ?? "",
+      timestamp: part.ended_at ?? part.started_at,
+    },
+  ];
+}
+
+function toolFromCallRecords(tool: SpanTool, records: readonly NormalizedRecord[]): SpanTool {
+  const [call, result] = records as unknown as [
+    { tool_calls: { args: string }[] },
+    { content: string; withheld?: string },
+  ];
+  return {
+    ...tool,
+    ...(tool.args !== undefined ? { args: call.tool_calls[0]?.args ?? "" } : {}),
+    ...(tool.result !== undefined || result.withheld ? { result: result.content } : {}),
+  };
+}
+
 export function redactSpanPart(
   redactor: Redactor,
   part: SpanPart,
@@ -46,30 +78,7 @@ export function redactSpanPart(
   if (part.input) out.input = pass(part.input);
   if (part.output) out.output = pass(part.output);
   if (part.tool) {
-    const id = part.tool.call_id ?? `span:${part.span_id}`;
-    const records: NormalizedRecord[] = [
-      {
-        role: "assistant",
-        content: null,
-        tool_calls: [{ id, name: part.tool.name, args: part.tool.args ?? "" }],
-        timestamp: part.started_at,
-      },
-      {
-        role: "tool",
-        tool_call_id: id,
-        content: part.tool.result ?? "",
-        timestamp: part.ended_at ?? part.started_at,
-      },
-    ];
-    const [call, result] = pass(records) as unknown as [
-      { tool_calls: { args: string }[] },
-      { content: string; withheld?: string },
-    ];
-    out.tool = {
-      ...part.tool,
-      ...(part.tool.args !== undefined ? { args: call.tool_calls[0]?.args ?? "" } : {}),
-      ...(part.tool.result !== undefined || result.withheld ? { result: result.content } : {}),
-    };
+    out.tool = toolFromCallRecords(part.tool, pass(toolAsCallRecords(part, part.tool)));
   }
   if (part.llm_call) {
     const { calls, counts: found } = redactLlmCalls(redactor, [part.llm_call]);
@@ -141,10 +150,12 @@ export const FINAL_GRACE_MS = 15_000;
 /** Sessions one pass publishes before it says there is more. */
 export const ASSEMBLE_BATCH = 50;
 
+function isSingleTraceSessionRoot(part: SpanPart, sessionKey: string): boolean {
+  return !part.parent_span_id && part.trace_id === sessionKey;
+}
+
 function endsSession(part: SpanPart, sessionKey: string): boolean {
-  return (
-    part.final === true || (!part.parent_span_id && part.trace_id === sessionKey && !!part.ended_at)
-  );
+  return part.final === true || (isSingleTraceSessionRoot(part, sessionKey) && !!part.ended_at);
 }
 
 export interface AssembleOptions {
@@ -232,6 +243,14 @@ export async function assemblePending(options: AssembleOptions): Promise<Assembl
     after = page.cursor;
   }
 
+  function isQuiet(marker: PendingMarker, envelope: PendingEnvelope): boolean {
+    const age = now().getTime() - Date.parse(marker.touched_at);
+    const quiet = options.quietMs(marker.source_id ?? envelope.source_id);
+    const inQuietPeriod = age < quiet;
+    const finalGraceOver = Boolean(marker.final) && age >= Math.min(grace, quiet);
+    return !inQuietPeriod || finalGraceOver;
+  }
+
   async function assembleOne(archive: string): Promise<"waiting" | "done"> {
     const found = await readPending(store, archive);
     if (!found) return "done";
@@ -254,9 +273,7 @@ export async function assemblePending(options: AssembleOptions): Promise<Assembl
       report.dropped++;
       return "done";
     }
-    const age = now().getTime() - Date.parse(marker.touched_at);
-    const quiet = options.quietMs(marker.source_id ?? envelope.source_id);
-    if (age < quiet && !(marker.final && age >= Math.min(grace, quiet))) {
+    if (!isQuiet(marker, envelope)) {
       report.waiting++;
       return "waiting";
     }

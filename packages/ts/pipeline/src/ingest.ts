@@ -186,6 +186,25 @@ export interface IngestInput extends WriteContext {
   dropped_prefix?: DroppedPrefix;
 }
 
+function retractHashIfCreating(
+  existing: SessionMetadata | null,
+  retractHash: string | undefined,
+): string | undefined {
+  return existing === null ? retractHash : undefined;
+}
+
+async function removeTraceUnlessListed(
+  store: Store,
+  owner: string,
+  archive: string,
+  contentHash: string,
+): Promise<void> {
+  const now = await readMetadata(store, owner, archive);
+  if (!now?.traces.some((t) => t.content_hash === contentHash)) {
+    await store.delete(keys.trace(owner, archive, contentHash));
+  }
+}
+
 function byteLength(value: unknown): number {
   return new TextEncoder().encode(JSON.stringify(value)).length;
 }
@@ -316,7 +335,8 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
     }
     const normalizer = input.session_normalizer ?? metadata.normalizer;
     if (normalizer) next.normalizer = normalizer;
-    if (input.retract_hash && existing === null) next.retract_hash = input.retract_hash;
+    const retractHash = retractHashIfCreating(existing, input.retract_hash);
+    if (retractHash) next.retract_hash = retractHash;
     const redaction = addRedaction(input.replace ? undefined : base.redaction, input.redaction);
     if (redaction) next.redaction = redaction;
     else delete next.redaction;
@@ -348,10 +368,7 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
     await updateMetadataWithChange(store, owner, archive, step, { expected: before });
   } catch (err) {
     if (outcome === "written") {
-      const now = await readMetadata(store, owner, archive);
-      if (!now?.traces.some((t) => t.content_hash === trace.content_hash)) {
-        await store.delete(keys.trace(owner, archive, trace.content_hash));
-      }
+      await removeTraceUnlessListed(store, owner, archive, trace.content_hash);
     }
     throw err;
   }
@@ -402,16 +419,18 @@ export async function recordProgress(input: {
   applied?: { idempotency_key: string; status: "unchanged" | "dropped" };
   guard?: (existing: SessionMetadata | null) => void;
   now?: () => Date;
-  stub?: StubInput;
+  createStubIfMissing?: StubInput;
 }): Promise<void> {
-  const { store, owner, normalized, stub } = input;
+  const { store, owner, normalized, createStubIfMissing } = input;
   const at = (input.now ?? (() => new Date()))().toISOString();
   await updateMetadata(store, owner, input.archive_id, (existing) => {
     if (existing?.status === "redacted") {
       throw new IngestRejected("redacted", "session was redacted; it will not be stored again");
     }
     input.guard?.(existing);
-    const base = existing ?? (stub ? newStub(owner, input.archive_id, stub, at) : null);
+    const base =
+      existing ??
+      (createStubIfMissing ? newStub(owner, input.archive_id, createStubIfMissing, at) : null);
     if (!base) return null;
     const next: SessionMetadata = { ...base, normalized, updated_at: at };
     if (base.head === undefined) next.dropped_prefix = droppedPrefixOf(normalized);
@@ -622,6 +641,10 @@ export async function listSessions(
   return { sessions, cursor: page.cursor, truncated: page.truncated };
 }
 
+export function keyPastSpansOf(sessionFolder: string): string {
+  return `${sessionFolder}/spans0`;
+}
+
 async function listSessionKeys(
   store: Store,
   prefix: string,
@@ -637,7 +660,7 @@ async function listSessionKeys(
     for (const key of page.keys) {
       const at = key.indexOf("/spans/", prefix.length);
       if (at >= 0) {
-        past = `${key.slice(0, at)}/spans0`;
+        past = keyPastSpansOf(key.slice(0, at));
         break;
       }
       out.push(key);
