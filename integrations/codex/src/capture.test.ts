@@ -68,7 +68,7 @@ describe("Codex's rollouts", () => {
     );
     expect(locateRollout("t3", host)).toBeUndefined();
     expect(CODEX_CAPTURE.sweep[0]?.resolve?.({ ...host, env: { CODEX_HOME: "/c" } })).toBe(
-      "/c/sessions",
+      join("/c", "sessions"),
     );
     expect(CODEX_CAPTURE.sweep[0]?.match("2026/10/01/rollout-x.jsonl")).toBe(true);
     expect(CODEX_CAPTURE.sweep[0]?.match("2026/10/01/other.jsonl")).toBe(false);

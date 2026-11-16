@@ -1,3 +1,4 @@
+import { join } from "node:path";
 export interface CaptureHost {
   env: Readonly<Record<string, string | undefined>>;
   home: string;
@@ -76,7 +77,7 @@ export interface CaptureAgent {
 
 export function expandTilde(path: string, home: string): string {
   if (path === "~") return home;
-  if (path.startsWith("~/") || path.startsWith("~\\")) return `${home}${path.slice(1)}`;
+  if (path.startsWith("~/") || path.startsWith("~\\")) return join(home, path.slice(2));
   return path;
 }
 
