@@ -258,10 +258,16 @@ export class LocalBackend implements Backend {
   }
 }
 
-export interface OpenBackendOptions {
-  server?: string;
-  purpose?: Purpose;
+declare const deleteConfirmed: unique symbol;
+
+export interface DeleteConfirmation {
+  readonly [deleteConfirmed]: true;
 }
+
+export type OpenBackendOptions = { server?: string } & (
+  | { purpose?: Exclude<Purpose, "delete"> }
+  | { purpose: "delete"; confirmed: DeleteConfirmation }
+);
 
 export async function openBackend(
   ctx: CommandContext,

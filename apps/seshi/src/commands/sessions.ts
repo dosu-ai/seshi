@@ -11,7 +11,7 @@ import {
   type Trace,
 } from "@seshi/model";
 import { type Account, openAccount } from "../account/account";
-import { type Backend, openBackend } from "../backend";
+import { type Backend, type DeleteConfirmation, openBackend } from "../backend";
 import { EXIT } from "../cli/exit";
 import { failWith, Refused } from "../cli/failures";
 import { emit, fail, helpOrUsageError, takeJson } from "../cli/output";
@@ -376,13 +376,15 @@ async function confirmDelete(
   ctx: CommandContext,
   ref: { agent: string; sessionId: string },
   values: Values,
-): Promise<boolean> {
-  if (values.yes) return true;
+): Promise<DeleteConfirmation | null> {
+  const confirmation = {} as DeleteConfirmation;
+  if (values.yes) return confirmation;
   const name = deleteName(ref, values);
   if (!ctx.terminal || !ctx.tty?.stdin) {
     throw new UsageError(`deleting ${name} cannot be undone: add --yes`);
   }
-  return confirm(ctx, `Delete ${name}? Its traces are removed and it cannot be undone.`);
+  const yes = await confirm(ctx, `Delete ${name}? Its traces are removed and it cannot be undone.`);
+  return yes ? confirmation : null;
 }
 
 async function rm(
@@ -471,15 +473,19 @@ export async function run(ctx: CommandContext): Promise<number> {
         );
       }
     }
-    if (sub === "rm" && !(await confirmDelete(ctx, ref as NonNullable<typeof ref>, values))) {
-      return fail(ctx, json, EXIT.failure, "cancelled", "nothing deleted");
+    let confirmed: DeleteConfirmation | null = null;
+    if (sub === "rm") {
+      confirmed = await confirmDelete(ctx, ref as NonNullable<typeof ref>, values);
+      if (confirmed === null) return fail(ctx, json, EXIT.failure, "cancelled", "nothing deleted");
     }
     account = openAccount(ctx);
     const style = await styleFor(ctx, { json, theme: account.cli.theme });
-    backend = await openBackend(ctx, account, {
-      ...(values.server ? { server: values.server } : {}),
-      purpose: sub === "rm" ? "delete" : "read",
-    });
+    const server = values.server ? { server: values.server } : {};
+    backend = await openBackend(
+      ctx,
+      account,
+      confirmed ? { ...server, purpose: "delete", confirmed } : { ...server, purpose: "read" },
+    );
     switch (sub) {
       case "ls":
       case "list":
