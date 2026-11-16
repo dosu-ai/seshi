@@ -1,17 +1,3 @@
-/** `seshi tokens`: manage seshi tokens (X5.9, X5.11) through `/v1/tokens`, which needs an admin
- * (`tokens:admin`); in local mode, on the bucket's own token records.
- *
- *   seshi tokens ls [--owner <id>] [--kind org|admin|device|service] [--all]
- *   seshi tokens create <kind> [--owner <id>] [--service <name>] [--scope <s>]…
- *                       [--visibility org|owner] [--expires <30d|date>] [--label <text>]
- *   seshi tokens revoke <id>
- *   seshi tokens revoke --owner <id> [--kind <k>]     every token of a person (offboarding)
- *
- * Each takes `--server <url>` and `--json`. `create` prints the token once; it is not stored
- * anywhere it can be read back. `ls` shows live tokens, `--all` revoked and expired ones too.
- *
- * Exit 0; 2 usage; 4 no such token; 5 not signed in, or not an admin. */
-
 import { parseArgs } from "node:util";
 import type { Scope, TokenInfo, TokenKind, TokenRequest } from "@seshi/client";
 import { parseDuration } from "@seshi/config";
@@ -74,7 +60,6 @@ function kindOf(value: string | undefined): TokenKind | undefined {
   return value as TokenKind;
 }
 
-/** `--expires`: a duration from now (`30d`, `12h`) or a date or time. */
 export function expiresAt(value: string, now: Date): string {
   const ms = parseDuration(value);
   const at = ms !== undefined ? new Date(now.getTime() + ms) : new Date(value);
@@ -85,7 +70,6 @@ export function expiresAt(value: string, now: Date): string {
   return at.toISOString();
 }
 
-/** A token's state in a word (live, revoked, expired) and the role that colours it. */
 export function tokenState(
   token: TokenInfo,
   now: Date,

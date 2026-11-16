@@ -38,7 +38,6 @@ import {
 
 export const AGENT = "claude-code";
 
-/** The events seshi listens to (F9.2), plus SessionStart for the session toggle (F9.5). */
 export const CLAUDE_CODE_EVENTS = [
   "SessionStart",
   "Stop",
@@ -47,13 +46,11 @@ export const CLAUDE_CODE_EVENTS = [
   "SessionEnd",
 ] as const;
 
-/** Claude Code's folder on this machine. */
 export function claudeDir(host: CaptureHost): string {
   const configured = host.env.CLAUDE_CONFIG_DIR;
   return configured ? expandTilde(configured, host.home) : join(host.home, ".claude");
 }
 
-/** The fields every Claude Code hook payload carries. */
 function common(payload: unknown): { session: string; path?: string; cwd?: string } {
   const object = payloadObject(payload, AGENT);
   const session = stringField(object, "session_id");
@@ -78,7 +75,6 @@ const turn = (event: string, final = false): HookHandler => ({
   parse: (payload) => ({ captures: [capture(payload, final)] }),
 });
 
-/** The id a subagent's session is stored under: its transcript's name, `agent-<id>`. */
 export function subagentSessionId(agentId: string): string {
   return agentId.startsWith("agent-") ? agentId : `agent-${agentId}`;
 }
@@ -124,7 +120,6 @@ export const CLAUDE_CODE_HOOKS: readonly HookHandler[] = [
   turn("SessionEnd", true),
 ];
 
-/** The first lines of `head` that are JSON objects (a partial last line is skipped). */
 function headRecords(head: string, max = 50): Record<string, unknown>[] {
   const out: Record<string, unknown>[] = [];
   for (const line of head.split("\n").slice(0, max)) {
@@ -132,9 +127,7 @@ function headRecords(head: string, max = 50): Record<string, unknown>[] {
     try {
       const value = JSON.parse(line);
       if (typeof value === "object" && value !== null && !Array.isArray(value)) out.push(value);
-    } catch {
-      // A partial last line, or a line Claude Code wrote that is not JSON.
-    }
+    } catch {}
   }
   return out;
 }
@@ -175,7 +168,6 @@ function safeDirs(path: string): string[] {
   }
 }
 
-/** A session's transcript, by its id, under `projects/`. */
 export function locateClaudeTranscript(sessionId: string, host: CaptureHost): string | undefined {
   if (!/^[\w.-]+$/.test(sessionId)) return undefined;
   const projects = join(claudeDir(host), "projects");
@@ -209,13 +201,9 @@ export function claudeAccountIds(host: CaptureHost): Record<string, string> {
   }
 }
 
-// --- installer (F9.6) -------------------------------------------------------------------
-
-/** The marker in the `/seshi` skill seshi writes, so uninstall removes only its own. */
 export const SKILL_MARKER =
   "<!-- written by seshi capture install; seshi capture uninstall removes it -->";
 
-/** The `/seshi` skill: turn capture off or on for this session, or see its state (F9.5). */
 export function seshiSkill(command: readonly string[]): string {
   const seshi = commandLine(command);
   return `---
@@ -415,7 +403,6 @@ export const CLAUDE_CODE_CAPTURE: CaptureAgent = {
       root: "~/.claude/projects",
       resolve: (host) => join(claudeDir(host), "projects"),
       depths: [2, 4],
-      // `<project>/<session>.jsonl`, or `<project>/<session>/subagents/agent-<id>.jsonl`.
       match: (relative) =>
         /^[^/]+\/[^/]+\.jsonl$/.test(relative) ||
         /^[^/]+\/[^/]+\/subagents\/agent-[^/]+\.jsonl$/.test(relative),

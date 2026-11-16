@@ -1,10 +1,6 @@
-/** What `seshi serve` needs from a loaded server config, checked: nothing is read or opened
- * here, so `seshi config check` runs the same checks without starting anything. */
-
 import { type AuthSettings, AuthSettingsError, authSettings } from "@seshi/auth";
 import { type FlagValue, parseListen, type ServerConfig } from "@seshi/config";
 
-/** A setting the server cannot start with: printed as `seshi: <message>`, exit 3 (`config`). */
 export class ServeConfigError extends Error {
   constructor(message: string) {
     super(message);
@@ -17,9 +13,7 @@ function fail(message: string): never {
 }
 
 export interface ServeSettings {
-  /** `[auth]`, checked, secrets revealed (X5). */
   auth: AuthSettings;
-  /** The owners of static tokens: their folders are probed at boot. */
   owners: string[];
   url: string;
   store: {
@@ -28,21 +22,16 @@ export interface ServeSettings {
     accountId?: string;
     credentials?: { accessKeyId: string; secretAccessKey: string; sessionToken?: string };
   };
-  /** The deployment the bucket must belong to (`store.deployment_id`, X1.4). */
   deploymentId: string | undefined;
-  /** The organization the bucket must belong to (`store.org`, X1.4). */
   org: string | undefined;
   redactionPacks: string[];
   hostname: string;
   port: number;
-  /** What this instance runs (X7.1). */
   roles: ServerConfig["server"]["roles"];
   filter: ServerConfig["filter"];
   limits: ServerConfig["limits"];
 }
 
-/** The settings, or `ServeConfigError` for the first one the server cannot start with. The
- * config's secrets must be resolved. */
 export function serveSettings(config: ServerConfig): ServeSettings {
   let auth: AuthSettings;
   try {
@@ -87,9 +76,6 @@ export function serveSettings(config: ServerConfig): ServeSettings {
   };
 }
 
-/** The server config flags shared by `serve` and `config`: `--listen`, `--roles` and
- * `--set path=value` (repeatable), as loader flag values. Throws `ServeConfigError` for a
- * `--set` without `=`. */
 export function configFlags(values: {
   listen?: string;
   roles?: string;
@@ -100,7 +86,6 @@ export function configFlags(values: {
     const at = item.indexOf("=");
     if (at < 1) fail(`--set takes path=value, got '${item}'`);
     const path = item.slice(0, at).trim();
-    // Named with its path, so a message or an origin says which --set it was.
     flags.push({ name: `--set ${path}`, path, value: item.slice(at + 1) });
   }
   if (values.listen !== undefined) {

@@ -1,12 +1,4 @@
 #!/usr/bin/env bun
-/** `seshi`: the one binary (X2.2). The router reads the command name and imports that command's
- * module only then (X3.3); everything else stays unevaluated.
- *
- *   seshi serve          run the server
- *   seshi --version      print the version
- *   seshi --help         list the commands
- *
- * Exit codes are stable (F8.1, `cli/exit.ts`): 2 for a command line it cannot read. */
 
 import { VERSION } from "@seshi/model";
 import { COMMANDS, type CommandContext, type CommandSpec } from "./commands/index";
@@ -28,7 +20,6 @@ export interface MainOptions {
   exec?: CommandContext["exec"];
 }
 
-/** `argv` without `--no-color` (before a `--`), and whether it was there (B1.4). */
 export function takeNoColor(argv: readonly string[]): { noColor: boolean; rest: string[] } {
   const end = argv.indexOf("--");
   const head = end === -1 ? argv : argv.slice(0, end);

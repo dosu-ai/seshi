@@ -1,6 +1,3 @@
-/** What `seshi login` keeps and how commands get a credential from it (F8.2), for the session
- * commands, the uploader (branch 14) and tests (`seshi/account`). */
-
 export {
   type Account,
   accountCredential,

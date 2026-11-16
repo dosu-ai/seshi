@@ -1,7 +1,3 @@
-/** One session: the header (agent, id, folder, the capture decision, visibility, where it is
- * stored), the checks (failures first), the pipeline strip, and three tabs: records side by
- * side, the timeline, and the raw evidence. */
-
 import type { CheckResult } from "../../doctor/types";
 import type { Pipeline, RecordsView, SessionDetail } from "../types";
 import { api } from "./api";
@@ -205,7 +201,6 @@ export function renderSession(
     let first: RecordsView;
     try {
       detail = await api.detail(agent, id, fresh);
-      // The records view reads the evidence the detail just gathered (the server keeps it).
       first = await api.records(agent, id, 0, 0, "all");
     } catch (err) {
       replace(

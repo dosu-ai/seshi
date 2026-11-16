@@ -1,16 +1,3 @@
-/** `seshi review eval` (F3.8): measure a review policy against labelled fixtures before
- * changing it: label accuracy and false drops for the decision model, recall for the redactor,
- * and what would have leaked. It runs where the server's config is and calls the policy's real
- * providers, so the fixtures (and only they) are sent to them. It reads no bucket.
- *
- *   seshi review eval [--policy <id>] [--fixtures <file or folder>] [--config <file>]
- *                     [--set path=value]… [--json]
- *
- * Without `--fixtures`, seshi's own labelled set is used. Exit 0 when every fixture came out as
- * labelled, 8 (`attention`) when any did not (a wrong label, a false or missed drop, a leak, a
- * failed call), 3 for a config or policy it cannot use, 4 for an unknown policy or a missing
- * fixtures path. */
-
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
@@ -36,7 +23,6 @@ const USAGE =
 
 const pct = (n: number) => `${Math.round(n * 1000) / 10}%`;
 
-/** The report as lines for a terminal. */
 export function reportLines(report: EvalReport): string[] {
   const lines = [
     `policy ${report.policy} (${report.policy_hash.slice(0, 12)})`,
@@ -64,7 +50,6 @@ export function reportLines(report: EvalReport): string[] {
   return lines;
 }
 
-/** Fixtures from a JSON file, or every `.json` file in a folder (in name order). */
 export function readFixtures(path: string): Fixture[] {
   const files = statSync(path).isDirectory()
     ? readdirSync(path)

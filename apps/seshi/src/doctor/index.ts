@@ -1,8 +1,3 @@
-/** The session checks engine: `gatherEvidence` (what is known about one session from its
- * transcript, this machine's capture state and what was stored) and `runChecks` (what that
- * says). Used by `seshi doctor`, and meant for `seshi explore` too: both steps take their
- * loaders in `DoctorDeps`, and the evidence is plain JSON. */
-
 export {
   chainCheck,
   changesCheck,

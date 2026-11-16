@@ -1,17 +1,3 @@
-/** `seshi upload`: send transcripts by hand (F8.1), through the same capture rules, state and
- * uploader as hooks (F9.3), so a manual upload can be retracted like any other (F9.7).
- *
- *   seshi upload <path>… [--agent <agent>] [--json]
- *   seshi upload --since <duration> [--agent <agent>] [--json]
- *
- * A path is a transcript, or a folder searched for them; which agent wrote each is read from
- * the file (or `--agent`). `--since 30d` backfills on purpose: every session of the installed
- * agents that started in the last 30 days, which the sweep alone never reaches back for. If the
- * background uploader is running it does the work and this command waits for it.
- *
- * Exit codes: 0 everything sent (or nothing new); 1 a session was refused; 2 usage; 3 a config
- * or state file it cannot use; 5 not signed in; 7 the server could not be reached. */
-
 import { readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
@@ -54,10 +40,8 @@ const USAGE = [
   "       seshi upload --since <duration> [--agent <agent>] [--json]",
 ].join("\n");
 
-/** How long to wait for a running uploader to send what this command queued. */
 const WAIT_MS = 120_000;
 
-/** Transcript files under `path`: itself, or the `.jsonl` and `.json` files in a folder. */
 export function transcriptsUnder(path: string, depth = 8): string[] {
   let stat: ReturnType<typeof statSync>;
   try {
@@ -191,7 +175,6 @@ async function upload(
     }
   }
 
-  // The same decision as a hook's (F9.3).
   const snapshot = await captureRules(host, paths);
   const state = readState(paths);
   const keys = new Map<string, string>();
@@ -215,7 +198,6 @@ async function upload(
     );
     if (!decision.capture) {
       outcomes.push({ path, key, result: "skipped", reason: decision.reason });
-      // Seen during a pause, or started in one: stopped where it is, as a hook would (F9.5).
       if (decision.frozen !== undefined && !known?.frozen) {
         stopped.push({
           offset: decision.frozen,
@@ -255,7 +237,6 @@ async function upload(
       const session = st.sessions[key] ?? addition;
       session.path = addition.path;
       if (addition.cwd) seenIn(session, addition.cwd);
-      // Asked for by hand: try again what was refused or held back.
       delete session.error;
       delete session.next_attempt_at;
       delete session.failures;
@@ -271,7 +252,6 @@ async function upload(
     if (lock) {
       try {
         for (let i = 0; i < 50; i++) {
-          // Held like the background uploader's, so a hook meanwhile does not start another.
           if (!lock.beat()) break;
           const summary = await runtime.uploader.pass({ only });
           if (summary.signIn) {
@@ -284,7 +264,6 @@ async function upload(
         lock.release();
       }
     } else {
-      // The background uploader has the lock: hand it the work and wait for it.
       appendSpool(paths, { v: 1, kind: "wake", at: now.toISOString() });
       const deadline = Date.now() + WAIT_MS;
       while (Date.now() < deadline) {
@@ -315,7 +294,6 @@ async function upload(
     outcomes.push({ path, key, result: word, ...(s?.error ? { reason: s.error.message } : {}) });
   }
   const style = await styleFor(ctx, { json });
-  // B1.3's state words: Collected for what was uploaded, All done when there was nothing to do.
   const collected = outcomes.filter((o) => o.result === "uploaded").length;
   emit(ctx, json, { sessions: outcomes, ...(signIn ? { sign_in: signIn } : {}) }, () => [
     ...(outcomes.length === 0 ? [`${style.status("All done", "success")}: nothing to upload`] : []),

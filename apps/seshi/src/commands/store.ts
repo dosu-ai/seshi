@@ -1,23 +1,3 @@
-/** `seshi store` (31): the bucket itself.
- *
- *   seshi store check [--owner <id>]… [--json] [--config <file>] [--set path=value]…
- *
- * `check` reads the bucket the server config names and says where it breaks the invariants of
- * `spec/layout.md` (`@seshi/store`'s `checkStore`): the layout marker, every session's
- * metadata, head, traces and their continuation chain, stubs and tombstoned sessions, old
- * trace objects no metadata names, the change feed, span records and their stored messages,
- * and token records (never their contents). `--owner` (repeatable) checks only those owners'
- * sessions and change feeds. It reads only: nothing is written, deleted or claimed, so it is
- * safe against a live bucket.
- *
- * The config is found as `seshi workers status` finds it (`admin-target.ts`), but there is no
- * server to ask: `--config` or `--set`; else `SESHI_CONFIG` or `/etc/seshi/seshi.toml`; else
- * the CLI config's `[local] config` (local mode's bucket); else `SESHI_*` env alone. A
- * `./seshi.toml` is never read unasked.
- *
- * Exit 0 when nothing is wrong (warnings alone included), 8 (`attention`) when there is an
- * error finding, 2 for bad usage, 3 when the config or the bucket URL cannot be used. */
-
 import { existsSync } from "node:fs";
 import { type ParseArgsConfig, parseArgs } from "node:util";
 import { ConfigError, findServerConfig, loadServerConfig } from "@seshi/config";
@@ -75,8 +55,6 @@ function parse(args: string[], options: NonNullable<ParseArgsConfig["options"]>)
   }
 }
 
-/** The server config file to read: what was named, else local mode's, else none (the usual
- * lookup, then `SESHI_*` env). */
 function configFile(ctx: CommandContext, values: CheckValues): string | undefined {
   if (values.config !== undefined || (values.set?.length ?? 0) > 0) return values.config;
   const found = findServerConfig({ env: ctx.env, cwd: process.cwd(), exists: existsSync });
@@ -116,8 +94,6 @@ function plural(n: number, word: string, many = `${word}s`): string {
   return `${n} ${n === 1 ? word : many}`;
 }
 
-/** The summary line, then the findings grouped by session (B1.4: the severity is a word,
- * coloured after padding; text from the bucket goes through `printable`). */
 export function lines(url: string, report: CheckReport, style: Style): string[] {
   const c = report.counts;
   const kinds = [

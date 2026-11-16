@@ -1,14 +1,7 @@
-/** Setting one top-level key in the CLI's own config file (`server` after `seshi login
- * --server`, `user` after `--user`), leaving everything else in it (comments, tables, order) as
- * written. The result is loaded before it is written, so a change never leaves a config the
- * CLI cannot read. */
-
 import { readFileSync } from "node:fs";
 import { type CliConfig, loadCliConfig } from "@seshi/config";
 import { writePrivateFile } from "./secrets";
 
-/** `text` with `key = "value"` set at the top level: an existing assignment before the first
- * table is replaced; otherwise it is added before the first table. */
 export function setTopLevelKey(text: string, key: string, value: string): string {
   const lines = text === "" ? [] : text.replace(/\n$/, "").split("\n");
   const assignment = `${key} = ${JSON.stringify(value)}`;
@@ -29,8 +22,6 @@ export function setTopLevelKey(text: string, key: string, value: string): string
   return `${lines.join("\n")}\n`;
 }
 
-/** Set `key` in the CLI config file at `path` (created if missing). Throws the loader's
- * `ConfigError` when the result would not load, writing nothing. */
 export function writeCliKey(
   path: string,
   key: "server" | "user",

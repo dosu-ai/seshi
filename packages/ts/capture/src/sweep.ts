@@ -1,9 +1,3 @@
-/** The sweep (F9.3): the uploader looks through each agent's transcript folders on a timer and
- * finds sessions hooks missed (a crash, a hook turned off, an agent update that broke one).
- * What it finds goes through the same decision function as a hook's sessions. It never reaches
- * back past when capture was installed for the agent (no surprise backfill), unless asked to
- * (`seshi upload --since 30d`). */
-
 import { closeSync, openSync, readdirSync, readSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -14,7 +8,6 @@ import {
   type TranscriptInfo,
 } from "@seshi/kit";
 
-/** How much of a transcript `identify` gets to see. */
 export const HEAD_BYTES = 64 * 1024;
 
 export interface FoundTranscript {
@@ -57,7 +50,6 @@ export function identifySafely(
   }
 }
 
-/** Where a sweep folder is on this machine. */
 export function sweepRoot(path: SweepPath, host: CaptureHost): string {
   return path.resolve ? path.resolve(host) : expandTilde(path.root, host.home);
 }
@@ -91,8 +83,6 @@ export function transcriptFiles(
   return out;
 }
 
-/** When a session started: its first record's time, else the file's birth time when the file
- * system records one, else its modification time. */
 function startedMs(info: TranscriptInfo, birthtimeMs: number, mtimeMs: number): number {
   const fromRecord = info.started_at ? Date.parse(info.started_at) : Number.NaN;
   if (Number.isFinite(fromRecord)) return fromRecord;
@@ -114,7 +104,6 @@ export function sweepAgent(
       } catch {
         continue;
       }
-      // Nothing written since then cannot hold a session that started since then.
       if (stat.mtimeMs < sinceMs || stat.size === 0) continue;
       const info = identifySafely(agent, file, readHead(file));
       if (!info) continue;

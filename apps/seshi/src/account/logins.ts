@@ -1,16 +1,3 @@
-/** What `seshi login` keeps (F8.2), per server: a profile with nothing secret in it
- * (`logins.json` next to the CLI config: the mode, who the server says the caller is, the IdP's
- * token endpoint, when the session token expires) and the secrets themselves, each its own
- * entry in a `SecretBackend` (the OS keychain, else a 0600 file):
- *
- * - `org_key` (no IdP, X5.12), or `token` (an admin, service or static token);
- * - with an IdP (X5.7): `session` (the one-hour session token for interactive commands),
- *   `refresh` (the IdP's refresh token, which renews it), and `device` (the write-only device
- *   token the uploader uses, 90 days).
- *
- * The file also holds this machine's id, which the IdP exchange names so the server can renew
- * one device token per machine (X5.2); it survives `seshi logout`. */
-
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -53,7 +40,6 @@ interface LoginsFile {
   logins: Record<string, LoginProfile>;
 }
 
-/** A server URL that cannot be signed in to. */
 export class BadServerUrl extends Error {
   constructor(url: string, reason: string) {
     super(`'${url}' is not a server URL: ${reason}`);
@@ -78,7 +64,6 @@ export function normalizeServer(url: string): string {
   return `${parsed.origin}${parsed.pathname.replace(/\/+$/, "")}`;
 }
 
-/** The logins file and the secrets, for one CLI config folder. */
 export class Logins {
   readonly file: string;
 

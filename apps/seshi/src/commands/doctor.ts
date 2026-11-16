@@ -1,21 +1,3 @@
-/** `seshi doctor`: check that agent sessions are captured right, end to end. A session has three
- * views: its transcript on this machine, this machine's capture state (the state file's entry,
- * the decision, the spool, the uploader's log), and what the server (or, in local mode, the
- * bucket) stored. Only this machine holds all three, so the checks run here.
- *
- *   seshi doctor [--session [<id>]] [--agent <agent>] [--since <duration>] [--deep]
- *                [--server <url>] [--json]
- *
- * With `--session`, one session: the id given, else `SESHI_SESSION_ID`, else the one session
- * seen in this folder in the past day (as `seshi capture` finds it). Without it, every session
- * this machine saw in the past day (`--since 7d` widens it): one line each with its worst
- * status, then the checks that failed. `--deep` also searches for each session. `--json`:
- * `{ sessions: [{ agent, session_id, evidence, checks }] }`, the stored traces' records left out.
- *
- * It changes nothing: no uploads, no state writes, no spool entries. Exit 0 when nothing
- * failed; 8 when a check failed; 2 usage; 3 the state file or config cannot be used; 5 not
- * signed in (or the credential may not read); 7 the server could not be reached. */
-
 import { type CaptureState, readState, StateUnreadable } from "@seshi/capture";
 import { parseDuration } from "@seshi/config";
 import { type Account, openAccount } from "../account/account";
@@ -51,7 +33,6 @@ interface Args {
   server?: string;
 }
 
-/** The flags, by hand: `--session` takes an optional value. */
 export function parseDoctorArgs(argv: readonly string[]): Args | string {
   const args: Args = {};
   for (let i = 0; i < argv.length; i++) {
@@ -94,8 +75,6 @@ export interface SessionReport {
   checks: CheckResult[];
 }
 
-/** The evidence as `--json` prints it: the stored traces' records left out (`seshi sessions
- * export` prints a trace). */
 export function forJson(evidence: SessionEvidence): SessionEvidence {
   return {
     ...evidence,
@@ -113,7 +92,6 @@ const ROLE: Record<CheckStatus, Role | undefined> = {
   skip: undefined,
 };
 
-/** A status word, padded before painting so columns line up; colour never alone (B1.4). */
 function word(style: Style, status: CheckStatus): string {
   const padded = status.padEnd(4);
   const role = ROLE[status];
@@ -176,7 +154,6 @@ function overviewLines(
   return lines;
 }
 
-/** The sessions to check: the one `--session` names, or every one seen since `since`. */
 function targetsOf(
   ctx: CommandContext,
   args: Args,
@@ -231,8 +208,6 @@ export async function run(ctx: CommandContext): Promise<number> {
   const targets = targetsOf(ctx, args, state, now, since);
   if (typeof targets === "string") return usageError(ctx, json, targets, USAGE);
 
-  // Where to ask what was stored. Not being able to ask is recorded in each session's evidence
-  // (the local checks still run) and decides the exit code.
   let account: Account | undefined;
   let backend: Backend | undefined;
   let backendError: (ReturnType<typeof failureOf> & { exit?: number }) | undefined;
@@ -288,8 +263,6 @@ export async function run(ctx: CommandContext): Promise<number> {
   }
 }
 
-/** Not being able to ask the server (not signed in, the config, unreachable) comes first: the
- * result is incomplete. Then any failed check. */
 function exitCode(reports: SessionReport[], backendError: { exit?: number } | undefined): ExitCode {
   if (backendError?.exit !== undefined && reports.length > 0) return backendError.exit as ExitCode;
   const codes = new Set(reports.map((r) => r.evidence.server.metadata_error?.code));

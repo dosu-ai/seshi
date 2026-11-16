@@ -1,17 +1,3 @@
-/** `seshi explore`'s web server: the page and a JSON API, on 127.0.0.1 only, for the person at
- * this machine. Transcripts are sensitive, so every request is checked, in this order:
- *
- * 1. the `Host` header must be `127.0.0.1:<port>` or `localhost:<port>` (403): a page on
- *    another site that rebinds its DNS name to 127.0.0.1 sends its own name;
- * 2. an `Origin`, when sent, must be this server's (403);
- * 3. GET only (405);
- * 4. the token (401), compared in constant time: in the query string for the page and its files
- *    (the served HTML links each file with it), in the `X-Seshi-Token` header for the API.
- *
- * Every response carries a strict Content-Security-Policy (`default-src 'self'`, no inline
- * script or style, nothing remote), no CORS headers, `no-store`, `nosniff`, no framing and no
- * referrer. */
-
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import type { ExploreApi } from "./api";
 import type { Assets } from "./assets";
@@ -48,14 +34,11 @@ export function newToken(): string {
 
 const digest = (s: string) => createHash("sha256").update(s, "utf8").digest();
 
-/** Whether `given` is `token`, in time that does not depend on where they differ. */
 export function sameToken(given: string | null | undefined, token: string): boolean {
   if (typeof given !== "string") return false;
   return timingSafeEqual(digest(given), digest(token));
 }
 
-/** The page's HTML with each local file it links carrying the token, so the browser's requests
- * for them pass the token check too. */
 export function withToken(html: string, token: string): string {
   return html.replace(
     /\b(src|href)="(\/(?!\/)[^"?#]*)"/g,
@@ -81,7 +64,6 @@ export type ExploreHandler = Pick<ExploreApi, "list" | "detail" | "records">;
 export interface ExploreServerOptions {
   api: ExploreHandler;
   assets: Assets;
-  /** 0 (the default) picks a free one. */
   port?: number;
   token?: string;
 }
@@ -89,7 +71,6 @@ export interface ExploreServerOptions {
 export interface ExploreServer {
   port: number;
   token: string;
-  /** The page's address, token included. */
   url: string;
   stop(): Promise<void>;
 }
@@ -101,7 +82,6 @@ function int(value: string | null): number | undefined {
   return Number(value);
 }
 
-/** The request handler, for a server listening on `port`. */
 export function exploreHandler(
   options: { api: ExploreHandler; assets: Assets; token: string },
   port: () => number,
@@ -192,7 +172,6 @@ const notSeen = (agent: string, id: string) => ({
   message: `this machine has not seen ${agent} session ${id}`,
 });
 
-/** Serve on 127.0.0.1. */
 export function startExploreServer(options: ExploreServerOptions): ExploreServer {
   const token = options.token ?? newToken();
   let port = 0;

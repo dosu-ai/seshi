@@ -1,8 +1,3 @@
-/** `seshi explore`'s page: vanilla TypeScript, bundled by Bun from `index.html`. It takes the token
- * from the address once, removes it from the address bar (so it is not on screen when sharing,
- * nor in history), keeps it in memory and sends it as a header on every API call. Routes live in
- * the hash: `#/` the session list, `#/s/<agent>/<id>[/<tab>]` one session. */
-
 import { setToken } from "./api";
 import { h, replace } from "./dom";
 import { renderList } from "./list";

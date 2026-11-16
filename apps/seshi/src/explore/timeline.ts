@@ -1,13 +1,8 @@
-/** One session's events, from every view, merged and sorted by time: when this machine saw it,
- * spool entries, the uploader's log lines, answers and refusals, toggles, pauses, retractions
- * and rebuilds from the state file, and the server's change entries and review decisions. */
-
 import type { SessionEvidence } from "../doctor/types";
 import type { TimelineEvent } from "./types";
 
 const short = (hash: string | null | undefined) => (hash ? hash.slice(0, 12) : "none");
 
-/** A log line's leading ISO timestamp (as `appendLog` writes it), and the rest. */
 export function splitLogLine(line: string): { at?: string; text: string } {
   const space = line.indexOf(" ");
   if (space > 0) {

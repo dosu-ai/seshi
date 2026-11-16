@@ -18,7 +18,6 @@ import type { NormalizedRecord } from "@seshi/model";
 
 const SUBAGENT_REPORT_PREFIX = "<subagent_notification>";
 
-/** The normalized records with each subagent report turned into an observation. */
 export function subagentReportsAsObservations(records: NormalizedRecord[]): NormalizedRecord[] {
   return records.map((record) =>
     record.role === "user" && record.content.trimStart().startsWith(SUBAGENT_REPORT_PREFIX)

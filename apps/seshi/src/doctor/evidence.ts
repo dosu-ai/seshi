@@ -1,7 +1,3 @@
-/** Step one of the doctor: everything known about one session, from its transcript, this
- * machine's capture state and what was stored, as plain JSON. Errors fetching any part are
- * recorded where that part would be, never thrown, so a UI can show what it has. */
-
 import { createHash } from "node:crypto";
 import {
   type CaptureState,
@@ -23,20 +19,16 @@ import {
 } from "./types";
 
 export interface Target {
-  /** The capture agent. */
   agent: string;
   session_id: string;
 }
 
 export interface GatherOptions {
-  /** Also search for the session (`--deep`). */
   deep?: boolean;
 }
 
-/** The most change entries read for one session. */
 const MAX_CHANGES = 5000;
 
-/** The state entry without its secret. */
 export function localEntry(entry: SessionState): LocalEntry {
   const { secret, ...rest } = entry;
   return secret
@@ -50,7 +42,6 @@ export function localEntry(entry: SessionState): LocalEntry {
     : rest;
 }
 
-/** The upload id before the last retraction: `<id>` or `<id>~<n-1>`. */
 export function retractedUploadId(entry: Pick<SessionState, "session_id" | "generation">) {
   const generation = entry.generation ?? 0;
   if (generation === 0) return undefined;
@@ -80,7 +71,6 @@ function transcriptFacts(
   }
 }
 
-/** Text of a record, for picking a search term. */
 function textOf(record: NormalizedRecord): string {
   const content = (record as { content?: unknown }).content;
   if (typeof content === "string") return content;
@@ -92,8 +82,6 @@ function textOf(record: NormalizedRecord): string {
   return "";
 }
 
-/** A distinctive word of the last records that have text: the longest, at least six
- * characters, never inside a redaction marker. */
 export function distinctiveTerm(records: readonly NormalizedRecord[]): string | undefined {
   for (let i = records.length - 1; i >= 0; i--) {
     const record = records[i] as NormalizedRecord;
@@ -139,7 +127,6 @@ async function traceEvidence(
   };
 }
 
-/** Everything known about `target`. */
 export async function gatherEvidence(
   target: Target,
   deps: DoctorDeps,
@@ -169,7 +156,6 @@ export async function gatherEvidence(
       : {}),
   };
 
-  // (b) The capture state.
   let state: CaptureState | undefined;
   try {
     state = deps.state();
@@ -199,7 +185,6 @@ export async function gatherEvidence(
     }
   }
 
-  // (a) The transcript.
   let path = entry?.path;
   if (path === undefined && info?.locate) {
     try {
@@ -235,7 +220,6 @@ export async function gatherEvidence(
     evidence.log.error = error;
   }
 
-  // (c) What was stored.
   const server = deps.server;
   if (!server) {
     evidence.server.error = deps.serverError ?? {
@@ -264,7 +248,6 @@ export async function gatherEvidence(
       ...(got.error ? { error: got.error } : {}),
     };
   }
-  // A stub is read as a session only where it can be seen (local mode).
   const stored = evidence.server.metadata ?? evidence.server.pointer ?? undefined;
   for (const ref of stored?.traces ?? []) {
     evidence.server.traces.push(await traceEvidence(deps, format, id, ref));
@@ -292,8 +275,6 @@ export async function gatherEvidence(
   return evidence;
 }
 
-/** `--deep`: the session found by a word of its last stored record, or a deleted one not
- * found by a word of its transcript. */
 async function searchEvidence(
   evidence: SessionEvidence,
   deps: DoctorDeps,

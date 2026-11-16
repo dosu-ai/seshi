@@ -1,9 +1,3 @@
-/** Where the uploader sends sessions: a seshi server over HTTP (`httpSink`), or, in local mode,
- * an Instance `apps/seshi` builds in-process (it implements `SessionSink` itself, since this
- * package may not import the instance, X3.2). The credential comes from `apps/seshi` too: it
- * calls the account code (`seshi login`'s store) and hands the result in, so a renewed device
- * token is picked up on the next call. */
-
 import { HttpSessionDB, ServerError } from "@seshi/client";
 import type { Fetch, IngestOptions, StaleSession, StoreSessionResult, Upload } from "@seshi/model";
 
@@ -28,7 +22,6 @@ export class RetractRefused extends Error {
   }
 }
 
-/** What a retraction found on the server. */
 export type RetractOutcome = "retracted" | "gone" | "absent";
 
 export interface SessionSink {
@@ -52,7 +45,6 @@ export interface SessionSink {
   ready(): Promise<void>;
 }
 
-/** What the uploader sends with over HTTP: what `credentialFor(…, "upload")` gives. */
 export interface UploadCredential {
   server: string;
   token: string;
@@ -61,7 +53,6 @@ export interface UploadCredential {
 }
 
 export interface HttpSinkOptions {
-  /** The server, for status before any credential is read. */
   target: string;
   /** Called before each request; throws `SignInNeeded` when there is no credential. */
   credential: () => Promise<UploadCredential>;
@@ -69,10 +60,8 @@ export interface HttpSinkOptions {
   userAgent?: string;
 }
 
-/** The most pages of stale sessions read in one go (each up to 1000 keys). */
 const STALE_PAGES = 100;
 
-/** Every stale session a paged listing gives. */
 export async function allStale(
   page: (after: string | undefined) => Promise<{
     sessions: StaleSession[];
@@ -91,7 +80,6 @@ export async function allStale(
   return out;
 }
 
-/** A sink over the HTTP API (`POST /v1/sessions`, `DELETE /v1/sessions/…` with the secret). */
 export function httpSink(options: HttpSinkOptions): SessionSink {
   const client = async () => {
     const credential = await options.credential();

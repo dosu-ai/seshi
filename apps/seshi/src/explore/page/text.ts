@@ -1,8 +1,5 @@
-/** Pure helpers for the page (no DOM): status words and icons, redaction markers, folding. */
-
 import type { ListStatus, RowState, TimelineKind } from "../types";
 
-/** A status as a word and an icon, never colour alone (brand: B1.4). */
 export const STATUS: Readonly<Record<ListStatus, { icon: string; word: string }>> = {
   fail: { icon: "✕", word: "fail" },
   warn: { icon: "▲", word: "warn" },
@@ -36,7 +33,6 @@ export const KIND_WORD: Readonly<Record<TimelineKind, string>> = {
   rebuild: "rebuild",
 };
 
-/** Text split around redaction markers (`[redacted:<rule>]`), each marker with its rule. */
 export function splitMarkers(text: string): { text: string; rule?: string }[] {
   const parts: { text: string; rule?: string }[] = [];
   const re = /\[redacted:([a-z0-9]+(?:-[a-z0-9]+)*)\]/g;
@@ -51,7 +47,6 @@ export function splitMarkers(text: string): { text: string; rule?: string }[] {
   return parts;
 }
 
-/** The first `max` lines of `text`, and how many there are in all. */
 export function fold(text: string, max: number): { head: string; lines: number; folded: boolean } {
   const lines = text.split("\n");
   if (lines.length <= max) return { head: text, lines: lines.length, folded: false };
@@ -62,7 +57,6 @@ export function plural(n: number, one: string, many = `${one}s`): string {
   return `${n} ${n === 1 ? one : many}`;
 }
 
-/** Bytes, briefly. */
 export function bytes(n: number | undefined): string {
   if (n === undefined) return "?";
   if (n < 1024) return `${n} B`;
@@ -70,7 +64,6 @@ export function bytes(n: number | undefined): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
-/** A time as the person's local date and time. */
 export function when(iso: string | undefined): string {
   if (!iso) return "";
   const d = new Date(iso);

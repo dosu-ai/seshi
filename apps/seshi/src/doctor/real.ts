@@ -1,8 +1,3 @@
-/** The doctor's loaders on this machine: the state file, spool and log in the capture folder,
- * the CLI config's capture rules, the agents' own readings of their transcripts, the format
- * registry this binary was built with, the redaction rules the uploader last fetched (or local
- * mode's), and the server or bucket through a `Backend`. Every one only reads. */
-
 import { closeSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import {
   type CapturePaths,
@@ -40,12 +35,9 @@ import type { Failure } from "./types";
 export interface RealDepsOptions {
   host?: CaptureHost;
   paths: CapturePaths;
-  /** The backend, when one could be opened. */
   backend?: Backend;
-  /** Why none could be. */
   backendError?: Failure & { exit?: number };
   account?: Account;
-  /** The folder a session without a recorded one is judged in. */
   cwd?: string;
 }
 
@@ -87,9 +79,6 @@ function agentInfo(agent: CaptureAgent, host: CaptureHost): AgentInfo {
   };
 }
 
-/** The records a pass of `rules` would still change, record by record (withheld calls carried
- * along, as the pipeline carries them). The rules are idempotent on what they wrote, so any
- * change is something they would redact now. */
 export function residueOf(rules: RuleSet, records: readonly NormalizedRecord[]): Residue[] {
   const redactor = ruleRedactor(rules);
   const hits: Residue[] = [];
@@ -110,8 +99,6 @@ export function residueOf(rules: RuleSet, records: readonly NormalizedRecord[]):
   return hits;
 }
 
-/** A `Redaction` over a rule set. `preRedacts`: the uploader redacts each piece before sending
- * (a server); local mode's Instance redacts on write instead. */
 export function ruleRedaction(rules: RuleSet, origin: string, preRedacts: boolean): Redaction {
   const redactor = ruleRedactor(rules);
   return {
@@ -124,8 +111,6 @@ export function ruleRedaction(rules: RuleSet, origin: string, preRedacts: boolea
   };
 }
 
-/** The rules the uploader pre-redacts with: those it last fetched from `server` (kept in the
- * capture folder), else the built-in pack. */
 function uploaderRules(paths: CapturePaths, server: string | undefined): Redaction {
   try {
     const cached = JSON.parse(readFileSync(paths.redactionRules, "utf8")) as {
@@ -140,7 +125,6 @@ function uploaderRules(paths: CapturePaths, server: string | undefined): Redacti
   return ruleRedaction(redactionRules(), "the built-in pack", true);
 }
 
-/** The loaders for this machine. */
 export async function realDeps(ctx: CommandContext, options: RealDepsOptions): Promise<DoctorDeps> {
   const host = options.host ?? hostOf(ctx);
   const { paths } = options;
@@ -149,8 +133,6 @@ export async function realDeps(ctx: CommandContext, options: RealDepsOptions): P
   const formats = buildFormats(await ctx.integrations());
   const cwd = options.cwd ?? process.cwd();
   const normalizer: Normalizer = {
-    // The adapter's records as the pipeline's stage 2 makes them: unredacted (the server's
-    // redaction stage is `Redaction.records`).
     records: (format, text) => formats.normalize({ source: format, transcript: text }).records,
     version: (format) => formats.versionOf(format),
     stale: (format, builtWith) => formats.isStale(format, builtWith),

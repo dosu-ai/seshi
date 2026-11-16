@@ -1,5 +1,3 @@
-/** Cursor's local agent transcripts, normalized by `@letta-ai/trajectory` as they are. */
-
 import { lettaAdapter } from "@seshi/formats";
 import type { FormatAdapter, JsonObject } from "@seshi/kit";
 

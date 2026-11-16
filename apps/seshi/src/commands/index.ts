@@ -1,54 +1,27 @@
-/** The command registry: every `seshi` command group (F8.1), by name, with the module that
- * runs it. A command's module is imported only when that command runs (X3.3), so `seshi hook`
- * and `seshi statusline` never evaluate the server, protobuf or search code
- * (`bun run check:hook` enforces it). Nothing here may import a command module at the top
- * level.
- *
- * Each command lives in its own file; every command group is built (the `notImplemented` stubs
- * of the parallel branches are gone, exit 9 stays reserved). Conventions every command follows:
- * `--json` for one JSON document on stdout, and the stable exit codes in `../cli/exit.ts`. */
-
 import type { Integration } from "@seshi/kit";
 import type { SecretBackend } from "../account/secrets";
 import type { Terminal } from "../cli/terminal";
 
-/** What a command gets from the router. */
 export interface CommandContext {
-  /** The arguments after the command name. */
   argv: string[];
   env: Record<string, string | undefined>;
   stdout(line: string): void;
   stderr(line: string): void;
-  /** The integrations this binary was built with (the static registry), loaded on demand. */
   integrations(): Promise<readonly Integration[]>;
-  /** All of standard input, for commands that read `-`; absent where there is none. */
   stdin?(): Promise<string>;
-  /** Whether standard output and input are terminals: colour, glyphs and questions need them
-   * (B1.4). Neither is, when absent. */
   tty?: { stdout: boolean; stdin: boolean };
-  /** `--no-color` was on the command line; the router takes it out of `argv` (B1.4). */
   noColor?: boolean;
-  /** The terminal, for questions, the background colour and opening a browser; absent when
-   * standard input or output is not one. Loaded on demand. */
   terminal?(): Promise<Terminal>;
-  /** Where credentials are kept (F8.2); the OS keychain with a file fallback when absent. */
   secrets?: SecretBackend;
-  /** Start a program detached, not waited for (a hook starting the uploader, F9.1). `self`
-   * puts the words that start this seshi in front of `words`. Tests record calls instead. */
   spawn?(words: string[], options?: { self?: boolean }): Promise<void>;
-  /** Run a program and wait for it (a service manager's own command); a real process when
-   * absent. Tests record calls instead. */
   exec?(words: string[]): Promise<{ code: number; output: string }>;
 }
 
 export interface CommandModule {
-  /** Runs the command. The exit code, or `undefined` for a command that keeps the process
-   * running (a server) and exits on its own. */
   run(ctx: CommandContext): Promise<number | undefined>;
 }
 
 export interface CommandSpec {
-  /** One line for `seshi --help`. */
   summary: string;
   load(): Promise<CommandModule>;
 }

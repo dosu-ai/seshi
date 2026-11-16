@@ -1,16 +1,3 @@
-/** `seshi normalize` (X3.10): a transcript in any format this binary reads, out as the
- * canonical records (trajectory-v1, `seshi/trace/1`'s records), with the built-in redaction
- * applied. For tools in other languages that need what the pipeline would store without
- * porting an adapter. Nothing is sent or stored.
- *
- *   seshi normalize [--agent <format>] [--json] [<file> | -]
- *
- * Without `--agent` the format is detected from the transcript. Out: one record per line
- * (JSON Lines), or with `--json` one document `{ agent, records, llm_calls? }`, where
- * `llm_calls` are the model calls (model, token usage) the records' `llm_call` fields name, for
- * a log that records them. Exit 4 (`notFound`) for a
- * file that is not there, 1 for a transcript the adapter cannot read. */
-
 import { parseArgs } from "node:util";
 import { NormalizeError } from "@seshi/formats";
 import { normalizeTranscript } from "@seshi/pipeline";

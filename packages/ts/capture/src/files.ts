@@ -1,7 +1,3 @@
-/** File plumbing for the capture folder: private files written whole (temporary file, then
- * rename, so a reader never sees half of one), a lock file for read-modify-write, and the log.
- * Only `node:` modules: the hook loads this. */
-
 import { randomBytes } from "node:crypto";
 import {
   appendFileSync,
@@ -52,22 +48,12 @@ export function readText(path: string): string | undefined {
   }
 }
 
-/** The most `readBounded` reads of a repo's own file (`.seshi/config.toml`, the `.git` pointer,
- * `HEAD`, git's `config`): far more than any real one holds. */
 export const REPO_FILE_MAX_BYTES = 64 * 1024;
 
-/** The most `readBounded` reads of git's own `config`, which grows with every branch and remote
- * it tracks: real ones pass 64 KiB (one seen at over 64 KiB turned capture off for its repo), so
- * it gets more room, still bounded so a link to `/dev/zero` or a huge file cannot hang a hook. */
 export const GIT_CONFIG_MAX_BYTES = 4 * 1024 * 1024;
 
-/** A file a repo controls, read without trusting it: its text; `absent` when it is not there;
- * `invalid` (why) when it is anything but a regular file of at most `max` bytes. */
 export type BoundedRead = { text: string } | { absent: true } | { invalid: string };
 
-/** Read a file a checkout may have planted (a link to `/dev/zero`, a FIFO, a folder, a huge
- * file) without hanging or throwing: `lstat` it (and `stat`, through a link), open it without
- * blocking, `fstat` the descriptor and require a regular file, and read at most `max` bytes. */
 export function readBounded(path: string, max = REPO_FILE_MAX_BYTES): BoundedRead {
   let stat: Stats;
   try {
@@ -109,7 +95,6 @@ export function readBounded(path: string, max = REPO_FILE_MAX_BYTES): BoundedRea
   }
 }
 
-/** The log stops growing past this: it is moved to `<log>.1` and started again. */
 export const LOG_MAX_BYTES = 1024 * 1024;
 
 /** Append one line to the capture log, stamped with the time. Never throws: a log that cannot
@@ -121,9 +106,7 @@ export function appendLog(path: string, line: string, now: Date = new Date()): v
       if (statSync(path).size > LOG_MAX_BYTES) renameSync(path, `${path}.1`);
     } catch {}
     appendFileSync(path, `${now.toISOString()} ${line.replace(/\n/g, " ")}\n`, { mode: 0o600 });
-  } catch {
-    // Nowhere left to say it.
-  }
+  } catch {}
 }
 
 export interface LockOptions {
@@ -133,7 +116,6 @@ export interface LockOptions {
   staleMs?: number;
 }
 
-/** The lock could not be taken in time. */
 export class LockTimeout extends Error {
   constructor(readonly path: string) {
     super(`${path} is locked by another seshi process`);

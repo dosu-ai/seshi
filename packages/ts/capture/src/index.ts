@@ -1,13 +1,3 @@
-/** `@seshi/capture`, layer 5 (X3.2): everything that captures sessions on a machine (F9). The
- * spool hooks write to, the uploader that drains it with the offset and continuation protocol,
- * the sweep, the capture rules and the one decision function, the state file, the status line's
- * words, and retraction (F9.7). It uses `@seshi/client`, `@seshi/config`, `@seshi/kit` and
- * `@seshi/model`, never `@seshi/instance`: `apps/seshi` hands it a `SessionSink` (HTTP, or local
- * mode's Instance) and the credential.
- *
- * `seshi hook` and `seshi statusline` import `@seshi/capture/fast` instead, which loads none of
- * the HTTP client or the config schema. */
-
 export {
   appendLog,
   ensurePrivateDir,

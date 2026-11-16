@@ -1,16 +1,3 @@
-/** `seshi serve` (`bun start`): the server, configured by `@seshi/config` (F1): flags, then
- * `SESHI_*` env, then the TOML file (`--config`, `SESHI_CONFIG`, `./seshi.toml`,
- * `/etc/seshi/seshi.toml`), then defaults. From a checkout (`bun start`) Bun reads `.env` on its
- * own; the compiled binary does not (scripts/build-binary.ts). Changes apply on restart (F1.5).
- * docs/config.md lists every setting.
- *
- *   seshi serve [--config <file>] [--listen <host:port>] [--roles api,worker] [--set path=value]…
- *
- * It builds one Instance (X1.2) and runs the roles `server.roles` names (X7.1): `api` serves
- * the HTTP API; `worker` runs the background jobs (pollers, retention, the heartbeat). The
- * default runs both, which is what one container wants; exactly one instance should run the
- * worker (X7.2). An instance without `api` still answers `/healthz`. */
-
 import { parseArgs } from "node:util";
 import { createApp, maxBodyBytes } from "@seshi/api";
 import { checkServerConfig } from "@seshi/config";
@@ -23,10 +10,6 @@ import { openServer, serverFailure } from "./server-instance";
 
 export { ServeConfigError, serveSettings } from "./serve-settings";
 
-/** The largest request body the listener takes: a transcript up to `limits.max_upload_bytes`,
- * as JSON (a gzipped body is held to the same cap once decoded), or an OTLP body up to
- * `limits.max_otlp_bytes`, whichever is larger, so the OTLP route's own 413 (which names the
- * key) is the one an exporter sees. */
 export function requestBodyCap(limits: {
   max_upload_bytes: number;
   max_otlp_bytes: number;
@@ -39,8 +22,6 @@ const USAGE =
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
-/** Build the instance (config, bucket, marker), serve, and start the jobs; runs until a
- * signal. */
 async function start(ctx: CommandContext, argv: string[]): Promise<number | undefined> {
   let values: { config?: string; listen?: string; roles?: string; set?: string[] };
   try {
@@ -59,12 +40,10 @@ async function start(ctx: CommandContext, argv: string[]): Promise<number | unde
     return usageError(ctx, false, message(err), USAGE);
   }
   const log = lineLogger(ctx.stdout, ctx.stderr);
-  // Only serve reads ./seshi.toml unasked: it runs where its own config is.
   const { instance, loaded, settings } = await openServer(ctx, values, { log, cwdFile: true });
   for (const warning of checkServerConfig(loaded.config).warnings) log.warn(warning);
   const { owners, url } = settings;
 
-  // Without static tokens or an IdP, only tokens in the bucket let anyone in.
   if (instance.api && owners.length === 0 && !settings.auth.oidc) {
     const live = await instance.auth.tokens.list().catch(() => []);
     if (live.length === 0) {
@@ -125,7 +104,6 @@ async function start(ctx: CommandContext, argv: string[]): Promise<number | unde
       `redaction: packs ${packs} (from ${settings.redactionPacks.join(", ")}) on top of the built-in rules ${instance.redaction.builtinVersion}; rule set ${instance.redaction.hash.slice(0, 12)}`,
     );
   }
-  // Last, so whoever waits for the address has read everything before it.
   ctx.stdout(
     `seshi ${VERSION} listening on http://${host}:${server.port}, storing sessions in ${url} (deployment ${instance.deployment}); ${serving}${
       loaded.file ? ` (config ${loaded.file})` : ""
@@ -136,9 +114,6 @@ async function start(ctx: CommandContext, argv: string[]): Promise<number | unde
   async function shutdown(): Promise<void> {
     if (stopping) return;
     stopping = true;
-    // Take no new requests and let the ones in flight finish (an upload is written whole or
-    // not at all, and its client resends), while the jobs stop and source health is written;
-    // each bounded, so a stuck request cannot hold the process past its grace period.
     await Promise.all([Promise.race([server.stop(), Bun.sleep(5000)]), instance.close(5000)]);
     process.exit(0);
   }
@@ -147,8 +122,6 @@ async function start(ctx: CommandContext, argv: string[]): Promise<number | unde
   return undefined;
 }
 
-/** Serves until a signal; returns `config` (3) when a setting stops it from starting and
- * `usage` (2) for a bad flag. */
 export async function run(ctx: CommandContext): Promise<number | undefined> {
   try {
     return await start(ctx, ctx.argv);

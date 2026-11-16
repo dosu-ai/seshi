@@ -1,16 +1,3 @@
-/** `seshi workers status` (X7.5): whether the worker runs, whether a second one does, each
- * job's last run (and what it did: the sweep's deletions, a poller's envelopes), last error and
- * backlog, and each source's drop and failure counts. It runs
- * where the server's config and bucket keys are, and reads the bucket (the heartbeat, the
- * checkpoints, the records); or, from a machine signed in with `seshi login` as an admin, asks
- * a server's `GET /v1/admin/jobs` (`--server`, or the CLI config's `server` when no server
- * config is here: `admin-target.ts`).
- *
- *   seshi workers status [--config <file>] [--set path=value]… [--server <url>] [--json]
- *
- * Exit 0, or 8 (`attention`) when the worker stopped, two are running, or a job's last run
- * failed. */
-
 import { parseArgs } from "node:util";
 import type { InstanceStatus } from "@seshi/instance";
 import { EXIT } from "../cli/exit";
@@ -40,8 +27,6 @@ function counts(record: Record<string, number> | undefined): string {
   return parts.length > 0 ? ` (${parts.join(", ")})` : "";
 }
 
-/** The role that colours a worker state or a job outcome (B1.4); the word itself is always
- * printed. */
 function roleOf(word: string): Role | undefined {
   if (word === "running" || word === "ok") return "success";
   if (word === "error") return "error";
@@ -54,7 +39,6 @@ function painted(style: Style, word: string): string {
   return role ? style.status(word, role) : word;
 }
 
-/** The status as lines for a terminal. */
 export function statusLines(status: InstanceStatus, style: Style = Style.plain()): string[] {
   const { worker } = status;
   const lines: string[] = [];
@@ -77,7 +61,6 @@ export function statusLines(status: InstanceStatus, style: Style = Style.plain()
     lines.push(
       `  ${job.name.padEnd(24)} ${outcome}${last ? ` ${when}` : ""}${counts(job.backlog)}${records}`,
     );
-    // What the last run did (the sweep's deletions, a poller's envelopes), when it did anything.
     const did = Object.entries(last?.last_summary ?? {}).filter(([, n]) => n !== 0);
     if (did.length > 0) {
       lines.push(`    last run: ${did.map(([k, n]) => `${k} ${n}`).join(", ")}`);
@@ -105,7 +88,6 @@ export function statusLines(status: InstanceStatus, style: Style = Style.plain()
   return lines;
 }
 
-/** Whether the status asks for an operator: a stopped or second worker, or a failed job. */
 export function needsAttention(status: InstanceStatus): boolean {
   return (
     status.worker.state === "stopped" ||

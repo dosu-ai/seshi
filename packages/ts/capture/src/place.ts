@@ -1,13 +1,8 @@
-/** Where a session ran, as the capture rules need it (F9.5): the git repository around the
- * folder, the repo's own `.seshi/config.toml`, its remotes and branch. Read from the files
- * themselves (no `git` process), so a hook can afford it on every turn. */
-
 import { realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { GIT_CONFIG_MAX_BYTES, REPO_FILE_MAX_BYTES, readBounded } from "./files";
 import { normalizeRemote, type Place, type RepoConfig } from "./rules";
 
-/** The repo config file, relative to the repo root. */
 export const REPO_CONFIG = join(".seshi", "config.toml");
 
 function kind(path: string): "dir" | "file" | undefined {
@@ -19,8 +14,6 @@ function kind(path: string): "dir" | "file" | undefined {
   }
 }
 
-/** A file the repo controls, through `readBounded`: its text (undefined when absent), or why it
- * cannot be trusted, which makes the repo's config invalid (capture off there, fail closed). */
 function repoFile(
   path: string,
   name: string,
@@ -127,9 +120,6 @@ export function placeOf(cwd: string | undefined): Place {
   } catch {}
   const repo = findRepo(place.real ?? cwd);
   if (repo) {
-    // Every file is read bounded: a repo can plant a link to /dev/zero, a FIFO or a folder
-    // where one is expected, and one that cannot be trusted turns capture off in this repo
-    // only, without hanging or throwing in a hook.
     if (repo.invalid !== undefined) {
       place.repo = { root: repo.root, config: { invalid: repo.invalid }, remotes: [] };
       return place;

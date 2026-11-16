@@ -1,25 +1,13 @@
-/** The terminal a person runs seshi in: questions (a confirmation, an org key typed without
- * echo), the background colour (B1.4: an OSC 11 query with a short timeout), and opening a
- * browser for sign-in (X5.7). The router hands commands a `Terminal` only when standard input
- * and output are both terminals; tests hand them a fake. Questions and prompts go to standard
- * error, so standard output stays the command's answer. */
-
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import type { Theme } from "./style";
 
 export interface Terminal {
-  /** Ask on the terminal and answer the line typed; without echo when `hidden`. Rejects when
-   * the person presses Ctrl-C or input ends. */
   ask(question: string, options?: { hidden?: boolean }): Promise<string>;
-  /** The background's lightness, from an OSC 11 query; undefined when the terminal does not
-   * answer within `timeoutMs`. */
   background(timeoutMs?: number): Promise<Theme | undefined>;
-  /** Open `url` in the person's browser; false when no browser could be started. */
   openUrl(url: string): Promise<boolean>;
 }
 
-/** The person stopped a question (Ctrl-C, end of input). */
 export class Cancelled extends Error {
   constructor() {
     super("cancelled");
@@ -27,8 +15,6 @@ export class Cancelled extends Error {
   }
 }
 
-/** How long the background query waits: long enough for a local terminal, short enough that
- * one that never answers costs nothing noticeable (B1.4). */
 export const BACKGROUND_TIMEOUT_MS = 100;
 
 /** The theme an OSC 11 answer describes (`ESC ] 11 ; rgb:RRRR/GGGG/BBBB` ended by BEL or ST,
@@ -46,7 +32,6 @@ export function parseOsc11(answer: string): Theme | undefined {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.5 ? "light" : "dark";
 }
 
-/** The command that opens a URL on this platform. */
 export function browserCommand(platform: NodeJS.Platform, url: string): string[] {
   if (platform === "darwin") return ["open", url];
   // `start` would read `&` in the URL as a command separator; the URL handler does not.
@@ -54,8 +39,6 @@ export function browserCommand(platform: NodeJS.Platform, url: string): string[]
   return ["xdg-open", url];
 }
 
-/** Whether `openUrl` may hand `url` to the OS opener: `http:` and `https:` only, never `file:`,
- * `smb:` or a custom scheme a server or IdP named (X5.7). */
 export function openable(url: string): boolean {
   try {
     const { protocol } = new URL(url);
@@ -65,7 +48,6 @@ export function openable(url: string): boolean {
   }
 }
 
-/** The process's own terminal. */
 export function processTerminal(): Terminal {
   const stdin = process.stdin;
   const stderr = process.stderr;

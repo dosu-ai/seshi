@@ -1,22 +1,9 @@
-/** `seshi hook <agent> <event>`: internal; agents call it on their events (F9.1, F9.2). It reads
- * the hook's JSON (from standard input, or from its last argument as Codex's `notify` passes
- * it), applies the capture rules (F9.5), appends to the spool and starts the uploader if it is
- * not running. It always exits 0 and prints nothing, so it never blocks or disturbs the agent;
- * errors go to the capture log.
- *
- * It must start fast (X3.3): it imports only what capture's fast path needs, and loads the one
- * agent's capture module it is called for. `bun run check:hook` holds it to that.
- *
- * After `--` comes a program to run after seshi's hook, with the same payload: how the Codex
- * installer keeps the `notify` program that was there before (Codex has only one). */
-
 import { appendLog, runHook } from "@seshi/capture/fast";
 import { captureAgent } from "../capture-agents";
 import { EXIT } from "../cli/exit";
 import { pathsOf, startUploader } from "./capture-host";
 import type { CommandContext } from "./index";
 
-/** How long a hook waits for its standard input before giving up. */
 const STDIN_TIMEOUT_MS = 5000;
 
 async function readInput(ctx: CommandContext): Promise<string> {

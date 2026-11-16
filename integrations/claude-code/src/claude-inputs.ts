@@ -24,20 +24,14 @@ import type { NormalizedRecord } from "@seshi/model";
 
 const NOTIFICATION_PREFIX = "<task-notification";
 
-/** The attachment type of input queued while the agent was busy. */
 const QUEUED_COMMAND = "queued_command";
 
-/** Prepended to a marked row's text so the adapter keeps it as a user record, and stripped
- * from the record afterwards. Bracketed in U+E000 (private use), which no real prompt starts
- * with. */
 const MARK = "sessiondb-observation";
 
 function startsNotification(text: unknown): boolean {
   return typeof text === "string" && text.trimStart().startsWith(NOTIFICATION_PREFIX);
 }
 
-/** The user row a queued input stands for, its text marked when nobody typed it; null for any
- * other row, and for queued input of a kind not seen yet (left to the adapter, which skips it). */
 function queuedInputRow(row: Record<string, unknown>): Record<string, unknown> | null {
   const { attachment, ...rest } = row;
   if (row.type !== "attachment" || typeof attachment !== "object" || attachment === null) {
@@ -51,8 +45,6 @@ function queuedInputRow(row: Record<string, unknown>): Record<string, unknown> |
   return { ...rest, type: "user", message: { role: "user", content } };
 }
 
-/** Mark one transcript row when the normalizer would drop it as a notification: a user message
- * whose text (a string, or its first text block) starts with the tag. Null when it would not. */
 function markRow(row: Record<string, unknown>): Record<string, unknown> | null {
   const message = row.message as { content?: unknown } | undefined;
   if (row.type !== "user" || typeof message !== "object" || message === null) return null;

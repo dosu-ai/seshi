@@ -1,6 +1,3 @@
-/** The raw tab: the evidence JSON as a tree that opens a level at a time (children are built only
- * when their parent is opened, so a large evidence document costs nothing until read). */
-
 import { h, replace } from "./dom";
 
 function preview(value: unknown): string {

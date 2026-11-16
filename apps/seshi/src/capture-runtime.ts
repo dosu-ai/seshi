@@ -1,12 +1,3 @@
-/** Wiring the uploader (`@seshi/capture`) to this machine's seshi setup, for `seshi daemon` and
- * `seshi upload`: where sessions go (the server the CLI config names, with the credential
- * `seshi login` stored, or local mode's Instance), and the agents this binary captures.
- * `@seshi/capture` may not import the account code or the instance (X3.2), so they are handed
- * in from here.
- *
- * Pre-redaction (F2.4): `preRedactor` fetches the org's rules once per uploader run and
- * redacts each piece with `redactTranscript` before it is sent. */
-
 import { readFileSync } from "node:fs";
 import {
   allStale,
@@ -33,15 +24,11 @@ import { hostOf } from "./commands/capture-host";
 import type { CommandContext } from "./commands/index";
 import { USER_AGENT } from "./user-agent";
 
-/** A sink and what to call when done with it. */
 export interface OpenedSink {
   sink: SessionSink;
   close(): Promise<void>;
 }
 
-/** Uploads to local mode's bucket through an Instance (X3.5): the bucket's owner writes, and a
- * retraction checks the secret against the stored hash before the same tombstone the server
- * writes (F9.7). */
 export async function localSink(ctx: CommandContext, account: Account): Promise<OpenedSink> {
   const { connect, localOwner } = await import("./connect");
   const connection = await connect({
@@ -70,7 +57,6 @@ export async function localSink(ctx: CommandContext, account: Account): Promise<
       const metadata = await getSession(instance.store, owner, agent, sessionId);
       if (!metadata) return "absent";
       if (metadata.status === "redacted") {
-        // An earlier tombstone whose answer was lost may have left objects: remove them.
         await finishTombstone({ store: instance.store, owner, agent, session_id: sessionId });
         return "gone";
       }
@@ -95,9 +81,6 @@ export async function localSink(ctx: CommandContext, account: Account): Promise<
   return { sink, close: () => connection.close() };
 }
 
-/** Uploads to the server the CLI config names, with the stored upload credential: the device
- * token, or the org key and the username to state (F8.2, X5.7). Read again before every
- * request, so a sign-in or a renewed token is picked up without a restart. */
 export async function serverSink(account: Account): Promise<OpenedSink> {
   const { httpSink } = await import("@seshi/capture");
   const server = serverOf(account);
@@ -136,12 +119,10 @@ export async function serverSink(account: Account): Promise<OpenedSink> {
   return { sink, close: async () => {} };
 }
 
-/** The sink the CLI config names: local mode, else its server. */
 export async function openSink(ctx: CommandContext, account: Account): Promise<OpenedSink> {
   return account.cli.local ? localSink(ctx, account) : serverSink(account);
 }
 
-/** The org's redaction rules as last fetched from `server`, kept for If-None-Match. */
 interface CachedRules {
   server: string;
   etag: string;
@@ -159,8 +140,6 @@ function readCachedRules(file: string | undefined, server: string): CachedRules 
   return undefined;
 }
 
-/** The withheld calls a piece carries over, as `redactTranscript` takes them: the state file
- * is this machine's own, but only what the redactor itself writes is passed back. */
 function withheldOf(carried: Record<string, unknown> | undefined): WithheldCalls {
   const withheld: WithheldCalls = {};
   for (const [id, kind] of Object.entries(carried ?? {})) {
@@ -175,19 +154,6 @@ export interface PreRedactorOptions {
   log?: (line: string) => void;
 }
 
-/** The pre-redaction the uploader applies (F2.4): each piece goes through the org's rule packs
- * and the built-in pack (`redactTranscript`) before it leaves the machine, so a secret the
- * rules know is never sent. The server redacts everything again either way.
- *
- * The rules are fetched (`GET /v1/redaction/rules`) once per uploader run, on the first piece,
- * with the upload credential; the document is kept in the capture folder, so the next run's
- * request names its ETag and an unchanged rule set answers 304. A server from before the rules
- * route (404), or a document this client cannot use, leaves the built-in pack. When the server
- * cannot be reached the rules last fetched are used; with none, the piece waits, as an upload
- * would. 401 is "sign in". `@seshi/redact` and the client are imported here, on first use, and
- * never on a hook's path.
- *
- * Local mode sends nothing anywhere: the Instance in this process redacts before it writes. */
 export function preRedactor(account: Account, options: PreRedactorOptions = {}): PreRedactor {
   if (account.cli.local) return NO_PREREDACTION;
   const log = options.log ?? (() => {});
@@ -256,7 +222,6 @@ export function preRedactor(account: Account, options: PreRedactorOptions = {}):
 
   return {
     async redact({ encoding, text, carried }) {
-      // Once per run; a failed fetch is tried again with the next piece.
       loading ??= load().catch((err) => {
         loading = undefined;
         throw err;
@@ -275,7 +240,6 @@ export interface CaptureRuntime {
   paths: ReturnType<typeof capturePaths>;
   account: Account;
   uploader: Uploader;
-  /** Let go of the sink (local mode's instance). */
   close(): Promise<void>;
 }
 
@@ -301,7 +265,6 @@ export async function captureRuntime(
       cacheFile: paths.redactionRules,
       log: options.log ?? ((line) => appendLog(paths.log, `uploader: ${line}`)),
     }),
-    // Claims come from the command's home, not whatever home the process was started in.
     git: gitIdentityIn(ctx.env),
     ...options,
   });

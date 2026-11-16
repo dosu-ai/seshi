@@ -1,13 +1,7 @@
-/** The doctor's read-only view of what was stored, over the `Backend` the session commands use
- * (F8.3): a seshi server through the HTTP client, or local mode's bucket through its Instance.
- * Local mode reads the bucket itself where a server would hide something: a stub's pointer
- * (F3.4) and the change feed. */
-
 import type { ChangeEntry } from "@seshi/model";
 import { type Backend, LocalBackend, ServerBackend } from "../backend";
 import type { ServerView } from "./deps";
 
-/** The most change entries one page asks for. */
 const CHANGE_PAGE = 1000;
 
 export function serverView(backend: Backend): ServerView {
@@ -49,7 +43,6 @@ export function serverView(backend: Backend): ServerView {
   return view;
 }
 
-/** Every page of a change feed, up to `limit` entries. */
 async function readAll(
   page: (after?: string) => Promise<{
     entries: { key: string; entry: ChangeEntry }[];

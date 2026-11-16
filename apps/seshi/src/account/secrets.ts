@@ -1,15 +1,7 @@
-/** Where the CLI keeps credentials (F8.2): the OS keychain through `Bun.secrets` (macOS
- * Keychain, Windows Credential Manager, libsecret on Linux), falling back to a file only its
- * owner can read (`credentials.json`, mode 0600, next to the CLI config) where there is no
- * keychain, such as a Linux machine without a secret service. Each secret is its own entry,
- * so a long IdP refresh token never pushes a short key over a keychain's size limit; one the
- * keychain refuses goes to the file alone. */
-
 import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { ConfigError } from "@seshi/config";
 
-/** The keychain service every seshi entry is filed under. */
 export const KEYCHAIN_SERVICE = "seshi";
 
 export interface SecretBackend {
@@ -21,7 +13,6 @@ export interface SecretBackend {
   delete(name: string): Promise<boolean>;
 }
 
-/** The OS keychain. */
 export function keychainSecrets(service = KEYCHAIN_SERVICE): SecretBackend {
   return {
     kind: "keychain",
@@ -37,8 +28,6 @@ export function keychainSecrets(service = KEYCHAIN_SERVICE): SecretBackend {
   };
 }
 
-/** Write `text` to `path` readable by its owner only: a temporary file made 0600, then renamed
- * into place, so the file is never briefly readable by others or half written. */
 export function writePrivateFile(path: string, text: string): void {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const temp = `${path}.${process.pid}.${Date.now()}.tmp`;
@@ -52,9 +41,6 @@ export function writePrivateFile(path: string, text: string): void {
   }
 }
 
-/** The JSON object in one of the CLI's own files (`logins.json`, `credentials.json`). A file
- * that is not one (cut short, edited by hand) is a `ConfigError` that names it, rather than a
- * crash; the way out is to remove it and sign in again. */
 export function parseJsonFile(path: string, text: string): Record<string, unknown> {
   const refuse = (why: string) =>
     new ConfigError([`${path} is not a JSON object (${why}); remove it and run seshi login again`]);
@@ -119,7 +105,6 @@ export class FileSecrets implements SecretBackend {
   }
 }
 
-/** Secrets in memory, for tests and for a process that must not persist anything. */
 export class MemorySecrets implements SecretBackend {
   readonly kind = "memory";
   readonly values = new Map<string, string>();
@@ -157,9 +142,7 @@ export class FallbackSecrets implements SecretBackend {
     try {
       const value = await this.primary.get(name);
       if (value !== null) return value;
-    } catch {
-      // No keychain here: the file is the only place it can be.
-    }
+    } catch {}
     return this.fallback.get(name);
   }
 
@@ -167,7 +150,6 @@ export class FallbackSecrets implements SecretBackend {
     try {
       await this.primary.set(name, value);
       this.placed.set(name, this.primary.kind);
-      // A stale copy in the file would be found if the keychain entry went away.
       await this.fallback.delete(name);
       return;
     } catch (err) {
@@ -181,9 +163,7 @@ export class FallbackSecrets implements SecretBackend {
     let deleted = false;
     try {
       deleted = await this.primary.delete(name);
-    } catch {
-      // Nothing can be in a keychain that is not there.
-    }
+    } catch {}
     return (await this.fallback.delete(name)) || deleted;
   }
 }

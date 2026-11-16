@@ -16,7 +16,6 @@ import type { Chunk, JsonObject, LlmCall, TokenUsage } from "@seshi/model";
 const isObject = (value: unknown): value is JsonObject =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** The response items and events that hold what the model wrote. */
 const MODEL_ITEMS = new Set([
   "function_call",
   "custom_tool_call",
@@ -24,7 +23,6 @@ const MODEL_ITEMS = new Set([
   "tool_search_call",
 ]);
 
-/** Codex's usage names, to the trace's. */
 const USAGE_KEYS: readonly [string, keyof TokenUsage][] = [
   ["input_tokens", "input_tokens"],
   ["cached_input_tokens", "cache_read_input_tokens"],
@@ -50,8 +48,6 @@ function isModelLine(type: unknown, payload: JsonObject): boolean {
   return MODEL_ITEMS.has(payload.type as string);
 }
 
-/** The model calls a rollout (or a chunk of one, at `chunk.offset`) records, and the lines each
- * wrote. */
 export function codexCalls(transcript: string, chunk?: Chunk): SourceCalls {
   const calls: LlmCall[] = [];
   const sites: CallSite[] = [];
@@ -71,7 +67,6 @@ export function codexCalls(transcript: string, chunk?: Chunk): SourceCalls {
     if (!isObject(row) || !isObject(row.payload)) continue;
     const payload = row.payload;
     if (row.type === "turn_context") {
-      // A new turn: what an earlier turn wrote and never counted is not this turn's.
       pending = [];
       if (typeof payload.model === "string" && payload.model !== "") model = payload.model;
       continue;

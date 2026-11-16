@@ -1,18 +1,10 @@
-/** The records view of one session: the local transcript re-normalized with the current adapter
- * and redacted with the local rules (never raw), the stored trace records as the server stored
- * them, and the two aligned by record index, with the review-dropped prefix, the point a pause
- * froze the session at, where the server's log ends and a stub marked. Built from the doctor's
- * evidence (with the traces' records) and its loaders; reads nothing else. */
-
 import { canonicalJson, isStub, type NormalizedRecord, type SessionMetadata } from "@seshi/model";
 import type { DoctorDeps } from "../doctor/deps";
 import type { SessionEvidence } from "../doctor/types";
 import type { Pipeline, RecordRow, RecordsView, RowFilter, RowState } from "./types";
 
-/** A redaction marker as the redactor writes it: `[redacted:<rule>]`. */
 export const MARKER = /\[redacted:([a-z0-9]+(?:-[a-z0-9]+)*)\]/g;
 
-/** Markers in `value`, by rule. */
 export function markersIn(value: unknown): Record<string, number> {
   const counts: Record<string, number> = {};
   if (value === undefined) return counts;
@@ -36,9 +28,6 @@ function storedOf(ev: SessionEvidence): SessionMetadata | undefined {
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
-/** The transcript's first `end` bytes, as the uploader would send them (pre-redacted where it
- * pre-redacts), normalized by the current adapter: unredacted records, never returned as they
- * are (`alignRecords` redacts them before anything leaves). */
 function normalizedUpTo(ev: SessionEvidence, deps: DoctorDeps, end: number): NormalizedRecord[] {
   const path = ev.transcript.path as string;
   const capture = ev.capture as NonNullable<SessionEvidence["capture"]>;
@@ -46,7 +35,6 @@ function normalizedUpTo(ev: SessionEvidence, deps: DoctorDeps, end: number): Nor
   return deps.normalizer.records(capture.format, deps.redaction.transcript(text, capture.encoding));
 }
 
-/** Where in the transcript the server's log ends, as the doctor's records check finds it. */
 function serverEnd(ev: SessionEvidence): number | undefined {
   const s = ev.local;
   const n = storedOf(ev)?.normalized;
@@ -56,9 +44,6 @@ function serverEnd(ev: SessionEvidence): number | undefined {
   return undefined;
 }
 
-/** The stored records by session record index, following the trace chain: the first trace
- * starts at 0 (or, continuing, at the dropped prefix's end), each continuation at its
- * `from_record`; a continuation's leading meta record repeats record 0. */
 function storedByIndex(ev: SessionEvidence): Map<number, { record: unknown; trace: number }> {
   const out = new Map<number, { record: unknown; trace: number }>();
   ev.server.traces.forEach((t, trace) => {
@@ -76,7 +61,6 @@ function storedByIndex(ev: SessionEvidence): Map<number, { record: unknown; trac
   return out;
 }
 
-/** Every row of the session, aligned. */
 export function alignRecords(ev: SessionEvidence, deps: DoctorDeps): Aligned {
   const s = ev.local;
   const m = storedOf(ev);
@@ -111,7 +95,6 @@ export function alignRecords(ev: SessionEvidence, deps: DoctorDeps): Aligned {
     },
   };
 
-  // The local side: redacted before it is kept.
   let local: NormalizedRecord[] = [];
   const size = ev.transcript.size ?? 0;
   const readable = ev.transcript.exists && ev.transcript.path && ev.capture;
@@ -151,7 +134,6 @@ export function alignRecords(ev: SessionEvidence, deps: DoctorDeps): Aligned {
     if ((record as { withheld?: string }).withheld) pipeline.redacted.withheld++;
   }
 
-  // The stored side, and the rows.
   const stored = storedByIndex(ev);
   const dropped = m?.dropped_prefix?.records;
   const hasTrace = ev.server.traces.length > 0;
@@ -218,7 +200,6 @@ export function matches(row: RecordRow, filter: RowFilter): boolean {
 
 export const MAX_PAGE = 500;
 
-/** One page of the aligned rows. */
 export function page(
   aligned: Aligned,
   options: { offset?: number; limit?: number; filter?: RowFilter } = {},

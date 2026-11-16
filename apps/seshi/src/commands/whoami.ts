@@ -1,13 +1,3 @@
-/** `seshi whoami`: who the CLI is signed in as, and where its sessions go (F8.2). Against a
- * server it asks `GET /v1/me` with the stored credential (renewing a session token on the
- * way), so it also says whether the credential still works; in local mode it names the owner
- * and the bucket.
- *
- *   seshi whoami [--server <url>] [--json]
- *
- * Exit 0; 5 not signed in, or the server refused the credential; 7 the server cannot be
- * reached. */
-
 import { parseArgs } from "node:util";
 import type { Identity } from "@seshi/model";
 import { openAccount, serverOf } from "../account/account";
@@ -72,7 +62,6 @@ export async function run(ctx: CommandContext): Promise<number> {
         backend.mode === "server"
           ? account.logins.get(serverOf(account, values.server) as string)
           : undefined;
-      // The username actually sent now, which SESHI_USER may have changed since sign-in.
       const login = profile
         ? {
             mode: profile.mode,

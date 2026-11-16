@@ -1,9 +1,3 @@
-/** The records tab: the local transcript (re-normalized and redacted with the local rules) on the
- * left and what was stored on the right, aligned by record index. Redaction markers are
- * highlighted with their rule, mismatches marked, long records folded, and the review-dropped
- * prefix, the pause's stop and the end of the server's log drawn as dividers. Rows come a page
- * at a time, so a session of thousands of records stays responsive. */
-
 import type { RecordRow, RecordsView, RowFilter, RowState } from "../types";
 import { api } from "./api";
 import { h, replace, withMarkers } from "./dom";
@@ -84,7 +78,6 @@ export function renderRecords(
     marks.stub ? " · the stored session is a stub" : "",
   );
 
-  /** Dividers for the marks between the previous row shown and `index`. */
   function dividersBefore(index: number): HTMLElement[] {
     const out: HTMLElement[] = [];
     const crossed = (at: number | undefined) => at !== undefined && lastIndex < at && index >= at;

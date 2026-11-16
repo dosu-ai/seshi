@@ -30,7 +30,6 @@ import {
 
 export const AGENT = "codex";
 
-/** Codex's folder on this machine. */
 export function codexDir(host: CaptureHost): string {
   const configured = host.env.CODEX_HOME;
   return configured ? expandTilde(configured, host.home) : join(host.home, ".codex");
@@ -128,8 +127,6 @@ export function locateRollout(sessionId: string, host: CaptureHost): string | un
   return undefined;
 }
 
-// --- installer (F9.6): a config.toml edit ---------------------------------------------------
-
 const HOOK_WORDS = ["hook", AGENT, "notify"];
 
 /** Whether a `notify` value is seshi's: `<command…> hook codex notify [-- <old program>…]`,
@@ -148,9 +145,6 @@ export function isSeshiNotify(notify: unknown, own?: readonly string[]): notify 
   return command.some((w) => basename(w.replace(/\\/g, "/")).replace(/\.exe$/i, "") === "seshi");
 }
 
-/** The program seshi's `notify` runs after itself: the words after `--`. A chain that is seshi's
- * own notify again (installs whose command an older seshi did not recognize as its own) is
- * unwound, so seshi never runs itself. */
 export function chainedNotify(notify: readonly string[], own?: readonly string[]): string[] {
   let chain = [...notify];
   for (;;) {

@@ -1,24 +1,3 @@
-/** `seshi login`: sign in to a seshi server (F8.2, X5.7). `GET /v1/auth/config` says which
- * ways in the server takes:
- *
- * - With an IdP: the device flow (a code to enter in a browser), or `--browser` for the browser
- *   with PKCE where the device flow is not allowed. The ID token is exchanged once for a session
- *   token (interactive commands, one hour, renewed through the IdP's refresh token) and a
- *   write-only device token for unattended uploads (90 days).
- * - Without one: `--key` stores the org key; the username stated with it is resolved on every
- *   use (`--user`, which writes `user` to the CLI config, SESHI_USER, git user.email, the OS
- *   user).
- * - `--token` stores a token an admin issued (an admin or service token), or a static token.
- *
- * Credentials go in the OS keychain, falling back to a 0600 file next to the CLI config. A
- * `--server` is written to the CLI config, so later commands use it.
- *
- *   seshi login [--server <url>] [--key <key>|-] [--token <token>|-] [--user <name>]
- *               [--browser|--device] [--visibility org|owner] [--json]
- *
- * Exit 0 signed in; 2 usage; 3 the CLI config is in local mode or cannot be written; 5 the
- * server or IdP refused; 7 the server or IdP cannot be reached. */
-
 import { hostname } from "node:os";
 import { parseArgs } from "node:util";
 import {
@@ -71,7 +50,6 @@ interface Values {
   visibility?: string;
 }
 
-/** A secret from a flag: `-` reads it from standard input. */
 async function secretArg(ctx: CommandContext, value: string, what: string): Promise<string> {
   if (value !== "-") return value.trim();
   if (!ctx.stdin)
@@ -81,7 +59,6 @@ async function secretArg(ctx: CommandContext, value: string, what: string): Prom
   return read;
 }
 
-/** Who a pasted credential is, as the server says; 401 means it does not accept it. */
 async function identify(server: string, token: string, user?: string): Promise<Identity> {
   try {
     return await new HttpSessionDB({
@@ -98,7 +75,6 @@ async function identify(server: string, token: string, user?: string): Promise<I
   }
 }
 
-/** The IdP sign-in: device flow or browser, then the exchange (X5.2). */
 async function idpSignIn(
   ctx: CommandContext,
   account: Account,
@@ -277,7 +253,6 @@ export async function run(ctx: CommandContext): Promise<number> {
 
     const viaIdp = values.token === undefined && values.key === undefined && !!config.oidc;
     if (values.visibility !== undefined && !viaIdp) {
-      // It is the device token's default (X5.10); the org key and a pasted token have theirs.
       throw new Refused(
         EXIT.usage,
         "usage",
@@ -321,7 +296,6 @@ export async function run(ctx: CommandContext): Promise<number> {
           USAGE,
         );
       }
-      // --user wins here; later uses resolve it again in X5.7's order (SESHI_USER first).
       const { user, from } =
         values.user !== undefined
           ? { user: values.user, from: "flag" }

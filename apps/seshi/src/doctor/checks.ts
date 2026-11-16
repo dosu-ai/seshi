@@ -1,16 +1,8 @@
-/** Step two of the doctor: what the evidence of one session says, as checks. Each check reads
- * the evidence (and, for the records it re-normalizes, the transcript through `deps`) and
- * answers ok, warn, fail or skip with one line and, when there is more, detail and a hint.
- * Pure apart from those reads: the same evidence always gives the same answers. */
-
 import { isStub, type NormalizedRecord, prefixSha256, type SessionMetadata } from "@seshi/model";
 import type { DoctorDeps } from "./deps";
 import type { CheckResult, CheckStatus, SessionEvidence, TraceEvidence } from "./types";
 
-/** A spool entry older than this, with no uploader running, is stuck. */
 export const SPOOL_STUCK_MS = 10 * 60 * 1000;
-/** Bytes not uploaded for this long after the transcript last changed, with no uploader
- * running, are stuck. */
 export const PENDING_STUCK_MS = 30 * 60 * 1000;
 
 const short = (hash: string | undefined) => (hash ? hash.slice(0, 12) : "none");
@@ -34,13 +26,10 @@ function result(
   };
 }
 
-/** What the server stored, as far as it can be seen: the metadata readers get, else the stored
- * pointer (a stub, in local mode). */
 function storedOf(ev: SessionEvidence): SessionMetadata | undefined {
   return ev.server.metadata ?? ev.server.pointer ?? undefined;
 }
 
-/** Why a check that needs the server cannot run, if it cannot. */
 function noServer(ev: SessionEvidence): string | undefined {
   if (ev.server.error) return `could not ask the server: ${ev.server.error.message}`;
   if (ev.server.metadata_error) {
@@ -51,8 +40,6 @@ function noServer(ev: SessionEvidence): string | undefined {
 
 const sessionRef = (ev: SessionEvidence) =>
   `seshi capture status --session ${ev.session_id} --agent ${ev.agent}`;
-
-// --- decision -------------------------------------------------------------------------------
 
 export function decisionCheck(ev: SessionEvidence): CheckResult {
   const id = "decision";
@@ -84,8 +71,6 @@ export function decisionCheck(ev: SessionEvidence): CheckResult {
   }
   return result(id, title, "ok", `${word}: ${d.reason} (${d.level})`, { detail });
 }
-
-// --- transcript -----------------------------------------------------------------------------
 
 export function transcriptCheck(ev: SessionEvidence): CheckResult {
   const id = "transcript";
@@ -156,8 +141,6 @@ export function transcriptCheck(ev: SessionEvidence): CheckResult {
   });
 }
 
-// --- queue ----------------------------------------------------------------------------------
-
 export function queueCheck(ev: SessionEvidence): CheckResult {
   const id = "queue";
   const title = "Queue";
@@ -216,7 +199,6 @@ export function queueCheck(ev: SessionEvidence): CheckResult {
         : `a rebuild waits until ${s.rebuild.not_before}${s.rebuild.for ? ` (stale against ${s.rebuild.for})` : ""}`,
     });
   }
-  // Bytes still to send, up to where a pause stopped the session.
   const d = ev.decision;
   if (
     s &&
@@ -256,8 +238,6 @@ export function queueCheck(ev: SessionEvidence): CheckResult {
   });
 }
 
-// --- server presence ------------------------------------------------------------------------
-
 export function presenceCheck(ev: SessionEvidence): CheckResult {
   const id = "presence";
   const title = "Server presence";
@@ -290,7 +270,6 @@ export function presenceCheck(ev: SessionEvidence): CheckResult {
   }
   const d = ev.decision;
   const off = d?.level === "session" && !d.capture;
-  // What an earlier retraction left: the upload id before it is gone or tombstoned.
   let retracted: string | undefined;
   const previous = ev.server.retracted;
   if (s.retract === "done" && previous) {
@@ -332,7 +311,6 @@ export function presenceCheck(ev: SessionEvidence): CheckResult {
     : now;
 }
 
-/** Presence of the session's current upload id. */
 function presenceNow(
   ev: SessionEvidence,
   s: NonNullable<SessionEvidence["local"]>,
@@ -370,9 +348,6 @@ function presenceNow(
       const frozen = s.frozen ? `, stopped by a pause at ${bytes(s.frozen.offset)}` : "";
       return result(id, title, "ok", `stored as ${uid}: head ${short(m?.head)}${frozen}`);
     }
-    // A stub answers `dropped` first, and `unchanged` to a later whole send of nothing past the
-    // dropped start (a rebuild, `seshi capture resend`): the server holds the stub all along
-    // (StoreSessionResult, model/api.ts).
     const stubbed = s.last_status === "dropped" || s.last_status === "unchanged";
     if (stubbed) {
       if (pointer && isStub(pointer)) {
@@ -402,14 +377,10 @@ function presenceNow(
       `this machine stored ${uid} (${bytes(s.file_offset ?? 0)} sent), but ${where} holds nothing of it`,
     );
   }
-  // Sent, nothing stored.
   if (s.last_status === "filtered") {
     if (!has(m)) {
       return result(id, title, "ok", "filtered: nothing stored until the transcript grows");
     }
-    // Sent again once it grew past what the filter judged, and that answer lost (and not sent
-    // since: a pause stopped it): the server holds it though the last answer heard said
-    // filtered (33). Warned below, as any lost answer is.
     const grown = s.held_at_size !== undefined && (ev.transcript.size ?? 0) > s.held_at_size;
     if (!grown) return lost(`the session filter kept it out, yet ${where} holds ${uid}`);
   }
@@ -420,8 +391,6 @@ function presenceNow(
   }
   return result(id, title, "ok", `sent, nothing stored yet (${s.last_status ?? "no answer yet"})`);
 }
-
-// --- retraction secret ----------------------------------------------------------------------
 
 export function secretCheck(ev: SessionEvidence): CheckResult {
   const id = "secret";
@@ -454,12 +423,6 @@ export function secretCheck(ev: SessionEvidence): CheckResult {
   return result(id, title, "ok", "the secret here matches the stored hash");
 }
 
-// --- a dropped replace ------------------------------------------------------------------------
-
-/** Model review dropped this machine's last replace (or rebuild) of the session: the server kept
- * the session it had, which this transcript no longer extends, and the uploader sends it whole
- * as a replace again once the transcript grows (`replace_next`, uploader.ts; 20 × 21). Until
- * then the offsets, the record count and the prefix differ by design: a warning, not a fault. */
 function replaceDropped(ev: SessionEvidence): boolean {
   return ev.local?.replace_next === true;
 }
@@ -467,8 +430,6 @@ function replaceDropped(ev: SessionEvidence): boolean {
 const REPLACE_DROPPED =
   "review dropped the last replace: the server keeps the session it had, which this transcript no longer extends";
 const REPLACE_HINT = "the uploader sends it whole, as a replace, once the transcript grows";
-
-// --- offsets --------------------------------------------------------------------------------
 
 export function offsetsCheck(ev: SessionEvidence): CheckResult {
   const id = "offsets";
@@ -489,17 +450,12 @@ export function offsetsCheck(ev: SessionEvidence): CheckResult {
   if (m.status === "redacted") return result(id, title, "skip", "deleted");
   const n = m.normalized;
   const fails: string[] = [];
-  // A pause stopped the session after a piece whose answer was lost: the server holds that
-  // piece, past what this machine heard, and nothing more is ever sent to tell it (uploader.ts
-  // keeps what the server holds and sends nothing past the stop; 33).
   const pausedAhead = s.frozen !== undefined && n.bytes > (s.server_offset ?? 0);
   if (s.server_offset !== n.bytes && !pausedAhead) {
     fails.push(
       `the server's log ends at ${bytes(n.bytes)}; this machine thinks ${bytes(s.server_offset ?? 0)}`,
     );
   }
-  // A dropped replace is answered with what the server kept: the offsets wait for the
-  // transcript to grow, and then it goes whole (uploader.ts).
   const waiting = replaceDropped(ev) && s.file_offset !== s.server_offset;
   if (s.aligned !== false && s.file_offset !== s.server_offset && !waiting) {
     fails.push(
@@ -548,17 +504,13 @@ export function offsetsCheck(ev: SessionEvidence): CheckResult {
   return result(id, title, "ok", summary);
 }
 
-// --- records and prefix hash ----------------------------------------------------------------
-
 interface LocalRecords {
-  /** Where in the transcript the server's log ends. */
   end: number;
   records?: NormalizedRecord[];
   error?: string;
   skip?: string;
 }
 
-/** The transcript up to where the server's log ends, normalized as the server would. */
 function localRecords(ev: SessionEvidence, deps: DoctorDeps): LocalRecords {
   const s = ev.local;
   const m = storedOf(ev);
@@ -569,17 +521,12 @@ function localRecords(ev: SessionEvidence, deps: DoctorDeps): LocalRecords {
   if (!ev.transcript.exists || !ev.transcript.path) {
     return { end: 0, skip: "the transcript is not here to compare" };
   }
-  // No answer ever came (it was lost, and the session is not sent again: a pause): whether
-  // pre-redaction kept every length is not known, so neither is where the server's log ends in
-  // the transcript (33).
   if (s.server_offset === undefined && s.aligned === undefined) {
     return {
       end: 0,
       skip: "no answer came for what was sent: where the server's log ends in the transcript is not known",
     };
   }
-  // The server holds more than this machine heard of: a piece whose answer was lost, and whether
-  // pre-redaction kept its lengths is not known either (33).
   if (s.server_offset !== undefined && n.bytes > s.server_offset) {
     return {
       end: 0,
@@ -674,12 +621,6 @@ export function recordsCheck(
   );
 }
 
-/** Whether a redaction backfill (F2.5) rewrote the session's traces after its prefix hash was
- * last computed from a whole log. A backfill leaves `normalized` as the earlier rules made it,
- * by design (the next whole upload conflicts and replaces); only a whole write (a first
- * publish, a replace, a rebuild) computes it afresh. The change feed says which came last: a
- * backfill's entry is a `published` replace with `reason: "redacted"`; a whole write's is a
- * `published` entry without `continuation`. Undefined feed: false. */
 function backfilledSincePrefix(ev: SessionEvidence): boolean {
   let backfilled = false;
   for (const { entry } of ev.server.changes ?? []) {
@@ -690,7 +631,6 @@ function backfilledSincePrefix(ev: SessionEvidence): boolean {
   return backfilled;
 }
 
-/** The ids in the redaction markers (`[redacted:<id>]`) of some records. */
 function markersIn(records: readonly NormalizedRecord[]): Set<string> {
   const out = new Set<string>();
   for (const record of records) {
@@ -749,8 +689,6 @@ export function prefixCheck(
       { hint: "the next whole upload is a 409 conflict, answered with replace" },
     );
   }
-  // The dropped start of a stub (F3.4) is hashed into the prefix as the rules of its day made
-  // it, and is not stored, so no backfill can redo it under rules that change it (33).
   const dropped = m.dropped_prefix;
   if (
     hash !== n.prefix_sha256 &&
@@ -769,10 +707,6 @@ export function prefixCheck(
       `review dropped the first ${plural(dropped.records, "record")}, hashed under earlier rules and not stored to redact again; the hashes cannot agree`,
     );
   }
-  // A rule set that dropped or renamed a rule: a backfill that found nothing more to redact
-  // records the new rule set without rewriting (backfill.ts), and an earlier rule's markers stay
-  // as they are (ruleset.ts), so the stored records keep markers this machine's rules never
-  // write, and the hashes cannot agree (33).
   const foreign =
     hash === n.prefix_sha256
       ? []
@@ -817,8 +751,6 @@ export function prefixCheck(
     `${short(hash)} over ${plural(local.records.length, "record")}, as stored`,
   );
 }
-
-// --- trace chain ----------------------------------------------------------------------------
 
 export function chainCheck(ev: SessionEvidence): CheckResult {
   const id = "chain";
@@ -916,8 +848,6 @@ export function chainCheck(ev: SessionEvidence): CheckResult {
   return result(id, title, "ok", summary, { detail: notes });
 }
 
-// --- redaction residue ----------------------------------------------------------------------
-
 export function residueCheck(ev: SessionEvidence, deps: DoctorDeps): CheckResult {
   const id = "residue";
   const title = "Redaction residue";
@@ -966,8 +896,6 @@ export function residueCheck(ev: SessionEvidence, deps: DoctorDeps): CheckResult
   );
 }
 
-// --- staleness ------------------------------------------------------------------------------
-
 export function stalenessCheck(ev: SessionEvidence, deps: DoctorDeps): CheckResult {
   const id = "staleness";
   const title = "Staleness";
@@ -1006,8 +934,6 @@ export function stalenessCheck(ev: SessionEvidence, deps: DoctorDeps): CheckResu
     },
   );
 }
-
-// --- change feed ----------------------------------------------------------------------------
 
 export function changesCheck(ev: SessionEvidence): CheckResult {
   const id = "changes";
@@ -1050,8 +976,6 @@ export function changesCheck(ev: SessionEvidence): CheckResult {
   return result(id, title, "ok", summary);
 }
 
-// --- search ---------------------------------------------------------------------------------
-
 export function searchCheck(ev: SessionEvidence): CheckResult | undefined {
   const id = "search";
   const title = "Search";
@@ -1078,7 +1002,6 @@ export function searchCheck(ev: SessionEvidence): CheckResult | undefined {
   return result(id, title, "ok", `deleted ${s.upload_id} is not found by ${term}`);
 }
 
-/** Every check of one session, in order. */
 export function runChecks(ev: SessionEvidence, deps: DoctorDeps): CheckResult[] {
   const local = localRecords(ev, deps);
   const results = [

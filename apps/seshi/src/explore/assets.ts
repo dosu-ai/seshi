@@ -14,13 +14,10 @@ export interface Asset {
 }
 
 export interface Assets {
-  /** The page's HTML. */
   index: string;
-  /** Every other file, by the URL path the HTML links it at (`/chunk-1a2b.js`). */
   files: Map<string, Asset>;
 }
 
-/** Bundle the page at `indexPath` (its HTML) into memory. */
 export async function buildAssets(indexPath: string): Promise<Assets> {
   const built = await Bun.build({
     entrypoints: [indexPath],
@@ -44,7 +41,6 @@ export async function buildAssets(indexPath: string): Promise<Assets> {
 
 let loaded: Promise<Assets> | undefined;
 
-/** The page this binary carries (or, from source, bundles now); loaded once. */
 export function loadAssets(): Promise<Assets> {
   loaded ??= (async () => {
     const bundle = (await import("./page/index.html")).default;

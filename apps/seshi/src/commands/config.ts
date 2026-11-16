@@ -1,14 +1,3 @@
-/** `seshi config check` and `seshi config show` (F1.4).
- *
- *   seshi config check [--cli] [--config <file>] [--json] [--set path=value]…
- *       Validates the server's config (or the CLI's, with --cli) the way `seshi serve` loads it,
- *       secret references included, and the redaction packs it names (every rule compiled and
- *       checked against its own test strings, as serve does), and prints warnings. Exit 0 when
- *       it can be used, 3 (config) when not.
- *   seshi config show [--cli] [--config <file>] [--origin] [--json] [--set path=value]…
- *       Prints every value, with --origin where it came from (flag, env, file, default).
- *       Secrets are masked and not read. */
-
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { parseArgs } from "node:util";
@@ -77,7 +66,6 @@ function where(loaded: Loaded<unknown>): string {
   return loaded.file ?? "no config file (env and defaults)";
 }
 
-/** What stops `[redaction] packs` from loading, as serve would load them (F2.1). */
 function packProblems(paths: readonly string[]): string[] {
   const files: { path: string; text: string }[] = [];
   const problems: string[] = [];

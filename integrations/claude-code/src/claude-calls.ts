@@ -33,8 +33,6 @@ function usageOf(value: unknown): TokenUsage | undefined {
   return Object.keys(usage).length > 0 ? usage : undefined;
 }
 
-/** The model calls a Claude Code transcript (or a chunk of one) records, and its assistant
- * lines. */
 export function claudeCodeCalls(transcript: string): SourceCalls {
   const calls = new Map<string, LlmCall>();
   const sites: CallSite[] = [];
@@ -63,7 +61,6 @@ export function claudeCodeCalls(transcript: string): SourceCalls {
     calls.set(id, call);
     sites.push({ timestamp: row.timestamp, call: id });
   }
-  // A call the log says nothing about (no model, no usage) is only an id: no call at all.
   const known = [...calls.values()].filter((call) => call.model || call.usage);
   return { calls: known, sites };
 }

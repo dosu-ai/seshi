@@ -1,24 +1,3 @@
-/** The capture rules (F9.5) and the one decision function hooks, the sweep, the status line and
- * the uploader all call (F9.3), so the sweep can never upload what a hook would have skipped.
- *
- * Four levels, combined like this:
- *
- * 1. Shared rules can only turn capture off, and always win: the org rule (the CLI config's
- *    `capture.remotes`: only repos whose remote matches) and a repo's `.seshi/config.toml`
- *    with `capture = false`, in the folder the session runs in or any other it was seen in.
- * 2. A session turned off by its own toggle is off.
- * 3. A pause (`seshi capture pause`) stops sessions where they are (F9.5, revised 15 Nov 2026):
- *    a session seen while it lasts, or that started in one, keeps what it has uploaded and
- *    sends nothing past that offset, ever (`frozen`). A pause ending does not undo it; turning
- *    the session on does (`seshi capture on --session`), and a session turned on after a pause
- *    began is not stopped by that pause.
- * 4. Otherwise the most specific personal level that says anything decides: the session's own
- *    toggle, then the longest matching folder rule (`[[capture.paths]]`), then the global
- *    `capture.enabled`.
- *
- * Where a session ran must be known: without it the repo's rule cannot be checked, so such a
- * session is not captured. Pure: everything it judges comes in as arguments. */
-
 import type { Toggle } from "./state";
 
 export interface PathRule {
@@ -29,7 +8,6 @@ export interface PathRule {
   capture: boolean;
 }
 
-/** The personal and org rules from the CLI config. */
 export interface CaptureRules {
   enabled: boolean;
   paths: PathRule[];
@@ -40,7 +18,6 @@ export interface CaptureRules {
 
 export const DEFAULT_RULES: CaptureRules = { enabled: true, paths: [], remotes: [] };
 
-/** What a repo's own `.seshi/config.toml` says. */
 export interface RepoConfig {
   capture?: boolean;
   visibility?: "org" | "owner";
@@ -48,13 +25,10 @@ export interface RepoConfig {
   invalid?: string;
 }
 
-/** Where a session ran, as far as the rules care. */
 export interface Place {
-  /** The folder the agent ran in; unknown when nothing said. */
   cwd?: string;
   /** `cwd` with symbolic links resolved, when it differs. */
   real?: string;
-  /** The git repository `cwd` is in, if any. */
   repo?: {
     root: string;
     config: RepoConfig;
@@ -64,7 +38,6 @@ export interface Place {
   };
 }
 
-/** Which level decided. */
 export type Level =
   | "config"
   | "unknown"
@@ -78,7 +51,6 @@ export type Level =
 export interface Decision {
   capture: boolean;
   level: Level;
-  /** One short sentence: why. */
   reason: string;
   /** Set when a pause stops the session (`level: "pause"`): the transcript offset it stops at.
    * What lies before it may still be sent again (a whole-log resend after a 409, a moved
@@ -98,13 +70,10 @@ export interface DecideInput {
   /** The CLI config could not be read: nothing is captured until it is fixed. */
   rulesError?: string;
   place: Place;
-  /** The session's toggle, when it has one. */
   toggle?: Toggle;
   /** When that toggle was set: a session turned on after a pause began is not stopped by it. */
   toggledAt?: string;
-  /** A pause is in force now. */
   paused?: boolean;
-  /** When the pause in force began. */
   pausedAt?: string;
   /** The offset an earlier pause stopped the session at (its `frozen` state). */
   frozen?: number;
@@ -130,9 +99,7 @@ export function normalizeRemote(remote: string): string {
     try {
       const url = new URL(text);
       text = `${url.hostname.toLowerCase()}${url.pathname}`;
-    } catch {
-      // A local path remote: kept as written.
-    }
+    } catch {}
   }
   return text.replace(/\/+$/, "").replace(/\.git$/, "");
 }
@@ -186,7 +153,6 @@ export function folderRule(
   return best?.rule;
 }
 
-/** The shared rule (the org's, or the repo's own) that turns capture off at `place`, if any. */
 function sharedExclusion(rules: CaptureRules, place: Place): Decision | undefined {
   if (rules.remotes.length > 0) {
     const remotes = place.repo?.remotes ?? [];
@@ -218,7 +184,6 @@ function sharedExclusion(rules: CaptureRules, place: Place): Decision | undefine
   return undefined;
 }
 
-/** Whether to capture a session, and which level said so. */
 export function decide(input: DecideInput, platform: NodeJS.Platform = process.platform): Decision {
   const { rules, place } = input;
   if (input.rulesError !== undefined) {
@@ -237,8 +202,6 @@ export function decide(input: DecideInput, platform: NodeJS.Platform = process.p
   }
   const shared = sharedExclusion(rules, place);
   if (shared) return shared;
-  // A session that moved: what it did in an excluded repo is in its transcript, so a shared
-  // rule of any folder it was seen in still wins (F9.5).
   for (const other of input.seen ?? []) {
     if (other.cwd === undefined || other.cwd === place.cwd) continue;
     const excluded = sharedExclusion(rules, other);
@@ -252,8 +215,6 @@ export function decide(input: DecideInput, platform: NodeJS.Platform = process.p
   if (input.toggle === "off") {
     return { capture: false, level: "session", reason: "turned off for this session" };
   }
-  // A pause stops sessions where they are (F9.5): never retracts, never sends past the offset.
-  // A session turned on after a pause began is the person's own choice, and that pause leaves it.
   const turnedOnSince = (at: string | undefined) =>
     input.toggle === "on" &&
     input.toggledAt !== undefined &&

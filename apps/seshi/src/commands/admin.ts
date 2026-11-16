@@ -1,18 +1,3 @@
-/** `seshi admin init` (X5.12): the first admin token and the org key. It runs where the server's
- * config and bucket keys are, writes straight to the bucket, and prints each token once; after
- * that, admins manage tokens through the API (`/v1/tokens`).
- *
- *   seshi admin init [--config <file>] [--set path=value]… [--owner <id>] [--force]
- *                    [--rotate-org-key] [--json]
- *
- * - The admin token belongs to `--owner` (`admin` by default): what it writes is that owner's.
- * - The org key is made when `auth.org_key.enabled` and none is live. `--rotate-org-key`
- *   revokes the live ones and makes a new one: without an IdP, the only way to cut someone off
- *   (X5.11). Every member then sets the new key.
- * - Run again, it refuses: an admin token already exists. `--force` makes another one.
- * - `--json` prints one document, `{ admin?: {id, owner, token}, org_key?: {id, token},
- *   revoked: [id] }`, for a deployment script to keep the tokens (F8.1). */
-
 import { parseArgs } from "node:util";
 import { AdminInitError } from "@seshi/auth";
 import { EXIT } from "../cli/exit";
@@ -47,7 +32,6 @@ async function init(ctx: CommandContext, argv: string[], json: boolean): Promise
   } catch (err) {
     return usageError(ctx, json, message(err), USAGE);
   }
-  // A one-shot instance: no roles, nothing probed; the marker is still checked (X1.4).
   const { instance } = await openServer(ctx, values, { roles: [], probe: [] });
   let result: Awaited<ReturnType<typeof instance.auth.initAdmin>>;
   try {

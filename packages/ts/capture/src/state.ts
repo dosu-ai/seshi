@@ -1,13 +1,3 @@
-/** The one capture state file per machine (F9.5): read by hooks, the sweep, the status line and
- * the uploader, written by the uploader and the `seshi capture` commands. It holds which agents
- * capture is installed for (the sweep's floor, F9.3), a pause, every session seen with its
- * toggle, its upload position and its retraction secret (F9.7), and the problems the status
- * line reports (B1.6).
- *
- * Writers take the lock and write the whole file through a rename, so a reader (the status
- * line, a hook) never sees half of one. The file is readable only by this user: it holds the
- * retraction secrets, which never leave the machine. */
-
 import { randomBytes } from "node:crypto";
 import type { ShippedPrefix } from "@seshi/model";
 import { readText, withLock, writePrivateFile } from "./files";
@@ -16,7 +6,6 @@ import type { DecideInput, PauseWindow } from "./rules";
 
 export const STATE_SCHEMA = "seshi/capture-state/1";
 
-/** A session's own toggle (F9.5, the session level). */
 export type Toggle = "on" | "off";
 
 export interface Problem {
@@ -24,18 +13,11 @@ export interface Problem {
   at: string;
 }
 
-/** One session this machine has seen, by hook or sweep. */
 export interface SessionState {
   agent: string;
-  /** The agent's own id for it. */
   session_id: string;
-  /** Its transcript, once known. */
   path?: string;
-  /** Where the agent ran last: what the capture rules are judged against. */
   cwd?: string;
-  /** Every folder a hook or the sweep saw the session in, `cwd` included, captured or not: a
-   * shared rule that turns any of them off turns the session off (F9.5), so moving out of an
-   * excluded repo does not upload what the session did there. */
   folders?: string[];
   parent_session_id?: string;
   first_seen: string;
@@ -45,20 +27,16 @@ export interface SessionState {
   /** When the session started, as its transcript says (or its file's birth time). */
   started_at?: string;
 
-  // Set by a pause (F9.5, revised 15 Nov 2026) -----------------------------------------------
   /** A pause stopped the session here: it keeps what it uploaded and nothing past `offset` (a
    * transcript offset) is ever sent, even after the pause ends. Only `seshi capture on
    * --session` takes it away. */
   frozen?: { at: string; offset: number };
 
-  // Set by `seshi capture off|on --session` -------------------------------------------------
   toggle?: Toggle;
   toggled_at?: string;
-  /** A retraction asked for by turning the session off (F9.7): waiting, done, or refused. */
   retract?: "pending" | "done" | "failed";
   retract_error?: string;
 
-  // Set by the uploader --------------------------------------------------------------------
   /** How many times the session was retracted: each later upload is a new session on the
    * server (`<id>~<n>`), since a retracted one is never stored again (F9.7). */
   generation?: number;
@@ -131,7 +109,6 @@ export interface CaptureState {
     /** When the server was last asked which sessions are stale (X4.9). */
     last_stale_check?: string;
   };
-  /** What needs the person's action (B1.6): a sign-in, uploads that keep failing. */
   problems?: { sign_in?: Problem; upload?: Problem };
 }
 
@@ -150,7 +127,6 @@ export function emptyState(): CaptureState {
   return { schema: STATE_SCHEMA, agents: {}, sessions: {} };
 }
 
-/** The key of a session in the state file. */
 export function sessionKey(agent: string, sessionId: string): string {
   return `${agent}:${sessionId}`;
 }
@@ -196,14 +172,12 @@ export async function updateState(
   });
 }
 
-/** Whether everything is paused at `now`. */
 export function isPaused(state: CaptureState, now: Date): boolean {
   const paused = state.paused;
   if (!paused) return false;
   return paused.until === undefined || Date.parse(paused.until) > now.getTime();
 }
 
-/** How many ended pauses the state keeps. */
 export const MAX_PAUSES = 20;
 
 /** Every pause recorded, the one in the state now (in force or run out) last. */
@@ -256,8 +230,6 @@ export function stateFacts(
   const holder = toggleHolder(state, agent, session, parentId);
   const paused = isPaused(state, now);
   const pauses = pauseWindows(state);
-  // A subagent is part of the session that started it: a parent a pause stopped stops the
-  // subagents it starts later too (at what they uploaded: nothing), unless one has its own toggle.
   const frozen =
     session?.frozen ??
     (session?.toggle
@@ -329,8 +301,6 @@ export function sessionToggle(
   return toggleHolder(state, agent, session, parentId)?.toggle;
 }
 
-/** Whether a parent of `session` (up the chain, to the first with a toggle) was stopped by a
- * pause. */
 function frozenParent(
   state: CaptureState,
   agent: string,
@@ -349,7 +319,6 @@ function frozenParent(
   return false;
 }
 
-/** The session whose toggle applies to `session`: itself, or the nearest parent with one. */
 function toggleHolder(
   state: CaptureState,
   agent: string,

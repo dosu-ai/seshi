@@ -1,17 +1,3 @@
-/** `seshi healthcheck`: ask a running server's `/healthz` whether it is up, for container
- * health checks where the image has no curl (the image is the compiled binary alone, X2.2).
- *
- *   seshi healthcheck [--url <url>] [--config <file>] [--json]
- *
- * Without `--url` it asks `/healthz` where the server listens: `server.listen` from
- * `SESHI_SERVER__LISTEN`, else from the TOML file serve would read (`--config`, `SESHI_CONFIG`,
- * `./seshi.toml`, `/etc/seshi/seshi.toml`), else `:7200`. A wildcard host (`:7200`, `0.0.0.0`,
- * `::`) is asked on 127.0.0.1. Only `server.listen` is read from the file, so a health check
- * never resolves secrets.
- *
- * Exit 0 when it answers ok, 7 (`unavailable`) otherwise. `--json` prints `{ ok, url, version }`
- * when it is up, and the error object (`unavailable`) when not (F8.1). */
-
 import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { parseListen } from "@seshi/config";
@@ -23,7 +9,6 @@ const USAGE = "usage: seshi healthcheck [--url <url>] [--config <file>] [--json]
 
 const DEFAULT_LISTEN = ":7200";
 
-/** The `server.listen` serve would use, without loading the whole config. */
 export function listenSetting(
   env: Record<string, string | undefined>,
   configFlag: string | undefined,
@@ -54,7 +39,6 @@ export function listenSetting(
   return DEFAULT_LISTEN;
 }
 
-/** The `/healthz` URL for a `server.listen` value. */
 export function healthUrl(listen: string): string {
   const parsed = parseListen(listen) ?? parseListen(DEFAULT_LISTEN);
   const { hostname, port } = parsed as { hostname: string; port: number };

@@ -1,35 +1,3 @@
-/** `seshi redact` (F2): try redaction rules, and apply new ones to stored sessions.
- *
- *   seshi redact test [<file> | -] [--pack <file>]… [--config <file>] [--set path=value]…
- *                     [--agent <format> | --text] [--field text|tool_input|tool_output]
- *                     [--print] [--json]
- *   seshi redact backfill (--since <30d | time> | --all) [--owner <id>]… [--dry-run]
- *                     [--limit N] [--as <owner>] [--json] [--config <file>] [--set path=value]…
- *   seshi redact sweep [--owner <id>]… [--dry-run] [--json] [--config <file>] [--set path=value]…
- *
- * `test` builds the rule set from the built-in pack, the packs `--pack` names and, with
- * `--config`, the server's `[redaction] packs`, checks every rule against its own test strings,
- * and, given a file (or `-` for standard input), shows how often each rule fires on it and
- * where: by record for a transcript (the format is detected, or named with `--agent`; it is
- * normalized and redacted as the server would), by line for plain text (`--text`, or anything
- * no format reads; each line is a string in `--field`, `text` by default). It never shows what
- * matched; `--print` prints the redacted records or text. Nothing is sent or stored. Exit 0, 1
- * when a test string fails, 3 when a pack cannot be used, 4 for a file that is not there.
- *
- * `backfill` runs where the server's config and bucket keys are. It applies the server's
- * current rule set to the stored sessions written since `--since` (or every session with
- * `--all`) that an earlier rule set redacted, writes one new trace for each session the rules
- * change, deletes its old traces, and appends a change entry so readers pick it up (F2.5). It
- * cannot be undone; `--dry-run` says what it would do and writes nothing. Restart the server
- * with the new packs before running it, or the server keeps writing with the old rules. Each
- * session it looks at is then swept, as `sweep` does. Exit 0, 8 when a session changed while it
- * ran (run it again) or could not be rewritten.
- *
- * `sweep` (F2.5) deletes the trace objects no session's metadata names that are over an hour
- * old: what a backfill, replace or publish that stopped partway left behind. The worker does it
- * daily; this is that job as a one-shot (X7.1), for a deployment with no worker, or to finish
- * at once. Only trace objects are deleted. Exit 0, 1 when a session could not be swept. */
-
 import { type ParseArgsConfig, parseArgs } from "node:util";
 import { loadServerConfig, parseDuration } from "@seshi/config";
 import { NormalizeError } from "@seshi/formats";
@@ -63,7 +31,6 @@ const USAGE = `usage: seshi redact test [<file> | -] [--pack <file>]… [--confi
                          [--as <owner>] [--json] [--config <file>] [--set path=value]…
        seshi redact sweep [--owner <id>]… [--dry-run] [--json] [--config <file>] [--set path=value]…`;
 
-/** The writer source id of a backfill's change entries: what rewrote the session. */
 export const BACKFILL_SOURCE_ID = "redaction";
 
 class UsageError extends Error {}
@@ -98,8 +65,6 @@ function parse<T>(args: string[], options: NonNullable<ParseArgsConfig["options"
   }
 }
 
-// --- test ---------------------------------------------------------------------------
-
 interface TestValues {
   pack?: string[];
   config?: string;
@@ -110,13 +75,11 @@ interface TestValues {
   print?: boolean;
 }
 
-/** Where a rule fired: record numbers (1-based) or line numbers. */
 interface RuleHits {
   count: number;
   at: number[];
 }
 
-/** The input to `test`, redacted. */
 interface ReadInput {
   kind: "records" | "text";
   agent?: string;
@@ -142,7 +105,6 @@ async function test(ctx: CommandContext, json: boolean, args: string[]): Promise
     throw new UsageError(`--field must be one of ${APPLIES_TO.join(", ")}`);
   }
 
-  // The rule set: the server's packs (with --config), then the ones named here.
   const paths: string[] = [];
   if (values.config !== undefined || values.set !== undefined) {
     let loaded: ReturnType<typeof loadServerConfig>;
@@ -220,8 +182,6 @@ async function test(ctx: CommandContext, json: boolean, args: string[]): Promise
       for (const line of input.output) ctx.stdout(line);
     }
     const out = (line: string) => (values.print ? ctx.stderr(line) : ctx.stdout(line));
-    // Colour only where the report goes to a terminal's standard output (B1.4); with --print
-    // it goes to stderr, which may not be one.
     const style = values.print ? Style.plain() : await styleFor(ctx, { json });
     for (const line of testLines(rules, tests, failed, input, style)) out(line);
   }
@@ -277,7 +237,6 @@ function testLines(
   return lines;
 }
 
-/** Read and redact the input, counting where each rule fired. */
 async function readInput(
   ctx: CommandContext,
   json: boolean,
@@ -325,7 +284,6 @@ async function readInput(
           return fail(ctx, json, EXIT.failure, err.code, err.message);
         throw err;
       }
-      // Record by record, carrying withheld calls, as the pipeline's one pass would.
       const redactor = ruleRedactor(rules);
       let withheld: WithheldCalls = {};
       const output: string[] = [];
@@ -349,8 +307,6 @@ async function readInput(
   return { kind: "text", items: lines.length, hits, output };
 }
 
-// --- backfill -----------------------------------------------------------------------
-
 interface BackfillValues {
   config?: string;
   set?: string[];
@@ -362,7 +318,6 @@ interface BackfillValues {
   as?: string;
 }
 
-/** `--since`: a duration back from now (`30d`) or a date or time. */
 function sinceOf(value: string, now: Date): Date {
   const ms = parseDuration(value);
   if (ms !== undefined) return new Date(now.getTime() - ms);
@@ -383,7 +338,6 @@ function sessionLine(s: BackfillSession, dryRun: boolean): string {
   return `  ${s.owner}/${s.agent}/${s.session_id}: ${what}`;
 }
 
-/** What a sweep did, for the end of `backfill` and `sweep`: nothing when it found nothing. */
 function sweepLines(
   sweep: { deleted: number; young: number; errors: number; error?: string },
   dryRun: boolean,
@@ -509,8 +463,6 @@ async function backfill(ctx: CommandContext, json: boolean, args: string[]): Pro
     await instance.close();
   }
 }
-
-// --- sweep --------------------------------------------------------------------------
 
 interface SweepValues {
   config?: string;

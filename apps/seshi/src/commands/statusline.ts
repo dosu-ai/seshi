@@ -1,15 +1,3 @@
-/** `seshi statusline`: one short line for an agent's status bar (F9.4, B1.6). It reads the small
- * local state the hooks and the uploader keep, with no network call, and says whether this
- * session is being captured: `Session Capture ◉` or `Session Capture ⏸`, with anything that
- * needs action after a separator (`Session Capture ◉ · 3 queued`, `· sign in`,
- * `· upload failing`). No brand word and no expression name: the label says what it does.
- *
- * Claude Code runs it as its `statusLine` command, with a JSON object on stdin naming the
- * session (`session_id`) and the folder (`cwd`, `workspace.current_dir`). Run by hand it judges
- * the current folder. Its output goes to the agent, not a terminal, so colour is on unless
- * `NO_COLOR` or `--no-color` says otherwise (B1.4); it always exits 0. Must start fast, like
- * hook (X3.3). */
-
 import {
   captureRules,
   decide,
@@ -28,7 +16,6 @@ import { colourLevel, detectTheme, Style } from "../cli/style";
 import { pathsOf } from "./capture-host";
 import type { CommandContext } from "./index";
 
-/** The label both surfaces use (B1.6). */
 export const LABEL = "Session Capture";
 export const CAPTURING = "◉";
 export const NOT_CAPTURING = "⏸";
@@ -52,7 +39,6 @@ async function readPayload(ctx: CommandContext): Promise<Record<string, unknown>
   }
 }
 
-/** The line, painted: the glyph and each problem in its role's colour, the label plain. */
 export function renderStatusLine(line: StatusLine, style: Style): string {
   const glyph = line.capturing ? style.success(CAPTURING) : style.muted(NOT_CAPTURING);
   const problems = line.problems.map((p) => ` · ${style.paint(p.kind, p.text)}`).join("");
@@ -86,8 +72,6 @@ export async function run(ctx: CommandContext): Promise<number> {
       rules: snapshot.rules,
       ...(snapshot.error ? { rulesError: snapshot.error } : {}),
       place: placeOf(cwd),
-      // The toggle, pause and folders the uploader judges the session by too, so the two never
-      // disagree: a session a pause stopped shows ⏸ after the pause ends.
       ...(state ? stateFacts(state, agent, known, new Date()) : {}),
       seen: otherFolders(state, agent, known, cwd).map(placeOf),
     },

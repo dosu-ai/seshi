@@ -1,24 +1,3 @@
-/** `seshi sessions`: list, read, export and delete sessions (F8.1), against a seshi server
- * with the credential `seshi login` stored, or in local mode against your own bucket (F8.3).
- * `--owner` reads another owner's sessions as far as visibility allows (X5.10).
- *
- *   seshi sessions ls [--owner <id>] [--limit N] [--after <cursor>] [--all]
- *   seshi sessions show <agent> <session-id> [--owner <id>] [--trace]
- *       (with model review on, each stored write's decision: allow, redact or skipped, F3.8)
- *   seshi sessions export <agent> <session-id> [--format seshi|letta|otlp|atif] [--hash <h>]
- *                         [--output <file>|-o <file>] [--owner <id>]
- *   seshi sessions rm <agent> <session-id> [--owner <id>] [--yes]
- *   seshi sessions visibility <agent> <session-id> org|owner [--owner <id>]
- *
- * Each takes `--server <url>` and `--json`. A session is named `<agent> <session-id>` or
- * `<agent>/<session-id>`. `export` writes the trace itself to standard output (or the file),
- * whatever `--json` says. `rm` asks first on a terminal; elsewhere it needs `--yes`. With an
- * IdP a delete needs a session token from the last 10 minutes (X5.3), which `rm` renews on the
- * way.
- *
- * Exit 0; 2 usage; 4 no such session (or one you may not read); 5 not signed in or not
- * allowed; 7 the server cannot be reached. */
-
 import { statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
@@ -76,7 +55,6 @@ const SUBCOMMANDS = ["ls", "list", "show", "export", "rm", "visibility"] as cons
 
 class UsageError extends Error {}
 
-/** `<agent> <session-id>` or `<agent>/<session-id>`, and what is left. */
 export function sessionRef(args: readonly string[]): {
   agent: string;
   sessionId: string;
@@ -105,7 +83,6 @@ function positiveInt(value: string | undefined, name: string, fallback: number):
   return n;
 }
 
-/** How many records the session's log holds. */
 function recordCount(m: SessionMetadata): number | undefined {
   if (m.normalized) return m.normalized.records;
   return m.traces.find((t) => t.content_hash === m.head)?.records;
@@ -123,7 +100,6 @@ function listLines(page: SessionsPage, owner: string, style: Style): string[] {
   const lines = [style.muted(`${printable(owner)}: ${sorted.length} session(s), newest first`)];
   sorted.forEach((m, i) => {
     const records = recordCount(m);
-    // Padded before painting, so colour codes do not throw the columns out.
     const state =
       m.status === "redacted"
         ? style.status("deleted".padEnd(11), "warn")
@@ -141,8 +117,6 @@ function listLines(page: SessionsPage, owner: string, style: Style): string[] {
   return lines;
 }
 
-/** Model review's decision for each stored write (F3.8), as words: `#0 allow, #1 redact`, or
- * counts when there are many. Empty when no policy covered any write. */
 export function reviewSummary(reviews: readonly ReviewDecision[], style: Style): string {
   const role = (d: ReviewDecision["decision"]) => (d === "allow" ? "success" : "warn");
   if (reviews.length <= 8) {
@@ -160,7 +134,6 @@ function showLines(
   style: Style,
   reviews: readonly ReviewDecision[] = [],
 ): string[] {
-  // `row`: the session's (other people's) text, made printable; `line`: our own.
   const line = (label: string, value: string) => [`  ${label.padEnd(11)} ${value}`];
   const row = (label: string, value: string | undefined) =>
     value === undefined || value === "" ? [] : line(label, printable(value));
@@ -212,7 +185,6 @@ function showLines(
   ];
 }
 
-/** One line per record: the role and the first line of what it says. */
 export function traceLines(trace: Trace, style: Style, width = 100): string[] {
   const clip = (text: string) => {
     const line = printable(text.split("\n").find((l) => l.trim() !== "") ?? "");
@@ -303,7 +275,6 @@ async function show(
       format: "seshi",
     })) as Trace | null;
   }
-  // Model review's labels, for people (the JSON stays the metadata; `GET …/reviews` has them).
   const reviews =
     json || metadata.status === "redacted"
       ? null
@@ -369,9 +340,7 @@ async function exportTrace(
   let isDir = path.endsWith("/");
   try {
     isDir ||= statSync(path).isDirectory();
-  } catch {
-    // A file to create.
-  }
+  } catch {}
   if (isDir) {
     const name =
       `${ref.agent}-${ref.sessionId}-${(hash ?? "").slice(0, 12)}.${format}.json`.replace(
@@ -398,9 +367,6 @@ function deleteName(ref: { agent: string; sessionId: string }, values: Values): 
   return printable(`${ref.agent}/${ref.sessionId}${values.owner ? ` of ${values.owner}` : ""}`);
 }
 
-/** Whether the person means it: `--yes`, or a terminal's yes. Asked before the backend is
- * opened, so the session token is renewed for the delete only once they have answered, and
- * the delete goes out within the server's freshness window however long they took (X5.3). */
 async function confirmDelete(
   ctx: CommandContext,
   ref: { agent: string; sessionId: string },

@@ -1,34 +1,3 @@
-/** `seshi sync` (X7.1, X4.8, X6.4): the pollers, the span assembler and retention as one-shot
- * commands, and what they left behind. Run where the server's config and bucket keys are.
- *
- *   seshi sync run <source> [--force] [--json]       poll a source once (for cron, X7.1)
- *   seshi sync assemble [--json]                     publish quiet span sessions once (cron)
- *   seshi sync prune [--json]                        prune old drop/failure records once (cron)
- *   seshi sync status [<source>] [--days N] [--json] checkpoints, record counts, health
- *   seshi sync failed <source> [--since <time>] [--limit N] [--json]
- *   seshi sync dropped <source> [--since <time>] [--limit N] [--json]
- *
- * Each also takes `--config <file>` and `--set path=value`. `failed` and `dropped` list the
- * records of envelopes that were not stored and why, never their content; `upload` is the
- * source id of hooks and `seshi upload`.
- *
- * `status`, `failed` and `dropped` also run from a machine signed in with `seshi login` as an
- * admin, through the server's `/v1/admin/sources` routes: `--server <url>`, or the CLI config's
- * `server` when no server config is here (`admin-target.ts`). `run`, `assemble` and `prune`
- * run from where the server config is only; on a server the worker runs them on its own.
- *
- * `assemble` is the span assembler as a one-shot (X7.1): it publishes the OTLP and Datadog
- * sessions whose spans went quiet (F4.4), as the worker's `assembler` job does. A deployment
- * whose instances all run `--roles api` runs it from cron next to `sync run`, or span sessions
- * are stored as span records and never published. `prune` is the `retention` job as a
- * one-shot: it removes drop and failure records and source health shards past `[records]`
- * retention, which nothing else removes on such a deployment.
- *
- * `run` exits 0 when the run finished, 6 (`conflict`) when another worker moved the checkpoint
- * and the run was discarded (X7.3), 1 when the connector failed. `assemble` exits 0, or 1 when
- * a session could not be assembled (its marker stays for the next run). `prune` exits 0, or 1
- * when the bucket failed. */
-
 import { parseArgs } from "node:util";
 import type { HttpSessionDB, RecordsPage } from "@seshi/client";
 import type { AssembleRun, Instance, PruneRun } from "@seshi/instance";
@@ -58,7 +27,6 @@ const USAGE = `usage: seshi sync run <source> [--force] [--json]
         status, failed and dropped take --server <url> instead)`;
 
 const SUBCOMMANDS = ["run", "assemble", "prune", "status", "failed", "dropped"];
-/** The subcommands that take no source id and write: the worker's jobs as one-shots. */
 const ONE_SHOTS = new Set(["assemble", "prune"]);
 
 const OPTIONS = {
@@ -142,14 +110,12 @@ function assembleLines(run: AssembleRun): string[] {
   return lines;
 }
 
-/** The span assembler once (X7.1), for a deployment with no worker. */
 async function assemble(ctx: CommandContext, json: boolean, instance: Instance) {
   const result = await instance.assemble();
   emit(ctx, json, result, () => assembleLines(result));
   return result.errors > 0 ? EXIT.failure : EXIT.ok;
 }
 
-/** The retention job once (X7.1), for a deployment with no worker. */
 async function prune(ctx: CommandContext, json: boolean, instance: Instance) {
   const result: PruneRun = await instance.prune();
   emit(ctx, json, result, () => [
@@ -186,8 +152,6 @@ async function records(
   id: string,
   values: Values,
 ) {
-  // A source no longer in [[sources]] keeps its records until retention prunes them, and
-  // status still lists it, so they can be read; an id with neither is unknown.
   const known =
     id === UPLOAD_SOURCE ||
     instance.source(id) !== undefined ||
@@ -204,7 +168,6 @@ async function records(
   return EXIT.ok;
 }
 
-/** `--since` as an ISO time. */
 function sinceOf(values: Values): string | undefined {
   if (values.since === undefined) return undefined;
   const at = new Date(values.since);
@@ -212,7 +175,6 @@ function sinceOf(values: Values): string | undefined {
   return at.toISOString();
 }
 
-/** A page of records as lines: when, which session, why; never content. */
 function recordLines(page: {
   source: string;
   kind: "failed" | "dropped";
@@ -223,7 +185,6 @@ function recordLines(page: {
   const lines = page.records.map(({ record }) => {
     const r = record as FailedRecord | DroppedRecord;
     const why = "code" in r ? `${r.code}: ${r.message}` : `${r.reason} (${r.policy})`;
-    // Records come from the bucket (and over HTTP, from a server): made printable.
     return printable(`${r.at}  ${r.session_key ?? "-"}  ${why}`);
   });
   if (page.truncated) {
@@ -233,7 +194,6 @@ function recordLines(page: {
   return lines;
 }
 
-/** `status`, `failed` and `dropped` through a server's admin routes. */
 async function remoteSync(
   ctx: CommandContext,
   json: boolean,
@@ -328,8 +288,6 @@ export async function run(ctx: CommandContext): Promise<number> {
         values,
       );
     }
-    // Only `run`, `assemble` and `prune` write; the others refuse a bucket no server has used
-    // rather than claim it.
     const local = target.config ? { ...values, config: target.config } : values;
     const { instance } = await openServer(ctx, local, {
       roles: [],

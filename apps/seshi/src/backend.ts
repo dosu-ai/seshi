@@ -1,9 +1,3 @@
-/** What the session, token and search commands talk to (F8.3): a seshi server through
- * `@seshi/client` with the credential `seshi login` stored, or, in local mode (X3.5), an
- * Instance built in-process for the one person who owns the bucket. The commands see one
- * interface, so `seshi sessions ls` and `seshi search` read the same either way. Nothing else
- * touches a bucket. */
-
 import type { TokenRequest as AuthTokenRequest, Principal } from "@seshi/auth";
 import {
   HttpSessionDB,
@@ -40,13 +34,11 @@ export interface TraceOptions extends OwnerOption {
 }
 
 export interface SearchHooks {
-  /** Called before a local index is first built from the change feed (it can take a while). */
   building?: () => void;
 }
 
 export interface Backend {
   mode: "server" | "local";
-  /** The server's URL, or the bucket's. */
   where: string;
   me(): Promise<Identity>;
   listSessions(options: { owner?: string; after?: string; limit?: number }): Promise<SessionsPage>;
@@ -67,15 +59,11 @@ export interface Backend {
     visibility: Visibility,
     options?: OwnerOption,
   ): Promise<SessionMetadata | null>;
-  /** What model review decided for each stored write (F3.8), oldest first; null for a session
-   * not stored. */
   reviews(
     agent: string,
     sessionId: string,
     options?: OwnerOption,
   ): Promise<ReviewDecision[] | null>;
-  /** Keyword search over what this caller may read (F10): `GET /v1/search` on a server, the
-   * Instance's own index in local mode (brought up to date with the change feed first). */
   search(request: SearchRequest, hooks?: SearchHooks): Promise<SearchResults>;
   listTokens(filter: { owner?: string; kind?: TokenKind; all?: boolean }): Promise<TokenInfo[]>;
   createToken(request: TokenRequest): Promise<{ token: string; record: TokenInfo }>;
@@ -84,11 +72,9 @@ export interface Backend {
   close(): Promise<void>;
 }
 
-/** A seshi server, through the HTTP client. */
 export class ServerBackend implements Backend {
   readonly mode = "server";
 
-  /** With the org key: the username this backend states (`X-Seshi-User`), resolved now. */
   constructor(
     readonly db: HttpSessionDB,
     readonly user?: string,
@@ -143,7 +129,6 @@ export class ServerBackend implements Backend {
   async close(): Promise<void> {}
 }
 
-/** Local mode: the bucket's owner acts on it directly, as its admin would (X3.5). */
 export class LocalBackend implements Backend {
   readonly mode = "local";
 
@@ -156,7 +141,6 @@ export class LocalBackend implements Backend {
     return this.instance.storage.url;
   }
 
-  /** The session API for `owner`'s folder, writing (deletes, visibility) as the local user. */
   private db(owner?: string): StoreSessionDB {
     if (owner === undefined || owner === this.owner) return this.instance.localSessions(this.owner);
     return this.instance.sessions({
@@ -166,7 +150,6 @@ export class LocalBackend implements Backend {
     });
   }
 
-  /** Who token changes are recorded as made by. */
   private principal(): Principal {
     return {
       kind: "local",
@@ -224,7 +207,6 @@ export class LocalBackend implements Backend {
     );
     return records as ReviewDecision[];
   }
-  /** The bucket's keys read everything (X5.6), so nothing is filtered by owner. */
   async search(request: SearchRequest, hooks: SearchHooks = {}): Promise<SearchResults> {
     const search = this.instance.search;
     if (!search) {
@@ -272,14 +254,10 @@ export class LocalBackend implements Backend {
 }
 
 export interface OpenBackendOptions {
-  /** `--server`: talk to this server, whatever the CLI config says. */
   server?: string;
-  /** What the credential is for: `delete` asks for a fresh session token (X5.3). */
   purpose?: Purpose;
 }
 
-/** The backend the CLI config names: `--server`, else `[local]`, else `server`. Throws
- * `NotSignedIn` when it names neither, or names a server with no stored credential. */
 export async function openBackend(
   ctx: CommandContext,
   account: Account,

@@ -1,8 +1,3 @@
-/** What `seshi hook <agent> <event>` does (F9.1), apart from reading its input and starting the
- * uploader: the agent's handler turns the payload into sessions, each is judged by the capture
- * rules (F9.5) against the local state, and the ones to capture go to the spool. Nothing here
- * touches the network or reads a transcript, so a hook stays inside its time budget (X3.3). */
-
 import { appendFileSync } from "node:fs";
 import { type CaptureAgent, type CaptureHost, type HookCapture, hookHandler } from "@seshi/kit";
 import type { CapturePaths } from "./paths";
@@ -22,14 +17,9 @@ export interface HookRun {
 }
 
 export interface HookOutcome {
-  /** Sessions spooled for the uploader. */
   spooled: HookCapture[];
-  /** Sessions the rules said not to capture, and why. */
   skipped: { session_id: string; decision: Decision }[];
-  /** The environment file written, when the handler asked for one (Claude Code's
-   * SessionStart). */
   exported?: string;
-  /** Why nothing was done at all (an event seshi does not handle). */
   ignored?: string;
 }
 
@@ -66,7 +56,6 @@ export async function runHook(run: HookRun): Promise<HookOutcome> {
         rules,
         ...(error !== undefined ? { rulesError: error } : {}),
         place: placeOf(cwd),
-        // A subagent has no toggle of its own until someone sets one: its parent's covers it.
         ...stateFacts(state, run.agent.name, known, now, capture.parent_session_id),
         seen: otherFolders(state, run.agent.name, known, cwd, capture.parent_session_id).map(
           placeOf,
@@ -76,10 +65,6 @@ export async function runHook(run: HookRun): Promise<HookOutcome> {
     );
     if (!decision.capture) {
       outcome.skipped.push({ session_id: capture.session_id, decision });
-      // A pause stops the session where it is (F9.5): the uploader records it, so it stays
-      // stopped once the pause ends. A hook writes no state itself (X3.3). A session already
-      // stopped whose transcript moved is told again with the new path: the uploader forgets a
-      // session whose transcript is gone, and with it the stop and the retraction secret (33).
       const moved =
         known?.frozen !== undefined &&
         known.path !== undefined &&
@@ -102,8 +87,6 @@ export async function runHook(run: HookRun): Promise<HookOutcome> {
         );
         continue;
       }
-      // A shared rule turns this folder off: the uploader records it, so neither a later hook
-      // in another folder nor the upload of a session already known carries this work out.
       if ((decision.level === "org" || decision.level === "repo") && capture.cwd) {
         appendSpool(
           run.paths,

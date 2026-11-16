@@ -1,38 +1,3 @@
-/** `seshi capture`: the agent integrations on this machine (F9).
- *
- *   seshi capture install [<agent>…] [--service] [--command <program>]
- *   seshi capture uninstall [<agent>…] [--service] [--command <program>]
- *   seshi capture status [--session [<id>]] [--agent <agent>]
- *   seshi capture pause [<duration>]
- *   seshi capture resume
- *   seshi capture off|on [--session [<id>]] [--agent <agent>]
- *   seshi capture off|on --path <folder>
- *   seshi capture resend --all | --session [<id>] [--agent <agent>]
- *
- * `install` merges seshi's hooks into each agent's own config (F9.6), keeping every hook there;
- * with no agent named it installs for every agent found on this machine. `uninstall` takes out
- * only seshi's entries. `--service` adds (or removes) a launchd, systemd or Task Scheduler entry
- * that keeps the uploader running between sessions.
- *
- * `off` and `on` set a capture rule (F9.5): for one session (`--session`; with no id, the
- * session the agent's environment names, else the one seen in this folder), for a folder
- * (`--path`, a `[[capture.paths]]` rule in the CLI config), or for everything (the CLI config's
- * `capture.enabled`). Turning a session off stops its uploads and retracts what was uploaded
- * (F9.7). `pause` stops sessions where they are (F9.5, revised 15 Nov 2026): every session
- * running when it starts, or seen while it lasts, keeps what it uploaded and sends nothing more,
- * ever, and a session started during it is not captured; nothing is retracted. `resume` (or the
- * pause running out) lets new sessions be captured again; a stopped session stays stopped until
- * `on --session` turns it on, which uploads all of it.
- *
- * `resend` sends sessions this machine uploaded again, whole, with `rebuild` (X4.9): the server
- * builds and reviews each again even when its log only extends what is stored, so a session an
- * older normalizer built, or one whose envelopes review skipped or dropped, is redone. The
- * uploader does the same by itself for the sessions the server says are stale. Sessions turned
- * off, never uploaded, or whose transcript is gone are left out.
- *
- * Every subcommand takes `--json`. Exit codes: 0; 2 usage; 3 a config or state file it cannot
- * use; 4 no agent to install for; 8 (`status`) something needs action. */
-
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import {
@@ -101,13 +66,11 @@ const USAGE = [
 
 interface Args {
   positionals: string[];
-  /** `--session` alone (true) or with an id. */
   session?: string | true;
   agent?: string;
   path?: string;
   service?: boolean;
   command?: string;
-  /** `resend --all`. */
   all?: boolean;
 }
 
@@ -158,7 +121,6 @@ export function parseCaptureArgs(argv: readonly string[]): Args | string {
   return args;
 }
 
-/** A command line as words: spaces split, double quotes group. */
 export function splitWords(text: string): string[] {
   return [...text.matchAll(/"([^"]*)"|(\S+)/g)].map((m) => (m[1] ?? m[2]) as string);
 }
@@ -171,11 +133,6 @@ function accountOrNone(ctx: CommandContext): Account | undefined {
   }
 }
 
-/** Which session `--session` names: the id given, else `SESHI_SESSION_ID` (set by the agent's
- * SessionStart hook), else the one session seen in this folder in the past day. With more than
- * one there (two agents open in the same repo), it refuses and lists them: picking the latest
- * could turn off, and retract, a session other than the one asking. Subagents are never
- * candidates; their parent's toggle covers them. */
 export function resolveSession(
   args: Args,
   state: CaptureState,
@@ -261,7 +218,6 @@ export async function run(ctx: CommandContext): Promise<number> {
   }
 }
 
-/** The agents a subcommand names (all known names), or a usage error. */
 async function namedAgents(
   ctx: CommandContext,
   json: boolean,
@@ -324,7 +280,6 @@ async function install(ctx: CommandContext, json: boolean, args: Args): Promise<
     );
   }
   const results: { agent: string; changed: string[]; notes: string[] }[] = [];
-  // One agent's config it cannot read does not stop the others; it is reported, exit 1.
   const failed: { agent: string; error: string }[] = [];
   for (const agent of targets) {
     if (!agent.installer) continue;
@@ -380,11 +335,8 @@ async function uninstall(ctx: CommandContext, json: boolean, args: Args): Promis
   if (typeof agents === "number") return agents;
   const host = hostOf(ctx);
   const { paths } = pathsOf(ctx);
-  // The program an install was given with --command (a wrapper): its entries are seshi's too.
   const command = args.command ? splitWords(args.command) : hookCommand();
   const results: { agent: string; changed: string[]; notes: string[] }[] = [];
-  // As install: one agent's config it cannot read does not stop the others; it is reported, its
-  // agent stays in the state (its hooks are still there), exit 1.
   const failed: { agent: string; error: string }[] = [];
   for (const agent of agents) {
     if (!agent.installer) continue;
@@ -453,7 +405,6 @@ async function status(ctx: CommandContext, json: boolean, args: Args): Promise<n
       },
       host.platform,
     );
-  // A new session here: no toggle, nothing uploaded, so only the pause in force applies.
   const here = judge(cwd, stateFacts(state, "", undefined, now));
   let session:
     | { agent: string; id: string; state?: SessionState; decision: ReturnType<typeof judge> }
@@ -491,7 +442,6 @@ async function status(ctx: CommandContext, json: boolean, args: Args): Promise<n
   const service = await serviceInstalled(serviceContext(ctx, hookCommand())).catch(() => false);
   const queued = (state.uploader?.queued ?? 0) + spoolCount(paths);
   const running = uploaderRunning(paths, now);
-  // Sessions a pause stopped: they send nothing more until turned on (F9.5).
   const stopped = stoppedCount(state);
   const recent = Object.entries(state.sessions)
     .sort(([, a], [, b]) => (b.last_seen ?? "").localeCompare(a.last_seen ?? ""))
@@ -519,7 +469,6 @@ async function status(ctx: CommandContext, json: boolean, args: Args): Promise<n
             },
           }
         : {}),
-      // A pause that ran out is still in the file until `resume`: it no longer applies.
       paused: paused && state.paused ? state.paused : null,
       stopped,
       agents: installs,
@@ -585,13 +534,11 @@ async function pause(ctx: CommandContext, json: boolean, args: Args): Promise<nu
   const now = new Date();
   const at = now.toISOString();
   const until = ms === undefined ? undefined : new Date(now.getTime() + ms).toISOString();
-  // Sessions a hook named that the uploader has not taken in yet are running too.
   const spooled = readSpool(paths).items.flatMap(({ entry }) =>
     entry.kind === "capture" ? [entry] : [],
   );
   let stopped = 0;
   await updateState(paths, (state) => {
-    // Pausing again while paused moves the end only: a session turned on since it began stays on.
     const since = isPaused(state, now) && state.paused ? state.paused.at : at;
     if (since === at) endPause(state, now);
     state.paused = { at: since, ...(until ? { until } : {}) };
@@ -606,9 +553,6 @@ async function pause(ctx: CommandContext, json: boolean, args: Args): Promise<nu
         ...(entry.parent_session_id ? { parent_session_id: entry.parent_session_id } : {}),
       };
     }
-    // F9.5 (revised 15 Nov 2026): every session running now stops where it is. It keeps what it
-    // uploaded, nothing is retracted, and nothing past that offset is ever sent. A session turned
-    // on during the pause being extended is the person's own choice, and stays on.
     for (const session of Object.values(state.sessions)) {
       if (session.frozen || session.toggle === "off") continue;
       if (
@@ -631,7 +575,6 @@ async function pause(ctx: CommandContext, json: boolean, args: Args): Promise<nu
   return EXIT.ok;
 }
 
-/** Sessions a pause stopped that are not off anyway. */
 function stoppedCount(state: CaptureState): number {
   return Object.values(state.sessions).filter((s) => s.frozen && s.toggle !== "off").length;
 }
@@ -644,14 +587,12 @@ async function resume(ctx: CommandContext, json: boolean, _args: Args): Promise<
   await updateState(paths, (state) => {
     was = state.paused !== undefined;
     stopped = stoppedCount(state);
-    // Kept as an ended pause: a session that started during it stays off when first seen after.
     endPause(state, now);
     return was;
   });
   appendSpool(paths, { v: 1, kind: "wake", at: now.toISOString() });
   await startUploader(ctx, paths);
   const style = await styleFor(ctx, { json });
-  // Resuming does not undo the pause: the sessions it stopped stay stopped (F9.5).
   emit(ctx, json, { paused: false, was_paused: was, stopped }, () => [
     was
       ? `${style.status("resumed", "success")}: sessions started from now on are captured`
@@ -734,9 +675,6 @@ async function toggleSession(
   let retracting = false;
   let fresh = false;
   let unfrozen = false;
-  // A session turned off before any hook named its transcript (`/seshi capture off` as the
-  // first prompt): find it now, so the toggle is kept as long as the transcript exists (F9.3)
-  // and not forgotten as a session with nothing to show for it.
   const known = readState(paths).sessions[key];
   const located = known?.path ? undefined : (await captureAgent(agent))?.locate?.(id, hostOf(ctx));
   await updateState(paths, (state) => {
@@ -750,8 +688,6 @@ async function toggleSession(
     session.toggle = which;
     session.toggled_at = now.toISOString();
     state.sessions[key] = session;
-    // The session's subagents with no toggle of their own go with it: their transcripts hold
-    // its task prompts and tool output (F9.5), so what they uploaded is retracted too.
     for (const s of [session, ...subsessionKeys(state, agent, id).map((k) => state.sessions[k])]) {
       if (!s) continue;
       if (which === "off") {
@@ -760,17 +696,11 @@ async function toggleSession(
           retracting = true;
         }
       } else {
-        // A retraction the server refused is called off: nothing was removed, capture goes on.
-        // One still waiting is not: it may have landed with its answer lost, and the server
-        // then refuses the session for good (422 redacted) while this machine thinks it live
-        // (33). It is done, and the session is uploaded again from its start as a new one.
         if (s.retract === "failed") {
           delete s.retract;
           delete s.retract_error;
         }
         if (s.retract === "pending" || ((s.generation ?? 0) > 0 && !s.stored)) fresh = true;
-        // A session a pause stopped goes on from where it stopped, so the server ends up with
-        // all of it (F9.7), what it wrote while stopped included.
         if (s.frozen) {
           delete s.frozen;
           unfrozen = true;
@@ -809,7 +739,6 @@ async function toggleSession(
   return EXIT.ok;
 }
 
-/** Why a session cannot be resent from here, or undefined when it can. */
 function notResendable(state: CaptureState, s: SessionState): string | undefined {
   if (s.retract === "pending" || sessionToggle(state, s.agent, s) === "off") return "turned off";
   if (!s.sent) return "never uploaded from here";
@@ -817,8 +746,6 @@ function notResendable(state: CaptureState, s: SessionState): string | undefined
   return undefined;
 }
 
-/** `seshi capture resend`: mark sessions for a whole resend with `rebuild` (X4.9), and wake the
- * uploader to send them. */
 async function resend(ctx: CommandContext, json: boolean, args: Args): Promise<number> {
   if (args.positionals.length > 0) {
     return usageError(ctx, json, `unexpected ${args.positionals.join(" ")}`, USAGE);
@@ -867,7 +794,6 @@ async function resend(ctx: CommandContext, json: boolean, args: Args): Promise<n
         continue;
       }
       session.rebuild = { at: now.toISOString(), key: rebuildKey() };
-      // Asked for by hand: a refusal that waits for the transcript to change does not hold it.
       if (session.error?.permanent) delete session.error;
       marked.push(key);
     }
@@ -884,7 +810,6 @@ async function resend(ctx: CommandContext, json: boolean, args: Args): Promise<n
       : "Nothing to resend.",
     ...skipped.map((s) => `  ${printable(s.key)}: not resent, ${s.reason}`),
   ]);
-  // One session asked for by name that cannot be resent is a refusal; --all reports and goes on.
   if (!args.all && marked.length === 0) return EXIT.conflict;
   return EXIT.ok;
 }

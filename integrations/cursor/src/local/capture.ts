@@ -33,7 +33,6 @@ import {
 
 export const AGENT = "cursor";
 
-/** The hook events seshi listens to (F9.2), in Cursor's naming. */
 export const CURSOR_EVENTS = ["stop", "sessionEnd"] as const;
 
 export function cursorDir(host: CaptureHost): string {
@@ -80,7 +79,6 @@ export function identifyCursorTranscript(path: string, head: string): Transcript
   return { session_id: basename(path, ".jsonl") };
 }
 
-/** A conversation's transcript, under any project. */
 export function locateCursorTranscript(sessionId: string, host: CaptureHost): string | undefined {
   if (!/^[\w.-]+$/.test(sessionId)) return undefined;
   const projects = join(cursorDir(host), "projects");
@@ -96,8 +94,6 @@ export function locateCursorTranscript(sessionId: string, host: CaptureHost): st
   }
   return undefined;
 }
-
-// --- installer (F9.6): ~/.cursor/hooks.json -------------------------------------------------
 
 interface CursorHook {
   command?: unknown;

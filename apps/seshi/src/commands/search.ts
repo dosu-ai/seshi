@@ -1,30 +1,3 @@
-/** `seshi search <query>`: keyword search over the sessions you may read (F10.5).
- *
- *   seshi search <words…> [--owner <id>] [--agent <a>] [--repo <r>] [--branch <b>]
- *                [--source <id>] [--since <time|7d>] [--until <time|7d>]
- *                [--sort relevance|recent] [--limit <n>] [--matches <n>] [--cursor <c>]
- *                [--server <url>] [--token <t> [--user <name>]] [--config <file>] [--set k=v]… [--json]
- *   seshi search --status [--config <file>]    the local index: where it is, how much it holds
- *   seshi search --rebuild [--config <file>]   drop the local index and build it again from the change feed
- *
- * It goes through the same backend as `seshi sessions` (F8.3, `openBackend`): a seshi server
- * (`GET /v1/search`) when the CLI config names one (`server`, or `--server`), with the
- * credential `seshi login` stored (`--token`, with `--user` for the org key, overrides it); or
- * in-process, with `[local] config` in the CLI config. `--config` / `--set`, or a server config
- * where a server host keeps one (`SESHI_CONFIG`, `/etc/seshi/seshi.toml`; never `./seshi.toml`),
- * also search in-process. In-process, whoever holds the bucket keys reads everything (X5.6), so
- * nothing is filtered by owner; the local index is brought up to date with the change feed
- * before every search (built from scratch the first time).
- *
- * Output is a line per session and a line per matching record, in the search colour (B1.4:
- * lilac) for the session and the matched words (`SearchMatch.highlights`) on a terminal; plain
- * with `NO_COLOR`, `--no-color` or off a terminal. Stored text is printed through `printable`.
- * `--json` prints the API's `SearchResults` as is.
- *
- * Exit codes: 0 (also when nothing matches), 2 for a query that cannot be run, 3 when nothing
- * is configured or search is off, 5 when not signed in or not allowed, 7 when the server or
- * bucket cannot answer (or the server's index is still being built). */
-
 import { existsSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { HttpSessionDB, ServerError } from "@seshi/client";
@@ -90,7 +63,6 @@ type Values = {
 
 class UsageProblem extends Error {}
 
-/** `--since 7d`, `--since 2026-11-01` or an RFC 3339 time, as RFC 3339. */
 export function timeArg(value: string, name: string, now: Date): string {
   const ago = parseDuration(value);
   if (ago !== undefined) return new Date(now.getTime() - ago).toISOString();
@@ -108,7 +80,6 @@ function intArg(value: string, name: string): number {
   return Number.parseInt(value, 10);
 }
 
-/** The search the command line asks for. */
 export function requestOf(query: string, values: Values, now: Date): SearchRequest {
   return {
     q: query,
@@ -126,19 +97,14 @@ export function requestOf(query: string, values: Values, now: Date): SearchReque
   };
 }
 
-/** `2026-11-14 09:05` (UTC). */
 function when(iso: string | undefined): string {
   return iso ? `${iso.slice(0, 10)} ${iso.slice(11, 16)}` : "";
 }
 
-/** Stored text on one line: runs of white space folded, control characters made harmless. */
 function fold(text: string): string {
   return printable(text.replace(/\s+/g, " "));
 }
 
-/** A snippet on one line, with the matched words (`highlights`: `[start, end)` offsets into
- * the snippet) in the search colour. Offsets are taken on the snippet as stored, before white
- * space is folded, so folding never moves a highlight. */
 export function highlighted(
   snippet: string,
   highlights: readonly (readonly [number, number])[] | undefined,
@@ -160,7 +126,6 @@ export function highlighted(
   return out.replace(/^ +| +$/g, "");
 }
 
-/** The lines for one result: the session, then each matching record. */
 export function resultLines(result: SearchResult, style: Style = Style.plain()): string[] {
   const where = printable([result.project, result.branch].filter(Boolean).join(" @ "));
   const head = [
@@ -180,8 +145,6 @@ export function resultLines(result: SearchResult, style: Style = Style.plain()):
   return lines;
 }
 
-/** Every line `seshi search` prints for an answer. An empty answer carries B1.3's state word
- * for a search, Exploring. */
 export function searchLines(results: SearchResults, style: Style = Style.plain()): string[] {
   if (results.results.length === 0) {
     return [
@@ -215,8 +178,6 @@ function statusLines(status: SearchStatus): string[] {
   ];
 }
 
-/** Whether a server config is where a server host keeps one (`SESHI_CONFIG`, `/etc/seshi`, or
- * `SESHI_STORE__URL`). Never `./seshi.toml`: the folder may be a checkout someone else wrote. */
 function serverConfigHere(ctx: CommandContext): boolean {
   if (ctx.env.SESHI_STORE__URL) return true;
   return (
@@ -225,7 +186,6 @@ function serverConfigHere(ctx: CommandContext): boolean {
   );
 }
 
-/** Run against an in-process Instance (local mode, or where the server's config is). */
 async function inProcess(
   ctx: CommandContext,
   json: boolean,
@@ -264,7 +224,6 @@ async function inProcess(
   return EXIT.ok;
 }
 
-/** One search through a backend, printed. */
 async function query(
   ctx: CommandContext,
   json: boolean,
@@ -315,11 +274,9 @@ export async function run(ctx: CommandContext): Promise<number> {
 
   let backend: Backend | undefined;
   try {
-    // 1. A server config named on the command line: in-process, as the server commands do.
     if (values.config !== undefined || values.set !== undefined) {
       return await withServer(ctx, json, values, mode, request, await styleFor(ctx, { json }));
     }
-    // 2. The CLI's own config: a server, or local mode.
     const account = openAccount(ctx);
     const cli = account.cli;
     const style = await styleFor(ctx, { json, theme: cli.theme });
@@ -333,7 +290,6 @@ export async function run(ctx: CommandContext): Promise<number> {
           USAGE,
         );
       }
-      // The stored credential (`seshi login`), unless --token names one for this run.
       if (values.token !== undefined) {
         const user = values.user ?? cli.user;
         backend = new ServerBackend(
@@ -355,7 +311,6 @@ export async function run(ctx: CommandContext): Promise<number> {
       if (mode === "query") return await query(ctx, json, backend, request as SearchRequest, style);
       return await inProcess(ctx, json, (backend as LocalBackend).instance, mode, request, style);
     }
-    // 3. Where the server's own config is (a server host, a container).
     if (serverConfigHere(ctx)) {
       return await withServer(ctx, json, values, mode, request, style);
     }
@@ -397,8 +352,6 @@ async function withServer(
   }
 }
 
-/** The exit code for an error, printed; rethrows what no code covers. Search's own refusals
- * first, then the client commands' (`failWith`: not signed in, a refused credential). */
 function failure(ctx: CommandContext, json: boolean, err: unknown): number {
   const config = serverFailure(ctx, json, err);
   if (config !== undefined) return config;

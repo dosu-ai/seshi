@@ -1,13 +1,3 @@
-/** The credential a command sends to a server, from what `seshi login` stored (F8.2):
- *
- * - org key: the key, with the username resolved now (X5.7), so `SESHI_USER` applies at once;
- * - a pasted token (admin, service, static): the token;
- * - with an IdP: the session token for interactive commands, renewed through the IdP's refresh
- *   token and `/v1/auth/exchange` when it is about to expire, or for a delete when it is older
- *   than the server's freshness window (X5.3); the device token for uploads (X5.2).
- *
- * The uploader (branch 14) asks for purpose `upload`. */
-
 import { exchangeIdToken, ServerError } from "@seshi/client";
 import type { LoginProfile, Logins } from "./logins";
 import { peekClaims, refreshIdToken, SignInError } from "./oidc";
@@ -44,16 +34,13 @@ export interface Credential {
 export interface CredentialOptions {
   logins: Logins;
   env: Record<string, string | undefined>;
-  /** The CLI config's `user`. */
   configuredUser?: string;
   fetch?: Fetch;
   now?: () => Date;
   gitEmail?: () => Promise<string | undefined>;
 }
 
-/** A session token is renewed this long before it expires. */
 const EXPIRY_MARGIN_MS = 60_000;
-/** The server's delete window when the profile does not say (X5.3: 10 minutes). */
 const DEFAULT_DELETE_FRESH_SECONDS = 600;
 
 function msUntil(iso: string | undefined, now: Date): number {
@@ -61,7 +48,6 @@ function msUntil(iso: string | undefined, now: Date): number {
   return Date.parse(iso) - now.getTime();
 }
 
-/** Whether the stored session token serves `purpose` now. */
 export function sessionUsable(profile: LoginProfile, purpose: Purpose, now: Date): boolean {
   const session = profile.session;
   if (!session || msUntil(session.expires_at, now) <= EXPIRY_MARGIN_MS) return false;
@@ -70,7 +56,6 @@ export function sessionUsable(profile: LoginProfile, purpose: Purpose, now: Date
   return now.getTime() - Date.parse(session.issued_at) < freshMs - EXPIRY_MARGIN_MS;
 }
 
-/** A new session token through the IdP's refresh token. */
 async function renewSession(
   options: CredentialOptions,
   profile: LoginProfile,

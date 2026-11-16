@@ -1,7 +1,3 @@
-/** The page's calls to its server: GET, with the token in a header. The token arrives once in
- * the address's query string; `app.ts` takes it out of the address bar and hands it here, where
- * it stays in memory. */
-
 import type { RecordsView, RowFilter, SessionDetail, SessionList } from "../types";
 
 let token = "";

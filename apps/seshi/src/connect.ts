@@ -1,13 +1,3 @@
-/** Which sessions a CLI command reads and writes (F8.3): a seshi server over HTTP through
- * `@seshi/client`, or, in local mode (X3.5), an Instance built in-process for the one person
- * who owns the bucket. Nothing else touches a bucket: `@seshi/client` is HTTP only, and the old
- * direct-to-bucket client is gone.
- *
- * The CLI config picks: `server = "https://…"` for a team server, or
- * `[local] config = "~/.config/seshi/seshi.toml"` (a server config naming the bucket and its
- * keys) for local mode. Either way the caller gets a `SessionDB`, so the session commands
- * and the uploader (14) do not care which. */
-
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { usernameOwner } from "@seshi/auth";
@@ -43,7 +33,6 @@ export interface ConnectOptions {
   home?: string;
   /** For a server: the credential `seshi login` stored. */
   token?: string;
-  /** With the org key: the username to state (X5.7). */
   user?: string;
   integrations: readonly Integration[];
 }
@@ -54,14 +43,11 @@ export function expandHome(path: string, home: string): string {
   return path.startsWith("~/") ? join(home, path.slice(2)) : path;
 }
 
-/** The owner local mode stores sessions under: `local.owner`, else the CLI's `user`, else the
- * OS user, as an owner id (X5.8). */
 export function localOwner(cli: CliConfig, env: Record<string, string | undefined>): string {
   const named = cli.local?.owner ?? cli.user ?? env.USER ?? env.USERNAME ?? "local";
   return usernameOwner(named) ?? "local";
 }
 
-/** The session API the CLI config names. */
 export async function connect(options: ConnectOptions): Promise<Connection> {
   const { cli, env } = options;
   if (cli.local) {
@@ -73,7 +59,6 @@ export async function connect(options: ConnectOptions): Promise<Connection> {
       formats: buildFormats(options.integrations),
       integrations: options.integrations,
       env,
-      // A CLI process serves nothing and runs no jobs; it only writes as its owner.
       roles: [],
       probe: [owner],
     });

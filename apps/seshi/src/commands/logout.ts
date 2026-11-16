@@ -1,12 +1,3 @@
-/** `seshi logout`: forget the credentials `seshi login` stored for a server (F8.2): the
- * profile and every secret, from the keychain and the fallback file. Nothing is revoked on the
- * server: the CLI's credentials cannot revoke tokens (X5.3). A device token stays valid until
- * it expires or an admin revokes it (`seshi tokens revoke <id>`); the message names its id.
- *
- *   seshi logout [--server <url>] [--all] [--json]
- *
- * Exit 0, whether or not there was anything to forget. */
-
 import { parseArgs } from "node:util";
 import { openAccount, serverOf } from "../account/account";
 import type { LoginProfile } from "../account/logins";

@@ -1,18 +1,7 @@
-/** Signing in through the IdP (X5.7). The CLI is a public client registered in the IdP. It
- * gets an ID token by the device authorization flow (RFC 8628: a code to enter in a browser,
- * on any machine), or by the browser with PKCE and a loopback redirect (RFC 8252) where the
- * device flow is not allowed, and keeps the IdP's refresh token to renew seshi's one-hour
- * session token without signing in again. The ID token goes to the server's
- * `/v1/auth/exchange` once (X5.2); the API never sees an IdP token.
- *
- * Every network call goes through the `fetch` given, so tests run against a local stand-in
- * IdP. */
-
 import { createHash, randomBytes } from "node:crypto";
 
 type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
 
-/** What the IdP's discovery document says, as far as sign-in needs it. */
 export interface Discovery {
   issuer: string;
   token_endpoint: string;
@@ -21,14 +10,12 @@ export interface Discovery {
   scopes_supported?: string[];
 }
 
-/** What the token endpoint answers. */
 export interface IdpTokens {
   id_token: string;
   refresh_token?: string;
   expires_in?: number;
 }
 
-/** Sign-in did not work: the IdP refused, the person declined, the code expired. */
 export class SignInError extends Error {
   constructor(
     message: string,
@@ -43,18 +30,14 @@ function base64url(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString("base64url");
 }
 
-/** A random value for state, nonce and the PKCE verifier. */
 export function randomToken(bytes = 32): string {
   return base64url(randomBytes(bytes));
 }
 
-/** The PKCE S256 challenge for a verifier. */
 export function pkceChallenge(verifier: string): string {
   return base64url(createHash("sha256").update(verifier).digest());
 }
 
-/** An ID token's claims, read without checking it (the server checks it): the nonce to send
- * back with a refreshed token, and its times. */
 export function peekClaims(idToken: string): Record<string, unknown> {
   const part = idToken.split(".")[1];
   if (!part) return {};
@@ -98,7 +81,6 @@ function form(fields: Record<string, string>): RequestInit {
   };
 }
 
-/** The IdP's discovery document (`<issuer>/.well-known/openid-configuration`). */
 export async function discover(issuer: string, fetchImpl: Fetch): Promise<Discovery> {
   const url = `${issuer.replace(/\/+$/, "")}/.well-known/openid-configuration`;
   const response = await call(fetchImpl, url, { headers: { accept: "application/json" } });
@@ -125,8 +107,6 @@ export async function discover(issuer: string, fetchImpl: Fetch): Promise<Discov
   return doc as unknown as Discovery;
 }
 
-/** Whether `url` is one sign-in may open or call: `https:`, or `http:` on a loopback host (an
- * IdP on this machine, in development). */
 export function webUrl(url: unknown): boolean {
   if (typeof url !== "string") return false;
   let parsed: URL;
@@ -154,7 +134,6 @@ export function signInScopes(serverScopes: readonly string[], discovery: Discove
   return scopes;
 }
 
-/** A token endpoint answer as tokens, or the IdP's error. */
 function tokensOf(body: Record<string, unknown>): IdpTokens {
   if (typeof body.id_token !== "string") {
     throw new SignInError("the IdP answered without an ID token (is openid among the scopes?)");
@@ -166,11 +145,9 @@ function tokensOf(body: Record<string, unknown>): IdpTokens {
   };
 }
 
-/** What the person is asked to do in the device flow. */
 export interface DeviceCode {
   user_code: string;
   verification_uri: string;
-  /** The URL with the code in it, when the IdP gives one. */
   verification_uri_complete?: string;
   expires_in: number;
 }
@@ -180,14 +157,11 @@ export interface DeviceFlowOptions {
   clientId: string;
   scopes: readonly string[];
   fetch: Fetch;
-  /** Shown to the person: the code and where to enter it. */
   prompt(code: DeviceCode): void | Promise<void>;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
 }
 
-/** The device authorization flow (RFC 8628): ask for a code, show it, poll until the person
- * has signed in. */
 export async function deviceFlow(options: DeviceFlowOptions): Promise<IdpTokens> {
   const { discovery, clientId, fetch: fetchImpl } = options;
   const endpoint = discovery.device_authorization_endpoint;
@@ -261,15 +235,11 @@ export interface BrowserFlowOptions {
   clientId: string;
   scopes: readonly string[];
   fetch: Fetch;
-  /** Open the sign-in page; false when no browser could be started. */
   open(url: string): Promise<boolean>;
-  /** Shown to the person: the URL, in case no browser opened. */
   prompt(url: string): void | Promise<void>;
-  /** How long to wait for the browser to come back. Default 5 minutes. */
   timeoutMs?: number;
 }
 
-/** What the browser flow gives: the tokens and the nonce the ID token must carry. */
 export interface BrowserSignIn extends IdpTokens {
   nonce: string;
 }
@@ -285,8 +255,6 @@ function failPage(message: string): string {
 <p>Go back to the terminal.</p></body>`;
 }
 
-/** The browser flow with PKCE (RFC 7636) and a loopback redirect (RFC 8252): a one-shot server
- * on 127.0.0.1 takes the IdP's redirect, the code is exchanged with the verifier. */
 export async function browserFlow(options: BrowserFlowOptions): Promise<BrowserSignIn> {
   const { discovery, clientId, fetch: fetchImpl } = options;
   const authorize = discovery.authorization_endpoint;
@@ -306,7 +274,6 @@ export async function browserFlow(options: BrowserFlowOptions): Promise<BrowserS
       if (url.pathname !== "/callback") return new Response("not found", { status: 404 });
       const html = { headers: { "content-type": "text/html; charset=utf-8" } };
       if (url.searchParams.get("state") !== state) {
-        // Not our sign-in (a stale tab, or someone else's request): keep waiting.
         return new Response(failPage("this page is from another sign-in"), {
           ...html,
           status: 400,
@@ -372,8 +339,6 @@ export async function browserFlow(options: BrowserFlowOptions): Promise<BrowserS
   }
 }
 
-/** A fresh ID token from the refresh token. Throws `SignInError` `refresh_refused` when the
- * IdP no longer honours it (the person was removed, or it expired): sign in again. */
 export async function refreshIdToken(options: {
   tokenEndpoint: string;
   clientId: string;

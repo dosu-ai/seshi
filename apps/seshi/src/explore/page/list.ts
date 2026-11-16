@@ -1,7 +1,3 @@
-/** The session list: every session this machine saw within `--since`, with its capture decision,
- * last answer and worst check status; filters by status, agent and text, and a refresh. While
- * the background checks run, it asks again every two seconds. */
-
 import type { ListStatus, SessionList, SessionSummary } from "../types";
 import { api } from "./api";
 import { badge, h, replace } from "./dom";

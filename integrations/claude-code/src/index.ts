@@ -1,8 +1,3 @@
-/** Claude Code (X3.11): what seshi knows about Claude Code's own files: its transcript format,
- * normalized by `@letta-ai/trajectory` with the background-task input fixups in
- * `claude-inputs.ts` around it and each model call's model and token usage read by
- * `claude-calls.ts`, and how its sessions are captured (`capture.ts`, F9). */
-
 import { lettaAdapter } from "@seshi/formats";
 import { defineIntegration, type FormatAdapter } from "@seshi/kit";
 import type { JsonObject } from "@seshi/model";
@@ -17,7 +12,6 @@ export { markClaudeInputs, markedAsObservations } from "./claude-inputs";
 const isObject = (value: unknown): value is JsonObject =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** A Claude Code transcript (`~/.claude/projects/<project>/<session>.jsonl`). */
 export const CLAUDE_CODE_FORMAT: FormatAdapter = lettaAdapter({
   source: "claude-code",
   // `{ type: "user" | "assistant", uuid, sessionId, message: { role, content } }`.

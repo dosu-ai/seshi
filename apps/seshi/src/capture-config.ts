@@ -1,9 +1,3 @@
-/** Editing the capture rules in the CLI's own config (F9.5): `seshi capture off|on` with no
- * session turns the global level (`[capture] enabled`), and with `--path` sets a folder rule
- * (`[[capture.paths]]`). Everything else in the file (comments, order, other tables) is left as
- * written, and the result is loaded with the CLI config's own loader before it is written, so a
- * change never leaves a config the CLI cannot read. */
-
 import { readFileSync } from "node:fs";
 import { posix, win32 } from "node:path";
 import { type CliConfig, loadCliConfig } from "@seshi/config";
@@ -11,8 +5,6 @@ import { writePrivateFile } from "./account/secrets";
 
 const HEADER = /^\s*\[/;
 
-/** `text` with `key = <literal>` set in `[table]`: replaced where it is, added under the
- * table's header, or a new table added (before any `[[table.…]]`, so the file stays valid). */
 export function setTableKey(text: string, table: string, key: string, literal: string): string {
   const lines = text === "" ? [] : text.replace(/\n$/, "").split("\n");
   const header = new RegExp(`^\\s*\\[\\s*${table.replace(/\./g, "\\.")}\\s*\\]\\s*(#.*)?$`);
@@ -44,9 +36,6 @@ export function setTableKey(text: string, table: string, key: string, literal: s
   return `${lines.join("\n")}\n`;
 }
 
-/** `path` as the rule writes it: `~/…` under the home folder (with `/`, which every platform
- * takes), else absolute. Folders are compared as the platform does: either slash and any case
- * on Windows. */
 export function rulePath(
   path: string,
   home: string,
@@ -62,9 +51,6 @@ export function rulePath(
   return `~/${relative.split(paths.sep).join("/")}`;
 }
 
-/** `text` with the folder rule for `path` set to `capture`: the `[[capture.paths]]` entry for
- * the same folder is changed where it is, or a new one is added at the end. `same` compares two
- * rule paths as folders. */
 export function setCapturePath(
   text: string,
   path: string,
@@ -99,8 +85,6 @@ export function setCapturePath(
   return `${lines.join("\n")}\n`;
 }
 
-/** Write `next` as the CLI config at `file`, after loading it: throws the loader's
- * `ConfigError`, writing nothing, when it would not load. */
 export function writeCliConfig(
   file: string,
   next: string,
@@ -115,7 +99,6 @@ export function writeCliConfig(
   return loaded.config;
 }
 
-/** The CLI config's text; empty when the file does not exist yet. */
 export function readCliText(file: string): string {
   try {
     return readFileSync(file, "utf8");

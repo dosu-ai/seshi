@@ -1,12 +1,3 @@
-/** What `seshi explore`'s endpoints answer, over the doctor's engine (`gatherEvidence`,
- * `runChecks`) and its loaders. Read-only: it never uploads, writes state, adds spool entries or
- * writes to a server.
- *
- * The session list is cheap: the state file and `decide` for each session, plus the worst check
- * status once a background pass (one session at a time, newest first) has run the full checks.
- * Opening one session gathers its evidence on demand (every trace fetched), kept for the few
- * sessions open most recently so the records view can page through it. */
-
 import { type SessionState, sessionKey } from "@seshi/capture";
 import { forJson } from "../commands/doctor";
 import { CAPTURING, NOT_CAPTURING } from "../commands/statusline";
@@ -32,9 +23,7 @@ import type {
 } from "./types";
 
 export interface ExploreApiOptions {
-  /** How far back the list reaches, in ms. */
   sinceMs: number;
-  /** How many sessions' full evidence is kept. */
   keep?: number;
 }
 
@@ -50,7 +39,6 @@ interface Opened {
   aligned?: Aligned;
 }
 
-/** Checks, failures first, then warnings, passes and skips; in the doctor's order within each. */
 export function failuresFirst(checks: readonly CheckResult[]): CheckResult[] {
   return checks
     .map((check, i) => ({ check, i }))
@@ -83,7 +71,6 @@ export class ExploreApi {
     private readonly options: ExploreApiOptions,
   ) {}
 
-  /** The sessions seen since `since`, newest first. */
   private sessions(): { sessions: SessionState[]; error?: string } {
     let state: ReturnType<DoctorDeps["state"]>;
     try {
@@ -98,7 +85,6 @@ export class ExploreApi {
     return { sessions };
   }
 
-  /** The state entry for a session this machine saw, or undefined. */
   private find(agent: string, id: string): SessionState | undefined {
     try {
       return this.deps.state().sessions[sessionKey(agent, id)];
@@ -173,7 +159,6 @@ export class ExploreApi {
     });
   }
 
-  /** The background pass: the full checks, one session at a time. */
   private async drain(): Promise<void> {
     for (;;) {
       const s = this.queue.shift();
@@ -197,7 +182,6 @@ export class ExploreApi {
     }
   }
 
-  /** Gather and check one session, and keep its evidence when asked. */
   private async open(agent: string, id: string, options: { keep: boolean }): Promise<Opened> {
     const key = sessionKey(agent, id);
     const evidence = await gatherEvidence({ agent, session_id: id }, this.deps);
@@ -223,7 +207,6 @@ export class ExploreApi {
     return kept ?? this.open(agent, id, { keep: true });
   }
 
-  /** One session's evidence and checks; undefined for a session this machine never saw. */
   async detail(agent: string, id: string, options: { fresh?: boolean } = {}) {
     const got = await this.lookup(agent, id, options.fresh === true);
     if (!got) return undefined;
@@ -237,7 +220,6 @@ export class ExploreApi {
     return detail;
   }
 
-  /** A page of one session's records view. */
   async records(
     agent: string,
     id: string,
@@ -249,7 +231,6 @@ export class ExploreApi {
     return page(got.aligned, options);
   }
 
-  /** Waits for the background pass (tests). */
   async settled(): Promise<void> {
     while (this.running) await this.running;
   }

@@ -1,11 +1,3 @@
-/** The capture rules from the CLI config (F9.5), with the same loader every command uses (F1.4),
- * but without paying for it on every hook. Loading and checking the config costs a hook tens of
- * milliseconds (the schema library), so the rules are kept in `rules.json` with what they were
- * read from: the config file's path, size and modification time, and the `SESHI_*` setting
- * variables. A hook reads the cache when all of those still match, and loads the config again
- * only when one changed. The uploader, the sweep and the status line go through the same
- * function, so they all judge with the same rules (F9.3). */
-
 import { realpathSync, statSync } from "node:fs";
 import { cliConfigPath, NOT_SETTINGS_ENV } from "@seshi/config/paths";
 import type { CaptureHost } from "@seshi/kit";
@@ -16,12 +8,10 @@ import { type CaptureRules, DEFAULT_RULES, type PathRule } from "./rules";
 
 const CACHE_SCHEMA = "seshi/capture-rules/1";
 
-/** What the CLI config says that capture and the status line need. */
 export interface RulesSnapshot {
   rules: CaptureRules;
   /** The config cannot be loaded: nothing is captured until it is fixed. */
   error?: string;
-  /** The CLI config's colour theme, for the status line (B1.4). */
   theme?: "auto" | "dark" | "light";
 }
 
@@ -47,9 +37,6 @@ function keyOf(host: CaptureHost): CacheKey {
     size = stat.size;
     mtime = stat.mtimeMs;
   } catch {}
-  // Every `SESHI_*` setting, not only the capture ones: the strict loader refuses an unknown or
-  // bad one, and an error cached under a key without it would stop capture in every shell
-  // until the config file changed. Capture's own variables (the session id) are not settings.
   const env: Record<string, string> = {};
   for (const [name, value] of Object.entries(host.env)) {
     if (name.startsWith("SESHI_") && !NOT_SETTINGS_ENV.includes(name) && value !== undefined) {
@@ -61,7 +48,6 @@ function keyOf(host: CaptureHost): CacheKey {
 
 const sameKey = (a: CacheKey, b: CacheKey) => JSON.stringify(a) === JSON.stringify(b);
 
-/** A folder rule with `~` expanded and, when it exists, its real path. */
 function pathRule(path: string, capture: boolean, home: string): PathRule {
   const expanded = expandTilde(path, home);
   const rule: PathRule = { path: expanded, capture };
@@ -72,7 +58,6 @@ function pathRule(path: string, capture: boolean, home: string): PathRule {
   return rule;
 }
 
-/** Load the CLI config with the full loader and turn its `[capture]` into rules. */
 export async function loadRules(host: CaptureHost): Promise<RulesSnapshot> {
   try {
     const { loadCliConfig } = await import("@seshi/config");
@@ -106,8 +91,6 @@ export async function captureRules(host: CaptureHost, paths: CapturePaths): Prom
   try {
     const file: CacheFile = { schema: CACHE_SCHEMA, key, snapshot };
     writePrivateFile(paths.rules, JSON.stringify(file));
-  } catch {
-    // A cache that cannot be written only costs the next hook a load.
-  }
+  } catch {}
   return snapshot;
 }

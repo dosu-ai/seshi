@@ -1,7 +1,3 @@
-/** Everything a command needs to know about this machine's seshi setup: the CLI config, where
- * it lives, the stored logins and the secret store. Built per command from its context; nothing
- * here is module state (X1.2). */
-
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { type CliConfig, cliConfigPath, loadCliConfig } from "@seshi/config";
@@ -22,7 +18,6 @@ export interface Account {
   secrets: SecretBackend;
 }
 
-/** The home folder from the command's env (tests point it elsewhere), else the OS's. */
 export function homeOf(env: Record<string, string | undefined>): string {
   return env.HOME || env.USERPROFILE || homedir();
 }
@@ -49,14 +44,12 @@ export function openAccount(ctx: CommandContext): Account {
   return { cli: loaded.config, cliFile, dir, home, env, logins, secrets };
 }
 
-/** With `keychain = false`, a login made earlier with the keychain cannot be read, and logout
- * would delete only the file's copy, leaving the secrets in the keychain. Say so. */
 function warnKeychainLogins(ctx: CommandContext, logins: Logins): void {
   let profiles: ReturnType<Logins["list"]>;
   try {
     profiles = logins.list();
   } catch {
-    return; // An unreadable logins.json is reported by the command that reads it.
+    return;
   }
   for (const profile of profiles) {
     if (profile.stored_in !== "keychain") continue;
@@ -90,7 +83,6 @@ export function accountCredential(
   );
 }
 
-/** Where secrets went, for messages: a warning when the keychain could not be used. */
 export function fallbackWarning(account: Account): string | undefined {
   const secrets = account.secrets;
   if (secrets instanceof FallbackSecrets && secrets.fellBack !== undefined) {

@@ -1,10 +1,5 @@
-/** Starting programs that outlive the command: the uploader a hook starts (F9.1), and the
- * program Codex's `notify` named before seshi (run after seshi's hook, so it keeps working).
- * They run detached, with no terminal and no input, and the command does not wait for them. */
-
 import { spawn } from "node:child_process";
 
-/** Whether this process is the compiled `seshi` binary rather than `bun …/main.ts`. */
 export function isCompiled(
   argv: readonly string[] = process.argv,
   execPath = process.execPath,
@@ -18,7 +13,6 @@ export function isCompiled(
   );
 }
 
-/** The words that start this same seshi again: the binary, or bun and the entry script. */
 export function selfCommand(
   argv: readonly string[] = process.argv,
   execPath = process.execPath,
@@ -26,13 +20,10 @@ export function selfCommand(
   return isCompiled(argv, execPath) ? [execPath] : [execPath, argv[1] as string];
 }
 
-/** The program hooks should run: the compiled binary's absolute path (so hooks work whatever
- * the agent's PATH is), or `seshi` from the PATH when running from source. */
 export function hookCommand(
   argv: readonly string[] = process.argv,
   execPath = process.execPath,
 ): string[] {
-  // Either separator, whatever OS runs this: an npm platform package's `bin\seshi.exe` too.
   return isCompiled(argv, execPath) && /(^|[\\/])seshi(\.exe)?$/i.test(execPath)
     ? [execPath]
     : ["seshi"];
@@ -44,8 +35,6 @@ export function inNpxCache(program: string): boolean {
   return /[\\/]_npx[\\/]/.test(program);
 }
 
-/** Start `words` detached: no terminal, no input or output, not waited for. `cwd` is where it
- * runs; the current folder by default. */
 export async function spawnDetached(
   words: readonly string[],
   env: Record<string, string | undefined>,

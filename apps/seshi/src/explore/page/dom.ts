@@ -1,6 +1,3 @@
-/** A small element builder. Every piece of data becomes a text node (`textContent`), never
- * HTML: transcripts and stored records are untrusted text. */
-
 import type { ListStatus } from "../types";
 import { STATUS, splitMarkers } from "./text";
 
@@ -36,7 +33,6 @@ export function replace(el: Element, ...children: Child[]): void {
   append(el, children);
 }
 
-/** A status as icon plus word; the colour is only a second cue. */
 export function badge(status: ListStatus, extra = ""): HTMLElement {
   const s = STATUS[status];
   return h(
@@ -48,7 +44,6 @@ export function badge(status: ListStatus, extra = ""): HTMLElement {
   );
 }
 
-/** `text` with each redaction marker highlighted and named. */
 export function withMarkers(text: string): Node[] {
   return splitMarkers(text).map((part) =>
     part.rule

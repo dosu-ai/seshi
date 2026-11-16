@@ -1,6 +1,3 @@
-/** The errors the client-side commands (login, sessions, tokens, remote status) meet, as the
- * stable exit codes (F8.1) and one message each that says what to do. */
-
 import { ServerError } from "@seshi/client";
 import { ConfigError } from "@seshi/config";
 import { Forbidden, SessionRejected, StoreError, Unauthorized } from "@seshi/model";
@@ -13,7 +10,6 @@ import { EXIT, type ExitCode } from "./exit";
 import { fail } from "./output";
 import { Cancelled } from "./terminal";
 
-/** A command line that makes sense but asks for something this setup cannot do. */
 export class Refused extends Error {
   constructor(
     readonly exit: ExitCode,
@@ -25,8 +21,6 @@ export class Refused extends Error {
   }
 }
 
-/** The exit code, error code and message for `err`; undefined for an error no command
- * expects (a bug: the caller rethrows it). */
 export function classify(
   err: unknown,
 ): { exit: ExitCode; code: string; message: string } | undefined {
@@ -36,8 +30,6 @@ export function classify(
   if (err instanceof ConfigError) {
     return { exit: EXIT.config, code: "config", message: err.issues.join("\n") };
   }
-  // Local mode's instance (by name: importing @seshi/instance here would load the server for
-  // every client command).
   if (err instanceof Error && (err.name === "InstanceError" || err.name === "ServeConfigError")) {
     return { exit: EXIT.config, code: "config", message: err.message };
   }
@@ -86,15 +78,12 @@ export function classify(
   if (err instanceof SessionRejected) {
     return { exit: EXIT.failure, code: err.code, message: err.message };
   }
-  // A file this machine could not read or write: an export's target, the CLI config, the
-  // logins or the credentials file (a missing folder, no permission, a full disk).
   if (err instanceof Error && typeof (err as NodeJS.ErrnoException).syscall === "string") {
     return { exit: EXIT.failure, code: "io", message: err.message };
   }
   return undefined;
 }
 
-/** Report `err` and return its exit code; rethrows an error no command expects. */
 export function failWith(ctx: CommandContext, json: boolean, err: unknown): ExitCode {
   const known = classify(err);
   if (!known) throw err;

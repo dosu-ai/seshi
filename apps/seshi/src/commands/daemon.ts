@@ -1,15 +1,3 @@
-/** `seshi daemon`: the background uploader and sweep (F9.1, F9.3). Hooks start it when it is not
- * running; it drains the spool, uploads, retracts, sweeps, and stops after a few idle minutes.
- * One runs per machine: a second exits at once. `--keep-alive` never stops (what the service
- * entry `seshi capture install --service` runs), and while another uploader holds the lock it
- * waits for its turn instead of exiting; `--once` makes one pass, sweep included, and prints
- * what it did.
- *
- *   seshi daemon [--keep-alive] [--once] [--idle <duration>] [--json]
- *
- * Exit codes: 0, also when another uploader is already running; 2 usage; 3 a CLI config it
- * cannot use; 5 (`--once`) when a sign-in is needed. */
-
 import { parseArgs } from "node:util";
 import {
   acquireUploaderLock,
@@ -91,7 +79,6 @@ export async function run(ctx: CommandContext): Promise<number> {
         lock = null;
       }
       log("stopped");
-      // Taken over by another uploader: a service waits for its turn again.
       if (!keepAlive || stop.signal.aborted) break;
     }
     return EXIT.ok;
@@ -106,10 +93,8 @@ export async function run(ctx: CommandContext): Promise<number> {
   }
 }
 
-/** How often a waiting service entry looks whether the running uploader stopped. */
 const LOCK_WAIT_MS = 30_000;
 
-/** The uploader lock, once whoever holds it lets go (or goes stale); null when stopped. */
 export async function waitForLock(
   paths: ReturnType<typeof capturePaths>,
   signal: AbortSignal,

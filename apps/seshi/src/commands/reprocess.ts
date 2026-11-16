@@ -1,17 +1,3 @@
-/** `seshi reprocess` (X4.9): rebuild sessions by asking their source again, since no raw is
- * stored (X6.3). For a polled source it rewinds the checkpoint, so the next run reads again
- * from `--since` (through the connector) or from the start, and the pipeline writes new heads
- * and change entries for what changed; resends of what did not are deduplicated (X4.7). It
- * works only while the source still has the data.
- *
- *   seshi reprocess --source <id> [--since <time>] [--dry-run] [--run] [--json]
- *                   [--config <file>] [--set path=value]…
- *
- * `--run` polls the source once right away instead of waiting for the worker. Uploads (source
- * `upload`) are refused: they are not polled, and the server keeps no raw logs to rebuild them
- * from. The machines that hold the transcripts resend them (X4.9): the uploader resends the
- * sessions the server marks stale by itself, and `seshi capture resend` does it by hand (21). */
-
 import { isDeepStrictEqual, parseArgs } from "node:util";
 import { SourceError } from "@seshi/sources";
 import { isPreconditionFailed } from "@seshi/store";
@@ -60,7 +46,6 @@ export async function run(ctx: CommandContext): Promise<number> {
     if (Number.isNaN(since.getTime())) {
       return usageError(ctx, json, "--since must be a date or time", USAGE);
     }
-    // Nothing after now can be read again; a mistyped year would otherwise pass silently.
     if (since.getTime() > Date.now()) {
       return usageError(ctx, json, `--since ${since.toISOString()} is in the future`, USAGE);
     }
@@ -82,7 +67,6 @@ export async function run(ctx: CommandContext): Promise<number> {
           `${dryRun ? "would rewind" : "rewound"} source ${id} ${target}: checkpoint ${JSON.stringify(rewind.before)} → ${JSON.stringify(rewind.after)}`,
         ];
         if (since && rewind.before !== null && isDeepStrictEqual(rewind.before, rewind.after)) {
-          // A rewind never moves a checkpoint forward past what the source has not read.
           lines.push(
             `checkpoint unchanged: the source has read nothing since ${since.toISOString()} yet`,
           );

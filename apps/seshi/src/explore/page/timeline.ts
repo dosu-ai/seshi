@@ -1,6 +1,3 @@
-/** The timeline tab: spool entries, uploader log lines, change entries, review decisions,
- * toggles, pauses, retractions and rebuilds, merged and sorted by time. */
-
 import type { TimelineEvent, TimelineKind } from "../types";
 import { h, replace } from "./dom";
 import { KIND_WORD, when } from "./text";

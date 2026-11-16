@@ -1,18 +1,3 @@
-/** `seshi explore`: a local, read-only web page for exploring and debugging captured sessions,
- * the visual front end to `seshi doctor`'s engine. For each session it shows the three views side
- * by side: the transcript on this machine (re-normalized and redacted with the local rules, never
- * raw), this machine's capture state (the decision and why, offsets, a pause's stop, the spool,
- * retries, the uploader's log), and what the server or the local bucket stored (metadata, the
- * trace chain, review decisions, change entries), with the doctor's checks.
- *
- *   seshi explore [--port <n>] [--no-open] [--server <url>] [--since <duration>]
- *
- * It serves on 127.0.0.1 only (a free port unless `--port`), prints the page's address with a
- * random token, opens it in the browser unless `--no-open`, and runs until Ctrl-C. The list holds
- * every session this machine saw within `--since` (7 days). It changes nothing: no uploads, no
- * state writes, no spool entries, only GETs to the server. Exit 2 usage; 3 the port cannot be
- * used. Not being able to ask the server is shown on the page (the local views still work). */
-
 import { parseDuration } from "@seshi/config";
 import { type Account, openAccount } from "../account/account";
 import { type Backend, openBackend } from "../backend";

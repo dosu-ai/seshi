@@ -1,23 +1,3 @@
-/** `seshi capture install --service` (F9.1): an entry in the OS's own service manager that keeps
- * the uploader running between agent sessions, for people who want that. Without it the
- * uploader starts on demand and stops when idle, which needs nothing installed.
- *
- * - macOS: a launchd agent, `~/Library/LaunchAgents/dev.seshi.uploader.plist`.
- * - Linux: a systemd user unit, `~/.config/systemd/user/seshi-uploader.service`.
- * - Windows: a Task Scheduler task, `seshi-uploader`, run at log-on.
- *
- * Each runs `seshi daemon --keep-alive`. The commands that load the entry are run through
- * `exec`, so tests see them without touching the real service manager.
- *
- * A service starts with the service manager's bare environment, not the shell's that hooks
- * inherit. The variables that move seshi's own folders (`XDG_STATE_HOME`, `XDG_CONFIG_HOME`)
- * and the agents' (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`) are written into the launchd and systemd
- * entries, so the service uses the same capture folder (lock, spool, state), CLI config and
- * sweep folders as the hooks; Windows keeps seshi's folders in the user's profile, which the
- * task has, and a task carries no environment, so a moved agent folder is reported. `SESHI_*`
- * settings are never written there (an entry file is readable, and the namespace also holds
- * server secrets): installing reports each one set, so it can go in the CLI config instead. */
-
 import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { NOT_SETTINGS_ENV } from "@seshi/config/paths";
@@ -27,7 +7,6 @@ export const LAUNCHD_LABEL = "dev.seshi.uploader";
 export const SYSTEMD_UNIT = "seshi-uploader.service";
 export const WINDOWS_TASK = "seshi-uploader";
 
-/** Runs a program and waits: its exit code and what it printed. */
 export type Exec = (words: string[]) => Promise<{ code: number; output: string }>;
 
 export interface ServiceContext {
@@ -35,25 +14,18 @@ export interface ServiceContext {
   platform: NodeJS.Platform;
   /** The words that start seshi (an absolute path: service managers have a bare PATH). */
   command: readonly string[];
-  /** Where the uploader's own output goes. */
   logFile: string;
   exec: Exec;
-  /** The environment `install` runs in: what the entry carries, and what it warns about. */
   env?: Record<string, string | undefined>;
 }
 
 export interface ServiceReport {
-  /** The entry: a file, or the Windows task's name. */
   entry: string;
   changed: boolean;
-  /** Commands that failed, with what they said. */
   problems: string[];
-  /** Settings in this environment the service will not see. */
   notes?: string[];
 }
 
-/** The variables that move seshi's folders (macOS and Linux only) and the agents' folders the
- * sweep looks in: paths, carried into the entry. */
 export const CARRIED_ENV = [
   "XDG_STATE_HOME",
   "XDG_CONFIG_HOME",
@@ -62,7 +34,6 @@ export const CARRIED_ENV = [
 ] as const;
 const XDG_ONLY = new Set(["XDG_STATE_HOME", "XDG_CONFIG_HOME"]);
 
-/** What a service entry carries from `env`, and a note per setting it does not. */
 export function serviceEnvironment(
   env: Record<string, string | undefined>,
   platform: NodeJS.Platform,
@@ -132,7 +103,6 @@ ${environment}  <key>RunAtLoad</key>
 `;
 }
 
-/** A systemd `ExecStart` word: quoted when it holds a space or a quote. */
 const systemdWord = (w: string) =>
   /^[\w@%+=:,./-]+$/.test(w) ? w : `"${w.replace(/(["\\])/g, "\\$1")}"`;
 
@@ -156,7 +126,6 @@ WantedBy=default.target
 `;
 }
 
-/** The Task Scheduler command line: the program quoted, as `schtasks /TR` takes it. */
 export function windowsTaskCommand(command: readonly string[]): string {
   return [...command, "daemon", "--keep-alive"].map((w) => (/\s/.test(w) ? `"${w}"` : w)).join(" ");
 }
@@ -258,7 +227,6 @@ export async function uninstallService(context: ServiceContext): Promise<Service
   }
 }
 
-/** Whether the entry is there (on Windows, whether the task exists). */
 export async function serviceInstalled(context: ServiceContext): Promise<boolean> {
   if (context.platform === "win32") {
     return (await runAll(context, [["schtasks", "/Query", "/TN", WINDOWS_TASK]])).length === 0;
@@ -266,7 +234,6 @@ export async function serviceInstalled(context: ServiceContext): Promise<boolean
   return existsSync(entryOf(context));
 }
 
-/** Runs a program and waits for it, bounded at 30 s. */
 export const exec: Exec = async (words) => {
   const proc = Bun.spawn(words, { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
   const timer = setTimeout(() => proc.kill(), 30_000);

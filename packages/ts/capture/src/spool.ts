@@ -1,8 +1,3 @@
-/** The spool (F9.1): what hooks hand the uploader. Each entry is one small JSON file in
- * `spool/`, written to a temporary name and renamed, so the uploader never reads half of one
- * and no two writers share a file. Entries hold paths and ids, never transcript text (F9 Data):
- * the uploader reads the transcript itself, from where the session left off. */
-
 import { randomBytes } from "node:crypto";
 import { readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -13,7 +8,6 @@ export const SPOOL_VERSION = 1;
 
 const WAKE_SUFFIX = ".wake.json";
 
-/** One thing for the uploader to do. */
 export type SpoolEntry =
   | {
       v: typeof SPOOL_VERSION;
@@ -27,9 +21,6 @@ export type SpoolEntry =
       parent_session_id?: string;
       final?: boolean;
     }
-  /** A hook skipped the session because a shared rule (the org's or the repo's) turns its
-   * folder off: the uploader records the folder, so the session stays off wherever it goes
-   * next (F9.5). No work of its own, so it starts no uploader. */
   | {
       v: typeof SPOOL_VERSION;
       kind: "seen";
@@ -40,8 +31,6 @@ export type SpoolEntry =
       transcript_path?: string;
       parent_session_id?: string;
     }
-  /** A hook saw the session while capture was paused (F9.5): the uploader stops it where it
-   * is (`frozen`), so it sends nothing more after the pause ends either. No work of its own. */
   | {
       v: typeof SPOOL_VERSION;
       kind: "paused";
@@ -52,26 +41,19 @@ export type SpoolEntry =
       transcript_path?: string;
       parent_session_id?: string;
     }
-  /** A session was turned off: retract what was uploaded (F9.7). The state file says what; the
-   * entry wakes the uploader, so a retraction waits in the spool while it is not running. */
   | { v: typeof SPOOL_VERSION; kind: "retract"; at: string; agent: string; session_id: string }
-  /** Something changed that the uploader should look at now (a session turned back on). */
   | { v: typeof SPOOL_VERSION; kind: "wake"; at: string };
 
 export interface SpoolItem {
-  /** The entry's file name in the spool folder. */
   name: string;
   entry: SpoolEntry;
 }
 
-/** Add an entry to the spool. */
 export function appendSpool(paths: CapturePaths, entry: SpoolEntry, now: Date = new Date()): void {
   ensurePrivateDir(paths.spool);
   const name = `${now.getTime().toString().padStart(14, "0")}-${randomBytes(6).toString("hex")}`;
   const temp = join(paths.spool, `.${name}.tmp`);
   writeFileSync(temp, JSON.stringify(entry), { mode: 0o600 });
-  // A wake-up (or a folder seen, or a session seen during a pause) is no work of its own: its
-  // name says so, so the queue count leaves it out.
   const idle = entry.kind === "wake" || entry.kind === "seen" || entry.kind === "paused";
   renameSync(temp, join(paths.spool, `${name}${idle ? WAKE_SUFFIX : ".json"}`));
 }
@@ -111,7 +93,6 @@ export function spoolCount(paths: CapturePaths): number {
   }
 }
 
-/** Remove entries the uploader has taken in. */
 export function removeSpool(paths: CapturePaths, names: readonly string[]): void {
   for (const name of names) rmSync(join(paths.spool, name), { force: true });
 }

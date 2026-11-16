@@ -1,7 +1,3 @@
-/** The username an org-key caller states (X5.7, X5.12), resolved the way Datadog Trajectory
- * does it: `SESHI_USER`, then `user` in the CLI config, then git's `user.email`, then the OS
- * user name. It travels as the `X-Seshi-User` header, so it must be printable ASCII. */
-
 import { userInfo } from "node:os";
 
 export type UserSource = "SESHI_USER" | "config" | "git" | "os";
@@ -11,7 +7,6 @@ export interface ResolvedUser {
   from: UserSource;
 }
 
-/** A username that cannot be sent (not printable ASCII, or empty). */
 export class BadUsername extends Error {
   constructor(
     readonly user: string,
@@ -26,12 +21,8 @@ export class BadUsername extends Error {
 
 export interface ResolveUserOptions {
   env: Record<string, string | undefined>;
-  /** The CLI config's `user`. The loader also fills it from `SESHI_USER`; the env is read
-   * first here only to say where the name came from. */
   configured?: string;
-  /** `git config --get user.email`; undefined when git has none or is not installed. */
   gitEmail?: () => Promise<string | undefined>;
-  /** The OS user name. */
   osUser?: () => string | undefined;
 }
 
