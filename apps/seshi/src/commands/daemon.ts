@@ -9,7 +9,7 @@ import { parseDuration } from "@seshi/config";
 import { captureRuntime } from "../capture-runtime";
 import { EXIT } from "../cli/exit";
 import { failWith } from "../cli/failures";
-import { emit, takeJson, usageError } from "../cli/output";
+import { emit, helpOrUsageError, takeJson } from "../cli/output";
 import { hostOf } from "./capture-host";
 import type { CommandContext } from "./index";
 
@@ -30,11 +30,16 @@ export async function run(ctx: CommandContext): Promise<number> {
       allowPositionals: false,
     }));
   } catch (err) {
-    return usageError(ctx, json, (err as Error).message, USAGE);
+    return helpOrUsageError(ctx, json, (err as Error).message, USAGE);
   }
   const idleMs = values.idle === undefined ? undefined : parseDuration(values.idle);
   if (values.idle !== undefined && idleMs === undefined) {
-    return usageError(ctx, json, `--idle takes a duration (5m, 1h), not '${values.idle}'`, USAGE);
+    return helpOrUsageError(
+      ctx,
+      json,
+      `--idle takes a duration (5m, 1h), not '${values.idle}'`,
+      USAGE,
+    );
   }
 
   const paths = capturePaths(hostOf(ctx));

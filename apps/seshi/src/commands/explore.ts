@@ -2,7 +2,7 @@ import { parseDuration } from "@seshi/config";
 import { type Account, openAccount } from "../account/account";
 import { type Backend, openBackend } from "../backend";
 import { EXIT } from "../cli/exit";
-import { fail, usageError } from "../cli/output";
+import { fail, helpOrUsageError } from "../cli/output";
 import { printable } from "../cli/style";
 import { failureOf, realDeps } from "../doctor/index";
 import { ExploreApi } from "../explore/api";
@@ -116,10 +116,10 @@ export async function startExplore(
 
 export async function run(ctx: CommandContext): Promise<number | undefined> {
   const args = parseExploreArgs(ctx.argv);
-  if (typeof args === "string") return usageError(ctx, false, args, USAGE);
+  if (typeof args === "string") return helpOrUsageError(ctx, false, args, USAGE);
   const sinceMs = args.since === undefined ? DEFAULT_SINCE_MS : parseDuration(args.since);
   if (sinceMs === undefined) {
-    return usageError(
+    return helpOrUsageError(
       ctx,
       false,
       `--since takes a duration (2h, 1d, 7d), not '${args.since}'`,

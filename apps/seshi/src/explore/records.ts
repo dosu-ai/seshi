@@ -28,7 +28,11 @@ function storedOf(ev: SessionEvidence): SessionMetadata | undefined {
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
-function normalizedUpTo(ev: SessionEvidence, deps: DoctorDeps, end: number): NormalizedRecord[] {
+function unredactedRecordsUpTo(
+  ev: SessionEvidence,
+  deps: DoctorDeps,
+  end: number,
+): NormalizedRecord[] {
   const path = ev.transcript.path as string;
   const capture = ev.capture as NonNullable<SessionEvidence["capture"]>;
   const text = deps.files.read(path, end);
@@ -104,7 +108,7 @@ export function alignRecords(ev: SessionEvidence, deps: DoctorDeps): Aligned {
     pipeline.transcript.error = ev.transcript.error?.message ?? "the transcript is not here";
   } else {
     try {
-      local = deps.redaction.records(normalizedUpTo(ev, deps, size));
+      local = deps.redaction.records(unredactedRecordsUpTo(ev, deps, size));
       pipeline.records.count = local.length;
     } catch (err) {
       pipeline.records.error = `the adapter cannot read the transcript now: ${message(err)}`;
@@ -112,14 +116,16 @@ export function alignRecords(ev: SessionEvidence, deps: DoctorDeps): Aligned {
     const end = serverEnd(ev);
     if (end !== undefined && !pipeline.records.error) {
       try {
-        sentUntil = end >= size ? local.length : normalizedUpTo(ev, deps, end).length;
+        sentUntil = end >= size ? local.length : unredactedRecordsUpTo(ev, deps, end).length;
         pipeline.sent.records = sentUntil;
       } catch {}
     }
     if (s?.frozen && !pipeline.records.error) {
       try {
         frozenAt =
-          s.frozen.offset >= size ? local.length : normalizedUpTo(ev, deps, s.frozen.offset).length;
+          s.frozen.offset >= size
+            ? local.length
+            : unredactedRecordsUpTo(ev, deps, s.frozen.offset).length;
       } catch {}
     }
   }

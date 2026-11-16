@@ -140,7 +140,7 @@ function readCachedRules(file: string | undefined, server: string): CachedRules 
   return undefined;
 }
 
-function withheldOf(carried: Record<string, unknown> | undefined): WithheldCalls {
+function withheldCallsIn(carried: Record<string, unknown> | undefined): WithheldCalls {
   const withheld: WithheldCalls = {};
   for (const [id, kind] of Object.entries(carried ?? {})) {
     if (kind === "sensitive-file" || kind === "secret-output") withheld[id] = kind;
@@ -227,7 +227,7 @@ export function preRedactor(account: Account, options: PreRedactorOptions = {}):
         throw err;
       });
       const { rules, redact } = await loading;
-      const out = redact(rules, text, encoding, withheldOf(carried));
+      const out = redact(rules, text, encoding, withheldCallsIn(carried));
       return Object.keys(out.withheld).length > 0
         ? { text: out.text, carried: out.withheld }
         : { text: out.text };

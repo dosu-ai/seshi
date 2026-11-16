@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { parseListen } from "@seshi/config";
 import { EXIT } from "../cli/exit";
-import { emit, fail, takeJson, usageError } from "../cli/output";
+import { emit, fail, helpOrUsageError, takeJson } from "../cli/output";
 import type { CommandContext } from "./index";
 
 const USAGE = "usage: seshi healthcheck [--url <url>] [--config <file>] [--json]";
@@ -61,7 +61,7 @@ export async function run(ctx: CommandContext): Promise<number> {
     });
     url = values.url ?? healthUrl(listenSetting(ctx.env, values.config));
   } catch (err) {
-    return usageError(ctx, json, (err as Error).message, USAGE);
+    return helpOrUsageError(ctx, json, (err as Error).message, USAGE);
   }
   let problem: string;
   try {

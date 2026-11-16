@@ -9,7 +9,7 @@ import {
 } from "@seshi/client";
 import type { Identity } from "@seshi/model";
 import { type Account, fallbackWarning, openAccount, serverOf } from "../account/account";
-import { writeCliKey } from "../account/cli-file";
+import { writeCliKeyIfValid } from "../account/cli-file";
 import type { LoginProfile } from "../account/logins";
 import {
   browserFlow,
@@ -22,7 +22,7 @@ import {
 import { resolveUser, sendableUser } from "../account/user";
 import { EXIT } from "../cli/exit";
 import { failWith, Refused } from "../cli/failures";
-import { emit, takeJson, usageError } from "../cli/output";
+import { emit, helpOrUsageError, takeJson } from "../cli/output";
 import { printable, type Style, styleFor } from "../cli/style";
 import { USER_AGENT } from "../user-agent";
 import type { CommandContext } from "./index";
@@ -206,22 +206,22 @@ export async function run(ctx: CommandContext): Promise<number> {
     });
     values = parsed.values;
   } catch (err) {
-    return usageError(ctx, json, (err as Error).message, USAGE);
+    return helpOrUsageError(ctx, json, (err as Error).message, USAGE);
   }
   const given = [values.key, values.token].filter((v) => v !== undefined).length;
-  if (given > 1) return usageError(ctx, json, "give --key or --token, not both", USAGE);
+  if (given > 1) return helpOrUsageError(ctx, json, "give --key or --token, not both", USAGE);
   if (values.browser && values.device) {
-    return usageError(ctx, json, "give --browser or --device, not both", USAGE);
+    return helpOrUsageError(ctx, json, "give --browser or --device, not both", USAGE);
   }
   if (
     values.visibility !== undefined &&
     values.visibility !== "org" &&
     values.visibility !== "owner"
   ) {
-    return usageError(ctx, json, "--visibility must be org or owner", USAGE);
+    return helpOrUsageError(ctx, json, "--visibility must be org or owner", USAGE);
   }
   if (values.user !== undefined && !sendableUser(values.user)) {
-    return usageError(ctx, json, "--user must be printable ASCII", USAGE);
+    return helpOrUsageError(ctx, json, "--user must be printable ASCII", USAGE);
   }
   try {
     const account = openAccount(ctx);
@@ -235,7 +235,7 @@ export async function run(ctx: CommandContext): Promise<number> {
     }
     const server = serverOf(account, values.server);
     if (server === undefined) {
-      return usageError(ctx, json, "which server? seshi login --server <url>", USAGE);
+      return helpOrUsageError(ctx, json, "which server? seshi login --server <url>", USAGE);
     }
     let config: AuthConfig;
     try {
@@ -289,7 +289,7 @@ export async function run(ctx: CommandContext): Promise<number> {
         key = (await (await ctx.terminal()).ask("Org key: ", { hidden: true })).trim();
         if (!key) throw new Refused(EXIT.usage, "usage", "no org key given");
       } else {
-        return usageError(
+        return helpOrUsageError(
           ctx,
           json,
           `${server} signs in with the org key: seshi login --key - (reads it from standard input)`,
@@ -301,7 +301,7 @@ export async function run(ctx: CommandContext): Promise<number> {
           ? { user: values.user, from: "flag" }
           : await resolveUser({
               env: ctx.env,
-              ...(account.cli.user ? { configured: account.cli.user } : {}),
+              ...(account.user ? { configured: account.user } : {}),
             });
       const me = await identify(server, key, user);
       profile = {
@@ -331,9 +331,10 @@ export async function run(ctx: CommandContext): Promise<number> {
     }
 
     const saved = await account.logins.save(profile, secrets);
-    if (serverOf(account) !== server) writeCliKey(account.cliFile, "server", server, ctx.env);
+    if (serverOf(account) !== server)
+      writeCliKeyIfValid(account.cliFile, "server", server, ctx.env);
     if (values.user !== undefined && values.user !== account.cli.user) {
-      writeCliKey(account.cliFile, "user", values.user, ctx.env);
+      writeCliKeyIfValid(account.cliFile, "user", values.user, ctx.env);
     }
     const warning = fallbackWarning(account);
     if (warning) ctx.stderr(`seshi: warning: ${warning}`);

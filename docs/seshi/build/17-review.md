@@ -342,7 +342,7 @@ what changed.
   It names seshi; the legacy Letta render's `sessionstorage/trace/1` mentions stay.
 - **cli, low** (found in the final check): `seshi <command> --help` answered
   `Unknown option '--help'` with exit 2 for every command but `config`, and `seshi --help`
-  listed `sessions (ls|show|export|rm)` without `visibility` (16's note). `usageError` now
+  listed `sessions (ls|show|export|rm)` without `visibility` (16's note). `helpOrUsageError` now
   prints the usage on stdout with exit 0 when the command line holds `--help` or `-h` (before
   a `--`), `serve` reports its parse errors through it, and the summary names `visibility`.
   Test: `main.test.ts` runs `--help` and `-h` on every command but `hook` and `statusline`.

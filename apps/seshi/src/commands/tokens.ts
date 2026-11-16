@@ -5,7 +5,7 @@ import { type Account, openAccount } from "../account/account";
 import { type Backend, openBackend } from "../backend";
 import { EXIT } from "../cli/exit";
 import { failWith, Refused } from "../cli/failures";
-import { emit, takeJson, usageError } from "../cli/output";
+import { emit, helpOrUsageError, takeJson } from "../cli/output";
 import { printable, type Style, styleFor } from "../cli/style";
 import type { CommandContext } from "./index";
 
@@ -166,7 +166,7 @@ export async function run(ctx: CommandContext): Promise<number> {
   const { json, rest } = takeJson(ctx.argv);
   const [sub, ...args] = rest;
   if (!sub || !["ls", "list", "create", "revoke"].includes(sub)) {
-    return usageError(
+    return helpOrUsageError(
       ctx,
       json,
       sub === undefined ? "tokens needs a subcommand" : `unknown tokens command '${sub}'`,
@@ -183,7 +183,7 @@ export async function run(ctx: CommandContext): Promise<number> {
       allowPositionals: true,
     }));
   } catch (err) {
-    return usageError(ctx, json, (err as Error).message, USAGE);
+    return helpOrUsageError(ctx, json, (err as Error).message, USAGE);
   }
   let account: Account | undefined;
   let backend: Backend | undefined;
@@ -211,7 +211,7 @@ export async function run(ctx: CommandContext): Promise<number> {
     emit(ctx, json, { tokens }, () => listLines(tokens, style, now));
     return EXIT.ok;
   } catch (err) {
-    if (err instanceof UsageError) return usageError(ctx, json, err.message, USAGE);
+    if (err instanceof UsageError) return helpOrUsageError(ctx, json, err.message, USAGE);
     return failWith(ctx, json, err);
   } finally {
     await backend?.close();

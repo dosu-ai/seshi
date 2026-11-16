@@ -4,17 +4,20 @@ import { checkServerConfig } from "@seshi/config";
 import { lineLogger } from "@seshi/instance";
 import { VERSION } from "@seshi/model";
 import { EXIT } from "../cli/exit";
-import { fail, usageError } from "../cli/output";
+import { fail, helpOrUsageError } from "../cli/output";
 import type { CommandContext } from "./index";
 import { openServer, serverFailure } from "./server-instance";
 
-export { ServeConfigError, serveSettings } from "./serve-settings";
+export { ServeConfigError } from "../cli/failures";
+export { serveSettings } from "./serve-settings";
 
 export function requestBodyCap(limits: {
   max_upload_bytes: number;
   max_otlp_bytes: number;
 }): number {
-  return Math.max(maxBodyBytes(limits.max_upload_bytes), limits.max_otlp_bytes);
+  const uploadCapAsJson = maxBodyBytes(limits.max_upload_bytes);
+  const otlpCap = limits.max_otlp_bytes;
+  return Math.max(uploadCapAsJson, otlpCap);
 }
 
 const USAGE =
@@ -37,10 +40,13 @@ async function start(ctx: CommandContext, argv: string[]): Promise<number | unde
       allowPositionals: false,
     }));
   } catch (err) {
-    return usageError(ctx, false, message(err), USAGE);
+    return helpOrUsageError(ctx, false, message(err), USAGE);
   }
   const log = lineLogger(ctx.stdout, ctx.stderr);
-  const { instance, loaded, settings } = await openServer(ctx, values, { log, cwdFile: true });
+  const { instance, loaded, settings } = await openServer(ctx, values, {
+    log,
+    trustCwdConfig: true,
+  });
   for (const warning of checkServerConfig(loaded.config).warnings) log.warn(warning);
   const { owners, url } = settings;
 
@@ -104,21 +110,28 @@ async function start(ctx: CommandContext, argv: string[]): Promise<number | unde
       `redaction: packs ${packs} (from ${settings.redactionPacks.join(", ")}) on top of the built-in rules ${instance.redaction.builtinVersion}; rule set ${instance.redaction.hash.slice(0, 12)}`,
     );
   }
-  ctx.stdout(
-    `seshi ${VERSION} listening on http://${host}:${server.port}, storing sessions in ${url} (deployment ${instance.deployment}); ${serving}${
-      loaded.file ? ` (config ${loaded.file})` : ""
-    }`,
-  );
 
+  function stopWithin(graceMs: number): Promise<unknown> {
+    return Promise.race([server.stop(), Bun.sleep(graceMs)]);
+  }
   let stopping = false;
   async function shutdown(): Promise<void> {
     if (stopping) return;
     stopping = true;
-    await Promise.all([Promise.race([server.stop(), Bun.sleep(5000)]), instance.close(5000)]);
+    await Promise.all([stopWithin(5000), instance.close(5000)]);
     process.exit(0);
   }
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
+
+  function announceListening(): void {
+    ctx.stdout(
+      `seshi ${VERSION} listening on http://${host}:${server.port}, storing sessions in ${url} (deployment ${instance.deployment}); ${serving}${
+        loaded.file ? ` (config ${loaded.file})` : ""
+      }`,
+    );
+  }
+  announceListening();
   return undefined;
 }
 

@@ -22,7 +22,7 @@ export function setTopLevelKey(text: string, key: string, value: string): string
   return `${lines.join("\n")}\n`;
 }
 
-export function writeCliKey(
+export function writeCliKeyIfValid(
   path: string,
   key: "server" | "user",
   value: string,

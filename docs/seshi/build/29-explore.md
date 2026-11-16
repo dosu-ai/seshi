@@ -14,7 +14,7 @@ local bucket stored (metadata, the trace chain, review decisions, change entries
 
 - **`seshi explore [--port <n>] [--no-open] [--server <url>] [--since <duration>]`**
   (`apps/seshi/src/commands/explore.ts`, registered in the command registry, `--help` through
-  `usageError`). It opens the backend as `seshi doctor` does (`openBackend`, `purpose: "read"`),
+  `helpOrUsageError`). It opens the backend as `seshi doctor` does (`openBackend`, `purpose: "read"`),
   builds the doctor's `realDeps`, starts the server on 127.0.0.1 (port 0 unless `--port`), prints
   `seshi explore: http://127.0.0.1:<port>/?token=<token>`, opens it with the terminal's existing
   `openUrl` (http(s) only, `cli/terminal.ts`) unless `--no-open`, and runs until SIGINT or SIGTERM

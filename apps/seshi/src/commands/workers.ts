@@ -2,7 +2,7 @@ import { parseArgs } from "node:util";
 import type { InstanceStatus } from "@seshi/instance";
 import { EXIT } from "../cli/exit";
 import { failWith } from "../cli/failures";
-import { emit, takeJson, usageError } from "../cli/output";
+import { emit, helpOrUsageError, takeJson } from "../cli/output";
 import { printable, type Role, Style, styleFor } from "../cli/style";
 import { adminTarget } from "./admin-target";
 import type { CommandContext } from "./index";
@@ -100,7 +100,7 @@ export async function run(ctx: CommandContext): Promise<number> {
   const { json, rest } = takeJson(ctx.argv);
   const [sub, ...args] = rest;
   if (sub !== "status") {
-    return usageError(
+    return helpOrUsageError(
       ctx,
       json,
       sub === undefined ? "workers needs a subcommand" : `unknown workers command '${sub}'`,
@@ -115,10 +115,10 @@ export async function run(ctx: CommandContext): Promise<number> {
       strict: true,
     }));
   } catch (err) {
-    return usageError(ctx, json, (err as Error).message, USAGE);
+    return helpOrUsageError(ctx, json, (err as Error).message, USAGE);
   }
   if (values.server !== undefined && (values.config !== undefined || values.set !== undefined)) {
-    return usageError(ctx, json, "give --server, or --config and --set, not both", USAGE);
+    return helpOrUsageError(ctx, json, "give --server, or --config and --set, not both", USAGE);
   }
   const style = await styleFor(ctx, { json });
   try {
@@ -134,7 +134,7 @@ export async function run(ctx: CommandContext): Promise<number> {
       {
         roles: [],
         probe: [],
-        initialize: false,
+        claimUnmarkedBucket: false,
       },
     );
     try {

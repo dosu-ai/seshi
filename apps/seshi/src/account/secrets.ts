@@ -120,6 +120,14 @@ export class MemorySecrets implements SecretBackend {
   }
 }
 
+async function tryUnusableBackend<T>(op: () => Promise<T>): Promise<T | undefined> {
+  try {
+    return await op();
+  } catch {
+    return undefined;
+  }
+}
+
 /** The keychain first, the file when the keychain cannot be used. Reads look in both, so a
  * secret written to the file while the keychain was locked is still found. `fellBack` says
  * why the last write went to the file, for a warning. */
@@ -141,10 +149,8 @@ export class FallbackSecrets implements SecretBackend {
   }
 
   async get(name: string): Promise<string | null> {
-    try {
-      const value = await this.primary.get(name);
-      if (value !== null) return value;
-    } catch {}
+    const value = await tryUnusableBackend(() => this.primary.get(name));
+    if (typeof value === "string") return value;
     return this.fallback.get(name);
   }
 
@@ -162,10 +168,7 @@ export class FallbackSecrets implements SecretBackend {
   }
 
   async delete(name: string): Promise<boolean> {
-    let deleted = false;
-    try {
-      deleted = await this.primary.delete(name);
-    } catch {}
+    const deleted = (await tryUnusableBackend(() => this.primary.delete(name))) ?? false;
     return (await this.fallback.delete(name)) || deleted;
   }
 }

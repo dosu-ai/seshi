@@ -2,7 +2,7 @@ import { isDeepStrictEqual, parseArgs } from "node:util";
 import { SourceError } from "@seshi/sources";
 import { isPreconditionFailed } from "@seshi/store";
 import { EXIT, type ExitCode } from "../cli/exit";
-import { emit, fail, takeJson, usageError } from "../cli/output";
+import { emit, fail, helpOrUsageError, takeJson } from "../cli/output";
 import type { CommandContext } from "./index";
 import { openServer, SERVER_OPTIONS, serverFailure } from "./server-instance";
 
@@ -36,27 +36,28 @@ export async function run(ctx: CommandContext): Promise<number> {
       strict: true,
     }));
   } catch (err) {
-    return usageError(ctx, json, (err as Error).message, USAGE);
+    return helpOrUsageError(ctx, json, (err as Error).message, USAGE);
   }
   const id = values.source;
-  if (!id) return usageError(ctx, json, "reprocess needs --source <id>", USAGE);
+  if (!id) return helpOrUsageError(ctx, json, "reprocess needs --source <id>", USAGE);
   let since: Date | undefined;
   if (values.since !== undefined) {
     since = new Date(values.since);
     if (Number.isNaN(since.getTime())) {
-      return usageError(ctx, json, "--since must be a date or time", USAGE);
+      return helpOrUsageError(ctx, json, "--since must be a date or time", USAGE);
     }
     if (since.getTime() > Date.now()) {
-      return usageError(ctx, json, `--since ${since.toISOString()} is in the future`, USAGE);
+      return helpOrUsageError(ctx, json, `--since ${since.toISOString()} is in the future`, USAGE);
     }
   }
   const dryRun = values["dry-run"] === true;
-  if (dryRun && values.run) return usageError(ctx, json, "--dry-run and --run conflict", USAGE);
+  if (dryRun && values.run)
+    return helpOrUsageError(ctx, json, "--dry-run and --run conflict", USAGE);
   try {
     const { instance } = await openServer(ctx, values, {
       roles: [],
       probe: [],
-      initialize: !dryRun,
+      claimUnmarkedBucket: !dryRun,
     });
     try {
       const rewind = await instance.sources.rewind(id, { ...(since ? { since } : {}), dryRun });

@@ -34,18 +34,28 @@ export const CARRIED_ENV = [
 ] as const;
 const XDG_ONLY = new Set(["XDG_STATE_HOME", "XDG_CONFIG_HOME"]);
 
-export function serviceEnvironment(
+export function carriedEnvironment(
   env: Record<string, string | undefined>,
   platform: NodeJS.Platform,
-): { carried: Record<string, string>; notes: string[] } {
+): Record<string, string> {
   const carried: Record<string, string> = {};
-  const notes: string[] = [];
+  if (platform === "win32") return carried;
   for (const name of CARRIED_ENV) {
     const value = env[name];
-    if (!value) continue;
+    if (value) carried[name] = value;
+  }
+  return carried;
+}
+
+export function unseenEnvironmentNotes(
+  env: Record<string, string | undefined>,
+  platform: NodeJS.Platform,
+): string[] {
+  const notes: string[] = [];
+  for (const name of CARRIED_ENV) {
+    if (!env[name]) continue;
     // A Task Scheduler task carries no environment; XDG does not apply on Windows anyway.
-    if (platform !== "win32") carried[name] = value;
-    else if (!XDG_ONLY.has(name)) {
+    if (platform === "win32" && !XDG_ONLY.has(name)) {
       notes.push(
         `${name} is set here, but the service does not see it: its sweep looks in the agent's default folder`,
       );
@@ -59,7 +69,7 @@ export function serviceEnvironment(
       `${n} is set here, but the service does not see it: put the setting in the CLI config, or the service uploads without it`,
     );
   }
-  return { carried, notes };
+  return notes;
 }
 
 const xml = (text: string) =>
@@ -156,13 +166,13 @@ async function runAll(context: ServiceContext, commands: string[][]): Promise<st
 
 export async function installService(context: ServiceContext): Promise<ServiceReport> {
   const report = await install(context);
-  const { notes } = serviceEnvironment(context.env ?? {}, context.platform);
+  const notes = unseenEnvironmentNotes(context.env ?? {}, context.platform);
   return notes.length > 0 ? { ...report, notes } : report;
 }
 
 async function install(context: ServiceContext): Promise<ServiceReport> {
   const entry = entryOf(context);
-  const { carried } = serviceEnvironment(context.env ?? {}, context.platform);
+  const carried = carriedEnvironment(context.env ?? {}, context.platform);
   switch (context.platform) {
     case "darwin": {
       writeFileAtomic(entry, launchdPlist(context.command, context.logFile, carried), 0o644);

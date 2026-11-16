@@ -13,8 +13,9 @@ import { join } from "node:path";
 import { loadConfig, type ServerConfig, serverConfigSchema } from "@seshi/config";
 import { VERSION } from "@seshi/model";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { ServeConfigError } from "../cli/failures";
 import { requestBodyCap } from "./serve";
-import { configFlags, ServeConfigError, serveSettings } from "./serve-settings";
+import { configFlags, serveSettings } from "./serve-settings";
 
 let dir: string;
 beforeEach(() => {

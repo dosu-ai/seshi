@@ -11,7 +11,7 @@ import {
 } from "@seshi/store";
 import { EXIT, type ExitCode } from "../cli/exit";
 import { failWith, Refused } from "../cli/failures";
-import { emit, fail, takeJson, usageError } from "../cli/output";
+import { emit, fail, helpOrUsageError, takeJson } from "../cli/output";
 import { printable } from "../cli/style";
 import { adminTarget } from "./admin-target";
 import type { CommandContext } from "./index";
@@ -234,7 +234,7 @@ export async function run(ctx: CommandContext): Promise<number> {
   const { json, rest } = takeJson(ctx.argv);
   const [sub, ...args] = rest;
   if (!sub || !SUBCOMMANDS.includes(sub)) {
-    return usageError(
+    return helpOrUsageError(
       ctx,
       json,
       sub === undefined ? "sync needs a subcommand" : `unknown sync command '${sub}'`,
@@ -251,11 +251,11 @@ export async function run(ctx: CommandContext): Promise<number> {
       allowPositionals: true,
     }));
   } catch (err) {
-    return usageError(ctx, json, (err as Error).message, USAGE);
+    return helpOrUsageError(ctx, json, (err as Error).message, USAGE);
   }
   const id = positionals[0];
   if (ONE_SHOTS.has(sub) && (positionals.length > 0 || values.force !== undefined)) {
-    return usageError(
+    return helpOrUsageError(
       ctx,
       json,
       sub === "assemble"
@@ -265,10 +265,10 @@ export async function run(ctx: CommandContext): Promise<number> {
     );
   }
   if (positionals.length > 1 || (sub !== "status" && !ONE_SHOTS.has(sub) && id === undefined)) {
-    return usageError(ctx, json, `sync ${sub} takes one source id`, USAGE);
+    return helpOrUsageError(ctx, json, `sync ${sub} takes one source id`, USAGE);
   }
   if (values.server !== undefined && (values.config !== undefined || values.set !== undefined)) {
-    return usageError(ctx, json, "give --server, or --config and --set, not both", USAGE);
+    return helpOrUsageError(ctx, json, "give --server, or --config and --set, not both", USAGE);
   }
   try {
     const target = await adminTarget(ctx, values);
@@ -292,7 +292,7 @@ export async function run(ctx: CommandContext): Promise<number> {
     const { instance } = await openServer(ctx, local, {
       roles: [],
       probe: [],
-      initialize: sub === "run" || ONE_SHOTS.has(sub),
+      claimUnmarkedBucket: sub === "run" || ONE_SHOTS.has(sub),
     });
     try {
       if (sub === "run") return await runSource(ctx, json, instance, id as string, values);
@@ -304,7 +304,7 @@ export async function run(ctx: CommandContext): Promise<number> {
       await instance.close();
     }
   } catch (err) {
-    if (err instanceof UsageError) return usageError(ctx, json, err.message, USAGE);
+    if (err instanceof UsageError) return helpOrUsageError(ctx, json, err.message, USAGE);
     if (err instanceof SourceError) return fail(ctx, json, sourceCode(err), err.code, err.message);
     const code = serverFailure(ctx, json, err);
     if (code !== undefined) return code;

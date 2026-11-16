@@ -30,7 +30,7 @@ import { allCaptureAgents } from "../capture-agents";
 import { captureRuntime } from "../capture-runtime";
 import { EXIT } from "../cli/exit";
 import { failWith } from "../cli/failures";
-import { emit, fail, takeJson, usageError } from "../cli/output";
+import { emit, fail, helpOrUsageError, takeJson } from "../cli/output";
 import { printable, styleFor } from "../cli/style";
 import { pathsOf } from "./capture-host";
 import type { CommandContext } from "./index";
@@ -92,14 +92,19 @@ export async function run(ctx: CommandContext): Promise<number> {
       allowPositionals: true,
     }));
   } catch (err) {
-    return usageError(ctx, json, (err as Error).message, USAGE);
+    return helpOrUsageError(ctx, json, (err as Error).message, USAGE);
   }
   if (positionals.length === 0 && values.since === undefined) {
-    return usageError(ctx, json, "name a transcript or a folder, or --since <duration>", USAGE);
+    return helpOrUsageError(
+      ctx,
+      json,
+      "name a transcript or a folder, or --since <duration>",
+      USAGE,
+    );
   }
   const sinceMs = values.since === undefined ? undefined : parseDuration(values.since);
   if (values.since !== undefined && sinceMs === undefined) {
-    return usageError(
+    return helpOrUsageError(
       ctx,
       json,
       `--since takes a duration (7d, 30d), not '${values.since}'`,
@@ -110,7 +115,7 @@ export async function run(ctx: CommandContext): Promise<number> {
   if (values.agent !== undefined) {
     agents = agents.filter((a) => a.name === values.agent);
     if (agents.length === 0) {
-      return usageError(ctx, json, `seshi does not capture '${values.agent}'`, USAGE);
+      return helpOrUsageError(ctx, json, `seshi does not capture '${values.agent}'`, USAGE);
     }
   }
   const { host, paths } = pathsOf(ctx);

@@ -82,6 +82,22 @@ function int(value: string | null): number | undefined {
   return Number(value);
 }
 
+function refuseForeignHost(request: Request, allowed: readonly string[]): Response | undefined {
+  const host = request.headers.get("host");
+  if (!host || !allowed.includes(host.toLowerCase())) {
+    return text(403, "seshi explore: this server answers only http://127.0.0.1 on its port");
+  }
+  return undefined;
+}
+
+function refuseCrossOrigin(request: Request, allowed: readonly string[]): Response | undefined {
+  const origin = request.headers.get("origin");
+  if (origin !== null && !allowed.some((h) => origin.toLowerCase() === `http://${h}`)) {
+    return text(403, "seshi explore: cross-origin requests are refused");
+  }
+  return undefined;
+}
+
 export function exploreHandler(
   options: { api: ExploreHandler; assets: Assets; token: string },
   port: () => number,
@@ -90,14 +106,8 @@ export function exploreHandler(
   return async (request) => {
     const p = port();
     const allowed = [`127.0.0.1:${p}`, `localhost:${p}`];
-    const host = request.headers.get("host");
-    if (!host || !allowed.includes(host.toLowerCase())) {
-      return text(403, "seshi explore: this server answers only http://127.0.0.1 on its port");
-    }
-    const origin = request.headers.get("origin");
-    if (origin !== null && !allowed.some((h) => origin.toLowerCase() === `http://${h}`)) {
-      return text(403, "seshi explore: cross-origin requests are refused");
-    }
+    const refused = refuseForeignHost(request, allowed) ?? refuseCrossOrigin(request, allowed);
+    if (refused) return refused;
     if (request.method !== "GET") {
       return text(405, "seshi explore is read-only: GET only", { allow: "GET" });
     }

@@ -13,7 +13,7 @@ import {
   ReviewSetupError,
 } from "@seshi/review";
 import { EXIT } from "../cli/exit";
-import { emit, fail, takeJson, usageError } from "../cli/output";
+import { emit, fail, helpOrUsageError, takeJson } from "../cli/output";
 import type { CommandContext } from "./index";
 import { configFlags } from "./serve-settings";
 import { cwdConfigHint, SERVER_OPTIONS, serverFailure } from "./server-instance";
@@ -73,7 +73,7 @@ export async function run(ctx: CommandContext): Promise<number> {
   const { json, rest } = takeJson(ctx.argv);
   const [sub, ...args] = rest;
   if (sub !== "eval") {
-    return usageError(
+    return helpOrUsageError(
       ctx,
       json,
       sub === undefined ? "review needs a subcommand" : `unknown review command '${sub}'`,
@@ -88,7 +88,7 @@ export async function run(ctx: CommandContext): Promise<number> {
       strict: true,
     }));
   } catch (err) {
-    return usageError(ctx, json, (err as Error).message, USAGE);
+    return helpOrUsageError(ctx, json, (err as Error).message, USAGE);
   }
   try {
     cwdConfigHint(ctx, values.config);

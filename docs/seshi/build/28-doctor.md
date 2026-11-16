@@ -45,7 +45,7 @@ entries and search). Only the laptop holds all three, so the doctor runs there.
     stored record that changes holds something they redact now.
 - **`seshi doctor [--session [<id>]] [--agent <a>] [--since <duration>] [--deep] [--server
   <url>] [--json]`** (`apps/seshi/src/commands/doctor.ts`, registered in the command
-  registry, `--help` through `usageError`). `--session` resolves as `seshi capture` does
+  registry, `--help` through `helpOrUsageError`). `--session` resolves as `seshi capture` does
   (`resolveSession`: the id, `SESHI_SESSION_ID`, else the one session seen in this folder in
   the past day). Without it, every session the state file saw since `--since` (1 day), newest
   first: one line each with its worst status and the first check at that status, then

@@ -19,9 +19,14 @@ export class BadUsername extends Error {
   }
 }
 
+export interface ConfiguredUser {
+  user: string;
+  from: Extract<UserSource, "SESHI_USER" | "config">;
+}
+
 export interface ResolveUserOptions {
   env: Record<string, string | undefined>;
-  configured?: string;
+  configured?: ConfiguredUser;
   gitEmail?: () => Promise<string | undefined>;
   osUser?: () => string | undefined;
 }
@@ -64,11 +69,9 @@ export function sendableUser(user: string): boolean {
 
 /** The username to state with the org key. Throws `BadUsername` for one that cannot be sent. */
 export async function resolveUser(options: ResolveUserOptions): Promise<ResolvedUser> {
-  const fromEnv = options.env.SESHI_USER?.trim();
-  const configured = options.configured?.trim();
+  const configured = options.configured?.user.trim();
   let found: ResolvedUser | undefined;
-  if (fromEnv) found = { user: fromEnv, from: "SESHI_USER" };
-  else if (configured) found = { user: configured, from: "config" };
+  if (options.configured && configured) found = { user: configured, from: options.configured.from };
   else {
     const email = (await (options.gitEmail ?? (() => gitUserEmail(options.env)))())?.trim();
     if (email) found = { user: email, from: "git" };

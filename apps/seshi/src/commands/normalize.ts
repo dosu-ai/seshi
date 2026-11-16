@@ -2,7 +2,7 @@ import { parseArgs } from "node:util";
 import { NormalizeError } from "@seshi/formats";
 import { normalizeTranscript } from "@seshi/pipeline";
 import { EXIT } from "../cli/exit";
-import { fail, takeJson, usageError } from "../cli/output";
+import { fail, helpOrUsageError, takeJson } from "../cli/output";
 import { buildFormats } from "../integrations";
 import type { CommandContext } from "./index";
 
@@ -20,14 +20,15 @@ export async function run(ctx: CommandContext): Promise<number> {
       allowPositionals: true,
     }));
   } catch (err) {
-    return usageError(ctx, json, (err as Error).message, USAGE);
+    return helpOrUsageError(ctx, json, (err as Error).message, USAGE);
   }
-  if (positionals.length > 1) return usageError(ctx, json, "one file at a time", USAGE);
+  if (positionals.length > 1) return helpOrUsageError(ctx, json, "one file at a time", USAGE);
   const path = positionals[0] ?? "-";
 
   let transcript: string;
   if (path === "-") {
-    if (!ctx.stdin) return usageError(ctx, json, "no standard input here; name a file", USAGE);
+    if (!ctx.stdin)
+      return helpOrUsageError(ctx, json, "no standard input here; name a file", USAGE);
     transcript = await ctx.stdin();
   } else {
     const file = Bun.file(path);
@@ -49,7 +50,7 @@ export async function run(ctx: CommandContext): Promise<number> {
     );
   }
   if (!formats.has(agent)) {
-    return usageError(
+    return helpOrUsageError(
       ctx,
       json,
       `no normalizer for '${agent}' (one of ${formats.sources.join(", ")})`,

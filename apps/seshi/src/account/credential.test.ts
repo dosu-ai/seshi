@@ -135,14 +135,20 @@ describe("the credential for a purpose", () => {
   it("is the org key with the username resolved now, or a pasted token", async () => {
     await logins.save({ server: SERVER, mode: "org_key", signed_in_at: at(0) }, { org_key: "k" });
     const key = await credentialFor(
-      options({ env: { SESHI_USER: "bob@acme.com" }, configuredUser: "alice" }),
+      options({ configuredUser: { user: "bob@acme.com", from: "SESHI_USER" } }),
       SERVER,
       "upload",
     );
     expect(key).toMatchObject({ token: "k", user: "bob@acme.com" });
-    expect((await credentialFor(options({ configuredUser: "alice" }), SERVER, "read")).user).toBe(
-      "alice",
-    );
+    expect(
+      (
+        await credentialFor(
+          options({ configuredUser: { user: "alice", from: "config" } }),
+          SERVER,
+          "read",
+        )
+      ).user,
+    ).toBe("alice");
     await logins.save({ server: SERVER, mode: "token", signed_in_at: at(0) }, { token: "t" });
     expect(await credentialFor(options(), SERVER, "delete")).toMatchObject({ token: "t" });
   });

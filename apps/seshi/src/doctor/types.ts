@@ -9,7 +9,7 @@ export interface Failure {
   message: string;
 }
 
-export type LocalEntry = Omit<SessionState, "secret"> & {
+export type SecretlessStateEntry = Omit<SessionState, "secret"> & {
   secret?: { present: true; sha256: string };
 };
 
@@ -86,7 +86,7 @@ export interface SessionEvidence {
   session_id: string;
   key: string;
   machine: MachineEvidence;
-  local?: LocalEntry;
+  local?: SecretlessStateEntry;
   parent?: { session_id: string; known: boolean };
   decision?: Decision;
   transcript: TranscriptFacts;

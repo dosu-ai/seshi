@@ -4,7 +4,7 @@ import { openAccount, serverOf } from "../account/account";
 import { openBackend, ServerBackend } from "../backend";
 import { EXIT } from "../cli/exit";
 import { failWith } from "../cli/failures";
-import { emit, takeJson, usageError } from "../cli/output";
+import { emit, helpOrUsageError, takeJson } from "../cli/output";
 import { type Style, styleFor } from "../cli/style";
 import type { CommandContext } from "./index";
 
@@ -48,7 +48,7 @@ export async function run(ctx: CommandContext): Promise<number> {
   try {
     ({ values } = parseArgs({ args: rest, options: { server: { type: "string" } }, strict: true }));
   } catch (err) {
-    return usageError(ctx, json, (err as Error).message, USAGE);
+    return helpOrUsageError(ctx, json, (err as Error).message, USAGE);
   }
   try {
     const account = openAccount(ctx);

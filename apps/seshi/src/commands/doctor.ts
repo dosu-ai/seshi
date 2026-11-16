@@ -3,7 +3,7 @@ import { parseDuration } from "@seshi/config";
 import { type Account, openAccount } from "../account/account";
 import { type Backend, openBackend } from "../backend";
 import { EXIT, type ExitCode } from "../cli/exit";
-import { emit, fail, takeJson, usageError } from "../cli/output";
+import { emit, fail, helpOrUsageError, takeJson } from "../cli/output";
 import { printable, type Role, type Style, styleFor } from "../cli/style";
 import {
   type CheckResult,
@@ -184,10 +184,10 @@ function targetsOf(
 export async function run(ctx: CommandContext): Promise<number> {
   const { json, rest } = takeJson(ctx.argv);
   const args = parseDoctorArgs(rest);
-  if (typeof args === "string") return usageError(ctx, json, args, USAGE);
+  if (typeof args === "string") return helpOrUsageError(ctx, json, args, USAGE);
   const sinceMs = args.since === undefined ? DAY_MS : parseDuration(args.since);
   if (sinceMs === undefined) {
-    return usageError(
+    return helpOrUsageError(
       ctx,
       json,
       `--since takes a duration (2h, 1d, 7d), not '${args.since}'`,
@@ -206,7 +206,7 @@ export async function run(ctx: CommandContext): Promise<number> {
     throw err;
   }
   const targets = targetsOf(ctx, args, state, now, since);
-  if (typeof targets === "string") return usageError(ctx, json, targets, USAGE);
+  if (typeof targets === "string") return helpOrUsageError(ctx, json, targets, USAGE);
 
   let account: Account | undefined;
   let backend: Backend | undefined;

@@ -48,6 +48,15 @@ describe("openAccount: where secrets go", () => {
     expect(openAccount(ctx({ SESHI_KEYCHAIN: "false" })).secrets).toBeInstanceOf(FileSecrets);
   });
 
+  it("says whether the configured username came from SESHI_USER or the file", () => {
+    cliConfig('user = "alice"\n');
+    expect(openAccount(ctx()).user).toEqual({ user: "alice", from: "config" });
+    expect(openAccount(ctx({ SESHI_USER: "bob@acme.com" })).user).toEqual({
+      user: "bob@acme.com",
+      from: "SESHI_USER",
+    });
+  });
+
   it("warns when keychain = false hides a login whose secrets are in the keychain", () => {
     mkdirSync(join(home, "config/seshi"), { recursive: true });
     writeFileSync(

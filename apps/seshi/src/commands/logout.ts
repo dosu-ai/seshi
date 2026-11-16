@@ -3,7 +3,7 @@ import { openAccount, serverOf } from "../account/account";
 import type { LoginProfile } from "../account/logins";
 import { EXIT } from "../cli/exit";
 import { failWith } from "../cli/failures";
-import { emit, takeJson, usageError } from "../cli/output";
+import { emit, helpOrUsageError, takeJson } from "../cli/output";
 import { styleFor } from "../cli/style";
 import type { CommandContext } from "./index";
 
@@ -19,10 +19,10 @@ export async function run(ctx: CommandContext): Promise<number> {
       strict: true,
     }));
   } catch (err) {
-    return usageError(ctx, json, (err as Error).message, USAGE);
+    return helpOrUsageError(ctx, json, (err as Error).message, USAGE);
   }
   if (values.all && values.server) {
-    return usageError(ctx, json, "give --server or --all, not both", USAGE);
+    return helpOrUsageError(ctx, json, "give --server or --all, not both", USAGE);
   }
   try {
     const account = openAccount(ctx);
@@ -32,7 +32,12 @@ export async function run(ctx: CommandContext): Promise<number> {
     else {
       const server = serverOf(account, values.server);
       if (server === undefined) {
-        return usageError(ctx, json, "which server? seshi logout --server <url>, or --all", USAGE);
+        return helpOrUsageError(
+          ctx,
+          json,
+          "which server? seshi logout --server <url>, or --all",
+          USAGE,
+        );
       }
       servers = [server];
     }

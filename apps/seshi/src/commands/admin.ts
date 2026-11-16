@@ -1,7 +1,7 @@
 import { parseArgs } from "node:util";
 import { AdminInitError } from "@seshi/auth";
 import { EXIT } from "../cli/exit";
-import { emit, fail, takeJson, usageError } from "../cli/output";
+import { emit, fail, helpOrUsageError, takeJson } from "../cli/output";
 import type { CommandContext } from "./index";
 import { openServer, SERVER_OPTIONS, serverFailure } from "./server-instance";
 
@@ -30,7 +30,7 @@ async function init(ctx: CommandContext, argv: string[], json: boolean): Promise
       allowPositionals: false,
     }));
   } catch (err) {
-    return usageError(ctx, json, message(err), USAGE);
+    return helpOrUsageError(ctx, json, message(err), USAGE);
   }
   const { instance } = await openServer(ctx, values, { roles: [], probe: [] });
   let result: Awaited<ReturnType<typeof instance.auth.initAdmin>>;
@@ -73,7 +73,7 @@ export async function run(ctx: CommandContext): Promise<number> {
   const { json, rest: argv } = takeJson(ctx.argv);
   const [sub, ...rest] = argv;
   if (sub !== "init") {
-    return usageError(
+    return helpOrUsageError(
       ctx,
       json,
       sub === undefined ? "admin needs a subcommand" : `unknown admin command '${sub}'`,

@@ -21,6 +21,13 @@ export class Refused extends Error {
   }
 }
 
+export class ServeConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ServeConfigError";
+  }
+}
+
 export function classify(
   err: unknown,
 ): { exit: ExitCode; code: string; message: string } | undefined {
@@ -30,7 +37,7 @@ export function classify(
   if (err instanceof ConfigError) {
     return { exit: EXIT.config, code: "config", message: err.issues.join("\n") };
   }
-  if (err instanceof Error && (err.name === "InstanceError" || err.name === "ServeConfigError")) {
+  if (err instanceof ServeConfigError || (err instanceof Error && err.name === "InstanceError")) {
     return { exit: EXIT.config, code: "config", message: err.message };
   }
   if (err instanceof BadServerUrl) return { exit: EXIT.usage, code: "usage", message: err.message };

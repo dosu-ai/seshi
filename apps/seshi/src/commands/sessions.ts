@@ -14,7 +14,7 @@ import { type Account, openAccount } from "../account/account";
 import { type Backend, openBackend } from "../backend";
 import { EXIT } from "../cli/exit";
 import { failWith, Refused } from "../cli/failures";
-import { emit, fail, takeJson, usageError } from "../cli/output";
+import { emit, fail, helpOrUsageError, takeJson } from "../cli/output";
 import { printable, type Style, styleFor } from "../cli/style";
 import type { CommandContext } from "./index";
 
@@ -337,10 +337,7 @@ async function exportTrace(
     return EXIT.ok;
   }
   let path = values.output;
-  let isDir = path.endsWith("/");
-  try {
-    isDir ||= statSync(path).isDirectory();
-  } catch {}
+  const isDir = path.endsWith("/") || tryIsDirectory(path);
   if (isDir) {
     const name =
       `${ref.agent}-${ref.sessionId}-${(hash ?? "").slice(0, 12)}.${format}.json`.replace(
@@ -355,6 +352,14 @@ async function exportTrace(
     `Wrote ${path} (${format}, ${bytes} bytes).`,
   ]);
   return EXIT.ok;
+}
+
+function tryIsDirectory(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 async function confirm(ctx: CommandContext, question: string): Promise<boolean> {
@@ -430,7 +435,7 @@ export async function run(ctx: CommandContext): Promise<number> {
   const { json, rest } = takeJson(ctx.argv);
   const [sub, ...args] = rest;
   if (!sub || !(SUBCOMMANDS as readonly string[]).includes(sub)) {
-    return usageError(
+    return helpOrUsageError(
       ctx,
       json,
       sub === undefined ? "sessions needs a subcommand" : `unknown sessions command '${sub}'`,
@@ -447,7 +452,7 @@ export async function run(ctx: CommandContext): Promise<number> {
       allowPositionals: true,
     }));
   } catch (err) {
-    return usageError(ctx, json, (err as Error).message, USAGE);
+    return helpOrUsageError(ctx, json, (err as Error).message, USAGE);
   }
   let account: Account | undefined;
   let backend: Backend | undefined;
@@ -497,7 +502,7 @@ export async function run(ctx: CommandContext): Promise<number> {
         );
     }
   } catch (err) {
-    if (err instanceof UsageError) return usageError(ctx, json, err.message, USAGE);
+    if (err instanceof UsageError) return helpOrUsageError(ctx, json, err.message, USAGE);
     return failWith(ctx, json, err);
   } finally {
     await backend?.close();

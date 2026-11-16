@@ -113,7 +113,7 @@ command. The Docker image is built from the compiled binary.
   - `cli/exit.ts` holds the stable exit codes: 0 ok, 1 failure, 2 usage, 3 config,
     4 notFound, 5 auth, 6 conflict, 7 unavailable, 8 attention, 9 notImplemented.
   - `cli/output.ts` holds the `--json` conventions (`takeJson`, `emit`, `fail`,
-    `usageError`). `cli/stub.ts` holds `notImplemented`.
+    `helpOrUsageError`). `cli/stub.ts` holds `notImplemented`.
   - The registry lists every F8.1 group, each command in its own file, plus `healthcheck`
     for the image.
   - Built here: `serve`, `config`, `admin`, `workers status`, `sync run|status|failed|dropped`
@@ -124,7 +124,7 @@ command. The Docker image is built from the compiled binary.
     (07).
   - `commands/server-instance.ts` (`openServer`, `serverFailure`) is what every command that
     needs the server config uses. Read-only commands (`workers status`, `sync status|failed|
-    dropped`, `reprocess --dry-run`) pass `initialize: false`: `buildInstance` then refuses a
+    dropped`, `reprocess --dry-run`) pass `claimUnmarkedBucket: false`: `buildInstance` then refuses a
     bucket with no layout marker (exit 3) instead of writing one, so a mistyped `store.url` is
     not claimed as a new deployment by a status check.
   - `sync failed|dropped` also read a source that is no longer in `[[sources]]` but still has
@@ -260,7 +260,7 @@ command. The Docker image is built from the compiled binary.
 
 A review of this branch added: the transient-failure guard on checkpoints and the end-of-run
 guard (sources); job retries with backoff (X4.8); the build's `no-autoload` flags (security);
-`healthcheck` reading a mounted `seshi.toml`; `initialize: false` for read-only commands; `sync
+`healthcheck` reading a mounted `seshi.toml`; `claimUnmarkedBucket: false` for read-only commands; `sync
 failed|dropped` for unconfigured sources with records; serve's message for a taken address and
 its graceful stop; `admin init` closing its instance.
 

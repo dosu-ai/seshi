@@ -51,7 +51,7 @@ describe("findServerConfig", () => {
     expect(
       findServerConfig({ env: {}, cwd: "/w", exists: both, systemPath: "/etc/s.toml" }),
     ).toEqual({ path: "/etc/s.toml", explicit: false, skipped: local });
-    expect(findServerConfig({ env: {}, cwd: "/w", exists: here, cwdFile: true })).toEqual({
+    expect(findServerConfig({ env: {}, cwd: "/w", exists: here, trustCwdConfig: true })).toEqual({
       path: local,
       explicit: false,
     });

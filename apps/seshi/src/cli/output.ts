@@ -33,7 +33,7 @@ export function asksForHelp(argv: readonly string[]): boolean {
   return (end === -1 ? argv : argv.slice(0, end)).some((a) => a === "--help" || a === "-h");
 }
 
-export function usageError(
+export function helpOrUsageError(
   ctx: CommandContext,
   json: boolean,
   message: string,

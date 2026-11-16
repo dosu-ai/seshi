@@ -11,9 +11,15 @@ describe("the org key's username (X5.7)", () => {
     const git = async () => "dev@acme.com";
     const os = () => "dev";
     expect(
-      await resolveUser({ env: { SESHI_USER: "env@acme.com" }, configured: "cfg", gitEmail: git }),
+      await resolveUser({
+        env: {},
+        configured: { user: "env@acme.com", from: "SESHI_USER" },
+        gitEmail: git,
+      }),
     ).toEqual({ user: "env@acme.com", from: "SESHI_USER" });
-    expect(await resolveUser({ env: {}, configured: "cfg", gitEmail: git })).toEqual({
+    expect(
+      await resolveUser({ env: {}, configured: { user: "cfg", from: "config" }, gitEmail: git }),
+    ).toEqual({
       user: "cfg",
       from: "config",
     });
@@ -21,7 +27,14 @@ describe("the org key's username (X5.7)", () => {
       user: "dev@acme.com",
       from: "git",
     });
-    expect(await resolveUser({ env: { SESHI_USER: " " }, gitEmail: noGit, osUser: os })).toEqual({
+    expect(
+      await resolveUser({
+        env: {},
+        configured: { user: " ", from: "SESHI_USER" },
+        gitEmail: noGit,
+        osUser: os,
+      }),
+    ).toEqual({
       user: "dev",
       from: "os",
     });
@@ -48,7 +61,9 @@ describe("the org key's username (X5.7)", () => {
     expect(sendableUser("alice@acme.com")).toBe(true);
     expect(sendableUser("Zoë")).toBe(false);
     expect(sendableUser("a\nb")).toBe(false);
-    await expect(resolveUser({ env: { SESHI_USER: "Zoë" } })).rejects.toBeInstanceOf(BadUsername);
+    await expect(
+      resolveUser({ env: {}, configured: { user: "Zoë", from: "SESHI_USER" } }),
+    ).rejects.toBeInstanceOf(BadUsername);
     await expect(resolveUser({ env: {}, gitEmail: noGit, osUser: () => "名前" })).rejects.toThrow(
       /printable ASCII/,
     );

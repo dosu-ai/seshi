@@ -1,7 +1,7 @@
 import { exchangeIdToken, ServerError } from "@seshi/client";
 import type { LoginProfile, Logins } from "./logins";
 import { peekClaims, refreshIdToken, SignInError } from "./oidc";
-import { resolveUser } from "./user";
+import { type ConfiguredUser, resolveUser } from "./user";
 
 type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -34,7 +34,7 @@ export interface Credential {
 export interface CredentialOptions {
   logins: Logins;
   env: Record<string, string | undefined>;
-  configuredUser?: string;
+  configuredUser?: ConfiguredUser;
   fetch?: Fetch;
   now?: () => Date;
   gitEmail?: () => Promise<string | undefined>;

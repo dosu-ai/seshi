@@ -1,13 +1,15 @@
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { type CliConfig, cliConfigPath, loadCliConfig } from "@seshi/config";
+import { type CliConfig, cliConfigPath, type Loaded, loadCliConfig } from "@seshi/config";
 import type { CommandContext } from "../commands/index";
 import { type Credential, credentialFor, type Purpose } from "./credential";
 import { Logins, normalizeServer, SECRETS_FILE } from "./logins";
 import { FallbackSecrets, FileSecrets, keychainSecrets, type SecretBackend } from "./secrets";
+import type { ConfiguredUser } from "./user";
 
 export interface Account {
   cli: CliConfig;
+  user?: ConfiguredUser;
   /** The CLI config file (it may not exist yet). */
   cliFile: string;
   /** The folder the CLI config, logins and the credentials file are in. */
@@ -41,7 +43,24 @@ export function openAccount(ctx: CommandContext): Account {
     (loaded.config.keychain ? defaultSecrets(dir) : new FileSecrets(join(dir, SECRETS_FILE)));
   const logins = new Logins(dir, secrets);
   if (!loaded.config.keychain && !ctx.secrets) warnKeychainLogins(ctx, logins);
-  return { cli: loaded.config, cliFile, dir, home, env, logins, secrets };
+  const user = configuredUser(loaded);
+  return {
+    cli: loaded.config,
+    ...(user ? { user } : {}),
+    cliFile,
+    dir,
+    home,
+    env,
+    logins,
+    secrets,
+  };
+}
+
+function configuredUser(loaded: Loaded<CliConfig>): ConfiguredUser | undefined {
+  const user = loaded.config.user;
+  if (!user) return undefined;
+  const from = loaded.origins.get(["user"]).source === "env" ? "SESHI_USER" : "config";
+  return { user, from };
 }
 
 function warnKeychainLogins(ctx: CommandContext, logins: Logins): void {
@@ -76,7 +95,7 @@ export function accountCredential(
     {
       logins: account.logins,
       env: account.env,
-      ...(account.cli.user ? { configuredUser: account.cli.user } : {}),
+      ...(account.user ? { configuredUser: account.user } : {}),
     },
     server,
     purpose,

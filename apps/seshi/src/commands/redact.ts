@@ -18,7 +18,7 @@ import {
 } from "@seshi/redact";
 import { isOwner, type SweptObject, sweepTraces } from "@seshi/store";
 import { EXIT, type ExitCode } from "../cli/exit";
-import { emit, fail, takeJson, usageError } from "../cli/output";
+import { emit, fail, helpOrUsageError, takeJson } from "../cli/output";
 import { printable, Style, styleFor } from "../cli/style";
 import { buildFormats } from "../integrations";
 import type { CommandContext } from "./index";
@@ -43,10 +43,10 @@ export async function run(ctx: CommandContext): Promise<number> {
     if (sub === "backfill") return await backfill(ctx, json, args);
     if (sub === "sweep") return await sweep(ctx, json, args);
   } catch (err) {
-    if (err instanceof UsageError) return usageError(ctx, json, err.message, USAGE);
+    if (err instanceof UsageError) return helpOrUsageError(ctx, json, err.message, USAGE);
     throw err;
   }
-  return usageError(
+  return helpOrUsageError(
     ctx,
     json,
     sub === undefined ? "redact needs test, backfill or sweep" : `unknown redact command '${sub}'`,
@@ -398,7 +398,7 @@ async function backfill(ctx: CommandContext, json: boolean, args: string[]): Pro
 
   let opened: Awaited<ReturnType<typeof openServer>>;
   try {
-    opened = await openServer(ctx, values, { roles: [], probe: [], initialize: false });
+    opened = await openServer(ctx, values, { roles: [], probe: [], claimUnmarkedBucket: false });
   } catch (err) {
     const code = serverFailure(ctx, json, err);
     if (code === undefined) throw err;
@@ -484,7 +484,7 @@ async function sweep(ctx: CommandContext, json: boolean, args: string[]): Promis
   const dryRun = values["dry-run"] === true;
   let opened: Awaited<ReturnType<typeof openServer>>;
   try {
-    opened = await openServer(ctx, values, { roles: [], probe: [], initialize: false });
+    opened = await openServer(ctx, values, { roles: [], probe: [], claimUnmarkedBucket: false });
   } catch (err) {
     const code = serverFailure(ctx, json, err);
     if (code === undefined) throw err;

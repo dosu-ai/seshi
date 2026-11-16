@@ -141,7 +141,7 @@ export class LocalBackend implements Backend {
     return this.instance.storage.url;
   }
 
-  private db(owner?: string): StoreSessionDB {
+  private sessionsAsLocalOwner(owner?: string): StoreSessionDB {
     if (owner === undefined || owner === this.owner) return this.instance.localSessions(this.owner);
     return this.instance.sessions({
       owner,
@@ -174,19 +174,24 @@ export class LocalBackend implements Backend {
     return { owner: this.owner, storage: this.instance.storage, kind: "local", role: "admin" };
   }
   listSessions(options: { owner?: string; after?: string; limit?: number }) {
-    return this.db(options.owner).listSessions({
+    return this.sessionsAsLocalOwner(options.owner).listSessions({
       ...(options.after ? { after: options.after } : {}),
       ...(options.limit ? { limit: options.limit } : {}),
     });
   }
   getSession(agent: string, sessionId: string, options: OwnerOption = {}) {
-    return this.db(options.owner).getSession(agent, sessionId);
+    return this.sessionsAsLocalOwner(options.owner).getSession(agent, sessionId);
   }
   getTrace(agent: string, sessionId: string, options: TraceOptions = {}) {
-    return this.db(options.owner).getTrace(agent, sessionId, options.hash, options.format);
+    return this.sessionsAsLocalOwner(options.owner).getTrace(
+      agent,
+      sessionId,
+      options.hash,
+      options.format,
+    );
   }
   tombstone(agent: string, sessionId: string, options: OwnerOption = {}) {
-    return this.db(options.owner).tombstone(agent, sessionId);
+    return this.sessionsAsLocalOwner(options.owner).tombstone(agent, sessionId);
   }
   setVisibility(
     agent: string,
@@ -194,7 +199,7 @@ export class LocalBackend implements Backend {
     visibility: Visibility,
     options: OwnerOption = {},
   ) {
-    return this.db(options.owner).setVisibility(agent, sessionId, visibility);
+    return this.sessionsAsLocalOwner(options.owner).setVisibility(agent, sessionId, visibility);
   }
   async reviews(agent: string, sessionId: string, options: OwnerOption = {}) {
     if (!(await this.getSession(agent, sessionId, options))) return null;

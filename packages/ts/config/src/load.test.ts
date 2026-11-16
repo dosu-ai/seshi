@@ -44,7 +44,7 @@ function server(
   return loadServerConfig({
     cwd: "/work",
     systemPath: "/etc/seshi/seshi.toml",
-    cwdFile: true,
+    trustCwdConfig: true,
     fs: memFs(files),
     ...options,
   });
@@ -135,8 +135,10 @@ describe("which file (F1.1)", () => {
     const { "/work/seshi.toml": _, ...noLocal } = files;
     expect(server(noLocal).file).toBe("/etc/seshi/seshi.toml");
     // Any other command never reads ./seshi.toml unasked: the folder may be someone's checkout.
-    expect(server(files, { cwdFile: false }).file).toBe("/etc/seshi/seshi.toml");
-    expect(server(at("/work/seshi.toml"), { cwdFile: false, env: STORE }).file).toBeUndefined();
+    expect(server(files, { trustCwdConfig: false }).file).toBe("/etc/seshi/seshi.toml");
+    expect(
+      server(at("/work/seshi.toml"), { trustCwdConfig: false, env: STORE }).file,
+    ).toBeUndefined();
   });
 
   it("resolves a relative --config against the working directory", () => {

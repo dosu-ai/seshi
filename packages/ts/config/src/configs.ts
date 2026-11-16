@@ -7,7 +7,7 @@ export interface ServerLoadOptions extends Omit<LoadOptions, "file" | "foreign" 
   configFlag?: string;
   cwd?: string;
   systemPath?: string;
-  cwdFile?: boolean;
+  trustCwdConfig?: boolean;
 }
 
 export function loadServerConfig(options: ServerLoadOptions = {}): Loaded<ServerConfig> {
@@ -19,7 +19,7 @@ export function loadServerConfig(options: ServerLoadOptions = {}): Loaded<Server
     cwd: options.cwd ?? process.cwd(),
     exists: (path) => fs.mode(path) !== undefined,
     systemPath: options.systemPath,
-    cwdFile: options.cwdFile,
+    trustCwdConfig: options.trustCwdConfig,
   });
   return loadConfig(serverConfigSchema, {
     ...options,

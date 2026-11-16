@@ -53,12 +53,18 @@ export async function detectTheme(inputs: ThemeInputs): Promise<Theme> {
   const fromEnv = themeFromColorFgBg(inputs.env.COLORFGBG);
   if (fromEnv) return fromEnv;
   if (inputs.query) {
-    try {
-      const answered = await inputs.query();
-      if (answered) return answered;
-    } catch {}
+    const answered = await tryQueryTheme(inputs.query);
+    if (answered) return answered;
   }
   return "dark";
+}
+
+async function tryQueryTheme(query: () => Promise<Theme | undefined>): Promise<Theme | undefined> {
+  try {
+    return await query();
+  } catch {
+    return undefined;
+  }
 }
 
 type Ink = { token: BrandColour } | { sgr: number };

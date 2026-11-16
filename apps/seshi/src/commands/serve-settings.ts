@@ -1,12 +1,6 @@
 import { type AuthSettings, AuthSettingsError, authSettings } from "@seshi/auth";
 import { type FlagValue, parseListen, type ServerConfig } from "@seshi/config";
-
-export class ServeConfigError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "ServeConfigError";
-  }
-}
+import { ServeConfigError } from "../cli/failures";
 
 function fail(message: string): never {
   throw new ServeConfigError(message);

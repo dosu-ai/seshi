@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   appendSpool,
+  type CapturePaths,
   type CaptureState,
   captureRules,
   decide,
@@ -47,7 +48,7 @@ import {
 } from "../capture-service";
 import { EXIT, type ExitCode } from "../cli/exit";
 import { failWith } from "../cli/failures";
-import { emit, fail, takeJson, usageError } from "../cli/output";
+import { emit, fail, helpOrUsageError, takeJson } from "../cli/output";
 import { hookCommand, inNpxCache, isCompiled } from "../cli/spawn";
 import { printable, type Style, styleFor } from "../cli/style";
 import { hostOf, pathsOf, startUploader } from "./capture-host";
@@ -186,7 +187,7 @@ export async function run(ctx: CommandContext): Promise<number> {
   const { json, rest } = takeJson(ctx.argv);
   const [sub, ...argv] = rest;
   const parsed = parseCaptureArgs(argv);
-  if (typeof parsed === "string") return usageError(ctx, json, parsed, USAGE);
+  if (typeof parsed === "string") return helpOrUsageError(ctx, json, parsed, USAGE);
   try {
     switch (sub) {
       case "install":
@@ -205,7 +206,7 @@ export async function run(ctx: CommandContext): Promise<number> {
       case "resend":
         return await resend(ctx, json, parsed);
       default:
-        return usageError(
+        return helpOrUsageError(
           ctx,
           json,
           sub === undefined ? "capture needs a subcommand" : `unknown subcommand '${sub}'`,
@@ -226,7 +227,7 @@ async function namedAgents(
   const agents = await allCaptureAgents();
   const unknown = names.filter((n) => !agents.some((a) => a.name === n));
   if (unknown.length > 0) {
-    return usageError(
+    return helpOrUsageError(
       ctx,
       json,
       `seshi does not capture ${unknown.map((n) => `'${n}'`).join(", ")} (one of ${agents.map((a) => a.name).join(", ")})`,
@@ -411,7 +412,7 @@ async function status(ctx: CommandContext, json: boolean, args: Args): Promise<n
     | undefined;
   if (args.session !== undefined) {
     const which = resolveSession(args, state, ctx.env, cwd, now);
-    if (typeof which === "string") return usageError(ctx, json, which, USAGE);
+    if (typeof which === "string") return helpOrUsageError(ctx, json, which, USAGE);
     const known = state.sessions[sessionKey(which.agent, which.id)];
     session = {
       ...which,
@@ -525,10 +526,15 @@ async function status(ctx: CommandContext, json: boolean, args: Args): Promise<n
 
 async function pause(ctx: CommandContext, json: boolean, args: Args): Promise<number> {
   const [length, ...extra] = args.positionals;
-  if (extra.length > 0) return usageError(ctx, json, `unexpected ${extra.join(" ")}`, USAGE);
+  if (extra.length > 0) return helpOrUsageError(ctx, json, `unexpected ${extra.join(" ")}`, USAGE);
   const ms = length === undefined ? undefined : parseDuration(length);
   if (length !== undefined && ms === undefined) {
-    return usageError(ctx, json, `pause takes a duration (30m, 2h, 1d), not '${length}'`, USAGE);
+    return helpOrUsageError(
+      ctx,
+      json,
+      `pause takes a duration (30m, 2h, 1d), not '${length}'`,
+      USAGE,
+    );
   }
   const { paths } = pathsOf(ctx);
   const now = new Date();
@@ -539,9 +545,7 @@ async function pause(ctx: CommandContext, json: boolean, args: Args): Promise<nu
   );
   let stopped = 0;
   await updateState(paths, (state) => {
-    const since = isPaused(state, now) && state.paused ? state.paused.at : at;
-    if (since === at) endPause(state, now);
-    state.paused = { at: since, ...(until ? { until } : {}) };
+    const since = extendPause(state, now, until);
     for (const entry of spooled) {
       const key = sessionKey(entry.agent, entry.session_id);
       state.sessions[key] ??= {
@@ -553,17 +557,7 @@ async function pause(ctx: CommandContext, json: boolean, args: Args): Promise<nu
         ...(entry.parent_session_id ? { parent_session_id: entry.parent_session_id } : {}),
       };
     }
-    for (const session of Object.values(state.sessions)) {
-      if (session.frozen || session.toggle === "off") continue;
-      if (
-        session.toggle === "on" &&
-        session.toggled_at !== undefined &&
-        Date.parse(session.toggled_at) >= Date.parse(since)
-      ) {
-        continue;
-      }
-      freeze(session, at, uploadedOffset(session));
-    }
+    freezeRunningSessions(state, since, at);
     stopped = stoppedCount(state);
   });
   const style = await styleFor(ctx, { json });
@@ -573,6 +567,28 @@ async function pause(ctx: CommandContext, json: boolean, args: Args): Promise<nu
     "  To upload a stopped session in full: seshi capture on --session <id>",
   ]);
   return EXIT.ok;
+}
+
+function extendPause(state: CaptureState, now: Date, until: string | undefined): string {
+  const at = now.toISOString();
+  const since = isPaused(state, now) && state.paused ? state.paused.at : at;
+  if (since === at) endPause(state, now);
+  state.paused = { at: since, ...(until ? { until } : {}) };
+  return since;
+}
+
+function freezeRunningSessions(state: CaptureState, since: string, at: string): void {
+  for (const session of Object.values(state.sessions)) {
+    if (session.frozen || session.toggle === "off") continue;
+    if (
+      session.toggle === "on" &&
+      session.toggled_at !== undefined &&
+      Date.parse(session.toggled_at) >= Date.parse(since)
+    ) {
+      continue;
+    }
+    freeze(session, at, uploadedOffset(session));
+  }
 }
 
 function stoppedCount(state: CaptureState): number {
@@ -615,10 +631,10 @@ async function toggle(
   const on = which === "on";
   const style = await styleFor(ctx, { json });
   if (args.positionals.length > 0) {
-    return usageError(ctx, json, `unexpected ${args.positionals.join(" ")}`, USAGE);
+    return helpOrUsageError(ctx, json, `unexpected ${args.positionals.join(" ")}`, USAGE);
   }
   if (args.session !== undefined && args.path !== undefined) {
-    return usageError(ctx, json, "--session and --path cannot go together", USAGE);
+    return helpOrUsageError(ctx, json, "--session and --path cannot go together", USAGE);
   }
   if (args.session !== undefined || args.agent !== undefined) {
     return toggleSession(ctx, json, args, which, style);
@@ -669,14 +685,13 @@ async function toggleSession(
     process.cwd(),
     now,
   );
-  if (typeof which_ === "string") return usageError(ctx, json, which_, USAGE);
+  if (typeof which_ === "string") return helpOrUsageError(ctx, json, which_, USAGE);
   const { agent, id } = which_;
   const key = sessionKey(agent, id);
   let retracting = false;
   let fresh = false;
   let unfrozen = false;
-  const known = readState(paths).sessions[key];
-  const located = known?.path ? undefined : (await captureAgent(agent))?.locate?.(id, hostOf(ctx));
+  const located = await locateUnnamedTranscript(ctx, paths, agent, id);
   await updateState(paths, (state) => {
     const session: SessionState = state.sessions[key] ?? {
       agent,
@@ -688,23 +703,15 @@ async function toggleSession(
     session.toggle = which;
     session.toggled_at = now.toISOString();
     state.sessions[key] = session;
-    for (const s of [session, ...subsessionKeys(state, agent, id).map((k) => state.sessions[k])]) {
-      if (!s) continue;
+    for (const s of cascadeToSubagents(state, session, agent, id)) {
       if (which === "off") {
         if (s.sent) {
           s.retract = "pending";
           retracting = true;
         }
       } else {
-        if (s.retract === "failed") {
-          delete s.retract;
-          delete s.retract_error;
-        }
-        if (s.retract === "pending" || ((s.generation ?? 0) > 0 && !s.stored)) fresh = true;
-        if (s.frozen) {
-          delete s.frozen;
-          unfrozen = true;
-        }
+        if (restartAfterRetraction(s)) fresh = true;
+        if (unfreeze(s)) unfrozen = true;
       }
     }
   });
@@ -739,6 +746,39 @@ async function toggleSession(
   return EXIT.ok;
 }
 
+async function locateUnnamedTranscript(
+  ctx: CommandContext,
+  paths: CapturePaths,
+  agent: string,
+  id: string,
+): Promise<string | undefined> {
+  const known = readState(paths).sessions[sessionKey(agent, id)];
+  return known?.path ? undefined : (await captureAgent(agent))?.locate?.(id, hostOf(ctx));
+}
+
+function cascadeToSubagents(
+  state: CaptureState,
+  session: SessionState,
+  agent: string,
+  id: string,
+): SessionState[] {
+  return [session, ...subsessionKeys(state, agent, id).flatMap((k) => state.sessions[k] ?? [])];
+}
+
+function restartAfterRetraction(s: SessionState): boolean {
+  if (s.retract === "failed") {
+    delete s.retract;
+    delete s.retract_error;
+  }
+  return s.retract === "pending" || ((s.generation ?? 0) > 0 && !s.stored);
+}
+
+function unfreeze(s: SessionState): boolean {
+  if (!s.frozen) return false;
+  delete s.frozen;
+  return true;
+}
+
 function notResendable(state: CaptureState, s: SessionState): string | undefined {
   if (s.retract === "pending" || sessionToggle(state, s.agent, s) === "off") return "turned off";
   if (!s.sent) return "never uploaded from here";
@@ -748,16 +788,16 @@ function notResendable(state: CaptureState, s: SessionState): string | undefined
 
 async function resend(ctx: CommandContext, json: boolean, args: Args): Promise<number> {
   if (args.positionals.length > 0) {
-    return usageError(ctx, json, `unexpected ${args.positionals.join(" ")}`, USAGE);
+    return helpOrUsageError(ctx, json, `unexpected ${args.positionals.join(" ")}`, USAGE);
   }
   if (args.path !== undefined || args.service || args.command !== undefined) {
-    return usageError(ctx, json, "resend takes --all or --session [<id>]", USAGE);
+    return helpOrUsageError(ctx, json, "resend takes --all or --session [<id>]", USAGE);
   }
   if (args.all && args.session !== undefined) {
-    return usageError(ctx, json, "--all and --session cannot go together", USAGE);
+    return helpOrUsageError(ctx, json, "--all and --session cannot go together", USAGE);
   }
   if (!args.all && args.session === undefined) {
-    return usageError(ctx, json, "resend needs --all or --session [<id>]", USAGE);
+    return helpOrUsageError(ctx, json, "resend needs --all or --session [<id>]", USAGE);
   }
   const { paths } = pathsOf(ctx);
   const now = new Date();
@@ -769,7 +809,7 @@ async function resend(ctx: CommandContext, json: boolean, args: Args): Promise<n
       .sort();
   } else {
     const which = resolveSession(args, state, ctx.env, process.cwd(), now);
-    if (typeof which === "string") return usageError(ctx, json, which, USAGE);
+    if (typeof which === "string") return helpOrUsageError(ctx, json, which, USAGE);
     const key = sessionKey(which.agent, which.id);
     if (!state.sessions[key]) {
       return fail(

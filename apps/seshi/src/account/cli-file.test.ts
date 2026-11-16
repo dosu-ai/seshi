@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ConfigError } from "@seshi/config";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { setTopLevelKey, writeCliKey } from "./cli-file";
+import { setTopLevelKey, writeCliKeyIfValid } from "./cli-file";
 
 let dir: string;
 beforeEach(() => {
@@ -32,13 +32,13 @@ describe("setting a key in the CLI config", () => {
 
   it("writes a file the CLI can load, and nothing when it would not load", () => {
     const path = join(dir, "seshi", "config.toml");
-    expect(writeCliKey(path, "server", "https://seshi.acme.com", {})).toMatchObject({
+    expect(writeCliKeyIfValid(path, "server", "https://seshi.acme.com", {})).toMatchObject({
       server: "https://seshi.acme.com",
     });
     expect(readFileSync(path, "utf8")).toBe('server = "https://seshi.acme.com"\n');
     const local = join(dir, "local.toml");
     writeFileSync(local, '[local]\nconfig = "~/seshi.toml"\n');
-    expect(() => writeCliKey(local, "server", "https://a", {})).toThrow(ConfigError);
+    expect(() => writeCliKeyIfValid(local, "server", "https://a", {})).toThrow(ConfigError);
     expect(readFileSync(local, "utf8")).toBe('[local]\nconfig = "~/seshi.toml"\n');
   });
 });

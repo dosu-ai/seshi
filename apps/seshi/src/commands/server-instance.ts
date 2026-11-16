@@ -14,10 +14,11 @@ import {
   type Role,
 } from "@seshi/instance";
 import { EXIT } from "../cli/exit";
+import { ServeConfigError } from "../cli/failures";
 import { fail } from "../cli/output";
 import { buildFormats } from "../integrations";
 import type { CommandContext } from "./index";
-import { configFlags, ServeConfigError, type ServeSettings, serveSettings } from "./serve-settings";
+import { configFlags, type ServeSettings, serveSettings } from "./serve-settings";
 
 export const SERVER_OPTIONS = {
   config: { type: "string" },
@@ -35,8 +36,8 @@ export interface OpenServerOptions {
   roles?: readonly Role[];
   probe?: readonly string[];
   log?: Logger;
-  initialize?: boolean;
-  cwdFile?: boolean;
+  claimUnmarkedBucket?: boolean;
+  trustCwdConfig?: boolean;
 }
 
 export function cwdConfigHint(
@@ -62,12 +63,12 @@ export async function openServer(
   args: ServerArgs,
   options: OpenServerOptions = {},
 ): Promise<OpenedServer> {
-  if (options.cwdFile !== true) cwdConfigHint(ctx, args.config);
+  if (options.trustCwdConfig !== true) cwdConfigHint(ctx, args.config);
   const loaded = loadServerConfig({
     configFlag: args.config,
     env: ctx.env,
     flags: configFlags(args),
-    ...(options.cwdFile === true ? { cwdFile: true } : {}),
+    ...(options.trustCwdConfig === true ? { trustCwdConfig: true } : {}),
   });
   for (const warning of loaded.warnings) ctx.stderr(`seshi: warning: ${warning}`);
   const settings = serveSettings(loaded.config);
@@ -79,7 +80,7 @@ export async function openServer(
     ...(options.roles ? { roles: options.roles } : {}),
     ...(options.probe ? { probe: options.probe } : {}),
     ...(options.log ? { log: options.log } : {}),
-    ...(options.initialize === false ? { initialize: false } : {}),
+    ...(options.claimUnmarkedBucket === false ? { initialize: false } : {}),
   });
   return { instance, loaded, settings };
 }

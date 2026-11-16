@@ -99,13 +99,15 @@ export function residueOf(rules: RuleSet, records: readonly NormalizedRecord[]):
   return hits;
 }
 
-export function ruleRedaction(rules: RuleSet, origin: string, preRedacts: boolean): Redaction {
+export type RedactionPoint = "pre-redact" | "redact-on-write";
+
+export function ruleRedaction(rules: RuleSet, origin: string, point: RedactionPoint): Redaction {
   const redactor = ruleRedactor(rules);
   return {
     rule_set: rules.hash,
     origin,
     transcript: (text, encoding) =>
-      preRedacts ? redactTranscript(rules, text, encoding).text : text,
+      point === "pre-redact" ? redactTranscript(rules, text, encoding).text : text,
     records: (records) => redactor.redact(records).records,
     residue: (records) => residueOf(rules, records),
   };
@@ -119,10 +121,14 @@ function uploaderRules(paths: CapturePaths, server: string | undefined): Redacti
     };
     if (cached.document && (server === undefined || cached.server === server)) {
       const { rules } = ruleSetFromDocument(cached.document);
-      return ruleRedaction(rules, `the rules fetched from ${cached.server ?? "the server"}`, true);
+      return ruleRedaction(
+        rules,
+        `the rules fetched from ${cached.server ?? "the server"}`,
+        "pre-redact",
+      );
     }
   } catch {}
-  return ruleRedaction(redactionRules(), "the built-in pack", true);
+  return ruleRedaction(redactionRules(), "the built-in pack", "pre-redact");
 }
 
 export async function realDeps(ctx: CommandContext, options: RealDepsOptions): Promise<DoctorDeps> {
@@ -140,7 +146,7 @@ export async function realDeps(ctx: CommandContext, options: RealDepsOptions): P
   const backend = options.backend;
   const redaction =
     backend instanceof LocalBackend
-      ? ruleRedaction(backend.instance.redaction, "the local bucket's rules", false)
+      ? ruleRedaction(backend.instance.redaction, "the local bucket's rules", "redact-on-write")
       : uploaderRules(paths, backend?.where);
   return {
     now: () => new Date(),

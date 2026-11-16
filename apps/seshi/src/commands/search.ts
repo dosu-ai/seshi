@@ -17,7 +17,7 @@ import { normalizeServer } from "../account/logins";
 import { type Backend, LocalBackend, openBackend, ServerBackend } from "../backend";
 import { EXIT } from "../cli/exit";
 import { failWith } from "../cli/failures";
-import { emit, fail, takeJson, usageError } from "../cli/output";
+import { emit, fail, helpOrUsageError, takeJson } from "../cli/output";
 import { printable, Style, styleFor } from "../cli/style";
 import { NotConnected } from "../connect";
 import { USER_AGENT } from "../user-agent";
@@ -252,23 +252,23 @@ export async function run(ctx: CommandContext): Promise<number> {
       strict: true,
     }) as { values: Values; positionals: string[] });
   } catch (err) {
-    return usageError(ctx, json, (err as Error).message, USAGE);
+    return helpOrUsageError(ctx, json, (err as Error).message, USAGE);
   }
   const mode = values.status ? "status" : values.rebuild ? "rebuild" : "query";
   if (values.status && values.rebuild) {
-    return usageError(ctx, json, "--status and --rebuild are separate runs", USAGE);
+    return helpOrUsageError(ctx, json, "--status and --rebuild are separate runs", USAGE);
   }
   if (mode === "query" && positionals.length === 0) {
-    return usageError(ctx, json, "search needs words to look for", USAGE);
+    return helpOrUsageError(ctx, json, "search needs words to look for", USAGE);
   }
   if (mode !== "query" && positionals.length > 0) {
-    return usageError(ctx, json, `--${mode} takes no words`, USAGE);
+    return helpOrUsageError(ctx, json, `--${mode} takes no words`, USAGE);
   }
   let request: SearchRequest | undefined;
   try {
     if (mode === "query") request = requestOf(positionals.join(" "), values, new Date());
   } catch (err) {
-    if (err instanceof UsageProblem) return usageError(ctx, json, err.message, USAGE);
+    if (err instanceof UsageProblem) return helpOrUsageError(ctx, json, err.message, USAGE);
     throw err;
   }
 
@@ -283,7 +283,7 @@ export async function run(ctx: CommandContext): Promise<number> {
     const server = values.server ?? cli.server;
     if (server !== undefined && (values.server !== undefined || cli.local === undefined)) {
       if (mode !== "query") {
-        return usageError(
+        return helpOrUsageError(
           ctx,
           json,
           `--${mode} works on a local index; run it where the index is (with --config)`,
@@ -343,7 +343,7 @@ async function withServer(
       ...(values.config !== undefined ? { config: values.config } : {}),
       ...(values.set ? { set: values.set } : {}),
     },
-    { roles: [], probe: [], initialize: false },
+    { roles: [], probe: [], claimUnmarkedBucket: false },
   );
   try {
     return await inProcess(ctx, json, instance, mode, request, style);
@@ -357,13 +357,13 @@ function failure(ctx: CommandContext, json: boolean, err: unknown): number {
   if (config !== undefined) return config;
   if (err instanceof NotConnected)
     return fail(ctx, json, EXIT.config, "not_configured", err.message);
-  if (err instanceof SearchQueryError) return usageError(ctx, json, err.message, USAGE);
+  if (err instanceof SearchQueryError) return helpOrUsageError(ctx, json, err.message, USAGE);
   if (err instanceof SearchUnavailable) {
     return fail(ctx, json, EXIT.unavailable, err.code, err.message);
   }
   if (err instanceof Forbidden) return fail(ctx, json, EXIT.auth, "forbidden", err.message);
   if (err instanceof ServerError) {
-    if (err.status === 400) return usageError(ctx, json, err.message, USAGE);
+    if (err.status === 400) return helpOrUsageError(ctx, json, err.message, USAGE);
     if (err.status === 401) {
       return fail(ctx, json, EXIT.auth, err.code, `${err.message}: run seshi login`);
     }

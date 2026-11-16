@@ -38,8 +38,10 @@ describe("residueOf", () => {
 
   it("pre-redacts transcripts only where the uploader does", () => {
     const line = `${JSON.stringify({ content: `push ${TOKEN}` })}\n`;
-    expect(ruleRedaction(rules, "built-in", true).transcript(line, "jsonl")).not.toContain(TOKEN);
-    expect(ruleRedaction(rules, "local", false).transcript(line, "jsonl")).toBe(line);
+    expect(ruleRedaction(rules, "built-in", "pre-redact").transcript(line, "jsonl")).not.toContain(
+      TOKEN,
+    );
+    expect(ruleRedaction(rules, "local", "redact-on-write").transcript(line, "jsonl")).toBe(line);
   });
 });
 

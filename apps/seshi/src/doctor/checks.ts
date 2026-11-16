@@ -1,6 +1,12 @@
 import { isStub, type NormalizedRecord, prefixSha256, type SessionMetadata } from "@seshi/model";
 import type { DoctorDeps } from "./deps";
-import type { CheckResult, CheckStatus, SessionEvidence, TraceEvidence } from "./types";
+import type {
+  CheckResult,
+  CheckStatus,
+  SecretlessStateEntry,
+  SessionEvidence,
+  TraceEvidence,
+} from "./types";
 
 export const SPOOL_STUCK_MS = 10 * 60 * 1000;
 export const PENDING_STUCK_MS = 30 * 60 * 1000;
@@ -311,6 +317,14 @@ export function presenceCheck(ev: SessionEvidence): CheckResult {
     : now;
 }
 
+function heldAsStub(status: SecretlessStateEntry["last_status"]): boolean {
+  return status === "dropped" || status === "unchanged";
+}
+
+function filteredButResentAnswerLost(ev: SessionEvidence, s: SecretlessStateEntry): boolean {
+  return s.held_at_size !== undefined && (ev.transcript.size ?? 0) > s.held_at_size;
+}
+
 function presenceNow(
   ev: SessionEvidence,
   s: NonNullable<SessionEvidence["local"]>,
@@ -348,8 +362,7 @@ function presenceNow(
       const frozen = s.frozen ? `, stopped by a pause at ${bytes(s.frozen.offset)}` : "";
       return result(id, title, "ok", `stored as ${uid}: head ${short(m?.head)}${frozen}`);
     }
-    const stubbed = s.last_status === "dropped" || s.last_status === "unchanged";
-    if (stubbed) {
+    if (heldAsStub(s.last_status)) {
       if (pointer && isStub(pointer)) {
         return result(
           id,
@@ -381,8 +394,8 @@ function presenceNow(
     if (!has(m)) {
       return result(id, title, "ok", "filtered: nothing stored until the transcript grows");
     }
-    const grown = s.held_at_size !== undefined && (ev.transcript.size ?? 0) > s.held_at_size;
-    if (!grown) return lost(`the session filter kept it out, yet ${where} holds ${uid}`);
+    if (!filteredButResentAnswerLost(ev, s))
+      return lost(`the session filter kept it out, yet ${where} holds ${uid}`);
   }
   if (has(m)) {
     return result(id, title, "warn", `${where} holds ${uid} though no answer said so here`, {
@@ -456,8 +469,8 @@ export function offsetsCheck(ev: SessionEvidence): CheckResult {
       `the server's log ends at ${bytes(n.bytes)}; this machine thinks ${bytes(s.server_offset ?? 0)}`,
     );
   }
-  const waiting = replaceDropped(ev) && s.file_offset !== s.server_offset;
-  if (s.aligned !== false && s.file_offset !== s.server_offset && !waiting) {
+  const awaitingWholeReplace = replaceDropped(ev) && s.file_offset !== s.server_offset;
+  if (s.aligned !== false && s.file_offset !== s.server_offset && !awaitingWholeReplace) {
     fails.push(
       `pre-redaction kept every length, yet ${bytes(s.file_offset ?? 0)} of the transcript map to ${bytes(s.server_offset ?? 0)} on the server`,
     );
@@ -486,7 +499,7 @@ export function offsetsCheck(ev: SessionEvidence): CheckResult {
       hint: "another machine wrote the session, or an answer was lost; the next upload is told 409 offset_mismatch and goes on from the server's offset",
     });
   }
-  if (waiting) {
+  if (awaitingWholeReplace) {
     return result(id, title, "warn", REPLACE_DROPPED, { detail: [summary], hint: REPLACE_HINT });
   }
   if (pausedAhead) {
@@ -643,6 +656,19 @@ function markersIn(records: readonly NormalizedRecord[]): Set<string> {
   return out;
 }
 
+function droppedPrefixUnderOldRules(
+  dropped: NonNullable<SessionMetadata["dropped_prefix"]>,
+  records: NormalizedRecord[],
+  deps: DoctorDeps,
+): boolean {
+  return (
+    dropped.records > 0 &&
+    dropped.records <= records.length &&
+    prefixSha256(deps.redaction.records(records.slice(0, dropped.records)), dropped.records) !==
+      dropped.prefix_sha256
+  );
+}
+
 export function prefixCheck(
   ev: SessionEvidence,
   deps: DoctorDeps,
@@ -693,12 +719,7 @@ export function prefixCheck(
   if (
     hash !== n.prefix_sha256 &&
     dropped &&
-    dropped.records > 0 &&
-    dropped.records <= local.records.length &&
-    prefixSha256(
-      deps.redaction.records(local.records.slice(0, dropped.records)),
-      dropped.records,
-    ) !== dropped.prefix_sha256
+    droppedPrefixUnderOldRules(dropped, local.records, deps)
   ) {
     return result(
       id,
@@ -707,18 +728,18 @@ export function prefixCheck(
       `review dropped the first ${plural(dropped.records, "record")}, hashed under earlier rules and not stored to redact again; the hashes cannot agree`,
     );
   }
-  const foreign =
+  const markersFromRetiredRules =
     hash === n.prefix_sha256
       ? []
       : [...markersIn(ev.server.traces.flatMap((t) => t.records ?? []))].filter(
           (marker) => !markersIn(deps.redaction.records(local.records ?? [])).has(marker),
         );
-  if (foreign.length > 0) {
+  if (markersFromRetiredRules.length > 0) {
     return result(
       id,
       title,
       "skip",
-      `the stored records keep ${foreign.map((m) => `[redacted:${m}]`).join(", ")}, which this machine's rules do not write (an earlier rule set's markers); the hashes cannot agree`,
+      `the stored records keep ${markersFromRetiredRules.map((m) => `[redacted:${m}]`).join(", ")}, which this machine's rules do not write (an earlier rule set's markers); the hashes cannot agree`,
       { hint: "a whole upload (seshi capture resend) stores it under the current rules" },
     );
   }

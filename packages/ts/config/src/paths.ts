@@ -17,7 +17,7 @@ export interface ServerConfigLookup {
   cwd: string;
   exists(path: string): boolean;
   systemPath?: string;
-  cwdFile?: boolean;
+  trustCwdConfig?: boolean;
 }
 
 export function findServerConfig(lookup: ServerConfigLookup): {
@@ -28,8 +28,8 @@ export function findServerConfig(lookup: ServerConfigLookup): {
   const named = lookup.flag ?? (lookup.env[CONFIG_ENV] || undefined);
   if (named !== undefined) return { path: resolve(lookup.cwd, named), explicit: true };
   const here = join(lookup.cwd, SERVER_CONFIG_NAME);
-  if (lookup.cwdFile === true && lookup.exists(here)) return { path: here, explicit: false };
-  const skipped = lookup.cwdFile !== true && lookup.exists(here) ? { skipped: here } : {};
+  if (lookup.trustCwdConfig === true && lookup.exists(here)) return { path: here, explicit: false };
+  const skipped = lookup.trustCwdConfig !== true && lookup.exists(here) ? { skipped: here } : {};
   const system = lookup.systemPath ?? SYSTEM_CONFIG_PATH;
   if (lookup.exists(system)) return { path: system, explicit: false, ...skipped };
   return { explicit: false, ...skipped };

@@ -5,7 +5,7 @@ import { storeOptions } from "@seshi/instance";
 import { type CheckReport, checkStore, type Finding, isOwner, openStore } from "@seshi/store";
 import { openAccount } from "../account/account";
 import { EXIT } from "../cli/exit";
-import { emit, fail, takeJson, usageError } from "../cli/output";
+import { emit, fail, helpOrUsageError, takeJson } from "../cli/output";
 import { printable, type Style, styleFor } from "../cli/style";
 import { expandHome } from "../connect";
 import type { CommandContext } from "./index";
@@ -27,7 +27,7 @@ export async function run(ctx: CommandContext): Promise<number> {
   const { json, rest } = takeJson(ctx.argv);
   const [sub, ...args] = rest;
   if (sub !== "check") {
-    return usageError(
+    return helpOrUsageError(
       ctx,
       json,
       sub === undefined ? "store needs check" : `unknown store command '${sub}'`,
@@ -37,7 +37,7 @@ export async function run(ctx: CommandContext): Promise<number> {
   try {
     return await check(ctx, json, args);
   } catch (err) {
-    if (err instanceof UsageError) return usageError(ctx, json, err.message, USAGE);
+    if (err instanceof UsageError) return helpOrUsageError(ctx, json, err.message, USAGE);
     const code = serverFailure(ctx, json, err);
     if (code !== undefined) return code;
     throw err;

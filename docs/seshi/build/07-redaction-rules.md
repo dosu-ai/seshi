@@ -155,7 +155,7 @@ Reference for operators: [docs/redaction.md](../../redaction.md).
   - `backfill`: `--since <30d|time>` or `--all` (one is required, since it is irreversible),
     `--owner`, `--dry-run`, `--limit`, `--as <owner>`. Change entries are written by
     `{kind: "admin", principal: --as or "admin", source_id: "redaction"}`. It opens the
-    Instance with `initialize: false`, so a mistyped bucket is refused, not claimed. SIGINT
+    Instance with `claimUnmarkedBucket: false`, so a mistyped bucket is refused, not claimed. SIGINT
     stops it between sessions. Exit 8 on conflicts or failures.
 - **Goldens.**
   - The transcript goldens now go through the built-in rule set's redactor:

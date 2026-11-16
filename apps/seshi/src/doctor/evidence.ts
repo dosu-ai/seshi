@@ -10,9 +10,9 @@ import { isStub, type NormalizedRecord, type SessionMetadata, type Trace } from 
 import { attempt, type DoctorDeps, failureOf } from "./deps";
 import {
   EVIDENCE_SCHEMA,
-  type LocalEntry,
   MAX_LOG_LINES,
   type SearchEvidence,
+  type SecretlessStateEntry,
   type SessionEvidence,
   type TraceEvidence,
   type TranscriptFacts,
@@ -29,7 +29,7 @@ export interface GatherOptions {
 
 const MAX_CHANGES = 5000;
 
-export function localEntry(entry: SessionState): LocalEntry {
+export function localEntry(entry: SessionState): SecretlessStateEntry {
   const { secret, ...rest } = entry;
   return secret
     ? {
