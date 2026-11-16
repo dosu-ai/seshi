@@ -64,6 +64,8 @@ const envKeyRE = new RegExp(
 );
 const genericKVIntlRE =
   /(парол[ьяею]|токен[ауы]?|секрет[ауы]?|ключ[аеиуом]?|contraseña|senha|passwort|密码|密碼|パスワード|비밀번호)(\\*['"]?\s*[:=]\s*)(\\*['"]?)([A-Za-z0-9/+=._-]{16,})((?:\\*['"])?)/gi;
+// `[ \t]*(?::[ \t]*)?`, not `[ \t]*:?[ \t]*`: with the colon optional, JavaScript's backtracking
+// engine splits a long run of blanks every way before failing (a label and 240k tabs: 54 s).
 const labeledLineRE =
   /((?:^|\n|\\n)[ \t]*(?:secret[ _-]?access[ _-]?key|access[ _-]?key[ _-]?id|secret[ _-]?key|api[ _-]?key|token[ _-]?value|access[ _-]?token|client[ _-]?secret|password|secret|token)[ \t]*(?::[ \t]*)?(?:\n|\\n)+[ \t]*)([A-Za-z0-9/+=._-]{16,})(?=[ \t]*(?:\n|\\n|$|["']))/gi;
 const bearerRE = /\b(Bearer|Basic)(\s+)([A-Za-z0-9._~+/=-]{16,})/gi;
@@ -74,6 +76,8 @@ const pemPrivateRE =
 const seshiTokenRE = /(?<![A-Za-z0-9_-])seshi_[0-9a-f]{20}_[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])/g;
 const providerRE =
   /\b(?:(gh[opsur]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{20,}|(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}|sk_user_[A-Za-z0-9_-]{8,}|gsk_[A-Za-z0-9]{20,}|xai-[A-Za-z0-9]{20,}|hf_[A-Za-z0-9]{20,}|npm_[A-Za-z0-9]{30,}|xox[bpcs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{30,}|pul-[0-9a-f]{40}|sbp_[0-9a-f]{40})\b|sk-)/g;
+// The glued start is bounded to 8 characters: unbounded, JavaScript's backtracking regex engine
+// rescans a long base64url run from every `eyJ` inside it, which is quadratic.
 const jwtRE =
   /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\b|(?<=(?:^|[^A-Za-z0-9_-])[A-Za-z0-9_-]{1,8})eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}/g;
 
@@ -212,6 +216,8 @@ const isTokenChar = (code: number) => isAlnum(code) || code === UNDERSCORE || co
 /** What `\b` counts as a word character (no `u` flag): `[A-Za-z0-9_]`. */
 const isRegexWord = (code: number) => isAlnum(code) || code === UNDERSCORE;
 
+// Hand-written: as `sk-[A-Za-z0-9_-]*[A-Za-z0-9]{20,}\b`, JavaScript's backtracking engine rescans
+// the token run from every split of it, quadratic on a long run that does not end in a key.
 function skKeyEnd(s: string, at: number): { runEnd: number; keyEnd: number } {
   let keyEnd = -1;
   let alnum = 0;
@@ -271,6 +277,8 @@ const isRegexSpace = (code: number) =>
   code === 0x3000 ||
   code === 0xfeff;
 
+// Hand-written: as `\b([A-Za-z][A-Za-z0-9+.-]*:\/\/)([^\s/@:]*):([^\s]+)@([^\s]+)`, JavaScript's
+// backtracking engine rescans a run without whitespace from every `://` in it: quadratic.
 function replaceConnUrls(s: string, counts: RedactionCounts): string {
   let out = "";
   let last = 0;

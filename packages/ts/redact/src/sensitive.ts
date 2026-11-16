@@ -30,6 +30,8 @@ type GlobToken =
   | { kind: "any" }
   | { kind: "dirs" };
 
+// Hand-matched, stepping the set of reachable glob positions: as a `RegExp` with `.*` pieces,
+// JavaScript's backtracking engine took seconds on a few KB of repeated directory names.
 class Glob implements GlobTest {
   private readonly tokens: GlobToken[] = [];
   private readonly suffix: string;
