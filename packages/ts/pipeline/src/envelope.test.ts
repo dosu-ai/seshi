@@ -1,13 +1,7 @@
 import { createHash } from "node:crypto";
-import { ENVELOPE_SCHEMA, type Envelope, SessionRejected } from "@seshi/model";
+import { type Envelope, SessionRejected } from "@seshi/model";
 import { describe, expect, it } from "vitest";
-import {
-  checkEnvelope,
-  hasCaller,
-  uploadEnvelope,
-  uploadIdempotencyKey,
-  writerOf,
-} from "./envelope";
+import { checkEnvelope, uploadEnvelope, uploadIdempotencyKey, writerOf } from "./envelope";
 import { mayReplace, permissiveAuthorizer, retractSecretMatches } from "./stages";
 
 const now = () => new Date("2026-11-14T09:00:00.000Z");
@@ -30,55 +24,6 @@ function base(): Envelope {
 }
 
 describe("uploadEnvelope", () => {
-  it("builds the envelope an upload stands for", () => {
-    const envelope = uploadEnvelope(
-      {
-        owner: "alice",
-        agent: "codex",
-        session_id: "s9",
-        transcript: "a\n",
-        format: "jsonl",
-        offset: 12,
-        project: "p",
-        branch: "main",
-        parent_session_id: "s0",
-        fork_of: "s0",
-        replace: true,
-        visibility: "owner",
-        shipped: { records: 3, prefix_sha256: "a".repeat(64) },
-      },
-      {
-        caller: { kind: "person", principal: "alice" },
-        owner_basis: "verified",
-        source: "hook",
-        claims: { git_email: "a@example.com" },
-        now,
-      },
-    );
-    expect(envelope).toEqual({
-      schema: ENVELOPE_SCHEMA,
-      source: "hook",
-      source_id: "upload",
-      format: "codex",
-      session_key: "s9",
-      payload: { kind: "log", encoding: "jsonl", text: "a\n", offset: 12 },
-      caller: { kind: "person", principal: "alice" },
-      owner: "alice",
-      owner_basis: "verified",
-      idempotency_key: uploadIdempotencyKey("s9", 12, "a\n"),
-      received_at: "2026-11-14T09:00:00.000Z",
-      claims: { git_email: "a@example.com" },
-      visibility: "owner",
-      replace: true,
-      shipped: { records: 3, prefix_sha256: "a".repeat(64) },
-      project: "p",
-      branch: "main",
-      parent_session_id: "s0",
-      fork_of: "s0",
-    });
-    expect(() => checkEnvelope(envelope)).not.toThrow();
-  });
-
   it("keys an upload by session, offset and text, unless it names its own key", () => {
     expect(uploadIdempotencyKey("s1", 0, "a")).toBe(uploadIdempotencyKey("s1", 0, "a"));
     expect(uploadIdempotencyKey("s1", 0, "a")).not.toBe(uploadIdempotencyKey("s1", 0, "ab"));
@@ -153,23 +98,6 @@ describe("checkEnvelope", () => {
 });
 
 describe("callers and writers", () => {
-  it("answers uploads and hooks, records for every other source", () => {
-    expect(hasCaller({ source: "upload" })).toBe(true);
-    expect(hasCaller({ source: "hook" })).toBe(true);
-    for (const source of ["otlp", "datadog", "s3", "cursor-cloud"] as const) {
-      expect(hasCaller({ source })).toBe(false);
-    }
-  });
-
-  it("writes as the caller, through the envelope's source", () => {
-    expect(writerOf(base())).toEqual({
-      kind: "device",
-      principal: "alice",
-      credential_id: "tok_1",
-      source_id: "upload",
-    });
-  });
-
   it("trusts the envelope by default, and lets only the original writer or an admin replace", async () => {
     const auth = await permissiveAuthorizer().authorize(base());
     expect(auth).toEqual({

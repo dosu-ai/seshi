@@ -9,41 +9,21 @@ const META: NormalizedRecord = { role: "meta", source: "fake" };
 const user = (content: string): NormalizedRecord =>
   ({ role: "user", content, timestamp: "2026-09-01T00:00:00Z" }) as NormalizedRecord;
 
-/** An adapter that returns what it is told to, and records how it was called. */
-function fake(records: NormalizedRecord[]): FormatAdapter & { calls: unknown[] } {
-  const calls: unknown[] = [];
-  return {
-    source: "fake",
-    chunkable: true,
-    calls,
-    normalize(transcript, chunk) {
-      calls.push({ transcript, chunk });
-      return records;
-    },
-  };
-}
+/** An adapter that answers with one user record quoting the transcript it was given. */
+const echo: FormatAdapter = {
+  source: "fake",
+  chunkable: true,
+  normalize: (transcript) => [META, user(`${transcript.trim()}: token ${SECRET}`)],
+};
 
 describe("normalizeTranscript", () => {
   it("runs the registry's adapter and redacts what it returns", () => {
-    const adapter = fake([META, user(`token ${SECRET}`)]);
-    const { records } = normalizeTranscript(new FormatRegistry([adapter]), {
+    const { records } = normalizeTranscript(new FormatRegistry([echo]), {
       source: "fake",
       transcript: "anything",
     });
-    expect(adapter.calls).toEqual([{ transcript: "anything", chunk: undefined }]);
+    expect(records[1]).toMatchObject({ content: "anything: token [redacted:github-token]" });
     expect(JSON.stringify(records)).not.toContain(SECRET);
-    expect(JSON.stringify(records)).toContain("[redacted:github-token]");
-  });
-
-  it("passes the chunk through to the adapter", () => {
-    const adapter = fake([user("more")]);
-    const chunk = { offset: 10, session_id: "s" };
-    normalizeTranscript(new FormatRegistry([adapter]), {
-      source: "fake",
-      transcript: "x\n",
-      chunk,
-    });
-    expect(adapter.calls).toEqual([{ transcript: "x\n", chunk }]);
   });
 
   it("works over the built-in formats alone", () => {

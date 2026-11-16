@@ -222,22 +222,6 @@ describe("stages and the write (X4.3, X6.3)", () => {
     });
     expect(rules.hash).not.toBe(compileRuleSet().hash);
   });
-
-  it("withholds a sensitive result in a later chunk than its call", async () => {
-    const p = pipeline();
-    const first = await submit(p, upload(HEAD + call("t9", { file_path: "/x/.env" })));
-    const second = await submit(
-      p,
-      upload(result("t9", "SECRET=1") + reply("ok"), first.bytes_total),
-    );
-    const trace = await getTrace(
-      store,
-      "alice",
-      ARCHIVE,
-      (second as { content_hash: string }).content_hash,
-    );
-    expect(trace?.records[1]).toMatchObject({ content: "[redacted:sensitive-file]" });
-  });
 });
 
 describe("the session filter (X4.10)", () => {

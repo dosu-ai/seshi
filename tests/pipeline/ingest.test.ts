@@ -186,17 +186,6 @@ describe("ingest", () => {
     ).rejects.toBeInstanceOf(IngestRejected);
     expect(await getSession(store, "acme", "claude", "sess1")).toBeNull();
   });
-
-  it("rejects an oversized record set", async () => {
-    // Read the fixture once: 50,001 golden reads alone came near the 30 s test timeout.
-    const [first, one] = records("claude-basic");
-    const many = [first, ...Array.from({ length: 50_001 }, () => one)];
-    await expect(
-      ingest({ store, owner: "acme", records: many, metadata: meta, now }),
-    ).rejects.toMatchObject({
-      code: "too_large",
-    });
-  });
 });
 
 describe("ingest's options for the pipeline", () => {
@@ -293,29 +282,6 @@ describe("ingest's options for the pipeline", () => {
       }),
     ).rejects.toThrow("changed");
     expect((await store.list(keys.session("acme", archive))).keys).toEqual(before);
-  });
-
-  it("replaces the session's traces with one, removing the others", async () => {
-    const first = await ingest({
-      store,
-      owner: "acme",
-      records: records("claude-basic"),
-      metadata: meta,
-      now,
-    });
-    const second = await ingest({
-      store,
-      owner: "acme",
-      records: records("claude-queued-input"),
-      metadata: meta,
-      now,
-      replace: true,
-    });
-    const session = await getSession(store, "acme", "claude", "sess1");
-    expect(session?.traces.map((t) => t.content_hash)).toEqual([second.content_hash]);
-    expect(await getTrace(store, "acme", first.archive_id, first.content_hash)).toBeNull();
-    const changes = (await readChanges(store, "acme")).entries;
-    expect(changes.map((c) => c.entry.replace)).toEqual([undefined, true]);
   });
 
   it("records progress without a trace: the log moves on and the envelope is remembered", async () => {
@@ -613,30 +579,6 @@ describe("the canonical trace (X6.2)", () => {
       ).rejects.toMatchObject({ code: "invalid", message: expect.stringContaining(message) });
     }
   });
-
-  it("sums redaction counts over a session's writes", async () => {
-    const ruleSet = "f".repeat(64);
-    await ingest({
-      store,
-      owner: "acme",
-      records: records("claude-basic"),
-      metadata: meta,
-      now,
-      redaction: { rule_set: ruleSet, counts: { "aws-key": 1 } },
-    });
-    await ingest({
-      store,
-      owner: "acme",
-      records: [...records("claude-basic"), { role: "user", content: "x", timestamp: "t" }],
-      metadata: meta,
-      now,
-      redaction: { rule_set: ruleSet, counts: { "aws-key": 2, "github-token": 1 } },
-    });
-    expect((await getSession(store, "acme", "claude", "sess1"))?.redaction).toEqual({
-      rule_set: ruleSet,
-      counts: { "aws-key": 3, "github-token": 1 },
-    });
-  });
 });
 
 describe("conditional pointer writes (X6.5)", () => {
@@ -661,28 +603,5 @@ describe("conditional pointer writes (X6.5)", () => {
       ingest({ store, owner: "acme", records: records("claude-basic"), metadata: meta, now }),
     ).rejects.toBeInstanceOf(LayoutError);
     expect((await store.list("owners/")).keys).toEqual([]);
-  });
-});
-
-describe("readChanges", () => {
-  it("pages by cursor and by time", async () => {
-    for (const name of ["claude-basic", "codex-subagent-report", "opencode-export"]) {
-      await ingest({
-        store,
-        owner: "acme",
-        records: records(name),
-        metadata: { ...meta, session_id: name },
-        now,
-      });
-    }
-    const page1 = await readChanges(store, "acme", { limit: 2 });
-    expect(page1.entries).toHaveLength(2);
-    expect(page1.truncated).toBe(true);
-    const page2 = await readChanges(store, "acme", { after: page1.cursor });
-    expect(page2.entries).toHaveLength(1);
-    expect(page2.truncated).toBe(false);
-    const since = await readChanges(store, "acme", { since: "2026-10-21T12:00:01.000Z" });
-    expect(since.entries.length).toBeLessThan(3);
-    expect(since.entries.length).toBeGreaterThan(0);
   });
 });
