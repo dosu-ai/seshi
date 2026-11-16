@@ -54,11 +54,12 @@ left as they are.
 
 | | Before | After |
 |---|---|---|
+| Test cases in the diff | | 68 removed, 4 rewritten, none added |
 | Tests (`bun run test`) | 2298 | 2238 (8 skipped in both) |
 | Lines covered (istanbul) | 18298 / 19550 | 18298 / 19550 |
 | Branches covered | 15754 / 18710 | 15753 / 18710 |
 
-No source file lost a covered line. The one branch is the heartbeat job's "another worker"
+The 2298 was counted in the baseline coverage run; the generated scenarios and `found/` files make the total move a little between runs, so the diff is the exact count. No source file lost a covered line. The one branch is the heartbeat job's "another worker"
 path in `packages/ts/instance/src/builtin-jobs.ts`, which depends on timing: on unchanged
 b2ab2b1 it is covered in some runs and not others.
 

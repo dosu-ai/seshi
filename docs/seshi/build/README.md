@@ -44,7 +44,7 @@ Branch names use a hyphen (`seshi-01-restructure`), not a slash: git cannot hold
 | 32 | `seshi-32-scenarios` | An in-process capture scenario runner (YAML scenarios, HTTP and store faults, a moved clock, invariants after every step) with 19 scenarios, and a doctor fix it found | F9, X4, X6 | Built |
 | 33 | `seshi-33-scenario-gen` | Generated scenarios with shrinking (fast-check): a fixed-seed budget in `bun run test`, `bun run scenarios:explore` for longer runs; 16 bugs found and fixed | F9, X4, X6, F3.4, F2.5 | Built |
 | 34 | `seshi-34-scenario-proc` | Real-process scenarios: a TCP fault proxy, process kills and races (`bun run scenarios:process`, nightly in CI); a fix for two uploaders taking over one stale lock | F9.1, F9.7, X4.7 | Built |
-| 35 | `seshi-35-test-audit` | A test audit: 67 tests that repeated what behaviour tests, scenarios or goldens already assert removed, 4 rewritten to assert outcomes instead of calls; no line of coverage lost; the ReDoS timing tests check growth, not a time budget | All | Built |
+| 35 | `seshi-35-test-audit` | A test audit: 68 test cases that repeated what behaviour tests, scenarios or goldens already assert removed, 4 rewritten to assert outcomes instead of calls; no line of coverage lost; the ReDoS timing tests check growth, not a time budget | All | Built |
 
 F7 (Cursor Cloud sync) is deferred and is not built. Agreed but not built, found in 17's review
 and left for a decision (see [17](17-review.md#not-fixed)): the first-run notice for Cursor and
