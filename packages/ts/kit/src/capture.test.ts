@@ -52,7 +52,8 @@ describe("the capture contract", () => {
 
   it("expands ~", () => {
     expect(expandTilde("~", "/h")).toBe("/h");
-    expect(expandTilde("~/x", "/h")).toBe("/h/x");
+    expect(expandTilde("~/x", "/h")).toBe(join("/h", "x"));
+    expect(expandTilde("~\\x", "/h")).toBe(join("/h", "x"));
     expect(expandTilde("~x", "/h")).toBe("~x");
   });
 });

@@ -25,7 +25,9 @@ const clients = [
   { name: "explicit fetch", fetch: (input: string, init?: RequestInit) => fetch(input, init) },
 ];
 
-const records = golden<NormalizedRecord[]>("claude-basic.records.json");
+const records = golden<Record<string, unknown>[]>("claude-basic.records.json").map(
+  ({ llm_call: _, ...record }) => record as unknown as NormalizedRecord,
+);
 
 describe.skipIf(!configured).each(clients)(
   "S3Store over $name against a live endpoint",
@@ -49,6 +51,7 @@ describe.skipIf(!configured).each(clients)(
       expect(await s.stat("a/b.txt")).toEqual({
         size: 5,
         etag: "5d41402abc4b2a76b9719d911017c592",
+        modified: expect.any(String),
       });
       expect(await getBytes(s, "a/missing")).toBeNull();
       expect(await s.stat("a/missing")).toBeNull();
