@@ -29,7 +29,7 @@ export function subagentReportsAsObservations(records: NormalizedRecord[]): Norm
 /** A forked subagent's rollout without the parent history copied into it: its own
  * `session_meta`, then the records from `subagent_history_start_ordinal` on. Any other rollout,
  * or one this cannot read, comes back as it was. */
-export function withoutInheritedHistory(transcript: string): string {
+export function withoutInheritedHistoryInHead(transcript: string): string {
   const lines = transcript.split("\n");
   const start = lines.findIndex((line) => line.trim() !== "");
   const ownFrom = subagentHistoryStart(lines[start]);

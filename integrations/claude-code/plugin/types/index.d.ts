@@ -4,6 +4,8 @@ export type Capture = {
   problems: string[];
 };
 
+export type CaptureShape = "capture-1";
+
 declare module "claude-code" {
   interface PluginState {
     seshi: {

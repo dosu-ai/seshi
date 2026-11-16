@@ -211,7 +211,7 @@ what changed.
   seshi to itself (each turn ran the hook twice), `status` said not installed and `uninstall`
   removed nothing, against capture.md's "twice is once" and F9.6. It now finds
   `hook codex notify` after the command words, which must hold a `seshi` binary or be the
-  command the install was given, and `chainedNotify` unwinds a chain that is seshi's own
+  command the install was given, and `unwrapNestedSeshiNotify` unwinds a chain that is seshi's own
   notify again (repairing what older installs left). Claude Code's and Cursor's `isSeshiHook`
   already took `npx seshi`; it now also takes the install's own command line, for a wrapper,
   and `capture uninstall` takes `--command` (cli.md). Tests: `npx seshi` and a wrapper installed

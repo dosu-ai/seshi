@@ -120,14 +120,22 @@ export const CLAUDE_CODE_HOOKS: readonly HookHandler[] = [
   turn("SessionEnd", true),
 ];
 
+function tryParseJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
 function headRecords(head: string, max = 50): Record<string, unknown>[] {
   const out: Record<string, unknown>[] = [];
   for (const line of head.split("\n").slice(0, max)) {
     if (!line.trim()) continue;
-    try {
-      const value = JSON.parse(line);
-      if (typeof value === "object" && value !== null && !Array.isArray(value)) out.push(value);
-    } catch {}
+    const value = tryParseJson(line);
+    if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+      out.push(value as Record<string, unknown>);
+    }
   }
   return out;
 }

@@ -3,11 +3,11 @@ import { defineIntegration, type FormatAdapter } from "@seshi/kit";
 import type { JsonObject } from "@seshi/model";
 import { CODEX_CAPTURE } from "./capture";
 import { codexCalls } from "./codex-calls";
-import { subagentReportsAsObservations, withoutInheritedHistory } from "./codex-rollout";
+import { subagentReportsAsObservations, withoutInheritedHistoryInHead } from "./codex-rollout";
 
 export { CODEX_CAPTURE } from "./capture";
 export { codexCalls } from "./codex-calls";
-export { subagentReportsAsObservations, withoutInheritedHistory } from "./codex-rollout";
+export { subagentReportsAsObservations, withoutInheritedHistoryInHead } from "./codex-rollout";
 
 const isObject = (value: unknown): value is JsonObject =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -21,7 +21,7 @@ export const CODEX_FORMAT: FormatAdapter = lettaAdapter({
       ["session_meta", "response_item", "event_msg", "turn_context"].includes(row.type) &&
       isObject(row.payload),
   },
-  prepare: withoutInheritedHistory,
+  prepare: withoutInheritedHistoryInHead,
   finish: (records) => subagentReportsAsObservations(records),
   calls: codexCalls,
 });

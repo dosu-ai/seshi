@@ -1,7 +1,7 @@
 import type { EngineInterface, Register } from "claude-code";
 import { atom, read, update } from "claude-code";
 
-import type { Capture } from "../types";
+import type { Capture, CaptureShape } from "../types";
 
 const LABEL = "Session Capture";
 const CAPTURING = "◉";
@@ -9,8 +9,9 @@ const NOT_CAPTURING = "⏸";
 const BANNER_MS = 5_000;
 const REFRESH_MS = 30_000;
 const USAGE = "Usage: /session-capture [on|off|status]";
+const CAPTURE_SHAPE: CaptureShape = "capture-1";
 
-const capture = atom({ plugin: "seshi", key: "capture" } as const, null, { shape: "capture-1" });
+const capture = atom({ plugin: "seshi", key: "capture" } as const, null, { shape: CAPTURE_SHAPE });
 const banner = atom({ plugin: "seshi", key: "banner" } as const, null);
 
 let hide: { cancel(): void } | undefined;
@@ -41,19 +42,25 @@ function firstLine(text: string): string | undefined {
     .find((l) => l !== "");
 }
 
+function tryParseJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
 function failure(ran: Ran): string {
   for (const text of [ran.stdout, ran.stderr]) {
-    try {
-      const parsed = JSON.parse(text) as { error?: unknown };
-      const said =
-        parsed.error && typeof parsed.error === "object" && "message" in parsed.error
-          ? String((parsed.error as { message: unknown }).message)
-          : typeof parsed.error === "string"
-            ? parsed.error
-            : undefined;
-      const line = said === undefined ? undefined : firstLine(said);
-      if (line) return line;
-    } catch {}
+    const parsed = tryParseJson(text) as { error?: unknown } | null | undefined;
+    const said =
+      parsed?.error && typeof parsed.error === "object" && "message" in parsed.error
+        ? String((parsed.error as { message: unknown }).message)
+        : typeof parsed?.error === "string"
+          ? parsed.error
+          : undefined;
+    const line = said === undefined ? undefined : firstLine(said);
+    if (line) return line;
   }
   return firstLine(`${ran.stderr}\n${ran.stdout}`) ?? `seshi exited ${ran.exitCode}`;
 }

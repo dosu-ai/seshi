@@ -145,7 +145,10 @@ export function isSeshiNotify(notify: unknown, own?: readonly string[]): notify 
   return command.some((w) => basename(w.replace(/\\/g, "/")).replace(/\.exe$/i, "") === "seshi");
 }
 
-export function chainedNotify(notify: readonly string[], own?: readonly string[]): string[] {
+export function unwrapNestedSeshiNotify(
+  notify: readonly string[],
+  own?: readonly string[],
+): string[] {
   let chain = [...notify];
   for (;;) {
     const at = chain.indexOf("--");
@@ -229,8 +232,9 @@ export const codexInstaller: Installer = {
     const { text, notify } = readNotify(path);
     const notes: string[] = [];
     let chain: string[] = [];
-    if (isSeshiNotify(notify, context.command)) chain = chainedNotify(notify, context.command);
-    else if (Array.isArray(notify) && notify.every((w) => typeof w === "string")) {
+    if (isSeshiNotify(notify, context.command)) {
+      chain = unwrapNestedSeshiNotify(notify, context.command);
+    } else if (Array.isArray(notify) && notify.every((w) => typeof w === "string")) {
       chain = notify as string[];
       if (chain.length > 0) {
         notes.push(`Codex's notify program (${chain.join(" ")}) still runs, after seshi's hook`);
@@ -252,7 +256,7 @@ export const codexInstaller: Installer = {
     if (!existsSync(path)) return { changed: [], notes: [] };
     const { text, notify } = readNotify(path);
     if (!isSeshiNotify(notify, context.command)) return { changed: [], notes: [] };
-    const chain = chainedNotify(notify, context.command);
+    const chain = unwrapNestedSeshiNotify(notify, context.command);
     writeFileAtomic(path, withNotify(text, chain.length > 0 ? chain : null));
     return {
       changed: [path],
