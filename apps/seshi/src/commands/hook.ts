@@ -43,6 +43,8 @@ async function hook(
     log("usage: seshi hook <agent> <event>");
     return;
   }
+  // After `--`, the program Codex's `notify` named before seshi, run with the same payload:
+  // Codex runs only one `notify` program.
   const dash = rest.indexOf("--");
   const args = dash === -1 ? rest : rest.slice(0, dash);
   const after = dash === -1 ? [] : rest.slice(dash + 1);

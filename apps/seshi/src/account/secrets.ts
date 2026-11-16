@@ -123,6 +123,8 @@ export class MemorySecrets implements SecretBackend {
 /** The keychain first, the file when the keychain cannot be used. Reads look in both, so a
  * secret written to the file while the keychain was locked is still found. `fellBack` says
  * why the last write went to the file, for a warning. */
+/** Each secret is its own keychain entry, so a long IdP refresh token never pushes a short key
+ * over a keychain's size limit; one the keychain refuses goes to the file alone. */
 export class FallbackSecrets implements SecretBackend {
   /** Why a secret went to the file, when one did. */
   fellBack: string | undefined;
