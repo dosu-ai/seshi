@@ -37,7 +37,7 @@ import {
   type FindingCode,
   FsStore,
   getBytes,
-  gzipJson,
+  gzipJsonDeterministic,
   keys,
   LAYOUT_KEY,
   listSpanMessages,
@@ -539,7 +539,7 @@ describe.each([
         ),
       );
       trace.records[1].content = "changed after the fact";
-      await store.put(key, gzipJson(trace));
+      await store.put(key, gzipJsonDeterministic(trace));
     }, ["trace_unreadable", "trace_mismatch"]);
     // Without reading traces, only their presence is checked.
     expect(unexpected(await checkStore(store, { readTraces: false }))).toEqual([]);

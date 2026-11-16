@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { getSession } from "@seshi/pipeline";
 import { reviewerFromConfig } from "@seshi/review";
 import { type FakeServer, fakeProviderServer, KeywordModel } from "@seshi/review/testing";
-import { archiveId, gunzipJson, gzipJson, keys } from "@seshi/store";
+import { archiveId, gunzipJson, gzipJsonDeterministic, keys } from "@seshi/store";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Machine, startServer, type TestServer } from "../tooling/cli";
 import { serverConfig } from "../tooling/instance";
@@ -183,7 +183,7 @@ describe("seshi doctor (28)", () => {
     const trace = gunzipJson(bytes?.body as Uint8Array) as { records: { content?: unknown }[] };
     const index = trace.records.findIndex((r) => r && (r as { role?: string }).role === "user");
     trace.records[index] = { ...trace.records[index], content: `push with ${PLANTED}` };
-    await store.put(key, gzipJson(trace));
+    await store.put(key, gzipJsonDeterministic(trace));
 
     const run = await doctor();
     expect(run.code).toBe(8);

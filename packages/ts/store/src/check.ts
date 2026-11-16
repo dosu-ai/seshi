@@ -23,7 +23,7 @@ import { TOKEN_SCHEMA } from "./objects";
 import { listOwners } from "./owners";
 import { SPAN_SCHEMA, type SpanRecord, storedHashes } from "./spans";
 import type { ListedKey, Store } from "./store";
-import { namedTraces, SWEEP_MIN_AGE_MS } from "./sweep";
+import { namedTraces, type SessionFolder, SWEEP_MIN_AGE_MS, sessionFolders } from "./sweep";
 
 export type Severity = "error" | "warn";
 
@@ -168,15 +168,13 @@ export interface CheckOptions {
   readTraces?: boolean;
 }
 
-const PAST_FOLDER = "\u{10FFFF}";
-const TRACE_NAME = /^trace\.([0-9a-f]{64})\.json\.gz$/;
 const MESSAGE_NAME = /^([0-9a-f]{64})\.json$/;
 const TOKEN_NAME = /^([A-Za-z0-9_-]{8,64})\.json$/;
 const HEX64 = /^[0-9a-f]{64}$/;
 const STUB_FORBIDDEN = ["source", "project", "branch", "claims", "provenance", "redaction"];
 const TOKEN_KINDS = new Set(["org", "admin", "device", "service"]);
 const CONCURRENCY = 16;
-const SHOWN = 3;
+const MAX_LISTED_PER_FINDING = 3;
 
 function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -184,6 +182,15 @@ function message(err: unknown): string {
 
 function short(hash: string): string {
   return `${hash.slice(0, 12)}…`;
+}
+
+function knownWriteTime(modified: string | undefined): number | undefined {
+  const at = modified === undefined ? Number.NaN : Date.parse(modified);
+  return Number.isFinite(at) ? at : undefined;
+}
+
+function continuationEnd(fromRecord: number, records: number): number {
+  return fromRecord + Math.max(records - 1, 0);
 }
 
 function plural(n: number, word: string): string {
@@ -214,58 +221,13 @@ async function listAll(store: Store, prefix: string): Promise<ListedKey[]> {
   }
 }
 
-interface Folder {
-  archive: string;
-  metadata: boolean;
-  traces: Map<string, string | undefined>;
-  folders: Set<string>;
-}
-
-async function* sessionFolders(
-  store: Store,
-  owner: string,
-  prefix: string,
-): AsyncGenerator<Folder> {
-  const base = keys.sessions(owner);
-  let after: string | undefined;
-  let current: Folder | undefined;
-  for (;;) {
-    const page = await store.list(prefix, { startAfter: after, limit: 1000, details: true });
-    const listed: ListedKey[] = page.objects ?? page.keys.map((key) => ({ key }));
-    let stepped = false;
-    for (const object of listed) {
-      after = object.key;
-      const rest = object.key.slice(base.length);
-      const slash = rest.indexOf("/");
-      if (slash < 0) continue;
-      const archive = rest.slice(0, slash);
-      const name = rest.slice(slash + 1);
-      if (current?.archive !== archive) {
-        if (current) yield current;
-        current = { archive, metadata: false, traces: new Map(), folders: new Set() };
-      }
-      const inner = name.indexOf("/");
-      if (inner >= 0) {
-        const folder = name.slice(0, inner);
-        current.folders.add(folder);
-        after = `${base}${archive}/${folder}/${PAST_FOLDER}`;
-        stepped = true;
-        break;
-      }
-      if (name === "metadata.json") current.metadata = true;
-      const hash = TRACE_NAME.exec(name)?.[1];
-      if (hash) current.traces.set(hash, object.modified);
-    }
-    if (!stepped && (!page.truncated || listed.length === 0)) break;
-  }
-  if (current) yield current;
-}
-
 interface FeedEntry {
   key: string;
   parts: ChangeKeyParts;
   entry: ChangeEntry | null;
 }
+
+type SessionFeed = { kind: "read"; entries: FeedEntry[] } | { kind: "unreadable" };
 
 type SessionState =
   | { kind: "none" }
@@ -322,9 +284,9 @@ class Check {
     }
   }
 
-  private old(modified: string | undefined): boolean {
-    const at = modified === undefined ? Number.NaN : Date.parse(modified);
-    return Number.isFinite(at) && at < this.cutoff;
+  private isKnownOld(modified: string | undefined): boolean {
+    const at = knownWriteTime(modified);
+    return at !== undefined && at < this.cutoff;
   }
 
   async run(): Promise<void> {
@@ -403,9 +365,13 @@ class Check {
     }
     const problems = schemaProblems("layout.schema.json", value);
     if (problems.length > 0) {
-      this.add("marker_invalid", `${LAYOUT_KEY}: ${problems.slice(0, SHOWN).join("; ")}`, {
-        key: LAYOUT_KEY,
-      });
+      this.add(
+        "marker_invalid",
+        `${LAYOUT_KEY}: ${problems.slice(0, MAX_LISTED_PER_FINDING).join("; ")}`,
+        {
+          key: LAYOUT_KEY,
+        },
+      );
     }
   }
 
@@ -461,7 +427,13 @@ class Check {
         seen.add(folder.archive);
         const where = { owner, archive_id: folder.archive };
         await this.guard("checking the session", where, () =>
-          this.session(owner, folder, known === null ? null : (known.get(folder.archive) ?? [])),
+          this.session(
+            owner,
+            folder,
+            known === null
+              ? { kind: "unreadable" }
+              : { kind: "read", entries: known.get(folder.archive) ?? [] },
+          ),
         );
       }
     };
@@ -522,7 +494,7 @@ class Check {
     }
     const problems = schemaProblems("change.schema.json", value);
     if (problems.length > 0) {
-      this.add("change_unreadable", problems.slice(0, SHOWN).join("; "), where);
+      this.add("change_unreadable", problems.slice(0, MAX_LISTED_PER_FINDING).join("; "), where);
       return;
     }
     const entry = value as ChangeEntry;
@@ -543,13 +515,13 @@ class Check {
     }
   }
 
-  private async session(owner: string, folder: Folder, entries: FeedEntry[] | null): Promise<void> {
+  private async session(owner: string, folder: SessionFolder, feed: SessionFeed): Promise<void> {
     const archive = folder.archive;
     const where = { owner, archive_id: archive };
     this.counts.trace_objects += folder.traces.size;
     let state: SessionState = { kind: "none" };
     if (folder.metadata) state = await this.metadata(owner, archive);
-    if (entries !== null) this.entries(owner, archive, entries, state);
+    if (feed.kind === "read") this.entries(owner, archive, feed.entries, state);
 
     if (state.kind === "unusable") return;
     const metadata = state.kind === "read" ? state.metadata : null;
@@ -566,7 +538,7 @@ class Check {
 
     const named = namedTraces(metadata);
     for (const [hash, modified] of folder.traces) {
-      if (named.has(hash) || !this.old(modified)) continue;
+      if (named.has(hash) || !this.isKnownOld(modified)) continue;
       const key = keys.trace(owner, archive, hash);
       const age = `written ${modified}`;
       if (kind === "redacted") {
@@ -585,7 +557,7 @@ class Check {
     }
 
     if (metadata !== null && kind === "stored")
-      await this.stored(owner, archive, metadata, folder, entries);
+      await this.stored(owner, archive, metadata, folder, feed);
     if (metadata !== null && kind === "stub") this.stub(owner, archive, metadata);
     if (metadata !== null && kind === "redacted") {
       if (metadata.head !== undefined || metadata.traces.length > 0) {
@@ -595,7 +567,7 @@ class Check {
           { ...where, key: keys.metadata(owner, archive) },
         );
       }
-      if (entries !== null && !entries.some((e) => e.parts.kind === "tombstone")) {
+      if (feed.kind === "read" && !feed.entries.some((e) => e.parts.kind === "tombstone")) {
         this.add("tombstone_no_entry", "tombstoned, but no tombstone entry names it", where);
       }
     }
@@ -620,7 +592,7 @@ class Check {
     }
     const problems = schemaProblems("metadata.schema.json", value);
     if (problems.length > 0) {
-      this.add("metadata_invalid", problems.slice(0, SHOWN).join("; "), where);
+      this.add("metadata_invalid", problems.slice(0, MAX_LISTED_PER_FINDING).join("; "), where);
       return { kind: "unusable" };
     }
     const metadata = value as SessionMetadata;
@@ -640,8 +612,8 @@ class Check {
     owner: string,
     archive: string,
     metadata: SessionMetadata,
-    folder: Folder,
-    entries: FeedEntry[] | null,
+    folder: SessionFolder,
+    feed: SessionFeed,
   ): Promise<void> {
     const where = { owner, archive_id: archive };
     const head = metadata.head as string;
@@ -683,9 +655,9 @@ class Check {
         { ...where, key: keys.metadata(owner, archive) },
       );
     }
-    if (entries !== null) {
+    if (feed.kind === "read") {
       const announced = new Set(
-        entries.filter((e) => e.parts.kind === "published").map((e) => e.parts.content_hash),
+        feed.entries.filter((e) => e.parts.kind === "published").map((e) => e.parts.content_hash),
       );
       for (const ref of metadata.traces) {
         if (!announced.has(ref.content_hash)) {
@@ -717,7 +689,7 @@ class Check {
     }
     const problems = schemaProblems("trace.schema.json", trace);
     if (problems.length > 0) {
-      this.add("trace_unreadable", problems.slice(0, SHOWN).join("; "), where);
+      this.add("trace_unreadable", problems.slice(0, MAX_LISTED_PER_FINDING).join("; "), where);
       return;
     }
     let again: string;
@@ -761,7 +733,7 @@ class Check {
         where,
       );
     }
-    let end = first.continuation ? start + Math.max(first.records - 1, 0) : first.records;
+    let end = first.continuation ? continuationEnd(start, first.records) : first.records;
     let broken = false;
     traces.slice(1).forEach((ref, i) => {
       const n = i + 1;
@@ -790,7 +762,7 @@ class Check {
           where,
         );
       }
-      end = from + Math.max(ref.records - 1, 0);
+      end = continuationEnd(from, ref.records);
     });
     const total = metadata.normalized?.records;
     if (total === undefined || broken) return;
@@ -884,20 +856,20 @@ class Check {
       this.add(
         "span_message_missing",
         `span records name ${plural(missing.length, "message")} not stored: ${missing
-          .slice(0, SHOWN)
+          .slice(0, MAX_LISTED_PER_FINDING)
           .map(([h]) => short(h))
           .join(", ")}`,
         { ...where, key: missing[0]?.[1] },
       );
     }
     const unnamed = [...messages].filter(
-      ([hash, modified]) => !named.has(hash) && this.old(modified),
+      ([hash, modified]) => !named.has(hash) && this.isKnownOld(modified),
     );
     if (unnamed.length > 0) {
       this.add(
         "span_message_unnamed",
         `${plural(unnamed.length, "stored message")} no span record names: ${unnamed
-          .slice(0, SHOWN)
+          .slice(0, MAX_LISTED_PER_FINDING)
           .map(([h]) => short(h))
           .join(", ")}`,
         { ...where, key: keys.spanMessage(owner, archive, unnamed[0]?.[0] as string) },
@@ -907,7 +879,7 @@ class Check {
 
   private async redactedSpans(owner: string, archive: string): Promise<void> {
     const listed = await listAll(this.store, keys.spans(owner, archive));
-    const old = listed.filter((o) => this.old(o.modified));
+    const old = listed.filter((o) => this.isKnownOld(o.modified));
     if (old.length > 0) {
       this.add(
         "redacted_spans",

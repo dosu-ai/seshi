@@ -10,7 +10,7 @@ import {
   FsStore,
   getBytes,
   gunzipJson,
-  gzipJson,
+  gzipJsonDeterministic,
   keys,
   readChanges,
   readMetadata,
@@ -210,7 +210,7 @@ describe("the indexer (F10.2)", () => {
     const trace = gunzipJson<Trace>((await getBytes(store, key)) as Uint8Array);
     const first = trace.events.findIndex((e) => e.role === "user");
     trace.events[first] = { ...(trace.events[first] as Trace["events"][number]), text: "fresh" };
-    await store.put(key, gzipJson(trace));
+    await store.put(key, gzipJsonDeterministic(trace));
     await appendChange(store, {
       kind: "published",
       at: tick().toISOString(),

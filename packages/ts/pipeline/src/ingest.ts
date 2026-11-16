@@ -32,7 +32,7 @@ import {
   ensureLayout,
   getBytes,
   gunzipJson,
-  gzipJson,
+  gzipJsonDeterministic,
   keys,
   publishObject,
   readMetadata,
@@ -245,7 +245,7 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
   const outcome = await publishObject(
     store,
     keys.trace(owner, archive, trace.content_hash),
-    gzipJson(trace),
+    gzipJsonDeterministic(trace),
     "application/gzip",
     input.replace ? "replace" : "immutable",
   );

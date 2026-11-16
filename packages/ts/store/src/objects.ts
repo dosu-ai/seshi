@@ -158,12 +158,18 @@ export function writeHeartbeat(
 
 export const PENDING_SCHEMA = "seshi/pending/1" as const;
 
+export type EtagChangingNonce = string;
+
+function newEtagChangingNonce(): EtagChangingNonce {
+  return randomBytes(8).toString("hex");
+}
+
 export interface PendingMarker {
   schema: typeof PENDING_SCHEMA;
   owner: string;
   archive_id: string;
   touched_at: string;
-  touch: string;
+  touch: EtagChangingNonce;
   source_id?: string;
   envelope?: PendingEnvelope;
   final?: boolean;
@@ -190,7 +196,7 @@ export function touchPending(
     owner: assertOwner(owner),
     archive_id: archive,
     touched_at: now().toISOString(),
-    touch: randomBytes(8).toString("hex"),
+    touch: newEtagChangingNonce(),
     ...(details.source_id ? { source_id: details.source_id } : {}),
     ...(details.envelope ? { envelope: details.envelope } : {}),
     ...(details.final ? { final: true } : {}),

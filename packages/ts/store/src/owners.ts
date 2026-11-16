@@ -1,7 +1,5 @@
-import { assertOwner, isOwner, keys } from "./layout";
+import { assertOwner, isOwner, keys, PAST_FOLDER } from "./layout";
 import type { Store } from "./store";
-
-const PAST_FOLDER = "\u{10FFFF}";
 
 export interface OwnersPage {
   owners: string[];

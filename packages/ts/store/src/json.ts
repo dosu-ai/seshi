@@ -18,7 +18,15 @@ export function decodeJson<T>(bytes: Uint8Array): T {
   return JSON.parse(decoder.decode(bytes)) as T;
 }
 
-export function gzipJson(value: unknown): Uint8Array {
+export function tryDecodeJson<T>(bytes: Uint8Array): T | undefined {
+  try {
+    return decodeJson<T>(bytes);
+  } catch {
+    return undefined;
+  }
+}
+
+export function gzipJsonDeterministic(value: unknown): Uint8Array {
   return new Uint8Array(gzipSync(encoder.encode(JSON.stringify(value)), { level: 6 }));
 }
 

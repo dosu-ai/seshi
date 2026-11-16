@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { LAYOUT_SCHEMA, type LayoutMarker, LEGACY_LAYOUT_SCHEMA, TRACE_SCHEMA } from "@seshi/model";
-import { createJson, decodeJson, readJson, updateJson } from "./json";
+import { createJson, readJson, tryDecodeJson, updateJson } from "./json";
 import { LAYOUT_KEY, LEGACY_LAYOUT_KEY } from "./layout";
 import { getBytes, isPreconditionFailed, type Store, StoreError } from "./store";
 
@@ -40,10 +40,7 @@ function check(marker: LayoutMarker): LayoutMarker {
 async function refuseLegacy(store: Store): Promise<void> {
   const legacy = await getBytes(store, LEGACY_LAYOUT_KEY);
   if (legacy === null) return;
-  let schema = LEGACY_LAYOUT_SCHEMA as string;
-  try {
-    schema = decodeJson<{ schema?: string }>(legacy).schema ?? schema;
-  } catch {}
+  const schema = tryDecodeJson<{ schema?: string }>(legacy)?.schema ?? LEGACY_LAYOUT_SCHEMA;
   throw new LayoutError(
     `${store.url} holds a sessiondb store (${LEGACY_LAYOUT_KEY}, ${schema}): its traces are letta or otlp objects beside raw transcripts, which seshi does not read, and there is no migration (X1.5). Point store.url at a new prefix.`,
   );
@@ -82,6 +79,14 @@ export async function ensureLayout(store: Store, options: LayoutOptions): Promis
   }
 }
 
+async function claimOrg(store: Store, org: string): Promise<LayoutMarker> {
+  const updated = await updateJson<LayoutMarker>(store, LAYOUT_KEY, (current) => {
+    if (current === null) throw new LayoutError(`${LAYOUT_KEY} disappeared`);
+    return current.org === undefined ? { ...current, org } : null;
+  });
+  return check(updated.value as LayoutMarker);
+}
+
 async function agree(
   store: Store,
   marker: LayoutMarker,
@@ -102,11 +107,7 @@ async function agree(
     }
     return marker;
   }
-  const updated = await updateJson<LayoutMarker>(store, LAYOUT_KEY, (current) => {
-    if (current === null) throw new LayoutError(`${LAYOUT_KEY} disappeared`);
-    return current.org === undefined ? { ...current, org } : null;
-  });
-  const result = check(updated.value as LayoutMarker);
+  const result = await claimOrg(store, org);
   if (result.org !== org) {
     throw new LayoutError(
       `${store.url} belongs to org ${JSON.stringify(result.org)}, not ${JSON.stringify(org)} (store.org)`,

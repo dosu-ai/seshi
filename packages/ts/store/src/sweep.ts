@@ -1,12 +1,10 @@
 import type { SessionMetadata } from "@seshi/model";
-import { isOwner, keys } from "./layout";
+import { isOwner, keys, PAST_FOLDER } from "./layout";
 import { listOwners } from "./owners";
 import { readMetadata } from "./publish";
 import type { ListedKey, Store } from "./store";
 
 export const SWEEP_MIN_AGE_MS = 60 * 60 * 1000;
-
-const PAST_FOLDER = "\u{10FFFF}";
 
 const TRACE_NAME = /^trace\.([0-9a-f]{64})\.json\.gz$/;
 
@@ -70,41 +68,65 @@ function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-async function* traceObjectsBySession(
+export interface SessionFolder {
+  archive: string;
+  metadata: boolean;
+  traces: Map<string, string | undefined>;
+  folders: Set<string>;
+}
+
+export async function* sessionFolders(
   store: Store,
   owner: string,
-): AsyncGenerator<{ archive: string; traces: ListedTrace[] }> {
-  const prefix = keys.sessions(owner);
+  prefix: string,
+): AsyncGenerator<SessionFolder> {
+  const base = keys.sessions(owner);
   let after: string | undefined;
-  let current: { archive: string; traces: ListedTrace[] } | undefined;
+  let current: SessionFolder | undefined;
   for (;;) {
     const page = await store.list(prefix, { startAfter: after, limit: 1000, details: true });
     const listed: ListedKey[] = page.objects ?? page.keys.map((key) => ({ key }));
     let stepped = false;
     for (const object of listed) {
-      const rest = object.key.slice(prefix.length);
-      const slash = rest.indexOf("/");
       after = object.key;
+      const rest = object.key.slice(base.length);
+      const slash = rest.indexOf("/");
       if (slash < 0) continue;
       const archive = rest.slice(0, slash);
       const name = rest.slice(slash + 1);
       if (current?.archive !== archive) {
-        if (current && current.traces.length > 0) yield current;
-        current = { archive, traces: [] };
+        if (current) yield current;
+        current = { archive, metadata: false, traces: new Map(), folders: new Set() };
       }
       const inner = name.indexOf("/");
       if (inner >= 0) {
-        after = `${prefix}${archive}/${name.slice(0, inner)}/${PAST_FOLDER}`;
+        const folder = name.slice(0, inner);
+        current.folders.add(folder);
+        after = `${base}${archive}/${folder}/${PAST_FOLDER}`;
         stepped = true;
         break;
       }
+      if (name === "metadata.json") current.metadata = true;
       const hash = TRACE_NAME.exec(name)?.[1];
-      if (hash)
-        current.traces.push({ hash, ...(object.modified ? { modified: object.modified } : {}) });
+      if (hash) current.traces.set(hash, object.modified);
     }
     if (!stepped && (!page.truncated || listed.length === 0)) break;
   }
-  if (current && current.traces.length > 0) yield current;
+  if (current) yield current;
+}
+
+async function* traceObjectsBySession(
+  store: Store,
+  owner: string,
+): AsyncGenerator<{ archive: string; traces: ListedTrace[] }> {
+  for await (const folder of sessionFolders(store, owner, keys.sessions(owner))) {
+    if (folder.traces.size === 0) continue;
+    const traces = [...folder.traces].map(([hash, modified]) => ({
+      hash,
+      ...(modified ? { modified } : {}),
+    }));
+    yield { archive: folder.archive, traces };
+  }
 }
 
 async function traceObjectsOf(

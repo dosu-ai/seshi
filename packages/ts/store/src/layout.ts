@@ -70,6 +70,8 @@ export function archiveId(owner: string, agent: string, sessionId: string): stri
 export const LAYOUT_KEY = "seshi.json";
 export const LEGACY_LAYOUT_KEY = "sessionstorage.json";
 
+export const PAST_FOLDER = "\u{10FFFF}";
+
 export type RecordKind = "dropped" | "failed";
 
 const REVIEW_DIGITS = 8;

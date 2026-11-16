@@ -10,7 +10,7 @@ import {
   type UpdateOptions,
 } from "./store";
 
-export { decodeJson, gunzipJson, gzipJson } from "./json";
+export { decodeJson, gunzipJson, gzipJsonDeterministic } from "./json";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -47,7 +47,7 @@ export async function publishObject(
     const kept =
       mode === "immutable" ||
       (before.size === body.length && (await matches(store, key, before.etag, want, body)));
-    if (kept && (await refresh(store, key, contentType))) return "exists";
+    if (kept && (await resetAgeSoSweepSkips(store, key, contentType))) return "exists";
   }
   if (mode === "immutable") {
     try {
@@ -70,7 +70,11 @@ export async function publishObject(
   return "written";
 }
 
-async function refresh(store: Store, key: string, contentType: string): Promise<boolean> {
+async function resetAgeSoSweepSkips(
+  store: Store,
+  key: string,
+  contentType: string,
+): Promise<boolean> {
   const current = await store.get(key);
   if (current === null) return false;
   try {

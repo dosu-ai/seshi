@@ -14,7 +14,7 @@ import {
 } from "@seshi/model";
 import { type Redactor, redactLlmCalls } from "@seshi/redact";
 import {
-  gzipJson,
+  gzipJsonDeterministic,
   isOwner,
   keys,
   listOwners,
@@ -328,7 +328,7 @@ async function backfillSession(
   const written = await publishObject(
     store,
     keys.trace(owner, archive, trace.content_hash),
-    gzipJson(trace),
+    gzipJsonDeterministic(trace),
     "application/gzip",
     reused ? "replace" : "immutable",
   );

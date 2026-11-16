@@ -27,7 +27,7 @@ export {
   decodeJson,
   encodeJson,
   gunzipJson,
-  gzipJson,
+  gzipJsonDeterministic,
   type JsonUpdate,
   putJson,
   readJson,
