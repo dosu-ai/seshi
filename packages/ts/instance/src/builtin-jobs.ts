@@ -74,9 +74,10 @@ export function heartbeatJob(host: JobHost): Job {
         for (const other of beat.others ?? []) seen.push(other);
       }
       const started = host.startedAt.toISOString();
+      const isSecondWorker = (at: string) => at > started && heartbeatFresh(at, interval, now);
       for (const { instance, at } of seen) {
         if (instance === host.process) continue;
-        if (at <= started || !heartbeatFresh(at, interval, now)) continue;
+        if (!isSecondWorker(at)) continue;
         const known = others.get(instance);
         if (known === undefined || known < at) others.set(instance, at);
       }
