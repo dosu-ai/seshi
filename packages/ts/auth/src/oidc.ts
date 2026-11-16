@@ -1,9 +1,3 @@
-/** Checking an IdP's ID token (X5.2). The CLI signs in through the IdP (device flow, or the
- * browser with PKCE, X5.7) and sends the ID token to `POST /v1/auth/exchange`, once. The token is
- * checked against the keys the IdP publishes: signature, issuer, audience (the deployment's own,
- * X1.4), expiry, and the nonce the CLI chose. ID tokens are standard everywhere, unlike access
- * tokens, so this is the only IdP token seshi reads. */
-
 import type { Fetch } from "@seshi/model";
 import {
   createRemoteJWKSet,
@@ -28,7 +22,6 @@ const ALGORITHMS = [
   "EdDSA",
 ];
 
-/** IdP and seshi clocks may differ by this much. */
 const CLOCK_TOLERANCE_SECONDS = 60;
 
 export class IdTokenError extends Error {
@@ -39,13 +32,9 @@ export class IdTokenError extends Error {
 }
 
 export interface OidcVerifierOptions {
-  /** The IdP's issuer URL (`[auth.oidc] issuer`). */
   issuer: string;
-  /** The audience an ID token must have: `[auth.oidc] audience`, else the client id. */
   audience: string;
-  /** How the discovery document and keys are fetched; the global `fetch` by default. */
   fetch?: Fetch;
-  /** The IdP's keys, instead of fetching them (tests use a local key set). */
   keys?: JWTVerifyGetKey;
   now?: () => Date;
 }

@@ -1,10 +1,3 @@
-/** `@seshi/auth` (layer 2, X5): identity and access. Credentials (the org key, IdP sign-in
- * exchanged for session and device tokens, admin and service tokens, static tokens from config)
- * become principals with a role and scopes; owner ids come from identity (X5.8); visibility and
- * the delete and replace rules decide which sessions a principal may touch (X5.3, X5.10). The
- * pipeline's authorize stage is `ownershipAuthorizer`. Everything hangs off an `Auth` built from
- * config and a store: no module state (X1.2). */
-
 export {
   canRead,
   DELETE_FRESH_MS,

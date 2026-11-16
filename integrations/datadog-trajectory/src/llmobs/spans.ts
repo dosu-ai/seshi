@@ -1,17 +1,7 @@
-/** A Datadog LLM Observability span → a span in OTLP's JSON mapping (`ReceivedSpan`), the shape
- * every span set travels in (X4.2). Datadog's own fields ride along as `datadog.*` attributes,
- * which the `datadog-llmobs` span adapter (`format.ts`) reads back; nothing here interprets
- * them. Ids become OTLP hex, times nanosecond strings.
- *
- * Trajectory (datadog-labs/trajectory) publishes each turn of a coding-agent session as its own
- * trace; its spans carry `trajectory.*` tags (docs/LLM-OBS-SPAN-TAGS.md in that repository),
- * and `sessionOf` reads the session they share from them (F5.3). */
-
 import { createHash } from "node:crypto";
 import type { ReceivedSpan, SpanAttribute, SpanValue } from "@seshi/model";
 import type { DatadogIO, DatadogSpan } from "./api-types";
 
-/** The attributes a converted span carries. */
 export const ATTR = {
   spanKind: "datadog.span_kind",
   mlApp: "datadog.ml_app",
@@ -25,7 +15,6 @@ export const ATTR = {
   metricPrefix: "datadog.metrics.",
   tags: "datadog.tags",
   sessionId: "datadog.session_id",
-  /** Datadog's own ids, as it wrote them (decimal span ids), for tracing a span back. */
   spanId: "datadog.span_id",
   traceId: "datadog.trace_id",
 } as const;
@@ -84,10 +73,10 @@ export function startNanos(value: unknown): bigint | undefined {
     return undefined;
   }
   if (n <= 0n) return undefined;
-  if (n >= 100_000_000_000_000_000n) return n; // ns
-  if (n >= 100_000_000_000_000n) return n * 1_000n; // µs
-  if (n >= 100_000_000_000n) return n * 1_000_000n; // ms
-  return n * 1_000_000_000n; // s
+  if (n >= 100_000_000_000_000_000n) return n;
+  if (n >= 100_000_000_000_000n) return n * 1_000n;
+  if (n >= 100_000_000_000n) return n * 1_000_000n;
+  return n * 1_000_000_000n;
 }
 
 /** A tag's value from Datadog's `key:value` tags: the first with that key. */
@@ -170,7 +159,6 @@ export function toReceivedSpan(span: DatadogSpan): ReceivedSpan {
   return out;
 }
 
-/** The tags of a converted span. */
 export function tagsOf(span: ReceivedSpan): string[] {
   const attr = span.attributes?.find((a) => a.key === ATTR.tags)?.value;
   if (!attr || !("arrayValue" in attr)) return [];

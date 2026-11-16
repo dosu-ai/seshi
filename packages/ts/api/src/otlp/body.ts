@@ -1,17 +1,5 @@
-/** The body of `POST /otlp/v1/traces`, under the OTLP caps (F4.1, `[limits]`):
- *
- * - `limits.max_otlp_bytes` (64 MiB) on the wire. A `Content-Length` past it is refused before
- *   anything is read; otherwise the body is read as a stream and refused at the first chunk past
- *   it, so a chunked body is never held whole first.
- * - `limits.max_otlp_inflated_bytes` (256 MiB) after gunzip. A gzipped body is inflated as a
- *   stream while it arrives and stopped at the first chunk past the cap, so a small body that
- *   inflates to gigabytes (a gzip bomb) costs the cap, not what it would inflate to.
- *
- * Past either cap the request is answered 413 with a message naming the key. */
-
 import { createGunzip } from "node:zlib";
 
-/** A refused body: the receiver answers it with `status`. */
 export class OtlpBodyError extends Error {
   constructor(
     readonly status: number,
@@ -24,9 +12,7 @@ export class OtlpBodyError extends Error {
 }
 
 export interface OtlpBodyCaps {
-  /** `limits.max_otlp_bytes`. */
   wire: number;
-  /** `limits.max_otlp_inflated_bytes`. */
   inflated: number;
 }
 
@@ -38,8 +24,6 @@ function tooLarge(key: string, max: number, what: string): OtlpBodyError {
   );
 }
 
-/** Reads `stream` whole, refusing it with `refuse()` at the first chunk that takes it past
- * `max`: the stream is cancelled there and never read to its end. The JSON routes use it too. */
 export async function readCapped(
   stream: ReadableStream<Uint8Array>,
   max: number,
@@ -68,16 +52,12 @@ export async function readCapped(
   return out;
 }
 
-/** How `inflateCapped` refuses a body: past the wire cap, past the inflated cap, not gzip. */
 export interface InflateRefusals {
   wire: () => Error;
   inflated: () => Error;
   invalid: () => Error;
 }
 
-/** `stream` gunzipped, read a chunk at a time and each chunk inflated before the next is read.
- * Refused at the first chunk sent past `caps.wire` or inflated past `caps.inflated`: inflating
- * stops there, and the rest of the body is never read. The JSON routes use it too. */
 export async function inflateCapped(
   stream: ReadableStream<Uint8Array>,
   caps: OtlpBodyCaps,
@@ -86,7 +66,6 @@ export async function inflateCapped(
   const gunzip = createGunzip();
   const chunks: Buffer[] = [];
   let length = 0;
-  // A cap passed (`refused`), or the gzip stream broken: either stops reading.
   let refused: Error | undefined;
   let broken = false;
   let failed = false;
@@ -118,8 +97,6 @@ export async function inflateCapped(
       failed = true;
       break;
     }
-    // Inflated, and counted, before the next chunk is read. A destroyed stream never calls
-    // back, so `close` ends the wait too.
     await Promise.race([new Promise((resolve) => gunzip.write(value, resolve)), closed]);
   }
   if (failed) {
@@ -134,9 +111,6 @@ export async function inflateCapped(
   return new Uint8Array(Buffer.concat(chunks, length));
 }
 
-/** The request's body, gunzipped when sent gzipped, within `caps` (see the module comment).
- * Throws `OtlpBodyError`: 413 past a cap, 400 for a body that is not gzip, 415 for another
- * `Content-Encoding`. */
 export async function readOtlpBody(request: Request, caps: OtlpBodyCaps): Promise<Uint8Array> {
   const declared = Number(request.headers.get("content-length") ?? Number.NaN);
   if (Number.isFinite(declared) && declared > caps.wire) {

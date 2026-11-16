@@ -1,8 +1,3 @@
-/** `storeSession`: one upload through the pipeline, as the session API takes it. The upload is
- * turned into the envelope it stands for (`uploadEnvelope`, source id `upload`) and submitted to
- * a `Pipeline` built from the options; nothing here knows about HTTP. The HTTP route and local
- * mode go through `StoreSessionDB`, which does the same with one pipeline it keeps. */
-
 import type { FormatRegistry } from "@seshi/formats";
 import {
   localWriter,
@@ -24,10 +19,7 @@ export { OffsetMismatch, SessionRejected, type SessionUpload, type StoreSessionR
 
 export interface SessionOptions {
   store: Store;
-  /** The transcript formats this deployment reads: `apps/seshi` builds it from its integration
-   * registry. */
   formats: FormatRegistry;
-  /** Identifies the writer in the layout marker. */
   client?: string;
   now?: () => Date;
   /** The operator's own redaction (`redactionRules`); the built-in rules when omitted. Either

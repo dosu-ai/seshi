@@ -1,7 +1,3 @@
-/** A stand-in IdP for tests (`@seshi/auth/testing`): an RS256 key pair, its key set, a `fetch`
- * that serves the discovery document and the keys, and ID tokens signed with the key. Nothing
- * here talks to a real IdP. */
-
 import type { Fetch } from "@seshi/model";
 import {
   createLocalJWKSet,
@@ -15,7 +11,6 @@ import {
 
 export interface FakeIdpOptions {
   issuer?: string;
-  /** The audience its ID tokens carry by default. */
   audience?: string;
   now?: () => Date;
 }
@@ -41,7 +36,6 @@ export class FakeIdp {
     return new FakeIdp(privateKey, { keys: [jwk] }, options);
   }
 
-  /** The key set as `OidcVerifier` takes it. */
   get keys(): JWTVerifyGetKey {
     return createLocalJWKSet(this.jwks);
   }

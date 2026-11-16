@@ -1,19 +1,3 @@
-/** OTLP/HTTP protobuf (F4.1), hand-written for the subset the trace receiver needs:
- * `ExportTraceServiceRequest` in, `ExportTraceServiceResponse` and `google.rpc.Status` out.
- * The Claude Console sends protobuf only, and a general protobuf runtime would be a large
- * dependency for six messages, so this reads the wire format directly (`opentelemetry-proto`
- * v1, `collector/trace/v1/trace_service.proto`, `trace/v1/trace.proto`,
- * `common/v1/common.proto`, `resource/v1/resource.proto`).
- *
- * The request decodes into OTLP's JSON mapping (ids as lowercase hex, times as decimal strings
- * of Unix nanoseconds, `int64` as decimal strings, bytes as base64), which
- * `readExportRequest` (`@seshi/formats`) then checks as it checks a JSON body, so both
- * encodings take one path. Unknown fields are skipped, as protobuf requires; a field whose wire
- * type is not the one the schema gives is skipped too. Malformed input (a length past the end,
- * a varint over ten bytes, nesting deeper than `MAX_DEPTH`) throws `ProtobufError`.
- *
- * Only the API (`seshi serve`) loads this module: `seshi hook` never does (X3.3). */
-
 export class ProtobufError extends Error {
   constructor(message: string) {
     super(message);
@@ -21,7 +5,6 @@ export class ProtobufError extends Error {
   }
 }
 
-/** How deep `AnyValue`s may nest (arrays and key-value lists inside each other). */
 export const MAX_DEPTH = 32;
 
 const VARINT = 0;
@@ -47,7 +30,6 @@ class Reader {
     return this.pos >= this.end;
   }
 
-  /** A varint as a bigint (up to 64 bits). */
   varint(): bigint {
     let result = 0n;
     let shift = 0n;
@@ -61,9 +43,7 @@ class Reader {
     throw new ProtobufError("varint longer than ten bytes");
   }
 
-  /** A varint that must fit a non-negative safe integer (tags, lengths, enums, counts). */
   uint(): number {
-    // Fast path: tags and lengths almost always fit four bytes (28 bits).
     let result = 0;
     for (let i = 0, at = this.pos; i < 4 && at < this.end; i++, at++) {
       const byte = this.buf[at] as number;
@@ -92,7 +72,6 @@ class Reader {
     return view.getFloat64(0, true);
   }
 
-  /** The bounds of a length-delimited field's body. */
   len(): { start: number; end: number } {
     const length = this.uint();
     const start = this.pos;
@@ -138,7 +117,6 @@ class Reader {
     }
   }
 
-  /** Each field of the message: `visit(field, wire)` reads it, or returns false to skip it. */
   fields(visit: (field: number, wire: number) => boolean): void {
     while (!this.done) {
       const tag = this.uint();
@@ -340,7 +318,6 @@ function resourceSpans(r: Reader): Json {
   return out;
 }
 
-/** An `ExportTraceServiceRequest` → its JSON mapping (`{ resourceSpans: [...] }`). */
 export function decodeExportRequest(bytes: Uint8Array): { resourceSpans: Json[] } {
   const r = new Reader(bytes);
   const resourceSpansList: Json[] = [];
@@ -352,10 +329,6 @@ export function decodeExportRequest(bytes: Uint8Array): { resourceSpans: Json[] 
   return { resourceSpans: resourceSpansList };
 }
 
-// --- encoding -------------------------------------------------------------------
-
-/** A protobuf writer for the few messages the receiver answers with, and for building requests
- * in tests and tools. */
 class Writer {
   private chunks: number[] = [];
 
@@ -409,8 +382,6 @@ class Writer {
   }
 }
 
-/** `ExportTraceServiceResponse`: empty on full success; `partial_success` (rejected span count
- * and a message) when some spans were not accepted (F4.1, F4.5). */
 export function encodeExportResponse(partial?: {
   rejected_spans: number;
   error_message?: string;
@@ -467,8 +438,6 @@ function encodeKeyValue(kv: JsonValue): Writer {
 
 const idBytes = (value: unknown) => Buffer.from(String(value ?? ""), "hex");
 
-/** An `ExportTraceServiceRequest` in OTLP's JSON mapping → protobuf. For tests and tools: the
- * receiver only decodes. */
 export function encodeExportRequest(request: { resourceSpans: JsonValue[] }): Uint8Array {
   const w = new Writer();
   for (const rs of request.resourceSpans) {

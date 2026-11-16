@@ -1,15 +1,3 @@
-/** A directory as a `Store`: the local target for development and single-machine use, and what
- * tests use (X6.1). Writes are temp + rename so a reader never sees a partial object.
- *
- * The ETag is the MD5 of the object's bytes in hex, as S3 reports it for a single-part PUT, so
- * an ETag read here can be compared, verified and passed back as `ifMatch` the same way.
- *
- * Conditional writes (X6.5) are emulated with a lock file per key, created exclusively
- * (`open(…, "wx")`): every write and delete of a key takes its lock, checks the condition
- * against the object on disk, renames the new object into place and releases the lock. That is
- * safe between processes on one machine only, as decided; a lock left by a process that died is
- * taken over once it is older than `STALE_LOCK_MS`. */
-
 import { createHash, randomBytes } from "node:crypto";
 import {
   link,
@@ -39,19 +27,13 @@ import {
   StoreError,
 } from "./store";
 
-/** Suffixes of the files the store keeps beside objects; never listed, never valid keys. */
 const TMP_SUFFIX = ".tmp";
 const LOCK_SUFFIX = ".~lock";
 
-/** The store holds sessions: its root and every folder in it are created owner-only, and its
- * objects, temp files and locks are written owner-only. */
 const DIR_MODE = 0o700;
 const FILE_MODE = 0o600;
 
-/** A lock older than this was left by a process that died mid-write. Writes hold a lock for
- * milliseconds. */
 export const STALE_LOCK_MS = 10_000;
-/** How long a writer waits for a key's lock before failing. */
 const LOCK_WAIT_MS = 15_000;
 
 function isCode(err: unknown, code: string): boolean {
@@ -106,8 +88,6 @@ export class FsStore implements Store {
     }
   }
 
-  /** Run `fn` holding the key's lock file. The lock holds a random token, so release removes
-   * only this writer's own lock, never one another writer took over. */
   private async locked<T>(key: string, path: string, fn: () => Promise<T>): Promise<T> {
     const lock = `${path}${LOCK_SUFFIX}`;
     const token = `${process.pid} ${randomBytes(8).toString("hex")} ${new Date().toISOString()}\n`;
@@ -139,22 +119,16 @@ export class FsStore implements Store {
     }
   }
 
-  /** Remove a lock left by a writer that died. The lock is moved aside first: a rename is
-   * atomic, so of several writers that judged it stale only one moves it, and none can delete a
-   * fresh lock another writer created meanwhile (the old `rm`-then-create could, letting two
-   * writers hold the key). What was moved is checked again: a lock that turns out fresh was
-   * taken by a live writer between the `stat` and the rename, and is put back. */
   private async takeOver(lock: string): Promise<boolean> {
     const aside = `${lock}.${randomBytes(6).toString("hex")}${TMP_SUFFIX}`;
     try {
       await rename(lock, aside);
     } catch (err) {
-      if (isCode(err, "ENOENT")) return true; // someone else moved it; try to take it
+      if (isCode(err, "ENOENT")) return true;
       throw err;
     }
     const info = await stat(aside).catch(() => null);
     if (info && Date.now() - info.mtimeMs <= STALE_LOCK_MS) {
-      // A live writer's lock: put it back unless a new lock is already in place.
       try {
         await link(aside, lock);
       } catch (err) {
@@ -167,7 +141,6 @@ export class FsStore implements Store {
     return true;
   }
 
-  /** Remove the lock if it is still this writer's. */
   private async release(lock: string, token: string): Promise<void> {
     const held = await readFile(lock, "utf8").catch(() => null);
     if (held === token) await rm(lock, { force: true });
@@ -248,7 +221,6 @@ export class FsStore implements Store {
 
   async list(prefix: string, options: ListOptions = {}): Promise<ListResult> {
     const limit = options.limit ?? 1000;
-    // The deepest directory the prefix fully names; walk from there and filter.
     const cut = prefix.lastIndexOf("/");
     const dir = cut < 0 ? this.root : join(this.root, ...prefix.slice(0, cut).split("/"));
     if (prefix.split("/").includes("..")) throw new StoreError(`invalid prefix: ${prefix}`);

@@ -1,31 +1,21 @@
-/** AWS STS `AssumeRole` over `fetch` and SigV4, with no AWS SDK: how a poller reads a bucket
- * through a role the bucket's owner grants (F6.1, "a role to assume with an external ID"). The
- * temporary keys it returns sign S3 requests like static ones, with their session token. */
-
 import type { Fetch } from "@seshi/model";
 import { S3HttpError } from "./s3-fetch";
 import { type SigningCredentials, sha256Hex, signRequest } from "./sigv4";
 
 export interface AssumeRoleOptions {
-  /** The role to assume (`arn:aws:iam::123456789012:role/seshi-read`). */
   roleArn: string;
-  /** Names the session in the bucket owner's CloudTrail (`seshi-<source id>`). */
   sessionName: string;
-  /** The external id the role's trust policy requires. */
   externalId?: string;
   /** How long the keys last, in seconds; 3600 by default (STS allows 900 to the role's max). */
   durationSeconds?: number;
-  /** The keys that may assume the role. */
   credentials: SigningCredentials;
   /** The STS region; the regional endpoint is used when set, the global one otherwise. */
   region?: string;
-  /** An explicit STS endpoint (`https://sts.example.test`), for tests and partitions. */
   endpoint?: string;
   fetch?: Fetch;
   now?: () => Date;
 }
 
-/** Temporary keys from STS, and when they stop working. */
 export interface AssumedCredentials extends SigningCredentials {
   sessionToken: string;
   expiration: Date;

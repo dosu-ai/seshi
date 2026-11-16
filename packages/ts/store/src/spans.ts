@@ -1,25 +1,3 @@
-/** The span store (F4.4, X6.3): one object per span under the session's folder,
- * `owners/<owner>/sessions/<archive_id>/spans/<trace_id>-<span_id>.json`. Each holds the span's
- * part of the session, normalized and regex-redacted on arrival, never the span as received.
- * A span sent twice lands on the same key, so repeats are removed by trace and span id. The
- * records stay after the session is published, so a late span can rebuild it; they are never
- * readable through the API, and deleting the session deletes them. Code-first: only the binary
- * reads them (X3.10).
- *
- * History stored once (F4.4, revised 15 Nov 2026). A chat span's input repeats the conversation
- * so far, so copying it into every record made a session's records grow with the square of its
- * calls. Each input record is instead stored once per session as a message,
- * `spans/messages/<sha256>.json`, keyed by the SHA-256 of its bytes: the record as redaction left
- * it, with its `timestamp` emptied (`""`), since every span gives its input its own time. A span
- * record keeps `input`: the time (`at`) and the hashes of its messages in order, an entry
- * `[hash, time]` for a message whose time is not `at`. Reading puts the times back, so a part
- * reads exactly as it was written. Messages are written before the record that names them.
- *
- * Reading streams: `listSpans` reads records a page at a time, keeps each part without its
- * input, reads every message the records name once, and gives each part an `input` that is
- * rebuilt from them when read. Memory is the records' hashes plus each message once, not each
- * record's copy of the history. */
-
 import { createHash } from "node:crypto";
 import type { NormalizedRecord, RedactionSummary, SpanPart } from "@seshi/model";
 import { keys } from "./layout";
@@ -32,7 +10,6 @@ export const SPAN_SCHEMA = "seshi/span/1" as const;
  * it is not the input's `at`. */
 export type StoredMessageRef = string | [hash: string, timestamp: string];
 
-/** A part's input as a span record stores it: the messages it is made of, in order. */
 export interface StoredInput {
   /** The time of the input's records (their `timestamp`), unless an entry gives its own. */
   at?: string;
@@ -41,23 +18,17 @@ export interface StoredInput {
 
 export interface SpanRecord {
   schema: typeof SPAN_SCHEMA;
-  /** When the batch that carried it arrived. */
   received_at: string;
-  /** The source it came from (an OTLP destination, a poller). */
   source_id: string;
-  /** The span format that normalized it (`otlp-genai`). */
   format: string;
   /** The span's part. Stored without `input` (see `input`); `listSpans` gives it back. */
   part: SpanPart;
   /** The part's input as references to the session's stored messages. Only at rest:
    * `listSpans` resolves it into `part.input` and leaves this out. */
   input?: StoredInput;
-  /** What regex redaction did to this span on arrival (rule set and counts, F2.3). */
   redaction?: RedactionSummary;
 }
 
-/** A span record named a message the store does not hold (deleted underneath it). A
- * `StoreError`, so the assembler keeps the session's marker and tries again later. */
 export class MissingSpanMessage extends StoreError {
   constructor(readonly hash: string) {
     super(`span message ${hash} is missing`);
@@ -68,20 +39,15 @@ export class MissingSpanMessage extends StoreError {
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-/** A record's message: its bytes (with a string `timestamp` emptied), their hash, and the time
- * taken out. */
 function messageOf(record: NormalizedRecord): { hash: string; bytes: Uint8Array; time?: string } {
   const value = record as unknown as Record<string, unknown>;
   const time = typeof value.timestamp === "string" ? value.timestamp : undefined;
-  // Spread keeps the key order, and assigning an existing key keeps its place, so the record
-  // reads back with its fields in the order they were written.
   const body = time === undefined ? value : { ...value, timestamp: "" };
   const bytes = encoder.encode(JSON.stringify(body));
   const hash = createHash("sha256").update(bytes).digest("hex");
   return time === undefined ? { hash, bytes } : { hash, bytes, time };
 }
 
-/** `input` as messages: the stored form, and each message's bytes by hash. */
 export function storedInputOf(input: readonly NormalizedRecord[]): {
   input: StoredInput;
   messages: Map<string, Uint8Array>;
@@ -98,12 +64,10 @@ export function storedInputOf(input: readonly NormalizedRecord[]): {
   return { input: { ...(at !== undefined ? { at } : {}), messages: refs }, messages };
 }
 
-/** The hashes a stored input names. */
 export function storedHashes(input: StoredInput | undefined): string[] {
   return (input?.messages ?? []).map((ref) => (typeof ref === "string" ? ref : ref[0]));
 }
 
-/** Every message hash stored for a session. */
 export async function listSpanMessages(
   store: Store,
   owner: string,
@@ -153,8 +117,6 @@ export async function listSpanKeys(
   return out;
 }
 
-/** A session's span record keys a listing page at a time. Messages sort after every record
- * (`messages/` after hex), so the listing stops at the first. */
 async function* spanKeyPages(
   store: Store,
   owner: string,
@@ -172,7 +134,6 @@ async function* spanKeyPages(
   }
 }
 
-/** Run `work` over `items`, `limit` at a time. */
 async function pool<T, R>(items: readonly T[], limit: number, work: (item: T) => Promise<R>) {
   const results: R[] = new Array(items.length);
   let next = 0;
@@ -217,7 +178,6 @@ export async function* spanRecords(
   }
 }
 
-/** A session's stored messages, each read once and kept: what rebuilds the parts' inputs. */
 export class SpanMessages {
   private readonly held = new Map<string, Record<string, unknown>>();
 
@@ -252,8 +212,6 @@ export class SpanMessages {
   }
 }
 
-/** `record` with its stored input given back as `part.input`, rebuilt from `messages` each time
- * it is read (so no part holds a copy of the history), and without `input`. */
 export function withInput(record: SpanRecord, messages: SpanMessages): SpanRecord {
   const { input, ...rest } = record;
   if (!input) return rest;
@@ -274,7 +232,7 @@ export function withInput(record: SpanRecord, messages: SpanMessages): SpanRecor
   return { ...rest, part };
 }
 
-/** Every span record of a session, streamed (see the top of this file): each part's `input` is
+/** Every span record of a session, streamed: each part's `input` is
  * rebuilt from the session's messages when read. A record that is gone between the listing and
  * the read, or that does not parse as one, is skipped; a message a record names that is gone
  * throws `MissingSpanMessage`. */
@@ -285,7 +243,6 @@ export async function listSpans(
   options: { concurrency?: number } = {},
 ): Promise<SpanRecord[]> {
   const records: SpanRecord[] = [];
-  // One string per hash, however many records name it.
   const hashes = new Map<string, string>();
   const intern = (hash: string) => {
     const held = hashes.get(hash);
@@ -324,7 +281,6 @@ export async function putSpans(
     if (input && input.length > 0) {
       const stored = storedInputOf(input);
       for (const [hash, bytes] of stored.messages) messages.set(hash, bytes);
-      // In the record's place for `part.input`: after `part`, before `redaction`.
       const { redaction, ...head } = body;
       return {
         part,
@@ -363,7 +319,6 @@ export async function deleteSpans(store: Store, owner: string, archive: string):
     if (!page.truncated || page.keys.length === 0) break;
     after = page.keys.at(-1);
   }
-  // Records first, so no record is left naming a message that is gone.
   const messages = keys.spanMessages(owner, archive);
   const records = found.filter((k) => !k.startsWith(messages));
   await pool(records, 16, (key) => store.delete(key));

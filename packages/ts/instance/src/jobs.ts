@@ -1,42 +1,23 @@
-/** Background jobs (X7): one job runner per instance, no queue service (X7.1). A job is a
- * named piece of work that runs on an interval; the runner runs the jobs this instance's roles
- * call for, keeps each one's last run, last error and counts in memory, and the heartbeat
- * writes them to the bucket so `seshi workers status` and `GET /v1/admin/jobs` can show them
- * from anywhere (X7.5).
- *
- * Jobs find their own work (X7.4): a poller from its checkpoint, the span assembler from its
- * pending markers, the indexer from its local cursor. Nothing here coordinates workers: there
- * is one in the first version (X7.2), and a second by mistake is harmless (X7.3). */
-
 import type { JobRecord } from "@seshi/store";
 import type { Logger } from "./log";
 
-/** Where a job runs: on the one worker instance, or on every instance (the search indexer
- * keeps a local index on each, X7). */
 export type JobPlacement = "worker" | "every";
 
-/** What one run of a job says about itself. */
 export interface JobResult {
   /** `ok` unless said otherwise; `discarded` when another worker won a race (X7.3). */
   outcome?: "ok" | "discarded" | "error";
-  /** The run failed without throwing (a poller reports its connector's error this way). */
   error?: string;
   /** More is waiting now: run again without waiting for the interval. */
   more?: boolean;
-  /** Counts worth showing in status (envelopes submitted, sessions stored, records pruned). */
   summary?: Record<string, number>;
 }
 
-/** One kind of background work. */
 export interface Job {
-  /** Unique within an instance: `heartbeat`, `retention`, `source:<id>`, `assembler`. */
   readonly name: string;
-  /** What kind of job it is: `heartbeat`, `retention`, `poller`, `assembler`, `indexer`. */
   readonly kind: string;
   readonly placement: JobPlacement;
   /** How long to wait after a run ends before the next starts. */
   readonly intervalMs: number;
-  /** The source a poller polls. */
   readonly source?: string;
   /** One run. It should stop early when `signal` aborts. A throw is the run's error. */
   run(signal: AbortSignal): Promise<JobResult | undefined>;
@@ -45,11 +26,8 @@ export interface Job {
   backlog?(): Promise<Record<string, number> | undefined>;
 }
 
-/** How soon a job whose run said `more` runs again. */
 const MORE_DELAY_MS = 10;
 
-/** The first retry after a failed run; each further failure in a row doubles it, up to the
- * job's interval (X4.8: a transient failure retries with backoff). */
 export const RETRY_BASE_MS = 5_000;
 
 const ERROR_LENGTH = 500;
@@ -68,8 +46,6 @@ export interface JobRunnerOptions {
   retryBaseMs?: number;
 }
 
-/** Runs an instance's jobs. `register` every job the instance knows (status lists them all,
- * on any role); `start` runs the ones this instance's roles call for; `stop` ends them. */
 export class JobRunner {
   private readonly jobs = new Map<string, Job>();
   private readonly records = new Map<string, JobRecord>();
@@ -81,7 +57,6 @@ export class JobRunner {
   private readonly now: () => Date;
   private readonly log: Logger | undefined;
   private readonly retryBaseMs: number;
-  /** Failed runs in a row, by job: how far the next retry backs off. */
   private readonly failing = new Map<string, number>();
 
   constructor(options: JobRunnerOptions) {
@@ -121,7 +96,6 @@ export class JobRunner {
     return this.jobs.get(name);
   }
 
-  /** Whether this instance runs `job` when started. */
   runsHere(job: Job): boolean {
     return job.placement === "every" || this.worker;
   }
@@ -135,7 +109,6 @@ export class JobRunner {
     return this.started;
   }
 
-  /** Schedule every job this instance runs, each starting now. */
   start(): void {
     if (this.started) return;
     this.started = true;
@@ -178,7 +151,6 @@ export class JobRunner {
         this.schedule(job, this.delayAfter(job, record));
       });
     }, delayMs);
-    // A timer alone never keeps the process alive: the server or the command does.
     (timer as { unref?: () => void }).unref?.();
     this.timers.set(job.name, timer);
   }

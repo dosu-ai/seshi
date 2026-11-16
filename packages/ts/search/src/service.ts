@@ -1,13 +1,3 @@
-/** Search for one Instance (X1.2): its index file, its indexer and its query layer. Nothing is
- * opened until first used, so building an Instance (and every test that builds one) touches no
- * disk; the indexer job (`@seshi/instance`) and the first query open the file.
- *
- * A query is answered only once the index has caught up with the change feed at least once:
- * until then it throws `SearchUnavailable` (the API answers 503, F10.3). The viewer the server
- * built from the verified principal filters the query in the index, and every result is then
- * checked against the session's live metadata, so a session deleted or made private since it
- * was indexed is never returned (F10.4). */
-
 import { OwnerAliases } from "@seshi/auth";
 import {
   type EventRole,
@@ -27,7 +17,6 @@ import { highlights } from "./snippet";
 import { SqliteIndex } from "./sqlite";
 import type { Viewer } from "./viewer";
 
-/** Search cannot answer now; the API answers 503 with `Retry-After`. */
 export class SearchUnavailable extends Error {
   readonly code = "index_building";
   constructor(message: string) {
@@ -40,22 +29,17 @@ export const DEFAULT_LIMIT = 20;
 export const MAX_LIMIT = 100;
 export const DEFAULT_MATCHES = 3;
 export const MAX_MATCHES = 20;
-/** The deepest page offered: past it, narrow the query. */
 export const MAX_OFFSET = 10_000;
-/** The longest filter value accepted. */
 const MAX_FILTER_LENGTH = 512;
 
 export interface SearchSettings {
   /** The index file; `defaultIndexPath(deployment)` when omitted. `:memory:` for none. */
   path?: string;
-  /** Which event roles are indexed. */
   events: readonly EventRole[];
 }
 
 export interface SearchServiceOptions {
   store: Store;
-  /** The deployment the bucket belongs to: it names the default file and is checked against
-   * the file's. */
   deployment: string;
   settings: SearchSettings;
   aliases?: OwnerAliases;
@@ -63,13 +47,11 @@ export interface SearchServiceOptions {
   log?: IndexerLogger;
   /** Check each result against the session's live metadata (true). */
   verify?: boolean;
-  /** Indexer tuning, for tests. */
   indexer?: { lagMs?: number; pageSize?: number; budget?: number; ownerRefreshMs?: number };
 }
 
 export interface SearchStatus {
   path: string;
-  /** Whether the index has caught up with the change feed once, and answers queries. */
   ready: boolean;
   ready_at?: string;
   caught_up_at?: string;
@@ -77,7 +59,6 @@ export interface SearchStatus {
   events: number;
 }
 
-/** A resolved, checked query. */
 interface Checked {
   query: Omit<BackendQuery, "viewer">;
   q: string;
@@ -112,8 +93,6 @@ function iso(ms: number | undefined): string | undefined {
   return ms === undefined ? undefined : new Date(ms).toISOString();
 }
 
-/** Check a request and resolve what the index needs: the match expression, owner folders
- * (aliases folded), times in epoch ms, the page. */
 export function checkRequest(request: SearchRequest, aliases = new OwnerAliases()): Checked {
   if (typeof request.q !== "string" || request.q.trim() === "") {
     throw new SearchQueryError("q is required: the words to search for");
@@ -162,8 +141,6 @@ export function checkRequest(request: SearchRequest, aliases = new OwnerAliases(
   };
 }
 
-/** A session's metadata as it is now; null when it is gone or cannot be decoded (it cannot be
- * shown, and must not fail the whole search). Store errors are thrown. */
 async function liveMetadata(
   store: Store,
   owner: string,
@@ -178,7 +155,6 @@ async function liveMetadata(
   }
 }
 
-/** A hit as the API answers it. */
 function resultOf(hit: BackendHit): SearchResult {
   const s = hit.session;
   const started = iso(s.started_at);
@@ -226,7 +202,6 @@ export class SearchService {
     this.path = options.settings.path ?? defaultIndexPath({ deployment: options.deployment });
   }
 
-  /** The index and indexer, opened on first use. */
   private open(): { index: IndexStore; indexer: Indexer } {
     if (this.closed) throw new SearchUnavailable("search is shut down");
     if (!this.opened) {
@@ -248,12 +223,10 @@ export class SearchService {
     return this.opened;
   }
 
-  /** One indexer pass (the job's run). */
   run(signal?: AbortSignal): Promise<IndexerRun> {
     return this.open().indexer.run(signal);
   }
 
-  /** Read the change feed until the index has caught up (local mode, before a query). */
   catchUp(signal?: AbortSignal): Promise<IndexerRun> {
     return this.open().indexer.catchUp(signal);
   }
@@ -280,7 +253,6 @@ export class SearchService {
     };
   }
 
-  /** Whether the index has caught up once and answers queries. */
   ready(): boolean {
     return this.open().index.readyAt() !== undefined;
   }

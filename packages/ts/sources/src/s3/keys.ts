@@ -1,9 +1,3 @@
-/** Which keys under an S3 source's prefix are sessions, and what a key says about its session
- * (F6.1): the `include` globs pick keys, and the optional `path` template reads the session id,
- * its format, its work and identity claims from the key. Claims never decide the owner, which is
- * always the source's service account (X5.4); they are recorded in metadata (X5.5). */
-
-/** What a key's template match names. */
 export interface KeyFields {
   session?: string;
   format?: string;
@@ -56,7 +50,6 @@ export class PathTemplate {
         source += `(?<${name}>[^/]+?)`;
         i = end + 1;
       } else if (ch === "*" && template[i + 1] === "*") {
-        // `**/` is any number of whole segments (none included); a trailing `**` is anything.
         if (template[i + 2] === "/") {
           source += "(?:[^/]*/)*";
           i += 3;

@@ -1,27 +1,12 @@
-/** Owner ids (X5.8). There is no stored list of people: an owner id is derived every time from
- * the caller's identity.
- *
- * - With an IdP: the claim `owner_claim` names (`sub` by default, `oid` on Entra, or `email`).
- * - With the org key: the username the caller states, lowercased.
- * - A service account: `svc:<source-id>` (X5.4).
- *
- * An id is one path segment of the layout (`owners/<owner>/`): letters, digits and `.`, `_`, `-`,
- * `@`, `+`. A value that does not fit is replaced by a short hash of it, so every identity maps
- * to one id and no identity can name a path. `[auth.owner_aliases]` maps old ids to new ones and
- * is applied when reading (X5.8). */
-
 import { createHash } from "node:crypto";
 import { assertSourceId, isOwner } from "@seshi/store";
 
 export const SERVICE_PREFIX = "svc:";
 
-/** The service account of a source (X5.4). */
 export function serviceOwner(sourceId: string): string {
   return `${SERVICE_PREFIX}${assertSourceId(sourceId)}`;
 }
 
-/** What a poller or OTLP destination puts on its envelopes (X5.4): it runs inside the server,
- * needs no token, and writes as its source's service account, visible org-wide. */
 export function serviceIdentity(sourceId: string): {
   caller: { kind: "service"; principal: string };
   owner: string;
@@ -68,8 +53,6 @@ export function claimOwner(claims: Record<string, unknown>, claim: string): stri
   return ownerId(claim === "email" ? value.toLowerCase() : value);
 }
 
-/** `[auth.owner_aliases]` (X5.8): old owner id to new one, applied when reading, so sessions
- * stored under the old id are read as the new id's. */
 export class OwnerAliases {
   private readonly to = new Map<string, string>();
   private readonly from = new Map<string, string[]>();
@@ -98,14 +81,12 @@ export class OwnerAliases {
     }
   }
 
-  /** The id `owner` is read as: its alias, followed to the end. */
   canonical(owner: string): string {
     let at = owner;
     for (let next = this.to.get(at); next !== undefined; next = this.to.get(at)) at = next;
     return at;
   }
 
-  /** Whether two stored ids are the same owner. */
   same(a: string, b: string): boolean {
     return this.canonical(a) === this.canonical(b);
   }

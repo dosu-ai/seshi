@@ -1,58 +1,29 @@
-/** The orphan sweep (F2.5, revised 15 Nov 2026): delete a session's trace objects that no
- * metadata names and that are over an hour old.
- *
- * A trace object is named when its session's `metadata.json` lists it in `traces` (the head and
- * every continuation of a chunked session, in order) or as `head`. Anything else under
- * `trace.<hash>.json.gz` was left by a write that stopped partway: a redaction backfill or a
- * replace stopped after the pointer moved and before it deleted the old objects, a publish that
- * died before its pointer update, a tombstone stopped mid-delete. No reader is served those
- * (the trace routes and `getTrace` serve only a hash `traces` names), but they hold content the
- * session no longer has, so they are deleted, not kept.
- *
- * The age guard: a publish writes its trace object before the pointer names it (layout.md,
- * publish steps 1–3), so a young unnamed object may be a publish in flight. Only objects whose
- * last write (the store's listing: S3's `LastModified`, the file's mtime) is more than
- * `minAgeMs` (1 hour) ago are deleted; a listing that gives no time keeps the object. The
- * metadata is read after the listing and read again just before deleting, so an object a
- * publish named meanwhile (one that reused an object already under its hash, whose age says
- * nothing) is kept unless it is named in the instant between that read and the delete.
- *
- * Only trace objects are ever deleted: span records, reviews, metadata and anything else in a
- * session's folder are not looked at. */
-
 import type { SessionMetadata } from "@seshi/model";
 import { isOwner, keys } from "./layout";
 import { listOwners } from "./owners";
 import { readMetadata } from "./publish";
 import type { ListedKey, Store } from "./store";
 
-/** How old an unnamed trace object must be before the sweep deletes it (F2.5). */
 export const SWEEP_MIN_AGE_MS = 60 * 60 * 1000;
 
-/** Sorts after every character a key uses, so `startAfter` set to a folder plus this skips the
- * whole folder (as `listOwners` does). */
 const PAST_FOLDER = "\u{10FFFF}";
 
 const TRACE_NAME = /^trace\.([0-9a-f]{64})\.json\.gz$/;
 
-/** A trace object the sweep deleted (or would, in a dry run). */
 export interface SweptObject {
   owner: string;
   archive_id: string;
   content_hash: string;
-  /** When it was last written, as the listing said. */
   modified: string;
 }
 
 export interface SweepOptions {
-  /** Only these sessions: what a backfill or a replace touched. */
   sessions?: readonly { owner: string; archive_id: string }[];
   /** Only these owners' sessions; every owner when neither this nor `sessions` is given. */
   owners?: readonly string[];
   /** `SWEEP_MIN_AGE_MS` by default. */
   minAgeMs?: number;
   now?: () => Date;
-  /** Find what would be deleted, and delete nothing. */
   dryRun?: boolean;
   signal?: AbortSignal;
   /** Told of each object as it is deleted (or would be). */
@@ -80,7 +51,6 @@ export interface SweepReport {
   more: boolean;
 }
 
-/** The objects `swept` keeps; `deleted` counts them all. */
 const SWEPT_SHOWN = 100;
 
 interface ListedTrace {
@@ -88,8 +58,6 @@ interface ListedTrace {
   modified?: string;
 }
 
-/** The trace objects a session's metadata names: every `traces[]` entry (the head and each
- * continuation of a chunked session) and `head`. None when there is no metadata. */
 export function namedTraces(metadata: SessionMetadata | null): Set<string> {
   const named = new Set<string>();
   if (!metadata) return named;
@@ -102,9 +70,6 @@ function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/** The trace objects of each session under `owner`, from one walk of its `sessions/` folder.
- * Folders inside a session (`spans/`, `review/`, anything a later layout adds) are stepped over
- * rather than listed, so a session with thousands of span records costs one extra listing. */
 async function* traceObjectsBySession(
   store: Store,
   owner: string,
@@ -142,7 +107,6 @@ async function* traceObjectsBySession(
   if (current && current.traces.length > 0) yield current;
 }
 
-/** One session's trace objects, listed. */
 async function traceObjectsOf(
   store: Store,
   owner: string,
@@ -173,7 +137,6 @@ async function* ownersOf(store: Store): AsyncGenerator<string> {
   }
 }
 
-/** One session's unnamed, old trace objects deleted. */
 async function sweepSession(
   store: Store,
   owner: string,
@@ -186,7 +149,6 @@ async function sweepSession(
   report.traces += traces.length;
   const now = (options.now ?? (() => new Date()))().getTime();
   const cutoff = now - (options.minAgeMs ?? SWEEP_MIN_AGE_MS);
-  // The metadata after the listing: an object written after it was read is not in the listing.
   const named = namedTraces(await readMetadata(store, owner, archive));
   const unnamed = traces.filter((t) => !named.has(t.hash));
   const old = unnamed.filter((t) => {
@@ -195,17 +157,11 @@ async function sweepSession(
   });
   report.young += unnamed.length - old.length;
   if (old.length === 0) return;
-  // Again just before deleting: a publish that found its object already there (an earlier
-  // publish of the same content that stopped) names it without writing it, so its age says
-  // nothing about whether a publish is in flight.
   const still = options.dryRun ? named : namedTraces(await readMetadata(store, owner, archive));
   for (const trace of old) {
     if (options.signal?.aborted) return;
     if (still.has(trace.hash)) continue;
     if (!options.dryRun) {
-      // And its age again: a publish that found the object already there writes it again
-      // (`publishObject`), so an object about to be named is young here even when the listing
-      // said old. Gone already, or young now: keep counting it as not deleted.
       const key = keys.trace(owner, archive, trace.hash);
       const now = await store.stat(key);
       if (now === null) continue;
@@ -237,10 +193,9 @@ async function guarded(report: SweepReport, work: () => Promise<void>): Promise<
   }
 }
 
-/** Delete the trace objects no metadata names that are over `minAgeMs` old (see the top of
- * this file): in `sessions`, in `owners`' sessions, or in every session. A session that fails
- * (the bucket, unreadable metadata) is counted in `errors` and the sweep goes on; it never
- * throws for one. */
+/** Delete the trace objects no metadata names that are over `minAgeMs` old: in `sessions`, in
+ * `owners`' sessions, or in every session. A session that fails (the bucket, unreadable metadata)
+ * is counted in `errors` and the sweep goes on; it never throws for one. */
 export async function sweepTraces(store: Store, options: SweepOptions = {}): Promise<SweepReport> {
   const report: SweepReport = {
     dry_run: options.dryRun === true,

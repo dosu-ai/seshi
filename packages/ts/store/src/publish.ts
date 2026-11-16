@@ -1,12 +1,3 @@
-/** The publish protocol: write a trace object, verify it landed intact, append a change entry,
- * then update the session's pointer. A trace is content-addressed, so re-publishing the same
- * bytes is a no-op and two writers converge. The change entry goes before the pointer
- * (decision 7 of 18), so a write that fails between the two leaves an entry for a change that
- * did not happen (readers read the current metadata, so that is harmless) rather than a change
- * with no entry. The
- * pointer (`metadata.json`) is mutable and written with If-Match (X6.5): two writers updating
- * one session each re-read and retry instead of one losing the other's update. */
-
 import { createHash } from "node:crypto";
 import { CHANGE_SCHEMA, type ChangeEntry, type SessionMetadata } from "@seshi/model";
 import { decodeJson, encodeJson, type JsonUpdate, updateJson } from "./json";
@@ -56,15 +47,9 @@ export async function publishObject(
     const kept =
       mode === "immutable" ||
       (before.size === body.length && (await matches(store, key, before.etag, want, body)));
-    // An object kept is about to be named, so it is written again with its own bytes: its age
-    // then says a publish is in flight, and the orphan sweep (F2.5), which deletes only unnamed
-    // objects over an hour old, leaves it. Gone meanwhile (swept): write ours below.
     if (kept && (await refresh(store, key, contentType))) return "exists";
   }
   if (mode === "immutable") {
-    // Created with If-None-Match (X6.5): of two writers racing on one content hash, whose
-    // objects may differ outside the hash (provenance, LLM calls), the first wins and the
-    // second sees it exists, instead of replacing it or failing verification.
     try {
       await store.put(key, body, { contentType, ifNoneMatch: "*" });
     } catch (err) {
@@ -85,9 +70,6 @@ export async function publishObject(
   return "written";
 }
 
-/** Write the object at `key` again with its own bytes, so its last-modified time is now; false
- * when it is gone. Conditional on the version read: a writer that replaced it meanwhile wrote it
- * recently anyway. */
 async function refresh(store: Store, key: string, contentType: string): Promise<boolean> {
   const current = await store.get(key);
   if (current === null) return false;
@@ -168,7 +150,6 @@ export interface PointerWithChange extends JsonUpdate<SessionMetadata> {
   change: string | null;
 }
 
-/** Thrown out of a pointer update to write its change entry first. */
 class ChangeFirst extends Error {
   constructor(readonly entry: Omit<ChangeEntry, "schema">) {
     super("the change entry is written before the pointer moves");

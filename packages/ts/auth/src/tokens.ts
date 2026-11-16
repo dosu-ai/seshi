@@ -1,9 +1,3 @@
-/** The stored seshi tokens (X5.9): org keys, admin, device and service tokens, each a record
- * `tokens/<id>.json` holding the token's hash, its owner, scopes, default visibility, expiry and
- * revoked flag. Created with If-None-Match and changed with If-Match (X6.5). Records are cached
- * in memory for a short time, so a busy uploader costs no bucket read per call; a revocation in
- * this process takes effect at once, one in another process within the cache's lifetime. */
-
 import type { Claims, OwnerBasis, Visibility } from "@seshi/model";
 import {
   createToken,
@@ -18,12 +12,9 @@ import {
 import { hashMatches, isTokenId, mintToken, tokenId } from "./opaque";
 import type { Scope } from "./scopes";
 
-/** How long a token record is trusted from memory before it is read again. */
 export const TOKEN_CACHE_MS = 30_000;
-/** The most records the cache holds; the oldest go first. */
 const CACHE_ENTRIES = 10_000;
 
-/** A record as it may be shown: everything but the hash. */
 export type TokenInfo = Omit<TokenRecord, "hash">;
 
 export function tokenInfo(record: TokenRecord): TokenInfo {
@@ -52,7 +43,6 @@ export interface TokenListFilter {
   all?: boolean;
 }
 
-/** Whether a record still lets its holder in at `now`. */
 export function isLive(record: TokenRecord, now: Date): boolean {
   if (record.revoked) return false;
   return record.expires_at === null || Date.parse(record.expires_at) > now.getTime();
@@ -108,7 +98,6 @@ export class TokenService {
     return isLive(record, this.now()) ? record : undefined;
   }
 
-  /** A record by id, through the cache. */
   private async record(id: string): Promise<TokenRecord | null> {
     const cached = this.cache.get(id);
     if (cached && this.now().getTime() - cached.at < this.cacheMs) return cached.record;
@@ -134,8 +123,7 @@ export class TokenService {
     return read?.value ?? null;
   }
 
-  /** Every record that passes `filter`, in id order. There is no index: this reads every token
-   * record, which an org has hundreds of, not millions. */
+  /** Every record that passes `filter`, in id order. */
   async list(filter: TokenListFilter = {}): Promise<TokenRecord[]> {
     const now = this.now();
     const out: TokenRecord[] = [];
@@ -168,8 +156,6 @@ export class TokenService {
     return record;
   }
 
-  /** Revoke every live token of `owner` (X5.11), or only those of one kind; the ones revoked.
-   * Sessions stay, under the owner's id. */
   async revokeOwner(owner: string, kind?: TokenKind): Promise<TokenRecord[]> {
     const live = await this.list({ owner, ...(kind ? { kind } : {}) });
     const revoked: TokenRecord[] = [];

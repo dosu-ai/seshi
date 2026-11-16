@@ -1,13 +1,3 @@
-/** An Instance: everything one deployment runs, built from one config (X1.2). The store, auth,
- * the pipeline, source health, the connector scheduler and the job runner all hang off it, and
- * nothing is kept at module level, so tests build as many as they like in parallel, and a later
- * mode can host several orgs in one process.
- *
- * `buildInstance` does the I/O (open the bucket, read redaction packs, check the layout marker,
- * X1.4); `new Instance(parts)` assembles the rest without any, so tests that already hold a
- * store build one synchronously. The HTTP API (`@seshi/api`) serves an Instance; `seshi serve`,
- * the admin and sync commands, and local mode (X3.5) each build one. */
-
 import { randomBytes } from "node:crypto";
 import { hostname } from "node:os";
 import { Auth, AuthSettingsError, authSettings, ownershipAuthorizer } from "@seshi/auth";
@@ -68,8 +58,6 @@ import { type InstanceStatus, instanceStatus } from "./status";
 
 export type Role = (typeof ROLES)[number];
 
-/** Something stops the instance from being built: a setting, the bucket, the marker. The
- * message says which and is meant for the operator. */
 export class InstanceError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {
     super(message, options);
@@ -79,16 +67,11 @@ export class InstanceError extends Error {
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
-/** Everything an Instance is assembled from: what `buildInstance` opened and read, and
- * overrides for what is otherwise derived from `config` (tests, embedders). */
 export interface InstanceParts {
   config: ServerConfig;
   store: Store;
   storage: StorageView;
-  /** The transcript formats this binary reads: `apps/seshi` builds the registry from its
-   * integrations (X3.11). */
   formats: FormatRegistry;
-  /** The deployment the bucket belongs to (the layout marker's `deployment_id`, X1.4). */
   deployment: string;
   /** The connectors this binary has: the integrations' (`connectorsOf`). The built-in S3
    * poller (F6) is added unless one of these polls `s3` already. */
@@ -121,19 +104,15 @@ export interface InstanceParts {
   /** The stable instance id: health shards and the heartbeat's `host`. `server.instance_id`,
    * else the host name. */
   id?: string;
-  /** Jobs beyond the built-in ones. */
   jobs?: readonly JobFactory[];
   /** Session search (F10); built from `[search]` when omitted, none when null. */
   search?: SearchService | null;
   now?: () => Date;
-  /** How connectors reach their APIs and auth reaches the IdP. */
   fetch?: typeof fetch;
   log?: Logger;
-  /** Identifies this binary in layout markers (`seshi/0.9.0`). */
   client?: string;
 }
 
-/** A host name as an instance id: letters, digits, `_` and `-`, up to 64. */
 export function defaultInstanceId(host: string = hostname()): string {
   const id = host
     .replace(/[^A-Za-z0-9_-]+/g, "-")
@@ -142,13 +121,11 @@ export function defaultInstanceId(host: string = hostname()): string {
   return id === "" ? "seshi" : id;
 }
 
-/** A session writer's identity for `Instance.sessions`. */
 export interface SessionIdentity {
   owner: string;
   writer: Writer;
   owner_basis: OwnerBasis;
   claims?: Claims;
-  /** The default visibility of what it writes (a token's, X5.10). */
   visibility?: Visibility;
 }
 
@@ -163,20 +140,14 @@ export class Instance {
   readonly health: HealthCounters;
   readonly sources: Sources;
   readonly jobs: JobRunner;
-  /** Where span batches go: the span store, unless the parts named another. */
   readonly assembler: SpanAssembler;
   /** Session search over a local index (F10.3); undefined when `search.enabled` is false. */
   readonly search: SearchService | undefined;
   readonly roles: readonly Role[];
-  /** The stable instance id. */
   readonly id: string;
-  /** This process: unique per run (`<id>-<random>`), so the heartbeat tells two workers on
-   * one host apart. */
   readonly process: string;
   readonly client: string;
   readonly limits: Readonly<Limits>;
-  /** The rule set every write is redacted with (F2): what `GET /v1/redaction/rules` serves
-   * and `seshi redact backfill` applies. */
   readonly redaction: RuleSet;
   readonly log: Logger;
   readonly startedAt: Date;
@@ -235,14 +206,12 @@ export class Instance {
       client: this.client,
       now: this.now,
       redaction: this.redaction,
-      // Each source's own rules over [filter] (X4.10); uploads get [filter].
       filter: parts.filter ?? ((sourceId) => filterFor(config, sourceId)),
       limits: this.limits,
       reviewer: parts.reviewer,
       assembler: this.assembler,
       health: this.health,
       authorizer: ownershipAuthorizer(),
-      // The request, then the token's default, then the source's, then default_visibility.
       visibility: parts.visibility ?? ((sourceId) => visibilityFor(config, sourceId)),
     });
 
@@ -305,17 +274,14 @@ export class Instance {
     }
   }
 
-  /** Whether this instance serves the HTTP API. */
   get api(): boolean {
     return this.roles.includes("api");
   }
 
-  /** Whether this instance is the worker (X7.2). */
   get worker(): boolean {
     return this.roles.includes("worker");
   }
 
-  /** Start the background jobs this instance's roles call for (X7.1). */
   start(): void {
     if (this.closed) throw new Error("this instance is closed");
     this.jobs.start();
@@ -338,13 +304,10 @@ export class Instance {
     clearTimeout(timer);
   }
 
-  /** The workers, jobs and sources as status shows them (X7.5). */
   status(): Promise<InstanceStatus> {
     return instanceStatus(this);
   }
 
-  /** The session API over this instance's pipeline, writing as `identity` (the HTTP routes
-   * build one per principal). */
   sessions(identity: SessionIdentity): StoreSessionDB {
     return new StoreSessionDB({
       store: this.store,
@@ -361,21 +324,15 @@ export class Instance {
     });
   }
 
-  /** Local mode (X3.5): the session API for the one person who owns the bucket, writing as
-   * themselves (`local` writer, verified owner). */
   localSessions(owner: string): StoreSessionDB {
     assertOwner(owner);
     return this.sessions({ owner, writer: localWriter(owner), owner_basis: "verified" });
   }
 
-  /** The source config for `id`, if configured. */
   source(id: string): SourceConfig | undefined {
     return this.config.sources.find((s) => s.id === id);
   }
 
-  /** Run the retention job now, whatever this instance's roles: `seshi sync prune`, the
-   * one-shot a deployment with no worker runs from cron (X7.1), as the `retention` job does on
-   * the worker (X6.4, X4.8). */
   async prune(): Promise<PruneRun> {
     const record = await this.jobs.runNow("retention");
     const summary = record.last_summary ?? {};
@@ -435,57 +392,37 @@ export class Instance {
   }
 }
 
-/** What `Instance.prune` removed. */
 export interface PruneRun {
-  /** Drop records past `records.dropped_retention`. */
   dropped: number;
-  /** Failure records past `records.failed_retention`. */
   failed: number;
-  /** Source health shards past `records.health_retention`. */
   health: number;
-  /** Why the run stopped, when it failed. */
   error?: string;
 }
 
-/** What `Instance.assemble` did, summed over its passes. */
 export interface AssembleRun {
   passes: number;
-  /** Sessions published (any outcome the pipeline answered). */
   published: number;
-  /** Sessions still inside their quiet period after the last pass (F4.4). */
   waiting: number;
-  /** Sessions the pipeline recorded a permanent failure for (their marker cleared). */
   failed: number;
-  /** Sessions whose marker stayed because a batch arrived while they were published. */
   retouched: number;
-  /** Sessions skipped by an error (marker kept, tried again next time). */
   errors: number;
-  /** Markers removed without publishing (session deleted, or no envelope). */
   dropped: number;
-  /** How the pipeline answered, by status. */
   outcomes: Record<string, number>;
-  /** More sessions are ready than these passes handled: run it again. */
   more: boolean;
-  /** The first session that could not be assembled, and why. */
   error?: string;
 }
 
-/** How `buildInstance` opens and reads what an Instance needs. */
 export interface BuildOptions
   extends Omit<InstanceParts, "config" | "store" | "storage" | "deployment" | "connectors"> {
-  /** An open store, instead of opening `store.url` (tests, embedders). */
   store?: { store: Store; storage: StorageView };
   /** Env the bucket client falls back to for credentials (`AWS_*`, `S3_*`, `R2_*`) when
    * `[store]` sets none; `process.env` by default. */
   env?: Record<string, string | undefined>;
-  /** The integrations this binary was built with: their connectors are scheduled. */
   integrations?: readonly Integration[];
-  /** Connectors beyond the integrations' (tests, built-in pollers). */
   connectors?: readonly Connector[];
   /** Owners whose folders are written and read back once, so a bucket key that cannot write
    * fails now and not on the first session; the static tokens' owners by default. */
   probe?: readonly string[];
-  /** For tests: the deployment id a new prefix gets. */
   newDeploymentId?: () => string;
   /** Write the layout marker when the bucket has none (true by default). Read-only commands
    * pass false: they refuse a bucket no seshi server has used rather than claim it, so a
@@ -493,7 +430,6 @@ export interface BuildOptions
   initialize?: boolean;
 }
 
-/** The bucket options `[store]` gives, secrets revealed. */
 export function storeOptions(config: ServerConfig): {
   region?: string;
   endpoint?: string;
@@ -519,10 +455,6 @@ export function storeOptions(config: ServerConfig): {
   };
 }
 
-/** The rule set `redaction.packs` names (F2.1): each file read and validated, TOML packs as
- * they are and JSON rule files merged into the `legacy` pack, then compiled on top of the
- * built-in pack with every operator rule checked against its own test strings. A problem names
- * its file. With no packs, the built-in pack alone. */
 export async function readRedactionPacks(paths: readonly string[]): Promise<RuleSet> {
   const files: { path: string; text: string }[] = [];
   for (const path of paths) {
@@ -545,8 +477,6 @@ export async function readRedactionPacks(paths: readonly string[]): Promise<Rule
   }
 }
 
-/** The reviewer `[review]` describes (F3), its prompt files read; none without policies, so
- * nothing is sent anywhere. A policy that cannot run stops the build. */
 async function buildReviewer(
   config: ServerConfig,
   options: BuildOptions,

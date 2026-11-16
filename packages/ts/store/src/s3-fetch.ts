@@ -1,7 +1,3 @@
-/** S3's object API over `fetch` and SigV4, for runtimes without `Bun.S3Client` (Node). Keys
- * here are full bucket keys; `S3Store` adds its prefix. Virtual-hosted style against AWS,
- * path style against an explicit endpoint (R2, MinIO and most S3-compatible stores). */
-
 import type { Fetch } from "@seshi/model";
 import { encodeKeyPath, type SigningCredentials, sha256Hex, signRequest, uriEncode } from "./sigv4";
 
@@ -14,7 +10,6 @@ export interface FetchS3Options {
   fetch?: Fetch;
 }
 
-/** An S3 answer that was not a success, with S3's error `Code` when the body carried one. */
 export class S3HttpError extends Error {
   constructor(
     readonly status: number,
@@ -54,13 +49,11 @@ function xmlValues(xml: string, tag: string): string[] {
   return out;
 }
 
-/** An ETag header without its quotes (and a weak `W/` prefix); undefined when absent. */
 function unquote(value: string | null): string | undefined {
   if (!value) return undefined;
   return value.replace(/^W\//, "").replace(/^"|"$/g, "");
 }
 
-/** An ETag as a conditional header wants it: quoted. */
 function quote(etag: string): string {
   return etag.startsWith('"') ? etag : `"${etag}"`;
 }
@@ -161,8 +154,6 @@ export class FetchS3Client {
     };
   }
 
-  /** DELETE, with `If-Match` when given. Which S3-compatible backends honour it on DELETE is
-   * still to check (X6.5); one that ignores it deletes unconditionally. */
   async delete(key: string, condition: { ifMatch?: string } = {}): Promise<void> {
     const headers: Record<string, string> = {};
     if (condition.ifMatch !== undefined) headers["if-match"] = quote(condition.ifMatch);
@@ -191,9 +182,6 @@ export class FetchS3Client {
     return { keys, truncated: xmlValues(xml, "IsTruncated")[0] === "true" };
   }
 
-  /** One page of ListObjectsV2 with what each object is: its size, ETag and last change, so a
-   * poller can tell a new or changed object from the listing alone (F6.2). Pages continue
-   * with `startAfter` (the last key of the page before) or S3's `continuationToken`. */
   async listObjects(options: {
     prefix: string;
     maxKeys: number;
@@ -248,8 +236,6 @@ export class FetchS3Client {
       headers.range = `bytes=${options.start}-`;
     }
     if (options.ifMatch !== undefined) headers["if-match"] = quote(options.ifMatch);
-    // Not decoded by fetch: a small object stored with `Content-Encoding: gzip` could inflate
-    // without bound before anyone checked its size. The caller unzips with a limit.
     const response = await this.send("GET", this.url(key), undefined, headers, {
       decompress: false,
     });
@@ -281,7 +267,6 @@ export class FetchS3Client {
   }
 }
 
-/** One object in a listing. */
 export interface ListedObject {
   /** The full bucket key. */
   key: string;
@@ -292,15 +277,12 @@ export interface ListedObject {
   last_modified?: string;
 }
 
-/** A page of `listObjects`. */
 export interface ObjectListing {
   objects: ListedObject[];
   truncated: boolean;
-  /** S3's token for the next page, when it sent one. */
   next_token?: string;
 }
 
-/** What `getObject` read. */
 export interface FetchedObject {
   /** The bytes from `start` to the end of the object. */
   body: Uint8Array;

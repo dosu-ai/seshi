@@ -1,37 +1,7 @@
-/** Datadog Trajectory's session file format → trajectory-v1 records.
- *
- * Trajectory (github.com/datadog-labs/trajectory) is Datadog's capture daemon for coding agents.
- * It records each session it captures, from Claude Code, Codex, Cursor, Pi and the rest, as one
- * canonical event per line at `~/.trajectory/trajectories/sessions/<date>/session-<id>.jsonl`.
- * This server has nothing to do with the daemon itself; it reads that format when a client
- * posts such a file as a transcript.
- * `@letta-ai/trajectory` has no adapter for it, so this is the server's own, and what it
- * produces is the same trajectory-v1 the Letta adapters produce, hashed, redacted and stored
- * the same way. The events are the daemon's shape, the same for every client it captures, so
- * one adapter covers them all and the records say which client ran the session in the meta
- * record's `source` (`datadog-trajectory:claude-code`).
- *
- * A session the daemon imported from a client's own history (`trajectory session import`,
+/** A session the daemon imported from a client's own history (`trajectory session import`,
  * `_backfilled: true`) is thinner than one it captured live: `session_start` carries `cwd`
  * instead of `project_dir`, a tool call appears only as its `phase: post` event, and the
- * agent's prose is not in it at all.
- *
- * What ships, by `event_type`:
- *
- * - `session_start`: the meta record (`project_dir` or `cwd`, `git_branch`, `model`).
- * - `user_prompt` / `input_prompt`: a user record; an observation when the daemon says nobody
- *   typed it (`provenance.actor_type` other than `human`).
- * - `tool_use` with `phase: pre`: an assistant tool call, under the client's own tool name
- *   (`native_tool_name`, else the daemon's shared `tool_name`).
- * - `tool_use` with `phase: post`: the tool result (`output_summary`, else the `error`), with
- *   `ok` from `success`. One whose call was never seen (a backfilled session) gets the call
- *   synthesized in front of it, so the result has something to answer.
- * - `agent_message`: a reasoning record for `thinking_text`, an assistant record for `text`.
- *
- * Everything else is dropped: `turn_end`, `llm_call`, `session_end`, `inventory.snapshot` and
- * the permission and elicitation events carry no conversation, and `subagent_start` /
- * `subagent_stop` repeat what the `Agent` tool's result already says. The subagent's own session
- * arrives as its own stream. */
+ * agent's prose is not in it at all. */
 
 import type {
   AssistantToolCallRecord,
@@ -40,14 +10,10 @@ import type {
   ToolResultRecord,
 } from "@seshi/model";
 
-/** The `agent` these sessions are filed under, and the prefix of their trace `source`. */
 export const DATADOG_TRAJECTORY = "datadog-trajectory" as const;
 
 type Event = Record<string, unknown>;
 
-/** Thrown for a stream this adapter cannot turn into a session. `code` is what the server
- * reports (`missing_session_start`); `missing_user_records` and `missing_assistant_records` mean
- * there is no conversation in it yet. */
 class DatadogTrajectoryError extends Error {
   constructor(
     readonly code: "missing_session_start" | "missing_user_records" | "missing_assistant_records",
@@ -67,14 +33,11 @@ function parseEvents(transcript: string): Event[] {
       if (typeof value === "object" && value !== null && !Array.isArray(value)) {
         events.push(value as Event);
       }
-    } catch {
-      // Not an event; the daemon's own files are one JSON object per line.
-    }
+    } catch {}
   }
   return events;
 }
 
-/** A string with something in it, else undefined. */
 function present(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() !== "" ? value : undefined;
 }
@@ -102,8 +65,6 @@ function metaOf(start: Event): MetaRecord {
   return meta;
 }
 
-/** Whether the daemon attributes an input to a person. It marks every prompt with who produced
- * it; only one it does not attribute to a human is something the agent observed. */
 function typedByHuman(event: Event): boolean {
   const provenance = event.provenance;
   if (typeof provenance !== "object" || provenance === null) return true;
@@ -129,14 +90,11 @@ export function normalizeDatadogTrajectory(
   const events = parseEvents(transcript);
   const start = options.partial ? undefined : sessionStart(events);
   const records: NormalizedRecord[] = start ? [metaOf(start)] : [];
-  // An event without a timestamp takes the last one seen, so order is kept.
   let last = present(start?.timestamp) ?? present(start?.started_at) ?? "";
   let asked = false;
   let answered = false;
-  /** Tool calls seen as `phase: pre`, so a result can tell whether its call was shipped. */
   const called = new Set<string>();
 
-  /** The assistant record for one tool call. */
   function toolCall(event: Event, id: string, timestamp: string): AssistantToolCallRecord | null {
     const name = present(event.native_tool_name) ?? present(event.tool_name);
     if (name === undefined) return null;
@@ -174,9 +132,6 @@ export function normalizeDatadogTrajectory(
           called.add(id);
           records.push(call);
         } else if (event.phase === "post") {
-          // A result whose call is not in the stream: in a backfilled session there never was
-          // one, so the call is what the result's own event says it was, with whatever input
-          // the event kept. In a chunk of a live session, the call was in an earlier chunk.
           const orphan = !options.partial || event._backfilled === true;
           if (!called.has(id) && orphan) {
             const call = toolCall(event, id, timestamp);

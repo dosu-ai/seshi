@@ -1,21 +1,3 @@
-/** The HTTP surface: one `fetch(Request) → Response` over an Instance (`@seshi/instance`), which
- * the tests call directly and `seshi serve` serves. The instance holds the bucket, auth, the
- * pipeline and the job status; the routes only translate HTTP. Every call but `/healthz`, `/v1/auth/config` and the IdP exchange
- * carries a credential (X5): the org key with the caller's username, a session, device, admin
- * or service token, or a static token from config. `@seshi/auth` turns it into a principal with
- * a role and scopes, and the routes check the scope a call needs and, for a session, its owner
- * and visibility (X5.3, X5.10): a member reads their own sessions and the org's, an admin or a
- * service reads all.
- *
- * Uploads become envelopes and go through the pipeline inline (X4.4): normalized, redacted,
- * filtered and reviewed in memory, and only the trace written (X6.3), so the laptop never holds
- * a bucket credential and the bucket never holds an unredacted byte. A principal always writes
- * its own sessions; the pipeline's authorize stage (`ownershipAuthorizer`) holds every write to
- * that.
- *
- * Reads take `?owner=` to read another owner's sessions; without it a caller reads its own, and
- * `[auth.owner_aliases]` folds an old owner id into its new one (X5.8). */
-
 import { createHash, timingSafeEqual } from "node:crypto";
 import {
   AuthRequestError,
@@ -91,7 +73,6 @@ import { searchRequestOf } from "./search";
 
 export type { StorageView };
 
-/** How long a client is told to wait while the search index is being built. */
 const SEARCH_RETRY_AFTER_S = 5;
 
 type Handler = (ctx: Context) => Promise<Response> | Response;
@@ -130,10 +111,8 @@ function error(status: number, code: string, message: string): Response {
   return json({ error: { code, message } }, status);
 }
 
-/** The header a retraction carries its secret in (F9.7); the same name as the client's. */
 const RETRACT_HEADER = "x-seshi-retract";
 
-/** The hash a retraction secret is kept as: sha256 of its text, in hex. */
 function retractHashOf(secret: string): string {
   return createHash("sha256").update(secret, "utf8").digest("hex");
 }
@@ -151,9 +130,6 @@ function bearer(request: Request): string | undefined {
   return scheme?.toLowerCase() === "bearer" && token ? token : undefined;
 }
 
-/** The largest request body an upload of `maxUploadBytes` of transcript needs, decoded: the
- * transcript as a JSON string (escaping grows it) plus the other fields. `seshi serve` caps the
- * request at it too. */
 export function maxBodyBytes(maxUploadBytes: number): number {
   return maxUploadBytes * 2 + 1024 * 1024;
 }
@@ -162,10 +138,6 @@ function tooLarge(max: number): HttpError {
   return new HttpError(413, "too_large", `request body exceeds ${max} bytes`);
 }
 
-/** The body, gunzipped when sent gzipped, refused past `max` bytes either way: a small gzipped
- * body can inflate to far more than any upload. A `Content-Length` past `max` is refused before
- * anything is read; otherwise the body is read as a stream and refused at the first chunk past
- * `max`, so no route holds more of a body (an unauthenticated caller's included) than its limit. */
 async function readBody(request: Request, max: number): Promise<Uint8Array> {
   const declared = Number(request.headers.get("content-length") ?? Number.NaN);
   if (Number.isFinite(declared) && declared > max) throw tooLarge(max);
@@ -176,8 +148,6 @@ async function readBody(request: Request, max: number): Promise<Uint8Array> {
   const stream = request.body;
   if (!stream) return new Uint8Array();
   if (!encoding || encoding === "identity") return readCapped(stream, max, () => tooLarge(max));
-  // Inflated as a stream while it arrives and stopped at the first chunk past `max`, so a gzip
-  // bomb costs the cap and never blocks the event loop inflating.
   return inflateCapped(
     stream,
     { wire: max, inflated: max },
@@ -214,8 +184,6 @@ function str(body: Record<string, unknown>, key: string, required = false): stri
   return value;
 }
 
-/** `agent` is the trajectory source name (`claude-code`, not `claude`): one spelling, since the
- * archive id is derived from it. */
 function sourceOf(formats: Instance["formats"], agent: string): string {
   if (!formats.has(agent)) {
     throw new HttpError(
@@ -249,9 +217,6 @@ function visibilityField(value: unknown, where = "visibility"): Visibility | und
   return value;
 }
 
-/** The writer a principal's writes record (X5.5): through the upload route, filed under
- * `upload`, or for a service token under its own source, so the source's visibility, filter and
- * health apply to what it writes (X5.4, X5.10). */
 function writerFor(principal: Principal): Writer {
   return {
     kind: principal.kind,
@@ -261,7 +226,6 @@ function writerFor(principal: Principal): Writer {
   };
 }
 
-/** Who the caller is, as `GET /v1/me` answers it. */
 function identityOf(principal: Principal, storage: StorageView): Identity {
   return {
     owner: principal.owner,
@@ -278,8 +242,6 @@ function identityOf(principal: Principal, storage: StorageView): Identity {
 
 const TOKEN_KINDS: readonly TokenKind[] = ["org", "admin", "device", "service"];
 
-/** The routes over `instance`. An instance without the api role (`--roles worker`) answers
- * `/healthz` only, so a container's health check still works (X7.1). */
 export function createApp(instance: Instance) {
   const { store, storage, formats, auth, pipeline, now } = instance;
   const aliases = auth.aliases;
@@ -297,20 +259,16 @@ export function createApp(instance: Instance) {
     routes.push({ method, pattern, names, handler });
   }
 
-  /** The principal the request's credential stands for; `Unauthorized` (401) otherwise. */
   function authenticate(request: Request): Promise<Principal> {
     return auth.authenticate(bearer(request), request.headers.get(USER_HEADER) ?? undefined);
   }
 
-  /** The principal, when its credential carries `scope`; 403 otherwise. */
   async function caller(request: Request, scope: Scope): Promise<Principal> {
     const principal = await authenticate(request);
     requireScope(principal, scope);
     return principal;
   }
 
-  /** The session API over the instance's pipeline, writing as the principal: its own sessions,
-   * its writer, its owner basis, claims and default visibility (X5.5, X5.10). */
   function writerClient(principal: Principal): StoreSessionDB {
     return instance.sessions({
       owner: principal.owner,
@@ -321,18 +279,12 @@ export function createApp(instance: Instance) {
     });
   }
 
-  /** The owner a read is about: `?owner=`, else the caller's own. */
   function ownerOf(url: URL, principal: Principal): string {
     const owner = url.searchParams.get("owner") ?? principal.owner;
     if (!isOwner(owner)) throw new HttpError(400, "bad_query", "owner is not an owner id");
     return owner;
   }
 
-  /** A session the principal may read, from the folders the owner's sessions are stored under
-   * (aliases applied), with the folder it was found in. A session it may not read is "not
-   * found", so its existence is not given away. So is a stub (F3.4: a session whose first
-   * envelope model review dropped, with no trace), which is never served; with `stubs`, the
-   * session's owner and admins find one, to delete it or change who will read it. */
   async function readable(
     principal: Principal,
     owner: string,
@@ -359,13 +311,9 @@ export function createApp(instance: Instance) {
     };
   }
 
-  // --- health -----------------------------------------------------------------
-
   route("GET", "/healthz", () => json({ ok: true, version: VERSION }));
 
   if (!instance.api) return { fetch: dispatch(routes), auth, pipeline };
-
-  // --- auth (X5.2, X5.7) ------------------------------------------------------------
 
   route("GET", "/v1/auth/config", () => json({ version: VERSION, ...auth.modes() }));
 
@@ -401,8 +349,6 @@ export function createApp(instance: Instance) {
     }
   });
 
-  // --- identity -----------------------------------------------------------------
-
   route("GET", "/v1/me", async ({ request }) => {
     const principal = await authenticate(request);
     return json(identityOf(principal, storage));
@@ -417,14 +363,6 @@ export function createApp(instance: Instance) {
     return json(await listOwners(store, { after, limit: intParam(url, "limit", 100, 1000) }));
   });
 
-  // --- sessions ---------------------------------------------------------
-
-  /** `ingest` as a response: 201 for a new trace; 200 for a duplicate, an unchanged, filtered
-   * or dropped session; 422 for a transcript it refuses; 409 `offset_mismatch` for a chunk that
-   * does not start where the session's log ends (`expected` says where it does: 0 while the
-   * session has no trace), 409 `conflict` for a whole upload that does not extend the session
-   * without `replace`; 403 for a `replace` by someone other than the original writer (with the
-   * org key: without the session's retraction secret). */
   async function stored(
     db: StoreSessionDB,
     upload: Upload,
@@ -492,9 +430,6 @@ export function createApp(instance: Instance) {
         `an idempotency key must be at most ${MAX_IDEMPOTENCY_KEY_LENGTH} characters`,
       );
     }
-    // A replace (or a rebuild, which is one) proves the uploading machine with the session's
-    // retraction secret (F9.7), in the same header a retraction uses; the org key needs it
-    // (X5.12, `mayReplace`).
     const retractSecret =
       replace || rebuild ? (request.headers.get(RETRACT_HEADER) ?? undefined) : undefined;
     const upload: Upload = {
@@ -525,9 +460,6 @@ export function createApp(instance: Instance) {
     return stored(writerClient(principal), upload, retractSecret ? { retractSecret } : {});
   });
 
-  /** One owner's sessions a page at a time, across the folders aliases fold into it (up to
-   * `limit` keys from each), as far as the principal may read them. The cursor is the last key
-   * listed, which says which folder it is in. */
   route("GET", "/v1/sessions", async ({ request, url }) => {
     const principal = await caller(request, "sessions:read");
     const owner = ownerOf(url, principal);
@@ -547,10 +479,8 @@ export function createApp(instance: Instance) {
         else if (after > prefix) continue;
       }
       const page = await listSessions(store, folder, { startAfter, limit });
-      // A stub (F3.4) has no trace to read: it is not listed.
       sessions.push(...page.sessions.filter((m) => !isStub(m) && canRead(principal, m, aliases)));
       cursor = page.cursor ?? cursor;
-      // A page ends inside a folder; the next one picks up there and goes on to the rest.
       if (page.truncated) {
         truncated = true;
         break;
@@ -559,10 +489,6 @@ export function createApp(instance: Instance) {
     return json({ sessions, cursor, truncated });
   });
 
-  /** The caller's own sessions an older normalizer built (X4.9), for the uploader that sent
-   * them: it sends each again whole with `rebuild`. Paged by key as `GET /v1/sessions` is, so a
-   * page can hold none and still be truncated. `sessions:write`, since that is what the
-   * uploader's credential holds; only the caller's own sessions, and only their ids. */
   route("GET", "/v1/sessions/stale", async ({ request, url }) => {
     const principal = await caller(request, "sessions:write");
     const after = url.searchParams.get("after") ?? undefined;
@@ -582,8 +508,6 @@ export function createApp(instance: Instance) {
     return json(metadata);
   });
 
-  /** The head trace, or `?hash=`, rendered as `?format=` (`seshi` by default), of a session
-   * the principal may read. */
   async function renderedTrace(request: Request, params: Record<string, string>, url: URL) {
     const principal = await caller(request, "sessions:read");
     const { agent, sessionId } = sessionParams(params);
@@ -602,8 +526,6 @@ export function createApp(instance: Instance) {
     }
     const hash = url.searchParams.get("hash") ?? metadata.head;
     if (!hash) throw new HttpError(404, "no_trace", "session has no trace");
-    // Only a trace the session names: an object it no longer names (one a stopped backfill or
-    // replace left behind) holds what newer rules or a rewrite took out.
     if (!metadata.traces.some((ref) => ref.content_hash === hash)) {
       throw new HttpError(404, "not_found", "no such trace");
     }
@@ -622,8 +544,6 @@ export function createApp(instance: Instance) {
     return json((await renderedTrace(request, params, url)).body);
   });
 
-  /** The same trace as a download: `Content-Disposition: attachment` with a file name that
-   * says which session, which trace and which format. */
   route("GET", "/v1/sessions/:agent/:session_id/export", async ({ request, params, url }) => {
     const { agent, sessionId, format, hash, body } = await renderedTrace(request, params, url);
     const name = `${agent}-${sessionId}-${hash.slice(0, 12)}.${format}.json`.replace(
@@ -633,11 +553,6 @@ export function createApp(instance: Instance) {
     return json(body, 200, { "content-disposition": `attachment; filename="${name}"` });
   });
 
-  /** What model review decided for each stored write of a session (F3.8). Audit records are
-   * for admins: an admin gets them whole (policy, models, findings by location, failures);
-   * anyone else who may read the session sees only that each write was allowed, redacted or
-   * skipped, never the findings (F3 access). Drops are not here: nothing of them is in the
-   * session; `seshi sync dropped` lists them. */
   route("GET", "/v1/sessions/:agent/:session_id/reviews", async ({ request, params, url }) => {
     const principal = await caller(request, "sessions:read");
     const { agent, sessionId } = sessionParams(params);
@@ -665,7 +580,6 @@ export function createApp(instance: Instance) {
     if (visibility === undefined) {
       throw new HttpError(400, "missing_field", "visibility is required");
     }
-    // A stub's visibility is what its first trace will have (F3.4).
     const { folder, metadata: current } = await readable(
       principal,
       ownerOf(url, principal),
@@ -695,10 +609,6 @@ export function createApp(instance: Instance) {
     return json(metadata);
   });
 
-  /** A retraction (F9.7): the machine that uploaded a session removes it with the secret whose
-   * hash it sent, using its normal upload credential. It works only on the caller's own
-   * sessions, only while `capture.allow_retract` is on, and only with the right secret; the
-   * tombstone says `retracted`. */
   async function retracted(request: Request, params: Record<string, string>, secret: string) {
     const principal = await caller(request, "sessions:write");
     const { agent, sessionId } = sessionParams(params);
@@ -709,9 +619,6 @@ export function createApp(instance: Instance) {
         "this server does not allow retraction (capture.allow_retract)",
       );
     }
-    // The caller's own folders only (`owner` is ignored), aliases applied: a session uploaded
-    // under an owner id that `[auth.owner_aliases]` folds into the caller's (an org-key
-    // username before an IdP sign-in, X5.8) is still the caller's to retract.
     let folder: string | undefined;
     let metadata: SessionMetadata | null = null;
     for (const candidate of aliases.storedAs(principal.owner)) {
@@ -725,7 +632,6 @@ export function createApp(instance: Instance) {
       throw new HttpError(404, "not_found", "no such session");
     }
     if (metadata.status === "redacted") {
-      // An earlier tombstone whose answer was lost may have left objects: remove them first.
       await finishTombstone({ store, owner: folder, agent, session_id: sessionId });
       throw new HttpError(410, "redacted", "session was already removed");
     }
@@ -754,7 +660,6 @@ export function createApp(instance: Instance) {
     if (secret !== null) return retracted(request, params, secret);
     const principal = await caller(request, "sessions:delete");
     const { agent, sessionId } = sessionParams(params);
-    // A stub is deleted too (F3.4), so what would have extended it is refused from then on.
     const { folder } = await readable(principal, ownerOf(url, principal), agent, sessionId, {
       stubs: true,
     });
@@ -772,8 +677,6 @@ export function createApp(instance: Instance) {
     return json(result);
   });
 
-  /** One owner's change feed. A member reading someone else's sees the entries of sessions
-   * that are visible to the org now (X5.10). */
   route("GET", "/v1/changes", async ({ request, url }) => {
     const principal = await caller(request, "sessions:read");
     const owner = ownerOf(url, principal);
@@ -790,7 +693,6 @@ export function createApp(instance: Instance) {
       let ok = visible.get(archive);
       if (ok === undefined) {
         const metadata = await readMetadata(store, owner, archive);
-        // A stub's entries (a visibility change) are about a session not served (F3.4).
         ok = metadata !== null && !isStub(metadata) && canRead(principal, metadata, aliases);
         visible.set(archive, ok);
       }
@@ -799,11 +701,6 @@ export function createApp(instance: Instance) {
     return json({ ...page, entries });
   });
 
-  // --- search (F10) -----------------------------------------------------------------
-
-  /** Keyword search over the sessions the caller may read (F10.4): the server adds the
-   * permission filter from the verified principal; nothing in the request widens it. 503 while
-   * this instance's index is first built from the change feed (F10.3). */
   route("GET", "/v1/search", async ({ request, url }) => {
     const principal = await caller(request, "search");
     if (!instance.search) {
@@ -823,8 +720,6 @@ export function createApp(instance: Instance) {
       throw err;
     }
   });
-
-  // --- tokens (X5.9, X5.11) -------------------------------------------------------
 
   function tokenKind(value: unknown): TokenKind {
     if (typeof value !== "string" || !(TOKEN_KINDS as readonly string[]).includes(value)) {
@@ -890,8 +785,6 @@ export function createApp(instance: Instance) {
     await caller(request, "tokens:admin");
     const body = await readJson(request, 64 * 1024);
     const owner = str(body, "owner", true) as string;
-    // A person's or service account's id: the org key (owner `*`) is rotated, not revoked by
-    // owner (X5.11).
     if (!isOwner(owner)) throw new HttpError(400, "bad_field", "owner is not an owner id");
     const kind = body.kind === undefined ? undefined : tokenKind(body.kind);
     const revoked = await auth.tokens.revokeOwner(owner, kind);
@@ -905,22 +798,11 @@ export function createApp(instance: Instance) {
     return json({ token: tokenInfo(record) });
   });
 
-  // --- admin (X7.5) ----------------------------------------------------------------
-
-  /** The worker, its jobs and every source: last run, last error, backlog, drop and failure
-   * counts. Admin only. */
   route("GET", "/v1/admin/jobs", async ({ request }) => {
     await caller(request, "sources:admin");
     return json(await instance.status());
   });
 
-  // --- redaction (F2.4) -------------------------------------------------------------
-
-  /** The org's rule packs, for a client that redacts before upload: any signed-in caller, the
-   * uploader's write-only device token included. They may say what the org considers secret,
-   * so they are not public. The built-in pack is not sent (the client has its own); `rule_set`
-   * lets the client tell whether its rule set is the server's. The ETag is the rule-set hash,
-   * so a client that sends it back gets 304 until the server's packs change. */
   route("GET", "/v1/redaction/rules", async ({ request }) => {
     await authenticate(request);
     const document = rulesDocument(instance.redaction);
@@ -931,8 +813,6 @@ export function createApp(instance: Instance) {
     }
     return json(document, 200, { etag, "cache-control": "private, no-cache" });
   });
-
-  // --- OTLP ingest (F4), outside /v1: OTLP's own v1 follows ----------------------
 
   const traces = otlpTraces(instance, {
     bearer,
@@ -945,12 +825,6 @@ export function createApp(instance: Instance) {
   });
   route("POST", "/otlp/v1/traces", ({ request }) => traces(request));
 
-  // --- admin: sources (X4.8, X6.4) ------------------------------------------------------
-  // What `seshi sync status|failed|dropped` read over HTTP. A source no longer in [[sources]]
-  // keeps its records until retention prunes them, so its records can still be read.
-
-  /** Whether `id` names a source this deployment knows: `upload`, a configured one, or (with
-   * `withRecords`) one that still has records. */
   async function knownSource(id: string, withRecords: boolean): Promise<boolean> {
     if (id === UPLOAD_SOURCE || instance.source(id) !== undefined) return true;
     return withRecords && (await sourcesWithRecords(store)).includes(id);
@@ -964,8 +838,6 @@ export function createApp(instance: Instance) {
     return intParam(url, "days", 7, 90);
   }
 
-  /** Every configured source and `upload`: checkpoint, record counts and health over
-   * `?days=` (7 by default). */
   route("GET", "/v1/admin/sources", async ({ request, url }) => {
     await caller(request, "sources:admin");
     const days = daysParam(url);
@@ -982,8 +854,6 @@ export function createApp(instance: Instance) {
     return json(await instance.sources.status(id, { days: daysParam(url) }));
   });
 
-  /** A source's failure or drop records, oldest first: why each envelope was not stored,
-   * never its content. `?since=` (a time) or `?after=` (the last key seen), `?limit=`. */
   route("GET", "/v1/admin/sources/:id/:kind", async ({ request, params, url }) => {
     await caller(request, "sources:admin");
     const id = decodeURIComponent(params.id as string);
@@ -1014,8 +884,6 @@ export function createApp(instance: Instance) {
   return { fetch: dispatch(routes), auth, pipeline };
 }
 
-/** One handler for every route: the method and path pick it, and the errors the routes throw
- * become their statuses. */
 function dispatch(routes: readonly Route[]): (request: Request) => Promise<Response> {
   return async function fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);

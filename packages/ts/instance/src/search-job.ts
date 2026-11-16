@@ -1,10 +1,3 @@
-/** The search indexer as a job (F10.2, F10.3, X7): every instance that serves search keeps its
- * own index and its own cursors in the change feed, so the job is placed on `every` instance
- * with the api role, not on the worker. A worker-only instance serves no search and gets no
- * index; local mode (no roles) reads the feed itself before it answers (`SearchService
- * .catchUp`). Each run reads up to a budget of change entries and says `more` when it stopped
- * at it, so a first build of a large bucket runs back to back until it has caught up. */
-
 import type { JobHost } from "./builtin-jobs";
 import type { Job } from "./jobs";
 

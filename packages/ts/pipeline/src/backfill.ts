@@ -1,57 +1,3 @@
-/** Redaction backfill (F2.5): apply the current rule set to sessions already stored, so a rule
- * added today also covers what was stored before it.
- *
- * For each session with a trace not written under the current rule set (`traces[].rule_set`;
- * for a trace without one, the session's `redaction.rule_set`), its traces (the head and its
- * continuations, in order) are read and joined into one record list, which is redacted with the
- * current rules. Then:
- *
- * - nothing changed: only the rule set is recorded on the session, so the next run skips it;
- * - something changed: one new trace object holds the whole redacted session; a `published`
- *   change entry with `replace: true` and `reason: "redacted"` tells readers to drop what they
- *   held of the session and take the new trace (written before the pointer moves, decision 7 of
- *   18); the pointer is moved to it (If-Match, X6.5; a session another write changed meanwhile
- *   is left for the next run); and every earlier trace object is deleted (they hold what the
- *   new rules take out, F2.5's "deleted, not kept").
- *
- * Redaction cannot be undone: unredacted data is never stored, so there is nothing to restore
- * from. The counts the new rules found are added to the session's (F2.3). Idempotent: a session
- * redacted with the current rules is skipped, and redacted records redact to themselves, so a
- * run can be stopped and started again.
- *
- * Span records (09): a session's records under `spans/` that an earlier rule set redacted are
- * redacted again with the current rules and rewritten in place, whatever became of its traces
- * (a session the assembler published after the rules changed is `current`, but its span records
- * are not). Their counts stay on the records, which the assembler adds to the session when it
- * next publishes it; they are not added to the session's or the report's counts here, since the
- * span records repeat what the traces hold. A stub (F3.4: a session whose first envelopes review
- * dropped) has no trace, but its span records are redacted again all the same. Spans of sessions
- * never published (pending, or refused by the filter) have no metadata: after an owner's
- * sessions, the owner's session folders are walked for span records with no metadata beside
- * them, which are redacted again the same way.
- *
- * A span record keeps its input as messages stored once per session (`spans/messages/`, by
- * content hash, F4.4). A record is redacted with its input rebuilt from them; a message the new
- * rules change is stored again under its new hash and the record rewritten to name it. Once a
- * session's records are done, every message a rewritten record stopped naming and no record
- * names any more is deleted: it holds what the new rules take out.
- *
- * The sweep (F2.5, revised 15 Nov 2026): each session looked at (every one with a trace, whatever
- * its outcome) is then swept: its trace objects no metadata names that are over an hour old are
- * deleted (`sweepTraces`). That finishes what an earlier run stopped partway left behind (the
- * old objects of a session it rewrote before it could delete them, which the next run finds
- * `current`), and anything a stopped replace or publish left in the session. It runs session by
- * session rather than once at the end, so a run over a large bucket keeps no list of what it
- * touched; a run stopped by the signal skips it for the session it stopped in. A dry run reports
- * what the sweep would delete. The report's `sweep` sums them.
- *
- * Not touched: `normalized` (the uploader's log state). A later whole upload of such a session,
- * redacted from the transcript with the same new rules, may not hash to the stored prefix; it
- * is then a 409 `conflict`, which the uploader answers with `replace` (as after any rules
- * change, 04). Chunks continue as before. `applied` is cleared of the answers that name trace
- * objects, which are gone (as a replace does, X4.6); its drops stay, since they name none and
- * explain the records review left out between or after the traces. */
-
 import {
   canonicalJson,
   isStub,
@@ -89,7 +35,6 @@ import {
 import { getTrace, listSessions, type WithheldCallIds } from "./ingest";
 import { redactSpanPart } from "./spans";
 
-/** What became of one session. */
 export type BackfillOutcome =
   /** Redacted with the current rules already. */
   | "current"
@@ -124,9 +69,7 @@ export interface BackfillSession {
 
 export interface BackfillOptions {
   store: Store;
-  /** The current rules (`ruleRedactor(instance.redaction)`). */
   redactor: Redactor;
-  /** Who the change entries name (X5.5). */
   writer: Writer;
   /** Only sessions written (`updated_at`) at or after this; every session when absent. */
   since?: Date;
@@ -138,7 +81,6 @@ export interface BackfillOptions {
   limit?: number;
   signal?: AbortSignal;
   now?: () => Date;
-  /** Told of each session as it is done (progress). */
   onSession?: (session: BackfillSession) => void;
 }
 
@@ -166,11 +108,9 @@ export interface BackfillSweep {
   /** Unnamed objects kept because they are under an hour old. */
   young: number;
   errors: number;
-  /** The first error. */
   error?: string;
 }
 
-/** Sweep one session the backfill looked at, adding to the report. */
 async function sweepAfter(
   done: BackfillSession,
   options: BackfillOptions,
@@ -189,7 +129,6 @@ async function sweepAfter(
   if (swept.deleted > 0) done.swept = swept.deleted;
 }
 
-/** The sessions under one owner, every page. */
 async function* sessionsOf(store: Store, owner: string): AsyncGenerator<SessionMetadata> {
   let startAfter: string | undefined;
   for (;;) {
@@ -200,10 +139,6 @@ async function* sessionsOf(store: Store, owner: string): AsyncGenerator<SessionM
   }
 }
 
-/** The archives of `owner` that hold span records but no metadata: sessions never published
- * (pending, or refused by the filter or review). Keys sort `metadata.json` before `spans/`, so
- * an archive's metadata, if it has any, is seen before its spans; listing steps over each
- * archive's spans once it reaches them. */
 async function* unpublishedSpanArchives(store: Store, owner: string): AsyncGenerator<string> {
   const prefix = keys.sessions(owner);
   let after: string | undefined;
@@ -220,7 +155,6 @@ async function* unpublishedSpanArchives(store: Store, owner: string): AsyncGener
       if (name === "metadata.json") published = archive;
       else if (name.startsWith("spans/")) {
         if (published !== archive) yield archive;
-        // `0` sorts right after `/`: past every span record of this archive.
         after = `${prefix}${archive}/spans0`;
         stepped = true;
         break;
@@ -251,8 +185,6 @@ function addCounts(into: Record<string, number>, counts: Readonly<Record<string,
   }
 }
 
-/** A session's traces as one: the head's records, then each continuation's past its meta
- * record (a continuation repeats the head's), and every LLM call once. */
 function joined(traces: readonly Trace[]): {
   records: NormalizedRecord[];
   llm_calls: LlmCall[];
@@ -267,7 +199,6 @@ function joined(traces: readonly Trace[]): {
   return { records, llm_calls: [...calls.values()] };
 }
 
-/** Thrown inside the pointer update when the session is no longer what was read. */
 class Moved extends Error {}
 
 const sameTraces = (a: SessionMetadata, b: SessionMetadata) =>
@@ -275,7 +206,6 @@ const sameTraces = (a: SessionMetadata, b: SessionMetadata) =>
   a.head === b.head &&
   a.traces.map((t) => t.content_hash).join() === b.traces.map((t) => t.content_hash).join();
 
-/** One session through the current rules. */
 async function backfillSession(
   session: SessionMetadata,
   options: BackfillOptions,
@@ -296,8 +226,6 @@ async function backfillSession(
   if (options.since && Date.parse(session.updated_at) < options.since.getTime()) {
     return { ...base, outcome: "skipped" };
   }
-  // Current only when every trace was written under the current rules: a chunk written after
-  // the rules changed gives the session the new rule set, but not the traces stored before it.
   const ruleSetOf = (ref: SessionTraceRef) => ref.rule_set ?? session.redaction?.rule_set;
   if (session.traces.every((ref) => ruleSetOf(ref) === redactor.rule_set)) {
     return { ...base, outcome: "current" };
@@ -316,7 +244,6 @@ async function backfillSession(
   const joinedTraces = joined(traces);
   const { records } = joinedTraces;
   const redacted = redactor.redact(records);
-  // What an LLM call says in free text (its error, string parameters) is content too.
   const calls = redactLlmCalls(redactor, joinedTraces.llm_calls);
   const llm_calls = calls.calls ?? [];
   const counts = { ...redacted.summary.counts };
@@ -325,7 +252,6 @@ async function backfillSession(
     canonicalJson(redacted.records) !== canonicalJson(records) ||
     canonicalJson(llm_calls) !== canonicalJson(joinedTraces.llm_calls);
 
-  /** The pointer as it should be, or a throw when the session moved. */
   const step = (next: (existing: SessionMetadata) => SessionMetadata) => {
     return (existing: SessionMetadata | null) => {
       if (existing === null || !sameTraces(existing, session)) throw new Moved();
@@ -349,10 +275,6 @@ async function backfillSession(
         store,
         owner,
         archive,
-        // A call a new rule withholds whose result has not arrived yet changes no record, but
-        // its id must be kept, so the result is withheld when a later chunk brings it.
-        // `updated_at` stays: nothing anyone reads changed, so the session should not look
-        // recently written (lists sort by it, and `--since` selects by it).
         step((existing) => {
           const next = {
             ...existing,
@@ -373,11 +295,6 @@ async function backfillSession(
     return { ...base, outcome: "unchanged", counts };
   }
 
-  // What the meta record gives (cwd, branch, model) comes from the redacted meta record; the
-  // rest of the first trace's metadata is kept. Its `continuation` is kept too: only a fork's
-  // first trace has one (it continues the copy of its parent's history, which is the parent's
-  // to store), and the new trace still starts where that copy ends. Later traces' continuations
-  // are folded into the new one.
   const {
     cwd: _cwd,
     git_branch: _branch,
@@ -407,8 +324,6 @@ async function backfillSession(
   }
 
   const old = session.traces.map((t) => t.content_hash);
-  // A change only outside what the hash covers (a meta record's cwd) keeps the hash: the object
-  // under it is replaced, not kept.
   const reused = old.includes(trace.content_hash);
   const written = await publishObject(
     store,
@@ -417,13 +332,8 @@ async function backfillSession(
     "application/gzip",
     reused ? "replace" : "immutable",
   );
-  // The change entry goes before the pointer (decision 7 of 18): a run stopped between the two
-  // leaves an entry for a rewrite that did not happen, which readers take as "read the session
-  // again" and find it as it was; the next run rewrites it and writes another.
   const rewrite = step((existing) => {
     const { applied, withheld_calls: _withheld, ...rest } = existing;
-    // A drop names no trace object, and it is what explains records review left out between
-    // or after the traces (checkStore's chain_gap): it stays (33).
     const drops = (applied ?? []).filter((a) => a.status === "dropped");
     const next: SessionMetadata = {
       ...rest,
@@ -480,18 +390,12 @@ async function backfillSession(
     }
     throw err;
   }
-  // The old objects go last: a run stopped before this leaves them behind, which the sweep
-  // deletes (the next run's, or the worker's daily one), and no read serves them meanwhile: the
-  // trace routes and `getTrace` serve only a hash the pointer names.
   for (const hash of old) {
     if (hash !== trace.content_hash) await store.delete(keys.trace(owner, archive, hash));
   }
   return { ...base, outcome: "rewritten", counts, content_hash: trace.content_hash };
 }
 
-/** A session's span records through the current rules (see the top of this file): how many
- * an earlier rule set redacted, each rewritten in place unless `dryRun`, and then the messages
- * only the old records named deleted. */
 async function backfillSpans(
   store: Store,
   owner: string,
@@ -502,9 +406,7 @@ async function backfillSpans(
   let done = 0;
   const messages = new SpanMessages(store, owner, archive);
   let stored: Set<string> | undefined;
-  /** Messages some record names after this pass. */
   const named = new Set<string>();
-  /** Messages a rewritten record named before and no longer does. */
   const replaced = new Set<string>();
   for await (const record of spanRecords(store, owner, archive)) {
     const before = storedHashes(record.input);
@@ -533,8 +435,6 @@ async function backfillSpans(
   }
   for (const hash of named) replaced.delete(hash);
   if (replaced.size > 0) {
-    // Read the records again just before deleting: a span that arrived during the pass from a
-    // server still on the old rules may name an old message, which then stays.
     for await (const record of spanRecords(store, owner, archive)) {
       for (const hash of storedHashes(record.input)) replaced.delete(hash);
     }
@@ -543,7 +443,6 @@ async function backfillSpans(
   return done;
 }
 
-/** Run the backfill over the store (see the top of this file). */
 export async function backfillRedaction(options: BackfillOptions): Promise<BackfillReport> {
   const now = options.now ?? (() => new Date());
   const report: BackfillReport = {
@@ -569,8 +468,6 @@ export async function backfillRedaction(options: BackfillOptions): Promise<Backf
         return report;
       }
       const done = await backfillSession(session, options, now().toISOString());
-      // A stub (F3.4) has no trace to redact, but an assembled session's span records are kept
-      // beside it, as for a session never published.
       if (done.outcome !== "skipped" || isStub(session)) {
         const spans = await backfillSpans(
           options.store,

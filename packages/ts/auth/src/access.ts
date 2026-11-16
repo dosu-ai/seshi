@@ -1,26 +1,10 @@
-/** Who may do what to which session (X5.3, X5.10). Scopes say what kind of call a credential
- * may make; these rules add the session: its owner and its visibility.
- *
- * - Read: admins and services see everything; anyone else sees their own sessions (by owner id,
- *   through `[auth.owner_aliases]`) and every session whose visibility is `org`.
- * - Delete: needs `sessions:delete`. An admin token deletes anything. A session token deletes
- *   its own person's sessions, or anything for an admin, but only within ten minutes of being
- *   issued. A static token deletes its owner's. The org key cannot delete (it has no
- *   `sessions:delete`): anyone holding it could claim to be the owner.
- * - Change visibility: the owner or an admin, with a credential that can read (so not a
- *   write-only device token). An org-key caller (owner basis `claimed`) never changes a session
- *   whose owner was verified: anyone holding the key can state that username, and opening a
- *   person's `owner` session to the org would show it to members who hold no org key (X5.12). */
-
 import { Forbidden, type OwnerBasis, type Visibility } from "@seshi/model";
 import { OwnerAliases } from "./owner";
 import type { Principal } from "./principal";
 import type { Scope } from "./scopes";
 
-/** How recent a session token must be to delete (X5.3). */
 export const DELETE_FRESH_MS = 10 * 60 * 1000;
 
-/** The parts of a session the rules look at. */
 export interface SessionAccess {
   owner: string;
   visibility?: Visibility;
@@ -35,7 +19,6 @@ export function requireScope(principal: Principal, scope: Scope): void {
   }
 }
 
-/** Whether the principal is the session's owner (aliases applied). */
 export function isOwnSession(
   principal: Principal,
   owner: string,
@@ -44,7 +27,6 @@ export function isOwnSession(
   return aliases.same(principal.owner, owner);
 }
 
-/** Whether the principal sees everything (X5.10). */
 export function seesEverything(principal: Principal): boolean {
   return principal.role === "admin" || principal.role === "service";
 }

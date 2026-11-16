@@ -1,25 +1,3 @@
-/** Span sets (X4.2, F4.4): the span store and the span assembler.
- *
- * Arrival (`Pipeline.submit` with a span batch, `SpanStore.accept`). Each span is normalized by
- * its format's span adapter and regex-redacted (its records, its tool call, its LLM call), then
- * kept as one record under the session's `spans/`; a repeat lands on the same key. The session's
- * pending marker (`assembly/pending/<archive_id>`) is touched last, with the batch's envelope
- * (never its payload), so the assembler knows who sent the spans and whose session it is.
- *
- * Assembly (`assemblePending`, the worker's `assembler` job). It lists the markers; for each
- * session quiet for its source's quiet period (or shortly after a final span) it reads the
- * span records (`listSpans`: streamed a page at a time, each stored input message read once and
- * each part's input rebuilt from them as the adapter reads it, so memory stays linear in the
- * calls), assembles them with the format's adapter, and hands the whole session to
- * `Pipeline.publishAssembled`, which runs the session filter, model review and the write. The
- * marker is then deleted with If-Match, so a batch that arrived meanwhile keeps it for the next
- * pass (X7.4). A permanent failure is recorded by the pipeline (X4.8) and the marker cleared; a
- * transient one keeps the marker, so the session is assembled again.
- *
- * Connectors that read spans (Datadog, F5) submit envelopes whose payload is `{ kind: "spans",
- * spans, resource? }` in OTLP's JSON mapping, with `format` naming a format that has a span
- * adapter and `session_key` the session the spans belong to. They come out here. */
-
 import type { FormatRegistry } from "@seshi/formats";
 import type {
   Envelope,
@@ -54,9 +32,6 @@ function addCounts(into: Counts, from: Readonly<Counts> | undefined): Counts {
   return into;
 }
 
-/** One span part through regex redaction: its input and output records, its tool call (as a
- * call and its result, so the sensitive-file and secret-command rules apply), and its LLM
- * call's free text (`redactLlmCalls` from `@seshi/redact`, through the same rule set). */
 export function redactSpanPart(
   redactor: Redactor,
   part: SpanPart,
@@ -111,7 +86,6 @@ export interface SpanStoreOptions {
   concurrency?: number;
 }
 
-/** The span store: the pipeline's `SpanAssembler` (`accept`). See the module comment. */
 export class SpanStore implements SpanAssembler {
   readonly store: Store;
   private readonly now: () => Date;
@@ -144,9 +118,6 @@ export class SpanStore implements SpanAssembler {
       })),
       { concurrency: this.concurrency },
     );
-    // Last, so the quiet period counts from the last span written. A final span seen by an
-    // earlier batch stays seen until the session is published (the marker is then removed); two
-    // batches racing can lose it, which only means waiting the whole quiet period.
     const final =
       batch.parts.some(({ part }) => endsSession(part, envelope.session_key)) ||
       (await readPending(this.store, archive_id))?.value.final === true;
@@ -170,8 +141,6 @@ export const FINAL_GRACE_MS = 15_000;
 /** Sessions one pass publishes before it says there is more. */
 export const ASSEMBLE_BATCH = 50;
 
-/** Whether a part ends its session: a final span, or the root span of a session that is one
- * trace (a request with no session or conversation id ends with its root). */
 function endsSession(part: SpanPart, sessionKey: string): boolean {
   return (
     part.final === true || (!part.parent_span_id && part.trace_id === sessionKey && !!part.ended_at)
@@ -181,13 +150,11 @@ function endsSession(part: SpanPart, sessionKey: string): boolean {
 export interface AssembleOptions {
   store: Store;
   formats: FormatRegistry;
-  /** Where an assembled session goes: `Pipeline.publishAssembled`. */
   publish: (
     session: AssembledSession,
   ) => Promise<
     StoreSessionResult | { status: "failed"; code: string; message: string; record: string }
   >;
-  /** The quiet period of a source, in milliseconds (F4.4). */
   quietMs: (sourceId: string) => number;
   finalGraceMs?: number;
   now?: () => Date;
@@ -213,7 +180,6 @@ export interface AssembleReport {
   dropped: number;
   /** The pass stopped at `limit`: run again. */
   more: boolean;
-  /** How the pipeline answered, by status. */
   outcomes: Record<string, number>;
 }
 
@@ -228,7 +194,6 @@ function sum(records: readonly SpanRecord[]): RedactionSummary | undefined {
   return rule_set ? { rule_set, counts } : undefined;
 }
 
-/** One pass of the assembler over the pending markers (see the module comment). */
 export async function assemblePending(options: AssembleOptions): Promise<AssembleReport> {
   const { store, formats } = options;
   const now = options.now ?? (() => new Date());
@@ -285,12 +250,10 @@ export async function assemblePending(options: AssembleOptions): Promise<Assembl
     };
     const envelope = marker.envelope;
     if (!envelope) {
-      // A marker without the batch's envelope cannot be published as anyone.
       await clear();
       report.dropped++;
       return "done";
     }
-    // Quiet for the source's quiet period, or for a short grace after a final span (F4.4).
     const age = now().getTime() - Date.parse(marker.touched_at);
     const quiet = options.quietMs(marker.source_id ?? envelope.source_id);
     if (age < quiet && !(marker.final && age >= Math.min(grace, quiet))) {
@@ -299,7 +262,6 @@ export async function assemblePending(options: AssembleOptions): Promise<Assembl
     }
     const session = await readMetadata(store, marker.owner, archive);
     if (session?.status === "redacted") {
-      // Deleted while its spans waited: nothing of it is kept.
       await deleteSpans(store, marker.owner, archive);
       await clear();
       report.dropped++;

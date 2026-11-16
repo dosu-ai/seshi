@@ -1,10 +1,3 @@
-/** Native transcript → redacted trajectory-v1 records: the format registry's adapter, then a
- * rule set's redaction (the built-in pack alone by default), as the pipeline's redaction stage
- * runs it: sensitive calls withheld, then the text rules and the built-in secret patterns over
- * every non-structural string. The registry is the deployment's (built by `apps/seshi` from its
- * integrations); redaction is this layer's, since `@seshi/formats` sits beside `@seshi/redact`
- * and may not import it (X3.2). */
-
 import type { FormatRegistry, NormalizeInput, NormalizeOutcome } from "@seshi/formats";
 import { compileRuleSet, type RuleSet, redactLlmCalls, ruleRedactor } from "@seshi/redact";
 

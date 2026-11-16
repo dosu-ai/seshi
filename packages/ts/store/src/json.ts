@@ -1,7 +1,3 @@
-/** JSON objects in the store, read with their ETag and written conditionally (X6.5): the
- * typed accessors for every mutable object (metadata, markers, checkpoints, token records,
- * pending markers) are built on these. */
-
 import { gunzipSync, gzipSync } from "node:zlib";
 import {
   type Store,
@@ -14,7 +10,6 @@ import {
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-/** Pretty JSON with a final newline: how every small object is written. */
 export function encodeJson(value: unknown): Uint8Array {
   return encoder.encode(`${JSON.stringify(value, null, 2)}\n`);
 }
@@ -24,8 +19,6 @@ export function decodeJson<T>(bytes: Uint8Array): T {
 }
 
 export function gzipJson(value: unknown): Uint8Array {
-  // Deterministic: mtime 0, default level. The same value always gzips to the same bytes, which
-  // is what makes a re-publish a no-op.
   return new Uint8Array(gzipSync(encoder.encode(JSON.stringify(value)), { level: 6 }));
 }
 
@@ -35,7 +28,6 @@ export function gunzipJson<T>(bytes: Uint8Array): T {
 
 const JSON_TYPE = "application/json";
 
-/** A JSON object and the ETag it was read at. */
 export interface Versioned<T> {
   value: T;
   etag: string;

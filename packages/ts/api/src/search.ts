@@ -1,7 +1,3 @@
-/** `GET /v1/search` (F10.5): the query string as a `SearchRequest`. The search service checks
- * the values; this only reads them, and refuses a parameter given twice or a number that is not
- * one, so a typo is a 400 and not a silently different search. */
-
 import type { SearchRequest, SearchSort } from "@seshi/model";
 import { SearchQueryError } from "@seshi/search";
 
@@ -9,7 +5,6 @@ const STRINGS = ["q", "owner", "agent", "repo", "branch", "source", "since", "un
 const NUMBERS = ["limit", "matches"];
 const KNOWN = new Set([...STRINGS, ...NUMBERS, "sort"]);
 
-/** The search a request's query string asks for. Throws `SearchQueryError`. */
 export function searchRequestOf(url: URL): SearchRequest {
   const params = url.searchParams;
   for (const name of new Set(params.keys())) {

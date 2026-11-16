@@ -1,9 +1,3 @@
-/** `@seshi/pipeline`: one ingest pipeline (X4). An envelope in (`Pipeline.submit`); authorize,
- * normalize in memory, regex redaction, the session filter, model review; then the trace, the
- * head and the change entry out, and nothing raw (X6.3). Also the reads over a store and
- * `StoreSessionDB`, the session API over a pipeline (the HTTP routes' and local mode's).
- * Layer 2 (X3.2). */
-
 export {
   Forbidden,
   IngestRejected,

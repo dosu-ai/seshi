@@ -1,22 +1,3 @@
-/** The generic S3 poller (F6): a built-in connector for `[[sources]] type = "s3"`. Each run lists
- * the source's prefix, compares every object's key, ETag and size with the manifest in its
- * checkpoint (F6.2), and submits what is new or changed as envelopes:
- *
- * - A new object, or one rewritten, goes whole with `replace` (F6.3, X4.6). The pipeline
- *   extends the session when the object starts with what it holds, replaces it when not (the
- *   poller is the session's original writer), and answers `unchanged` when nothing is new.
- * - An append-only log that grew continues from the byte offset its session holds (X4.4): only
- *   the tail is read (a `Range` request) and submitted as a chunk. It continues only when the
- *   up to 4 KiB before that offset are unchanged; otherwise it goes whole as above.
- * - Whole-document formats (ATIF, OpenCode exports) and gzip-compressed objects always go whole.
- *
- * Every session belongs to the source's service account `svc:<id>` (X5.4). What the key's
- * `path` template or the object's `x-amz-meta-seshi-*` metadata say of the person are claims,
- * recorded in metadata (X5.5), never the owner. Deleting a source object changes nothing
- * (F6.4); its key leaves the manifest at the next complete listing. Idempotency keys are the
- * object's location and ETag (X4.7), so a run repeated after a crash is answered from the
- * session's applied envelopes. */
-
 import { createHash } from "node:crypto";
 import { gunzipSync } from "node:zlib";
 import { pickClaims, serviceIdentity } from "@seshi/auth";
@@ -44,36 +25,26 @@ import {
 import { type KeyFields, KeyFilter, metadataFields, PathTemplate } from "./keys";
 import { type Manifest, type ObjectEntry, readManifest, rewindManifest } from "./manifest";
 
-/** An `s3` source as the config parses it. */
 export type S3SourceConfig = Extract<SourceConfig, { type: "s3" }>;
 
 /** How many bytes before a log's offset must be unchanged for it to continue. */
 export const TAIL_WINDOW = 4096;
-/** How much of an object format detection reads. */
 const SAMPLE_CHARS = 64 * 1024;
-/** Objects read per run before the run hands over (`more`), so a large backlog does not hold
- * the worker in one run. */
 export const DEFAULT_BATCH = 200;
 /** Keys per listing page (S3's maximum). */
 export const DEFAULT_PAGE_SIZE = 1000;
-/** Objects handled between checkpoint saves within a run. */
 export const DEFAULT_SAVE_EVERY = 25;
 
 export interface S3ConnectorOptions {
-  /** The formats this binary reads: detection and whether a format can continue by offset. */
   formats: FormatRegistry;
   /** The largest transcript the pipeline takes (`[limits] max_upload_bytes`): a bigger object
    * is recorded as `too_large` without being read. */
   maxBytes: number;
-  /** Where bucket keys are read from when a source sets none (`AWS_*`, `S3_*`, `R2_*`);
-   * `process.env` by default. */
   env?: Readonly<Record<string, string | undefined>>;
   batch?: number;
   pageSize?: number;
   saveEvery?: number;
-  /** STS endpoint override (tests). */
   stsEndpoint?: string;
-  /** Open a source's bucket another way (tests). */
   openBucket?: (config: S3SourceConfig, ctx: ConnectorContext) => SourceBucket;
 }
 
@@ -83,7 +54,6 @@ function digest(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex").slice(0, 32);
 }
 
-/** The digest of the up to `TAIL_WINDOW` bytes before `offset` in `bytes`. */
 function tailOf(bytes: Uint8Array, offset: number): string | undefined {
   if (offset <= 0 || offset > bytes.length) return undefined;
   return digest(bytes.subarray(Math.max(0, offset - TAIL_WINDOW), offset));
@@ -109,7 +79,6 @@ export function completeLines(text: string): string {
   }
 }
 
-/** The URL's key prefix joined with the source's own `prefix`. */
 export function sourcePrefix(config: Pick<S3SourceConfig, "url" | "prefix">): string {
   const fromUrl = /^(?:s3|r2):\/\//.test(config.url) ? parseS3Url(config.url).prefix : "";
   return [fromUrl, config.prefix ?? ""]
@@ -118,10 +87,8 @@ export function sourcePrefix(config: Pick<S3SourceConfig, "url" | "prefix">): st
     .join("/");
 }
 
-/** What a run decided for one object. */
 type Handled = ObjectEntry | "changed" | "gone";
 
-/** The S3 poller. One per instance; it keeps no state between runs except assumed role keys. */
 export class S3Connector implements Connector<S3SourceConfig> {
   readonly kind = "s3";
   private readonly roleCache = new Map<string, AssumedCredentials>();
@@ -132,7 +99,6 @@ export class S3Connector implements Connector<S3SourceConfig> {
     return new S3Run(this.options, ctx, this.openBucket(ctx)).run();
   }
 
-  /** `seshi reprocess --since` (X4.9): forget the objects changed since then. */
   rewind(cursor: Cursor | null, since: Date): Cursor | null {
     if (cursor === null) return null;
     const quiet = { info() {}, warn() {}, error() {} };
@@ -176,7 +142,6 @@ export class S3Connector implements Connector<S3SourceConfig> {
   }
 }
 
-/** One run of one source. */
 class S3Run {
   private readonly config: S3SourceConfig;
   private readonly formats: FormatRegistry;
@@ -187,7 +152,6 @@ class S3Run {
   private readonly batch: number;
   private readonly pageSize: number;
   private readonly saveEvery: number;
-  /** Which object holds each session, so two objects never feed one session. */
   private sessions: Map<string, string> | undefined;
   private processed = 0;
   private unsaved = 0;
@@ -201,8 +165,6 @@ class S3Run {
     this.config = ctx.source.config;
     this.formats = options.formats;
     this.manifest = readManifest(ctx.checkpoint.read(), ctx.log);
-    // A manifest that starts (first run, rewind to the start, a cursor it could not read)
-    // starts a new reading of the source.
     this.manifest.epoch ??= ctx.now().getTime();
     const prefix = sourcePrefix(this.config);
     this.prefix = prefix === "" ? "" : `${prefix}/`;
@@ -221,12 +183,11 @@ class S3Run {
       );
     }
     const ordered = config.ordered_keys;
-    // A pass that starts in this run lists every key, so a key it does not see is gone.
     const fresh = manifest.after === undefined;
     const from = manifest.after ?? (ordered ? manifest.watch_from : undefined);
     const seen = new Set<string>();
     let startAfter = from;
-    let previous: string | undefined; // the key listed before the last one
+    let previous: string | undefined;
     let last: string | undefined;
 
     for (;;) {
@@ -264,7 +225,6 @@ class S3Run {
     return this.complete({ fresh, from, seen, previous, last });
   }
 
-  /** The end of a complete listing: drop what it did not see, settle where the next starts. */
   private async complete(pass: {
     fresh: boolean;
     from: string | undefined;
@@ -274,7 +234,6 @@ class S3Run {
   }): Promise<ConnectorRunResult> {
     const { manifest } = this;
     if (pass.fresh) {
-      // F6.4: a key missing from a complete listing leaves the manifest; nothing else happens.
       for (const key of Object.keys(manifest.objects)) {
         if ((pass.from === undefined || key > pass.from) && !pass.seen.has(key)) {
           delete manifest.objects[key];
@@ -282,8 +241,6 @@ class S3Run {
       }
     }
     if (this.config.ordered_keys) {
-      // Watch the newest key (it may still grow), and anything held back for a retry.
-      // The key before the newest one listed; with one key listed, where the listing started.
       let watch = pass.last !== undefined ? (pass.previous ?? pass.from) : manifest.watch_from;
       if (manifest.hold !== undefined) {
         const hold = manifest.hold === "" ? undefined : manifest.hold;
@@ -312,7 +269,6 @@ class S3Run {
     return { lag_ms: 0 };
   }
 
-  /** Stop before the listing is done: save where it resumes. */
   private async stop(result: ConnectorRunResult = {}): Promise<ConnectorRunResult> {
     await this.save();
     return result;
@@ -323,14 +279,12 @@ class S3Run {
     this.unsaved = 0;
   }
 
-  /** Whether `object` is one of the source's sessions, and what its key says; null when not. */
   private wanted(object: SourceObject): KeyFields | null {
     const rel = object.key.slice(this.prefix.length);
     if (rel === "" || rel.endsWith("/") || !this.filter.includes(rel)) return null;
     return this.template ? this.template.match(rel) : {};
   }
 
-  /** Read and submit one new or changed object. */
   private async object(
     object: SourceObject,
     fields: KeyFields,
@@ -346,7 +300,6 @@ class S3Run {
       ...(entry?.session !== undefined ? { session: entry.session } : {}),
       ...(entry?.gz ? { gz: true } : {}),
     };
-    // An admin deleted the session in seshi (F6.4): it is not stored again.
     if (entry?.failed === "redacted") return { ...base, failed: "redacted" };
     if (object.size === 0) return base;
     const { format, session, tail } = entry ?? {};
@@ -366,9 +319,6 @@ class S3Run {
     return this.whole(object, fields, entry, base);
   }
 
-  /** A log that grew: read from just before where its session ends, check that those bytes
-   * are unchanged, and submit the new complete lines as a chunk. `rewritten` when it cannot
-   * continue: the caller reads it whole. */
   private async append(
     object: SourceObject,
     entry: ObjectEntry & { format: string; session: string; tail: string },
@@ -411,7 +361,6 @@ class S3Run {
     if (digest(known) !== entry.tail) return "rewritten";
     const fresh = read.body.subarray(skip + window);
     const cut = fresh.lastIndexOf(0x0a) + 1;
-    // No complete line yet: wait for the writer.
     if (cut === 0) return base;
     const chunk = fresh.subarray(0, cut);
     let text: string;
@@ -437,8 +386,6 @@ class S3Run {
     });
     const result = await this.ctx.submit(envelope);
     if (result.status === "failed") {
-      // The session is not where the manifest says (a crash between submit and checkpoint, a
-      // rewind): send it whole, which the pipeline extends from where it really is.
       if (result.code === "offset_mismatch") return "rewritten";
       return { ...base, failed: result.code };
     }
@@ -456,8 +403,6 @@ class S3Run {
     return next;
   }
 
-  /** A new or rewritten object: read it whole, work out its format and session, and submit
-   * it with `replace` (F6.3). */
   private async whole(
     object: SourceObject,
     fields: KeyFields,
@@ -466,7 +411,6 @@ class S3Run {
   ): Promise<Handled> {
     const location = this.bucket.locate(object.key);
     const provenance: SourceLocation = { object_key: location, etag: object.etag };
-    // The epoch keeps a read after `seshi reprocess` from being answered with the old result.
     const idempotency = `${location}#${object.etag}~${this.manifest.epoch}`;
     const rel = object.key.slice(this.prefix.length);
     const failing = (code: string, message: string, session?: string) =>
@@ -581,8 +525,6 @@ class S3Run {
     return next;
   }
 
-  /** The object's format: what it was read as before; else the source's `format`; else what
-   * its metadata or key names; else what detection finds in its start. */
   private formatOf(
     entry: ObjectEntry | undefined,
     said: KeyFields,
@@ -605,7 +547,6 @@ class S3Run {
         };
   }
 
-  /** The object key that already feeds `session`, if another one does. */
   private sessionHolder(format: string, session: string): string | undefined {
     if (!this.sessions) {
       this.sessions = new Map();
@@ -660,8 +601,6 @@ class S3Run {
     };
   }
 
-  /** Record a permanent failure of this version (X4.8): it is not read again until it
-   * changes. */
   private async failure(base: ObjectEntry, failure: ConnectorFailure): Promise<ObjectEntry> {
     if (this.ctx.fail) await this.ctx.fail(failure);
     else this.ctx.log.warn(`${failure.provenance?.object_key ?? "an object"}: ${failure.message}`);
@@ -669,8 +608,6 @@ class S3Run {
   }
 }
 
-/** The failure a bucket's refusal to read one object is recorded as: `access_denied` (403) or
- * `unreadable` (another final 4xx, with S3's error code, never content). */
 function refusal(err: ObjectDenied): { code: string; message: string } {
   if (err.status === 403) {
     return {
@@ -685,7 +622,6 @@ function refusal(err: ObjectDenied): { code: string; message: string } {
   };
 }
 
-/** Where the session's log ends, from the pipeline's answer. */
 function bytesOf(result: SubmitOutcome): number {
   const bytes = (result as { bytes_total?: unknown }).bytes_total;
   return typeof bytes === "number" && bytes >= 0 ? bytes : 0;

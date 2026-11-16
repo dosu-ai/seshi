@@ -1,29 +1,3 @@
-/** The store checker: reads a bucket and says where it breaks the invariants `spec/layout.md`
- * states and every writer relies on. Read only (list, get, stat; never put or delete), it pages
- * through every listing, and one bad object is a finding, never a throw. Two callers: `seshi
- * store check` (a person, or CI, against a bucket) and a scenario runner that checks the bucket
- * after every step; so nothing here prints or exits.
- *
- * What it checks, by finding code (`FINDINGS` holds each code's severity and meaning):
- * - The layout marker exists, parses and is the version this code reads; no sessiondb marker.
- * - Every `metadata.json` parses, matches `metadata.schema.json`, and names its own owner and
- *   archive id (`archive_id` = sha256(owner, agent, session_id)).
- * - A stored session's `head` is one of its `traces`, and every trace it names is an object
- *   whose records hash to its key, whose count and continuation agree with `traces`.
- * - The continuation chain: the first trace starts at `dropped_prefix.records` (F3.4), each
- *   later one where the one before ends (a gap only for an envelope model review dropped), and
- *   the chain ends at `normalized.records`.
- * - A stub (stored, no head) has no traces, nothing of the dropped content, and its log state.
- * - A tombstoned session has nothing readable and an entry saying so.
- * - Unnamed trace objects: the sweep (F2.5) deletes them after an hour, so an old one is a
- *   warning (an error in a stub or a tombstoned session, which should hold none at all).
- * - Change entries: the unique key format (decision 8 of 18), a valid entry that agrees with its
- *   key, a session that exists, and a change the session shows. Entries are written before the
- *   pointer moves (decision 7), so an entry for a change that did not happen is a warning; a
- *   change made without its entry is an error.
- * - Span records parse, every message they name is stored, and stored messages are named.
- * - Token records parse (their contents are never reported). */
-
 import {
   type ChangeEntry,
   isStub,
@@ -53,7 +27,6 @@ import { namedTraces, SWEEP_MIN_AGE_MS } from "./sweep";
 
 export type Severity = "error" | "warn";
 
-/** Every finding the checker reports: its severity and what it means. */
 export const FINDINGS = {
   read_failed: { severity: "error", what: "the store failed a read, so part was not checked" },
   marker_missing: { severity: "error", what: "the bucket holds sessions but no seshi.json" },
@@ -156,7 +129,6 @@ export interface Finding {
   code: FindingCode;
   owner?: string;
   archive_id?: string;
-  /** The object the finding is about, when it is one. */
   key?: string;
   message: string;
 }
@@ -168,7 +140,6 @@ export interface CheckCounts {
   stubs: number;
   /** Tombstoned sessions. */
   redacted: number;
-  /** Trace objects present. */
   trace_objects: number;
   change_entries: number;
   span_records: number;
@@ -197,18 +168,14 @@ export interface CheckOptions {
   readTraces?: boolean;
 }
 
-/** Sorts after every character a key uses: a folder plus this skips the whole folder. */
 const PAST_FOLDER = "\u{10FFFF}";
 const TRACE_NAME = /^trace\.([0-9a-f]{64})\.json\.gz$/;
 const MESSAGE_NAME = /^([0-9a-f]{64})\.json$/;
 const TOKEN_NAME = /^([A-Za-z0-9_-]{8,64})\.json$/;
 const HEX64 = /^[0-9a-f]{64}$/;
-/** What a stub must not hold: the dropped envelope's content (F3.4). */
 const STUB_FORBIDDEN = ["source", "project", "branch", "claims", "provenance", "redaction"];
 const TOKEN_KINDS = new Set(["org", "admin", "device", "service"]);
-/** Reads in flight at once. */
 const CONCURRENCY = 16;
-/** Hashes named in one finding's message at most. */
 const SHOWN = 3;
 
 function message(err: unknown): string {
@@ -235,7 +202,6 @@ async function pool<T>(items: readonly T[], work: (item: T) => Promise<void>): P
   await Promise.all(lanes);
 }
 
-/** Every key under `prefix`, a listing page at a time, with ages. */
 async function listAll(store: Store, prefix: string): Promise<ListedKey[]> {
   const out: ListedKey[] = [];
   let after: string | undefined;
@@ -248,19 +214,13 @@ async function listAll(store: Store, prefix: string): Promise<ListedKey[]> {
   }
 }
 
-/** One session folder as a listing shows it. */
 interface Folder {
   archive: string;
   metadata: boolean;
-  /** Trace objects by hash, with when they were last written. */
   traces: Map<string, string | undefined>;
-  /** Folders inside it (`spans`, `review`). */
   folders: Set<string>;
 }
 
-/** The session folders under `prefix` (an owner's `sessions/`, or one session's folder), one
- * listing walk. Folders inside a session are stepped over, as the sweep does, so a session with
- * thousands of span records costs one more listing call. */
 async function* sessionFolders(
   store: Store,
   owner: string,
@@ -301,14 +261,12 @@ async function* sessionFolders(
   if (current) yield current;
 }
 
-/** One change entry: its key, what the key says, and the entry (null when it does not parse). */
 interface FeedEntry {
   key: string;
   parts: ChangeKeyParts;
   entry: ChangeEntry | null;
 }
 
-/** A session's metadata as far as change entries need it: none, there but unusable, or read. */
 type SessionState =
   | { kind: "none" }
   | { kind: "unusable" }
@@ -352,7 +310,6 @@ class Check {
     this.findings.push({ severity, code, ...where, message: text });
   }
 
-  /** Run `work`; a throw is a `read_failed` finding, and the check goes on. */
   async guard(
     what: string,
     where: { owner?: string; archive_id?: string; key?: string },
@@ -365,7 +322,6 @@ class Check {
     }
   }
 
-  /** Whether an object last written at `modified` is past the sweep age. Unknown is young. */
   private old(modified: string | undefined): boolean {
     const at = modified === undefined ? Number.NaN : Date.parse(modified);
     return Number.isFinite(at) && at < this.cutoff;
@@ -453,7 +409,6 @@ class Check {
     }
   }
 
-  /** Token records parse. Nothing of what they hold is reported: only the key. */
   private async tokens(): Promise<void> {
     const prefix = keys.tokens();
     const listed = (await listAll(this.store, prefix)).filter((o) =>
@@ -488,7 +443,6 @@ class Check {
     });
   }
 
-  /** One owner: its change feed, then its sessions (`only` these, when given). */
   private async owner(owner: string, only?: Set<string>): Promise<void> {
     this.counts.owners++;
     let feed: Map<string, FeedEntry[]> | null = null;
@@ -517,13 +471,11 @@ class Check {
     for (const prefix of prefixes) {
       await this.guard(`listing ${prefix}`, { owner, key: prefix }, () => walk(prefix));
     }
-    // Entries of sessions with no folder at all.
     for (const [archive, entries] of known ?? []) {
       if (!seen.has(archive)) this.entries(owner, archive, entries, { kind: "none" });
     }
   }
 
-  /** An owner's change entries by session, read and checked against their keys. */
   private async feed(owner: string, only?: Set<string>): Promise<Map<string, FeedEntry[]>> {
     const prefix = keys.changes(owner);
     const listed: FeedEntry[] = [];
@@ -559,7 +511,6 @@ class Check {
     return out;
   }
 
-  /** One change entry parsed, validated, and compared with its key and folder. */
   private entry(owner: string, item: FeedEntry, body: Uint8Array): void {
     const where = { owner, archive_id: item.parts.archive_id, key: item.key };
     let value: unknown;
@@ -592,7 +543,6 @@ class Check {
     }
   }
 
-  /** One session folder. `entries`: its change entries; null when the feed could not be read. */
   private async session(owner: string, folder: Folder, entries: FeedEntry[] | null): Promise<void> {
     const archive = folder.archive;
     const where = { owner, archive_id: archive };
@@ -614,7 +564,6 @@ class Check {
     if (kind === "redacted") this.counts.redacted++;
     if (kind === "stub") this.counts.stubs++;
 
-    // Trace objects no metadata names.
     const named = namedTraces(metadata);
     for (const [hash, modified] of folder.traces) {
       if (named.has(hash) || !this.old(modified)) continue;
@@ -656,7 +605,6 @@ class Check {
     }
   }
 
-  /** The session's metadata read and checked. */
   private async metadata(owner: string, archive: string): Promise<SessionState> {
     const key = keys.metadata(owner, archive);
     const where = { owner, archive_id: archive, key };
@@ -688,7 +636,6 @@ class Check {
     return { kind: "read", metadata };
   }
 
-  /** A stored session with a head: its traces, their chain, and their entries. */
   private async stored(
     owner: string,
     archive: string,
@@ -752,7 +699,6 @@ class Check {
     }
   }
 
-  /** One named trace object read: a trace, under its own hash, as `traces` describes it. */
   private async trace(owner: string, archive: string, ref: SessionTraceRef): Promise<void> {
     const hash = ref.content_hash;
     const key = keys.trace(owner, archive, hash);
@@ -799,9 +745,6 @@ class Check {
     if (wrong.length > 0) this.add("trace_mismatch", wrong.join("; "), where);
   }
 
-  /** The continuation chain (see the top of this file). Each trace starts with a meta record:
-   * the first trace without a continuation holds records [0, records); a continuation holds
-   * [from_record, from_record + records - 1). */
   private chain(owner: string, archive: string, metadata: SessionMetadata): void {
     const where = { owner, archive_id: archive, key: keys.metadata(owner, archive) };
     const traces = metadata.traces;
@@ -819,7 +762,6 @@ class Check {
       );
     }
     let end = first.continuation ? start + Math.max(first.records - 1, 0) : first.records;
-    // Past a break, where the chain ends is unknown: gaps and the total are not judged.
     let broken = false;
     traces.slice(1).forEach((ref, i) => {
       const n = i + 1;
@@ -896,8 +838,6 @@ class Check {
     }
   }
 
-  /** A session's span records parse, every message they name is stored, and every stored
-   * message is named (unless young: messages are written before the records naming them). */
   private async spans(owner: string, archive: string): Promise<void> {
     const where = { owner, archive_id: archive };
     const prefix = keys.spans(owner, archive);
@@ -965,7 +905,6 @@ class Check {
     }
   }
 
-  /** A tombstoned session's span folder: anything older than the sweep age should be gone. */
   private async redactedSpans(owner: string, archive: string): Promise<void> {
     const listed = await listAll(this.store, keys.spans(owner, archive));
     const old = listed.filter((o) => this.old(o.modified));
@@ -978,7 +917,6 @@ class Check {
     }
   }
 
-  /** A session's change entries against what its metadata says now. */
   entries(owner: string, archive: string, entries: FeedEntry[], state: SessionState): void {
     const where = { owner, archive_id: archive };
     if (state.kind === "unusable") return;
@@ -1010,7 +948,6 @@ class Check {
         );
       }
     }
-    // Nothing more happens to a tombstoned session: every entry before it is shown.
     if (metadata.status === "redacted") return;
     const listed = new Set(metadata.traces.map((t) => t.content_hash));
     const sorted = [...entries].sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
@@ -1026,7 +963,6 @@ class Check {
           at,
         );
       } else if (e.parts.kind === "published" && !listed.has(e.parts.content_hash as string)) {
-        // A trace a later replace (or backfill) took off the list was in `traces`.
         const replacedLater = sorted
           .slice(i + 1)
           .some((later) => later.parts.kind === "published" && later.entry?.replace === true);
@@ -1042,9 +978,9 @@ class Check {
   }
 }
 
-/** Check `store` against the layout's invariants (see the top of this file): every finding, and
- * what was looked at. Reads only; one bad object is a finding, never a throw. Throws only for
- * options that name no owner or archive id. */
+/** Check `store` against the layout's invariants: every finding, and what was looked at. Reads
+ * only; one bad object is a finding, never a throw. Throws only for options that name no owner or
+ * archive id. */
 export async function checkStore(store: Store, options: CheckOptions = {}): Promise<CheckReport> {
   const check = new Check(store, options);
   await check.run();

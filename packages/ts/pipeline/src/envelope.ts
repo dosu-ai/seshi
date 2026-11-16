@@ -1,7 +1,3 @@
-/** Envelopes (X4.1): the only input to the pipeline. The type is generated from
- * `spec/schemas/envelope.schema.json` into `@seshi/model`; this module checks one at run time,
- * builds the one an upload stands for, and answers the questions every stage asks of it. */
-
 import { createHash, randomUUID } from "node:crypto";
 import {
   type Caller,
@@ -20,9 +16,7 @@ import {
 } from "@seshi/model";
 import { assertOwner } from "@seshi/store";
 
-/** An envelope carrying an append-only log (X4.2). */
 export type LogEnvelope = Envelope & { payload: LogPayload };
-/** An envelope carrying a batch of spans for the span assembler (X4.2). */
 export type SpanEnvelope = Envelope & { payload: SpanPayload };
 
 const SOURCE_KINDS: ReadonlySet<string> = new Set<SourceKind>([
@@ -44,9 +38,6 @@ const CALLER_KINDS: ReadonlySet<string> = new Set([
 const OWNER_BASES: ReadonlySet<string> = new Set(["verified", "claimed", "service"]);
 const SOURCE_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
-/** The sources whose envelopes have a caller waiting for the answer: an upload or a hook gets
- * its 409 or 422 at once (X4.4). Every other source (the pollers, the span assembler) has
- * nobody to tell, so a permanent failure becomes a failure record (X4.8). */
 const ANSWERED: ReadonlySet<SourceKind> = new Set<SourceKind>(["upload", "hook"]);
 
 export function hasCaller(envelope: Pick<Envelope, "source">): boolean {
@@ -57,7 +48,6 @@ export function isLogEnvelope(envelope: Envelope): envelope is LogEnvelope {
   return envelope.payload.kind === "log";
 }
 
-/** Who wrote what this envelope carries (X5.5): the caller, through the envelope's source. */
 export function writerOf(envelope: Pick<Envelope, "caller" | "source_id">): Writer {
   const { caller } = envelope;
   return {
@@ -78,8 +68,7 @@ function nonEmpty(value: unknown, field: string): string {
 }
 
 /** Check what the schema requires of an envelope that matters to the pipeline, so an
- * integration's malformed envelope is refused (`bad_envelope`, permanent) rather than written.
- * The HTTP routes build theirs with `uploadEnvelope`. */
+ * integration's malformed envelope is refused (`bad_envelope`, permanent) rather than written. */
 export function checkEnvelope(envelope: Envelope): void {
   if (typeof envelope !== "object" || envelope === null) refuse("an envelope is an object");
   if (envelope.schema !== ENVELOPE_SCHEMA) refuse(`schema must be ${ENVELOPE_SCHEMA}`);
@@ -128,32 +117,22 @@ export function checkEnvelope(envelope: Envelope): void {
   }
 }
 
-/** An upload's idempotency key when it names none (X4.7): the session, the byte offset and a
- * digest of the text. The offset alone would not do: a session's whole log is resent at offset
- * 0 as it grows, and each version is a different envelope. */
 export function uploadIdempotencyKey(sessionKey: string, offset: number, text: string): string {
   const digest = createHash("sha256").update(text, "utf8").digest("hex").slice(0, 32);
   return `${sessionKey}@${offset}#${digest}`;
 }
 
 export interface UploadEnvelopeOptions {
-  /** The verified caller (05 resolves it from the token). */
   caller: Caller;
-  /** How the owner was established. */
   owner_basis: OwnerBasis;
   /** `upload` (the CLI) or `hook` (capture); `upload` by default. */
   source?: "upload" | "hook";
-  /** The source id the upload is filed under: `upload` (X6.4) by default. A service token
-   * uploads under its own source (`svc:<id>` → `<id>`), so that source's visibility, filter
-   * and health apply. */
+  /** The source id the upload is filed under: `upload` (X6.4) by default. */
   source_id?: string;
-  /** Identity the data asserts (X5.5). */
   claims?: Claims;
   now?: () => Date;
 }
 
-/** The envelope an upload stands for: what the HTTP route and local mode submit. Uploads use the
- * source id `upload` (X6.4), or a service token's own source. */
 export function uploadEnvelope(upload: SessionUpload, options: UploadEnvelopeOptions): LogEnvelope {
   const offset = upload.offset ?? 0;
   const envelope: LogEnvelope = {
@@ -166,8 +145,6 @@ export function uploadEnvelope(upload: SessionUpload, options: UploadEnvelopeOpt
     caller: options.caller,
     owner: upload.owner,
     owner_basis: options.owner_basis,
-    // A rebuild without a key of its own gets a fresh one: the same log was most likely applied
-    // before, and its key would answer from that instead of building again (X4.9).
     idempotency_key:
       upload.idempotency_key ??
       `${uploadIdempotencyKey(upload.session_id, offset, upload.transcript)}${upload.rebuild ? `#rebuild-${randomUUID()}` : ""}`,

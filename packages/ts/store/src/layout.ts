@@ -1,55 +1,23 @@
-/** The key layout: the contract between every writer and every reader. See `spec/layout.md`.
- *
- * ```
- * seshi.json                                                   layout marker (X1.4)
- * tokens/<id>.json                                             hashed seshi tokens (X5.9)
- * sources/<source_id>/checkpoint.json                          poller cursor (X7)
- * sources/<source_id>/dropped/<stamp>-<key_hash>.json          envelopes review dropped (X6.4)
- * sources/<source_id>/failed/<stamp>-<key_hash>.json           envelopes that failed (X4.8)
- * sources/<source_id>/health/<yyyy-mm-dd>/<instance>.json      outcome counters (X4.8)
- * worker/heartbeat.json                                        the worker's last run (X7.5)
- * assembly/pending/<archive_id>                                sessions with new spans (X7.4)
- * owners/<owner>/.probe                                        a writer's write check
- * owners/<owner>/sessions/<archive_id>/metadata.json           the session's pointer
- * owners/<owner>/sessions/<archive_id>/trace.<content_hash>.json.gz   seshi/trace/1
- * owners/<owner>/sessions/<archive_id>/spans/<trace_id>-<span_id>.json   span records (F4)
- * owners/<owner>/sessions/<archive_id>/spans/messages/<sha256>.json      input history, once (F4.4)
- * owners/<owner>/sessions/<archive_id>/review/<n>.json         model review decisions (F3)
- * owners/<owner>/changes/<stamp>-<archive_id>-<suffix>-<content_hash|tombstone|visibility>.json
- *                                                              change feed
- * ```
- *
- * Every segment a caller supplies is checked here, so no key can escape its folder. */
-
 import { createHash, randomBytes } from "node:crypto";
 import type { ChangeKind } from "@seshi/model";
 import { StoreError } from "./store";
 
-/** A person's owner id (X5.8): a username, an email or an IdP subject. */
 const PERSON_OWNER = /^[A-Za-z0-9][A-Za-z0-9._@+-]{0,127}$/;
-/** A service account (X5.4): `svc:` and a source id. */
 const SERVICE_OWNER = /^svc:[a-z0-9]+(?:-[a-z0-9]+)*$/;
-/** A configured source's id, as `@seshi/config` accepts them, or `upload`. */
 const SOURCE_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const TOKEN_ID = /^[A-Za-z0-9_-]{8,64}$/;
-/** A health counter shard's writer: one process's instance id. */
 const INSTANCE_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const HEX64 = /^[0-9a-f]{64}$/;
 const HEX = /^[0-9a-f]+$/;
-/** A change key's random part: 8 hex characters. */
 const CHANGE_SUFFIX = /^[0-9a-f]{8}$/;
 
-/** An owner id is one path segment (X5.8): letters, digits and `.`, `_`, `-`, `@`, `+`,
- * starting with a letter or digit, up to 128 characters (a username or an email); or a service
- * account, `svc:<source-id>` (X5.4). `@seshi/auth` derives ids that always fit. */
 export function assertOwner(owner: string): string {
   const ok = PERSON_OWNER.test(owner) || (SERVICE_OWNER.test(owner) && owner.length <= 4 + 64);
   if (!ok) throw new StoreError(`invalid owner: ${JSON.stringify(owner)}`);
   return owner;
 }
 
-/** Whether `owner` is a valid owner id (`assertOwner`). */
 export function isOwner(owner: string): boolean {
   try {
     assertOwner(owner);
@@ -76,7 +44,6 @@ export function assertInstanceId(id: string): string {
   return id;
 }
 
-/** A UTC day, `YYYY-MM-DD`. */
 export function assertDay(day: string): string {
   if (!DAY.test(day) || Number.isNaN(Date.parse(`${day}T00:00:00Z`))) {
     throw new StoreError(`invalid day: ${JSON.stringify(day)}`);
@@ -84,7 +51,6 @@ export function assertDay(day: string): string {
   return day;
 }
 
-/** An archive id or content hash: 64 lowercase hex characters. */
 export function assertHash(value: string, what = "hash"): string {
   if (!HEX64.test(value)) throw new StoreError(`invalid ${what}: ${JSON.stringify(value)}`);
   return value;
@@ -97,21 +63,15 @@ function assertSpanKey(traceId: string, spanId: string): string {
   return `${traceId}-${spanId}`;
 }
 
-/** `sha256(owner + "\n" + agent + "\n" + session_id)`: deterministic, so every upload for one
- * session lands in one directory; derived, so no native id or path appears in a key. */
 export function archiveId(owner: string, agent: string, sessionId: string): string {
   return createHash("sha256").update(`${owner}\n${agent}\n${sessionId}`, "utf8").digest("hex");
 }
 
-/** The seshi layout marker. */
 export const LAYOUT_KEY = "seshi.json";
-/** The marker a sessiondb (pre-seshi) prefix holds; seshi refuses such a prefix (X1.5). */
 export const LEGACY_LAYOUT_KEY = "sessionstorage.json";
 
-/** Drop and failure records: one per envelope that was not stored (X6.4). */
 export type RecordKind = "dropped" | "failed";
 
-/** Review decisions are numbered from 0 and zero-padded, so a listing is in order. */
 const REVIEW_DIGITS = 8;
 
 export const keys = {
@@ -142,8 +102,6 @@ export const keys = {
   spans: (owner: string, archive: string) => `${keys.session(owner, archive)}/spans/`,
   span: (owner: string, archive: string, traceId: string, spanId: string) =>
     `${keys.spans(owner, archive)}${assertSpanKey(traceId, spanId)}.json`,
-  /** A session's stored input messages (F4.4): under `spans/`, after every span record (`m`
-   * sorts after hex), so what steps over or deletes `spans/` covers them too. */
   spanMessages: (owner: string, archive: string) => `${keys.spans(owner, archive)}messages/`,
   spanMessage: (owner: string, archive: string, hash: string) =>
     `${keys.spanMessages(owner, archive)}${assertHash(hash, "message hash")}.json`,
@@ -155,10 +113,6 @@ export const keys = {
     return `${keys.reviews(owner, archive)}${String(n).padStart(REVIEW_DIGITS, "0")}.json`;
   },
   changes: (owner: string) => `${keys.owner(owner)}/changes/`,
-  /** One change entry's key (decision 8 of 18): the stamp first, so keys sort by time and a
-   * `StartAfter` cursor works; then the session's archive id and a random `suffix`
-   * (`changeSuffix()`), so two changes in one millisecond (a bulk delete) never share a key;
-   * then what changed. */
   change: (
     owner: string,
     at: string,
@@ -170,7 +124,6 @@ export const keys = {
     `${keys.changes(owner)}${changeStamp(at)}-${assertHash(archive, "archive id")}-${assertChangeSuffix(suffix)}-${changeWhat(kind, hash)}.json`,
 } as const;
 
-/** A change key's last segment: the trace's hash for a publish, else the kind. */
 function changeWhat(kind: ChangeKind, hash: string | null): string {
   if (kind === "tombstone") return "tombstone";
   if (kind === "visibility_changed") return "visibility";
@@ -185,13 +138,10 @@ function assertChangeSuffix(suffix: string): string {
   return suffix;
 }
 
-/** A fresh random part for a change key: 8 hex characters (32 bits). Only changes of one
- * session in one millisecond need it to differ. */
 export function changeSuffix(): string {
   return randomBytes(4).toString("hex");
 }
 
-/** What a change key (its name under `changes/`) says. */
 export interface ChangeKeyParts {
   /** The stamp, in epoch ms. */
   at: number;
@@ -248,8 +198,6 @@ export function stampTime(stamp: string): number | null {
   );
 }
 
-/** A record's key segment for an idempotency key: its sha256, shortened. The key itself may hold
- * object keys or session ids, so it never appears in a key. */
 export function recordKeyHash(idempotencyKey: string): string {
   if (idempotencyKey === "") throw new StoreError("an idempotency key is required");
   return createHash("sha256").update(idempotencyKey, "utf8").digest("hex").slice(0, 24);

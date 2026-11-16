@@ -1,14 +1,3 @@
-/** The SQLite backend (F10.3): Bun's built-in SQLite with FTS5, one file on local disk per
- * instance, no service to run. Sessions are rows; each searchable event is a row in `events`
- * and a document in the FTS5 table `events_text` with the same rowid. Ranking is FTS5's bm25,
- * snippets are FTS5's `snippet()`. The feed cursors live in the same file, so wiping the file
- * (or `reset`) forgets them too and the index is rebuilt from the change feed.
- *
- * Several processes may share one file (a server and a local `seshi search` on the same host):
- * the file is in WAL mode with a busy timeout, every write is a transaction, and an update read
- * before what the index holds (by its read stamp, `SessionUpdate.read_at`) is refused, so a
- * slow writer never puts back what a faster one replaced. */
-
 import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { chmodSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
@@ -25,10 +14,8 @@ import type {
 import { MEMORY_INDEX } from "./paths";
 import { indexText, MATCH_END, MATCH_START } from "./snippet";
 
-/** The index file's own format: a file of another format is wiped and rebuilt. */
 export const INDEX_SCHEMA = "seshi/search-index/2";
 
-/** Words of context `snippet()` keeps around a match. */
 const SNIPPET_TOKENS = 24;
 
 const TABLES = `
@@ -126,7 +113,6 @@ function sessionOf(row: SessionRow): IndexedSession {
   };
 }
 
-/** `%`, `_` and `\` matched literally in a LIKE pattern with `ESCAPE '\'`. */
 function likeLiteral(value: string): string {
   return value.replace(/[\\%_]/g, (c) => `\\${c}`);
 }
@@ -165,14 +151,10 @@ export class SqliteIndex implements IndexStore {
     const memory = options.path === MEMORY_INDEX;
     if (!memory) mkdirSync(dirname(options.path), { recursive: true, mode: 0o700 });
     this.db = new Database(options.path, { create: true, strict: true });
-    // The index holds session text (redacted, but still the org's): owner-only, like the
-    // CLI's credentials file.
     if (!memory && process.platform !== "win32") {
       try {
         chmodSync(options.path, 0o600);
-      } catch {
-        // A file another user owns: SQLite opened it, so it is readable; leave it.
-      }
+      } catch {}
     }
     this.db.run("PRAGMA busy_timeout = 5000");
     if (!memory) {
@@ -225,8 +207,6 @@ export class SqliteIndex implements IndexStore {
   transaction<T>(fn: () => T): T {
     return this.db.transaction(fn).immediate();
   }
-
-  // --- SearchBackend ----------------------------------------------------------------
 
   private row(owner: string, archive: string): SessionRow | null {
     return this.db
@@ -322,8 +302,6 @@ export class SqliteIndex implements IndexStore {
     return this.transaction(() => {
       const existing = this.row(owner, archive);
       if (existing !== null && existing.read_ms > readAt) return false;
-      // Kept (or added) as a removed row, so an update read earlier that arrives late is
-      // refused. A session never held gets one too: another process may index it late.
       if (existing === null) {
         this.db
           .query(
@@ -494,8 +472,6 @@ export class SqliteIndex implements IndexStore {
   close(): void {
     this.db.close();
   }
-
-  // --- FeedState -----------------------------------------------------------------------
 
   cursor(owner: string): string | undefined {
     const row = this.db.query("SELECT cursor FROM feeds WHERE owner = ?").get(owner) as {

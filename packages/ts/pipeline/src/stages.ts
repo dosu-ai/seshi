@@ -1,13 +1,3 @@
-/** The seams the pipeline's stages plug into. Each is an interface the pipeline is given, with a
- * default that does the least: the branch that owns a stage supplies the real one.
- *
- * - `Authorizer` (stage 1, X4.3): checks the caller and resolves the owner. `@seshi/auth`'s
- *   `ownershipAuthorizer` holds the X5 rules; the default trusts what the envelope says.
- * - `Reviewer` (stage 5, F3): labels what an envelope adds `allow`, `redact` or `drop`. 08
- *   supplies the decision model and the redactor; the default allows everything.
- * - `HealthCounters`: counts how each envelope ended, per source (X4.8, X4.10).
- * - `SpanAssembler` (X4.2): takes span batches. 09 builds it and the span store. */
-
 import { createHash, timingSafeEqual } from "node:crypto";
 import type {
   Authorization,
@@ -33,15 +23,8 @@ import {
 import type { SpanEnvelope } from "./envelope";
 import { writerOf } from "./envelope";
 
-// --- authorize ----------------------------------------------------------------
-
-/** The stage's contract lives in `@seshi/model`, so `@seshi/auth` (the same layer) can
- * implement it; re-exported here for callers of the pipeline. */
 export type { Authorization, Authorizer };
 
-/** Trust the envelope: its owner and basis as given, its caller as the writer, admin when the
- * caller is. Right for routes that resolved the caller themselves (a static token binds its
- * owner); 05 replaces it with scopes and roles. */
 export function permissiveAuthorizer(): Authorizer {
   return {
     authorize: (envelope) => ({
@@ -66,14 +49,7 @@ export function retractSecretMatches(
 }
 
 /** Whether `auth` may replace a session first written by `original` (X4.6): its original writer
- * (the same person or service account, through the same source) or an admin.
- *
- * A caller whose owner is only `claimed` (an org-key caller, X5.12) states its username, and
- * anyone holding the key can state any username (X5.3), so the name alone never proves it is
- * the original writer: the key "cannot replace other people's sessions" (X5.12). Such a caller
- * never replaces a session whose owner was established otherwise, and replaces a `claimed` one
- * only with `retractProven`: it sent the session's retraction secret, which only the machine
- * that uploaded it holds (F9.7). */
+ * (the same person or service account, through the same source) or an admin. */
 export function mayReplace(
   auth: Authorization,
   original: Writer,
@@ -89,8 +65,6 @@ export function mayReplace(
     auth.writer.principal === original.principal && auth.writer.source_id === original.source_id
   );
 }
-
-// --- model review ---------------------------------------------------------------
 
 /** What a review decided, as kept beside the session (`review/<n>.json`, F3.8): never the
  * matched text. */
@@ -149,12 +123,9 @@ export interface Reviewer {
   review(input: ReviewInput): Promise<ReviewDecision>;
 }
 
-/** No review policy applies: everything is allowed, and nothing is recorded. */
 export function noReview(): Reviewer {
   return { review: async () => ({ action: "allow" }) };
 }
-
-// --- source health --------------------------------------------------------------
 
 export interface HealthCounters {
   /** Count one envelope from `sourceId` that ended as `outcome`. Never throws and never waits:
@@ -164,12 +135,10 @@ export interface HealthCounters {
   flush(): Promise<void>;
 }
 
-/** Counts nothing. */
 export function noHealth(): HealthCounters {
   return { count: () => {}, flush: async () => {} };
 }
 
-/** Counts in memory, for tests and for a status line in one process. */
 export class MemoryHealthCounters implements HealthCounters {
   readonly counts: Record<string, HealthCounts> = {};
 
@@ -247,17 +216,12 @@ export class StoreHealthCounters implements HealthCounters {
   }
 }
 
-// --- span sets ------------------------------------------------------------------
-
 /** One batch of spans for the assembler, authorized, normalized and regex-redacted by the
  * pipeline: the span store never sees a span as received. */
 export interface SpanBatch {
-  /** The batch's envelope without its payload. */
   envelope: Omit<SpanEnvelope, "payload">;
   authorization: Authorization;
-  /** The session the spans belong to. */
   archive_id: string;
-  /** Each span's part of the session, and what redaction did to it. */
   parts: { part: SpanPart; redaction?: RedactionSummary }[];
   /** Spans the format could not read, left out. */
   rejected?: number;
@@ -268,17 +232,11 @@ export interface SpanBatch {
 export interface SpanBatchResult {
   status: "accepted";
   archive_id: string;
-  /** Spans stored. */
   spans: number;
   /** Spans left out because the format could not read them. */
   rejected?: number;
 }
 
-/** The span assembler (X4.2, F4.4, branch 09). `accept` stores each span's normalized,
- * redacted part under the session's `spans/` and touches the session's pending marker; later
- * the assembler (`assemblePending`) orders a session's parts into records and hands them to
- * `Pipeline.publishAssembled`, which runs the session filter, model review and the write.
- * `SpanStore` is the implementation. */
 export interface SpanAssembler {
   accept(batch: SpanBatch): Promise<SpanBatchResult>;
 }
@@ -290,7 +248,6 @@ export interface AssembledSession {
   envelope: Envelope;
   /** The session's records, meta first, normalized and regex-redacted. */
   records: NormalizedRecord[];
-  /** The LLM calls the records' `llm_call` fields name. */
   llm_calls?: LlmCall[];
   /** What regex redaction found in the session's spans when they arrived, summed over all of
    * them: the publish adds what the session's stored counts do not have yet. */

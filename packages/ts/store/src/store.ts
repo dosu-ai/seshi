@@ -1,12 +1,3 @@
-/** The storage interface the server writes through. Keys are relative to the
- * store's root (a directory, or a bucket prefix) and use `/`. Two implementations: `fs` and
- * `s3` (AWS S3 and Cloudflare R2, plus anything S3-compatible with an explicit endpoint).
- *
- * Mutable objects (metadata, checkpoints, markers, token records) are written with conditional
- * writes (X6.5): `get` returns the object's ETag, `put` takes `ifMatch` (replace only that
- * version) or `ifNoneMatch: "*"` (create only), and a failed condition throws
- * `PreconditionFailed`. `updateObject` is the read-modify-write loop over them. */
-
 import { StoreError } from "@seshi/model";
 
 export interface ObjectStat {
@@ -17,13 +8,10 @@ export interface ObjectStat {
    * reports none. */
   etag?: string;
   /** When the object was last written, ISO 8601 (S3's `Last-Modified`, the file's mtime).
-   * Absent when the backend does not say. The orphan sweep (F2.5) checks it again just before
-   * it deletes. */
+   * Absent when the backend does not say. */
   modified?: string;
 }
 
-/** An object and the version it was read at: pass `etag` as `ifMatch` to replace exactly
- * this version. */
 export interface StoredObject {
   body: Uint8Array;
   /** Unquoted. */
@@ -60,7 +48,6 @@ export interface ListOptions {
   details?: boolean;
 }
 
-/** One listed object, with what the listing says of it. */
 export interface ListedKey {
   key: string;
   /** When the object was last written, ISO 8601, as the backend reports it (S3's
@@ -78,7 +65,6 @@ export interface ListResult {
 }
 
 export interface Store {
-  /** `file:///…`, `s3://bucket/prefix`, `r2://bucket/prefix`. */
   readonly url: string;
   /** The object and its ETag, or null when there is none. */
   get(key: string): Promise<StoredObject | null>;
@@ -89,8 +75,6 @@ export interface Store {
   list(prefix: string, options?: ListOptions): Promise<ListResult>;
 }
 
-/** Defined in `@seshi/model` so the HTTP client throws the same class without depending on
- * this package. */
 export { StoreError };
 
 /** A conditional write or delete whose condition did not hold: the object changed since it was
@@ -109,7 +93,6 @@ export function isPreconditionFailed(err: unknown): err is PreconditionFailed {
   return err instanceof PreconditionFailed;
 }
 
-/** The bytes at `key`, or null: `get` without the ETag. */
 export async function getBytes(store: Store, key: string): Promise<Uint8Array | null> {
   return (await store.get(key))?.body ?? null;
 }
@@ -122,12 +105,10 @@ export interface UpdateOptions {
   contentType?: string;
   /** How many times to re-read and retry after a `PreconditionFailed`; default 8. */
   retries?: number;
-  /** Waits between tries, for tests; default a short jittered backoff. */
   sleep?: (ms: number) => Promise<void>;
 }
 
 export interface UpdateResult {
-  /** Whether a new version was written. */
   written: boolean;
   /** The object as it now stands: what was written, or what `step` left alone (null when
    * there is none). */

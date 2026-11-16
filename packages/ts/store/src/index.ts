@@ -1,8 +1,3 @@
-/** `@seshi/store`: the bucket layout (`spec/layout.md`) and the drivers behind one `Store`
- * interface: a folder (`file://`) and S3-compatible buckets (`s3://`, `r2://`). Conditional
- * writes for mutable objects (X6.5), the layout marker (X1.4), and typed accessors for every
- * object X6.4 adds. Layer 1: it imports only `@seshi/model` (X3.2). */
-
 export { type ChangesPage, type ReadChangesOptions, readChanges } from "./changes";
 export {
   type CheckCounts,

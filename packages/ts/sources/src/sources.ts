@@ -1,14 +1,3 @@
-/** The connector scheduler's core (X7, X7.4): the configured sources, which connector polls
- * each, and one run of a source. A run reads its checkpoint once, hands the connector a context
- * (`ConnectorContext`, X3.11) to submit envelopes and save the checkpoint, and reports what
- * happened. The worker role runs every polled source on its interval through the instance's
- * job runner; `seshi sync run <id>` runs one once.
- *
- * Correctness does not rest on there being one worker (X7.3): the checkpoint is saved with
- * If-Match over the version the run read, so a run that lost a race to another worker is
- * discarded, and anything it submitted is deduplicated by the envelopes' idempotency keys
- * (X4.7). */
-
 import type { SourceConfig } from "@seshi/config";
 import {
   CheckpointLost,
@@ -32,15 +21,11 @@ import {
   writeFailed,
 } from "@seshi/store";
 
-/** The pipeline as the scheduler needs it. */
 export interface Submitter {
   submit(envelope: Envelope, options?: { onFailure?: "throw" | "record" }): Promise<unknown>;
-  /** Source health, which a connector's own failure records count in (`ConnectorContext.fail`);
-   * the pipeline's counters. */
   readonly health?: { count(sourceId: string, outcome: "failed"): void };
 }
 
-/** The longest message a connector's failure record keeps (as the pipeline's). */
 const FAILURE_MESSAGE_LENGTH = 300;
 
 const SOURCE_KINDS: ReadonlySet<string> = new Set<SourceKind>([
@@ -52,13 +37,10 @@ const SOURCE_KINDS: ReadonlySet<string> = new Set<SourceKind>([
   "cursor-cloud",
 ]);
 
-/** How often a source is polled when its config does not say. */
 export const DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
 
-/** The longest error message a run report keeps. */
 const ERROR_LENGTH = 500;
 
-/** A source id that is not configured, or a source that cannot do what was asked. */
 export class SourceError extends Error {
   constructor(
     readonly code: "unknown_source" | "not_polled" | "disabled" | "busy" | "no_rewind",
@@ -69,22 +51,16 @@ export class SourceError extends Error {
   }
 }
 
-/** One configured source, as the scheduler sees it. */
 export interface SourceInfo {
   id: string;
   type: string;
   enabled: boolean;
-  /** Whether the worker polls it: enabled, and a connector for its type is in this binary. */
   polled: boolean;
-  /** The connector kind that polls it, when one is registered. */
   connector?: string;
-  /** How often it is polled, in milliseconds. */
   interval_ms?: number;
-  /** Why it is not polled, when it is not. */
   note?: string;
 }
 
-/** What one run did (X7.5). */
 export interface RunReport {
   source: string;
   started_at: string;
@@ -92,30 +68,21 @@ export interface RunReport {
   /** `ok`; `discarded` when another worker moved the checkpoint (X7.3); `error` when the
    * connector or a transient store failure stopped it, with the checkpoint left in place. */
   outcome: "ok" | "discarded" | "error";
-  /** Envelopes submitted. */
   submitted: number;
-  /** The pipeline's answers by status (`stored`, `duplicate`, `filtered`, `failed`…). */
   outcomes: Record<string, number>;
-  /** Whether the run saved its checkpoint. */
   checkpoint_saved: boolean;
-  /** The connector says more is waiting now. */
   more: boolean;
-  /** How far behind its source the checkpoint is, when the connector says. */
   lag_ms?: number;
   error?: string;
 }
 
-/** A source's state, for `seshi sync status` and the jobs endpoint. */
 export interface SourceStatus extends SourceInfo {
   checkpoint: { updated_at: string; cursor: Cursor } | null;
-  /** Records of envelopes not stored (X6.4). */
   dropped: number;
   failed: number;
-  /** Outcome counts summed over the days asked for (X4.8). */
   health: HealthCounts;
 }
 
-/** What a rewind changed (or would, with `dryRun`). */
 export interface RewindReport {
   source: string;
   before: Cursor | null;
@@ -126,11 +93,8 @@ export interface RewindReport {
 export interface SourcesOptions {
   store: Store;
   pipeline: Submitter;
-  /** `[[sources]]` from the config. */
   sources: readonly SourceConfig[];
-  /** The connectors this binary has: the integrations' and the built-in ones. */
   connectors: readonly Connector[];
-  /** How connectors reach their APIs; the global `fetch` by default. */
   fetch?: typeof fetch;
   log?: ConnectorLogger;
   now?: () => Date;
@@ -143,7 +107,6 @@ function message(err: unknown): string {
   return text.length > ERROR_LENGTH ? `${text.slice(0, ERROR_LENGTH - 1)}…` : text;
 }
 
-/** The configured sources and the connectors that poll them. Built once per instance. */
 export class Sources {
   private readonly store: Store;
   private readonly pipeline: Submitter;
@@ -176,7 +139,6 @@ export class Sources {
     return [...this.configs.values()].map((config) => this.info(config));
   }
 
-  /** The polled sources: what the worker schedules. */
   polled(): SourceInfo[] {
     return this.list().filter((s) => s.polled);
   }
@@ -225,7 +187,6 @@ export class Sources {
     };
   }
 
-  /** The connector for a source that can be polled, or `SourceError`. */
   private pollable(id: string): { config: SourceConfig; connector: Connector } {
     const config = this.config(id);
     const connector = this.connectors.get(config.type);
@@ -268,11 +229,7 @@ export class Sources {
     let submitted = 0;
     let saved = false;
     let lost = false;
-    // A transient failure (the store) of an envelope this run submitted: the checkpoint must
-    // not move past it, even if the connector caught the error and went on (X4.8).
     let transient: string | undefined;
-    // Set when the run has been reported: a connector that keeps going after its run resolved
-    // (a stray promise) can no longer submit or move the checkpoint.
     let ended = false;
     const controller = new AbortController();
     const signal = outer ? AbortSignal.any([outer, controller.signal]) : controller.signal;
@@ -313,7 +270,6 @@ export class Sources {
         try {
           result = (await this.pipeline.submit(envelope, { onFailure: "record" })) as SubmitOutcome;
         } catch (err) {
-          // Permanent failures are recorded and answered `failed`; what is thrown is transient.
           transient ??= message(err);
           throw err;
         }
@@ -373,7 +329,6 @@ export class Sources {
             message: text,
           });
         } catch (err) {
-          // Not recorded: as transient as a submit that threw (X4.8).
           transient ??= message(err);
           throw err;
         }
@@ -387,7 +342,6 @@ export class Sources {
       const result = await connector.run(context);
       if (lost) return report("discarded", { error: new CheckpointLost(id).message });
       if (transient !== undefined) {
-        // The connector swallowed the failure; the run still failed, and its checkpoint stayed.
         return report("error", { error: `an envelope failed transiently: ${transient}` });
       }
       return report("ok", {

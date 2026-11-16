@@ -1,9 +1,3 @@
-/** `@seshi/sources/testing`: an in-memory S3-compatible bucket and STS for tests, so the S3
- * poller (F6) is exercised over real signed HTTP requests with no network. Its answers follow
- * the shapes AWS documents for ListObjectsV2, GetObject (Range, If-Match, user metadata) and
- * STS AssumeRole; see `packages/ts/sources/testdata/README.md`. Plug `fetch` into a client, or
- * `listen()` for a local HTTP server. Nothing here is used outside tests. */
-
 import { createHash } from "node:crypto";
 
 export interface FakeObject {
@@ -24,10 +18,7 @@ export interface FakeS3Options {
   bucket: string;
   /** The access key id requests must be signed with; any when unset. */
   accessKeyId?: string;
-  /** Answer GET with the whole object even when a Range is asked (a backend that ignores it). */
   ignoreRange?: boolean;
-  /** Take PUT (with `If-Match` / `If-None-Match`) and DELETE (with `If-Match`), so the bucket
-   * can back an `S3Store`. Read-only when unset, as a source bucket the poller only reads. */
   writable?: boolean;
   now?: () => Date;
 }
@@ -53,8 +44,6 @@ function error(status: number, code: string, message: string): Response {
   );
 }
 
-/** One bucket, addressed path-style (`<endpoint>/<bucket>/<key>`) or virtual-hosted
- * (`<bucket>.s3.<region>.amazonaws.com/<key>`). */
 export class FakeS3 {
   readonly objects = new Map<string, FakeObject>();
   readonly requests: FakeRequest[] = [];
@@ -85,8 +74,6 @@ export class FakeS3 {
     return object;
   }
 
-  /** Rewrite an object with `more` at its end (an S3 object is replaced whole; a growing log
-   * is uploaded again with more lines). */
   append(key: string, more: string | Uint8Array, options: { modified?: Date } = {}): FakeObject {
     const current = this.objects.get(key);
     const tail = typeof more === "string" ? encoder.encode(more) : more;
@@ -100,7 +87,6 @@ export class FakeS3 {
     this.objects.delete(key);
   }
 
-  /** The requests made for objects (not listings), by method and key. */
   reads(): { key: string; range?: string }[] {
     return this.requests
       .filter((r) => r.method === "GET" && !r.url.searchParams.has("list-type"))
@@ -110,11 +96,9 @@ export class FakeS3 {
       });
   }
 
-  /** A `fetch` that answers from this bucket. */
   readonly fetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> =>
     this.handle(new Request(input, init));
 
-  /** Serve the bucket over HTTP on a free local port; `endpoint` is the path-style base. */
   listen(): { endpoint: string; stop(): void } {
     const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (req) => this.handle(req) });
     return { endpoint: `http://127.0.0.1:${server.port}`, stop: () => server.stop(true) };
@@ -203,7 +187,6 @@ export class FakeS3 {
     return new Response(null, { status: 200, headers: { etag: `"${object.etag}"` } });
   }
 
-  /** A DELETE on a writable bucket: 204 whether or not there was an object. */
   private remove(key: string, request: Request): Response {
     const current = this.objects.get(key);
     const ifMatch = request.headers.get("if-match");
@@ -266,17 +249,13 @@ export class FakeS3 {
 }
 
 export interface FakeStsOptions {
-  /** The role that may be assumed, and the external id it requires. */
   roleArn: string;
   externalId?: string;
-  /** The keys it hands out. */
   issued: { accessKeyId: string; secretAccessKey: string; sessionToken: string };
-  /** How long they last; 1 h by default. */
   lifetimeMs?: number;
   now?: () => Date;
 }
 
-/** STS's AssumeRole, as AWS documents its query API and XML answer. */
 export class FakeSts {
   readonly calls: URLSearchParams[] = [];
 

@@ -1,9 +1,3 @@
-/** Stale sessions (X4.9): the server keeps no raw logs, so a session an older normalizer built
- * cannot be rebuilt here. Its metadata records the format version that built it
- * (`normalizer.format_version`, the oldest of its stored traces); a session whose version is
- * older than its format's current one is stale, and the machine that uploaded it sends it again
- * whole with `rebuild`. This lists an owner's stale sessions for that uploader. */
-
 import type { FormatRegistry } from "@seshi/formats";
 import type { SessionMetadata, StaleSession, StaleSessionsPage } from "@seshi/model";
 import type { Store } from "@seshi/store";

@@ -1,8 +1,3 @@
-/** The change feed: `owners/<owner>/changes/` listed after a cursor. Keys are time-prefixed, so
- * a plain `list` with `startAfter` is the feed; the cursor is the last key processed. Entries
- * are written by clocks on laptops, so a consumer re-reads a lag window behind its cursor and
- * dedupes by key rather than trusting strict order. */
-
 import type { ChangeEntry, ChangesPage, ReadChangesOptions } from "@seshi/model";
 import { decodeJson } from "./json";
 import { changeStamp, keys } from "./layout";

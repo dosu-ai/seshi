@@ -1,14 +1,3 @@
-/** Source health counters: how many envelopes from each source ended how (X4.8, X4.10). A
- * filtered session is only counted, never recorded, so these counters are the one place a
- * misconfigured source shows up (Datadog minimal capture, metadata-only OTLP); 06's status
- * reads them.
- *
- * `sources/<id>/health/<yyyy-mm-dd>/<instance>.json`: one object per source, UTC day and
- * writing process. Every API instance and the worker count into their own shard, so no two
- * processes contend on one object; a reader sums the shards of a day. Each shard is updated
- * with If-Match (X6.5), so concurrent flushes in one process cannot lose counts either. Code-first:
- * only the binary reads them (X3.10). */
-
 import { readJson, updateJson } from "./json";
 import { assertDay, keys } from "./layout";
 import type { Store } from "./store";
@@ -41,7 +30,6 @@ export const HEALTH_OUTCOMES: readonly HealthOutcome[] = [
 
 export type HealthCounts = Partial<Record<HealthOutcome, number>>;
 
-/** One shard: one process's counts for one source and day. */
 export interface HealthShard {
   schema: typeof HEALTH_SCHEMA;
   source: string;
@@ -51,7 +39,6 @@ export interface HealthShard {
   updated_at: string;
 }
 
-/** The UTC day of `at`, `YYYY-MM-DD`. */
 export function healthDay(at: Date): string {
   return at.toISOString().slice(0, 10);
 }
@@ -65,7 +52,6 @@ function add(into: HealthCounts, counts: HealthCounts): HealthCounts {
   return out;
 }
 
-/** Add `counts` to one process's shard for `day`. */
 export async function addHealth(
   store: Store,
   input: { source: string; day: string; instance: string; counts: HealthCounts; at: string },
@@ -110,7 +96,6 @@ export async function readHealth(
     .map(([day, counts]) => ({ day, counts }));
 }
 
-/** The source ids that have health counters, from a listing of `sources/`. */
 export async function sourcesWithHealth(store: Store): Promise<string[]> {
   const ids = new Set<string>();
   let after: string | undefined;

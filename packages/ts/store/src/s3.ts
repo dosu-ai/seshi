@@ -1,13 +1,3 @@
-/** AWS S3 and Cloudflare R2 as a `Store`, with no AWS SDK: signed (SigV4) requests over
- * `fetch`, on Bun and Node alike. `s3://` and `r2://` are two URL schemes over this one class;
- * the scheme only decides how the endpoint and credentials are resolved. Anything
- * S3-compatible (MinIO, Garage) works through `s3://` with an explicit `endpoint`.
- *
- * Conditional writes (X6.5) are S3's own: `If-Match` and `If-None-Match` on PUT, both honoured
- * by S3 and R2, and a 412 (or a 409 `ConditionalRequestConflict`) becomes
- * `PreconditionFailed`. `Bun.S3Client` has no way to send those headers, so this class no longer
- * uses it. */
-
 import type { Fetch } from "@seshi/model";
 import { FetchS3Client, S3HttpError } from "./s3-fetch";
 import {
@@ -32,11 +22,8 @@ export interface S3Credentials {
 
 export interface S3StoreOptions {
   bucket: string;
-  /** Key prefix inside the bucket, no leading or trailing slash. */
   prefix?: string;
-  /** AWS region (`s3://`). */
   region?: string;
-  /** Cloudflare account id (`r2://`); sets the endpoint. */
   accountId?: string;
   /** Explicit endpoint for S3-compatible stores; overrides `region` / `accountId` resolution. */
   endpoint?: string;
@@ -44,13 +31,11 @@ export interface S3StoreOptions {
    * `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` first. */
   credentials?: S3Credentials;
   scheme?: "s3" | "r2";
-  /** Talk to the bucket through this `fetch`; the global one by default. */
   fetch?: Fetch;
   /** Where the standard S3 variables are read from when not given; `process.env` by default. */
   env?: Record<string, string | undefined>;
 }
 
-/** Parse `s3://bucket/prefix` / `r2://bucket/prefix`. */
 export function parseS3Url(url: string): { scheme: "s3" | "r2"; bucket: string; prefix: string } {
   const match = /^(s3|r2):\/\/([^/]+)(?:\/(.*))?$/.exec(url);
   if (!match) throw new StoreError(`not an s3:// or r2:// URL: ${url}`);
@@ -114,7 +99,6 @@ export class S3Store implements Store {
     });
   }
 
-  /** The store from a `s3://` / `r2://` URL plus the per-scheme extras. */
   static fromUrl(
     url: string,
     options: Omit<S3StoreOptions, "bucket" | "prefix" | "scheme"> = {},
@@ -193,7 +177,6 @@ export class S3Store implements Store {
     }
   }
 
-  /** `list` with each object's `LastModified` and size, which ListObjectsV2 sends anyway. */
   private async listDetailed(prefix: string, options: ListOptions): Promise<ListResult> {
     try {
       const response = await this.client.listObjects({

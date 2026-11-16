@@ -1,7 +1,3 @@
-/** AWS Signature Version 4 for S3 requests, over Web Crypto, so the fetch-based S3 client runs
- * on Node and Bun alike with no AWS SDK. Only what an S3 call needs: the payload hash is sent
- * as `x-amz-content-sha256`, and every header passed in is signed. */
-
 const encoder = new TextEncoder();
 
 export interface SigningCredentials {
@@ -55,7 +51,6 @@ export function uriEncode(value: string): string {
   );
 }
 
-/** An object key as a URL path: each segment encoded, the slashes kept. */
 export function encodeKeyPath(key: string): string {
   return key.split("/").map(uriEncode).join("/");
 }

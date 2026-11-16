@@ -1,9 +1,3 @@
-/** `@seshi/search`, layer 3 (X3.2): session search (F10). An indexer tails the change feed into
- * a local SQLite FTS5 index (F10.2, F10.3); the query layer answers keyword searches with
- * filters, adding the viewer's permission filter itself (F10.4). One `SearchService` per
- * Instance (X1.2): `@seshi/instance` runs its indexer as a job, `@seshi/api` serves `GET
- * /v1/search` from it, and local mode queries it in-process. */
-
 export type {
   BackendHit,
   BackendMatch,

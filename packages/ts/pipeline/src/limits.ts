@@ -1,14 +1,8 @@
-/** Size caps on what one upload may become. Past them the session is refused with a 422, which
- * is final: the same bytes cannot succeed on a retry. Config's `[limits]` (F1) sets them; these
- * are the defaults, today's values. The names match the config's. */
-
 export interface Limits {
-  /** Records in one trace. */
   max_records: number;
   /** JSON bytes of the records array. */
   max_records_bytes: number;
-  /** Bytes of one upload's transcript (the envelope's log text), uncompressed. Nothing of it is
-   * stored (X6.3); the cap bounds what is normalized in memory. */
+  /** Bytes of one upload's transcript (the envelope's log text), uncompressed. */
   max_upload_bytes: number;
   /** Bytes of one `POST /otlp/v1/traces` body as sent, gzipped or not (F4.1); past it the
    * request is answered 413. `DEFAULT_LIMITS`' when absent. */

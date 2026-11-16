@@ -1,22 +1,4 @@
-/** The `anthropic.*` span attributes of the Claude Platform's OpenTelemetry export (F4): what a
- * Claude Console destination sends for Messages API requests and Managed Agents sessions, and
- * what the Anthropic SDK sends from an application. The GenAI conventions (`gen_ai.*`) carry
- * most of it and `@seshi/formats` reads those; this mapper adds what only Anthropic names:
- *
- * - the session key: `anthropic.session.id`, which groups a Managed Agents session's spans
- *   across traces and threads (F4.3);
- * - a tool span's result, `anthropic.tool_result.content` (content blocks as JSON), and its
- *   name from the span name (`anthropic.tool_use bash`, `anthropic.mcp_tool_use …`,
- *   `anthropic.custom_tool_use …`);
- * - an outcome evaluation's explanation, as an observation;
- * - a request's stop reason (`anthropic.message.stop_reason`), request id, thinking and
- *   service-tier parameters, and cache writes by tier when the GenAI total is missing;
- * - the end of a session: archiving or deleting it (`anthropic.sessions.archive`,
- *   `anthropic.sessions.delete`) is a final span (F4.4);
- * - identity the data asserts (X5.5): the organization, the workspace and the application's
- *   end-user id, recorded as account ids and never trusted for ownership.
- *
- * Shapes follow Anthropic's span reference (platform.claude.com, "OpenTelemetry span
+/** Shapes follow Anthropic's span reference (platform.claude.com, "OpenTelemetry span
  * reference", beta: names and attributes can change). */
 
 import {
@@ -28,10 +10,8 @@ import {
 } from "@seshi/formats";
 import type { Claims, LlmCall, SpanPart } from "@seshi/model";
 
-/** The prefixes of Anthropic's tool span names; the tool's name follows a space. */
 const TOOL_SPANS = ["anthropic.tool_use", "anthropic.mcp_tool_use", "anthropic.custom_tool_use"];
 
-/** Spans that end a session. */
 const FINAL_SPANS = new Set(["anthropic.sessions.archive", "anthropic.sessions.delete"]);
 
 function toolNameOf(spanName: string): string | undefined {

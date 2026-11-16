@@ -1,7 +1,3 @@
-/** Identity claims (X5.5): what the data or the credential asserts about who someone is. They
- * are copied into a session's metadata from a fixed allowlist, and with no raw stored that is
- * the only place they survive. They never decide ownership (X5.4). */
-
 import type { Claims } from "@seshi/model";
 
 const TEXT_FIELDS = ["email", "name", "username", "git_email", "git_name"] as const;
@@ -40,8 +36,6 @@ export function pickClaims(input: unknown): Claims | undefined {
   return Object.keys(claims).length > 0 ? claims : undefined;
 }
 
-/** The email and name an ID token verified (an email the IdP says is unverified is left
- * out). */
 export function idTokenClaims(payload: Record<string, unknown>): Claims {
   const claims: Claims = {};
   if (typeof payload.email === "string" && payload.email_verified !== false) {

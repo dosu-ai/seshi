@@ -1,16 +1,3 @@
-/** The write stage: the decided records in, objects in the store out. The pipeline
- * (`pipeline.ts`) runs every other stage in memory first (X4.3) and calls `ingest` last, so this
- * is the only place a session's objects are written: cap → parse (validate, strip NUL, events,
- * hash) → publish the canonical trace (`seshi/trace/1`, X6.2) → change entry → update
- * `metadata.json` (the entry first: decision 7 of 18). Nothing raw is stored (X6.3): a session is its pointer, its traces and its change
- * entries. `tombstone` removes them.
- *
- * `metadata.json` is updated with If-Match and retried on 412 (X6.5), so two writers on one
- * session (an API instance and the worker, two uploads racing) each see the other's update; a
- * `guard` lets the caller refuse a version that is not the one it planned against. Every write
- * records who made it (X5.5): the session keeps its original writer and how its owner was
- * established, and each change entry its own writer. */
-
 import {
   type AppliedEnvelope,
   type Claims,
@@ -63,7 +50,6 @@ export { IngestRejected, type IngestResult, type StoredTrace };
  * an uploader already handles. */
 export const APPLIED_KEPT = 16;
 
-/** Withheld call ids, by id (`SessionMetadata.withheld_calls`). */
 export type WithheldCallIds = NonNullable<SessionMetadata["withheld_calls"]>;
 
 /** `applied` with `entry` added (a resend's entry replaces its earlier one), the oldest past
@@ -86,11 +72,9 @@ export interface WriteContext {
   visibility?: Visibility;
   /** Identity the data asserts, merged into the session's (X5.5). */
   claims?: Claims;
-  /** Where this write came from. */
   provenance?: Provenance;
 }
 
-/** A new session's pointer, before anything is in it. */
 function newSession(
   owner: string,
   archive: string,
@@ -115,7 +99,6 @@ function newSession(
   };
 }
 
-/** The session's claims and provenance with this write's added. */
 function withContext(metadata: SessionMetadata, context: WriteContext): SessionMetadata {
   const next = { ...metadata };
   if (context.claims && Object.keys(context.claims).length > 0) {
@@ -125,7 +108,6 @@ function withContext(metadata: SessionMetadata, context: WriteContext): SessionM
   return next;
 }
 
-/** Whether two pointers differ in anything but `updated_at`. */
 function changed(a: SessionMetadata | null, b: SessionMetadata): boolean {
   return (
     a === null ||
@@ -133,9 +115,6 @@ function changed(a: SessionMetadata | null, b: SessionMetadata): boolean {
   );
 }
 
-/** Redaction counts summed over two writes; the later rule set is the one that last ran. Which
- * rule set each trace was written under is on its `SessionTraceRef` (`rule_set`), so a write
- * under new rules does not make the traces stored under the old ones look current. */
 function addRedaction(
   before: RedactionSummary | undefined,
   write: RedactionSummary | undefined,
@@ -148,7 +127,6 @@ function addRedaction(
 
 export interface IngestMetadata {
   session_id: string;
-  /** The trajectory source (`claude-code`, `codex`, …). */
   agent: string;
   project?: string;
   branch?: string;
@@ -165,7 +143,6 @@ export interface IngestInput extends WriteContext {
   /** Normalized, redacted and reviewed; `parseTrace` validates the shape. */
   records: readonly NormalizedRecord[];
   metadata: IngestMetadata;
-  /** Identifies the writer in the layout marker (`seshi/0.9.0`). */
   client?: string;
   now?: () => Date;
   /** Where the session's log stands once these records are in, written with the pointer. */
@@ -186,11 +163,9 @@ export interface IngestInput extends WriteContext {
    * to abandon the write when the session is not as the caller planned (another write landed
    * first). The trace object written for it is removed again. */
   guard?: (existing: SessionMetadata | null) => void;
-  /** The layout marker was already checked by the caller (the pipeline checks it once). */
   layout_checked?: boolean;
   /** Size caps; `DEFAULT_LIMITS` when omitted. */
   limits?: Readonly<Limits>;
-  /** The LLM calls the records' `llm_call` fields name (model, timing, token usage). */
   llm_calls?: readonly LlmCall[];
   /** What redaction did on this write, added to the session's counts. */
   redaction?: RedactionSummary;
@@ -267,10 +242,6 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
   }
   input.guard?.(before);
 
-  // A replace rewrites an object already under its hash: the content hash leaves things out (an
-  // assistant record's text beside its tool calls, the meta record, LLM calls), so a session
-  // redacted again under new rules, or reviewed again, can keep its hash while those differ, and
-  // keeping the first object would leave what the new write took out (as backfill does).
   const outcome = await publishObject(
     store,
     keys.trace(owner, archive, trace.content_hash),
@@ -280,8 +251,6 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
   );
 
   const context: WriteContext = { ...input, writer, provenance };
-  // Whether the pointer already listed this trace, as of the version the update applied to, and
-  // what a replacement took off it.
   let already = false;
   let replaced: string[] = [];
   let basis: OwnerBasis = input.owner_basis ?? "verified";
@@ -306,9 +275,6 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
     replaced = input.replace
       ? base.traces.map((t) => t.content_hash).filter((h) => h !== trace.content_hash)
       : [];
-    // Outside a replace, a trace already listed keeps its entry, and so the rule set its stored
-    // object was written under: that object is not rewritten, so the old rules' output stays
-    // under the hash. A replace rewrote it (above), so its entry is this write's.
     const traces = input.replace ? [ref] : listed ? base.traces : [...base.traces, ref];
     const next: SessionMetadata = withContext(
       {
@@ -325,20 +291,15 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
     );
     if (metadata.project ?? base.project) next.project = metadata.project ?? base.project;
     if (metadata.branch ?? base.branch) next.branch = metadata.branch ?? base.branch;
-    // Lineage is backfilled onto an existing session: a duplicate upload that knows the parent
-    // adds that knowledge rather than being ignored.
     const parent = metadata.parent_session_id ?? base.parent_session_id;
     if (parent) next.parent_session_id = parent;
     const normalized = input.normalized ?? base.normalized;
     if (normalized) next.normalized = normalized;
-    // Kept from the stub through every write (`...base`), or set anew by a whole write past it.
     if (input.dropped_prefix) next.dropped_prefix = input.dropped_prefix;
     if (input.withheld_calls !== undefined) {
       if (Object.keys(input.withheld_calls).length > 0) next.withheld_calls = input.withheld_calls;
       else delete next.withheld_calls;
     }
-    // A replace starts the session over: what earlier envelopes answered named traces that are
-    // gone, and their redaction counts described content that is no longer stored.
     if (input.replace) delete next.applied;
     if (input.applied && normalized) {
       next.applied = withApplied(input.replace ? [] : base.applied, {
@@ -355,21 +316,13 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
     }
     const normalizer = input.session_normalizer ?? metadata.normalizer;
     if (normalizer) next.normalizer = normalizer;
-    // Only the write that creates the pointer sets the retraction hash (F9.7). A later write
-    // never adds one, or another holder of the org key could extend a claimed session that has
-    // none with a hash of their own, then replace or retract it with their secret.
     if (input.retract_hash && existing === null) next.retract_hash = input.retract_hash;
     const redaction = addRedaction(input.replace ? undefined : base.redaction, input.redaction);
     if (redaction) next.redaction = redaction;
     else delete next.redaction;
     return changed(existing, next) ? next : null;
   };
-  // A duplicate is one the pointer already lists and whose object was there: nothing new to say.
-  // An object that exists without a pointer entry (an interrupted earlier publish) is completed
-  // here, pointer and change entry included.
   let duplicate = false;
-  // The change entry is written before the pointer moves (decision 7 of 18): a failure between
-  // the two leaves an entry for a publish that did not happen, never a publish with no entry.
   const step = (existing: SessionMetadata | null): ChangeUpdate => {
     const next = nextPointer(existing);
     duplicate = already && outcome === "exists" && replaced.length === 0;
@@ -394,11 +347,6 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
   try {
     await updateMetadataWithChange(store, owner, archive, step, { expected: before });
   } catch (err) {
-    // Tombstoned between the check above and now, or the guard refused a session another write
-    // changed: the object this write just created would be left behind (a tombstone already
-    // removed the objects it knew of). Remove it too, unless the pointer already lists it (a
-    // replace that rewrote a listed object leaves it rewritten: the write planned again puts the
-    // same there). A change entry already written stays: readers find the session unchanged.
     if (outcome === "written") {
       const now = await readMetadata(store, owner, archive);
       if (!now?.traces.some((t) => t.content_hash === trace.content_hash)) {
@@ -407,12 +355,8 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
     }
     throw err;
   }
-  // The pointer no longer lists them, so no reader looks for them any more.
   for (const hash of replaced) await store.delete(keys.trace(owner, archive, hash));
 
-  // F2.5's sweep, scoped to this session: what an earlier replace (or backfill, or publish) that
-  // stopped partway left behind, unnamed and over an hour old. It never throws; a sweep that
-  // fails leaves them for the worker's daily one.
   if (input.replace) {
     await sweepTraces(store, { sessions: [{ owner, archive_id: archive }], now });
   }
@@ -427,42 +371,28 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
   };
 }
 
-/** Who a session stub is (F3.4): the session, and who wrote it and may read and retract it.
- * Never content. */
 export interface StubInput {
   session_id: string;
-  /** The format the session is filed under. */
   agent: string;
   writer?: Writer;
   owner_basis?: OwnerBasis;
   visibility?: Visibility;
-  /** The uploading machine's retraction hash (F9.7), so the stub can be retracted. */
   retract_hash?: string;
 }
 
-/** A stub's pointer: a new session's, with the retraction hash and nothing else (`normalized`
- * and `applied` are added by `recordProgress`). */
 function newStub(owner: string, archive: string, stub: StubInput, at: string): SessionMetadata {
   const metadata = newSession(owner, archive, stub.session_id, stub.agent, at, stub);
   if (stub.retract_hash) metadata.retract_hash = stub.retract_hash;
   return metadata;
 }
 
-/** The dropped part of a log, from the state its log was in when it was dropped. */
 function droppedPrefixOf(state: NormalizedState): DroppedPrefix {
   return { bytes: state.bytes, records: state.records, prefix_sha256: state.prefix_sha256 };
 }
 
 /** Record where a session's log stands when no trace is written for an envelope: a chunk with
  * no records in it, a whole log with nothing past what is stored, an envelope model review
- * dropped. The log moves on and the envelope is remembered (X4.7) without a new trace.
- *
- * With `stub`, a session that has no pointer yet gets one: a stub (F3.4, revised 15 Nov 2026)
- * for a session whose first envelope model review dropped. It holds the session's identity, its
- * writer, where its log ends and the prefix hash, and no `head`, so the next envelope continues
- * past the dropped one and is reviewed on its own (`isStub`). Without `stub`, nothing is written
- * for a session that has no pointer. A session with no trace records its log state as its
- * `dropped_prefix` too, which every later write keeps. */
+ * dropped. The log moves on and the envelope is remembered (X4.7) without a new trace. */
 export async function recordProgress(input: {
   store: Store;
   owner: string;
@@ -484,9 +414,6 @@ export async function recordProgress(input: {
     const base = existing ?? (stub ? newStub(owner, input.archive_id, stub, at) : null);
     if (!base) return null;
     const next: SessionMetadata = { ...base, normalized, updated_at: at };
-    // A session with no trace stores nothing of its log: everything normalized so far was
-    // dropped (or held no records). Remember it past the first trace, so a whole write that does
-    // not extend what is stored (a rebuild, a replace) still leaves it out (F3.4).
     if (base.head === undefined) next.dropped_prefix = droppedPrefixOf(normalized);
     if (input.withheld_calls !== undefined) {
       if (Object.keys(input.withheld_calls).length > 0) next.withheld_calls = input.withheld_calls;
@@ -530,21 +457,15 @@ export async function tombstone(input: TombstoneInput): Promise<{ removed: numbe
   const archive = archiveId(owner, input.agent, input.session_id);
   const at = (input.now ?? (() => new Date()))().toISOString();
   let removedObjects: { traces: string[] } | null = null;
-  // Mark it redacted first, so no write that races the removal can give it a new head; the
-  // change entry goes before that (decision 7 of 18), naming the head as it was.
   await updateMetadataWithChange(store, owner, archive, (existing) => {
     if (!existing) {
       removedObjects = null;
       return { next: null, change: null };
     }
-    // Kept across attempts: a pointer write that landed but answered `PreconditionFailed` is
-    // tried again on the redacted pointer it wrote, which names no trace, and the traces the
-    // first attempt read must still go (33).
     const earlier = (removedObjects as { traces: string[] } | null)?.traces ?? [];
     removedObjects = {
       traces: [...new Set([...earlier, ...existing.traces.map((t) => t.content_hash)])],
     };
-    // What the next chunk would continue from goes too: nothing of the session is left.
     const {
       head: _head,
       normalized: _n,
@@ -570,9 +491,6 @@ export async function tombstone(input: TombstoneInput): Promise<{ removed: numbe
   });
   const gone = removedObjects as { traces: string[] } | null;
   if (gone === null) {
-    // Never published (pending, or refused by the filter): no pointer, but its
-    // span records (F4.4) may hold content, and only this removes them. Nothing was indexed, so
-    // there is no change entry; null when there was nothing at all.
     const spans = await deleteSpans(store, owner, archive);
     await store.delete(keys.pending(archive));
     return spans > 0 ? { removed: spans } : null;
@@ -582,20 +500,14 @@ export async function tombstone(input: TombstoneInput): Promise<{ removed: numbe
     await store.delete(keys.trace(owner, archive, hash));
     removed++;
   }
-  // Span records (F4.4) hold the session's content too, and a pending marker would only have
-  // the assembler find them again.
   await deleteSpans(store, owner, archive);
   await store.delete(keys.pending(archive));
   return { removed };
 }
 
 /** Remove what a tombstone of an already tombstoned session left behind: trace objects still in
- * its folder, span records, the pending marker; how many trace objects went. A tombstone marks
- * the session redacted before it deletes, so one whose pointer write landed but whose answer
- * was lost (or whose deletes failed) is found redacted by the retry, which used to answer
- * "already removed" and leave the retracted content in the bucket until the orphan sweep (33).
- * Callers that find a session redacted call this before they say so. A session not redacted is
- * left alone. */
+ * its folder, span records, the pending marker; how many trace objects went. A session not
+ * redacted is left alone. */
 export async function finishTombstone(input: {
   store: Store;
   owner: string;
@@ -640,7 +552,6 @@ export async function setVisibility(input: SetVisibilityInput): Promise<SessionM
   const { store, owner } = input;
   const archive = archiveId(owner, input.agent, input.session_id);
   const at = (input.now ?? (() => new Date()))().toISOString();
-  // The change entry goes before the pointer (decision 7 of 18).
   const result = await updateMetadataWithChange(store, owner, archive, (existing) => {
     if (!existing) return { next: null, change: null };
     if (existing.status === "redacted") {
@@ -666,8 +577,6 @@ export async function setVisibility(input: SetVisibilityInput): Promise<SessionM
   if (session === null) return null;
   return session;
 }
-
-// --- read side ----------------------------------------------------------------
 
 /** One stored trace, the canonical `seshi/trace/1` object; null when there is none. Render it
  * with `renderTrace` from `@seshi/formats` for another format. */
@@ -713,10 +622,6 @@ export async function listSessions(
   return { sessions, cursor: page.cursor, truncated: page.truncated };
 }
 
-/** Up to `limit` keys under `prefix` after `startAfter`, stepping over each session's `spans/`:
- * on reaching one, listing starts again just past it (`…/spans0`; `0` sorts right after `/`).
- * The cursor is the last key looked at, or such a step, so the next page never walks the
- * spans again. */
 async function listSessionKeys(
   store: Store,
   prefix: string,

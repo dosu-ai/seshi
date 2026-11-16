@@ -1,9 +1,3 @@
-/** `@seshi/sources`, layer 3 (X3.2): the connector scheduler and checkpoints (X7, X7.4). The
- * instance builds one `Sources` from `[[sources]]` and the connectors its integrations provide
- * (X3.11); the worker role runs each polled source on its interval, and `seshi sync run`,
- * `sync status` and `reprocess` use the same object. The generic S3 poller (F6) is a built-in
- * connector (`builtinConnectors`). */
-
 import { S3Connector, type S3ConnectorOptions } from "./s3/connector";
 
 export {
@@ -39,8 +33,6 @@ export {
   type Submitter,
 } from "./sources";
 
-/** The connectors every binary has, whatever its integrations (X3.11): the vendor-neutral S3
- * poller (F6). One set per instance (X1.2). */
 export function builtinConnectors(options: S3ConnectorOptions): S3Connector[] {
   return [new S3Connector(options)];
 }

@@ -1,15 +1,3 @@
-/** The Datadog LLM Observability Export API (F5.1): `POST /api/v2/llm-obs/v1/spans/events/search`
- * with the API and application keys, cursor paging, and a response pinned to the documented
- * shape. The endpoints are marked preview, so an answer that no longer fits that shape is
- * refused loudly (`DatadogShapeError`) rather than read as nothing.
- *
- * 429 answers honour `Retry-After` (else `X-RateLimit-Reset`), waiting inside the run; 5xx
- * answers, a query Datadog cut short (`meta.status: timeout`) and network failures are retried
- * with backoff, and so is a request that has not answered within `requestTimeoutMs`. Everything
- * else is an error for the run, which leaves the checkpoint where it was (X4.8). Redirects are
- * not followed: fetch would carry the `DD-API-KEY` and `DD-APPLICATION-KEY` headers to wherever
- * the redirect points. No message ever holds a key. */
-
 import type {
   DatadogSearchRequest,
   DatadogSearchResponse,
@@ -51,7 +39,6 @@ export function apiBase(site: string, apiUrl?: string): string {
   return `https://api.${host}`;
 }
 
-/** Config tags (`key:value`) as the filter's tag map. */
 export function tagFilter(tags: readonly string[]): Record<string, string> | undefined {
   const out: Record<string, string> = {};
   for (const tag of tags) {
@@ -60,7 +47,6 @@ export function tagFilter(tags: readonly string[]): Record<string, string> | und
       throw new Error(`tag '${tag}' is not key:value`);
     }
     const key = tag.slice(0, at);
-    // The filter is a map: a second value for a key would silently replace the first.
     if (key in out) throw new Error(`tag key '${key}' is given twice; a span must carry all tags`);
     out[key] = tag.slice(at + 1);
   }
@@ -98,14 +84,12 @@ export function searchBody(query: SearchQuery): DatadogSearchRequest {
   };
 }
 
-/** One page, read. */
 export interface SearchPage {
   spans: DatadogSpan[];
   /** Items of `data` that did not have a span's shape, skipped. */
   invalid: number;
   /** What was wrong with the first of them, in words that quote no data. */
   problem?: string;
-  /** The cursor of the next page, when there is one. */
   next?: string;
   /** `meta.status`: `done`, or `timeout` when Datadog cut the query short. */
   status?: string;
@@ -114,7 +98,6 @@ export interface SearchPage {
 const isObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 
-/** Why one item of `data` is not a span, or undefined when it is one. */
 function spanProblem(item: unknown): string | undefined {
   if (!isObject(item)) return "an item of data is not an object";
   const a = item.attributes;
@@ -194,26 +177,20 @@ export interface ExportApiOptions {
   appKey: string;
   fetch: (input: string, init: RequestInit) => Promise<Response>;
   signal: AbortSignal;
-  /** Waits between attempts; abortable. A real timer by default. */
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
   /** Attempts for 5xx answers, timeouts and network failures (default 4). */
   attempts?: number;
-  /** Attempts for 429 answers (default 6). */
   rateLimitAttempts?: number;
   /** The longest single wait a 429 may ask for (default 5 minutes); asking for longer fails
    * the run, so the job's own backoff takes over. */
   maxRateLimitWaitMs?: number;
-  /** Base of the exponential backoff (default 1 s). */
   backoffMs?: number;
   /** How long one request may take, answer body included, before it counts as a network
-   * failure and is retried (default 2 minutes). The job runner has no run timeout, so a request
-   * that never answers would otherwise hold the source's run forever. */
+   * failure and is retried (default 2 minutes). */
   requestTimeoutMs?: number;
-  /** For `Retry-After` given as an HTTP date. */
   now?: () => number;
 }
 
-/** A real, abortable timer. */
 export function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal.aborted) return reject(signal.reason);
@@ -243,7 +220,6 @@ export function retryAfterMs(headers: Headers, now: number): number | undefined 
   return undefined;
 }
 
-/** What Datadog said went wrong, from its `{ errors: [...] }` body, bounded. */
 async function errorText(response: Response): Promise<string> {
   let body = "";
   try {
@@ -259,14 +235,11 @@ async function errorText(response: Response): Promise<string> {
       );
       body = parts.filter((p) => p !== "").join("; ");
     }
-  } catch {
-    // Not JSON: the text as it is.
-  }
+  } catch {}
   body = body.replace(/\s+/g, " ").trim();
   return body.length > 300 ? `${body.slice(0, 300)}…` : body;
 }
 
-/** One page of the search, with the retries above. */
 export async function searchPage(
   options: ExportApiOptions,
   query: SearchQuery,
@@ -288,7 +261,6 @@ export async function searchPage(
     options.signal.throwIfAborted();
     const timeout = AbortSignal.timeout(requestTimeout);
     const signal = AbortSignal.any([options.signal, timeout]);
-    /** A failure of this attempt's request (unreachable, or no answer in time). */
     const failed = async (err: unknown): Promise<void> => {
       if (options.signal.aborted) throw options.signal.reason ?? err;
       failures++;

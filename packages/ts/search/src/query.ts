@@ -1,19 +1,3 @@
-/** The keyword syntax `seshi search` and `GET /v1/search` accept, turned into an SQLite FTS5
- * match expression. People type words, paths and commands, not FTS5: `src/app.ts`, `git
- * push --force` or a stray `"` must never be a syntax error or reach FTS5 as an operator, so
- * every word becomes a quoted FTS5 string, and only these forms mean anything:
- *
- * - words: all must appear in one record, in any order (`flaky test`): a record is the unit
- *   matched, and a session is found by its matching records;
- * - `"a phrase"`: the words in that order;
- * - `word*`: words starting with `word`;
- * - `a OR b`: either (upper case `OR` between two words or phrases);
- * - `-word`, `-"a phrase"`, or `NOT word`: records without it (`--force` is a word).
- *
- * Case and accents are ignored (the index's tokenizer folds both). Punctuation separates words,
- * so `src/app.ts` finds the words `src`, `app`, `ts` next to each other. */
-
-/** Something about the search request is wrong; the API answers 400 `bad_query`. */
 export class SearchQueryError extends Error {
   readonly code = "bad_query";
   constructor(message: string) {
@@ -24,7 +8,6 @@ export class SearchQueryError extends Error {
 
 /** The longest query accepted, in characters. */
 export const MAX_QUERY_LENGTH = 1000;
-/** The most words and phrases one query may hold. */
 export const MAX_QUERY_TERMS = 32;
 
 interface Item {
@@ -35,7 +18,6 @@ interface Item {
 }
 
 export interface ParsedQuery {
-  /** The FTS5 match expression. */
   match: string;
   /** The words and phrases to find, as typed (negated ones left out). */
   terms: string[];
@@ -50,7 +32,6 @@ function quoted(item: Item): string {
   return item.prefix ? `${body} *` : body;
 }
 
-/** Split `text` into items, honouring quotes, `-` and `*`, and the bare operators. */
 function lex(text: string): (Item | "OR" | "NOT")[] {
   const out: (Item | "OR" | "NOT")[] = [];
   let i = 0;
@@ -60,7 +41,6 @@ function lex(text: string): (Item | "OR" | "NOT")[] {
       i++;
       continue;
     }
-    // `-word` and `-"phrase"` exclude; `--force` and `-` alone are words (a flag, a dash).
     let negated = false;
     const after = text[i + 1];
     if (ch === "-" && after !== undefined && (after === '"' || TOKEN_CHAR.test(after))) {
@@ -104,7 +84,6 @@ export function parseQuery(text: string): ParsedQuery {
     throw new SearchQueryError(`the query is longer than ${MAX_QUERY_LENGTH} characters`);
   }
   const tokens = lex(text);
-  // `NOT x` is `-x`; a NOT with nothing after it is dropped.
   const items: (Item | "OR")[] = [];
   for (let k = 0; k < tokens.length; k++) {
     const token = tokens[k] as Item | "OR" | "NOT";
@@ -124,7 +103,6 @@ export function parseQuery(text: string): ParsedQuery {
     throw new SearchQueryError(`the query has more than ${MAX_QUERY_TERMS} words and phrases`);
   }
 
-  // Positive items grouped by OR; negated items apart.
   const groups: Item[][] = [];
   const negated: Item[] = [];
   let joinNext = false;

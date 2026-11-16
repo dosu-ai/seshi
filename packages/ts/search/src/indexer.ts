@@ -1,47 +1,3 @@
-/** The indexer (F10.2): it tails every owner's change feed (`owners/<owner>/changes/`) and keeps
- * the index in step. A change entry says which session changed; the session's own metadata
- * says what it is now, and that is what gets indexed:
- *
- * - `published`: the session's new traces are read and their events added. When the index
- *   already holds the earlier traces of the session (a continuation), only the new ones are
- *   read; when it does not, or the publish replaced the session (X4.6), it is read again from
- *   its last whole trace.
- * - `published` with `replace: true` (a replacing upload, X4.6, or `seshi redact backfill`'s
- *   `reason: "redacted"`, F2.5): everything indexed for the session is dropped and it is read
- *   again from the trace the entry names (`content_hash`), whatever the index held. The
- *   metadata alone would miss one case: a backfill whose new trace keeps an old hash (only
- *   what the hash leaves out changed) rewrites that object in place, and the trace list looks
- *   unchanged.
- * - `tombstone`: the session is dropped.
- * - `visibility_changed`: the session's visibility is updated (F10.4).
- *
- * Indexing from the metadata rather than from the entry alone makes every step idempotent and
- * order-free: an entry read twice, entries out of order, or a session whose entry is missing
- * still end with the index matching the session as it is. Sessions dropped by model review never
- * reach the feed, so they are never indexed.
- *
- * Writers append the change entry before they move the session's pointer (decision 7 of 18), so
- * an entry can be read before the change it announces is in the metadata, and a write that
- * failed between the two leaves an entry for a change that never happened. An entry whose change
- * the metadata does not show yet (`shows`) is indexed as the session is and not marked seen, so
- * the next run reads it again; once its stamp is `lagMs` behind this host's clock it is marked
- * seen whatever the metadata says (its write failed, or a later one superseded it).
- *
- * Every update carries when its metadata was read (`SessionUpdate.read_at`), and the index
- * refuses one read before what it holds, so processes sharing one index file never undo each
- * other. The metadata's own `updated_at` is not used to order updates: several writers stamp it
- * with clocks that disagree, and a continuation written by a machine whose clock is behind
- * would look older than what it extends.
- *
- * An object that cannot be decoded (a corrupt or foreign metadata or trace object) is skipped
- * with a warning rather than failing the run: one bad object must not stop an owner's feed, or
- * keep a new index from ever becoming ready. Store errors still fail the run, which is retried.
- *
- * Change keys are stamped by the writer's clock (a laptop in local mode), so the indexer re-reads
- * a lag window behind its cursor and skips the keys it already processed (`spec/layout.md`).
- * Owners have no list of their own (X5.8): the indexer lists `owners/` and refreshes that list
- * every so often. */
-
 import {
   type ChangeEntry,
   canonicalText,
@@ -62,16 +18,10 @@ import {
 } from "@seshi/store";
 import type { IndexedEvent, IndexedSession, IndexStore, SessionUpdate } from "./backend";
 
-/** How far behind its cursor the indexer re-reads each feed, for entries stamped by a clock
- * that runs behind. */
 export const FEED_LAG_MS = 5 * 60 * 1000;
-/** Change keys listed per request. */
 export const FEED_PAGE = 500;
-/** Change entries one run reads before it yields (and says more is waiting). */
 export const RUN_BUDGET = 5000;
-/** How often the list of owners is read again (a new owner's sessions are found within it). */
 export const OWNER_REFRESH_MS = 60 * 1000;
-/** Bucket reads in flight at once. */
 const CONCURRENCY = 8;
 
 const HEX64 = /^[0-9a-f]{64}$/;
@@ -83,7 +33,6 @@ export interface IndexerLogger {
 export interface IndexerOptions {
   store: Store;
   index: IndexStore;
-  /** Which event roles are indexed (`search.events`). */
   events: readonly EventRole[];
   now?: () => Date;
   log?: IndexerLogger;
@@ -93,22 +42,17 @@ export interface IndexerOptions {
   ownerRefreshMs?: number;
 }
 
-/** What one run did. */
 export interface IndexerRun {
   /** The run stopped at its budget with entries still to read. */
   more: boolean;
   /** Every owner's feed was read to its end: the index is caught up (and ready). */
   caught_up: boolean;
   owners: number;
-  /** Change entries read. */
   entries: number;
-  /** Sessions whose index rows changed. */
   indexed: number;
-  /** Sessions dropped from the index. */
   removed: number;
 }
 
-/** `fn` over `items`, at most `limit` at a time, results in order. */
 async function mapLimit<T, R>(
   items: readonly T[],
   limit: number,
@@ -132,9 +76,6 @@ function epoch(value: string | null | undefined): number | undefined {
   return Number.isFinite(ms) ? ms : undefined;
 }
 
-/** The traces that make up the session now: from its last whole trace (one with no
- * `continuation`) to the head. A replace leaves one trace; a session extended by chunks keeps
- * its first trace and every continuation. */
 export function currentTraces(metadata: SessionMetadata): string[] {
   let start = 0;
   metadata.traces.forEach((t, i) => {
@@ -143,10 +84,6 @@ export function currentTraces(metadata: SessionMetadata): string[] {
   return metadata.traces.slice(start).map((t) => t.content_hash);
 }
 
-/** A trace's events whose role is indexed, as index documents. One addition: the trace's
- * events leave out what the assistant said alongside tool calls (the record fans out into its
- * `tool_call` events), and that text is assistant text F10.1 asks to search, so it is indexed
- * as an `assistant` document pointing at the record's first event. */
 export function searchableEvents(
   hash: string,
   trace: Trace,
@@ -166,8 +103,6 @@ export function searchableEvents(
     });
   }
   if (!roles.has("assistant")) return out;
-  // Walk the records as the events were derived (model's parse.ts) to find each record's
-  // first event.
   let next = 0;
   for (const record of trace.records.slice(1)) {
     if (record.role === "meta") continue;
@@ -201,17 +136,12 @@ export function tracesFrom(metadata: SessionMetadata, hash: string): string[] {
   return at < 0 ? currentTraces(metadata) : metadata.traces.slice(at).map((t) => t.content_hash);
 }
 
-/** Whether `metadata` (null: no session) shows the change `entry` announces. Entries are
- * written before the pointer moves, so one may be read before its change is in the metadata,
- * or name a change that failed. Only a yes is acted on: a no is read again later. */
 export function shows(metadata: SessionMetadata | null, entry: ChangeEntry): boolean {
   if (metadata === null) return entry.kind === "tombstone";
-  // Nothing more happens to a redacted session.
   if (metadata.status === "redacted") return true;
   if (entry.kind === "tombstone") return false;
   if (entry.kind === "visibility_changed") return metadata.visibility === entry.visibility;
   if (entry.content_hash === null) return true;
-  // A replace leaves its trace first in the list (continuations may follow).
   if (entry.replace === true) return metadata.traces[0]?.content_hash === entry.content_hash;
   return metadata.traces.some((t) => t.content_hash === entry.content_hash);
 }
@@ -220,20 +150,15 @@ function startsWith(list: readonly string[], prefix: readonly string[]): boolean
   return prefix.length <= list.length && prefix.every((h, i) => list[i] === h);
 }
 
-/** A trace read for indexing, with its index documents. */
 interface ReadTrace {
   trace: Trace;
   events: IndexedEvent[];
 }
 
-/** A replacing entry's say over how a session is read (see the top of this file). */
 interface Replaced {
-  /** The trace the replacing entry named. */
   content_hash: string;
 }
 
-/** What to do to one session, decided from its metadata (kept: `shows` reads it) before
- * anything is written. */
 type Plan =
   | {
       kind: "remove";
@@ -301,14 +226,10 @@ export class Indexer {
     }
   }
 
-  /** Forget the owners list, so the next run reads it again (after a rebuild). */
   forgetOwners(): void {
     this.owners = undefined;
   }
 
-  /** Every owner folder. Listing them costs one request per owner, so the list is kept for
-   * `ownerRefreshMs`; an empty list (a new deployment) is read again on every run, so the first
-   * sessions are found at once. */
   private async ownerList(): Promise<string[]> {
     const now = this.now().getTime();
     const cached = this.owners;
@@ -348,7 +269,6 @@ export class Indexer {
       }
     }
     if (signal.aborted) return run;
-    // Not when the index was reset during the pass: the pass did not read the rebuilt feed.
     const caughtUp = this.index.transaction(() => {
       if (this.index.generation() !== generation) return false;
       this.index.caughtUp(this.now().toISOString());
@@ -359,15 +279,12 @@ export class Indexer {
     return run;
   }
 
-  /** Where re-reading `owner`'s feed starts: the lag window behind its cursor. */
   private windowStart(prefix: string, cursor: string): string {
     const at = stampTime(cursor.slice(prefix.length));
     if (at === null) return cursor;
     return `${prefix}${changeStamp(new Date(Math.max(0, at - this.lagMs)).toISOString())}`;
   }
 
-  /** Read `owner`'s feed from its cursor, a page at a time. True when the run's budget ran
-   * out with more to read, or the index was reset under it (`generation`). */
   private async drain(
     owner: string,
     run: IndexerRun,
@@ -386,7 +303,6 @@ export class Indexer {
       const entries = await mapLimit(fresh, CONCURRENCY, (key) => this.entry(key));
       const named = entries.filter((e): e is ChangeEntry => e !== null && HEX64.test(e.archive_id));
       const archives = [...new Set(named.map((e) => e.archive_id))];
-      // The last replacing entry per session on this page (entries are read in key order).
       const replaced = new Map<string, Replaced>();
       for (const e of named) {
         if (e.kind === "published" && e.replace === true && e.content_hash) {
@@ -400,8 +316,6 @@ export class Indexer {
       const held = this.index.cursor(owner);
       const next = held === undefined || (last !== undefined && last > held) ? last : held;
       const nextAt = next === undefined ? undefined : stampTime(next.slice(prefix.length));
-      // Entries whose change is in the metadata, or that are too old to wait for, are done;
-      // the rest are read again by the next run (see the top of this file).
       const metadata = new Map(archives.map((a, i) => [a, plans[i]?.metadata ?? null]));
       const nowMs = this.now().getTime();
       const done = fresh.filter((key, i) => {
@@ -427,10 +341,7 @@ export class Indexer {
         );
         return false;
       });
-      // Reset (rebuilt) since this run started: write nothing, and let the next run start over.
       if (reset) return true;
-      // An update refused because another process changed the session in between: plan it
-      // again from what the index holds now.
       for (const archive of refused) {
         this.applyPlan(await this.plan(owner, archive, replaced.get(archive)), run);
       }
@@ -452,11 +363,9 @@ export class Indexer {
     }
   }
 
-  /** Apply a plan to the index; false when the index refused it. */
   private applyPlan(plan: Plan, run: IndexerRun): boolean {
     if (plan.kind === "remove") {
       const held = this.index.session(plan.owner, plan.archive) !== null;
-      // Refused only when another process read the session later; its view stands.
       if (this.index.remove(plan.owner, plan.archive, plan.read_at) && held) run.removed++;
       return true;
     }
@@ -465,16 +374,12 @@ export class Indexer {
     return applied;
   }
 
-  /** What the index should do about one session, from its metadata and the traces the index
-   * does not hold yet; after a replacing entry (`replaced`), from the trace it named on, with
-   * nothing the index held kept. */
   private async plan(
     owner: string,
     archive: string,
     replaced?: Replaced,
     attempt = 0,
   ): Promise<Plan> {
-    // Taken before the read: a read that starts later sees this state or a newer one.
     const readAt = this.now().getTime();
     const metadata = await this.metadataOf(owner, archive);
     if (metadata === null || metadata.status === "redacted" || metadata.head === undefined) {
@@ -486,8 +391,6 @@ export class Indexer {
     const toRead = extends_ ? wanted.slice((held as IndexedSession).traces.length) : wanted;
     const traces = await mapLimit(toRead, 4, (hash) => this.traceOf(owner, archive, hash));
     if (traces.some((t) => t === null) && attempt === 0) {
-      // The session moved on (a replace deleted a trace) between the two reads: start over
-      // from its metadata as it is now.
       return this.plan(owner, archive, replaced, 1);
     }
     const read = toRead
@@ -516,8 +419,6 @@ export class Indexer {
     };
   }
 
-  /** A session's metadata; null when it is gone, or cannot be decoded (warned): a session the
-   * index cannot read is one it cannot serve, so it is dropped. */
   private async metadataOf(owner: string, archive: string): Promise<SessionMetadata | null> {
     const bytes = await getBytes(this.store, keys.metadata(owner, archive));
     if (bytes === null) return null;
@@ -539,8 +440,6 @@ export class Indexer {
     }
   }
 
-  /** A trace and its index documents; null when it is gone, or cannot be decoded (warned by
-   * the caller). */
   private async traceOf(owner: string, archive: string, hash: string): Promise<ReadTrace | null> {
     const bytes = await getBytes(this.store, keys.trace(owner, archive, hash));
     if (bytes === null) return null;
@@ -555,8 +454,6 @@ export class Indexer {
     }
   }
 
-  /** The session's index row: from its metadata, the traces read now, and (for a
-   * continuation) what the index held. */
   private sessionFields(
     owner: string,
     metadata: SessionMetadata,

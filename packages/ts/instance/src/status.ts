@@ -1,8 +1,3 @@
-/** Job status (X7.5): what `seshi workers status` and `GET /v1/admin/jobs` show. The worker's
- * heartbeat says whether it runs, whether a second one does, and how each of its jobs last
- * went; backlog and record counts are read from the bucket when asked, so any instance can
- * answer, the worker or not. */
-
 import { UPLOAD_SOURCE, VERSION } from "@seshi/model";
 import type { SourceStatus } from "@seshi/sources";
 import {
@@ -16,10 +11,7 @@ import { heartbeatFresh, STALE_HEARTBEATS } from "./builtin-jobs";
 import type { Instance } from "./instance";
 import type { JobPlacement } from "./jobs";
 
-/** The worker as its heartbeat shows it. */
 export interface WorkerView {
-  /** `running`; `stopped` (its heartbeat is older than three intervals); `never` (no heartbeat
-   * in this bucket); `several` (a second worker is running, X7.3). */
   state: "running" | "stopped" | "never" | "several";
   instance?: string;
   host?: string;
@@ -27,9 +19,7 @@ export interface WorkerView {
   roles?: string[];
   started_at?: string;
   last_heartbeat?: string;
-  /** How long ago the heartbeat was written. */
   age_ms?: number;
-  /** The other workers seen running. */
   others: { instance: string; at: string }[];
 }
 
@@ -39,11 +29,8 @@ export interface JobStatus {
   placement: JobPlacement;
   interval_ms: number;
   source?: string;
-  /** Its last run, from the heartbeat (worker jobs) or this instance (jobs on every instance). */
   last?: JobRecord;
-  /** What is waiting, read now. */
   backlog?: Record<string, number>;
-  /** For a poller: its source's drop and failure records (X6.4). */
   dropped?: number;
   failed?: number;
 }
@@ -51,13 +38,10 @@ export interface JobStatus {
 export interface InstanceStatus {
   at: string;
   deployment: string;
-  /** The instance answering. */
   instance: { id: string; process: string; roles: string[]; version: string };
   worker: WorkerView;
   jobs: JobStatus[];
-  /** Every configured source, `upload`, and any other source that has records. */
   sources: SourceStatus[];
-  /** What an operator should act on, in words. */
   warnings: string[];
 }
 
@@ -114,7 +98,6 @@ export function assessWorker(
   return { worker: view, warnings };
 }
 
-/** The status of `instance`'s deployment, read now. */
 export async function instanceStatus(instance: Instance): Promise<InstanceStatus> {
   const now = instance.now();
   const found = await readHeartbeat(instance.store);
@@ -133,7 +116,6 @@ export async function instanceStatus(instance: Instance): Promise<InstanceStatus
     if (id === UPLOAD_SOURCE || configured.includes(id)) {
       sources.push(await instance.sources.status(id));
     } else {
-      // Records of a source no longer configured: still counted, so they are not forgotten.
       sources.push(await orphanStatus(instance, id));
     }
   }
@@ -190,7 +172,6 @@ export async function instanceStatus(instance: Instance): Promise<InstanceStatus
   };
 }
 
-/** A source that has records but is no longer in `[[sources]]`. */
 async function orphanStatus(instance: Instance, id: string): Promise<SourceStatus> {
   const [dropped, failed] = await Promise.all([
     countRecords(instance.store, "dropped", id),

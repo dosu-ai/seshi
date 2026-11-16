@@ -1,16 +1,3 @@
-/** Drop and failure records (X6.4): one per envelope that was not stored, saying that it
- * arrived and why, never what it contained. Both kinds share the base fields and live under
- * separate prefixes, so each is listed, counted and retained on its own:
- *
- * - `sources/<id>/dropped/`: model review dropped it, or review failed with
- *   `on_failure = "drop"` (F3.4); adds the policy, its hash and the decision model.
- * - `sources/<id>/failed/`: a permanent pipeline failure such as an unknown format or an
- *   adapter error (X4.8); adds the error code and message.
- *
- * Keys start with the time (`changeStamp`), so a listing is in time order and retention stops
- * at the first record young enough to keep. Uploads from hooks and the CLI use the source id
- * `upload`. Sessions removed by the session filter are only counted, never recorded. */
-
 import type { SourceKind, SourceLocation } from "@seshi/model";
 import { createJson, readJson } from "./json";
 import { changeStamp, keys, type RecordKind, stampTime } from "./layout";
@@ -20,24 +7,17 @@ import { isPreconditionFailed, type Store } from "./store";
 export const DROPPED_SCHEMA = "seshi/dropped/1" as const;
 export const FAILED_SCHEMA = "seshi/failed/1" as const;
 
-/** How long records are kept when config does not say: 30 days, as `[records]` defaults. */
 export const DEFAULT_RECORD_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
-/** What every record says. */
 export interface RecordBase {
-  /** When the envelope was given up on. */
   at: string;
   /** The source id (`upload` for hooks and the CLI). */
   source: string;
-  /** How it arrived. */
   source_kind?: SourceKind;
   /** The owner the envelope resolved to, when it got that far. */
   owner?: string;
-  /** The session as the source names it. */
   session_key?: string;
-  /** The envelope's idempotency key (X4.7): what `seshi reprocess` asks the source for. */
   idempotency_key: string;
-  /** Where in the source it was. */
   provenance?: SourceLocation;
 }
 
@@ -70,7 +50,6 @@ export function writeDropped(store: Store, record: Omit<DroppedRecord, "schema">
   return write(store, "dropped", { schema: DROPPED_SCHEMA, ...record });
 }
 
-/** Write a failure record; returns its key. */
 export function writeFailed(store: Store, record: Omit<FailedRecord, "schema">): Promise<string> {
   return write(store, "failed", { schema: FAILED_SCHEMA, ...record });
 }
@@ -86,7 +65,6 @@ async function write(store: Store, kind: RecordKind, record: DropOrFailure): Pro
 }
 
 export interface ListRecordsOptions {
-  /** The last key already seen. */
   after?: string;
   /** Only records at or after this time (ISO 8601). Ignored when `after` is given. */
   since?: string;
@@ -108,7 +86,6 @@ export async function listRecords<K extends RecordKind>(
 ): Promise<RecordsPage<K extends "dropped" ? DroppedRecord : FailedRecord>> {
   type T = K extends "dropped" ? DroppedRecord : FailedRecord;
   const prefix = keys.records(kind, sourceId);
-  // A key at `since` (`<stamp>-<hash>.json`) sorts after the bare stamp, so it is included.
   const startAfter =
     options.after ??
     (options.since !== undefined ? `${prefix}${changeStamp(options.since)}` : undefined);
@@ -121,7 +98,6 @@ export async function listRecords<K extends RecordKind>(
   return { records, cursor: page.keys.at(-1), truncated: page.truncated };
 }
 
-/** How many records a source has of one kind (a full listing; for status and source health). */
 export async function countRecords(
   store: Store,
   kind: RecordKind,
@@ -167,7 +143,6 @@ export async function pruneRecords(
   }
 }
 
-/** The source ids that have records of either kind, from a listing of `sources/`. */
 export async function sourcesWithRecords(store: Store): Promise<string[]> {
   const ids = new Set<string>();
   let after: string | undefined;

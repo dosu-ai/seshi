@@ -1,8 +1,3 @@
-/** One deployment's identity and access (X5), built from its `[auth]` settings and its store:
- * no module state, so a process can hold several (X1.2). It authenticates credentials into
- * principals, exchanges IdP ID tokens for seshi tokens (X5.2), issues and revokes stored tokens
- * (X5.9, X5.11) and creates the first admin (`seshi admin init`, X5.12). */
-
 import { type Claims, type Fetch, Unauthorized, type Visibility } from "@seshi/model";
 import { isOwner, type Store, type TokenKind, type TokenRecord } from "@seshi/store";
 import type { JWTVerifyGetKey } from "jose";
@@ -16,13 +11,9 @@ import { looksLikeJwt, SESSION_TOKEN_SECONDS, SessionTokens } from "./session-to
 import type { AuthSettings } from "./settings";
 import { type IssueOptions, TokenService } from "./tokens";
 
-/** A device token lasts 90 days; signing in again renews it (X5.9). */
 export const DEVICE_TOKEN_DAYS = 90;
-/** The header an org-key caller states its username in (X5.12). */
 export const USER_HEADER = "x-seshi-user";
-/** The scopes the CLI asks the IdP for (X5.7). */
 export const OIDC_SCOPES = ["openid", "email", "profile"] as const;
-/** The owner of the org key's record: it has none; its caller states one. */
 export const ORG_KEY_OWNER = "*";
 
 const MACHINE_ID = /^[A-Za-z0-9._:-]{1,128}$/;
@@ -30,20 +21,14 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 export interface AuthOptions {
   store: Store;
-  /** The deployment session tokens are for (`seshi.json`'s `deployment_id`, X1.4). */
   deployment: string;
   now?: () => Date;
-  /** How the IdP's discovery document and keys are fetched. */
   fetch?: Fetch;
-  /** The IdP's keys, instead of fetching them (tests). */
   oidcKeys?: JWTVerifyGetKey;
-  /** The ids of the configured sources: a service token that writes must name one (X5.4). */
   sources?: readonly string[];
-  /** How long token records are cached (`TOKEN_CACHE_MS` by default). */
   tokenCacheMs?: number;
 }
 
-/** What `GET /v1/auth/config` tells the CLI (X5.7): which ways in this server takes. */
 export interface AuthModes {
   org_key: boolean;
   oidc: {
@@ -58,11 +43,8 @@ export interface AuthModes {
 
 export interface ExchangeRequest {
   id_token: string;
-  /** The nonce the CLI put in its sign-in request. */
   nonce?: string;
-  /** Sent on the first sign-in from a machine, or to renew its device token (X5.2). */
   machine?: { id: string; name?: string };
-  /** The device token's default visibility (X5.10). */
   visibility?: Visibility;
 }
 
@@ -75,22 +57,16 @@ export interface ExchangeResult {
   device_token?: { token: string; id: string; expires_at: string };
 }
 
-/** What `POST /v1/tokens` takes (X5.9). */
 export interface TokenRequest {
   kind: TokenKind;
-  /** A person's owner id, for `admin` and `device` tokens. */
   owner?: string;
-  /** For a service token: the source it writes for (`svc:<source-id>`), or a name for a reader
-   * (`svc:<name>`). */
   service?: string;
-  /** For a service token: `["sessions:read", "search"]` (the default) or `["sessions:write"]`. */
   scopes?: Scope[];
   visibility?: Visibility;
   expires_at?: Date | null;
   label?: string;
 }
 
-/** A request the auth settings cannot serve: no IdP, a bad token request. */
 export class AuthRequestError extends Error {
   constructor(
     readonly code: string,
@@ -157,7 +133,6 @@ export class Auth {
     this.sources = options.sources ? new Set(options.sources) : undefined;
   }
 
-  /** The ways in this server takes (X5.7). */
   modes(): AuthModes {
     const { oidc } = this.settings;
     return {
@@ -174,8 +149,6 @@ export class Auth {
       delete_fresh_seconds: 600,
     };
   }
-
-  // --- authenticate ---------------------------------------------------------------
 
   /** The principal a bearer token stands for. `user` is the `X-Seshi-User` header, which an
    * org-key caller must send (X5.12) and anyone else may leave out. Throws `Unauthorized` for
@@ -211,9 +184,6 @@ export class Auth {
     throw new Unauthorized();
   }
 
-  /** A static token is named by its config entry, `static-<owner>` (one token per owner): never
-   * by anything derived from the secret, since the id is recorded in every write's `writer` and
-   * any reader of the owner's sessions sees it. */
   private staticPrincipal(owner: string): Principal {
     return {
       kind: "static",
@@ -248,7 +218,6 @@ export class Auth {
           owner_basis: "claimed",
           role: "member",
           credential: "org_key",
-          // Bounded like any claim (X5.5): the header is the caller's to fill.
           claims: pickClaims({ username: user }) ?? {},
         };
       }
@@ -287,8 +256,6 @@ export class Auth {
     }
   }
 
-  // --- the IdP exchange (X5.2) ----------------------------------------------------
-
   /** Check an IdP ID token and answer a session token, and a device token when the request
    * names a machine (its first sign-in there, or a renewal: earlier device tokens for that
    * machine are revoked). Throws `AuthRequestError` (`no_idp`) without an IdP, `Unauthorized`
@@ -311,8 +278,6 @@ export class Auth {
       if (err instanceof IdTokenError) throw new Unauthorized(err.message);
       throw err;
     }
-    // An owner taken from the email needs an email the IdP stands behind: one it marks
-    // unverified could be anyone's, and would file this person's sessions under theirs.
     if (oidc.owner_claim === "email" && payload.email_verified === false) {
       throw new Unauthorized(
         "the ID token's email is not verified, and owner ids come from the email (owner_claim)",
@@ -380,8 +345,6 @@ export class Auth {
     if (claims.email && admins.includes(claims.email)) return "admin";
     return "member";
   }
-
-  // --- token administration (X5.9, X5.11) -------------------------------------------
 
   /** Issue a stored token as an admin asked for it. Throws `AuthRequestError` for a request
    * that does not make sense. */
@@ -482,13 +445,6 @@ export class Auth {
     }
   }
 
-  // --- the first admin (X5.12) -----------------------------------------------------
-
-  /** `seshi admin init`: run where the config and bucket keys are, it creates the first admin
-   * token and, with the org key on, the org key. Each is shown once. Refuses when there is
-   * nothing to do: a live admin token exists (unless `force`) and a live org key too (unless
-   * `rotateOrgKey`, which revokes the old keys and makes a new one: the only cut-off without an
-   * IdP, X5.11). */
   async initAdmin(options: { owner: string; force?: boolean; rotateOrgKey?: boolean }): Promise<{
     admin?: { token: string; record: TokenRecord };
     org_key?: { token: string; record: TokenRecord };

@@ -1,10 +1,3 @@
-/** Resumed sessions: a session that grew after it was stored stores only what is new. The
- * client sends back how many normalized records were stored last time and a hash of them (the
- * `records_total` and `prefix_sha256` of the last answer); when the session's records still
- * start with exactly that prefix, only the meta record plus the tail is written, marked with
- * where the tail starts. Anything else (the harness rewrote history, the normalizer changed) is
- * written in full and dedupes by content. */
-
 import {
   canonicalJson,
   type NormalizedRecord,
@@ -14,20 +7,16 @@ import {
 
 export { canonicalJson, prefixSha256, type ShippedPrefix };
 
-/** The ingest metadata that marks a tail-only upload. */
 interface Continuation {
   from_record: number;
   prefix_sha256: string;
 }
 
 export interface ShipPlan {
-  /** The records to upload. */
   records: NormalizedRecord[];
   /** Set when `records` is the meta record plus a tail. */
   continuation?: Continuation;
-  /** The records past what already shipped (all of them for a full ship), meta excluded. A
-   * full ship is judged by the session filter on them; a tail that continues a stored head is
-   * not judged (X4.10). */
+  /** The records past what already shipped (all of them for a full ship), meta excluded. */
   fresh: NormalizedRecord[];
 }
 
@@ -55,7 +44,6 @@ export function copiedPrefix(
   return { records: start + shared, prefix_sha256: prefixSha256(records, start + shared) };
 }
 
-/** Ship the tail when the session still starts with what shipped before; otherwise all of it. */
 export function planShipment(
   records: NormalizedRecord[],
   shipped: ShippedPrefix | undefined,

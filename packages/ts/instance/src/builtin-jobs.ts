@@ -1,7 +1,3 @@
-/** The jobs every instance registers (X7). A later branch that adds background work (the span
- * assembler, 09; the search indexer, 12) adds its factory to `BUILTIN_JOBS`, one line; tests
- * and embedders pass more through `InstanceParts.jobs`. */
-
 import type { FormatRegistry } from "@seshi/formats";
 import { type AssembleReport, assemblePending, type Pipeline } from "@seshi/pipeline";
 import type { SearchService } from "@seshi/search";
@@ -22,16 +18,13 @@ import {
 import type { Job, JobRunner } from "./jobs";
 import { searchIndexJobs } from "./search-job";
 
-/** What a job factory gets: the parts of the instance jobs are built from. */
 export interface JobHost {
   readonly store: Store;
   readonly sources: Sources;
   readonly jobs: JobRunner;
-  /** Session search, when `[search]` is enabled (the indexer job, F10.2). */
   readonly search?: SearchService;
   readonly config: {
     readonly worker: { readonly heartbeat_interval: number; readonly assembly_interval: number };
-    /** Each source's quiet period applies to its sessions' spans (F4.4). */
     readonly sources: readonly { readonly id: string; readonly quiet_period?: number }[];
     readonly records: {
       readonly dropped_retention: number;
@@ -41,40 +34,28 @@ export interface JobHost {
     readonly search: { readonly interval: number };
   };
   readonly roles: readonly string[];
-  /** This process, unique per run. */
   readonly process: string;
-  /** The stable instance id. */
   readonly id: string;
   readonly version: string;
   readonly startedAt: Date;
-  /** The pipeline the span assembler publishes through. */
   readonly pipeline: Pipeline;
-  /** The formats whose span adapters assemble sessions. */
   readonly formats: FormatRegistry;
   now(): Date;
 }
 
-/** Builds the jobs of one kind for an instance. */
 export type JobFactory = (host: JobHost) => Job[];
 
-/** A heartbeat older than this many intervals means the worker stopped (X7.5). */
 export const STALE_HEARTBEATS = 3;
 
-/** How often the retention job runs. */
 export const RETENTION_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** Whether a heartbeat written at `at` with `intervalMs` is still fresh at `now`. */
 export function heartbeatFresh(at: string, intervalMs: number, now: Date): boolean {
   const written = Date.parse(at);
   return Number.isFinite(written) && now.getTime() - written < STALE_HEARTBEATS * intervalMs;
 }
 
-/** `worker/heartbeat.json`, every `worker.heartbeat_interval` (X7.5). Before writing, it reads
- * the heartbeat there: one from another process, written since this one started and still
- * fresh, means a second worker, and it is named in `others` so status sees both whichever wrote
- * last (X7.3). */
 export function heartbeatJob(host: JobHost): Job {
   const interval = host.config.worker.heartbeat_interval;
   const others = new Map<string, string>();
@@ -95,8 +76,6 @@ export function heartbeatJob(host: JobHost): Job {
       const started = host.startedAt.toISOString();
       for (const { instance, at } of seen) {
         if (instance === host.process) continue;
-        // A heartbeat from before this process started is a predecessor's (a restart, a
-        // replaced container), not a second worker: only one written since counts.
         if (at <= started || !heartbeatFresh(at, interval, now)) continue;
         const known = others.get(instance);
         if (known === undefined || known < at) others.set(instance, at);
@@ -123,8 +102,6 @@ export function heartbeatJob(host: JobHost): Job {
   };
 }
 
-/** Prunes drop and failure records past `[records]` retention, and source health shards past
- * `health_retention` (X6.4, X4.8). */
 export function retentionJob(host: JobHost): Job {
   const { records } = host.config;
   return {
@@ -156,8 +133,6 @@ export function retentionJob(host: JobHost): Job {
   };
 }
 
-/** One job per polled source (X7, X7.4): a run of its connector on its interval. Its backlog
- * is how long ago its checkpoint was saved. */
 export function pollerJobs(host: JobHost): Job[] {
   return host.sources.polled().map(
     (source): Job => ({
@@ -189,21 +164,15 @@ export function pollerJobs(host: JobHost): Job[] {
   );
 }
 
-/** A source's quiet period when its config names none (F4.4; config's default for `otlp`). */
 export const DEFAULT_QUIET_PERIOD_MS = 10 * 60 * 1000;
 
-/** What one assembler pass needs: the parts of the instance it reads and publishes through. */
 export type AssembleHost = Pick<JobHost, "store" | "formats" | "pipeline" | "config" | "now">;
 
-/** One assembler pass and its first error. */
 export interface AssemblePass {
   report: AssembleReport;
-  /** The first session the pass could not assemble, and why (its marker stays). */
   error?: string;
 }
 
-/** One pass of the span assembler over the pending markers (X7.4, F4.4): what the `assembler`
- * job runs on the worker and `seshi sync assemble` runs from cron (X7.1). */
 export async function assembleOnce(
   host: AssembleHost,
   signal?: AbortSignal,
@@ -225,8 +194,6 @@ export async function assembleOnce(
   return { report, ...(error ? { error } : {}) };
 }
 
-/** The span assembler (X7.4, F4.4): publishes sessions whose spans have gone quiet, through
- * the pipeline. Its backlog is the pending markers. */
 export function assemblerJob(host: JobHost): Job {
   return {
     name: "assembler",
@@ -262,14 +229,8 @@ export function assemblerJob(host: JobHost): Job {
   };
 }
 
-/** How often the sweep runs (F2.5): once a day. */
 export const SWEEP_INTERVAL_MS = DAY_MS;
 
-/** The orphan sweep (F2.5, revised 15 Nov 2026): across every session, deletes the trace objects
- * no metadata names that are over an hour old (`sweepTraces`), what a backfill, replace or
- * publish that stopped partway left behind. Daily, on the worker; it also runs when the worker
- * starts. A session it could not finish fails the run (retried with backoff) after the others
- * are done. */
 export function sweepJob(host: Pick<JobHost, "store" | "now">): Job {
   return {
     name: "sweep",
@@ -296,7 +257,6 @@ export function sweepJob(host: Pick<JobHost, "store" | "now">): Job {
   };
 }
 
-/** The jobs every instance registers, in order. */
 export const BUILTIN_JOBS: readonly JobFactory[] = [
   (host) => [heartbeatJob(host)],
   (host) => [retentionJob(host)],

@@ -1,23 +1,3 @@
-/** The `datadog-llmobs` format (F5.3): Datadog LLM Observability spans, as the poller converts
- * them (`spans.ts`), read into span parts and assembled into a session.
- *
- * A Trajectory turn is its own trace (datadog-labs/trajectory, docs/LLM-OBS-SPAN-TAGS.md): a
- * turn root (`trajectory.semantic_type:turn`) whose input is the user's prompt, agent-message
- * spans (`agent_message`, one per model step) with the assistant's text, tool spans with the
- * call's input and result, and LLM spans: real calls Trajectory captured
- * (`trajectory.llm_call:true`) or, when there were none, one synthetic span carrying the turn's
- * token totals (`trajectory.placeholder_llm_span:true`). Several of these repeat each other: the
- * turn's output is its last message, an LLM span's input is the whole conversation so far, the
- * synthetic span repeats the turn. So a turn is written from one source each: the prompt from
- * the root, the assistant's words from the agent messages (the root's output only when there
- * are none), tool calls from the tool spans, and the token counts from one tier of LLM spans,
- * named by the assistant records in order. Each turn is its own thread, so a prompt that repeats
- * the previous turn's is still kept.
- *
- * Spans of any other LLM Observability app (no Trajectory tags) are read by their span kind:
- * LLM spans' messages, matched against the session's history as the OTLP assembler does, else
- * the trace root's input and output, plus tool spans whose call no message already holds. */
-
 import {
   Attributes,
   argsOf,
@@ -47,8 +27,6 @@ import { ATTR, sessionOf, tagsOf, tagValue, toReceivedSpan } from "./spans";
 /** The format Datadog sessions are filed under; archive ids derive from it. */
 export const DATADOG_LLMOBS = "datadog-llmobs";
 
-/** What a part stands for (`SpanPart.operation`): Trajectory's semantic types, else Datadog's
- * span kind (`agent`, `workflow`, `task`, `embedding`, `retrieval`, and `llm` and `tool`). */
 export const OPERATION = {
   turn: "turn",
   agentMessage: "agent_message",
@@ -63,7 +41,6 @@ type Json = Record<string, unknown>;
 const isObject = (v: unknown): v is Json =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 
-/** A span's Datadog fields, read back from its `datadog.*` attributes. */
 interface DatadogView {
   span: ReceivedSpan;
   attrs: Attributes;
@@ -107,8 +84,6 @@ function messagesOf(view: DatadogView, key: string): DatadogMessage[] | undefine
   return Array.isArray(parsed) && parsed.length > 0 ? (parsed as DatadogMessage[]) : undefined;
 }
 
-/** Datadog messages in the shape the GenAI message reader takes: text and tool results as
- * content parts, tool calls as `tool_calls`, thinking as reasoning. */
 function genAiMessages(messages: readonly DatadogMessage[], defaultRole: string): Json[] {
   return messages.filter(isObject).map((message) => {
     const role = (text(message.role) ?? defaultRole).toLowerCase();
@@ -151,7 +126,6 @@ function ioRecords(
   return [{ role: isInput ? "user" : "assistant", content: value, timestamp }];
 }
 
-/** Whether the span carried any prompt, response or tool content. */
 function hasContent(view: DatadogView): boolean {
   return [ATTR.inputValue, ATTR.inputMessages, ATTR.outputValue, ATTR.outputMessages].some((key) =>
     view.attrs.has(key),
@@ -165,7 +139,6 @@ const metric = (view: DatadogView, name: string) => {
     : undefined;
 };
 
-/** Token counts from Datadog's metrics (`input_tokens`, `cache_write_input_tokens`, …). */
 function usageOf(view: DatadogView): TokenUsage | undefined {
   const usage: TokenUsage = {};
   const set = (key: keyof TokenUsage, ...names: string[]) => {
@@ -188,8 +161,6 @@ function usageOf(view: DatadogView): TokenUsage | undefined {
 
 const PARAMETERS = ["temperature", "max_tokens", "top_p", "top_k", "reasoning_effort"] as const;
 
-/** The error a failed span names: `error.type` and `error.message` in its metadata (flat or
- * nested), else just `error`. */
 function errorOf(view: DatadogView): string | undefined {
   if (view.span.status?.code !== 2) return undefined;
   const nested = isObject(view.metadata.error) ? view.metadata.error : {};
@@ -262,8 +233,6 @@ function toolOf(view: DatadogView): SpanTool {
   return tool;
 }
 
-/** An absolute path, POSIX, home-relative or Windows: what a working folder looks like (a
- * Trajectory `project_dir` tag holds only the last segment, which is not one). */
 const ABSOLUTE = /^(?:\/|~(?:\/|$)|[A-Za-z]:[\\/]|\\\\)/;
 
 function metaOf(view: DatadogView): SpanPart["meta"] {
@@ -321,15 +290,12 @@ export function datadogPart(span: ReceivedSpan): SpanPart {
   return part;
 }
 
-// --- assembly -------------------------------------------------------------------------------
-
 const startNs = (p: SpanPart) => BigInt(p.start_unix_nano ?? Date.parse(p.started_at) * 1e6);
 const byStart = (a: SpanPart, b: SpanPart) => {
   const d = startNs(a) - startNs(b);
   return d < 0n ? -1 : d > 0n ? 1 : a.span_id < b.span_id ? -1 : a.span_id > b.span_id ? 1 : 0;
 };
 
-/** The part with only what the turn writes from it. */
 function keep(part: SpanPart, what: Partial<Pick<SpanPart, "input" | "output" | "tool">>) {
   const { input: _i, output: _o, tool: _t, llm_call: _c, thread: _th, ...rest } = part;
   const out: SpanPart = { ...rest };
@@ -379,14 +345,10 @@ export function mergeCalls(calls: readonly LlmCall[]): LlmCall {
   return merged;
 }
 
-/** The parts of one Trajectory turn trace, each with only what the turn writes from it, and
- * the turn's model requests named by its assistant records. */
 function turnParts(trace: readonly SpanPart[]): SpanPart[] {
   const parts = [...trace].sort(byStart);
   const thread = parts[0]?.trace_id ?? "";
   const tools = parts.some((p) => p.operation === OPERATION.tool && p.tool);
-  // With tool spans present they are where calls and results come from; a message's own copy of
-  // them would repeat them.
   const messageOutput = (p: SpanPart): NormalizedRecord[] =>
     (p.output ?? []).flatMap((r): NormalizedRecord[] => {
       if (!tools) return [r];
@@ -432,7 +394,6 @@ function turnParts(trace: readonly SpanPart[]): SpanPart[] {
     kept.set(p, out);
   }
 
-  // No prompt on the root: the user's words that end the first captured request's input.
   const prompted = [...kept.values()].some((p) => (p.input ?? []).some((r) => r.role === "user"));
   if (!prompted) {
     const first = parts.find(
@@ -450,9 +411,6 @@ function turnParts(trace: readonly SpanPart[]): SpanPart[] {
     }
   }
 
-  // The turn's model requests, from one tier only, so no tokens are counted twice: the real
-  // calls Trajectory captured, else the agent messages' own counts, else the synthetic carrier
-  // of the turn's totals, else the root's, else any other.
   const tiers: ((p: SpanPart) => boolean)[] = [
     (p) => p.operation === OPERATION.llm,
     (p) => p.operation === OPERATION.agentMessage,
@@ -460,7 +418,6 @@ function turnParts(trace: readonly SpanPart[]): SpanPart[] {
     (p) => p.operation === OPERATION.turn,
     () => true,
   ];
-  // A tier that counts tokens wins over one that only names a model.
   let calls: { part: SpanPart; call: LlmCall }[] = [];
   let totals = false;
   for (const counted of [true, false]) {
@@ -470,24 +427,20 @@ function turnParts(trace: readonly SpanPart[]): SpanPart[] {
         .map((p) => ({ part: p, call: p.llm_call as LlmCall }));
       if (found.length > 0) {
         calls = found;
-        // The synthetic carrier and the root hold the whole turn's totals.
         totals = i === 2 || i === 3;
         break;
       }
     }
     if (calls.length > 0) break;
   }
-  // Named by the records that speak: the agent messages, else the root's output.
   const carriers = [...kept.entries()]
     .filter(([, k]) => spoke(k.output))
     .map(([original]) => original);
   if (carriers.length > 0 && calls.length > 0 && totals) {
-    // The turn's totals are named by its last words.
     const target = kept.get(carriers[carriers.length - 1] as SpanPart);
     if (target) target.llm_call = mergeCalls(calls.map((c) => c.call));
   } else if (carriers.length > 0 && calls.length > 0) {
     const byId = new Map(parts.map((p) => [p.span_id, p]));
-    /** The carrier a call sits under (an agent message that made the request), if any. */
     const above = (part: SpanPart): SpanPart | undefined => {
       const seen = new Set<string>();
       for (let id = part.parent_span_id; id && !seen.has(id); ) {
@@ -519,7 +472,6 @@ function turnParts(trace: readonly SpanPart[]): SpanPart[] {
   return [...kept.values()];
 }
 
-/** The parts of a trace from any other LLM Observability app (see the module comment). */
 function genericParts(trace: readonly SpanPart[]): SpanPart[] {
   const parts = [...trace].sort(byStart);
   const llm = (p: SpanPart) =>
@@ -540,8 +492,6 @@ function genericParts(trace: readonly SpanPart[]): SpanPart[] {
         if (p.llm_call) out.llm_call = p.llm_call;
         return out;
       }
-      // A tool span adds its call only when no message names any call (its duration still
-      // reaches a matching result).
       if (p.tool && (held.size === 0 || (p.tool.call_id && held.has(p.tool.call_id)))) {
         return keep(p, { tool: p.tool });
       }
@@ -561,9 +511,6 @@ function genericParts(trace: readonly SpanPart[]): SpanPart[] {
   });
 }
 
-/** A session's parts → its records and LLM calls: each trace read as a Trajectory turn when it
- * has a turn root or agent messages, else by span kind; then the OTLP assembler orders and
- * joins them. */
 export function assembleDatadogParts(
   input: readonly SpanPart[],
   session: { source: string },
@@ -606,7 +553,6 @@ export function datadogClaims(span: ReceivedSpan): Claims | undefined {
   return Object.keys(claims).length > 0 ? claims : undefined;
 }
 
-/** The span adapter of `datadog-llmobs`. */
 export const DATADOG_SPANS: SpanAdapter = {
   sessionKey: (span: ReceivedSpan, _resource: SpanResource) => sessionOf(span) ?? span.traceId,
   hasContent: (span) => hasContent(viewOf(span)),
@@ -628,19 +574,14 @@ export function spansOfDocument(value: unknown): ReceivedSpan[] {
     if (!isObject(item) || !isObject(item.attributes)) continue;
     try {
       spans.push(toReceivedSpan(item.attributes));
-    } catch {
-      // A span without ids or a start cannot be placed; the rest still reads.
-    }
+    } catch {}
   }
   return spans;
 }
 
-/** The `datadog-llmobs` format adapter: span sets from the poller, and a saved Export API answer
- * read whole as one session (`seshi normalize`). */
 export const DATADOG_LLMOBS_FORMAT: FormatAdapter = {
   source: DATADOG_LLMOBS,
   chunkable: false,
-  // `{ "data": [...], "meta": {...} }`, an Export API answer.
   detect: {
     document: (head) => head.get("data")?.kind === "array" && head.get("meta")?.kind === "object",
   },
@@ -657,8 +598,6 @@ export const DATADOG_LLMOBS_FORMAT: FormatAdapter = {
         },
       );
     }
-    // A log is one session: the spans of the one session the export names (spans that name
-    // none, such as oversight traces, are left out), or every span when none names one.
     const spans = spansOfDocument(value);
     const sessions = new Set(spans.map(sessionOf).filter((s) => s !== undefined));
     if (sessions.size > 1) {
@@ -673,11 +612,8 @@ export const DATADOG_LLMOBS_FORMAT: FormatAdapter = {
     for (const span of sessions.size === 1 ? spans.filter((s) => sessionOf(s)) : spans) {
       try {
         parts.push(datadogPart(span));
-      } catch {
-        // As above.
-      }
+      } catch {}
     }
-    // The LLM calls the span path keeps, kept here too.
     const { records, llm_calls } = assembleDatadogParts(parts, { source: DATADOG_LLMOBS });
     return llm_calls.length > 0 ? { records, llm_calls } : { records };
   },

@@ -1,8 +1,3 @@
-/** The bucket an S3 source reads (F6), read-only: list a prefix with each object's size and
- * ETag, and read an object, or its tail from a byte offset, only while it is the version
- * listed. S3 and R2 over signed `fetch` (no SDK), keys static or from a role assumed through
- * STS with an external id (F6.1); a local folder (`file:///path`) for one machine and tests. */
-
 import { open, readdir, stat } from "node:fs/promises";
 import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,7 +12,6 @@ import {
   S3HttpError,
 } from "@seshi/store";
 
-/** One object in a listing. */
 export type SourceObject = ListedObject;
 
 /** A page of the listing, in key order. */
@@ -26,13 +20,10 @@ export interface SourceListing {
   truncated: boolean;
 }
 
-/** What a read got: the bytes from `start` to the end, and what the object says of itself. */
 export type SourceRead = FetchedObject;
 
 /** The bucket refuses to let the source read this object: 403, or another final 4xx for this
- * one object (an archived object's `InvalidObjectState`, an SSE-C object's 400). A fault of
- * this object, not of the source, so it is recorded and the run goes on; retrying it would
- * hold the whole source back for good. */
+ * one object (an archived object's `InvalidObjectState`, an SSE-C object's 400). */
 export class ObjectDenied extends Error {
   constructor(
     readonly key: string,
@@ -56,18 +47,15 @@ export class ObjectChanged extends Error {
 }
 
 export interface SourceBucket {
-  /** `s3://bucket/prefix`, as configured, for messages. */
   readonly url: string;
   /** Where `key` sits, for provenance: `s3://bucket/key`, `r2://bucket/key`, `file:///path`. */
   locate(key: string): string;
-  /** Keys under `prefix`, after `startAfter`, at most `limit` of them. */
   list(prefix: string, options: { startAfter?: string; limit: number }): Promise<SourceListing>;
   /** The object at `key` from byte `start` (0 by default), only while its ETag is `etag`:
    * `ObjectChanged` otherwise, null when it is gone. */
   read(key: string, options: { etag: string; start?: number }): Promise<SourceRead | null>;
 }
 
-/** The bucket keys an S3 source signs with, or the role it assumes with them. */
 export interface SourceCredentials {
   accessKeyId: string;
   secretAccessKey: string;
@@ -81,21 +69,16 @@ export interface S3SourceOptions {
   accountId?: string;
   /** Static keys; else the standard variables in `env` (`AWS_*`, `S3_*`; `R2_*` for r2://). */
   credentials?: SourceCredentials;
-  /** A role to assume with those keys (F6.1). */
   role?: { arn: string; externalId?: string; sessionName: string };
-  /** Where assumed keys are kept between runs, so a run does not call STS each time. */
   roleCache?: Map<string, AssumedCredentials>;
   fetch: Fetch;
   env: Readonly<Record<string, string | undefined>>;
   now: () => Date;
-  /** STS endpoint override (tests). */
   stsEndpoint?: string;
 }
 
-/** Assumed keys are renewed this long before they expire. */
 const RENEW_BEFORE_MS = 5 * 60 * 1000;
 
-/** S3, R2 or anything S3-compatible. */
 export class S3SourceBucket implements SourceBucket {
   readonly url: string;
   private readonly scheme: "s3" | "r2";
@@ -113,7 +96,6 @@ export class S3SourceBucket implements SourceBucket {
     return `${this.scheme}://${this.bucket}/${key}`;
   }
 
-  /** The signed client, with keys resolved (and a role assumed) on first use. */
   private async connect(): Promise<FetchS3Client> {
     const { options } = this;
     const env = options.env;
@@ -149,7 +131,6 @@ export class S3SourceBucket implements SourceBucket {
     return this.client;
   }
 
-  /** Keys from the environment, as any S3 tool reads them. */
   private ambient(): SourceCredentials {
     const env = this.options.env;
     const r2 =
@@ -170,7 +151,6 @@ export class S3SourceBucket implements SourceBucket {
     return { accessKeyId, secretAccessKey, ...(sessionToken ? { sessionToken } : {}) };
   }
 
-  /** The role's keys, from the cache while they last. */
   private async assumed(base: SourceCredentials): Promise<SourceCredentials> {
     const { role, roleCache, now } = this.options;
     if (!role) return base;
@@ -219,7 +199,6 @@ export class S3SourceBucket implements SourceBucket {
         throw new ObjectChanged(key);
       }
       if (err instanceof S3HttpError && err.status === 403) throw new ObjectDenied(key);
-      // Any other 4xx but a timeout or throttling is final for this object.
       if (
         err instanceof S3HttpError &&
         err.status >= 400 &&
@@ -234,8 +213,6 @@ export class S3SourceBucket implements SourceBucket {
   }
 }
 
-/** A folder as a source (`file:///path`): for one machine and tests. A file's ETag is its
- * change time and size, so a listing needs no reads. */
 export class FolderSourceBucket implements SourceBucket {
   readonly url: string;
   private readonly root: string;

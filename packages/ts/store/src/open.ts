@@ -1,10 +1,3 @@
-/** A `Store` from a URL, the way every sessiondb program resolves one: `file:///path` (or a
- * bare absolute path) is a folder, `s3://bucket/prefix` and `r2://bucket/prefix` a bucket. The
- * bucket's region, account and endpoint come from `options`, falling back to the environment
- * variables the S3 tooling uses (`AWS_REGION`, `R2_ACCOUNT_ID`, `S3_ENDPOINT`); credentials
- * are resolved by `S3Store` from the same `env` (`AWS_*` / `S3_*` / `R2_*`), or passed
- * explicitly. */
-
 import type { Fetch, StorageView } from "@seshi/model";
 import { FsStore } from "./fs";
 import type { S3Credentials } from "./s3";
@@ -18,7 +11,6 @@ export interface OpenStoreOptions {
   accountId?: string;
   endpoint?: string;
   credentials?: S3Credentials;
-  /** Reach the bucket through this `fetch` (signed requests), under any runtime. */
   fetch?: Fetch;
   /** Where to read the per-scheme extras from when not given; `process.env` by default. */
   env?: Record<string, string | undefined>;

@@ -1,8 +1,3 @@
-/** Opaque seshi tokens (X5.9): `seshi_<id>_<secret>`. The id (20 lowercase hex digits) names the
- * record, `tokens/<id>.json`, so checking a token is one read; the secret is 32 random bytes,
- * base64url. Only `sha256:<hex>` of the whole token is stored. A slow password hash would add
- * nothing: the secret has 256 bits of entropy, so nothing can be guessed from its hash. */
-
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 
 export const TOKEN_PREFIX = "seshi_";
@@ -11,11 +6,8 @@ const TOKEN = /^seshi_([0-9a-f]{20})_([A-Za-z0-9_-]{43})$/;
 const ID = /^[0-9a-f]{20}$/;
 
 export interface MintedToken {
-  /** The record id. */
   id: string;
-  /** The token as the holder uses it; shown once, never stored. */
   token: string;
-  /** What is stored. */
   hash: string;
 }
 
@@ -30,7 +22,6 @@ export function tokenId(token: string): string | undefined {
   return TOKEN.exec(token)?.[1];
 }
 
-/** Whether `id` is a record id this module mints. */
 export function isTokenId(id: string): boolean {
   return ID.test(id);
 }

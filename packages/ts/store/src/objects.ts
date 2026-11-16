@@ -1,25 +1,11 @@
-/** Typed accessors for the objects X6.4 adds beside the sessions: token records, source
- * checkpoints, the worker heartbeat, span-assembly pending markers and model review decisions.
- * Only the binary reads them, so their types are code-first here rather than generated from
- * `spec/schemas/` (X3.10). The branches that use them (05 tokens, 08 review, 09 assembly,
- * 06/10/11 workers and pollers) own their fields and may add to them.
- *
- * Mutable ones are written conditionally (X6.5): token records are created with If-None-Match,
- * checkpoints and pending-marker deletes use If-Match, so a second worker's write fails with
- * `PreconditionFailed` instead of overwriting (X7.3). */
-
 import { randomBytes } from "node:crypto";
 import type { Claims, Envelope, OwnerBasis, Visibility } from "@seshi/model";
 import { createJson, putJson, readJson, replaceJson, updateJson, type Versioned } from "./json";
 import { assertOwner, keys } from "./layout";
 import type { Store } from "./store";
 
-// --- tokens -------------------------------------------------------------------
-
 export const TOKEN_SCHEMA = "seshi/token/1" as const;
 
-/** The kinds of stored token (X5.9). Session tokens are signed, not stored, and static tokens
- * live in config. */
 export type TokenKind = "org" | "admin" | "device" | "service";
 
 /** One seshi token (X5.9), stored by id and never in clear: `hash` is what the server compares
@@ -28,23 +14,15 @@ export interface TokenRecord {
   schema: typeof TOKEN_SCHEMA;
   id: string;
   hash: string;
-  /** `device`, `service`, `admin` or `org` (the org key). */
   kind: TokenKind;
   /** The person's owner id or `svc:<source-id>`; `*` for the org key, which has no owner (its
    * caller states one, X5.12). */
   owner: string;
   scopes: string[];
-  /** A note for people listing tokens (`laptop`, `otlp destination`). */
   label?: string;
-  /** Who created it: the admin, the exchange (X5.2) or `seshi admin init`. */
   created_by?: { kind: string; principal: string; credential_id?: string };
-  /** A device token's machine, as the CLI names it (X5.2): signing in again from it renews the
-   * token and revokes the old one. */
   machine?: { id: string; name?: string };
-  /** Identity the IdP verified when the token was issued (email, name), copied into what the
-   * token writes (X5.5). */
   claims?: Claims;
-  /** The default visibility for what the token writes (X5.10). */
   visibility?: Visibility;
   owner_basis?: OwnerBasis;
   created_at: string;
@@ -77,7 +55,6 @@ export async function updateToken(
   return result.value;
 }
 
-/** Token ids, in order, a page at a time. */
 export async function listTokens(
   store: Store,
   options: { after?: string; limit?: number } = {},
@@ -93,16 +70,12 @@ export async function listTokens(
   return { ids, cursor: ids.at(-1), truncated: page.truncated };
 }
 
-// --- checkpoints --------------------------------------------------------------
-
 export const CHECKPOINT_SCHEMA = "seshi/checkpoint/1" as const;
 
-/** A poller's position in its source: a time window, an API cursor or an S3 manifest. */
 export interface Checkpoint {
   schema: typeof CHECKPOINT_SCHEMA;
   source: string;
   updated_at: string;
-  /** The poller's own state; its shape is the poller's. */
   cursor: Record<string, unknown>;
 }
 
@@ -141,35 +114,25 @@ export function deleteCheckpoint(store: Store, sourceId: string, etag: string): 
   return store.delete(keys.checkpoint(sourceId), { ifMatch: etag });
 }
 
-// --- worker heartbeat ---------------------------------------------------------
-
 export const HEARTBEAT_SCHEMA = "seshi/heartbeat/1" as const;
 
-/** One job's record in the heartbeat: what status shows for it (X7.5). */
 export interface JobRecord {
-  /** When its last run started and ended. */
   last_started?: string;
   last_finished?: string;
   /** `ok`, `error`, or `discarded` (another worker moved its checkpoint, X7.3). */
   last_outcome?: "ok" | "error" | "discarded";
-  /** When it last ended without an error. */
   last_ok?: string;
   /** Its last error, with when it happened; kept until a later run succeeds. */
   last_error?: { at: string; message: string };
   runs: number;
   failures: number;
-  /** What its last run reported (envelopes submitted, sessions stored…). */
   last_summary?: Record<string, number>;
 }
 
-/** What the worker writes every `worker.heartbeat_interval` (X7.5); status reads it to spot a
- * stopped worker, or a second one. Last writer wins; a worker that finds another live worker's
- * heartbeat names it in `others`, so either one's heartbeat shows both (X7.3). */
 export interface Heartbeat {
   schema: typeof HEARTBEAT_SCHEMA;
   /** The writing process: unique per run (`<instance id>-<random>`). */
   instance: string;
-  /** The stable instance id (`server.instance_id`, else the host name). */
   host?: string;
   version: string;
   roles: string[];
@@ -178,9 +141,7 @@ export interface Heartbeat {
   /** How often it writes, in milliseconds: status calls a heartbeat older than three of these
    * stopped. */
   interval_ms?: number;
-  /** Its jobs, by name. */
   jobs?: Record<string, JobRecord>;
-  /** Other workers whose heartbeat it found fresh, with when that heartbeat was written. */
   others?: { instance: string; at: string }[];
 }
 export function readHeartbeat(store: Store): Promise<Versioned<Heartbeat> | null> {
@@ -195,37 +156,21 @@ export function writeHeartbeat(
   return putJson(store, keys.heartbeat(), { schema: HEARTBEAT_SCHEMA, ...heartbeat });
 }
 
-// --- span assembly ------------------------------------------------------------
-
 export const PENDING_SCHEMA = "seshi/pending/1" as const;
 
-/** `assembly/pending/<archive_id>`: a session has spans not yet assembled (X7.4). Touched on
- * every batch; the assembler deletes it with If-Match after publishing, so a batch that arrived
- * meanwhile leaves it in place. */
 export interface PendingMarker {
   schema: typeof PENDING_SCHEMA;
   owner: string;
   archive_id: string;
-  /** When the last batch arrived: the assembler waits for a quiet period after it (F4.4). */
   touched_at: string;
-  /** Random per touch, so every touch changes the marker's ETag. Without it two touches in one
-   * millisecond write the same bytes (the same MD5 ETag), and the assembler's If-Match delete
-   * would clear a marker a batch touched after the assembler read it. */
   touch: string;
-  /** The source the spans came from: its quiet period applies (F4.4). */
   source_id?: string;
-  /** The last batch's envelope without its payload: who sent the spans, whose session it is,
-   * which session and format. The assembler publishes the session as it (09). */
   envelope?: PendingEnvelope;
-  /** The last batch held a span that ends the session: publish without waiting the whole
-   * quiet period (F4.4). */
   final?: boolean;
 }
 
-/** An envelope as a pending marker keeps it: never the payload. */
 export type PendingEnvelope = Omit<Envelope, "payload">;
 
-/** What a touch records beside the time. */
 export interface PendingDetails {
   source_id?: string;
   envelope?: PendingEnvelope;
@@ -260,7 +205,6 @@ export function readPending(
   return readJson<PendingMarker>(store, keys.pending(archive));
 }
 
-/** Archive ids with pending spans, in order, a page at a time. */
 export async function listPending(
   store: Store,
   options: { after?: string; limit?: number } = {},
@@ -280,28 +224,20 @@ export function clearPending(store: Store, archive: string, etag: string): Promi
   return store.delete(keys.pending(archive), { ifMatch: etag });
 }
 
-// --- model review decisions ---------------------------------------------------
-
 export const REVIEW_SCHEMA = "seshi/review/1" as const;
 
-/** One finding of the redactor: where and what kind, never the matched text (F3.8). */
 export interface ReviewFinding {
   /** The record's index in the trace. */
   record: number;
-  /** The field the text was in (`content`, `tool_calls[0].args`, …). */
   field: string;
   category: string;
-  /** `redact` the text, or `withhold` the whole tool result. */
   action: "redact" | "withhold";
 }
 
-/** `owners/<o>/sessions/<a>/review/<n>.json`: what model review decided for the `n`th write
- * that was stored (F3). Drops are recorded under `sources/<id>/dropped/` instead. */
 export interface ReviewRecord {
   schema: typeof REVIEW_SCHEMA;
   n: number;
   at: string;
-  /** The trace the write produced. */
   content_hash: string;
   policy: string;
   policy_hash: string;
@@ -316,12 +252,9 @@ export interface ReviewRecord {
   unmatched?: number;
   /** How many parts the envelope was split into to fit the model's input (F3.7). */
   parts?: number;
-  /** Why review was skipped (`decision: "skipped"`): which step failed and how, never what the
-   * provider said about the content. */
   failure?: ReviewFailure;
 }
 
-/** A model call that failed after its retries (F3.4): a code, never the provider's text. */
 export interface ReviewFailure {
   step: "decision" | "redactor";
   /** `timeout`, `network`, `http_<status>`, `invalid_answer`, `refusal`, `truncated`, … */
@@ -343,7 +276,6 @@ export function writeReview(
   });
 }
 
-/** Every review decision of a session, in order. */
 export async function listReviews(
   store: Store,
   owner: string,

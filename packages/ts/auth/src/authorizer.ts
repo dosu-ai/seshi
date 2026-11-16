@@ -1,17 +1,3 @@
-/** The pipeline's authorize stage with the X5 ownership rules (X4.3 stage 1). The HTTP routes
- * authenticate the credential and check its scopes before an envelope exists; what reaches the
- * pipeline is an envelope whose caller, owner and basis this checks against each other, so no
- * route, poller or integration can write a session in someone else's name:
- *
- * - A service account's sessions are its own (`svc:<id>`, basis `service`), and only a service
- *   account writes as one (X5.4). A poller or OTLP destination writes as its own source's
- *   service account.
- * - Anyone else writes their own sessions: the owner is the caller's principal. An admin may
- *   write for any owner.
- * - `claimed` is the org-key basis (X5.12): only a person caller has it.
- *
- * The session's original writer and `admin` then decide replace (`mayReplace`, X4.6). */
-
 import type { Authorization, Authorizer, Envelope, Writer } from "@seshi/model";
 import { Forbidden } from "@seshi/model";
 import { isServiceOwner, serviceOwner } from "./owner";

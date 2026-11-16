@@ -1,9 +1,3 @@
-/** The session API (`SessionDB`) over the pipeline and a `Store`, scoped to one owner and one
- * writer. The HTTP routes build one per principal over the instance's shared `Pipeline`; local
- * mode (X3.5) builds one for the person who owns the bucket, through an Instance built
- * in-process (`@seshi/instance`). The calls, their results and what they throw are those of
- * the HTTP client (`@seshi/client`), so a caller cannot tell the two apart. */
-
 import { type FormatRegistry, renderTrace } from "@seshi/formats";
 import {
   type ChangesPage,
@@ -41,11 +35,9 @@ import { staleSessions } from "./stale";
 export interface StoreClientOptions {
   store: Store;
   owner: string;
-  /** The transcript formats to read: the deployment's registry (`apps/seshi` builds it). */
   formats: FormatRegistry;
   /** What `me()` reports as the store's location; derived from the store's URL when omitted. */
   storage?: StorageView;
-  /** Identifies this writer in the layout marker (`seshi/0.9.0`). */
   client?: string;
   now?: () => Date;
   /** Redaction added to the built-in rules (`redactionRules`). */
@@ -59,16 +51,13 @@ export interface StoreClientOptions {
   claims?: Claims;
   /** The visibility of a new session when an upload sets none (the token's default, X5.10). */
   visibility?: Visibility;
-  /** The session filter (`SessionOptions.filter`). */
   filter?: FilterSetting;
-  /** Size caps (`SessionOptions.limits`). */
   limits?: Readonly<Limits>;
   /** The pipeline to submit uploads to, shared by every owner's client (the server keeps one);
    * built from the options above when omitted. */
   pipeline?: Pipeline;
 }
 
-/** The pipeline over a `Store`, scoped to one owner. */
 export class StoreSessionDB implements SessionDB {
   readonly owner: string;
   readonly store: Store;
@@ -104,8 +93,6 @@ export class StoreSessionDB implements SessionDB {
     this.visibility = options.visibility;
   }
 
-  /** The upload as an envelope (this client's writer as the caller, under its source id),
-   * through the pipeline; `retractSecret` goes beside it, never into it. */
   async ingest(upload: Upload, options: IngestOptions = {}): Promise<StoreSessionResult> {
     const visibility = upload.visibility ?? this.visibility;
     const claims = { ...upload.claims, ...this.claims };
@@ -124,7 +111,6 @@ export class StoreSessionDB implements SessionDB {
         },
         owner_basis: this.ownerBasis,
         claims,
-        // The writer's source: `upload`, or a service token's own source (X5.4).
         source_id: this.writer.source_id,
         now: this.now,
       },
@@ -151,7 +137,6 @@ export class StoreSessionDB implements SessionDB {
     const metadata = await this.getSession(agent, sessionId);
     if (!metadata || metadata.status === "redacted") return null;
     const wanted = hash ?? metadata.head;
-    // Only a trace the session names (see the API's trace route).
     if (!wanted || !metadata.traces.some((ref) => ref.content_hash === wanted)) return null;
     const archive = archiveId(this.owner, agent, sessionId);
     const trace = await getTrace(this.store, this.owner, archive, wanted);
@@ -167,7 +152,6 @@ export class StoreSessionDB implements SessionDB {
     return { ...page, sessions: page.sessions.filter((m) => !isStub(m)) };
   }
 
-  /** The owner's sessions an older normalizer built (X4.9), a page at a time. */
   staleSessions(options: { after?: string; limit?: number } = {}): Promise<StaleSessionsPage> {
     return staleSessions(this.store, this.owner, this.pipeline.formats, options);
   }
@@ -209,7 +193,6 @@ export class StoreSessionDB implements SessionDB {
     return readChanges(this.store, this.owner, options);
   }
 
-  /** Who this client is, without touching the store. */
   async me(): Promise<Identity> {
     return { owner: this.owner, storage: this.storage };
   }

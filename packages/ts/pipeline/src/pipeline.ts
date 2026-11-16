@@ -1,38 +1,3 @@
-/** One ingest pipeline (X4): five ways in, one way through. Every source builds an envelope and
- * submits it here; the stages run in order, in memory, and the session is written last, so
- * nothing is stored before regex redaction, the session filter and model review have run
- * (X4.3). Only the normalized, redacted trace is stored, never the payload (X6.3).
- *
- * 1. Authorize the caller and resolve the owner (`Authorizer`).
- * 2. Normalize the payload in memory: a whole log through its format adapter; a chunk through
- *    the adapter's partial mode, with the session's small stored state (`metadata.normalized`:
- *    where the log ends and the prefix hash; `withheld_calls`).
- * 3. Regex redaction on the normalized records (`Redactor`, F2).
- * 4. The session filter, on a session's first trace only (X4.10).
- * 5. Model review (`Reviewer`, F3): allow, redact or drop.
- * 6. Write the trace, the head and the change entry (`ingest`).
- *
- * Logs are processed inline (X4.4): the call returns once the session is written, so an
- * uploader learns at once about 409 `offset_mismatch` (with `expected`), 409 `conflict` or 422.
- * Span batches go to the span assembler (X4.2), which returns once they are stored.
- *
- * The log protocol without raw (X6.3, F9.1): until a session has a trace the server stores
- * nothing for it and takes only the whole log, so a chunk (`offset` > 0) for such a session is
- * 409 `offset_mismatch` with `expected: 0`. Once it has one, a chunk must start where the
- * session's log ends, and a whole upload must extend what is stored (its records start with
- * the stored prefix) or set `replace`, which only the original writer or an admin may (X4.6).
- * A session whose first envelope model review dropped keeps a stub with no trace, only where
- * its log ends and the prefix hash (F3.4): it is extended exactly as a stored session is, so
- * the dropped records are never stored or judged again. The session remembers that dropped
- * start (`dropped_prefix`) once it has a trace, and a whole write that does not extend what is
- * stored (a rebuild, a replace, an assembled session written again) leaves it out too.
- *
- * Every envelope carries an idempotency key (X4.7); a session remembers the last ones it applied
- * with their answers, so a resend gets the same answer and runs no stage again. A permanent
- * failure is thrown to a caller that is waiting (uploads, hooks) and recorded under
- * `sources/<id>/failed/` for one that is not (pollers, the assembler); a transient one (the
- * store) is always thrown, so it is retried (X4.8). */
-
 import { type FormatRegistry, NormalizeError } from "@seshi/formats";
 import {
   type AppliedEnvelope,
@@ -118,10 +83,7 @@ import {
 
 export interface PipelineOptions {
   store: Store;
-  /** The formats this deployment reads: `apps/seshi` builds the registry from its
-   * integrations. */
   formats: FormatRegistry;
-  /** Identifies the writer in the layout marker (`seshi/0.9.0`). */
   client?: string;
   now?: () => Date;
   /** The redaction stage; `ruleRedactor(redaction)` when omitted. */
@@ -147,10 +109,8 @@ export interface PipelineOptions {
   visibility?: VisibilitySetting;
 }
 
-/** One visibility for every source, or the visibility per source id. */
 export type VisibilitySetting = Visibility | ((sourceId: string) => Visibility);
 
-/** A permanent failure with no caller to tell, as recorded (X4.8). */
 export interface FailedResult {
   status: "failed";
   code: string;
@@ -171,19 +131,14 @@ export interface SubmitOptions {
   retractSecret?: string;
 }
 
-/** What a session the server holds nothing of answers (X6.3): the next upload is the whole
- * log again. */
 const NOTHING: ShippedState = {
   records_total: 0,
   prefix_sha256: EMPTY_PREFIX_SHA256,
   bytes_total: 0,
 };
 
-/** How many times a whole upload is planned again when another write to the session landed
- * between reading it and writing. */
 const PLAN_ATTEMPTS = 3;
 
-/** Another write changed the session after it was read: plan again. */
 class StalePlan extends Error {
   constructor() {
     super("the session changed while this envelope was written");
@@ -191,7 +146,6 @@ class StalePlan extends Error {
   }
 }
 
-/** A refusal that sending the same envelope again cannot change. */
 function isPermanent(err: unknown): err is { code: string; message: string } {
   return (
     err instanceof SessionRejected ||
@@ -201,7 +155,6 @@ function isPermanent(err: unknown): err is { code: string; message: string } {
   );
 }
 
-/** The longest failure message a failure record keeps. */
 const RECORDED_MESSAGE_LENGTH = 300;
 
 /** A failure's message as a failure record keeps it: never content (X4.8). An adapter's or the
@@ -248,15 +201,10 @@ function metaOf(records: readonly NormalizedRecord[]): NormalizedRecord | undefi
   return records[0]?.role === "meta" ? records[0] : undefined;
 }
 
-/** The meta record of a stub's first trace (F3.4). The session's own was in the envelope review
- * dropped, and nothing of that is stored or judged again (its working directory, branch or model
- * included), so the trace names only the format it was filed under. The same whether the next
- * envelope is a chunk or the whole log again. */
 function stubMeta(envelope: Envelope): NormalizedRecord {
   return { role: "meta", source: envelope.format } as NormalizedRecord;
 }
 
-/** The answer an applied envelope gave, given again (X4.7). */
 function replayed(applied: AppliedEnvelope, session: SessionMetadata): StoreSessionResult {
   const shipped: ShippedState = {
     records_total: applied.records_total,
@@ -277,7 +225,6 @@ function replayed(applied: AppliedEnvelope, session: SessionMetadata): StoreSess
   return { status: applied.status === "dropped" ? "dropped" : "unchanged", ...shipped };
 }
 
-/** The LLM calls the records name, in their order. */
 function callsFor(
   records: readonly NormalizedRecord[],
   calls: readonly LlmCall[] | undefined,
@@ -290,7 +237,6 @@ function callsFor(
   return kept.length > 0 ? kept : undefined;
 }
 
-/** `summary` with `extra` counts added. */
 function withCounts(
   summary: RedactionSummary,
   extra: Readonly<Record<string, number>>,
@@ -306,29 +252,15 @@ function isSpanIds(part: SpanPart): boolean {
   return /^[0-9a-f]{32}$/.test(part.trace_id) && /^[0-9a-f]{16}$/.test(part.span_id);
 }
 
-/** How a whole session is written. */
 interface WholeOptions {
   replace: boolean;
-  /** Build the session again from these records and review them, even when they only extend
-   * what is stored (X4.9): a replace, with its permission. */
   rebuild?: boolean;
-  /** The retraction secret sent with a `replace` (`SubmitOptions.retractSecret`). */
   retract_secret?: string;
-  /** Redacted, and counted, by `commit` (F2). */
   llm_calls?: readonly LlmCall[];
-  /** For an assembled session: what redaction found in its spans when they arrived, summed over
-   * all of them. A write of the whole session counts all of it; a tail counts what the
-   * session's stored counts do not have yet. */
   arrived?: RedactionSummary;
-  /** For an uploaded log: how many records its first `bytes` bytes normalize to now, cut at the
-   * line boundary at or past them (`bytes`, the cut). Finds where a session's dropped start ends
-   * when its records no longer hash to it (F3.4). Undefined when the log cannot be cut (a
-   * document) or what the cut leaves cannot be read. */
   recordsIn?: (bytes: number) => { records: number; bytes: number } | undefined;
 }
 
-/** `total` less what `stored` already counts (by rule, never below zero); everything when the
- * rule set changed, since the stored counts are another rule set's. */
 function countsNotIn(
   total: RedactionSummary,
   stored: RedactionSummary | undefined,
@@ -342,7 +274,6 @@ function countsNotIn(
   return out;
 }
 
-/** One envelope on its way through: who, whose, which session, as stored when read. */
 interface Run {
   envelope: Envelope;
   auth: Authorization;
@@ -351,32 +282,23 @@ interface Run {
   session: SessionMetadata | null;
 }
 
-/** What a run decided to write: the records (the meta record first), where they sit in the
- * session's log, and whether they replace it. */
 interface Plan {
   write: NormalizedRecord[];
   continuation?: { from_record: number; prefix_sha256: string };
   replace?: boolean;
-  /** The session's log state once the envelope is in: what the answer and the next chunk
-   * continue from. */
   normalized: NormalizedState;
   withheld: WithheldCallIds;
   summary: RedactionSummary;
   llm_calls?: readonly LlmCall[];
   project?: string;
   branch?: string;
-  /** Refuses a stored session that is not the one the plan was made against. */
   guard: (existing: SessionMetadata | null) => void;
-  /** What the session's metadata records as its normalizer, when it is not this write's: a
-   * chunk added to a session an older normalizer built leaves it stale (X4.9). */
   sessionNormalizer?: Normalizer;
-  /** The session's dropped start as this write leaves it out (F3.4); the stored one otherwise. */
   dropped_prefix?: DroppedPrefix;
 }
 
 interface Outcome {
   result: StoreSessionResult;
-  /** A resend answered from the session's applied envelopes. */
   replay?: boolean;
 }
 
@@ -410,7 +332,6 @@ export class Pipeline {
     this.visibility = options.visibility ?? "org";
   }
 
-  /** The layout marker, checked once per pipeline (and again after a failure). */
   private layout(): Promise<unknown> {
     this.layoutChecked ??= ensureLayout(this.store, { createdBy: this.client }).catch((err) => {
       this.layoutChecked = undefined;
@@ -419,7 +340,6 @@ export class Pipeline {
     return this.layoutChecked;
   }
 
-  /** Run one envelope through every stage (see above). */
   async submit(envelope: Envelope, options: SubmitOptions = {}): Promise<SubmitResult> {
     try {
       checkEnvelope(envelope);
@@ -449,8 +369,6 @@ export class Pipeline {
     try {
       checkEnvelope(envelope);
       const auth = await this.authorizer.authorize(envelope);
-      // LLM calls carry free text (an error message, string parameters): `commit` redacts what
-      // the written records refer to with the rule set and counts it, as for any write (F2).
       const outcome = await this.planned(envelope, auth, (run) =>
         this.whole(run, input.records, 0, {
           replace: true,
@@ -465,8 +383,6 @@ export class Pipeline {
     }
   }
 
-  /** A failure: thrown when transient, or to a caller who waits; otherwise recorded under
-   * `sources/<id>/failed/` (X4.8). */
   private async failed(
     envelope: Envelope,
     err: unknown,
@@ -474,7 +390,6 @@ export class Pipeline {
   ): Promise<FailedResult> {
     if (!isPermanent(err)) throw err;
     const respond = options.onFailure ?? (hasCaller(envelope) ? "throw" : "record");
-    // Telling an uploader where its log ends is the protocol working, not a refusal.
     if (!(err instanceof OffsetMismatch)) {
       this.health.count(envelope.source_id, respond === "throw" ? "rejected" : "failed");
     }
@@ -494,8 +409,6 @@ export class Pipeline {
     return { status: "failed", code: err.code, message, record };
   }
 
-  // --- spans --------------------------------------------------------------------
-
   private async spans(envelope: SpanEnvelope, auth: Authorization): Promise<SpanBatchResult> {
     if (!this.assembler) {
       throw new SessionRejected(
@@ -512,8 +425,6 @@ export class Pipeline {
       );
     }
     const { spans, resource = [] } = envelope.payload;
-    // Normalize and regex-redact each span on arrival (X6.3): the span store keeps only what
-    // redaction left, never the span as received. A span the format cannot read is left out.
     const parts: { part: SpanPart; redaction: RedactionSummary }[] = [];
     let rejected = 0;
     for (const span of spans as unknown as ReceivedSpan[]) {
@@ -524,10 +435,6 @@ export class Pipeline {
         rejected++;
         continue;
       }
-      // The ids name the span's record in the bucket: a connector's span with ids that are not
-      // OTLP's hex is the sender's fault, not the store's, so it is left out like any span the
-      // format cannot read (a bad key would otherwise fail the batch as a store error, which a
-      // poller retries forever).
       if (!isSpanIds(part)) {
         rejected++;
         continue;
@@ -559,8 +466,6 @@ export class Pipeline {
     );
   }
 
-  // --- logs ---------------------------------------------------------------------
-
   private async log(
     envelope: LogEnvelope,
     auth: Authorization,
@@ -591,7 +496,6 @@ export class Pipeline {
       return this.planned(envelope, auth, (run) => this.chunk(run, payload.text, payload.offset));
     }
     if (payload.text.trim() === "") throw new SessionRejected("empty", "transcript is empty");
-    // The whole log's records do not depend on what is stored: normalize once.
     const { records, llm_calls } = this.normalize(
       envelope.format,
       payload.text,
@@ -608,10 +512,6 @@ export class Pipeline {
     );
   }
 
-  /** How many records a whole log's first `bytes` bytes normalize to with the current adapter,
-   * cut at the first line boundary at or past them (a cut that falls inside a line takes all of
-   * it, so more is left out rather than less); undefined for a log that cannot be cut there (a
-   * document) or whose start cannot be read. */
   private recordsIn(
     envelope: LogEnvelope,
     bytes: number,
@@ -633,8 +533,6 @@ export class Pipeline {
     }
   }
 
-  /** Read the session, answer a resend from it, else run `body` against it; plan again when
-   * another write to the session landed first. */
   private async planned(
     envelope: Envelope,
     auth: Authorization,
@@ -650,9 +548,6 @@ export class Pipeline {
       }
       const applied = session?.applied?.find((a) => a.idempotency_key === envelope.idempotency_key);
       if (session && applied) return { result: replayed(applied, session), replay: true };
-      // A caller whose owner is only claimed (the org key, X5.12) writes new sessions under any
-      // username, but never adds to one whose owner was verified: the session would still say
-      // `verified` while holding what anyone with the key sent (X5.5).
       if (
         session &&
         !auth.admin &&
@@ -674,8 +569,6 @@ export class Pipeline {
     }
   }
 
-  /** Stage 2 for a log: the adapter's records, unredacted, and the LLM calls they name (redacted
-   * by `commit`). A log the adapter reads but finds no conversation in has none. */
   private normalize(
     format: string,
     text: string,
@@ -699,13 +592,9 @@ export class Pipeline {
     }
   }
 
-  /** A chunk: the bytes of the log from where the session's log ends, normalized on its own and
-   * written as a continuation of the head, or of a stub's dropped envelopes (F3.4). Never
-   * filtered: the session's first envelope was. */
   private async chunk(run: Run, text: string, offset: number): Promise<StoreSessionResult> {
     const { session, envelope } = run;
     if (!session?.normalized) {
-      // Nothing is stored for a session without a trace or a stub (X6.3): send the whole log.
       throw new OffsetMismatch(offset, 0);
     }
     const state = session.normalized;
@@ -713,9 +602,6 @@ export class Pipeline {
     const guard = (existing: SessionMetadata | null) => {
       const at = existing?.normalized?.bytes ?? 0;
       if (at !== offset) throw new OffsetMismatch(offset, at);
-      // The log did not move but a redaction backfill rewrote the session (a new head, or the
-      // same hash with what it leaves out redacted, and always a new rule set): the meta record
-      // read from the old head may hold what the new rules take out. Plan again.
       if (
         existing?.head !== session.head ||
         existing?.redaction?.rule_set !== session.redaction?.rule_set
@@ -732,7 +618,6 @@ export class Pipeline {
     const redacted = this.redactor.redact(raw, session.withheld_calls ?? {});
     const bytes = offset + utf8Length(text);
     if (redacted.records.length === 0) {
-      // Lines with no records in them (transport, progress): the log moved on, nothing to write.
       const normalized = { ...state, bytes };
       return this.progress(run, normalized, redacted.withheld, "unchanged", guard);
     }
@@ -744,13 +629,7 @@ export class Pipeline {
       prefix_sha256: hash.digest(),
       hash_state: hash.export(),
     };
-    // The session's meta record is the head's: a chunk has none of its own. A stub has no head,
-    // and its meta record was in what review dropped: the stub's own stands in.
     const meta = session.head ? await this.headMeta(run, session.head) : stubMeta(envelope);
-    // The tail is this normalizer's, the prefix still whatever built it: a session an older one
-    // built stays stale until it is rebuilt whole (X4.9). A stub has no stored prefix (review
-    // dropped it), so its first trace is all this normalizer's: it takes the current version, or
-    // it would count as stale forever and be resent whole at every format bump.
     const current = this.formats.normalizerFor(envelope.format);
     const builtWith = session.normalizer?.format_version;
     const sessionNormalizer: Normalizer =
@@ -775,11 +654,8 @@ export class Pipeline {
     });
   }
 
-  /** The meta record of the session's head trace, which a chunk's continuation repeats. */
   private async headMeta(run: Run, head: string): Promise<NormalizedRecord | undefined> {
     const trace = await getTrace(this.store, run.owner, run.archive, head);
-    // Gone because the session moved since it was read (a backfill or a replace removed it):
-    // plan again on the session as it is now, rather than write a continuation with no meta.
     if (trace === null) {
       const now = await readMetadata(this.store, run.owner, run.archive);
       if (now?.head !== head) throw new StalePlan();
@@ -788,9 +664,6 @@ export class Pipeline {
     return metaOf(trace.records as NormalizedRecord[]);
   }
 
-  /** A whole session (a whole log, or what the assembler rebuilt): the first trace, judged by
-   * the session filter; a tail that extends the stored session or a stub, never judged; or,
-   * with `replace`, a rewrite of the session by its original writer or an admin (X4.6). */
   private async whole(
     run: Run,
     raw: readonly NormalizedRecord[],
@@ -817,23 +690,14 @@ export class Pipeline {
       guard,
     };
 
-    // A stub (F3.4): model review dropped the session's first envelopes. The log it holds is
-    // handled like a stored prefix: a log that extends it ships only its tail, reviewed alone,
-    // and the dropped records are neither judged nor written again.
     const stub = session !== null && session.head === undefined && session.normalized !== undefined;
     if (session && (session.head || stub)) {
-      // What is stored: the server's own state, or for a session without it what the uploader
-      // says shipped.
       const base =
         session.normalized ??
         (envelope.shipped
           ? { records: envelope.shipped.records, prefix_sha256: envelope.shipped.prefix_sha256 }
           : undefined);
-      // A rebuild writes the whole session again even when it extends what is stored, so what
-      // review skipped or dropped, or an older normalizer built, is built and reviewed anew.
       if (!options.rebuild && base && base.records > 0 && base.records <= raw.length) {
-        // Redact the stored prefix and the tail as two passes of one: the tail carries the
-        // prefix's withheld calls, and only the tail's matches count, since only it is written.
         const prefix = this.redactor.redact(raw.slice(0, base.records));
         if (prefixSha256(prefix.records, base.records) === base.prefix_sha256) {
           const tail = this.redactor.redact(raw.slice(base.records), prefix.withheld);
@@ -842,8 +706,6 @@ export class Pipeline {
           if (tail.records.length === 0) {
             return this.progress(run, normalized, tail.withheld, "unchanged", guard);
           }
-          // A stub's tail is its first trace, with the stub's meta record: the log's own is in
-          // what review dropped, as is the branch it records.
           const lead = stub
             ? [stubMeta(envelope)]
             : meta
@@ -875,14 +737,12 @@ export class Pipeline {
             : `only the session's original writer or an admin may ${options.rebuild ? "rebuild" : "replace"} it`,
         );
       }
-      // A session whose first envelopes review dropped: the rewrite leaves the dropped start out.
       const dropped = session.dropped_prefix ?? (stub ? session.normalized : undefined);
       if (dropped && (dropped.records > 0 || dropped.bytes > 0)) {
         const past = this.pastDropped(run, raw, bytes, dropped, options, common);
         if (past) return past;
       }
       const all = this.redactor.redact(raw);
-      // A rewrite of a session that passed the filter is not judged again.
       return this.commit(run, {
         ...common,
         write: all.records,
@@ -893,10 +753,8 @@ export class Pipeline {
       });
     }
 
-    // The session's first trace.
     const all = this.redactor.redact(raw);
     const records = all.records;
-    // A fork's copy of its parent's history is the parent's to ship.
     const copied = await this.forkCopy(run, records);
     const plan = copied ? planShipment(records, copied) : { records, fresh: records };
     if (isFiltered(plan.fresh, filterRulesFor(this.filter, envelope.source_id))) {
@@ -912,17 +770,6 @@ export class Pipeline {
     });
   }
 
-  /** A whole write that does not extend what is stored (a rebuild, a replace, an assembled
-   * session written again) of a session whose first envelopes model review dropped (F3.4): the
-   * dropped start is left out, and only what follows it is reviewed and written, as the
-   * continuation of the dropped records a stub's first trace is. Where the dropped start ends:
-   * - its records, when they still hash to what was dropped (as regex redaction leaves them);
-   * - else, for an uploaded log, what the current adapter makes of its first `bytes` bytes (the
-   *   rules or the adapter changed since);
-   * - else (an assembled session, or a document) the count that was dropped: a span that
-   *   arrived late inside the dropped part leaves the last dropped record in what follows.
-   * Undefined when nothing is left out (the dropped start held no records), so the session is
-   * rewritten whole. A write of nothing past the dropped start answers `unchanged`. */
   private pastDropped(
     run: Run,
     raw: readonly NormalizedRecord[],
@@ -951,18 +798,11 @@ export class Pipeline {
       }
     }
     if (skip === 0) return undefined;
-    // The dropped start and what follows as two passes of one, as for a tail that extends what is
-    // stored: what follows carries the dropped part's withheld calls, and only its matches count.
     const prefix = this.redactor.redact(raw.slice(0, skip));
     const tail = this.redactor.redact(raw.slice(skip), prefix.withheld);
     const normalized = stateOf([...prefix.records, ...tail.records], bytes);
     const prefixHash = prefixSha256(prefix.records, skip);
     if (tail.records.length === 0 && session?.head !== undefined) {
-      // The log ends inside the dropped start (compacted shorter, say), but a trace continues
-      // the stub: recording this log's position would leave `normalized` behind the traces
-      // (checkStore's chain_total, 33). Nothing is written and the session stays as it is,
-      // answered as a replace review dropped is (with what is stored), so the uploader replaces
-      // it again once the log grows past the dropped start (`replace_next`, uploader.ts).
       return Promise.resolve({
         status: "dropped",
         ...shippedOf(session.normalized as NormalizedState),
@@ -973,11 +813,9 @@ export class Pipeline {
     }
     return this.commit(run, {
       ...common,
-      // The log's meta record and the branch it names are in the dropped start.
       branch: envelope.branch,
       write: [stubMeta(envelope), ...tail.records],
       continuation: { from_record: skip, prefix_sha256: prefixHash },
-      // A stub has no trace to replace: its first trace extends it, and a drop moves it on.
       ...(session?.head !== undefined ? { replace: true } : {}),
       normalized,
       withheld: tail.withheld,
@@ -986,9 +824,6 @@ export class Pipeline {
     });
   }
 
-  /** A write's redaction summary: the records' pass, plus for an assembled session what its
-   * spans' arrival found (`arrived`; see `WholeOptions`). The LLM calls' matches are added by
-   * `commit`. */
   private summaryOf(
     pass: RedactionSummary,
     options: WholeOptions,
@@ -1005,7 +840,6 @@ export class Pipeline {
     return { rule_set: pass.rule_set, counts };
   }
 
-  /** What a fork copied from the session it was made from, when that parent is stored here. */
   private async forkCopy(run: Run, records: NormalizedRecord[]) {
     const forkOf = run.envelope.fork_of;
     if (!forkOf) return undefined;
@@ -1015,12 +849,10 @@ export class Pipeline {
     return copiedPrefix(records, (trace?.records as NormalizedRecord[] | undefined) ?? null);
   }
 
-  /** Stages 5 and 6: review what the plan adds, then write it, or record the drop. */
   private async commit(run: Run, plan: Plan): Promise<StoreSessionResult> {
     const { envelope, session } = run;
     const lead = metaOf(plan.write) ? 1 : 0;
     const judged = plan.write.slice(lead);
-    // The reviewer may send what it judges to a model provider: never the raw payload.
     const { payload: _payload, ...about } = envelope;
     const decision = await this.reviewer.review({
       envelope: about,
@@ -1046,11 +878,6 @@ export class Pipeline {
         ...(decision.redactor_model ? { redactor_model: decision.redactor_model } : {}),
         ...(decision.failure ? { failure: decision.failure } : {}),
       });
-      // A dropped replace leaves the session as stored: its log state stays the stored
-      // history's, never the dropped one's, or a later upload extending the dropped history
-      // would be written as a continuation of the stored one (two histories spliced). The next
-      // upload of that history does not extend what is stored, so it must replace again and is
-      // reviewed again. The answer says what is stored.
       if (plan.replace) {
         if (!session?.normalized) return { status: "dropped", ...NOTHING };
         return this.progress(
@@ -1061,10 +888,6 @@ export class Pipeline {
           plan.guard,
         );
       }
-      // The envelope counts as handled (F3.4): the log moves past it, whether or not the session
-      // has a trace. A session with none (its first envelope, or every one so far, dropped)
-      // keeps a stub that says where its log ends and nothing of what was dropped (F3.4 over
-      // F3.1, revised 15 Nov 2026), so the next envelope continues from there.
       return this.progress(run, plan.normalized, plan.withheld, "dropped", plan.guard, {
         session_id: envelope.session_key,
         agent: envelope.format,
@@ -1081,7 +904,6 @@ export class Pipeline {
       }
       write = [...plan.write.slice(0, lead), ...decision.records];
     }
-    // An LLM call's free text (its error, string parameters) is redacted like the records (F2).
     const calls = redactLlmCalls(this.redactor, callsFor(write, plan.llm_calls));
     const summary = withCounts(plan.summary, calls.counts);
 
@@ -1121,8 +943,6 @@ export class Pipeline {
     return { ...result, ...shippedOf(plan.normalized) };
   }
 
-  /** No trace to write, but the log moved on and the envelope is remembered; with `stub`, a
-   * session with no pointer gets a stub (`recordProgress`). */
   private async progress(
     run: Run,
     normalized: NormalizedState,
@@ -1145,7 +965,6 @@ export class Pipeline {
     return { status, ...shippedOf(normalized) };
   }
 
-  /** Who writes, how the owner was established and who may read a new session (X5.5, X5.10). */
   private who(run: Run): Pick<WriteContext, "writer" | "owner_basis" | "visibility"> {
     const { envelope, auth } = run;
     const visibility =
@@ -1156,7 +975,6 @@ export class Pipeline {
     return { writer: auth.writer, owner_basis: auth.owner_basis, visibility };
   }
 
-  /** Who writes and what the data claims and came from (X5.5). */
   private context(run: Run): WriteContext {
     const { envelope } = run;
     return {
@@ -1171,7 +989,6 @@ export class Pipeline {
     };
   }
 
-  /** Keep what review decided for a stored write (F3.8), numbered after the session's last. */
   private async writeNote(
     run: Run,
     contentHash: string,
@@ -1191,7 +1008,6 @@ export class Pipeline {
         });
         return;
       } catch (err) {
-        // Another write of the session took that number: take the next.
         if (!isPreconditionFailed(err) || attempt === 4) throw err;
       }
     }

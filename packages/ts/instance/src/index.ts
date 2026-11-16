@@ -1,6 +1,3 @@
-/** `@seshi/instance`, layer 4 (X3.2): an Instance built from one config, with everything that
- * hangs off it (X1.2), and the background jobs its worker role runs (X7). */
-
 export {
   type AssembleHost,
   type AssemblePass,

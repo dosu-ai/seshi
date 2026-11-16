@@ -1,13 +1,6 @@
-/** The index behind search (F10.3): one narrow interface, so a second backend (ClickHouse,
- * later) changes neither the indexer nor the API. It holds sessions and their searchable
- * events, and answers keyword queries with filters and the viewer's permission filter. Where
- * the indexer has got to in the change feed is `FeedState`: the SQLite backend keeps it in the
- * same file, so a wiped index also forgets its cursors and starts over. */
-
 import type { EventRole, SearchSort, Visibility } from "@seshi/model";
 import type { Viewer } from "./viewer";
 
-/** What the index keeps of a session: enough to filter, show and address it. */
 export interface IndexedSession {
   owner: string;
   archive_id: string;
@@ -29,7 +22,6 @@ export interface IndexedSession {
   traces: string[];
 }
 
-/** One searchable event of a trace. */
 export interface IndexedEvent {
   content_hash: string;
   event_index: number;
@@ -112,14 +104,11 @@ export interface SearchBackend {
    * session as read later. */
   remove(owner: string, archive: string, readAt?: number): boolean;
   query(query: BackendQuery): BackendResults;
-  /** Sessions and events held. */
   counts(): { sessions: number; events: number };
   close(): void;
 }
 
-/** How far the indexer has read each owner's change feed. */
 export interface FeedState {
-  /** The last change key processed for `owner`. */
   cursor(owner: string): string | undefined;
   /** Which of `keys` were already processed (within the lag window). */
   seen(owner: string, keys: readonly string[]): Set<string>;
@@ -133,7 +122,6 @@ export interface FeedState {
   ): void;
   /** When the index first caught up with the whole feed; undefined while it is building. */
   readyAt(): string | undefined;
-  /** When the indexer last finished a pass over every owner. */
   caughtUpAt(): string | undefined;
   /** A full pass over every owner finished at `at`; the first one makes the index ready. */
   caughtUp(at: string): void;

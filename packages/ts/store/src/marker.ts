@@ -1,21 +1,9 @@
-/** The layout marker, `seshi.json` (X1.4): written once, with If-None-Match, by the first
- * writer of a prefix. It records the layout's schema, the canonical trace format every trace
- * under the prefix is in, and the deployment and organization the prefix belongs to. A server
- * whose config names another deployment or org refuses to start, which catches a config
- * pointed at the wrong bucket. Kept small on purpose (X1.4 is low priority).
- *
- * A prefix that holds sessiondb's marker (`sessionstorage.json`, `sessionstorage/layout/1`)
- * is refused: its traces are letta or OTLP objects beside raw parts, and seshi ships no
- * migration (X1.5). Point seshi at a new prefix. */
-
 import { randomUUID } from "node:crypto";
 import { LAYOUT_SCHEMA, type LayoutMarker, LEGACY_LAYOUT_SCHEMA, TRACE_SCHEMA } from "@seshi/model";
 import { createJson, decodeJson, readJson, updateJson } from "./json";
 import { LAYOUT_KEY, LEGACY_LAYOUT_KEY } from "./layout";
 import { getBytes, isPreconditionFailed, type Store, StoreError } from "./store";
 
-/** The prefix cannot be used: it holds another layout, another deployment's or org's data, or
- * a marker this version cannot read. */
 export class LayoutError extends StoreError {
   constructor(message: string) {
     super(message);
@@ -24,7 +12,6 @@ export class LayoutError extends StoreError {
 }
 
 export interface LayoutOptions {
-  /** Who writes the marker if there is none (`seshi/0.9.0`). */
   createdBy: string;
   /** Config's `store.deployment_id`: the marker must name it, or one is recorded when the
    * prefix is new. Without it a new prefix gets a generated id, and any id is accepted. */
@@ -33,7 +20,6 @@ export interface LayoutOptions {
    * first time a config names one. */
   org?: string;
   now?: () => Date;
-  /** For tests: the id a new prefix gets when `deploymentId` is not given. */
   newDeploymentId?: () => string;
 }
 
@@ -57,9 +43,7 @@ async function refuseLegacy(store: Store): Promise<void> {
   let schema = LEGACY_LAYOUT_SCHEMA as string;
   try {
     schema = decodeJson<{ schema?: string }>(legacy).schema ?? schema;
-  } catch {
-    // An unreadable legacy marker is still a legacy prefix.
-  }
+  } catch {}
   throw new LayoutError(
     `${store.url} holds a sessiondb store (${LEGACY_LAYOUT_KEY}, ${schema}): its traces are letta or otlp objects beside raw transcripts, which seshi does not read, and there is no migration (X1.5). Point store.url at a new prefix.`,
   );
@@ -93,7 +77,6 @@ export async function ensureLayout(store: Store, options: LayoutOptions): Promis
       await createJson(store, LAYOUT_KEY, marker);
       return marker;
     } catch (err) {
-      // Another writer created it first: read theirs and check it.
       if (!isPreconditionFailed(err) || attempt >= 3) throw err;
     }
   }
@@ -119,7 +102,6 @@ async function agree(
     }
     return marker;
   }
-  // The first config to name an org claims the prefix for it.
   const updated = await updateJson<LayoutMarker>(store, LAYOUT_KEY, (current) => {
     if (current === null) throw new LayoutError(`${LAYOUT_KEY} disappeared`);
     return current.org === undefined ? { ...current, org } : null;

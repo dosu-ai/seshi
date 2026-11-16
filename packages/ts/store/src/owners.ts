@@ -1,18 +1,10 @@
-/** The owners a bucket holds sessions for: the folders under `owners/`. There is no stored list
- * of people (X5.8); this reads what is there. A store lists keys, not folders, so each owner
- * costs one listing call: after finding one key of an owner, the next call starts past every
- * key that owner's folder can hold. */
-
 import { assertOwner, isOwner, keys } from "./layout";
 import type { Store } from "./store";
 
-/** Sorts after every character a key under an owner's folder uses, so `startAfter` set to the
- * folder plus this skips the whole folder. */
 const PAST_FOLDER = "\u{10FFFF}";
 
 export interface OwnersPage {
   owners: string[];
-  /** Pass as `after` to continue. */
   cursor: string | undefined;
   truncated: boolean;
 }

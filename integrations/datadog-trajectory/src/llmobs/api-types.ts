@@ -3,7 +3,6 @@
  * reference). The endpoints are marked preview, so these types are pinned to the tested shape
  * and `readSearchResponse` fails loudly when a response stops matching it. */
 
-/** One message of a span's input or output (`SearchedIO.messages`). */
 export interface DatadogMessage {
   content?: string;
   role?: string;
@@ -25,14 +24,11 @@ export interface DatadogToolResult {
   type?: string;
 }
 
-/** A span's input or output (`SearchedIO`). */
 export interface DatadogIO {
   value?: string;
   messages?: readonly DatadogMessage[];
 }
 
-/** One span's attributes (`SearchedSpan`). Fields the docs list and seshi does not read
- * (`evaluation`, `tool_definitions`, `intent`) are allowed and ignored. */
 export interface DatadogSpan {
   span_id: string;
   trace_id: string;
@@ -59,7 +55,6 @@ export interface DatadogSpan {
   session_id?: string;
 }
 
-/** One item of `data` (`SearchedSpanResource`). */
 export interface DatadogSpanResource {
   id?: string;
   type?: string;
@@ -79,7 +74,6 @@ export interface DatadogSearchResponse {
   links?: { next?: string | null };
 }
 
-/** `POST /api/v2/llm-obs/v1/spans/events/search`'s body. */
 export interface DatadogSearchRequest {
   data: {
     type: "spans";

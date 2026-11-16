@@ -1,17 +1,3 @@
-/** The Datadog LLM Observability poller (F5): a `[[sources]]` `type = "datadog"` connector.
- *
- * Each run reads a time window of spans from the Export API (F5.1), oldest first and a page at
- * a time: from the checkpoint minus `overlap` (spans Datadog indexed late) to now minus `lag`;
- * the first run reaches back `backfill` (F5.2). Spans already submitted in the overlap are left
- * out by span id. The rest are grouped by the session their Trajectory tags name (F5.3) and
- * each group is submitted as a span batch, as the source's service account (X5.4), to the span
- * assembler, which publishes a session once it has been quiet for `quiet_period` (F4.4).
- *
- * The checkpoint is written after every page, once that page's batches were submitted (X4.7:
- * a crash in between submits them again, which is harmless). A window too large for one run
- * is carried on by the next (`more`), from the page cursor it saved. Nothing is captured on
- * laptops (F5.4). */
-
 import { createHash } from "node:crypto";
 import type { Connector, ConnectorContext, Cursor } from "@seshi/kit";
 import { type Claims, ENVELOPE_SCHEMA, type Envelope, type ReceivedSpan } from "@seshi/model";
@@ -26,10 +12,8 @@ import {
 import { DATADOG_LLMOBS, datadogClaims } from "./format";
 import { sessionOf, tagsOf, tagValue, toReceivedSpan } from "./spans";
 
-/** The source type this connector polls. */
 export const DATADOG_SOURCE = "datadog";
 
-/** A secret as the config hands it over (`Secret` from `@seshi/config`, or a plain string). */
 type SecretLike = string | { reveal(): string };
 
 /** The fields of a `type = "datadog"` source this connector reads (`datadogSource` in
@@ -47,12 +31,10 @@ export interface DatadogSourceConfig {
   page_size: number;
 }
 
-/** What the checkpoint holds. */
 export interface DatadogCursor {
   v: 1;
   /** The end of the last window read to its last page (ISO 8601). */
   until?: string;
-  /** A window being read, and the cursor of its next page. */
   window?: { from: string; to: string; page?: string };
   /** Span ids (OTLP hex) submitted with a start inside the overlap, and that start in ms:
    * repeats the next window reads again are left out (F5.2). */
@@ -60,14 +42,11 @@ export interface DatadogCursor {
 }
 
 export interface DatadogConnectorOptions {
-  /** Waits for rate limits and retries (a real timer by default; tests pass a fake). */
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
-  /** Pages one run reads before it hands over with `more` (default 20). */
   maxPagesPerRun?: number;
   /** Most span ids the checkpoint remembers (default 50,000); the oldest go first. Past it, a
    * repeat is resubmitted, which the span store absorbs. */
   maxSeen?: number;
-  /** Retry tuning for the Export API, for tests. */
   backoffMs?: number;
 }
 
@@ -101,7 +80,6 @@ export function readDatadogConfig(raw: Readonly<Record<string, unknown>>): Datad
   if (!Number.isInteger(page) || page < 1 || page > 5000) {
     throw new Error("the datadog source's page_size must be 1 to 5000");
   }
-  // Checked here so a bad tag list fails the run before any request (the filter is a map).
   tagFilter(tags);
   const api_url = apiUrl(raw.api_url);
   return {
@@ -118,8 +96,6 @@ export function readDatadogConfig(raw: Readonly<Record<string, unknown>>): Datad
   };
 }
 
-/** `api_url`, checked: the keys travel in its headers, so plain HTTP is only for this machine
- * (a test server, a local proxy). */
 function apiUrl(raw: unknown): string | undefined {
   if (typeof raw !== "string" || raw === "") return undefined;
   let url: URL;
@@ -187,14 +163,11 @@ export function nextWindow(
   return { from: new Date(from).toISOString(), to: new Date(to).toISOString() };
 }
 
-/** The X4.7 key of a batch: a digest of its trace and span ids. */
 export function batchKey(spans: readonly ReceivedSpan[]): string {
   const ids = spans.map((s) => `${s.traceId}:${s.spanId}`).sort();
   return `datadog:${createHash("sha256").update(ids.join("\n")).digest("hex")}`;
 }
 
-/** What a poller puts on its envelopes (X5.4, `serviceIdentity` in `@seshi/auth`, which
- * integrations may not import): it writes as its source's service account. */
 export function serviceEnvelopeIdentity(
   sourceId: string,
 ): Pick<Envelope, "caller" | "owner" | "owner_basis"> {
@@ -212,7 +185,6 @@ function mergeClaims(a: Claims | undefined, b: Claims | undefined): Claims | und
 
 const startMs = (span: ReceivedSpan) => Number(BigInt(span.startTimeUnixNano) / 1_000_000n);
 
-/** What one page came to. */
 interface PageTally {
   spans: number;
   submitted: number;
@@ -222,14 +194,11 @@ interface PageTally {
   sessions: number;
   rejected: number;
   failed: number;
-  /** Unreadable spans recorded through `ctx.fail` (one record per page). */
   recorded: number;
 }
 
-/** The code of the failure record a page with unreadable spans leaves (`ctx.fail`). */
 export const UNREADABLE_SPANS = "unreadable_spans";
 
-/** The Datadog LLM Observability poller, with `options` for tests. */
 export function datadogConnector(options: DatadogConnectorOptions = {}): Connector {
   const maxPages = options.maxPagesPerRun ?? 20;
   const maxSeen = options.maxSeen ?? 50_000;
@@ -272,7 +241,6 @@ export function datadogConnector(options: DatadogConnectorOptions = {}): Connect
         continue;
       }
       const group = groups.get(key) ?? [];
-      // The same span twice in one page counts once.
       if (!group.some((s) => s.spanId === span.spanId && s.traceId === span.traceId)) {
         group.push(span);
       }
@@ -304,9 +272,6 @@ export function datadogConnector(options: DatadogConnectorOptions = {}): Connect
       if (outcome.status === "failed") tally.failed++;
       for (const span of spans) seen.set(span.spanId, startMs(span));
     }
-    // Spans that never became an envelope leave a failure record (X4.8), so `sync failed` and
-    // source health show them; the rest of the page goes on. A page with no readable span at
-    // all is a changed answer shape and has already failed the run (F5.1).
     if (tally.invalid > 0 && ctx.fail) {
       const where = `${window.from}/${window.to}`;
       await ctx.fail({
@@ -320,16 +285,12 @@ export function datadogConnector(options: DatadogConnectorOptions = {}): Connect
     return tally;
   }
 
-  /** The seen ids that still matter, newest kept when there are too many: those `keep` says
-   * yes to (inside an overlap a window may read again). */
   function prune(seen: Map<string, number>, keep: (ms: number) => boolean): Record<string, number> {
     let entries = [...seen.entries()].filter(([, ms]) => keep(ms));
     if (entries.length > maxSeen) {
       entries.sort((a, b) => b[1] - a[1]);
       entries = entries.slice(0, maxSeen);
     }
-    // The run itself keeps every id it saw (a page repeating an earlier one is still left
-    // out); only the checkpoint forgets.
     return Object.fromEntries(entries);
   }
 
@@ -408,9 +369,6 @@ export function datadogConnector(options: DatadogConnectorOptions = {}): Connect
           ...(until ? { until } : {}),
           ...(done ? {} : { window: { from: window.from, to: window.to, page: page.next } }),
         };
-        // Only ids a window may read again matter: inside the next window's overlap and, while
-        // this window is being read, inside the overlap it starts with (ids from the window
-        // before). A long backfill so keeps few.
         const nextFrom = Date.parse(window.to) - config.overlap;
         const windowFrom = Date.parse(window.from);
         const overlapEnd = windowFrom + config.overlap;
@@ -438,7 +396,6 @@ export function datadogConnector(options: DatadogConnectorOptions = {}): Connect
           if (totals.failed) parts.push(`${totals.failed} batch(es) failed (see sync failed)`);
           ctx.log.info(parts.join("; "));
           const lag = lagOf(cursor) ?? now.getTime() - Date.parse(window.from);
-          // A finished window opened by an earlier run is behind now: open the next at once.
           if (done) return { lag_ms: lag, ...(resumed ? { more: true } : {}) };
           return { more: true, lag_ms: lag };
         }
@@ -468,5 +425,4 @@ export function datadogConnector(options: DatadogConnectorOptions = {}): Connect
   };
 }
 
-/** The poller every `type = "datadog"` source runs. */
 export const DATADOG_CONNECTOR: Connector = datadogConnector();
