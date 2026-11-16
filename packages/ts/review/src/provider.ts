@@ -38,6 +38,14 @@ export function statusError(status: number): ProviderError {
   );
 }
 
+function tryParseJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
 /** Parse a model's text answer as JSON. Tolerates a fenced block or prose around one object,
  * which models without constrained output sometimes add; anything else is `invalid_json`,
  * which is retried (F3.4: an answer that does not fit). */
@@ -50,9 +58,8 @@ export function parseAnswer(text: string): unknown {
     const start = trimmed.indexOf("{");
     const end = trimmed.lastIndexOf("}");
     if (start !== -1 && end > start) {
-      try {
-        return JSON.parse(trimmed.slice(start, end + 1));
-      } catch {}
+      const inner = tryParseJson(trimmed.slice(start, end + 1));
+      if (inner !== undefined) return inner;
     }
     throw new ProviderError("invalid_json", true, "the model's answer is not JSON");
   }
