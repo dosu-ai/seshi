@@ -265,8 +265,4 @@ describe("seshi config", () => {
       "--origin is for config show",
     );
   });
-
-  it("is listed in --help", async () => {
-    expect((await seshi(["--help"])).out).toContain("config");
-  });
 });

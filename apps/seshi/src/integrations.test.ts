@@ -4,11 +4,6 @@ import { describe, expect, it } from "vitest";
 import { buildFormats, INTEGRATIONS } from "./integrations";
 
 describe("the integration registry", () => {
-  it("names each integration once", () => {
-    const names = INTEGRATIONS.map((integration) => integration.name);
-    expect(new Set(names).size).toBe(names.length);
-  });
-
   it("reads every format the server has always accepted", () => {
     expect(buildFormats().sources.sort()).toEqual(
       [

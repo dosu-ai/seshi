@@ -17,7 +17,7 @@ import { EXIT } from "../cli/exit";
 import { Style, stripStyle } from "../cli/style";
 import { INTEGRATIONS } from "../integrations";
 import { main } from "../main";
-import { highlighted, requestOf, searchLines, timeArg } from "./search";
+import { highlighted, searchLines, timeArg } from "./search";
 
 const formats = new FormatRegistry(BUILTIN_FORMATS);
 const line = (record: Record<string, unknown>) => `${JSON.stringify(record)}\n`;
@@ -112,6 +112,19 @@ describe("seshi search, in-process", () => {
     expect(old.out).toBe("Exploring: no sessions match.");
     const paged = await seshi(["topic", "--limit", "1", "--config", toml]);
     expect(paged.out).toContain("1 of 2 sessions shown; more with --cursor 1");
+    const bare = await seshi([
+      "topic",
+      "--sort",
+      "recent",
+      "--matches",
+      "0",
+      "--config",
+      toml,
+      "--json",
+    ]);
+    const sessions = JSON.parse(bare.out) as SearchResults;
+    expect(sessions.total).toBe(2);
+    expect(sessions.results.map((r) => r.matches)).toEqual([[], []]);
   });
 
   it("shows and rebuilds the local index", async () => {
@@ -294,12 +307,6 @@ describe("the command's pieces", () => {
     expect(timeArg("2026-11-01", "since", now)).toBe("2026-11-01T00:00:00.000Z");
     expect(timeArg("2026-11-01T09:30:00+01:00", "since", now)).toBe("2026-11-01T08:30:00.000Z");
     expect(() => timeArg("soon", "since", now)).toThrow(/--since/);
-  });
-
-  it("builds the request from the flags", () => {
-    expect(requestOf("a b", { owner: "x", limit: "5", matches: "0", sort: "recent" }, now)).toEqual(
-      { q: "a b", owner: "x", limit: 5, matches: 0, sort: "recent" },
-    );
   });
 
   it("prints a session per result and a line per match", () => {

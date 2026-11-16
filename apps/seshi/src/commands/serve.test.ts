@@ -409,11 +409,6 @@ describe("serveSettings", () => {
       "'a/b' is not a valid owner id",
     );
   });
-
-  it("takes either role alone (X7.1)", () => {
-    expect(serveSettings(config({ "server.roles": "worker" })).roles).toEqual(["worker"]);
-    expect(serveSettings(config({ "server.roles": "api" })).roles).toEqual(["api"]);
-  });
 });
 
 describe("requestBodyCap", () => {

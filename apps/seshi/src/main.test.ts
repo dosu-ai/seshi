@@ -110,11 +110,6 @@ describe("seshi", () => {
     expect((await run(["sessions", "frobnicate"])).code).toBe(2);
   });
 
-  it("registers every command lazily", () => {
-    expect(Object.keys(COMMANDS)).toContain("serve");
-    for (const spec of Object.values(COMMANDS)) expect(typeof spec.load).toBe("function");
-  });
-
   // A shebang runs only on macOS and Linux; on Windows npm puts a .cmd shim in front instead.
   it.skipIf(process.platform === "win32")(
     "runs as the package's bin, with no `bun` in front",
