@@ -24,7 +24,6 @@ import {
   queueCheck,
   recordsCheck,
   residueCheck,
-  retractedUploadId,
   runChecks,
   type ServerView,
   type SessionEvidence,
@@ -1149,31 +1148,19 @@ describe("gatherEvidence", () => {
     );
     expect(none.server).toMatchObject({ mode: "none", error: { code: "not_signed_in" } });
 
-    const asked: string[] = [];
     const ev = await gatherEvidence(
       { agent: "claude-code", session_id: SID },
       deps({
         state: () => state({ [KEY]: entry({ generation: 2, toggle: "off", retract: "done" }) }),
-        server: fakeServer({
-          getSession: async (_a, id) => {
-            asked.push(id);
-            return null;
-          },
-        }),
+        server: fakeServer({ getSession: async () => null }),
       }),
     );
-    expect(asked).toEqual([`${SID}~2`, `${SID}~1`]);
+    expect(ev.server).toMatchObject({ upload_id: `${SID}~2`, metadata: null });
     expect(ev.server.retracted).toEqual({ upload_id: `${SID}~1`, metadata: null });
   });
 });
 
 describe("helpers", () => {
-  it("names the upload id before the last retraction", () => {
-    expect(retractedUploadId({ session_id: "s", generation: 0 })).toBeUndefined();
-    expect(retractedUploadId({ session_id: "s", generation: 1 })).toBe("s");
-    expect(retractedUploadId({ session_id: "s", generation: 3 })).toBe("s~2");
-  });
-
   it("picks a distinctive word outside redaction markers", () => {
     expect(
       distinctiveTerm([

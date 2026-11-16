@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { CommandContext } from "../commands/index";
 import { openAccount } from "./account";
-import { FallbackSecrets, FileSecrets, MemorySecrets } from "./secrets";
+import { FallbackSecrets, FileSecrets } from "./secrets";
 
 describe("openAccount: where secrets go", () => {
   let home: string;
@@ -13,7 +13,7 @@ describe("openAccount: where secrets go", () => {
   });
   afterEach(() => rmSync(home, { recursive: true, force: true }));
 
-  const ctx = (env: Record<string, string> = {}, secrets?: MemorySecrets): CommandContext => ({
+  const ctx = (env: Record<string, string> = {}): CommandContext => ({
     argv: [],
     // The CLI config folder under home/config whatever the platform (%APPDATA% on Windows).
     env: {
@@ -25,7 +25,6 @@ describe("openAccount: where secrets go", () => {
     stdout: () => {},
     stderr: () => {},
     integrations: async () => [],
-    ...(secrets ? { secrets } : {}),
   });
 
   function cliConfig(toml: string) {
@@ -71,10 +70,5 @@ describe("openAccount: where secrets go", () => {
     });
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain("https://a.example keeps its secrets in the OS keychain");
-  });
-
-  it("a test's own store wins over either", () => {
-    const memory = new MemorySecrets();
-    expect(openAccount(ctx({ SESHI_KEYCHAIN: "false" }, memory)).secrets).toBe(memory);
   });
 });

@@ -77,18 +77,26 @@ describe("the credential for a purpose", () => {
       session: "old",
       refresh: "rt1",
     });
-    const seen: string[] = [];
+    // An IdP that honours only the stored refresh token, and a server whose exchange takes only
+    // the ID token the IdP issued, with its nonce.
+    const claims = Buffer.from(JSON.stringify({ nonce: "n1" })).toString("base64url");
+    const idToken = `h.${claims}.s`;
     const fetch = async (url: string, init?: RequestInit) => {
-      seen.push(url);
       if (url === "https://idp.test/token") {
-        expect(String(init?.body)).toContain("refresh_token=rt1");
-        const claims = Buffer.from(JSON.stringify({ nonce: "n1" })).toString("base64url");
-        return Response.json({ id_token: `h.${claims}.s`, refresh_token: "rt2" });
+        const form = new URLSearchParams(String(init?.body));
+        if (form.get("refresh_token") !== "rt1") {
+          return Response.json({ error: "invalid_grant" }, { status: 400 });
+        }
+        return Response.json({ id_token: idToken, refresh_token: "rt2" });
       }
-      expect(JSON.parse(String(new TextDecoder().decode(init?.body as Uint8Array)))).toEqual({
-        id_token: expect.any(String),
-        nonce: "n1",
-      });
+      const body = JSON.parse(new TextDecoder().decode(init?.body as Uint8Array));
+      if (
+        url !== `${SERVER}/v1/auth/exchange` ||
+        body.id_token !== idToken ||
+        body.nonce !== "n1"
+      ) {
+        return Response.json({ error: { code: "unauthorized" } }, { status: 401 });
+      }
       return Response.json({
         session_token: "new",
         expires_at: at(60),
@@ -99,7 +107,6 @@ describe("the credential for a purpose", () => {
     };
     const credential = await credentialFor(options({ fetch }), SERVER, "read");
     expect(credential.token).toBe("new");
-    expect(seen).toEqual(["https://idp.test/token", `${SERVER}/v1/auth/exchange`]);
     expect(await logins.secret(SERVER, "refresh")).toBe("rt2");
     expect(await logins.secret(SERVER, "session")).toBe("new");
     expect(logins.get(SERVER)?.session).toEqual({

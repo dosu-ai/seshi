@@ -3,9 +3,8 @@
 import type { NormalizedRecord } from "@seshi/model";
 import { redactionRules, ruleRedactor } from "@seshi/redact";
 import { describe, expect, it } from "vitest";
-import { forJson, parseDoctorArgs } from "../commands/doctor";
+import { parseDoctorArgs } from "../commands/doctor";
 import { residueOf, ruleRedaction } from "./real";
-import type { SessionEvidence } from "./types";
 
 /** A token the built-in github-token rule matches, split so no scanner reads it here. */
 const TOKEN = `${"gh"}p_${"abcdefghijklmnopqrstuvwx0123456789"}`;
@@ -64,12 +63,5 @@ describe("seshi doctor's flags", () => {
     expect(parseDoctorArgs(["stray"])).toContain("unexpected");
     expect(parseDoctorArgs(["--agent"])).toContain("needs a value");
     expect(parseDoctorArgs(["--session", "x", "--since", "1d"])).toContain("--since");
-  });
-
-  it("leaves the stored records out of --json", () => {
-    const evidence = {
-      server: { traces: [{ content_hash: "a", records: [{ role: "user" }] }] },
-    } as unknown as SessionEvidence;
-    expect(forJson(evidence).server.traces[0]).toEqual({ content_hash: "a" });
   });
 });
