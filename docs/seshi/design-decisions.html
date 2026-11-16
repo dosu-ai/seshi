@@ -402,6 +402,7 @@ pre.tree .d { color: var(--accent); font-weight: 500; }
         <h3>Local mode replaces the direct-to-bucket client</h3>
         <dl>
           <dt>Detail</dt><dd>Today <code>connect({ store })</code> runs the pipeline on the caller's machine and writes the bucket with its keys. In seshi, local mode builds an <code>Instance</code> in-process from the CLI's config, and <code>ts/client</code> is HTTP-only. Local mode is for one person who owns the bucket; team setups keep bucket keys on the server (<a href="#identity">X5.6</a>).</dd>
+          <dt>Revised (F11)</dt><dd>Local mode became serverless mode, for one person or a team: each laptop writes its owner's folder of a shared bucket, and the bucket's permissions are the only roles. <code>[local]</code> is read as the old name of <code>[serverless]</code>. See <code>docs/seshi/serverless.md</code>.</dd>
         </dl>
       </div>
     </div>
@@ -715,6 +716,7 @@ pre.tree .d { color: var(--accent); font-weight: 500; }
         <h3>Bucket keys stay on the server</h3>
         <dl>
           <dt>Decision</dt><dd class="rec">Only <code>seshi serve</code> holds bucket keys, and local mode (<a href="#repo">X3.5</a>) for one person who owns the bucket. Services read through the API. Read-only bucket keys for a service are possible but skip every check, so they count as org-wide read.</dd>
+          <dt>Revised (F11)</dt><dd>Or every laptop, in serverless mode: each holds a key, and the bucket's permissions decide what it may read and write. Visibility is then kept by the CLI, not enforced, unless the keys enforce it.</dd>
         </dl>
       </div>
     </div>
@@ -1490,6 +1492,7 @@ pre.tree .d { color: var(--accent); font-weight: 500; }
         <h3>The CLI talks to a server, or runs one in-process</h3>
         <dl>
           <dt>Detail</dt><dd>Team setups use the HTTP API through <code>@seshi/client</code> (<code>packages/ts/client</code>). Local mode (<a href="#repo">X3.5</a>) builds an <code>Instance</code> in-process for one person who owns the bucket. Nothing else touches a bucket.</dd>
+          <dt>Revised (F11)</dt><dd>Team setups use the HTTP API, or serverless mode: the CLI builds the <code>Instance</code> in-process over a shared bucket for each member.</dd>
         </dl>
       </div>
     </div>

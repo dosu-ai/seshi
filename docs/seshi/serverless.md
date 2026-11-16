@@ -1,7 +1,8 @@
 # Serverless mode (F11): spec
 
-Status: draft for review. Builds on the `seshi-mvp` branch (dosu-ai/sessiondb#20). The design
-sketch it came from is the "Serverless mode" artifact; this page is what gets built.
+Status: built on `seshi-39-serverless`, on `seshi-mvp` (dosu-ai/sessiondb#20); the build note is
+[`build/39-serverless.md`](build/39-serverless.md), which lists where the build differs from this
+page and what is still open. The design sketch it came from is the "Serverless mode" artifact.
 
 ## What it is
 
@@ -86,13 +87,15 @@ scope = "visible"                    # "mine", "visible" or "all"
   `[otlp]`, `[auth]`, `[server]`, `[worker]`) are ignored in serverless mode, with one warning
   from `doctor`, since a bucket that switches modes may keep them. `[store]` in the shared file
   is ignored: the laptop already knows where the bucket is. Secrets appear only as references
-  (`{ env = "…" }` or a keychain name), never as values; `admin config push` refuses a literal
-  secret.
+  (`{ env = "…" }`), never as values; `admin config push` refuses a literal secret. A key stored
+  with `seshi review key set <provider>` fills a review policy's `{ env = "…" }` for that
+  provider when the variable is unset.
 - **Checking.** The same checks `seshi serve` runs at start (each pack's rules against its own
   test strings, review policy shapes). Not stricter. A shared config that fails them is reported
   by `doctor` and `capture status`, and the CLI keeps using the last good copy it cached.
-- **Caching.** The CLI caches `config/` in its state folder with each object's ETag, reads it
-  again at most every 5 minutes (the daemon refreshes it), and sends `If-None-Match`. When the
+- **Caching.** The CLI caches `config/` in its state folder with each object's ETag, and asks
+  the bucket again at most every 5 minutes (the daemon's uploader reopens the bucket that
+  often): it lists `config/` and downloads only when an ETag changed. When the
   bucket can't be reached it uses the cache; with no cache, commands that write fail and uploads
   wait in the spool.
 - **Writing.** `seshi admin config push [<dir>] [--dry-run]` checks the files and uploads them
@@ -204,8 +207,8 @@ folder.
   The env var name comes from the policy's `api_key = { env = "…" }`.
 - `false`, and the key can't be resolved: the session is stored with regex redaction only and
   recorded as `skipped`, as `on_failure = "skip"` does today; `doctor` warns.
-- `seshi review key set <provider>` stores a key in the keychain under a name review policies can
-  reference. New.
+- `seshi review key set <provider>` stores a key in the keychain; it fills a policy's
+  `api_key = { env = "…" }` for that provider when the variable is unset. New.
 
 ## Search (F11.9)
 
@@ -224,7 +227,8 @@ folder.
 ## Drop and failure records (F11.10)
 
 - The pipeline's records sink becomes an instance option. In serverless mode it writes the same
-  JSON records under `<state>/records/{dropped,failed}/`.
+  JSON records, per bucket, under
+  `<state>/serverless/<bucket id>/records/sources/upload/{dropped,failed}/`.
 - `capture status` and `explore` show them; `seshi sync dropped|failed` reads them in serverless
   mode.
 - The daemon prunes them by `[records]` retention.

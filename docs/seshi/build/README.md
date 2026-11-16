@@ -48,6 +48,7 @@ Branch names use a hyphen (`seshi-01-restructure`), not a slash: git cannot hold
 | 36 | `seshi-36-comments` | A comment audit (`/no-comments`): about 6,400 comment lines deleted across 301 source files, comments only (checked by printing each file without comments); kept: vendor, platform and protocol behaviour and public API contracts | All | Built |
 | 37 | `seshi-37-tier1` | After the comment audit, the code says what the deleted comments said: names for conditions, types for placeholder values, `try…` helpers for empty catches, one copy where there were two or three; no behaviour or stored format changed | All | Built |
 | 38 | `seshi-38-tier2` | Where a deleted comment held up an invariant, the code now enforces it or a test pins it: the uploader's `sync` per server answer, `decide` as an ordered list, one local lock, `ingest` steps that return values, change-then-pointer without exceptions, one kept-part split, store orderings pinned; each proved by breaking it | All | Built |
+| 39 | `seshi-39-serverless` | Serverless mode (F11): laptops run the pipeline and write their owner's folder of a shared bucket; marker schema 2 (mode, minimum version), shared settings in `config/`, bucket permissions as the only roles, held uploads, `init --serverless`, `admin mode|layout|config`, `review key set`, daemon upkeep | F11, X3.5, X5.6, F8.3 | Built |
 
 F7 (Cursor Cloud sync) is deferred and is not built. Agreed but not built, found in 17's review
 and left for a decision (see [17](17-review.md#not-fixed)): the first-run notice for Cursor and
