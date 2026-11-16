@@ -1,4 +1,4 @@
-import { createGunzip } from "node:zlib";
+import { createGunzip, type Gunzip } from "node:zlib";
 
 export class OtlpBodyError extends Error {
   constructor(
@@ -58,6 +58,14 @@ export interface InflateRefusals {
   invalid: () => Error;
 }
 
+function writeUnlessClosed(
+  gunzip: Gunzip,
+  chunk: Uint8Array,
+  closed: Promise<void>,
+): Promise<unknown> {
+  return Promise.race([new Promise((resolve) => gunzip.write(chunk, resolve)), closed]);
+}
+
 export async function inflateCapped(
   stream: ReadableStream<Uint8Array>,
   caps: OtlpBodyCaps,
@@ -97,7 +105,7 @@ export async function inflateCapped(
       failed = true;
       break;
     }
-    await Promise.race([new Promise((resolve) => gunzip.write(value, resolve)), closed]);
+    await writeUnlessClosed(gunzip, value, closed);
   }
   if (failed) {
     gunzip.destroy();

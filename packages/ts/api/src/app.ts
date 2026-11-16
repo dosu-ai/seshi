@@ -130,8 +130,11 @@ function bearer(request: Request): string | undefined {
   return scheme?.toLowerCase() === "bearer" && token ? token : undefined;
 }
 
+const JSON_STRING_GROWTH = 2;
+const ENVELOPE_FIELDS_ALLOWANCE = 1024 * 1024;
+
 export function maxBodyBytes(maxUploadBytes: number): number {
-  return maxUploadBytes * 2 + 1024 * 1024;
+  return maxUploadBytes * JSON_STRING_GROWTH + ENVELOPE_FIELDS_ALLOWANCE;
 }
 
 function tooLarge(max: number): HttpError {
@@ -184,7 +187,7 @@ function str(body: Record<string, unknown>, key: string, required = false): stri
   return value;
 }
 
-function sourceOf(formats: Instance["formats"], agent: string): string {
+function assertKnownSource(formats: Instance["formats"], agent: string): string {
   if (!formats.has(agent)) {
     throw new HttpError(
       422,
@@ -285,6 +288,10 @@ export function createApp(instance: Instance) {
     return owner;
   }
 
+  function canManageStub(principal: Principal, stub: SessionMetadata): boolean {
+    return canRead(principal, { ...stub, visibility: "owner" }, aliases);
+  }
+
   async function readable(
     principal: Principal,
     owner: string,
@@ -296,8 +303,7 @@ export function createApp(instance: Instance) {
       const metadata = await getSession(store, folder, agent, sessionId);
       if (metadata === null) continue;
       if (isStub(metadata)) {
-        if (!options.stubs || !canRead(principal, { ...metadata, visibility: "owner" }, aliases))
-          break;
+        if (!options.stubs || !canManageStub(principal, metadata)) break;
       } else if (!canRead(principal, metadata, aliases)) break;
       return { folder, metadata };
     }
@@ -388,7 +394,7 @@ export function createApp(instance: Instance) {
   route("POST", "/v1/sessions", async ({ request }) => {
     const principal = await caller(request, "sessions:write");
     const body = await readJson(request, bodyLimit);
-    const agent = sourceOf(formats, str(body, "agent", true) as string);
+    const agent = assertKnownSource(formats, str(body, "agent", true) as string);
     const format = (str(body, "format") ?? "jsonl") as RawFormat;
     if (format !== "jsonl" && format !== "json") {
       throw new HttpError(400, "bad_field", "format must be jsonl or json");
