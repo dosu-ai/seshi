@@ -228,27 +228,13 @@ section follow.
 
 ## Still to check
 
-- **Open: one record short after a rule change, a lost answer and a backfill** (seed 62372, the
-  last exploration, not triaged in time). The doctor fails `records` ("the transcript's first
-  11910 bytes normalize to 31 records; the server counts 30"); every turn's text is in the
-  bucket and the laptop has sent all of it, so it may be the doctor's count (pre-redaction
-  under a rule that changes lengths, `module \d+`) rather than a lost record. Not kept in
-  `found/` (it fails); the steps:
-
-  ```yaml
-  steps:
-    - turns: { session: main, count: 2 }
-    - pass
-    - turns: { session: main, count: 2 }
-    - rules: { add: [{ id: r1, pattern: "module \\d+" }] }
-    - fault: { store: put, key: "owners/*/sessions/*/metadata.json", after: true }
-    - pass
-    - turns: { session: main, count: 2 }
-    - fault: { store: put, key: "owners/*/sessions/*/metadata.json" }
-    - heal
-    - backfill
-    - settle
-  ```
+- **Resolved after the branch: one record short after a rule change and a lost answer** (seed
+  62372). A real uploader bug, not the doctor's count. A rule change made pre-redaction lengthen a
+  piece; the server stored it but the answer was lost, so `aligned` stayed true. When the log grew,
+  `offset_mismatch` answered with the server's length, the uploader took it as a file offset,
+  started the next chunk 20 bytes into a line, and the line was dropped. The uploader now records
+  `aligned = false` when it sends a piece whose length changed, before the answer. Unit test in
+  `uploader.test.ts` and scenario 24, both failing without the fix.
 
 - **A sweep in the quiet check.** Orphans of failed writes are allowed once quiet rather than
   swept; running the orphan sweep (as the worker would) before the last checkStore and then

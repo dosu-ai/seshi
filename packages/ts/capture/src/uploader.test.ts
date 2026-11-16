@@ -623,6 +623,42 @@ describe("the upload protocol", () => {
     expect(server.sessions.get("s1")?.text).not.toContain("secret");
     expect(session().carried).toEqual({ n: 2 });
   });
+  it("never reads a server offset as a file offset after a length-changing piece's answer is lost (33, seed 62372)", async () => {
+    // Redaction that lengthens a line: the first piece keeps its length, the second does not.
+    const preRedact: PreRedactor = {
+      redact: ({ text }) => ({ text: text.replace(/secret/g, "[REDACTED]") }),
+    };
+    writeFileSync(transcript(), line("one") + line("two"));
+    hooked();
+    await uploader({ preRedact }).pass();
+    expect(session().aligned).toBe(true);
+    // The server stores the next piece, and its answer is lost on the way back.
+    const ingest = server.ingest.bind(server);
+    let lose = true;
+    server.ingest = async (upload, options) => {
+      const answer = await ingest(upload, options);
+      if (lose) {
+        lose = false;
+        throw new Error("connection reset after the server answered");
+      }
+      return answer;
+    };
+    appendFileSync(transcript(), line("three secret"));
+    hooked();
+    await uploader({ preRedact }).pass();
+    expect(session().aligned).toBe(false);
+    // The log grows before the retry; the server answers offset_mismatch at its own length.
+    appendFileSync(transcript(), line("four"));
+    hooked();
+    clock = new Date(clock.getTime() + 60 * 60_000);
+    await uploader({ preRedact }).pass();
+    const whole = (line("one") + line("two") + line("three secret") + line("four")).replace(
+      /secret/g,
+      "[REDACTED]",
+    );
+    // Every line arrived whole: nothing was cut at a mapped-back offset.
+    expect(server.sessions.get("s1")?.text).toBe(whole);
+  });
 });
 
 describe("the rules apply to the uploader too (F9.3)", () => {

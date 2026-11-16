@@ -1,0 +1,24 @@
+# Found by the scenario explorer (seed 62372, 33's last run; shrunk by hand to these steps). A
+# rule change makes the laptop's pre-redaction change a piece's byte length; the server stores that
+# piece but its answer is lost (the pointer write lands and fails), so the laptop never learned the
+# offsets stopped mapping one to one. When the log grew, the server answered offset_mismatch at its
+# own length, the uploader read that as a file offset, sent the next chunk from inside a line, and
+# the line was dropped: one record lost. The uploader now records the misalignment when it sends
+# such a piece, so the mismatch sends the whole log instead.
+name: a lost answer after a length-changing piece loses no record
+description: >
+  A rule change lengthens a piece in pre-redaction; the server stores it but the answer is lost.
+  The log grows, the server answers offset_mismatch, and the uploader resends whole rather than
+  cutting into a line. Every record arrives.
+steps:
+  - turns: { session: main, count: 2 }
+  - pass
+  - turns: { session: main, count: 2 }
+  - rules: { add: [{ id: r1, pattern: "module \\d+" }] }
+  - fault: { store: put, key: "owners/*/sessions/*/metadata.json", after: true }
+  - pass
+  - turns: { session: main, count: 2 }
+  - settle
+  - expect:
+      sessions:
+        main: { matches-transcript: true, sent-all: true }

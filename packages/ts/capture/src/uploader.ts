@@ -1014,6 +1014,7 @@ export class Uploader {
       }
       let redacted: { text: string; carried?: Record<string, unknown> };
       let result: StoreSessionResult;
+      let keptLength = true;
       try {
         // Inside the try: fetching the org's rules can need a sign-in or fail for a while, and
         // then nothing is sent, exactly as when the upload itself does.
@@ -1023,6 +1024,17 @@ export class Uploader {
           text: piece.text,
           ...(!whole && session.carried ? { carried: session.carried } : {}),
         });
+        // A piece whose pre-redaction changed its length breaks the map from server offsets to
+        // file offsets from the moment it is sent, not when its answer arrives: the server may
+        // store it and the answer be lost, and an offset_mismatch after that must not be read as
+        // a file offset (that skipped into the middle of a line and lost a record, 33's seed
+        // 62372). Recorded first; a whole upload answered later sets it again.
+        keptLength = bytesOf(redacted.text) === bytesOf(piece.text);
+        if (!keptLength && session.aligned !== false) {
+          await this.save(key, (s) => {
+            s.aligned = false;
+          });
+        }
         const upload: Upload = {
           agent: agent.format,
           session_id: uploadId(session),
@@ -1121,7 +1133,6 @@ export class Uploader {
 
       uploaded++;
       const stored = result.bytes_total > 0;
-      const keptLength = bytesOf(redacted.text) === bytesOf(piece.text);
       const now = this.now().toISOString();
       await this.save(key, (s) => {
         s.stored = stored;
