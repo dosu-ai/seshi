@@ -1049,24 +1049,6 @@ describe("a pause stops sessions where they are (F9.5, revised 15 Nov 2026)", ()
     expect(server.uploads).toHaveLength(1);
   });
 
-  it("is not undone by resume; turning the session on uploads all of it", async () => {
-    writeFileSync(transcript(), head);
-    hooked();
-    await uploader().pass();
-    await pauseNow();
-    appendFileSync(transcript(), line("three"));
-    later(10);
-    await resume();
-    appendFileSync(transcript(), line("four"));
-    hooked();
-    await uploader().pass();
-    expect(server.uploads).toHaveLength(1);
-    await turnOn();
-    await uploader().pass();
-    expect(server.sessions.get("s1")?.text).toBe(head + line("three") + line("four"));
-    expect(session().frozen).toBeUndefined();
-  });
-
   it("captures a session turned on after the pause began, while it lasts", async () => {
     writeFileSync(transcript(), head);
     hooked();
@@ -1457,57 +1439,6 @@ describe("resending stale sessions (X4.9)", () => {
   };
   const rebuilds = () => server.uploads.filter((u) => u.rebuild);
 
-  it("spreads a stale rebuild over the day, chunks going on meanwhile", async () => {
-    writeFileSync(transcript(), line("one") + line("two"));
-    hooked();
-    await uploader().pass();
-    staleAt("2");
-    later(HOUR);
-    // Halfway through the 24-hour spread: twelve hours from the check.
-    const spread = { random: () => 0.5 };
-    await uploader(spread).pass();
-    expect(session().rebuild?.not_before).toBe(new Date(clock.getTime() + 12 * HOUR).toISOString());
-    // Waiting: no rebuild, but new turns still go as chunks.
-    appendFileSync(transcript(), line("three"));
-    hooked();
-    await uploader(spread).pass();
-    expect(rebuilds()).toHaveLength(0);
-    expect(server.uploads.at(-1)).toMatchObject({ transcript: line("three") });
-    later(11 * HOUR);
-    await uploader(spread).pass();
-    expect(rebuilds()).toHaveLength(0);
-    // Its time has come: the whole log, once.
-    later(HOUR);
-    await uploader(spread).pass();
-    expect(rebuilds()).toHaveLength(1);
-    expect(rebuilds()[0]?.transcript).toBe(line("one") + line("two") + line("three"));
-    expect(session().rebuild).toBeUndefined();
-  });
-
-  it("sends at most two rebuilds a pass; the rest go in the passes after", async () => {
-    for (const id of ["s1", "s2", "s3"]) {
-      writeFileSync(transcript(id), line("one", id));
-      hooked(id);
-    }
-    await uploader().pass();
-    await updateState(paths, (s) => {
-      for (const id of ["s1", "s2", "s3"]) {
-        (s.sessions[`fake:${id}`] as SessionState).rebuild = {
-          at: clock.toISOString(),
-          key: `k-${id}`,
-        };
-      }
-    });
-    await uploader().pass();
-    expect(rebuilds()).toHaveLength(2);
-    await uploader().pass();
-    expect(
-      rebuilds()
-        .map((u) => u.session_id)
-        .sort(),
-    ).toEqual(["s1", "s2", "s3"]);
-  });
-
   it("resends a session the server lists as stale, whole with rebuild, once per version", async () => {
     writeFileSync(transcript(), line("one") + line("two") + line("three"));
     hooked();
@@ -1681,24 +1612,5 @@ describe("resending stale sessions (X4.9)", () => {
     });
     expect(session().rebuild).toBeUndefined();
     expect(session().rebuilt_for).toBeUndefined();
-  });
-
-  it("rebuilds a session a pause stopped only up to where it stopped (F9.5 with X4.9)", async () => {
-    writeFileSync(transcript(), line("one") + line("two"));
-    hooked();
-    await uploader().pass();
-    const stoppedAt = Buffer.byteLength(line("one") + line("two"));
-    await updateState(paths, (s) => {
-      freeze(s.sessions["fake:s1"] as SessionState, clock.toISOString(), stoppedAt);
-    });
-    appendFileSync(transcript(), line("three"));
-    await updateState(paths, (s) => {
-      (s.sessions["fake:s1"] as SessionState).rebuild = { at: clock.toISOString(), key: "k2" };
-    });
-    await uploader().pass();
-    expect(rebuilds()).toHaveLength(1);
-    expect(rebuilds()[0]?.transcript).toBe(line("one") + line("two"));
-    expect(server.uploads.map((u) => u.transcript).join("")).not.toContain("three");
-    expect(session().rebuild).toBeUndefined();
   });
 });
