@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { GIT_CONFIG_MAX_BYTES, REPO_FILE_MAX_BYTES, readBounded } from "./files";
+import { GIT_CONFIG_MAX_BYTES, REPO_FILE_MAX_BYTES, readUntrustedRepoFile } from "./files";
 import { findRepo, gitRemotes, headBranch, parseRepoConfig, placeOf } from "./place";
 import { DEFAULT_RULES, decide, type RepoConfig } from "./rules";
 
@@ -135,10 +135,12 @@ describe("files a repo plants where its config and git files are", () => {
 
   it("read bounded: a regular file, an absent one, and anything else", () => {
     write("ok.txt", "hello");
-    expect(readBounded(join(dir, "ok.txt"))).toEqual({ text: "hello" });
-    expect(readBounded(join(dir, "missing"))).toEqual({ absent: true });
-    expect(readBounded(dir)).toEqual({ invalid: "is not a regular file" });
-    expect(readBounded(join(dir, "ok.txt"), 4)).toEqual({ invalid: "is larger than 4 bytes" });
+    expect(readUntrustedRepoFile(join(dir, "ok.txt"))).toEqual({ text: "hello" });
+    expect(readUntrustedRepoFile(join(dir, "missing"))).toEqual({ absent: true });
+    expect(readUntrustedRepoFile(dir)).toEqual({ invalid: "is not a regular file" });
+    expect(readUntrustedRepoFile(join(dir, "ok.txt"), 4)).toEqual({
+      invalid: "is larger than 4 bytes",
+    });
   });
 });
 

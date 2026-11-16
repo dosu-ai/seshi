@@ -1,6 +1,6 @@
 import { realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { GIT_CONFIG_MAX_BYTES, REPO_FILE_MAX_BYTES, readBounded } from "./files";
+import { GIT_CONFIG_MAX_BYTES, REPO_FILE_MAX_BYTES, readUntrustedRepoFile } from "./files";
 import { normalizeRemote, type Place, type RepoConfig } from "./rules";
 
 export const REPO_CONFIG = join(".seshi", "config.toml");
@@ -19,7 +19,7 @@ function repoFile(
   name: string,
   max = REPO_FILE_MAX_BYTES,
 ): { text?: string; invalid?: string } {
-  const read = readBounded(path, max);
+  const read = readUntrustedRepoFile(path, max);
   if ("text" in read) return { text: read.text };
   if ("invalid" in read) return { invalid: `${name} ${read.invalid}` };
   return {};

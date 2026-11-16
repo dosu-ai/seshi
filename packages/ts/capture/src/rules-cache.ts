@@ -1,8 +1,7 @@
-import { realpathSync, statSync } from "node:fs";
 import { cliConfigPath, NOT_SETTINGS_ENV } from "@seshi/config/paths";
 import type { CaptureHost } from "@seshi/kit";
 import { expandTilde } from "@seshi/kit";
-import { readText, writePrivateFile } from "./files";
+import { tryReadJson, tryRealpath, tryStat, tryWritePrivateFile } from "./files";
 import type { CapturePaths } from "./paths";
 import { type CaptureRules, DEFAULT_RULES, type PathRule } from "./rules";
 
@@ -30,13 +29,9 @@ interface CacheFile {
 
 function keyOf(host: CaptureHost): CacheKey {
   const file = cliConfigPath({ env: host.env, home: host.home, platform: host.platform });
-  let size: number | null = null;
-  let mtime: number | null = null;
-  try {
-    const stat = statSync(file);
-    size = stat.size;
-    mtime = stat.mtimeMs;
-  } catch {}
+  const stat = tryStat(file);
+  const size = stat?.size ?? null;
+  const mtime = stat?.mtimeMs ?? null;
   const env: Record<string, string> = {};
   for (const [name, value] of Object.entries(host.env)) {
     if (name.startsWith("SESHI_") && !NOT_SETTINGS_ENV.includes(name) && value !== undefined) {
@@ -51,10 +46,8 @@ const sameKey = (a: CacheKey, b: CacheKey) => JSON.stringify(a) === JSON.stringi
 function pathRule(path: string, capture: boolean, home: string): PathRule {
   const expanded = expandTilde(path, home);
   const rule: PathRule = { path: expanded, capture };
-  try {
-    const real = realpathSync(expanded);
-    if (real !== expanded) rule.real = real;
-  } catch {}
+  const real = tryRealpath(expanded);
+  if (real !== undefined && real !== expanded) rule.real = real;
   return rule;
 }
 
@@ -83,14 +76,10 @@ export async function loadRules(host: CaptureHost): Promise<RulesSnapshot> {
  * loaded again (and the cache rewritten). */
 export async function captureRules(host: CaptureHost, paths: CapturePaths): Promise<RulesSnapshot> {
   const key = keyOf(host);
-  try {
-    const cached = JSON.parse(readText(paths.rules) ?? "null") as CacheFile | null;
-    if (cached?.schema === CACHE_SCHEMA && sameKey(cached.key, key)) return cached.snapshot;
-  } catch {}
+  const cached = tryReadJson(paths.rules) as CacheFile | null | undefined;
+  if (cached?.schema === CACHE_SCHEMA && sameKey(cached.key, key)) return cached.snapshot;
   const snapshot = await loadRules(host);
-  try {
-    const file: CacheFile = { schema: CACHE_SCHEMA, key, snapshot };
-    writePrivateFile(paths.rules, JSON.stringify(file));
-  } catch {}
+  const file: CacheFile = { schema: CACHE_SCHEMA, key, snapshot };
+  tryWritePrivateFile(paths.rules, JSON.stringify(file));
   return snapshot;
 }

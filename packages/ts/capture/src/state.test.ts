@@ -255,7 +255,7 @@ describe("one uploader per machine", () => {
   it("lets one taker at a time replace a stale lock (two uploaders started together)", () => {
     const now = new Date();
     const dead = acquireUploaderLock(paths, now, 2 ** 30);
-    const guard = `${paths.uploader}.takeover`;
+    const guard = `${paths.uploaderLock}.takeover`;
     // Another uploader is taking the stale lock over right now: this one gives way and leaves
     // the lock alone, instead of writing its own over it and both running.
     writeFileSync(guard, "other");

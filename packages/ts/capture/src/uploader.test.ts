@@ -1417,10 +1417,10 @@ describe("running", () => {
     const beats: string[] = [];
     const sink: SessionSink = Object.create(server);
     sink.ingest = async (upload) => {
-      beats.push(JSON.parse(readFileSync(paths.uploader, "utf8")).beat);
+      beats.push(JSON.parse(readFileSync(paths.uploaderLock, "utf8")).beat);
       const result = await server.ingest(upload);
       // Another uploader takes the lock over while this upload is in flight.
-      writeFileSync(paths.uploader, JSON.stringify({ ...lock.lock, token: "theirs" }));
+      writeFileSync(paths.uploaderLock, JSON.stringify({ ...lock.lock, token: "theirs" }));
       return result;
     };
     await uploader({ sink: async () => sink, pollMs: 5 }).run({ lock, keepAlive: true });

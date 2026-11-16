@@ -28,7 +28,7 @@ export function processAlive(pid: number): boolean {
 
 export function readUploaderLock(paths: CapturePaths): UploaderLock | undefined {
   try {
-    const lock = JSON.parse(readText(paths.uploader) ?? "null") as UploaderLock | null;
+    const lock = JSON.parse(readText(paths.uploaderLock) ?? "null") as UploaderLock | null;
     return lock && typeof lock.pid === "number" ? lock : undefined;
   } catch {
     return undefined;
@@ -56,12 +56,12 @@ export class HeldUploaderLock {
   beat(now: Date = new Date()): boolean {
     if (!this.held()) return false;
     this.lock.beat = now.toISOString();
-    writePrivateFile(this.paths.uploader, JSON.stringify(this.lock));
+    writePrivateFile(this.paths.uploaderLock, JSON.stringify(this.lock));
     return true;
   }
 
   release(): void {
-    if (this.held()) rmSync(this.paths.uploader, { force: true });
+    if (this.held()) rmSync(this.paths.uploaderLock, { force: true });
   }
 }
 
@@ -80,7 +80,7 @@ export function acquireUploaderLock(
     beat: now.toISOString(),
   };
   try {
-    const fd = openSync(paths.uploader, "wx", 0o600);
+    const fd = openSync(paths.uploaderLock, "wx", 0o600);
     writeFileSync(fd, JSON.stringify(lock));
     closeSync(fd);
   } catch (err) {
@@ -95,7 +95,7 @@ export function acquireUploaderLock(
 export const TAKEOVER_STALE_MS = 10_000;
 
 function takeOver(paths: CapturePaths, lock: UploaderLock, now: Date): boolean {
-  const guard = `${paths.uploader}.takeover`;
+  const guard = `${paths.uploaderLock}.takeover`;
   let fd: number;
   try {
     fd = openSync(guard, "wx", 0o600);
@@ -111,7 +111,7 @@ function takeOver(paths: CapturePaths, lock: UploaderLock, now: Date): boolean {
     writeFileSync(fd, lock.token);
     closeSync(fd);
     if (uploaderRunning(paths, now)) return false;
-    writePrivateFile(paths.uploader, JSON.stringify(lock));
+    writePrivateFile(paths.uploaderLock, JSON.stringify(lock));
     return true;
   } finally {
     rmSync(guard, { force: true });

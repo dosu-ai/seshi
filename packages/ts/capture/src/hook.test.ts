@@ -323,7 +323,7 @@ describe("runHook (F9.1)", () => {
       host: { ...host, env: { ...host.env, ENV_FILE: file } },
       paths,
     });
-    expect(outcome.exported).toBe(file);
+    expect(outcome.envFileWritten).toBe(file);
     expect(readFileSync(file, "utf8")).toBe(`export SESHI_SESSION_ID='it'\\''s'\n`);
     expect(shellWord("a b")).toBe("'a b'");
   });

@@ -230,13 +230,7 @@ export function stateFacts(
   const holder = toggleHolder(state, agent, session, parentId);
   const paused = isPaused(state, now);
   const pauses = pauseWindows(state);
-  const frozen =
-    session?.frozen ??
-    (session?.toggle
-      ? undefined
-      : frozenParent(state, agent, session, parentId)
-        ? { offset: uploadedOffset(session) }
-        : undefined);
+  const frozen = session?.frozen ?? inheritedFreeze(state, agent, session, parentId);
   return {
     ...(holder?.toggle ? { toggle: holder.toggle } : {}),
     ...(holder?.toggled_at ? { toggledAt: holder.toggled_at } : {}),
@@ -299,6 +293,16 @@ export function sessionToggle(
   parentId?: string,
 ): Toggle | undefined {
   return toggleHolder(state, agent, session, parentId)?.toggle;
+}
+
+function inheritedFreeze(
+  state: CaptureState,
+  agent: string,
+  session: SessionState | undefined,
+  parentId?: string,
+): { offset: number } | undefined {
+  if (session?.toggle || !frozenParent(state, agent, session, parentId)) return undefined;
+  return { offset: uploadedOffset(session) };
 }
 
 function frozenParent(

@@ -6,7 +6,7 @@ import type { CapturePaths } from "./paths";
 
 export const SPOOL_VERSION = 1;
 
-const WAKE_SUFFIX = ".wake.json";
+const NO_WORK_SUFFIX = ".wake.json";
 
 export type SpoolEntry =
   | {
@@ -54,8 +54,8 @@ export function appendSpool(paths: CapturePaths, entry: SpoolEntry, now: Date = 
   const name = `${now.getTime().toString().padStart(14, "0")}-${randomBytes(6).toString("hex")}`;
   const temp = join(paths.spool, `.${name}.tmp`);
   writeFileSync(temp, JSON.stringify(entry), { mode: 0o600 });
-  const idle = entry.kind === "wake" || entry.kind === "seen" || entry.kind === "paused";
-  renameSync(temp, join(paths.spool, `${name}${idle ? WAKE_SUFFIX : ".json"}`));
+  const noWork = entry.kind === "wake" || entry.kind === "seen" || entry.kind === "paused";
+  renameSync(temp, join(paths.spool, `${name}${noWork ? NO_WORK_SUFFIX : ".json"}`));
 }
 
 /** The entries waiting, oldest first. A file that is not an entry is skipped (and reported in
@@ -86,7 +86,7 @@ export function readSpool(paths: CapturePaths): { items: SpoolItem[]; unreadable
 export function spoolCount(paths: CapturePaths): number {
   try {
     return readdirSync(paths.spool).filter(
-      (n) => n.endsWith(".json") && !n.endsWith(WAKE_SUFFIX) && !n.startsWith("."),
+      (n) => n.endsWith(".json") && !n.endsWith(NO_WORK_SUFFIX) && !n.startsWith("."),
     ).length;
   } catch {
     return 0;

@@ -5,7 +5,7 @@ import { placeOf } from "./place";
 import { type Decision, decide } from "./rules";
 import { captureRules } from "./rules-cache";
 import { appendSpool } from "./spool";
-import { otherFolders, readState, sessionKey, stateFacts } from "./state";
+import { otherFolders, readState, type SessionState, sessionKey, stateFacts } from "./state";
 
 export interface HookRun {
   agent: CaptureAgent;
@@ -19,7 +19,7 @@ export interface HookRun {
 export interface HookOutcome {
   spooled: HookCapture[];
   skipped: { session_id: string; decision: Decision }[];
-  exported?: string;
+  envFileWritten?: string;
   ignored?: string;
 }
 
@@ -42,7 +42,7 @@ export async function runHook(run: HookRun): Promise<HookOutcome> {
       .map(([name, value]) => `export ${name}=${shellWord(value)}\n`)
       .join("");
     appendFileSync(result.exportEnv.file, lines);
-    outcome.exported = result.exportEnv.file;
+    outcome.envFileWritten = result.exportEnv.file;
   }
   if (result.captures.length === 0) return outcome;
 
@@ -65,28 +65,7 @@ export async function runHook(run: HookRun): Promise<HookOutcome> {
     );
     if (!decision.capture) {
       outcome.skipped.push({ session_id: capture.session_id, decision });
-      const moved =
-        known?.frozen !== undefined &&
-        known.path !== undefined &&
-        capture.transcript_path !== undefined &&
-        capture.transcript_path !== known.path;
-      if (decision.frozen !== undefined && (known?.frozen === undefined || moved)) {
-        appendSpool(
-          run.paths,
-          {
-            v: 1,
-            kind: "paused",
-            at: now.toISOString(),
-            agent: run.agent.name,
-            session_id: capture.session_id,
-            ...(capture.cwd ? { cwd: capture.cwd } : {}),
-            ...(capture.transcript_path ? { transcript_path: capture.transcript_path } : {}),
-            ...(capture.parent_session_id ? { parent_session_id: capture.parent_session_id } : {}),
-          },
-          now,
-        );
-        continue;
-      }
+      if (respoolPausedSession(run, capture, known, decision, now)) continue;
       if ((decision.level === "org" || decision.level === "repo") && capture.cwd) {
         appendSpool(
           run.paths,
@@ -124,4 +103,35 @@ export async function runHook(run: HookRun): Promise<HookOutcome> {
     outcome.spooled.push(capture);
   }
   return outcome;
+}
+
+function respoolPausedSession(
+  run: HookRun,
+  capture: HookCapture,
+  known: SessionState | undefined,
+  decision: Decision,
+  now: Date,
+): boolean {
+  if (decision.frozen === undefined) return false;
+  const pausedTranscriptMoved =
+    known?.frozen !== undefined &&
+    known.path !== undefined &&
+    capture.transcript_path !== undefined &&
+    capture.transcript_path !== known.path;
+  if (known?.frozen !== undefined && !pausedTranscriptMoved) return false;
+  appendSpool(
+    run.paths,
+    {
+      v: 1,
+      kind: "paused",
+      at: now.toISOString(),
+      agent: run.agent.name,
+      session_id: capture.session_id,
+      ...(capture.cwd ? { cwd: capture.cwd } : {}),
+      ...(capture.transcript_path ? { transcript_path: capture.transcript_path } : {}),
+      ...(capture.parent_session_id ? { parent_session_id: capture.parent_session_id } : {}),
+    },
+    now,
+  );
+  return true;
 }

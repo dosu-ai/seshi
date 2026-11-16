@@ -10,6 +10,7 @@ import {
   openSync,
   readFileSync,
   readSync,
+  realpathSync,
   renameSync,
   rmSync,
   type Stats,
@@ -52,9 +53,12 @@ export const REPO_FILE_MAX_BYTES = 64 * 1024;
 
 export const GIT_CONFIG_MAX_BYTES = 4 * 1024 * 1024;
 
-export type BoundedRead = { text: string } | { absent: true } | { invalid: string };
+export type UntrustedRepoFileRead = { text: string } | { absent: true } | { invalid: string };
 
-export function readBounded(path: string, max = REPO_FILE_MAX_BYTES): BoundedRead {
+export function readUntrustedRepoFile(
+  path: string,
+  max = REPO_FILE_MAX_BYTES,
+): UntrustedRepoFileRead {
   let stat: Stats;
   try {
     stat = lstatSync(path);
@@ -99,14 +103,58 @@ export const LOG_MAX_BYTES = 1024 * 1024;
 
 /** Append one line to the capture log, stamped with the time. Never throws: a log that cannot
  * be written must not break a hook. */
-export function appendLog(path: string, line: string, now: Date = new Date()): void {
+export function appendLog(path: string, line: string, now: Date = new Date()): boolean {
   try {
     ensurePrivateDir(dirname(path));
-    try {
-      if (statSync(path).size > LOG_MAX_BYTES) renameSync(path, `${path}.1`);
-    } catch {}
+    tryRotateLog(path);
     appendFileSync(path, `${now.toISOString()} ${line.replace(/\n/g, " ")}\n`, { mode: 0o600 });
-  } catch {}
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function tryRotateLog(path: string): boolean {
+  try {
+    if (statSync(path).size <= LOG_MAX_BYTES) return false;
+    renameSync(path, `${path}.1`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function tryStat(path: string): Stats | undefined {
+  try {
+    return statSync(path);
+  } catch {
+    return undefined;
+  }
+}
+
+export function tryRealpath(path: string): string | undefined {
+  try {
+    return realpathSync(path);
+  } catch {
+    return undefined;
+  }
+}
+
+export function tryReadJson(path: string): unknown {
+  try {
+    return JSON.parse(readText(path) ?? "null");
+  } catch {
+    return undefined;
+  }
+}
+
+export function tryWritePrivateFile(path: string, text: string): boolean {
+  try {
+    writePrivateFile(path, text);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export interface LockOptions {
@@ -162,8 +210,16 @@ export async function withLock<T>(
   try {
     return await fn();
   } finally {
-    try {
-      if (readFileSync(lock, "utf8") === token) rmSync(lock, { force: true });
-    } catch {}
+    tryReleaseLock(lock, token);
+  }
+}
+
+function tryReleaseLock(lock: string, token: string): boolean {
+  try {
+    if (readFileSync(lock, "utf8") !== token) return false;
+    rmSync(lock, { force: true });
+    return true;
+  } catch {
+    return false;
   }
 }

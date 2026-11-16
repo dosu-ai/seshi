@@ -96,12 +96,18 @@ export function normalizeRemote(remote: string): string {
   if (scp && !/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) {
     text = `${(scp[1] as string).toLowerCase()}/${scp[2]}`;
   } else {
-    try {
-      const url = new URL(text);
-      text = `${url.hostname.toLowerCase()}${url.pathname}`;
-    } catch {}
+    const url = tryParseUrl(text);
+    if (url) text = `${url.hostname.toLowerCase()}${url.pathname}`;
   }
   return text.replace(/\/+$/, "").replace(/\.git$/, "");
+}
+
+function tryParseUrl(text: string): URL | undefined {
+  try {
+    return new URL(text);
+  } catch {
+    return undefined;
+  }
 }
 
 /** Whether a normalized remote matches a pattern: `*` stands for one path segment (or part of
@@ -184,6 +190,18 @@ function sharedExclusion(rules: CaptureRules, place: Place): Decision | undefine
   return undefined;
 }
 
+export function turnedOnSince(
+  toggle: Toggle | undefined,
+  toggledAt: string | undefined,
+  at: string | undefined,
+): boolean {
+  return (
+    toggle === "on" &&
+    toggledAt !== undefined &&
+    (at === undefined || Date.parse(toggledAt) >= Date.parse(at))
+  );
+}
+
 export function decide(input: DecideInput, platform: NodeJS.Platform = process.platform): Decision {
   const { rules, place } = input;
   if (input.rulesError !== undefined) {
@@ -215,10 +233,6 @@ export function decide(input: DecideInput, platform: NodeJS.Platform = process.p
   if (input.toggle === "off") {
     return { capture: false, level: "session", reason: "turned off for this session" };
   }
-  const turnedOnSince = (at: string | undefined) =>
-    input.toggle === "on" &&
-    input.toggledAt !== undefined &&
-    (at === undefined || Date.parse(input.toggledAt) >= Date.parse(at));
   if (input.frozen !== undefined) {
     return {
       capture: false,
@@ -227,7 +241,7 @@ export function decide(input: DecideInput, platform: NodeJS.Platform = process.p
       frozen: input.frozen,
     };
   }
-  if (input.paused && !turnedOnSince(input.pausedAt)) {
+  if (input.paused && !turnedOnSince(input.toggle, input.toggledAt, input.pausedAt)) {
     return {
       capture: false,
       level: "pause",
@@ -241,7 +255,7 @@ export function decide(input: DecideInput, platform: NodeJS.Platform = process.p
         (w) =>
           Date.parse(w.at) <= started &&
           (w.until === undefined || started < Date.parse(w.until)) &&
-          !turnedOnSince(w.at),
+          !turnedOnSince(input.toggle, input.toggledAt, w.at),
       )
     : undefined;
   if (startedIn) {

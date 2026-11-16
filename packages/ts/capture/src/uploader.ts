@@ -16,10 +16,10 @@ import {
 import { appendLog } from "./files";
 import type { CapturePaths } from "./paths";
 import { placeOf } from "./place";
-import { type Decision, decide, type Place } from "./rules";
+import { type Decision, decide, type Place, type RepoConfig, turnedOnSince } from "./rules";
 import { captureRules, type RulesSnapshot } from "./rules-cache";
 import { RetractRefused, type SessionSink, SignInNeeded } from "./sink";
-import { readSpool, removeSpool } from "./spool";
+import { readSpool, removeSpool, type SpoolEntry } from "./spool";
 import {
   type CaptureState,
   freeze,
@@ -190,9 +190,58 @@ function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-function rebuilt(s: SessionState, rebuild: NonNullable<SessionState["rebuild"]>): void {
+function markRebuildAnswered(s: SessionState, rebuild: NonNullable<SessionState["rebuild"]>): void {
   if (rebuild.for) s.rebuilt_for = rebuild.for;
   if (s.rebuild?.key === rebuild.key) delete s.rebuild;
+}
+
+function rebuildIdempotencyKey(rebuild: NonNullable<SessionState["rebuild"]>, end: number): string {
+  return `${rebuild.key}@${end}`;
+}
+
+type HookSpoolEntry = Extract<SpoolEntry, { kind: "capture" | "seen" | "paused" }>;
+
+function followsTranscriptPath(
+  entry: HookSpoolEntry,
+  session: SessionState,
+): entry is HookSpoolEntry & { transcript_path: string } {
+  return !!entry.transcript_path && (entry.kind !== "seen" || !session.path);
+}
+
+function shouldRelocate(session: SessionState): boolean {
+  return session.path ? !existsSync(session.path) : session.toggle !== undefined;
+}
+
+function repoVisibilityClaim(config: RepoConfig | undefined): { visibility?: "owner" } {
+  return config?.visibility === "owner" ? { visibility: "owner" } : {};
+}
+
+function mustSendWhole(
+  session: SessionState,
+  path: string,
+  limit: number,
+  agent: CaptureAgent,
+): boolean {
+  const transcriptMoved = session.sent_path !== undefined && session.sent_path !== path;
+  return (
+    transcriptMoved || !session.stored || limit < (session.file_offset ?? 0) || !agent.chunkable
+  );
+}
+
+function whyNotSessionTranscript(
+  agent: CaptureAgent,
+  path: string,
+  session: SessionState,
+): string | undefined {
+  const info = identifySafely(agent, path, readHead(path));
+  if (info?.session_id === session.session_id) return undefined;
+  return info
+    ? `${path} is session ${info.session_id}'s transcript`
+    : `${path} is not a ${agent.name} transcript`;
+}
+
+function mayReplaceOwnSession(session: SessionState): boolean {
+  return session.stored === true || session.sent === true;
 }
 
 export class Uploader {
@@ -434,19 +483,13 @@ export class Uploader {
           session_id: entry.session_id,
           first_seen: entry.at,
         };
-        if (entry.transcript_path && (entry.kind !== "seen" || !session.path)) {
-          session.path = entry.transcript_path;
-        }
+        if (followsTranscriptPath(entry, session)) session.path = entry.transcript_path;
         if (entry.cwd) seenIn(session, entry.cwd);
         if (entry.parent_session_id) session.parent_session_id = entry.parent_session_id;
         if (entry.kind === "capture" && entry.final) session.final = true;
         if (
           entry.kind === "paused" &&
-          !(
-            session.toggle === "on" &&
-            session.toggled_at !== undefined &&
-            Date.parse(session.toggled_at) >= Date.parse(entry.at)
-          )
+          !turnedOnSince(session.toggle, session.toggled_at, entry.at)
         ) {
           freeze(session, entry.at, uploadedOffset(session));
         }
@@ -522,7 +565,7 @@ export class Uploader {
       }
       for (const [key, session] of Object.entries(st.sessions)) {
         if (session.retract === "pending") continue;
-        if (session.path ? !existsSync(session.path) : session.toggle !== undefined) {
+        if (shouldRelocate(session)) {
           const found = this.agents.get(session.agent)?.locate?.(session.session_id, this.host);
           if (found) {
             session.path = found;
@@ -799,10 +842,31 @@ export class Uploader {
     return {
       ...(folder ? { project: basename(folder) } : {}),
       ...(repo?.branch ? { branch: repo.branch } : {}),
-      ...(repo?.config.visibility === "owner" ? { visibility: "owner" as const } : {}),
+      ...repoVisibilityClaim(repo?.config),
       ...(session.parent_session_id ? { parent_session_id: session.parent_session_id } : {}),
       ...(Object.keys(claims).length > 0 ? { claims } : {}),
     };
+  }
+
+  private async keepSecretUnlessTurnedOff(key: string, secret: string): Promise<boolean> {
+    let kept = true;
+    await updateState(this.paths, (state) => {
+      const s = state.sessions[key];
+      if (!s || this.off(state, s)) {
+        kept = false;
+        return false;
+      }
+      s.secret = secret;
+      s.sent = true;
+    });
+    return kept;
+  }
+
+  private async markMisalignedBeforeSend(key: string, session: SessionState): Promise<void> {
+    if (session.aligned === false) return;
+    await this.save(key, (s) => {
+      s.aligned = false;
+    });
   }
 
   private async sync(
@@ -823,7 +887,6 @@ export class Uploader {
       if (!session || this.off(current, session)) return { uploaded };
       const fileOffset = session.file_offset ?? 0;
       const limit = sendLimit(session, size);
-      const moved = session.sent_path !== undefined && session.sent_path !== path;
       const replaceAgain = session.stored === true && session.replace_next === true;
       if (!rebuilding && session.rebuild && this.rebuildDue(session.rebuild)) {
         if (this.rebuildsLeft > 0) {
@@ -834,24 +897,14 @@ export class Uploader {
       const rebuild = rebuilding ? session.rebuild : undefined;
       const whole =
         forceWhole ||
-        moved ||
-        !session.stored ||
-        limit < fileOffset ||
-        !agent.chunkable ||
         replaceAgain ||
-        rebuild !== undefined;
+        rebuild !== undefined ||
+        mustSendWhole(session, path, limit, agent);
       const replacing = replace || replaceAgain;
       if (!whole && fileOffset >= limit) return { uploaded };
-      const info = identifySafely(agent, path, readHead(path));
-      if (info?.session_id !== session.session_id) {
-        await this.refuse(
-          key,
-          "not_a_transcript",
-          info
-            ? `${path} is session ${info.session_id}'s transcript`
-            : `${path} is not a ${agent.name} transcript`,
-          size,
-        );
+      const notTranscript = whyNotSessionTranscript(agent, path, session);
+      if (notTranscript !== undefined) {
+        await this.refuse(key, "not_a_transcript", notTranscript, size);
         return { uploaded, failed: true };
       }
       const piece = this.piece(path, whole ? 0 : fileOffset, limit, agent.encoding, whole);
@@ -860,18 +913,7 @@ export class Uploader {
       let secret = session.secret;
       if (!secret || !session.sent) {
         secret ??= newSecret();
-        const kept = secret;
-        let stopped = false;
-        await updateState(this.paths, (state) => {
-          const s = state.sessions[key];
-          if (!s || this.off(state, s)) {
-            stopped = true;
-            return false;
-          }
-          s.secret = kept;
-          s.sent = true;
-        });
-        if (stopped) return { uploaded };
+        if (!(await this.keepSecretUnlessTurnedOff(key, secret))) return { uploaded };
       }
       let redacted: { text: string; carried?: Record<string, unknown> };
       let result: StoreSessionResult;
@@ -884,11 +926,7 @@ export class Uploader {
           ...(!whole && session.carried ? { carried: session.carried } : {}),
         });
         keptLength = bytesOf(redacted.text) === bytesOf(piece.text);
-        if (!keptLength && session.aligned !== false) {
-          await this.save(key, (s) => {
-            s.aligned = false;
-          });
-        }
+        if (!keptLength) await this.markMisalignedBeforeSend(key, session);
         const upload: Upload = {
           agent: agent.format,
           session_id: uploadId(session),
@@ -898,7 +936,7 @@ export class Uploader {
           retract_hash: retractHash(secret),
           ...(await this.details(session, agent, place)),
           ...(rebuild
-            ? { rebuild: true, idempotency_key: `${rebuild.key}@${piece.end}` }
+            ? { rebuild: true, idempotency_key: rebuildIdempotencyKey(rebuild, piece.end) }
             : replacing
               ? { replace: true }
               : {}),
@@ -935,8 +973,8 @@ export class Uploader {
         if (
           err instanceof SessionConflict &&
           whole &&
-          (session.stored || session.sent) &&
-          !replacing
+          !replacing &&
+          mayReplaceOwnSession(session)
         ) {
           replace = true;
           recoveries++;
@@ -958,7 +996,7 @@ export class Uploader {
                   ? err.code
                   : "refused";
         await this.refuse(key, code, message(err), size);
-        if (rebuild) await this.save(key, (s) => rebuilt(s, rebuild));
+        if (rebuild) await this.save(key, (s) => markRebuildAnswered(s, rebuild));
         return { uploaded, failed: true };
       }
 
@@ -993,7 +1031,7 @@ export class Uploader {
           delete s.carried;
           delete s.replace_next;
         }
-        if (rebuild) rebuilt(s, rebuild);
+        if (rebuild) markRebuildAnswered(s, rebuild);
       });
       if (!stored || piece.end >= limit) return { uploaded };
       replace = false;

@@ -5,7 +5,7 @@ export interface CapturePaths {
   dir: string;
   state: string;
   spool: string;
-  uploader: string;
+  uploaderLock: string;
   rules: string;
   redactionRules: string;
   log: string;
@@ -27,7 +27,7 @@ export function capturePaths(host: CaptureHost): CapturePaths {
     dir,
     state: at(dir, "state.json"),
     spool: at(dir, "spool"),
-    uploader: at(dir, "uploader.json"),
+    uploaderLock: at(dir, "uploader.json"),
     rules: at(dir, "rules.json"),
     redactionRules: at(dir, "redaction-rules.json"),
     log: at(dir, "capture.log"),

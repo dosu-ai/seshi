@@ -64,7 +64,7 @@ User docs: [docs/capture.md](../../capture.md) (new), docs/cli.md (rows), docs/c
   - `place.ts`: the repo around a folder from the files alone (no `git` process): `.git` dir or
     worktree file + `commondir`, remotes, branch, `.seshi/config.toml` (`capture`,
     `visibility`; unknown keys ignored, wrong types make it unreadable). Each of these files is
-    read through `files.ts` `readBounded` (lstat, open non-blocking, fstat the descriptor,
+    read through `files.ts` `readUntrustedRepoFile` (lstat, open non-blocking, fstat the descriptor,
     regular files only, at most 64 KiB); anything else makes the repo config invalid (capture
     off in that repo only), never a hang or a throw. A repo config only
     narrows: the uploader sends its `visibility` when it is `owner` and ignores `org`, since a
