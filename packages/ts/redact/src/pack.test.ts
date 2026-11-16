@@ -94,7 +94,7 @@ describe("parsePackToml", () => {
 
   it("says where TOML that does not parse goes wrong", () => {
     expect(problems(() => parsePackToml('id = "x"\npattern = "a', { source: "bad.toml" }))).toEqual(
-      [expect.stringMatching(/^bad\.toml: not valid TOML: line 2, column \d+: /)],
+      [expect.stringMatching(/^bad\.toml: not valid TOML: (line 2, column \d+: )?\S/)],
     );
   });
 

@@ -23,6 +23,7 @@ COPY apps ./apps
 COPY packages ./packages
 COPY integrations ./integrations
 COPY scripts/build-binary.ts ./scripts/
+COPY brand/glyph/seshi-glyph-badge.svg ./brand/glyph/
 RUN bun install --frozen-lockfile --production
 # x64 uses the baseline build, which runs on CPUs without AVX2 (and under emulation).
 RUN case "$TARGETARCH" in \
