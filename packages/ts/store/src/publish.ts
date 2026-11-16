@@ -149,9 +149,12 @@ export interface ChangeUpdate {
   change: Omit<ChangeEntry, "schema"> | null;
 }
 
-export interface PointerWithChange extends JsonUpdate<SessionMetadata> {
+export interface PointerWithChange<U extends ChangeUpdate = ChangeUpdate>
+  extends JsonUpdate<SessionMetadata> {
   /** The change entry's key, when one was written. */
   change: string | null;
+  decided: U;
+  attempts: U[];
 }
 
 class ChangeFirst extends Error {
@@ -170,17 +173,23 @@ class ChangeFirst extends Error {
  * `expected` is the pointer as the caller last read it (null: no session): when given, the
  * entry `step` wants for it is written before the first read, which saves a read. `step` may
  * run more than once and must depend only on what it is given. */
-export async function updateMetadataWithChange(
+export async function updateMetadataWithChange<U extends ChangeUpdate>(
   store: Store,
   owner: string,
   archive: string,
-  step: (current: SessionMetadata | null) => ChangeUpdate,
+  step: (current: SessionMetadata | null) => U,
   options: Omit<UpdateOptions, "contentType"> & { expected?: SessionMetadata | null } = {},
-): Promise<PointerWithChange> {
+): Promise<PointerWithChange<U>> {
   const { expected, ...update } = options;
+  const attempts: U[] = [];
+  const decide = (current: SessionMetadata | null): U => {
+    const decided = step(current);
+    attempts.push(decided);
+    return decided;
+  };
   let change: string | null = null;
   if (expected !== undefined) {
-    const wanted = step(expected).change;
+    const wanted = decide(expected).change;
     if (wanted) change = await appendChange(store, wanted);
   }
   for (;;) {
@@ -190,13 +199,13 @@ export async function updateMetadataWithChange(
         owner,
         archive,
         (current) => {
-          const decided = step(current);
+          const decided = decide(current);
           if (decided.change && change === null) throw new ChangeFirst(decided.change);
           return decided.next;
         },
         update,
       );
-      return { ...result, change };
+      return { ...result, change, decided: attempts.at(-1) as U, attempts };
     } catch (err) {
       if (!(err instanceof ChangeFirst)) throw err;
       change = await appendChange(store, err.entry);

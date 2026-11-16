@@ -24,6 +24,7 @@ import {
   LAYOUT_KEY,
   LayoutError,
   LEGACY_LAYOUT_KEY,
+  PreconditionFailed,
   readChanges,
 } from "@seshi/store";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -347,6 +348,36 @@ describe("tombstone", () => {
     ]);
   });
 
+  it("removes the traces it read when its pointer write landed but answered PreconditionFailed", async () => {
+    const stored = await ingest({
+      store,
+      owner: "acme",
+      records: records("claude-basic"),
+      metadata: meta,
+      now,
+    });
+    let answered = false;
+    const lost = new Proxy(store, {
+      get(target, prop, receiver) {
+        if (prop !== "put") return Reflect.get(target, prop, receiver);
+        return async (key: string, body: Uint8Array, options?: object) => {
+          const put = await target.put(key, body, options);
+          if (!answered && key === keys.metadata("acme", stored.archive_id)) {
+            answered = true;
+            throw new PreconditionFailed(key, "the answer was lost");
+          }
+          return put;
+        };
+      },
+    });
+    expect(
+      await tombstone({ store: lost, owner: "acme", agent: "claude", session_id: "sess1", now }),
+    ).toEqual({ removed: 1 });
+    expect(answered).toBe(true);
+    expect(await getTrace(store, "acme", stored.archive_id, stored.content_hash)).toBeNull();
+    expect((await getSession(store, "acme", "claude", "sess1"))?.status).toBe("redacted");
+  });
+
   it("removes the trace objects and the log state, marks the session redacted, and refuses re-ingest", async () => {
     const stored = await ingest({
       store,
@@ -582,6 +613,58 @@ describe("the canonical trace (X6.2)", () => {
 });
 
 describe("conditional pointer writes (X6.5)", () => {
+  it("acts on what the attempt that landed found, when another write makes it retry", async () => {
+    const first = await ingest({
+      store,
+      owner: "acme",
+      records: records("claude-basic"),
+      metadata: meta,
+      now,
+    });
+    const archive = first.archive_id;
+    // Another writer adds a trace between the replace's read of the pointer and its
+    // conditional write: the first attempt would take off one trace, the second two.
+    let metadataReads = 0;
+    let added: string | undefined;
+    const racing = new Proxy(store, {
+      get(target, prop, receiver) {
+        if (prop !== "get") return Reflect.get(target, prop, receiver);
+        return async (key: string) => {
+          const read = await target.get(key);
+          if (key === keys.metadata("acme", archive) && ++metadataReads === 2) {
+            added = (
+              await ingest({
+                store: target,
+                owner: "acme",
+                records: records("claude-queued-input"),
+                metadata: meta,
+                now,
+              })
+            ).content_hash;
+          }
+          return read;
+        };
+      },
+    });
+    const replacing = await ingest({
+      store: racing,
+      owner: "acme",
+      records: [
+        ...records("claude-basic"),
+        { role: "user", content: "and one more", timestamp: "2026-01-01T00:00:00Z" },
+      ],
+      metadata: meta,
+      now,
+      replace: true,
+    });
+    expect(added).toBeDefined();
+    expect(metadataReads).toBeGreaterThan(2);
+    const session = await getSession(store, "acme", "claude", "sess1");
+    expect(session?.traces.map((t) => t.content_hash)).toEqual([replacing.content_hash]);
+    expect(await getTrace(store, "acme", archive, first.content_hash)).toBeNull();
+    expect(await getTrace(store, "acme", archive, added as string)).toBeNull();
+  });
+
   it("lists every trace when writers race on one session", async () => {
     const variants = Array.from({ length: 5 }, (_, i) => [
       ...records("claude-basic"),

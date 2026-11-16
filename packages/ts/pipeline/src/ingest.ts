@@ -205,6 +205,18 @@ async function removeTraceUnlessListed(
   }
 }
 
+interface PointerPlan {
+  next: SessionMetadata | null;
+  already: boolean;
+  replaced: string[];
+  basis: OwnerBasis;
+}
+
+interface IngestDecision extends ChangeUpdate {
+  duplicate: boolean;
+  replaced: string[];
+}
+
 function byteLength(value: unknown): number {
   return new TextEncoder().encode(JSON.stringify(value)).length;
 }
@@ -270,16 +282,13 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
   );
 
   const context: WriteContext = { ...input, writer, provenance };
-  let already = false;
-  let replaced: string[] = [];
-  let basis: OwnerBasis = input.owner_basis ?? "verified";
-  const nextPointer = (existing: SessionMetadata | null): SessionMetadata | null => {
+  const nextPointer = (existing: SessionMetadata | null): PointerPlan => {
     if (existing?.status === "redacted") {
       throw new IngestRejected("redacted", "session was redacted; it will not be stored again");
     }
     input.guard?.(existing);
     const listed = existing?.traces.find((t) => t.content_hash === trace.content_hash);
-    already = listed !== undefined;
+    const already = listed !== undefined;
     const ref: SessionTraceRef = {
       content_hash: trace.content_hash,
       created_at: listed?.created_at ?? at,
@@ -290,8 +299,7 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
 
     const base =
       existing ?? newSession(owner, archive, metadata.session_id, metadata.agent, at, context);
-    basis = base.owner_basis;
-    replaced = input.replace
+    const replaced = input.replace
       ? base.traces.map((t) => t.content_hash).filter((h) => h !== trace.content_hash)
       : [];
     const traces = input.replace ? [ref] : listed ? base.traces : [...base.traces, ref];
@@ -340,14 +348,20 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
     const redaction = addRedaction(input.replace ? undefined : base.redaction, input.redaction);
     if (redaction) next.redaction = redaction;
     else delete next.redaction;
-    return changed(existing, next) ? next : null;
+    return {
+      next: changed(existing, next) ? next : null,
+      already,
+      replaced,
+      basis: base.owner_basis,
+    };
   };
-  let duplicate = false;
-  const step = (existing: SessionMetadata | null): ChangeUpdate => {
-    const next = nextPointer(existing);
-    duplicate = already && outcome === "exists" && replaced.length === 0;
+  const step = (existing: SessionMetadata | null): IngestDecision => {
+    const { next, already, replaced, basis } = nextPointer(existing);
+    const duplicate = already && outcome === "exists" && replaced.length === 0;
     return {
       next,
+      duplicate,
+      replaced,
       change: duplicate
         ? null
         : {
@@ -364,14 +378,18 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
           },
     };
   };
+  let decided: IngestDecision;
   try {
-    await updateMetadataWithChange(store, owner, archive, step, { expected: before });
+    ({ decided } = await updateMetadataWithChange(store, owner, archive, step, {
+      expected: before,
+    }));
   } catch (err) {
     if (outcome === "written") {
       await removeTraceUnlessListed(store, owner, archive, trace.content_hash);
     }
     throw err;
   }
+  const { duplicate, replaced } = decided;
   for (const hash of replaced) await store.delete(keys.trace(owner, archive, hash));
 
   if (input.replace) {
@@ -465,6 +483,18 @@ export interface TombstoneInput {
   writer?: Writer;
 }
 
+interface TombstoneDecision extends ChangeUpdate {
+  traces: string[] | null;
+}
+
+function tracesEveryAttemptRead(attempts: readonly TombstoneDecision[]): string[] | null {
+  let read: Set<string> | null = null;
+  for (const { traces } of attempts) {
+    read = traces === null ? null : new Set([...(read ?? []), ...traces]);
+  }
+  return read === null ? null : [...read];
+}
+
 /** Remove a session's trace objects and mark it redacted. Irreversible; a later ingest
  * of the same session is refused, so a tombstoned session stays gone. The change entry records
  * the reason and the writer, never the content. A stub (F3.4) is tombstoned like any session:
@@ -475,47 +505,45 @@ export async function tombstone(input: TombstoneInput): Promise<{ removed: numbe
   const { store, owner } = input;
   const archive = archiveId(owner, input.agent, input.session_id);
   const at = (input.now ?? (() => new Date()))().toISOString();
-  let removedObjects: { traces: string[] } | null = null;
-  await updateMetadataWithChange(store, owner, archive, (existing) => {
-    if (!existing) {
-      removedObjects = null;
-      return { next: null, change: null };
-    }
-    const earlier = (removedObjects as { traces: string[] } | null)?.traces ?? [];
-    removedObjects = {
-      traces: [...new Set([...earlier, ...existing.traces.map((t) => t.content_hash)])],
-    };
-    const {
-      head: _head,
-      normalized: _n,
-      dropped_prefix: _d,
-      withheld_calls: _w,
-      applied: _a,
-      ...rest
-    } = existing;
-    return {
-      next: { ...rest, status: "redacted", traces: [], updated_at: at },
-      change: {
-        kind: "tombstone",
-        at,
-        owner,
-        archive_id: archive,
-        session_id: input.session_id,
-        content_hash: existing.head ?? null,
-        writer: input.writer ?? localWriter(owner),
-        owner_basis: existing.owner_basis,
-        reason: input.reason ?? "deleted",
-      },
-    };
-  });
-  const gone = removedObjects as { traces: string[] } | null;
+  const { attempts } = await updateMetadataWithChange(
+    store,
+    owner,
+    archive,
+    (existing): TombstoneDecision => {
+      if (!existing) return { next: null, change: null, traces: null };
+      const {
+        head: _head,
+        normalized: _n,
+        dropped_prefix: _d,
+        withheld_calls: _w,
+        applied: _a,
+        ...rest
+      } = existing;
+      return {
+        next: { ...rest, status: "redacted", traces: [], updated_at: at },
+        change: {
+          kind: "tombstone",
+          at,
+          owner,
+          archive_id: archive,
+          session_id: input.session_id,
+          content_hash: existing.head ?? null,
+          writer: input.writer ?? localWriter(owner),
+          owner_basis: existing.owner_basis,
+          reason: input.reason ?? "deleted",
+        },
+        traces: existing.traces.map((t) => t.content_hash),
+      };
+    },
+  );
+  const gone = tracesEveryAttemptRead(attempts);
   if (gone === null) {
     const spans = await deleteSpans(store, owner, archive);
     await store.delete(keys.pending(archive));
     return spans > 0 ? { removed: spans } : null;
   }
   let removed = 0;
-  for (const hash of gone.traces) {
+  for (const hash of gone) {
     await store.delete(keys.trace(owner, archive, hash));
     removed++;
   }
