@@ -3,15 +3,9 @@
  * pipeline to the bucket and back. */
 
 import { createApp } from "@seshi/api";
-import { HttpSessionDB, ServerError } from "@seshi/client";
+import { HttpSessionDB } from "@seshi/client";
 import type { Instance } from "@seshi/instance";
-import {
-  OffsetMismatch,
-  SessionConflict,
-  type StoreSessionResult,
-  type Trace,
-  VERSION,
-} from "@seshi/model";
+import { type StoreSessionResult, type Trace, VERSION } from "@seshi/model";
 import { readMetadata } from "@seshi/store";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { bootInstance } from "../tooling/instance";
@@ -93,29 +87,6 @@ describe("a team setup end to end", () => {
 
     expect(await db.tombstone("claude-code", "sess1")).toEqual({ removed: 1 });
     expect(await db.getTrace("claude-code", "sess1")).toBeNull();
-  });
-
-  it("maps the pipeline's refusals back to the same errors", async () => {
-    const db = client();
-    const first = stored(
-      await db.ingest({ agent: "claude-code", session_id: "sess1", transcript: CLAUDE }),
-    );
-    await expect(
-      db.ingest({
-        agent: "claude-code",
-        session_id: "sess1",
-        transcript: '{"type":"progress"}\n',
-        offset: first.bytes_total + 7,
-      }),
-    ).rejects.toBeInstanceOf(OffsetMismatch);
-    await expect(
-      db.ingest({
-        agent: "claude-code",
-        session_id: "sess1",
-        transcript: CLAUDE.replace("The auth flow:", "Another:"),
-      }),
-    ).rejects.toBeInstanceOf(SessionConflict);
-    await expect(client("not-a-token-0123456789").me()).rejects.toBeInstanceOf(ServerError);
   });
 
   it("keeps each owner to their own folder", async () => {

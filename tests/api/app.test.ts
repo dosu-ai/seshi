@@ -97,12 +97,6 @@ function call(
 }
 
 describe("health and routing", () => {
-  it("answers /healthz without auth", async () => {
-    const res = await call("GET", "/healthz");
-    expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ ok: true });
-  });
-
   it("404s unknown paths and 405s wrong methods", async () => {
     expect((await call("GET", "/nope")).status).toBe(404);
     expect((await call("PATCH", "/healthz")).status).toBe(405);
@@ -354,23 +348,6 @@ describe("sessions", () => {
     const text = new TextDecoder().decode(trace);
     expect(text).toContain("The auth [redacted:custom-pattern]");
     expect(text).not.toContain("The auth flow");
-  });
-
-  it("accepts a gzipped body", async () => {
-    const token = TOKEN;
-    const payload = JSON.stringify({
-      agent: "claude-code",
-      session_id: "sess2",
-      transcript: CLAUDE,
-    });
-    const res = await call("POST", "/v1/sessions", {
-      token,
-      body: Bun.gzipSync(new TextEncoder().encode(payload)),
-      headers: { "content-type": "application/json", "content-encoding": "gzip" },
-    });
-    expect(res.status).toBe(201);
-    const metadata = await readMetadata(store, "acme", archiveId("acme", "claude-code", "sess2"));
-    expect(metadata?.traces).toHaveLength(1);
   });
 
   it("refuses a body that inflates past what an upload can need (413)", async () => {

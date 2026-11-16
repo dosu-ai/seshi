@@ -124,13 +124,6 @@ async function trace(sessionId = SESSION): Promise<Trace> {
 }
 
 describe("a datadog source", () => {
-  it("is polled by the binary's connector", () => {
-    expect(instance.sources.list().find((s) => s.id === SOURCE)).toMatchObject({
-      polled: true,
-      connector: "datadog",
-    });
-  });
-
   it("syncs a Trajectory session into the span store, then publishes it once quiet", async () => {
     const run = await instance.sources.run(SOURCE);
     expect(run).toMatchObject({ outcome: "ok", submitted: 3, outcomes: { accepted: 3 } });

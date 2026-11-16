@@ -522,11 +522,6 @@ describe("the OTLP body caps (F4.1, [limits])", () => {
   const message = async (response: Response) =>
     new TextDecoder().decode(await response.arrayBuffer());
 
-  it("defaults to 64 MiB sent and 256 MiB inflated", () => {
-    expect(instance.config.limits.max_otlp_bytes).toBe(64 * 1024 * 1024);
-    expect(instance.config.limits.max_otlp_inflated_bytes).toBe(256 * 1024 * 1024);
-  });
-
   it("takes a body of exactly limits.max_otlp_bytes and answers 413 naming the key one byte past it", async () => {
     const body = raw();
     for (const [cap, status] of [

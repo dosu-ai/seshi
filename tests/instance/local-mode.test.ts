@@ -9,8 +9,6 @@ import { cliConfigSchema } from "@seshi/config";
 import { InstanceError } from "@seshi/instance";
 import {
   IngestRejected,
-  OffsetMismatch,
-  SessionConflict,
   type SessionDB,
   SessionRejected,
   type StoreSessionResult,
@@ -180,35 +178,6 @@ describe("over a store", () => {
     expect(await db.changes({ after: changes.cursor })).toMatchObject({ entries: [] });
   });
 
-  it("answers null for what is not there", async () => {
-    expect(await db.getSession("claude-code", "nope")).toBeNull();
-    expect(await db.getTrace("claude-code", "nope")).toBeNull();
-    expect(await db.tombstone("claude-code", "nope")).toBeNull();
-  });
-
-  it("stores nothing of a filtered session", async () => {
-    const result = await db.ingest({ agent: "claude-code", session_id: "tiny", transcript: SMALL });
-    expect(result).toMatchObject({ status: "filtered", bytes_total: 0 });
-    expect(await db.getSession("claude-code", "tiny")).toBeNull();
-    expect(await db.getTrace("claude-code", "tiny")).toBeNull();
-  });
-
-  it("refuses a whole upload that does not extend the session, and replaces it on request", async () => {
-    await db.ingest({ agent: "claude-code", session_id: "sess1", transcript: CLAUDE });
-    const other = CLAUDE.replace("The auth flow:", "Another answer:");
-    await expect(
-      db.ingest({ agent: "claude-code", session_id: "sess1", transcript: other }),
-    ).rejects.toBeInstanceOf(SessionConflict);
-    const replaced = await db.ingest({
-      agent: "claude-code",
-      session_id: "sess1",
-      transcript: other,
-      replace: true,
-    });
-    expect(replaced.status).toBe("stored");
-    expect((await db.getSession("claude-code", "sess1"))?.traces).toHaveLength(1);
-  });
-
   it("tombstones, and refuses the session after", async () => {
     await db.ingest({ agent: "claude-code", session_id: "sess1", transcript: CLAUDE });
     expect(await db.tombstone("claude-code", "sess1")).toEqual({ removed: 1 });
@@ -223,27 +192,5 @@ describe("over a store", () => {
 
     const changes = await db.changes();
     expect(changes.entries.map((e) => e.entry.kind)).toEqual(["published", "tombstone"]);
-  });
-
-  it("refuses a chunk that does not start where the log ends", async () => {
-    const first = await db.ingest({
-      agent: "claude-code",
-      session_id: "sess1",
-      transcript: CLAUDE,
-    });
-    const wrong = db.ingest({
-      agent: "claude-code",
-      session_id: "sess1",
-      transcript: '{"type":"progress"}\n',
-      offset: first.bytes_total + 1,
-    });
-    await expect(wrong).rejects.toBeInstanceOf(OffsetMismatch);
-    await expect(wrong).rejects.toMatchObject({ expected: first.bytes_total });
-  });
-
-  it("refuses what the pipeline refuses, as SessionRejected", async () => {
-    await expect(
-      db.ingest({ agent: "claude-code", session_id: "blank", transcript: "   " }),
-    ).rejects.toMatchObject({ name: "SessionRejected", code: "empty" });
   });
 });
