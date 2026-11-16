@@ -439,6 +439,9 @@ export interface BuildOptions
    * pass false: they refuse a bucket no seshi server has used rather than claim it, so a
    * mistyped `store.url` is not turned into a new deployment by a status check. */
   initialize?: boolean;
+  /** Record `store.org` in a marker that names none (true). A serverless laptop never writes
+   * the marker (F11.11): it checks the org, and leaves an unnamed one alone. */
+  claimOrg?: boolean;
 }
 
 export function storeOptions(config: ServerConfig): {
@@ -549,6 +552,8 @@ export async function buildInstance(
       createdBy: client,
       deploymentId: config.store.deployment_id,
       org: config.store.org,
+      ...(options.initialize === false ? { create: false } : {}),
+      ...(options.claimOrg === false ? { claimOrg: false } : {}),
       ...(options.now ? { now: options.now } : {}),
       ...(options.newDeploymentId ? { newDeploymentId: options.newDeploymentId } : {}),
     });
@@ -566,6 +571,7 @@ export async function buildInstance(
     probe: probed,
     newDeploymentId: _newDeploymentId,
     initialize: _initialize,
+    claimOrg: _claimOrg,
     ...rest
   } = options;
   let instanceConnectors: Connector[];

@@ -320,8 +320,8 @@ The bucket holds the team's settings, in the server config format:
 
 Paths in `config/seshi.toml` (`redaction.packs`, a review policy's `prompt_file`) are relative to
 `config/`. Any server config key may be there. Laptops ignore `[store]` and `search.path` in it
-(they know where the bucket is, and where their own index goes), and `[[sources]]`, `[otlp]`,
-`[auth]`, `[server]` and `[worker]` wherever they are set, since those need a server; a bucket
+(they know where the bucket is, and where their own index goes), and `[[sources]]` (OTLP intake
+included), `[auth]`, `[server]` and `[worker]` wherever they are set, since those need a server; a bucket
 that switches modes may keep them. `doctor` lists what was ignored.
 
 Each laptop's settings, lowest first: built-in defaults, `config/seshi.toml`, the local file

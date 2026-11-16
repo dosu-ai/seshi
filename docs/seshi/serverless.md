@@ -84,7 +84,7 @@ scope = "visible"                    # "mine", "visible" or "all"
 - **Precedence**, lowest first: built-in defaults, `config/seshi.toml`, the local file
   (`serverless.config`), `SESHI_*` env, `--set`.
 - **Format.** Any server config key is accepted. Keys that need a server (`[[sources]]`,
-  `[otlp]`, `[auth]`, `[server]`, `[worker]`) are ignored in serverless mode, with one warning
+  OTLP intake included, `[auth]`, `[server]`, `[worker]`) are ignored in serverless mode, with one warning
   from `doctor`, since a bucket that switches modes may keep them. `[store]` in the shared file
   is ignored: the laptop already knows where the bucket is. Secrets appear only as references
   (`{ env = "…" }`), never as values; `admin config push` refuses a literal secret. A key stored
@@ -283,7 +283,7 @@ folder.
 - Shared settings: present, checked, cached copy age, ignored server-only keys.
 - Model review: each policy's key resolves, and `review.required`.
 - Search: enabled, scope, index freshness.
-- Settings that need a server in the local config or flags (`[[sources]]`, `[otlp]`): an error,
+- Settings that need a server in the local config or flags (`[[sources]]`, including OTLP intake): an error,
   "needs a server".
 
 ## Docs

@@ -3,6 +3,7 @@ import type { CliConfig } from "@seshi/config";
 import {
   type BaseLayer,
   ConfigError,
+  DEFAULT_BASE_URLS,
   type FlagValue,
   formatPath,
   loadServerlessConfig,
@@ -160,6 +161,9 @@ async function resolveConfig(
     for (const step of [steps.decision, steps.redactor]) {
       const ref = step.api_key?.ref;
       if (ref?.kind !== "env" || env[ref.name]) continue;
+      // A stored key goes only to the provider's own endpoint, never to one a shared config
+      // names.
+      if (step.base_url !== DEFAULT_BASE_URLS[step.provider]) continue;
       const stored = options.secrets ? await readReviewKey(options.secrets, step.provider) : null;
       if (stored) env[ref.name] = stored;
     }
@@ -413,15 +417,29 @@ export async function openServerless(options: ServerlessOpenOptions): Promise<Se
     );
   }
 
-  const shared = await sharedSettings(store, paths, {
-    now,
-    ...(options.refreshShared ? { force: true } : {}),
-    check: async (base) => {
-      const candidate = await resolveConfig(options, settings, base);
-      await readRedactionPacks(candidate.config.redaction.packs);
-    },
-  });
+  let shared: SharedSettings;
+  try {
+    shared = await sharedSettings(store, paths, {
+      now,
+      ...(options.refreshShared ? { force: true } : {}),
+      check: async (base) => {
+        const candidate = await resolveConfig(options, settings, base);
+        await readRedactionPacks(candidate.config.redaction.packs);
+      },
+    });
+  } catch (err) {
+    const refused = refusalOf(err, owner);
+    if (options.write || !(refused instanceof Refused)) throw refused;
+    warnings.push(`cannot read the shared settings: ${refused.message}`);
+    shared = { files: [], refreshed: false };
+  }
   if (shared.problem) warnings.push(`the shared settings fail their checks: ${shared.problem}`);
+  if (shared.unusable) {
+    const why = `${url} has shared settings this machine can't use (${shared.unusable}); fix them (seshi admin config pull, push) or update seshi`;
+    if (options.write)
+      throw new Refused(EXIT.config, "shared_settings", `${why}. Uploads wait until then.`);
+    warnings.push(why);
+  }
   if (shared.unreachable && shared.files.length === 0 && options.write && !shared.checkedAt) {
     throw new Refused(
       EXIT.unavailable,
@@ -451,6 +469,7 @@ export async function openServerless(options: ServerlessOpenOptions): Promise<Se
       roles: [],
       probe: options.write ? [owner] : [],
       initialize: false,
+      claimOrg: false,
       health: noHealth(),
       records,
       createLayout: false,

@@ -16,6 +16,7 @@ import {
   type ListOptions,
   listReviews,
   type PutOptions,
+  readLayout,
   type Store,
   setLayout,
 } from "@seshi/store";
@@ -278,16 +279,47 @@ describe("shared settings (F11.6)", () => {
   });
 
   it("ignores server-only sections and the shared [store], saying where", async () => {
-    await sharedConfig(
-      '[store]\nurl = "s3://elsewhere/x"\n[server]\nlisten = ":9000"\n[otlp]\nenabled = true\n',
-    );
+    await sharedConfig('[store]\nurl = "s3://elsewhere/x"\n[server]\nlisten = ":9000"\n[worker]\n');
     const alice = await laptop("alice", member("alice"));
     expect(alice.bucket.instance.storage.url).toBe(shared.url);
     expect(alice.bucket.ignored).toEqual([
-      `[otlp] in ${shared.url}/config/seshi.toml`,
       `[server] in ${shared.url}/config/seshi.toml`,
+      `[worker] in ${shared.url}/config/seshi.toml`,
       `[store] in ${shared.url}/config/seshi.toml`,
     ]);
+  });
+
+  it("holds writes when the bucket's copy fails its checks and there is no good one", async () => {
+    await sharedConfig('default_visibility = "org"\nnot_a_setting = 1\n');
+    await expect(laptop("alice", member("alice"))).rejects.toMatchObject({
+      code: "shared_settings",
+    });
+    const reader = await laptop("alice", member("alice"), { write: false });
+    expect(reader.bucket.warnings.join("\n")).toMatch(/shared settings this machine can't use/);
+    // The same copy is not checked again, and still holds writes.
+    await expect(laptop("alice", member("alice"))).rejects.toMatchObject({
+      code: "shared_settings",
+    });
+  });
+
+  it("refuses a shared copy that names a path outside config/ or a file secret", async () => {
+    await sharedConfig('[redaction]\npacks = ["../../../etc/passwd"]\n');
+    await expect(laptop("alice", member("alice"))).rejects.toMatchObject({
+      code: "shared_settings",
+      message: expect.stringMatching(/is outside config\//),
+    });
+    await sharedConfig(
+      '[[review.policies]]\nid = "p"\ndecision = { api_key = { file = "/home/a/.key" } }\n',
+    );
+    await expect(laptop("alice", member("alice"))).rejects.toMatchObject({
+      message: expect.stringMatching(/a secret read from a file/),
+    });
+  });
+
+  it("holds writes when the key cannot read the shared settings", async () => {
+    await sharedConfig('default_visibility = "org"\n');
+    const blind = { read: ["owners/alice/", "seshi.json"], write: ["owners/alice/"] };
+    await expect(laptop("alice", blind)).rejects.toMatchObject({ code: "access_denied" });
   });
 
   it("keeps the last good copy when the bucket's fails its checks", async () => {
@@ -331,6 +363,17 @@ describe("model review without a key (F11)", () => {
     expect(alice.bucket.review.missing).toEqual([]);
   });
 
+  it("does not send a stored key to an endpoint the shared config names", async () => {
+    await sharedConfig(
+      '[review]\nrequired = true\n[[review.policies]]\nid = "team"\ndecision = { api_key = { env = "ANTHROPIC_API_KEY" }, base_url = "https://elsewhere.example" }\n',
+    );
+    const secrets = new MemorySecrets();
+    await saveReviewKey(secrets, "anthropic", "sk-test");
+    await expect(laptop("alice", member("alice"), { secrets })).rejects.toMatchObject({
+      code: "needs_review_key",
+    });
+  });
+
   it("stores with regex redaction only, as skipped, when review is not required", async () => {
     await sharedConfig(POLICY);
     const alice = await laptop("alice", member("alice"));
@@ -342,6 +385,13 @@ describe("model review without a key (F11)", () => {
 });
 
 describe("what a laptop writes (F11.10, F11.11)", () => {
+  it("never records an org in the marker, even when its config names one", async () => {
+    const local = join(dir, "local.toml");
+    writeFileSync(local, '[store]\norg = "acme"\n');
+    await laptop("alice", member("alice"), { config: local });
+    expect((await readLayout(shared))?.org).toBeUndefined();
+  });
+
   it("keeps records and health off the bucket, and never writes outside its folder", async () => {
     const alice = await laptop("alice", member("alice"));
     await alice.bucket.instance.localSessions("alice", "claimed").ingest(upload("s1"));

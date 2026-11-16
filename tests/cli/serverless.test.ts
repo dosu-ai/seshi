@@ -124,11 +124,19 @@ describe("a serverless machine", () => {
 
     writeFileSync(
       join(dir, "seshi.toml"),
-      'default_visibility = "owner"\n[otlp]\nenabled = true\n',
+      '[store.credentials]\naccess_key_id = "AKIA"\nsecret_access_key = "s3cret"\n',
+    );
+    const ignoredSecret = await machine.seshi(["admin", "config", "push", dir]);
+    expect(ignoredSecret.code).toBe(3);
+    expect(ignoredSecret.err).toContain("store.credentials.secret_access_key");
+
+    writeFileSync(
+      join(dir, "seshi.toml"),
+      'default_visibility = "owner"\n[server]\nlisten = ":9000"\n',
     );
     const dry = await machine.seshi(["admin", "config", "push", dir, "--dry-run"]);
     expect(dry.out).toContain("Would push seshi.toml (create)");
-    expect(dry.out).toContain("[otlp]");
+    expect(dry.out).toContain("[server]");
     expect((await machine.seshi(["admin", "config", "push", dir])).code).toBe(0);
 
     const other = join(machine.dir, "other");

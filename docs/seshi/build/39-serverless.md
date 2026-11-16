@@ -48,7 +48,7 @@ its owner's folder may not touch `assembly/`, and without this a member could no
 own session on a per-folder key.
 
 **Shared settings (F11.6).** `loadServerlessConfig` (config package) layers a parsed base below
-the file (`LoadOptions.base`) and drops `[[sources]]`, `[otlp]`, `[auth]`, `[server]` and
+the file (`LoadOptions.base`) and drops `[[sources]]` (OTLP intake included), `[auth]`, `[server]` and
 `[worker]` from every layer and `[store]` from the shared one, reporting where.
 `serverless/shared.ts` caches `config/` per bucket and refreshes at most every 5 minutes; a copy
 that fails the checks (`readRedactionPacks` and the config's shape) is not used, and the last
@@ -92,6 +92,37 @@ bucket marked serverless.
 policies, owner names, switching modes, what needs a server); `config.md`, `cli.md`,
 `server.md`, `capture.md` and the README's quick start. X3.5, X5.6 and F8.3 in
 `design-decisions.html` carry a "Revised (F11)" line.
+
+## After an independent review
+
+A review of the whole change found twelve problems; each is fixed, most with a test:
+
+- A shared config this machine could not use (failed checks, no good copy before, or a lost
+  cache) let uploads go out without the team's review and redaction settings. Writes now hold
+  (`bad shared settings`), and a rejected copy is checked again after seshi is updated.
+- `admin config push` missed literal secrets in sections laptops ignore (`[store.credentials]`,
+  `[auth]`, sources); it now checks the whole file as a server reads it. `pull` refuses names
+  with `..`.
+- A shared config can no longer name paths outside `config/`, read a secret from a laptop's
+  file, or receive a stored review key at an endpoint it names (the key goes only to the
+  provider's own endpoint).
+- `buildInstance` could record `store.org` in the marker from a laptop; serverless opens pass
+  `claimOrg: false`.
+- A `403` during an upload refused the session for good; it now holds uploads (`bucket
+  refused`), as a refusal at open does.
+- The storage test threw when a store answered a conditional delete with an error; it records
+  the step as failed and goes on.
+- A key that cannot read `config/` now holds writes instead of retrying as "unavailable".
+- The sink's open is shared between the uploader and the upkeep timer; retraction opens the
+  bucket on its own, so it does not wait on a review key or a newer seshi.
+- `init` sets `scope = "mine"` for a key that reads only its folder, and `doctor` says so when
+  the scope needs every owner's folder.
+- `[otlp]` is not a server config section (OTLP intake is a source); the ignored sections are
+  `[[sources]]`, `[auth]`, `[server]` and `[worker]`.
+
+Known from the review and not changed: any S3 `403` counts as a refusal (an expired key or a
+skewed clock holds uploads as `bucket refused`, which is the right outcome, with a less precise
+message); a shared key still sends a harmless delete to `assembly/pending/` on tombstone.
 
 ## Where the build differs from the spec
 

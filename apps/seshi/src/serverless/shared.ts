@@ -1,7 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, join } from "node:path";
-import { type BaseLayer, parseConfigToml } from "@seshi/config";
-import type { Store } from "@seshi/store";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { type BaseLayer, ConfigError, parseConfigToml } from "@seshi/config";
+import { VERSION } from "@seshi/model";
+import { accessDeniedIn, type Store } from "@seshi/store";
 import { writePrivateFile } from "../account/secrets";
 import type { ServerlessPaths } from "./settings";
 
@@ -21,7 +22,7 @@ interface SharedIndex {
   files: Record<string, string>;
   /** The last copy that failed the checks, so it is not fetched and checked again on every
    * command; the good copy stays in use. */
-  rejected?: { files: Record<string, string>; message: string; at: string };
+  rejected?: { files: Record<string, string>; message: string; at: string; version?: string };
 }
 
 export interface SharedSettings {
@@ -36,6 +37,9 @@ export interface SharedSettings {
   problem?: string;
   /** The bucket could not be asked; the cached copy, if any, is in use. */
   unreachable?: string;
+  /** The bucket holds shared settings and this machine has no copy it can use: it failed the
+   * checks and there was no good one before, or the cache is gone. Writes wait (F11.6). */
+  unusable?: string;
   /** Whether a copy came from the bucket this time. */
   refreshed: boolean;
 }
@@ -71,25 +75,66 @@ function same(a: Record<string, string>, b: Record<string, string>): boolean {
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
+/** A secret read from a file is the laptop's own: a shared config may not name one. */
+function fileSecrets(value: unknown, path: string[], found: string[]): void {
+  if (Array.isArray(value)) {
+    value.forEach((v, i) => {
+      fileSecrets(v, [...path, String(i)], found);
+    });
+  } else if (value && typeof value === "object") {
+    const keys = Object.keys(value);
+    if (keys.length === 1 && keys[0] === "file") found.push(path.join("."));
+    else for (const [k, v] of Object.entries(value)) fileSecrets(v, [...path, k], found);
+  }
+}
+
 /** `config/seshi.toml` from a copy of the folder, with the paths it names relative to
- * `config/` (redaction packs, review prompt files) made absolute into that copy. */
+ * `config/` (redaction packs, review prompt files) made absolute into that copy. A path must
+ * stay inside the copy, and no secret may be read from a file: a shared config names nothing
+ * on the laptop. */
 export function baseLayerIn(dir: string, origin: string): BaseLayer | undefined {
   const file = join(dir, SHARED_CONFIG);
   if (!existsSync(file)) return undefined;
   const tree = parseConfigToml(origin, readFileSync(file, "utf8"));
-  const local = (path: unknown) =>
-    typeof path === "string" && !isAbsolute(path) && !path.startsWith("~") ? join(dir, path) : path;
+  const problems: string[] = [];
+  const local = (path: unknown, where: string) => {
+    if (typeof path !== "string") return path;
+    const inside = resolve(dir, path);
+    const rel = relative(resolve(dir), inside);
+    if (
+      isAbsolute(path) ||
+      path.startsWith("~") ||
+      rel.startsWith("..") ||
+      rel.split(sep)[0] === ".."
+    ) {
+      problems.push(`${where}: ${JSON.stringify(path)} is outside config/; name a file in it`);
+      return path;
+    }
+    return inside;
+  };
+  const named: string[] = [];
+  fileSecrets(tree, [], named);
+  for (const where of named) {
+    problems.push(
+      `${where}: a secret read from a file names a path on each laptop; use { env = "NAME" }`,
+    );
+  }
   const redaction = tree.redaction as { packs?: unknown } | undefined;
-  if (redaction && Array.isArray(redaction.packs)) redaction.packs = redaction.packs.map(local);
+  if (redaction && Array.isArray(redaction.packs)) {
+    redaction.packs = redaction.packs.map((p, i) => local(p, `redaction.packs.${i}`));
+  }
   const review = tree.review as { policies?: unknown } | undefined;
   if (review && Array.isArray(review.policies)) {
-    for (const policy of review.policies as Record<string, Record<string, unknown>>[]) {
+    (review.policies as Record<string, Record<string, unknown>>[]).forEach((policy, i) => {
       for (const step of ["decision", "redactor"]) {
         const s = policy?.[step];
-        if (s && typeof s === "object" && "prompt_file" in s) s.prompt_file = local(s.prompt_file);
+        if (s && typeof s === "object" && "prompt_file" in s) {
+          s.prompt_file = local(s.prompt_file, `review.policies.${i}.${step}.prompt_file`);
+        }
       }
-    }
+    });
   }
+  if (problems.length > 0) throw new ConfigError(problems.map((p) => `${origin}: ${p}`));
   return { path: origin, tree };
 }
 
@@ -120,33 +165,59 @@ export async function sharedSettings(
   const now = (options.now ?? (() => new Date()))();
   const index = readIndex(paths, store.url);
   const origin = (name: string) => `${store.url}/${SHARED_PREFIX}${name}`;
-  const fromCache = (extra: Partial<SharedSettings>): SharedSettings => ({
-    ...(Object.keys(index.files).length > 0 && existsSync(paths.shared)
-      ? { base: baseLayerIn(paths.shared, origin(SHARED_CONFIG)) }
-      : {}),
-    files: Object.keys(index.files).sort(),
-    ...(index.checked_at ? { checkedAt: index.checked_at } : {}),
-    ...(index.rejected ? { problem: index.rejected.message } : {}),
-    refreshed: false,
-    ...extra,
-  });
+  const fromCache = (extra: Partial<SharedSettings>, listed?: Record<string, string>) => {
+    let base: BaseLayer | undefined;
+    let unusable: string | undefined;
+    const hasConfig = SHARED_CONFIG in index.files;
+    if (hasConfig) {
+      try {
+        base = baseLayerIn(paths.shared, origin(SHARED_CONFIG));
+        if (!base) unusable = "the cached copy of the shared settings is gone";
+      } catch (err) {
+        unusable = message(err);
+      }
+    }
+    const bucketHas = listed ? SHARED_CONFIG in listed : hasConfig || index.rejected !== undefined;
+    if (!base && bucketHas && unusable === undefined && index.rejected) {
+      unusable = index.rejected.message;
+    }
+    const settings: SharedSettings = {
+      ...(base ? { base } : {}),
+      files: Object.keys(index.files).sort(),
+      ...(index.checked_at ? { checkedAt: index.checked_at } : {}),
+      ...(index.rejected ? { problem: index.rejected.message } : {}),
+      ...(unusable !== undefined ? { unusable } : {}),
+      refreshed: false,
+      ...extra,
+    };
+    return settings;
+  };
   const age = index.checked_at ? now.getTime() - Date.parse(index.checked_at) : Infinity;
-  if (!options.force && age < (options.maxAgeMs ?? SHARED_MAX_AGE_MS)) return fromCache({});
+  const cacheBroken =
+    SHARED_CONFIG in index.files && !existsSync(join(paths.shared, SHARED_CONFIG));
+  if (!options.force && !cacheBroken && age < (options.maxAgeMs ?? SHARED_MAX_AGE_MS)) {
+    return fromCache({});
+  }
 
   let listed: Record<string, string>;
   try {
     listed = await listShared(store);
   } catch (err) {
+    if (accessDeniedIn(err)) throw err;
     return fromCache({ unreachable: message(err) });
   }
   const checkedAt = now.toISOString();
-  if (same(listed, index.files) || (index.rejected && same(listed, index.rejected.files))) {
+  const rejectedHere =
+    index.rejected !== undefined &&
+    same(listed, index.rejected.files) &&
+    (index.rejected.version ?? VERSION) === VERSION;
+  if ((same(listed, index.files) && !cacheBroken) || rejectedHere) {
     index.checked_at = checkedAt;
     writeIndex(paths, index);
-    return fromCache({ checkedAt });
+    return fromCache({ checkedAt }, listed);
   }
 
-  const next = `${paths.shared}.next`;
+  const next = `${paths.shared}.next-${process.pid}`;
   rmSync(next, { recursive: true, force: true });
   mkdirSync(next, { recursive: true, mode: 0o700 });
   try {
@@ -159,7 +230,8 @@ export async function sharedSettings(
     }
   } catch (err) {
     rmSync(next, { recursive: true, force: true });
-    return fromCache({ unreachable: message(err) });
+    if (accessDeniedIn(err)) throw err;
+    return fromCache({ unreachable: message(err) }, listed);
   }
   try {
     const base = baseLayerIn(next, origin(SHARED_CONFIG));
@@ -167,15 +239,21 @@ export async function sharedSettings(
   } catch (err) {
     rmSync(next, { recursive: true, force: true });
     index.checked_at = checkedAt;
-    index.rejected = { files: listed, message: message(err), at: checkedAt };
+    index.rejected = { files: listed, message: message(err), at: checkedAt, version: VERSION };
     writeIndex(paths, index);
-    return fromCache({ checkedAt });
+    return fromCache({ checkedAt }, listed);
   }
-  const old = `${paths.shared}.old`;
+  const old = `${paths.shared}.old-${process.pid}`;
   rmSync(old, { recursive: true, force: true });
-  if (existsSync(paths.shared)) renameSync(paths.shared, old);
-  renameSync(next, paths.shared);
-  rmSync(old, { recursive: true, force: true });
+  try {
+    if (existsSync(paths.shared)) renameSync(paths.shared, old);
+    renameSync(next, paths.shared);
+  } catch (err) {
+    rmSync(next, { recursive: true, force: true });
+    return fromCache({ unreachable: `another seshi was refreshing the cache: ${message(err)}` });
+  } finally {
+    rmSync(old, { recursive: true, force: true });
+  }
   const saved: SharedIndex = { url: store.url, checked_at: checkedAt, files: listed };
   writeIndex(paths, saved);
   const base = baseLayerIn(paths.shared, origin(SHARED_CONFIG));

@@ -3,6 +3,7 @@ import { usernameOwner } from "@seshi/auth";
 import { cliConfigSchema } from "@seshi/config";
 import { VERSION } from "@seshi/model";
 import {
+  accessDeniedIn,
   ensureLayout,
   isPreconditionFailed,
   LayoutError,
@@ -178,10 +179,11 @@ export async function run(ctx: CommandContext): Promise<number> {
       : false;
 
     const sharedSearch = await sharedSearchEnabled(store);
+    const readOwn = await readsOnlyItsFolder(store);
     const written = writeServerlessConfig(
       account.cliFile,
       serverless,
-      { enabled: sharedSearch ?? true, scope: account.cli.search.scope },
+      { enabled: sharedSearch ?? true, scope: readOwn ? "mine" : account.cli.search.scope },
       ctx.env,
     );
 
@@ -189,6 +191,11 @@ export async function run(ctx: CommandContext): Promise<number> {
     if (marker.mode === "server") {
       warnings.push(
         `${url} is in server mode: laptops should upload through its server. To switch it: seshi admin mode serverless`,
+      );
+    }
+    if (readOwn) {
+      warnings.push(
+        'this key reads only its own folder: search is set to scope = "mine" (your sessions)',
       );
     }
     if (!storage.conditionalDelete) {
@@ -232,6 +239,18 @@ export async function run(ctx: CommandContext): Promise<number> {
     if (err instanceof LayoutError)
       return failWith(ctx, json, new Refused(EXIT.config, "config", err.message));
     return failWith(ctx, json, err);
+  }
+}
+
+/** Whether the key is refused a listing of every owner's folder: a key limited to its own
+ * folder (F11.5), whose search can only cover its own sessions. */
+async function readsOnlyItsFolder(store: Store): Promise<boolean> {
+  try {
+    await store.list("owners/", { limit: 1 });
+    return false;
+  } catch (err) {
+    if (accessDeniedIn(err)) return true;
+    throw err;
   }
 }
 

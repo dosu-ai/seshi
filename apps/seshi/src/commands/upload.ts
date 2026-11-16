@@ -336,7 +336,9 @@ async function upload(
         : []),
     ],
   );
-  if (held === "needs update" || held === "needs review key") return EXIT.config;
+  if (held === "needs update" || held === "needs review key" || held === "bad shared settings") {
+    return EXIT.config;
+  }
   if (signIn) return EXIT.auth;
   if (refused) return EXIT.failure;
   if (unreachable) return EXIT.unavailable;

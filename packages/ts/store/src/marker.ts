@@ -35,6 +35,8 @@ export interface LayoutOptions {
   create?: boolean;
   /** For a new marker: the mode to record, which makes it schema 2. */
   mode?: BucketMode;
+  /** Record `org` in a marker that names none (true). False checks only. */
+  claimOrg?: boolean;
 }
 
 /** The prefix has no marker and the caller may not write one. */
@@ -134,6 +136,7 @@ async function agree(
     }
     return marker;
   }
+  if (options.claimOrg === false) return marker;
   const result = await claimOrg(store, org);
   if (result.org !== org) {
     throw new LayoutError(

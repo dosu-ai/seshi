@@ -14,7 +14,12 @@ export class SignInNeeded extends Error {
   }
 }
 
-export type HoldWord = "sign in" | "needs review key" | "needs update" | "bucket refused";
+export type HoldWord =
+  | "sign in"
+  | "needs review key"
+  | "needs update"
+  | "bucket refused"
+  | "bad shared settings";
 
 /** The server would not retract (F9.7): retraction is turned off there (`retract_disabled`), or
  * the secret is not the one the session was uploaded with (`bad_retract_secret`). */

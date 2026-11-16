@@ -4,9 +4,12 @@ import { parseArgs } from "node:util";
 import {
   type BaseLayer,
   ConfigError,
+  loadConfig,
   loadServerConfig,
   loadServerlessConfig,
+  parseConfigToml,
   secretsIn,
+  serverConfigSchema,
 } from "@seshi/config";
 import { readRedactionPacks } from "@seshi/instance";
 import { type BucketMode, VERSION } from "@seshi/model";
@@ -37,6 +40,11 @@ export const DEFAULT_CONFIG_DIR = "seshi-config";
 /** Beside the pulled files: the ETags they had, so `push` changes only what it read. */
 const PULLED = ".seshi-pulled.json";
 const SAFE_NAME = /^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*$/;
+
+/** A name under `config/` that stays inside the folder it is written to. */
+function safeName(name: string): boolean {
+  return SAFE_NAME.test(name) && !name.split("/").some((part) => part === ".." || part === ".");
+}
 
 interface BucketValues {
   config?: string;
@@ -152,7 +160,7 @@ function filesIn(dir: string): string[] {
     }
   };
   walk(dir);
-  return out.filter((name) => SAFE_NAME.test(name));
+  return out.filter(safeName);
 }
 
 function readPulled(dir: string): Record<string, string> {
@@ -177,7 +185,18 @@ async function checkShared(dir: string, url: string): Promise<string[]> {
     flags: [{ name: "the bucket", path: "store.url", value: url }],
     resolveSecrets: false,
   });
-  const literal = secretsIn(loaded.config)
+  // The whole file as a server reads it, the sections laptops ignore included: a secret's
+  // value there would still be readable by every key that can read config/.
+  const whole = loadConfig(serverConfigSchema, {
+    base: {
+      path: base.path,
+      tree: parseConfigToml(base.path, readFileSync(join(dir, SHARED_CONFIG), "utf8")),
+    },
+    env: {},
+    flags: [{ name: "the bucket", path: "store.url", value: url }],
+    resolveSecrets: false,
+  });
+  const literal = secretsIn(whole.config)
     .filter(({ secret }) => secret.ref.kind === "literal")
     .map(({ path }) => path.join("."));
   if (literal.length > 0) {
@@ -204,7 +223,7 @@ async function pull(ctx: CommandContext, json: boolean, args: string[]): Promise
       const page = await store.list(SHARED_PREFIX, { startAfter: after });
       for (const key of page.keys) {
         const name = key.slice(SHARED_PREFIX.length);
-        if (!SAFE_NAME.test(name)) continue;
+        if (!safeName(name)) continue;
         const object = await store.get(key);
         if (!object) continue;
         const file = join(dir, name);

@@ -67,9 +67,10 @@ export function loadCliConfig(options: CliLoadOptions = {}): Loaded<CliConfig> {
   });
 }
 
-/** The sections a serverless laptop ignores (F11.3): they configure what only a server runs.
+/** The sections a serverless laptop ignores (F11.3): they configure what only a server runs
+ * (OTLP intake is a source, so `[[sources]]` covers it).
  * A bucket that switches modes may keep them in its shared config. */
-export const SERVER_ONLY_SECTIONS = ["sources", "otlp", "auth", "server", "worker"] as const;
+export const SERVER_ONLY_SECTIONS = ["sources", "auth", "server", "worker"] as const;
 
 export interface ServerlessLoadOptions extends Omit<LoadOptions, "foreign" | "ignoreEnv"> {
   /** The local server config (`serverless.config`); none when unset. Unlike

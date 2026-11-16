@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { keys } from "./layout";
-import { isPreconditionFailed, type Store } from "./store";
+import { S3HttpError } from "./s3-fetch";
+import { accessDeniedIn, isPreconditionFailed, type Store, StoreError } from "./store";
 
 /** One step of the storage test and what the store did. */
 export interface StorageStep {
@@ -25,6 +26,16 @@ export interface StorageTestResult {
 }
 
 const encoder = new TextEncoder();
+
+/** A delete with If-Match the store answered with an error other than a failed condition:
+ * a refusal of the key is thrown on (it says nothing about the store); anything else means the
+ * store does not do conditional deletes. */
+function notConditional(err: unknown): string {
+  if (accessDeniedIn(err)) throw err;
+  const answered = err instanceof StoreError && err.cause instanceof S3HttpError;
+  if (!answered) throw err;
+  return `answered a delete with If-Match with an error (${err.message}): this store does not do conditional deletes`;
+}
 const MADE_UP_ETAG = "0123456789abcdef0123456789abcdef";
 
 /** The key the test writes: beside the start-up probe, in the owner's own folder, so it needs
@@ -107,27 +118,35 @@ export async function storageTest(
         : "refused an upload with the right If-Match",
     );
     etag = (await store.stat(key))?.etag ?? etag;
-    let kept = false;
+    let deleteError: string | undefined;
     try {
       await store.delete(key, { ifMatch: MADE_UP_ETAG });
     } catch (err) {
-      if (!isPreconditionFailed(err)) throw err;
+      if (!isPreconditionFailed(err)) deleteError = notConditional(err);
     }
-    kept = (await store.stat(key)) !== null;
+    const kept = (await store.stat(key)) !== null;
     record(
       5,
       "delete with If-Match on a made-up ETag leaves the object",
-      kept,
-      "deleted the object despite a wrong If-Match: this store ignores If-Match on delete",
+      kept && deleteError === undefined,
+      deleteError ??
+        "deleted the object despite a wrong If-Match: this store ignores If-Match on delete",
     );
+    let realError: string | undefined;
     if (kept) {
-      await store.delete(key, etag !== undefined ? { ifMatch: etag } : {});
+      try {
+        await store.delete(key, etag !== undefined ? { ifMatch: etag } : {});
+      } catch (err) {
+        realError = isPreconditionFailed(err)
+          ? "refused a delete with the right If-Match"
+          : notConditional(err);
+      }
     }
     record(
       6,
       "delete with the real ETag removes the object",
-      (await store.stat(key)) === null,
-      "the object is still there",
+      realError === undefined && (await store.stat(key)) === null,
+      realError ?? "the object is still there",
     );
   } finally {
     await store.delete(key).catch(() => {});

@@ -3,8 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FsStore } from "./fs";
+import { S3HttpError } from "./s3-fetch";
 import { storageTest, storageTestKey } from "./storage-test";
-import type { DeleteOptions, PutOptions, Store } from "./store";
+import { type DeleteOptions, type PutOptions, type Store, StoreError } from "./store";
 
 let dir: string;
 let store: FsStore;
@@ -66,6 +67,22 @@ describe("the storage test (F11)", () => {
     const result = await storageTest(ignoring(store, { delete: true }), "alice");
     expect(result).toMatchObject({ conditionalWrites: true, conditionalDelete: false });
     expect(result.missing).toMatch(/ignores If-Match on delete/);
+    expect((await store.list("owners/alice/")).keys).toEqual([]);
+  });
+
+  it("records a store that answers a conditional delete with an error, and goes on", async () => {
+    const answering: Store = {
+      ...ignoring(store, {}),
+      delete: async (key: string, options: DeleteOptions = {}) => {
+        if (options.ifMatch !== undefined) {
+          throw new StoreError(`delete ${key}`, new S3HttpError(501, "NotImplemented", "no"));
+        }
+        return store.delete(key);
+      },
+    };
+    const result = await storageTest(answering, "alice");
+    expect(result).toMatchObject({ conditionalWrites: true, conditionalDelete: false });
+    expect(result.missing).toMatch(/does not do conditional deletes/);
     expect((await store.list("owners/alice/")).keys).toEqual([]);
   });
 });

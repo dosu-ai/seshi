@@ -167,7 +167,9 @@ export function queueCheck(ev: SessionEvidence): CheckResult {
             ? "update seshi"
             : word === "bucket refused"
               ? "check the bucket key's permissions (seshi doctor)"
-              : "seshi login --server <url>",
+              : word === "bad shared settings"
+                ? "seshi admin config pull, fix, seshi admin config push"
+                : "seshi login --server <url>",
     });
   }
   if (problems.upload)

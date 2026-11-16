@@ -15,7 +15,7 @@ import {
   writePrivateFile,
 } from "@seshi/capture";
 import type { CaptureHost } from "@seshi/kit";
-import { localWriter, SessionRejected } from "@seshi/model";
+import { localWriter } from "@seshi/model";
 import type { RuleSet, redactTranscript, WithheldCalls } from "@seshi/redact";
 import { type Account, accountCredential, openAccount, serverOf } from "./account/account";
 import { NotSignedIn } from "./account/credential";
@@ -51,6 +51,8 @@ function holdOf(err: unknown): unknown {
     case "no_bucket":
     case "store_unsupported":
       return new SignInNeeded(err.message, "bucket refused");
+    case "shared_settings":
+      return new SignInNeeded(err.message, "bad shared settings");
     default:
       return err;
   }
@@ -60,30 +62,43 @@ function holdOf(err: unknown): unknown {
 export async function serverlessSink(ctx: CommandContext, account: Account): Promise<OpenedSink> {
   const { openServerless, refusalOf, SERVERLESS_BASIS } = await import("./serverless/open");
   let bucket: ServerlessBucket | undefined;
+  let opening: Promise<ServerlessBucket> | undefined;
   let openedAt = 0;
-  const open = async (): Promise<ServerlessBucket> => {
-    if (bucket && Date.now() - openedAt < SERVERLESS_REOPEN_MS) return bucket;
-    const old = bucket;
-    bucket = undefined;
-    await old?.close();
-    try {
-      bucket = await openServerless({
-        cli: account.cli,
-        env: account.env,
-        home: account.home,
-        integrations: await ctx.integrations(),
-        secrets: account.secrets,
-        write: true,
-      });
-      openedAt = Date.now();
-    } catch (err) {
-      throw holdOf(err);
-    }
-    return bucket;
+  /** The bucket opened for writing, shared by the uploader and the upkeep timer: one open at
+   * a time, and an old instance is closed only once a new one is in place. */
+  const open = (): Promise<ServerlessBucket> => {
+    if (bucket && Date.now() - openedAt < SERVERLESS_REOPEN_MS) return Promise.resolve(bucket);
+    opening ??= (async () => {
+      try {
+        const next = await openServerless({
+          cli: account.cli,
+          env: account.env,
+          home: account.home,
+          integrations: await ctx.integrations(),
+          secrets: account.secrets,
+          write: true,
+        });
+        const old = bucket;
+        bucket = next;
+        openedAt = Date.now();
+        await old?.close();
+        return next;
+      } catch (err) {
+        throw holdOf(err);
+      } finally {
+        opening = undefined;
+      }
+    })();
+    return opening;
   };
+  /** A refusal during a write is about the key, not the session (rotated, expired, a clock
+   * off): uploads wait, as when opening the bucket is refused. */
   const refusedIngest = (err: unknown): never => {
     const refused = refusalOf(err, bucket?.owner);
-    if (refused instanceof Refused) throw new SessionRejected("access_denied", refused.message);
+    if (refused instanceof Refused) {
+      openedAt = 0;
+      throw new SignInNeeded(refused.message, "bucket refused");
+    }
     throw err;
   };
   const db = async () => {
@@ -108,38 +123,69 @@ export async function serverlessSink(ctx: CommandContext, account: Account): Pro
       return allStale((after) => sessions.staleSessions(after !== undefined ? { after } : {}));
     },
     async retract(agent, sessionId, secret) {
-      const { instance, owner } = await open();
-      if (!instance.config.capture.allow_retract) {
-        throw new RetractRefused(
-          "retract_disabled",
-          "retraction is turned off (capture.allow_retract)",
-        );
+      // Retraction does not wait on a review key or a newer seshi: open the bucket for it alone.
+      let opened: ServerlessBucket;
+      try {
+        opened = await openServerless({
+          cli: account.cli,
+          env: account.env,
+          home: account.home,
+          integrations: await ctx.integrations(),
+          secrets: account.secrets,
+          write: false,
+          search: false,
+        });
+      } catch (err) {
+        throw holdOf(err);
       }
-      const { finishTombstone, getSession, tombstone } = await import("@seshi/pipeline");
-      const metadata = await getSession(instance.store, owner, agent, sessionId);
-      if (!metadata) return "absent";
-      if (metadata.status === "redacted") {
-        await finishTombstone({ store: instance.store, owner, agent, session_id: sessionId });
-        return "gone";
+      try {
+        return await retractIn(opened, agent, sessionId, secret);
+      } catch (err) {
+        const refused = refusalOf(err, opened.owner);
+        if (refused instanceof Refused) throw new SignInNeeded(refused.message, "bucket refused");
+        throw err;
+      } finally {
+        await opened.close();
       }
-      if (metadata.retract_hash !== retractHash(secret)) {
-        throw new RetractRefused(
-          "bad_retract_secret",
-          "the retraction secret is not the one this session was uploaded with",
-        );
-      }
-      await tombstone({
-        store: instance.store,
-        owner,
-        agent,
-        session_id: sessionId,
-        now: instance.now,
-        reason: "retracted",
-        writer: localWriter(owner),
-      });
-      return "retracted";
     },
   };
+  async function retractIn(
+    opened: ServerlessBucket,
+    agent: string,
+    sessionId: string,
+    secret: string,
+  ): Promise<"retracted" | "gone" | "absent"> {
+    const { instance, owner } = opened;
+    if (!instance.config.capture.allow_retract) {
+      throw new RetractRefused(
+        "retract_disabled",
+        "retraction is turned off (capture.allow_retract)",
+      );
+    }
+    const { finishTombstone, getSession, tombstone } = await import("@seshi/pipeline");
+    const metadata = await getSession(instance.store, owner, agent, sessionId);
+    if (!metadata) return "absent";
+    if (metadata.status === "redacted") {
+      await finishTombstone({ store: instance.store, owner, agent, session_id: sessionId });
+      return "gone";
+    }
+    if (metadata.retract_hash !== retractHash(secret)) {
+      throw new RetractRefused(
+        "bad_retract_secret",
+        "the retraction secret is not the one this session was uploaded with",
+      );
+    }
+    await tombstone({
+      store: instance.store,
+      owner,
+      agent,
+      session_id: sessionId,
+      now: instance.now,
+      reason: "retracted",
+      writer: localWriter(owner),
+    });
+    return "retracted";
+  }
   return {
     sink,
     upkeep: async (log) => {

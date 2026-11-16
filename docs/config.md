@@ -403,7 +403,7 @@ The bucket key is not in this file: `seshi init --serverless` keeps it in the ke
 `credentials.json` with `keychain = false`; without one, the `AWS_*`, `S3_*` and `R2_*` variables
 apply ([serverless.md](serverless.md#credentials)). The server config this machine uses is,
 lowest first: built-in defaults, the bucket's `config/seshi.toml`, the file `config` names,
-`SESHI_*` env, `--set`; `[[sources]]`, `[otlp]`, `[auth]`, `[server]` and `[worker]` are ignored
+`SESHI_*` env, `--set`; `[[sources]]` (OTLP intake included), `[auth]`, `[server]` and `[worker]` are ignored
 in any of them.
 
 `[search]`, this machine's search index in serverless mode (F11.9):
