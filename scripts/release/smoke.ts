@@ -298,6 +298,22 @@ export async function smoke(options: SmokeOptions): Promise<SmokeResult> {
         `${orgKey}\n`,
       ),
     );
+    if (login.out.trim() === "") {
+      // Which await never answered: stdin, or the OS keychain? Ask both ways round.
+      const loginArgs = ["login", "--server", url, "--user", "smoke@example.com", "--json"];
+      const asArgument = await run([...loginArgs, "--key", orgKey]);
+      const noKeychain = await run([...loginArgs, "--key", "-"], `${orgKey}\n`, {
+        ...env,
+        SESHI_KEYCHAIN: "false",
+      });
+      const said = (r: Ran) =>
+        `exit ${r.code}, stdout ${JSON.stringify(r.out.slice(0, 200))}, stderr ${JSON.stringify(r.err.slice(0, 300))}`;
+      throw new Error(
+        `login --key - printed nothing (exit ${login.code}, stderr ${JSON.stringify(login.err)}).\n` +
+          `  key as an argument, keychain on: ${said(asArgument)}\n` +
+          `  key on stdin, keychain off: ${said(noKeychain)}`,
+      );
+    }
     const storedIn = jsonOf("login --key", login).stored_in as string;
     log(`credentials stored in: ${storedIn}`);
     if (keychain === "required" && storedIn !== "keychain") {

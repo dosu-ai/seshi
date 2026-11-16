@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
 import { VERSION } from "@seshi/model";
+import { EXIT } from "./cli/exit";
 import { COMMANDS, type CommandContext, type CommandSpec } from "./commands/index";
 
 export interface MainOptions {
@@ -114,7 +115,18 @@ function flushed(stream: NodeJS.WriteStream): Promise<void> {
 
 if (import.meta.main) {
   // No top-level await: the compiled binary is bytecode, which needs a CommonJS-shaped entry.
+  let settled = false;
+  // Bun exits 0 when the event loop empties, even while a command still awaits something that
+  // will never answer: say so, and fail, instead of reporting success with no output.
+  process.on("beforeExit", () => {
+    if (settled) return;
+    process.stderr.write(
+      "seshi: stopped before finishing: something it waited on never answered\n",
+    );
+    process.exit(EXIT.failure);
+  });
   void main(process.argv.slice(2)).then(async (code) => {
+    settled = true;
     if (code === undefined) return;
     await Promise.all([flushed(process.stdout), flushed(process.stderr)]);
     process.exit(code);
