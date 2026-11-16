@@ -118,6 +118,7 @@ async function laptop(
     secrets?: MemorySecrets;
     config?: string;
     includePrivate?: boolean;
+    scope?: "mine" | "visible" | "all";
   } = {},
 ): Promise<{ bucket: ServerlessBucket; backend: ServerlessBackend }> {
   const bucket = await openServerless({
@@ -127,7 +128,7 @@ async function laptop(
         owner,
         ...(options.config ? { config: options.config } : {}),
       },
-      search: { enabled: true, scope: "visible" },
+      search: { enabled: true, scope: options.scope ?? "visible" },
     }),
     env: options.env ?? {},
     home: join(dir, `home-${owner}`),
@@ -214,6 +215,15 @@ describe("two laptops on one bucket (F11.4, F11.5)", () => {
       code: "access_denied",
       message: "this key can't read owners/alice/…: it can read only its own owner's folder",
     });
+  });
+
+  it("searches its own sessions with scope mine, without listing other owners", async () => {
+    const alice = await laptop("alice", member("alice"));
+    await alice.bucket.instance.localSessions("alice", "claimed").ingest(upload("a1"));
+    const bob = await laptop("bob", ownOnly("bob"), { scope: "mine" });
+    await bob.bucket.instance.localSessions("bob", "claimed").ingest(upload("b1"));
+    const found = await bob.backend.search({ q: "auth flow" });
+    expect(found.results.map((r) => `${r.owner}/${r.session_id}`)).toEqual(["bob/b1"]);
   });
 
   it("refuses to write with a key that cannot write its own folder", async () => {

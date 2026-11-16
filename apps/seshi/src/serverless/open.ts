@@ -466,7 +466,7 @@ export async function openServerless(options: ServerlessOpenOptions): Promise<Se
             },
             ...(options.now ? { now: options.now } : {}),
             indexer: {
-              ...(scope === "mine" ? { owners: (o: string) => o === owner } : {}),
+              ...(scope === "mine" ? { owners: [owner] } : {}),
               ...(scope === "visible"
                 ? {
                     admit: (s: { owner: string; visibility?: string }) =>

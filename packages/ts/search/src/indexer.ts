@@ -40,8 +40,9 @@ export interface IndexerOptions {
   pageSize?: number;
   budget?: number;
   ownerRefreshMs?: number;
-  /** Only these owners' feeds are read; every owner's when omitted (F11.9, scope `mine`). */
-  owners?: (owner: string) => boolean;
+  /** Only these owners' feeds are read, without listing `owners/` (F11.9, scope `mine`: a key
+   * limited to its own folder may not list the others); every owner's when omitted. */
+  owners?: readonly string[];
   /** Only sessions this admits are indexed; one it stops admitting is removed (F11.9, scope
    * `visible`: others' owner-only sessions are left out). */
   admit?: (session: { owner: string; visibility?: SessionMetadata["visibility"] }) => boolean;
@@ -184,7 +185,7 @@ export class Indexer {
   private readonly pageSize: number;
   private readonly budget: number;
   private readonly ownerRefreshMs: number;
-  private readonly ownerFilter: ((owner: string) => boolean) | undefined;
+  private readonly fixedOwners: readonly string[] | undefined;
   private readonly admit: IndexerOptions["admit"];
   private owners: { list: string[]; at: number } | undefined;
   private running: Promise<IndexerRun> | undefined;
@@ -199,7 +200,7 @@ export class Indexer {
     this.pageSize = options.pageSize ?? FEED_PAGE;
     this.budget = options.budget ?? RUN_BUDGET;
     this.ownerRefreshMs = options.ownerRefreshMs ?? OWNER_REFRESH_MS;
-    this.ownerFilter = options.owners;
+    this.fixedOwners = options.owners;
     this.admit = options.admit;
   }
 
@@ -240,6 +241,7 @@ export class Indexer {
   }
 
   private async ownerList(): Promise<string[]> {
+    if (this.fixedOwners) return [...this.fixedOwners];
     const now = this.now().getTime();
     const cached = this.owners;
     if (cached && cached.list.length > 0 && now - cached.at < this.ownerRefreshMs) {
@@ -249,8 +251,7 @@ export class Indexer {
     let after: string | undefined;
     for (;;) {
       const page = await listOwners(this.store, { after, limit: 1000 });
-      const filter = this.ownerFilter;
-      list.push(...(filter ? page.owners.filter((o) => filter(o)) : page.owners));
+      list.push(...page.owners);
       if (!page.truncated || page.cursor === undefined) break;
       after = page.cursor;
     }

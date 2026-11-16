@@ -100,6 +100,12 @@ export function loadServerlessConfig(
   const base = options.base
     ? { path: options.base.path, tree: drop(options.base.tree, options.base.path, true) }
     : undefined;
+  const search = base?.tree.search;
+  if (search && typeof search === "object" && "path" in search) {
+    ignored.push(`search.path in ${base?.path}: a path on each laptop is the laptop's to set`);
+    const { path: _path, ...rest } = search as Record<string, unknown>;
+    (base as { tree: Record<string, unknown> }).tree.search = rest;
+  }
   const file = options.file;
   if (file !== undefined) {
     let text: string;
