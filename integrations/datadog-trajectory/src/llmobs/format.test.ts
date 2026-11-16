@@ -487,6 +487,36 @@ describe("assembling a turn from what it has", () => {
     expect(named.map((r) => (r as { content: string }).content)).toEqual(["a", "b"]);
   });
 
+  it("names a real call by the message it sits under, whatever order the calls started in", () => {
+    const message = (id: string, ms: number, value: string) =>
+      child(ms, { span_id: id, tags: semantic("agent_message"), output: { value } });
+    const call = (id: string, ms: number, parent: string, tokens: number) =>
+      dd(ms, 500, {
+        span_id: id,
+        parent_id: parent,
+        span_kind: "llm",
+        tags: ["trajectory.session_id:s", "trajectory.llm_call:true"],
+        metrics: { input_tokens: tokens, output_tokens: 1 },
+      });
+    const { records, llm_calls } = assemble([
+      part(root()),
+      part(message("11", 1000, "a")),
+      part(message("12", 2000, "b")),
+      part(call("21", 900, "12", 30)),
+      part(call("22", 1100, "11", 10)),
+    ]);
+    const named = records
+      .filter((r) => (r as { llm_call?: string }).llm_call)
+      .map((r) => {
+        const id = (r as unknown as { llm_call: string }).llm_call;
+        return [(r as { content: string }).content, llm_calls.find((c) => c.id === id)?.usage];
+      });
+    expect(named).toEqual([
+      ["a", expect.objectContaining({ input_tokens: 10 })],
+      ["b", expect.objectContaining({ input_tokens: 30 })],
+    ]);
+  });
+
   it("prefers a tier that counts tokens over one that only names a model", () => {
     const { llm_calls } = assemble([
       part(root({ output: undefined })),

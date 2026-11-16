@@ -345,11 +345,11 @@ export function mergeCalls(calls: readonly LlmCall[]): LlmCall {
   return merged;
 }
 
-function turnParts(trace: readonly SpanPart[]): SpanPart[] {
-  const parts = [...trace].sort(byStart);
-  const thread = parts[0]?.trace_id ?? "";
+type TurnCall = { part: SpanPart; call: LlmCall };
+
+function messageOutputOf(parts: readonly SpanPart[]): (p: SpanPart) => NormalizedRecord[] {
   const tools = parts.some((p) => p.operation === OPERATION.tool && p.tool);
-  const messageOutput = (p: SpanPart): NormalizedRecord[] =>
+  return (p) =>
     (p.output ?? []).flatMap((r): NormalizedRecord[] => {
       if (!tools) return [r];
       if (r.role === "tool") return [];
@@ -367,108 +367,134 @@ function turnParts(trace: readonly SpanPart[]): SpanPart[] {
       }
       return [r];
     });
+}
+
+function keptTurnParts(parts: readonly SpanPart[]): Map<SpanPart, SpanPart> {
+  const thread = parts[0]?.trace_id ?? "";
+  const messageOutput = messageOutputOf(parts);
   const messages = parts.filter(
     (p) => p.operation === OPERATION.agentMessage && spoke(messageOutput(p)),
   );
-
-  const kept = new Map<SpanPart, SpanPart>();
-  for (const p of parts) {
-    let out: SpanPart;
+  const keepFrom = (p: SpanPart): SpanPart => {
     switch (p.operation) {
       case OPERATION.turn:
-        out = keep(p, { input: p.input, ...(messages.length === 0 ? { output: p.output } : {}) });
-        break;
+        return keep(p, { input: p.input, ...(messages.length === 0 ? { output: p.output } : {}) });
       case OPERATION.agentMessage:
-        out = keep(p, { output: messageOutput(p) });
-        break;
+        return keep(p, { output: messageOutput(p) });
       case OPERATION.tool:
-        out = keep(p, p.tool ? { tool: p.tool } : {});
-        break;
+        return keep(p, p.tool ? { tool: p.tool } : {});
       case OPERATION.compaction:
-        out = keep(p, { output: p.output });
-        break;
+        return keep(p, { output: p.output });
       default:
-        out = keep(p, {});
+        return keep(p, {});
     }
+  };
+  const kept = new Map<SpanPart, SpanPart>();
+  for (const p of parts) {
+    const out = keepFrom(p);
     out.thread = thread;
     kept.set(p, out);
   }
+  return kept;
+}
 
+function promptFromFirstRequest(parts: readonly SpanPart[], kept: Map<SpanPart, SpanPart>): void {
   const prompted = [...kept.values()].some((p) => (p.input ?? []).some((r) => r.role === "user"));
-  if (!prompted) {
-    const first = parts.find(
-      (p) =>
-        (p.operation === OPERATION.llm || p.operation === OPERATION.placeholder) &&
-        (p.input ?? []).length > 0,
-    );
-    if (first?.input) {
-      const input = first.input;
-      let from = input.length;
-      while (from > 0 && input[from - 1]?.role === "user") from--;
-      const prompt = input.slice(from);
-      const target = kept.get(first);
-      if (target && prompt.length > 0) target.input = prompt;
-    }
-  }
+  if (prompted) return;
+  const first = parts.find(
+    (p) =>
+      (p.operation === OPERATION.llm || p.operation === OPERATION.placeholder) &&
+      (p.input ?? []).length > 0,
+  );
+  if (!first?.input) return;
+  const input = first.input;
+  let from = input.length;
+  while (from > 0 && input[from - 1]?.role === "user") from--;
+  const prompt = input.slice(from);
+  const target = kept.get(first);
+  if (target && prompt.length > 0) target.input = prompt;
+}
 
-  const tiers: ((p: SpanPart) => boolean)[] = [
-    (p) => p.operation === OPERATION.llm,
-    (p) => p.operation === OPERATION.agentMessage,
-    (p) => p.operation === OPERATION.placeholder,
-    (p) => p.operation === OPERATION.turn,
-    () => true,
-  ];
-  let calls: { part: SpanPart; call: LlmCall }[] = [];
-  let totals = false;
+const CALL_TIERS: { holds: (p: SpanPart) => boolean; totals: boolean }[] = [
+  { holds: (p) => p.operation === OPERATION.llm, totals: false },
+  { holds: (p) => p.operation === OPERATION.agentMessage, totals: false },
+  { holds: (p) => p.operation === OPERATION.placeholder, totals: true },
+  { holds: (p) => p.operation === OPERATION.turn, totals: true },
+  { holds: () => true, totals: false },
+];
+
+function turnCalls(parts: readonly SpanPart[]): { calls: TurnCall[]; totals: boolean } {
   for (const counted of [true, false]) {
-    for (const [i, tier] of tiers.entries()) {
-      const found = parts
-        .filter((p) => p.llm_call && tier(p) && (!counted || p.llm_call.usage))
+    for (const tier of CALL_TIERS) {
+      const calls = parts
+        .filter((p) => p.llm_call && tier.holds(p) && (!counted || p.llm_call.usage))
         .map((p) => ({ part: p, call: p.llm_call as LlmCall }));
-      if (found.length > 0) {
-        calls = found;
-        totals = i === 2 || i === 3;
-        break;
-      }
+      if (calls.length > 0) return { calls, totals: tier.totals };
     }
-    if (calls.length > 0) break;
   }
+  return { calls: [], totals: false };
+}
+
+function nameTotals(
+  kept: Map<SpanPart, SpanPart>,
+  carriers: readonly SpanPart[],
+  calls: readonly TurnCall[],
+): void {
+  const target = kept.get(carriers[carriers.length - 1] as SpanPart);
+  if (target) target.llm_call = mergeCalls(calls.map((c) => c.call));
+}
+
+function nameEachCall(
+  parts: readonly SpanPart[],
+  kept: Map<SpanPart, SpanPart>,
+  carriers: readonly SpanPart[],
+  calls: readonly TurnCall[],
+): void {
+  const byId = new Map(parts.map((p) => [p.span_id, p]));
+  const above = (part: SpanPart): SpanPart | undefined => {
+    const seen = new Set<string>();
+    for (let id = part.parent_span_id; id && !seen.has(id); ) {
+      seen.add(id);
+      const parent = byId.get(id);
+      if (!parent) return undefined;
+      if (carriers.includes(parent)) return parent;
+      id = parent.parent_span_id;
+    }
+    return undefined;
+  };
+  const assigned = new Map<SpanPart, LlmCall[]>();
+  const rest: LlmCall[] = [];
+  for (const { part, call } of calls) {
+    const home = carriers.includes(part) ? part : above(part);
+    if (home) assigned.set(home, [...(assigned.get(home) ?? []), call]);
+    else rest.push(call);
+  }
+  const free = carriers.filter((c) => !assigned.has(c));
+  rest.forEach((call, i) => {
+    const carrier = free[i] ?? (carriers[carriers.length - 1] as SpanPart);
+    assigned.set(carrier, [...(assigned.get(carrier) ?? []), call]);
+  });
+  for (const [carrier, list] of assigned) {
+    const target = kept.get(carrier);
+    if (target) target.llm_call = mergeCalls(list);
+  }
+}
+
+function nameCalls(parts: readonly SpanPart[], kept: Map<SpanPart, SpanPart>): void {
+  const { calls, totals } = turnCalls(parts);
   const carriers = [...kept.entries()]
     .filter(([, k]) => spoke(k.output))
     .map(([original]) => original);
-  if (carriers.length > 0 && calls.length > 0 && totals) {
-    const target = kept.get(carriers[carriers.length - 1] as SpanPart);
-    if (target) target.llm_call = mergeCalls(calls.map((c) => c.call));
-  } else if (carriers.length > 0 && calls.length > 0) {
-    const byId = new Map(parts.map((p) => [p.span_id, p]));
-    const above = (part: SpanPart): SpanPart | undefined => {
-      const seen = new Set<string>();
-      for (let id = part.parent_span_id; id && !seen.has(id); ) {
-        seen.add(id);
-        const parent = byId.get(id);
-        if (!parent) return undefined;
-        if (carriers.includes(parent)) return parent;
-        id = parent.parent_span_id;
-      }
-      return undefined;
-    };
-    const assigned = new Map<SpanPart, LlmCall[]>();
-    const rest: LlmCall[] = [];
-    for (const { part, call } of calls) {
-      const home = carriers.includes(part) ? part : above(part);
-      if (home) assigned.set(home, [...(assigned.get(home) ?? []), call]);
-      else rest.push(call);
-    }
-    const free = carriers.filter((c) => !assigned.has(c));
-    rest.forEach((call, i) => {
-      const carrier = free[i] ?? (carriers[carriers.length - 1] as SpanPart);
-      assigned.set(carrier, [...(assigned.get(carrier) ?? []), call]);
-    });
-    for (const [carrier, list] of assigned) {
-      const target = kept.get(carrier);
-      if (target) target.llm_call = mergeCalls(list);
-    }
-  }
+  if (carriers.length === 0 || calls.length === 0) return;
+  if (totals) nameTotals(kept, carriers, calls);
+  else nameEachCall(parts, kept, carriers, calls);
+}
+
+function turnParts(trace: readonly SpanPart[]): SpanPart[] {
+  const parts = [...trace].sort(byStart);
+  const kept = keptTurnParts(parts);
+  promptFromFirstRequest(parts, kept);
+  nameCalls(parts, kept);
   return [...kept.values()];
 }
 
