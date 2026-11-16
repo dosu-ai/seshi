@@ -202,27 +202,32 @@ export function turnedOnSince(
   );
 }
 
-export function decide(input: DecideInput, platform: NodeJS.Platform = process.platform): Decision {
-  const { rules, place } = input;
-  if (input.rulesError !== undefined) {
-    return {
-      capture: false,
-      level: "config",
-      reason: `the CLI config cannot be read: ${input.rulesError}`,
-    };
-  }
-  if (place.cwd === undefined) {
-    return {
-      capture: false,
-      level: "unknown",
-      reason: "where the session ran is not known, so its repo's rules cannot be checked",
-    };
-  }
-  const shared = sharedExclusion(rules, place);
-  if (shared) return shared;
+type LevelRule = (input: DecideInput, platform: NodeJS.Platform) => Decision | undefined;
+
+const unreadableConfig: LevelRule = (input) =>
+  input.rulesError === undefined
+    ? undefined
+    : {
+        capture: false,
+        level: "config",
+        reason: `the CLI config cannot be read: ${input.rulesError}`,
+      };
+
+const unknownFolder: LevelRule = (input) =>
+  input.place.cwd !== undefined
+    ? undefined
+    : {
+        capture: false,
+        level: "unknown",
+        reason: "where the session ran is not known, so its repo's rules cannot be checked",
+      };
+
+const sharedRulesHere: LevelRule = (input) => sharedExclusion(input.rules, input.place);
+
+const sharedRulesSeen: LevelRule = (input) => {
   for (const other of input.seen ?? []) {
-    if (other.cwd === undefined || other.cwd === place.cwd) continue;
-    const excluded = sharedExclusion(rules, other);
+    if (other.cwd === undefined || other.cwd === input.place.cwd) continue;
+    const excluded = sharedExclusion(input.rules, other);
     if (excluded) {
       return {
         ...excluded,
@@ -230,58 +235,96 @@ export function decide(input: DecideInput, platform: NodeJS.Platform = process.p
       };
     }
   }
-  if (input.toggle === "off") {
-    return { capture: false, level: "session", reason: "turned off for this session" };
-  }
-  if (input.frozen !== undefined) {
-    return {
-      capture: false,
-      level: "pause",
-      reason: "stopped by a pause; seshi capture on --session turns it back on",
-      frozen: input.frozen,
-    };
-  }
-  if (input.paused && !turnedOnSince(input.toggle, input.toggledAt, input.pausedAt)) {
-    return {
-      capture: false,
-      level: "pause",
-      reason: "capture is paused: the session stops where it is",
-      frozen: input.uploaded ?? 0,
-    };
-  }
-  const started = input.started === undefined ? Number.NaN : Date.parse(input.started);
-  const startedIn = Number.isFinite(started)
-    ? input.pauses?.find(
-        (w) =>
-          Date.parse(w.at) <= started &&
-          (w.until === undefined || started < Date.parse(w.until)) &&
-          !turnedOnSince(input.toggle, input.toggledAt, w.at),
-      )
+  return undefined;
+};
+
+const sessionOff: LevelRule = (input) =>
+  input.toggle === "off"
+    ? { capture: false, level: "session", reason: "turned off for this session" }
     : undefined;
-  if (startedIn) {
-    return {
-      capture: false,
-      level: "pause",
-      reason: "it started while capture was paused",
-      frozen: input.uploaded ?? 0,
-    };
-  }
-  if (input.toggle !== undefined) {
-    return {
-      capture: input.toggle === "on",
-      level: "session",
-      reason: `turned ${input.toggle} for this session`,
-    };
-  }
-  const folder = folderRule(rules, place, platform);
-  if (folder) {
-    return {
-      capture: folder.capture,
-      level: "folder",
-      reason: `${folder.capture ? "captured" : "not captured"} under ${folder.path} ([[capture.paths]])`,
-    };
-  }
+
+const frozenByPause: LevelRule = (input) =>
+  input.frozen === undefined
+    ? undefined
+    : {
+        capture: false,
+        level: "pause",
+        reason: "stopped by a pause; seshi capture on --session turns it back on",
+        frozen: input.frozen,
+      };
+
+const pausedNow: LevelRule = (input) =>
+  input.paused && !turnedOnSince(input.toggle, input.toggledAt, input.pausedAt)
+    ? {
+        capture: false,
+        level: "pause",
+        reason: "capture is paused: the session stops where it is",
+        frozen: input.uploaded ?? 0,
+      }
+    : undefined;
+
+const startedInPause: LevelRule = (input) => {
+  const started = input.started === undefined ? Number.NaN : Date.parse(input.started);
+  if (!Number.isFinite(started)) return undefined;
+  const window = input.pauses?.find(
+    (w) =>
+      Date.parse(w.at) <= started &&
+      (w.until === undefined || started < Date.parse(w.until)) &&
+      !turnedOnSince(input.toggle, input.toggledAt, w.at),
+  );
+  return window
+    ? {
+        capture: false,
+        level: "pause",
+        reason: "it started while capture was paused",
+        frozen: input.uploaded ?? 0,
+      }
+    : undefined;
+};
+
+const sessionToggle: LevelRule = (input) =>
+  input.toggle === undefined
+    ? undefined
+    : {
+        capture: input.toggle === "on",
+        level: "session",
+        reason: `turned ${input.toggle} for this session`,
+      };
+
+const folderLevel: LevelRule = (input, platform) => {
+  const folder = folderRule(input.rules, input.place, platform);
+  return folder
+    ? {
+        capture: folder.capture,
+        level: "folder",
+        reason: `${folder.capture ? "captured" : "not captured"} under ${folder.path} ([[capture.paths]])`,
+      }
+    : undefined;
+};
+
+function globalLevel(rules: CaptureRules): Decision {
   return rules.enabled
     ? { capture: true, level: "global", reason: "capture is on" }
     : { capture: false, level: "global", reason: "capture is off for this user (capture.enabled)" };
+}
+
+const PRECEDENCE: readonly LevelRule[] = [
+  unreadableConfig,
+  unknownFolder,
+  sharedRulesHere,
+  sharedRulesSeen,
+  sessionOff,
+  frozenByPause,
+  pausedNow,
+  startedInPause,
+  sessionToggle,
+  folderLevel,
+];
+
+export function decide(input: DecideInput, platform: NodeJS.Platform = process.platform): Decision {
+  for (const level of PRECEDENCE) {
+    const decision = level(input, platform);
+    if (decision) return decision;
+  }
+  return globalLevel(input.rules);
 }

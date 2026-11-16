@@ -221,3 +221,83 @@ describe("the decision (F9.5)", () => {
     });
   });
 });
+
+describe("the order of the levels: each beats the one below it", () => {
+  const orgOnly: CaptureRules = { ...DEFAULT_RULES, remotes: ["github.com/acme"] };
+  const offRepo: Place = {
+    cwd: "/work/secret",
+    repo: repo({ root: "/work/secret", config: { capture: false } }),
+  };
+  const pauses = [{ at: "2026-11-01T10:00:00Z", until: "2026-11-01T12:00:00Z" }];
+
+  it("an unreadable CLI config beats an unknown folder", () => {
+    expect(judge({ rulesError: "bad", place: {} })).toMatchObject({ level: "config" });
+  });
+
+  it("an unknown folder beats the shared rules", () => {
+    expect(judge({ rules: orgOnly, place: {} })).toMatchObject({ level: "unknown" });
+  });
+
+  it("the shared rules where it runs beat those of a folder it was seen in", () => {
+    expect(judge({ rules: orgOnly, place: offRepo, seen: [{ cwd: "/tmp" }] })).toEqual({
+      capture: false,
+      level: "repo",
+      reason: "the repo turns capture off (.seshi/config.toml)",
+    });
+  });
+
+  it("the shared rules of a folder it was seen in beat a session turned off", () => {
+    expect(judge({ place: { cwd: "/work/app" }, seen: [offRepo], toggle: "off" })).toMatchObject({
+      level: "repo",
+    });
+  });
+
+  it("a session turned off beats a pause that stopped it", () => {
+    expect(judge({ toggle: "off", frozen: 80 })).toEqual({
+      capture: false,
+      level: "session",
+      reason: "turned off for this session",
+    });
+  });
+
+  it("a pause that stopped it beats the pause in force: it stays at its first offset", () => {
+    expect(judge({ frozen: 80, paused: true, uploaded: 120 })).toEqual({
+      capture: false,
+      level: "pause",
+      reason: "stopped by a pause; seshi capture on --session turns it back on",
+      frozen: 80,
+    });
+  });
+
+  it("the pause in force beats a pause it started in", () => {
+    expect(judge({ paused: true, pauses, started: "2026-11-01T11:00:00Z", uploaded: 40 })).toEqual({
+      capture: false,
+      level: "pause",
+      reason: "capture is paused: the session stops where it is",
+      frozen: 40,
+    });
+  });
+
+  it("a pause it started in beats a session turned on before that pause", () => {
+    expect(
+      judge({
+        pauses,
+        started: "2026-11-01T11:00:00Z",
+        toggle: "on",
+        toggledAt: "2026-11-01T09:00:00Z",
+      }),
+    ).toMatchObject({ capture: false, level: "pause" });
+  });
+
+  it("a session turned on beats a folder rule, and a folder rule beats the global one", () => {
+    const rules: CaptureRules = {
+      enabled: false,
+      remotes: [],
+      paths: [{ path: "/work", capture: false }],
+    };
+    expect(judge({ rules, toggle: "on" })).toMatchObject({ capture: true, level: "session" });
+    expect(judge({ rules: { ...rules, paths: [{ path: "/work", capture: true }] } })).toMatchObject(
+      { capture: true, level: "folder" },
+    );
+  });
+});
