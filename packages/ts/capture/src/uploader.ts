@@ -160,6 +160,11 @@ export interface PassSummary {
   signIn?: string;
 }
 
+interface PassProgress {
+  succeeded: boolean;
+  transientFailure?: string;
+}
+
 const SECOND = 1000;
 
 const bytesOf = (text: string) => Buffer.byteLength(text, "utf8");
@@ -473,8 +478,6 @@ export class Uploader {
       this.now().getTime() - Date.parse(before.uploader.last_sweep) >= this.sweepIntervalMs;
     if (sweepDue) summary.found = await this.sweep(snapshot, options.sweepSince);
 
-    let transientFailure: string | undefined;
-    let succeeded = false;
     const state = readState(this.paths);
     const keys = Object.keys(state.sessions)
       .filter((k) => !options.only || options.only.has(k))
@@ -483,7 +486,26 @@ export class Uploader {
           (state.sessions[a]?.last_seen ?? "").localeCompare(state.sessions[b]?.last_seen ?? "") ||
           (a < b ? -1 : a > b ? 1 : 0),
       );
+    const retracted = await this.retractPending(keys, state, summary);
+    const uploaded = await this.uploadPending(keys, state, snapshot, summary);
+    const succeeded = retracted.succeeded || uploaded.succeeded;
+    const transientFailure = uploaded.transientFailure ?? retracted.transientFailure;
+    const signedIn = await this.clearSignInWhenReady(state, summary, succeeded);
+    if (!summary.signIn) await this.checkStale();
+    const backlog = this.queued(snapshot);
+    summary.queued = backlog.queued;
+    summary.retrying = backlog.retrying;
+    await this.finish(summary, { succeeded, signedIn, transientFailure });
+    return summary;
+  }
 
+  private async retractPending(
+    keys: readonly string[],
+    state: CaptureState,
+    summary: PassSummary,
+  ): Promise<PassProgress> {
+    let transientFailure: string | undefined;
+    let succeeded = false;
     for (const key of keys) {
       if (summary.signIn) break;
       const session = state.sessions[key] as SessionState;
@@ -499,7 +521,17 @@ export class Uploader {
         if (outcome.transient) transientFailure = outcome.transient;
       }
     }
+    return { succeeded, ...(transientFailure !== undefined ? { transientFailure } : {}) };
+  }
 
+  private async uploadPending(
+    keys: readonly string[],
+    state: CaptureState,
+    snapshot: RulesSnapshot,
+    summary: PassSummary,
+  ): Promise<PassProgress> {
+    let transientFailure: string | undefined;
+    let succeeded = false;
     for (const key of keys) {
       if (summary.signIn) break;
       let session = state.sessions[key];
@@ -534,7 +566,14 @@ export class Uploader {
         if (outcome.transient) transientFailure = outcome.transient;
       }
     }
+    return { succeeded, ...(transientFailure !== undefined ? { transientFailure } : {}) };
+  }
 
+  private async clearSignInWhenReady(
+    state: CaptureState,
+    summary: PassSummary,
+    succeeded: boolean,
+  ): Promise<boolean> {
     let signedIn = succeeded;
     if (!summary.signIn && !succeeded && state.problems?.sign_in) {
       try {
@@ -545,13 +584,7 @@ export class Uploader {
         else this.log(`could not check the credential: ${message(err)}`);
       }
     }
-
-    if (!summary.signIn) await this.checkStale();
-    const backlog = this.queued(snapshot);
-    summary.queued = backlog.queued;
-    summary.retrying = backlog.retrying;
-    await this.finish(summary, { succeeded, signedIn, transientFailure });
-    return summary;
+    return signedIn;
   }
 
   private async takeSpool(): Promise<number> {

@@ -605,6 +605,66 @@ describe("the upload protocol", () => {
     expect(readState(paths).problems).toBeUndefined();
   });
 
+  it("retracts before it uploads anything in a pass", async () => {
+    writeFileSync(transcript(), line("one") + line("two"));
+    hooked();
+    await uploader().pass();
+    await updateState(paths, (s) => {
+      const off = s.sessions["fake:s1"] as SessionState;
+      off.toggle = "off";
+      off.retract = "pending";
+    });
+    writeFileSync(transcript("s2"), line("one", "s2") + line("two", "s2"));
+    hooked("s2");
+    const calls: string[] = [];
+    const ingest = server.ingest.bind(server);
+    const retract = server.retract.bind(server);
+    server.ingest = async (upload, options) => {
+      calls.push(`ingest ${upload.session_id}`);
+      return ingest(upload, options);
+    };
+    server.retract = async (format, id, secret) => {
+      calls.push(`retract ${id}`);
+      return retract(format, id, secret);
+    };
+    await uploader().pass();
+    expect(calls).toEqual(["retract s1", "ingest s2"]);
+  });
+
+  it("lets an upload clear a sign-in problem without asking for the credential first", async () => {
+    server.signedIn = false;
+    writeFileSync(transcript(), line("one") + line("two"));
+    hooked();
+    await uploader().pass();
+    expect(readState(paths).problems?.sign_in?.message).toBe("not signed in");
+    server.signedIn = true;
+    let asked = 0;
+    const ready = server.ready.bind(server);
+    server.ready = async () => {
+      asked++;
+      return ready();
+    };
+    const pass = await uploader().pass();
+    expect(pass.uploaded).toBe(1);
+    expect(asked).toBe(0);
+    expect(readState(paths).problems).toBeUndefined();
+  });
+
+  it("asks nothing about stale sessions while a sign-in is needed", async () => {
+    writeFileSync(transcript(), line("one") + line("two"));
+    hooked();
+    await uploader().pass();
+    expect(server.staleCalls).toBe(1);
+    await updateState(paths, (s) => {
+      s.problems = { sign_in: { message: "not signed in", at: clock.toISOString() } };
+    });
+    server.signedIn = false;
+    clock = new Date(clock.getTime() + 2 * 3600 * 1000);
+    const pass = await uploader().pass();
+    expect(pass.signIn).toBe("not signed in");
+    expect(server.staleCalls).toBe(1);
+  });
+
   it("sends a long tail in chunks of at most maxChunkBytes", async () => {
     writeFileSync(transcript(), line("one") + line("two"));
     hooked();
