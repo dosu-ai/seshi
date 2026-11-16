@@ -189,6 +189,26 @@ export async function smokeExplore(
   }
 }
 
+/** Set, read and delete one entry in the OS keychain, each step with a deadline. */
+async function probeKeychain(): Promise<string> {
+  const entry = { service: "seshi-smoke-probe", name: "probe" };
+  const within = <T>(step: string, work: Promise<T>) =>
+    Promise.race([
+      work,
+      Bun.sleep(10_000).then(() => {
+        throw new Error(`${step} did not answer in 10 s`);
+      }),
+    ]);
+  try {
+    await within("set", Bun.secrets.set({ ...entry, value: "x" }));
+    const read = await within("get", Bun.secrets.get(entry));
+    await within("delete", Bun.secrets.delete(entry));
+    return `set, get (${read === "x" ? "same value" : `got ${JSON.stringify(read)}`}) and delete answered`;
+  } catch (err) {
+    return (err as Error).message;
+  }
+}
+
 export async function smoke(options: SmokeOptions): Promise<SmokeResult> {
   const keychain = options.keychain ?? "allowed";
   const log = options.log ?? (() => {});
@@ -291,27 +311,23 @@ export async function smoke(options: SmokeOptions): Promise<SmokeResult> {
     }
     log("ok: serve");
 
-    const login = expectOk(
-      "login --key",
-      await run(
-        ["login", "--server", url, "--key", "-", "--user", "smoke@example.com", "--json"],
-        `${orgKey}\n`,
-      ),
-    );
-    if (login.out.trim() === "") {
-      // Which await never answered: stdin, or the OS keychain? Ask both ways round.
-      const loginArgs = ["login", "--server", url, "--user", "smoke@example.com", "--json"];
-      const asArgument = await run([...loginArgs, "--key", orgKey]);
-      const noKeychain = await run([...loginArgs, "--key", "-"], `${orgKey}\n`, {
-        ...env,
-        SESHI_KEYCHAIN: "false",
-      });
+    const loginArgs = ["login", "--server", url, "--user", "smoke@example.com", "--json"];
+    const login = await run([...loginArgs, "--key", "-"], `${orgKey}\n`);
+    if (login.code !== 0 || login.out.trim() === "") {
+      // Which await never answered? Read the key without stdin, store it without the keychain,
+      // and ask this runtime's keychain directly.
       const said = (r: Ran) =>
         `exit ${r.code}, stdout ${JSON.stringify(r.out.slice(0, 200))}, stderr ${JSON.stringify(r.err.slice(0, 300))}`;
+      const noKeychain = { ...env, SESHI_KEYCHAIN: "false" };
+      const argKeychain = await run([...loginArgs, "--key", orgKey]);
+      const stdinFile = await run([...loginArgs, "--key", "-"], `${orgKey}\n`, noKeychain);
+      const argFile = await run([...loginArgs, "--key", orgKey], undefined, noKeychain);
       throw new Error(
-        `login --key - printed nothing (exit ${login.code}, stderr ${JSON.stringify(login.err)}).\n` +
-          `  key as an argument, keychain on: ${said(asArgument)}\n` +
-          `  key on stdin, keychain off: ${said(noKeychain)}`,
+        `login --key - failed (${said(login)}).\n` +
+          `  key as an argument, keychain on: ${said(argKeychain)}\n` +
+          `  key on stdin, keychain off: ${said(stdinFile)}\n` +
+          `  key as an argument, keychain off: ${said(argFile)}\n` +
+          `  Bun.secrets in this runtime: ${await probeKeychain()}`,
       );
     }
     const storedIn = jsonOf("login --key", login).stored_in as string;
