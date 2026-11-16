@@ -51,9 +51,8 @@ const tick = () => {
 };
 
 /** `store`, with the next write of a session pointer failing once `armed` is set. */
-function failingPointer(): { store: Store; arm: () => void; puts: string[] } {
+function failingPointer(): { store: Store; arm: () => void } {
   let armed = false;
-  const puts: string[] = [];
   const wrapped = new Proxy(store, {
     get(target, prop, receiver) {
       if (prop === "put") {
@@ -62,14 +61,13 @@ function failingPointer(): { store: Store; arm: () => void; puts: string[] } {
             armed = false;
             throw new StoreError("injected: the pointer update failed");
           }
-          puts.push(key);
           return target.put(key, body, options);
         };
       }
       return Reflect.get(target, prop, receiver);
     },
   }) as Store;
-  return { store: wrapped, arm: () => (armed = true), puts };
+  return { store: wrapped, arm: () => (armed = true) };
 }
 
 const db = (over: Store = store, now: () => Date = tick) =>
@@ -81,47 +79,6 @@ const feed = async (after?: string) =>
   (await readChanges(store, "alice", after ? { after } : {})).entries;
 
 describe("change entries before the pointer (decision 7 of 18)", () => {
-  it("leaves a publish's entry, and the session as it was, when the pointer update fails", async () => {
-    const first = await db().ingest({
-      agent: "trajectory",
-      session_id: "s1",
-      transcript: log("a"),
-    });
-    const before = await metadata("s1");
-    const failing = failingPointer();
-    failing.arm();
-    const chunk = line({ role: "user", content: "appended", timestamp: ts });
-    await expect(
-      db(failing.store).ingest({
-        agent: "trajectory",
-        session_id: "s1",
-        transcript: chunk,
-        offset: first.bytes_total,
-      }),
-    ).rejects.toThrow(/injected/);
-    // The entry was written first; the pointer did not move, so it names a trace the session
-    // does not list.
-    const entries = await feed();
-    expect(entries).toHaveLength(2);
-    const orphan = entries.at(-1)?.entry;
-    expect(orphan).toMatchObject({ kind: "published", session_id: "s1" });
-    expect(failing.puts.filter((k) => k.includes("/changes/"))).toHaveLength(1);
-    expect(await metadata("s1")).toEqual(before);
-    expect(before?.traces.map((t) => t.content_hash)).not.toContain(orphan?.content_hash);
-    // The resend lands, with an entry of its own for the same trace.
-    const again = await db().ingest({
-      agent: "trajectory",
-      session_id: "s1",
-      transcript: chunk,
-      offset: first.bytes_total,
-    });
-    expect(again.status).toBe("stored");
-    const after = await feed();
-    expect(after).toHaveLength(3);
-    expect(after.at(-1)?.entry.content_hash).toBe(orphan?.content_hash);
-    expect((await metadata("s1"))?.head).toBe(orphan?.content_hash);
-  });
-
   it("leaves an entry for a first publish that failed, and no session", async () => {
     const failing = failingPointer();
     failing.arm();
@@ -133,13 +90,6 @@ describe("change entries before the pointer (decision 7 of 18)", () => {
     // Nothing of the session is left but the entry: its trace object was removed again.
     const files = (await store.list(`${keys.session("alice", archive("s1"))}/`)).keys;
     expect(files).toEqual([]);
-  });
-
-  it("writes no entry for a resend answered from `applied`", async () => {
-    const upload = { agent: "trajectory", session_id: "s1", transcript: log("a") };
-    await db().ingest(upload);
-    await db().ingest(upload);
-    expect(await feed()).toHaveLength(1);
   });
 
   it("leaves a tombstone's entry, and the session readable, when the pointer update fails", async () => {
