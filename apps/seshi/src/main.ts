@@ -2,6 +2,7 @@
 
 import { VERSION } from "@seshi/model";
 import { EXIT } from "./cli/exit";
+import { readStdin } from "./cli/stdin";
 import { COMMANDS, type CommandContext, type CommandSpec } from "./commands/index";
 
 export interface MainOptions {
@@ -86,7 +87,7 @@ export async function main(argv: string[], options: MainOptions = {}): Promise<n
     stderr,
     integrations:
       options.integrations ?? (() => import("./integrations").then((m) => m.INTEGRATIONS)),
-    stdin: options.stdin ?? (() => Bun.stdin.text()),
+    stdin: options.stdin ?? readStdin,
     tty,
     ...(noColor ? { noColor } : {}),
     ...(terminal ? { terminal } : {}),
