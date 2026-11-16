@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import type { CliConfig } from "@seshi/config";
 import {
@@ -197,11 +198,31 @@ async function resolveConfig(
   return { config: first.config, ignored: first.ignored, missing };
 }
 
-/** The endpoint a policy without a key here is pointed at: its model calls fail at once. */
-const NO_KEY_ENDPOINT = "https://no-review-key.seshi.invalid";
+/** What on this machine the shared settings' check reads besides the shared copy: the local
+ * config file, `SESHI_*` settings and `--set` values. */
+function localFingerprint(options: ServerlessOpenOptions, settings: ServerlessSettings): string {
+  const file =
+    settings.config !== undefined
+      ? expandHome(settings.config, homeFor(options.env, options.home))
+      : undefined;
+  let text: string | null = null;
+  if (file !== undefined) {
+    try {
+      text = readFileSync(file, "utf8");
+    } catch {}
+  }
+  const seshiEnv = Object.entries(options.env)
+    .filter(([name, value]) => name.startsWith("SESHI_") && value !== undefined)
+    .sort(([a], [b]) => a.localeCompare(b));
+  return createHash("sha256")
+    .update(JSON.stringify({ file, text, env: seshiEnv, flags: options.flags ?? [] }))
+    .digest("hex")
+    .slice(0, 16);
+}
 
 /** A reviewer whose policies without a key here fail at once, as a model that cannot be
- * reached would, and are stored as `skipped` (F11: `review.required = false`). */
+ * reached would, with no retries, and so are stored as `skipped` (F11: `review.required =
+ * false`). */
 async function reviewerFor(
   config: ServerConfig,
   missing: readonly MissingReviewKey[],
@@ -210,26 +231,18 @@ async function reviewerFor(
   if (config.review.policies.length === 0) return undefined;
   const keyless = new Set(missing.map((m) => m.policy));
   const policies = config.review.policies.map((p) =>
-    keyless.has(p.id)
-      ? {
-          ...p,
-          on_failure: "skip" as const,
-          retries: 0,
-          decision: { ...p.decision, base_url: NO_KEY_ENDPOINT },
-          redactor: { ...p.redactor, base_url: NO_KEY_ENDPOINT },
-        }
-      : p,
+    keyless.has(p.id) ? { ...p, on_failure: "skip" as const, retries: 0 } : p,
   );
   const real = providerFactory();
   return reviewerFromConfig(
     { review: { policies } },
     {
-      providers: (step, role) => {
-        if (step.base_url !== NO_KEY_ENDPOINT) return real(step, role);
+      providers: (step, role, policy) => {
+        if (!keyless.has(policy)) return real(step, role, policy);
         return {
           kind: step.provider,
           model: step.model,
-          endpoint: NO_KEY_ENDPOINT,
+          endpoint: step.base_url ?? "",
           complete: async () => {
             throw new ProviderError("no_key", false, `no ${step.provider} key on this machine`);
           },
@@ -240,16 +253,34 @@ async function reviewerFor(
   );
 }
 
+function settingsOf(cli: CliConfig): ServerlessSettings {
+  const settings = serverlessOf(cli);
+  if (!settings) {
+    throw new Refused(EXIT.config, "not_configured", "no [serverless] bucket in the CLI config");
+  }
+  return settings;
+}
+
+function noBucket(url: string): Refused {
+  return new Refused(
+    EXIT.config,
+    "no_bucket",
+    `no seshi bucket at ${url}: run seshi init --serverless`,
+  );
+}
+
+/** What a seshi below the bucket's minimum version is told (F11.7). */
+export function needsUpdate(minVersion: string): string {
+  return `this bucket needs seshi ${minVersion} or newer; you have ${VERSION}. Update seshi, then try again.`;
+}
+
 /** The bucket URL the CLI config names: `serverless.url`, else the local config's `[store]`. */
 export function serverlessBucketUrl(
   cli: CliConfig,
   env: Record<string, string | undefined>,
   home?: string,
 ): string {
-  const settings = serverlessOf(cli);
-  if (!settings) {
-    throw new Refused(EXIT.config, "not_configured", "no [serverless] bucket in the CLI config");
-  }
+  const settings = settingsOf(cli);
   if (settings.url !== undefined) return settings.url;
   const file = expandHome(settings.config as string, homeFor(env, home));
   return loadServerlessConfig({ file, env, resolveSecrets: false }).config.store.url;
@@ -338,10 +369,7 @@ export async function openServerlessStore(options: {
   secrets?: SecretBackend;
   flags?: readonly FlagValue[];
 }): Promise<{ store: Store; storage: StorageView; owner: string; paths: ServerlessPaths }> {
-  const settings = serverlessOf(options.cli);
-  if (!settings) {
-    throw new Refused(EXIT.config, "not_configured", "no [serverless] bucket in the CLI config");
-  }
+  const settings = settingsOf(options.cli);
   const home = homeFor(options.env, options.home);
   const file = settings.config !== undefined ? expandHome(settings.config, home) : undefined;
   const loaded = loadServerlessConfig({
@@ -369,10 +397,7 @@ export async function openServerlessStore(options: {
  * version and the mode, load the shared settings, and build the instance this machine runs
  * the pipeline in. */
 export async function openServerless(options: ServerlessOpenOptions): Promise<ServerlessBucket> {
-  const settings = serverlessOf(options.cli);
-  if (!settings) {
-    throw new Refused(EXIT.config, "not_configured", "no [serverless] bucket in the CLI config");
-  }
+  const settings = settingsOf(options.cli);
   const log = options.log ?? (() => {});
   const now = options.now ?? (() => new Date());
   const home = homeFor(options.env, options.home);
@@ -399,15 +424,11 @@ export async function openServerless(options: ServerlessOpenOptions): Promise<Se
     throw refusalOf(err, owner);
   }
   if (marker === null) {
-    throw new Refused(
-      EXIT.config,
-      "no_bucket",
-      `no seshi bucket at ${url}: run seshi init --serverless`,
-    );
+    throw noBucket(url);
   }
   const writable = marker.min_version === undefined || versionAtLeast(VERSION, marker.min_version);
   if (!writable) {
-    const needs = `this bucket needs seshi ${marker.min_version} or newer; you have ${VERSION}. Update seshi, then try again.`;
+    const needs = needsUpdate(marker.min_version as string);
     if (options.write) throw new Refused(EXIT.config, "needs_update", needs);
     warnings.push(needs);
   }
@@ -421,6 +442,7 @@ export async function openServerless(options: ServerlessOpenOptions): Promise<Se
   try {
     shared = await sharedSettings(store, paths, {
       now,
+      local: localFingerprint(options, settings),
       ...(options.refreshShared ? { force: true } : {}),
       check: async (base) => {
         const candidate = await resolveConfig(options, settings, base);
@@ -479,6 +501,7 @@ export async function openServerless(options: ServerlessOpenOptions): Promise<Se
         ? new SearchService({
             store,
             deployment: marker.deployment_id,
+            scope: scope === "all" ? "all" : `${scope}:${owner}`,
             settings: {
               ...(config.search.path ? { path: config.search.path } : {}),
               events: config.search.events,
@@ -498,11 +521,7 @@ export async function openServerless(options: ServerlessOpenOptions): Promise<Se
     });
   } catch (err) {
     if (err instanceof NoLayout) {
-      throw new Refused(
-        EXIT.config,
-        "no_bucket",
-        `no seshi bucket at ${url}: run seshi init --serverless`,
-      );
+      throw noBucket(url);
     }
     throw refusalOf(err, owner);
   }

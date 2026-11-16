@@ -61,67 +61,52 @@ function holdOf(err: unknown): unknown {
 /** Serverless mode (F11): this machine runs the pipeline and writes its owner's folder. */
 export async function serverlessSink(ctx: CommandContext, account: Account): Promise<OpenedSink> {
   const { openServerless, refusalOf, SERVERLESS_BASIS } = await import("./serverless/open");
-  let bucket: ServerlessBucket | undefined;
-  let opening: Promise<ServerlessBucket> | undefined;
-  let openedAt = 0;
-  /** The bucket opened for writing, shared by the uploader and the upkeep timer: one open at
-   * a time, and an old instance is closed only once a new one is in place. */
-  const open = (): Promise<ServerlessBucket> => {
-    if (bucket && Date.now() - openedAt < SERVERLESS_REOPEN_MS) return Promise.resolve(bucket);
-    opening ??= (async () => {
-      try {
-        const next = await openServerless({
-          cli: account.cli,
-          env: account.env,
-          home: account.home,
-          integrations: await ctx.integrations(),
-          secrets: account.secrets,
-          write: true,
-        });
-        const old = bucket;
-        bucket = next;
-        openedAt = Date.now();
-        await old?.close();
-        return next;
-      } catch (err) {
-        throw holdOf(err);
-      } finally {
-        opening = undefined;
-      }
-    })();
-    return opening;
-  };
+  const { Reopening } = await import("./serverless/reopening");
+  /** The bucket opened for writing, shared by the uploader and the upkeep timer. */
+  const bucket = new Reopening(async () => {
+    try {
+      return await openServerless({
+        cli: account.cli,
+        env: account.env,
+        home: account.home,
+        integrations: await ctx.integrations(),
+        secrets: account.secrets,
+        write: true,
+      });
+    } catch (err) {
+      throw holdOf(err);
+    }
+  }, SERVERLESS_REOPEN_MS);
   /** A refusal during a write is about the key, not the session (rotated, expired, a clock
    * off): uploads wait, as when opening the bucket is refused. */
-  const refusedIngest = (err: unknown): never => {
-    const refused = refusalOf(err, bucket?.owner);
+  const refusedIngest = (err: unknown, owner: string): never => {
+    const refused = refusalOf(err, owner);
     if (refused instanceof Refused) {
-      openedAt = 0;
+      bucket.expire();
       throw new SignInNeeded(refused.message, "bucket refused");
     }
     throw err;
   };
-  const db = async () => {
-    const opened = await open();
-    return opened.instance.localSessions(opened.owner, SERVERLESS_BASIS);
-  };
   const sink: SessionSink = {
     target: `serverless: ${serverlessOf(account.cli)?.url ?? "the bucket"}`,
     async ready() {
-      await open();
+      await bucket.open();
     },
-    ingest: async (upload, options) => {
-      const sessions = await db();
-      try {
-        return await sessions.ingest(upload, options);
-      } catch (err) {
-        return refusedIngest(err);
-      }
-    },
-    stale: async () => {
-      const sessions = await db();
-      return allStale((after) => sessions.staleSessions(after !== undefined ? { after } : {}));
-    },
+    ingest: (upload, options) =>
+      bucket.use(async (opened) => {
+        try {
+          return await opened.instance
+            .localSessions(opened.owner, SERVERLESS_BASIS)
+            .ingest(upload, options);
+        } catch (err) {
+          return refusedIngest(err, opened.owner);
+        }
+      }),
+    stale: () =>
+      bucket.use((opened) => {
+        const sessions = opened.instance.localSessions(opened.owner, SERVERLESS_BASIS);
+        return allStale((after) => sessions.staleSessions(after !== undefined ? { after } : {}));
+      }),
     async retract(agent, sessionId, secret) {
       // Retraction does not wait on a review key or a newer seshi: open the bucket for it alone.
       let opened: ServerlessBucket;
@@ -190,11 +175,9 @@ export async function serverlessSink(ctx: CommandContext, account: Account): Pro
     sink,
     upkeep: async (log) => {
       const { runUpkeep } = await import("./serverless/upkeep");
-      await runUpkeep(await open(), { log });
+      await bucket.use((opened) => runUpkeep(opened, { log }));
     },
-    close: async () => {
-      await bucket?.close();
-    },
+    close: () => bucket.close(),
   };
 }
 
@@ -373,14 +356,26 @@ export async function captureRuntime(
   const paths = capturePaths(host);
   const account = openAccount(ctx);
   let opened: OpenedSink | undefined;
+  let opening: Promise<OpenedSink> | undefined;
+  /** The one sink, shared by the uploader and the upkeep timer. */
+  const sinkOnce = (): Promise<OpenedSink> => {
+    opening ??= openSink(ctx, account).then(
+      (s) => {
+        opened = s;
+        return s;
+      },
+      (err: unknown) => {
+        opening = undefined;
+        throw err;
+      },
+    );
+    return opening;
+  };
   const uploader = new Uploader({
     paths,
     host,
     agents: await allCaptureAgents(),
-    sink: async () => {
-      opened ??= await openSink(ctx, account);
-      return opened.sink;
-    },
+    sink: async () => (await sinkOnce()).sink,
     preRedact: preRedactor(account, {
       cacheFile: paths.redactionRules,
       log: options.log ?? ((line) => appendLog(paths.log, `uploader: ${line}`)),
@@ -397,13 +392,13 @@ export async function captureRuntime(
     upkeep: async () => {
       if (!isServerless(account.cli)) return;
       try {
-        opened ??= await openSink(ctx, account);
-        await opened.upkeep?.(log);
+        await (await sinkOnce()).upkeep?.(log);
       } catch (err) {
         log(`upkeep: ${err instanceof Error ? err.message : String(err)}`);
       }
     },
     close: async () => {
+      await opening?.catch(() => undefined);
       await opened?.close();
     },
   };

@@ -159,10 +159,13 @@ What a key can be limited to depends on the store:
 
 **These policies have not yet been tried against a real AWS account.** Check them on a test
 bucket before you rely on them. When one is wrong, `seshi init --serverless` and `seshi doctor`
-say which request the bucket refused and which kind of key it takes. One thing to watch: S3
-answers a read of an object that does not exist with `403` instead of `404` when the key may not
-list where the object would be, and seshi reads missing objects as a matter of course (a new
-session's metadata). If `init` says a key can't read its own folder, check the `s3:ListBucket`
+say which request the bucket refused and which kind of key it takes. One thing to know: S3
+answers a read of an object that does not exist with `403` instead of `404` when the key's
+`s3:ListBucket` does not cover the read, and a grant limited by an `s3:prefix` condition (as
+below) never covers a GET, which carries no prefix. seshi reads missing objects as a matter of
+course (a new session's metadata), so on a `403` it lists exactly that key: when the listing is
+allowed and finds nothing, the object is missing; only when the listing is refused too is the
+read a refusal. If `init` says a key can't read its own folder, check the `s3:ListBucket`
 statement first.
 
 The examples are for the bucket `acme-seshi` with the prefix `seshi`

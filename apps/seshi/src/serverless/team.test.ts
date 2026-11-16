@@ -27,6 +27,8 @@ import { Refused } from "../cli/failures";
 import { INTEGRATIONS } from "../integrations";
 import { saveReviewKey } from "./keys";
 import { openServerless, type ServerlessBucket } from "./open";
+import { serverlessPaths } from "./settings";
+import { sharedSettings } from "./shared";
 
 const SMALL = readFileSync(
   new URL(
@@ -187,6 +189,18 @@ describe("two laptops on one bucket (F11.4, F11.5)", () => {
     expect(all.sessions.map((s) => s.session_id).sort()).toEqual(["open", "secret"]);
   });
 
+  it("fills a page past sessions the viewer may not read", async () => {
+    const alice = await laptop("alice", member("alice"));
+    const sessions = alice.bucket.instance.localSessions("alice", "claimed");
+    await sessions.ingest({ ...upload("p1"), visibility: "owner" });
+    await sessions.ingest({ ...upload("p2"), visibility: "owner" });
+    await sessions.ingest(upload("z1"));
+    const bob = await laptop("bob", member("bob"), { write: false });
+    const page = await bob.backend.listSessions({ owner: "alice", limit: 2 });
+    expect(page.sessions.map((s) => s.session_id)).toEqual(["z1"]);
+    expect(page.truncated).toBe(false);
+  });
+
   it("turns the bucket's refusal of another owner's folder into a message (exit 5)", async () => {
     const alice = await laptop("alice", member("alice"));
     await alice.bucket.instance.localSessions("alice", "claimed").ingest(upload("s1"));
@@ -225,6 +239,20 @@ describe("two laptops on one bucket (F11.4, F11.5)", () => {
     await bob.bucket.instance.localSessions("bob", "claimed").ingest(upload("b1"));
     const found = await bob.backend.search({ q: "auth flow" });
     expect(found.results.map((r) => `${r.owner}/${r.session_id}`)).toEqual(["bob/b1"]);
+  });
+
+  it("forgets other owners' sessions when the scope narrows to mine", async () => {
+    const alice = await laptop("alice", member("alice"));
+    await alice.bucket.instance.localSessions("alice", "claimed").ingest(upload("a1"));
+    const wide = await laptop("bob", member("bob"), { scope: "visible" });
+    await wide.bucket.instance.localSessions("bob", "claimed").ingest(upload("b1"));
+    const before = await wide.backend.search({ q: "auth flow" });
+    expect(before.results.map((r) => r.owner).sort()).toEqual(["alice", "bob"]);
+    await wide.bucket.close();
+
+    const narrow = await laptop("bob", ownOnly("bob"), { scope: "mine" });
+    const after = await narrow.backend.search({ q: "auth flow" });
+    expect(after.results.map((r) => `${r.owner}/${r.session_id}`)).toEqual(["bob/b1"]);
   });
 
   it("refuses to write with a key that cannot write its own folder", async () => {
@@ -322,6 +350,23 @@ describe("shared settings (F11.6)", () => {
     await expect(laptop("alice", blind)).rejects.toMatchObject({ code: "access_denied" });
   });
 
+  it("checks a rejected copy again once this machine's own settings change", async () => {
+    await sharedConfig('default_visibility = "org"\n');
+    const paths = serverlessPaths({}, join(dir, "home-x"), shared.url);
+    let fine = false;
+    const check = async () => {
+      if (!fine) throw new Error("the local file says no");
+    };
+    const first = await sharedSettings(shared, paths, { check, local: "a", force: true });
+    expect(first.unusable).toBe("the local file says no");
+    fine = true;
+    const unchanged = await sharedSettings(shared, paths, { check, local: "a", force: true });
+    expect(unchanged.unusable).toBe("the local file says no");
+    const fixed = await sharedSettings(shared, paths, { check, local: "b", force: true });
+    expect(fixed.unusable).toBeUndefined();
+    expect(fixed.base).toBeDefined();
+  });
+
   it("keeps the last good copy when the bucket's fails its checks", async () => {
     await sharedConfig('default_visibility = "owner"\n');
     await laptop("alice", member("alice"));
@@ -363,15 +408,31 @@ describe("model review without a key (F11)", () => {
     expect(alice.bucket.review.missing).toEqual([]);
   });
 
-  it("does not send a stored key to an endpoint the shared config names", async () => {
+  it("sends no laptop's key to an endpoint the shared config names", async () => {
     await sharedConfig(
-      '[review]\nrequired = true\n[[review.policies]]\nid = "team"\ndecision = { api_key = { env = "ANTHROPIC_API_KEY" }, base_url = "https://elsewhere.example" }\n',
+      '[[review.policies]]\nid = "team"\ndecision = { api_key = { env = "AWS_SECRET_ACCESS_KEY" }, base_url = "https://elsewhere.example" }\n',
     );
     const secrets = new MemorySecrets();
     await saveReviewKey(secrets, "anthropic", "sk-test");
-    await expect(laptop("alice", member("alice"), { secrets })).rejects.toMatchObject({
-      code: "needs_review_key",
+    const held = laptop("alice", member("alice"), {
+      secrets,
+      env: { AWS_SECRET_ACCESS_KEY: "laptop-secret" },
     });
+    await expect(held).rejects.toMatchObject({ code: "shared_settings" });
+    await expect(held).rejects.toThrow(/may not send each laptop's key to an endpoint it names/);
+  });
+
+  it("lets a laptop's own config name an endpoint for its key", async () => {
+    const local = join(dir, "local.toml");
+    writeFileSync(
+      local,
+      '[[review.policies]]\nid = "team"\ndecision = { api_key = { env = "PROXY_KEY" }, base_url = "https://proxy.example" }\n',
+    );
+    const alice = await laptop("alice", member("alice"), {
+      config: local,
+      env: { PROXY_KEY: "k" },
+    });
+    expect(alice.bucket.review.missing).toEqual([]);
   });
 
   it("stores with regex redaction only, as skipped, when review is not required", async () => {

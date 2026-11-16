@@ -61,7 +61,12 @@ export function matches(policy: Policy, scope: PolicyScope): boolean {
   return true;
 }
 
-export type ProviderFactory = (step: ResolvedStep, role: "decision" | "redactor") => ModelProvider;
+/** The model a policy's step calls; `policy` is the policy's id. */
+export type ProviderFactory = (
+  step: ResolvedStep,
+  role: "decision" | "redactor",
+  policy: string,
+) => ModelProvider;
 
 export function providerFactory(fetcher?: typeof fetch): ProviderFactory {
   return (step) => {
@@ -180,7 +185,7 @@ export async function loadPolicy(policy: ReviewPolicy, options: LoadOptions = {}
     policy.redactor.categories.length > 0 ? policy.redactor.categories : DEFAULT_CATEGORIES;
   const build = (role: "decision" | "redactor") => {
     try {
-      return providers(steps[role], role);
+      return providers(steps[role], role, policy.id);
     } catch (err) {
       const why = err instanceof Error ? err.message : String(err);
       throw new ReviewSetupError(`review policy '${policy.id}' ${role}: ${why}`);

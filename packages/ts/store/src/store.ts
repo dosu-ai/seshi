@@ -55,6 +55,8 @@ export interface ListedKey {
    * between the listing and the look. */
   modified?: string;
   size?: number;
+  /** The object's ETag, when the listing says (S3 does; the folder store does not). */
+  etag?: string;
 }
 
 export interface ListResult {

@@ -140,6 +140,9 @@ export interface SqliteIndexOptions {
   /** Which event roles are indexed: a file built with others is wiped (it would miss some,
    * or hold some it should not). */
   events: readonly EventRole[];
+  /** What the indexer admits, named (F11.9: a serverless laptop's search scope and owner): a
+   * file built under another scope is wiped, so it holds nothing this one would leave out. */
+  scope?: string;
 }
 
 export class SqliteIndex implements IndexStore {
@@ -162,6 +165,7 @@ export class SqliteIndex implements IndexStore {
       schema: INDEX_SCHEMA,
       deployment: options.deployment,
       events: JSON.stringify([...options.events].sort()),
+      ...(options.scope !== undefined ? { scope: options.scope } : {}),
     };
     this.transaction(() => {
       const stored = this.metaAll();

@@ -21,7 +21,13 @@ import { Refused } from "../cli/failures";
 import { emit, helpOrUsageError } from "../cli/output";
 import { openBucketStore, openServerlessStore, refusalOf } from "../serverless/open";
 import { isServerless } from "../serverless/settings";
-import { baseLayerIn, SHARED_CONFIG, SHARED_PREFIX } from "../serverless/shared";
+import {
+  baseLayerIn,
+  listSharedKeys,
+  SHARED_CONFIG,
+  SHARED_PREFIX,
+  safeSharedName,
+} from "../serverless/shared";
 import type { CommandContext } from "./index";
 import { configFlags } from "./serve-settings";
 import { SERVER_OPTIONS } from "./server-instance";
@@ -39,12 +45,6 @@ export const BUCKET_USAGE = [
 export const DEFAULT_CONFIG_DIR = "seshi-config";
 /** Beside the pulled files: the ETags they had, so `push` changes only what it read. */
 const PULLED = ".seshi-pulled.json";
-const SAFE_NAME = /^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*$/;
-
-/** A name under `config/` that stays inside the folder it is written to. */
-function safeName(name: string): boolean {
-  return SAFE_NAME.test(name) && !name.split("/").some((part) => part === ".." || part === ".");
-}
 
 interface BucketValues {
   config?: string;
@@ -160,7 +160,7 @@ function filesIn(dir: string): string[] {
     }
   };
   walk(dir);
-  return out.filter(safeName);
+  return out.filter(safeSharedName);
 }
 
 function readPulled(dir: string): Record<string, string> {
@@ -218,21 +218,13 @@ async function pull(ctx: CommandContext, json: boolean, args: string[]): Promise
   const { store, url } = await adminStore(ctx, values);
   const files: Record<string, string> = {};
   try {
-    let after: string | undefined;
-    for (;;) {
-      const page = await store.list(SHARED_PREFIX, { startAfter: after });
-      for (const key of page.keys) {
-        const name = key.slice(SHARED_PREFIX.length);
-        if (!safeName(name)) continue;
-        const object = await store.get(key);
-        if (!object) continue;
-        const file = join(dir, name);
-        mkdirSync(dirname(file), { recursive: true });
-        writeFileSync(file, object.body);
-        files[name] = object.etag;
-      }
-      after = page.keys.at(-1);
-      if (!page.truncated || after === undefined) break;
+    for (const { name } of await listSharedKeys(store)) {
+      const object = await store.get(`${SHARED_PREFIX}${name}`);
+      if (!object) continue;
+      const file = join(dir, name);
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, object.body);
+      files[name] = object.etag;
     }
   } catch (err) {
     throw refusalOf(err);

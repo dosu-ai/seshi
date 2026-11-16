@@ -124,6 +124,29 @@ Known from the review and not changed: any S3 `403` counts as a refusal (an expi
 skewed clock holds uploads as `bucket refused`, which is the right outcome, with a less precise
 message); a shared key still sends a harmless delete to `assembly/pending/` on tombstone.
 
+## After a code review of the PR
+
+A second review found ten more; each is fixed:
+
+- **A `403` for an object that is not there.** S3 answers a GET or HEAD of a missing object with
+  `403` when the key's `s3:ListBucket` does not cover it, and a grant limited by `s3:prefix` (as
+  in the example policies) never covers a GET. On a `403` the S3 store now lists exactly that
+  key: allowed and not found reads as missing; only a refused listing is a refusal.
+- **Keys sent where a shared config says.** A shared review policy with a key may name no
+  endpoint but its provider's; a laptop's own `serverless.config` still may. Before, any
+  environment variable on a laptop could be sent to any URL.
+- **A rejected shared copy** is remembered with a fingerprint of this machine's local file,
+  `SESHI_*` settings and `--set`, and checked again when they change.
+- **The serverless sink** keeps a replaced bucket open until the last job using it ends
+  (`serverless/reopening.ts`), and the uploader and the upkeep timer share one sink.
+- **Search** wipes an index built under another scope (the scope and owner are recorded in the
+  index), and leaves out a hit whose live metadata the key may not read.
+- **`sessions ls`** reads listings until a page holds `limit` readable sessions.
+- **Model review without a key** marks the policy by id (`ProviderFactory` gets the policy's
+  id), not with a made-up endpoint.
+- **Shared settings refresh** takes ETags from the listing (S3 gives them) and sends a HEAD only
+  when it does not; `admin config pull` uses the same listing and name check.
+
 ## Where the build differs from the spec
 
 - **Review key references.** The spec allowed "a keychain name" as a secret reference. Built:

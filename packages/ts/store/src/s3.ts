@@ -116,11 +116,29 @@ export class S3Store implements Store {
     return this.prefix ? `${this.prefix}/${key}` : key;
   }
 
+  /** S3 answers a read of an object that is not there with 403, not 404, when the key's
+   * `s3:ListBucket` does not cover the read: no grant at all, or one limited by an `s3:prefix`
+   * condition, which a GET or HEAD does not carry (F11). A listing of exactly that key does
+   * carry it: when the listing is allowed and finds nothing, the object is missing; otherwise
+   * the 403 stands. */
+  private async missing(key: string): Promise<boolean> {
+    const full = this.keyOf(key);
+    try {
+      const listed = await this.client.list({ prefix: full, maxKeys: 1 });
+      return !listed.keys.includes(full);
+    } catch {
+      return false;
+    }
+  }
+
   async get(key: string): Promise<StoredObject | null> {
     try {
       return await this.client.get(this.keyOf(key));
     } catch (err) {
-      if (denied(err)) throw new AccessDenied("read", key, err);
+      if (denied(err)) {
+        if (await this.missing(key)) return null;
+        throw new AccessDenied("read", key, err);
+      }
       throw new StoreError(`read ${key}`, err);
     }
   }
@@ -154,7 +172,10 @@ export class S3Store implements Store {
     try {
       return await this.client.head(this.keyOf(key));
     } catch (err) {
-      if (denied(err)) throw new AccessDenied("stat", key, err);
+      if (denied(err)) {
+        if (await this.missing(key)) return null;
+        throw new AccessDenied("stat", key, err);
+      }
       throw new StoreError(`stat ${key}`, err);
     }
   }
@@ -200,6 +221,7 @@ export class S3Store implements Store {
         return {
           key: o.key.slice(strip),
           size: o.size,
+          ...(o.etag ? { etag: o.etag } : {}),
           ...(Number.isFinite(at) ? { modified: new Date(at).toISOString() } : {}),
         };
       });

@@ -28,7 +28,7 @@ import { NotSignedIn } from "./account/credential";
 import { EXIT } from "./cli/exit";
 import { Refused } from "./cli/failures";
 import type { CommandContext } from "./commands/index";
-import { refusalOf, SERVERLESS_BASIS, type ServerlessBucket } from "./serverless/open";
+import { needsUpdate, refusalOf, SERVERLESS_BASIS, type ServerlessBucket } from "./serverless/open";
 import { isServerless } from "./serverless/settings";
 import { USER_AGENT } from "./user-agent";
 
@@ -211,7 +211,7 @@ export class ServerlessBackend implements Backend {
     throw new Refused(
       EXIT.config,
       "needs_update",
-      `this bucket needs seshi ${this.bucket.marker.min_version} or newer; you have ${VERSION}. Update seshi, then try again.`,
+      needsUpdate(this.bucket.marker.min_version as string),
     );
   }
 
@@ -224,13 +224,30 @@ export class ServerlessBackend implements Backend {
       owner_basis: SERVERLESS_BASIS,
     };
   }
+  /** A page of the sessions this viewer may read. Sessions it may not are left out before
+   * counting: listings are read, each asking for what is still wanted, until `limit`
+   * readable ones are found (without a limit, until one listing holds any) or the listing
+   * ends. */
   listSessions(options: { owner?: string; after?: string; limit?: number }) {
     return this.refused(async () => {
-      const page = await this.sessionsAs(options.owner).listSessions({
-        ...(options.after ? { after: options.after } : {}),
-        ...(options.limit ? { limit: options.limit } : {}),
-      });
-      return { ...page, sessions: page.sessions.filter((s) => this.readable(s) !== null) };
+      const db = this.sessionsAs(options.owner);
+      const sessions: SessionMetadata[] = [];
+      let after = options.after;
+      for (;;) {
+        const left = options.limit === undefined ? undefined : options.limit - sessions.length;
+        const page = await db.listSessions({
+          ...(after ? { after } : {}),
+          ...(left !== undefined ? { limit: left } : {}),
+        });
+        sessions.push(...page.sessions.filter((s) => this.readable(s) !== null));
+        // Without a limit, a page is whatever one listing holds, unless none of it is readable.
+        const full =
+          options.limit !== undefined ? sessions.length >= options.limit : sessions.length > 0;
+        if (full || !page.truncated || page.cursor === undefined || page.cursor === after) {
+          return { sessions, cursor: page.cursor, truncated: page.truncated };
+        }
+        after = page.cursor;
+      }
     });
   }
   getSession(agent: string, sessionId: string, options: OwnerOption = {}) {

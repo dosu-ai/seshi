@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { type BaseLayer, ConfigError, parseConfigToml } from "@seshi/config";
+import { type BaseLayer, ConfigError, DEFAULT_BASE_URLS, parseConfigToml } from "@seshi/config";
 import { VERSION } from "@seshi/model";
 import { accessDeniedIn, type Store } from "@seshi/store";
 import { writePrivateFile } from "../account/secrets";
@@ -12,6 +12,9 @@ export const SHARED_CONFIG = "seshi.toml";
 /** How long a cached copy is used before the bucket is asked again. */
 export const SHARED_MAX_AGE_MS = 5 * 60 * 1000;
 
+/** The providers' own endpoints: the only ones a shared config may send a key to. */
+const PROVIDER_ENDPOINTS = new Set(Object.values(DEFAULT_BASE_URLS));
+
 const SAFE_NAME = /^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*$/;
 
 interface SharedIndex {
@@ -22,7 +25,14 @@ interface SharedIndex {
   files: Record<string, string>;
   /** The last copy that failed the checks, so it is not fetched and checked again on every
    * command; the good copy stays in use. */
-  rejected?: { files: Record<string, string>; message: string; at: string; version?: string };
+  rejected?: {
+    files: Record<string, string>;
+    message: string;
+    at: string;
+    version?: string;
+    /** `SharedOptions.local` when it was rejected. */
+    local?: string;
+  };
 }
 
 export interface SharedSettings {
@@ -51,6 +61,10 @@ export interface SharedOptions {
   force?: boolean;
   /** The checks `seshi serve` runs at start, on a candidate copy (F11.6); throws to reject it. */
   check?: (base: BaseLayer | undefined) => Promise<void>;
+  /** A fingerprint of what on this machine `check` also reads (the local config file,
+   * `SESHI_*` settings, `--set`): a copy rejected under other local settings is checked
+   * again. */
+  local?: string;
 }
 
 function readIndex(paths: ServerlessPaths, url: string): SharedIndex {
@@ -90,8 +104,9 @@ function fileSecrets(value: unknown, path: string[], found: string[]): void {
 
 /** `config/seshi.toml` from a copy of the folder, with the paths it names relative to
  * `config/` (redaction packs, review prompt files) made absolute into that copy. A path must
- * stay inside the copy, and no secret may be read from a file: a shared config names nothing
- * on the laptop. */
+ * stay inside the copy, no secret may be read from a file (a shared config names nothing on
+ * the laptop), and a policy with a key may name no endpoint but its provider's (a key from a
+ * laptop's environment goes nowhere the shared config chose). */
 export function baseLayerIn(dir: string, origin: string): BaseLayer | undefined {
   const file = join(dir, SHARED_CONFIG);
   if (!existsSync(file)) return undefined;
@@ -126,10 +141,20 @@ export function baseLayerIn(dir: string, origin: string): BaseLayer | undefined 
   const review = tree.review as { policies?: unknown } | undefined;
   if (review && Array.isArray(review.policies)) {
     (review.policies as Record<string, Record<string, unknown>>[]).forEach((policy, i) => {
+      const keyed = ["decision", "redactor"].some((step) => {
+        const s = policy?.[step];
+        return !!s && typeof s === "object" && "api_key" in s;
+      });
       for (const step of ["decision", "redactor"]) {
         const s = policy?.[step];
-        if (s && typeof s === "object" && "prompt_file" in s) {
+        if (!s || typeof s !== "object") continue;
+        if ("prompt_file" in s) {
           s.prompt_file = local(s.prompt_file, `review.policies.${i}.${step}.prompt_file`);
+        }
+        if (keyed && typeof s.base_url === "string" && !PROVIDER_ENDPOINTS.has(s.base_url)) {
+          problems.push(
+            `review.policies.${i}.${step}.base_url: a shared config may not send each laptop's key to an endpoint it names; leave base_url unset, or set this policy in each laptop's own config (serverless.config)`,
+          );
         }
       }
     });
@@ -138,20 +163,40 @@ export function baseLayerIn(dir: string, origin: string): BaseLayer | undefined 
   return { path: origin, tree };
 }
 
-async function listShared(store: Store): Promise<Record<string, string>> {
-  const files: Record<string, string> = {};
+/** A name under `config/` a laptop or `seshi admin config` will read or write: a relative
+ * path of plain names, none of them `.` or `..`, so it stays inside the folder it lands in. */
+export function safeSharedName(name: string): boolean {
+  return SAFE_NAME.test(name) && !name.split("/").some((part) => part === ".." || part === ".");
+}
+
+/** Each object under `config/` with a safe name (`safeSharedName`), by its name there. */
+export async function listSharedKeys(store: Store): Promise<{ name: string; etag?: string }[]> {
+  const out: { name: string; etag?: string }[] = [];
   let after: string | undefined;
   for (;;) {
-    const page = await store.list(SHARED_PREFIX, { startAfter: after });
-    for (const key of page.keys) {
+    const page = await store.list(SHARED_PREFIX, { startAfter: after, details: true });
+    const objects = page.objects ?? page.keys.map((key) => ({ key, etag: undefined }));
+    for (const { key, etag } of objects) {
       const name = key.slice(SHARED_PREFIX.length);
-      if (!SAFE_NAME.test(name) || name.split("/").includes("..")) continue;
-      const stat = await store.stat(key);
-      if (stat) files[name] = stat.etag ?? stat.modified ?? "";
+      if (safeSharedName(name)) out.push({ name, ...(etag ? { etag } : {}) });
     }
     after = page.keys.at(-1);
-    if (!page.truncated || after === undefined) return files;
+    if (!page.truncated || after === undefined) return out;
   }
+}
+
+/** Each shared file and its version: the ETag the listing gives (S3 does), else one `stat`. */
+async function listShared(store: Store): Promise<Record<string, string>> {
+  const files: Record<string, string> = {};
+  for (const { name, etag } of await listSharedKeys(store)) {
+    if (etag) {
+      files[name] = etag;
+      continue;
+    }
+    const stat = await store.stat(`${SHARED_PREFIX}${name}`);
+    if (stat) files[name] = stat.etag ?? stat.modified ?? "";
+  }
+  return files;
 }
 
 /** The bucket's shared settings, from the cache when it is fresh, else from the bucket
@@ -210,7 +255,8 @@ export async function sharedSettings(
   const rejectedHere =
     index.rejected !== undefined &&
     same(listed, index.rejected.files) &&
-    (index.rejected.version ?? VERSION) === VERSION;
+    (index.rejected.version ?? VERSION) === VERSION &&
+    index.rejected.local === options.local;
   if ((same(listed, index.files) && !cacheBroken) || rejectedHere) {
     index.checked_at = checkedAt;
     writeIndex(paths, index);
@@ -239,7 +285,13 @@ export async function sharedSettings(
   } catch (err) {
     rmSync(next, { recursive: true, force: true });
     index.checked_at = checkedAt;
-    index.rejected = { files: listed, message: message(err), at: checkedAt, version: VERSION };
+    index.rejected = {
+      files: listed,
+      message: message(err),
+      at: checkedAt,
+      version: VERSION,
+      ...(options.local !== undefined ? { local: options.local } : {}),
+    };
     writeIndex(paths, index);
     return fromCache({ checkedAt }, listed);
   }
