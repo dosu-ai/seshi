@@ -33,6 +33,7 @@ import {
   readHealth,
   readMetadata,
   type Store,
+  updateMetadata,
 } from "@seshi/store";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type UploadEnvelopeOptions, uploadEnvelope } from "./envelope";
@@ -1041,6 +1042,46 @@ describe("a dropped first envelope leaves a stub (F3.4, revised 15 Nov 2026)", (
       expect(metadata?.normalizer?.format_version).toBe("2");
     });
 
+    it("takes the dropped records while they still hash as dropped, before the dropped bytes", async () => {
+      const v1 = new FormatRegistry([
+        ATIF_FORMAT,
+        { ...TRAJECTORY_FORMAT, version: "1" },
+        otlpGenAiFormat(),
+      ]);
+      // Version 2 acknowledges every answer with a record of its own: the dropped part's first
+      // three records are as they were, and its bytes now make four.
+      const acknowledging: FormatAdapter = {
+        ...TRAJECTORY_FORMAT,
+        version: "2",
+        normalize: (text, chunk) =>
+          (TRAJECTORY_FORMAT.normalize(text, chunk) as NormalizedRecord[]).flatMap((rec) =>
+            rec.role === "assistant"
+              ? [rec, { role: "user", content: "(ack)", timestamp: ts } as NormalizedRecord]
+              : [rec],
+          ),
+      };
+      const v2 = new FormatRegistry([ATIF_FORMAT, acknowledging, otlpGenAiFormat()]);
+      const { answer } = await begunAsStub({ formats: v1 });
+      const allow = allowAll();
+      const rebuilt = await submit(
+        pipeline({ reviewer: allow, formats: v2 }),
+        upload(FIRST + tail, 0, { rebuild: true }),
+      );
+      expect(rebuilt).toMatchObject({ status: "stored", records: 5, records_total: 7 });
+      expect(contents(allow.seen[0])).toEqual(["(ack)", "now fix the build", "fixed", "(ack)"]);
+      expectNone(JSON.stringify(allow.seen));
+      const metadata = await session();
+      expect(metadata?.traces[0]?.continuation).toEqual({
+        from_record: 3,
+        prefix_sha256: answer.prefix_sha256,
+      });
+      expect(metadata?.dropped_prefix).toEqual({
+        bytes: bytes(FIRST),
+        records: 3,
+        prefix_sha256: answer.prefix_sha256,
+      });
+    });
+
     it("leaves the dropped part out of a replace after the rules changed", async () => {
       const { answer } = await begunAsStub();
       // A rule that matches the dropped text: its records no longer hash to what was dropped.
@@ -1125,6 +1166,67 @@ describe("a dropped first envelope leaves a stub (F3.4, revised 15 Nov 2026)", (
       ]);
       const entries = (await readChanges(store, "svc-console")).entries.map((e) => e.entry);
       expect(entries.at(-1)).toMatchObject({ kind: "published", replace: true });
+    });
+
+    it("leaves the dropped count out of an assembled session that no longer hashes as dropped", async () => {
+      const envelope: Envelope = {
+        ...upload(HEAD),
+        source: "otlp",
+        source_id: "console",
+        format: "otlp-genai",
+        session_key: "sesn_2",
+        caller: { kind: "service", principal: "svc-console" },
+        owner: "svc-console",
+        owner_basis: "service",
+        payload: { kind: "spans", spans: [] },
+        idempotency_key: "ab/cd",
+      };
+      const records = (text: string) =>
+        formats.normalize({ source: "trajectory", transcript: text }).records;
+      const archive = archiveId("svc-console", "otlp-genai", "sesn_2");
+      const p = pipeline({ reviewer: judge() });
+      await p.publishAssembled({ envelope, records: records(FIRST) });
+      expect((await readMetadata(store, "svc-console", archive))?.dropped_prefix).toMatchObject({
+        bytes: 0,
+        records: 3,
+      });
+      await p.publishAssembled({ envelope, records: records(FIRST + tail) });
+      // A rule that matches the dropped text, and a late span: the assembly is written again,
+      // its first three records no longer hash as dropped, and there are no bytes to cut at.
+      const allow = allowAll();
+      const strict = pipeline({
+        reviewer: allow,
+        redaction: redactionRules({ patterns: ["customer"] }),
+      });
+      const late = FIRST + user("now fix the build") + reply("a late span") + reply("fixed");
+      const replaced = await strict.publishAssembled({ envelope, records: records(late) });
+      expect(replaced).toMatchObject({ status: "stored", records: 4, records_total: 6 });
+      expect(contents(allow.seen[0])).toEqual(["now fix the build", "a late span", "fixed"]);
+      expectNone(JSON.stringify(allow.seen));
+      expectNone(await headText("svc-console", archive));
+      const metadata = await readMetadata(store, "svc-console", archive);
+      expect(metadata?.traces[0]?.continuation?.from_record).toBe(3);
+      expect(metadata?.dropped_prefix).toMatchObject({ bytes: 0, records: 3 });
+    });
+
+    it("finds the dropped part of a stub stored before dropped_prefix existed by its log state", async () => {
+      await submit(pipeline({ reviewer: judge() }), upload(FIRST, 0, { retract_hash }));
+      await updateMetadata(store, "alice", ARCHIVE, (m) => {
+        if (!m) return null;
+        const { dropped_prefix: _d, ...rest } = m;
+        return rest;
+      });
+      expect(await session()).not.toHaveProperty("dropped_prefix");
+      const allow = allowAll();
+      const rebuilt = await submit(
+        pipeline({ reviewer: allow }),
+        upload(FIRST + tail, 0, { rebuild: true }),
+      );
+      expect(rebuilt).toMatchObject({ status: "stored", records: 3, records_total: 5 });
+      expect(contents(allow.seen[0])).toEqual(["now fix the build", "fixed"]);
+      expectNone(JSON.stringify(allow.seen));
+      expectNone(await headText());
+      expect((await session())?.traces[0]?.continuation?.from_record).toBe(3);
     });
 
     it("keeps where the dropped part ends through later chunks, drops, replaces and rebuilds", async () => {

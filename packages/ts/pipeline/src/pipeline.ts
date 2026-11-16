@@ -28,6 +28,7 @@ import {
   type Visibility,
 } from "@seshi/model";
 import {
+  type RecordRedaction,
   type RedactionRules,
   type Redactor,
   redactionRules,
@@ -267,6 +268,49 @@ function hasBucketSafeSpanIds(part: SpanPart): boolean {
 interface LogCut {
   records: number;
   bytes: number;
+}
+
+interface KeptPart {
+  from: number;
+  before: RecordRedaction;
+  kept: RecordRedaction;
+  normalized: NormalizedState;
+}
+
+function keptPartFrom(
+  redactor: Redactor,
+  raw: readonly NormalizedRecord[],
+  from: number,
+  bytes: number,
+  before: RecordRedaction = redactor.redact(raw.slice(0, from)),
+): KeptPart {
+  const kept = redactor.redact(raw.slice(from), before.withheld);
+  return { from, before, kept, normalized: stateOf([...before.records, ...kept.records], bytes) };
+}
+
+interface DroppedStartEnd extends LogCut {
+  before?: RecordRedaction;
+}
+
+function droppedStartEnd(
+  redactor: Redactor,
+  raw: readonly NormalizedRecord[],
+  dropped: DroppedPrefix,
+  recordsBeforeCut: WholeOptions["recordsBeforeCut"],
+): DroppedStartEnd {
+  if (dropped.records > 0 && dropped.records <= raw.length) {
+    const before = redactor.redact(raw.slice(0, dropped.records));
+    if (prefixSha256(before.records, dropped.records) === dropped.prefix_sha256) {
+      return { records: dropped.records, bytes: dropped.bytes, before };
+    }
+  }
+  const cut = dropped.bytes > 0 ? recordsBeforeCut?.(dropped.bytes) : undefined;
+  if (cut) return { records: Math.min(cut.records, raw.length), bytes: cut.bytes };
+  return { records: Math.min(dropped.records, raw.length), bytes: dropped.bytes };
+}
+
+function droppedStartOf(session: SessionMetadata, stub: boolean): DroppedPrefix | undefined {
+  return session.dropped_prefix ?? (stub ? session.normalized : undefined);
 }
 
 interface WholeOptions {
@@ -706,27 +750,31 @@ export class Pipeline {
           ? { records: envelope.shipped.records, prefix_sha256: envelope.shipped.prefix_sha256 }
           : undefined);
       if (!options.rebuild && base && base.records > 0 && base.records <= raw.length) {
-        const prefix = this.redactor.redact(raw.slice(0, base.records));
-        if (prefixSha256(prefix.records, base.records) === base.prefix_sha256) {
-          const tail = this.redactor.redact(raw.slice(base.records), prefix.withheld);
-          const records = [...prefix.records, ...tail.records];
-          const normalized = stateOf(records, bytes);
-          if (tail.records.length === 0) {
-            return this.progress(run, normalized, tail.withheld, "unchanged", guard);
+        const before = this.redactor.redact(raw.slice(0, base.records));
+        if (prefixSha256(before.records, base.records) === base.prefix_sha256) {
+          const { kept, normalized } = keptPartFrom(
+            this.redactor,
+            raw,
+            base.records,
+            bytes,
+            before,
+          );
+          if (kept.records.length === 0) {
+            return this.progress(run, normalized, kept.withheld, "unchanged", guard);
           }
           const lead = stub
             ? [stubMeta(envelope)]
             : meta
-              ? [prefix.records[0] as NormalizedRecord]
+              ? [before.records[0] as NormalizedRecord]
               : [];
           return this.commit(run, {
             ...common,
             ...(stub ? { branch: envelope.branch } : {}),
-            write: [...lead, ...tail.records],
+            write: [...lead, ...kept.records],
             continuation: { from_record: base.records, prefix_sha256: base.prefix_sha256 },
             normalized,
-            withheld: tail.withheld,
-            summary: this.summaryOf(tail.summary, options, session, false),
+            withheld: kept.withheld,
+            summary: this.summaryOf(kept.summary, options, session, false),
           });
         }
       }
@@ -745,7 +793,7 @@ export class Pipeline {
             : `only the session's original writer or an admin may ${options.rebuild ? "rebuild" : "replace"} it`,
         );
       }
-      const dropped = session.dropped_prefix ?? (stub ? session.normalized : undefined);
+      const dropped = droppedStartOf(session, stub);
       if (dropped && (dropped.records > 0 || dropped.bytes > 0)) {
         const past = this.pastDropped(run, raw, bytes, dropped, options, common);
         if (past) return past;
@@ -791,44 +839,35 @@ export class Pipeline {
     },
   ): Promise<StoreSessionResult> | undefined {
     const { session, envelope } = run;
-    let skip = Math.min(dropped.records, raw.length);
-    let cut = dropped.bytes;
-    const same =
-      dropped.records > 0 &&
-      dropped.records <= raw.length &&
-      prefixSha256(this.redactor.redact(raw.slice(0, dropped.records)).records, dropped.records) ===
-        dropped.prefix_sha256;
-    if (!same && dropped.bytes > 0) {
-      const now = options.recordsBeforeCut?.(dropped.bytes);
-      if (now) {
-        skip = Math.min(now.records, raw.length);
-        cut = now.bytes;
-      }
-    }
-    if (skip === 0) return undefined;
-    const prefix = this.redactor.redact(raw.slice(0, skip));
-    const tail = this.redactor.redact(raw.slice(skip), prefix.withheld);
-    const normalized = stateOf([...prefix.records, ...tail.records], bytes);
-    const prefixHash = prefixSha256(prefix.records, skip);
-    if (tail.records.length === 0 && session?.head !== undefined) {
+    const end = droppedStartEnd(this.redactor, raw, dropped, options.recordsBeforeCut);
+    if (end.records === 0) return undefined;
+    const { from, before, kept, normalized } = keptPartFrom(
+      this.redactor,
+      raw,
+      end.records,
+      bytes,
+      end.before,
+    );
+    const prefixHash = prefixSha256(before.records, from);
+    if (kept.records.length === 0 && session?.head !== undefined) {
       return Promise.resolve({
         status: "dropped",
         ...shippedOf(session.normalized as NormalizedState),
       });
     }
-    if (tail.records.length === 0) {
-      return this.progress(run, normalized, tail.withheld, "unchanged", common.guard);
+    if (kept.records.length === 0) {
+      return this.progress(run, normalized, kept.withheld, "unchanged", common.guard);
     }
     return this.commit(run, {
       ...common,
       branch: envelope.branch,
-      write: [stubMeta(envelope), ...tail.records],
-      continuation: { from_record: skip, prefix_sha256: prefixHash },
+      write: [stubMeta(envelope), ...kept.records],
+      continuation: { from_record: from, prefix_sha256: prefixHash },
       ...(session?.head !== undefined ? { replace: true } : {}),
       normalized,
-      withheld: tail.withheld,
-      summary: this.summaryOf(tail.summary, options, session, true),
-      dropped_prefix: { bytes: cut, records: skip, prefix_sha256: prefixHash },
+      withheld: kept.withheld,
+      summary: this.summaryOf(kept.summary, options, session, true),
+      dropped_prefix: { bytes: end.bytes, records: from, prefix_sha256: prefixHash },
     });
   }
 
