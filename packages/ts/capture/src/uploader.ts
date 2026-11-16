@@ -190,12 +190,12 @@ function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-function markRebuildAnswered(s: SessionState, rebuild: NonNullable<SessionState["rebuild"]>): void {
+function markRebuildAnswered(s: SessionState, rebuild: Rebuild): void {
   if (rebuild.for) s.rebuilt_for = rebuild.for;
   if (s.rebuild?.key === rebuild.key) delete s.rebuild;
 }
 
-function rebuildIdempotencyKey(rebuild: NonNullable<SessionState["rebuild"]>, end: number): string {
+function rebuildIdempotencyKey(rebuild: Rebuild, end: number): string {
   return `${rebuild.key}@${end}`;
 }
 
@@ -242,6 +242,97 @@ function whyNotSessionTranscript(
 
 function mayReplaceOwnSession(session: SessionState): boolean {
   return session.stored === true || session.sent === true;
+}
+
+type SessionStep = (session: SessionState) => void;
+
+type Rebuild = NonNullable<SessionState["rebuild"]>;
+
+interface SyncOutcome {
+  uploaded: number;
+  failed?: boolean;
+  transient?: string;
+  signIn?: string;
+}
+
+/** How the next send of one sync differs from a plain one. */
+interface Retry {
+  replace: boolean;
+  forceWhole: boolean;
+  recoveries: number;
+}
+
+/** One send: the session as read before it, what it carries and how. */
+interface Attempt {
+  session: SessionState;
+  limit: number;
+  whole: boolean;
+  replacing: boolean;
+  rebuild: Rebuild | undefined;
+  piece: { text: string; end: number };
+  secret: string;
+}
+
+interface Sent {
+  result: StoreSessionResult;
+  redacted: { text: string; carried?: Record<string, unknown> };
+  keptLength: boolean;
+}
+
+/** What an answer leads to: the state changes to save after it, in order, then whether to send
+ * again. */
+interface Handled {
+  saves: SessionStep[];
+  next: { again: Retry } | { stop: Omit<SyncOutcome, "uploaded"> };
+}
+
+function refusalCode(err: unknown): string {
+  return err instanceof SessionRejected
+    ? err.code
+    : err instanceof SessionConflict
+      ? "conflict"
+      : err instanceof Forbidden
+        ? "forbidden"
+        : err instanceof ServerError
+          ? err.code
+          : "refused";
+}
+
+function onOffsetMismatch(expected: number, attempt: Attempt, retry: Retry, size: number): Handled {
+  const recoveries = retry.recoveries + 1;
+  if (expected === 0 || attempt.session.aligned === false || expected > size) {
+    return {
+      saves:
+        expected === 0
+          ? [
+              (s) => {
+                s.stored = false;
+                s.file_offset = 0;
+                s.server_offset = 0;
+              },
+            ]
+          : [],
+      next: { again: { ...retry, forceWhole: true, recoveries } },
+    };
+  }
+  return {
+    saves: [
+      (s) => {
+        s.file_offset = expected;
+        s.server_offset = expected;
+        delete s.shipped;
+        if (s.frozen && s.frozen.offset < expected) s.frozen.offset = expected;
+      },
+    ],
+    next: { again: { ...retry, forceWhole: false, recoveries } },
+  };
+}
+
+function onConflictReplaceOwn(retry: Retry): Handled {
+  return {
+    saves: [],
+    next: { again: { ...retry, replace: true, recoveries: retry.recoveries + 1 } },
+  };
 }
 
 export class Uploader {
@@ -743,10 +834,7 @@ export class Uploader {
     return { queued, retrying };
   }
 
-  private async save(
-    key: string,
-    step: (session: SessionState) => void,
-  ): Promise<SessionState | undefined> {
+  private async save(key: string, step: SessionStep): Promise<SessionState | undefined> {
     let saved: SessionState | undefined;
     await updateState(this.paths, (state) => {
       const session = state.sessions[key];
@@ -757,22 +845,30 @@ export class Uploader {
     return saved;
   }
 
-  private async backoff(key: string, code: string, text: string): Promise<void> {
-    await this.save(key, (s) => {
+  private backoffStep(code: string, text: string): SessionStep {
+    return (s) => {
       s.failures = (s.failures ?? 0) + 1;
       const delay = Math.min(this.retryMaxMs, this.retryBaseMs * 2 ** (s.failures - 1));
       s.next_attempt_at = new Date(this.now().getTime() + delay).toISOString();
       s.error = { code, message: text, permanent: false, at: this.now().toISOString() };
-    });
+    };
+  }
+
+  private async backoff(key: string, code: string, text: string): Promise<void> {
+    await this.save(key, this.backoffStep(code, text));
+  }
+
+  private refusedStep(code: string, text: string, size: number): SessionStep {
+    return (s) => {
+      s.error = { code, message: text, permanent: true, at: this.now().toISOString(), size };
+      delete s.next_attempt_at;
+      delete s.failures;
+    };
   }
 
   private async refuse(key: string, code: string, text: string, size: number): Promise<void> {
     this.log(`${key}: ${code}: ${text}`);
-    await this.save(key, (s) => {
-      s.error = { code, message: text, permanent: true, at: this.now().toISOString(), size };
-      delete s.next_attempt_at;
-      delete s.failures;
-    });
+    await this.save(key, this.refusedStep(code, text, size));
   }
 
   private piece(
@@ -875,168 +971,199 @@ export class Uploader {
     place: Place,
     path: string,
     size: number,
-  ): Promise<{ uploaded: number; failed?: boolean; transient?: string; signIn?: string }> {
+  ): Promise<SyncOutcome> {
     let uploaded = 0;
-    let replace = false;
-    let recoveries = 0;
-    let forceWhole = false;
+    let retry: Retry = { replace: false, forceWhole: false, recoveries: 0 };
     let rebuilding = false;
     for (;;) {
       const current = readState(this.paths);
       const session = current.sessions[key];
       if (!session || this.off(current, session)) return { uploaded };
-      const fileOffset = session.file_offset ?? 0;
-      const limit = sendLimit(session, size);
-      const replaceAgain = session.stored === true && session.replace_next === true;
       if (!rebuilding && session.rebuild && this.rebuildDue(session.rebuild)) {
         if (this.rebuildsLeft > 0) {
           this.rebuildsLeft--;
           rebuilding = true;
         }
       }
-      const rebuild = rebuilding ? session.rebuild : undefined;
-      const whole =
-        forceWhole ||
-        replaceAgain ||
-        rebuild !== undefined ||
-        mustSendWhole(session, path, limit, agent);
-      const replacing = replace || replaceAgain;
-      if (!whole && fileOffset >= limit) return { uploaded };
-      const notTranscript = whyNotSessionTranscript(agent, path, session);
-      if (notTranscript !== undefined) {
-        await this.refuse(key, "not_a_transcript", notTranscript, size);
-        return { uploaded, failed: true };
+      const prepared = await this.prepare(key, agent, path, size, session, retry, rebuilding);
+      if ("stop" in prepared) return { uploaded, ...prepared.stop };
+      const attempt = prepared.attempt;
+      const answer = await this.send(key, agent, place, attempt).then(
+        (sent) => ({ sent }),
+        (error: unknown) => ({ error }),
+      );
+      let handled: Handled;
+      if ("error" in answer) handled = this.onError(key, answer.error, attempt, retry, size);
+      else {
+        uploaded++;
+        handled = this.onAccepted(attempt, answer.sent, path, retry);
       }
-      const piece = this.piece(path, whole ? 0 : fileOffset, limit, agent.encoding, whole);
-      if (!piece) return { uploaded };
-
-      let secret = session.secret;
-      if (!secret || !session.sent) {
-        secret ??= newSecret();
-        if (!(await this.keepSecretUnlessTurnedOff(key, secret))) return { uploaded };
-      }
-      let redacted: { text: string; carried?: Record<string, unknown> };
-      let result: StoreSessionResult;
-      let keptLength = true;
-      try {
-        redacted = await this.preRedact.redact({
-          agent: agent.format,
-          encoding: agent.encoding,
-          text: piece.text,
-          ...(!whole && session.carried ? { carried: session.carried } : {}),
-        });
-        keptLength = bytesOf(redacted.text) === bytesOf(piece.text);
-        if (!keptLength) await this.markMisalignedBeforeSend(key, session);
-        const upload: Upload = {
-          agent: agent.format,
-          session_id: uploadId(session),
-          transcript: redacted.text,
-          format: agent.encoding,
-          offset: whole ? 0 : (session.server_offset ?? 0),
-          retract_hash: retractHash(secret),
-          ...(await this.details(session, agent, place)),
-          ...(rebuild
-            ? { rebuild: true, idempotency_key: rebuildIdempotencyKey(rebuild, piece.end) }
-            : replacing
-              ? { replace: true }
-              : {}),
-        };
-        result = await (await this.getSink()).ingest(
-          upload,
-          replacing || rebuild ? { retractSecret: secret } : {},
-        );
-      } catch (err) {
-        if (err instanceof SignInNeeded) return { uploaded, signIn: err.message };
-        if (err instanceof OffsetMismatch && recoveries < 3) {
-          recoveries++;
-          const expected = err.expected;
-          if (expected === 0 || session.aligned === false || expected > size) {
-            forceWhole = true;
-            if (expected === 0) {
-              await this.save(key, (s) => {
-                s.stored = false;
-                s.file_offset = 0;
-                s.server_offset = 0;
-              });
-            }
-          } else {
-            forceWhole = false;
-            await this.save(key, (s) => {
-              s.file_offset = expected;
-              s.server_offset = expected;
-              delete s.shipped;
-              if (s.frozen && s.frozen.offset < expected) s.frozen.offset = expected;
-            });
-          }
-          continue;
-        }
-        if (
-          err instanceof SessionConflict &&
-          whole &&
-          !replacing &&
-          mayReplaceOwnSession(session)
-        ) {
-          replace = true;
-          recoveries++;
-          continue;
-        }
-        if (transient(err)) {
-          this.log(`${key}: will retry: ${message(err)}`);
-          await this.backoff(key, "unavailable", message(err));
-          return { uploaded, failed: true, transient: message(err) };
-        }
-        const code =
-          err instanceof SessionRejected
-            ? err.code
-            : err instanceof SessionConflict
-              ? "conflict"
-              : err instanceof Forbidden
-                ? "forbidden"
-                : err instanceof ServerError
-                  ? err.code
-                  : "refused";
-        await this.refuse(key, code, message(err), size);
-        if (rebuild) await this.save(key, (s) => markRebuildAnswered(s, rebuild));
-        return { uploaded, failed: true };
-      }
-
-      uploaded++;
-      const stored = result.bytes_total > 0;
-      const now = this.now().toISOString();
-      await this.save(key, (s) => {
-        s.stored = stored;
-        s.last_status = result.status;
-        s.uploaded_at = now;
-        delete s.error;
-        delete s.failures;
-        delete s.next_attempt_at;
-        if (stored && s.frozen && s.frozen.offset < piece.end) s.frozen.offset = piece.end;
-        if (stored) {
-          s.sent_path = path;
-          s.file_offset = piece.end;
-          s.server_offset = result.bytes_total;
-          s.aligned = (whole ? true : s.aligned !== false) && keptLength;
-          s.shipped = { records: result.records_total, prefix_sha256: result.prefix_sha256 };
-          if (redacted.carried) s.carried = redacted.carried;
-          else delete s.carried;
-          delete s.held_at_size;
-          if ((replacing || rebuild) && result.status === "dropped") s.replace_next = true;
-          else delete s.replace_next;
-        } else {
-          s.file_offset = 0;
-          s.server_offset = 0;
-          s.held_at_size = limit;
-          delete s.sent_path;
-          delete s.shipped;
-          delete s.carried;
-          delete s.replace_next;
-        }
-        if (rebuild) markRebuildAnswered(s, rebuild);
-      });
-      if (!stored || piece.end >= limit) return { uploaded };
-      replace = false;
-      forceWhole = false;
+      for (const step of handled.saves) await this.save(key, step);
+      if ("stop" in handled.next) return { uploaded, ...handled.next.stop };
+      retry = handled.next.again;
     }
+  }
+
+  private async prepare(
+    key: string,
+    agent: CaptureAgent,
+    path: string,
+    size: number,
+    session: SessionState,
+    retry: Retry,
+    rebuilding: boolean,
+  ): Promise<{ attempt: Attempt } | { stop: Omit<SyncOutcome, "uploaded"> }> {
+    const fileOffset = session.file_offset ?? 0;
+    const limit = sendLimit(session, size);
+    const replaceAgain = session.stored === true && session.replace_next === true;
+    const rebuild = rebuilding ? session.rebuild : undefined;
+    const whole =
+      retry.forceWhole ||
+      replaceAgain ||
+      rebuild !== undefined ||
+      mustSendWhole(session, path, limit, agent);
+    const replacing = retry.replace || replaceAgain;
+    if (!whole && fileOffset >= limit) return { stop: {} };
+    const notTranscript = whyNotSessionTranscript(agent, path, session);
+    if (notTranscript !== undefined) {
+      await this.refuse(key, "not_a_transcript", notTranscript, size);
+      return { stop: { failed: true } };
+    }
+    const piece = this.piece(path, whole ? 0 : fileOffset, limit, agent.encoding, whole);
+    if (!piece) return { stop: {} };
+    let secret = session.secret;
+    if (!secret || !session.sent) {
+      secret ??= newSecret();
+      if (!(await this.keepSecretUnlessTurnedOff(key, secret))) return { stop: {} };
+    }
+    return { attempt: { session, limit, whole, replacing, rebuild, piece, secret } };
+  }
+
+  private async send(
+    key: string,
+    agent: CaptureAgent,
+    place: Place,
+    attempt: Attempt,
+  ): Promise<Sent> {
+    const { session, whole, replacing, rebuild, piece, secret } = attempt;
+    const redacted = await this.preRedact.redact({
+      agent: agent.format,
+      encoding: agent.encoding,
+      text: piece.text,
+      ...(!whole && session.carried ? { carried: session.carried } : {}),
+    });
+    const keptLength = bytesOf(redacted.text) === bytesOf(piece.text);
+    if (!keptLength) await this.markMisalignedBeforeSend(key, session);
+    const upload: Upload = {
+      agent: agent.format,
+      session_id: uploadId(session),
+      transcript: redacted.text,
+      format: agent.encoding,
+      offset: whole ? 0 : (session.server_offset ?? 0),
+      retract_hash: retractHash(secret),
+      ...(await this.details(session, agent, place)),
+      ...(rebuild
+        ? { rebuild: true, idempotency_key: rebuildIdempotencyKey(rebuild, piece.end) }
+        : replacing
+          ? { replace: true }
+          : {}),
+    };
+    const result = await (await this.getSink()).ingest(
+      upload,
+      replacing || rebuild ? { retractSecret: secret } : {},
+    );
+    return { result, redacted, keptLength };
+  }
+
+  private onAccepted(attempt: Attempt, sent: Sent, path: string, retry: Retry): Handled {
+    const { whole, replacing, rebuild, piece, limit } = attempt;
+    const { result, redacted, keptLength } = sent;
+    const stored = result.bytes_total > 0;
+    const now = this.now().toISOString();
+    return {
+      saves: [
+        (s) => {
+          s.stored = stored;
+          s.last_status = result.status;
+          s.uploaded_at = now;
+          delete s.error;
+          delete s.failures;
+          delete s.next_attempt_at;
+          if (stored && s.frozen && s.frozen.offset < piece.end) s.frozen.offset = piece.end;
+          if (stored) {
+            s.sent_path = path;
+            s.file_offset = piece.end;
+            s.server_offset = result.bytes_total;
+            s.aligned = (whole ? true : s.aligned !== false) && keptLength;
+            s.shipped = { records: result.records_total, prefix_sha256: result.prefix_sha256 };
+            if (redacted.carried) s.carried = redacted.carried;
+            else delete s.carried;
+            delete s.held_at_size;
+            if ((replacing || rebuild) && result.status === "dropped") s.replace_next = true;
+            else delete s.replace_next;
+          } else {
+            s.file_offset = 0;
+            s.server_offset = 0;
+            s.held_at_size = limit;
+            delete s.sent_path;
+            delete s.shipped;
+            delete s.carried;
+            delete s.replace_next;
+          }
+          if (rebuild) markRebuildAnswered(s, rebuild);
+        },
+      ],
+      next:
+        !stored || piece.end >= limit
+          ? { stop: {} }
+          : { again: { ...retry, replace: false, forceWhole: false } },
+    };
+  }
+
+  private onError(
+    key: string,
+    err: unknown,
+    attempt: Attempt,
+    retry: Retry,
+    size: number,
+  ): Handled {
+    if (err instanceof SignInNeeded) return { saves: [], next: { stop: { signIn: err.message } } };
+    if (err instanceof OffsetMismatch && retry.recoveries < 3) {
+      return onOffsetMismatch(err.expected, attempt, retry, size);
+    }
+    if (
+      err instanceof SessionConflict &&
+      attempt.whole &&
+      !attempt.replacing &&
+      mayReplaceOwnSession(attempt.session)
+    ) {
+      return onConflictReplaceOwn(retry);
+    }
+    if (transient(err)) return this.onTransient(key, err);
+    return this.onRefused(key, err, attempt.rebuild, size);
+  }
+
+  private onTransient(key: string, err: unknown): Handled {
+    this.log(`${key}: will retry: ${message(err)}`);
+    return {
+      saves: [this.backoffStep("unavailable", message(err))],
+      next: { stop: { failed: true, transient: message(err) } },
+    };
+  }
+
+  private onRefused(
+    key: string,
+    err: unknown,
+    rebuild: Rebuild | undefined,
+    size: number,
+  ): Handled {
+    const code = refusalCode(err);
+    this.log(`${key}: ${code}: ${message(err)}`);
+    const refused = this.refusedStep(code, message(err), size);
+    return {
+      saves: rebuild ? [refused, (s) => markRebuildAnswered(s, rebuild)] : [refused],
+      next: { stop: { failed: true } },
+    };
   }
 
   private async retract(

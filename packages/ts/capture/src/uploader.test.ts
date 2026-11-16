@@ -312,6 +312,23 @@ describe("the upload protocol", () => {
     expect(server.uploads[1]).toMatchObject({ session_id: "s2", visibility: "owner" });
   });
 
+  it("keeps the secret and marks the session sent before its hash is ever sent", async () => {
+    writeFileSync(transcript(), line("one") + line("two"));
+    hooked();
+    const atSend: { secret?: string; sent?: boolean; hash?: string }[] = [];
+    const ingest = server.ingest.bind(server);
+    server.ingest = async (upload, options) => {
+      const stored = session();
+      atSend.push({ secret: stored.secret, sent: stored.sent, hash: upload.retract_hash });
+      return ingest(upload, options);
+    };
+    await uploader().pass();
+    expect(atSend).toHaveLength(1);
+    const [first] = atSend;
+    expect(first?.sent).toBe(true);
+    expect(first?.hash).toBe(retractHash(first?.secret as string));
+  });
+
   it("sends only a file the agent says is that session's transcript", async () => {
     writeFileSync(join(dir, "id_rsa"), "-----BEGIN KEY-----\n");
     hooked("s1", join(dir, "id_rsa"));
@@ -1149,6 +1166,26 @@ describe("retraction (F9.7)", () => {
     server.allowRetract = false;
     await uploader().pass();
     expect(session()).toMatchObject({ retract: "failed", retract_error: "off" });
+  });
+
+  it("retracts as done a session the server said it holds nothing of, though the resend failed", async () => {
+    writeFileSync(transcript(), line("one") + line("two"));
+    hooked();
+    await uploader().pass();
+    server.sessions.delete("s1");
+    appendFileSync(transcript(), line("three"));
+    server.failNext = [undefined, new StoreError("down")];
+    await uploader().pass();
+    expect(server.uploads.map((u) => u.offset)).toEqual([
+      0,
+      Buffer.byteLength(line("one") + line("two")),
+      0,
+    ]);
+    expect(session()).toMatchObject({ stored: false, file_offset: 0, server_offset: 0 });
+    await turnOff();
+    clock = new Date(clock.getTime() + 60_000);
+    await uploader().pass();
+    expect(session()).toMatchObject({ retract: "done", last_status: "retracted" });
   });
 
   it("never reports as retracted a stored session the server cannot find for this owner", async () => {
