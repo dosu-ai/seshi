@@ -380,8 +380,7 @@ export class Indexer {
     replaced?: Replaced,
     attempt = 0,
   ): Promise<Plan> {
-    const readAt = this.now().getTime();
-    const metadata = await this.metadataOf(owner, archive);
+    const { readAt, metadata } = await this.stampedMetadata(owner, archive);
     if (metadata === null || metadata.status === "redacted" || metadata.head === undefined) {
       return { kind: "remove", owner, archive, read_at: readAt, metadata };
     }
@@ -419,9 +418,13 @@ export class Indexer {
     };
   }
 
-  private async metadataOf(owner: string, archive: string): Promise<SessionMetadata | null> {
+  private async stampedMetadata(
+    owner: string,
+    archive: string,
+  ): Promise<{ readAt: number; metadata: SessionMetadata | null }> {
+    const readAt = this.now().getTime();
     const bytes = await getBytes(this.store, keys.metadata(owner, archive));
-    if (bytes === null) return null;
+    if (bytes === null) return { readAt, metadata: null };
     try {
       const metadata = decodeJson<SessionMetadata>(bytes);
       if (
@@ -433,10 +436,10 @@ export class Indexer {
       ) {
         throw new Error("not session metadata");
       }
-      return metadata;
+      return { readAt, metadata };
     } catch {
       this.log?.warn(`search: skipped a session of ${owner} whose metadata cannot be read`);
-      return null;
+      return { readAt, metadata: null };
     }
   }
 

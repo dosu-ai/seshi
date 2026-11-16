@@ -178,6 +178,61 @@ describe("the indexer (F10.2)", () => {
     expect(index.counts().events).toBe(4);
   });
 
+  it("never puts back a session a slower run read before a faster run indexed it", async () => {
+    const first = await db().ingest({
+      agent: "trajectory",
+      session_id: "s1",
+      transcript: log("original"),
+    });
+    const { index, indexer: fast, find } = setup();
+    // A second process sharing the index file: its first metadata read returns, then it stalls
+    // before it can use what it read.
+    let reached = () => {};
+    const stalled = new Promise<void>((resolve) => (reached = resolve));
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let armed = true;
+    const slowStore = new Proxy(store, {
+      get(target, prop, receiver) {
+        if (prop === "get") {
+          return async (key: string) => {
+            const got = await target.get(key);
+            if (armed && key.endsWith("/metadata.json")) {
+              armed = false;
+              reached();
+              await gate;
+            }
+            return got;
+          };
+        }
+        return Reflect.get(target, prop, receiver);
+      },
+    }) as Store;
+    const slow = new Indexer({
+      store: slowStore,
+      index,
+      events: EVENTS,
+      now: () => clock,
+      ownerRefreshMs: 0,
+    });
+    const slowRun = slow.run();
+    await stalled;
+    await db().ingest({
+      agent: "trajectory",
+      session_id: "s1",
+      transcript: line({ role: "user", content: "appended later", timestamp: ts }),
+      offset: first.bytes_total,
+    });
+    tick();
+    await fast.run();
+    expect(find("appended")).toEqual(["alice/s1"]);
+    tick();
+    release();
+    await slowRun;
+    expect(find("appended")).toEqual(["alice/s1"]);
+    expect(find("original")).toEqual(["alice/s1"]);
+  });
+
   it("drops a replaced session's earlier text (X4.6)", async () => {
     await db().ingest({ agent: "trajectory", session_id: "s1", transcript: log("old words") });
     const { indexer, find } = setup();
