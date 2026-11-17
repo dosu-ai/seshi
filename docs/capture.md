@@ -178,11 +178,14 @@ The status line names the problem after the separator, and `seshi capture status
 | `sign in` | No credential for the server, or it was refused | `seshi login --server <url>` |
 | `needs review key` | Serverless mode: the team requires model review (`review.required = true`), and no key for a policy's provider is set on this machine. Nothing has been uploaded unreviewed | `seshi review key set <provider>`, or set the variable the policy names (such as `ANTHROPIC_API_KEY`) where the uploader runs (a `--service` uploader does not see your shell's variables); then `seshi doctor` |
 | `needs update` | Serverless mode: the bucket needs a newer seshi to write (`seshi admin layout --min-version`) | Update seshi ([install.md](install.md)) |
-| `bucket refused` | Serverless mode: the bucket key can't write this owner's folder, the bucket has no seshi marker, or the store fails the storage test | `seshi doctor` says which. Check the key's permissions and that `serverless.owner` is the folder it may write (`seshi whoami`); run `seshi init --serverless` on a bucket with no marker; use a store with conditional writes ([serverless.md](serverless.md#credentials)) |
+| `bad shared settings` | Serverless mode: the bucket's shared settings (`config/`) fail their checks on this machine, and there is no earlier good copy to use. Uploading without them would skip the team's redaction and review settings | `seshi doctor` says what fails. An admin fixes `config/` (`seshi admin config pull`, edit, `push`), or you update seshi or fix this machine's `serverless.config`; the copy is checked again after each |
+| `bucket refused` | Serverless mode: the bucket key can't write this owner's folder or read the shared settings, the bucket refused a write during an upload (a rotated or expired key, a clock far off), the bucket has no seshi marker, or the store fails the storage test | `seshi doctor` says which. Check the key's permissions and that `serverless.owner` is the folder it may write (`seshi whoami`); run `seshi init --serverless` on a bucket with no marker; use a store with conditional writes ([serverless.md](serverless.md#credentials)) |
 
-`seshi upload` exits 3 while uploads wait for a review key or an update, and 5 for `sign in` and
-`bucket refused`. A refusal of one session only (the bucket refused that session's write) is
-not a hold: that session waits until its transcript changes, as for a `403` from a server.
+`seshi upload` exits 3 while uploads wait for a review key, an update or usable shared settings,
+and 5 for `sign in` and `bucket refused`. In serverless mode, a refusal from the bucket while one
+session is written holds every upload (`bucket refused`), since it is about the key, not the
+session; with a server, a `403` for one session is not a hold: that session waits until its
+transcript changes.
 
 ### Redacting before upload (F2.4)
 

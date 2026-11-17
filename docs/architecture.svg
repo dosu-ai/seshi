@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600" width="1000" height="600" role="img" aria-labelledby="title desc">
   <title id="title">seshi architecture</title>
-  <desc id="desc">A session flows from the coding agent's hooks through the spool and uploader on the developer laptop, over HTTP to the seshi serve API and its in-memory pipeline, and into the bucket. Other sources reach the worker. Readers use the seshi CLI, the HTTP API, or the bucket's change feed. In local mode the CLI runs the pipeline and writes the bucket itself.</desc>
+  <desc id="desc">A session flows from the coding agent's hooks through the spool and uploader on the developer laptop, over HTTP to the seshi serve API and its in-memory pipeline, and into the bucket. Other sources reach the worker. Readers use the seshi CLI, the HTTP API, or the bucket's change feed. In serverless mode each laptop's CLI runs the pipeline and writes its owner's folder of the shared bucket itself.</desc>
   <style>
     svg { --bg: #F6F4EE; --panel: #ECE8DE; --fg: #173A41; --muted: #5A6B70; --line: rgba(23, 58, 65, 0.22); --accent: #247C73; --accent-fill: rgba(36, 124, 115, 0.16); --accent-fill-2: rgba(36, 124, 115, 0.30); }
     @media (prefers-color-scheme: dark) {
@@ -108,7 +108,7 @@
   <text class="ts" x="725" y="198" text-anchor="middle">writes</text>
   <path class="edge" d="M682,333 H764" marker-start="url(#ah)" marker-end="url(#ah)"/>
   <text class="ts" x="725" y="325" text-anchor="middle">reads, sweeps</text>
-  <!-- Local mode -->
+  <!-- Serverless mode -->
   <path class="edge-dash" d="M290,362 H330 V442 H800 V422" marker-end="url(#ahm)"/>
 
   <!-- Other sources -->
@@ -135,7 +135,7 @@
 
   <!-- Key -->
   <path class="edge-dash" d="M20,578 H56"/>
-  <text class="ts" x="64" y="582">local mode: no server; the CLI runs the same pipeline and writes the bucket itself</text>
+  <text class="ts" x="64" y="582">serverless mode: no server; each laptop runs the pipeline and writes its own folder</text>
   <path class="edge-accent" d="M560,578 H596"/>
   <text class="ts" x="604" y="582">one session's path</text>
 </svg>

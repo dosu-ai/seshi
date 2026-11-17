@@ -8,7 +8,7 @@ import { openServerless, SERVERLESS_BASIS, type ServerlessBucket } from "./serve
 import { isServerless, serverlessOwner } from "./serverless/settings";
 import { USER_AGENT } from "./user-agent";
 
-/** The CLI config names neither a server nor local mode, or names one it cannot use. */
+/** The CLI config names neither a server nor a serverless bucket, or names one it cannot use. */
 export class NotConnected extends Error {
   constructor(message: string) {
     super(message);

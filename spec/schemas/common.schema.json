@@ -25,7 +25,7 @@
       "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
     },
     "CallerKind": {
-      "description": "Which kind of credential made a call (X5.1, X5.9): `person` (IdP session token or org key with a stated username), `device` (write-only device token), `service` (a service account: a reader, an OTLP destination, a poller), `admin` (an admin token, or the session token of a person with the admin role), `static` (a token from config) or `local` (local mode, writing a bucket it owns, X3.5).",
+      "description": "Which kind of credential made a call (X5.1, X5.9): `person` (IdP session token or org key with a stated username), `device` (write-only device token), `service` (a service account: a reader, an OTLP destination, a poller), `admin` (an admin token, or the session token of a person with the admin role), `static` (a token from config) or `local` (a serverless laptop writing its owner's folder of the bucket directly, F11.4).",
       "type": "string",
       "enum": ["person", "device", "service", "admin", "static", "local"]
     },
