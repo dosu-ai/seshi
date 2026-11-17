@@ -1,5 +1,6 @@
-/** The OpenCode plugin and command `seshi capture install opencode` writes to
- * `~/.config/opencode/plugins/seshi.js` and `~/.config/opencode/command/seshi.md`.
+/** The OpenCode plugins and command `seshi capture install opencode` writes to
+ * `~/.config/opencode/plugins/seshi.js`, `~/.config/opencode/seshi/tui.js` and
+ * `~/.config/opencode/command/seshi.md`.
  *
  * OpenCode runs no shell hooks and keeps its sessions in a database, not in a transcript file.
  * The plugin, which OpenCode's server loads in the TUI, `opencode run`, `serve` and `web`, reads
@@ -7,14 +8,17 @@
  * `seshi hook opencode Stop` whole, as an export (`{info, messages}`, the shape `opencode export`
  * prints), so seshi writes it to disk only for a captured session. It also tells the person, in a
  * toast, whether a new session is captured, and carries out `/seshi off|on|status`, a command
- * file, before OpenCode sends it to the model. The module exports nothing but the plugin function:
- * OpenCode calls every export. */
+ * file, before OpenCode sends it to the model (`opencode run --command seshi`, the web UI, and the
+ * TUI's home screen; in a session, the TUI plugin takes `/seshi` first). The module exports
+ * nothing but the plugin function: OpenCode calls every export. */
 
 import { bridgeRuntime } from "@seshi/kit";
 
 export const PLUGIN_MARKER = "seshi:opencode-plugin";
 export const COMMAND_MARKER = "seshi:opencode-command";
-export const PLUGIN_VERSION = 2;
+export const PLUGIN_VERSION = 3;
+export const TUI_PLUGIN_MARKER = "seshi:opencode-tui-plugin";
+export const TUI_PLUGIN_VERSION = 1;
 
 export function opencodePlugin(command: readonly string[]): string {
   return `// ${PLUGIN_MARKER} v${PLUGIN_VERSION} -- written by "seshi capture install opencode", which
@@ -47,6 +51,20 @@ export const SeshiCapture = async ({ client }) => {
   // Sessions seshi said it does not capture (turned off, paused, excluded): their turns are not
   // read or handed over. /seshi on, or a new OpenCode, asks again.
   const notCaptured = new Set();
+  // Whether a session seshi said it does not capture still is not, from seshi's status line,
+  // without reading the session: capture can be turned on where this plugin does not hear it
+  // (the TUI plugin's /seshi on, \`seshi capture on --session\`).
+  const stillOff = async (id, cwd) => {
+    if (!notCaptured.has(id)) return false;
+    const run = await seshi(
+      ["statusline", "--agent", AGENT],
+      JSON.stringify({ session_id: id, ...(cwd ? { cwd } : {}) }),
+      { env: { NO_COLOR: "1" } },
+    );
+    if (run.code !== 0 || !run.stdout.includes("◉")) return true;
+    notCaptured.delete(id);
+    return false;
+  };
   const heard = (id, message) => {
     if (message.includes("⏸")) notCaptured.add(id);
     else if (message.includes("◉")) notCaptured.delete(id);
@@ -80,9 +98,9 @@ export const SeshiCapture = async ({ client }) => {
       if (event.type === "session.idle" && properties.sessionID) {
         // Awaited: \`opencode run\` exits once the turn is over, and seshi must have the session.
         const id = properties.sessionID;
-        if (notCaptured.has(id)) return;
         const info = await session(id);
-        if (!info || (info.parentID && notCaptured.has(info.parentID))) return;
+        if (!info || (await stillOff(id, info.directory))) return;
+        if (info.parentID && (await stillOff(info.parentID, info.directory))) return;
         let list;
         try {
           list = (await client.session.messages({ path: { id } })).data;
@@ -135,5 +153,166 @@ description: "Session Capture: turn it off or on for this session, or show wheth
 ---
 <!-- ${COMMAND_MARKER}: written by "seshi capture install opencode"; seshi's plugin carries it out. -->
 /seshi $ARGUMENTS
+`;
+}
+
+/** The TUI plugin, at `~/.config/opencode/seshi/tui.js` and named in `tui.json`'s `plugin` list
+ * (OpenCode's TUI loads no plugin folder of its own, and its server would load this file as a
+ * server plugin from `plugins/`). It shows `Session Capture ◉/⏸` beside the prompt for the
+ * session in view, from `seshi statusline --agent opencode`, refreshed when the session comes into
+ * view and after each turn. And it takes `/seshi off|on|status` from the prompt itself, on the
+ * keys that submit it, so the command never reaches the server and the model does not answer.
+ * On the home screen, with no session yet, `/seshi` goes on to the server's command as before.
+ *
+ * Plain JavaScript, no JSX: OpenCode maps `@opentui/solid` and `solid-js` to its own copies. */
+export function opencodeTuiPlugin(command: readonly string[]): string {
+  return `// ${TUI_PLUGIN_MARKER} v${TUI_PLUGIN_VERSION} -- written by "seshi capture install opencode", which
+// rewrites it; "seshi capture uninstall opencode" removes it, so edits do not last.
+//
+// Session Capture in OpenCode's TUI: beside the prompt, whether the session in view is captured
+// (◉) or not (⏸); and /seshi off|on|status, typed in the prompt, carried out by seshi before
+// OpenCode sends anything to the model. seshi's server plugin (plugins/seshi.js) does the
+// capturing; tui.json's "plugin" list names this file.
+
+import { spawn } from "node:child_process";
+import { createElement, insert, setProp } from "@opentui/solid";
+import { createEffect, createSignal } from "solid-js";
+
+const SESHI = ${JSON.stringify(command)};
+const AGENT = "opencode";
+${bridgeRuntime()}
+
+// Only these are taken from the prompt; anything else (an attachment's placeholder text, an
+// unknown word) goes on to the server's /seshi command, attachments and all.
+const SESHI_COMMAND = /^\\/seshi(?:\\s+(off|on|status))?$/i;
+
+// seshi's status line up to its first " · ", so it fits beside the prompt.
+function short(line) {
+  const at = line.indexOf(" · ");
+  return at === -1 ? line : line.slice(0, at);
+}
+
+export default {
+  id: "seshi",
+  tui: async (api) => {
+    // The status line last read, for the session in view only, by id.
+    const [statuses, setStatuses] = createSignal({});
+    // Reads can finish out of order: only the latest one started is shown.
+    let reads = 0;
+
+    // The session /seshi and the status are about, with its folder: a subagent's session is
+    // captured with its parent's.
+    const which = (id) => {
+      let top = id;
+      for (let i = 0; i < 32; i++) {
+        const parent = api.state.session.get(top)?.parentID;
+        if (!parent) break;
+        top = parent;
+      }
+      const cwd = api.state.session.get(top)?.directory || api.state.path.directory;
+      return { session_id: top, ...(cwd ? { cwd } : {}) };
+    };
+
+    const refresh = async (id) => {
+      const read = ++reads;
+      const run = await seshi(["statusline", "--agent", AGENT], JSON.stringify(which(id)), {
+        env: { NO_COLOR: "1" },
+      });
+      if (read !== reads) return;
+      const line = run.code === 0 ? (run.stdout.trim().split("\\n")[0] ?? "") : "";
+      setStatuses({ [id]: line });
+    };
+
+    // The session in view, when its own prompt is the one shown: not a subagent's (no prompt),
+    // and none waiting on a permission or a question (their inputs replace the prompt).
+    const prompting = () => {
+      const route = api.route.current;
+      const id = route.name === "session" ? route.params?.sessionID : undefined;
+      if (typeof id !== "string" || api.ui.dialog.open) return undefined;
+      if (api.state.session.get(id)?.parentID) return undefined;
+      if (api.state.session.permission(id).length > 0) return undefined;
+      if (api.state.session.question(id).length > 0) return undefined;
+      return id;
+    };
+
+    const command = async (id, args) => {
+      const run = await seshi(
+        ["hook", AGENT, "Command"],
+        JSON.stringify({ ...which(id), arguments: args }),
+      );
+      const said =
+        messages(run.stdout)[0] ??
+        "Session Capture could not be changed: seshi did not answer (is it installed and on this machine's PATH?)";
+      api.ui.toast({
+        title: "Session Capture",
+        message: said,
+        variant: said.includes("◉") ? "info" : "warning",
+        duration: 6000,
+      });
+      await refresh(id);
+    };
+
+    api.slots.register({
+      order: 1000,
+      slots: {
+        session_prompt_right(_ctx, props) {
+          const node = createElement("text");
+          createEffect(() => {
+            void refresh(props.session_id);
+          });
+          createEffect(() => {
+            const theme = api.theme.current;
+            const line = statuses()[props.session_id] ?? "";
+            setProp(node, "fg", line.includes("⏸") ? theme.warning : theme.textMuted);
+          });
+          insert(node, () => short(statuses()[props.session_id] ?? ""));
+          return node;
+        },
+      },
+    });
+
+    // After each turn, the session in view, when the turn is its own or a subagent's of it.
+    api.lifecycle.onDispose(
+      api.event.on("session.idle", (event) => {
+        const id = event.properties?.sessionID;
+        const route = api.route.current;
+        const shown = route.name === "session" ? route.params?.sessionID : undefined;
+        if (!id || typeof shown !== "string") return;
+        if (which(shown).session_id === which(id).session_id) void refresh(shown);
+      }),
+    );
+
+    // /seshi off|on|status, on the keys that submit the prompt, before the prompt sends it. A
+    // binding that returns false passes the key on to the prompt.
+    // The textarea submits on input.submit ("return" by default); prompt.submit is unbound by
+    // default.
+    const keys = [];
+    for (const name of ["input.submit", "prompt.submit"]) {
+      try {
+        for (const binding of api.tuiConfig.keybinds.get(name) ?? []) {
+          if (binding?.key && !keys.includes(binding.key)) keys.push(binding.key);
+        }
+      } catch {}
+    }
+    if (keys.length === 0) keys.push("return");
+    api.keymap.registerLayer({
+      priority: 100,
+      bindings: keys.map((key) => ({
+        key,
+        cmd: (ctx) => {
+          const text = ctx.focused?.plainText;
+          const id = prompting();
+          if (typeof text !== "string" || !id) return false;
+          const asked = SESHI_COMMAND.exec(text.trim());
+          if (!asked) return false;
+          // Taken only once the prompt is cleared; if it cannot be, the prompt sends it on.
+          if (api.keymap.dispatchCommand("prompt.clear")?.ok !== true) return false;
+          void command(id, (asked[1] ?? "").toLowerCase());
+          return true;
+        },
+      })),
+    });
+  },
+};
 `;
 }

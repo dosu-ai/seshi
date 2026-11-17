@@ -12,8 +12,9 @@
  * chunks). OpenCode has no end-of-session event (`session.idle` follows every turn), so a session
  * ends when the uploader finds it quiet. */
 
-import { existsSync } from "node:fs";
-import { basename, join } from "node:path";
+import { existsSync, rmdirSync, rmSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import {
   type CaptureAgent,
   type CaptureHost,
@@ -30,12 +31,21 @@ import {
   ownedFileNotes,
   ownedFileState,
   payloadObject,
+  readTextFile,
   removeOwnedFiles,
   seshiPrompt,
   stringField,
   type TranscriptInfo,
+  writeJsonConfig,
 } from "@seshi/kit";
-import { COMMAND_MARKER, opencodeCommand, opencodePlugin, PLUGIN_MARKER } from "./plugin";
+import {
+  COMMAND_MARKER,
+  opencodeCommand,
+  opencodePlugin,
+  opencodeTuiPlugin,
+  PLUGIN_MARKER,
+  TUI_PLUGIN_MARKER,
+} from "./plugin";
 
 export const AGENT = "opencode";
 
@@ -160,33 +170,136 @@ export function commandPath(host: CaptureHost): string {
   return join(opencodeConfigDir(host), "command", "seshi.md");
 }
 
+/** The TUI plugin: not in `plugins/`, which OpenCode's server loads as server plugins. */
+export function tuiPluginPath(host: CaptureHost): string {
+  return join(opencodeConfigDir(host), "seshi", "tui.js");
+}
+
+/** OpenCode's global TUI config, whose `plugin` list names the TUI plugins to load. OpenCode also
+ * reads a `tui.jsonc` beside it and merges the two lists, so seshi writes only `tui.json`. */
+export function tuiConfigPath(host: CaptureHost): string {
+  return join(opencodeConfigDir(host), "tui.json");
+}
+
+const TUI_SCHEMA = "https://opencode.ai/tui.json";
+
 function owned(context: InstallContext): OwnedFile[] {
   return [
     { path: pluginPath(context), text: opencodePlugin(context.command), marker: PLUGIN_MARKER },
+    {
+      path: tuiPluginPath(context),
+      text: opencodeTuiPlugin(context.command),
+      marker: TUI_PLUGIN_MARKER,
+    },
     { path: commandPath(context), text: opencodeCommand(), marker: COMMAND_MARKER },
   ];
 }
+
+/** Whether an entry of `tui.json`'s `plugin` list (a path or URL, alone or with options) names
+ * seshi's TUI plugin. */
+function isOurEntry(entry: unknown, file: string): boolean {
+  const spec = Array.isArray(entry) ? entry[0] : entry;
+  return spec === file || spec === pathToFileURL(file).href;
+}
+
+type TuiConfig =
+  | { present: boolean; config: Record<string, unknown>; plugins: unknown[] }
+  | { present: true; problem: string };
+
+/** `tui.json` as seshi may change it: plain JSON holding an object, its `plugin` a list. OpenCode
+ * reads it as JSONC; one with comments is left to the person, since rewriting it would drop them. */
+function readTuiConfig(path: string): TuiConfig {
+  const text = readTextFile(path);
+  if (text === undefined || text.trim() === "") {
+    return { present: text !== undefined, config: {}, plugins: [] };
+  }
+  let config: unknown;
+  try {
+    config = JSON.parse(text);
+  } catch {
+    return { present: true, problem: "is not plain JSON (comments?)" };
+  }
+  if (!isObject(config)) return { present: true, problem: "does not hold a JSON object" };
+  const plugins = config.plugin ?? [];
+  if (!Array.isArray(plugins))
+    return { present: true, problem: 'has a "plugin" that is not a list' };
+  return { present: true, config, plugins };
+}
+
+/** `tui.json`, the TUI plugin's path, and whether the list names it. */
+function tuiEntry(host: CaptureHost) {
+  const path = tuiConfigPath(host);
+  const file = tuiPluginPath(host);
+  const current = readTuiConfig(path);
+  const listed = !("problem" in current) && current.plugins.some((e) => isOurEntry(e, file));
+  return { path, file, current, listed };
+}
+
+const byHand = (path: string, file: string, problem: string) =>
+  `${path} ${problem}: left alone, so OpenCode shows no Session Capture status; add "${file}" to its "plugin" list`;
 
 export const opencodeInstaller: Installer = {
   detect: (host) => existsSync(opencodeConfigDir(host)) || existsSync(opencodeDataDir(host)),
 
   async install(context: InstallContext): Promise<InstallReport> {
-    const { changed, notes } = installOwnedFiles(owned(context), "OpenCode");
+    const { changed, foreign, notes } = installOwnedFiles(owned(context), "OpenCode");
+    if (foreign.length > 0) return { changed, notes };
+    const { path, file: tui, current, listed } = tuiEntry(context);
+    if ("problem" in current) notes.push(byHand(path, tui, current.problem));
+    else if (!listed) {
+      const config: Record<string, unknown> = current.present
+        ? { ...current.config }
+        : { $schema: TUI_SCHEMA };
+      config.plugin = [...current.plugins, tui];
+      writeJsonConfig(path, config);
+      changed.push(path);
+    }
     if (changed.length > 0)
       notes.push("OpenCode loads the plugin when it starts: restart OpenCode");
     return { changed, notes };
   },
 
   async uninstall(context: InstallContext): Promise<InstallReport> {
-    return { changed: removeOwnedFiles(owned(context)), notes: [] };
+    const changed = removeOwnedFiles(owned(context));
+    const { path, file: tui, current, listed } = tuiEntry(context);
+    if (changed.includes(tui)) {
+      try {
+        // seshi's own folder, once empty.
+        rmdirSync(dirname(tui));
+      } catch {}
+    }
+    if (!("problem" in current) && listed) {
+      const config = { ...current.config };
+      const plugins = current.plugins.filter((entry) => !isOurEntry(entry, tui));
+      if (plugins.length > 0) config.plugin = plugins;
+      else delete config.plugin;
+      // Nothing left but the schema line seshi wrote: the file goes too.
+      const rest = Object.keys(config).filter((key) => key !== "$schema");
+      if (rest.length === 0 && (config.$schema ?? TUI_SCHEMA) === TUI_SCHEMA) {
+        rmSync(path, { force: true });
+      } else writeJsonConfig(path, config);
+      changed.push(path);
+    }
+    return { changed, notes: [] };
   },
 
   async status(context: InstallContext): Promise<InstallStatus> {
     const states = owned(context).map(ownedFileState);
+    const notes = ownedFileNotes(states, AGENT);
+    // Capture needs only seshi's own files; tui.json's entry (the status and /seshi in the TUI)
+    // is reported, not required.
+    const { path, file: tui, current, listed } = tuiEntry(context);
+    if ("problem" in current) notes.push(byHand(path, tui, current.problem));
+    else if (!listed && states.some((s) => s.ours)) {
+      notes.push(`${path} does not list seshi's TUI plugin: run seshi capture install opencode`);
+    }
     return {
       installed: states.every((s) => s.ours),
-      files: states.map(({ path, present, ours }) => ({ path, present, ours })),
-      notes: ownedFileNotes(states, AGENT),
+      files: [
+        ...states.map(({ path, present, ours }) => ({ path, present, ours })),
+        { path, present: current.present, ours: listed },
+      ],
+      notes,
     };
   },
 };

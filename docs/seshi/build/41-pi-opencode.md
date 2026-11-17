@@ -155,7 +155,8 @@ sessions ran with no model spend, and each agent's folders isolated:
 
 ## Follow-ups
 
-- An OpenCode TUI plugin for a status that stays on screen, and `/seshi` without a model turn.
+- An OpenCode TUI plugin for a status that stays on screen, and `/seshi` without a model turn:
+  built in 42 ([42-opencode-tui.md](42-opencode-tui.md)).
 - Backfilling OpenCode sessions no plugin handed over: listing them needs OpenCode's database or
   its CLI.
 - Adapter fidelity:
