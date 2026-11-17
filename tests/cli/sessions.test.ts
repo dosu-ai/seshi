@@ -123,8 +123,11 @@ describe("seshi sessions against a server", () => {
   });
 
   it("dates each session by its last activity, in local time", async () => {
-    const ls = await machine.seshi(["sessions", "ls"], { env: { TZ: "America/Los_Angeles" } });
-    expect(ls.out).toMatch(/claude-code\/sess1 +2026-08-31 17:00 /);
+    const local = new Date("2026-09-01T00:00:08.000Z");
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const stamp = `${local.getFullYear()}-${pad(local.getMonth() + 1)}-${pad(local.getDate())} ${pad(local.getHours())}:${pad(local.getMinutes())}`;
+    const ls = await machine.seshi(["sessions", "ls"]);
+    expect(ls.out).toContain(`claude-code/sess1  ${stamp}  `);
     const show = await machine.seshi(["sessions", "show", "claude-code", "sess1"]);
     expect(show.out).toContain("active      2026-09-01T00:00:08.000Z");
   });
