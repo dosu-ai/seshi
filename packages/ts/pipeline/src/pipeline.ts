@@ -342,9 +342,10 @@ function countsNotIn(
 }
 
 interface Run {
-  /** The redactor this write started with: a reload that swaps it mid-write does not mix two
-   * rule sets in one session. */
+  /** The redactor and reviewer this write started with: a reload that swaps them mid-write
+   * does not mix two config generations in one write. */
   redactor: Redactor;
+  reviewer: Reviewer;
   envelope: Envelope;
   auth: Authorization;
   owner: string;
@@ -627,7 +628,7 @@ export class Pipeline {
     await this.layout();
     const owner = auth.owner;
     const archive = archiveId(owner, envelope.format, envelope.session_key);
-    const redactor = this.redactor;
+    const { redactor, reviewer } = this;
     for (let attempt = 1; ; attempt++) {
       const session = await readMetadata(this.store, owner, archive);
       if (session?.status === "redacted") {
@@ -641,7 +642,9 @@ export class Pipeline {
         );
       }
       try {
-        return { result: await body({ redactor, envelope, auth, owner, archive, session }) };
+        return {
+          result: await body({ redactor, reviewer, envelope, auth, owner, archive, session }),
+        };
       } catch (err) {
         if (!(err instanceof StalePlan)) throw err;
         if (attempt >= PLAN_ATTEMPTS) {
@@ -924,7 +927,7 @@ export class Pipeline {
     const lead = metaOf(plan.write) ? 1 : 0;
     const judged = plan.write.slice(lead);
     const { payload: _payload, ...about } = envelope;
-    const decision = await this.reviewer.review({
+    const decision = await run.reviewer.review({
       envelope: about,
       owner: run.owner,
       archive_id: run.archive,

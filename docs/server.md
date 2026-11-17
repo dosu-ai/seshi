@@ -298,7 +298,7 @@ allow.
 | `GET /v1/admin/sources/:id?days` | One source's status; `404 unknown_source` for an id no source has (`sources:admin`) |
 | `GET /v1/admin/sources/:id/failed`, `…/dropped` `?since&after&limit` | A source's failure or drop records, oldest first, as `seshi sync failed\|dropped --json` prints them; never content. A source no longer configured can still have its records read (`sources:admin`, X6.4) |
 | `POST /v1/admin/reload` | Read the config file, its `seshi.d/` drop-ins and the rule packs again and apply them, all or nothing, as `SIGHUP` does ([config.md](config.md#reloading), F1.5): `{reload, config}`, `reload.outcome` `applied` or `unchanged`; `422 reload_rejected` with `reload.errors` when they do not load or check (the running config stays); `409 not_reloadable` for a server started with no config file (`sources:admin`) |
-| `GET /v1/admin/reload` | The running config's `generation`, `config_hash` and `rule_set`, when it was loaded, `restart_required`, and the last reload (`sources:admin`) |
+| `GET /v1/admin/reload` | The running config's `generation`, `config_hash`, `rule_set` and `review_set` (changes with a review prompt file), when it was loaded, `restart_required`, and the last reload (`sources:admin`) |
 
 ### Retraction (F9.7)
 

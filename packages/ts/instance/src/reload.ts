@@ -46,6 +46,7 @@ export interface ReloadReport {
   generation: number;
   config_hash: string;
   rule_set: string;
+  review_set: string | null;
   /** Why it was rejected, one problem a line. */
   errors?: string[];
   /** The live sections that changed (`sources`, `redaction`…). */
@@ -62,6 +63,9 @@ export interface ConfigStatus {
   config_hash: string;
   /** The running redaction rule set's hash, as `GET /v1/redaction/rules` serves it. */
   rule_set: string;
+  /** A hash of the running review policies' hashes (each covers its prompt text, so an edited
+   * `prompt_file` changes it); null for a reviewer seshi did not build from `[review]`. */
+  review_set: string | null;
   /** When the running generation started. */
   loaded_at: string;
   /** Whether this server can reload (it was started from a config it can read again). */
@@ -95,6 +99,12 @@ export function canonical(value: unknown): unknown {
 
 function sha256(text: string): string {
   return createHash("sha256").update(text).digest("hex");
+}
+
+/** `ConfigStatus.review_set` from a review fingerprint (the JSON of its policies' ids and
+ * hashes); null when there is none. */
+export function reviewSetHash(fingerprint: string | undefined): string | null {
+  return fingerprint === undefined ? null : sha256(fingerprint);
 }
 
 export function configHash(config: ServerConfig): string {

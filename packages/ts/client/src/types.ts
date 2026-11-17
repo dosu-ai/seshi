@@ -150,6 +150,7 @@ export interface ReloadReport {
   generation: number;
   config_hash: string;
   rule_set: string;
+  review_set: string | null;
   errors?: string[];
   changed: string[];
   sources?: { added: string[]; removed: string[]; changed: string[]; unchanged: string[] };
@@ -161,6 +162,9 @@ export interface ConfigStatus {
   generation: number;
   config_hash: string;
   rule_set: string;
+  /** A hash of the running review policies (their prompt text included); null for a reviewer
+   * seshi did not build. */
+  review_set: string | null;
   loaded_at: string;
   reloadable: boolean;
   restart_required: string[];

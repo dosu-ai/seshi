@@ -46,7 +46,8 @@ source of truth and applies them without one.
   `default_visibility`, `records`, `capture`. To make `records` and `quiet_period` live, the
   job host's `config` is a getter and the retention job reads `[records]` at each run.
 - **Status.** `GET /v1/admin/reload` (`Instance.configStatus()`): `generation` (1 at start,
-  +1 per applied reload), `config_hash` (sha256 of the canonical config), `rule_set`,
+  +1 per applied reload), `config_hash` (sha256 of the canonical config), `rule_set`, `review_set` (sha256 of the
+  review policies' `[id, hash]` pairs, so a prompt-file edit shows; null for an injected reviewer),
   `loaded_at`, `reloadable`, `restart_required`, `last_reload`. `POST` answers
   `{reload, config}`; 422 `reload_rejected` with the same body when rejected; 409
   `not_reloadable` when the server started with no config file. `/v1/admin/sources` stays

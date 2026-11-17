@@ -41,7 +41,11 @@ const modelStep = z.strictObject({
     .min(1)
     .optional()
     .describe("The prompt, inline; seshi's default prompt when neither is set."),
-  prompt_file: z.string().min(1).optional().describe("The prompt, from a file read at start."),
+  prompt_file: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("The prompt, from a file read at start and again on every config reload."),
   api_key: secret()
     .optional()
     .describe(
@@ -146,6 +150,16 @@ export interface ResolvedStep {
   max_tokens: number;
   effort: (typeof EFFORTS)[number] | undefined;
   timeout_ms: number;
+}
+
+/** The prompt files review policies read: what `server.watch_config` watches besides the
+ * config file and the rule packs. */
+export function reviewPromptFiles(review: { policies: readonly ReviewPolicy[] }): string[] {
+  return review.policies.flatMap((policy) =>
+    [policy.decision.prompt_file, policy.redactor.prompt_file].filter(
+      (file): file is string => file !== undefined,
+    ),
+  );
 }
 
 export function resolveSteps(policy: ReviewPolicy): {

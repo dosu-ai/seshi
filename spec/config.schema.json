@@ -678,7 +678,7 @@
                     "minLength": 1
                   },
                   "prompt_file": {
-                    "description": "The prompt, from a file read at start.",
+                    "description": "The prompt, from a file read at start and again on every config reload.",
                     "type": "string",
                     "minLength": 1
                   },
@@ -786,7 +786,7 @@
                     "minLength": 1
                   },
                   "prompt_file": {
-                    "description": "The prompt, from a file read at start.",
+                    "description": "The prompt, from a file read at start and again on every config reload.",
                     "type": "string",
                     "minLength": 1
                   },

@@ -72,6 +72,7 @@ import {
   RESTART_ONLY_SECTIONS,
   type ReloadReport,
   type ReloadTrigger,
+  reviewSetHash,
   same,
 } from "./reload";
 import { type InstanceStatus, instanceStatus } from "./status";
@@ -343,6 +344,7 @@ export class Instance {
       generation: this.generation,
       config_hash: this.hash,
       rule_set: this.rules.hash,
+      review_set: reviewSetHash(this.reviewPrint),
       loaded_at: this.loadedAt.toISOString(),
       reloadable: this.loadConfig !== undefined,
       restart_required: [...this.restartRequired],
@@ -353,12 +355,12 @@ export class Instance {
   }
 
   /** Apply a changed config without a restart: `next`, or the config read again through
-   * `loadConfig`. All or nothing: the config is loaded and checked and the rule packs (and
-   * review policies, if `[review]` changed) are built before anything changes; on any error the
+   * `loadConfig`. All or nothing: the config is loaded and checked and the rule packs and review
+   * policies (their prompt files read again) are built before anything changes; on any error the
    * running config stays and the report says why. Then sources are compared by id: an added
    * one starts polling, a removed one stops (its run is aborted and waited for), a changed one
    * restarts, an unchanged one keeps running. Checkpoints are never touched. New writes use the
-   * new rules; a write already going finishes with the rules it started with. Settings in
+   * new rules and review; a write already going finishes with the ones it started with. Settings in
    * `RESTART_ONLY_SECTIONS` keep their running values and are listed in `restart_required`.
    * Reloads run one at a time, in the order asked. */
   reload(trigger: ReloadTrigger = "manual", next?: ServerConfig): Promise<ReloadReport> {
@@ -381,6 +383,7 @@ export class Instance {
         generation: this.generation,
         config_hash: this.hash,
         rule_set: this.rules.hash,
+        review_set: reviewSetHash(this.reviewPrint),
         changed: [],
         restart_required: [],
         ...extra,

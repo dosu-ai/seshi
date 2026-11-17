@@ -5,7 +5,8 @@ import { loadServerConfig, type ServerConfig } from "@seshi/config";
 import { BUILTIN_FORMATS, FormatRegistry } from "@seshi/formats";
 import type { Connector } from "@seshi/kit";
 import { getTrace, type Reviewer, uploadEnvelope } from "@seshi/pipeline";
-import { archiveId, readCheckpoint, readMetadata } from "@seshi/store";
+import { fakeProviderServer, KeywordModel } from "@seshi/review/testing";
+import { archiveId, listReviews, readCheckpoint, readMetadata } from "@seshi/store";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildInstance, type Instance, readRedactionPacks } from "./instance";
 import { canonical, differences, diffSources, effectiveConfig } from "./reload";
@@ -250,25 +251,27 @@ describe("a rejected reload", () => {
   });
 });
 
+/** A short session that mentions an `ACME-` key. */
+const text = () =>
+  `${JSON.stringify({ role: "meta", source: "trajectory" })}\n${JSON.stringify({
+    role: "user",
+    content: `${"x".repeat(2000)} the key is ACME-1234`,
+    timestamp: "2026-09-01T00:00:00Z",
+  })}\n${JSON.stringify({ role: "assistant", content: "ok", timestamp: "2026-09-01T00:00:01Z" })}\n`;
+const envelope = (sessionId: string) =>
+  uploadEnvelope(
+    {
+      owner: "alice",
+      agent: "trajectory",
+      session_id: sessionId,
+      transcript: text(),
+      format: "jsonl",
+    },
+    { caller: { kind: "static", principal: "alice" }, owner_basis: "verified" },
+  );
+
 describe("reloading rule packs", () => {
   const PACK = 'id = "acme"\n[[rules]]\nid = "acme-key"\npattern = "ACME-[0-9]{4}"\n';
-  const text = () =>
-    `${JSON.stringify({ role: "meta", source: "trajectory" })}\n${JSON.stringify({
-      role: "user",
-      content: `${"x".repeat(2000)} the key is ACME-1234`,
-      timestamp: "2026-09-01T00:00:00Z",
-    })}\n${JSON.stringify({ role: "assistant", content: "ok", timestamp: "2026-09-01T00:00:01Z" })}\n`;
-  const envelope = (sessionId: string) =>
-    uploadEnvelope(
-      {
-        owner: "alice",
-        agent: "trajectory",
-        session_id: sessionId,
-        transcript: text(),
-        format: "jsonl",
-      },
-      { caller: { kind: "static", principal: "alice" }, owner_basis: "verified" },
-    );
   async function stored(instance: Instance, sessionId: string) {
     const archive = archiveId("alice", "trajectory", sessionId);
     const meta = await readMetadata(instance.store, "alice", archive);
@@ -333,33 +336,62 @@ describe("reloading rule packs", () => {
 });
 
 describe("reloading review", () => {
-  type Judged = { reviewer: { policies?: { hash: string; decision: { prompt: string } }[] } };
-  const judged = (instance: Instance) =>
-    (instance.pipeline as unknown as Judged).reviewer.policies?.[0];
-
   it("reads prompt files again: an edited prompt is a new policy, with [review] unchanged", async () => {
-    const prompt = join(dir, "decision.txt");
-    writeFileSync(prompt, "Judge it, version 1.");
-    writeConfig(
-      `\n[[review.policies]]\nid = "p"\ndecision = { api_key = "sk-test", prompt_file = "${prompt}" }\n`,
-    );
-    const instance = await start();
-    const before = judged(instance);
-    expect(before?.decision.prompt).toBe("Judge it, version 1.");
-    expect(await instance.reload()).toMatchObject({ outcome: "unchanged", changed: [] });
+    const provider = fakeProviderServer({ model: new KeywordModel({}) });
+    try {
+      const prompt = join(dir, "decision.txt");
+      writeFileSync(prompt, "Judge it, version 1.");
+      writeConfig(
+        `\n[[review.policies]]\nid = "p"\ndecision = { api_key = "sk-test", base_url = "${provider.url}", prompt_file = "${prompt}" }\n`,
+      );
+      const instance = await start();
+      /** Write a session and return the policy hash its review decision recorded. */
+      const judged = async (sessionId: string) => {
+        await instance.pipeline.submit(envelope(sessionId));
+        const archive = archiveId("alice", "trajectory", sessionId);
+        const [review] = await listReviews(instance.store, "alice", archive);
+        return review?.policy_hash;
+      };
+      const asked = (text: string) =>
+        provider.requests.some((r) => JSON.stringify(r.body).includes(text));
 
-    writeFileSync(prompt, "Judge it, version 2.");
-    const report = await instance.reload();
-    expect(report).toMatchObject({ outcome: "applied", generation: 2, changed: ["review"] });
-    expect(judged(instance)?.decision.prompt).toBe("Judge it, version 2.");
-    expect(judged(instance)?.hash).not.toBe(before?.hash);
+      const v1 = await judged("s1");
+      expect(v1).toMatch(/^[0-9a-f]{64}$/);
+      expect(asked("Judge it, version 1.")).toBe(true);
+      const before = instance.configStatus();
+      expect(before.review_set).toMatch(/^[0-9a-f]{64}$/);
+      expect(await instance.reload()).toMatchObject({
+        outcome: "unchanged",
+        changed: [],
+        review_set: before.review_set,
+      });
 
-    // A prompt file that cannot be read is refused, as a restart would be.
-    rmSync(prompt);
-    const missing = await instance.reload();
-    expect(missing.outcome).toBe("rejected");
-    expect(missing.errors?.[0]).toMatch(/decision\.txt/);
-    expect(judged(instance)?.decision.prompt).toBe("Judge it, version 2.");
+      writeFileSync(prompt, "Judge it, version 2.");
+      const report = await instance.reload();
+      // The config names the same file, so its hash stays; the review set shows the change.
+      expect(report).toMatchObject({
+        outcome: "applied",
+        generation: 2,
+        changed: ["review"],
+        config_hash: before.config_hash,
+      });
+      expect(report.review_set).not.toBe(before.review_set);
+      expect(instance.configStatus().review_set).toBe(report.review_set);
+      const v2 = await judged("s2");
+      expect(v2).toMatch(/^[0-9a-f]{64}$/);
+      expect(v2).not.toBe(v1);
+      expect(asked("Judge it, version 2.")).toBe(true);
+
+      // A prompt file that cannot be read is refused, as a restart would be.
+      rmSync(prompt);
+      const missing = await instance.reload();
+      expect(missing.outcome).toBe("rejected");
+      expect(missing.errors?.[0]).toMatch(/decision\.txt/);
+      expect(missing.review_set).toBe(report.review_set);
+      expect(await judged("s3")).toBe(v2);
+    } finally {
+      await provider.close();
+    }
   });
 });
 

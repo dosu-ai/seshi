@@ -1460,7 +1460,7 @@ components:
       type: object
       description: One config reload (F1.5).
       required:
-        [trigger, started_at, finished_at, outcome, generation, config_hash, rule_set, changed, restart_required]
+        [trigger, started_at, finished_at, outcome, generation, config_hash, rule_set, review_set, changed, restart_required]
       properties:
         trigger:
           enum: [signal, api, watch, manual]
@@ -1475,6 +1475,7 @@ components:
         generation: { type: integer, minimum: 1, description: The generation running after it. }
         config_hash: { type: string }
         rule_set: { type: string }
+        review_set: { type: [string, "null"] }
         errors:
           type: array
           items: { type: string }
@@ -1500,7 +1501,7 @@ components:
       type: object
       description: The running config (F1.5).
       required:
-        [generation, config_hash, rule_set, loaded_at, reloadable, restart_required, last_reload, live_sections, restart_only_sections]
+        [generation, config_hash, rule_set, review_set, loaded_at, reloadable, restart_required, last_reload, live_sections, restart_only_sections]
       properties:
         generation: { type: integer, minimum: 1 }
         config_hash:
@@ -1509,6 +1510,12 @@ components:
         rule_set:
           type: string
           description: The redaction rule set's hash, the `ETag` of `GET /v1/redaction/rules`.
+        review_set:
+          type: [string, "null"]
+          description: |
+            A hash of the running review policies' hashes. Each covers its prompt text, so an
+            edited `prompt_file` changes it where `config_hash` does not. Null for a reviewer
+            seshi did not build from `[review]`.
         loaded_at: { type: string, format: date-time }
         reloadable:
           type: boolean

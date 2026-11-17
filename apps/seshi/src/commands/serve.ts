@@ -1,6 +1,6 @@
 import { parseArgs } from "node:util";
 import { createApp, maxBodyBytes } from "@seshi/api";
-import { checkServerConfig, serverDropInDir } from "@seshi/config";
+import { checkServerConfig, reviewPromptFiles, serverDropInDir } from "@seshi/config";
 import { lineLogger, type ReloadTrigger, SERVERLESS_BUCKET_WARNING } from "@seshi/instance";
 import { VERSION } from "@seshi/model";
 import { readLayout } from "@seshi/store";
@@ -133,11 +133,7 @@ async function start(ctx: CommandContext, argv: string[]): Promise<number | unde
         files: () => [
           configFile,
           ...instance.config.redaction.packs,
-          ...instance.config.review.policies.flatMap((p) =>
-            [p.decision.prompt_file, p.redactor.prompt_file].filter(
-              (f): f is string => f !== undefined,
-            ),
-          ),
+          ...reviewPromptFiles(instance.config.review),
         ],
         dirs: () => [serverDropInDir(configFile)],
         onChange: () => void reload("watch"),

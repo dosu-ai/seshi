@@ -71,7 +71,9 @@ All three do the same thing, one reload at a time:
    it was. Use `seshi sync rewind` to read again on purpose.
 3. **Review follows its prompts.** A review policy whose `prompt_file` changed is a new
    policy even when `[review]` did not: its `policy_hash` (recorded with every review
-   decision) changes, and new writes are judged with it.
+   decision) changes, and new writes are judged with it; a write already going finishes with
+   the review it started with. `GET /v1/admin/reload` shows it as a new `review_set` (the
+   `config_hash` covers the file's path, not its text).
 4. **Rule packs swap atomically.** New writes redact with the new rule set; a write already
    going finishes with the rules it started with. `GET /v1/redaction/rules` serves the new
    packs (a new `ETag`) at once. Stored sessions keep the rules they were stored with until
@@ -308,7 +310,7 @@ Each step takes:
 | `model` | `claude-haiku-5-5` on `anthropic` | Required for `openai-compatible` |
 | `api_key` | | Secret. Required for `anthropic`, and for `openai-compatible` without a `base_url` |
 | `base_url` | `https://api.anthropic.com`, `https://api.openai.com/v1` | A proxy, an OpenAI-compatible server, or a local model |
-| `prompt`, `prompt_file` | seshi's default prompt | One or the other; the file is read at start |
+| `prompt`, `prompt_file` | seshi's default prompt | One or the other; the file is read at start and again on every reload ([Reloading](#reloading)) |
 | `max_tokens` | `4096` (decision), `16000` (redactor) | Output cap of one call, the model's thinking included |
 | `effort` | the model's own | `anthropic` only: `low`, `medium`, `high`, `xhigh` or `max` |
 | `timeout` | `"60s"` | How long one call may take |

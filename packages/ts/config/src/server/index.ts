@@ -166,6 +166,7 @@ export {
   type ReviewSection,
   type ReviewStepConfig,
   resolveSteps,
+  reviewPromptFiles,
   reviewSection,
 } from "./review";
 export { type SearchSection, searchSection } from "./search";
