@@ -5,10 +5,6 @@
 
 **Seshi is a toolkit for teams to capture, redact, store, and analyze coding agent sessions.**
 
-It is one binary. `seshi capture install` hooks your coding agents so every session is captured
-as it happens; `seshi serve` runs the server; the rest of the CLI lists, exports and searches
-what was captured. Sessions are kept in a bucket you own.
-
 ## Who is Seshi for?
 
 Teams that want to get the most out of coding agents: to see how the work actually gets done,
