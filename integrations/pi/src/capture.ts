@@ -90,8 +90,7 @@ function capture(payload: unknown, final: boolean): HookCapture {
   };
 }
 
-export const UNKNOWN_COMMAND =
-  "Session Capture: /session-capture takes off, on or status; nothing was changed. For a pause, run seshi capture pause in a terminal.";
+export const UNKNOWN_COMMAND = `Session Capture: /${CAPTURE_COMMAND} takes off, on or status; nothing was changed. For a pause, run seshi capture pause in a terminal.`;
 
 /** What the extension prints for a message seshi has for the person: it shows `message`. */
 const reply = (message: string) => ({ message });
@@ -104,9 +103,11 @@ export const PI_HOOKS: readonly HookHandler[] = [
     event: "Command",
     reply,
     parse(payload) {
-      const asked = captureCommandPrompt(
-        stringField(payloadObject(payload, AGENT), "prompt") || `/${CAPTURE_COMMAND}`,
-      );
+      // Only seshi's own command sends this event, so its name (which an extension written
+      // before a rename still sends) is dropped and only the words after it are read.
+      const prompt = stringField(payloadObject(payload, AGENT), "prompt") ?? "";
+      const args = prompt.replace(/^\s*[$/]\S*/, "");
+      const asked = captureCommandPrompt(`/${CAPTURE_COMMAND} ${args}`);
       const { session_id, cwd } = capture(payload, false);
       const which = { session_id, ...(cwd ? { cwd } : {}) };
       if (!asked) return { captures: [], say: UNKNOWN_COMMAND };

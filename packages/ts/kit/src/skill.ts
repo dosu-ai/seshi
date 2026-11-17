@@ -71,13 +71,13 @@ export function installSkill(
   command: readonly string[],
 ): { changed: string[]; notes: string[] } {
   const path = skillFile(skillsDir);
-  const old = removeOne(join(skillsDir, OLD_SKILL_NAME, "SKILL.md"));
   const existing = readTextFile(path);
   if (existing !== undefined && !existing.includes(SKILL_MARKER)) {
-    return { changed: old, notes: [`${path} is someone else's skill, so it was left as it is`] };
+    return { changed: [], notes: [`${path} is someone else's skill, so it was left as it is`] };
   }
   writeFileAtomic(path, captureSkill(command));
-  return { changed: [...old, path], notes: [] };
+  const old = removeOne(join(skillsDir, OLD_SKILL_NAME, "SKILL.md"));
+  return { changed: [path], notes: old.map((p) => `removed ${p}, the skill's old name`) };
 }
 
 /** Remove the skill's folder from `skillsDir`, under its name and its old one, where the skill

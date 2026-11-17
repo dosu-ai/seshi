@@ -6,7 +6,7 @@
  * capture works as it does for Claude Code: the rules, the spool and the uploader are seshi's.
  * It is plain JavaScript (no type annotations), so it loads whatever pi does with types. */
 
-import { bridgeRuntime } from "@seshi/kit";
+import { bridgeRuntime, CAPTURE_COMMAND } from "@seshi/kit";
 
 export const EXTENSION_MARKER = "seshi:pi-extension";
 export const EXTENSION_VERSION = 3;
@@ -87,10 +87,10 @@ export default function (pi) {
     if (event && event.reason === "reload") return;
     await hook("SessionEnd", ctx, {}, SHUTDOWN_TIMEOUT_MS);
   });
-  pi.registerCommand("session-capture", {
+  pi.registerCommand("${CAPTURE_COMMAND}", {
     description: "Session Capture: turn it off or on for this session, or show whether it is captured",
     handler: async (args, ctx) => {
-      await hook("Command", ctx, { prompt: \`/session-capture \${args || ""}\`.trim() });
+      await hook("Command", ctx, { prompt: \`/${CAPTURE_COMMAND} \${args || ""}\`.trim() });
       await refresh(ctx);
     },
   });

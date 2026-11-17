@@ -222,7 +222,9 @@ describe("the installer (F9.6)", () => {
     expect(captureCommandPrompt("$session-capture status")).toBe("status");
     expect(captureCommandPrompt("$session-capture off and then fix the tests")).toBeUndefined();
     expect(captureCommandPrompt("please run $session-capture off")).toBeUndefined();
-    expect(captureCommandPrompt("$seshi off")).toBeUndefined();
+    expect(captureCommandPrompt("$session-capture capture off")).toBe("off");
+    // The old name, which an old skill still tells the agent the hook handles.
+    expect(captureCommandPrompt("$seshi off")).toBe("off");
     const handler = hookHandler(CODEX_CAPTURE, "UserPromptSubmit");
     const prompt = (text: string) =>
       handler?.parse({ session_id: "t1", cwd: "/w", prompt: text }, host);

@@ -84,6 +84,8 @@ describe("pi's hooks, from seshi's extension (F9.2)", () => {
     expect(command("/session-capture pause 2h")).toEqual({ captures: [], say: UNKNOWN_COMMAND });
     expect(command("/session-capture of")?.say).toBe(UNKNOWN_COMMAND);
     expect(command("/session-capture status")).toEqual({ captures: [], announce: which });
+    // An extension written before the rename sends its old name: only the words after it count.
+    expect(command("/seshi off")?.request?.action).toBe("off");
     expect(hookHandler(PI_CAPTURE, "Command")?.reply?.("hi")).toEqual({ message: "hi" });
   });
 });

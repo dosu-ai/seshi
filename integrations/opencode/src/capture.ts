@@ -84,8 +84,7 @@ function which(payload: unknown): HookCapture {
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-export const UNKNOWN_COMMAND =
-  "Session Capture: /session-capture takes off, on or status; nothing was changed. For a pause, run seshi capture pause in a terminal.";
+export const UNKNOWN_COMMAND = `Session Capture: /${CAPTURE_COMMAND} takes off, on or status; nothing was changed. For a pause, run seshi capture pause in a terminal.`;
 
 /** What the plugin shows for a message seshi has for the person: it toasts `message`. */
 const reply = (message: string) => ({ message });
@@ -171,13 +170,12 @@ export function commandPath(host: CaptureHost): string {
   return join(opencodeConfigDir(host), "command", `${CAPTURE_COMMAND}.md`);
 }
 
-/** The command's file under its old name, `seshi.md`: install and uninstall remove seshi's own. */
-function oldCommand(host: CaptureHost): OwnedFile {
-  return {
-    path: join(opencodeConfigDir(host), "command", "seshi.md"),
-    text: "",
-    marker: COMMAND_MARKER,
-  };
+/** Remove the command's file under its old name, `seshi.md`, when it is seshi's. */
+function removeOldCommand(host: CaptureHost): string[] {
+  const path = join(opencodeConfigDir(host), "command", "seshi.md");
+  if (!readTextFile(path)?.includes(COMMAND_MARKER)) return [];
+  rmSync(path, { force: true });
+  return [path];
 }
 
 /** The TUI plugin: not in `plugins/`, which OpenCode's server loads as server plugins. */
@@ -254,7 +252,7 @@ export const opencodeInstaller: Installer = {
   async install(context: InstallContext): Promise<InstallReport> {
     const { changed, foreign, notes } = installOwnedFiles(owned(context), "OpenCode");
     if (foreign.length > 0) return { changed, notes };
-    changed.push(...removeOwnedFiles([oldCommand(context)]));
+    notes.push(...removeOldCommand(context).map((p) => `removed ${p}, the command's old name`));
     const { path, file: tui, current, listed } = tuiEntry(context);
     if ("problem" in current) notes.push(byHand(path, tui, current.problem));
     else if (!listed) {
@@ -271,7 +269,7 @@ export const opencodeInstaller: Installer = {
   },
 
   async uninstall(context: InstallContext): Promise<InstallReport> {
-    const changed = removeOwnedFiles([...owned(context), oldCommand(context)]);
+    const changed = [...removeOwnedFiles(owned(context)), ...removeOldCommand(context)];
     const { path, file: tui, current, listed } = tuiEntry(context);
     if (changed.includes(tui)) {
       try {

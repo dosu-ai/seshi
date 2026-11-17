@@ -18,11 +18,12 @@ describe("the session-capture command", () => {
     expect(captureSkill(["seshi"])).toMatch(/^---\nname: session-capture\n/);
   });
 
-  it("reads only /session-capture and $session-capture, alone in the prompt", () => {
+  it("reads /session-capture and $session-capture (and the old name) alone in the prompt", () => {
     expect(captureCommandPrompt("/session-capture off")).toBe("off");
     expect(captureCommandPrompt("$session-capture On!")).toBe("on");
     expect(captureCommandPrompt("/session-capture")).toBe("status");
-    expect(captureCommandPrompt("/seshi off")).toBeUndefined();
+    expect(captureCommandPrompt("/session-capture capture off")).toBe("off");
+    expect(captureCommandPrompt("/seshi off")).toBe("off");
     expect(captureCommandPrompt("/session-capture pause")).toBeUndefined();
   });
 });
@@ -42,7 +43,8 @@ describe("the skill on disk", () => {
   it("replaces seshi's skill under its old name with the new one", () => {
     writeOld(`---\nname: seshi\n---\n${SKILL_MARKER}\n`);
     const report = installSkill(dir, ["seshi"]);
-    expect(report.changed).toEqual([old(), skillFile(dir)]);
+    expect(report.changed).toEqual([skillFile(dir)]);
+    expect(report.notes).toEqual([`removed ${old()}, the skill's old name`]);
     expect(existsSync(join(dir, "seshi"))).toBe(false);
     expect(readFileSync(join(dir, "session-capture", "SKILL.md"), "utf8")).toBe(
       captureSkill(["seshi"]),
@@ -59,6 +61,11 @@ describe("the skill on disk", () => {
     expect(removeSkill(dir)).toEqual([]);
     expect(readFileSync(old(), "utf8")).toBe("my own seshi skill\n");
     expect(readFileSync(skillFile(dir), "utf8")).toBe("my own\n");
+
+    // Its own old skill stays too while the new name is someone else's: no command is lost.
+    writeOld(`${SKILL_MARKER}\n`);
+    installSkill(dir, ["seshi"]);
+    expect(existsSync(old())).toBe(true);
   });
 
   it("removes its skill under both names on uninstall", () => {

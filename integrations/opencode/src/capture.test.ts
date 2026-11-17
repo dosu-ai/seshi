@@ -243,7 +243,9 @@ describe("seshi capture install opencode", () => {
     const old = join(commandPath(host), "..", "seshi.md");
     mkdirSync(join(old, ".."), { recursive: true });
     writeFileSync(old, `<!-- ${COMMAND_MARKER}: old -->\n/seshi $ARGUMENTS\n`);
-    expect((await opencodeInstaller.install(context())).changed).toContain(old);
+    expect((await opencodeInstaller.install(context())).notes).toContain(
+      `removed ${old}, the command's old name`,
+    );
     expect(existsSync(old)).toBe(false);
     expect(readFileSync(commandPath(host), "utf8")).toContain("/session-capture $ARGUMENTS");
 

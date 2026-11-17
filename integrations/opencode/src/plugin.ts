@@ -12,7 +12,7 @@
  * TUI's home screen; in a session, the TUI plugin takes `/session-capture` first). The module exports
  * nothing but the plugin function: OpenCode calls every export. */
 
-import { bridgeRuntime } from "@seshi/kit";
+import { bridgeRuntime, CAPTURE_COMMAND } from "@seshi/kit";
 
 export const PLUGIN_MARKER = "seshi:opencode-plugin";
 export const COMMAND_MARKER = "seshi:opencode-command";
@@ -122,7 +122,7 @@ export const SeshiCapture = async ({ client }) => {
     // /session-capture off|on|status: seshi does it here, and the model gets the result instead of the
     // command (OpenCode sends a command's text to the model; it cannot be stopped).
     "command.execute.before": async (input, output) => {
-      if (input.command !== "session-capture") return;
+      if (input.command !== "${CAPTURE_COMMAND}") return;
       const info = await session(input.sessionID);
       const run = await seshi(
         ["hook", AGENT, "Command"],
@@ -139,7 +139,7 @@ export const SeshiCapture = async ({ client }) => {
       await toast(said);
       output.parts.splice(0, output.parts.length, {
         type: "text",
-        text: \`\${said}\\n\\n(seshi's /session-capture command already did this. Reply with one short sentence that says so, and do nothing else.)\`,
+        text: \`\${said}\\n\\n(seshi's /${CAPTURE_COMMAND} command already did this. Reply with one short sentence that says so, and do nothing else.)\`,
       });
     },
   };
@@ -152,7 +152,7 @@ export function opencodeCommand(): string {
 description: "Session Capture: turn it off or on for this session, or show whether it is captured (off, on, status)"
 ---
 <!-- ${COMMAND_MARKER}: written by "seshi capture install opencode"; seshi's plugin carries it out. -->
-/session-capture $ARGUMENTS
+/${CAPTURE_COMMAND} $ARGUMENTS
 `;
 }
 
@@ -184,7 +184,7 @@ ${bridgeRuntime()}
 
 // Only these are taken from the prompt; anything else (an attachment's placeholder text, an
 // unknown word) goes on to the server's /session-capture command, attachments and all.
-const CAPTURE_COMMAND = /^\\/session-capture(?:\\s+(off|on|status))?$/i;
+const COMMAND_PATTERN = /^\\/${CAPTURE_COMMAND}(?:\\s+(off|on|status))?$/i;
 
 // seshi's status line up to its first " · ", so it fits beside the prompt.
 function short(line) {
@@ -303,7 +303,7 @@ export default {
           const text = ctx.focused?.plainText;
           const id = prompting();
           if (typeof text !== "string" || !id) return false;
-          const asked = CAPTURE_COMMAND.exec(text.trim());
+          const asked = COMMAND_PATTERN.exec(text.trim());
           if (!asked) return false;
           // Taken only once the prompt is cleared; if it cannot be, the prompt sends it on.
           if (api.keymap.dispatchCommand("prompt.clear")?.ok !== true) return false;

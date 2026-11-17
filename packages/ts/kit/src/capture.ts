@@ -49,9 +49,14 @@ export interface HookHandler {
 export const CAPTURE_COMMAND = "session-capture";
 
 /** What a prompt that is only `$session-capture` or `/session-capture`, with `off`, `on` or
- * `status` after it, asks for (bare: status); undefined for any other prompt. */
+ * `status` after it, asks for (bare: status); undefined for any other prompt. The old name,
+ * `seshi`, is still read: until `seshi capture install` runs again, the skill it wrote under that
+ * name tells the agent the hook has already done `$seshi off`. */
 export function captureCommandPrompt(prompt: string): "off" | "on" | "status" | undefined {
-  const match = /^\s*[$/]session-capture(?:\s+(off|on|status))?\s*[.!]?\s*$/i.exec(prompt);
+  const match =
+    /^\s*[$/](?:session-capture|seshi)(?:\s+(?:capture\s+)?(off|on|status))?\s*[.!]?\s*$/i.exec(
+      prompt,
+    );
   if (!match) return undefined;
   return (match[1]?.toLowerCase() as "off" | "on" | "status" | undefined) ?? "status";
 }
