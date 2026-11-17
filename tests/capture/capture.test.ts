@@ -278,6 +278,26 @@ describe("hooks and the uploader (F9.1)", () => {
     expect(state().sessions["codex:thread-2"]).toMatchObject({ toggle: "on" });
   });
 
+  it("does /seshi typed in Cursor itself, answering in place of the stopped prompt", async () => {
+    const say = (prompt: string) =>
+      machine.seshi(["hook", "cursor", "beforeSubmitPrompt"], {
+        stdin: JSON.stringify({ conversation_id: "conv-1", workspace_roots: [project], prompt }),
+      });
+    expect(await say("explain this file")).toEqual({ code: 0, out: "", err: "" });
+    expect(JSON.parse((await say("/seshi off")).out)).toEqual({
+      continue: false,
+      user_message: "Session Capture ⏸ · turned off for this session; nothing of it was uploaded",
+    });
+    expect(state().sessions["cursor:conv-1"]).toMatchObject({ toggle: "off" });
+    expect(JSON.parse((await say("/seshi")).out)).toEqual({
+      continue: false,
+      user_message: "Session Capture ⏸ · turned off for this session",
+    });
+    expect(JSON.parse((await say("/seshi on")).out).user_message).toMatch(
+      /^Session Capture ◉ · turned on for this session/,
+    );
+  });
+
   it("exports the session for the /seshi skill on SessionStart", async () => {
     const envFile = join(machine.dir, "claude-env");
     await machine.seshi(["hook", "claude-code", "SessionStart"], {

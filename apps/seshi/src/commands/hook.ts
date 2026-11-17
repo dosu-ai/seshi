@@ -1,4 +1,5 @@
 import { appendLog, runHook } from "@seshi/capture/fast";
+import { hookHandler } from "@seshi/kit";
 import { captureAgent } from "../capture-agents";
 import { EXIT } from "../cli/exit";
 import { pathsOf, startUploader } from "./capture-host";
@@ -81,18 +82,20 @@ async function hook(
     return;
   }
   const { host, paths } = pathsOf(ctx);
-  const outcome = await runHook({ agent: await load, event, payload, host, paths });
+  const agent = await load;
+  const outcome = await runHook({ agent, event, payload, host, paths });
   if (outcome.ignored) log(outcome.ignored);
-  if (outcome.announced) ctx.stdout(JSON.stringify({ systemMessage: notice(outcome.announced) }));
-  if (outcome.requested) {
+  const reply = (message: string) =>
     ctx.stdout(
-      JSON.stringify({ systemMessage: await carryOut(ctx, agentName, outcome.requested) }),
+      JSON.stringify(hookHandler(agent, event)?.reply?.(message) ?? { systemMessage: message }),
     );
-  }
+  if (outcome.announced) reply(notice(outcome.announced));
+  if (outcome.requested) reply(await carryOut(ctx, agentName, outcome.requested));
   if (outcome.spooled.length > 0) await startUploader(ctx, paths);
 }
 
-/** What a session that just started is told (Codex shows it as a notice). */
+/** What a session is told when it starts or the person asks (Codex shows it as a notice,
+ * Cursor in place of the message it stopped). */
 export function notice({ decision }: { decision: { capture: boolean; reason: string } }): string {
   return decision.capture
     ? "Session Capture ◉ · this session is uploaded to your team's session store as you work; $seshi off stops it"

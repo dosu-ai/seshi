@@ -29,6 +29,17 @@ export interface HookResult {
 export interface HookHandler {
   readonly event: string;
   parse(payload: unknown, host: CaptureHost): HookResult;
+  /** What the hook prints to tell the person `message` (an `announce` or a `request`'s
+   * result), in the shape this agent shows to the person. */
+  reply?(message: string): unknown;
+}
+
+/** What a prompt that is only `$seshi` or `/seshi`, with `off`, `on` or `status` after it,
+ * asks for (bare: status); undefined for any other prompt. */
+export function seshiPrompt(prompt: string): "off" | "on" | "status" | undefined {
+  const match = /^\s*[$/]seshi(?:\s+(?:capture\s+)?(off|on|status))?\s*[.!]?\s*$/i.exec(prompt);
+  if (!match) return undefined;
+  return (match[1]?.toLowerCase() as "off" | "on" | "status" | undefined) ?? "status";
 }
 
 export interface SweepPath {

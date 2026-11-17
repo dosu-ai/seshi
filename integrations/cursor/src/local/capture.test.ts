@@ -44,6 +44,34 @@ describe("Cursor's hooks (F9.2)", () => {
   });
 });
 
+describe("/seshi typed in Cursor", () => {
+  const prompt = (text: string) =>
+    hookHandler(CURSOR_CAPTURE, "beforeSubmitPrompt")?.parse(
+      { conversation_id: "c1", workspace_roots: ["/w/app"], prompt: text },
+      host,
+    );
+
+  it("is a request for the hook, and any other prompt passes untouched", () => {
+    expect(prompt("/seshi off")).toEqual({
+      captures: [],
+      request: { action: "off", session: { session_id: "c1", cwd: "/w/app" } },
+    });
+    expect(prompt("/seshi")).toEqual({
+      captures: [],
+      announce: { session_id: "c1", cwd: "/w/app" },
+    });
+    expect(prompt("/seshi off and then fix the tests")).toEqual({ captures: [] });
+    expect(prompt("fix the tests")).toEqual({ captures: [] });
+  });
+
+  it("answers by stopping the prompt, the only way Cursor shows a hook's message", () => {
+    expect(hookHandler(CURSOR_CAPTURE, "beforeSubmitPrompt")?.reply?.("hi")).toEqual({
+      continue: false,
+      user_message: "hi",
+    });
+  });
+});
+
 describe("Cursor's transcripts", () => {
   it("are known by their name and found under any project", () => {
     const dir = join(home, ".cursor", "projects", "Users-dev-app", "agent-transcripts");
@@ -87,6 +115,7 @@ describe("the installer (F9.6)", () => {
         stop: [{ command: "./audit.sh" }, { command: "seshi hook cursor stop" }],
         beforeShellExecution: [{ command: "./guard.sh" }],
         sessionEnd: [{ command: "seshi hook cursor sessionEnd" }],
+        beforeSubmitPrompt: [{ command: "seshi hook cursor beforeSubmitPrompt" }],
       },
     });
     expect((await cursorInstaller.status(context())).installed).toBe(true);

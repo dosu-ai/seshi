@@ -29,6 +29,7 @@ import {
   readJsonConfig,
   readTextFile,
   removeSkill,
+  seshiPrompt,
   stringField,
   type TranscriptInfo,
   writeFileAtomic,
@@ -59,6 +60,7 @@ export const CODEX_HOOKS: readonly HookHandler[] = [
     // Codex's lifecycle hook (hooks.json): nothing to upload yet, but the notice of whether
     // the session is captured.
     event: "SessionStart",
+    reply: (message) => ({ systemMessage: message }),
     parse(payload) {
       const object = payloadObject(payload, AGENT);
       const session = stringField(object, "session_id");
@@ -71,6 +73,7 @@ export const CODEX_HOOKS: readonly HookHandler[] = [
     // Codex's sandbox keeps the agent's commands from writing seshi's state, so `$seshi off|on`
     // typed by the person is done here, by the hook, before the model sees the prompt.
     event: "UserPromptSubmit",
+    reply: (message) => ({ systemMessage: message }),
     parse(payload) {
       const object = payloadObject(payload, AGENT);
       const asked = seshiPrompt(stringField(object, "prompt") ?? "");
@@ -86,12 +89,7 @@ export const CODEX_HOOKS: readonly HookHandler[] = [
   },
 ];
 
-/** What a prompt that is only `$seshi [off|on|status]` asks for (bare: status). */
-export function seshiPrompt(prompt: string): "off" | "on" | "status" | undefined {
-  const match = /^\s*\$seshi(?:\s+(?:capture\s+)?(off|on|status))?\s*[.!]?\s*$/i.exec(prompt);
-  if (!match) return undefined;
-  return (match[1]?.toLowerCase() as "off" | "on" | "status" | undefined) ?? "status";
-}
+export { seshiPrompt };
 
 /** Which session a rollout is: its own `session_meta` (the first; a forked rollout repeats its
  * parent's after it). */

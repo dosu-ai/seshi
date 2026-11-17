@@ -29,6 +29,7 @@ import {
   payloadObject,
   readJsonConfig,
   removeSkill,
+  seshiPrompt,
   stringField,
   type TranscriptInfo,
   writeJsonConfig,
@@ -36,7 +37,7 @@ import {
 
 export const AGENT = "cursor";
 
-export const CURSOR_EVENTS = ["stop", "sessionEnd"] as const;
+export const CURSOR_EVENTS = ["stop", "sessionEnd", "beforeSubmitPrompt"] as const;
 
 export function cursorDir(host: CaptureHost): string {
   return join(host.home, ".cursor");
@@ -63,6 +64,22 @@ function capture(payload: unknown, final: boolean): HookCapture {
 export const CURSOR_HOOKS: readonly HookHandler[] = [
   { event: "stop", parse: (payload) => ({ captures: [capture(payload, false)] }) },
   { event: "sessionEnd", parse: (payload) => ({ captures: [capture(payload, true)] }) },
+  {
+    // `/seshi off|on|status` typed as a message of its own: the hook does it, outside the
+    // agent's sandbox, and stops the message there. Cursor shows a hook's `user_message` only
+    // when the hook blocks the prompt, and the model has nothing to do.
+    event: "beforeSubmitPrompt",
+    reply: (message) => ({ continue: false, user_message: message }),
+    parse(payload) {
+      const asked = seshiPrompt(stringField(payloadObject(payload, AGENT), "prompt") ?? "");
+      if (!asked) return { captures: [] };
+      const { session_id, cwd } = capture(payload, false);
+      const which = { session_id, ...(cwd ? { cwd } : {}) };
+      return asked === "status"
+        ? { captures: [], announce: which }
+        : { captures: [], request: { action: asked, session: which } };
+    },
+  },
 ];
 
 /** Which conversation an agent transcript is: its file name. The first records must look like

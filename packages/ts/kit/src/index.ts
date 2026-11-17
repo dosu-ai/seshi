@@ -32,6 +32,7 @@ export {
   type InstallStatus,
   payloadObject,
   type SweepPath,
+  seshiPrompt,
   stringField,
   type TranscriptInfo,
 } from "./capture";
