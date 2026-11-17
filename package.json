@@ -23,7 +23,7 @@
     "test:watch": "bun --bun vitest",
     "test:laptop": "bun --bun vitest run --config vitest.laptop.config.ts",
     "scenarios:process": "bun run tests/tooling/scenario-proc/main.ts",
-    "typecheck": "bunx tsc --noEmit",
+    "typecheck": "bunx tsc --noEmit && bunx tsc --noEmit -p integrations/cursor/extension",
     "lint": "bunx biome lint .",
     "format": "bunx biome format --write .",
     "check": "bunx biome check . && bun run check:layers && bun run check:schema && bun run check:types && bun run check:hook --static-only && bun run check:brand",
@@ -39,7 +39,8 @@
     "brand:outline": "bun run scripts/brand/outline-wordmark.ts",
     "fixtures": "bun run tests/tooling/fixtures.ts",
     "goldens": "bun run tests/tooling/write-goldens.ts",
-    "scenarios:explore": "bun run tests/tooling/scenario/explore.ts"
+    "scenarios:explore": "bun run tests/tooling/scenario/explore.ts",
+    "ext:build": "bun run integrations/cursor/extension/build.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.0",
@@ -63,6 +64,7 @@
     "@seshi/store": "workspace:*",
     "@types/bun": "1.4.2",
     "@types/fontkit": "2.0.8",
+    "@types/vscode": "1.96.0",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
     "fast-check": "^4.10.2",

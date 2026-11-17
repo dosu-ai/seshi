@@ -23,6 +23,7 @@ export default defineConfig({
       "apps/*/src/**/*.test.ts",
       "packages/ts/*/src/**/*.test.ts",
       "integrations/*/src/**/*.test.ts",
+      "integrations/cursor/extension/src/**/*.test.ts",
       "tests/**/*.test.ts",
       "scripts/**/*.test.ts",
     ],

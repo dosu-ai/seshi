@@ -22,6 +22,7 @@ export const LAPTOP_TESTS = [
   "integrations/claude-code/src/**/capture.test.ts",
   "integrations/codex/src/**/capture.test.ts",
   "integrations/cursor/src/**/capture.test.ts",
+  "integrations/cursor/extension/src/**/*.test.ts",
   "apps/seshi/src/account/**/*.test.ts",
   "apps/seshi/src/cli/**/*.test.ts",
   "apps/seshi/src/capture.test.ts",

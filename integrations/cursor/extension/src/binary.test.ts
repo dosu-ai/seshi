@@ -1,0 +1,26 @@
+import { describe, expect, it } from "vitest";
+import { programFromHooks, seshiProgram } from "./binary";
+
+const hooks = (command: string) =>
+  JSON.stringify({ version: 1, hooks: { stop: [{ command: "./audit.sh" }, { command }] } });
+
+describe("the seshi program", () => {
+  it("is the setting, else what seshi's own Cursor hook runs, else seshi on the PATH", () => {
+    const written = hooks("/Users/me/.local/bin/seshi hook cursor stop");
+    expect(seshiProgram("/opt/seshi", written)).toBe("/opt/seshi");
+    expect(seshiProgram("", written)).toBe("/Users/me/.local/bin/seshi");
+    expect(seshiProgram(undefined, undefined)).toBe("seshi");
+    expect(seshiProgram(undefined, "{ not json")).toBe("seshi");
+  });
+
+  it("reads a quoted Windows path, and gives up on a command of several words", () => {
+    expect(programFromHooks(hooks('"C:/Program Files/seshi/seshi.exe" hook cursor stop'))).toBe(
+      "C:/Program Files/seshi/seshi.exe",
+    );
+    expect(programFromHooks(hooks("C:/tools/seshi.exe hook cursor sessionEnd"))).toBe(
+      "C:/tools/seshi.exe",
+    );
+    expect(programFromHooks(hooks("npx seshi hook cursor stop"))).toBeUndefined();
+    expect(programFromHooks(hooks("./audit.sh"))).toBeUndefined();
+  });
+});
