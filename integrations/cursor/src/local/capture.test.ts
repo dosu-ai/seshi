@@ -187,6 +187,13 @@ describe("the installer (F9.6)", () => {
     expect(existsSync(chain)).toBe(false);
   });
 
+  it("suggests the status bar extension until it is installed", async () => {
+    const note = (await cursorInstaller.install(context())).notes;
+    expect(note).toEqual([expect.stringContaining("dosu.seshi-cursor")]);
+    mkdirSync(join(home, ".cursor", "extensions", "dosu.seshi-cursor-0.9.0"), { recursive: true });
+    expect((await cursorInstaller.install(context())).notes).toEqual([]);
+  });
+
   it("gives the Cursor CLI seshi's own status line when it has none", async () => {
     await cursorInstaller.install(context());
     const cli = join(home, ".cursor", "cli-config.json");

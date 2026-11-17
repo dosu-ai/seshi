@@ -32,7 +32,7 @@ seshi capture install --service  # also keep the uploader running between sessio
 |---|---|---|
 | Claude Code | hooks, the status line and the `/seshi` skill in `~/.claude/settings.json` and `~/.claude/skills/seshi/` (`CLAUDE_CONFIG_DIR` moves them) | SessionStart, Stop, SubagentStop, PreCompact, SessionEnd |
 | Codex | `notify` in `~/.codex/config.toml` (`CODEX_HOME` moves it); a `notify` program already there keeps running, after seshi's. SessionStart and UserPromptSubmit hooks in `~/.codex/hooks.json` for the notice and `$seshi`, and the `$seshi` skill in `~/.agents/skills/seshi/` | notify, plus the sweep of `~/.codex/sessions`; SessionStart and UserPromptSubmit only for the notice and `$seshi` |
-| Cursor (IDE and CLI) | hooks in `~/.cursor/hooks.json`, the Cursor CLI's status line in `~/.cursor/cli-config.json`, and the `/seshi` skill in `~/.cursor/skills/seshi/` | stop, sessionEnd; beforeSubmitPrompt only for `/seshi` |
+| Cursor (IDE and CLI) | hooks in `~/.cursor/hooks.json`, the Cursor CLI's status line in `~/.cursor/cli-config.json`, and the `/seshi` skill in `~/.cursor/skills/seshi/`; it suggests the status bar extension ([below](#the-cursor-status-bar)) | stop, sessionEnd; beforeSubmitPrompt for `/seshi` and the last chat prompted |
 
 `install` merges: every hook already in those files stays, and running it twice is the same as
 once. A status line someone else set up, in Claude Code or the Cursor CLI, still shows, with
@@ -153,6 +153,32 @@ same words as a chip in the prompt footer; clicking it turns capture off or on f
 and `/session-capture [on|off|status]` does the same by command. It needs the plugin installed
 (`/plugin install seshi --marketplace dosu-ai/sessiondb`), not just `seshi capture install`; see
 [the plugin's README](../integrations/claude-code/plugin/README.md#the-desktop-chip).
+
+### The Cursor status bar
+
+Cursor's editor windows have no status line either. The **seshi Session Capture** extension
+(`dosu.seshi-cursor`, from Cursor's Extensions view; [its source](../integrations/cursor/extension/))
+puts the same words in their status bar for the chat you have open, coloured when something
+needs action, and a click turns capture off or on for that chat (a team's rule is explained
+instead).
+
+- **Which chat.** Cursor has no API for it. The extension asks Cursor for the open chats
+  through an undocumented command (`composer.getOrderedSelectedComposerIds`) and matches the
+  active chat tab to them; they come in the same order. When that is not possible (a new chat's
+  tab appears before its id, or a Cursor update changes either), it shows the chat you last
+  sent a message in, which Cursor's beforeSubmitPrompt hook records per folder in
+  `recent/`, and a click asks which chat first. **seshi.useCursorInternals** off uses only the
+  last chat.
+- **What it runs.** `seshi statusline --agent cursor --json --folder <workspace folder>…` with
+  `--session <focused chat>` and `--selected <open chats>`, and
+  `seshi capture off|on --session <id> --agent cursor`. It never reads seshi's files itself. The
+  program is **seshi.command**, else the one seshi's own hook in `~/.cursor/hooks.json` runs,
+  else `seshi` on the PATH.
+- **When it refreshes.** When seshi's state, a recorded prompt or the CLI config changes, when
+  tabs or the window change, every 2 seconds for the open chats while the window has focus,
+  and every 30 seconds.
+- **Where.** Editor windows only: the Agents Window does not show extensions' status bar items,
+  and the Cursor CLI has its own status line (above). `/seshi` works in both.
 
 ## The uploader
 
@@ -361,10 +387,6 @@ the server stored them.
 
 ## Not yet
 
-- **A Cursor IDE extension** (on the roadmap): `Session Capture ◉` or `⏸` in Cursor's status
-  bar, kept current, with a click to turn capture off or on, since Cursor has no status line
-  and shows a hook's message only when the hook stops a prompt. An extension cannot see which
-  agent chat is open, so it would show the workspace's most recent Cursor conversation; it does
-  nothing for the Cursor CLI. Until then, `/seshi` says it on request.
+- Session Capture in Cursor's Agents Window, which shows no extension's status bar item.
 - A first-run notice inside Cursor that capture is on.
 - Datadog Trajectory's local files.

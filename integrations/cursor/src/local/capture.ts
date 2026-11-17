@@ -168,6 +168,22 @@ function removeStatusLine(context: InstallContext): string[] {
   return [path, ...status.removed];
 }
 
+export const EXTENSION_ID = "dosu.seshi-cursor";
+
+/** Whether the status bar extension is installed: Cursor keeps each extension in
+ * `~/.cursor/extensions/<publisher>.<name>-<version>`. */
+function hasExtension(host: CaptureHost): boolean {
+  try {
+    return readdirSync(join(cursorDir(host), "extensions")).some((n) =>
+      n.toLowerCase().startsWith(`${EXTENSION_ID}-`),
+    );
+  } catch {
+    return false;
+  }
+}
+
+const EXTENSION_NOTE = `for Session Capture in Cursor's status bar, install the "seshi Session Capture" extension (${EXTENSION_ID}) from the Extensions view`;
+
 function skillPath(host: CaptureHost): string {
   return join(cursorDir(host), "skills", "seshi", "SKILL.md");
 }
@@ -207,7 +223,7 @@ export const cursorInstaller: Installer = {
     const skill = installSkill(skillPath(context), context.command);
     return {
       changed: [path, ...status.changed, ...skill.changed],
-      notes: [...status.notes, ...skill.notes],
+      notes: [...status.notes, ...skill.notes, ...(hasExtension(context) ? [] : [EXTENSION_NOTE])],
     };
   },
 

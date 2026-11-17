@@ -102,5 +102,12 @@ host's real binary built, installed and smoke tested.
   one more patch whose README says it moved to `seshi` and `@seshi/client`, then
   `npm deprecate @dosu/sessiondb "moved to seshi: npm i -g seshi; the client is @seshi/client"`.
   This is a one-off, done by hand from the last sessiondb tag.
+- **Open VSX** (the Cursor extension). Create an Eclipse account, sign the Open VSX publisher
+  agreement, create the `dosu` namespace (`bunx ovsx@1.3.0 create-namespace dosu -p <token>`)
+  and claim it, and give CI an `OVSX_PAT` secret. Without it the `openvsx` job publishes
+  nothing; the `.vsix` is still attached to each release, for installing by hand ("Install from
+  VSIX…"). Cursor installs extensions from Open VSX through its own proxy, which scans new
+  versions first, so a release can take a while to appear in Cursor. A verified publisher badge
+  needs a homepage on the publisher's own domain that links the listing.
 - **Runners.** The matrices use `ubuntu-24.04-arm` and `windows-11-arm`, which GitHub offers
   free to public repositories only, and `macos-15-intel` for Intel macOS.

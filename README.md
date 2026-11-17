@@ -128,7 +128,8 @@ API, or the change feed directly.
 
 ## Roadmap
 
-- A Cursor IDE extension that shows whether the current chat is captured in the status bar.
+- Publishing the Cursor status bar extension on Open VSX (it is built and attached to each
+  release).
 - Cursor Cloud Agents sync.
 - Datadog Trajectory's local session files.
 - Proving the setups that have not met real services yet: per-person AWS IAM policies for
