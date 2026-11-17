@@ -76,7 +76,7 @@ seshi search flaky checkout test
 ```
 
 From then on each session is uploaded as it goes. Claude Code's status line says
-`Session Capture ◉` while a session is captured; `/seshi` (`$seshi` in Codex) turns it off or on
+`Session Capture ◉` while a session is captured; `/session-capture` (`$session-capture` in Codex) turns it off or on
 for the session you are in.
 
 ### Run it for a team
@@ -122,12 +122,12 @@ Everything else is in [docs/](docs/README.md).
 
 | Client | Live capture | Capture state shown in | Turn off or on in the session | Upload its session files |
 |---|:-:|---|---|:-:|
-| Claude Code, including the Claude desktop app | ✓ | Status line; a chip in the desktop app | `/seshi` | ✓ |
-| Codex CLI | ✓ | A notice when the session starts | `$seshi` | ✓ |
-| Cursor (editor) | ✓ | Status bar extension | `/seshi`, or a click on the status bar | ✓ |
-| Cursor CLI | ✓ | Status line | `/seshi` | ✓ |
-| OpenCode | ✓ | A notice when the session starts | `/seshi` | ✓ |
-| pi | ✓ | Footer | `/seshi` | ✓ |
+| Claude Code, including the Claude desktop app | ✓ | Status line; a chip in the desktop app | `/session-capture` | ✓ |
+| Codex CLI | ✓ | A notice when the session starts | `$session-capture` | ✓ |
+| Cursor (editor) | ✓ | Status bar extension | `/session-capture`, or a click on the status bar | ✓ |
+| Cursor CLI | ✓ | Status line | `/session-capture` | ✓ |
+| OpenCode | ✓ | A notice when the session starts | `/session-capture` | ✓ |
+| pi | ✓ | Footer | `/session-capture` | ✓ |
 | Oh My Pi, OpenClaw | — | — | — | ✓ |
 | Gemini CLI | — | — | — | ✓ |
 | Devin | — | — | — | — |

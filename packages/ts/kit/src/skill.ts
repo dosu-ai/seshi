@@ -1,18 +1,24 @@
 import { rmSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
+import { CAPTURE_COMMAND } from "./capture";
 import { commandLine, readTextFile, writeFileAtomic } from "./files";
 
 export const SKILL_MARKER =
   "<!-- written by seshi capture install; seshi capture uninstall removes it -->";
 
-/** The `seshi` skill: turn Session Capture off or on for the session the agent is in, or say
- * whether it is captured. One text for every agent, since Cursor also reads Claude Code's and the
- * shared skill folders: the agent names itself with `--agent`. */
+/** The skill's folder name before it was `session-capture`. seshi's own skill there is removed
+ * by install and by uninstall; anyone else's is left. */
+const OLD_SKILL_NAME = "seshi";
+
+/** The `session-capture` skill: turn Session Capture off or on for the session the agent is in,
+ * or say whether it is captured. One text for every agent, since Cursor also reads Claude Code's
+ * and the shared skill folders: the agent names itself with `--agent`. */
 export function captureSkill(command: readonly string[]): string {
   const seshi = commandLine(command);
+  const name = CAPTURE_COMMAND;
   return `---
-name: seshi
-description: Turn Session Capture off or on for this session, or show whether it is being captured. Use when the user runs /seshi or $seshi, or asks to stop, pause, resume or check session capture or seshi.
+name: ${name}
+description: Turn Session Capture off or on for this session, or show whether it is being captured. Use when the user runs /${name} or $${name}, or asks to stop, pause, resume or check session capture or seshi.
 ---
 ${SKILL_MARKER}
 
@@ -36,39 +42,53 @@ finished a turn yet seshi may not know it: say so. When seshi answers that more 
 here, show the user the sessions it lists and ask which, then run the command again with
 \`--session <id>\`.
 
-In Codex and Cursor, when the user's whole message is \`$seshi off\`, \`$seshi on\` or
-\`$seshi status\` (\`/seshi …\` in Cursor), seshi's own hook has already done it before you see
-the message, and shown the user the result: do not run off or on. Run
+In Codex and Cursor, when the user's whole message is \`$${name} off\`, \`$${name} on\` or
+\`$${name} status\` (\`/${name} …\` in Cursor), seshi's own hook has already done it before
+you see the message, and shown the user the result: do not run off or on. Run
 \`${seshi} capture status --session --agent <agent>\`, which only reads, and confirm in one
 sentence.
 
 Otherwise, off and on write seshi's state folder (\`~/.local/state/seshi\`, outside the
 workspace), which a sandbox blocks. In a sandbox, run the command with escalated permissions,
 saying it changes Session Capture for this session, and let the user approve it. If that is
-refused, tell the user to type \`$seshi off\` or \`$seshi on\` as a message of its own in Codex
-(\`/seshi off\` in Cursor), or to run the command in a terminal.
+refused, tell the user to type \`$${name} off\` or \`$${name} on\` as a message of its own in
+Codex (\`/${name} off\` in Cursor), or to run the command in a terminal.
 
 Report the command's output to the user in one or two sentences. Do not run any other seshi
 command unless the user asks for it.
 `;
 }
 
-/** Write the skill at `path` unless someone else's skill is there. */
+/** The skill's file in an agent's skills folder (`~/.claude/skills`, `~/.agents/skills`, …). */
+export function skillFile(skillsDir: string): string {
+  return join(skillsDir, CAPTURE_COMMAND, "SKILL.md");
+}
+
+/** Write the skill into `skillsDir` unless someone else's skill is there, and remove seshi's own
+ * skill under its old name. */
 export function installSkill(
-  path: string,
+  skillsDir: string,
   command: readonly string[],
 ): { changed: string[]; notes: string[] } {
+  const path = skillFile(skillsDir);
   const existing = readTextFile(path);
   if (existing !== undefined && !existing.includes(SKILL_MARKER)) {
     return { changed: [], notes: [`${path} is someone else's skill, so it was left as it is`] };
   }
   writeFileAtomic(path, captureSkill(command));
-  return { changed: [path], notes: [] };
+  const old = removeOne(join(skillsDir, OLD_SKILL_NAME, "SKILL.md"));
+  return { changed: [path], notes: old.map((p) => `removed ${p}, the skill's old name`) };
 }
 
-/** Remove the skill's folder at `path` when the skill there is seshi's. */
-export function removeSkill(path: string): string[] {
-  if (!readTextFile(path)?.includes(SKILL_MARKER)) return [];
+/** Remove the skill's folder from `skillsDir`, under its name and its old one, where the skill
+ * there is seshi's. */
+export function removeSkill(skillsDir: string): string[] {
+  return [skillFile(skillsDir), join(skillsDir, OLD_SKILL_NAME, "SKILL.md")].flatMap(removeOne);
+}
+
+/** Remove the folder of the skill at `path` when the skill there is seshi's. */
+function removeOne(path: string): string[] {
+  if (!isOurSkill(path)) return [];
   rmSync(dirname(path), { recursive: true, force: true });
   return [path];
 }

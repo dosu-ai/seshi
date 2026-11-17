@@ -14,7 +14,7 @@ import {
   pluginPath,
   tuiConfigPath,
   tuiPluginPath,
-  UNKNOWN_SESHI,
+  UNKNOWN_COMMAND,
 } from "./capture";
 import { OPENCODE_FORMAT } from "./index";
 import {
@@ -65,7 +65,7 @@ describe("OpenCode's hooks, from seshi's plugin (F9.2)", () => {
     expect(() => stop?.parse({ export: EXPORT }, host)).toThrow("session_id");
   });
 
-  it("announces a new session, and turns /seshi into a request", () => {
+  it("announces a new session, and turns /session-capture into a request", () => {
     const which = { session_id: ID, cwd: "/repo/app" };
     expect(
       hookHandler(OPENCODE_CAPTURE, "SessionStart")?.parse(payload("SessionStart"), host),
@@ -84,7 +84,7 @@ describe("OpenCode's hooks, from seshi's plugin (F9.2)", () => {
     );
     expect(command?.parse({ ...payload("Command"), arguments: "pause 2h" }, host)).toEqual({
       captures: [],
-      say: UNKNOWN_SESHI,
+      say: UNKNOWN_COMMAND,
     });
     expect(command?.reply?.("hi")).toEqual({ message: "hi" });
   });
@@ -153,7 +153,7 @@ describe("the sessions seshi was handed", () => {
 describe("seshi capture install opencode", () => {
   const context = () => ({ ...host, command: ["/opt/seshi/bin/seshi"] });
 
-  it("writes the plugins and the /seshi command once, and removes only its own", async () => {
+  it("writes the plugins and the /session-capture command once, and removes only its own", async () => {
     mkdirSync(join(home, ".config", "opencode"), { recursive: true });
     expect(opencodeInstaller.detect(host)).toBe(true);
     const plugin = pluginPath(host);
@@ -167,9 +167,9 @@ describe("seshi capture install opencode", () => {
       command,
       config,
     ]);
-    expect(readFileSync(plugin, "utf8")).toContain(`// ${PLUGIN_MARKER} v3`);
+    expect(readFileSync(plugin, "utf8")).toContain(`// ${PLUGIN_MARKER} v4`);
     expect(readFileSync(plugin, "utf8")).toContain('const SESHI = ["/opt/seshi/bin/seshi"];');
-    expect(readFileSync(tui, "utf8")).toContain(`// ${TUI_PLUGIN_MARKER} v1`);
+    expect(readFileSync(tui, "utf8")).toContain(`// ${TUI_PLUGIN_MARKER} v2`);
     expect(readFileSync(tui, "utf8")).toContain('const SESHI = ["/opt/seshi/bin/seshi"];');
     expect(readFileSync(command, "utf8")).toContain(COMMAND_MARKER);
     expect(JSON.parse(readFileSync(config, "utf8"))).toEqual({
@@ -239,7 +239,27 @@ describe("seshi capture install opencode", () => {
     expect(readFileSync(config, "utf8")).toBe(JSON.stringify({ plugin: "one" }));
   });
 
-  it("leaves a seshi.js, seshi/tui.js or seshi.md that is someone else's alone", async () => {
+  it("replaces its command under the old name, seshi.md, and leaves someone else's", async () => {
+    const old = join(commandPath(host), "..", "seshi.md");
+    mkdirSync(join(old, ".."), { recursive: true });
+    writeFileSync(old, `<!-- ${COMMAND_MARKER}: old -->\n/seshi $ARGUMENTS\n`);
+    expect((await opencodeInstaller.install(context())).notes).toContain(
+      `removed ${old}, the command's old name`,
+    );
+    expect(existsSync(old)).toBe(false);
+    expect(readFileSync(commandPath(host), "utf8")).toContain("/session-capture $ARGUMENTS");
+
+    writeFileSync(old, `<!-- ${COMMAND_MARKER}: old -->\n`);
+    expect((await opencodeInstaller.uninstall(context())).changed).toContain(old);
+    expect(existsSync(old)).toBe(false);
+
+    writeFileSync(old, "my own seshi command\n");
+    await opencodeInstaller.install(context());
+    await opencodeInstaller.uninstall(context());
+    expect(readFileSync(old, "utf8")).toBe("my own seshi command\n");
+  });
+
+  it("leaves a seshi.js, seshi/tui.js or session-capture.md that is someone else's alone", async () => {
     mkdirSync(join(commandPath(host), ".."), { recursive: true });
     writeFileSync(commandPath(host), "my own command\n");
     const report = await opencodeInstaller.install(context());
@@ -381,11 +401,11 @@ process.stdin.on("end", () => {
     ]);
   });
 
-  it("carries out /seshi and gives the model the result instead of the command", async () => {
+  it("carries out /session-capture and gives the model the result instead of the command", async () => {
     const oc = await load();
-    const output = { parts: [{ type: "text", text: "/seshi off" }] as unknown[] };
+    const output = { parts: [{ type: "text", text: "/session-capture off" }] as unknown[] };
     await oc.hooks["command.execute.before"](
-      { command: "seshi", sessionID: ID, arguments: "off" },
+      { command: "session-capture", sessionID: ID, arguments: "off" },
       output,
     );
     const [call] = oc.calls();
@@ -416,7 +436,7 @@ process.stdin.on("end", () => {
     expect(other.parts).toEqual([{ type: "text", text: "/review" }]);
     expect(oc.calls()).toHaveLength(2);
 
-    // Turned on where the plugin does not hear it (the TUI plugin's /seshi on, the CLI): handed
+    // Turned on where the plugin does not hear it (the TUI plugin's /session-capture on, the CLI): handed
     // over again from the next turn.
     writeFileSync(join(home, "on"), "");
     await oc.hooks.event({ event: { type: "session.idle", properties: { sessionID: ID } } });
@@ -607,11 +627,11 @@ export function createEffect(fn) { globalThis.__effects.push(fn); fn(); }
     expect(tui.calls()).toHaveLength(3);
   });
 
-  it("carries out /seshi off from the prompt, so nothing reaches the model", async () => {
+  it("carries out /session-capture off from the prompt, so nothing reaches the model", async () => {
     const tui = await load();
     const node = tui.show(ID);
     await vi.waitFor(() => expect(node.text()).toBe("Session Capture ◉"));
-    expect(tui.submit("  /seshi off ")).toBe(true);
+    expect(tui.submit("  /session-capture off ")).toBe(true);
     expect(tui.dispatched).toEqual(["prompt.clear"]);
     await vi.waitFor(() => expect(node.text()).toBe("Session Capture ⏸"));
     const command = tui.calls().find((c) => c.args[2] === "Command");
@@ -636,42 +656,42 @@ export function createEffect(fn) { globalThis.__effects.push(fn); fn(); }
     writeFileSync(join(home, "slow"), "");
     const node = tui.show(ID);
     await vi.waitFor(() => expect(existsSync(join(home, "slow"))).toBe(false));
-    expect(tui.submit("/seshi off")).toBe(true);
+    expect(tui.submit("/session-capture off")).toBe(true);
     await vi.waitFor(() => expect(node.text()).toBe("Session Capture ⏸"));
     await new Promise((resolve) => setTimeout(resolve, 1200));
     expect(node.text()).toBe("Session Capture ⏸");
   });
 
-  it("passes every other prompt on, and /seshi too where there is no session yet", async () => {
+  it("passes every other prompt on, and /session-capture too where there is no session yet", async () => {
     const tui = await load();
     expect(tui.submit("hello")).toBe(false);
     expect(tui.submit("/seshiful")).toBe(false);
     expect(tui.submit(undefined)).toBe(false);
     // With an attachment's placeholder, or a word seshi does not take, the server's command gets
     // it, attachments and all.
-    expect(tui.submit("/seshi off [Image 1]")).toBe(false);
-    expect(tui.submit("/seshi offf")).toBe(false);
+    expect(tui.submit("/session-capture off [Image 1]")).toBe(false);
+    expect(tui.submit("/session-capture offf")).toBe(false);
     // A permission or a question replaces the prompt; a subagent's session has none.
     tui.waiting[ID] = { permission: [{}], question: [] };
-    expect(tui.submit("/seshi off")).toBe(false);
+    expect(tui.submit("/session-capture off")).toBe(false);
     tui.waiting[ID] = { permission: [], question: [{}] };
-    expect(tui.submit("/seshi off")).toBe(false);
+    expect(tui.submit("/session-capture off")).toBe(false);
     delete tui.waiting[ID];
     tui.api.route.current = { name: "session", params: { sessionID: "ses_child" } };
-    expect(tui.submit("/seshi off")).toBe(false);
+    expect(tui.submit("/session-capture off")).toBe(false);
     tui.api.route.current = { name: "session", params: { sessionID: ID } };
     tui.api.ui.dialog.open = true;
-    expect(tui.submit("/seshi off")).toBe(false);
+    expect(tui.submit("/session-capture off")).toBe(false);
     tui.api.ui.dialog.open = false;
     tui.api.route.current = { name: "home" };
-    expect(tui.submit("/seshi off")).toBe(false);
+    expect(tui.submit("/session-capture off")).toBe(false);
     expect(tui.dispatched).toEqual([]);
     expect(tui.calls()).toEqual([]);
   });
 
-  it("passes /seshi on when the prompt cannot be cleared", async () => {
+  it("passes /session-capture on when the prompt cannot be cleared", async () => {
     const tui = await load({ clearFails: true });
-    expect(tui.submit("/seshi off")).toBe(false);
+    expect(tui.submit("/session-capture off")).toBe(false);
     expect(tui.dispatched).toEqual(["prompt.clear"]);
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect(tui.calls()).toEqual([]);

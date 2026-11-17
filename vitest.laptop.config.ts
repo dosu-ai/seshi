@@ -15,6 +15,7 @@ import base from "./vitest.config";
 export const LAPTOP_TESTS = [
   "packages/ts/capture/src/**/*.test.ts",
   "packages/ts/kit/src/capture.test.ts",
+  "packages/ts/kit/src/skill.test.ts",
   "packages/ts/config/src/cli.test.ts",
   "packages/ts/config/src/secret.test.ts",
   "packages/ts/config/src/units.test.ts",

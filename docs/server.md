@@ -297,7 +297,7 @@ allow.
 ### Retraction (F9.7)
 
 A person can turn capture off in the middle of a session (`seshi capture off --session`, the
-`/seshi` skill), and what was already uploaded must go too. The uploader's credentials cannot
+`/session-capture` skill), and what was already uploaded must go too. The uploader's credentials cannot
 delete (a device token is write-only, the org key cannot delete at all), so each session carries
 a retraction secret instead. Before a session's first upload, the uploading machine makes a
 random secret and keeps it in its capture state file; every upload sends only its sha256 as

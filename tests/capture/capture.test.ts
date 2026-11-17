@@ -247,7 +247,7 @@ describe("hooks and the uploader (F9.1)", () => {
     const on = await start();
     expect(on.code).toBe(0);
     expect(JSON.parse(on.out).systemMessage).toMatch(
-      /^Session Capture ◉ · .*\$seshi off stops it$/,
+      /^Session Capture ◉ · .*\$session-capture off stops it$/,
     );
     expect(spooled()).toBe(0);
     expect(machine.spawned).toEqual([]);
@@ -257,37 +257,37 @@ describe("hooks and the uploader (F9.1)", () => {
     );
   });
 
-  it("does $seshi off|on|status typed in Codex itself, outside the agent's sandbox", async () => {
+  it("does $session-capture off|on|status typed in Codex itself, outside the agent's sandbox", async () => {
     const say = (prompt: string) =>
       machine.seshi(["hook", "codex", "UserPromptSubmit"], {
         stdin: JSON.stringify({ session_id: "thread-2", cwd: project, prompt }),
       });
     expect(await say("fix the tests")).toEqual({ code: 0, out: "", err: "" });
-    const off = await say("$seshi off");
+    const off = await say("$session-capture off");
     expect(JSON.parse(off.out).systemMessage).toBe(
       "Session Capture ⏸ · turned off for this session; nothing of it was uploaded",
     );
     expect(state().sessions["codex:thread-2"]).toMatchObject({ toggle: "off" });
-    expect(JSON.parse((await say("$seshi")).out).systemMessage).toBe(
+    expect(JSON.parse((await say("$session-capture")).out).systemMessage).toBe(
       "Session Capture ⏸ · turned off for this session",
     );
-    const on = await say("$seshi on");
+    const on = await say("$session-capture on");
     expect(JSON.parse(on.out).systemMessage).toMatch(
       /^Session Capture ◉ · turned on for this session/,
     );
     expect(state().sessions["codex:thread-2"]).toMatchObject({ toggle: "on" });
   });
 
-  it("does /seshi typed in Cursor itself, answering in place of the stopped prompt", async () => {
+  it("does /session-capture typed in Cursor itself, answering in place of the stopped prompt", async () => {
     const say = (prompt: string) =>
       machine.seshi(["hook", "cursor", "beforeSubmitPrompt"], {
         stdin: JSON.stringify({ conversation_id: "conv-1", workspace_roots: [project], prompt }),
       });
     expect(await say("explain this file")).toEqual({ code: 0, out: "", err: "" });
-    expect(JSON.parse((await say("/seshi")).out).user_message).toBe(
-      "Session Capture ◉ · this session is uploaded to your team's session store as you work; /seshi off stops it",
+    expect(JSON.parse((await say("/session-capture")).out).user_message).toBe(
+      "Session Capture ◉ · this session is uploaded to your team's session store as you work; /session-capture off stops it",
     );
-    expect(JSON.parse((await say("/seshi off")).out)).toEqual({
+    expect(JSON.parse((await say("/session-capture off")).out)).toEqual({
       continue: false,
       user_message: "Session Capture ⏸ · turned off for this session; nothing of it was uploaded",
     });
@@ -298,11 +298,11 @@ describe("hooks and the uploader (F9.1)", () => {
       env: { NO_COLOR: "1" },
     });
     expect(line.out).toMatch(/^Session Capture ⏸/);
-    expect(JSON.parse((await say("/seshi")).out)).toEqual({
+    expect(JSON.parse((await say("/session-capture")).out)).toEqual({
       continue: false,
       user_message: "Session Capture ⏸ · turned off for this session",
     });
-    expect(JSON.parse((await say("/seshi on")).out).user_message).toMatch(
+    expect(JSON.parse((await say("/session-capture on")).out).user_message).toMatch(
       /^Session Capture ◉ · turned on for this session/,
     );
   });
@@ -345,13 +345,13 @@ describe("hooks and the uploader (F9.1)", () => {
       session_id: "conv-new",
       by: "selected",
     });
-    await prompt("conv-a", "/seshi off");
+    await prompt("conv-a", "/session-capture off");
     const off = await ask("--session", "conv-a");
     expect(off).toMatchObject({ capturing: false, level: "session", attention: null });
     expect(off.session.state).toBe("off");
   });
 
-  it("exports the session for the /seshi skill on SessionStart", async () => {
+  it("exports the session for the /session-capture skill on SessionStart", async () => {
     const envFile = join(machine.dir, "claude-env");
     await machine.seshi(["hook", "claude-code", "SessionStart"], {
       stdin: JSON.stringify({ session_id: SESSION, cwd: project }),
@@ -369,7 +369,7 @@ describe("turning a session off (F9.5, F9.7)", () => {
     await hook();
     await daemon();
     machine.spawned.length = 0;
-    // The /seshi skill runs this inside Claude Code, where SessionStart set the variables.
+    // The /session-capture skill runs this inside Claude Code, where SessionStart set the variables.
     const off = await machine.seshi(["capture", "off", "--session"], {
       env: { SESHI_SESSION_ID: SESSION, SESHI_AGENT: "claude-code" },
     });

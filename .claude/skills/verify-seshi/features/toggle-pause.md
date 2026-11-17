@@ -16,7 +16,7 @@ started during the pause off. Resume doesn't restart stopped sessions; only `cap
 
 ## How to get to it (user POV)
 
-- Run `seshi capture off|on --session <id>` (or `/seshi capture off` in Claude Code, or click the
+- Run `seshi capture off|on --session <id>` (or `/session-capture off` in Claude Code, or click the
   desktop chip).
 - Run `seshi capture pause 2h`, then `seshi capture resume`.
 - Read `seshi capture status --session <id>`, or the status line.

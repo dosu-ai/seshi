@@ -20,7 +20,7 @@ import {
   piInstaller,
   piSessionsDir,
   sessionIdOfFile,
-  UNKNOWN_SESHI,
+  UNKNOWN_COMMAND,
 } from "./capture";
 import { EXTENSION_MARKER, piExtension } from "./extension";
 
@@ -70,20 +70,22 @@ describe("pi's hooks, from seshi's extension (F9.2)", () => {
     expect(() => hookHandler(PI_CAPTURE, "Stop")?.parse({ cwd: "/x" }, host)).toThrow("session_id");
   });
 
-  it("turns /seshi into a request, a status into an announcement", () => {
+  it("turns /session-capture into a request, a status into an announcement", () => {
     const command = (prompt: string) =>
       hookHandler(PI_CAPTURE, "Command")?.parse({ session_id: "s1", cwd: "/w", prompt }, host);
     const which = { session_id: "s1", cwd: "/w" };
-    expect(command("/seshi off")).toEqual({
+    expect(command("/session-capture off")).toEqual({
       captures: [],
       request: { action: "off", session: which },
     });
-    expect(command("/seshi on")?.request?.action).toBe("on");
-    expect(command("/seshi")).toEqual({ captures: [], announce: which });
+    expect(command("/session-capture on")?.request?.action).toBe("on");
+    expect(command("/session-capture")).toEqual({ captures: [], announce: which });
     // An argument it does not know changes nothing, and says so.
-    expect(command("/seshi pause 2h")).toEqual({ captures: [], say: UNKNOWN_SESHI });
-    expect(command("/seshi of")?.say).toBe(UNKNOWN_SESHI);
-    expect(command("/seshi status")).toEqual({ captures: [], announce: which });
+    expect(command("/session-capture pause 2h")).toEqual({ captures: [], say: UNKNOWN_COMMAND });
+    expect(command("/session-capture of")?.say).toBe(UNKNOWN_COMMAND);
+    expect(command("/session-capture status")).toEqual({ captures: [], announce: which });
+    // An extension written before the rename sends its old name: only the words after it count.
+    expect(command("/seshi off")?.request?.action).toBe("off");
     expect(hookHandler(PI_CAPTURE, "Command")?.reply?.("hi")).toEqual({ message: "hi" });
   });
 });
@@ -154,7 +156,7 @@ describe("seshi capture install pi", () => {
     const path = extensionPath(host);
     expect(await piInstaller.install(context())).toMatchObject({ changed: [path] });
     const text = readFileSync(path, "utf8");
-    expect(text.startsWith(`// ${EXTENSION_MARKER} v2`)).toBe(true);
+    expect(text.startsWith(`// ${EXTENSION_MARKER} v3`)).toBe(true);
     expect(text).toContain('const SESHI = ["/opt/seshi/bin/seshi"];');
     expect(await piInstaller.install(context())).toEqual({ changed: [], notes: [] });
     expect(await piInstaller.status(context())).toMatchObject({ installed: true, notes: [] });
@@ -300,14 +302,14 @@ process.stdin.on("end", () => {
     expect(call?.color).toBe("1");
   });
 
-  it("runs /seshi through seshi and shows what it said", async () => {
+  it("runs /session-capture through seshi and shows what it said", async () => {
     const pi = await load();
     process.env.FAKE_SESHI_LOG = pi.log;
-    await pi.commands.get("seshi")?.handler("off", pi.ctx(forkFile));
+    await pi.commands.get("session-capture")?.handler("off", pi.ctx(forkFile));
     expect(pi.notes).toEqual(["Session Capture ⏸ · turned off for this session"]);
     const [command] = pi.calls();
     expect(command?.args).toEqual(["hook", "pi", "Command"]);
-    expect(JSON.parse(command?.input ?? "").prompt).toBe("/seshi off");
+    expect(JSON.parse(command?.input ?? "").prompt).toBe("/session-capture off");
   });
 
   it("does nothing for a session pi keeps no file for, and draws nothing without a UI", async () => {

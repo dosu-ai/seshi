@@ -14,7 +14,7 @@ is not possible it shows the chat you last sent a message in, and asks which cha
 changes anything. Turn **seshi.useCursorInternals** off to use only the last chat.
 
 **Where.** Cursor's editor windows. The Agents Window does not show extensions' status bar
-items. In the Cursor CLI, seshi sets the CLI's own status line instead, and `/seshi off`,
-`/seshi on` and `/seshi` work in any Cursor chat.
+items. In the Cursor CLI, seshi sets the CLI's own status line instead, and `/session-capture off`,
+`/session-capture on` and `/session-capture` work in any Cursor chat.
 
 MIT licensed.

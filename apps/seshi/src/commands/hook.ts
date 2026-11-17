@@ -1,5 +1,5 @@
 import { appendLog, runHook } from "@seshi/capture/fast";
-import { hookHandler } from "@seshi/kit";
+import { CAPTURE_COMMAND, hookHandler } from "@seshi/kit";
 import { captureAgent } from "../capture-agents";
 import { EXIT } from "../cli/exit";
 import { pathsOf, startUploader } from "./capture-host";
@@ -101,7 +101,7 @@ export function notice(
   { decision }: { decision: { capture: boolean; reason: string } },
   agent: string,
 ): string {
-  const off = agent === "codex" ? "$seshi off" : "/seshi off";
+  const off = `${agent === "codex" ? "$" : "/"}${CAPTURE_COMMAND} off`;
   return decision.capture
     ? `Session Capture ◉ · this session is uploaded to your team's session store as you work; ${off} stops it`
     : `Session Capture ⏸ · ${decision.reason}`;

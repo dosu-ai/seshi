@@ -1,12 +1,12 @@
 # seshi's Claude Code plugin
 
-The same hooks and `/seshi` skill `seshi capture install claude-code` writes into
+The same hooks and `/session-capture` skill `seshi capture install claude-code` writes into
 `~/.claude/settings.json`, packaged as a Claude Code plugin (F9.6), for rolling out through a
 plugin marketplace or managed settings instead of each person running the installer.
 
 - `hooks/hooks.json`: `seshi hook claude-code <event>` on SessionStart, Stop, SubagentStop,
   PreCompact and SessionEnd. `seshi` must be on the PATH Claude Code runs hooks with.
-- `skills/seshi/SKILL.md`: `/seshi capture off|on|status` for the current session.
+- `skills/session-capture/SKILL.md`: `/session-capture off|on|status` for the current session.
 - `hooks/register.tsx`: the Session Capture chip and `/session-capture` for the Claude desktop
   app's Code tab, which has no status line (F9.4). See below.
 - The status line is not part of a plugin; add `"statusLine": {"type": "command", "command":
@@ -39,7 +39,7 @@ puts a chip in the prompt footer, beside the mode labels:
   (`Session Capture ◉ · 3 queued`, `· sign in`). It asks `seshi statusline --json`, so it says
   what the hooks will do, at the start of the session, after each turn and every 30 seconds.
 - Clicking it turns capture off or on for this session: `seshi capture off|on --session <id>`,
-  as the `/seshi` skill does. Turning it off retracts what was uploaded (F9.7). A line above the
+  as the `/session-capture` skill does. Turning it off retracts what was uploaded (F9.7). A line above the
   prompt says what happened for five seconds.
 - `/session-capture` flips it; `/session-capture on`, `off` and `status` set it or say why it is
   as it is.

@@ -31,11 +31,11 @@ seshi capture install --service  # also keep the uploader running between sessio
 
 | Agent | What `install` writes | Events (F9.2) |
 |---|---|---|
-| Claude Code | hooks, the status line and the `/seshi` skill in `~/.claude/settings.json` and `~/.claude/skills/seshi/` (`CLAUDE_CONFIG_DIR` moves them) | SessionStart, Stop, SubagentStop, PreCompact, SessionEnd |
-| Codex | `notify` in `~/.codex/config.toml` (`CODEX_HOME` moves it); a `notify` program already there keeps running, after seshi's. SessionStart and UserPromptSubmit hooks in `~/.codex/hooks.json` for the notice and `$seshi`, and the `$seshi` skill in `~/.agents/skills/seshi/` | notify, plus the sweep of `~/.codex/sessions`; SessionStart and UserPromptSubmit only for the notice and `$seshi` |
-| Cursor (IDE and CLI) | hooks in `~/.cursor/hooks.json`, the Cursor CLI's status line in `~/.cursor/cli-config.json`, and the `/seshi` skill in `~/.cursor/skills/seshi/`; it suggests the status bar extension ([below](#the-cursor-status-bar)) | stop, sessionEnd; beforeSubmitPrompt for `/seshi` and the last chat prompted |
-| pi | the extension `~/.pi/agent/extensions/seshi.ts` (`PI_CODING_AGENT_DIR` moves it) | agent_end (Stop), session_shutdown (SessionEnd, not on `/reload`); `/seshi`, a command of its own; plus the sweep of `~/.pi/agent/sessions`, or of the folder `PI_CODING_AGENT_SESSION_DIR` or `sessionDir` in pi's settings names |
-| OpenCode | the plugin `~/.config/opencode/plugins/seshi.js`, the TUI plugin `~/.config/opencode/seshi/tui.js` with its entry in `tui.json`'s `plugin` list, and the `/seshi` command `~/.config/opencode/command/seshi.md` (`XDG_CONFIG_HOME` moves them) | session.idle (Stop), with the whole session; session.created (SessionStart) for the notice; `/seshi` |
+| Claude Code | hooks, the status line and the `/session-capture` skill in `~/.claude/settings.json` and `~/.claude/skills/session-capture/` (`CLAUDE_CONFIG_DIR` moves them) | SessionStart, Stop, SubagentStop, PreCompact, SessionEnd |
+| Codex | `notify` in `~/.codex/config.toml` (`CODEX_HOME` moves it); a `notify` program already there keeps running, after seshi's. SessionStart and UserPromptSubmit hooks in `~/.codex/hooks.json` for the notice and `$session-capture`, and the `$session-capture` skill in `~/.agents/skills/session-capture/` | notify, plus the sweep of `~/.codex/sessions`; SessionStart and UserPromptSubmit only for the notice and `$session-capture` |
+| Cursor (IDE and CLI) | hooks in `~/.cursor/hooks.json`, the Cursor CLI's status line in `~/.cursor/cli-config.json`, and the `/session-capture` skill in `~/.cursor/skills/session-capture/`; it suggests the status bar extension ([below](#the-cursor-status-bar)) | stop, sessionEnd; beforeSubmitPrompt for `/session-capture` and the last chat prompted |
+| pi | the extension `~/.pi/agent/extensions/seshi.ts` (`PI_CODING_AGENT_DIR` moves it) | agent_end (Stop), session_shutdown (SessionEnd, not on `/reload`); `/session-capture`, a command of its own; plus the sweep of `~/.pi/agent/sessions`, or of the folder `PI_CODING_AGENT_SESSION_DIR` or `sessionDir` in pi's settings names |
+| OpenCode | the plugin `~/.config/opencode/plugins/seshi.js`, the TUI plugin `~/.config/opencode/seshi/tui.js` with its entry in `tui.json`'s `plugin` list, and the `/session-capture` command `~/.config/opencode/command/session-capture.md` (`XDG_CONFIG_HOME` moves them) | session.idle (Stop), with the whole session; session.created (SessionStart) for the notice; `/session-capture` |
 
 pi and OpenCode run no shell hooks: they load code at start-up, so seshi installs a file each
 loads, written whole (and rewritten by the next `install`, so edits do not last) and removed by
@@ -58,7 +58,7 @@ TUI plugin there and keeps every other entry and setting; `uninstall` takes out 
 (and the file, when nothing but its `$schema` is left). OpenCode also reads a `tui.jsonc`, but a
 `tui.json` with comments is left alone, since rewriting it would drop them: `install` and
 `capture status` say what to add to its `plugin` list by hand. Capture works without the TUI
-plugin; only the status and `/seshi` without a model turn need it.
+plugin; only the status and `/session-capture` without a model turn need it.
 
 `install` merges: every hook already in those files stays, and running it twice is the same as
 once. A status line someone else set up, in Claude Code or the Cursor CLI, still shows, with
@@ -119,7 +119,7 @@ session whose folder is not known is not captured, since its repo's rule cannot 
 a hook has seen). See [config.md](config.md#the-clis-config) for the settings.
 
 ```sh
-seshi capture off --session         # this session (from inside the agent: the /seshi skill)
+seshi capture off --session         # this session (from inside the agent: the /session-capture skill)
 seshi capture off --session <id> --agent codex
 seshi capture off --path ~/clients/acme
 seshi capture off                   # everything, for this user
@@ -133,7 +133,7 @@ keeps it on the server and sends nothing more. Under the hood, the state file re
 each stopped session reached (`frozen`); every send of that session stops there, even a resend
 of the whole log the server asks for (after a `409`, a moved transcript or a `replace`).
 
-In Claude Code, `/seshi capture off`, `/seshi capture on` and `/seshi capture status` run
+In Claude Code, `/session-capture off`, `/session-capture on` and `/session-capture status` run
 these for the current session: seshi's SessionStart hook sets `SESHI_SESSION_ID` for the
 commands Claude Code runs. Without it, `--session` alone means the one session seen in the
 current folder in the past day; when more than one ran there it lists them and asks for
@@ -157,17 +157,17 @@ network. Claude Code and the Cursor CLI run it as their status line (the Cursor 
 `--agent cursor`). Codex's status line takes only its own
 built-in items, so there seshi's SessionStart hook says it once, when a session starts or
 resumes, as a notice: `Session Capture ◉ · this session is uploaded to your team's session
-store as you work; $seshi off stops it`, or `Session Capture ⏸ · <why not>`. Codex asks you to
+store as you work; $session-capture off stops it`, or `Session Capture ⏸ · <why not>`. Codex asks you to
 trust a new hook the first time it runs.
 
 Codex's sandbox keeps the commands its agent runs from writing seshi's state folder, so in
-Codex `$seshi off`, `$seshi on` and `$seshi status` (or `$seshi`), typed as a message of its
+Codex `$session-capture off`, `$session-capture on` and `$session-capture status` (or `$session-capture`), typed as a message of its
 own, are done by seshi's UserPromptSubmit hook, which runs outside the sandbox, before the
 model sees the message; the result shows as a notice.
 
 The Cursor IDE has no status line, and shows a hook's message only when the hook stops a
-prompt. So Cursor's beforeSubmitPrompt hook does the same for `/seshi off`, `/seshi on` and `/seshi status`
-(or `/seshi`) typed as a message of its own: it stops the message, the answer appears in its
+prompt. So Cursor's beforeSubmitPrompt hook does the same for `/session-capture off`, `/session-capture on` and `/session-capture status`
+(or `/session-capture`) typed as a message of its own: it stops the message, the answer appears in its
 place, and the model never runs. Every other message passes.
 
 Elsewhere the skill runs `seshi capture off|on`, asking to leave a sandbox when there is one.
@@ -176,21 +176,21 @@ decided, the queue, the last errors).
 
 pi has no status line of its own to run, so seshi's extension puts `seshi statusline --agent pi`
 in pi's footer, refreshed when a session starts and after each agent run, and registers
-`/seshi off|on|status` as a pi command: seshi does it, the answer shows as a notification, and
+`/session-capture off|on|status` as a pi command: seshi does it, the answer shows as a notification, and
 the model never sees it (any other argument changes nothing, and says so). OpenCode shows the
 start notice above in a toast when a new session starts, and seshi's TUI plugin puts
 `seshi statusline --agent opencode` (up to its first `·`) on the right of the prompt, for the
 session in view, refreshed when it comes into view and after each turn: `Session Capture ◉`, or
-`⏸` in the theme's warning colour. `/seshi`, `/seshi off`, `/seshi on` or `/seshi status`
+`⏸` in the theme's warning colour. `/session-capture`, `/session-capture off`, `/session-capture on` or `/session-capture status`
 typed in a session's prompt is taken by the TUI plugin when you submit it: seshi does it, the
 prompt is cleared, the answer shows in a toast, and nothing reaches the model. Anything else
-after `/seshi`, and `/seshi` where there is no TUI plugin (`opencode run --command seshi`, the
+after `/session-capture`, and `/session-capture` where there is no TUI plugin (`opencode run --command session-capture`, the
 web UI) or no session yet (OpenCode's home screen), goes to the command file, which OpenCode
 always sends to the model; seshi's server plugin does what it asks first and puts the answer,
 with a request for a one-line acknowledgement, in place of the command, so the model's reply is
-the only cost. Once seshi has said a session is not captured (at its start, or by `/seshi`), the
+the only cost. Once seshi has said a session is not captured (at its start, or by `/session-capture`), the
 server plugin stops reading and handing over its turns, until seshi's status line says it is
-captured again (after the TUI's `/seshi on`, or `seshi capture on --session`). In both agents,
+captured again (after the TUI's `/session-capture on`, or `seshi capture on --session`). In both agents,
 the extension and the plugins pass the session's id themselves: seshi's own `SESHI_SESSION_ID`,
 set in a shell another agent started, is ignored.
 
@@ -224,7 +224,7 @@ instead).
   tabs or the window change, every 2 seconds for the open chats while the window has focus,
   and every 30 seconds.
 - **Where.** Editor windows only: the Agents Window does not show extensions' status bar items,
-  and the Cursor CLI has its own status line (above). `/seshi` works in both.
+  and the Cursor CLI has its own status line (above). `/session-capture` works in both.
 
 ## The uploader
 

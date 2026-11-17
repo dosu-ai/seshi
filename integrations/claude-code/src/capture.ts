@@ -1,5 +1,5 @@
 /** Capturing Claude Code sessions (F9): its hook payloads, where its transcripts are, and the
- * installer that merges seshi's hooks, status line and `/seshi` skill into Claude Code's
+ * installer that merges seshi's hooks, status line and `/session-capture` skill into Claude Code's
  * settings. Loaded alone by `seshi hook claude-code <event>`, so it imports only `@seshi/kit`
  * and `node:` modules (X3.3), never the transcript adapter.
  *
@@ -10,7 +10,7 @@
  * `hook_event_name`; SubagentStop adds `agent_id` and `agent_transcript_path` in recent
  * versions. A SessionStart hook may append `export` lines to the file `CLAUDE_ENV_FILE` names,
  * and Claude Code sets them for every command it runs afterwards in that session: that is how
- * `seshi capture off --session` (the `/seshi` skill) knows which session it is in. */
+ * `seshi capture off --session` (the `/session-capture` skill) knows which session it is in. */
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
@@ -35,6 +35,7 @@ import {
   readJsonConfig,
   removeSkill,
   type StatusLineTarget,
+  skillFile,
   statusLineNotes,
   stringField,
   type TranscriptInfo,
@@ -216,7 +217,7 @@ export function claudeAccountIds(host: CaptureHost): Record<string, string> {
 
 export { SKILL_MARKER } from "@seshi/kit";
 
-export function seshiSkill(command: readonly string[]): string {
+export function sessionCaptureSkill(command: readonly string[]): string {
   return captureSkill(command);
 }
 
@@ -224,8 +225,8 @@ function settingsPath(host: CaptureHost): string {
   return join(claudeDir(host), "settings.json");
 }
 
-function skillPath(host: CaptureHost): string {
-  return join(claudeDir(host), "skills", "seshi", "SKILL.md");
+function skillsDir(host: CaptureHost): string {
+  return join(claudeDir(host), "skills");
 }
 
 interface HookEntry {
@@ -299,7 +300,7 @@ export const claudeCodeInstaller: Installer = {
     const changed = [path, ...status.changed];
     notes.push(...status.notes);
     writeJsonConfig(path, settings);
-    const skill = installSkill(skillPath(context), context.command);
+    const skill = installSkill(skillsDir(context), context.command);
     return { changed: [...changed, ...skill.changed], notes: [...notes, ...skill.notes] };
   },
 
@@ -336,7 +337,7 @@ export const claudeCodeInstaller: Installer = {
         changed.push(path);
       }
     }
-    changed.push(...removeSkill(skillPath(context)));
+    changed.push(...removeSkill(skillsDir(context)));
     return { changed, notes: [] };
   },
 
@@ -353,7 +354,7 @@ export const claudeCodeInstaller: Installer = {
       notes.push(`hooks missing for ${missing.join(", ")}: run seshi capture install claude-code`);
     }
     notes.push(...statusLineNotes(settings, statusTarget(context), AGENT));
-    const skill = skillPath(context);
+    const skill = skillFile(skillsDir(context));
     return {
       installed: present && missing.length === 0,
       files: [
