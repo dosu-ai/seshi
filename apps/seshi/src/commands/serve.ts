@@ -130,7 +130,15 @@ async function start(ctx: CommandContext, argv: string[]): Promise<number | unde
     process.on("SIGHUP", () => void reload("signal"));
     if (loaded.config.server.watch_config) {
       watcher = watchConfig({
-        files: () => [configFile, ...instance.config.redaction.packs],
+        files: () => [
+          configFile,
+          ...instance.config.redaction.packs,
+          ...instance.config.review.policies.flatMap((p) =>
+            [p.decision.prompt_file, p.redactor.prompt_file].filter(
+              (f): f is string => f !== undefined,
+            ),
+          ),
+        ],
         dirs: () => [serverDropInDir(configFile)],
         onChange: () => void reload("watch"),
         onError: (err) => log.warn(`config watch: ${message(err)}`),

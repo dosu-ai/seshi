@@ -1149,8 +1149,8 @@ paths:
       operationId: adminReload
       description: |
         Does what `SIGHUP` does, and answers with the result. The config file, its drop-ins
-        (`seshi.d/*.toml`) and the redaction packs are read and checked, and the packs
-        compiled, before anything changes; on any error the running config stays and the
+        (`seshi.d/*.toml`), the redaction packs and the review policies' prompt files are read
+        and checked, and the packs compiled, before anything changes; on any error the running config stays and the
         answer is 422 with the reasons. Then sources are compared by id: an added one starts
         polling, a removed one stops, a changed one restarts, an unchanged one keeps running.
         Checkpoints are never reset. New writes redact with the new packs; a write already

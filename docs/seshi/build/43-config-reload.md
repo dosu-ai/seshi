@@ -15,8 +15,8 @@ source of truth and applies them without one.
 - **All or nothing.** The instance gets a `loadConfig` closure from `openServer`: the same
   file, drop-ins, env and flags as at start-up. A reload loads that, runs the cross-section
   checks (`serverConfigProblems`, extracted from the schema's `superRefine`) on the config it
-  would run, compiles the rule packs (`readRedactionPacks`, test strings included) and, when
-  `[review]` changed, builds the reviewer. Only then does anything change. A failure is the
+  would run, compiles the rule packs (`readRedactionPacks`, test strings included) and builds
+  the reviewer. Only then does anything change. A failure is the
   report's `errors`; the running config, rule set, jobs and generation stay.
 - **Sources by id.** `diffSources` compares the canonical form of each source (secrets as a
   hash of their value, so a rotated key counts as a change). Removed and changed sources'
@@ -30,6 +30,13 @@ source of truth and applies them without one.
   `run.redactor`, so a write that began before the swap is stored with the old rule set and
   its `redaction.rule_set` says so. Span batches take it once per batch. `instance.redaction`
   is a getter, so `GET /v1/redaction/rules` serves the new packs and `ETag` at once.
+- **Review prompts.** The reviewer is built on every reload, which reads each policy's
+  `prompt_file` again (it calls no model). It replaces the running one when `[review]` changed
+  (a rotated key file counts: secrets compare by value) or when the policies' hashes differ;
+  `policyHash` covers the prompt text, so an edited prompt file alone is a change and the new
+  `policy_hash` shows in review decisions from then on. A reviewer handed to the instance
+  that does not list its policies is replaced only when `[review]` changes. Prompt files are
+  watched with `watch_config`.
 - **Restart-only settings.** `RESTART_ONLY_SECTIONS`: `server`, `store`, `auth`, `limits`,
   `search`, `worker`. The config a reload applies is the file's with these sections taken from
   the running config (`effectiveConfig`); the leaf paths that differ are `restart_required`,
@@ -78,7 +85,8 @@ atomically (Kubernetes ConfigMaps) and nothing calls the API.
   rejected reloads (bad TOML, duplicate ids, a pack that does not compile, a source reading
   the running bucket once restart-only sections are applied) keep generation, hash, rule set
   and pollers; an edited pack redacts the next write while a write held in review keeps the
-  old rule set; restart-only settings listed and not applied; concurrent reloads serialized.
+  old rule set; an edited review prompt file alone swaps the reviewer, and a missing one is
+  refused; restart-only settings listed and not applied; concurrent reloads serialized.
 - `packages/ts/instance/src/jobs.test.ts`: `unregister`.
 - `packages/ts/config/src/drop-ins.test.ts`: order, origins, refused keys, unique ids,
   literal-secret warnings.
@@ -109,7 +117,5 @@ bucket, `restart_required` said `server.listen` and the server kept its port.
 
 - macOS may report a file written just before the watch began, so a server started with
   `watch_config` can do one "nothing changed" reload at start-up. Harmless; not filtered.
-- A reload does not re-read the review policies when only a policy's referenced files change
-  and `[review]` does not.
 - A `seshi admin reload` command (for operators without signal access to the process) would
   be a small addition over `@seshi/client`'s `reload()`.

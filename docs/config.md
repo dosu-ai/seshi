@@ -53,26 +53,30 @@ A running `seshi serve` reads its config again, without a restart, on any of (F1
 
 - `SIGHUP` (`kill -HUP <pid>`, `docker kill --signal HUP <container>`);
 - `POST /v1/admin/reload` (`sources:admin`), which answers with the result;
-- a change to the file, a drop-in or a rule pack, when `server.watch_config = true` (off by
-  default; a second after the last change).
+- a change to the file, a drop-in, a rule pack or a review policy's `prompt_file`, when
+  `server.watch_config = true` (off by default; a second after the last change).
 
 All three do the same thing, one reload at a time:
 
 1. **All or nothing.** The file, its drop-ins, `SESHI_*` env and the flags the server started
    with are loaded and checked, every secret reference is read, the rule packs are compiled
-   and their test strings run, and, if `[review]` changed, the review policies are loaded,
-   before anything changes. On any error the running config stays; the reason is logged, in
+   and their test strings run, and the review policies are loaded again (their `prompt_file`s
+   read), before anything changes. A prompt file that cannot be read is an error like any
+   other, as it would be at start-up. On any error the running config stays; the reason is logged, in
    the API's answer (`422 reload_rejected`) and in `GET /v1/admin/reload`.
 2. **Sources are compared by id.** An added source starts polling; a removed one stops (a
    run that is going is aborted and waited for); a changed one (any setting, a secret's value
    included) stops and starts again; an unchanged one keeps running. Checkpoints live in the
    bucket and are never reset by a reload: a source removed and added back reads on from where
    it was. Use `seshi sync rewind` to read again on purpose.
-3. **Rule packs swap atomically.** New writes redact with the new rule set; a write already
+3. **Review follows its prompts.** A review policy whose `prompt_file` changed is a new
+   policy even when `[review]` did not: its `policy_hash` (recorded with every review
+   decision) changes, and new writes are judged with it.
+4. **Rule packs swap atomically.** New writes redact with the new rule set; a write already
    going finishes with the rules it started with. `GET /v1/redaction/rules` serves the new
    packs (a new `ETag`) at once. Stored sessions keep the rules they were stored with until
    `seshi redact backfill`.
-4. **Some settings need a restart.** `[server]`, `[store]`, `[auth]`, `[limits]`, `[search]`
+5. **Some settings need a restart.** `[server]`, `[store]`, `[auth]`, `[limits]`, `[search]`
    and `[worker]` are read once at start-up (the listener, the bucket, identity, request
    caps, the index and the worker's own intervals). A reload that changes one of them applies
    everything else and lists the changed settings in `restart_required` (and logs a warning
@@ -170,7 +174,7 @@ milliseconds. Sizes are `<n><unit>` with `B`, `KB`, `MB`, `GB`, `KiB`, `MiB` or 
 | `public_url` | | The URL clients reach the server at, behind any proxy. Accepted but unused: sign-in goes from the CLI to the IdP directly (X5.7), so nothing reads it, and `config check` warns when it is set |
 | `roles` | `["api", "worker"]` | What this instance runs (X7.1). Flag `--roles`. `api` serves the HTTP API; `worker` runs the background jobs (pollers, retention, the heartbeat). Run exactly one worker (X7.2); an instance without `api` answers `/healthz` only |
 | `instance_id` | the host name | This instance's stable name: its source health shard and the heartbeat's `host` (letters, digits, `_`, `-`, up to 64) |
-| `watch_config` | `false` | Reload when the config file, a drop-in in `seshi.d/` or a rule pack file changes, a second after the last change ([Reloading](#reloading)). Off by default: an editor saving half a change would be applied or refused at once, and `SIGHUP` or `POST /v1/admin/reload` say when, and report the result |
+| `watch_config` | `false` | Reload when the config file, a drop-in in `seshi.d/`, a rule pack or a review `prompt_file` changes, a second after the last change ([Reloading](#reloading)). Off by default: an editor saving half a change would be applied or refused at once, and `SIGHUP` or `POST /v1/admin/reload` say when, and report the result |
 
 ### `[store]`
 

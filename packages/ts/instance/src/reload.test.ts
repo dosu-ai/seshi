@@ -332,6 +332,37 @@ describe("reloading rule packs", () => {
   });
 });
 
+describe("reloading review", () => {
+  type Judged = { reviewer: { policies?: { hash: string; decision: { prompt: string } }[] } };
+  const judged = (instance: Instance) =>
+    (instance.pipeline as unknown as Judged).reviewer.policies?.[0];
+
+  it("reads prompt files again: an edited prompt is a new policy, with [review] unchanged", async () => {
+    const prompt = join(dir, "decision.txt");
+    writeFileSync(prompt, "Judge it, version 1.");
+    writeConfig(
+      `\n[[review.policies]]\nid = "p"\ndecision = { api_key = "sk-test", prompt_file = "${prompt}" }\n`,
+    );
+    const instance = await start();
+    const before = judged(instance);
+    expect(before?.decision.prompt).toBe("Judge it, version 1.");
+    expect(await instance.reload()).toMatchObject({ outcome: "unchanged", changed: [] });
+
+    writeFileSync(prompt, "Judge it, version 2.");
+    const report = await instance.reload();
+    expect(report).toMatchObject({ outcome: "applied", generation: 2, changed: ["review"] });
+    expect(judged(instance)?.decision.prompt).toBe("Judge it, version 2.");
+    expect(judged(instance)?.hash).not.toBe(before?.hash);
+
+    // A prompt file that cannot be read is refused, as a restart would be.
+    rmSync(prompt);
+    const missing = await instance.reload();
+    expect(missing.outcome).toBe("rejected");
+    expect(missing.errors?.[0]).toMatch(/decision\.txt/);
+    expect(judged(instance)?.decision.prompt).toBe("Judge it, version 2.");
+  });
+});
+
 describe("restart-only settings", () => {
   it("applies the rest and lists what waits for a restart", async () => {
     writeConfig("");

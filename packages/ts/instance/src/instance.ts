@@ -189,6 +189,9 @@ export class Instance {
   private loadedAt: Date;
   private hash: string;
   private restartRequired: string[] = [];
+  /** What the running review judges with (`reviewFingerprint`); undefined for a reviewer
+   * handed in that seshi did not build from `[review]`. */
+  private reviewPrint: string | undefined;
   private lastReload: ReloadReport | null = null;
   private reloading: Promise<unknown> = Promise.resolve();
 
@@ -223,6 +226,7 @@ export class Instance {
     this.process = `${this.id}-${randomBytes(4).toString("hex")}`;
     this.limits = parts.limits ?? config.limits;
     this.rules = parts.redaction ?? compileRuleSet();
+    this.reviewPrint = reviewFingerprint(parts.reviewer);
 
     this.ownAuth = parts.auth === undefined;
     if (parts.auth) {
@@ -409,24 +413,30 @@ export class Instance {
     } catch (err) {
       return reject([message(err)]);
     }
-    const reviewChanged = !same(this.running.review, config.review);
+    // Built every time, so a prompt file edited without a change to [review] is seen: each
+    // policy's hash covers its prompt text. Building reads the prompt files and makes the
+    // provider objects; it calls no model.
     let reviewer: Reviewer | undefined;
-    if (reviewChanged) {
-      try {
-        reviewer = await buildReviewer(config, {
-          ...(this.fetchImpl ? { fetch: this.fetchImpl } : {}),
-          log: this.log,
-        });
-      } catch (err) {
-        return reject([message(err)]);
-      }
+    try {
+      reviewer = await buildReviewer(config, {
+        ...(this.fetchImpl ? { fetch: this.fetchImpl } : {}),
+        log: this.log,
+      });
+    } catch (err) {
+      return reject([message(err)]);
     }
+    const reviewPrint = reviewFingerprint(reviewer);
+    const reviewChanged =
+      !same(this.running.review, config.review) ||
+      (this.reviewPrint !== undefined && this.reviewPrint !== reviewPrint);
     if (this.closed) return reject(["this instance is closed"]);
 
     const changed = LIVE_SECTIONS.filter((section) =>
       section === "redaction"
         ? rules.hash !== this.rules.hash
-        : !same(this.running[section], config[section]),
+        : section === "review"
+          ? reviewChanged
+          : !same(this.running[section], config[section]),
     );
     const sources = diffSources(this.running.sources, config.sources);
     this.restartRequired = restartRequired;
@@ -452,7 +462,10 @@ export class Instance {
       this.rules = rules;
       this.pipeline.setRedaction(rules);
     }
-    if (reviewChanged) this.pipeline.setReviewer(reviewer);
+    if (reviewChanged) {
+      this.pipeline.setReviewer(reviewer);
+      this.reviewPrint = reviewPrint;
+    }
     for (const id of [...sources.added, ...sources.changed]) {
       const info = this.sources.get(id);
       const name = `${POLLER_PREFIX}${id}`;
@@ -688,6 +701,15 @@ export async function readRedactionPacks(paths: readonly string[]): Promise<Rule
     if (err instanceof RulePackError) throw new InstanceError(err.message, { cause: err });
     throw err;
   }
+}
+
+/** The hashes of a reviewer's policies (each covers its prompt text, steps and categories):
+ * `[]` for no review, undefined for a reviewer that does not say what it judges with. */
+function reviewFingerprint(reviewer: Reviewer | undefined): string | undefined {
+  if (reviewer === undefined) return "[]";
+  const policies = (reviewer as { policies?: unknown }).policies;
+  if (!Array.isArray(policies)) return undefined;
+  return JSON.stringify(policies.map((p: { id?: unknown; hash?: unknown }) => [p.id, p.hash]));
 }
 
 async function buildReviewer(
