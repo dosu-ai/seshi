@@ -40,7 +40,8 @@
     "fixtures": "bun run tests/tooling/fixtures.ts",
     "goldens": "bun run tests/tooling/write-goldens.ts",
     "scenarios:explore": "bun run tests/tooling/scenario/explore.ts",
-    "ext:build": "bun run integrations/cursor/extension/build.ts"
+    "ext:build": "bun run integrations/cursor/extension/build.ts",
+    "ext:package": "bun run integrations/cursor/extension/build.ts --vsix dist/seshi-cursor.vsix"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.0",

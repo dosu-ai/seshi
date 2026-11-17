@@ -27,7 +27,7 @@ import {
   smokeTranscript,
   startsWithProgram,
 } from "./smoke";
-import { hostTarget, TARGETS } from "./targets";
+import { extensionAsset, hostTarget, TARGETS } from "./targets";
 import { exec, installPackages } from "./testing";
 
 const VERSION = repositoryVersion();
@@ -156,12 +156,22 @@ describe.skipIf(!supported || process.platform === "win32")("the host's release"
   beforeAll(async () => {
     dir = mkdtempSync(join(tmpdir(), "seshi-e2e-"));
     release = join(dir, "releases/latest/download");
-    assets = await buildRelease({ out: release, targets: [hostTarget()] });
+    // The extension is packaged by vsce, fetched from npm; CI's test job packages it for real.
+    assets = await buildRelease({
+      out: release,
+      targets: [hostTarget()],
+      packageExtension: async (outfile) => writeFileSync(outfile, "a vsix"),
+    });
   }, 180_000);
   afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
-  it("is one archive, the install scripts and SHA256SUMS", () => {
-    expect(assets.map((a) => a.name)).toEqual([hostTarget().asset, "install.sh", "install.ps1"]);
+  it("is one archive, the install scripts, the Cursor extension and SHA256SUMS", () => {
+    expect(assets.map((a) => a.name)).toEqual([
+      hostTarget().asset,
+      "install.sh",
+      "install.ps1",
+      extensionAsset(repositoryVersion()),
+    ]);
     expect(existsSync(join(release, "SHA256SUMS"))).toBe(true);
   });
 

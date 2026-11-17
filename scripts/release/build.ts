@@ -6,6 +6,7 @@ import { checksumFile, readArchive, sha256, tarGz, zip } from "./archive";
 import { adhocSign } from "./macho-sign";
 import {
   CHECKSUMS,
+  extensionAsset,
   hostTarget,
   INSTALL_SCRIPTS,
   TARGETS,
@@ -29,7 +30,22 @@ export interface BuildReleaseOptions {
   version?: string;
   mtime?: number;
   compile?: (target: Target, outfile: string) => Promise<void>;
+  /** Packages the Cursor extension into `outfile` (a .vsix). */
+  packageExtension?: (outfile: string) => Promise<void>;
   log?: (line: string) => void;
+}
+
+export async function packageCursorExtension(outfile: string, root = ROOT): Promise<void> {
+  const proc = Bun.spawn(
+    ["bun", "run", join(root, "integrations/cursor/extension/build.ts"), "--vsix", outfile],
+    { cwd: root, stdout: "pipe", stderr: "pipe" },
+  );
+  const [code, out, err] = await Promise.all([
+    proc.exited,
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ]);
+  if (code !== 0) throw new Error(`packaging the Cursor extension failed (${code}):\n${out}${err}`);
 }
 
 export function repositoryVersion(root = ROOT): string {
@@ -111,6 +127,22 @@ export async function buildRelease(options: BuildReleaseOptions): Promise<Releas
     files.set(script, data);
     assets.push({ name: script, sha256: sha256(data), size: data.byteLength });
   }
+  const vsix = extensionAsset(version);
+  const manifest = JSON.parse(
+    readFileSync(join(root, "integrations/cursor/extension/package.json"), "utf8"),
+  ) as { version: string };
+  if (manifest.version !== version) {
+    throw new Error(
+      `integrations/cursor/extension/package.json says ${manifest.version}, not ${version}; run scripts/release-version.ts first`,
+    );
+  }
+  log(`package ${vsix}`);
+  await (options.packageExtension ?? ((outfile) => packageCursorExtension(outfile, root)))(
+    join(options.out, vsix),
+  );
+  const extension = readFileSync(join(options.out, vsix));
+  files.set(vsix, extension);
+  assets.push({ name: vsix, sha256: sha256(extension), size: extension.byteLength });
   writeFileSync(join(options.out, CHECKSUMS), checksumFile(files));
   log(`${CHECKSUMS}: ${files.size} assets`);
   return assets;

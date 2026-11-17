@@ -1,11 +1,13 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { parseChecksums, readArchive, sha256 } from "./archive";
-import { binaryEnv, buildRelease, selectTargets } from "./build";
-import { CHECKSUMS, hostTarget, INSTALL_SCRIPTS, TARGETS } from "./targets";
+import { binaryEnv, buildRelease, repositoryVersion, selectTargets } from "./build";
+import { CHECKSUMS, extensionAsset, hostTarget, INSTALL_SCRIPTS, TARGETS } from "./targets";
 import { standInCompile } from "./testing";
+
+const packageExtension = async (outfile: string) => writeFileSync(outfile, "a vsix");
 
 describe("buildRelease", () => {
   let out: string;
@@ -18,11 +20,17 @@ describe("buildRelease", () => {
     "archives every target's binary with the licence and checksums every asset",
     async () => {
       const { compile, compiled } = standInCompile();
-      const assets = await buildRelease({ out, compile, mtime: Date.UTC(2026, 10, 15) });
+      const assets = await buildRelease({
+        out,
+        compile,
+        packageExtension,
+        mtime: Date.UTC(2026, 10, 15),
+      });
       expect(compiled).toEqual(TARGETS.map((t) => t.id));
       expect(assets.map((a) => a.name)).toEqual([
         ...TARGETS.map((t) => t.asset),
         ...INSTALL_SCRIPTS,
+        extensionAsset(repositoryVersion()),
       ]);
       const sums = parseChecksums(readFileSync(join(out, CHECKSUMS), "utf8"));
       expect([...sums.keys()].sort()).toEqual(assets.map((a) => a.name).sort());
@@ -49,17 +57,17 @@ describe("buildRelease", () => {
     "refuses a host binary that prints another version",
     async () => {
       const { compile } = standInCompile("0.0.1");
-      await expect(buildRelease({ out, compile, targets: [hostTarget()] })).rejects.toThrow(
-        /--version printed "seshi 0.0.1"/,
-      );
+      await expect(
+        buildRelease({ out, compile, packageExtension, targets: [hostTarget()] }),
+      ).rejects.toThrow(/--version printed "seshi 0.0.1"/);
     },
   );
 
   it("refuses a --version the repository does not carry", async () => {
     const { compile, compiled } = standInCompile();
-    await expect(buildRelease({ out, compile, version: "99.0.0" })).rejects.toThrow(
-      /release-version/,
-    );
+    await expect(
+      buildRelease({ out, compile, packageExtension, version: "99.0.0" }),
+    ).rejects.toThrow(/release-version/);
     expect(compiled).toEqual([]);
   });
 });

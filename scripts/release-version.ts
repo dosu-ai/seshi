@@ -4,7 +4,7 @@
 
 import { join } from "node:path";
 
-export const VERSIONED = ["packages/ts/model"] as const;
+export const VERSIONED = ["packages/ts/model", "integrations/cursor/extension"] as const;
 
 const SEMVER = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
 

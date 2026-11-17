@@ -51,6 +51,11 @@ export const CHECKSUMS = "SHA256SUMS";
 
 export const INSTALL_SCRIPTS = ["install.sh", "install.ps1"] as const;
 
+/** The Cursor extension, packaged for Open VSX (integrations/cursor/extension). */
+export function extensionAsset(version: string): string {
+  return `seshi-cursor-${version}.vsix`;
+}
+
 export const REPOSITORY = "dosu-ai/sessiondb";
 
 export function targetById(id: string): Target {

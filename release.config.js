@@ -6,14 +6,14 @@
  *    repository's one version: what traces record as their normalizer, what /healthz and
  *    `seshi --version` report) and bun.lock; scripts/release/build.ts cross-compiles `seshi`
  *    for every target (scripts/release/targets.ts) into dist/release/: one archive per target,
- *    install.sh, install.ps1 and SHA256SUMS. @semantic-release/git commits the version files.
+ *    install.sh, install.ps1, the Cursor extension's .vsix and SHA256SUMS. @semantic-release/git commits the version files.
  * 2. The tag `vX.Y.Z` is pushed, and the GitHub release is published with those assets. The
  *    install scripts download from it, and `…/releases/latest/download/install.sh` is a stable
  *    URL.
  * 3. ci.yml's later jobs take it from there, from the release's own assets: `npm` publishes
  *    the platform packages, @seshi/model, @seshi/client and the `seshi` launcher; `image`
- *    builds ghcr.io/<repo> from the two Linux binaries; `verify` installs the release on every
- *    platform through each channel.
+ *    builds ghcr.io/<repo> from the two Linux binaries; `openvsx` publishes the Cursor
+ *    extension; `verify` installs the release on every platform through each channel.
  *
  * @type {import('semantic-release').GlobalConfig} */
 export default {
@@ -39,6 +39,7 @@ export default {
           { path: "dist/release/seshi-*.zip" },
           { path: "dist/release/install.sh" },
           { path: "dist/release/install.ps1" },
+          { path: "dist/release/seshi-cursor-*.vsix" },
           { path: "dist/release/SHA256SUMS" },
         ],
       },
@@ -46,7 +47,12 @@ export default {
     [
       "@semantic-release/git",
       {
-        assets: ["packages/ts/model/package.json", "bun.lock", "CHANGELOG.md"],
+        assets: [
+          "packages/ts/model/package.json",
+          "integrations/cursor/extension/package.json",
+          "bun.lock",
+          "CHANGELOG.md",
+        ],
         message: "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}",
       },
     ],

@@ -5,7 +5,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { CHECKSUMS, INSTALL_SCRIPTS, TARGETS } from "./targets";
+import { CHECKSUMS, extensionAsset, INSTALL_SCRIPTS, TARGETS } from "./targets";
 
 const ROOT = resolve(import.meta.dirname, "../..");
 const CI = readFileSync(join(ROOT, ".github/workflows/ci.yml"), "utf8");
@@ -27,9 +27,12 @@ describe("release.config.js", () => {
     const patterns = (options("@semantic-release/github").assets as { path: string }[]).map((a) =>
       glob(a.path),
     );
-    const written = [...TARGETS.map((t) => t.asset), ...INSTALL_SCRIPTS, CHECKSUMS].map(
-      (name) => `dist/release/${name}`,
-    );
+    const written = [
+      ...TARGETS.map((t) => t.asset),
+      ...INSTALL_SCRIPTS,
+      extensionAsset("1.2.3"),
+      CHECKSUMS,
+    ].map((name) => `dist/release/${name}`);
     for (const file of written)
       expect(
         patterns.some((p) => p.test(file)),
@@ -57,6 +60,7 @@ describe("release.config.js", () => {
     // The version files are committed with the release; built files never are.
     expect(options("@semantic-release/git").assets).toEqual([
       "packages/ts/model/package.json",
+      "integrations/cursor/extension/package.json",
       "bun.lock",
       "CHANGELOG.md",
     ]);

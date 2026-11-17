@@ -34,6 +34,11 @@ describe("setVersion", () => {
       join(root, "packages/ts/model/package.json"),
       JSON.stringify({ name: "@seshi/model", version: "0.9.0" }),
     );
+    mkdirSync(join(root, "integrations/cursor/extension"), { recursive: true });
+    writeFileSync(
+      join(root, "integrations/cursor/extension/package.json"),
+      JSON.stringify({ name: "seshi-cursor", version: "0.9.0" }),
+    );
     writeFileSync(join(root, "bun.lock"), LOCK);
   });
   afterEach(() => rmSync(root, { recursive: true, force: true }));
@@ -42,6 +47,10 @@ describe("setVersion", () => {
     await setVersion(root, "1.0.0");
     const manifest = JSON.parse(readFileSync(join(root, "packages/ts/model/package.json"), "utf8"));
     expect(manifest.version).toBe("1.0.0");
+    const extension = JSON.parse(
+      readFileSync(join(root, "integrations/cursor/extension/package.json"), "utf8"),
+    );
+    expect(extension.version).toBe("1.0.0");
     expect(readFileSync(join(root, "bun.lock"), "utf8")).toContain('"version": "1.0.0"');
   });
 
