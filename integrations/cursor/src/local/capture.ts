@@ -17,6 +17,7 @@ import {
   attachStatusLine,
   type CaptureAgent,
   type CaptureHost,
+  captureCommandPrompt,
   commandLine,
   detachStatusLine,
   type HookCapture,
@@ -32,7 +33,7 @@ import {
   readJsonConfig,
   removeSkill,
   type StatusLineTarget,
-  seshiPrompt,
+  skillFile,
   statusLineNotes,
   stringField,
   type TranscriptInfo,
@@ -69,13 +70,15 @@ export const CURSOR_HOOKS: readonly HookHandler[] = [
   { event: "stop", parse: (payload) => ({ captures: [capture(payload, false)] }) },
   { event: "sessionEnd", parse: (payload) => ({ captures: [capture(payload, true)] }) },
   {
-    // `/seshi off|on|status` typed as a message of its own: the hook does it, outside the
+    // `/session-capture off|on|status` typed as a message of its own: the hook does it, outside the
     // agent's sandbox, and stops the message there. Cursor shows a hook's `user_message` only
     // when the hook blocks the prompt, and the model has nothing to do.
     event: "beforeSubmitPrompt",
     reply: (message) => ({ continue: false, user_message: message }),
     parse(payload) {
-      const asked = seshiPrompt(stringField(payloadObject(payload, AGENT), "prompt") ?? "");
+      const asked = captureCommandPrompt(
+        stringField(payloadObject(payload, AGENT), "prompt") ?? "",
+      );
       const { session_id, cwd } = capture(payload, false);
       const which = { session_id, ...(cwd ? { cwd } : {}) };
       if (!asked) return { captures: [], active: which };
@@ -184,8 +187,8 @@ function hasExtension(host: CaptureHost): boolean {
 
 const EXTENSION_NOTE = `for Session Capture in Cursor's status bar, install the "seshi Session Capture" extension (${EXTENSION_ID}) from the Extensions view`;
 
-function skillPath(host: CaptureHost): string {
-  return join(cursorDir(host), "skills", "seshi", "SKILL.md");
+function skillsDir(host: CaptureHost): string {
+  return join(cursorDir(host), "skills");
 }
 
 function hooksPath(host: CaptureHost): string {
@@ -220,7 +223,7 @@ export const cursorInstaller: Installer = {
     }
     writeJsonConfig(path, { version: config.version ?? 1, ...config, hooks: table });
     const status = installStatusLine(context);
-    const skill = installSkill(skillPath(context), context.command);
+    const skill = installSkill(skillsDir(context), context.command);
     return {
       changed: [path, ...status.changed, ...skill.changed],
       notes: [...status.notes, ...skill.notes, ...(hasExtension(context) ? [] : [EXTENSION_NOTE])],
@@ -229,7 +232,7 @@ export const cursorInstaller: Installer = {
 
   async uninstall(context: InstallContext): Promise<InstallReport> {
     const path = hooksPath(context);
-    const skill = [...removeStatusLine(context), ...removeSkill(skillPath(context))];
+    const skill = [...removeStatusLine(context), ...removeSkill(skillsDir(context))];
     if (!existsSync(path)) return { changed: skill, notes: [] };
     const config = readJsonConfig(path);
     const table = hooksTable(config);
@@ -262,9 +265,9 @@ export const cursorInstaller: Installer = {
       files: [
         { path, present, ours: present && missing.length < CURSOR_EVENTS.length },
         {
-          path: skillPath(context),
-          present: existsSync(skillPath(context)),
-          ours: isOurSkill(skillPath(context)),
+          path: skillFile(skillsDir(context)),
+          present: existsSync(skillFile(skillsDir(context))),
+          ours: isOurSkill(skillFile(skillsDir(context))),
         },
       ],
       notes: [

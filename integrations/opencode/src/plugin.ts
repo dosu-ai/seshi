@@ -1,24 +1,24 @@
 /** The OpenCode plugins and command `seshi capture install opencode` writes to
  * `~/.config/opencode/plugins/seshi.js`, `~/.config/opencode/seshi/tui.js` and
- * `~/.config/opencode/command/seshi.md`.
+ * `~/.config/opencode/command/session-capture.md`.
  *
  * OpenCode runs no shell hooks and keeps its sessions in a database, not in a transcript file.
  * The plugin, which OpenCode's server loads in the TUI, `opencode run`, `serve` and `web`, reads
  * each session through OpenCode's own client once a turn is over (`session.idle`) and hands it to
  * `seshi hook opencode Stop` whole, as an export (`{info, messages}`, the shape `opencode export`
  * prints), so seshi writes it to disk only for a captured session. It also tells the person, in a
- * toast, whether a new session is captured, and carries out `/seshi off|on|status`, a command
- * file, before OpenCode sends it to the model (`opencode run --command seshi`, the web UI, and the
- * TUI's home screen; in a session, the TUI plugin takes `/seshi` first). The module exports
+ * toast, whether a new session is captured, and carries out `/session-capture off|on|status`, a command
+ * file, before OpenCode sends it to the model (`opencode run --command session-capture`, the web UI, and the
+ * TUI's home screen; in a session, the TUI plugin takes `/session-capture` first). The module exports
  * nothing but the plugin function: OpenCode calls every export. */
 
 import { bridgeRuntime } from "@seshi/kit";
 
 export const PLUGIN_MARKER = "seshi:opencode-plugin";
 export const COMMAND_MARKER = "seshi:opencode-command";
-export const PLUGIN_VERSION = 3;
+export const PLUGIN_VERSION = 4;
 export const TUI_PLUGIN_MARKER = "seshi:opencode-tui-plugin";
-export const TUI_PLUGIN_VERSION = 1;
+export const TUI_PLUGIN_VERSION = 2;
 
 export function opencodePlugin(command: readonly string[]): string {
   return `// ${PLUGIN_MARKER} v${PLUGIN_VERSION} -- written by "seshi capture install opencode", which
@@ -26,7 +26,7 @@ export function opencodePlugin(command: readonly string[]): string {
 //
 // Session Capture for OpenCode: once each turn is over, the session is handed to seshi, which
 // uploads it to your team's session store, or leaves it out as your capture rules say. A toast
-// says whether a new session is captured, and /seshi off|on|status turns it off or on for this
+// says whether a new session is captured, and /session-capture off|on|status turns it off or on for this
 // session. OpenCode started with --pure captures nothing.
 
 import { spawn } from "node:child_process";
@@ -49,11 +49,11 @@ export const SeshiCapture = async ({ client }) => {
     } catch {}
   };
   // Sessions seshi said it does not capture (turned off, paused, excluded): their turns are not
-  // read or handed over. /seshi on, or a new OpenCode, asks again.
+  // read or handed over. /session-capture on, or a new OpenCode, asks again.
   const notCaptured = new Set();
   // Whether a session seshi said it does not capture still is not, from seshi's status line,
   // without reading the session: capture can be turned on where this plugin does not hear it
-  // (the TUI plugin's /seshi on, \`seshi capture on --session\`).
+  // (the TUI plugin's /session-capture on, \`seshi capture on --session\`).
   const stillOff = async (id, cwd) => {
     if (!notCaptured.has(id)) return false;
     const run = await seshi(
@@ -119,10 +119,10 @@ export const SeshiCapture = async ({ client }) => {
         );
       }
     },
-    // /seshi off|on|status: seshi does it here, and the model gets the result instead of the
+    // /session-capture off|on|status: seshi does it here, and the model gets the result instead of the
     // command (OpenCode sends a command's text to the model; it cannot be stopped).
     "command.execute.before": async (input, output) => {
-      if (input.command !== "seshi") return;
+      if (input.command !== "session-capture") return;
       const info = await session(input.sessionID);
       const run = await seshi(
         ["hook", AGENT, "Command"],
@@ -139,7 +139,7 @@ export const SeshiCapture = async ({ client }) => {
       await toast(said);
       output.parts.splice(0, output.parts.length, {
         type: "text",
-        text: \`\${said}\\n\\n(seshi's /seshi command already did this. Reply with one short sentence that says so, and do nothing else.)\`,
+        text: \`\${said}\\n\\n(seshi's /session-capture command already did this. Reply with one short sentence that says so, and do nothing else.)\`,
       });
     },
   };
@@ -152,7 +152,7 @@ export function opencodeCommand(): string {
 description: "Session Capture: turn it off or on for this session, or show whether it is captured (off, on, status)"
 ---
 <!-- ${COMMAND_MARKER}: written by "seshi capture install opencode"; seshi's plugin carries it out. -->
-/seshi $ARGUMENTS
+/session-capture $ARGUMENTS
 `;
 }
 
@@ -160,9 +160,9 @@ description: "Session Capture: turn it off or on for this session, or show wheth
  * (OpenCode's TUI loads no plugin folder of its own, and its server would load this file as a
  * server plugin from `plugins/`). It shows `Session Capture ◉/⏸` beside the prompt for the
  * session in view, from `seshi statusline --agent opencode`, refreshed when the session comes into
- * view and after each turn. And it takes `/seshi off|on|status` from the prompt itself, on the
+ * view and after each turn. And it takes `/session-capture off|on|status` from the prompt itself, on the
  * keys that submit it, so the command never reaches the server and the model does not answer.
- * On the home screen, with no session yet, `/seshi` goes on to the server's command as before.
+ * On the home screen, with no session yet, `/session-capture` goes on to the server's command as before.
  *
  * Plain JavaScript, no JSX: OpenCode maps `@opentui/solid` and `solid-js` to its own copies. */
 export function opencodeTuiPlugin(command: readonly string[]): string {
@@ -170,7 +170,7 @@ export function opencodeTuiPlugin(command: readonly string[]): string {
 // rewrites it; "seshi capture uninstall opencode" removes it, so edits do not last.
 //
 // Session Capture in OpenCode's TUI: beside the prompt, whether the session in view is captured
-// (◉) or not (⏸); and /seshi off|on|status, typed in the prompt, carried out by seshi before
+// (◉) or not (⏸); and /session-capture off|on|status, typed in the prompt, carried out by seshi before
 // OpenCode sends anything to the model. seshi's server plugin (plugins/seshi.js) does the
 // capturing; tui.json's "plugin" list names this file.
 
@@ -183,8 +183,8 @@ const AGENT = "opencode";
 ${bridgeRuntime()}
 
 // Only these are taken from the prompt; anything else (an attachment's placeholder text, an
-// unknown word) goes on to the server's /seshi command, attachments and all.
-const SESHI_COMMAND = /^\\/seshi(?:\\s+(off|on|status))?$/i;
+// unknown word) goes on to the server's /session-capture command, attachments and all.
+const CAPTURE_COMMAND = /^\\/session-capture(?:\\s+(off|on|status))?$/i;
 
 // seshi's status line up to its first " · ", so it fits beside the prompt.
 function short(line) {
@@ -200,7 +200,7 @@ export default {
     // Reads can finish out of order: only the latest one started is shown.
     let reads = 0;
 
-    // The session /seshi and the status are about, with its folder: a subagent's session is
+    // The session /session-capture and the status are about, with its folder: a subagent's session is
     // captured with its parent's.
     const which = (id) => {
       let top = id;
@@ -282,7 +282,7 @@ export default {
       }),
     );
 
-    // /seshi off|on|status, on the keys that submit the prompt, before the prompt sends it. A
+    // /session-capture off|on|status, on the keys that submit the prompt, before the prompt sends it. A
     // binding that returns false passes the key on to the prompt.
     // The textarea submits on input.submit ("return" by default); prompt.submit is unbound by
     // default.
@@ -303,7 +303,7 @@ export default {
           const text = ctx.focused?.plainText;
           const id = prompting();
           if (typeof text !== "string" || !id) return false;
-          const asked = SESHI_COMMAND.exec(text.trim());
+          const asked = CAPTURE_COMMAND.exec(text.trim());
           if (!asked) return false;
           // Taken only once the prompt is cleared; if it cannot be, the prompt sends it on.
           if (api.keymap.dispatchCommand("prompt.clear")?.ok !== true) return false;

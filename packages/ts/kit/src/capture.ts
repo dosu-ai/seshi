@@ -31,7 +31,7 @@ export interface HookResult {
   /** The person just prompted this session: recorded as the folder's current conversation, for
    * an editor that cannot say which one it shows. */
   active?: HookCapture;
-  /** Something to tell the person as it is, such as a `/seshi` it could not read. */
+  /** Something to tell the person as it is, such as a `/session-capture` it could not read. */
   say?: string;
 }
 
@@ -43,10 +43,15 @@ export interface HookHandler {
   reply?(message: string): unknown;
 }
 
-/** What a prompt that is only `$seshi` or `/seshi`, with `off`, `on` or `status` after it,
- * asks for (bare: status); undefined for any other prompt. */
-export function seshiPrompt(prompt: string): "off" | "on" | "status" | undefined {
-  const match = /^\s*[$/]seshi(?:\s+(?:capture\s+)?(off|on|status))?\s*[.!]?\s*$/i.exec(prompt);
+/** The command a person types inside an agent to turn Session Capture off or on, or ask about it:
+ * `/session-capture` (`$session-capture` in Codex), and the skill's name. Generic, not seshi's
+ * name, so any product can install the same hooks under it. */
+export const CAPTURE_COMMAND = "session-capture";
+
+/** What a prompt that is only `$session-capture` or `/session-capture`, with `off`, `on` or
+ * `status` after it, asks for (bare: status); undefined for any other prompt. */
+export function captureCommandPrompt(prompt: string): "off" | "on" | "status" | undefined {
+  const match = /^\s*[$/]session-capture(?:\s+(off|on|status))?\s*[.!]?\s*$/i.exec(prompt);
   if (!match) return undefined;
   return (match[1]?.toLowerCase() as "off" | "on" | "status" | undefined) ?? "status";
 }

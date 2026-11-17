@@ -1,6 +1,6 @@
 {
   "name": "seshi",
-  "description": "Session Capture: uploads Claude Code sessions to your team's seshi server as they happen, with a /seshi skill, and in the desktop app a Session Capture chip and /session-capture, to turn capture off or on for a session.",
+  "description": "Session Capture: uploads Claude Code sessions to your team's seshi server as they happen, with a /session-capture skill, and in the desktop app a Session Capture chip and /session-capture, to turn capture off or on for a session.",
   "author": {
     "name": "Dosu"
   },

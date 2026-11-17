@@ -44,7 +44,7 @@ describe("Cursor's hooks (F9.2)", () => {
   });
 });
 
-describe("/seshi typed in Cursor", () => {
+describe("/session-capture typed in Cursor", () => {
   const prompt = (text: string) =>
     hookHandler(CURSOR_CAPTURE, "beforeSubmitPrompt")?.parse(
       { conversation_id: "c1", workspace_roots: ["/w/app"], prompt: text },
@@ -53,14 +53,17 @@ describe("/seshi typed in Cursor", () => {
 
   it("is a request for the hook, and any other prompt passes untouched", () => {
     const which = { session_id: "c1", cwd: "/w/app" };
-    expect(prompt("/seshi off")).toEqual({
+    expect(prompt("/session-capture off")).toEqual({
       captures: [],
       active: which,
       request: { action: "off", session: which },
     });
-    expect(prompt("/seshi")).toEqual({ captures: [], active: which, announce: which });
+    expect(prompt("/session-capture")).toEqual({ captures: [], active: which, announce: which });
     // Every prompt marks its conversation as the folder's current one, for the editor.
-    expect(prompt("/seshi off and then fix the tests")).toEqual({ captures: [], active: which });
+    expect(prompt("/session-capture off and then fix the tests")).toEqual({
+      captures: [],
+      active: which,
+    });
     expect(prompt("fix the tests")).toEqual({ captures: [], active: which });
   });
 
@@ -150,8 +153,8 @@ describe("the installer (F9.6)", () => {
     expect(JSON.parse(readFileSync(file(), "utf8")).version).toBe(1);
   });
 
-  it("adds the seshi skill to Cursor's skills, naming itself as cursor, and removes it", async () => {
-    const skill = join(home, ".cursor", "skills", "seshi", "SKILL.md");
+  it("adds the session-capture skill to Cursor's skills, naming itself as cursor, and removes it", async () => {
+    const skill = join(home, ".cursor", "skills", "session-capture", "SKILL.md");
     const cli = join(home, ".cursor", "cli-config.json");
     const report = await cursorInstaller.install(context());
     expect(report.changed).toEqual([file(), cli, skill]);

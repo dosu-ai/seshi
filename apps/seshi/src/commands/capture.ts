@@ -170,7 +170,7 @@ export function resolveSession(
       .sort((a, b) => (b.last_seen ?? "").localeCompare(a.last_seen ?? ""));
     const recent = candidates[0];
     if (!recent) {
-      return "which session? run it from inside the agent (the /seshi skill), or pass --session <id>";
+      return "which session? run it from inside the agent (the /session-capture skill), or pass --session <id>";
     }
     if (candidates.length > 1) {
       const listed = candidates

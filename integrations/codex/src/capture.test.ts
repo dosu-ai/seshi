@@ -5,11 +5,11 @@ import { type CaptureHost, hookHandler } from "@seshi/kit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   CODEX_CAPTURE,
+  captureCommandPrompt,
   codexInstaller,
   identifyRollout,
   isSeshiNotify,
   locateRollout,
-  seshiPrompt,
   topLevelAssignment,
   withNotify,
 } from "./capture";
@@ -97,7 +97,7 @@ describe("config.toml's notify", () => {
 
 describe("the installer (F9.6)", () => {
   const config = () => join(home, ".codex", "config.toml");
-  const skill = () => join(home, ".agents", "skills", "seshi", "SKILL.md");
+  const skill = () => join(home, ".agents", "skills", "session-capture", "SKILL.md");
   const hooks = () => join(home, ".codex", "hooks.json");
   const context = { command: ["seshi"] };
 
@@ -215,21 +215,25 @@ describe("the installer (F9.6)", () => {
     expect(JSON.parse(readFileSync(hooks(), "utf8"))).toEqual(theirs);
   });
 
-  it("takes a prompt that is only $seshi off|on|status as a request for the hook", () => {
-    expect(seshiPrompt("$seshi off")).toBe("off");
-    expect(seshiPrompt("  $seshi capture ON. ")).toBe("on");
-    expect(seshiPrompt("$seshi")).toBe("status");
-    expect(seshiPrompt("$seshi status")).toBe("status");
-    expect(seshiPrompt("$seshi off and then fix the tests")).toBeUndefined();
-    expect(seshiPrompt("please run $seshi off")).toBeUndefined();
+  it("takes a prompt that is only $session-capture off|on|status as a request for the hook", () => {
+    expect(captureCommandPrompt("$session-capture off")).toBe("off");
+    expect(captureCommandPrompt("  $session-capture ON. ")).toBe("on");
+    expect(captureCommandPrompt("$session-capture")).toBe("status");
+    expect(captureCommandPrompt("$session-capture status")).toBe("status");
+    expect(captureCommandPrompt("$session-capture off and then fix the tests")).toBeUndefined();
+    expect(captureCommandPrompt("please run $session-capture off")).toBeUndefined();
+    expect(captureCommandPrompt("$seshi off")).toBeUndefined();
     const handler = hookHandler(CODEX_CAPTURE, "UserPromptSubmit");
     const prompt = (text: string) =>
       handler?.parse({ session_id: "t1", cwd: "/w", prompt: text }, host);
-    expect(prompt("$seshi off")).toEqual({
+    expect(prompt("$session-capture off")).toEqual({
       captures: [],
       request: { action: "off", session: { session_id: "t1", cwd: "/w" } },
     });
-    expect(prompt("$seshi")).toEqual({ captures: [], announce: { session_id: "t1", cwd: "/w" } });
+    expect(prompt("$session-capture")).toEqual({
+      captures: [],
+      announce: { session_id: "t1", cwd: "/w" },
+    });
     expect(prompt("fix the build")).toEqual({ captures: [] });
   });
 
@@ -244,7 +248,7 @@ describe("the installer (F9.6)", () => {
   });
 
   it("puts its skill where Codex reads a user's skills, and keeps someone else's", async () => {
-    mkdirSync(join(home, ".agents", "skills", "seshi"), { recursive: true });
+    mkdirSync(join(home, ".agents", "skills", "session-capture"), { recursive: true });
     writeFileSync(skill(), "mine");
     const report = await codexInstaller.install({ ...host, ...context });
     expect(report.changed).toEqual([config(), hooks()]);

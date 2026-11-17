@@ -11,7 +11,7 @@ import {
   claudeCodeInstaller,
   identifyClaudeTranscript,
   locateClaudeTranscript,
-  seshiSkill,
+  sessionCaptureSkill,
 } from "./capture";
 
 const HOOKS = join(import.meta.dirname, "../testdata/hooks");
@@ -61,7 +61,7 @@ describe("Claude Code's hooks (F9.2)", () => {
     expect(parse("SubagentStop", payload("SubagentStop-older")).captures).toHaveLength(1);
   });
 
-  it("exports the session id on SessionStart for the /seshi skill, when Claude Code gives a file", () => {
+  it("exports the session id on SessionStart for the /session-capture skill, when Claude Code gives a file", () => {
     expect(parse("SessionStart", payload("SessionStart"))).toEqual({ captures: [] });
     const withFile = { ...host, env: { CLAUDE_ENV_FILE: "/tmp/env" } };
     expect(parse("SessionStart", payload("SessionStart"), withFile).exportEnv).toEqual({
@@ -161,7 +161,7 @@ describe("the installer (F9.6)", () => {
     const report = await claudeCodeInstaller.install(context());
     expect(report.changed).toEqual([
       settings(),
-      join(home, ".claude", "skills", "seshi", "SKILL.md"),
+      join(home, ".claude", "skills", "session-capture", "SKILL.md"),
     ]);
     const written = JSON.parse(readFileSync(settings(), "utf8"));
     expect(written.model).toBe("opus");
@@ -180,9 +180,9 @@ describe("the installer (F9.6)", () => {
       command: "/opt/seshi/bin/seshi statusline",
       padding: 0,
     });
-    expect(readFileSync(join(home, ".claude", "skills", "seshi", "SKILL.md"), "utf8")).toContain(
-      "/opt/seshi/bin/seshi capture off --session",
-    );
+    expect(
+      readFileSync(join(home, ".claude", "skills", "session-capture", "SKILL.md"), "utf8"),
+    ).toContain("/opt/seshi/bin/seshi capture off --session");
     expect((await claudeCodeInstaller.status(context())).installed).toBe(true);
 
     // Twice is the same as once; a new command replaces the old one in place.
@@ -193,10 +193,10 @@ describe("the installer (F9.6)", () => {
   });
 
   it("runs someone else's status line before its own, keeps their skill, and says so", async () => {
-    mkdirSync(join(home, ".claude", "skills", "seshi"), { recursive: true });
+    mkdirSync(join(home, ".claude", "skills", "session-capture"), { recursive: true });
     const theirs = { type: "command", command: "~/.claude/my-line.py", padding: 1 };
     writeFileSync(settings(), JSON.stringify({ statusLine: theirs }));
-    writeFileSync(join(home, ".claude", "skills", "seshi", "SKILL.md"), "mine");
+    writeFileSync(join(home, ".claude", "skills", "session-capture", "SKILL.md"), "mine");
     const report = await claudeCodeInstaller.install(context());
     expect(report.notes).toHaveLength(2);
     const chain = chainedStatusPath(context());
@@ -207,7 +207,9 @@ describe("the installer (F9.6)", () => {
       padding: 1,
     });
     expect(JSON.parse(readFileSync(chain, "utf8"))).toEqual({ statusLine: theirs });
-    expect(readFileSync(join(home, ".claude", "skills", "seshi", "SKILL.md"), "utf8")).toBe("mine");
+    expect(
+      readFileSync(join(home, ".claude", "skills", "session-capture", "SKILL.md"), "utf8"),
+    ).toBe("mine");
     // Twice is once: the saved status line stays theirs, not seshi's.
     await claudeCodeInstaller.install(context());
     expect(JSON.parse(readFileSync(chain, "utf8"))).toEqual({ statusLine: theirs });
@@ -233,7 +235,7 @@ describe("the installer (F9.6)", () => {
     expect(JSON.parse(readFileSync(settings(), "utf8"))).toEqual({
       hooks: { Stop: [{ hooks: [{ type: "command", command: "say done" }] }] },
     });
-    expect(existsSync(join(home, ".claude", "skills", "seshi"))).toBe(false);
+    expect(existsSync(join(home, ".claude", "skills", "session-capture"))).toBe(false);
     expect((await claudeCodeInstaller.status(context())).installed).toBe(false);
     expect((await claudeCodeInstaller.uninstall(context())).changed).toEqual([]);
   });
@@ -252,8 +254,8 @@ describe("the installer (F9.6)", () => {
     for (const event of CLAUDE_CODE_EVENTS) {
       expect(hooks[event][0].hooks[0].command).toBe(`seshi hook claude-code ${event}`);
     }
-    expect(readFileSync(join(plugin, "skills", "seshi", "SKILL.md"), "utf8")).toBe(
-      seshiSkill(["seshi"]),
+    expect(readFileSync(join(plugin, "skills", "session-capture", "SKILL.md"), "utf8")).toBe(
+      sessionCaptureSkill(["seshi"]),
     );
     expect(
       JSON.parse(readFileSync(join(plugin, ".claude-plugin", "plugin.json"), "utf8")).name,

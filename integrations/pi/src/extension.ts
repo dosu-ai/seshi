@@ -9,7 +9,7 @@
 import { bridgeRuntime } from "@seshi/kit";
 
 export const EXTENSION_MARKER = "seshi:pi-extension";
-export const EXTENSION_VERSION = 2;
+export const EXTENSION_VERSION = 3;
 
 export function piExtension(command: readonly string[]): string {
   return `// ${EXTENSION_MARKER} v${EXTENSION_VERSION} -- written by "seshi capture install pi", which rewrites
@@ -18,7 +18,7 @@ export function piExtension(command: readonly string[]): string {
 // Session Capture for pi: when an agent run ends and when the session ends, pi's session file is
 // handed to seshi, which uploads it to your team's session store, or leaves it out as your
 // capture rules say. The footer shows whether this session is captured, and
-// /seshi off|on|status turns it off or on for this session. pi started with --no-extensions or
+// /session-capture off|on|status turns it off or on for this session. pi started with --no-extensions or
 // --no-session captures nothing.
 
 import { spawn } from "node:child_process";
@@ -87,10 +87,10 @@ export default function (pi) {
     if (event && event.reason === "reload") return;
     await hook("SessionEnd", ctx, {}, SHUTDOWN_TIMEOUT_MS);
   });
-  pi.registerCommand("seshi", {
+  pi.registerCommand("session-capture", {
     description: "Session Capture: turn it off or on for this session, or show whether it is captured",
     handler: async (args, ctx) => {
-      await hook("Command", ctx, { prompt: \`/seshi \${args || ""}\`.trim() });
+      await hook("Command", ctx, { prompt: \`/session-capture \${args || ""}\`.trim() });
       await refresh(ctx);
     },
   });

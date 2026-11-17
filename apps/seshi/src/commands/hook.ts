@@ -101,7 +101,7 @@ export function notice(
   { decision }: { decision: { capture: boolean; reason: string } },
   agent: string,
 ): string {
-  const off = agent === "codex" ? "$seshi off" : "/seshi off";
+  const off = agent === "codex" ? "$session-capture off" : "/session-capture off";
   return decision.capture
     ? `Session Capture ◉ · this session is uploaded to your team's session store as you work; ${off} stops it`
     : `Session Capture ⏸ · ${decision.reason}`;

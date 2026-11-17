@@ -15,6 +15,7 @@ import { basename, join } from "node:path";
 import {
   type CaptureAgent,
   type CaptureHost,
+  captureCommandPrompt,
   commandLine,
   expandTilde,
   type HookHandler,
@@ -29,7 +30,7 @@ import {
   readJsonConfig,
   readTextFile,
   removeSkill,
-  seshiPrompt,
+  skillFile,
   stringField,
   type TranscriptInfo,
   writeFileAtomic,
@@ -70,13 +71,13 @@ export const CODEX_HOOKS: readonly HookHandler[] = [
     },
   },
   {
-    // Codex's sandbox keeps the agent's commands from writing seshi's state, so `$seshi off|on`
+    // Codex's sandbox keeps the agent's commands from writing seshi's state, so `$session-capture off|on`
     // typed by the person is done here, by the hook, before the model sees the prompt.
     event: "UserPromptSubmit",
     reply: (message) => ({ systemMessage: message }),
     parse(payload) {
       const object = payloadObject(payload, AGENT);
-      const asked = seshiPrompt(stringField(object, "prompt") ?? "");
+      const asked = captureCommandPrompt(stringField(object, "prompt") ?? "");
       if (!asked) return { captures: [] };
       const session = stringField(object, "session_id");
       if (!session) throw new Error(`${AGENT}: UserPromptSubmit has no session_id`);
@@ -89,7 +90,7 @@ export const CODEX_HOOKS: readonly HookHandler[] = [
   },
 ];
 
-export { seshiPrompt };
+export { captureCommandPrompt };
 
 /** Which session a rollout is: its own `session_meta` (the first; a forked rollout repeats its
  * parent's after it). */
@@ -249,8 +250,8 @@ export function withNotify(text: string, value: readonly string[] | null): strin
 }
 
 /** Codex reads a user's skills from `~/.agents/skills` (Cursor does too). */
-function skillPath(host: CaptureHost): string {
-  return join(host.home, ".agents", "skills", "seshi", "SKILL.md");
+function skillsDir(host: CaptureHost): string {
+  return join(host.home, ".agents", "skills");
 }
 
 function configPath(host: CaptureHost): string {
@@ -300,7 +301,7 @@ function ourHook(command: readonly string[]) {
   return (h: { command?: unknown }) => isSeshiHook(h.command, AGENT, own);
 }
 
-/** seshi's lifecycle hooks: the notice when a session starts, and `$seshi off|on|status`. */
+/** seshi's lifecycle hooks: the notice when a session starts, and `$session-capture off|on|status`. */
 const LIFECYCLE: readonly { event: string; matcher?: string }[] = [
   { event: "SessionStart", matcher: "startup|resume" },
   { event: "UserPromptSubmit" },
@@ -387,13 +388,13 @@ export const codexInstaller: Installer = {
     ];
     writeFileAtomic(path, withNotify(text, value));
     const hooks = installNotice(context);
-    const skill = installSkill(skillPath(context), context.command);
+    const skill = installSkill(skillsDir(context), context.command);
     return { changed: [path, hooks, ...skill.changed], notes: [...notes, ...skill.notes] };
   },
 
   async uninstall(context: InstallContext): Promise<InstallReport> {
     const path = configPath(context);
-    const others = [...removeNotice(context), ...removeSkill(skillPath(context))];
+    const others = [...removeNotice(context), ...removeSkill(skillsDir(context))];
     if (!existsSync(path)) return { changed: others, notes: [] };
     const { text, notify } = readNotify(path);
     if (!isSeshiNotify(notify, context.command)) return { changed: others, notes: [] };
@@ -409,7 +410,7 @@ export const codexInstaller: Installer = {
     const path = configPath(context);
     const present = existsSync(path);
     const ours = present && isSeshiNotify(readNotify(path).notify, context.command);
-    const skill = skillPath(context);
+    const skill = skillFile(skillsDir(context));
     const notice = hasNotice(context);
     return {
       installed: ours,
@@ -421,7 +422,7 @@ export const codexInstaller: Installer = {
       notes:
         ours && !notice
           ? [
-              "the session-start notice or the $seshi hook is missing: run seshi capture install codex",
+              "the session-start notice or the $session-capture hook is missing: run seshi capture install codex",
             ]
           : [],
     };

@@ -16,8 +16,10 @@ import { existsSync, rmdirSync, rmSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
+  CAPTURE_COMMAND,
   type CaptureAgent,
   type CaptureHost,
+  captureCommandPrompt,
   expandTilde,
   type HookCapture,
   type HookHandler,
@@ -33,7 +35,6 @@ import {
   payloadObject,
   readTextFile,
   removeOwnedFiles,
-  seshiPrompt,
   stringField,
   type TranscriptInfo,
   writeJsonConfig,
@@ -83,8 +84,8 @@ function which(payload: unknown): HookCapture {
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-export const UNKNOWN_SESHI =
-  "Session Capture: /seshi takes off, on or status; nothing was changed. For a pause, run seshi capture pause in a terminal.";
+export const UNKNOWN_COMMAND =
+  "Session Capture: /session-capture takes off, on or status; nothing was changed. For a pause, run seshi capture pause in a terminal.";
 
 /** What the plugin shows for a message seshi has for the person: it toasts `message`. */
 const reply = (message: string) => ({ message });
@@ -110,15 +111,15 @@ export const OPENCODE_HOOKS: readonly HookHandler[] = [
     },
   },
   {
-    // `/seshi off|on|status`: the plugin hands it over before OpenCode sends it to the model.
+    // `/session-capture off|on|status`: the plugin hands it over before OpenCode sends it to the model.
     event: "Command",
     reply,
     parse(payload) {
       const args = stringField(payloadObject(payload, AGENT), "arguments") ?? "";
-      const asked = seshiPrompt(`/seshi ${args}`);
+      const asked = captureCommandPrompt(`/${CAPTURE_COMMAND} ${args}`);
       const { session_id, cwd } = which(payload);
       const session = { session_id, ...(cwd ? { cwd } : {}) };
-      if (!asked) return { captures: [], say: UNKNOWN_SESHI };
+      if (!asked) return { captures: [], say: UNKNOWN_COMMAND };
       if (asked === "status") return { captures: [], announce: session };
       return { captures: [], request: { action: asked, session } };
     },
@@ -167,7 +168,16 @@ export function pluginPath(host: CaptureHost): string {
 }
 
 export function commandPath(host: CaptureHost): string {
-  return join(opencodeConfigDir(host), "command", "seshi.md");
+  return join(opencodeConfigDir(host), "command", `${CAPTURE_COMMAND}.md`);
+}
+
+/** The command's file under its old name, `seshi.md`: install and uninstall remove seshi's own. */
+function oldCommand(host: CaptureHost): OwnedFile {
+  return {
+    path: join(opencodeConfigDir(host), "command", "seshi.md"),
+    text: "",
+    marker: COMMAND_MARKER,
+  };
 }
 
 /** The TUI plugin: not in `plugins/`, which OpenCode's server loads as server plugins. */
@@ -244,6 +254,7 @@ export const opencodeInstaller: Installer = {
   async install(context: InstallContext): Promise<InstallReport> {
     const { changed, foreign, notes } = installOwnedFiles(owned(context), "OpenCode");
     if (foreign.length > 0) return { changed, notes };
+    changed.push(...removeOwnedFiles([oldCommand(context)]));
     const { path, file: tui, current, listed } = tuiEntry(context);
     if ("problem" in current) notes.push(byHand(path, tui, current.problem));
     else if (!listed) {
@@ -260,7 +271,7 @@ export const opencodeInstaller: Installer = {
   },
 
   async uninstall(context: InstallContext): Promise<InstallReport> {
-    const changed = removeOwnedFiles(owned(context));
+    const changed = removeOwnedFiles([...owned(context), oldCommand(context)]);
     const { path, file: tui, current, listed } = tuiEntry(context);
     if (changed.includes(tui)) {
       try {
@@ -286,7 +297,7 @@ export const opencodeInstaller: Installer = {
   async status(context: InstallContext): Promise<InstallStatus> {
     const states = owned(context).map(ownedFileState);
     const notes = ownedFileNotes(states, AGENT);
-    // Capture needs only seshi's own files; tui.json's entry (the status and /seshi in the TUI)
+    // Capture needs only seshi's own files; tui.json's entry (the status and /session-capture in the TUI)
     // is reported, not required.
     const { path, file: tui, current, listed } = tuiEntry(context);
     if ("problem" in current) notes.push(byHand(path, tui, current.problem));

@@ -20,8 +20,10 @@ export type {
 } from "@seshi/model";
 export { bridgeRuntime } from "./bridge";
 export {
+  CAPTURE_COMMAND,
   type CaptureAgent,
   type CaptureHost,
+  captureCommandPrompt,
   captureDir,
   expandTilde,
   type HookCapture,
@@ -35,7 +37,6 @@ export {
   type InstallStatus,
   payloadObject,
   type SweepPath,
-  seshiPrompt,
   stringField,
   type TranscriptInfo,
 } from "./capture";
@@ -56,7 +57,14 @@ export {
   ownedFileState,
   removeOwnedFiles,
 } from "./owned";
-export { captureSkill, installSkill, isOurSkill, removeSkill, SKILL_MARKER } from "./skill";
+export {
+  captureSkill,
+  installSkill,
+  isOurSkill,
+  removeSkill,
+  SKILL_MARKER,
+  skillFile,
+} from "./skill";
 export {
   attachStatusLine,
   chainedNote,
