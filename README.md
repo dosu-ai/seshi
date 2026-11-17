@@ -132,16 +132,6 @@ Everything else is in [docs/](docs/README.md).
 | Devin | — | — | — | — |
 | Factory Droid | — | — | — | — |
 
-- **Live capture:** `seshi capture install` hooks into the agent, and each turn is uploaded as
-  it ends.
-- **Upload its session files:** `seshi upload`, an [S3 source](docs/s3-sync.md) or the API.
-  [docs/formats.md](docs/formats.md) lists every format seshi reads, including ATIF and
-  trajectory-v1.
-- **Other clients:** Devin CLI, Factory Droid, GitHub Copilot CLI, Aider, Cline, Goose, Amp,
-  Kiro, Qwen Code and the rest of the clients [Datadog Trajectory](https://github.com/datadog-labs/trajectory) supports
-  come in through Trajectory: seshi reads its session files or
-  [syncs them from Datadog LLM Observability](docs/datadog.md).
-
 ### Cloud and managed agents
 
 | Agent | Supported | How |
