@@ -24,9 +24,9 @@ const FIXED = new Set(["org", "repo", "config", "unknown"]);
 
 /** How the chat was chosen, when it was not the one in view: a short hint after its id. */
 function hint(by: string, at: string | undefined, now: Date): string {
-  const ago = at ? `, ${relative(at, now)}` : "";
-  if (by === "prompt") return ` (the last chat you messaged${ago})`;
-  if (by === "recent") return ` (the last chat seen here${ago})`;
+  const ago = at ? ` ${relative(at, now)}` : "";
+  if (by === "prompt") return ` (last messaged${ago})`;
+  if (by === "recent") return ` (last seen${ago})`;
   return "";
 }
 

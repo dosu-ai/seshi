@@ -49,7 +49,7 @@ describe("the status bar item", () => {
       now,
     );
     expect(guessed.tooltip).toBe(
-      "`Session Capture` on for the chat `p1` (the last chat you messaged, 2 min ago)\n\nClick to choose the chat and toggle",
+      "`Session Capture` on for the chat `p1` (last messaged 2 min ago)\n\nClick to choose the chat and toggle",
     );
     expect(guessed.action).toMatchObject({ kind: "toggle", pick: true });
     const team = viewOf(
