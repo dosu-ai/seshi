@@ -3,7 +3,7 @@
   <img src="brand/lockup/seshi-lockup-light-outlined.svg" alt="seshi" width="272" height="80">
 </picture>
 
-**Seshi is an open-source toolkit for capturing, redacting, storing, and analyzing coding agent sessions.** It Works across agents and environments, with your data stored in your own infrastructure.
+**Seshi is an open-source toolkit for capturing, redacting, storing, and analyzing coding agent sessions.** It works across agents and environments within your infrastructure.
 
 ## Who is Seshi for?
 
@@ -11,10 +11,10 @@ Teams that want to get the most out of coding agents. Agent sessions are incredi
 
 Seshi is the easiest way for teams to create a secure shared session store for building downstream applications like
 
-- Build token usage and spend insights
-- Create a shared memory layer
-- Distill them into a decision log
-- Identify agent friction
+- Token usage and spend insights
+- Shared memory layer
+- Team decision log
+- Measuring agent friction
 - and much much more.
 
 ## Why Seshi?
