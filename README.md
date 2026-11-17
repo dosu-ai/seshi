@@ -3,13 +3,13 @@
   <img src="brand/lockup/seshi-lockup-light-outlined.svg" alt="seshi" width="272" height="80">
 </picture>
 
-**Seshi is a toolkit for teams to capture, redact, store, and analyze coding agent sessions.**
+**Seshi is an open-source toolkit for capturing, redacting, storing, and analyzing coding agent sessions.** It Works across agents and environments, with your data stored in your own infrastructure.
 
 ## Who is Seshi for?
 
 Teams that want to get the most out of coding agents. Agent sessions are incredibly rich with information. In many ways they are the new PR. They tell you how work was done, what decisions were made, what went wrong, etc.
 
-Seshi is the easiest way for teams to collect sessions, allowing them to build downstream applications like
+Seshi is the easiest way for teams to create a secure shared session store for building downstream applications like
 
 - Build token usage and spend insights
 - Create a shared memory layer
@@ -17,27 +17,26 @@ Seshi is the easiest way for teams to collect sessions, allowing them to build d
 - Identify agent friction
 - and much much more.
 
-## Why use Seshi?
+## Why Seshi?
 
-- **Every coding agent, one format.** Claude Code, Codex and Cursor are captured through their
-  hooks; OpenCode, pi, Gemini CLI and Datadog Trajectory transcripts upload as they are. All of
-  them are normalized to one format, and export as OpenTelemetry spans or ATIF. Each integration
-  is a package in [`integrations/`](integrations); add your own.
-- **Cloud agents too.** Agents running in the cloud arrive through OpenTelemetry (such as a Claude
-  Console destination), a Datadog LLM Observability sync, or an S3 bucket your sandboxes and eval
-  harnesses write to.
-- **Your bucket.** AWS S3, Cloudflare R2, any S3-compatible store with conditional writes, or a
-  folder. The bucket is the source of truth, in a [documented layout](spec/layout.md) anything
-  can read.
-- **Redaction built in.** Secrets are removed before anything is written, with no switch to turn
-  it off. Add your own rule packs, and an optional model review for what patterns miss, such as
-  personal or customer data.
-- **People stay in control.** Sessions are visible to the org or to their owner only. Anyone can
-  turn capture off for a session, a folder or a repository, and a session turned off is retracted.
-- **Your sign-in.** Okta, Entra or any OIDC issuer, or a shared org key. Tokens are scoped, stored
-  as hashes and revocable.
-- **Search.** Find sessions by what was said and done in them: prompts, answers, tool calls, file
-  paths and commands.
+- **One format for every coding agent.** Capture sessions from Claude Code, Codex, Cursor,
+  OpenCode, pi, Gemini CLI, and Datadog Trajectory. Normalize everything into a common format and
+  export as OpenTelemetry spans or ATIF. Extend support with
+  [your own integrations](integrations).
+- **Local and cloud agents.** Collect sessions from developer machines, cloud sandboxes, and eval
+  harnesses through native integrations, OpenTelemetry, Datadog LLM Observability, or S3.
+- **Your data, your storage.** Store sessions in AWS S3, Cloudflare R2, any compatible object
+  store with conditional writes, or a local folder. Your storage is the source of truth, with an
+  open, [documented layout](spec/layout.md) that any tool can read.
+- **Redaction by default.** Remove secrets before they're stored. Customize redaction rules and
+  LLM-based redaction to fit your needs.
+- **Privacy and control.** Keep sessions private or share them with your organization. Disable
+  capture for individual sessions, folders, or repositories, with automatic retraction of
+  disabled sessions.
+- **Your identity provider.** Authenticate with Okta, Microsoft Entra, any OIDC provider, or a
+  shared organization key. Tokens are scoped, hashed, and revocable.
+- **Search across sessions.** Find exactly what agents said and did, including prompts,
+  responses, tool calls, file paths, and commands.
 
 ## How is this different from agent observability tools?
 
@@ -46,8 +45,7 @@ build with.
 
 - **A different audience.** Observability is for teams shipping LLM products and debugging them
   in production. Seshi is for teams using coding agents to get work done.
-- **Built for coding agents.** Hooks in the agents on each laptop and syncs from cloud agents,
-  not an SDK added to your code.
+- **Built for coding agents.** Hooks in the agents on each laptop and syncs from cloud agents with skills to allow developers to toggle capture on/off whenever they want.
 - **You own the data.** Sessions live in your bucket, in an open layout that can be read without
   Seshi.
 - **Kept as long as you want.** Observability tools keep traces for a retention window, often a
