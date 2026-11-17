@@ -1,7 +1,8 @@
 # seshi docs
 
 seshi is one binary: the server, the CLI, and the hooks that capture coding-agent sessions.
-Start with the [README](../README.md) for what it is and a quick start; these pages go further.
+Start with the [README](../README.md) for what it is, the
+[agents it supports](../README.md#supported-agents) and a quick start; these pages go further.
 
 ## Using it
 

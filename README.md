@@ -20,7 +20,7 @@ Seshi is the easiest way for teams to create a secure shared session store for b
 ## Why Seshi?
 
 - **One format for every coding agent.** Capture sessions from Claude Code, Codex, Cursor,
-  OpenCode, pi, Gemini CLI, and Datadog Trajectory. Normalize everything into a common format and
+  OpenCode, pi, Gemini CLI, and Datadog Trajectory ([supported agents](#supported-agents)). Normalize everything into a common format and
   export as OpenTelemetry spans or ATIF. Extend support with
   [your own integrations](integrations).
 - **Local and cloud agents.** Collect sessions from developer machines, cloud sandboxes, and eval
@@ -52,6 +52,37 @@ build with.
   few weeks. Seshi keeps sessions until you delete them.
 - **Works alongside them.** Seshi reads OpenTelemetry and syncs Datadog LLM Observability, and
   writes sessions back out as OpenTelemetry spans.
+
+## Supported agents
+
+**Captured live.** `seshi capture install` hooks into these, and each turn is uploaded as it
+ends. Capture can be turned off or on from inside the session.
+
+| Agent | Shows whether the session is captured | Turn it off or on |
+|---|---|---|
+| Claude Code, including the Claude desktop app | Status line; a chip in the desktop app | `/seshi` |
+| Codex | A notice when the session starts | `$seshi` |
+| Cursor, the editor and the Cursor CLI | Status bar extension; the CLI's status line | `/seshi`, or a click on the status bar |
+
+**Read from their session files.** Use `seshi upload`, an [S3 source](docs/s3-sync.md) or the
+API.
+
+- OpenCode (a session export)
+- pi, and its forks Oh My Pi and OpenClaw
+- Gemini CLI
+
+**Through other tools.**
+
+- Every client [Datadog Trajectory](https://github.com/datadog-labs/trajectory) captures
+  (Aider, Cline, GitHub Copilot CLI, Goose, Amp, Kiro and many more): its session files, or
+  [synced from Datadog LLM Observability](docs/datadog.md).
+- Claude Managed Agents and Messages API calls, through a Claude Console
+  [OpenTelemetry destination](docs/otlp.md).
+- Anything that writes OpenTelemetry GenAI spans, [ATIF](docs/formats.md#atif-documents) or
+  trajectory-v1 records.
+
+[docs/formats.md](docs/formats.md) lists every format seshi reads. A new agent is an
+[integration](integrations).
 
 ## Getting started
 
