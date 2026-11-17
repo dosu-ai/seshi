@@ -53,37 +53,6 @@ build with.
 - **Works alongside them.** Seshi reads OpenTelemetry and syncs Datadog LLM Observability, and
   writes sessions back out as OpenTelemetry spans.
 
-## Supported agents
-
-**Captured live.** `seshi capture install` hooks into these, and each turn is uploaded as it
-ends. Capture can be turned off or on from inside the session.
-
-| Agent | Shows whether the session is captured | Turn it off or on |
-|---|---|---|
-| Claude Code, including the Claude desktop app | Status line; a chip in the desktop app | `/seshi` |
-| Codex | A notice when the session starts | `$seshi` |
-| Cursor, the editor and the Cursor CLI | Status bar extension; the CLI's status line | `/seshi`, or a click on the status bar |
-
-**Read from their session files.** Use `seshi upload`, an [S3 source](docs/s3-sync.md) or the
-API.
-
-- OpenCode (a session export)
-- pi, and its forks Oh My Pi and OpenClaw
-- Gemini CLI
-
-**Through other tools.**
-
-- Every client [Datadog Trajectory](https://github.com/datadog-labs/trajectory) captures
-  (Aider, Cline, GitHub Copilot CLI, Goose, Amp, Kiro and many more): its session files, or
-  [synced from Datadog LLM Observability](docs/datadog.md).
-- Claude Managed Agents and Messages API calls, through a Claude Console
-  [OpenTelemetry destination](docs/otlp.md).
-- Anything that writes OpenTelemetry GenAI spans, [ATIF](docs/formats.md#atif-documents) or
-  trajectory-v1 records.
-
-[docs/formats.md](docs/formats.md) lists every format seshi reads. A new agent is an
-[integration](integrations).
-
 ## Getting started
 
 ```sh
@@ -148,6 +117,41 @@ Everything else is in [docs/](docs/README.md).
 ## How it works
 
 ![How a session moves through seshi: agent hooks and the uploader on the developer laptop, the seshi serve API, pipeline and worker, the bucket, and the readers](docs/architecture.svg)
+
+## Supported agents
+
+| Client | Live capture | Capture state shown in | Turn off or on in the session | Upload its session files | Through Datadog Trajectory |
+|---|:-:|---|---|:-:|:-:|
+| Claude Code, including the Claude desktop app | ✓ | Status line; a chip in the desktop app | `/seshi` | ✓ | ✓ |
+| Codex CLI | ✓ | A notice when the session starts | `$seshi` | ✓ | ✓ |
+| Cursor (editor) | ✓ | Status bar extension | `/seshi`, or a click on the status bar | ✓ | ✓ |
+| Cursor CLI | ✓ | Status line | `/seshi` | ✓ | ✓ |
+| OpenCode | — | — | — | ✓ | ✓ |
+| pi, Oh My Pi, OpenClaw | — | — | — | ✓ | pi, Oh My Pi |
+| Gemini CLI | — | — | — | ✓ | — |
+| GitHub Copilot CLI, Aider, Cline, Goose, Amp, Kiro, Qwen Code and more | — | — | — | — | ✓ |
+
+- **Live capture:** `seshi capture install` hooks into the agent, and each turn is uploaded as
+  it ends.
+- **Upload its session files:** `seshi upload`, an [S3 source](docs/s3-sync.md) or the API.
+  [docs/formats.md](docs/formats.md) lists every format seshi reads, including ATIF and
+  trajectory-v1.
+- **Through Datadog Trajectory:**
+  [Trajectory](https://github.com/datadog-labs/trajectory) captures the session, and seshi
+  reads its session files or [syncs them from Datadog LLM Observability](docs/datadog.md).
+  Trajectory's README lists every client it supports.
+
+### Cloud and managed agents
+
+| Agent | Supported | How |
+|---|:-:|---|
+| Claude Managed Agents, and Messages API calls | ✓ | A Claude Console [OpenTelemetry destination](docs/otlp.md) |
+| Claude Code, Codex or Cursor CLI in your own sandboxes, CI or eval harnesses | ✓ | `seshi capture install` in the sandbox, or transcripts written to a bucket an [S3 source](docs/s3-sync.md) polls |
+| Any agent that writes OpenTelemetry GenAI spans | ✓ | The [OTLP endpoint](docs/otlp.md) |
+| Cursor Cloud Agents | Planned | See the roadmap |
+| Codex cloud, GitHub Copilot coding agent, Devin | — | |
+
+A new agent is an [integration](integrations).
 
 ## Roadmap
 
