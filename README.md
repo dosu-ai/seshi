@@ -129,14 +129,16 @@ Everything else is in [docs/](docs/README.md).
 | OpenCode | — | — | — | ✓ |
 | pi, Oh My Pi, OpenClaw | — | — | — | ✓ |
 | Gemini CLI | — | — | — | ✓ |
+| Devin | — | — | — | — |
+| Factory Droid | — | — | — | — |
 
 - **Live capture:** `seshi capture install` hooks into the agent, and each turn is uploaded as
   it ends.
 - **Upload its session files:** `seshi upload`, an [S3 source](docs/s3-sync.md) or the API.
   [docs/formats.md](docs/formats.md) lists every format seshi reads, including ATIF and
   trajectory-v1.
-- **Other clients:** GitHub Copilot CLI, Aider, Cline, Goose, Amp, Kiro, Qwen Code and the
-  rest of the clients [Datadog Trajectory](https://github.com/datadog-labs/trajectory) supports
+- **Other clients:** Devin CLI, Factory Droid, GitHub Copilot CLI, Aider, Cline, Goose, Amp,
+  Kiro, Qwen Code and the rest of the clients [Datadog Trajectory](https://github.com/datadog-labs/trajectory) supports
   come in through Trajectory: seshi reads its session files or
   [syncs them from Datadog LLM Observability](docs/datadog.md).
 
@@ -148,7 +150,7 @@ Everything else is in [docs/](docs/README.md).
 | Claude Code, Codex or Cursor CLI in your own sandboxes, CI or eval harnesses | ✓ | `seshi capture install` in the sandbox, or transcripts written to a bucket an [S3 source](docs/s3-sync.md) polls |
 | Any agent that writes OpenTelemetry GenAI spans | ✓ | The [OTLP endpoint](docs/otlp.md) |
 | Cursor Cloud Agents | Planned | See the roadmap |
-| Codex cloud, GitHub Copilot coding agent, Devin | — | |
+| Codex cloud, GitHub Copilot coding agent | — | |
 
 A new agent is an [integration](integrations).
 
