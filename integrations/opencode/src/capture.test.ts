@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { type CaptureHost, handedTranscriptDir, hookHandler } from "@seshi/kit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -106,8 +106,10 @@ describe("the sessions seshi was handed", () => {
     expect(locateOpencodeExport("ses_missing", host)).toBeUndefined();
     expect(locateOpencodeExport("../x", host)).toBeUndefined();
     const [path] = OPENCODE_CAPTURE.sweep;
-    expect(path?.resolve?.(host)).toBe(
-      join(home, ".local", "state", "seshi", "transcripts", "opencode"),
+    // The host is Linux on every machine, so the folder is written with `/`; resolve() reads it
+    // as this machine's path.
+    expect(resolve(path?.resolve?.(host) ?? "")).toBe(
+      resolve(home, ".local", "state", "seshi", "transcripts", "opencode"),
     );
     expect(path?.match(`${ID}.json`)).toBe(true);
     expect(path?.match(`${ID}.json.123.tmp`)).toBe(false);
