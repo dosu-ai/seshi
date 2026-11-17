@@ -35,11 +35,14 @@ export VERIFY_SESHI_RUN=<id>      # copy the export line `up` prints; every late
 
 - `up` prints `run <id>: <mode> mode at commit <sha>`, the run folder, the evidence folder and
   the `export` line. Local mode is seshi's serverless mode: `up` runs
-  `seshi init --serverless --url file://<run>/bucket --admin`, which writes the bucket's layout
-  marker and starter shared settings, and `[serverless]` (owner: your OS username) in the run's
-  CLI config; its output is in the run's `logs/init.log`. In server mode it instead runs `seshi admin init`, starts `seshi serve`, waits
-  until `GET /healthz` answers `{"ok":true,...}`, then runs `seshi login --key -` as the user
-  `verifier`. Ready means `up` returned 0 and `$C doctor` says `ready`.
+  `seshi init --serverless --url file://<run>/bucket --owner "$USER"`, which writes the bucket's
+  layout marker and `[serverless]` in the run's CLI config (owner: your OS username, `verifier`
+  when `USER` is unset; no shared settings, so seshi's built-in defaults apply). Its output is
+  in the run's `logs/init.log`. In server mode it instead runs `seshi admin init`, starts
+  `seshi serve`, waits until `GET /healthz` answers `{"ok":true,...}`, then runs
+  `seshi login --key -` as the user `verifier`. Ready means `up` returned 0 and `$C doctor` says
+  `ready`. When `up` fails it stops what it started, deletes the run folder and keeps its logs
+  in `.verify/seshi/<run-id>/up-logs/`.
 - seshi runs from source (`bun run apps/seshi/src/main.ts`, through a `seshi` shim on the run's
   PATH). `$C up --binary` uses `dist/seshi` instead; run `bun run build` first. Use the binary to
   verify packaging, the source otherwise.
@@ -145,5 +148,6 @@ is gone but a process survived, `$C stop` can't find it: look for
   can answer "no sessions match". Retry for a few seconds before calling it a failure.
 - `seshi upload` without the harness reads the real agent folders of whatever HOME it runs
   with. Always go through `$C cli` or `$C env` so it sees only the run's folders.
-- Only `seshi serve` reads `./seshi.toml` unasked. Other server commands need
-  `--config "$TMPDIR/seshi-verify/<run-id>/seshi.toml"`.
+- Server mode only: `seshi serve` alone reads `./seshi.toml` unasked. Other server commands need
+  `--config "$TMPDIR/seshi-verify/<run-id>/seshi.toml"`. A local-mode run has no `seshi.toml`;
+  the CLI config's `[serverless]` names its bucket.

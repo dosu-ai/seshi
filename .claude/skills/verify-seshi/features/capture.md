@@ -63,4 +63,4 @@ Preconditions:
 - `SESHI_NO_UPLOADER=1` is set in the run, so nothing uploads until a `daemon --once` (which
   `agent` runs) or `seshi upload`.
 - In server mode the owner is `verifier` (a claimed username with the org key). In local mode
-  it's your OS username.
+  it's your OS username (`verifier` when `USER` is unset).
