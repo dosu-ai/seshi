@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { join, posix, win32 } from "node:path";
 export interface CaptureHost {
   env: Readonly<Record<string, string | undefined>>;
   home: string;
@@ -13,6 +13,10 @@ export interface HookCapture {
   cwd?: string;
   parent_session_id?: string;
   final?: boolean;
+  /** The whole transcript, for an agent that keeps none in a file of its own (OpenCode keeps
+   * its sessions in a database): seshi writes it to `<capture dir>/transcripts/<agent>/` only
+   * when the session is captured, and uploads it from there. */
+  transcript?: string;
 }
 
 export interface HookResult {
@@ -27,6 +31,8 @@ export interface HookResult {
   /** The person just prompted this session: recorded as the folder's current conversation, for
    * an editor that cannot say which one it shows. */
   active?: HookCapture;
+  /** Something to tell the person as it is, such as a `/seshi` it could not read. */
+  say?: string;
 }
 
 export interface HookHandler {
@@ -93,6 +99,23 @@ export interface CaptureAgent {
   locate?(sessionId: string, host: CaptureHost): string | undefined;
   accountIds?(host: CaptureHost): Record<string, string>;
   readonly installer?: Installer;
+}
+
+/** seshi's own folder for capture state: `$XDG_STATE_HOME/seshi` (`~/.local/state/seshi`), or
+ * `%LOCALAPPDATA%\\seshi` on Windows. */
+export function captureDir(host: CaptureHost): string {
+  if (host.platform === "win32") {
+    const local = host.env.LOCALAPPDATA || win32.join(host.home, "AppData", "Local");
+    return win32.join(local, "seshi");
+  }
+  const base = host.env.XDG_STATE_HOME || posix.join(host.home, ".local", "state");
+  return posix.join(base, "seshi");
+}
+
+/** Where seshi keeps a transcript a hook handed it (`HookCapture.transcript`). */
+export function handedTranscriptDir(host: CaptureHost, agent: string): string {
+  const at = host.platform === "win32" ? win32.join : posix.join;
+  return at(captureDir(host), "transcripts", agent);
 }
 
 export function expandTilde(path: string, home: string): string {

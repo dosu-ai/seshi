@@ -524,6 +524,41 @@ describe("turning a session off (F9.5, F9.7)", () => {
     await daemon();
     expect(await stored()).toBeNull();
   });
+  it("keeps no copy of an OpenCode session turned off, or once OpenCode is uninstalled", async () => {
+    // OpenCode keeps no transcript file: its plugin hands seshi the session, which seshi writes
+    // to its own folder and must not keep for a session turned off.
+    const opencode = (session: string) =>
+      machine.seshi(["hook", "opencode", "Stop"], {
+        stdin: JSON.stringify({
+          session_id: session,
+          cwd: join(machine.dir, "code"),
+          export: { info: { id: session, directory: join(machine.dir, "code") }, messages: [] },
+        }),
+      });
+    const copy = (session: string) =>
+      join(stateDir(), "transcripts", "opencode", `${session}.json`);
+    expect((await opencode("ses_a")).code).toBe(0);
+    expect((await opencode("ses_b")).code).toBe(0);
+    expect(existsSync(copy("ses_a"))).toBe(true);
+
+    const off = await machine.seshi([
+      "capture",
+      "off",
+      "--session",
+      "ses_a",
+      "--agent",
+      "opencode",
+    ]);
+    expect(off.code, off.err).toBe(0);
+    expect(existsSync(copy("ses_a"))).toBe(false);
+    // Its next turn is not written either.
+    await opencode("ses_a");
+    expect(existsSync(copy("ses_a"))).toBe(false);
+    expect(existsSync(copy("ses_b"))).toBe(true);
+
+    expect((await machine.seshi(["capture", "uninstall", "opencode"])).code).toBe(0);
+    expect(existsSync(join(stateDir(), "transcripts", "opencode"))).toBe(false);
+  });
 });
 
 describe("the status line (F9.4, B1.6)", () => {
@@ -793,6 +828,8 @@ describe("seshi capture install|uninstall|status (F9.6)", () => {
       ["claude-code", true],
       ["codex", false],
       ["cursor", true],
+      ["opencode", false],
+      ["pi", false],
     ]);
     expect(status.target).toBe(server.url);
 

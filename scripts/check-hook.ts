@@ -39,6 +39,8 @@ export const HOOK_ENTRIES = [
   "integrations/claude-code/src/capture.ts",
   "integrations/codex/src/capture.ts",
   "integrations/cursor/src/local/capture.ts",
+  "integrations/opencode/src/capture.ts",
+  "integrations/pi/src/capture.ts",
 ];
 
 export function loadTimeImports(text: string, fileName = "x.ts"): string[] {

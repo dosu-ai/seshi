@@ -1,11 +1,14 @@
 {
   "name": "@seshi/integration-pi",
   "private": true,
-  "description": "Pi: the session log adapter.",
+  "description": "Pi: the session log adapter, and live capture through a pi extension.",
   "type": "module",
   "exports": {
     ".": {
       "bun": "./src/index.ts"
+    },
+    "./capture": {
+      "bun": "./src/capture.ts"
     }
   },
   "dependencies": {

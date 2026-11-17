@@ -1,0 +1,6 @@
+{
+  "session_id": "01a1ea8a-0000-7000-8000-000000000002",
+  "transcript_path": "/home/dev/.pi/agent/sessions/--repo-app--/2026-11-17T09-05-00-000Z_01a1ea8a-0000-7000-8000-000000000002.jsonl",
+  "cwd": "/repo/app",
+  "parent_session": "/home/dev/.pi/agent/sessions/--repo-app--/2026-11-17T09-00-00-000Z_01a1ea89-0000-7000-8000-000000000001.jsonl"
+}

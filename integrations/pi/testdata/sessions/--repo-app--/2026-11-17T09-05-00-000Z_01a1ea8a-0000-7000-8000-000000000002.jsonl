@@ -1,0 +1,2 @@
+{"type":"session","version":3,"id":"01a1ea8a-0000-7000-8000-000000000002","timestamp":"2026-11-17T09:05:00.000Z","cwd":"/repo/app","parentSession":"/home/dev/.pi/agent/sessions/--repo-app--/2026-11-17T09-00-00-000Z_01a1ea89-0000-7000-8000-000000000001.jsonl"}
+{"type":"message","id":"b1000001","parentId":null,"timestamp":"2026-11-17T09:05:01.000Z","message":{"role":"user","content":[{"type":"text","text":"And the logout handler?"}],"timestamp":1794906301000}}

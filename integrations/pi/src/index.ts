@@ -1,5 +1,8 @@
 import { lettaAdapter } from "@seshi/formats";
 import { defineIntegration, type FormatAdapter, type JsonObject } from "@seshi/kit";
+import { PI_CAPTURE } from "./capture";
+
+export { PI_CAPTURE } from "./capture";
 
 const isObject = (value: unknown): value is JsonObject =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -16,4 +19,5 @@ export const PI_FORMAT: FormatAdapter = lettaAdapter({
 export const pi = defineIntegration({
   name: "pi",
   formats: [PI_FORMAT],
+  capture: PI_CAPTURE,
 });

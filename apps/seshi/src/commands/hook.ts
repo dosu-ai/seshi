@@ -89,6 +89,7 @@ async function hook(
     ctx.stdout(
       JSON.stringify(hookHandler(agent, event)?.reply?.(message) ?? { systemMessage: message }),
     );
+  if (outcome.said) reply(outcome.said);
   if (outcome.announced) reply(notice(outcome.announced, agentName));
   if (outcome.requested) reply(await carryOut(ctx, agentName, outcome.requested));
   if (outcome.spooled.length > 0) await startUploader(ctx, paths);

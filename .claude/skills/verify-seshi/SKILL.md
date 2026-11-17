@@ -5,7 +5,7 @@ description: Drive a real, isolated seshi (the session-capture CLI, its local or
 
 # verify-seshi
 
-seshi captures coding-agent sessions (Claude Code, Codex, Cursor) through agent hooks and a
+seshi captures coding-agent sessions (Claude Code, Codex, Cursor, pi, OpenCode) through agent hooks and a
 background uploader, redacts them, and stores them in a bucket, either directly ("local mode")
 or through `seshi serve` (an HTTP API plus a worker). Users touch it through the `seshi` CLI,
 the agents' hooks, the `seshi explore` page and, in the Claude desktop app, a Session Capture
