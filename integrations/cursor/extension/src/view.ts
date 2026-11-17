@@ -22,18 +22,12 @@ export interface View {
 /** Levels a person cannot override from here: a team's rule, or a config seshi cannot read. */
 const FIXED = new Set(["org", "repo", "config", "unknown"]);
 
-function how(by: string, at: string | undefined, title: string | undefined, now: Date): string {
-  const ago = at ? ` ${relative(at, now)}` : "";
-  switch (by) {
-    case "focused":
-      return `the chat you have open${title ? `, “${title}”` : ""}`;
-    case "selected":
-      return "the open chat";
-    case "prompt":
-      return `the chat you last sent a message in${ago}`;
-    default:
-      return `the chat seen most recently here${ago}`;
-  }
+/** How the chat was chosen, when it was not the one in view: a short hint after its id. */
+function hint(by: string, at: string | undefined, now: Date): string {
+  const ago = at ? `, ${relative(at, now)}` : "";
+  if (by === "prompt") return ` (the last chat you messaged${ago})`;
+  if (by === "recent") return ` (the last chat seen here${ago})`;
+  return "";
 }
 
 function relative(at: string, now: Date): string {
@@ -67,27 +61,28 @@ export function viewOf(status: StatusJson, now: Date, title?: string): View {
   const background =
     status.attention === "error" ? "error" : status.attention === "warn" ? "warning" : undefined;
   const session = status.session;
+  const state = status.capturing ? "on" : "off";
   if (!session) {
     return {
       text,
-      tooltip: `**${LABEL}** ${status.capturing ? "is on" : "is off"} here: ${status.reason}.\n\nNo Cursor chat seen in this folder yet.`,
+      tooltip: `\`${LABEL}\` ${state} in this folder: no Cursor chat yet.\n\nClick for the status.`,
       ...(background ? { background } : {}),
       action: { kind: "status" },
     };
   }
-  const which = `\`${session.session_id.slice(0, 8)}\`, ${how(session.by, session.at, title, now)}`;
   const fixed = !status.capturing && FIXED.has(status.level);
   const to = status.capturing ? "off" : "on";
   const ambiguous =
     session.by !== "focused" &&
     (status.candidates ?? []).some((c) => c.session_id !== session.session_id);
+  const name = title ? ` "${title}"` : "";
   const tooltip = [
-    `**${LABEL}** ${status.capturing ? "on" : "off"} for chat ${which}.`,
-    `${status.reason}.`,
-    fixed
-      ? "A shared rule decides this; it cannot be turned on from here."
-      : `Click to turn capture ${to} for this chat${ambiguous ? " (you choose the chat first)" : ""}.`,
-  ].join("\n\n");
+    `\`${LABEL}\` ${state} for the chat \`${session.session_id.slice(0, 8)}\`${name}${hint(session.by, session.at, now)}`,
+    ...(fixed ? [`Off because ${status.reason}: a team rule, not a toggle.`] : []),
+    fixed ? "" : ambiguous ? "Click to choose the chat and toggle" : "Click to toggle",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
   return {
     text,
     tooltip,

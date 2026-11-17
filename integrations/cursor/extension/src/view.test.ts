@@ -18,7 +18,9 @@ describe("the status bar item", () => {
   it("says on or off for the chat in view, and a click turns it the other way", () => {
     const on = viewOf(base, now, "Testing discussion");
     expect(on.text).toBe("Session Capture ◉");
-    expect(on.tooltip).toContain("“Testing discussion”");
+    expect(on.tooltip).toBe(
+      '`Session Capture` on for the chat `887c0332` "Testing discussion"\n\nClick to toggle',
+    );
     expect(on.action).toEqual({ kind: "toggle", to: "off", session: "887c0332-aaaa", pick: false });
     const off = viewOf(
       { ...base, capturing: false, level: "session", reason: "turned off for this session" },
@@ -46,11 +48,16 @@ describe("the status bar item", () => {
       },
       now,
     );
-    expect(guessed.tooltip).toContain("last sent a message in 2 min ago");
+    expect(guessed.tooltip).toBe(
+      "`Session Capture` on for the chat `p1` (the last chat you messaged, 2 min ago)\n\nClick to choose the chat and toggle",
+    );
     expect(guessed.action).toMatchObject({ kind: "toggle", pick: true });
     const team = viewOf(
       { ...base, capturing: false, level: "repo", reason: "the repo turns capture off" },
       now,
+    );
+    expect(team.tooltip).toBe(
+      "`Session Capture` off for the chat `887c0332`\n\nOff because the repo turns capture off: a team rule, not a toggle.",
     );
     expect(team.action).toEqual({
       kind: "explain",
