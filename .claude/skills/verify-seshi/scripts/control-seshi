@@ -149,11 +149,11 @@ EOF
     printf '%s' "$key" | in_run seshi login --server "$url" --key - --user verifier >"$RUN/logs/login.log" 2>&1 \
       || { cat "$RUN/logs/login.log" >&2; die "login failed"; }
   else
-    cat >"$RUN/seshi.toml" <<EOF
-[store]
-url = "file://$RUN/bucket"
-EOF
-    printf '[local]\nconfig = "%s"\n' "$RUN/seshi.toml" >"$RUN/home/.config/seshi/config.toml"
+    # Local mode is serverless mode against the run's folder bucket: init writes the bucket's
+    # layout marker and starter shared settings, and `[serverless]` in the run's CLI config.
+    # The owner is the OS username, as for a real laptop.
+    in_run seshi init --serverless --url "file://$RUN/bucket" --admin >"$RUN/logs/init.log" 2>&1 \
+      || { cat "$RUN/logs/init.log" >&2; die "seshi init --serverless failed"; }
   fi
   commit=$(git -C "$REPO" rev-parse --short HEAD)
   printf '{"run":"%s","mode":"%s","port":"%s","repo":"%s","commit":"%s","binary":%s}\n' \

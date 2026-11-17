@@ -34,7 +34,10 @@ export VERIFY_SESHI_RUN=<id>      # copy the export line `up` prints; every late
 ```
 
 - `up` prints `run <id>: <mode> mode at commit <sha>`, the run folder, the evidence folder and
-  the `export` line. In server mode it also runs `seshi admin init`, starts `seshi serve`, waits
+  the `export` line. Local mode is seshi's serverless mode: `up` runs
+  `seshi init --serverless --url file://<run>/bucket --admin`, which writes the bucket's layout
+  marker and starter shared settings, and `[serverless]` (owner: your OS username) in the run's
+  CLI config; its output is in the run's `logs/init.log`. In server mode it instead runs `seshi admin init`, starts `seshi serve`, waits
   until `GET /healthz` answers `{"ok":true,...}`, then runs `seshi login --key -` as the user
   `verifier`. Ready means `up` returned 0 and `$C doctor` says `ready`.
 - seshi runs from source (`bun run apps/seshi/src/main.ts`, through a `seshi` shim on the run's
