@@ -21,6 +21,8 @@ export interface HookOutcome {
   skipped: { session_id: string; decision: Decision }[];
   envFileWritten?: string;
   ignored?: string;
+  /** For a session the hook announced: whether it is captured, and why. */
+  announced?: { session_id: string; decision: Decision };
 }
 
 /** A value as one shell word: single-quoted, with any single quote in it closed and escaped. */
@@ -44,11 +46,11 @@ export async function runHook(run: HookRun): Promise<HookOutcome> {
     appendFileSync(result.exportEnv.file, lines);
     outcome.envFileWritten = result.exportEnv.file;
   }
-  if (result.captures.length === 0) return outcome;
+  if (result.captures.length === 0 && !result.announce) return outcome;
 
   const now = run.now ?? new Date();
   const [{ rules, error }, state] = [await captureRules(run.host, run.paths), readState(run.paths)];
-  for (const capture of result.captures) {
+  const judge = (capture: HookCapture) => {
     const known = state.sessions[sessionKey(run.agent.name, capture.session_id)];
     const cwd = capture.cwd ?? known?.cwd;
     const decision = decide(
@@ -63,6 +65,16 @@ export async function runHook(run: HookRun): Promise<HookOutcome> {
       },
       run.host.platform,
     );
+    return { known, decision };
+  };
+  if (result.announce) {
+    outcome.announced = {
+      session_id: result.announce.session_id,
+      decision: judge(result.announce).decision,
+    };
+  }
+  for (const capture of result.captures) {
+    const { known, decision } = judge(capture);
     if (!decision.capture) {
       outcome.skipped.push({ session_id: capture.session_id, decision });
       if (respoolPausedSession(run, capture, known, decision, now)) continue;

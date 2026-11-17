@@ -83,5 +83,13 @@ async function hook(
   const { host, paths } = pathsOf(ctx);
   const outcome = await runHook({ agent: await load, event, payload, host, paths });
   if (outcome.ignored) log(outcome.ignored);
+  if (outcome.announced) ctx.stdout(JSON.stringify({ systemMessage: notice(outcome.announced) }));
   if (outcome.spooled.length > 0) await startUploader(ctx, paths);
+}
+
+/** What a session that just started is told (Codex shows it as a notice). */
+export function notice({ decision }: { decision: { capture: boolean; reason: string } }): string {
+  return decision.capture
+    ? "Session Capture ◉ · this session is uploaded to your team's session store as you work; $seshi off stops it"
+    : `Session Capture ⏸ · ${decision.reason}`;
 }

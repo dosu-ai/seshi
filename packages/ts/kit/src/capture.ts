@@ -18,6 +18,9 @@ export interface HookCapture {
 export interface HookResult {
   captures: HookCapture[];
   exportEnv?: { file: string; vars: Record<string, string> };
+  /** A session that just started: the hook tells the agent whether it is captured, and spools
+   * nothing (Codex shows it as a notice). */
+  announce?: HookCapture;
 }
 
 export interface HookHandler {

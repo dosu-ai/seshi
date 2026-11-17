@@ -97,6 +97,7 @@ describe("config.toml's notify", () => {
 describe("the installer (F9.6)", () => {
   const config = () => join(home, ".codex", "config.toml");
   const skill = () => join(home, ".agents", "skills", "seshi", "SKILL.md");
+  const hooks = () => join(home, ".codex", "hooks.json");
   const context = { command: ["seshi"] };
 
   it("points notify at seshi and keeps the program that was there, run after seshi", async () => {
@@ -143,6 +144,7 @@ describe("the installer (F9.6)", () => {
     expect((await codexInstaller.status(npx)).installed).toBe(true);
     expect((await codexInstaller.uninstall({ ...host, ...context })).changed).toEqual([
       config(),
+      hooks(),
       skill(),
     ]);
     expect(notify()).toBeUndefined();
@@ -152,7 +154,7 @@ describe("the installer (F9.6)", () => {
     await codexInstaller.install(wrapper);
     await codexInstaller.install(wrapper);
     expect(notify()).toEqual(["/usr/local/bin/my-wrapper", "hook", "codex", "notify"]);
-    expect((await codexInstaller.uninstall(wrapper)).changed).toEqual([config(), skill()]);
+    expect((await codexInstaller.uninstall(wrapper)).changed).toEqual([config(), hooks(), skill()]);
     expect(notify()).toBeUndefined();
 
     // What an older seshi left: its own notify chained after itself, then the user's program.
@@ -170,23 +172,60 @@ describe("the installer (F9.6)", () => {
 
   it("creates the setting when there is none, and removes it all on uninstall", async () => {
     const report = await codexInstaller.install({ ...host, ...context });
-    expect(report.changed).toEqual([config(), skill()]);
+    expect(report.changed).toEqual([config(), hooks(), skill()]);
     expect(readFileSync(skill(), "utf8")).toContain("--agent <agent>");
-    expect((await codexInstaller.status({ ...host, ...context })).files[1]).toMatchObject({
+    expect((await codexInstaller.status({ ...host, ...context })).files[2]).toMatchObject({
       present: true,
       ours: true,
     });
     await codexInstaller.uninstall({ ...host, ...context });
     expect(readFileSync(config(), "utf8")).toBe("");
     expect(existsSync(skill())).toBe(false);
+    expect(existsSync(hooks())).toBe(false);
     expect((await codexInstaller.uninstall({ ...host, ...context })).changed).toEqual([]);
+  });
+
+  it("adds a SessionStart hook for the notice to hooks.json, beside the hooks there", async () => {
+    mkdirSync(join(home, ".codex"));
+    const theirs = {
+      hooks: {
+        Stop: [{ hooks: [{ type: "command", command: "dosu knowledge sync" }] }],
+        SessionStart: [{ hooks: [{ type: "command", command: "say hi" }] }],
+      },
+    };
+    writeFileSync(hooks(), JSON.stringify(theirs));
+    await codexInstaller.install({ ...host, ...context });
+    await codexInstaller.install({ ...host, ...context });
+    expect(JSON.parse(readFileSync(hooks(), "utf8")).hooks).toEqual({
+      ...theirs.hooks,
+      SessionStart: [
+        ...theirs.hooks.SessionStart,
+        {
+          matcher: "startup|resume",
+          hooks: [{ type: "command", command: "seshi hook codex SessionStart", timeout: 5 }],
+        },
+      ],
+    });
+    expect((await codexInstaller.status({ ...host, ...context })).notes).toEqual([]);
+    await codexInstaller.uninstall({ ...host, ...context });
+    expect(JSON.parse(readFileSync(hooks(), "utf8"))).toEqual(theirs);
+  });
+
+  it("reads a SessionStart payload as a session to announce, spooling nothing", () => {
+    const handler = hookHandler(CODEX_CAPTURE, "SessionStart");
+    expect(
+      handler?.parse(
+        { session_id: "t1", cwd: "/w/app", source: "startup", hook_event_name: "SessionStart" },
+        host,
+      ),
+    ).toEqual({ captures: [], announce: { session_id: "t1", cwd: "/w/app" } });
   });
 
   it("puts its skill where Codex reads a user's skills, and keeps someone else's", async () => {
     mkdirSync(join(home, ".agents", "skills", "seshi"), { recursive: true });
     writeFileSync(skill(), "mine");
     const report = await codexInstaller.install({ ...host, ...context });
-    expect(report.changed).toEqual([config()]);
+    expect(report.changed).toEqual([config(), hooks()]);
     expect(report.notes).toEqual([`${skill()} is someone else's skill, so it was left as it is`]);
     await codexInstaller.uninstall({ ...host, ...context });
     expect(readFileSync(skill(), "utf8")).toBe("mine");

@@ -234,6 +234,29 @@ describe("hooks and the uploader (F9.1)", () => {
     expect(spooled()).toBe(1);
   });
 
+  it("tells Codex on SessionStart whether the session is captured, spooling nothing", async () => {
+    const start = () =>
+      machine.seshi(["hook", "codex", "SessionStart"], {
+        stdin: JSON.stringify({
+          session_id: "thread-1",
+          cwd: project,
+          source: "startup",
+          hook_event_name: "SessionStart",
+        }),
+      });
+    const on = await start();
+    expect(on.code).toBe(0);
+    expect(JSON.parse(on.out).systemMessage).toMatch(
+      /^Session Capture ◉ · .*\$seshi off stops it$/,
+    );
+    expect(spooled()).toBe(0);
+    expect(machine.spawned).toEqual([]);
+    await machine.seshi(["capture", "pause", "1h"]);
+    expect(JSON.parse((await start()).out).systemMessage).toBe(
+      "Session Capture ⏸ · capture is paused: the session stops where it is",
+    );
+  });
+
   it("exports the session for the /seshi skill on SessionStart", async () => {
     const envFile = join(machine.dir, "claude-env");
     await machine.seshi(["hook", "claude-code", "SessionStart"], {

@@ -10,11 +10,12 @@
  * `notify = ["seshi", "hook", "codex", "notify", "--", <the old program>…]`. The rollouts are
  * also swept (F9.2), which catches turns that end without a notification. */
 
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, rmSync } from "node:fs";
 import { basename, join } from "node:path";
 import {
   type CaptureAgent,
   type CaptureHost,
+  commandLine,
   expandTilde,
   type HookHandler,
   type InstallContext,
@@ -23,12 +24,15 @@ import {
   type InstallStatus,
   installSkill,
   isOurSkill,
+  isSeshiHook,
   payloadObject,
+  readJsonConfig,
   readTextFile,
   removeSkill,
   stringField,
   type TranscriptInfo,
   writeFileAtomic,
+  writeJsonConfig,
 } from "@seshi/kit";
 
 export const AGENT = "codex";
@@ -49,6 +53,18 @@ export const CODEX_HOOKS: readonly HookHandler[] = [
       if (!thread) throw new Error(`${AGENT}: the notification has no thread-id`);
       const cwd = stringField(object, "cwd");
       return { captures: [{ session_id: thread, ...(cwd ? { cwd } : {}) }] };
+    },
+  },
+  {
+    // Codex's lifecycle hook (hooks.json): nothing to upload yet, but the notice of whether
+    // the session is captured.
+    event: "SessionStart",
+    parse(payload) {
+      const object = payloadObject(payload, AGENT);
+      const session = stringField(object, "session_id");
+      if (!session) throw new Error(`${AGENT}: SessionStart has no session_id`);
+      const cwd = stringField(object, "cwd");
+      return { captures: [], announce: { session_id: session, ...(cwd ? { cwd } : {}) } };
     },
   },
 ];
@@ -232,6 +248,81 @@ function readNotify(path: string): { text: string; notify: unknown } {
   return { text, notify: parsed.notify };
 }
 
+interface CodexHookGroup {
+  matcher?: string;
+  hooks?: { type?: string; command?: unknown; [key: string]: unknown }[];
+  [key: string]: unknown;
+}
+
+/** Codex's lifecycle hooks: seshi adds one, on SessionStart, for the notice. */
+function hooksPath(host: CaptureHost): string {
+  return join(codexDir(host), "hooks.json");
+}
+
+function hooksTable(
+  config: Record<string, unknown>,
+  path: string,
+): Record<string, CodexHookGroup[]> {
+  const hooks = config.hooks;
+  if (hooks === undefined) return {};
+  if (typeof hooks !== "object" || hooks === null || Array.isArray(hooks)) {
+    throw new Error(`${path} has a 'hooks' that is not an object; fix it, then run again`);
+  }
+  return hooks as Record<string, CodexHookGroup[]>;
+}
+
+const groupsOf = (value: unknown): CodexHookGroup[] => (Array.isArray(value) ? value : []);
+
+function ourHook(command: readonly string[]) {
+  const own = commandLine(command);
+  return (h: { command?: unknown }) => isSeshiHook(h.command, AGENT, own);
+}
+
+function installNotice(context: InstallContext): string {
+  const path = hooksPath(context);
+  const config = readJsonConfig(path);
+  const table = hooksTable(config, path);
+  const command = `${commandLine(context.command)} hook ${AGENT} SessionStart`;
+  const groups = groupsOf(table.SessionStart);
+  const ours = groups.flatMap((g) => (g.hooks ?? []).filter(ourHook(context.command)));
+  if (ours.length > 0) for (const hook of ours) hook.command = command;
+  else
+    groups.push({ matcher: "startup|resume", hooks: [{ type: "command", command, timeout: 5 }] });
+  table.SessionStart = groups;
+  writeJsonConfig(path, { ...config, hooks: table });
+  return path;
+}
+
+function removeNotice(context: InstallContext): string[] {
+  const path = hooksPath(context);
+  if (!existsSync(path)) return [];
+  const config = readJsonConfig(path);
+  const table = hooksTable(config, path);
+  const groups = groupsOf(table.SessionStart);
+  const kept: CodexHookGroup[] = [];
+  let touched = false;
+  for (const group of groups) {
+    const hooks = (group.hooks ?? []).filter((h) => !ourHook(context.command)(h));
+    if (hooks.length !== (group.hooks ?? []).length) touched = true;
+    if (hooks.length > 0 || group.hooks === undefined) kept.push({ ...group, hooks });
+  }
+  if (!touched) return [];
+  if (kept.length > 0) table.SessionStart = kept;
+  else delete table.SessionStart;
+  const { hooks: _hooks, ...rest } = config;
+  const next = Object.keys(table).length > 0 ? { ...rest, hooks: table } : rest;
+  if (Object.keys(next).length === 0) rmSync(path, { force: true });
+  else writeJsonConfig(path, next);
+  return [path];
+}
+
+function hasNotice(context: InstallContext): boolean {
+  const path = hooksPath(context);
+  if (!existsSync(path)) return false;
+  const table = hooksTable(readJsonConfig(path), path);
+  return groupsOf(table.SessionStart).some((g) => (g.hooks ?? []).some(ourHook(context.command)));
+}
+
 export const codexInstaller: Installer = {
   detect: (host) => existsSync(codexDir(host)),
 
@@ -256,20 +347,21 @@ export const codexInstaller: Installer = {
       ...(chain.length > 0 ? ["--", ...chain] : []),
     ];
     writeFileAtomic(path, withNotify(text, value));
+    const hooks = installNotice(context);
     const skill = installSkill(skillPath(context), context.command);
-    return { changed: [path, ...skill.changed], notes: [...notes, ...skill.notes] };
+    return { changed: [path, hooks, ...skill.changed], notes: [...notes, ...skill.notes] };
   },
 
   async uninstall(context: InstallContext): Promise<InstallReport> {
     const path = configPath(context);
-    const skill = removeSkill(skillPath(context));
-    if (!existsSync(path)) return { changed: skill, notes: [] };
+    const others = [...removeNotice(context), ...removeSkill(skillPath(context))];
+    if (!existsSync(path)) return { changed: others, notes: [] };
     const { text, notify } = readNotify(path);
-    if (!isSeshiNotify(notify, context.command)) return { changed: skill, notes: [] };
+    if (!isSeshiNotify(notify, context.command)) return { changed: others, notes: [] };
     const chain = unwrapNestedSeshiNotify(notify, context.command);
     writeFileAtomic(path, withNotify(text, chain.length > 0 ? chain : null));
     return {
-      changed: [path, ...skill],
+      changed: [path, ...others],
       notes: chain.length > 0 ? [`Codex's notify is ${chain.join(" ")} again`] : [],
     };
   },
@@ -279,13 +371,18 @@ export const codexInstaller: Installer = {
     const present = existsSync(path);
     const ours = present && isSeshiNotify(readNotify(path).notify, context.command);
     const skill = skillPath(context);
+    const notice = hasNotice(context);
     return {
       installed: ours,
       files: [
         { path, present, ours },
+        { path: hooksPath(context), present: existsSync(hooksPath(context)), ours: notice },
         { path: skill, present: existsSync(skill), ours: isOurSkill(skill) },
       ],
-      notes: [],
+      notes:
+        ours && !notice
+          ? ["the session-start notice is missing: run seshi capture install codex"]
+          : [],
     };
   },
 };
