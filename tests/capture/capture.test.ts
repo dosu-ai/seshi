@@ -391,6 +391,13 @@ describe("turning a session off (F9.5, F9.7)", () => {
     expect((await stored())?.status).toBe("stored");
     const status = await machine.seshi(["capture", "status", "--session", SESSION]);
     expect(status.out).toContain("retraction refused");
+    // Only that session: not the folder, the agents or the other sessions.
+    expect(status.out).toContain(`session claude-code ${SESSION}: turned off for this session`);
+    expect(status.out).not.toContain("here (");
+    expect(status.out).not.toContain("agents:");
+    expect(status.out).not.toContain("recent sessions:");
+    const all = await machine.seshi(["capture", "status"]);
+    expect(all.out).toContain("agents:");
     const line = await machine.seshi(["statusline"], {
       stdin: JSON.stringify({ session_id: SESSION, cwd: project }),
       env: { NO_COLOR: "1" },

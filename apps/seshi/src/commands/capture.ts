@@ -496,13 +496,13 @@ async function status(ctx: CommandContext, json: boolean, args: Args): Promise<n
             `  session ${printable(session.agent)} ${printable(session.id)}: ${session.decision.reason} (${session.decision.level})${session.state ? `; ${sessionWord(session.state)}` : ""}`,
           ]
         : []),
-      `  here (${printable(cwd)}): ${here.reason} (${here.level})`,
+      ...(session ? [] : [`  here (${printable(cwd)}): ${here.reason} (${here.level})`]),
       ...(paused && state.paused
         ? [
             `  ${style.warn("paused")} ${state.paused.until ? `until ${state.paused.until}` : "until seshi capture resume"}: sessions stop where they are; new ones are not captured`,
           ]
         : []),
-      ...(stopped > 0
+      ...(stopped > 0 && !session
         ? [
             `  ${style.warn("stopped")}: ${stopped} session${stopped === 1 ? "" : "s"} stopped by a pause send nothing more; seshi capture on --session <id> uploads one in full`,
           ]
@@ -521,17 +521,21 @@ async function status(ctx: CommandContext, json: boolean, args: Args): Promise<n
       ...(problems.upload
         ? [`  ${style.status("upload failing", "error")}: ${printable(problems.upload.message)}`]
         : []),
-      "agents:",
-      ...installs.map(
-        (i) =>
-          `  ${i.agent.padEnd(12)} ${i.installed ? style.status("installed", "success") : "not installed"}${i.since ? ` (since ${i.since})` : ""}${i.status?.notes.length ? ` · ${i.status.notes.join("; ")}` : ""}`,
-      ),
-      ...(recent.length > 0
-        ? [
-            "recent sessions:",
-            ...recent.map(([key, s]) => `  ${printable(key)}  ${sessionWord(s)}`),
-          ]
-        : []),
+      ...(session
+        ? []
+        : [
+            "agents:",
+            ...installs.map(
+              (i) =>
+                `  ${i.agent.padEnd(12)} ${i.installed ? style.status("installed", "success") : "not installed"}${i.since ? ` (since ${i.since})` : ""}${i.status?.notes.length ? ` · ${i.status.notes.join("; ")}` : ""}`,
+            ),
+            ...(recent.length > 0
+              ? [
+                  "recent sessions:",
+                  ...recent.map(([key, s]) => `  ${printable(key)}  ${sessionWord(s)}`),
+                ]
+              : []),
+          ]),
     ],
   );
   return attention ? EXIT.attention : EXIT.ok;
