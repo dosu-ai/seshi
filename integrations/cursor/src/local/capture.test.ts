@@ -88,6 +88,21 @@ describe("Cursor's transcripts", () => {
       true,
     );
   });
+
+  it("are found in Cursor 3's folder per conversation too", () => {
+    const dir = join(home, ".cursor", "projects", "Users-dev-app", "agent-transcripts", "conv-3");
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, "conv-3.jsonl");
+    writeFileSync(file, '{"role":"user","message":{"content":"hi"}}\n');
+    expect(identifyCursorTranscript(file, readFileSync(file, "utf8"))).toEqual({
+      session_id: "conv-3",
+    });
+    expect(locateCursorTranscript("conv-3", host)).toBe(file);
+    const match = CURSOR_CAPTURE.sweep[0]?.match;
+    expect(match?.("Users-dev-app/agent-transcripts/conv-3/conv-3.jsonl")).toBe(true);
+    expect(match?.("Users-dev-app/agent-transcripts/conv-3/other.jsonl")).toBe(false);
+    expect(CURSOR_CAPTURE.sweep[0]?.depths).toContain(4);
+  });
 });
 
 describe("the installer (F9.6)", () => {

@@ -7,8 +7,8 @@
  * with a JSON object on stdin: `conversation_id`, `generation_id`, `hook_event_name`,
  * `workspace_roots` and, in recent versions, `transcript_path`, which can be empty on a
  * conversation's first prompt (F9.2). So a session is keyed by its conversation id, and the
- * uploader finds its transcript, `~/.cursor/projects/<project>/agent-transcripts/<id>.jsonl`,
- * when the hook did not say. The transcript does not say where the agent ran, so the sweep
+ * uploader finds its transcript, `~/.cursor/projects/<project>/agent-transcripts/<id>.jsonl`
+ * (`<id>/<id>.jsonl` from Cursor 3), when the hook did not say. The transcript does not say where the agent ran, so the sweep
  * captures only conversations a hook has seen (the capture rules need the folder). */
 
 import { existsSync, readdirSync } from "node:fs";
@@ -113,10 +113,23 @@ export function locateCursorTranscript(sessionId: string, host: CaptureHost): st
     return undefined;
   }
   for (const project of names) {
-    const file = join(projects, project, "agent-transcripts", `${sessionId}.jsonl`);
-    if (existsSync(file)) return file;
+    const dir = join(projects, project, "agent-transcripts");
+    for (const file of [
+      join(dir, sessionId, `${sessionId}.jsonl`),
+      join(dir, `${sessionId}.jsonl`),
+    ]) {
+      if (existsSync(file)) return file;
+    }
   }
   return undefined;
+}
+
+/** A transcript under a project's `agent-transcripts`: `<id>.jsonl`, or, from Cursor 3,
+ * `<id>/<id>.jsonl`. */
+export function isCursorTranscript(relative: string): boolean {
+  const nested = /^[^/]+\/agent-transcripts\/([^/]+)\/([^/]+)\.jsonl$/.exec(relative);
+  if (nested) return nested[1] === nested[2];
+  return /^[^/]+\/agent-transcripts\/[^/]+\.jsonl$/.test(relative);
 }
 
 interface CursorHook {
@@ -260,8 +273,8 @@ export const CURSOR_CAPTURE: CaptureAgent = {
     {
       root: "~/.cursor/projects",
       resolve: (host) => join(cursorDir(host), "projects"),
-      depths: [3],
-      match: (relative) => /^[^/]+\/agent-transcripts\/[^/]+\.jsonl$/.test(relative),
+      depths: [3, 4],
+      match: isCursorTranscript,
     },
   ],
   identify: identifyCursorTranscript,
