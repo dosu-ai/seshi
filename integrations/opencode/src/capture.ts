@@ -10,7 +10,9 @@
  * transcript: seshi writes it, for a captured session only, to
  * `<capture dir>/transcripts/opencode/<id>.json` and uploads it whole (a JSON document, never in
  * chunks). OpenCode has no end-of-session event (`session.idle` follows every turn), so a session
- * ends when the uploader finds it quiet. */
+ * ends when the uploader finds it quiet. A sweep also reads OpenCode's database (`./db.ts`) for
+ * the sessions the plugin never handed over, and writes a captured one's export to that same
+ * file: a session is one file, and one upload, whichever way seshi found it. */
 
 import { existsSync, rmdirSync, rmSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
@@ -60,7 +62,9 @@ export function opencodeConfigDir(host: CaptureHost): string {
   );
 }
 
-function opencodeDataDir(host: CaptureHost): string {
+/** OpenCode's data folder, which holds its database: `$XDG_DATA_HOME/opencode`, else
+ * `~/.local/share/opencode` (on every platform). */
+export function opencodeDataDir(host: CaptureHost): string {
   const configured = host.env.XDG_DATA_HOME;
   return join(
     configured ? expandTilde(configured, host.home) : join(host.home, ".local", "share"),
@@ -329,5 +333,8 @@ export const OPENCODE_CAPTURE: CaptureAgent = {
   ],
   identify: identifyOpencodeExport,
   locate: locateOpencodeExport,
+  // Sessions the plugin never handed over, read from OpenCode's database. Imported here, not at
+  // the top: `seshi hook` loads this module and never sweeps.
+  stored: async (host, sinceMs) => (await import("./db")).storedOpencodeSessions(host, sinceMs),
   installer: opencodeInstaller,
 };

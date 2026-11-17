@@ -17,6 +17,12 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import {
+  addOpencodeTurn,
+  type OpencodeExport,
+  opencodeSessionAt,
+  writeOpencodeDb,
+} from "@seshi/integration-opencode/testing";
 import { VERSION } from "@seshi/model";
 import { getSession } from "@seshi/pipeline";
 import { compileRuleSet, validatePack } from "@seshi/redact";
@@ -995,6 +1001,122 @@ describe("seshi upload (F8.1)", () => {
     } finally {
       other.cleanup();
     }
+  });
+});
+
+describe("seshi upload --since and the sweep, from OpenCode's database", () => {
+  const DAY = 86_400_000;
+  const EXPORT = JSON.parse(transcript("opencode-export.opencode.json")) as OpencodeExport;
+  const database = () => join(machine.dir, ".local", "share", "opencode", "opencode.db");
+  const copy = (id: string) => join(stateDir(), "transcripts", "opencode", `${id}.json`);
+  /** The fixture session as `id`, started at `created`, run in the test's project, with an answer
+   * long enough to pass the session filter. */
+  const session = (id: string, created: number): OpencodeExport => {
+    const doc = opencodeSessionAt(EXPORT, id, created);
+    const last = doc.messages.at(-1) as OpencodeExport["messages"][number];
+    last.parts = last.parts.map((part) =>
+      part.type === "text" ? { ...part, text: `The auth flow: ${"details ".repeat(400)}` } : part,
+    );
+    return { ...doc, info: { ...doc.info, directory: project } };
+  };
+  const turn = (at: number): OpencodeExport["messages"][number] => ({
+    info: { id: `msg_more_${at}`, role: "assistant", time: { created: at, completed: at } },
+    parts: [{ id: `prt_more_${at}`, type: "text", text: "One more thing about auth." }],
+  });
+  const upload = async (...more: string[]) => {
+    const run = await machine.seshi([
+      "upload",
+      "--since",
+      "30d",
+      "--agent",
+      "opencode",
+      "--json",
+      ...more,
+    ]);
+    expect(run.code, run.err).toBe(0);
+    return JSON.parse(run.out).sessions as { key?: string; result: string; reason?: string }[];
+  };
+  const storedOpencode = (id: string) => getSession(server.instance.store, OWNER, "opencode", id);
+
+  it("finds sessions from before install within the cutoff, and a later turn", async () => {
+    const now = Date.now();
+    writeOpencodeDb(database(), [
+      session("ses_before", now - 2 * DAY),
+      session("ses_ancient", now - 400 * DAY),
+    ]);
+    expect(await upload()).toEqual([
+      { path: copy("ses_before"), key: "opencode:ses_before", result: "uploaded" },
+    ]);
+    expect((await storedOpencode("ses_before"))?.status).toBe("stored");
+    expect(await storedOpencode("ses_ancient")).toBeNull();
+    expect(JSON.parse(readFileSync(copy("ses_before"), "utf8")).messages).toHaveLength(3);
+
+    expect(await upload()).toEqual([expect.objectContaining({ result: "up to date" })]);
+    addOpencodeTurn(database(), "ses_before", turn(now));
+    expect(await upload()).toEqual([
+      { path: copy("ses_before"), key: "opencode:ses_before", result: "uploaded" },
+    ]);
+    expect(JSON.parse(readFileSync(copy("ses_before"), "utf8")).messages).toHaveLength(4);
+  });
+
+  it("uploads once a session the plugin handed over that the database also holds", async () => {
+    const both = session("ses_both", Date.now() - DAY);
+    const handed = await machine.seshi(["hook", "opencode", "Stop"], {
+      stdin: JSON.stringify({ session_id: "ses_both", cwd: project, export: both }),
+    });
+    expect(handed.code, handed.err).toBe(0);
+    const plugin = readFileSync(copy("ses_both"), "utf8");
+    writeOpencodeDb(database(), [both]);
+    expect(await upload()).toEqual([
+      { path: copy("ses_both"), key: "opencode:ses_both", result: "uploaded" },
+    ]);
+    // The plugin's copy was as new as the database: it is what went.
+    expect(readFileSync(copy("ses_both"), "utf8")).toBe(plugin);
+    expect(await upload()).toEqual([expect.objectContaining({ result: "up to date" })]);
+    // A turn the plugin did not hand over (it did not load): the database's is newer.
+    addOpencodeTurn(database(), "ses_both", turn(Date.now() + 1000));
+    expect(await upload()).toEqual([expect.objectContaining({ result: "uploaded" })]);
+    expect(JSON.parse(readFileSync(copy("ses_both"), "utf8")).messages).toHaveLength(4);
+  });
+
+  it("writes no copy of a session that is not captured", async () => {
+    writeOpencodeDb(database(), [session("ses_off", Date.now() - DAY)]);
+    await machine.seshi(["capture", "off", "--session", "ses_off", "--agent", "opencode"]);
+    expect(await upload()).toEqual([expect.objectContaining({ result: "skipped" })]);
+    expect(existsSync(copy("ses_off"))).toBe(false);
+  });
+
+  it("finds nothing quietly without a database, and says why it skips one it cannot read", async () => {
+    expect(await upload()).toEqual([]);
+    mkdirSync(join(database(), ".."), { recursive: true });
+    writeFileSync(database(), "");
+    const { Database } = await import("bun:sqlite");
+    const other = new Database(database());
+    other.run("CREATE TABLE session_v2 (id text PRIMARY KEY)");
+    other.close();
+    expect(await upload()).toEqual([
+      {
+        path: "opencode",
+        result: "skipped",
+        reason: expect.stringContaining("not an OpenCode database seshi can read"),
+      },
+    ]);
+  });
+
+  it("the uploader's sweep finds a session the plugin never handed over", async () => {
+    // The plugin handing one session over records OpenCode as installed now.
+    const handed = session("ses_handed", Date.now() - 1000);
+    await machine.seshi(["hook", "opencode", "Stop"], {
+      stdin: JSON.stringify({ session_id: "ses_handed", cwd: project, export: handed }),
+    });
+    expect((await daemon()).summary).toMatchObject({ uploaded: 1 });
+    writeOpencodeDb(database(), [handed, session("ses_missed", Date.now())]);
+    const s = state();
+    delete s.uploader.last_sweep;
+    writeFileSync(join(stateDir(), "state.json"), JSON.stringify(s), { mode: 0o600 });
+    expect((await daemon()).summary).toMatchObject({ found: 1, uploaded: 1 });
+    expect((await storedOpencode("ses_missed"))?.status).toBe("stored");
+    expect(existsSync(copy("ses_missed"))).toBe(true);
   });
 });
 

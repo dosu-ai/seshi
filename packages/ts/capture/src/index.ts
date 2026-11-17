@@ -97,6 +97,7 @@ export {
   HEAD_BYTES,
   identifySafely,
   readHead,
+  type SweepOptions,
   sweepAgent,
   sweepRoot,
   transcriptFiles,

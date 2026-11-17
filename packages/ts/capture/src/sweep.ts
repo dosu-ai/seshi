@@ -1,12 +1,15 @@
-import { closeSync, openSync, readdirSync, readSync, statSync } from "node:fs";
+import { closeSync, openSync, readdirSync, readSync, statSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import {
   type CaptureAgent,
   type CaptureHost,
   expandTilde,
+  handedTranscriptPath,
+  type StoredSession,
   type SweepPath,
   type TranscriptInfo,
 } from "@seshi/kit";
+import { readText, writePrivateFile } from "./files";
 
 export const HEAD_BYTES = 64 * 1024;
 
@@ -19,6 +22,15 @@ export interface FoundTranscript {
   /** When the session started: its first record's time, else the file's birth time, else its
    * modification time. */
   startedMs: number;
+  /** For a session found in the agent's own store (`CaptureAgent.stored`) whose copy at `path` is
+   * missing or older than the store: writes that copy, as the agent's hook would have. Call it
+   * only for a session that is captured: one turned off never reaches the disk. */
+  keep?(): void;
+}
+
+export interface SweepOptions {
+  /** Told why an agent's store could not be read (its sessions there are left out). */
+  onProblem?(message: string): void;
 }
 
 /** The first `HEAD_BYTES` of a file as text; empty when it cannot be read. */
@@ -89,12 +101,59 @@ function startedMs(info: TranscriptInfo, birthtimeMs: number, mtimeMs: number): 
   return birthtimeMs > 0 ? birthtimeMs : mtimeMs;
 }
 
-/** Every transcript of `agent` that started at or after `sinceMs`. */
-export function sweepAgent(
+/** Every transcript of `agent` that started at or after `sinceMs`: its files, and the sessions
+ * in its own store (`CaptureAgent.stored`) that are newer than seshi's copy of them, or that seshi
+ * has no copy of. A session is found once, whichever way. */
+export async function sweepAgent(
   agent: CaptureAgent,
   host: CaptureHost,
   sinceMs: number,
-): FoundTranscript[] {
+  options: SweepOptions = {},
+): Promise<FoundTranscript[]> {
+  const found = sweepFiles(agent, host, sinceMs);
+  if (!agent.stored) return found;
+  let stored: StoredSession[];
+  try {
+    stored = await agent.stored(host, sinceMs);
+  } catch (err) {
+    options.onProblem?.((err as Error).message);
+    return found;
+  }
+  const at = new Map(found.map((f, i) => [f.info.session_id, i]));
+  for (const session of stored) {
+    const path = handedTranscriptPath(host, agent, session.info.session_id);
+    if (!path) continue;
+    // seshi's copy is as new as the store: the files above found it, or left it out for its age.
+    const copied = statSync(path, { throwIfNoEntry: false })?.mtimeMs;
+    if (copied !== undefined && copied >= session.updatedMs) continue;
+    const started = startedMs(session.info, 0, session.updatedMs);
+    if (started < sinceMs) continue;
+    const entry: FoundTranscript = {
+      agent,
+      path,
+      info: session.info,
+      size: 0,
+      mtimeMs: session.updatedMs,
+      startedMs: started,
+      keep: () => keepStored(path, session),
+    };
+    const i = at.get(session.info.session_id);
+    if (i === undefined) found.push(entry);
+    else found[i] = entry;
+  }
+  return found;
+}
+
+/** Write a stored session's transcript to seshi's copy, dated when the session last changed: a
+ * copy that is already the same is left as it is, so nothing is sent again. */
+function keepStored(path: string, session: StoredSession): void {
+  const text = session.transcript();
+  if (readText(path) !== text) writePrivateFile(path, text);
+  const changed = new Date(session.updatedMs);
+  utimesSync(path, changed, changed);
+}
+
+function sweepFiles(agent: CaptureAgent, host: CaptureHost, sinceMs: number): FoundTranscript[] {
   const found: FoundTranscript[] = [];
   for (const path of agent.sweep) {
     for (const { file } of transcriptFiles(path, sweepRoot(path, host))) {

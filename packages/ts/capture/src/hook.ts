@@ -1,10 +1,9 @@
 import { appendFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
 import {
   type CaptureAgent,
   type CaptureHost,
   type HookCapture,
-  handedTranscriptDir,
+  handedTranscriptPath,
   hookHandler,
 } from "@seshi/kit";
 import { writeRecent } from "./current";
@@ -142,17 +141,6 @@ export async function runHook(run: HookRun): Promise<HookOutcome> {
     outcome.spooled.push(path ? { ...spooled, transcript_path: path } : spooled);
   }
   return outcome;
-}
-
-/** Where a transcript the hook was handed whole is kept; undefined for an unusable session id. */
-function handedTranscriptPath(
-  host: CaptureHost,
-  agent: Pick<CaptureAgent, "name" | "encoding">,
-  sessionId: string,
-): string | undefined {
-  if (!/^[\w.-]+$/.test(sessionId)) return undefined;
-  const ext = agent.encoding === "json" ? "json" : "jsonl";
-  return join(handedTranscriptDir(host, agent.name), `${sessionId}.${ext}`);
 }
 
 /** A transcript the hook was handed whole, written where the uploader reads it, readable only by

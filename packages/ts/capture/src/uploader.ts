@@ -37,7 +37,7 @@ import {
   uploadedOffset,
   uploadId,
 } from "./state";
-import { identifySafely, readHead, sweepAgent } from "./sweep";
+import { type FoundTranscript, identifySafely, readHead, sweepAgent } from "./sweep";
 import type { HeldUploaderLock } from "./uploader-lock";
 
 export interface PreRedactInput {
@@ -353,6 +353,7 @@ export class Uploader {
   private readonly now: () => Date;
   private readonly log: (line: string) => void;
   private readonly sweepIntervalMs: number;
+  private readonly logged = new Set<string>();
   private readonly staleIntervalMs: number;
   private readonly resendSpreadMs: number;
   private readonly rebuildsPerPass: number;
@@ -637,10 +638,21 @@ export class Uploader {
       const installed = state.agents[agent.name]?.installed_at;
       const floor = since ?? (installed ? new Date(installed) : undefined);
       if (!floor) continue;
-      for (const found of sweepAgent(agent, this.host, floor.getTime())) {
+      const swept = await sweepAgent(agent, this.host, floor.getTime(), {
+        onProblem: (problem) => this.logOnce(`sweep: ${problem}`),
+      });
+      for (const found of swept) {
         const key = sessionKey(agent.name, found.info.session_id);
         const known = state.sessions[key];
         if (known) {
+          // A session found newer in the agent's store than seshi's copy: the copy catches up,
+          // for a session still captured.
+          if (found.keep) {
+            const place = placeOf(known.cwd ?? found.info.cwd);
+            if (!this.decision(snapshot, known, place, state).capture || !this.kept(found)) {
+              continue;
+            }
+          }
           if (known.path !== found.path) paths.set(key, found.path);
           continue;
         }
@@ -663,6 +675,8 @@ export class Uploader {
           this.host.platform,
         );
         if (!decision.capture && decision.frozen === undefined) continue;
+        // A session found only in the agent's store is written out for capture alone.
+        if (found.keep && (!decision.capture || !this.kept(found))) continue;
         additions.push({
           agent: agent.name,
           session_id: found.info.session_id,
@@ -707,6 +721,26 @@ export class Uploader {
     });
     if (additions.length > 0) this.log(`sweep found ${additions.length} session(s)`);
     return additions.length;
+  }
+
+  /** Write out a session found in its agent's store; false, logged, when that fails. */
+  private kept(found: FoundTranscript): boolean {
+    try {
+      found.keep?.();
+      return true;
+    } catch (err) {
+      this.log(
+        `sweep: could not keep ${found.agent.name} session ${found.info.session_id}: ${message(err)}`,
+      );
+      return false;
+    }
+  }
+
+  /** Log `line` once in this uploader's life: a sweep repeats every interval. */
+  private logOnce(line: string): void {
+    if (this.logged.has(line)) return;
+    this.logged.add(line);
+    this.log(line);
   }
 
   private async checkStale(): Promise<void> {

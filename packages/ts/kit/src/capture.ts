@@ -76,6 +76,16 @@ export interface TranscriptInfo {
   parent_session_id?: string;
 }
 
+/** A session an agent keeps where `sweep` finds no file of it (OpenCode's database). */
+export interface StoredSession {
+  info: TranscriptInfo;
+  /** When it last changed, in milliseconds since the epoch. */
+  updatedMs: number;
+  /** The whole transcript, as the agent's hook hands it over (`HookCapture.transcript`). Read
+   * only when it is needed: for a captured session whose copy is missing or older. */
+  transcript(): string;
+}
+
 export interface InstallReport {
   changed: string[];
   notes: string[];
@@ -107,6 +117,11 @@ export interface CaptureAgent {
   readonly sweep: readonly SweepPath[];
   identify(path: string, head: string): TranscriptInfo | null;
   locate?(sessionId: string, host: CaptureHost): string | undefined;
+  /** For an agent whose hook hands seshi the transcript whole (`HookCapture.transcript`): its
+   * sessions that changed at or after `sinceMs`, read from where the agent keeps them, so a
+   * sweep finds those no hook handed over (from before install, or a run without the plugin).
+   * None when the agent keeps no store here; throws, saying why, on a store it cannot read. */
+  stored?(host: CaptureHost, sinceMs: number): Promise<StoredSession[]>;
   accountIds?(host: CaptureHost): Record<string, string>;
   readonly installer?: Installer;
 }
@@ -126,6 +141,19 @@ export function captureDir(host: CaptureHost): string {
 export function handedTranscriptDir(host: CaptureHost, agent: string): string {
   const at = host.platform === "win32" ? win32.join : posix.join;
   return at(captureDir(host), "transcripts", agent);
+}
+
+/** The file seshi keeps a transcript it was handed whole in (`HookCapture.transcript`), or found
+ * in the agent's own store (`CaptureAgent.stored`); undefined for an unusable session id. */
+export function handedTranscriptPath(
+  host: CaptureHost,
+  agent: Pick<CaptureAgent, "name" | "encoding">,
+  sessionId: string,
+): string | undefined {
+  if (!/^[\w.-]+$/.test(sessionId)) return undefined;
+  const at = host.platform === "win32" ? win32.join : posix.join;
+  const ext = agent.encoding === "json" ? "json" : "jsonl";
+  return at(handedTranscriptDir(host, agent.name), `${sessionId}.${ext}`);
 }
 
 export function expandTilde(path: string, home: string): string {
