@@ -99,6 +99,15 @@ stop_bg() {
   fi
   rm -f "$f"
 }
+# A failed `up` never printed its run id, so nobody could `down` it: stop what it started, keep
+# its logs as evidence, and delete its folder.
+up_failed() {
+  local evidence="$REPO/.verify/seshi/$VERIFY_SESHI_RUN"
+  stop_bg serve >/dev/null 2>&1 || true
+  mkdir -p "$evidence" && cp -R "$RUN/logs" "$evidence/up-logs" 2>/dev/null || true
+  case $RUN in "$ROOT"/*) rm -rf -- "$RUN" ;; esac
+  echo "control-seshi: up failed; run folder removed, its logs kept in $evidence/up-logs" >&2
+}
 
 case $cmd in
 up)
@@ -115,6 +124,7 @@ up)
   RUN=$(run_dir)
   mkdir -p "$RUN"/{home/.config/seshi,home/.claude/projects,bin,app,bucket,logs}
   touch "$RUN/.seshi-verify"
+  trap up_failed EXIT
   git -C "$RUN/app" init -q
   if [[ $binary == 1 ]]; then
     [[ -x $REPO/dist/seshi ]] || die "no $REPO/dist/seshi: run bun run build first"
@@ -144,17 +154,19 @@ EOF
       alive serve || { cat "$RUN/logs/serve.log" >&2; die "seshi serve exited"; }
       sleep 0.25
     done
-    curl -sf "$url/healthz" >/dev/null || die "seshi serve not ready after 30 s (see $RUN/logs/serve.log)"
+    curl -sf "$url/healthz" >/dev/null || { cat "$RUN/logs/serve.log" >&2; die "seshi serve not ready after 30 s"; }
     key=$(bun -e 'console.log(JSON.parse(await Bun.file(process.argv[1]).text()).org_key.token)' "$RUN/admin.json")
     printf '%s' "$key" | in_run seshi login --server "$url" --key - --user verifier >"$RUN/logs/login.log" 2>&1 \
       || { cat "$RUN/logs/login.log" >&2; die "login failed"; }
   else
-    cat >"$RUN/seshi.toml" <<EOF
-[store]
-url = "file://$RUN/bucket"
-EOF
-    printf '[local]\nconfig = "%s"\n' "$RUN/seshi.toml" >"$RUN/home/.config/seshi/config.toml"
+    # Local mode is serverless mode against the run's folder bucket: init writes the bucket's
+    # layout marker and `[serverless]` in the run's CLI config, and no shared settings, so the
+    # run sees seshi's built-in defaults. The owner is the OS username, or `verifier` without one.
+    in_run seshi init --serverless --url "file://$RUN/bucket" --owner "${USER:-verifier}" \
+      >"$RUN/logs/init.log" 2>&1 \
+      || { cat "$RUN/logs/init.log" >&2; die "seshi init --serverless failed"; }
   fi
+  trap - EXIT
   commit=$(git -C "$REPO" rev-parse --short HEAD)
   printf '{"run":"%s","mode":"%s","port":"%s","repo":"%s","commit":"%s","binary":%s}\n' \
     "$VERIFY_SESHI_RUN" "$mode" "$port" "$REPO" "$commit" "$([[ $binary == 1 ]] && echo true || echo false)" >"$RUN/run.json"
