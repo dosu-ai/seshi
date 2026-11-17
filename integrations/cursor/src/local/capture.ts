@@ -14,9 +14,11 @@
 import { existsSync, readdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import {
+  attachStatusLine,
   type CaptureAgent,
   type CaptureHost,
   commandLine,
+  detachStatusLine,
   type HookCapture,
   type HookHandler,
   type InstallContext,
@@ -29,7 +31,9 @@ import {
   payloadObject,
   readJsonConfig,
   removeSkill,
+  type StatusLineTarget,
   seshiPrompt,
+  statusLineNotes,
   stringField,
   type TranscriptInfo,
   writeJsonConfig,
@@ -120,6 +124,37 @@ interface CursorHook {
   [key: string]: unknown;
 }
 
+/** The Cursor CLI's config, whose `statusLine` takes the same shape as Claude Code's. */
+function cliConfigPath(host: CaptureHost): string {
+  return join(cursorDir(host), "cli-config.json");
+}
+
+function statusTarget(host: CaptureHost): StatusLineTarget {
+  return {
+    label: "The Cursor CLI",
+    chain: join(cursorDir(host), "seshi-statusline.json"),
+    args: ["--agent", AGENT],
+  };
+}
+
+function installStatusLine(context: InstallContext): { changed: string[]; notes: string[] } {
+  const path = cliConfigPath(context);
+  const config = readJsonConfig(path);
+  const status = attachStatusLine(config, context.command, statusTarget(context));
+  writeJsonConfig(path, config);
+  return { changed: [path, ...status.changed], notes: status.notes };
+}
+
+function removeStatusLine(context: InstallContext): string[] {
+  const path = cliConfigPath(context);
+  if (!existsSync(path)) return [];
+  const config = readJsonConfig(path);
+  const status = detachStatusLine(config, statusTarget(context));
+  if (!status.touched) return status.removed;
+  writeJsonConfig(path, config);
+  return [path, ...status.removed];
+}
+
 function skillPath(host: CaptureHost): string {
   return join(cursorDir(host), "skills", "seshi", "SKILL.md");
 }
@@ -155,13 +190,17 @@ export const cursorInstaller: Installer = {
       table[event] = hooks;
     }
     writeJsonConfig(path, { version: config.version ?? 1, ...config, hooks: table });
+    const status = installStatusLine(context);
     const skill = installSkill(skillPath(context), context.command);
-    return { changed: [path, ...skill.changed], notes: skill.notes };
+    return {
+      changed: [path, ...status.changed, ...skill.changed],
+      notes: [...status.notes, ...skill.notes],
+    };
   },
 
   async uninstall(context: InstallContext): Promise<InstallReport> {
     const path = hooksPath(context);
-    const skill = removeSkill(skillPath(context));
+    const skill = [...removeStatusLine(context), ...removeSkill(skillPath(context))];
     if (!existsSync(path)) return { changed: skill, notes: [] };
     const config = readJsonConfig(path);
     const table = hooksTable(config);
@@ -199,10 +238,14 @@ export const cursorInstaller: Installer = {
           ours: isOurSkill(skillPath(context)),
         },
       ],
-      notes:
-        present && missing.length > 0 && missing.length < CURSOR_EVENTS.length
+      notes: [
+        ...(present && missing.length > 0 && missing.length < CURSOR_EVENTS.length
           ? [`hooks missing for ${missing.join(", ")}: run seshi capture install cursor`]
-          : [],
+          : []),
+        ...(existsSync(cliConfigPath(context))
+          ? statusLineNotes(readJsonConfig(cliConfigPath(context)), statusTarget(context), AGENT)
+          : []),
+      ],
     };
   },
 };

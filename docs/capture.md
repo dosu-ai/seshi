@@ -32,11 +32,12 @@ seshi capture install --service  # also keep the uploader running between sessio
 |---|---|---|
 | Claude Code | hooks, the status line and the `/seshi` skill in `~/.claude/settings.json` and `~/.claude/skills/seshi/` (`CLAUDE_CONFIG_DIR` moves them) | SessionStart, Stop, SubagentStop, PreCompact, SessionEnd |
 | Codex | `notify` in `~/.codex/config.toml` (`CODEX_HOME` moves it); a `notify` program already there keeps running, after seshi's. SessionStart and UserPromptSubmit hooks in `~/.codex/hooks.json` for the notice and `$seshi`, and the `$seshi` skill in `~/.agents/skills/seshi/` | notify, plus the sweep of `~/.codex/sessions`; SessionStart and UserPromptSubmit only for the notice and `$seshi` |
-| Cursor (IDE and CLI) | hooks in `~/.cursor/hooks.json`, and the `/seshi` skill in `~/.cursor/skills/seshi/` | stop, sessionEnd; beforeSubmitPrompt only for `/seshi` |
+| Cursor (IDE and CLI) | hooks in `~/.cursor/hooks.json`, the Cursor CLI's status line in `~/.cursor/cli-config.json`, and the `/seshi` skill in `~/.cursor/skills/seshi/` | stop, sessionEnd; beforeSubmitPrompt only for `/seshi` |
 
 `install` merges: every hook already in those files stays, and running it twice is the same as
-once. A Claude Code status line someone else set up still shows, with seshi's after it: `install`
-moves it to `~/.claude/seshi-statusline.json` and points the status line at
+once. A status line someone else set up, in Claude Code or the Cursor CLI, still shows, with
+seshi's after it: `install` moves it to `~/.claude/seshi-statusline.json` (or
+`~/.cursor/seshi-statusline.json`) and points the status line at
 `seshi statusline --chain <that file>`, which runs it with the same input first. A skill named
 `seshi` that is not seshi's is left alone. `seshi capture uninstall` takes out only seshi's
 entries and puts a chained status line back; sessions already uploaded stay in the store.
@@ -126,7 +127,8 @@ Session Capture ⏸
 ◉ means this session is being captured, ⏸ that it is not (off, stopped by a pause, paused or
 excluded); anything that
 needs action follows a separator, at most two things. It reads only local files, never the
-network. Claude Code runs it as its status line. Codex's status line takes only its own
+network. Claude Code and the Cursor CLI run it as their status line (the Cursor CLI's with
+`--agent cursor`). Codex's status line takes only its own
 built-in items, so there seshi's SessionStart hook says it once, when a session starts or
 resumes, as a notice: `Session Capture ◉ · this session is uploaded to your team's session
 store as you work; $seshi off stops it`, or `Session Capture ⏸ · <why not>`. Codex asks you to
@@ -137,8 +139,8 @@ Codex `$seshi off`, `$seshi on` and `$seshi status` (or `$seshi`), typed as a me
 own, are done by seshi's UserPromptSubmit hook, which runs outside the sandbox, before the
 model sees the message; the result shows as a notice.
 
-Cursor has no status line, and shows a hook's message only when the hook stops a prompt. So
-its beforeSubmitPrompt hook does the same for `/seshi off`, `/seshi on` and `/seshi status`
+The Cursor IDE has no status line, and shows a hook's message only when the hook stops a
+prompt. So Cursor's beforeSubmitPrompt hook does the same for `/seshi off`, `/seshi on` and `/seshi status`
 (or `/seshi`) typed as a message of its own: it stops the message, the answer appears in its
 place, and the model never runs. Every other message passes.
 

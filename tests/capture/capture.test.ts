@@ -292,6 +292,12 @@ describe("hooks and the uploader (F9.1)", () => {
       user_message: "Session Capture ⏸ · turned off for this session; nothing of it was uploaded",
     });
     expect(state().sessions["cursor:conv-1"]).toMatchObject({ toggle: "off" });
+    // The Cursor CLI's status line reads the same session from its own payload.
+    const line = await machine.seshi(["statusline", "--agent", "cursor"], {
+      stdin: JSON.stringify({ session_id: "conv-1", cwd: project }),
+      env: { NO_COLOR: "1" },
+    });
+    expect(line.out).toMatch(/^Session Capture ⏸/);
     expect(JSON.parse((await say("/seshi")).out)).toEqual({
       continue: false,
       user_message: "Session Capture ⏸ · turned off for this session",

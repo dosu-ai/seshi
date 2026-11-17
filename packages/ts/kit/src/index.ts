@@ -46,6 +46,14 @@ export {
   writeJsonConfig,
 } from "./files";
 export { captureSkill, installSkill, isOurSkill, removeSkill, SKILL_MARKER } from "./skill";
+export {
+  attachStatusLine,
+  chainedNote,
+  detachStatusLine,
+  type StatusLineTarget,
+  savedStatusLine,
+  statusLineNotes,
+} from "./statusline";
 
 export type SubmitOutcome =
   | StoreSessionResult

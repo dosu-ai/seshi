@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type CaptureHost, hookHandler } from "@seshi/kit";
+import { type CaptureHost, commandLine, hookHandler } from "@seshi/kit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   CURSOR_CAPTURE,
@@ -137,11 +137,50 @@ describe("the installer (F9.6)", () => {
 
   it("adds the seshi skill to Cursor's skills, naming itself as cursor, and removes it", async () => {
     const skill = join(home, ".cursor", "skills", "seshi", "SKILL.md");
+    const cli = join(home, ".cursor", "cli-config.json");
     const report = await cursorInstaller.install(context());
-    expect(report.changed).toEqual([file(), skill]);
+    expect(report.changed).toEqual([file(), cli, skill]);
     expect(readFileSync(skill, "utf8")).toContain("`cursor` in Cursor");
     expect((await cursorInstaller.status(context())).files[1]).toMatchObject({ ours: true });
-    expect((await cursorInstaller.uninstall(context())).changed).toEqual([file(), skill]);
+    expect((await cursorInstaller.uninstall(context())).changed).toEqual([file(), cli, skill]);
     expect(existsSync(skill)).toBe(false);
+  });
+
+  it("sets the Cursor CLI's status line, running one someone else set up first", async () => {
+    const cli = join(home, ".cursor", "cli-config.json");
+    const chain = join(home, ".cursor", "seshi-statusline.json");
+    mkdirSync(join(home, ".cursor"));
+    const theirs = { type: "command", command: "dosu knowledge statusline render --agent cursor" };
+    writeFileSync(cli, JSON.stringify({ statusLine: theirs, editor: { vimMode: false } }));
+    const report = await cursorInstaller.install(context());
+    expect(report.notes[0]).toContain(`yours is kept in ${chain}`);
+    const config = JSON.parse(readFileSync(cli, "utf8"));
+    expect(config.editor).toEqual({ vimMode: false });
+    expect(config.statusLine).toEqual({
+      type: "command",
+      command: commandLine(["seshi", "statusline", "--agent", "cursor", "--chain", chain]),
+      padding: 0,
+    });
+    expect(JSON.parse(readFileSync(chain, "utf8"))).toEqual({ statusLine: theirs });
+    await cursorInstaller.install(context());
+    expect(JSON.parse(readFileSync(chain, "utf8"))).toEqual({ statusLine: theirs });
+    await cursorInstaller.uninstall(context());
+    expect(JSON.parse(readFileSync(cli, "utf8"))).toEqual({
+      statusLine: theirs,
+      editor: { vimMode: false },
+    });
+    expect(existsSync(chain)).toBe(false);
+  });
+
+  it("gives the Cursor CLI seshi's own status line when it has none", async () => {
+    await cursorInstaller.install(context());
+    const cli = join(home, ".cursor", "cli-config.json");
+    expect(JSON.parse(readFileSync(cli, "utf8")).statusLine).toEqual({
+      type: "command",
+      command: "seshi statusline --agent cursor",
+      padding: 0,
+    });
+    await cursorInstaller.uninstall(context());
+    expect(JSON.parse(readFileSync(cli, "utf8"))).toEqual({});
   });
 });

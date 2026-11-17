@@ -12,13 +12,15 @@
  * and Claude Code sets them for every command it runs afterwards in that session: that is how
  * `seshi capture off --session` (the `/seshi` skill) knows which session it is in. */
 
-import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import {
+  attachStatusLine,
   type CaptureAgent,
   type CaptureHost,
   captureSkill,
   commandLine,
+  detachStatusLine,
   expandTilde,
   type HookCapture,
   type HookHandler,
@@ -29,11 +31,11 @@ import {
   installSkill,
   isOurSkill,
   isSeshiHook,
-  isSeshiStatusline,
   payloadObject,
   readJsonConfig,
-  readTextFile,
   removeSkill,
+  type StatusLineTarget,
+  statusLineNotes,
   stringField,
   type TranscriptInfo,
   writeJsonConfig,
@@ -265,19 +267,8 @@ export function chainedStatusPath(host: CaptureHost): string {
   return join(claudeDir(host), "seshi-statusline.json");
 }
 
-function chainedNote(file: string): string {
-  return `Claude Code already had a status line: seshi's now shows after it (yours is kept in ${file}, and seshi capture uninstall puts it back)`;
-}
-
-function savedStatusLine(file: string): Record<string, unknown> | undefined {
-  try {
-    const saved = (JSON.parse(readTextFile(file) ?? "") as { statusLine?: unknown }).statusLine;
-    return typeof saved === "object" && saved !== null && !Array.isArray(saved)
-      ? (saved as Record<string, unknown>)
-      : undefined;
-  } catch {
-    return undefined;
-  }
+function statusTarget(host: CaptureHost): StatusLineTarget {
+  return { label: "Claude Code", chain: chainedStatusPath(host), args: [] };
 }
 
 export const claudeCodeInstaller: Installer = {
@@ -304,35 +295,9 @@ export const claudeCodeInstaller: Installer = {
       table[event] = groups;
     }
     settings.hooks = table;
-    const chain = chainedStatusPath(context);
-    const status = settings.statusLine as { command?: unknown; padding?: unknown } | undefined;
-    const changed = [path];
-    if (status === undefined) {
-      settings.statusLine = {
-        type: "command",
-        command: commandLine([...context.command, "statusline"]),
-        padding: 0,
-      };
-    } else if (isSeshiStatusline(status.command)) {
-      const chained = savedStatusLine(chain) !== undefined;
-      settings.statusLine = {
-        ...status,
-        command: commandLine([
-          ...context.command,
-          "statusline",
-          ...(chained ? ["--chain", chain] : []),
-        ]),
-      };
-    } else {
-      writeJsonConfig(chain, { statusLine: status });
-      changed.push(chain);
-      settings.statusLine = {
-        type: "command",
-        command: commandLine([...context.command, "statusline", "--chain", chain]),
-        padding: typeof status.padding === "number" ? status.padding : 0,
-      };
-      notes.push(chainedNote(chain));
-    }
+    const status = attachStatusLine(settings, context.command, statusTarget(context));
+    const changed = [path, ...status.changed];
+    notes.push(...status.notes);
     writeJsonConfig(path, settings);
     const skill = installSkill(skillPath(context), context.command);
     return { changed: [...changed, ...skill.changed], notes: [...notes, ...skill.notes] };
@@ -363,18 +328,9 @@ export const claudeCodeInstaller: Installer = {
       }
       if (Object.keys(table).length === 0) delete settings.hooks;
       else settings.hooks = table;
-      const status = settings.statusLine as { command?: unknown } | undefined;
-      if (status && isSeshiStatusline(status.command)) {
-        const chain = chainedStatusPath(context);
-        const saved = savedStatusLine(chain);
-        if (saved) settings.statusLine = saved;
-        else delete settings.statusLine;
-        if (existsSync(chain)) {
-          rmSync(chain, { force: true });
-          changed.push(chain);
-        }
-        touched = true;
-      }
+      const status = detachStatusLine(settings, statusTarget(context));
+      if (status.touched) touched = true;
+      changed.push(...status.removed);
       if (touched) {
         writeJsonConfig(path, settings);
         changed.push(path);
@@ -392,18 +348,11 @@ export const claudeCodeInstaller: Installer = {
     const missing = CLAUDE_CODE_EVENTS.filter(
       (e) => !hasOurs(groupsOf(table, e), commandLine(context.command)),
     );
-    const status = settings.statusLine as { command?: unknown } | undefined;
     const notes: string[] = [];
     if (present && missing.length > 0 && missing.length < CLAUDE_CODE_EVENTS.length) {
       notes.push(`hooks missing for ${missing.join(", ")}: run seshi capture install claude-code`);
     }
-    if (status && !isSeshiStatusline(status.command)) {
-      notes.push(
-        "Claude Code's status line is someone else's: run seshi capture install claude-code to show Session Capture after it",
-      );
-    } else if (savedStatusLine(chainedStatusPath(context))) {
-      notes.push(chainedNote(chainedStatusPath(context)));
-    }
+    notes.push(...statusLineNotes(settings, statusTarget(context), AGENT));
     const skill = skillPath(context);
     return {
       installed: present && missing.length === 0,
