@@ -31,6 +31,8 @@ export interface HookResult {
   /** The person just prompted this session: recorded as the folder's current conversation, for
    * an editor that cannot say which one it shows. */
   active?: HookCapture;
+  /** Something to tell the person as it is, such as a `/seshi` it could not read. */
+  say?: string;
 }
 
 export interface HookHandler {

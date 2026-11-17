@@ -97,6 +97,26 @@ sessions ran with no model spend, and each agent's folders isolated:
   hook load check (`check:hook`) covers both new capture modules, and their tests run in
   `test:laptop` (Windows in CI).
 
+## After the code review
+
+- A session turned off keeps no local copy of what OpenCode handed over: the hook removes it
+  when it skips the session, `capture off` removes it (and its subagents'), and `capture
+  uninstall opencode` removes the folder.
+- pi's `session_shutdown` with reason `reload` no longer ends the session.
+- Hand-offs no longer hold the agent up: pi's `agent_end` and OpenCode's start toast are not
+  awaited. The session's end (pi) and `session.idle` (OpenCode, whose `run` exits after it) still
+  are.
+- The OpenCode plugin stops reading and handing over a session seshi said it does not capture.
+  Every turn of a captured session still goes whole: the export is one JSON document.
+- `identify` no longer depends on the order of `info`'s keys: seshi writes `info` first itself,
+  and checks the id by its value.
+- `/seshi` with an argument it does not know says so (`HookResult.say`) instead of showing the
+  status.
+- pi's sessions are also found in the folder `sessionDir` in its settings names (an absolute one),
+  where pi writes them flat, with no folder per project.
+- The add-ons' process runner (`bridgeRuntime`) and the installers' marker-file handling
+  (`installOwnedFiles`, `removeOwnedFiles`, `ownedFileState`) are shared in `@seshi/kit`.
+
 ## Where the build differs from the plan
 
 - The plan had the OpenCode plugin write the export into seshi's folder itself. It hands it to

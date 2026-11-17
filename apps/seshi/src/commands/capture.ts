@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   appendSpool,
@@ -7,6 +7,7 @@ import {
   captureRules,
   decide,
   endPause,
+  forgetHandedTranscript,
   freeze,
   isPaused,
   otherFolders,
@@ -30,7 +31,7 @@ import {
 } from "@seshi/capture";
 import { parseDuration } from "@seshi/config";
 import type { CaptureAgent, InstallStatus } from "@seshi/kit";
-import { expandTilde } from "@seshi/kit";
+import { expandTilde, handedTranscriptDir } from "@seshi/kit";
 import { type Account, openAccount } from "../account/account";
 import { allCaptureAgents, CAPTURE_AGENTS, captureAgent } from "../capture-agents";
 import {
@@ -359,6 +360,11 @@ async function uninstall(ctx: CommandContext, json: boolean, args: Args): Promis
       if (!failed.some((f) => f.agent === agent.name)) delete state.agents[agent.name];
     }
   });
+  // seshi's own copies of sessions an agent handed it whole (OpenCode's) go with the agent.
+  for (const agent of agents) {
+    if (failed.some((f) => f.agent === agent.name)) continue;
+    rmSync(handedTranscriptDir(host, agent.name), { recursive: true, force: true });
+  }
   const service = args.service
     ? await uninstallService(serviceContext(ctx, serviceCommand(command)))
     : undefined;
@@ -709,6 +715,7 @@ async function toggleSession(
   let fresh = false;
   let unfrozen = false;
   const located = await locateUnnamedTranscript(ctx, paths, agent, id);
+  const turnedOff: string[] = [];
   await updateState(paths, (state) => {
     const session: SessionState = state.sessions[key] ?? {
       agent,
@@ -722,6 +729,7 @@ async function toggleSession(
     state.sessions[key] = session;
     for (const s of cascadeToSubagents(state, session, agent, id)) {
       if (which === "off") {
+        turnedOff.push(s.session_id);
         if (s.sent) {
           s.retract = "pending";
           retracting = true;
@@ -732,6 +740,11 @@ async function toggleSession(
       }
     }
   });
+  // A session turned off keeps no copy here of what an agent handed seshi whole.
+  const loaded = turnedOff.length > 0 ? await captureAgent(agent) : undefined;
+  if (loaded) {
+    for (const off of turnedOff) forgetHandedTranscript(hostOf(ctx), loaded, off);
+  }
   appendSpool(
     paths,
     which === "off"

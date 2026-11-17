@@ -18,6 +18,7 @@ export type {
   SpanResource,
   SpanValue,
 } from "@seshi/model";
+export { bridgeRuntime } from "./bridge";
 export {
   type CaptureAgent,
   type CaptureHost,
@@ -47,6 +48,14 @@ export {
   writeFileAtomic,
   writeJsonConfig,
 } from "./files";
+export {
+  installOwnedFiles,
+  type OwnedFile,
+  type OwnedFileState,
+  ownedFileNotes,
+  ownedFileState,
+  removeOwnedFiles,
+} from "./owned";
 export { captureSkill, installSkill, isOurSkill, removeSkill, SKILL_MARKER } from "./skill";
 export {
   attachStatusLine,

@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { type CaptureHost, handedTranscriptDir, hookHandler } from "@seshi/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -14,6 +14,7 @@ import {
   pluginPath,
   tuiConfigPath,
   tuiPluginPath,
+  UNKNOWN_SESHI,
 } from "./capture";
 import { OPENCODE_FORMAT } from "./index";
 import {
@@ -46,6 +47,10 @@ describe("OpenCode's hooks, from seshi's plugin (F9.2)", () => {
     expect(hookHandler(OPENCODE_CAPTURE, "Stop")?.parse(stop, host)).toEqual({
       captures: [{ session_id: ID, cwd: "/repo/app", transcript: JSON.stringify(EXPORT) }],
     });
+    // Written with `info` first whatever order it came in, for identify to read from the head.
+    const reordered = { ...stop, export: { messages: EXPORT.messages, info: EXPORT.info } };
+    const written = hookHandler(OPENCODE_CAPTURE, "Stop")?.parse(reordered, host)?.captures[0];
+    expect(written?.transcript).toBe(JSON.stringify(EXPORT));
     const child = { ...stop, session_id: "ses_child", parent_session_id: ID };
     expect(hookHandler(OPENCODE_CAPTURE, "Stop")?.parse(child, host)?.captures[0]).toMatchObject({
       session_id: "ses_child",
@@ -77,6 +82,10 @@ describe("OpenCode's hooks, from seshi's plugin (F9.2)", () => {
     expect(command?.parse({ ...payload("Command"), arguments: "on" }, host)?.request?.action).toBe(
       "on",
     );
+    expect(command?.parse({ ...payload("Command"), arguments: "pause 2h" }, host)).toEqual({
+      captures: [],
+      say: UNKNOWN_SESHI,
+    });
     expect(command?.reply?.("hi")).toEqual({ message: "hi" });
   });
 });
@@ -102,6 +111,14 @@ describe("the sessions seshi was handed", () => {
       identifyOpencodeExport(join(home, "ses_child.json"), JSON.stringify(child)),
     ).toMatchObject({ session_id: "ses_child", parent_session_id: ID });
     expect(identifyOpencodeExport(join(home, "other.json"), JSON.stringify(EXPORT))).toBeNull();
+    // Whatever order info's keys come in, and an id nested before its own.
+    const shuffled = {
+      info: { share: { id: "share_1" }, directory: "/repo/app", id: ID, time: { created: 1 } },
+      messages: [],
+    };
+    expect(
+      identifyOpencodeExport(join(home, `${ID}.json`), JSON.stringify(shuffled)),
+    ).toMatchObject({ session_id: ID, cwd: "/repo/app" });
     expect(identifyOpencodeExport(file, '{"messages":[]}')).toBeNull();
   });
 
@@ -114,8 +131,10 @@ describe("the sessions seshi was handed", () => {
     expect(locateOpencodeExport("ses_missing", host)).toBeUndefined();
     expect(locateOpencodeExport("../x", host)).toBeUndefined();
     const [path] = OPENCODE_CAPTURE.sweep;
-    expect(path?.resolve?.(host)).toBe(
-      join(home, ".local", "state", "seshi", "transcripts", "opencode"),
+    // The host is Linux on every machine, so the folder is written with `/`; resolve() reads it
+    // as this machine's path.
+    expect(resolve(path?.resolve?.(host) ?? "")).toBe(
+      resolve(home, ".local", "state", "seshi", "transcripts", "opencode"),
     );
     expect(path?.match(`${ID}.json`)).toBe(true);
     expect(path?.match(`${ID}.json.123.tmp`)).toBe(false);
@@ -148,7 +167,7 @@ describe("seshi capture install opencode", () => {
       command,
       config,
     ]);
-    expect(readFileSync(plugin, "utf8")).toContain(`// ${PLUGIN_MARKER} v1`);
+    expect(readFileSync(plugin, "utf8")).toContain(`// ${PLUGIN_MARKER} v3`);
     expect(readFileSync(plugin, "utf8")).toContain('const SESHI = ["/opt/seshi/bin/seshi"];');
     expect(readFileSync(tui, "utf8")).toContain(`// ${TUI_PLUGIN_MARKER} v1`);
     expect(readFileSync(tui, "utf8")).toContain('const SESHI = ["/opt/seshi/bin/seshi"];');
@@ -263,6 +282,11 @@ process.stdin.on("end", () => {
   appendFileSync(process.env.FAKE_SESHI_LOG, JSON.stringify({ args, input, inherited: process.env.SESHI_SESSION_ID ?? null }) + "\\n");
   if (args[2] === "SessionStart") process.stdout.write(JSON.stringify({ message: "Session Capture ◉ · uploaded as you work" }) + "\\n");
   if (args[2] === "Command") process.stdout.write(JSON.stringify({ message: "Session Capture ⏸ · turned off for this session" }) + "\\n");
+  // Turned on elsewhere (the TUI plugin, the CLI) once an "on" file is beside the log.
+  if (args[0] === "statusline") {
+    const on = require("node:fs").existsSync(require("node:path").join(process.env.FAKE_SESHI_LOG, "..", "on"));
+    process.stdout.write(on ? "Session Capture ◉\\n" : "Session Capture ⏸ · turned off for this session\\n");
+  }
 });
 `;
 
@@ -347,6 +371,7 @@ process.stdin.on("end", () => {
         properties: { info: { ...EXPORT.info, id: "ses_child", parentID: ID } },
       },
     });
+    await vi.waitFor(() => expect(oc.toasts).toHaveLength(1));
     expect(oc.calls().map((c) => c.args)).toEqual([["hook", "opencode", "SessionStart"]]);
     expect(oc.toasts).toEqual([
       expect.objectContaining({
@@ -377,13 +402,33 @@ process.stdin.on("end", () => {
         text: expect.stringContaining("Session Capture ⏸ · turned off for this session"),
       },
     ]);
+    // A session seshi turned off is not handed over again: a turn only asks seshi's status line.
+    await oc.hooks.event({ event: { type: "session.idle", properties: { sessionID: ID } } });
+    expect(oc.calls().map((c) => c.args)).toEqual([
+      ["hook", "opencode", "Command"],
+      ["statusline", "--agent", "opencode"],
+    ]);
     const other = { parts: [{ type: "text", text: "/review" }] as unknown[] };
     await oc.hooks["command.execute.before"](
       { command: "review", sessionID: ID, arguments: "" },
       other,
     );
     expect(other.parts).toEqual([{ type: "text", text: "/review" }]);
-    expect(oc.calls()).toHaveLength(1);
+    expect(oc.calls()).toHaveLength(2);
+
+    // Turned on where the plugin does not hear it (the TUI plugin's /seshi on, the CLI): handed
+    // over again from the next turn.
+    writeFileSync(join(home, "on"), "");
+    await oc.hooks.event({ event: { type: "session.idle", properties: { sessionID: ID } } });
+    expect(oc.calls().map((c) => c.args.join(" "))).toEqual([
+      "hook opencode Command",
+      "statusline --agent opencode",
+      "statusline --agent opencode",
+      "hook opencode Stop",
+    ]);
+    await oc.hooks.event({ event: { type: "session.idle", properties: { sessionID: ID } } });
+    expect(oc.calls().at(-1)?.args).toEqual(["hook", "opencode", "Stop"]);
+    expect(oc.calls()).toHaveLength(5);
   });
 });
 

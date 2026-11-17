@@ -20,6 +20,7 @@ import {
   piInstaller,
   piSessionsDir,
   sessionIdOfFile,
+  UNKNOWN_SESHI,
 } from "./capture";
 import { EXTENSION_MARKER, piExtension } from "./extension";
 
@@ -79,6 +80,9 @@ describe("pi's hooks, from seshi's extension (F9.2)", () => {
     });
     expect(command("/seshi on")?.request?.action).toBe("on");
     expect(command("/seshi")).toEqual({ captures: [], announce: which });
+    // An argument it does not know changes nothing, and says so.
+    expect(command("/seshi pause 2h")).toEqual({ captures: [], say: UNKNOWN_SESHI });
+    expect(command("/seshi of")?.say).toBe(UNKNOWN_SESHI);
     expect(command("/seshi status")).toEqual({ captures: [], announce: which });
     expect(hookHandler(PI_CAPTURE, "Command")?.reply?.("hi")).toEqual({ message: "hi" });
   });
@@ -116,11 +120,27 @@ describe("pi's session files", () => {
     expect(piSessionsDir(host)).toBe(join(home, ".pi", "agent", "sessions"));
   });
 
-  it("are what the sweep matches, one folder below sessions/", () => {
+  it("are found in the session folder pi's settings name, where pi writes them flat", () => {
+    const notes = join(home, "notes-pi");
+    mkdirSync(join(home, ".pi", "agent"), { recursive: true });
+    mkdirSync(notes);
+    cpSync(forkFile, join(notes, `2026-11-17T09-05-00-000Z_${FORK}.jsonl`));
+    writeFileSync(join(home, ".pi", "agent", "settings.json"), '{"sessionDir": "~/notes-pi"}');
+    expect(piSessionsDir(host)).toBe(notes);
+    expect(locatePiSession(FORK, host)).toBe(join(notes, `2026-11-17T09-05-00-000Z_${FORK}.jsonl`));
+    // A relative one is per project (from each session's folder): not one place to look.
+    writeFileSync(join(home, ".pi", "agent", "settings.json"), '{"sessionDir": "sessions"}');
+    expect(piSessionsDir(host)).toBe(join(home, ".pi", "agent", "sessions"));
+    writeFileSync(join(home, ".pi", "agent", "settings.json"), "{ broken");
+    expect(piSessionsDir(host)).toBe(join(home, ".pi", "agent", "sessions"));
+  });
+
+  it("are what the sweep matches: in a folder per project, or flat in a folder set", () => {
     const [path] = PI_CAPTURE.sweep;
     expect(path?.match(`--repo-app--/2026-11-17T09-00-00-000Z_${PARENT}.jsonl`)).toBe(true);
+    expect(path?.match(`2026-11-17T09-00-00-000Z_${PARENT}.jsonl`)).toBe(true);
     expect(path?.match("--repo-app--/notes.jsonl")).toBe(false);
-    expect(path?.match(`2026-11-17T09-00-00-000Z_${PARENT}.jsonl`)).toBe(false);
+    expect(path?.match(`a/b/2026-11-17T09-00-00-000Z_${PARENT}.jsonl`)).toBe(false);
     expect(PI_CAPTURE).toMatchObject({ encoding: "jsonl", chunkable: true, format: "pi" });
   });
 });
@@ -134,7 +154,7 @@ describe("seshi capture install pi", () => {
     const path = extensionPath(host);
     expect(await piInstaller.install(context())).toMatchObject({ changed: [path] });
     const text = readFileSync(path, "utf8");
-    expect(text.startsWith(`// ${EXTENSION_MARKER} v1`)).toBe(true);
+    expect(text.startsWith(`// ${EXTENSION_MARKER} v2`)).toBe(true);
     expect(text).toContain('const SESHI = ["/opt/seshi/bin/seshi"];');
     expect(await piInstaller.install(context())).toEqual({ changed: [], notes: [] });
     expect(await piInstaller.status(context())).toMatchObject({ installed: true, notes: [] });
@@ -244,14 +264,13 @@ process.stdin.on("end", () => {
       "session_shutdown",
       "session_start",
     ]);
-    await pi.handlers.get("agent_end")?.({}, pi.ctx(forkFile));
+    // agent_end does not wait for seshi; the session's end does.
+    expect(pi.handlers.get("agent_end")?.({}, pi.ctx(forkFile))).toBeUndefined();
     await pi.handlers.get("session_shutdown")?.({ reason: "quit" }, pi.ctx(forkFile));
+    expect(pi.calls().map((c) => c.args)).toContainEqual(["hook", "pi", "SessionEnd"]);
     await vi.waitFor(() => expect(pi.calls()).toHaveLength(3));
     const hooks = pi.calls().filter((c) => c.args[0] === "hook");
-    expect(hooks.map((c) => c.args)).toEqual([
-      ["hook", "pi", "Stop"],
-      ["hook", "pi", "SessionEnd"],
-    ]);
+    expect(hooks.map((c) => c.args[2]).sort()).toEqual(["SessionEnd", "Stop"]);
     expect(JSON.parse(hooks[0]?.input ?? "")).toEqual({
       session_id: FORK,
       transcript_path: forkFile,
@@ -260,6 +279,14 @@ process.stdin.on("end", () => {
     });
     // A Claude Code shell's SESHI_SESSION_ID names that session, not pi's.
     expect(pi.calls().every((c) => c.inherited === null)).toBe(true);
+  });
+
+  it("does not end the session on /reload, which restarts only the extensions", async () => {
+    const pi = await load();
+    process.env.FAKE_SESHI_LOG = pi.log;
+    await pi.handlers.get("session_shutdown")?.({ reason: "reload" }, pi.ctx(forkFile));
+    await pi.handlers.get("session_shutdown")?.({ reason: "new" }, pi.ctx(forkFile));
+    expect(pi.calls().map((c) => c.args)).toEqual([["hook", "pi", "SessionEnd"]]);
   });
 
   it("shows seshi's status line in the footer, without colour", async () => {
@@ -303,8 +330,8 @@ process.stdin.on("end", () => {
     module.default({ on: (n: string, f: never) => handlers.set(n, f), registerCommand: () => {} });
     const status: unknown[] = [];
     await expect(
-      handlers.get("agent_end")?.(
-        {},
+      handlers.get("session_shutdown")?.(
+        { reason: "quit" },
         {
           cwd: home,
           hasUI: true,
@@ -317,6 +344,19 @@ process.stdin.on("end", () => {
         },
       ),
     ).resolves.toBeUndefined();
+    await handlers.get("session_start")?.(
+      {},
+      {
+        cwd: home,
+        hasUI: true,
+        sessionManager: {
+          getSessionFile: () => forkFile,
+          getSessionId: () => FORK,
+          getHeader: () => undefined,
+        },
+        ui: { setStatus: (_k: string, t: unknown) => status.push(t), notify: () => {} },
+      },
+    );
     await vi.waitFor(() => expect(status).toEqual([undefined]));
   });
 });

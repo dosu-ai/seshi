@@ -1,4 +1,4 @@
-import { appendFileSync } from "node:fs";
+import { appendFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import {
   type CaptureAgent,
@@ -34,6 +34,8 @@ export interface HookOutcome {
   announced?: { session_id: string; decision: Decision };
   /** What the person asked the hook to do for their session (the command carries it out). */
   requested?: { action: "off" | "on"; session: HookCapture };
+  /** What the handler asked to tell the person. */
+  said?: string;
 }
 
 /** A value as one shell word: single-quoted, with any single quote in it closed and escaped. */
@@ -66,6 +68,7 @@ export async function runHook(run: HookRun): Promise<HookOutcome> {
     });
   }
   if (result.request) outcome.requested = result.request;
+  if (result.say) outcome.said = result.say;
   if (result.captures.length === 0 && !result.announce) return outcome;
 
   const now = run.now ?? new Date();
@@ -96,6 +99,8 @@ export async function runHook(run: HookRun): Promise<HookOutcome> {
   for (const capture of result.captures) {
     const { known, decision } = judge(capture);
     if (!decision.capture) {
+      if (capture.transcript !== undefined)
+        forgetHandedTranscript(run.host, run.agent, capture.session_id);
       outcome.skipped.push({ session_id: capture.session_id, decision });
       if (respoolPausedSession(run, capture, known, decision, now)) continue;
       if ((decision.level === "org" || decision.level === "repo") && capture.cwd) {
@@ -139,16 +144,34 @@ export async function runHook(run: HookRun): Promise<HookOutcome> {
   return outcome;
 }
 
+/** Where a transcript the hook was handed whole is kept; undefined for an unusable session id. */
+function handedTranscriptPath(
+  host: CaptureHost,
+  agent: Pick<CaptureAgent, "name" | "encoding">,
+  sessionId: string,
+): string | undefined {
+  if (!/^[\w.-]+$/.test(sessionId)) return undefined;
+  const ext = agent.encoding === "json" ? "json" : "jsonl";
+  return join(handedTranscriptDir(host, agent.name), `${sessionId}.${ext}`);
+}
+
 /** A transcript the hook was handed whole, written where the uploader reads it, readable only by
  * this user. Only a captured session's is written: one turned off never reaches the disk. */
 function keep(run: HookRun, capture: HookCapture): string {
-  if (!/^[\w.-]+$/.test(capture.session_id)) {
-    throw new Error(`${run.agent.name}: unusable session id '${capture.session_id}'`);
-  }
-  const ext = run.agent.encoding === "json" ? "json" : "jsonl";
-  const path = join(handedTranscriptDir(run.host, run.agent.name), `${capture.session_id}.${ext}`);
+  const path = handedTranscriptPath(run.host, run.agent, capture.session_id);
+  if (!path) throw new Error(`${run.agent.name}: unusable session id '${capture.session_id}'`);
   writePrivateFile(path, capture.transcript as string);
   return path;
+}
+
+/** Remove seshi's copy of a session it was handed whole (a session turned off keeps none). */
+export function forgetHandedTranscript(
+  host: CaptureHost,
+  agent: Pick<CaptureAgent, "name" | "encoding">,
+  sessionId: string,
+): void {
+  const path = handedTranscriptPath(host, agent, sessionId);
+  if (path) rmSync(path, { force: true });
 }
 
 function respoolPausedSession(

@@ -43,8 +43,9 @@ fake model (`.claude/skills/verify-seshi/scripts/fake-model.ts`) and the agent's
 
 - **The TUI plugin** (`opencodeTuiPlugin` in `integrations/opencode/src/plugin.ts`), written to
   `~/.config/opencode/seshi/tui.js` with a marker, plain JavaScript with seshi's program baked
-  in, sharing the server plugin's runner (environment without `SESHI_SESSION_ID`/`SESHI_AGENT`,
-  a shell for a Windows `.cmd` shim, a 10 s limit, never rejecting):
+  in, running seshi through the add-ons' shared runner (`bridgeRuntime` in `@seshi/kit`:
+  environment without `SESHI_SESSION_ID`/`SESHI_AGENT`, a shell for a Windows `.cmd` shim, a
+  10 s limit, never rejecting):
   - fills `session_prompt_right` with `seshi statusline --agent opencode` (with `NO_COLOR`) up to
     its first ` · `, in the theme's muted colour, or its warning colour for `⏸`; read when the
     session comes into view and after each `session.idle` of that session or its subagents'.
@@ -67,9 +68,12 @@ fake model (`.claude/skills/verify-seshi/scripts/fake-model.ts`) and the agent's
   entry, removes `tui.json` when nothing but its `$schema` is left, and removes `seshi/` once
   empty (only when it removed the TUI plugin itself). `status` lists `tui.json` and notes when the
   entry is missing, without counting it toward `installed`: capture works without it.
-- **The server plugin** is unchanged but for its runner taking extra variables. Its command file
-  and `command.execute.before` stay for `opencode run --command seshi`, the web UI, and the TUI's
-  home screen; its start toast stays.
+- **The server plugin** keeps its command file and `command.execute.before` for
+  `opencode run --command seshi`, the web UI, and the TUI's home screen, and its start toast.
+  It stops handing over a session seshi said is not captured (41's review), but it no longer
+  hears `/seshi on` when the TUI plugin takes it. So for such a session, each turn asks
+  `seshi statusline` (no read of the session) and hands the session over again once it says
+  `◉`. That also covers `seshi capture on --session` from a shell.
 
 ## Where the build differs from the plan
 
