@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { type CaptureHost, handedTranscriptDir, hookHandler } from "@seshi/kit";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   commandPath,
   identifyOpencodeExport,
@@ -12,9 +12,17 @@ import {
   opencodeConfigDir,
   opencodeInstaller,
   pluginPath,
+  tuiConfigPath,
+  tuiPluginPath,
 } from "./capture";
 import { OPENCODE_FORMAT } from "./index";
-import { COMMAND_MARKER, opencodePlugin, PLUGIN_MARKER } from "./plugin";
+import {
+  COMMAND_MARKER,
+  opencodePlugin,
+  opencodeTuiPlugin,
+  PLUGIN_MARKER,
+  TUI_PLUGIN_MARKER,
+} from "./plugin";
 
 const TESTDATA = join(import.meta.dirname, "../testdata");
 const payload = (name: string) =>
@@ -126,37 +134,108 @@ describe("the sessions seshi was handed", () => {
 describe("seshi capture install opencode", () => {
   const context = () => ({ ...host, command: ["/opt/seshi/bin/seshi"] });
 
-  it("writes the plugin and the /seshi command once, and removes only its own", async () => {
+  it("writes the plugins and the /seshi command once, and removes only its own", async () => {
     mkdirSync(join(home, ".config", "opencode"), { recursive: true });
     expect(opencodeInstaller.detect(host)).toBe(true);
     const plugin = pluginPath(host);
+    const tui = tuiPluginPath(host);
     const command = commandPath(host);
-    expect((await opencodeInstaller.install(context())).changed).toEqual([plugin, command]);
+    const config = tuiConfigPath(host);
+    expect(tui).toBe(join(home, ".config", "opencode", "seshi", "tui.js"));
+    expect((await opencodeInstaller.install(context())).changed).toEqual([
+      plugin,
+      tui,
+      command,
+      config,
+    ]);
     expect(readFileSync(plugin, "utf8")).toContain(`// ${PLUGIN_MARKER} v1`);
     expect(readFileSync(plugin, "utf8")).toContain('const SESHI = ["/opt/seshi/bin/seshi"];');
+    expect(readFileSync(tui, "utf8")).toContain(`// ${TUI_PLUGIN_MARKER} v1`);
+    expect(readFileSync(tui, "utf8")).toContain('const SESHI = ["/opt/seshi/bin/seshi"];');
     expect(readFileSync(command, "utf8")).toContain(COMMAND_MARKER);
+    expect(JSON.parse(readFileSync(config, "utf8"))).toEqual({
+      $schema: "https://opencode.ai/tui.json",
+      plugin: [tui],
+    });
     expect(await opencodeInstaller.install(context())).toEqual({ changed: [], notes: [] });
     expect(await opencodeInstaller.status(context())).toMatchObject({ installed: true, notes: [] });
 
     const moved = { ...context(), command: ["/usr/local/bin/seshi"] };
     expect((await opencodeInstaller.status(moved)).notes[0]).toContain("out of date");
-    expect((await opencodeInstaller.install(moved)).changed).toEqual([plugin]);
+    expect((await opencodeInstaller.install(moved)).changed).toEqual([plugin, tui]);
     expect(await opencodeInstaller.uninstall(moved)).toEqual({
-      changed: [plugin, command],
+      changed: [plugin, tui, command, config],
       notes: [],
     });
-    expect(existsSync(plugin) || existsSync(command)).toBe(false);
+    expect([plugin, tui, command, config].some((f) => existsSync(f))).toBe(false);
+    expect(existsSync(join(tui, ".."))).toBe(false);
   });
 
-  it("leaves a seshi.js or seshi.md that is someone else's alone", async () => {
+  it("adds its TUI plugin to the person's tui.json, and takes only that out again", async () => {
+    const config = tuiConfigPath(host);
+    const tui = tuiPluginPath(host);
+    const theirs = {
+      $schema: "https://opencode.ai/tui.json",
+      theme: "tokyonight",
+      plugin: ["opencode-wakatime", ["./mine.ts", { loud: true }]],
+      keybinds: { leader: "ctrl+x" },
+    };
+    mkdirSync(join(config, ".."), { recursive: true });
+    writeFileSync(config, JSON.stringify(theirs));
+    expect((await opencodeInstaller.install(context())).changed).toContain(config);
+    expect(JSON.parse(readFileSync(config, "utf8"))).toEqual({
+      ...theirs,
+      plugin: [...theirs.plugin, tui],
+    });
+    expect((await opencodeInstaller.uninstall(context())).changed).toContain(config);
+    expect(JSON.parse(readFileSync(config, "utf8"))).toEqual(theirs);
+
+    // Listed by hand as a file URL, with options: found, not listed twice, and taken out.
+    const listed = { plugin: [[pathToFileURL(tui).href, {}]] };
+    writeFileSync(config, JSON.stringify(listed));
+    expect((await opencodeInstaller.install(context())).changed).not.toContain(config);
+    expect(JSON.parse(readFileSync(config, "utf8"))).toEqual(listed);
+    expect((await opencodeInstaller.status(context())).installed).toBe(true);
+    await opencodeInstaller.uninstall(context());
+    expect(existsSync(config)).toBe(false);
+  });
+
+  it("leaves a tui.json with comments alone, and says what to add by hand", async () => {
+    const config = tuiConfigPath(host);
+    const text = '{\n  // my theme\n  "theme": "tokyonight"\n}\n';
+    mkdirSync(join(config, ".."), { recursive: true });
+    writeFileSync(config, text);
+    const report = await opencodeInstaller.install(context());
+    expect(report.changed).toEqual([pluginPath(host), tuiPluginPath(host), commandPath(host)]);
+    expect(report.notes[0]).toContain(`add "${tuiPluginPath(host)}" to its "plugin" list`);
+    expect(readFileSync(config, "utf8")).toBe(text);
+    const status = await opencodeInstaller.status(context());
+    expect(status.installed).toBe(false);
+    expect(status.notes[0]).toContain("is not plain JSON");
+    await opencodeInstaller.uninstall(context());
+    expect(readFileSync(config, "utf8")).toBe(text);
+
+    writeFileSync(config, JSON.stringify({ plugin: "one" }));
+    expect((await opencodeInstaller.install(context())).notes[0]).toContain("not a list");
+    expect(readFileSync(config, "utf8")).toBe(JSON.stringify({ plugin: "one" }));
+  });
+
+  it("leaves a seshi.js, seshi/tui.js or seshi.md that is someone else's alone", async () => {
     mkdirSync(join(commandPath(host), ".."), { recursive: true });
     writeFileSync(commandPath(host), "my own command\n");
     const report = await opencodeInstaller.install(context());
     expect(report.changed).toEqual([]);
     expect(report.notes[0]).toContain("not seshi's");
-    expect(existsSync(pluginPath(host))).toBe(false);
+    expect(existsSync(pluginPath(host)) || existsSync(tuiConfigPath(host))).toBe(false);
     expect((await opencodeInstaller.uninstall(context())).changed).toEqual([]);
     expect(readFileSync(commandPath(host), "utf8")).toBe("my own command\n");
+
+    rmSync(commandPath(host));
+    mkdirSync(join(tuiPluginPath(host), ".."), { recursive: true });
+    writeFileSync(tuiPluginPath(host), "export default {};\n");
+    expect((await opencodeInstaller.install(context())).notes[0]).toContain(
+      `${tuiPluginPath(host)} is not seshi's`,
+    );
   });
 
   it("follows XDG_CONFIG_HOME, and finds OpenCode by its data folder too", () => {
@@ -302,5 +381,197 @@ process.stdin.on("end", () => {
     );
     expect(other.parts).toEqual([{ type: "text", text: "/review" }]);
     expect(oc.calls()).toHaveLength(1);
+  });
+});
+
+/** The TUI plugin as OpenCode's TUI loads it: `@opentui/solid` and `solid-js` stand-ins in a
+ * `node_modules` beside it (the stand-in effect runs once, the signal is read through the
+ * text's accessor), a stand-in for the TUI's plugin API, and a stand-in seshi. */
+describe("the OpenCode TUI plugin", () => {
+  const FAKE_SESHI = `
+const { appendFileSync, existsSync, writeFileSync } = require("node:fs");
+const { join } = require("node:path");
+let input = "";
+process.stdin.on("data", (c) => (input += c));
+process.stdin.on("end", () => {
+  const args = process.argv.slice(2);
+  const log = process.env.FAKE_SESHI_LOG;
+  const off = join(log, "..", "off");
+  appendFileSync(log, JSON.stringify({ args, input, inherited: process.env.SESHI_SESSION_ID ?? null, noColor: process.env.NO_COLOR ?? null }) + "\\n");
+  if (args[0] === "statusline") {
+    process.stdout.write(existsSync(off) ? "Session Capture ⏸ · turned off for this session\\n" : "Session Capture ◉\\n");
+  }
+  if (args[2] === "Command") {
+    writeFileSync(off, "");
+    process.stdout.write(JSON.stringify({ message: "Session Capture ⏸ · turned off for this session" }) + "\\n");
+  }
+});
+`;
+  const SOLID = `
+export const createElement = (tag) => ({ tag, props: {} });
+export const setProp = (node, name, value) => { node.props[name] = value; return value; };
+export const insert = (node, accessor) => { node.text = accessor; };
+`;
+  const SOLID_JS = `
+export function createSignal(value) {
+  return [() => value, (next) => { value = typeof next === "function" ? next(value) : next; }];
+}
+export function createEffect(fn) { fn(); }
+`;
+
+  interface Call {
+    args: string[];
+    input: string;
+    inherited: string | null;
+    noColor: string | null;
+  }
+  interface Node {
+    tag: string;
+    props: Record<string, unknown>;
+    text: () => string;
+  }
+  type Binding = { key: unknown; cmd: (ctx: { focused: unknown }) => boolean };
+
+  function stub(name: string, source: string) {
+    const dir = join(home, "node_modules", ...name.split("/"));
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ type: "module", main: "index.js" }));
+    writeFileSync(join(dir, "index.js"), source);
+  }
+
+  async function load(options: { submitKeys?: unknown[] } = {}) {
+    stub("@opentui/solid", SOLID);
+    stub("solid-js", SOLID_JS);
+    const fake = join(home, "fake-seshi.cjs");
+    writeFileSync(fake, FAKE_SESHI);
+    const log = join(home, "calls.jsonl");
+    process.env.FAKE_SESHI_LOG = log;
+    const file = join(home, "seshi", "tui.js");
+    mkdirSync(join(home, "seshi"), { recursive: true });
+    writeFileSync(file, opencodeTuiPlugin([process.execPath, fake]));
+    const module = (await import(pathToFileURL(file).href)) as {
+      default: { id: string; tui: (api: unknown) => Promise<void> };
+    };
+    expect(module.default.id).toBe("seshi");
+
+    const sessions: Record<string, { id: string; directory: string; parentID?: string }> = {
+      [ID]: { id: ID, directory: "/repo/app" },
+      ses_child: { id: "ses_child", directory: "/repo/app", parentID: ID },
+    };
+    const toasts: { message: string; variant: string }[] = [];
+    const dispatched: string[] = [];
+    const layers: { priority: number; bindings: Binding[] }[] = [];
+    const slots: { slots: Record<string, (ctx: unknown, props: unknown) => Node> }[] = [];
+    const events: Record<string, (event: unknown) => void> = {};
+    const api = {
+      state: {
+        session: { get: (id: string) => sessions[id] },
+        path: { directory: "/repo/elsewhere" },
+      },
+      route: { current: { name: "session", params: { sessionID: ID } } as unknown },
+      ui: {
+        toast: (t: { message: string; variant: string }) => toasts.push(t),
+        dialog: { open: false },
+      },
+      theme: { current: { warning: "warning", textMuted: "muted" } },
+      slots: { register: (plugin: (typeof slots)[number]) => slots.push(plugin) },
+      event: {
+        on: (type: string, fn: (event: unknown) => void) => {
+          events[type] = fn;
+          return () => {};
+        },
+      },
+      lifecycle: { onDispose: () => () => {} },
+      tuiConfig: {
+        keybinds: { get: () => (options.submitKeys ?? ["return"]).map((key) => ({ key })) },
+      },
+      keymap: {
+        registerLayer: (layer: (typeof layers)[number]) => layers.push(layer),
+        dispatchCommand: (name: string) => dispatched.push(name),
+      },
+    };
+    await module.default.tui(api);
+    const calls = (): Call[] =>
+      existsSync(log)
+        ? readFileSync(log, "utf8")
+            .trim()
+            .split("\n")
+            .map((l) => JSON.parse(l) as Call)
+        : [];
+    const show = (session_id: string) =>
+      slots[0]?.slots.session_prompt_right?.({}, { session_id }) as Node;
+    const submit = (text: unknown) => layers[0]?.bindings[0]?.cmd({ focused: { plainText: text } });
+    return { api, calls, toasts, dispatched, layers, events, show, submit };
+  }
+
+  beforeEach(() => {
+    process.env.SESHI_SESSION_ID = "the-claude-code-session-opencode-was-started-in";
+  });
+  afterEach(() => {
+    delete process.env.FAKE_SESHI_LOG;
+    delete process.env.SESHI_SESSION_ID;
+  });
+
+  it("shows beside the prompt whether the session in view is captured", async () => {
+    const tui = await load();
+    const node = tui.show(ID);
+    expect(node.tag).toBe("text");
+    await vi.waitFor(() => expect(node.text()).toBe("Session Capture ◉"));
+    expect(node.props.fg).toBe("muted");
+    const [call] = tui.calls();
+    expect(call?.args).toEqual(["statusline", "--agent", "opencode"]);
+    expect(JSON.parse(call?.input ?? "")).toEqual({ session_id: ID, cwd: "/repo/app" });
+    expect(call).toMatchObject({ inherited: null, noColor: "1" });
+
+    // A subagent's session is captured with its parent's: the status is the parent's.
+    const child = tui.show("ses_child");
+    await vi.waitFor(() => expect(child.text()).toBe("Session Capture ◉"));
+    expect(JSON.parse(tui.calls()[1]?.input ?? "")).toEqual({ session_id: ID, cwd: "/repo/app" });
+
+    // After a turn, the sessions shown that it belongs to are read again.
+    tui.events["session.idle"]?.({ properties: { sessionID: ID } });
+    await vi.waitFor(() => expect(tui.calls()).toHaveLength(4));
+  });
+
+  it("carries out /seshi off from the prompt, so nothing reaches the model", async () => {
+    const tui = await load();
+    const node = tui.show(ID);
+    await vi.waitFor(() => expect(node.text()).toBe("Session Capture ◉"));
+    expect(tui.submit("  /seshi off ")).toBe(true);
+    expect(tui.dispatched).toEqual(["prompt.clear"]);
+    await vi.waitFor(() => expect(node.text()).toBe("Session Capture ⏸"));
+    const command = tui.calls().find((c) => c.args[2] === "Command");
+    expect(command?.args).toEqual(["hook", "opencode", "Command"]);
+    expect(JSON.parse(command?.input ?? "")).toEqual({
+      session_id: ID,
+      cwd: "/repo/app",
+      arguments: "off",
+    });
+    expect(tui.toasts).toEqual([
+      expect.objectContaining({
+        message: "Session Capture ⏸ · turned off for this session",
+        variant: "warning",
+      }),
+    ]);
+  });
+
+  it("passes every other prompt on, and /seshi too where there is no session yet", async () => {
+    const tui = await load();
+    expect(tui.submit("hello")).toBe(false);
+    expect(tui.submit("/seshiful")).toBe(false);
+    expect(tui.submit(undefined)).toBe(false);
+    tui.api.ui.dialog.open = true;
+    expect(tui.submit("/seshi off")).toBe(false);
+    tui.api.ui.dialog.open = false;
+    tui.api.route.current = { name: "home" };
+    expect(tui.submit("/seshi off")).toBe(false);
+    expect(tui.dispatched).toEqual([]);
+    expect(tui.calls()).toEqual([]);
+  });
+
+  it("listens on the keys the person submits the prompt with", async () => {
+    const tui = await load({ submitKeys: ["ctrl+s", "return"] });
+    expect(tui.layers[0]?.bindings.map((b) => b.key)).toEqual(["ctrl+s", "return"]);
+    expect(tui.layers[0]?.priority).toBeGreaterThan(0);
   });
 });
