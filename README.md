@@ -120,26 +120,25 @@ Everything else is in [docs/](docs/README.md).
 
 ## Supported agents
 
-| Client | Live capture | Capture state shown in | Turn off or on in the session | Upload its session files | Through Datadog Trajectory |
-|---|:-:|---|---|:-:|:-:|
-| Claude Code, including the Claude desktop app | ✓ | Status line; a chip in the desktop app | `/seshi` | ✓ | ✓ |
-| Codex CLI | ✓ | A notice when the session starts | `$seshi` | ✓ | ✓ |
-| Cursor (editor) | ✓ | Status bar extension | `/seshi`, or a click on the status bar | ✓ | ✓ |
-| Cursor CLI | ✓ | Status line | `/seshi` | ✓ | ✓ |
-| OpenCode | — | — | — | ✓ | ✓ |
-| pi, Oh My Pi, OpenClaw | — | — | — | ✓ | pi, Oh My Pi |
-| Gemini CLI | — | — | — | ✓ | — |
-| GitHub Copilot CLI, Aider, Cline, Goose, Amp, Kiro, Qwen Code and more | — | — | — | — | ✓ |
+| Client | Live capture | Capture state shown in | Turn off or on in the session | Upload its session files |
+|---|:-:|---|---|:-:|
+| Claude Code, including the Claude desktop app | ✓ | Status line; a chip in the desktop app | `/seshi` | ✓ |
+| Codex CLI | ✓ | A notice when the session starts | `$seshi` | ✓ |
+| Cursor (editor) | ✓ | Status bar extension | `/seshi`, or a click on the status bar | ✓ |
+| Cursor CLI | ✓ | Status line | `/seshi` | ✓ |
+| OpenCode | — | — | — | ✓ |
+| pi, Oh My Pi, OpenClaw | — | — | — | ✓ |
+| Gemini CLI | — | — | — | ✓ |
 
 - **Live capture:** `seshi capture install` hooks into the agent, and each turn is uploaded as
   it ends.
 - **Upload its session files:** `seshi upload`, an [S3 source](docs/s3-sync.md) or the API.
   [docs/formats.md](docs/formats.md) lists every format seshi reads, including ATIF and
   trajectory-v1.
-- **Through Datadog Trajectory:**
-  [Trajectory](https://github.com/datadog-labs/trajectory) captures the session, and seshi
-  reads its session files or [syncs them from Datadog LLM Observability](docs/datadog.md).
-  Trajectory's README lists every client it supports.
+- **Other clients:** GitHub Copilot CLI, Aider, Cline, Goose, Amp, Kiro, Qwen Code and the
+  rest of the clients [Datadog Trajectory](https://github.com/datadog-labs/trajectory) supports
+  come in through Trajectory: seshi reads its session files or
+  [syncs them from Datadog LLM Observability](docs/datadog.md).
 
 ### Cloud and managed agents
 
