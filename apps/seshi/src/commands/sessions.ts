@@ -18,7 +18,7 @@ import { emit, fail, helpOrUsageError, takeJson } from "../cli/output";
 import { printable, type Style, styleFor } from "../cli/style";
 import type { CommandContext } from "./index";
 
-const USAGE = `usage: seshi sessions ls [--owner <id>] [--limit N] [--after <cursor>] [--all]
+const USAGE = `usage: seshi sessions ls [--owner <id>] [--limit N] [--after <cursor>] [--all] [--subagents]
        seshi sessions show <agent> <session-id> [--owner <id>] [--trace]
        seshi sessions export <agent> <session-id> [--format seshi|letta|otlp|atif] [--hash <h>] [-o <file>] [--owner <id>]
        seshi sessions rm <agent> <session-id> [--owner <id>] [--yes]
@@ -32,6 +32,7 @@ const OPTIONS = {
   limit: { type: "string" },
   after: { type: "string" },
   all: { type: "boolean" },
+  subagents: { type: "boolean" },
   trace: { type: "boolean" },
   format: { type: "string" },
   hash: { type: "string" },
@@ -47,6 +48,7 @@ interface Values {
   limit?: string;
   after?: string;
   all?: boolean;
+  subagents?: boolean;
   trace?: boolean;
   format?: string;
   hash?: string;
@@ -91,27 +93,85 @@ function recordCount(m: SessionMetadata): number | undefined {
   return m.traces.find((t) => t.content_hash === m.head)?.records;
 }
 
+const pad = (n: number) => String(n).padStart(2, "0");
+
+/** A timestamp in this machine's time zone, to the minute. */
 function when(iso: string): string {
-  return `${iso.slice(0, 10)} ${iso.slice(11, 16)}`;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function listLines(page: SessionsPage, owner: string, style: Style): string[] {
+const activeAt = (m: SessionMetadata) => m.active_at ?? m.updated_at;
+const refOf = (agent: string, id: string) => `${agent}/${id}`;
+
+function listLines(
+  page: SessionsPage,
+  owner: string,
+  style: Style,
+  withSubagents: boolean,
+): string[] {
   if (page.sessions.length === 0) return [`No sessions for ${printable(owner)}.`];
-  const sorted = [...page.sessions].sort((a, b) => (a.updated_at < b.updated_at ? 1 : -1));
-  const refs = sorted.map((m) => printable(`${m.agent}/${m.session_id}`));
+  const sorted = [...page.sessions].sort((a, b) => (activeAt(a) < activeAt(b) ? 1 : -1));
+  const listed = new Set(sorted.map((m) => refOf(m.agent, m.session_id)));
+  const parentOf = (m: SessionMetadata) =>
+    m.parent_session_id ? refOf(m.agent, m.parent_session_id) : undefined;
+  const children = new Map<string, SessionMetadata[]>();
+  for (const m of sorted) {
+    const parent = parentOf(m);
+    if (parent && listed.has(parent)) children.set(parent, [...(children.get(parent) ?? []), m]);
+  }
+  const subagents = sorted.filter((m) => m.parent_session_id).length;
+  const rows: { m: SessionMetadata; child: boolean }[] = [];
+  for (const m of sorted) {
+    if (m.parent_session_id) {
+      const parent = parentOf(m) as string;
+      if (withSubagents && !listed.has(parent)) rows.push({ m, child: false });
+      continue;
+    }
+    rows.push({ m, child: false });
+    if (withSubagents) {
+      for (const c of children.get(refOf(m.agent, m.session_id)) ?? [])
+        rows.push({ m: c, child: true });
+    }
+  }
+  const refs = rows.map(
+    ({ m, child }) => `${child ? "  └ " : ""}${printable(refOf(m.agent, m.session_id))}`,
+  );
   const width = Math.min(60, Math.max(...refs.map((r) => r.length)));
-  const lines = [style.muted(`${printable(owner)}: ${sorted.length} session(s), newest first`)];
-  sorted.forEach((m, i) => {
+  const sessions = rows.filter((r) => !r.m.parent_session_id).length;
+  const counted = [
+    `${sessions} session${sessions === 1 ? "" : "s"}`,
+    ...(subagents > 0
+      ? [
+          withSubagents
+            ? `${subagents} subagent${subagents === 1 ? "" : "s"}`
+            : `${subagents} subagent${subagents === 1 ? "" : "s"} not shown (--subagents)`,
+        ]
+      : []),
+  ].join(", ");
+  const lines = [
+    style.muted(`${printable(owner)}: ${counted}; most recently active first, in local time`),
+  ];
+  rows.forEach(({ m, child }, i) => {
     const records = recordCount(m);
     const state =
       m.status === "redacted"
         ? style.status("deleted".padEnd(11), "warn")
         : `${records ?? "?"} records`.padEnd(11);
+    const kids =
+      child || withSubagents ? 0 : (children.get(refOf(m.agent, m.session_id)) ?? []).length;
     const where = printable(
-      [m.project, m.branch ? `(${m.branch})` : undefined].filter(Boolean).join(" "),
+      [
+        m.project,
+        m.branch ? `(${m.branch})` : undefined,
+        kids > 0 ? `+${kids} subagent${kids === 1 ? "" : "s"}` : undefined,
+      ]
+        .filter(Boolean)
+        .join(" "),
     );
     lines.push(
-      `${(refs[i] as string).padEnd(width)}  ${when(m.updated_at)}  ${state}  ${m.visibility.padEnd(5)}  ${style.muted(where)}`.trimEnd(),
+      `${(refs[i] as string).padEnd(width)}  ${when(activeAt(m))}  ${state}  ${m.visibility.padEnd(5)}  ${style.muted(where)}`.trimEnd(),
     );
   });
   if (page.truncated && page.cursor) {
@@ -158,6 +218,8 @@ function showLines(
     ...row("visibility", m.visibility),
     ...row("project", m.project),
     ...row("branch", m.branch),
+    ...row("subagent of", m.parent_session_id),
+    ...row("active", m.active_at),
     ...row("created", m.created_at),
     ...row("updated", m.updated_at),
     ...row(
@@ -241,7 +303,7 @@ async function ls(
     }
     page = { sessions, cursor: undefined, truncated: false };
   }
-  emit(ctx, json, page, () => listLines(page, owner, style));
+  emit(ctx, json, page, () => listLines(page, owner, style, values.subagents === true));
   return EXIT.ok;
 }
 

@@ -971,7 +971,7 @@ export class Uploader {
     }
     if (Object.keys(accounts).length > 0) claims.account_ids = accounts;
     return {
-      ...(folder ? { project: basename(folder) } : {}),
+      ...(repo ? { project: repo.name } : folder ? { project: basename(folder) } : {}),
       ...(repo?.branch ? { branch: repo.branch } : {}),
       ...repoVisibilityClaim(repo?.config),
       ...(session.parent_session_id ? { parent_session_id: session.parent_session_id } : {}),

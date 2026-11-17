@@ -31,6 +31,8 @@ export interface Place {
   real?: string;
   repo?: {
     root: string;
+    /** The repository's name: its main checkout's folder, also for a worktree of it. */
+    name: string;
     config: RepoConfig;
     /** Its remotes, as `host/path` (`github.com/acme/app`). */
     remotes: string[];

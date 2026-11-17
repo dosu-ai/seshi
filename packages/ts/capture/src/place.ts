@@ -1,5 +1,5 @@
 import { realpathSync, statSync } from "node:fs";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { GIT_CONFIG_MAX_BYTES, REPO_FILE_MAX_BYTES, readUntrustedRepoFile } from "./files";
 import { normalizeRemote, type Place, type RepoConfig } from "./rules";
 
@@ -57,6 +57,14 @@ export function findRepo(
     if (parent === at) return undefined;
     at = parent;
   }
+}
+
+/** The repository's name: the folder of its main checkout (`commonDir` is that checkout's
+ * `.git`, also from a worktree of it), or of a bare repository without its `.git` suffix. */
+export function repoName(root: string, commonDir: string): string {
+  if (basename(commonDir) === ".git") return basename(dirname(commonDir));
+  if (commonDir.endsWith(".git")) return basename(commonDir).slice(0, -".git".length);
+  return basename(root);
 }
 
 /** The remotes a git config file names, normalized (`github.com/acme/app`). */
@@ -121,7 +129,12 @@ export function placeOf(cwd: string | undefined): Place {
   const repo = findRepo(place.real ?? cwd);
   if (repo) {
     if (repo.invalid !== undefined) {
-      place.repo = { root: repo.root, config: { invalid: repo.invalid }, remotes: [] };
+      place.repo = {
+        root: repo.root,
+        name: repoName(repo.root, repo.commonDir),
+        config: { invalid: repo.invalid },
+        remotes: [],
+      };
       return place;
     }
     const head = repoFile(join(repo.gitDir, "HEAD"), "git's HEAD");
@@ -131,6 +144,7 @@ export function placeOf(cwd: string | undefined): Place {
     const branch = headBranch(head.text);
     place.repo = {
       root: repo.root,
+      name: repoName(repo.root, repo.commonDir),
       config: invalid !== undefined ? { invalid } : parseRepoConfig(config.text),
       remotes: gitRemotes(git.text ?? ""),
       ...(branch ? { branch } : {}),

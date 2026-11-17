@@ -226,6 +226,7 @@ Readers neither list nor serve a stub: no `head`, nothing to read.
                   "format_version": "…" },          // a stored trace; older than the
                                                      // format's is stale (X4.9)
   "retract_hash": "<sha256>",         // F9.7: first upload's retraction secret, hashed
+  "active_at": "…",                   // the latest record timestamp: when it last did something
   "created_at": "…", "updated_at": "…"
 }
 ```

@@ -80,7 +80,7 @@ repository's code.
 | `login [--server <url>] [--key <key>\|-] [--token <token>\|-] [--user <name>] [--browser\|--device] [--visibility org\|owner]` | Sign in to a server (F8.2), [below](#signing-in-f82) |
 | `logout [--server <url>] [--all]` | Forget the stored credentials |
 | `whoami [--server <url>]` | Who the CLI is signed in as, and whether the credential still works. In serverless mode: the owner (claimed) and the bucket |
-| `sessions ls [--owner] [--limit N] [--after] [--all] [--include-private]` | An owner's sessions, newest first. `--include-private`: serverless mode, [below](#talking-to-a-server-or-to-a-bucket-f83-f11) |
+| `sessions ls [--owner] [--limit N] [--after] [--all] [--subagents] [--include-private]` | An owner's sessions, most recently active first, dated by their last record in local time. Subagents are counted on their session's row (`+2 subagents`); `--subagents` lists them under it. `--json` gives every session of the page. `--include-private`: serverless mode, [below](#talking-to-a-server-or-to-a-bucket-f83-f11) |
 | `sessions show <agent> <id> [--owner] [--trace] [--include-private]` | A session's metadata and, with model review on, each stored write's decision (`allow`, `redact`, `skipped`; F3.8); `--trace` adds its head trace, a line per record |
 | `sessions export <agent> <id> [--format seshi\|letta\|otlp\|atif] [--hash] [-o <file\|dir>] [--include-private]` | The trace itself, on stdout or into a file |
 | `sessions rm <agent> <id> [--owner] [--yes]` | Delete a session (a tombstone; it cannot be undone). Asks on a terminal, needs `--yes` elsewhere |

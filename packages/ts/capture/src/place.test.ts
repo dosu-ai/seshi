@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { GIT_CONFIG_MAX_BYTES, REPO_FILE_MAX_BYTES, readUntrustedRepoFile } from "./files";
-import { findRepo, gitRemotes, headBranch, parseRepoConfig, placeOf } from "./place";
+import { findRepo, gitRemotes, headBranch, parseRepoConfig, placeOf, repoName } from "./place";
 import { DEFAULT_RULES, decide, type RepoConfig } from "./rules";
 
 let dir: string;
@@ -50,11 +50,19 @@ describe("git files", () => {
     const place = placeOf(join(dir, "wt"));
     expect(place.repo).toEqual({
       root: join(dir, "wt"),
+      name: "app",
       config: {},
       remotes: ["github.com/acme/app", "github.com/me/app"],
       branch: "wt-branch",
     });
     expect(findRepo(dir)).toBeUndefined();
+  });
+
+  it("names a repo after its main checkout, from a worktree too", () => {
+    expect(repoName("/src/dosu", "/src/dosu/.git")).toBe("dosu");
+    expect(repoName("/src/dosu/.claude/worktrees/agent-a1", "/src/dosu/.git")).toBe("dosu");
+    expect(repoName("/wt/feature", "/srv/git/dosu.git")).toBe("dosu");
+    expect(repoName("/wt/feature", "/srv/git/plain")).toBe("feature");
   });
 });
 

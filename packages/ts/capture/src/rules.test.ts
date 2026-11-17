@@ -13,6 +13,7 @@ import {
 
 const repo = (config: Place["repo"] extends infer R ? Partial<NonNullable<R>> : never = {}) => ({
   root: "/work/app",
+  name: "app",
   config: {},
   remotes: ["github.com/acme/app"],
   ...config,

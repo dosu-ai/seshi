@@ -106,7 +106,7 @@ device token ([docs/server.md](docs/server.md#setting-up-who-may-call-it)).
 each turn to seshi in a few milliseconds. A background uploader sends only what each log gained,
 and a sweep picks up whatever the hooks missed. Capture can be turned off for everything, a
 folder, a repository (a committed `.seshi/config.toml`) or one session. A session turned off is
-retracted from the server.
+retracted from the session store.
 
 **Redaction rules** ([docs/redaction.md](docs/redaction.md)). The built-in pack removes
 provider tokens, credential assignments, bearer headers, JWTs, connection URLs and private keys,

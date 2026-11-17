@@ -100,7 +100,7 @@ describe("seshi sessions against a server", () => {
   it("lists, as lines or one JSON document, and pages", async () => {
     const ls = await machine.seshi(["sessions", "ls"]);
     expect(ls.code, ls.err).toBe(0);
-    expect(ls.out).toContain("acme: 2 session(s), newest first");
+    expect(ls.out).toContain("acme: 2 sessions; most recently active first, in local time");
     expect(ls.out).toMatch(
       /claude-code\/sess1 +\d{4}-\d\d-\d\d \d\d:\d\d +\d+ records +org +github.com\/acme\/widget \(main\)/,
     );
@@ -120,6 +120,36 @@ describe("seshi sessions against a server", () => {
     expect(all.sessions).toHaveLength(2);
     expect((await machine.seshi(["sessions", "ls", "--limit", "0"])).code).toBe(2);
     expect((await machine.seshi(["sessions", "ls", "extra"])).code).toBe(2);
+  });
+
+  it("dates each session by its last activity, in local time", async () => {
+    const ls = await machine.seshi(["sessions", "ls"], { env: { TZ: "America/Los_Angeles" } });
+    expect(ls.out).toMatch(/claude-code\/sess1 +2026-08-31 17:00 /);
+    const show = await machine.seshi(["sessions", "show", "claude-code", "sess1"]);
+    expect(show.out).toContain("active      2026-09-01T00:00:08.000Z");
+  });
+
+  it("folds subagents under their session, and lists them with --subagents", async () => {
+    const db = new HttpSessionDB({ server: server.url, token: TOKEN });
+    await db.ingest({
+      agent: "claude-code",
+      session_id: "agent-a1",
+      transcript: CLAUDE.replaceAll("sess1", "agent-a1"),
+      parent_session_id: "sess1",
+    });
+    const ls = await machine.seshi(["sessions", "ls"]);
+    expect(ls.out).toContain("acme: 2 sessions, 1 subagent not shown (--subagents)");
+    expect(ls.out).toMatch(/claude-code\/sess1 .*\(main\) \+1 subagent$/m);
+    expect(ls.out).not.toContain("agent-a1");
+    const all = await machine.seshi(["sessions", "ls", "--subagents"]);
+    expect(all.out).toContain("acme: 2 sessions, 1 subagent;");
+    const lines = all.out.split("\n");
+    const parent = lines.findIndex((l) => l.startsWith("claude-code/sess1 "));
+    expect(lines[parent + 1]).toMatch(/^ {2}└ claude-code\/agent-a1 /);
+    const show = await machine.seshi(["sessions", "show", "claude-code", "agent-a1"]);
+    expect(show.out).toContain("subagent of sess1");
+    const json = JSON.parse((await machine.seshi(["sessions", "ls", "--json"])).out);
+    expect(json.sessions).toHaveLength(3);
   });
 
   it("colours a terminal's output, and keeps the words", async () => {

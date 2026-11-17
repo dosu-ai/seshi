@@ -60,6 +60,8 @@ export interface SessionMetadata {
   normalizer?: Normalizer;
   /** The hash of the uploader's retraction secret (F9.7), kept from the session's first upload. The secret sent in X-Seshi-Retract (a retraction, or an org-key replace) is checked against it. */
   retract_hash?: Sha256;
+  /** When the session last did something: the latest record timestamp over its stored traces. Absent for a session written before it was recorded, and for one whose records carry no timestamps; readers then use `updated_at`. */
+  active_at?: Timestamp;
   created_at: Timestamp;
   updated_at: Timestamp;
 }
@@ -146,6 +148,7 @@ export const JSON_SCHEMA = {
     native_session_id: { type: "string" },
     normalizer: { $ref: "common.schema.json#/$defs/Normalizer" },
     retract_hash: { $ref: "common.schema.json#/$defs/Sha256" },
+    active_at: { $ref: "common.schema.json#/$defs/Timestamp" },
     created_at: { $ref: "common.schema.json#/$defs/Timestamp" },
     updated_at: { $ref: "common.schema.json#/$defs/Timestamp" },
   },

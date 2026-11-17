@@ -69,6 +69,45 @@ describe("the retraction hash (F9.7)", () => {
   });
 });
 
+describe("when a session was last active", () => {
+  const line = (record: Record<string, unknown>) => `${JSON.stringify(record)}\n`;
+  const head =
+    line({ role: "meta", source: "trajectory" }) +
+    line({ role: "user", content: "x".repeat(2000), timestamp: "2026-09-01T10:00:00Z" }) +
+    line({ role: "assistant", content: "done", timestamp: "2026-09-01T10:05:00Z" });
+
+  it("is the latest record timestamp, moved by a later chunk and never moved back", async () => {
+    const store = new FsStore(dir);
+    const formats = new FormatRegistry(BUILTIN_FORMATS);
+    const upload = (transcript: string, offset = 0) =>
+      storeSession(
+        {
+          owner: "alice",
+          agent: "trajectory",
+          session_id: "s1",
+          transcript,
+          format: "jsonl",
+          offset,
+        },
+        { store, formats },
+      );
+    const active = async () =>
+      (await readMetadata(store, "alice", archiveId("alice", "trajectory", "s1")))?.active_at;
+    const stored = await upload(head);
+    expect(await active()).toBe("2026-09-01T10:05:00.000Z");
+    const later = line({ role: "assistant", content: "more", timestamp: "2026-09-02T08:00:00Z" });
+    const grown = await upload(later, stored.bytes_total);
+    expect(await active()).toBe("2026-09-02T08:00:00.000Z");
+    const earlier = line({
+      role: "assistant",
+      content: "clock went back",
+      timestamp: "2026-09-01T09:00:00Z",
+    });
+    await upload(earlier, grown.bytes_total);
+    expect(await active()).toBe("2026-09-02T08:00:00.000Z");
+  });
+});
+
 describe("the session filter and limits from config", () => {
   const ts = "2026-09-01T00:00:00Z";
   const line = (record: Record<string, unknown>) => `${JSON.stringify(record)}\n`;

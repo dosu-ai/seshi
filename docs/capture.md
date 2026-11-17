@@ -5,7 +5,7 @@ seshi; a background uploader sends what is new to the team's server (or, in serv
 runs the pipeline and writes the bucket itself); a sweep catches whatever
 the hooks missed; and a status line says whether this session is being captured. Capture can be
 turned off for everything, a repo, a folder, or one session, and a session turned off is
-retracted from the server.
+retracted from the session store.
 
 ```
 agent turn ──▶ seshi hook ──▶ spool ──▶ seshi daemon (uploader) ──POST /v1/sessions──▶ server

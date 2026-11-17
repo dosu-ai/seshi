@@ -321,6 +321,9 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
     if (metadata.branch ?? base.branch) next.branch = metadata.branch ?? base.branch;
     const parent = metadata.parent_session_id ?? base.parent_session_id;
     if (parent) next.parent_session_id = parent;
+    const active = latest(lastActivity(trace.records), input.replace ? undefined : base.active_at);
+    if (active) next.active_at = active;
+    else delete next.active_at;
     const normalized = input.normalized ?? base.normalized;
     if (normalized) next.normalized = normalized;
     if (input.dropped_prefix) next.dropped_prefix = input.dropped_prefix;
@@ -713,4 +716,22 @@ async function listSessionKeys(
     }
     after = past;
   }
+}
+
+/** The latest record timestamp, as an ISO timestamp; undefined when no record has one. */
+export function lastActivity(records: readonly object[]): string | undefined {
+  let at: number | undefined;
+  for (const record of records) {
+    const stamp = (record as { timestamp?: unknown }).timestamp;
+    if (typeof stamp !== "string") continue;
+    const t = Date.parse(stamp);
+    if (Number.isFinite(t) && (at === undefined || t > at)) at = t;
+  }
+  return at === undefined ? undefined : new Date(at).toISOString();
+}
+
+function latest(a: string | undefined, b: string | undefined): string | undefined {
+  if (a === undefined) return b;
+  if (b === undefined) return a;
+  return a > b ? a : b;
 }

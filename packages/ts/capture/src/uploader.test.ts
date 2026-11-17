@@ -263,6 +263,33 @@ const session = (id = "s1"): SessionState =>
   readState(paths).sessions[`fake:${id}`] as SessionState;
 
 describe("the upload protocol", () => {
+  it("names the project after the repository, also from a worktree of it", async () => {
+    const main = join(dir, "dosu");
+    const worktree = join(main, ".claude", "worktrees", "agent-a1");
+    mkdirSync(join(main, ".git", "worktrees", "agent-a1"), { recursive: true });
+    writeFileSync(join(main, ".git", "HEAD"), "ref: refs/heads/main\n");
+    writeFileSync(join(main, ".git", "worktrees", "agent-a1", "commondir"), "../..\n");
+    writeFileSync(join(main, ".git", "worktrees", "agent-a1", "HEAD"), "ref: refs/heads/wt\n");
+    mkdirSync(worktree, { recursive: true });
+    writeFileSync(
+      join(worktree, ".git"),
+      `gitdir: ${join(main, ".git", "worktrees", "agent-a1")}\n`,
+    );
+    writeFileSync(transcript(), line("one") + line("two"));
+    appendSpool(paths, {
+      v: 1,
+      kind: "capture",
+      at: clock.toISOString(),
+      agent: "fake",
+      event: "Stop",
+      session_id: "s1",
+      transcript_path: transcript(),
+      cwd: worktree,
+    });
+    await uploader().pass();
+    expect(server.uploads[0]).toMatchObject({ project: "dosu", branch: "wt" });
+  });
+
   it("sends the whole log first, then only new complete lines at the server's offset", async () => {
     writeFileSync(transcript(), line("one") + line("two"));
     hooked();
