@@ -76,12 +76,12 @@ export const CURSOR_HOOKS: readonly HookHandler[] = [
     reply: (message) => ({ continue: false, user_message: message }),
     parse(payload) {
       const asked = seshiPrompt(stringField(payloadObject(payload, AGENT), "prompt") ?? "");
-      if (!asked) return { captures: [] };
       const { session_id, cwd } = capture(payload, false);
       const which = { session_id, ...(cwd ? { cwd } : {}) };
+      if (!asked) return { captures: [], active: which };
       return asked === "status"
-        ? { captures: [], announce: which }
-        : { captures: [], request: { action: asked, session: which } };
+        ? { captures: [], active: which, announce: which }
+        : { captures: [], active: which, request: { action: asked, session: which } };
     },
   },
 ];

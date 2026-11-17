@@ -9,6 +9,8 @@ export interface CapturePaths {
   rules: string;
   redactionRules: string;
   log: string;
+  /** The last conversation prompted, per agent and folder (an editor's indicator reads it). */
+  recent: string;
 }
 
 export function captureDir(host: CaptureHost): string {
@@ -31,5 +33,6 @@ export function capturePaths(host: CaptureHost): CapturePaths {
     rules: at(dir, "rules.json"),
     redactionRules: at(dir, "redaction-rules.json"),
     log: at(dir, "capture.log"),
+    recent: at(dir, "recent"),
   };
 }

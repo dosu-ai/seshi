@@ -52,16 +52,16 @@ describe("/seshi typed in Cursor", () => {
     );
 
   it("is a request for the hook, and any other prompt passes untouched", () => {
+    const which = { session_id: "c1", cwd: "/w/app" };
     expect(prompt("/seshi off")).toEqual({
       captures: [],
-      request: { action: "off", session: { session_id: "c1", cwd: "/w/app" } },
+      active: which,
+      request: { action: "off", session: which },
     });
-    expect(prompt("/seshi")).toEqual({
-      captures: [],
-      announce: { session_id: "c1", cwd: "/w/app" },
-    });
-    expect(prompt("/seshi off and then fix the tests")).toEqual({ captures: [] });
-    expect(prompt("fix the tests")).toEqual({ captures: [] });
+    expect(prompt("/seshi")).toEqual({ captures: [], active: which, announce: which });
+    // Every prompt marks its conversation as the folder's current one, for the editor.
+    expect(prompt("/seshi off and then fix the tests")).toEqual({ captures: [], active: which });
+    expect(prompt("fix the tests")).toEqual({ captures: [], active: which });
   });
 
   it("answers by stopping the prompt, the only way Cursor shows a hook's message", () => {

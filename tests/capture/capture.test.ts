@@ -307,6 +307,50 @@ describe("hooks and the uploader (F9.1)", () => {
     );
   });
 
+  it("tells an editor which Cursor conversation its folder is on, and whether it is captured", async () => {
+    const prompt = (conversation: string, text: string) =>
+      machine.seshi(["hook", "cursor", "beforeSubmitPrompt"], {
+        stdin: JSON.stringify({
+          conversation_id: conversation,
+          workspace_roots: [project],
+          prompt: text,
+        }),
+      });
+    const ask = async (...flags: string[]) =>
+      JSON.parse(
+        (
+          await machine.seshi([
+            "statusline",
+            "--agent",
+            "cursor",
+            "--json",
+            "--folder",
+            project,
+            ...flags,
+          ])
+        ).out,
+      );
+    const none = await ask();
+    expect(none).toMatchObject({ session: null, candidates: [], capturing: true });
+    expect(none.watch).toEqual([stateDir(), join(stateDir(), "recent"), expect.any(String)]);
+    await prompt("conv-a", "fix the tests");
+    await prompt("conv-b", "explain this file");
+    expect((await ask()).session).toMatchObject({ session_id: "conv-b", by: "prompt" });
+    // The editor's own answer wins: the chat with focus, else the only one open.
+    expect((await ask("--session", "conv-a", "--selected", "conv-a,conv-b")).session).toEqual({
+      session_id: "conv-a",
+      by: "focused",
+    });
+    expect((await ask("--selected", "conv-new")).session).toEqual({
+      session_id: "conv-new",
+      by: "selected",
+    });
+    await prompt("conv-a", "/seshi off");
+    const off = await ask("--session", "conv-a");
+    expect(off).toMatchObject({ capturing: false, level: "session", attention: null });
+    expect(off.session.state).toBe("off");
+  });
+
   it("exports the session for the /seshi skill on SessionStart", async () => {
     const envFile = join(machine.dir, "claude-env");
     await machine.seshi(["hook", "claude-code", "SessionStart"], {

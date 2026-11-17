@@ -1,3 +1,11 @@
+export {
+  type Current,
+  type CurrentBy,
+  type CurrentCandidate,
+  currentSession,
+  type RecentPrompt,
+  readRecent,
+} from "./current";
 export { appendLog } from "./files";
 export { type HookOutcome, type HookRun, runHook } from "./hook";
 export { type CapturePaths, captureDir, capturePaths } from "./paths";
@@ -15,5 +23,11 @@ export {
   sessionToggle,
   stateFacts,
 } from "./state";
-export { MAX_PROBLEMS, type StatusLine, type StatusProblem, statusLine } from "./status";
+export {
+  MAX_PROBLEMS,
+  type StatusLine,
+  type StatusProblem,
+  sessionWord,
+  statusLine,
+} from "./status";
 export { uploaderRunning } from "./uploader-lock";

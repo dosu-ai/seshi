@@ -1,5 +1,6 @@
 import { appendFileSync } from "node:fs";
 import { type CaptureAgent, type CaptureHost, type HookCapture, hookHandler } from "@seshi/kit";
+import { writeRecent } from "./current";
 import type { CapturePaths } from "./paths";
 import { placeOf } from "./place";
 import { type Decision, decide } from "./rules";
@@ -47,6 +48,14 @@ export async function runHook(run: HookRun): Promise<HookOutcome> {
       .join("");
     appendFileSync(result.exportEnv.file, lines);
     outcome.envFileWritten = result.exportEnv.file;
+  }
+  if (result.active?.cwd) {
+    writeRecent(run.paths, {
+      agent: run.agent.name,
+      session_id: result.active.session_id,
+      cwd: result.active.cwd,
+      at: (run.now ?? new Date()).toISOString(),
+    });
   }
   if (result.request) outcome.requested = result.request;
   if (result.captures.length === 0 && !result.announce) return outcome;

@@ -24,6 +24,9 @@ export interface HookResult {
   /** The person asked, in their own prompt, to turn capture off or on for this session: the
    * hook does it, outside any sandbox the agent's commands run in. */
   request?: { action: "off" | "on"; session: HookCapture };
+  /** The person just prompted this session: recorded as the folder's current conversation, for
+   * an editor that cannot say which one it shows. */
+  active?: HookCapture;
 }
 
 export interface HookHandler {

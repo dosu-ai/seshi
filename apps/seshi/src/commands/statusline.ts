@@ -1,16 +1,20 @@
 import { readFileSync } from "node:fs";
 import {
   captureRules,
+  currentSession,
   decide,
   otherFolders,
   placeOf,
+  readRecent,
   readState,
   type StatusLine,
   sessionKey,
+  sessionWord,
   spoolCount,
   stateFacts,
   statusLine,
 } from "@seshi/capture/fast";
+import { cliConfigPath } from "@seshi/config/paths";
 import { EXIT } from "../cli/exit";
 import { takeJson } from "../cli/output";
 import { colourLevel, detectTheme, Style } from "../cli/style";
@@ -92,22 +96,35 @@ export function renderStatusLine(line: StatusLine, style: Style): string {
   return `${LABEL} ${glyph}${problems}`;
 }
 
+/** Every value of a repeatable `--name <value>` flag. */
+function values(rest: readonly string[], name: string): string[] {
+  const out: string[] = [];
+  rest.forEach((word, i) => {
+    const next = rest[i + 1];
+    if (word === name && next !== undefined) out.push(next);
+  });
+  return out;
+}
+
 export async function run(ctx: CommandContext): Promise<number> {
   const { json, rest } = takeJson(ctx.argv);
   const agentAt = rest.indexOf("--agent");
   const agent = agentAt === -1 ? "claude-code" : (rest[agentAt + 1] ?? "claude-code");
   const chainAt = rest.indexOf("--chain");
   const chainFile = chainAt === -1 ? undefined : rest[chainAt + 1];
+  // An editor asking about its workspace (`--folder`, repeatable), with the conversation it says
+  // has focus (`--session`) and those it says are open (`--selected a,b`), instead of an
+  // agent's status line payload on stdin.
+  const folders = values(rest, "--folder");
+  const editor = folders.length > 0;
+  const focused = values(rest, "--session")[0];
+  const selected = values(rest, "--selected")
+    .flatMap((v) => v.split(","))
+    .filter(Boolean);
   const { host, paths } = pathsOf(ctx);
-  const { text, payload } = await readPayload(ctx);
+  const { text, payload } = editor ? { text: "", payload: {} } : await readPayload(ctx);
   const other = chainFile && !json ? chained(chainFile, text, host.platform) : Promise.resolve("");
   const workspace = payload.workspace as { current_dir?: unknown } | undefined;
-  const cwd =
-    (typeof payload.cwd === "string" && payload.cwd) ||
-    (typeof workspace?.current_dir === "string" && workspace.current_dir) ||
-    process.cwd();
-  const session = typeof payload.session_id === "string" ? payload.session_id : undefined;
-  const key = session ? sessionKey(agent, session) : undefined;
 
   let state: ReturnType<typeof readState> | undefined;
   try {
@@ -115,14 +132,39 @@ export async function run(ctx: CommandContext): Promise<number> {
   } catch {
     state = undefined;
   }
-  const snapshot = await captureRules(host, paths);
+  const now = new Date();
+  const current = editor
+    ? currentSession({
+        state,
+        agent,
+        folders,
+        recent: readRecent(paths, agent, folders, host.platform),
+        ...(focused ? { focused } : {}),
+        selected,
+        now,
+        platform: host.platform,
+      })
+    : undefined;
+  const session = editor
+    ? current?.session?.session_id
+    : typeof payload.session_id === "string"
+      ? payload.session_id
+      : undefined;
+  const key = session ? sessionKey(agent, session) : undefined;
   const known = key ? state?.sessions[key] : undefined;
+  const cwd = editor
+    ? (known?.cwd ?? (folders[0] as string))
+    : (typeof payload.cwd === "string" && payload.cwd) ||
+      (typeof workspace?.current_dir === "string" && workspace.current_dir) ||
+      process.cwd();
+
+  const snapshot = await captureRules(host, paths);
   const decision = decide(
     {
       rules: snapshot.rules,
       ...(snapshot.error ? { rulesError: snapshot.error } : {}),
       place: placeOf(cwd),
-      ...(state ? stateFacts(state, agent, known, new Date()) : {}),
+      ...(state ? stateFacts(state, agent, known, now) : {}),
       seen: otherFolders(state, agent, known, cwd).map(placeOf),
     },
     host.platform,
@@ -134,6 +176,11 @@ export async function run(ctx: CommandContext): Promise<number> {
     ...(key ? { session: key } : {}),
   });
   if (json) {
+    const worst = line.problems.some((p) => p.kind === "error")
+      ? "error"
+      : line.problems.some((p) => p.kind === "warn")
+        ? "warn"
+        : null;
     ctx.stdout(
       JSON.stringify({
         capturing: line.capturing,
@@ -141,6 +188,24 @@ export async function run(ctx: CommandContext): Promise<number> {
         reason: decision.reason,
         ...(decision.frozen !== undefined ? { frozen_at: decision.frozen } : {}),
         problems: line.problems.map((p) => p.text),
+        ...(editor && current
+          ? {
+              session: current.session
+                ? {
+                    ...current.session,
+                    ...(known ? { state: sessionWord(known) } : {}),
+                  }
+                : null,
+              candidates: current.candidates,
+              attention: worst,
+              installed: state?.agents[agent] !== undefined,
+              watch: [
+                paths.dir,
+                paths.recent,
+                cliConfigPath({ env: host.env, home: host.home, platform: host.platform }),
+              ],
+            }
+          : {}),
       }),
     );
     return EXIT.ok;
