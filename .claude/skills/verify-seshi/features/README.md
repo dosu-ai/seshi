@@ -49,6 +49,8 @@ behaviour. It then has exactly four H2 sections, in this order:
 
 - [Capture and upload](./capture.md): an agent session reaches the store through the hooks and
   the uploader, chunk by chunk, in local and server mode.
+- [pi and OpenCode capture](./pi-opencode.md): the real agents against a fake model, through
+  seshi's pi extension and OpenCode plugin, with their status and `/seshi`.
 - [Turn capture off, on or pause it](./toggle-pause.md): per-session toggles with retraction, and
   pause and resume.
 - [Sessions and search](./sessions-search.md): list, show, export and visibility of stored

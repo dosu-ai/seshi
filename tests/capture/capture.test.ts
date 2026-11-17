@@ -793,6 +793,8 @@ describe("seshi capture install|uninstall|status (F9.6)", () => {
       ["claude-code", true],
       ["codex", false],
       ["cursor", true],
+      ["opencode", false],
+      ["pi", false],
     ]);
     expect(status.target).toBe(server.url);
 

@@ -21,10 +21,12 @@ export type {
 export {
   type CaptureAgent,
   type CaptureHost,
+  captureDir,
   expandTilde,
   type HookCapture,
   type HookHandler,
   type HookResult,
+  handedTranscriptDir,
   hookHandler,
   type InstallContext,
   type Installer,

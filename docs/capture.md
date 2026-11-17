@@ -25,6 +25,7 @@ this machine up to write a bucket directly (`seshi init --serverless`,
 ```sh
 seshi capture install            # every agent found on this machine
 seshi capture install claude-code codex
+seshi capture install pi opencode
 seshi capture install --service  # also keep the uploader running between sessions
 ```
 
@@ -33,6 +34,24 @@ seshi capture install --service  # also keep the uploader running between sessio
 | Claude Code | hooks, the status line and the `/seshi` skill in `~/.claude/settings.json` and `~/.claude/skills/seshi/` (`CLAUDE_CONFIG_DIR` moves them) | SessionStart, Stop, SubagentStop, PreCompact, SessionEnd |
 | Codex | `notify` in `~/.codex/config.toml` (`CODEX_HOME` moves it); a `notify` program already there keeps running, after seshi's. SessionStart and UserPromptSubmit hooks in `~/.codex/hooks.json` for the notice and `$seshi`, and the `$seshi` skill in `~/.agents/skills/seshi/` | notify, plus the sweep of `~/.codex/sessions`; SessionStart and UserPromptSubmit only for the notice and `$seshi` |
 | Cursor (IDE and CLI) | hooks in `~/.cursor/hooks.json`, the Cursor CLI's status line in `~/.cursor/cli-config.json`, and the `/seshi` skill in `~/.cursor/skills/seshi/`; it suggests the status bar extension ([below](#the-cursor-status-bar)) | stop, sessionEnd; beforeSubmitPrompt for `/seshi` and the last chat prompted |
+| pi | the extension `~/.pi/agent/extensions/seshi.ts` (`PI_CODING_AGENT_DIR` moves it) | agent_end (Stop), session_shutdown (SessionEnd); `/seshi`, a command of its own; plus the sweep of `~/.pi/agent/sessions` |
+| OpenCode | the plugin `~/.config/opencode/plugins/seshi.js` and the `/seshi` command `~/.config/opencode/command/seshi.md` (`XDG_CONFIG_HOME` moves both) | session.idle (Stop), with the whole session; session.created (SessionStart) for the notice; `/seshi` |
+
+pi and OpenCode run no shell hooks: they load code at start-up, so seshi installs a file each
+loads, written whole (and rewritten by the next `install`, so edits do not last) and removed by
+`uninstall`. It runs `seshi hook pi|opencode <event>` with a JSON payload on stdin, as the other
+agents' hooks do, so the rules, the spool and the uploader are the same. A file of the same name
+that is not seshi's is left alone, and that agent is not captured. Restart pi (or `/reload`) and
+OpenCode after `install`. Started with `--no-extensions` (pi) or `--pure` (OpenCode), or with
+`--no-session` (pi), they capture nothing. pi's session files are append-only JSONL with the
+folder in their first line, so they upload in chunks and the sweep and `seshi upload --since`
+find sessions no hook saw. OpenCode keeps its sessions in a database, not in files: after each
+turn the plugin reads the session through OpenCode's own client and hands it to seshi whole (the
+`{info, messages}` export `opencode export` prints), and seshi writes it to
+`transcripts/opencode/` in the capture folder, only for a session it captures, and uploads it
+whole each time. OpenCode has no end-of-session event, so its sessions end when the uploader
+finds them quiet. A subagent's session (OpenCode's task tool) is captured as its own session with
+its parent's id.
 
 `install` merges: every hook already in those files stays, and running it twice is the same as
 once. A status line someone else set up, in Claude Code or the Cursor CLI, still shows, with
@@ -147,6 +166,16 @@ place, and the model never runs. Every other message passes.
 Elsewhere the skill runs `seshi capture off|on`, asking to leave a sandbox when there is one.
 In every agent, the skill and `seshi capture status` say the same and more (which rule
 decided, the queue, the last errors).
+
+pi has no status line of its own to run, so seshi's extension puts `seshi statusline --agent pi`
+in pi's footer, refreshed when a session starts and after each agent run, and registers
+`/seshi off|on|status` as a pi command: seshi does it, the answer shows as a notification, and
+the model never sees it. OpenCode shows the start notice above in a toast when a new session
+starts. Its `/seshi` is a command file, which OpenCode always sends to the model; seshi's plugin
+does what it asks first and puts the answer, with a request for a one-line acknowledgement, in
+place of the command, so the model's reply is the only cost. In both, the extension and the
+plugin pass the session's id themselves: seshi's own `SESHI_SESSION_ID`, set in a shell another
+agent started, is ignored.
 
 The Claude desktop app's Code tab has no status line. There, seshi's Claude Code plugin draws the
 same words as a chip in the prompt footer; clicking it turns capture off or on for the session,
@@ -381,6 +410,7 @@ the server stored them.
 | `rules.json` | the capture rules as last read from the CLI config |
 | `redaction-rules.json` | your server's redaction rules as last fetched, with their ETag |
 | `capture.log` | errors from hooks and the uploader (hooks never print) |
+| `transcripts/opencode/` | OpenCode sessions as seshi was handed them, one `<id>.json` each, for captured sessions only: OpenCode keeps its own in a database |
 | `serverless/<id>/` | serverless mode, per bucket: the cached shared settings, the storage test's result, this machine's drop and failure records, the daemon's upkeep times ([serverless.md](serverless.md#what-a-laptop-writes-and-keeps)) |
 
 `SESHI_NO_UPLOADER=1` makes hooks spool without starting an uploader (CI, tests).
@@ -390,3 +420,9 @@ the server stored them.
 - Session Capture in Cursor's Agents Window, which shows no extension's status bar item.
 - A first-run notice inside Cursor that capture is on.
 - Datadog Trajectory's local files.
+- A status that stays on screen in OpenCode (it needs a TUI plugin, a newer OpenCode API), and
+  turning capture off there without a model turn.
+- Backfilling OpenCode sessions no plugin handed over (`seshi upload --since` finds only those):
+  for now, `opencode export <id> > s.json && seshi upload s.json`.
+- pi's forks Oh My Pi and OpenClaw: their session files upload by hand; whether they load pi's
+  extensions from the same folder is not checked.

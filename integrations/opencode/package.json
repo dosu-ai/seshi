@@ -1,11 +1,14 @@
 {
   "name": "@seshi/integration-opencode",
   "private": true,
-  "description": "OpenCode: the session export adapter.",
+  "description": "OpenCode: the session export adapter, and live capture through an OpenCode plugin.",
   "type": "module",
   "exports": {
     ".": {
       "bun": "./src/index.ts"
+    },
+    "./capture": {
+      "bun": "./src/capture.ts"
     }
   },
   "dependencies": {

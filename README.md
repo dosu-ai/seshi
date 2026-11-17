@@ -126,8 +126,9 @@ Everything else is in [docs/](docs/README.md).
 | Codex CLI | ✓ | A notice when the session starts | `$seshi` | ✓ |
 | Cursor (editor) | ✓ | Status bar extension | `/seshi`, or a click on the status bar | ✓ |
 | Cursor CLI | ✓ | Status line | `/seshi` | ✓ |
-| OpenCode | — | — | — | ✓ |
-| pi, Oh My Pi, OpenClaw | — | — | — | ✓ |
+| OpenCode | ✓ | A notice when the session starts | `/seshi` | ✓ |
+| pi | ✓ | Footer | `/seshi` | ✓ |
+| Oh My Pi, OpenClaw | — | — | — | ✓ |
 | Gemini CLI | — | — | — | ✓ |
 | Devin | — | — | — | — |
 | Factory Droid | — | — | — | — |

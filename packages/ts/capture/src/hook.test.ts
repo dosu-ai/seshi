@@ -1,4 +1,13 @@
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CaptureAgent, CaptureHost } from "@seshi/kit";
@@ -102,6 +111,45 @@ describe("runHook (F9.1)", () => {
         cwd: dir,
       },
     ]);
+  });
+
+  it("writes a transcript the hook was handed whole, for a captured session only", async () => {
+    // OpenCode keeps no transcript file: its plugin hands seshi the session itself.
+    const handed: CaptureAgent = {
+      ...agent,
+      name: "handed",
+      encoding: "json",
+      chunkable: false,
+      hooks: [
+        {
+          event: "Stop",
+          parse: (p) => {
+            const { id, cwd } = p as { id: string; cwd: string };
+            return { captures: [{ session_id: id, cwd, transcript: `{"id":"${id}"}` }] };
+          },
+        },
+      ],
+    };
+    const run = (id: string) =>
+      runHook({ agent: handed, event: "Stop", payload: { id, cwd: dir }, host, paths });
+    const file = join(paths.dir, "transcripts", "handed", "s1.json");
+    const outcome = await run("s1");
+    expect(outcome.spooled).toEqual([{ session_id: "s1", cwd: dir, transcript_path: file }]);
+    expect(readFileSync(file, "utf8")).toBe('{"id":"s1"}');
+    if (process.platform !== "win32") expect(statSync(file).mode & 0o777).toBe(0o600);
+    expect(readSpool(paths).items[0]?.entry).toMatchObject({ transcript_path: file });
+
+    await updateState(paths, (s) => {
+      s.sessions["handed:s2"] = {
+        agent: "handed",
+        session_id: "s2",
+        first_seen: "x",
+        toggle: "off",
+      };
+    });
+    expect((await run("s2")).skipped).toHaveLength(1);
+    expect(existsSync(join(paths.dir, "transcripts", "handed", "s2.json"))).toBe(false);
+    await expect(run("../escape")).rejects.toThrow("unusable session id");
   });
 
   it("skips what the rules exclude, by any level, and says why", async () => {

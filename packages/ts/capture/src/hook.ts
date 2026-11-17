@@ -1,6 +1,14 @@
 import { appendFileSync } from "node:fs";
-import { type CaptureAgent, type CaptureHost, type HookCapture, hookHandler } from "@seshi/kit";
+import { join } from "node:path";
+import {
+  type CaptureAgent,
+  type CaptureHost,
+  type HookCapture,
+  handedTranscriptDir,
+  hookHandler,
+} from "@seshi/kit";
 import { writeRecent } from "./current";
+import { writePrivateFile } from "./files";
 import type { CapturePaths } from "./paths";
 import { placeOf } from "./place";
 import { type Decision, decide } from "./rules";
@@ -108,6 +116,7 @@ export async function runHook(run: HookRun): Promise<HookOutcome> {
       }
       continue;
     }
+    const path = capture.transcript === undefined ? capture.transcript_path : keep(run, capture);
     appendSpool(
       run.paths,
       {
@@ -117,16 +126,29 @@ export async function runHook(run: HookRun): Promise<HookOutcome> {
         agent: run.agent.name,
         event: run.event,
         session_id: capture.session_id,
-        ...(capture.transcript_path ? { transcript_path: capture.transcript_path } : {}),
+        ...(path ? { transcript_path: path } : {}),
         ...(capture.cwd ? { cwd: capture.cwd } : {}),
         ...(capture.parent_session_id ? { parent_session_id: capture.parent_session_id } : {}),
         ...(capture.final ? { final: true } : {}),
       },
       now,
     );
-    outcome.spooled.push(capture);
+    const { transcript: _, ...spooled } = capture;
+    outcome.spooled.push(path ? { ...spooled, transcript_path: path } : spooled);
   }
   return outcome;
+}
+
+/** A transcript the hook was handed whole, written where the uploader reads it, readable only by
+ * this user. Only a captured session's is written: one turned off never reaches the disk. */
+function keep(run: HookRun, capture: HookCapture): string {
+  if (!/^[\w.-]+$/.test(capture.session_id)) {
+    throw new Error(`${run.agent.name}: unusable session id '${capture.session_id}'`);
+  }
+  const ext = run.agent.encoding === "json" ? "json" : "jsonl";
+  const path = join(handedTranscriptDir(run.host, run.agent.name), `${capture.session_id}.${ext}`);
+  writePrivateFile(path, capture.transcript as string);
+  return path;
 }
 
 function respoolPausedSession(
