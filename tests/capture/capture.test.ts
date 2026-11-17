@@ -257,6 +257,27 @@ describe("hooks and the uploader (F9.1)", () => {
     );
   });
 
+  it("does $seshi off|on|status typed in Codex itself, outside the agent's sandbox", async () => {
+    const say = (prompt: string) =>
+      machine.seshi(["hook", "codex", "UserPromptSubmit"], {
+        stdin: JSON.stringify({ session_id: "thread-2", cwd: project, prompt }),
+      });
+    expect(await say("fix the tests")).toEqual({ code: 0, out: "", err: "" });
+    const off = await say("$seshi off");
+    expect(JSON.parse(off.out).systemMessage).toBe(
+      "Session Capture ⏸ · turned off for this session; nothing of it was uploaded",
+    );
+    expect(state().sessions["codex:thread-2"]).toMatchObject({ toggle: "off" });
+    expect(JSON.parse((await say("$seshi")).out).systemMessage).toBe(
+      "Session Capture ⏸ · turned off for this session",
+    );
+    const on = await say("$seshi on");
+    expect(JSON.parse(on.out).systemMessage).toMatch(
+      /^Session Capture ◉ · turned on for this session/,
+    );
+    expect(state().sessions["codex:thread-2"]).toMatchObject({ toggle: "on" });
+  });
+
   it("exports the session for the /seshi skill on SessionStart", async () => {
     const envFile = join(machine.dir, "claude-env");
     await machine.seshi(["hook", "claude-code", "SessionStart"], {

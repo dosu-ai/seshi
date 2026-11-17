@@ -21,6 +21,9 @@ export interface HookResult {
   /** A session that just started: the hook tells the agent whether it is captured, and spools
    * nothing (Codex shows it as a notice). */
   announce?: HookCapture;
+  /** The person asked, in their own prompt, to turn capture off or on for this session: the
+   * hook does it, outside any sandbox the agent's commands run in. */
+  request?: { action: "off" | "on"; session: HookCapture };
 }
 
 export interface HookHandler {

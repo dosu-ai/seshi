@@ -36,11 +36,16 @@ finished a turn yet seshi may not know it: say so. When seshi answers that more 
 here, show the user the sessions it lists and ask which, then run the command again with
 \`--session <id>\`.
 
-Off and on write seshi's state folder (\`~/.local/state/seshi\`, outside the workspace), which
-a sandbox blocks: Codex's does by default. So in a sandbox, run it with escalated permissions
-(in Codex, \`sandbox_permissions: "require_escalated"\`, saying it changes Session Capture for
-this session) and let the user approve it. Do not tell the user to run it themselves unless
-they decline.
+In Codex, when the user's whole message is \`$seshi off\`, \`$seshi on\` or \`$seshi status\`,
+seshi's own hook has already done it before you see the message, and shown the user the
+result: do not run off or on. Run \`${seshi} capture status --session --agent codex\`, which only
+reads, and confirm in one sentence.
+
+Otherwise, off and on write seshi's state folder (\`~/.local/state/seshi\`, outside the
+workspace), which a sandbox blocks. In a sandbox, run the command with escalated permissions,
+saying it changes Session Capture for this session, and let the user approve it. If that is
+refused, tell the user to type \`$seshi off\` or \`$seshi on\` as a message of its own in Codex,
+or to run the command in a terminal.
 
 Report the command's output to the user in one or two sentences. Do not run any other seshi
 command unless the user asks for it.

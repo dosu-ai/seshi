@@ -84,6 +84,11 @@ async function hook(
   const outcome = await runHook({ agent: await load, event, payload, host, paths });
   if (outcome.ignored) log(outcome.ignored);
   if (outcome.announced) ctx.stdout(JSON.stringify({ systemMessage: notice(outcome.announced) }));
+  if (outcome.requested) {
+    ctx.stdout(
+      JSON.stringify({ systemMessage: await carryOut(ctx, agentName, outcome.requested) }),
+    );
+  }
   if (outcome.spooled.length > 0) await startUploader(ctx, paths);
 }
 
@@ -92,4 +97,46 @@ export function notice({ decision }: { decision: { capture: boolean; reason: str
   return decision.capture
     ? "Session Capture ◉ · this session is uploaded to your team's session store as you work; $seshi off stops it"
     : `Session Capture ⏸ · ${decision.reason}`;
+}
+
+/** Turn capture off or on for the session the person asked about, as `seshi capture off|on
+ * --session <id>` would, and say what happened. */
+async function carryOut(
+  ctx: CommandContext,
+  agent: string,
+  { action, session }: { action: "off" | "on"; session: { session_id: string } },
+): Promise<string> {
+  const { run } = await import("./capture");
+  let out = "";
+  let err = "";
+  const code = await run({
+    ...ctx,
+    argv: [action, "--session", session.session_id, "--agent", agent, "--json"],
+    stdout: (line) => {
+      out += line;
+    },
+    stderr: (line) => {
+      err += line;
+    },
+  });
+  let said: {
+    retracting?: boolean;
+    fresh?: boolean;
+    unfrozen?: boolean;
+    error?: { message?: string };
+  } = {};
+  try {
+    said = JSON.parse(out || err);
+  } catch {}
+  if (code !== 0) {
+    return `Session Capture could not be turned ${action}: ${said.error?.message ?? (err.trim() || `exit ${code}`)}`;
+  }
+  if (action === "off") {
+    return `Session Capture ⏸ · turned off for this session; ${said.retracting ? "what it uploaded is being retracted" : "nothing of it was uploaded"}`;
+  }
+  const more = [
+    ...(said.fresh ? ["it is uploaded again from its start"] : []),
+    ...(said.unfrozen ? ["a pause had stopped it, so all of it is uploaded now"] : []),
+  ];
+  return `Session Capture ◉ · turned on for this session${more.length > 0 ? `; ${more.join("; ")}` : ""}`;
 }

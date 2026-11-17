@@ -9,6 +9,7 @@ import {
   identifyRollout,
   isSeshiNotify,
   locateRollout,
+  seshiPrompt,
   topLevelAssignment,
   withNotify,
 } from "./capture";
@@ -205,10 +206,31 @@ describe("the installer (F9.6)", () => {
           hooks: [{ type: "command", command: "seshi hook codex SessionStart", timeout: 5 }],
         },
       ],
+      UserPromptSubmit: [
+        { hooks: [{ type: "command", command: "seshi hook codex UserPromptSubmit", timeout: 5 }] },
+      ],
     });
     expect((await codexInstaller.status({ ...host, ...context })).notes).toEqual([]);
     await codexInstaller.uninstall({ ...host, ...context });
     expect(JSON.parse(readFileSync(hooks(), "utf8"))).toEqual(theirs);
+  });
+
+  it("takes a prompt that is only $seshi off|on|status as a request for the hook", () => {
+    expect(seshiPrompt("$seshi off")).toBe("off");
+    expect(seshiPrompt("  $seshi capture ON. ")).toBe("on");
+    expect(seshiPrompt("$seshi")).toBe("status");
+    expect(seshiPrompt("$seshi status")).toBe("status");
+    expect(seshiPrompt("$seshi off and then fix the tests")).toBeUndefined();
+    expect(seshiPrompt("please run $seshi off")).toBeUndefined();
+    const handler = hookHandler(CODEX_CAPTURE, "UserPromptSubmit");
+    const prompt = (text: string) =>
+      handler?.parse({ session_id: "t1", cwd: "/w", prompt: text }, host);
+    expect(prompt("$seshi off")).toEqual({
+      captures: [],
+      request: { action: "off", session: { session_id: "t1", cwd: "/w" } },
+    });
+    expect(prompt("$seshi")).toEqual({ captures: [], announce: { session_id: "t1", cwd: "/w" } });
+    expect(prompt("fix the build")).toEqual({ captures: [] });
   });
 
   it("reads a SessionStart payload as a session to announce, spooling nothing", () => {

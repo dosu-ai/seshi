@@ -31,7 +31,7 @@ seshi capture install --service  # also keep the uploader running between sessio
 | Agent | What `install` writes | Events (F9.2) |
 |---|---|---|
 | Claude Code | hooks, the status line and the `/seshi` skill in `~/.claude/settings.json` and `~/.claude/skills/seshi/` (`CLAUDE_CONFIG_DIR` moves them) | SessionStart, Stop, SubagentStop, PreCompact, SessionEnd |
-| Codex | `notify` in `~/.codex/config.toml` (`CODEX_HOME` moves it); a `notify` program already there keeps running, after seshi's. A SessionStart hook in `~/.codex/hooks.json` for the notice, and the `$seshi` skill in `~/.agents/skills/seshi/` | notify, plus the sweep of `~/.codex/sessions`; SessionStart only for the notice |
+| Codex | `notify` in `~/.codex/config.toml` (`CODEX_HOME` moves it); a `notify` program already there keeps running, after seshi's. SessionStart and UserPromptSubmit hooks in `~/.codex/hooks.json` for the notice and `$seshi`, and the `$seshi` skill in `~/.agents/skills/seshi/` | notify, plus the sweep of `~/.codex/sessions`; SessionStart and UserPromptSubmit only for the notice and `$seshi` |
 | Cursor (IDE and CLI) | hooks in `~/.cursor/hooks.json`, and the `/seshi` skill in `~/.cursor/skills/seshi/` | stop, sessionEnd |
 
 `install` merges: every hook already in those files stays, and running it twice is the same as
@@ -130,7 +130,13 @@ network. Claude Code runs it as its status line. Codex's status line takes only 
 built-in items, so there seshi's SessionStart hook says it once, when a session starts or
 resumes, as a notice: `Session Capture ◉ · this session is uploaded to your team's session
 store as you work; $seshi off stops it`, or `Session Capture ⏸ · <why not>`. Codex asks you to
-trust a new hook the first time it runs. Cursor has no status line and shows no hook's message.
+trust a new hook the first time it runs.
+
+Codex's sandbox keeps the commands its agent runs from writing seshi's state folder, so in
+Codex `$seshi off`, `$seshi on` and `$seshi status` (or `$seshi`), typed as a message of its
+own, are done by seshi's UserPromptSubmit hook, which runs outside the sandbox, before the
+model sees the message; the result shows as a notice. Elsewhere the skill runs
+`seshi capture off|on`, asking to leave a sandbox when there is one. Cursor has no status line and shows no hook's message.
 In both, the skill (`$seshi` in Codex, `/seshi` in Cursor) and `seshi capture status` say the
 same and more (which rule decided, the queue, the last errors).
 

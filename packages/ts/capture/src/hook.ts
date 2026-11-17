@@ -23,6 +23,8 @@ export interface HookOutcome {
   ignored?: string;
   /** For a session the hook announced: whether it is captured, and why. */
   announced?: { session_id: string; decision: Decision };
+  /** What the person asked the hook to do for their session (the command carries it out). */
+  requested?: { action: "off" | "on"; session: HookCapture };
 }
 
 /** A value as one shell word: single-quoted, with any single quote in it closed and escaped. */
@@ -46,6 +48,7 @@ export async function runHook(run: HookRun): Promise<HookOutcome> {
     appendFileSync(result.exportEnv.file, lines);
     outcome.envFileWritten = result.exportEnv.file;
   }
+  if (result.request) outcome.requested = result.request;
   if (result.captures.length === 0 && !result.announce) return outcome;
 
   const now = run.now ?? new Date();

@@ -67,7 +67,31 @@ export const CODEX_HOOKS: readonly HookHandler[] = [
       return { captures: [], announce: { session_id: session, ...(cwd ? { cwd } : {}) } };
     },
   },
+  {
+    // Codex's sandbox keeps the agent's commands from writing seshi's state, so `$seshi off|on`
+    // typed by the person is done here, by the hook, before the model sees the prompt.
+    event: "UserPromptSubmit",
+    parse(payload) {
+      const object = payloadObject(payload, AGENT);
+      const asked = seshiPrompt(stringField(object, "prompt") ?? "");
+      if (!asked) return { captures: [] };
+      const session = stringField(object, "session_id");
+      if (!session) throw new Error(`${AGENT}: UserPromptSubmit has no session_id`);
+      const cwd = stringField(object, "cwd");
+      const which = { session_id: session, ...(cwd ? { cwd } : {}) };
+      return asked === "status"
+        ? { captures: [], announce: which }
+        : { captures: [], request: { action: asked, session: which } };
+    },
+  },
 ];
+
+/** What a prompt that is only `$seshi [off|on|status]` asks for (bare: status). */
+export function seshiPrompt(prompt: string): "off" | "on" | "status" | undefined {
+  const match = /^\s*\$seshi(?:\s+(?:capture\s+)?(off|on|status))?\s*[.!]?\s*$/i.exec(prompt);
+  if (!match) return undefined;
+  return (match[1]?.toLowerCase() as "off" | "on" | "status" | undefined) ?? "status";
+}
 
 /** Which session a rollout is: its own `session_meta` (the first; a forked rollout repeats its
  * parent's after it). */
@@ -278,17 +302,28 @@ function ourHook(command: readonly string[]) {
   return (h: { command?: unknown }) => isSeshiHook(h.command, AGENT, own);
 }
 
+/** seshi's lifecycle hooks: the notice when a session starts, and `$seshi off|on|status`. */
+const LIFECYCLE: readonly { event: string; matcher?: string }[] = [
+  { event: "SessionStart", matcher: "startup|resume" },
+  { event: "UserPromptSubmit" },
+];
+
 function installNotice(context: InstallContext): string {
   const path = hooksPath(context);
   const config = readJsonConfig(path);
   const table = hooksTable(config, path);
-  const command = `${commandLine(context.command)} hook ${AGENT} SessionStart`;
-  const groups = groupsOf(table.SessionStart);
-  const ours = groups.flatMap((g) => (g.hooks ?? []).filter(ourHook(context.command)));
-  if (ours.length > 0) for (const hook of ours) hook.command = command;
-  else
-    groups.push({ matcher: "startup|resume", hooks: [{ type: "command", command, timeout: 5 }] });
-  table.SessionStart = groups;
+  for (const { event, matcher } of LIFECYCLE) {
+    const command = `${commandLine(context.command)} hook ${AGENT} ${event}`;
+    const groups = groupsOf(table[event]);
+    const ours = groups.flatMap((g) => (g.hooks ?? []).filter(ourHook(context.command)));
+    if (ours.length > 0) for (const hook of ours) hook.command = command;
+    else
+      groups.push({
+        ...(matcher ? { matcher } : {}),
+        hooks: [{ type: "command", command, timeout: 5 }],
+      });
+    table[event] = groups;
+  }
   writeJsonConfig(path, { ...config, hooks: table });
   return path;
 }
@@ -298,17 +333,21 @@ function removeNotice(context: InstallContext): string[] {
   if (!existsSync(path)) return [];
   const config = readJsonConfig(path);
   const table = hooksTable(config, path);
-  const groups = groupsOf(table.SessionStart);
-  const kept: CodexHookGroup[] = [];
   let touched = false;
-  for (const group of groups) {
-    const hooks = (group.hooks ?? []).filter((h) => !ourHook(context.command)(h));
-    if (hooks.length !== (group.hooks ?? []).length) touched = true;
-    if (hooks.length > 0 || group.hooks === undefined) kept.push({ ...group, hooks });
+  for (const { event } of LIFECYCLE) {
+    const kept: CodexHookGroup[] = [];
+    let ours = false;
+    for (const group of groupsOf(table[event])) {
+      const hooks = (group.hooks ?? []).filter((h) => !ourHook(context.command)(h));
+      if (hooks.length !== (group.hooks ?? []).length) ours = true;
+      if (hooks.length > 0 || group.hooks === undefined) kept.push({ ...group, hooks });
+    }
+    if (!ours) continue;
+    touched = true;
+    if (kept.length > 0) table[event] = kept;
+    else delete table[event];
   }
   if (!touched) return [];
-  if (kept.length > 0) table.SessionStart = kept;
-  else delete table.SessionStart;
   const { hooks: _hooks, ...rest } = config;
   const next = Object.keys(table).length > 0 ? { ...rest, hooks: table } : rest;
   if (Object.keys(next).length === 0) rmSync(path, { force: true });
@@ -320,7 +359,9 @@ function hasNotice(context: InstallContext): boolean {
   const path = hooksPath(context);
   if (!existsSync(path)) return false;
   const table = hooksTable(readJsonConfig(path), path);
-  return groupsOf(table.SessionStart).some((g) => (g.hooks ?? []).some(ourHook(context.command)));
+  return LIFECYCLE.every(({ event }) =>
+    groupsOf(table[event]).some((g) => (g.hooks ?? []).some(ourHook(context.command))),
+  );
 }
 
 export const codexInstaller: Installer = {
@@ -381,7 +422,9 @@ export const codexInstaller: Installer = {
       ],
       notes:
         ours && !notice
-          ? ["the session-start notice is missing: run seshi capture install codex"]
+          ? [
+              "the session-start notice or the $seshi hook is missing: run seshi capture install codex",
+            ]
           : [],
     };
   },
