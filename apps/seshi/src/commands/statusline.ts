@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import {
   captureRules,
   decide,
@@ -22,21 +23,67 @@ export const NOT_CAPTURING = "⏸";
 
 const STDIN_TIMEOUT_MS = 1000;
 
-async function readPayload(ctx: CommandContext): Promise<Record<string, unknown>> {
-  if (ctx.tty?.stdin || !ctx.stdin) return {};
+const CHAINED_TIMEOUT_MS = 1500;
+
+async function readPayload(
+  ctx: CommandContext,
+): Promise<{ text: string; payload: Record<string, unknown> }> {
+  if (ctx.tty?.stdin || !ctx.stdin) return { text: "", payload: {} };
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<string>((resolve) => {
     timer = setTimeout(() => resolve(""), STDIN_TIMEOUT_MS);
   });
+  let text = "";
   try {
-    const text = await Promise.race([ctx.stdin(), timeout]);
+    text = await Promise.race([ctx.stdin(), timeout]);
     const parsed = text.trim() ? JSON.parse(text) : {};
-    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? parsed : {};
+    const payload =
+      typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? parsed : {};
+    return { text, payload };
   } catch {
-    return {};
+    return { text, payload: {} };
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** The status line someone else set up, which `seshi capture install` moved into `file` so
+ * seshi's runs after it (`--chain <file>`): run with the same payload, its output kept. Nothing
+ * when the file is gone or unreadable, the command fails, or it is slower than Claude Code
+ * waits. */
+async function chained(file: string, payload: string, platform: NodeJS.Platform) {
+  let command: unknown;
+  try {
+    command = (JSON.parse(readFileSync(file, "utf8")) as { statusLine?: { command?: unknown } })
+      .statusLine?.command;
+  } catch {
+    return "";
+  }
+  if (typeof command !== "string" || command.trim() === "") return "";
+  const shell =
+    platform === "win32"
+      ? [process.env.CLAUDE_CODE_GIT_BASH_PATH || "bash", "-c"]
+      : ["/bin/sh", "-c"];
+  try {
+    const proc = Bun.spawn([...shell, command], {
+      stdin: new Blob([payload]),
+      stdout: "pipe",
+      stderr: "ignore",
+    });
+    const timer = setTimeout(() => proc.kill(), CHAINED_TIMEOUT_MS);
+    const out = await new Response(proc.stdout).text();
+    clearTimeout(timer);
+    return (await proc.exited) === 0 ? out.replace(/\s+$/, "") : "";
+  } catch {
+    return "";
+  }
+}
+
+/** Another status line's output and seshi's: on one line when the other is one line, else
+ * seshi's below it. */
+export function joinStatusLines(other: string, ours: string): string {
+  if (other === "") return ours;
+  return other.includes("\n") ? `${other}\n${ours}` : `${other} · ${ours}`;
 }
 
 export function renderStatusLine(line: StatusLine, style: Style): string {
@@ -49,8 +96,11 @@ export async function run(ctx: CommandContext): Promise<number> {
   const { json, rest } = takeJson(ctx.argv);
   const agentAt = rest.indexOf("--agent");
   const agent = agentAt === -1 ? "claude-code" : (rest[agentAt + 1] ?? "claude-code");
+  const chainAt = rest.indexOf("--chain");
+  const chainFile = chainAt === -1 ? undefined : rest[chainAt + 1];
   const { host, paths } = pathsOf(ctx);
-  const payload = await readPayload(ctx);
+  const { text, payload } = await readPayload(ctx);
+  const other = chainFile && !json ? chained(chainFile, text, host.platform) : Promise.resolve("");
   const workspace = payload.workspace as { current_dir?: unknown } | undefined;
   const cwd =
     (typeof payload.cwd === "string" && payload.cwd) ||
@@ -100,6 +150,6 @@ export async function run(ctx: CommandContext): Promise<number> {
     level === "none"
       ? "dark"
       : await detectTheme({ env: ctx.env, ...(snapshot.theme ? { setting: snapshot.theme } : {}) });
-  ctx.stdout(renderStatusLine(line, new Style(level, theme)));
+  ctx.stdout(joinStatusLines(await other, renderStatusLine(line, new Style(level, theme))));
   return EXIT.ok;
 }

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type CaptureHost, hookHandler } from "@seshi/kit";
@@ -104,5 +104,15 @@ describe("the installer (F9.6)", () => {
   it("writes a new hooks.json with version 1", async () => {
     await cursorInstaller.install(context());
     expect(JSON.parse(readFileSync(file(), "utf8")).version).toBe(1);
+  });
+
+  it("adds the seshi skill to Cursor's skills, naming itself as cursor, and removes it", async () => {
+    const skill = join(home, ".cursor", "skills", "seshi", "SKILL.md");
+    const report = await cursorInstaller.install(context());
+    expect(report.changed).toEqual([file(), skill]);
+    expect(readFileSync(skill, "utf8")).toContain("`cursor` in Cursor");
+    expect((await cursorInstaller.status(context())).files[1]).toMatchObject({ ours: true });
+    expect((await cursorInstaller.uninstall(context())).changed).toEqual([file(), skill]);
+    expect(existsSync(skill)).toBe(false);
   });
 });

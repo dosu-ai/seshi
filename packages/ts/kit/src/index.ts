@@ -44,6 +44,7 @@ export {
   writeFileAtomic,
   writeJsonConfig,
 } from "./files";
+export { captureSkill, installSkill, isOurSkill, removeSkill, SKILL_MARKER } from "./skill";
 
 export type SubmitOutcome =
   | StoreSessionResult

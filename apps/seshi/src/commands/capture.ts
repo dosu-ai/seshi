@@ -144,6 +144,10 @@ export function resolveSession(
 ): { agent: string; id: string } | string {
   let id = args.session === true ? env.SESHI_SESSION_ID || undefined : args.session;
   let agent = args.agent ?? (args.session === true ? env.SESHI_AGENT || undefined : undefined);
+  if (args.session === true && !id && env.CODEX_THREAD_ID && (!agent || agent === "codex")) {
+    id = env.CODEX_THREAD_ID;
+    agent = "codex";
+  }
   if (id && !agent) {
     const agents = new Set(
       Object.values(state.sessions)

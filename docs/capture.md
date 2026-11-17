@@ -31,13 +31,22 @@ seshi capture install --service  # also keep the uploader running between sessio
 | Agent | What `install` writes | Events (F9.2) |
 |---|---|---|
 | Claude Code | hooks, the status line and the `/seshi` skill in `~/.claude/settings.json` and `~/.claude/skills/seshi/` (`CLAUDE_CONFIG_DIR` moves them) | SessionStart, Stop, SubagentStop, PreCompact, SessionEnd |
-| Codex | `notify` in `~/.codex/config.toml` (`CODEX_HOME` moves it); a `notify` program already there keeps running, after seshi's | notify, plus the sweep of `~/.codex/sessions` |
-| Cursor (IDE and CLI) | hooks in `~/.cursor/hooks.json` | stop, sessionEnd |
+| Codex | `notify` in `~/.codex/config.toml` (`CODEX_HOME` moves it); a `notify` program already there keeps running, after seshi's. The `$seshi` skill in `~/.agents/skills/seshi/` | notify, plus the sweep of `~/.codex/sessions` |
+| Cursor (IDE and CLI) | hooks in `~/.cursor/hooks.json`, and the `/seshi` skill in `~/.cursor/skills/seshi/` | stop, sessionEnd |
 
 `install` merges: every hook already in those files stays, and running it twice is the same as
-once. A status line someone else set up is kept (add `seshi statusline` to it yourself).
-`seshi capture uninstall` takes out only seshi's entries; sessions already uploaded stay on the
-server.
+once. A Claude Code status line someone else set up still shows, with seshi's after it: `install`
+moves it to `~/.claude/seshi-statusline.json` and points the status line at
+`seshi statusline --chain <that file>`, which runs it with the same input first. A skill named
+`seshi` that is not seshi's is left alone. `seshi capture uninstall` takes out only seshi's
+entries and puts a chained status line back; sessions already uploaded stay in the store.
+
+The skill is the same in every agent (Cursor also reads Claude Code's and Codex's skill folders,
+so it may list it more than once): it turns capture off or on for the session the agent is in,
+or says whether it is captured, naming the agent with `--agent`. seshi knows which session that
+is in Claude Code (`SESHI_SESSION_ID`, set by its SessionStart hook) and in Codex
+(`CODEX_THREAD_ID`); in Cursor it is the one Cursor session seen in the current folder in the
+past day.
 
 Hooks run the binary by its absolute path when seshi is the compiled binary, else `seshi` from
 the agent's PATH; `--command <program>` names it. A Claude Code plugin with the same hooks and
@@ -117,8 +126,10 @@ Session Capture ⏸
 ◉ means this session is being captured, ⏸ that it is not (off, stopped by a pause, paused or
 excluded); anything that
 needs action follows a separator, at most two things. It reads only local files, never the
-network. Claude Code runs it as its status line; for Cursor and Codex, `seshi capture status`
-says the same and more (which rule decided, the queue, the last errors).
+network. Claude Code runs it as its status line. Codex's status line takes only its own
+built-in items and Cursor has none, so there the skill (`$seshi` in Codex, `/seshi` in Cursor)
+and `seshi capture status` say the same and more (which rule decided, the queue, the last
+errors).
 
 The Claude desktop app's Code tab has no status line. There, seshi's Claude Code plugin draws the
 same words as a chip in the prompt footer; clicking it turns capture off or on for the session,

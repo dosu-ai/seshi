@@ -1,11 +1,12 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type CaptureHost, hookHandler } from "@seshi/kit";
+import { type CaptureHost, commandLine, hookHandler } from "@seshi/kit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   CLAUDE_CODE_CAPTURE,
   CLAUDE_CODE_EVENTS,
+  chainedStatusPath,
   claudeAccountIds,
   claudeCodeInstaller,
   identifyClaudeTranscript,
@@ -191,17 +192,33 @@ describe("the installer (F9.6)", () => {
     expect(again.hooks.Stop[1].hooks[0].command).toBe("seshi hook claude-code Stop");
   });
 
-  it("keeps someone else's status line and skill, and says so", async () => {
+  it("runs someone else's status line before its own, keeps their skill, and says so", async () => {
     mkdirSync(join(home, ".claude", "skills", "seshi"), { recursive: true });
-    writeFileSync(
-      settings(),
-      JSON.stringify({ statusLine: { type: "command", command: "my-line" } }),
-    );
+    const theirs = { type: "command", command: "~/.claude/my-line.py", padding: 1 };
+    writeFileSync(settings(), JSON.stringify({ statusLine: theirs }));
     writeFileSync(join(home, ".claude", "skills", "seshi", "SKILL.md"), "mine");
     const report = await claudeCodeInstaller.install(context());
     expect(report.notes).toHaveLength(2);
-    expect(JSON.parse(readFileSync(settings(), "utf8")).statusLine.command).toBe("my-line");
+    const chain = chainedStatusPath(context());
+    expect(report.notes[0]).toContain(`yours is kept in ${chain}`);
+    expect(JSON.parse(readFileSync(settings(), "utf8")).statusLine).toEqual({
+      type: "command",
+      command: commandLine(["/opt/seshi/bin/seshi", "statusline", "--chain", chain]),
+      padding: 1,
+    });
+    expect(JSON.parse(readFileSync(chain, "utf8"))).toEqual({ statusLine: theirs });
     expect(readFileSync(join(home, ".claude", "skills", "seshi", "SKILL.md"), "utf8")).toBe("mine");
+    // Twice is once: the saved status line stays theirs, not seshi's.
+    await claudeCodeInstaller.install(context());
+    expect(JSON.parse(readFileSync(chain, "utf8"))).toEqual({ statusLine: theirs });
+    expect((await claudeCodeInstaller.status(context())).notes).toEqual([
+      expect.stringContaining(`yours is kept in ${chain}`),
+    ]);
+    // Uninstall puts theirs back.
+    const removed = await claudeCodeInstaller.uninstall(context());
+    expect(removed.changed).toContain(chain);
+    expect(JSON.parse(readFileSync(settings(), "utf8")).statusLine).toEqual(theirs);
+    expect(existsSync(chain)).toBe(false);
   });
 
   it("removes only its own entries on uninstall", async () => {

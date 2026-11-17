@@ -306,6 +306,24 @@ describe("seshi capture's arguments", () => {
       agent: "codex",
       id: "t1",
     });
+    // Inside Codex, its own thread is this session, wherever it runs.
+    const inCodex = { CODEX_THREAD_ID: "thread-7" };
+    expect(resolveSession({ positionals: [], session: true }, state, inCodex, "/", now)).toEqual({
+      agent: "codex",
+      id: "thread-7",
+    });
+    expect(
+      resolveSession({ positionals: [], session: true, agent: "codex" }, state, inCodex, "/", now),
+    ).toEqual({ agent: "codex", id: "thread-7" });
+    expect(
+      resolveSession(
+        { positionals: [], session: true },
+        state,
+        { ...inCodex, SESHI_SESSION_ID: "s9" },
+        "/",
+        now,
+      ),
+    ).toEqual({ agent: "claude-code", id: "s9" });
     expect(resolveSession({ positionals: [], session: "zz" }, state, {}, "/", now)).toEqual({
       agent: "claude-code",
       id: "zz",

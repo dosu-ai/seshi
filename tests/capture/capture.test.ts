@@ -13,6 +13,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -420,6 +421,38 @@ describe("the status line (F9.4, B1.6)", () => {
     const json = JSON.parse((await machine.seshi(["statusline", "--json"], { stdin: "" })).out);
     expect(json).toMatchObject({ capturing: true, level: "global", problems: [] });
   });
+
+  it.skipIf(process.platform === "win32")(
+    "runs the status line it was chained to first, with the same payload",
+    async () => {
+      const script = join(machine.dir, "theirs.sh");
+      writeFileSync(script, '#!/bin/sh\nprintf "dosu: %s" "$(cat | grep -o \'"cwd"\')"\n', {
+        mode: 0o755,
+      });
+      const chain = join(machine.dir, "chain.json");
+      const chained = (command: string) => {
+        writeFileSync(chain, JSON.stringify({ statusLine: { type: "command", command } }));
+        return machine.seshi(["statusline", "--chain", chain], {
+          stdin: JSON.stringify({ session_id: SESSION, cwd: project }),
+          env: { NO_COLOR: "1" },
+        });
+      };
+      expect((await chained(script)).out).toBe('dosu: "cwd" · Session Capture ◉');
+      // Theirs prints nothing, fails, or is gone: seshi's alone.
+      expect((await chained("true")).out).toBe("Session Capture ◉");
+      expect((await chained("exit 3")).out).toBe("Session Capture ◉");
+      expect((await chained("printf 'one\\ntwo'")).out).toBe("one\ntwo\nSession Capture ◉");
+      rmSync(chain);
+      expect(
+        (
+          await machine.seshi(["statusline", "--chain", chain], {
+            stdin: "{}",
+            env: { NO_COLOR: "1" },
+          })
+        ).out,
+      ).toBe("Session Capture ◉");
+    },
+  );
 
   it("paints the glyph and problems, never only colour", async () => {
     await hook();

@@ -23,9 +23,12 @@ import {
   type Installer,
   type InstallReport,
   type InstallStatus,
+  installSkill,
+  isOurSkill,
   isSeshiHook,
   payloadObject,
   readJsonConfig,
+  removeSkill,
   stringField,
   type TranscriptInfo,
   writeJsonConfig,
@@ -100,6 +103,10 @@ interface CursorHook {
   [key: string]: unknown;
 }
 
+function skillPath(host: CaptureHost): string {
+  return join(cursorDir(host), "skills", "seshi", "SKILL.md");
+}
+
 function hooksPath(host: CaptureHost): string {
   return join(cursorDir(host), "hooks.json");
 }
@@ -131,12 +138,14 @@ export const cursorInstaller: Installer = {
       table[event] = hooks;
     }
     writeJsonConfig(path, { version: config.version ?? 1, ...config, hooks: table });
-    return { changed: [path], notes: [] };
+    const skill = installSkill(skillPath(context), context.command);
+    return { changed: [path, ...skill.changed], notes: skill.notes };
   },
 
   async uninstall(context: InstallContext): Promise<InstallReport> {
     const path = hooksPath(context);
-    if (!existsSync(path)) return { changed: [], notes: [] };
+    const skill = removeSkill(skillPath(context));
+    if (!existsSync(path)) return { changed: skill, notes: [] };
     const config = readJsonConfig(path);
     const table = hooksTable(config);
     let touched = false;
@@ -150,9 +159,9 @@ export const cursorInstaller: Installer = {
       if (kept.length > 0) table[event] = kept;
       else delete table[event];
     }
-    if (!touched) return { changed: [], notes: [] };
+    if (!touched) return { changed: skill, notes: [] };
     writeJsonConfig(path, { ...config, hooks: table });
-    return { changed: [path], notes: [] };
+    return { changed: [path, ...skill], notes: [] };
   },
 
   async status(context: InstallContext): Promise<InstallStatus> {
@@ -165,7 +174,14 @@ export const cursorInstaller: Installer = {
     );
     return {
       installed: present && missing.length === 0,
-      files: [{ path, present, ours: present && missing.length < CURSOR_EVENTS.length }],
+      files: [
+        { path, present, ours: present && missing.length < CURSOR_EVENTS.length },
+        {
+          path: skillPath(context),
+          present: existsSync(skillPath(context)),
+          ours: isOurSkill(skillPath(context)),
+        },
+      ],
       notes:
         present && missing.length > 0 && missing.length < CURSOR_EVENTS.length
           ? [`hooks missing for ${missing.join(", ")}: run seshi capture install cursor`]

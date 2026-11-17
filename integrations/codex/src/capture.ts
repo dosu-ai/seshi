@@ -21,8 +21,11 @@ import {
   type Installer,
   type InstallReport,
   type InstallStatus,
+  installSkill,
+  isOurSkill,
   payloadObject,
   readTextFile,
+  removeSkill,
   stringField,
   type TranscriptInfo,
   writeFileAtomic,
@@ -207,6 +210,11 @@ export function withNotify(text: string, value: readonly string[] | null): strin
   return next;
 }
 
+/** Codex reads a user's skills from `~/.agents/skills` (Cursor does too). */
+function skillPath(host: CaptureHost): string {
+  return join(host.home, ".agents", "skills", "seshi", "SKILL.md");
+}
+
 function configPath(host: CaptureHost): string {
   return join(codexDir(host), "config.toml");
 }
@@ -248,18 +256,20 @@ export const codexInstaller: Installer = {
       ...(chain.length > 0 ? ["--", ...chain] : []),
     ];
     writeFileAtomic(path, withNotify(text, value));
-    return { changed: [path], notes };
+    const skill = installSkill(skillPath(context), context.command);
+    return { changed: [path, ...skill.changed], notes: [...notes, ...skill.notes] };
   },
 
   async uninstall(context: InstallContext): Promise<InstallReport> {
     const path = configPath(context);
-    if (!existsSync(path)) return { changed: [], notes: [] };
+    const skill = removeSkill(skillPath(context));
+    if (!existsSync(path)) return { changed: skill, notes: [] };
     const { text, notify } = readNotify(path);
-    if (!isSeshiNotify(notify, context.command)) return { changed: [], notes: [] };
+    if (!isSeshiNotify(notify, context.command)) return { changed: skill, notes: [] };
     const chain = unwrapNestedSeshiNotify(notify, context.command);
     writeFileAtomic(path, withNotify(text, chain.length > 0 ? chain : null));
     return {
-      changed: [path],
+      changed: [path, ...skill],
       notes: chain.length > 0 ? [`Codex's notify is ${chain.join(" ")} again`] : [],
     };
   },
@@ -268,7 +278,15 @@ export const codexInstaller: Installer = {
     const path = configPath(context);
     const present = existsSync(path);
     const ours = present && isSeshiNotify(readNotify(path).notify, context.command);
-    return { installed: ours, files: [{ path, present, ours }], notes: [] };
+    const skill = skillPath(context);
+    return {
+      installed: ours,
+      files: [
+        { path, present, ours },
+        { path: skill, present: existsSync(skill), ours: isOurSkill(skill) },
+      ],
+      notes: [],
+    };
   },
 };
 

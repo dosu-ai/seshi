@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type CaptureHost, hookHandler } from "@seshi/kit";
@@ -96,6 +96,7 @@ describe("config.toml's notify", () => {
 
 describe("the installer (F9.6)", () => {
   const config = () => join(home, ".codex", "config.toml");
+  const skill = () => join(home, ".agents", "skills", "seshi", "SKILL.md");
   const context = { command: ["seshi"] };
 
   it("points notify at seshi and keeps the program that was there, run after seshi", async () => {
@@ -140,7 +141,10 @@ describe("the installer (F9.6)", () => {
     expect(second.notes).toEqual([]);
     expect(notify()).toEqual(["npx", "seshi", "hook", "codex", "notify"]);
     expect((await codexInstaller.status(npx)).installed).toBe(true);
-    expect((await codexInstaller.uninstall({ ...host, ...context })).changed).toEqual([config()]);
+    expect((await codexInstaller.uninstall({ ...host, ...context })).changed).toEqual([
+      config(),
+      skill(),
+    ]);
     expect(notify()).toBeUndefined();
 
     // A wrapper with any name is known by the command it was installed with.
@@ -148,7 +152,7 @@ describe("the installer (F9.6)", () => {
     await codexInstaller.install(wrapper);
     await codexInstaller.install(wrapper);
     expect(notify()).toEqual(["/usr/local/bin/my-wrapper", "hook", "codex", "notify"]);
-    expect((await codexInstaller.uninstall(wrapper)).changed).toEqual([config()]);
+    expect((await codexInstaller.uninstall(wrapper)).changed).toEqual([config(), skill()]);
     expect(notify()).toBeUndefined();
 
     // What an older seshi left: its own notify chained after itself, then the user's program.
@@ -166,10 +170,26 @@ describe("the installer (F9.6)", () => {
 
   it("creates the setting when there is none, and removes it all on uninstall", async () => {
     const report = await codexInstaller.install({ ...host, ...context });
-    expect(report.changed).toEqual([config()]);
+    expect(report.changed).toEqual([config(), skill()]);
+    expect(readFileSync(skill(), "utf8")).toContain("--agent <agent>");
+    expect((await codexInstaller.status({ ...host, ...context })).files[1]).toMatchObject({
+      present: true,
+      ours: true,
+    });
     await codexInstaller.uninstall({ ...host, ...context });
     expect(readFileSync(config(), "utf8")).toBe("");
+    expect(existsSync(skill())).toBe(false);
     expect((await codexInstaller.uninstall({ ...host, ...context })).changed).toEqual([]);
+  });
+
+  it("puts its skill where Codex reads a user's skills, and keeps someone else's", async () => {
+    mkdirSync(join(home, ".agents", "skills", "seshi"), { recursive: true });
+    writeFileSync(skill(), "mine");
+    const report = await codexInstaller.install({ ...host, ...context });
+    expect(report.changed).toEqual([config()]);
+    expect(report.notes).toEqual([`${skill()} is someone else's skill, so it was left as it is`]);
+    await codexInstaller.uninstall({ ...host, ...context });
+    expect(readFileSync(skill(), "utf8")).toBe("mine");
   });
 
   it("refuses a config it cannot read, or a notify that is not words", async () => {
