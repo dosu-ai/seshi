@@ -58,17 +58,25 @@ function documentHead(text: string): DocumentHead | null {
     at = skipSpace(text, at + 1);
     const end = skipValue(text, at);
     if (end < 0) {
-      const kind = text[at] === "{" ? "object" : text[at] === "[" ? "array" : undefined;
-      if (kind) head.set(key, { kind });
+      if (text[at] === "{") head.set(key, { kind: "object" });
+      else if (text[at] === "[") head.set(key, arrayHead(text, at));
       return head;
     }
     const first = text[at];
     if (first === '"') head.set(key, { kind: "string", text: JSON.parse(text.slice(at, end)) });
     else if (first === "{") head.set(key, { kind: "object" });
-    else if (first === "[") head.set(key, { kind: "array" });
+    else if (first === "[") head.set(key, arrayHead(text.slice(0, end), at));
     else head.set(key, { kind: "scalar" });
     at = end;
   }
+}
+
+/** An array starting at `at`, with the head of its first element when that is an object. */
+function arrayHead(text: string, at: number): HeadValue {
+  const start = skipSpace(text, at + 1);
+  if (text[start] !== "{") return { kind: "array" };
+  const first = documentHead(text.slice(start));
+  return first && first.size > 0 ? { kind: "array", first } : { kind: "array" };
 }
 
 function skipSpace(text: string, at: number): number {

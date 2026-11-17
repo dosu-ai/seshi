@@ -3,22 +3,30 @@
  * `~/.config/opencode/command/session-capture.md`.
  *
  * OpenCode runs no shell hooks and keeps its sessions in a database, not in a transcript file.
- * The plugin, which OpenCode's server loads in the TUI, `opencode run`, `serve` and `web`, reads
- * each session through OpenCode's own client once a turn is over (`session.idle`) and hands it to
- * `seshi hook opencode Stop` whole, as an export (`{info, messages}`, the shape `opencode export`
- * prints), so seshi writes it to disk only for a captured session. It also tells the person, in a
- * toast, whether a new session is captured, and carries out `/session-capture off|on|status`, a command
- * file, before OpenCode sends it to the model (`opencode run --command session-capture`, the web UI, and the
- * TUI's home screen; in a session, the TUI plugin takes `/session-capture` first). The module exports
- * nothing but the plugin function: OpenCode calls every export. */
+ * Each plugin file serves both of OpenCode's release lines from one default export: 1.x reads
+ * `{id, server}` (`{id, tui}` for the TUI plugin) and 2.x reads `{id, setup}`, each ignoring the
+ * other's key.
+ *
+ * The server plugin, which OpenCode loads in the TUI, `opencode run`, `serve` and `web`, runs
+ * `seshi hook opencode Stop` once a turn is over. On 1.x (`session.idle`) it reads the session
+ * through OpenCode's own client and hands it over whole, as an export (`{info, messages}`, the
+ * shape `opencode export` prints), so seshi writes it to disk only for a captured session; it
+ * also toasts whether a new session is captured, and carries out `/session-capture off|on|status`,
+ * a command file, before OpenCode sends it to the model (`opencode run --command
+ * session-capture`, the web UI, and the TUI's home screen; in a session, the TUI plugin takes it
+ * first). On 2.x a plugin cannot read a whole session or toast, so it names the session (in the
+ * `experimental.idle` hook, which OpenCode awaits, or when a run ends) and seshi reads it from
+ * OpenCode's database; `/session-capture` (the command file, or typed into `opencode run`) is
+ * carried out in the `prompt` hook, before anything is sent, and the model gets the result. The
+ * 2.x TUI plugin shows the status and takes `/session-capture` as a slash command of its own. */
 
 import { bridgeRuntime, CAPTURE_COMMAND } from "@seshi/kit";
 
 export const PLUGIN_MARKER = "seshi:opencode-plugin";
 export const COMMAND_MARKER = "seshi:opencode-command";
-export const PLUGIN_VERSION = 4;
+export const PLUGIN_VERSION = 5;
 export const TUI_PLUGIN_MARKER = "seshi:opencode-tui-plugin";
-export const TUI_PLUGIN_VERSION = 2;
+export const TUI_PLUGIN_VERSION = 3;
 
 export function opencodePlugin(command: readonly string[]): string {
   return `// ${PLUGIN_MARKER} v${PLUGIN_VERSION} -- written by "seshi capture install opencode", which
@@ -27,7 +35,8 @@ export function opencodePlugin(command: readonly string[]): string {
 // Session Capture for OpenCode: once each turn is over, the session is handed to seshi, which
 // uploads it to your team's session store, or leaves it out as your capture rules say. A toast
 // says whether a new session is captured, and /session-capture off|on|status turns it off or on for this
-// session. OpenCode started with --pure captures nothing.
+// session. OpenCode started with --pure captures nothing. One default export serves OpenCode 1.x
+// (server) and 2.x (setup).
 
 import { spawn } from "node:child_process";
 
@@ -35,7 +44,8 @@ const SESHI = ${JSON.stringify(command)};
 const AGENT = "opencode";
 ${bridgeRuntime()}
 
-export const SeshiCapture = async ({ client }) => {
+// OpenCode 1.x.
+const server = async ({ client }) => {
   const toast = async (message) => {
     try {
       await client.tui.showToast({
@@ -144,6 +154,92 @@ export const SeshiCapture = async ({ client }) => {
     },
   };
 };
+
+// OpenCode 2.x: no session.idle, and a plugin can neither read a whole session nor toast. When a
+// session's run is over, seshi is told which session it was and reads it from OpenCode's database
+// (the release channel says which file). From 2.2.1 that is in the experimental.idle hook, which
+// OpenCode awaits before the session goes idle, so \`opencode run\` does not exit (and stop its
+// server) before seshi has the session; a run that failed or was interrupted skips that hook, and
+// before 2.2.1 there is none, so the end of a run (an event, not awaited) does it then. A session
+// missed even so is found by seshi's sweep of the database. /session-capture is a command of the
+// plugin's own, run here and never sent to the model; in the TUI, seshi's TUI plugin takes it
+// first and says the result.
+const ENDED = new Set([
+  "session.execution.succeeded",
+  "session.execution.failed",
+  "session.execution.interrupted",
+]);
+
+const setup = async (ctx) => {
+  const channel = ctx.app?.channel;
+  const session = async (id) => {
+    try {
+      const got = await ctx.session.get({ sessionID: id });
+      return got?.data ?? got;
+    } catch {
+      return undefined;
+    }
+  };
+  const where = (info) => {
+    const cwd = info?.location?.directory ?? info?.directory;
+    return typeof cwd === "string" && cwd ? { cwd } : {};
+  };
+  const handOver = async (id) => {
+    const info = await session(id);
+    await seshi(
+      ["hook", AGENT, "Stop"],
+      JSON.stringify({
+        session_id: id,
+        ...where(info),
+        ...(info?.parentID ? { parent_session_id: info.parentID } : {}),
+        ...(typeof channel === "string" && channel ? { opencode_channel: channel } : {}),
+      }),
+    );
+  };
+  let idle = false;
+  try {
+    await ctx.session.hook("experimental.idle", (input) => handOver(input.sessionID));
+    idle = true;
+  } catch {}
+  const stop = new AbortController();
+  void (async () => {
+    try {
+      for await (const event of ctx.event.subscribe({ signal: stop.signal })) {
+        if (!ENDED.has(event?.type)) continue;
+        if (idle && event.type === "session.execution.succeeded") continue;
+        const id = event.data?.sessionID ?? event.properties?.sessionID;
+        if (typeof id === "string") await handOver(id);
+      }
+    } catch {}
+  })();
+  // /session-capture: 2.x runs seshi's command file as a prompt (its text, with seshi's marker),
+  // and \`opencode run\` sends a typed /session-capture as plain text; seshi carries out either here,
+  // before the prompt is sent, and the model gets the result instead of the command.
+  try {
+    await ctx.session.hook("prompt", async (input) => {
+      const text = typeof input.prompt?.text === "string" ? input.prompt.text : "";
+      const filed = text.includes("${COMMAND_MARKER}");
+      const asked = /(?:^|\\n)\\s*\\/${CAPTURE_COMMAND}\\b([^\\n]*)\\s*$/i.exec(text);
+      if (!asked || (!filed && !/^\\s*\\/${CAPTURE_COMMAND}\\b/i.test(text))) return;
+      const info = await session(input.sessionID);
+      const run = await seshi(
+        ["hook", AGENT, "Command"],
+        JSON.stringify({
+          session_id: input.sessionID,
+          ...where(info),
+          arguments: asked[1].trim(),
+        }),
+      );
+      const said =
+        messages(run.stdout)[0] ??
+        "Session Capture could not be changed: seshi did not answer (is it installed and on this machine's PATH?)";
+      input.prompt.text = \`\${said}\\n\\n(seshi's /${CAPTURE_COMMAND} command already did this. Reply with one short sentence that says so, and do nothing else.)\`;
+    });
+  } catch {}
+  return () => stop.abort();
+};
+
+export default { id: "seshi", server, setup };
 `;
 }
 
@@ -192,9 +288,8 @@ function short(line) {
   return at === -1 ? line : line.slice(0, at);
 }
 
-export default {
-  id: "seshi",
-  tui: async (api) => {
+// OpenCode 1.x's TUI.
+const tui = async (api) => {
     // The status line last read, for the session in view only, by id.
     const [statuses, setStatuses] = createSignal({});
     // Reads can finish out of order: only the latest one started is shown.
@@ -312,7 +407,139 @@ export default {
         },
       })),
     });
-  },
 };
+
+// OpenCode 2.x's TUI: the status in the prompt's footer, /session-capture as a slash command of
+// its own (it runs before the prompt is sent, so the model never sees it), and the toast for a
+// new session, which 2.x's server plugins cannot show.
+const setup = async (ctx) => {
+  const [statuses, setStatuses] = createSignal({});
+  let reads = 0;
+  const cleanups = [];
+
+  const which = (id) => {
+    let top = id;
+    try {
+      top = ctx.data.session.root(id) || id;
+    } catch {}
+    const cwd =
+      ctx.data.session.get(top)?.location?.directory ||
+      ctx.location?.directory ||
+      process.cwd();
+    return { session_id: top, ...(cwd ? { cwd } : {}) };
+  };
+
+  const refresh = async (id) => {
+    const read = ++reads;
+    const run = await seshi(["statusline", "--agent", AGENT], JSON.stringify(which(id)), {
+      env: { NO_COLOR: "1" },
+    });
+    if (read !== reads) return;
+    const line = run.code === 0 ? (run.stdout.trim().split("\\n")[0] ?? "") : "";
+    setStatuses({ [id]: line });
+  };
+
+  const toast = (message) => {
+    try {
+      ctx.ui.toast.show({
+        title: "Session Capture",
+        message,
+        variant: message.includes("◉") ? "info" : "warning",
+        duration: 6000,
+      });
+    } catch {}
+  };
+
+  const shown = () => {
+    const route = ctx.ui.router.current();
+    return route?.type === "session" ? route.sessionID : undefined;
+  };
+
+  ctx.ui.slot({
+    append: "prompt.footer.status",
+    render: (input) => {
+      const node = createElement("text");
+      createEffect(() => {
+        if (input.sessionID) void refresh(input.sessionID);
+      });
+      createEffect(() => {
+        const line = input.sessionID ? (statuses()[input.sessionID] ?? "") : "";
+        const text = ctx.theme?.text;
+        const color = line.includes("⏸") ? text?.feedback?.warning?.base : text?.muted;
+        if (color) setProp(node, "fg", color);
+      });
+      insert(node, () => (input.sessionID ? short(statuses()[input.sessionID] ?? "") : ""));
+      return node;
+    },
+  });
+
+  ctx.keymap.layer(() => ({
+    mode: "global",
+    commands: [
+      {
+        id: "seshi.session-capture",
+        title: "Session Capture",
+        description: "Turn Session Capture off or on for this session, or show whether it is captured",
+        group: "Session",
+        slash: { name: "${CAPTURE_COMMAND}", arguments: true },
+        async run(input) {
+          const id = shown();
+          if (!id) {
+            toast("Session Capture: open a session first");
+            return;
+          }
+          const args = (input ?? "").replace(/^\\s*\\/?${CAPTURE_COMMAND}\\b/i, "").trim();
+          const run = await seshi(
+            ["hook", AGENT, "Command"],
+            JSON.stringify({ ...which(id), arguments: args.toLowerCase() }),
+          );
+          toast(
+            messages(run.stdout)[0] ??
+              "Session Capture could not be changed: seshi did not answer (is it installed and on this machine's PATH?)",
+          );
+          await refresh(id);
+        },
+      },
+    ],
+  }));
+
+  cleanups.push(
+    ctx.data.on("session.created", (event) => {
+      const data = event.data ?? {};
+      if (!data.sessionID || data.parentID) return;
+      const cwd = data.location?.directory;
+      void seshi(
+        ["hook", AGENT, "SessionStart"],
+        JSON.stringify({ session_id: data.sessionID, ...(cwd ? { cwd } : {}) }),
+      ).then((run) => {
+        for (const message of messages(run.stdout)) toast(message);
+      });
+    }),
+  );
+  // After each run, the session in view, when the run is its own or a subagent's of it.
+  for (const type of [
+    "session.execution.succeeded",
+    "session.execution.failed",
+    "session.execution.interrupted",
+  ]) {
+    cleanups.push(
+      ctx.data.on(type, (event) => {
+        const id = event.data?.sessionID;
+        const view = shown();
+        if (!id || !view) return;
+        if (which(view).session_id === which(id).session_id) void refresh(view);
+      }),
+    );
+  }
+  return () => {
+    for (const cleanup of cleanups) {
+      try {
+        cleanup?.();
+      } catch {}
+    }
+  };
+};
+
+export default { id: "seshi", tui, setup };
 `;
 }

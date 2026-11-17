@@ -4,10 +4,13 @@
  * never the transcript adapter.
  *
  * OpenCode keeps its sessions in a SQLite database (`~/.local/share/opencode/opencode.db`), not
- * in transcript files, and runs no shell hooks. seshi's plugin (`./plugin.ts`) reads each session
- * through OpenCode's client when a turn is over and runs `seshi hook opencode Stop` with
- * `{session_id, cwd, parent_session_id?, export: {info, messages}}` on stdin. The export is the
- * transcript: seshi writes it, for a captured session only, to
+ * in transcript files, and runs no shell hooks. seshi's plugin (`./plugin.ts`) runs
+ * `seshi hook opencode Stop` when a turn is over. On OpenCode 1.x it reads the session through
+ * OpenCode's client and sends `{session_id, cwd, parent_session_id?, export: {info, messages}}`
+ * on stdin; on 2.x, whose plugins cannot read a whole session, it sends the same without
+ * `export` (with `opencode_channel`), and seshi reads the session from the database
+ * (`./db.ts`), in the same shape. The export is the transcript: seshi writes it, for a captured
+ * session only, to
  * `<capture dir>/transcripts/opencode/<id>.json` and uploads it whole (a JSON document, never in
  * chunks). OpenCode has no end-of-session event (`session.idle` follows every turn), so a session
  * ends when the uploader finds it quiet. A sweep also reads OpenCode's database (`./db.ts`) for
@@ -103,10 +106,21 @@ export const OPENCODE_HOOKS: readonly HookHandler[] = [
   {
     event: "Stop",
     reply,
-    parse(payload) {
-      const exported = payloadObject(payload, AGENT).export;
+    parse(payload, host) {
+      const object = payloadObject(payload, AGENT);
+      const exported = object.export;
+      if (exported === undefined) {
+        // OpenCode 2.x's plugin cannot read a whole session, so it names only the session (and
+        // the release channel, which says which database file OpenCode keeps): seshi reads it
+        // from OpenCode's database, once it is captured.
+        const session = which(payload);
+        const channel = stringField(object, "opencode_channel");
+        const read = async () =>
+          (await import("./db")).readOpencodeSession(host, session.session_id, channel);
+        return { captures: [{ ...session, read }] };
+      }
       if (!isObject(exported) || !isObject(exported.info) || !Array.isArray(exported.messages)) {
-        throw new Error(`${AGENT}: the Stop payload has no export ({info, messages})`);
+        throw new Error(`${AGENT}: the Stop payload's export is not {info, messages}`);
       }
       // `info` first, whatever order it came in: `identify` reads it from the file's head.
       const transcript = JSON.stringify({ info: exported.info, messages: exported.messages });
@@ -207,20 +221,27 @@ function owned(context: InstallContext): OwnedFile[] {
   ];
 }
 
-/** Whether an entry of `tui.json`'s `plugin` list (a path or URL, alone or with options) names
- * seshi's TUI plugin. */
-function isOurEntry(entry: unknown, file: string): boolean {
-  const spec = Array.isArray(entry) ? entry[0] : entry;
-  return spec === file || spec === pathToFileURL(file).href;
+/** OpenCode 2.x's TUI config, whose `plugins` list names TUI plugins; a local one by its folder,
+ * from which 2.x loads `tui.js`. OpenCode 2.x writes it (copying `tui.json` over) when it first
+ * starts, so seshi changes it only once it is there. */
+export function cliConfigPath(host: CaptureHost): string {
+  return join(opencodeConfigDir(host), "cli.json");
 }
 
-type TuiConfig =
+/** Whether an entry of a TUI config's plugin list (a path or URL, alone, with options in a pair, or
+ * as 2.x's `{package, options}`) names `target`. */
+function isOurEntry(entry: unknown, target: string): boolean {
+  const spec = Array.isArray(entry) ? entry[0] : isObject(entry) ? entry.package : entry;
+  return spec === target || spec === pathToFileURL(target).href;
+}
+
+type PluginConfig =
   | { present: boolean; config: Record<string, unknown>; plugins: unknown[] }
   | { present: true; problem: string };
 
-/** `tui.json` as seshi may change it: plain JSON holding an object, its `plugin` a list. OpenCode
+/** A TUI config as seshi may change it: plain JSON holding an object, its `key` a list. OpenCode
  * reads it as JSONC; one with comments is left to the person, since rewriting it would drop them. */
-function readTuiConfig(path: string): TuiConfig {
+function readPluginConfig(path: string, key: string): PluginConfig {
   const text = readTextFile(path);
   if (text === undefined || text.trim() === "") {
     return { present: text !== undefined, config: {}, plugins: [] };
@@ -232,23 +253,36 @@ function readTuiConfig(path: string): TuiConfig {
     return { present: true, problem: "is not plain JSON (comments?)" };
   }
   if (!isObject(config)) return { present: true, problem: "does not hold a JSON object" };
-  const plugins = config.plugin ?? [];
+  const plugins = config[key] ?? [];
   if (!Array.isArray(plugins))
-    return { present: true, problem: 'has a "plugin" that is not a list' };
+    return { present: true, problem: `has a "${key}" that is not a list` };
   return { present: true, config, plugins };
 }
 
-/** `tui.json`, the TUI plugin's path, and whether the list names it. */
+/** `tui.json` (1.x), the TUI plugin's path, and whether the list names it. */
 function tuiEntry(host: CaptureHost) {
   const path = tuiConfigPath(host);
   const file = tuiPluginPath(host);
-  const current = readTuiConfig(path);
+  const current = readPluginConfig(path, "plugin");
   const listed = !("problem" in current) && current.plugins.some((e) => isOurEntry(e, file));
   return { path, file, current, listed };
 }
 
-const byHand = (path: string, file: string, problem: string) =>
-  `${path} ${problem}: left alone, so OpenCode shows no Session Capture status; add "${file}" to its "plugin" list`;
+/** `cli.json` (2.x), the TUI plugin's folder, whether the list names it, and whether it still
+ * names the file (copied over from `tui.json`), which 2.x cannot load. */
+function cliEntry(host: CaptureHost) {
+  const path = cliConfigPath(host);
+  const folder = dirname(tuiPluginPath(host));
+  const file = tuiPluginPath(host);
+  const current = readPluginConfig(path, "plugins");
+  const ok = !("problem" in current);
+  const listed = ok && current.plugins.some((e) => isOurEntry(e, folder));
+  const stale = ok && current.plugins.some((e) => isOurEntry(e, file));
+  return { path, folder, file, current, listed, stale };
+}
+
+const byHand = (path: string, file: string, problem: string, key = "plugin") =>
+  `${path} ${problem}: left alone, so OpenCode shows no Session Capture status; add "${file}" to its "${key}" list`;
 
 export const opencodeInstaller: Installer = {
   detect: (host) => existsSync(opencodeConfigDir(host)) || existsSync(opencodeDataDir(host)),
@@ -266,6 +300,15 @@ export const opencodeInstaller: Installer = {
       config.plugin = [...current.plugins, tui];
       writeJsonConfig(path, config);
       changed.push(path);
+    }
+    const cli = cliEntry(context);
+    if ("problem" in cli.current)
+      notes.push(byHand(cli.path, cli.folder, cli.current.problem, "plugins"));
+    else if (cli.current.present && (!cli.listed || cli.stale)) {
+      const plugins = cli.current.plugins.filter((entry) => !isOurEntry(entry, cli.file));
+      if (!cli.listed) plugins.push(cli.folder);
+      writeJsonConfig(cli.path, { ...cli.current.config, plugins });
+      changed.push(cli.path);
     }
     if (changed.length > 0)
       notes.push("OpenCode loads the plugin when it starts: restart OpenCode");
@@ -293,6 +336,18 @@ export const opencodeInstaller: Installer = {
       } else writeJsonConfig(path, config);
       changed.push(path);
     }
+    const cli = cliEntry(context);
+    if (!("problem" in cli.current) && (cli.listed || cli.stale)) {
+      const config = { ...cli.current.config };
+      const plugins = cli.current.plugins.filter(
+        (entry) => !isOurEntry(entry, cli.folder) && !isOurEntry(entry, cli.file),
+      );
+      if (plugins.length > 0) config.plugins = plugins;
+      else delete config.plugins;
+      // OpenCode's own file, with its other settings: it stays.
+      writeJsonConfig(cli.path, config);
+      changed.push(cli.path);
+    }
     return { changed, notes: [] };
   },
 
@@ -306,11 +361,23 @@ export const opencodeInstaller: Installer = {
     else if (!listed && states.some((s) => s.ours)) {
       notes.push(`${path} does not list seshi's TUI plugin: run seshi capture install opencode`);
     }
+    // OpenCode 2.x's TUI config, once 2.x has written it.
+    const cli = cliEntry(context);
+    if ("problem" in cli.current)
+      notes.push(byHand(cli.path, cli.folder, cli.current.problem, "plugins"));
+    else if (cli.current.present && (!cli.listed || cli.stale) && states.some((s) => s.ours)) {
+      notes.push(
+        `${cli.path} (OpenCode 2.x) does not list seshi's TUI plugin folder: run seshi capture install opencode`,
+      );
+    }
     return {
       installed: states.every((s) => s.ours),
       files: [
         ...states.map(({ path, present, ours }) => ({ path, present, ours })),
         { path, present: current.present, ours: listed },
+        ...(cli.current.present
+          ? [{ path: cli.path, present: true, ours: cli.listed && !cli.stale }]
+          : []),
       ],
       notes,
     };

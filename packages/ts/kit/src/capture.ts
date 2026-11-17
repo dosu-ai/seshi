@@ -17,6 +17,11 @@ export interface HookCapture {
    * its sessions in a database): seshi writes it to `<capture dir>/transcripts/<agent>/` only
    * when the session is captured, and uploads it from there. */
   transcript?: string;
+  /** For an agent whose hook names only the session (OpenCode 2.x, whose plugin cannot read a
+   * whole session): reads the transcript from where the agent keeps it, only once the session is
+   * captured, and seshi keeps it as it would `transcript`. `changedMs`, when the session last
+   * changed, dates seshi's copy, so a sweep can tell when the agent's store holds more. */
+  read?: () => Promise<{ transcript: string; changedMs?: number }>;
 }
 
 export interface HookResult {
@@ -82,8 +87,10 @@ export interface StoredSession {
   /** When it last changed, in milliseconds since the epoch. */
   updatedMs: number;
   /** The whole transcript, as the agent's hook hands it over (`HookCapture.transcript`). Read
-   * only when it is needed: for a captured session whose copy is missing or older. */
-  transcript(): string;
+   * only when it is needed: for a captured session whose copy is missing or older. Given seshi's
+   * `copy`, it returns that copy as it is when it holds the same session, so nothing is sent
+   * again for a difference that is not one (keys in another order, a newer time). */
+  transcript(copy?: string): string;
 }
 
 export interface InstallReport {

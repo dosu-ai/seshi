@@ -114,3 +114,25 @@ Each agent command runs in the run's environment and its app folder:
   (yours may be) makes OpenCode read your real `~/.config/opencode` even with `HOME` changed.
 - In the TUI, `/session-capture` on the home screen, before a session exists, still goes through the command
   file and the model answers once: start the session with a prompt first.
+
+## OpenCode 2.x
+
+Checked with OpenCode 2.3.0 (and 1.18.31 with the same files). Get the binary into a folder of its
+own with `npm pack @opencode/cli-darwin-arm64@2.3.0` (the `@opencode/cli` wrapper only names the
+platform package), unpack it, and run `package/bin/opencode` with the run's `HOME`, the same
+`opencode.json` and fake model, and `--standalone` (a private server that exits with the CLI;
+without it 2.x starts a background service). Never point it at a copy of a real `opencode.db`:
+2.x resumes the sessions it finds there with their stored credentials.
+
+- `po-oc2`: `opencode --standalone run "…"` leaves `transcripts/opencode/<id>.json` (rebuilt
+  from 2.x's tables in 1.x's export shape) before it exits: the plugin hands over in the
+  `experimental.idle` hook, which the run awaits.
+- `po-oc2-cmd`: `opencode --standalone run -s <id> "/session-capture off"` turns the session
+  off, removes its copy, and the stored user message is seshi's answer, not the command.
+- `po-oc2-tui`: start the TUI once (it writes `~/.config/opencode/cli.json` from `tui.json`), run
+  `capture install opencode` again (the list now names `~/.config/opencode/seshi`), then
+  `opencode --standalone -s <id>`: `Session Capture ◉` in the prompt footer, and
+  `/session-capture status` calls `seshi hook opencode Command` with no new message in the
+  session. Without tmux, a small Python `pty.fork()` driver that types keys at set times and
+  records the screen does.
+
