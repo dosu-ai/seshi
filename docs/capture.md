@@ -34,7 +34,7 @@ seshi capture install --service  # also keep the uploader running between sessio
 | Claude Code | hooks, the status line and the `/seshi` skill in `~/.claude/settings.json` and `~/.claude/skills/seshi/` (`CLAUDE_CONFIG_DIR` moves them) | SessionStart, Stop, SubagentStop, PreCompact, SessionEnd |
 | Codex | `notify` in `~/.codex/config.toml` (`CODEX_HOME` moves it); a `notify` program already there keeps running, after seshi's. SessionStart and UserPromptSubmit hooks in `~/.codex/hooks.json` for the notice and `$seshi`, and the `$seshi` skill in `~/.agents/skills/seshi/` | notify, plus the sweep of `~/.codex/sessions`; SessionStart and UserPromptSubmit only for the notice and `$seshi` |
 | Cursor (IDE and CLI) | hooks in `~/.cursor/hooks.json`, the Cursor CLI's status line in `~/.cursor/cli-config.json`, and the `/seshi` skill in `~/.cursor/skills/seshi/`; it suggests the status bar extension ([below](#the-cursor-status-bar)) | stop, sessionEnd; beforeSubmitPrompt for `/seshi` and the last chat prompted |
-| pi | the extension `~/.pi/agent/extensions/seshi.ts` (`PI_CODING_AGENT_DIR` moves it) | agent_end (Stop), session_shutdown (SessionEnd); `/seshi`, a command of its own; plus the sweep of `~/.pi/agent/sessions` |
+| pi | the extension `~/.pi/agent/extensions/seshi.ts` (`PI_CODING_AGENT_DIR` moves it) | agent_end (Stop), session_shutdown (SessionEnd, not on `/reload`); `/seshi`, a command of its own; plus the sweep of `~/.pi/agent/sessions`, or of the folder `PI_CODING_AGENT_SESSION_DIR` or `sessionDir` in pi's settings names |
 | OpenCode | the plugin `~/.config/opencode/plugins/seshi.js` and the `/seshi` command `~/.config/opencode/command/seshi.md` (`XDG_CONFIG_HOME` moves both) | session.idle (Stop), with the whole session; session.created (SessionStart) for the notice; `/seshi` |
 
 pi and OpenCode run no shell hooks: they load code at start-up, so seshi installs a file each
@@ -170,10 +170,11 @@ decided, the queue, the last errors).
 pi has no status line of its own to run, so seshi's extension puts `seshi statusline --agent pi`
 in pi's footer, refreshed when a session starts and after each agent run, and registers
 `/seshi off|on|status` as a pi command: seshi does it, the answer shows as a notification, and
-the model never sees it. OpenCode shows the start notice above in a toast when a new session
+the model never sees it (any other argument changes nothing, and says so). OpenCode shows the start notice above in a toast when a new session
 starts. Its `/seshi` is a command file, which OpenCode always sends to the model; seshi's plugin
 does what it asks first and puts the answer, with a request for a one-line acknowledgement, in
-place of the command, so the model's reply is the only cost. In both, the extension and the
+place of the command, so the model's reply is the only cost. Once seshi has said a session is not
+captured (at its start, or by `/seshi`), the plugin stops reading and handing over its turns. In both, the extension and the
 plugin pass the session's id themselves: seshi's own `SESHI_SESSION_ID`, set in a shell another
 agent started, is ignored.
 
@@ -410,7 +411,7 @@ the server stored them.
 | `rules.json` | the capture rules as last read from the CLI config |
 | `redaction-rules.json` | your server's redaction rules as last fetched, with their ETag |
 | `capture.log` | errors from hooks and the uploader (hooks never print) |
-| `transcripts/opencode/` | OpenCode sessions as seshi was handed them, one `<id>.json` each, for captured sessions only: OpenCode keeps its own in a database |
+| `transcripts/opencode/` | OpenCode sessions as seshi was handed them, one `<id>.json` each, for captured sessions only: OpenCode keeps its own in a database. A session's copy goes when it is turned off, and the folder when OpenCode is uninstalled |
 | `serverless/<id>/` | serverless mode, per bucket: the cached shared settings, the storage test's result, this machine's drop and failure records, the daemon's upkeep times ([serverless.md](serverless.md#what-a-laptop-writes-and-keeps)) |
 
 `SESHI_NO_UPLOADER=1` makes hooks spool without starting an uploader (CI, tests).

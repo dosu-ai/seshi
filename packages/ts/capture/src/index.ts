@@ -6,7 +6,13 @@ export {
   withLock,
   writePrivateFile,
 } from "./files";
-export { type HookOutcome, type HookRun, runHook, shellWord } from "./hook";
+export {
+  forgetHandedTranscript,
+  type HookOutcome,
+  type HookRun,
+  runHook,
+  shellWord,
+} from "./hook";
 export { type CapturePaths, captureDir, capturePaths } from "./paths";
 export {
   findRepo,

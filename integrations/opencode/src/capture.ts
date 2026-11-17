@@ -12,7 +12,7 @@
  * chunks). OpenCode has no end-of-session event (`session.idle` follows every turn), so a session
  * ends when the uploader finds it quiet. */
 
-import { existsSync, rmSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
 import {
   type CaptureAgent,
@@ -25,12 +25,15 @@ import {
   type Installer,
   type InstallReport,
   type InstallStatus,
+  installOwnedFiles,
+  type OwnedFile,
+  ownedFileNotes,
+  ownedFileState,
   payloadObject,
-  readTextFile,
+  removeOwnedFiles,
   seshiPrompt,
   stringField,
   type TranscriptInfo,
-  writeFileAtomic,
 } from "@seshi/kit";
 import { COMMAND_MARKER, opencodeCommand, opencodePlugin, PLUGIN_MARKER } from "./plugin";
 
@@ -70,6 +73,9 @@ function which(payload: unknown): HookCapture {
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+export const UNKNOWN_SESHI =
+  "Session Capture: /seshi takes off, on or status; nothing was changed. For a pause, run seshi capture pause in a terminal.";
+
 /** What the plugin shows for a message seshi has for the person: it toasts `message`. */
 const reply = (message: string) => ({ message });
 
@@ -88,7 +94,9 @@ export const OPENCODE_HOOKS: readonly HookHandler[] = [
       if (!isObject(exported) || !isObject(exported.info) || !Array.isArray(exported.messages)) {
         throw new Error(`${AGENT}: the Stop payload has no export ({info, messages})`);
       }
-      return { captures: [{ ...which(payload), transcript: JSON.stringify(exported) }] };
+      // `info` first, whatever order it came in: `identify` reads it from the file's head.
+      const transcript = JSON.stringify({ info: exported.info, messages: exported.messages });
+      return { captures: [{ ...which(payload), transcript }] };
     },
   },
   {
@@ -100,7 +108,8 @@ export const OPENCODE_HOOKS: readonly HookHandler[] = [
       const asked = seshiPrompt(`/seshi ${args}`);
       const { session_id, cwd } = which(payload);
       const session = { session_id, ...(cwd ? { cwd } : {}) };
-      if (!asked || asked === "status") return { captures: [], announce: session };
+      if (!asked) return { captures: [], say: UNKNOWN_SESHI };
+      if (asked === "status") return { captures: [], announce: session };
       return { captures: [], request: { action: asked, session } };
     },
   },
@@ -117,14 +126,15 @@ function stringAfter(text: string, key: string): string | undefined {
   }
 }
 
-/** Which session an export seshi wrote is: its file name, and, from the session's `info` (the
- * document's first key, before `messages`), where it ran, when it started and its parent. */
+/** Which session an export seshi wrote is: its file name, and, from the session's `info` (which
+ * seshi writes first, before `messages`), where it ran, when it started and its parent. Whatever
+ * order `info`'s own keys come in, it must name the same id. */
 export function identifyOpencodeExport(path: string, head: string): TranscriptInfo | null {
   if (!path.endsWith(".json") || !head.startsWith('{"info":{')) return null;
   const id = basename(path, ".json");
   const end = head.indexOf('"messages":');
   const info = end === -1 ? head : head.slice(0, end);
-  if (stringAfter(info, "id") !== id) return null;
+  if (!info.includes(`"id":${JSON.stringify(id)}`)) return null;
   const cwd = stringAfter(info, "directory");
   const parent = stringAfter(info, "parentID");
   const created = /"created":(\d+)/.exec(info)?.[1];
@@ -150,13 +160,7 @@ export function commandPath(host: CaptureHost): string {
   return join(opencodeConfigDir(host), "command", "seshi.md");
 }
 
-interface Owned {
-  path: string;
-  text: string;
-  marker: string;
-}
-
-function owned(context: InstallContext): Owned[] {
+function owned(context: InstallContext): OwnedFile[] {
   return [
     { path: pluginPath(context), text: opencodePlugin(context.command), marker: PLUGIN_MARKER },
     { path: commandPath(context), text: opencodeCommand(), marker: COMMAND_MARKER },
@@ -167,53 +171,23 @@ export const opencodeInstaller: Installer = {
   detect: (host) => existsSync(opencodeConfigDir(host)) || existsSync(opencodeDataDir(host)),
 
   async install(context: InstallContext): Promise<InstallReport> {
-    const files = owned(context);
-    const notes: string[] = [];
-    const foreign = files.filter((f) => {
-      const existing = readTextFile(f.path);
-      return existing !== undefined && !existing.includes(f.marker);
-    });
-    if (foreign.length > 0) {
-      return {
-        changed: [],
-        notes: foreign.map(
-          (f) => `${f.path} is not seshi's: left alone, so OpenCode is not captured`,
-        ),
-      };
-    }
-    const changed: string[] = [];
-    for (const file of files) {
-      if (readTextFile(file.path) === file.text) continue;
-      writeFileAtomic(file.path, file.text);
-      changed.push(file.path);
-    }
+    const { changed, notes } = installOwnedFiles(owned(context), "OpenCode");
     if (changed.length > 0)
       notes.push("OpenCode loads the plugin when it starts: restart OpenCode");
     return { changed, notes };
   },
 
   async uninstall(context: InstallContext): Promise<InstallReport> {
-    const changed: string[] = [];
-    for (const file of owned(context)) {
-      if (!readTextFile(file.path)?.includes(file.marker)) continue;
-      rmSync(file.path, { force: true });
-      changed.push(file.path);
-    }
-    return { changed, notes: [] };
+    return { changed: removeOwnedFiles(owned(context)), notes: [] };
   },
 
   async status(context: InstallContext): Promise<InstallStatus> {
-    const notes: string[] = [];
-    const files = owned(context).map((file) => {
-      const text = readTextFile(file.path);
-      const ours = text?.includes(file.marker) === true;
-      if (text !== undefined && !ours) notes.push(`${file.path} is not seshi's`);
-      else if (ours && text !== file.text) {
-        notes.push(`${file.path} is out of date: run seshi capture install opencode`);
-      }
-      return { path: file.path, present: text !== undefined, ours };
-    });
-    return { installed: files.every((f) => f.ours), files, notes };
+    const states = owned(context).map(ownedFileState);
+    return {
+      installed: states.every((s) => s.ours),
+      files: states.map(({ path, present, ours }) => ({ path, present, ours })),
+      notes: ownedFileNotes(states, AGENT),
+    };
   },
 };
 

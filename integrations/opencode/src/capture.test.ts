@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { type CaptureHost, handedTranscriptDir, hookHandler } from "@seshi/kit";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   commandPath,
   identifyOpencodeExport,
@@ -12,6 +12,7 @@ import {
   opencodeConfigDir,
   opencodeInstaller,
   pluginPath,
+  UNKNOWN_SESHI,
 } from "./capture";
 import { OPENCODE_FORMAT } from "./index";
 import { COMMAND_MARKER, opencodePlugin, PLUGIN_MARKER } from "./plugin";
@@ -38,6 +39,10 @@ describe("OpenCode's hooks, from seshi's plugin (F9.2)", () => {
     expect(hookHandler(OPENCODE_CAPTURE, "Stop")?.parse(stop, host)).toEqual({
       captures: [{ session_id: ID, cwd: "/repo/app", transcript: JSON.stringify(EXPORT) }],
     });
+    // Written with `info` first whatever order it came in, for identify to read from the head.
+    const reordered = { ...stop, export: { messages: EXPORT.messages, info: EXPORT.info } };
+    const written = hookHandler(OPENCODE_CAPTURE, "Stop")?.parse(reordered, host)?.captures[0];
+    expect(written?.transcript).toBe(JSON.stringify(EXPORT));
     const child = { ...stop, session_id: "ses_child", parent_session_id: ID };
     expect(hookHandler(OPENCODE_CAPTURE, "Stop")?.parse(child, host)?.captures[0]).toMatchObject({
       session_id: "ses_child",
@@ -69,6 +74,10 @@ describe("OpenCode's hooks, from seshi's plugin (F9.2)", () => {
     expect(command?.parse({ ...payload("Command"), arguments: "on" }, host)?.request?.action).toBe(
       "on",
     );
+    expect(command?.parse({ ...payload("Command"), arguments: "pause 2h" }, host)).toEqual({
+      captures: [],
+      say: UNKNOWN_SESHI,
+    });
     expect(command?.reply?.("hi")).toEqual({ message: "hi" });
   });
 });
@@ -94,6 +103,14 @@ describe("the sessions seshi was handed", () => {
       identifyOpencodeExport(join(home, "ses_child.json"), JSON.stringify(child)),
     ).toMatchObject({ session_id: "ses_child", parent_session_id: ID });
     expect(identifyOpencodeExport(join(home, "other.json"), JSON.stringify(EXPORT))).toBeNull();
+    // Whatever order info's keys come in, and an id nested before its own.
+    const shuffled = {
+      info: { share: { id: "share_1" }, directory: "/repo/app", id: ID, time: { created: 1 } },
+      messages: [],
+    };
+    expect(
+      identifyOpencodeExport(join(home, `${ID}.json`), JSON.stringify(shuffled)),
+    ).toMatchObject({ session_id: ID, cwd: "/repo/app" });
     expect(identifyOpencodeExport(file, '{"messages":[]}')).toBeNull();
   });
 
@@ -134,7 +151,7 @@ describe("seshi capture install opencode", () => {
     const plugin = pluginPath(host);
     const command = commandPath(host);
     expect((await opencodeInstaller.install(context())).changed).toEqual([plugin, command]);
-    expect(readFileSync(plugin, "utf8")).toContain(`// ${PLUGIN_MARKER} v1`);
+    expect(readFileSync(plugin, "utf8")).toContain(`// ${PLUGIN_MARKER} v2`);
     expect(readFileSync(plugin, "utf8")).toContain('const SESHI = ["/opt/seshi/bin/seshi"];');
     expect(readFileSync(command, "utf8")).toContain(COMMAND_MARKER);
     expect(await opencodeInstaller.install(context())).toEqual({ changed: [], notes: [] });
@@ -267,6 +284,7 @@ process.stdin.on("end", () => {
         properties: { info: { ...EXPORT.info, id: "ses_child", parentID: ID } },
       },
     });
+    await vi.waitFor(() => expect(oc.toasts).toHaveLength(1));
     expect(oc.calls().map((c) => c.args)).toEqual([["hook", "opencode", "SessionStart"]]);
     expect(oc.toasts).toEqual([
       expect.objectContaining({
@@ -297,6 +315,9 @@ process.stdin.on("end", () => {
         text: expect.stringContaining("Session Capture ⏸ · turned off for this session"),
       },
     ]);
+    // A session seshi turned off is not read or handed over again.
+    await oc.hooks.event({ event: { type: "session.idle", properties: { sessionID: ID } } });
+    expect(oc.calls()).toHaveLength(1);
     const other = { parts: [{ type: "text", text: "/review" }] as unknown[] };
     await oc.hooks["command.execute.before"](
       { command: "review", sessionID: ID, arguments: "" },

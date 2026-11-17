@@ -11,8 +11,8 @@
  * `{session_id, transcript_path, cwd, parent_session?}` on stdin: `Stop` after each agent run,
  * `SessionEnd` when the session ends, and `Command` for `/seshi`. */
 
-import { existsSync, readdirSync, rmSync } from "node:fs";
-import { basename, join } from "node:path";
+import { existsSync, readdirSync } from "node:fs";
+import { basename, isAbsolute, join } from "node:path";
 import {
   type CaptureAgent,
   type CaptureHost,
@@ -23,12 +23,16 @@ import {
   type Installer,
   type InstallReport,
   type InstallStatus,
+  installOwnedFiles,
+  type OwnedFile,
+  ownedFileNotes,
+  ownedFileState,
   payloadObject,
   readTextFile,
+  removeOwnedFiles,
   seshiPrompt,
   stringField,
   type TranscriptInfo,
-  writeFileAtomic,
 } from "@seshi/kit";
 import { EXTENSION_MARKER, piExtension } from "./extension";
 
@@ -39,9 +43,28 @@ export function piAgentDir(host: CaptureHost): string {
   return configured ? expandTilde(configured, host.home) : join(host.home, ".pi", "agent");
 }
 
+/** A session folder set in pi's `settings.json` (`sessionDir`), when it is one place for every
+ * project: a relative one is resolved from each session's working directory. */
+function settingsSessionDir(host: CaptureHost): string | undefined {
+  try {
+    const settings = JSON.parse(readTextFile(join(piAgentDir(host), "settings.json")) ?? "{}") as {
+      sessionDir?: unknown;
+    };
+    if (typeof settings.sessionDir !== "string" || settings.sessionDir === "") return undefined;
+    const dir = expandTilde(settings.sessionDir, host.home);
+    return isAbsolute(dir) ? dir : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Where pi keeps sessions: `PI_CODING_AGENT_SESSION_DIR`, else `sessionDir` in its settings,
+ * else `sessions/` in its agent folder. Only the last has a folder per working directory; pi
+ * writes the files straight into a folder set either way. */
 export function piSessionsDir(host: CaptureHost): string {
   const configured = host.env.PI_CODING_AGENT_SESSION_DIR;
-  return configured ? expandTilde(configured, host.home) : join(piAgentDir(host), "sessions");
+  if (configured) return expandTilde(configured, host.home);
+  return settingsSessionDir(host) ?? join(piAgentDir(host), "sessions");
 }
 
 /** The session id in a session file's name, `<timestamp>_<id>.jsonl`. */
@@ -66,6 +89,9 @@ function capture(payload: unknown, final: boolean): HookCapture {
   };
 }
 
+export const UNKNOWN_SESHI =
+  "Session Capture: /seshi takes off, on or status; nothing was changed. For a pause, run seshi capture pause in a terminal.";
+
 /** What the extension prints for a message seshi has for the person: it shows `message`. */
 const reply = (message: string) => ({ message });
 
@@ -77,10 +103,11 @@ export const PI_HOOKS: readonly HookHandler[] = [
     event: "Command",
     reply,
     parse(payload) {
-      const asked = seshiPrompt(stringField(payloadObject(payload, AGENT), "prompt") ?? "/seshi");
+      const asked = seshiPrompt(stringField(payloadObject(payload, AGENT), "prompt") || "/seshi");
       const { session_id, cwd } = capture(payload, false);
       const which = { session_id, ...(cwd ? { cwd } : {}) };
-      if (!asked || asked === "status") return { captures: [], announce: which };
+      if (!asked) return { captures: [], say: UNKNOWN_SESHI };
+      if (asked === "status") return { captures: [], announce: which };
       return { captures: [], request: { action: asked, session: which } };
     },
   },
@@ -111,14 +138,15 @@ export function locatePiSession(sessionId: string, host: CaptureHost): string | 
   if (!/^[\w-]+$/.test(sessionId)) return undefined;
   const root = piSessionsDir(host);
   const suffix = `_${sessionId}.jsonl`;
-  let folders: string[] = [];
+  let entries: import("node:fs").Dirent[] = [];
   try {
-    folders = readdirSync(root, { withFileTypes: true })
-      .filter((d) => d.isDirectory())
-      .map((d) => d.name);
+    entries = readdirSync(root, { withFileTypes: true });
   } catch {
     return undefined;
   }
+  const flat = entries.find((d) => d.isFile() && d.name.endsWith(suffix));
+  if (flat) return join(root, flat.name);
+  const folders = entries.filter((d) => d.isDirectory()).map((d) => d.name);
   for (const folder of folders) {
     try {
       const name = readdirSync(join(root, folder)).find((n) => n.endsWith(suffix));
@@ -132,48 +160,33 @@ export function extensionPath(host: CaptureHost): string {
   return join(piAgentDir(host), "extensions", "seshi.ts");
 }
 
-function isOurs(text: string | undefined): boolean {
-  return text?.startsWith(`// ${EXTENSION_MARKER}`) === true;
+function owned(context: InstallContext): OwnedFile[] {
+  return [
+    { path: extensionPath(context), text: piExtension(context.command), marker: EXTENSION_MARKER },
+  ];
 }
 
 export const piInstaller: Installer = {
   detect: (host) => existsSync(piAgentDir(host)),
 
   async install(context: InstallContext): Promise<InstallReport> {
-    const path = extensionPath(context);
-    const existing = readTextFile(path);
-    if (existing !== undefined && !isOurs(existing)) {
-      return { changed: [], notes: [`${path} is not seshi's: left alone, so pi is not captured`] };
+    const { changed, notes } = installOwnedFiles(owned(context), AGENT);
+    if (changed.length > 0) {
+      notes.push("pi loads it when it starts: restart pi, or run /reload in a running session");
     }
-    const text = piExtension(context.command);
-    if (existing === text) return { changed: [], notes: [] };
-    writeFileAtomic(path, text);
-    return {
-      changed: [path],
-      notes: ["pi loads it when it starts: restart pi, or run /reload in a running session"],
-    };
+    return { changed, notes };
   },
 
   async uninstall(context: InstallContext): Promise<InstallReport> {
-    const path = extensionPath(context);
-    if (!isOurs(readTextFile(path))) return { changed: [], notes: [] };
-    rmSync(path, { force: true });
-    return { changed: [path], notes: [] };
+    return { changed: removeOwnedFiles(owned(context)), notes: [] };
   },
 
   async status(context: InstallContext): Promise<InstallStatus> {
-    const path = extensionPath(context);
-    const text = readTextFile(path);
-    const ours = isOurs(text);
-    const notes: string[] = [];
-    if (text !== undefined && !ours) notes.push(`${path} is not seshi's`);
-    else if (ours && text !== piExtension(context.command)) {
-      notes.push("the pi extension is out of date: run seshi capture install pi");
-    }
+    const states = owned(context).map(ownedFileState);
     return {
-      installed: ours,
-      files: [{ path, present: text !== undefined, ours }],
-      notes,
+      installed: states.every((s) => s.ours),
+      files: states.map(({ path, present, ours }) => ({ path, present, ours })),
+      notes: ownedFileNotes(states, AGENT),
     };
   },
 };
@@ -188,8 +201,9 @@ export const PI_CAPTURE: CaptureAgent = {
     {
       root: "~/.pi/agent/sessions",
       resolve: piSessionsDir,
-      depths: [2],
-      match: (relative) => /^[^/]+\/[^/]+_[\w-]+\.jsonl$/.test(relative),
+      // A folder per working directory, or (a session folder set) the files themselves.
+      depths: [1, 2],
+      match: (relative) => /^(?:[^/]+\/)?[^/]+_[\w-]+\.jsonl$/.test(relative),
     },
   ],
   identify: identifyPiSession,

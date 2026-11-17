@@ -6,8 +6,10 @@
  * capture works as it does for Claude Code: the rules, the spool and the uploader are seshi's.
  * It is plain JavaScript (no type annotations), so it loads whatever pi does with types. */
 
+import { bridgeRuntime } from "@seshi/kit";
+
 export const EXTENSION_MARKER = "seshi:pi-extension";
-export const EXTENSION_VERSION = 1;
+export const EXTENSION_VERSION = 2;
 
 export function piExtension(command: readonly string[]): string {
   return `// ${EXTENSION_MARKER} v${EXTENSION_VERSION} -- written by "seshi capture install pi", which rewrites
@@ -24,70 +26,10 @@ import { spawn } from "node:child_process";
 const SESHI = ${JSON.stringify(command)};
 const AGENT = "pi";
 const STATUS_KEY = "seshi";
-const HOOK_TIMEOUT_MS = 10000;
 // How long quitting pi waits for seshi to take the session that ended.
 const SHUTDOWN_TIMEOUT_MS = 3000;
 
-// seshi's own variables, inherited from a shell another agent started (a Claude Code session
-// sets them), name that agent's session, not this one.
-function environment(extra) {
-  const env = { ...process.env, ...extra };
-  delete env.SESHI_SESSION_ID;
-  delete env.SESHI_AGENT;
-  return env;
-}
-
-function quoted(word) {
-  return /^[\\w@%+=:,./\\\\-]+$/.test(word) ? word : \`"\${word.replace(/"/g, '\\\\"')}"\`;
-}
-
-// Run seshi with input on stdin. Never rejects: a missing or failing seshi is an exit code.
-function seshi(args, input, options) {
-  return new Promise((resolve) => {
-    const [program, ...rest] = SESHI;
-    // A .cmd or .bat shim (npm's, on Windows) runs only through the shell.
-    const shell = process.platform === "win32" && !/\\.exe$/i.test(program);
-    let stdout = "";
-    let done = false;
-    let child;
-    const finish = (code) => {
-      if (done) return;
-      done = true;
-      clearTimeout(timer);
-      resolve({ code, stdout });
-    };
-    const timer = setTimeout(() => {
-      child?.kill();
-      finish(-1);
-    }, options.timeoutMs ?? HOOK_TIMEOUT_MS);
-    try {
-      child = shell
-        ? spawn([program, ...rest, ...args].map(quoted).join(" "), {
-            cwd: options.cwd,
-            env: environment(options.env),
-            shell: true,
-            stdio: ["pipe", "pipe", "ignore"],
-            windowsHide: true,
-          })
-        : spawn(program, [...rest, ...args], {
-            cwd: options.cwd,
-            env: environment(options.env),
-            stdio: ["pipe", "pipe", "ignore"],
-            windowsHide: true,
-          });
-    } catch {
-      finish(-1);
-      return;
-    }
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk;
-    });
-    child.on("error", () => finish(-1));
-    child.on("close", (code) => finish(code ?? -1));
-    child.stdin.on("error", () => {});
-    child.stdin.end(input);
-  });
-}
+${bridgeRuntime()}
 
 // The session pi is in; undefined when it keeps no session file (--no-session).
 function session(ctx) {
@@ -101,18 +43,6 @@ function session(ctx) {
     cwd: ctx.cwd,
     ...(header && header.parentSession ? { parent_session: header.parentSession } : {}),
   };
-}
-
-// What seshi asked to tell the person: one JSON object per line, with "message".
-function messages(stdout) {
-  const out = [];
-  for (const line of stdout.split("\\n")) {
-    try {
-      const said = JSON.parse(line);
-      if (said && typeof said.message === "string") out.push(said.message);
-    } catch {}
-  }
-  return out;
 }
 
 async function hook(event, ctx, extra, timeoutMs) {
@@ -147,11 +77,14 @@ export default function (pi) {
   pi.on("session_start", (_event, ctx) => {
     void refresh(ctx);
   });
-  pi.on("agent_end", async (_event, ctx) => {
-    await hook("Stop", ctx, {});
-    void refresh(ctx);
+  // Not awaited either: the next prompt need not wait for seshi. In print mode the session's
+  // end, which is awaited, hands it over again before pi exits.
+  pi.on("agent_end", (_event, ctx) => {
+    void hook("Stop", ctx, {}).then(() => refresh(ctx));
   });
-  pi.on("session_shutdown", async (_event, ctx) => {
+  pi.on("session_shutdown", async (event, ctx) => {
+    // /reload restarts the extensions, not the session: it carries on.
+    if (event && event.reason === "reload") return;
     await hook("SessionEnd", ctx, {}, SHUTDOWN_TIMEOUT_MS);
   });
   pi.registerCommand("seshi", {

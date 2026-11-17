@@ -10,9 +10,11 @@
  * file, before OpenCode sends it to the model. The module exports nothing but the plugin function:
  * OpenCode calls every export. */
 
+import { bridgeRuntime } from "@seshi/kit";
+
 export const PLUGIN_MARKER = "seshi:opencode-plugin";
 export const COMMAND_MARKER = "seshi:opencode-command";
-export const PLUGIN_VERSION = 1;
+export const PLUGIN_VERSION = 2;
 
 export function opencodePlugin(command: readonly string[]): string {
   return `// ${PLUGIN_MARKER} v${PLUGIN_VERSION} -- written by "seshi capture install opencode", which
@@ -27,75 +29,7 @@ import { spawn } from "node:child_process";
 
 const SESHI = ${JSON.stringify(command)};
 const AGENT = "opencode";
-const HOOK_TIMEOUT_MS = 10000;
-
-// seshi's own variables, inherited from a shell another agent started (a Claude Code session
-// sets them), name that agent's session, not this one.
-function environment() {
-  const env = { ...process.env };
-  delete env.SESHI_SESSION_ID;
-  delete env.SESHI_AGENT;
-  return env;
-}
-
-function quoted(word) {
-  return /^[\\w@%+=:,./\\\\-]+$/.test(word) ? word : \`"\${word.replace(/"/g, '\\\\"')}"\`;
-}
-
-// Run seshi with input on stdin. Never rejects: a missing or failing seshi is an exit code. It
-// runs where OpenCode does: the payload names the session's folder, which may be gone.
-function seshi(args, input) {
-  return new Promise((resolve) => {
-    const [program, ...rest] = SESHI;
-    // A .cmd or .bat shim (npm's, on Windows) runs only through the shell.
-    const shell = process.platform === "win32" && !/\\.exe$/i.test(program);
-    let stdout = "";
-    let done = false;
-    let child;
-    const finish = (code) => {
-      if (done) return;
-      done = true;
-      clearTimeout(timer);
-      resolve({ code, stdout });
-    };
-    const timer = setTimeout(() => {
-      child?.kill();
-      finish(-1);
-    }, HOOK_TIMEOUT_MS);
-    const options = {
-      env: environment(),
-      stdio: ["pipe", "pipe", "ignore"],
-      windowsHide: true,
-    };
-    try {
-      child = shell
-        ? spawn([program, ...rest, ...args].map(quoted).join(" "), { ...options, shell: true })
-        : spawn(program, [...rest, ...args], options);
-    } catch {
-      finish(-1);
-      return;
-    }
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk;
-    });
-    child.on("error", () => finish(-1));
-    child.on("close", (code) => finish(code ?? -1));
-    child.stdin.on("error", () => {});
-    child.stdin.end(input);
-  });
-}
-
-// What seshi asked to tell the person: one JSON object per line, with "message".
-function messages(stdout) {
-  const out = [];
-  for (const line of stdout.split("\\n")) {
-    try {
-      const said = JSON.parse(line);
-      if (said && typeof said.message === "string") out.push(said.message);
-    } catch {}
-  }
-  return out;
-}
+${bridgeRuntime()}
 
 export const SeshiCapture = async ({ client }) => {
   const toast = async (message) => {
@@ -110,6 +44,13 @@ export const SeshiCapture = async ({ client }) => {
       });
     } catch {}
   };
+  // Sessions seshi said it does not capture (turned off, paused, excluded): their turns are not
+  // read or handed over. /seshi on, or a new OpenCode, asks again.
+  const notCaptured = new Set();
+  const heard = (id, message) => {
+    if (message.includes("⏸")) notCaptured.add(id);
+    else if (message.includes("◉")) notCaptured.delete(id);
+  };
   const session = async (id) => {
     try {
       return (await client.session.get({ path: { id } })).data;
@@ -122,28 +63,33 @@ export const SeshiCapture = async ({ client }) => {
       const properties = event.properties ?? {};
       if (event.type === "session.created") {
         const info = properties.info;
-        // A subagent's session is captured with its parent's: no toast for it.
+        // A subagent's session is captured with its parent's: no toast for it. Not awaited: the
+        // session's first turn need not wait for seshi.
         if (!info?.id || info.parentID) return;
-        const run = await seshi(
+        void seshi(
           ["hook", AGENT, "SessionStart"],
           JSON.stringify({ session_id: info.id, cwd: info.directory }),
-        );
-        for (const message of messages(run.stdout)) await toast(message);
+        ).then(async (run) => {
+          for (const message of messages(run.stdout)) {
+            heard(info.id, message);
+            await toast(message);
+          }
+        });
         return;
       }
       if (event.type === "session.idle" && properties.sessionID) {
+        // Awaited: \`opencode run\` exits once the turn is over, and seshi must have the session.
         const id = properties.sessionID;
-        let info;
+        if (notCaptured.has(id)) return;
+        const info = await session(id);
+        if (!info || (info.parentID && notCaptured.has(info.parentID))) return;
         let list;
         try {
-          [info, list] = await Promise.all([
-            session(id),
-            client.session.messages({ path: { id } }).then((r) => r.data),
-          ]);
+          list = (await client.session.messages({ path: { id } })).data;
         } catch {
           return;
         }
-        if (!info || !Array.isArray(list)) return;
+        if (!Array.isArray(list)) return;
         await seshi(
           ["hook", AGENT, "Stop"],
           JSON.stringify({
@@ -171,6 +117,7 @@ export const SeshiCapture = async ({ client }) => {
       const said =
         messages(run.stdout)[0] ??
         "Session Capture could not be changed: seshi did not answer (is it installed and on this machine's PATH?)";
+      heard(input.sessionID, said);
       await toast(said);
       output.parts.splice(0, output.parts.length, {
         type: "text",

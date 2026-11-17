@@ -147,6 +147,9 @@ describe("runHook (F9.1)", () => {
         toggle: "off",
       };
     });
+    // A copy from before it was turned off goes too.
+    mkdirSync(join(paths.dir, "transcripts", "handed"), { recursive: true });
+    writeFileSync(join(paths.dir, "transcripts", "handed", "s2.json"), '{"id":"s2"}');
     expect((await run("s2")).skipped).toHaveLength(1);
     expect(existsSync(join(paths.dir, "transcripts", "handed", "s2.json"))).toBe(false);
     await expect(run("../escape")).rejects.toThrow("unusable session id");
