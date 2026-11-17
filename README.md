@@ -7,53 +7,53 @@
 
 ## Who is Seshi for?
 
-Teams that want to get the most out of coding agents: to see how the work actually gets done,
-find the session where a decision was made, and learn what works across everyone's agents.
+Teams that want to get the most out of coding agents. Agent sessions are incredibly rich with information. In many ways they are the new PR. They tell you how work was done, what decisions were made, what went wrong, etc.
 
-And teams that are software factory curious: the sessions are the record of how your agents
-work, kept in one format, ready for evals, reviews and the next generation of your agent
-workflows.
+Seshi is the easiest way for teams to collect sessions, allowing them to build downstream applications like
+
+- Build token usage and spend insights
+- Create a shared memory layer
+- Distill them into a decision log
+- Identify agent friction
+- and much much more.
 
 ## Why use Seshi?
 
-- **Built-in integrations, and extensible.** Claude Code, Codex and Cursor are captured through
-  their hooks; OpenCode, pi and Gemini CLI transcripts upload as they are. Each integration is a
-  package in [`integrations/`](integrations); contributions are welcome
-  ([CONTRIBUTING.md](CONTRIBUTING.md)).
-- **Coding and cloud agents.** Laptop agents through hooks; cloud agents through OpenTelemetry
-  (a Claude Console destination), Datadog LLM Observability, and an S3 source for sandboxes and
-  eval harnesses.
-- **Any S3-compatible storage.** AWS S3, Cloudflare R2, any store with conditional writes, or a
+- **Every coding agent, one format.** Claude Code, Codex and Cursor are captured through their
+  hooks; OpenCode, pi, Gemini CLI and Datadog Trajectory transcripts upload as they are. All of
+  them are normalized to one format, and export as OpenTelemetry spans or ATIF. Each integration
+  is a package in [`integrations/`](integrations); add your own.
+- **Cloud agents too.** Agents running in the cloud arrive through OpenTelemetry (such as a Claude
+  Console destination), a Datadog LLM Observability sync, or an S3 bucket your sandboxes and eval
+  harnesses write to.
+- **Your bucket.** AWS S3, Cloudflare R2, any S3-compatible store with conditional writes, or a
   folder. The bucket is the source of truth, in a [documented layout](spec/layout.md) anything
   can read.
-- **Redaction and PII scrubbing.** Secrets are removed before anything is written, and there is
-  no switch to turn it off. Add your own rule packs, and an optional model review for what
-  patterns miss, such as personal or customer data.
-- **Access and visibility controls.** Sessions are visible to the org or to their owner only.
-  Anyone can turn capture off for a session, a folder or a repository, and a session turned off
-  is retracted.
-- **Agent agnostic.** Every agent's log is normalized to one format, and exported as Letta
-  trajectory-v1, OpenTelemetry spans or ATIF.
-- **Authentication built in.** Sign in through your identity provider (Okta, Entra or any OIDC
-  issuer), or share an org key. Tokens are scoped, stored as hashes and revocable.
-- **OpenTelemetry support.** The server is an OTLP/HTTP endpoint, and every session can be read
-  back as OTLP spans.
-- **Session search.** Find sessions by what was said and done in them: prompts, answers, tool
-  calls, file paths and commands.
+- **Redaction built in.** Secrets are removed before anything is written, with no switch to turn
+  it off. Add your own rule packs, and an optional model review for what patterns miss, such as
+  personal or customer data.
+- **People stay in control.** Sessions are visible to the org or to their owner only. Anyone can
+  turn capture off for a session, a folder or a repository, and a session turned off is retracted.
+- **Your sign-in.** Okta, Entra or any OIDC issuer, or a shared org key. Tokens are scoped, stored
+  as hashes and revocable.
+- **Search.** Find sessions by what was said and done in them: prompts, answers, tool calls, file
+  paths and commands.
 
 ## How is this different from agent observability tools?
 
-LLM observability tools trace the applications you build: the model calls your product makes in
-production. Seshi keeps the sessions your developers run with coding agents.
+LLM observability tools trace the agents you build. Seshi keeps the sessions of the agents you
+build with.
 
-- **It captures where the work happens.** Hooks in the agents on each laptop, not an SDK in your
-  code.
-- **The archive is yours.** Sessions live in your bucket, in an open layout that can be read
-  without Seshi's server.
-- **People are in control.** Redaction runs before anything is stored, the person at the
-  keyboard can turn capture off for any session, and what they turn off is retracted.
-- **It works alongside them.** Seshi reads OpenTelemetry and Datadog LLM Observability, and
-  writes OpenTelemetry back out.
+- **A different audience.** Observability is for teams shipping LLM products and debugging them
+  in production. Seshi is for teams using coding agents to get work done.
+- **Built for coding agents.** Hooks in the agents on each laptop and syncs from cloud agents,
+  not an SDK added to your code.
+- **You own the data.** Sessions live in your bucket, in an open layout that can be read without
+  Seshi.
+- **Kept as long as you want.** Observability tools keep traces for a retention window, often a
+  few weeks. Seshi keeps sessions until you delete them.
+- **Works alongside them.** Seshi reads OpenTelemetry and syncs Datadog LLM Observability, and
+  writes sessions back out as OpenTelemetry spans.
 
 ## Getting started
 
@@ -120,20 +120,11 @@ Everything else is in [docs/](docs/README.md).
 
 ![How a session moves through seshi: agent hooks and the uploader on the developer laptop, the seshi serve API, pipeline and worker, the bucket, and the readers](docs/architecture.svg)
 
-Every upload goes through one pipeline in memory, and only its result is written. The log is
-normalized and redacted, model review runs if a policy applies, and only what is new is written:
-a log that grew adds its tail. The trace is stored under its content hash, an entry is appended
-to the bucket's change feed, and the session's pointer moves to it. Readers use the CLI, the HTTP
-API, or the change feed directly.
-
 ## Roadmap
 
-- Publishing the Cursor status bar extension on Open VSX (it is built and attached to each
-  release).
-- Cursor Cloud Agents sync.
-- Datadog Trajectory's local session files.
-- Proving the setups that have not met real services yet: per-person AWS IAM policies for
-  serverless teams, Cloudflare R2, and Okta, Entra and Google sign-in.
+- [ ] Cursor Cloud Agents sync
+- [ ] Publishing the Cursor status bar extension on Open VSX (it is built and attached to each
+      release)
 
 ## Development
 
