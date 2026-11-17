@@ -172,6 +172,10 @@ visibility, checkpoint and health ([config.md](config.md#sources)):
 | `datadog` | Polled: Datadog LLM Observability's Export API, the turns Datadog Trajectory published | [datadog.md](datadog.md) |
 | `s3` | Polled: transcripts other systems drop into a bucket (eval harnesses, ATIF exports, sandboxes) | [s3-sync.md](s3-sync.md) |
 
+Sources are added, changed and removed without a restart: edit the file (or a drop-in in
+`seshi.d/`) and reload with `SIGHUP` or `POST /v1/admin/reload`
+([config.md](config.md#reloading)). Unchanged sources keep running, and checkpoints are kept.
+
 ## Deploying
 
 Every release is published as a container image, `ghcr.io/dosu-ai/sessiondb:<version>`, built
@@ -293,6 +297,8 @@ allow.
 | `GET /v1/admin/sources?days` | Every configured source and `upload`: checkpoint, drop and failure counts, health over the last `days` (7) days, as `seshi sync status --json` prints them (`sources:admin`) |
 | `GET /v1/admin/sources/:id?days` | One source's status; `404 unknown_source` for an id no source has (`sources:admin`) |
 | `GET /v1/admin/sources/:id/failed`, `…/dropped` `?since&after&limit` | A source's failure or drop records, oldest first, as `seshi sync failed\|dropped --json` prints them; never content. A source no longer configured can still have its records read (`sources:admin`, X6.4) |
+| `POST /v1/admin/reload` | Read the config file, its `seshi.d/` drop-ins and the rule packs again and apply them, all or nothing, as `SIGHUP` does ([config.md](config.md#reloading), F1.5): `{reload, config}`, `reload.outcome` `applied` or `unchanged`; `422 reload_rejected` with `reload.errors` when they do not load or check (the running config stays); `409 not_reloadable` for a server started with no config file (`sources:admin`) |
+| `GET /v1/admin/reload` | The running config's `generation`, `config_hash` and `rule_set`, when it was loaded, `restart_required`, and the last reload (`sources:admin`) |
 
 ### Retraction (F9.7)
 

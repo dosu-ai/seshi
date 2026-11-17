@@ -76,6 +76,7 @@ answer back.
 | `redactionRules()`, `redactionRulesSince(etag)` | `GET /v1/redaction/rules`, for redacting before upload |
 | `createToken`, `listTokens`, `revokeToken`, `revokeOwnerTokens` | `/v1/tokens` (admins) |
 | `jobs()`, `sources({days})`, `source(id)`, `records(kind, id, …)` | `/v1/admin/jobs` and `/v1/admin/sources` (admins) |
+| `reload()`, `configStatus()` | `POST` and `GET /v1/admin/reload`: apply the config files again, and the running config's generation (admins). A rejected reload is returned with its `errors`, not thrown |
 
 `authConfig({server})` and `exchangeIdToken({server}, request)` are the two calls made before
 there is a token: which ways in the server takes, and an IdP ID token for a seshi session token

@@ -1,11 +1,12 @@
 import { parseArgs } from "node:util";
 import { createApp, maxBodyBytes } from "@seshi/api";
-import { checkServerConfig } from "@seshi/config";
-import { lineLogger, SERVERLESS_BUCKET_WARNING } from "@seshi/instance";
+import { checkServerConfig, serverDropInDir } from "@seshi/config";
+import { lineLogger, type ReloadTrigger, SERVERLESS_BUCKET_WARNING } from "@seshi/instance";
 import { VERSION } from "@seshi/model";
 import { readLayout } from "@seshi/store";
 import { EXIT } from "../cli/exit";
 import { fail, helpOrUsageError } from "../cli/output";
+import { watchConfig } from "./config-watch";
 import type { CommandContext } from "./index";
 import { openServer, serverFailure } from "./server-instance";
 
@@ -114,6 +115,33 @@ async function start(ctx: CommandContext, argv: string[]): Promise<number | unde
     );
   }
 
+  // Config reload (F1.5, revised): SIGHUP, POST /v1/admin/reload and, with
+  // server.watch_config, a change to the files all run instance.reload, one at a time.
+  const configFile = loaded.file;
+  let watcher: ReturnType<typeof watchConfig> | undefined;
+  async function reload(trigger: ReloadTrigger): Promise<void> {
+    const report = await instance.reload(trigger);
+    if (report.outcome === "unchanged") {
+      log.info(`config reload (${trigger}): nothing changed (generation ${report.generation})`);
+    }
+    watcher?.rearm();
+  }
+  if (configFile !== undefined) {
+    process.on("SIGHUP", () => void reload("signal"));
+    if (loaded.config.server.watch_config) {
+      watcher = watchConfig({
+        files: () => [configFile, ...instance.config.redaction.packs],
+        dirs: () => [serverDropInDir(configFile)],
+        onChange: () => void reload("watch"),
+        onError: (err) => log.warn(`config watch: ${message(err)}`),
+      });
+    }
+  } else {
+    process.on("SIGHUP", () =>
+      log.warn("config reload: this server was started without a config file; nothing to read"),
+    );
+  }
+
   function stopWithin(graceMs: number): Promise<unknown> {
     return Promise.race([server.stop(), Bun.sleep(graceMs)]);
   }
@@ -121,6 +149,7 @@ async function start(ctx: CommandContext, argv: string[]): Promise<number | unde
   async function shutdown(): Promise<void> {
     if (stopping) return;
     stopping = true;
+    watcher?.close();
     await Promise.all([stopWithin(5000), instance.close(5000)]);
     process.exit(0);
   }

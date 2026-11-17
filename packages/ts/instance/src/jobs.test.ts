@@ -196,3 +196,56 @@ describe("JobRunner", () => {
     await runner.stop();
   });
 });
+
+describe("JobRunner.unregister", () => {
+  it("stops scheduling a job, aborts its run and waits for it, and leaves the rest running", async () => {
+    let aborted = false;
+    let started = false;
+    let other = 0;
+    const runner = new JobRunner({ worker: true });
+    runner.register(
+      job(
+        "slow",
+        (signal) =>
+          new Promise((resolve) => {
+            started = true;
+            signal.addEventListener("abort", () => {
+              aborted = true;
+              resolve(undefined);
+            });
+          }),
+        { intervalMs: 60_000 },
+      ),
+    );
+    runner.register(job("other", async () => void other++));
+    runner.start();
+    await until(() => started && other > 0);
+    expect(await runner.unregister("slow")).toBe(true);
+    expect(aborted).toBe(true);
+    expect(runner.get("slow")).toBeUndefined();
+    expect(runner.snapshot().slow).toBeUndefined();
+    const before = other;
+    await until(() => other > before);
+    expect(await runner.unregister("slow")).toBe(false);
+    // The name can be used again.
+    runner.register(job("slow", async () => undefined));
+    await runner.stop();
+  });
+
+  it("gives up waiting after the timeout", async () => {
+    const runner = new JobRunner({ worker: true });
+    let started = false;
+    runner.register(
+      job("stuck", () => {
+        started = true;
+        return new Promise(() => {});
+      }),
+    );
+    runner.start();
+    await until(() => started);
+    const at = Date.now();
+    await runner.unregister("stuck", 50);
+    expect(Date.now() - at).toBeLessThan(1000);
+    await runner.stop(10);
+  });
+});

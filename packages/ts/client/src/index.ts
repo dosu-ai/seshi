@@ -35,12 +35,14 @@ export {
 } from "./http";
 export type {
   AuthConfig,
+  ConfigStatus,
   ExchangeRequest,
   ExchangeResult,
   JobsStatus,
   OwnersPage,
   RecordKind,
   RecordsPage,
+  ReloadReport,
   ReviewDecision,
   Scope,
   SourceRecord,

@@ -18,7 +18,7 @@ import { Ajv2020, type ValidateFunction } from "ajv/dist/2020";
 import addFormats from "ajv-formats";
 import { buildFormats } from "seshi/integrations";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { testApp, testInstance } from "../tooling/instance";
+import { serverConfig, testApp, testInstance } from "../tooling/instance";
 import { transcript } from "../tooling/testdata";
 
 // --- the document -------------------------------------------------------------------------
@@ -268,6 +268,8 @@ describe("the document itself", () => {
         "GET /v1/admin/sources",
         "GET /v1/admin/sources/{id}",
         "GET /v1/admin/sources/{id}/{kind}",
+        "GET /v1/admin/reload",
+        "POST /v1/admin/reload",
       ].sort(),
     );
   });
@@ -761,6 +763,46 @@ describe("identity and access (X5)", () => {
         })
       ).status,
     ).toBe(400);
+  });
+
+  it("the config reload routes (F1.5)", async () => {
+    const { admin: first, org_key } = await auth.initAdmin({ owner: "ops" });
+    const storeUrl = /^(file|s3|r2):\/\//.test(store.url) ? store.url : "file:///unused-test-store";
+    let toml = "";
+    const reloading = createApp({
+      store,
+      storage: { url: store.url },
+      auth,
+      loadConfig: () => serverConfig(toml, { storeUrl }),
+    });
+    const admin = { app: reloading, token: first?.token };
+    const alice = { app: reloading, token: org_key?.token, user: "alice" };
+    const nobody = { app: reloading, token: null };
+
+    const status = await call("GET", "/v1/admin/reload", admin);
+    expect(status.body).toMatchObject({ generation: 1, reloadable: true, last_reload: null });
+    expect((await call("GET", "/v1/admin/reload", alice)).status).toBe(403);
+    expect((await call("GET", "/v1/admin/reload", nobody)).status).toBe(401);
+
+    toml = '[[sources]]\nid = "otel"\ntype = "otlp"\n';
+    const applied = await call("POST", "/v1/admin/reload", admin);
+    expect(applied.status).toBe(200);
+    expect(applied.body).toMatchObject({
+      reload: { outcome: "applied", trigger: "api", sources: { added: ["otel"] } },
+      config: { generation: 2 },
+    });
+    toml = '[[sources]]\nid = "otel"\ntype = "nope"\n';
+    const rejected = await call("POST", "/v1/admin/reload", admin);
+    expect(rejected.status).toBe(422);
+    expect(rejected.body).toMatchObject({
+      error: { code: "reload_rejected" },
+      reload: { outcome: "rejected" },
+      config: { generation: 2 },
+    });
+    expect((await call("POST", "/v1/admin/reload", alice)).status).toBe(403);
+    expect((await call("POST", "/v1/admin/reload", nobody)).status).toBe(401);
+    // A server with no config file to read again.
+    expect((await call("POST", "/v1/admin/reload", { ...admin, app: x5 })).status).toBe(409);
   });
 
   it("the admin source routes", async () => {

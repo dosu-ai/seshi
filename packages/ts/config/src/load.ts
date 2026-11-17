@@ -1,4 +1,5 @@
-import { readFileSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 import * as z from "zod";
 import {
   type Assignment,
@@ -24,10 +25,20 @@ import {
 export interface ConfigFs {
   readFile(path: string): string;
   mode(path: string): number | undefined;
+  /** The names in a folder; none when it does not exist. Only drop-ins need it. */
+  list?(dir: string): string[];
 }
 
 export const nodeFs: ConfigFs = {
   readFile: (path) => readFileSync(path, "utf8"),
+  list(dir) {
+    try {
+      return readdirSync(dir);
+    } catch (err) {
+      if ((err as { code?: unknown }).code === "ENOENT") return [];
+      throw err;
+    }
+  },
   mode(path) {
     try {
       return statSync(path).mode;
@@ -52,10 +63,20 @@ export interface BaseLayer {
   tree: Record<string, unknown>;
 }
 
+/** A folder of `*.toml` files read after the file, in name order, that may only add to some
+ * lists (`[[sources]]`, `redaction.packs`): so another program can add a source in a file of
+ * its own without rewriting the operator's. */
+export interface DropIns {
+  dir: string;
+  /** The lists a drop-in may add to, as paths (`["sources"]`). */
+  lists: readonly (readonly string[])[];
+}
+
 export interface LoadOptions {
   /** Lowest layer above the built-in defaults. */
   base?: BaseLayer;
   file?: string;
+  dropIns?: DropIns;
   /** Top-level tables the file's own settings are read without. */
   omit?: readonly string[];
   env?: Record<string, string | undefined>;
@@ -70,6 +91,8 @@ export interface LoadOptions {
 export interface Loaded<T> {
   config: T;
   file?: string;
+  /** The drop-in files read, in order. */
+  dropIns: string[];
   origins: Origins;
   warnings: string[];
   shape: JsonSchema;
@@ -227,6 +250,84 @@ function referencedEnv(
   return names;
 }
 
+function readDropIns(
+  fs: ConfigFs,
+  { dir, lists }: DropIns,
+  shape: JsonSchema,
+  tree: PlainObject,
+  origins: Origins,
+): string[] {
+  const files = (fs.list?.(dir) ?? [])
+    .filter((name) => name.endsWith(".toml") && !name.startsWith("."))
+    .sort()
+    .map((name) => join(dir, name));
+  const allowed = lists.map((list) => list.join(".")).join(" and ");
+  for (const file of files) {
+    let text: string;
+    try {
+      text = fs.readFile(file);
+    } catch (err) {
+      throw new ConfigError([`cannot read ${file}: ${err instanceof Error ? err.message : err}`]);
+    }
+    const own = parseToml(file, text);
+    const adds: { list: readonly string[]; items: unknown[] }[] = [];
+    for (const list of lists) {
+      const items = takeAt(own, list);
+      if (items === undefined) continue;
+      if (!Array.isArray(items)) {
+        throw new ConfigError([`${file}: ${list.join(".")} must be a list`]);
+      }
+      adds.push({ list, items });
+    }
+    const left = leafPaths(own);
+    if (left.length > 0) {
+      throw new ConfigError([
+        `${file}: a drop-in may only add to ${allowed}; ${left.join(", ")} belong${left.length === 1 ? "s" : ""} in the main config file`,
+      ]);
+    }
+    for (const { list, items } of adds) {
+      const before = valueAt(tree, list);
+      const existing = Array.isArray(before) ? before : [];
+      // Sparse up to the existing items, so only the drop-in's own items get its origin.
+      const shifted = new Array(existing.length).concat(items);
+      recordFile(shape, nest(list, shifted), { source: "file", path: file }, origins);
+      setNested(tree, list, [...existing, ...items]);
+    }
+  }
+  return files;
+}
+
+function takeAt(tree: PlainObject, path: readonly string[]): unknown {
+  let at: unknown = tree;
+  for (const key of path.slice(0, -1)) {
+    if (!isPlainObject(at)) return undefined;
+    at = at[key];
+  }
+  if (!isPlainObject(at)) return undefined;
+  const last = path.at(-1) as string;
+  const value = at[last];
+  delete at[last];
+  return value;
+}
+
+function leafPaths(value: unknown, path: string[] = []): string[] {
+  if (!isPlainObject(value)) return [path.join(".")];
+  return Object.entries(value).flatMap(([key, child]) => leafPaths(child, [...path, key]));
+}
+
+function nest(path: readonly string[], value: unknown): PlainObject {
+  return path.reduceRight<unknown>((inner, key) => ({ [key]: inner }), value) as PlainObject;
+}
+
+function setNested(tree: PlainObject, path: readonly string[], value: unknown): void {
+  let at = tree;
+  for (const key of path.slice(0, -1)) {
+    if (!isPlainObject(at[key])) at[key] = {};
+    at = at[key] as PlainObject;
+  }
+  at[path.at(-1) as string] = value;
+}
+
 export function loadConfig<S extends z.ZodType>(
   schema: S,
   options: LoadOptions = {},
@@ -266,6 +367,7 @@ function load<S extends z.ZodType>(schema: S, options: LoadOptions): Loaded<z.ou
     recordFile(shape, own, { source: "file", path: options.file }, origins);
     tree = mergeTables(tree, own);
   }
+  const dropIns = options.dropIns ? readDropIns(fs, options.dropIns, shape, tree, origins) : [];
 
   const ignore = new Set([...(options.ignoreEnv ?? []), ...referencedEnv(shape, tree, env)]);
   const assignments: Assignment[] = [
@@ -323,24 +425,29 @@ function load<S extends z.ZodType>(schema: S, options: LoadOptions): Loaded<z.ou
     if (issues.length > 0) throw new ConfigError(issues);
   }
 
-  if (options.file !== undefined && (options.platform ?? process.platform) !== "win32") {
-    const literal = secrets.filter(({ path, secret }) => {
+  if ((options.platform ?? process.platform) !== "win32") {
+    const byFile = new Map<string, PathSegment[][]>();
+    for (const { path, secret } of secrets) {
       const origin = origins.get(path);
-      return secret.ref.kind === "literal" && origin.source === "file";
-    });
-    const mode = fs.mode(options.file);
-    if (literal.length > 0 && mode !== undefined && (mode & 0o077) !== 0) {
-      warnings.push(
-        `${options.file} holds literal secrets (${literal
-          .map(({ path }) => formatPath(path, ids))
-          .join(
-            ", ",
-          )}) and group or others can read it: use { env = "NAME" } or { file = "/path" } references, or chmod 600 ${options.file}`,
-      );
+      if (secret.ref.kind !== "literal" || origin.source !== "file") continue;
+      if (origin.path !== options.file && !dropIns.includes(origin.path)) continue;
+      byFile.set(origin.path, [...(byFile.get(origin.path) ?? []), path]);
+    }
+    for (const [file, paths] of byFile) {
+      const mode = fs.mode(file);
+      if (mode !== undefined && (mode & 0o077) !== 0) {
+        warnings.push(
+          `${file} holds literal secrets (${paths
+            .map((path) => formatPath(path, ids))
+            .join(
+              ", ",
+            )}) and group or others can read it: use { env = "NAME" } or { file = "/path" } references, or chmod 600 ${file}`,
+        );
+      }
     }
   }
 
-  return { config, file: options.file, origins, warnings, shape };
+  return { config, file: options.file, dropIns, origins, warnings, shape };
 }
 
 export function originOf<T>(loaded: Loaded<T>, path: readonly PathSegment[]): string {

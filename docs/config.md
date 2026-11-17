@@ -15,12 +15,15 @@
    the folder you run them in may be a checkout someone else wrote, and its secret references
    (`{ env = … }`, `{ file = … }`) would send your variables or files to the bucket it names.
    When one is there, they print a hint to pass `--config ./seshi.toml`.
+   Beside the file, a `seshi.d/` folder may hold drop-ins ([below](#drop-ins-seshid)).
 4. **Defaults**: today's values, listed below.
 
 The schema is strict: an unknown key, in the file or as a `SESHI_*` name, stops the server
-from starting, and every problem is reported at once with where its value came from. Changes
-apply on restart (F1.5). The config is the operator's: nothing in it can be set over the API,
-and a server never reads it from the bucket. (In serverless mode, laptops read shared settings
+from starting, and every problem is reported at once with where its value came from. Sources,
+rule packs and the other live settings apply without a restart when the server reloads
+([below](#reloading)); the rest apply on restart (F1.5). The config is the operator's: nothing
+in it can be set over the API (a reload only reads the files again), and a server never reads
+it from the bucket. (In serverless mode, laptops read shared settings
 in this same format from the bucket's `config/`; see [serverless.md](serverless.md#shared-settings).)
 
 [`seshi.example.toml`](../seshi.example.toml) is a commented example.
@@ -43,6 +46,67 @@ settings that do less than they say (a literal secret in a file others can read,
 visibility without an IdP, `server.public_url`), and names every provider a review policy sends
 data to. `show` does not read secret references, so it works where those files or variables are
 not present. Both take `--config` and `--set`, and `--cli` for the CLI's own config (below).
+
+## Reloading
+
+A running `seshi serve` reads its config again, without a restart, on any of (F1.5):
+
+- `SIGHUP` (`kill -HUP <pid>`, `docker kill --signal HUP <container>`);
+- `POST /v1/admin/reload` (`sources:admin`), which answers with the result;
+- a change to the file, a drop-in or a rule pack, when `server.watch_config = true` (off by
+  default; a second after the last change).
+
+All three do the same thing, one reload at a time:
+
+1. **All or nothing.** The file, its drop-ins, `SESHI_*` env and the flags the server started
+   with are loaded and checked, every secret reference is read, the rule packs are compiled
+   and their test strings run, and, if `[review]` changed, the review policies are loaded,
+   before anything changes. On any error the running config stays; the reason is logged, in
+   the API's answer (`422 reload_rejected`) and in `GET /v1/admin/reload`.
+2. **Sources are compared by id.** An added source starts polling; a removed one stops (a
+   run that is going is aborted and waited for); a changed one (any setting, a secret's value
+   included) stops and starts again; an unchanged one keeps running. Checkpoints live in the
+   bucket and are never reset by a reload: a source removed and added back reads on from where
+   it was. Use `seshi sync rewind` to read again on purpose.
+3. **Rule packs swap atomically.** New writes redact with the new rule set; a write already
+   going finishes with the rules it started with. `GET /v1/redaction/rules` serves the new
+   packs (a new `ETag`) at once. Stored sessions keep the rules they were stored with until
+   `seshi redact backfill`.
+4. **Some settings need a restart.** `[server]`, `[store]`, `[auth]`, `[limits]`, `[search]`
+   and `[worker]` are read once at start-up (the listener, the bucket, identity, request
+   caps, the index and the worker's own intervals). A reload that changes one of them applies
+   everything else and lists the changed settings in `restart_required` (and logs a warning
+   for each); they keep their running values until the server restarts. Live:
+   `[[sources]]`, `[redaction]`, `[review]`, `[filter]`, `default_visibility`, `[records]`,
+   `[capture]`.
+
+`GET /v1/admin/reload` shows the running config's `generation` (1 at start-up, one more for
+each reload that changed something), a hash of it (secrets hashed), the rule set's hash,
+when it was loaded, `restart_required`, and the last reload's trigger, outcome, errors and
+which sources were added, removed or changed. A program that writes the config confirms its
+change took effect by reading it after the reload.
+
+### Drop-ins (`seshi.d/`)
+
+`*.toml` files in a `seshi.d/` folder beside the config file (`/etc/seshi/seshi.d/` for
+`/etc/seshi/seshi.toml`) are read after it, in file-name order. A drop-in may only add
+`[[sources]]` and `redaction.packs` entries, appended after the file's; any other key in one is
+an error. This lets another program (an admin UI that connects buckets, say) add a source as a
+file of its own and reload, without rewriting the operator's file. Ids must still be unique
+across all of them. Files whose names start with `.` and files not ending in `.toml` are
+skipped, so write a drop-in under a temporary name and rename it into place. `seshi config
+show --origin` names the drop-in each value came from.
+
+### Why the files, and not an API that sets sources
+
+A mutable sources API (`PUT /v1/admin/sources/:id`) was considered and not built. The config
+holds connector credentials (or references to them) that the operator protects like the
+bucket keys (F1.3); one writable copy, in files, keeps a single source of truth that
+`config check`, `config show --origin`, version control and configuration management all
+read, and a restart cannot lose or resurrect a change made only in memory or in the bucket.
+A program that manages sources writes a drop-in and calls `POST /v1/admin/reload`: it gets the
+same validation and the same answer an API would give, and the operator can still see and
+override everything it wrote.
 
 ## Environment names
 
@@ -106,6 +170,7 @@ milliseconds. Sizes are `<n><unit>` with `B`, `KB`, `MB`, `GB`, `KiB`, `MiB` or 
 | `public_url` | | The URL clients reach the server at, behind any proxy. Accepted but unused: sign-in goes from the CLI to the IdP directly (X5.7), so nothing reads it, and `config check` warns when it is set |
 | `roles` | `["api", "worker"]` | What this instance runs (X7.1). Flag `--roles`. `api` serves the HTTP API; `worker` runs the background jobs (pollers, retention, the heartbeat). Run exactly one worker (X7.2); an instance without `api` answers `/healthz` only |
 | `instance_id` | the host name | This instance's stable name: its source health shard and the heartbeat's `host` (letters, digits, `_`, `-`, up to 64) |
+| `watch_config` | `false` | Reload when the config file, a drop-in in `seshi.d/` or a rule pack file changes, a second after the last change ([Reloading](#reloading)). Off by default: an editor saving half a change would be applied or refused at once, and `SIGHUP` or `POST /v1/admin/reload` say when, and report the result |
 
 ### `[store]`
 
@@ -199,8 +264,10 @@ runs (F2.1). A `.toml` file is a rule pack (`id`, `rules`, `sensitive_files`,
 See [redaction.md](redaction.md). Your patterns run under RE2 (F2.2). The server
 refuses to start on a pack it cannot use, a pattern RE2 cannot run, a rule id used twice, a
 `disable` of something that is not a built-in rule, or a rule that fails its own test strings,
-naming the file; `seshi config check` reports the same problems. A change applies after a
-restart; `seshi redact backfill` applies it to stored sessions.
+naming the file; `seshi config check` reports the same problems, and a reload with such a pack
+is refused and keeps the running rules. A change applies on the next [reload](#reloading) (or
+restart) to sessions stored from then on; `seshi redact backfill` applies it to stored
+sessions.
 
 ### `[review]`
 
@@ -286,7 +353,8 @@ a Datadog span it cannot parse) is recorded under `sources/<id>/failed/` and lis
 | `s3` | `url`, `prefix`, `credentials` or `role` (`arn`, `external_id`), `region`, `endpoint`, `account_id`, `include` globs, `format` (`"auto"`), `ordered_keys` (`false`), `interval` (`"5m"`), `path` |
 
 Ids are unique, and an `s3` source may not read seshi's own bucket and prefix, or its own
-folder (F6.4).
+folder (F6.4). Sources can also come from drop-ins in `seshi.d/`, and are added, changed and
+removed by a [reload](#reloading) without a restart; a reload never resets a checkpoint.
 
 An `s3` source is polled by the built-in S3 poller ([s3-sync.md](s3-sync.md)).
 Its `url` is `s3://`, `r2://` or a folder (`file:///path`, for one machine). `include` globs
