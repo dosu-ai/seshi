@@ -47,18 +47,26 @@ fake model (`.claude/skills/verify-seshi/scripts/fake-model.ts`) and the agent's
   a shell for a Windows `.cmd` shim, a 10 s limit, never rejecting):
   - fills `session_prompt_right` with `seshi statusline --agent opencode` (with `NO_COLOR`) up to
     its first ` · `, in the theme's muted colour, or its warning colour for `⏸`; read when the
-    session comes into view and after each `session.idle` of that session or its subagents';
-  - binds the keys `prompt.submit` is bound to (`api.tuiConfig.keybinds`, else `return`) at
-    priority 100. In a session, with no dialog open, a prompt that is `/seshi` with optional
-    arguments is cleared and handed to `seshi hook opencode Command`; seshi's answer is a toast
-    and the status is read again. Anything else, and `/seshi` on the home screen, passes on;
+    session comes into view and after each `session.idle` of that session or its subagents'.
+    Reads can finish out of order, so only the latest one started is shown;
+  - binds the keys `input.submit` and `prompt.submit` are bound to (`api.tuiConfig.keybinds`;
+    the textarea submits on `input.submit`, `return` by default, and `prompt.submit` is unbound
+    by default), else `return`, at priority 100. A prompt that is exactly `/seshi`, `/seshi off`,
+    `/seshi on` or `/seshi status` is taken only while the session's own prompt is the one shown
+    (no dialog, no permission or question waiting, not a subagent's session), and only once
+    `prompt.clear` succeeds; it then goes to `seshi hook opencode Command`, seshi's answer is a
+    toast and the status is read again. Anything else (an attachment's placeholder text after
+    `/seshi off`, an unknown word), and `/seshi` on the home screen, passes on to the prompt and
+    the server's command. Shell mode (`!`) is the prompt's own state, not visible to plugins, so
+    a shell command that is literally `/seshi off` would be taken too;
   - names the top-level session for a subagent's (its `parentID`, followed), as capture does.
 - **The installer** writes the TUI plugin beside the other two files, and adds its absolute path
   to `tui.json`'s `plugin` list, keeping every other entry and key; a missing `tui.json` is
   created with OpenCode's `$schema`. It finds its entry as the path or its `file://` URL, alone
   or with options, so an entry added by hand is not doubled. `uninstall` takes out only that
   entry, removes `tui.json` when nothing but its `$schema` is left, and removes `seshi/` once
-  empty. `status` lists `tui.json` and reports when the entry is missing.
+  empty (only when it removed the TUI plugin itself). `status` lists `tui.json` and notes when the
+  entry is missing, without counting it toward `installed`: capture works without it.
 - **The server plugin** is unchanged but for its runner taking extra variables. Its command file
   and `command.execute.before` stay for `opencode run --command seshi`, the web UI, and the TUI's
   home screen; its start toast stays.

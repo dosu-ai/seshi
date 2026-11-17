@@ -146,7 +146,9 @@ import { createElement, insert, setProp } from "@opentui/solid";
 import { createEffect, createSignal } from "solid-js";
 
 ${runner(command)}
-const SESHI_COMMAND = /^\\/seshi(?:\\s+([\\s\\S]*))?$/;
+// Only these are taken from the prompt; anything else (an attachment's placeholder text, an
+// unknown word) goes on to the server's /seshi command, attachments and all.
+const SESHI_COMMAND = /^\\/seshi(?:\\s+(off|on|status))?$/i;
 
 // seshi's status line up to its first " · ", so it fits beside the prompt.
 function short(line) {
@@ -157,8 +159,10 @@ function short(line) {
 export default {
   id: "seshi",
   tui: async (api) => {
-    // The status line last read for each session shown, by id.
+    // The status line last read, for the session in view only, by id.
     const [statuses, setStatuses] = createSignal({});
+    // Reads can finish out of order: only the latest one started is shown.
+    let reads = 0;
 
     // The session /seshi and the status are about, with its folder: a subagent's session is
     // captured with its parent's.
@@ -174,11 +178,25 @@ export default {
     };
 
     const refresh = async (id) => {
+      const read = ++reads;
       const run = await seshi(["statusline", "--agent", AGENT], JSON.stringify(which(id)), {
         NO_COLOR: "1",
       });
+      if (read !== reads) return;
       const line = run.code === 0 ? (run.stdout.trim().split("\\n")[0] ?? "") : "";
-      setStatuses((all) => ({ ...all, [id]: line }));
+      setStatuses({ [id]: line });
+    };
+
+    // The session in view, when its own prompt is the one shown: not a subagent's (no prompt),
+    // and none waiting on a permission or a question (their inputs replace the prompt).
+    const prompting = () => {
+      const route = api.route.current;
+      const id = route.name === "session" ? route.params?.sessionID : undefined;
+      if (typeof id !== "string" || api.ui.dialog.open) return undefined;
+      if (api.state.session.get(id)?.parentID) return undefined;
+      if (api.state.session.permission(id).length > 0) return undefined;
+      if (api.state.session.question(id).length > 0) return undefined;
+      return id;
     };
 
     const command = async (id, args) => {
@@ -217,40 +235,43 @@ export default {
       },
     });
 
-    // After each turn, the sessions shown that it belongs to.
+    // After each turn, the session in view, when the turn is its own or a subagent's of it.
     api.lifecycle.onDispose(
       api.event.on("session.idle", (event) => {
         const id = event.properties?.sessionID;
-        if (!id) return;
-        const top = which(id).session_id;
-        for (const shown of Object.keys(statuses())) {
-          if (which(shown).session_id === top) void refresh(shown);
-        }
+        const route = api.route.current;
+        const shown = route.name === "session" ? route.params?.sessionID : undefined;
+        if (!id || typeof shown !== "string") return;
+        if (which(shown).session_id === which(id).session_id) void refresh(shown);
       }),
     );
 
     // /seshi off|on|status, on the keys that submit the prompt, before the prompt sends it. A
     // binding that returns false passes the key on to the prompt.
-    let keys = [];
-    try {
-      keys = api.tuiConfig.keybinds.get("prompt.submit").map((binding) => binding.key);
-    } catch {}
-    if (keys.length === 0) keys = ["return"];
+    // The textarea submits on input.submit ("return" by default); prompt.submit is unbound by
+    // default.
+    const keys = [];
+    for (const name of ["input.submit", "prompt.submit"]) {
+      try {
+        for (const binding of api.tuiConfig.keybinds.get(name) ?? []) {
+          if (binding?.key && !keys.includes(binding.key)) keys.push(binding.key);
+        }
+      } catch {}
+    }
+    if (keys.length === 0) keys.push("return");
     api.keymap.registerLayer({
       priority: 100,
       bindings: keys.map((key) => ({
         key,
         cmd: (ctx) => {
           const text = ctx.focused?.plainText;
-          const route = api.route.current;
-          if (typeof text !== "string" || route.name !== "session" || api.ui.dialog.open) {
-            return false;
-          }
+          const id = prompting();
+          if (typeof text !== "string" || !id) return false;
           const asked = SESHI_COMMAND.exec(text.trim());
-          const id = route.params?.sessionID;
-          if (!asked || typeof id !== "string") return false;
-          api.keymap.dispatchCommand("prompt.clear");
-          void command(id, (asked[1] ?? "").trim());
+          if (!asked) return false;
+          // Taken only once the prompt is cleared; if it cannot be, the prompt sends it on.
+          if (api.keymap.dispatchCommand("prompt.clear")?.ok !== true) return false;
+          void command(id, (asked[1] ?? "").toLowerCase());
           return true;
         },
       })),

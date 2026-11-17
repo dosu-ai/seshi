@@ -210,7 +210,7 @@ describe("seshi capture install opencode", () => {
     expect(report.notes[0]).toContain(`add "${tuiPluginPath(host)}" to its "plugin" list`);
     expect(readFileSync(config, "utf8")).toBe(text);
     const status = await opencodeInstaller.status(context());
-    expect(status.installed).toBe(false);
+    expect(status.installed).toBe(true);
     expect(status.notes[0]).toContain("is not plain JSON");
     await opencodeInstaller.uninstall(context());
     expect(readFileSync(config, "utf8")).toBe(text);
@@ -230,8 +230,11 @@ describe("seshi capture install opencode", () => {
     expect((await opencodeInstaller.uninstall(context())).changed).toEqual([]);
     expect(readFileSync(commandPath(host), "utf8")).toBe("my own command\n");
 
+    // An empty seshi/ that seshi did not empty stays.
     rmSync(commandPath(host));
     mkdirSync(join(tuiPluginPath(host), ".."), { recursive: true });
+    await opencodeInstaller.uninstall(context());
+    expect(existsSync(join(tuiPluginPath(host), ".."))).toBe(true);
     writeFileSync(tuiPluginPath(host), "export default {};\n");
     expect((await opencodeInstaller.install(context())).notes[0]).toContain(
       `${tuiPluginPath(host)} is not seshi's`,
@@ -399,7 +402,12 @@ process.stdin.on("end", () => {
   const off = join(log, "..", "off");
   appendFileSync(log, JSON.stringify({ args, input, inherited: process.env.SESHI_SESSION_ID ?? null, noColor: process.env.NO_COLOR ?? null }) + "\\n");
   if (args[0] === "statusline") {
-    process.stdout.write(existsSync(off) ? "Session Capture ⏸ · turned off for this session\\n" : "Session Capture ◉\\n");
+    const line = existsSync(off) ? "Session Capture ⏸ · turned off for this session\\n" : "Session Capture ◉\\n";
+    // A "slow" file makes this one read answer late, with what it read now.
+    const slow = join(log, "..", "slow");
+    if (!existsSync(slow)) return process.stdout.write(line);
+    require("node:fs").rmSync(slow);
+    setTimeout(() => process.stdout.write(line), 800);
   }
   if (args[2] === "Command") {
     writeFileSync(off, "");
@@ -416,7 +424,8 @@ export const insert = (node, accessor) => { node.text = accessor; };
 export function createSignal(value) {
   return [() => value, (next) => { value = typeof next === "function" ? next(value) : next; }];
 }
-export function createEffect(fn) { fn(); }
+globalThis.__effects = [];
+export function createEffect(fn) { globalThis.__effects.push(fn); fn(); }
 `;
 
   interface Call {
@@ -439,7 +448,9 @@ export function createEffect(fn) { fn(); }
     writeFileSync(join(dir, "index.js"), source);
   }
 
-  async function load(options: { submitKeys?: unknown[] } = {}) {
+  async function load(
+    options: { keybinds?: Record<string, unknown[]>; clearFails?: boolean } = {},
+  ) {
     stub("@opentui/solid", SOLID);
     stub("solid-js", SOLID_JS);
     const fake = join(home, "fake-seshi.cjs");
@@ -463,9 +474,14 @@ export function createEffect(fn) { fn(); }
     const layers: { priority: number; bindings: Binding[] }[] = [];
     const slots: { slots: Record<string, (ctx: unknown, props: unknown) => Node> }[] = [];
     const events: Record<string, (event: unknown) => void> = {};
+    const waiting: Record<string, { permission: unknown[]; question: unknown[] }> = {};
     const api = {
       state: {
-        session: { get: (id: string) => sessions[id] },
+        session: {
+          get: (id: string) => sessions[id],
+          permission: (id: string) => waiting[id]?.permission ?? [],
+          question: (id: string) => waiting[id]?.question ?? [],
+        },
         path: { directory: "/repo/elsewhere" },
       },
       route: { current: { name: "session", params: { sessionID: ID } } as unknown },
@@ -483,11 +499,17 @@ export function createEffect(fn) { fn(); }
       },
       lifecycle: { onDispose: () => () => {} },
       tuiConfig: {
-        keybinds: { get: () => (options.submitKeys ?? ["return"]).map((key) => ({ key })) },
+        keybinds: {
+          get: (name: string) =>
+            options.keybinds?.[name] ?? (name === "input.submit" ? [{ key: "return" }] : []),
+        },
       },
       keymap: {
         registerLayer: (layer: (typeof layers)[number]) => layers.push(layer),
-        dispatchCommand: (name: string) => dispatched.push(name),
+        dispatchCommand: (name: string) => {
+          dispatched.push(name);
+          return options.clearFails ? { ok: false, reason: "not-found" } : { ok: true };
+        },
       },
     };
     await module.default.tui(api);
@@ -501,7 +523,10 @@ export function createEffect(fn) { fn(); }
     const show = (session_id: string) =>
       slots[0]?.slots.session_prompt_right?.({}, { session_id }) as Node;
     const submit = (text: unknown) => layers[0]?.bindings[0]?.cmd({ focused: { plainText: text } });
-    return { api, calls, toasts, dispatched, layers, events, show, submit };
+    const rerun = () => {
+      for (const effect of (globalThis as { __effects?: (() => void)[] }).__effects ?? []) effect();
+    };
+    return { api, calls, toasts, dispatched, layers, events, waiting, show, submit, rerun };
   }
 
   beforeEach(() => {
@@ -528,9 +553,13 @@ export function createEffect(fn) { fn(); }
     await vi.waitFor(() => expect(child.text()).toBe("Session Capture ◉"));
     expect(JSON.parse(tui.calls()[1]?.input ?? "")).toEqual({ session_id: ID, cwd: "/repo/app" });
 
-    // After a turn, the sessions shown that it belongs to are read again.
-    tui.events["session.idle"]?.({ properties: { sessionID: ID } });
-    await vi.waitFor(() => expect(tui.calls()).toHaveLength(4));
+    // After a turn, the session in view is read again: for its own turn or a subagent's, not
+    // another session's.
+    tui.events["session.idle"]?.({ properties: { sessionID: "ses_other" } });
+    tui.events["session.idle"]?.({ properties: { sessionID: "ses_child" } });
+    await vi.waitFor(() => expect(tui.calls()).toHaveLength(3));
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(tui.calls()).toHaveLength(3);
   });
 
   it("carries out /seshi off from the prompt, so nothing reaches the model", async () => {
@@ -553,6 +582,19 @@ export function createEffect(fn) { fn(); }
         variant: "warning",
       }),
     ]);
+    tui.rerun();
+    expect(node.props.fg).toBe("warning");
+  });
+
+  it("shows the latest read when an earlier one answers late", async () => {
+    const tui = await load();
+    writeFileSync(join(home, "slow"), "");
+    const node = tui.show(ID);
+    await vi.waitFor(() => expect(existsSync(join(home, "slow"))).toBe(false));
+    expect(tui.submit("/seshi off")).toBe(true);
+    await vi.waitFor(() => expect(node.text()).toBe("Session Capture ⏸"));
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    expect(node.text()).toBe("Session Capture ⏸");
   });
 
   it("passes every other prompt on, and /seshi too where there is no session yet", async () => {
@@ -560,6 +602,19 @@ export function createEffect(fn) { fn(); }
     expect(tui.submit("hello")).toBe(false);
     expect(tui.submit("/seshiful")).toBe(false);
     expect(tui.submit(undefined)).toBe(false);
+    // With an attachment's placeholder, or a word seshi does not take, the server's command gets
+    // it, attachments and all.
+    expect(tui.submit("/seshi off [Image 1]")).toBe(false);
+    expect(tui.submit("/seshi offf")).toBe(false);
+    // A permission or a question replaces the prompt; a subagent's session has none.
+    tui.waiting[ID] = { permission: [{}], question: [] };
+    expect(tui.submit("/seshi off")).toBe(false);
+    tui.waiting[ID] = { permission: [], question: [{}] };
+    expect(tui.submit("/seshi off")).toBe(false);
+    delete tui.waiting[ID];
+    tui.api.route.current = { name: "session", params: { sessionID: "ses_child" } };
+    expect(tui.submit("/seshi off")).toBe(false);
+    tui.api.route.current = { name: "session", params: { sessionID: ID } };
     tui.api.ui.dialog.open = true;
     expect(tui.submit("/seshi off")).toBe(false);
     tui.api.ui.dialog.open = false;
@@ -569,9 +624,25 @@ export function createEffect(fn) { fn(); }
     expect(tui.calls()).toEqual([]);
   });
 
+  it("passes /seshi on when the prompt cannot be cleared", async () => {
+    const tui = await load({ clearFails: true });
+    expect(tui.submit("/seshi off")).toBe(false);
+    expect(tui.dispatched).toEqual(["prompt.clear"]);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(tui.calls()).toEqual([]);
+  });
+
   it("listens on the keys the person submits the prompt with", async () => {
-    const tui = await load({ submitKeys: ["ctrl+s", "return"] });
-    expect(tui.layers[0]?.bindings.map((b) => b.key)).toEqual(["ctrl+s", "return"]);
+    expect((await load()).layers[0]?.bindings.map((b) => b.key)).toEqual(["return"]);
+    const tui = await load({
+      keybinds: {
+        "input.submit": [{ key: "ctrl+s" }, { key: undefined }],
+        "prompt.submit": [{ key: "ctrl+s" }, { key: "alt+return" }],
+      },
+    });
+    expect(tui.layers[0]?.bindings.map((b) => b.key)).toEqual(["ctrl+s", "alt+return"]);
     expect(tui.layers[0]?.priority).toBeGreaterThan(0);
+    const none = await load({ keybinds: { "input.submit": [], "prompt.submit": [] } });
+    expect(none.layers[0]?.bindings.map((b) => b.key)).toEqual(["return"]);
   });
 });

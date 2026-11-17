@@ -221,6 +221,15 @@ function readTuiConfig(path: string): TuiConfig {
   return { present: true, config, plugins };
 }
 
+/** `tui.json`, the TUI plugin's path, and whether the list names it. */
+function tuiEntry(host: CaptureHost) {
+  const path = tuiConfigPath(host);
+  const file = tuiPluginPath(host);
+  const current = readTuiConfig(path);
+  const listed = !("problem" in current) && current.plugins.some((e) => isOurEntry(e, file));
+  return { path, file, current, listed };
+}
+
 const byHand = (path: string, file: string, problem: string) =>
   `${path} ${problem}: left alone, so OpenCode shows no Session Capture status; add "${file}" to its "plugin" list`;
 
@@ -248,11 +257,9 @@ export const opencodeInstaller: Installer = {
       writeFileAtomic(file.path, file.text);
       changed.push(file.path);
     }
-    const path = tuiConfigPath(context);
-    const tui = tuiPluginPath(context);
-    const current = readTuiConfig(path);
+    const { path, file: tui, current, listed } = tuiEntry(context);
     if ("problem" in current) notes.push(byHand(path, tui, current.problem));
-    else if (!current.plugins.some((entry) => isOurEntry(entry, tui))) {
+    else if (!listed) {
       const config: Record<string, unknown> = current.present
         ? { ...current.config }
         : { $schema: TUI_SCHEMA };
@@ -272,14 +279,14 @@ export const opencodeInstaller: Installer = {
       rmSync(file.path, { force: true });
       changed.push(file.path);
     }
-    try {
-      // seshi's own folder, once empty.
-      rmdirSync(dirname(tuiPluginPath(context)));
-    } catch {}
-    const path = tuiConfigPath(context);
-    const tui = tuiPluginPath(context);
-    const current = readTuiConfig(path);
-    if (!("problem" in current) && current.plugins.some((entry) => isOurEntry(entry, tui))) {
+    const { path, file: tui, current, listed } = tuiEntry(context);
+    if (changed.includes(tui)) {
+      try {
+        // seshi's own folder, once empty.
+        rmdirSync(dirname(tui));
+      } catch {}
+    }
+    if (!("problem" in current) && listed) {
       const config = { ...current.config };
       const plugins = current.plugins.filter((entry) => !isOurEntry(entry, tui));
       if (plugins.length > 0) config.plugin = plugins;
@@ -305,16 +312,16 @@ export const opencodeInstaller: Installer = {
       }
       return { path: file.path, present: text !== undefined, ours };
     });
-    const path = tuiConfigPath(context);
-    const tui = tuiPluginPath(context);
-    const current = readTuiConfig(path);
-    const listed = !("problem" in current) && current.plugins.some((e) => isOurEntry(e, tui));
+    // Capture needs only seshi's own files; tui.json's entry (the status and /seshi in the TUI)
+    // is reported, not required.
+    const installed = files.every((f) => f.ours);
+    const { path, file: tui, current, listed } = tuiEntry(context);
     if ("problem" in current) notes.push(byHand(path, tui, current.problem));
     else if (!listed && files.some((f) => f.ours)) {
       notes.push(`${path} does not list seshi's TUI plugin: run seshi capture install opencode`);
     }
     files.push({ path, present: current.present, ours: listed });
-    return { installed: files.every((f) => f.ours), files, notes };
+    return { installed, files, notes };
   },
 };
 
