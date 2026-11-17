@@ -359,5 +359,10 @@ the server stored them.
 
 ## Not yet
 
-A first-run notice inside Cursor that capture is on, and Datadog Trajectory's local files, are
-later.
+- **A Cursor IDE extension** (on the roadmap): `Session Capture ◉` or `⏸` in Cursor's status
+  bar, kept current, with a click to turn capture off or on, since Cursor has no status line
+  and shows a hook's message only when the hook stops a prompt. An extension cannot see which
+  agent chat is open, so it would show the workspace's most recent Cursor conversation; it does
+  nothing for the Cursor CLI. Until then, `/seshi` says it on request.
+- A first-run notice inside Cursor that capture is on.
+- Datadog Trajectory's local files.
