@@ -284,6 +284,9 @@ describe("hooks and the uploader (F9.1)", () => {
         stdin: JSON.stringify({ conversation_id: "conv-1", workspace_roots: [project], prompt }),
       });
     expect(await say("explain this file")).toEqual({ code: 0, out: "", err: "" });
+    expect(JSON.parse((await say("/seshi")).out).user_message).toBe(
+      "Session Capture ◉ · this session is uploaded to your team's session store as you work; /seshi off stops it",
+    );
     expect(JSON.parse((await say("/seshi off")).out)).toEqual({
       continue: false,
       user_message: "Session Capture ⏸ · turned off for this session; nothing of it was uploaded",

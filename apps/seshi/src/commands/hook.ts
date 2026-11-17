@@ -89,16 +89,20 @@ async function hook(
     ctx.stdout(
       JSON.stringify(hookHandler(agent, event)?.reply?.(message) ?? { systemMessage: message }),
     );
-  if (outcome.announced) reply(notice(outcome.announced));
+  if (outcome.announced) reply(notice(outcome.announced, agentName));
   if (outcome.requested) reply(await carryOut(ctx, agentName, outcome.requested));
   if (outcome.spooled.length > 0) await startUploader(ctx, paths);
 }
 
 /** What a session is told when it starts or the person asks (Codex shows it as a notice,
  * Cursor in place of the message it stopped). */
-export function notice({ decision }: { decision: { capture: boolean; reason: string } }): string {
+export function notice(
+  { decision }: { decision: { capture: boolean; reason: string } },
+  agent: string,
+): string {
+  const off = agent === "codex" ? "$seshi off" : "/seshi off";
   return decision.capture
-    ? "Session Capture ◉ · this session is uploaded to your team's session store as you work; $seshi off stops it"
+    ? `Session Capture ◉ · this session is uploaded to your team's session store as you work; ${off} stops it`
     : `Session Capture ⏸ · ${decision.reason}`;
 }
 
