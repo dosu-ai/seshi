@@ -14,6 +14,10 @@ bun run seshi -- <command>     # the binary, from source
 bun run build                  # the compiled binary, dist/seshi
 ```
 
+`bun install` also points git at `.githooks/`, whose pre-commit hook runs Biome on the staged
+files. `bun run format` fixes most of what it reports; `git commit --no-verify` skips it. The rest
+of `bun run check`, the type check and the tests run in CI.
+
 ## The repository
 
 A Bun workspace, laid out as in the design decisions (X3,

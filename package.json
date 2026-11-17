@@ -11,6 +11,7 @@
     "integrations/*"
   ],
   "scripts": {
+    "prepare": "git config core.hooksPath .githooks || true",
     "start": "bun run apps/seshi/src/main.ts serve",
     "dev": "bun --watch run apps/seshi/src/main.ts serve",
     "seshi": "bun run apps/seshi/src/main.ts",

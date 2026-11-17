@@ -1,0 +1,4 @@
+#!/bin/sh
+# Biome on the staged files. `bun install` installs this hook (the prepare script);
+# `git commit --no-verify` skips it.
+exec bunx biome check --staged --no-errors-on-unmatched --files-ignore-unknown=true
