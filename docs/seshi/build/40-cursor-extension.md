@@ -85,11 +85,12 @@ could not:
   `bun run test:laptop`, `bun run check:hook`, the release script tests.
 - The sweep fix against a real Cursor 3.21 machine: 22 of 22 transcripts found.
 - The spikes, in Cursor 3.21 on macOS (above).
+- The extension itself, by hand in Cursor 3.21 on macOS, installed from the `.vsix`: the item in
+  the editor window, following the chat in view, and toggling it.
 
 ## Still to check
 
-- The extension itself in Cursor: the item in the editor window, switching between two chats,
-  a new chat, a click off and on, a team's rule, seshi missing.
+- The extension with a team's rule in force, and with seshi missing.
 - Windows: the program path from `hooks.json`, `.cmd` shims, and file watching.
 - Publishing: the Open VSX account and namespace, the `OVSX_PAT` secret, and how long Cursor's
   proxy takes to offer a new version.
