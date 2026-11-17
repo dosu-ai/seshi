@@ -19,8 +19,9 @@ export function readCursorHooks(home: string = homedir()): string | undefined {
   }
 }
 
-/** The program in seshi's hook command (`<program> hook cursor <event>`); a program with a
- * space in it is double-quoted there. */
+/** The program in seshi's own hook command (`<program> hook cursor <event>`), quoted when it
+ * has a space in it. Other tools' hooks share the shape (`foundation hook cursor capture`), so
+ * only a program named `seshi` counts. */
 export function programFromHooks(text: string): string | undefined {
   let config: { hooks?: Record<string, { command?: unknown }[]> };
   try {
@@ -33,13 +34,15 @@ export function programFromHooks(text: string): string | undefined {
       if (typeof hook.command !== "string") continue;
       const at = hook.command.indexOf(" hook cursor ");
       if (at <= 0) continue;
-      const program = hook.command.slice(0, at).trim();
-      if (program.startsWith('"') && program.endsWith('"') && program.length > 1) {
-        return program.slice(1, -1).replace(/\\"/g, '"');
+      let program = hook.command.slice(0, at).trim();
+      const quote = program[0];
+      if ((quote === '"' || quote === "'") && program.endsWith(quote) && program.length > 1) {
+        program = program.slice(1, -1).replace(/\\"/g, '"');
+      } else if (/\s/.test(program)) {
+        // A command of several words (`npx seshi`) cannot be run as one program.
+        continue;
       }
-      // A command of several words (`npx seshi`) cannot be run as one program.
-      if (/\s/.test(program)) return undefined;
-      return program;
+      if (/(^|[\\/])seshi(\.exe)?$/i.test(program)) return program;
     }
   }
   return undefined;

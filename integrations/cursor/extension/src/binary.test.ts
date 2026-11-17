@@ -22,5 +22,23 @@ describe("the seshi program", () => {
     );
     expect(programFromHooks(hooks("npx seshi hook cursor stop"))).toBeUndefined();
     expect(programFromHooks(hooks("./audit.sh"))).toBeUndefined();
+    // Another tool's hook in the same shape is not seshi's.
+    expect(
+      programFromHooks(
+        hooks("'/Applications/Foundation.app/Contents/Resources/foundation' hook cursor capture"),
+      ),
+    ).toBeUndefined();
+    expect(
+      programFromHooks(
+        JSON.stringify({
+          hooks: {
+            stop: [
+              { command: "'/Applications/Foundation.app/foundation' hook cursor capture" },
+              { command: "/Users/me/.local/bin/seshi hook cursor stop" },
+            ],
+          },
+        }),
+      ),
+    ).toBe("/Users/me/.local/bin/seshi");
   });
 });
