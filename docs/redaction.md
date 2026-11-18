@@ -98,7 +98,9 @@ Dosu's CLI keeps for an org's rules, so an org's list can be pasted as it is; th
 `excluded` and `names_only` lists are about the member's machine and are ignored. Its patterns
 now run under RE2 too, so one that used lookaround has to be rewritten.
 
-Rules apply to sessions stored after the server restarts with them (F1.5). Try them first with
+Rules apply to sessions stored after the server reloads (`SIGHUP`, `POST /v1/admin/reload`) or
+restarts with them (F1.5, [config.md](config.md#reloading)); a pack that does not compile is
+refused and the running rules stay. Try them first with
 `seshi redact test`, and apply them to what is already stored with `seshi redact backfill`
 ([below](#trying-and-applying-rules)).
 

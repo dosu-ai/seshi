@@ -2,10 +2,12 @@ import { randomBytes } from "node:crypto";
 import { hostname } from "node:os";
 import { Auth, AuthSettingsError, authSettings, ownershipAuthorizer } from "@seshi/auth";
 import {
+  ConfigError,
   filterFor,
   type ROLES,
   type ServerConfig,
   type SourceConfig,
+  serverConfigProblems,
   visibilityFor,
 } from "@seshi/config";
 import type { FormatRegistry } from "@seshi/formats";
@@ -51,9 +53,28 @@ import {
   readLayout,
   type Store,
 } from "@seshi/store";
-import { assembleOnce, BUILTIN_JOBS, type JobFactory, type JobHost } from "./builtin-jobs";
+import {
+  assembleOnce,
+  BUILTIN_JOBS,
+  type JobFactory,
+  type JobHost,
+  POLLER_PREFIX,
+  pollerJob,
+} from "./builtin-jobs";
 import { JobRunner } from "./jobs";
 import { type Logger, quietLogger } from "./log";
+import {
+  type ConfigStatus,
+  configHash,
+  diffSources,
+  effectiveConfig,
+  LIVE_SECTIONS,
+  RESTART_ONLY_SECTIONS,
+  type ReloadReport,
+  type ReloadTrigger,
+  reviewSetHash,
+  same,
+} from "./reload";
 import { type InstanceStatus, instanceStatus } from "./status";
 
 export type Role = (typeof ROLES)[number];
@@ -117,6 +138,9 @@ export interface InstanceParts {
   fetch?: typeof fetch;
   log?: Logger;
   client?: string;
+  /** Reads the config again for `reload()`: the same file, drop-ins, env and flags the server
+   * started with. Without it the instance reloads only a config handed to it. */
+  loadConfig?: () => ServerConfig | Promise<ServerConfig>;
 }
 
 export function defaultInstanceId(host: string = hostname()): string {
@@ -136,7 +160,6 @@ export interface SessionIdentity {
 }
 
 export class Instance {
-  readonly config: ServerConfig;
   readonly store: Store;
   readonly storage: StorageView;
   readonly formats: FormatRegistry;
@@ -154,29 +177,59 @@ export class Instance {
   readonly process: string;
   readonly client: string;
   readonly limits: Readonly<Limits>;
-  readonly redaction: RuleSet;
   readonly log: Logger;
   readonly startedAt: Date;
   readonly now: () => Date;
   private closed = false;
+  private running: ServerConfig;
+  private rules: RuleSet;
+  private readonly ownAuth: boolean;
+  private readonly fetchImpl: typeof fetch | undefined;
+  private readonly loadConfig: InstanceParts["loadConfig"];
+  private generation = 1;
+  private loadedAt: Date;
+  private hash: string;
+  private restartRequired: string[] = [];
+  /** What the running review judges with (`reviewFingerprint`); undefined for a reviewer
+   * handed in that seshi did not build from `[review]`. */
+  private reviewPrint: string | undefined;
+  private lastReload: ReloadReport | null = null;
+  private reloading: Promise<unknown> = Promise.resolve();
+
+  /** The running config: the start-up one, or the last reload's (its restart-only sections are
+   * always the start-up ones). */
+  get config(): ServerConfig {
+    return this.running;
+  }
+
+  /** The running redaction rule set. */
+  get redaction(): RuleSet {
+    return this.rules;
+  }
 
   constructor(parts: InstanceParts) {
     const { config } = parts;
-    this.config = config;
+    this.running = config;
+    this.loadConfig = parts.loadConfig;
+    this.fetchImpl = parts.fetch;
     this.store = parts.store;
     this.storage = parts.storage;
     this.formats = parts.formats;
     this.deployment = parts.deployment;
     this.now = parts.now ?? (() => new Date());
     this.startedAt = this.now();
+    this.loadedAt = this.startedAt;
+    this.hash = configHash(config);
     this.log = parts.log ?? quietLogger;
     this.client = parts.client ?? `seshi/${VERSION}`;
     this.roles = [...(parts.roles ?? config.server.roles)];
     this.id = parts.id ?? config.server.instance_id ?? defaultInstanceId();
     this.process = `${this.id}-${randomBytes(4).toString("hex")}`;
     this.limits = parts.limits ?? config.limits;
-    this.redaction = parts.redaction ?? compileRuleSet();
+    this.rules = parts.redaction ?? compileRuleSet();
+    this.reviewPrint = reviewFingerprint(parts.reviewer);
 
+    this.ownAuth = parts.auth === undefined;
     if (parts.auth) {
       this.auth = parts.auth;
     } else {
@@ -211,14 +264,14 @@ export class Instance {
       formats: this.formats,
       client: this.client,
       now: this.now,
-      redaction: this.redaction,
-      filter: parts.filter ?? ((sourceId) => filterFor(config, sourceId)),
+      redaction: this.rules,
+      filter: parts.filter ?? ((sourceId) => filterFor(this.config, sourceId)),
       limits: this.limits,
       reviewer: parts.reviewer,
       assembler: this.assembler,
       health: this.health,
       authorizer: ownershipAuthorizer(),
-      visibility: parts.visibility ?? ((sourceId) => visibilityFor(config, sourceId)),
+      visibility: parts.visibility ?? ((sourceId) => visibilityFor(this.config, sourceId)),
       ...(parts.records ? { records: parts.records } : {}),
       ...(parts.createLayout !== undefined ? { createLayout: parts.createLayout } : {}),
     });
@@ -262,12 +315,15 @@ export class Instance {
       now: this.now,
       log: this.log,
     });
+    const instance = this;
     const host: JobHost = {
       store: this.store,
       sources: this.sources,
       jobs: this.jobs,
       ...(this.search ? { search: this.search } : {}),
-      config,
+      get config() {
+        return instance.config;
+      },
       roles: this.roles,
       process: this.process,
       id: this.id,
@@ -280,6 +336,165 @@ export class Instance {
     for (const factory of [...BUILTIN_JOBS, ...(parts.jobs ?? [])]) {
       for (const job of factory(host)) this.jobs.register(job);
     }
+  }
+
+  /** The config's generation and hash, and how the last reload went. */
+  configStatus(): ConfigStatus {
+    return {
+      generation: this.generation,
+      config_hash: this.hash,
+      rule_set: this.rules.hash,
+      review_set: reviewSetHash(this.reviewPrint),
+      loaded_at: this.loadedAt.toISOString(),
+      reloadable: this.loadConfig !== undefined,
+      restart_required: [...this.restartRequired],
+      last_reload: this.lastReload ? structuredClone(this.lastReload) : null,
+      live_sections: LIVE_SECTIONS,
+      restart_only_sections: RESTART_ONLY_SECTIONS,
+    };
+  }
+
+  /** Apply a changed config without a restart: `next`, or the config read again through
+   * `loadConfig`. All or nothing: the config is loaded and checked and the rule packs and review
+   * policies (their prompt files read again) are built before anything changes; on any error the
+   * running config stays and the report says why. Then sources are compared by id: an added
+   * one starts polling, a removed one stops (its run is aborted and waited for), a changed one
+   * restarts, an unchanged one keeps running. Checkpoints are never touched. New writes use the
+   * new rules and review; a write already going finishes with the ones it started with. Settings in
+   * `RESTART_ONLY_SECTIONS` keep their running values and are listed in `restart_required`.
+   * Reloads run one at a time, in the order asked. */
+  reload(trigger: ReloadTrigger = "manual", next?: ServerConfig): Promise<ReloadReport> {
+    const run = this.reloading.then(() => this.reloadNow(trigger, next));
+    this.reloading = run.catch(() => undefined);
+    return run;
+  }
+
+  private async reloadNow(trigger: ReloadTrigger, given?: ServerConfig): Promise<ReloadReport> {
+    const started = this.now();
+    const report = (
+      outcome: ReloadReport["outcome"],
+      extra: Partial<ReloadReport> = {},
+    ): ReloadReport => {
+      const done: ReloadReport = {
+        trigger,
+        started_at: started.toISOString(),
+        finished_at: this.now().toISOString(),
+        outcome,
+        generation: this.generation,
+        config_hash: this.hash,
+        rule_set: this.rules.hash,
+        review_set: reviewSetHash(this.reviewPrint),
+        changed: [],
+        restart_required: [],
+        ...extra,
+      };
+      this.lastReload = done;
+      return done;
+    };
+    const reject = (errors: string[]): ReloadReport => {
+      const done = report("rejected", { errors, restart_required: [...this.restartRequired] });
+      for (const error of errors) this.log.error(`config reload (${trigger}) rejected: ${error}`);
+      return done;
+    };
+    if (this.closed) return reject(["this instance is closed"]);
+
+    let next: ServerConfig;
+    try {
+      if (given) next = given;
+      else if (this.loadConfig) next = await this.loadConfig();
+      else return reject(["this server was not started from a config file it can read again"]);
+    } catch (err) {
+      return reject(err instanceof ConfigError ? err.issues : [message(err)]);
+    }
+    const { config, restartRequired } = effectiveConfig(this.running, next);
+    const problems = serverConfigProblems(config);
+    if (problems.length > 0) return reject(problems);
+
+    let rules: RuleSet;
+    try {
+      rules = await readRedactionPacks(config.redaction.packs);
+    } catch (err) {
+      return reject([message(err)]);
+    }
+    // Built every time, so a prompt file edited without a change to [review] is seen: each
+    // policy's hash covers its prompt text. Building reads the prompt files and makes the
+    // provider objects; it calls no model.
+    let reviewer: Reviewer | undefined;
+    try {
+      reviewer = await buildReviewer(config, {
+        ...(this.fetchImpl ? { fetch: this.fetchImpl } : {}),
+        log: this.log,
+      });
+    } catch (err) {
+      return reject([message(err)]);
+    }
+    const reviewPrint = reviewFingerprint(reviewer);
+    const reviewChanged =
+      !same(this.running.review, config.review) ||
+      (this.reviewPrint !== undefined && this.reviewPrint !== reviewPrint);
+    if (this.closed) return reject(["this instance is closed"]);
+
+    const changed = LIVE_SECTIONS.filter((section) =>
+      section === "redaction"
+        ? rules.hash !== this.rules.hash
+        : section === "review"
+          ? reviewChanged
+          : !same(this.running[section], config[section]),
+    );
+    const sources = diffSources(this.running.sources, config.sources);
+    this.restartRequired = restartRequired;
+    for (const path of restartRequired) {
+      this.log.warn(`config reload (${trigger}): ${path} changed; it applies on restart`);
+    }
+    if (changed.length === 0) {
+      this.running = config;
+      return report("unchanged", { sources, restart_required: restartRequired });
+    }
+
+    // Stop what goes away or restarts, before the new config is in place.
+    await Promise.all(
+      [...sources.removed, ...sources.changed].map((id) =>
+        this.jobs.unregister(`${POLLER_PREFIX}${id}`),
+      ),
+    );
+    const ruleSetBefore = this.rules.hash;
+    this.running = config;
+    this.sources.update(config.sources);
+    if (this.ownAuth) this.auth.setSources(config.sources.map((s) => s.id));
+    if (rules.hash !== ruleSetBefore) {
+      this.rules = rules;
+      this.pipeline.setRedaction(rules);
+    }
+    if (reviewChanged) {
+      this.pipeline.setReviewer(reviewer);
+      this.reviewPrint = reviewPrint;
+    }
+    for (const id of [...sources.added, ...sources.changed]) {
+      const info = this.sources.get(id);
+      const name = `${POLLER_PREFIX}${id}`;
+      if (info.polled && !this.jobs.get(name)) {
+        this.jobs.register(
+          pollerJob({ sources: this.sources, store: this.store, now: this.now }, info),
+        );
+      }
+    }
+    this.generation += 1;
+    this.loadedAt = this.now();
+    this.hash = configHash(config);
+    const done = report("applied", { changed, sources, restart_required: restartRequired });
+    const parts = [
+      ...(sources.added.length > 0 ? [`sources added ${sources.added.join(", ")}`] : []),
+      ...(sources.removed.length > 0 ? [`removed ${sources.removed.join(", ")}`] : []),
+      ...(sources.changed.length > 0 ? [`restarted ${sources.changed.join(", ")}`] : []),
+      ...(rules.hash !== ruleSetBefore
+        ? [`rule set ${ruleSetBefore.slice(0, 12)} -> ${rules.hash.slice(0, 12)}`]
+        : []),
+      ...changed.filter((c) => c !== "sources" && c !== "redaction"),
+    ];
+    this.log.info(
+      `config reloaded (${trigger}): generation ${this.generation}${parts.length > 0 ? `; ${parts.join("; ")}` : ""}`,
+    );
+    return done;
   }
 
   get api(): boolean {
@@ -491,9 +706,18 @@ export async function readRedactionPacks(paths: readonly string[]): Promise<Rule
   }
 }
 
+/** The hashes of a reviewer's policies (each covers its prompt text, steps and categories):
+ * `[]` for no review, undefined for a reviewer that does not say what it judges with. */
+function reviewFingerprint(reviewer: Reviewer | undefined): string | undefined {
+  if (reviewer === undefined) return "[]";
+  const policies = (reviewer as { policies?: unknown }).policies;
+  if (!Array.isArray(policies)) return undefined;
+  return JSON.stringify(policies.map((p: { id?: unknown; hash?: unknown }) => [p.id, p.hash]));
+}
+
 async function buildReviewer(
   config: ServerConfig,
-  options: BuildOptions,
+  options: Pick<BuildOptions, "fetch" | "log">,
 ): Promise<Reviewer | undefined> {
   try {
     return await reviewerFromConfig(config, {

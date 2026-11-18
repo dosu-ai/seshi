@@ -40,6 +40,12 @@ export const serverSection = z
       .describe(
         "This instance's stable name in source health shards and the worker heartbeat; the host name when unset.",
       ),
+    watch_config: z
+      .boolean()
+      .default(false)
+      .describe(
+        "Reload when the config file, a drop-in in seshi.d/, a redaction pack or a review prompt file changes, a second after the last change. Off by default: SIGHUP and POST /v1/admin/reload apply changes when you say so and report the result.",
+      ),
   })
   .prefault({})
   .describe("The HTTP server.");

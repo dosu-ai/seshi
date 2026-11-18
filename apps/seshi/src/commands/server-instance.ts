@@ -64,12 +64,14 @@ export async function openServer(
   options: OpenServerOptions = {},
 ): Promise<OpenedServer> {
   if (options.trustCwdConfig !== true) cwdConfigHint(ctx, args.config);
-  const loaded = loadServerConfig({
-    configFlag: args.config,
-    env: ctx.env,
-    flags: configFlags(args),
-    ...(options.trustCwdConfig === true ? { trustCwdConfig: true } : {}),
-  });
+  const load = () =>
+    loadServerConfig({
+      configFlag: args.config,
+      env: ctx.env,
+      flags: configFlags(args),
+      ...(options.trustCwdConfig === true ? { trustCwdConfig: true } : {}),
+    });
+  const loaded = load();
   for (const warning of loaded.warnings) ctx.stderr(`seshi: warning: ${warning}`);
   const settings = serveSettings(loaded.config);
   const integrations = await ctx.integrations();
@@ -81,6 +83,9 @@ export async function openServer(
     ...(options.probe ? { probe: options.probe } : {}),
     ...(options.log ? { log: options.log } : {}),
     ...(options.claimUnmarkedBucket === false ? { initialize: false } : {}),
+    // A reload reads the same file, drop-ins, env and flags again (SIGHUP, POST
+    // /v1/admin/reload). A server started from defaults alone has nothing to read again.
+    ...(loaded.file !== undefined ? { loadConfig: () => load().config } : {}),
   });
   return { instance, loaded, settings };
 }

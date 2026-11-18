@@ -773,7 +773,7 @@ paths:
         whatever the client did. Any signed-in caller, a write-only device token included; the
         packs may describe what the org considers secret, so they are not public. The `ETag` is
         the rule-set hash: sent back as `If-None-Match`, it gets 304 until the packs change
-        (they change when the server restarts with new packs, F1.5).
+        (they change when the server reloads or restarts with new packs, F1.5).
       parameters:
         - name: If-None-Match
           in: header
@@ -1123,6 +1123,74 @@ paths:
               schema: { $ref: "#/components/schemas/Error" }
         "502": { $ref: "#/components/responses/StorageError" }
 
+  /v1/admin/reload:
+    get:
+      tags: [admin]
+      summary: The running config's generation and hash, and the last reload (F1.5).
+      operationId: adminReloadStatus
+      description: |
+        Which config is running: its `generation` (1 at start-up, one more for each reload that
+        changed something), a hash of it (secrets hashed, never shown), the redaction rule
+        set's hash (the `ETag` of `GET /v1/redaction/rules`), when it was loaded, the settings
+        the files change that wait for a restart, and how the last reload went. A program that
+        writes the config (an admin UI) reads it to confirm a change took effect. Needs
+        `sources:admin` (admins).
+      responses:
+        "200":
+          description: The status, read now.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConfigStatus" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [admin]
+      summary: Read the config files again and apply them, all or nothing (F1.5).
+      operationId: adminReload
+      description: |
+        Does what `SIGHUP` does, and answers with the result. The config file, its drop-ins
+        (`seshi.d/*.toml`), the redaction packs and the review policies' prompt files are read
+        and checked, and the packs compiled, before anything changes; on any error the running config stays and the
+        answer is 422 with the reasons. Then sources are compared by id: an added one starts
+        polling, a removed one stops, a changed one restarts, an unchanged one keeps running.
+        Checkpoints are never reset. New writes redact with the new packs; a write already
+        going finishes with the packs it started with. Settings only a restart applies
+        (`[server]`, `[store]`, `[auth]`, `[limits]`, `[search]`, `[worker]`) keep their
+        running values and are listed in `restart_required`. Reloads run one at a time. The
+        config itself is not sent: the files are the source of truth. Needs `sources:admin`.
+      responses:
+        "200":
+          description: Applied, or nothing changed (`reload.outcome`).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [reload, config]
+                properties:
+                  reload: { $ref: "#/components/schemas/ReloadReport" }
+                  config: { $ref: "#/components/schemas/ConfigStatus" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409":
+          description: "`not_reloadable`: the server was started without a config file to read again."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "422":
+          description: |
+            `reload_rejected`: the files did not load or check; nothing changed. `reload.errors`
+            lists each problem.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    required: [reload, config]
+                    properties:
+                      reload: { $ref: "#/components/schemas/ReloadReport" }
+                      config: { $ref: "#/components/schemas/ConfigStatus" }
+
 components:
   securitySchemes:
     bearer:
@@ -1388,6 +1456,79 @@ components:
         last_summary:
           type: object
           additionalProperties: { type: number }
+    ReloadReport:
+      type: object
+      description: One config reload (F1.5).
+      required:
+        [trigger, started_at, finished_at, outcome, generation, config_hash, rule_set, review_set, changed, restart_required]
+      properties:
+        trigger:
+          enum: [signal, api, watch, manual]
+          description: "`signal` (SIGHUP), `api` (POST /v1/admin/reload), `watch` (`server.watch_config`)."
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time }
+        outcome:
+          enum: [applied, unchanged, rejected]
+          description: |
+            `applied`: the running config changed and `generation` went up. `unchanged`: the
+            files say what runs. `rejected`: something did not load or check; nothing changed.
+        generation: { type: integer, minimum: 1, description: The generation running after it. }
+        config_hash: { type: string }
+        rule_set: { type: string }
+        review_set: { type: [string, "null"] }
+        errors:
+          type: array
+          items: { type: string }
+          description: Why it was rejected, one problem each.
+        changed:
+          type: array
+          items: { type: string }
+          description: The live sections that changed (`sources`, `redaction`, `review`…).
+        sources:
+          type: object
+          description: The sources by id.
+          required: [added, removed, changed, unchanged]
+          properties:
+            added: { type: array, items: { type: string } }
+            removed: { type: array, items: { type: string } }
+            changed: { type: array, items: { type: string } }
+            unchanged: { type: array, items: { type: string } }
+        restart_required:
+          type: array
+          items: { type: string }
+          description: Settings the files change that only a restart applies (`server.listen`).
+    ConfigStatus:
+      type: object
+      description: The running config (F1.5).
+      required:
+        [generation, config_hash, rule_set, review_set, loaded_at, reloadable, restart_required, last_reload, live_sections, restart_only_sections]
+      properties:
+        generation: { type: integer, minimum: 1 }
+        config_hash:
+          type: string
+          description: A hash of the running config; secrets are hashed, never shown.
+        rule_set:
+          type: string
+          description: The redaction rule set's hash, the `ETag` of `GET /v1/redaction/rules`.
+        review_set:
+          type: [string, "null"]
+          description: |
+            A hash of the running review policies' hashes. Each covers its prompt text, so an
+            edited `prompt_file` changes it where `config_hash` does not. Null for a reviewer
+            seshi did not build from `[review]`.
+        loaded_at: { type: string, format: date-time }
+        reloadable:
+          type: boolean
+          description: False when the server was started without a config file.
+        restart_required:
+          type: array
+          items: { type: string }
+        last_reload:
+          oneOf:
+            - $ref: "#/components/schemas/ReloadReport"
+            - type: "null"
+        live_sections: { type: array, items: { type: string } }
+        restart_only_sections: { type: array, items: { type: string } }
     JobsStatus:
       type: object
       required: [at, deployment, instance, worker, jobs, sources, warnings]

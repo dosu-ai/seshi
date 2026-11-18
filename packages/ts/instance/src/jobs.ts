@@ -51,6 +51,8 @@ export class JobRunner {
   private readonly records = new Map<string, JobRecord>();
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly inflight = new Map<string, Promise<JobRecord>>();
+  /** One per job, so a single job can be stopped (`unregister`) without the rest. */
+  private readonly own = new Map<string, AbortController>();
   private controller = new AbortController();
   private started = false;
   private readonly worker: boolean;
@@ -84,7 +86,36 @@ export class JobRunner {
     if (this.jobs.has(job.name)) throw new Error(`a job named '${job.name}' is already registered`);
     if (!(job.intervalMs > 0)) throw new Error(`job '${job.name}' needs an interval above 0`);
     this.jobs.set(job.name, job);
+    this.own.set(job.name, new AbortController());
     if (this.started && this.runsHere(job)) this.schedule(job, 0);
+  }
+
+  /** Remove a job: stop scheduling it, abort its run if one is going, and wait up to
+   * `timeoutMs` for that run to end. Its record goes with it. False when no job has the name.
+   * A run that outlasts the wait ends on its own; its result is dropped. */
+  async unregister(name: string, timeoutMs = 10_000): Promise<boolean> {
+    if (!this.jobs.has(name)) return false;
+    this.jobs.delete(name);
+    const timer = this.timers.get(name);
+    if (timer !== undefined) clearTimeout(timer);
+    this.timers.delete(name);
+    this.own.get(name)?.abort();
+    this.own.delete(name);
+    const running = this.inflight.get(name);
+    if (running) {
+      let wait: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([
+        running.catch(() => undefined),
+        new Promise<void>((resolve) => {
+          wait = setTimeout(resolve, timeoutMs);
+        }),
+      ]);
+      clearTimeout(wait);
+    }
+    this.records.delete(name);
+    this.failing.delete(name);
+    this.moreWaiting.delete(name);
+    return true;
   }
 
   /** Every registered job, in registration order. */
@@ -147,7 +178,7 @@ export class JobRunner {
       this.timers.delete(job.name);
       if (!this.started) return;
       void this.execute(job).then((record) => {
-        if (!this.started) return;
+        if (!this.started || this.jobs.get(job.name) !== job) return;
         this.schedule(job, this.delayAfter(job, record));
       });
     }, delayMs);
@@ -160,7 +191,9 @@ export class JobRunner {
   private execute(job: Job): Promise<JobRecord> {
     const current = this.inflight.get(job.name);
     if (current) return current;
-    const run = this.runOnce(job).finally(() => this.inflight.delete(job.name));
+    const run = this.runOnce(job).finally(() => {
+      if (this.inflight.get(job.name) === run) this.inflight.delete(job.name);
+    });
     this.inflight.set(job.name, run);
     return run;
   }
@@ -171,13 +204,16 @@ export class JobRunner {
     this.records.set(job.name, record);
     let result: JobResult | undefined;
     let error: string | undefined;
+    const own = this.own.get(job.name)?.signal;
+    const signal = own ? AbortSignal.any([this.controller.signal, own]) : this.controller.signal;
     try {
-      result = await job.run(this.controller.signal);
+      result = await job.run(signal);
       if (result?.outcome === "error") error = result.error ?? "the run failed";
     } catch (err) {
       error = message(err);
     }
     const finished = this.now().toISOString();
+    if (this.jobs.get(job.name) !== job) return structuredClone(record);
     record.runs += 1;
     record.last_finished = finished;
     if (result?.summary) record.last_summary = { ...result.summary };

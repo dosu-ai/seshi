@@ -9,6 +9,7 @@ export {
 } from "./cli";
 export {
   type CliLoadOptions,
+  DROP_IN_LISTS,
   loadCliConfig,
   loadServerConfig,
   loadServerlessConfig,
@@ -21,6 +22,7 @@ export {
   type BaseLayer,
   ConfigError,
   type ConfigFs,
+  type DropIns,
   type FlagValue,
   type Loaded,
   type LoadOptions,
@@ -34,10 +36,12 @@ export { describeOrigin, formatPath, type Origin, Origins, type PathSegment } fr
 export {
   CONFIG_ENV,
   cliConfigPath,
+  DROP_IN_DIR_NAME,
   findServerConfig,
   NOT_SETTINGS_ENV,
   SERVER_CONFIG_NAME,
   SYSTEM_CONFIG_PATH,
+  serverDropInDir,
 } from "./paths";
 export { describeSecret, Secret, type SecretRef, type SecretSources, secret } from "./secret";
 export * from "./server/index";

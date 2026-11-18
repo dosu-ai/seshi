@@ -26,12 +26,14 @@ import {
 } from "@seshi/model";
 import type {
   AuthConfig,
+  ConfigStatus,
   ExchangeRequest,
   ExchangeResult,
   JobsStatus,
   OwnersPage,
   RecordKind,
   RecordsPage,
+  ReloadReport,
   ReviewDecision,
   SourceStatus,
   TokenInfo,
@@ -467,6 +469,24 @@ export class HttpSessionDB implements SessionDB {
     const { status, body } = await this.request("GET", "/v1/admin/jobs");
     if (status !== 200) refuse(status, body);
     return body as JobsStatus;
+  }
+
+  /** The running config's generation, hash and rule set, and how the last reload went. */
+  async configStatus(): Promise<ConfigStatus> {
+    const { status, body } = await this.request("GET", "/v1/admin/reload");
+    if (status !== 200) refuse(status, body);
+    return body as ConfigStatus;
+  }
+
+  /** Have the server read its config files again and apply them (all or nothing). A rejected
+   * reload is returned, not thrown: its `errors` say why, and the running config stays. */
+  async reload(): Promise<{ reload: ReloadReport; config: ConfigStatus }> {
+    const { status, body } = await this.request("POST", "/v1/admin/reload");
+    const answer = body as { reload?: ReloadReport; config?: ConfigStatus } | null;
+    if ((status === 200 || status === 422) && answer?.reload && answer.config) {
+      return { reload: answer.reload, config: answer.config };
+    }
+    refuse(status, body);
   }
 
   /** Every configured source and `upload`: checkpoints, record counts, health over `days`. */

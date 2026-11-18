@@ -342,6 +342,10 @@ function countsNotIn(
 }
 
 interface Run {
+  /** The redactor and reviewer this write started with: a reload that swaps them mid-write
+   * does not mix two config generations in one write. */
+  redactor: Redactor;
+  reviewer: Reviewer;
   envelope: Envelope;
   auth: Authorization;
   owner: string;
@@ -376,11 +380,11 @@ export class Pipeline {
   private readonly client: string;
   private readonly createLayout: boolean;
   private readonly now: () => Date;
-  private readonly redactor: Redactor;
+  private redactor: Redactor;
   private readonly filter: FilterSetting | undefined;
   private readonly limits: Readonly<Limits>;
   private readonly authorizer: Authorizer;
-  private readonly reviewer: Reviewer;
+  private reviewer: Reviewer;
   private readonly assembler: SpanAssembler | undefined;
   readonly health: HealthCounters;
   private readonly visibility: VisibilitySetting;
@@ -401,6 +405,17 @@ export class Pipeline {
     this.assembler = options.assembler;
     this.health = options.health ?? noHealth();
     this.visibility = options.visibility ?? "org";
+  }
+
+  /** The rules new writes redact with (a config reload). A write already going finishes with
+   * the rules it started with. */
+  setRedaction(rules: RedactionRules): void {
+    this.redactor = ruleRedactor(rules);
+  }
+
+  /** The model review new writes go through (a config reload); `noReview()` for none. */
+  setReviewer(reviewer: Reviewer | undefined): void {
+    this.reviewer = reviewer ?? noReview();
   }
 
   private layout(): Promise<unknown> {
@@ -499,6 +514,7 @@ export class Pipeline {
       );
     }
     const { spans, resource = [] } = envelope.payload;
+    const redactor = this.redactor;
     const parts: { part: SpanPart; redaction: RedactionSummary }[] = [];
     let rejected = 0;
     for (const span of spans as unknown as ReceivedSpan[]) {
@@ -513,7 +529,7 @@ export class Pipeline {
         rejected++;
         continue;
       }
-      const redacted = redactSpanPart(this.redactor, part);
+      const redacted = redactSpanPart(redactor, part);
       parts.push({ part: redacted.part, redaction: redacted.summary });
     }
     if (parts.length === 0) {
@@ -612,6 +628,7 @@ export class Pipeline {
     await this.layout();
     const owner = auth.owner;
     const archive = archiveId(owner, envelope.format, envelope.session_key);
+    const { redactor, reviewer } = this;
     for (let attempt = 1; ; attempt++) {
       const session = await readMetadata(this.store, owner, archive);
       if (session?.status === "redacted") {
@@ -625,7 +642,9 @@ export class Pipeline {
         );
       }
       try {
-        return { result: await body({ envelope, auth, owner, archive, session }) };
+        return {
+          result: await body({ redactor, reviewer, envelope, auth, owner, archive, session }),
+        };
       } catch (err) {
         if (!(err instanceof StalePlan)) throw err;
         if (attempt >= PLAN_ATTEMPTS) {
@@ -676,7 +695,7 @@ export class Pipeline {
       envelope.session_key,
       offset,
     );
-    const redacted = this.redactor.redact(raw, session.withheld_calls ?? {});
+    const redacted = run.redactor.redact(raw, session.withheld_calls ?? {});
     const bytes = offset + utf8Length(text);
     if (redacted.records.length === 0) {
       const normalized = { ...state, bytes };
@@ -763,15 +782,9 @@ export class Pipeline {
           ? { records: envelope.shipped.records, prefix_sha256: envelope.shipped.prefix_sha256 }
           : undefined);
       if (!options.rebuild && base && base.records > 0 && base.records <= raw.length) {
-        const before = this.redactor.redact(raw.slice(0, base.records));
+        const before = run.redactor.redact(raw.slice(0, base.records));
         if (prefixSha256(before.records, base.records) === base.prefix_sha256) {
-          const { kept, normalized } = keptPartFrom(
-            this.redactor,
-            raw,
-            base.records,
-            bytes,
-            before,
-          );
+          const { kept, normalized } = keptPartFrom(run.redactor, raw, base.records, bytes, before);
           if (kept.records.length === 0) {
             return this.progress(run, normalized, kept.withheld, "unchanged", guard);
           }
@@ -811,7 +824,7 @@ export class Pipeline {
         const past = this.pastDropped(run, raw, bytes, dropped, options, common);
         if (past) return past;
       }
-      const all = this.redactor.redact(raw);
+      const all = run.redactor.redact(raw);
       return this.commit(run, {
         ...common,
         write: all.records,
@@ -822,7 +835,7 @@ export class Pipeline {
       });
     }
 
-    const all = this.redactor.redact(raw);
+    const all = run.redactor.redact(raw);
     const records = all.records;
     const copied = await this.forkCopy(run, records);
     const plan = copied ? planShipment(records, copied) : { records, fresh: records };
@@ -852,10 +865,10 @@ export class Pipeline {
     },
   ): Promise<StoreSessionResult> | undefined {
     const { session, envelope } = run;
-    const end = droppedStartEnd(this.redactor, raw, dropped, options.recordsBeforeCut);
+    const end = droppedStartEnd(run.redactor, raw, dropped, options.recordsBeforeCut);
     if (end.records === 0) return undefined;
     const { from, before, kept, normalized } = keptPartFrom(
-      this.redactor,
+      run.redactor,
       raw,
       end.records,
       bytes,
@@ -914,7 +927,7 @@ export class Pipeline {
     const lead = metaOf(plan.write) ? 1 : 0;
     const judged = plan.write.slice(lead);
     const { payload: _payload, ...about } = envelope;
-    const decision = await this.reviewer.review({
+    const decision = await run.reviewer.review({
       envelope: about,
       owner: run.owner,
       archive_id: run.archive,
@@ -964,7 +977,7 @@ export class Pipeline {
       }
       write = [...plan.write.slice(0, lead), ...decision.records];
     }
-    const calls = redactLlmCalls(this.redactor, callsFor(write, plan.llm_calls));
+    const calls = redactLlmCalls(run.redactor, callsFor(write, plan.llm_calls));
     const summary = withCounts(plan.summary, calls.counts);
 
     const result = await ingest({

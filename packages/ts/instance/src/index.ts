@@ -8,6 +8,8 @@ export {
   heartbeatJob,
   type JobFactory,
   type JobHost,
+  POLLER_PREFIX,
+  pollerJob,
   pollerJobs,
   RETENTION_INTERVAL_MS,
   retentionJob,
@@ -38,6 +40,16 @@ export {
   RETRY_BASE_MS,
 } from "./jobs";
 export { type Logger, lineLogger, quietLogger } from "./log";
+export {
+  type ConfigStatus,
+  configHash,
+  diffSources,
+  LIVE_SECTIONS,
+  RESTART_ONLY_SECTIONS,
+  type ReloadReport,
+  type ReloadTrigger,
+  type SourceChanges,
+} from "./reload";
 export { SEARCH_JOB, searchIndexJobs } from "./search-job";
 export {
   assessWorker,

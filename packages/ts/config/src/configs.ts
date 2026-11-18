@@ -9,7 +9,7 @@ import {
   parseConfigToml,
   shapeOf,
 } from "./load";
-import { cliConfigPath, findServerConfig, NOT_SETTINGS_ENV } from "./paths";
+import { cliConfigPath, findServerConfig, NOT_SETTINGS_ENV, serverDropInDir } from "./paths";
 import { type ServerConfig, serverConfigSchema } from "./server/index";
 
 export interface ServerLoadOptions extends Omit<LoadOptions, "file" | "foreign" | "ignoreEnv"> {
@@ -18,6 +18,10 @@ export interface ServerLoadOptions extends Omit<LoadOptions, "file" | "foreign" 
   systemPath?: string;
   trustCwdConfig?: boolean;
 }
+
+/** What a drop-in in `seshi.d/` may add to: sources and rule packs. Everything else is the
+ * main file's. */
+export const DROP_IN_LISTS: readonly (readonly string[])[] = [["sources"], ["redaction", "packs"]];
 
 export function loadServerConfig(options: ServerLoadOptions = {}): Loaded<ServerConfig> {
   const fs: ConfigFs = options.fs ?? nodeFs;
@@ -35,6 +39,9 @@ export function loadServerConfig(options: ServerLoadOptions = {}): Loaded<Server
     fs,
     env,
     file: found.path,
+    ...(found.path !== undefined
+      ? { dropIns: { dir: serverDropInDir(found.path), lists: DROP_IN_LISTS } }
+      : {}),
     ignoreEnv: [...NOT_SETTINGS_ENV],
     foreign: [shapeOf(cliConfigSchema)],
   });

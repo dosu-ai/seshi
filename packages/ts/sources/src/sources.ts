@@ -110,7 +110,7 @@ function message(err: unknown): string {
 export class Sources {
   private readonly store: Store;
   private readonly pipeline: Submitter;
-  private readonly configs: ReadonlyMap<string, SourceConfig>;
+  private configs: ReadonlyMap<string, SourceConfig>;
   private readonly connectors: ReadonlyMap<string, Connector>;
   private readonly fetchImpl: typeof fetch;
   private readonly log: ConnectorLogger;
@@ -132,6 +132,12 @@ export class Sources {
     this.fetchImpl = options.fetch ?? fetch;
     this.log = options.log ?? quietLog;
     this.now = options.now ?? (() => new Date());
+  }
+
+  /** Replace the configured sources (a config reload). A run already going keeps the config
+   * it started with; checkpoints are the store's and are not touched. */
+  update(sources: readonly SourceConfig[]): void {
+    this.configs = new Map(sources.map((s) => [s.id, s]));
   }
 
   /** Every configured source, in config order. */
