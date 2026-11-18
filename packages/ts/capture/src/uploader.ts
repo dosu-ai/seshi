@@ -100,6 +100,11 @@ export interface UploaderOptions {
   agents: readonly CaptureAgent[];
   /** Where sessions go; built once, on first need. */
   sink: () => Promise<SessionSink>;
+  /** A whole log the server says does not extend the stored session goes on as a new session
+   * that forks it (`<id>~r<n>`, `fork_of`), never replacing it. For a machine whose transcripts
+   * and upload state can be older than what it uploaded, or gone (a Cursor Cloud VM rebuilt for
+   * a follow-up): its log is not to be trusted over the stored one. */
+  continueOnConflict?: boolean;
   /** The capture rules; from the CLI config (cached) by default. */
   rules?: () => Promise<RulesSnapshot>;
   preRedact?: PreRedactor;
@@ -333,6 +338,32 @@ function onOffsetMismatch(expected: number, attempt: Attempt, retry: Retry, size
   };
 }
 
+/** A new session that forks the one stored, whose start this log is not (`continueOnConflict`):
+ * the next continuation id, sent whole. */
+function onConflictContinue(retry: Retry): Handled {
+  return {
+    saves: [
+      (s) => {
+        s.fork_of = uploadId(s);
+        s.continuation = (s.continuation ?? 0) + 1;
+        for (const field of [
+          "stored",
+          "file_offset",
+          "server_offset",
+          "aligned",
+          "sent_path",
+          "shipped",
+          "carried",
+          "replace_next",
+        ] as const) {
+          delete s[field];
+        }
+      },
+    ],
+    next: { again: { ...retry, forceWhole: true, recoveries: retry.recoveries + 1 } },
+  };
+}
+
 function onConflictReplaceOwn(retry: Retry): Handled {
   return {
     saves: [],
@@ -365,6 +396,7 @@ export class Uploader {
   private readonly maxChunkBytes: number;
   private readonly retryBaseMs: number;
   private readonly retryMaxMs: number;
+  private readonly continueOnConflict: boolean;
   private sink: SessionSink | undefined;
   private readonly identities = new Map<string, Promise<{ email?: string; name?: string }>>();
   private readonly accounts = new Map<string, Record<string, string>>();
@@ -390,6 +422,7 @@ export class Uploader {
     this.maxChunkBytes = options.maxChunkBytes ?? 8 * 1024 * 1024;
     this.retryBaseMs = options.retryBaseMs ?? 5 * SECOND;
     this.retryMaxMs = options.retryMaxMs ?? 5 * 60 * SECOND;
+    this.continueOnConflict = options.continueOnConflict ?? false;
   }
 
   private async getSink(): Promise<SessionSink> {
@@ -1096,6 +1129,9 @@ export class Uploader {
       format: agent.encoding,
       offset: whole ? 0 : (session.server_offset ?? 0),
       retract_hash: retractHash(secret),
+      // A continuation names what it continues: resumed from (`parent_session_id`, which a
+      // reader sees on the session) and forked from (`fork_of`, whose history it may share).
+      ...(session.fork_of ? { parent_session_id: session.fork_of, fork_of: session.fork_of } : {}),
       ...(await this.details(session, agent, place)),
       ...(rebuild
         ? { rebuild: true, idempotency_key: rebuildIdempotencyKey(rebuild, piece.end) }
@@ -1172,6 +1208,18 @@ export class Uploader {
     }
     if (err instanceof OffsetMismatch && retry.recoveries < 3) {
       return onOffsetMismatch(err.expected, attempt, retry, size);
+    }
+    if (
+      err instanceof SessionConflict &&
+      this.continueOnConflict &&
+      attempt.whole &&
+      !attempt.replacing &&
+      retry.recoveries < 5
+    ) {
+      this.log(
+        `${key}: the stored session is not this log's start; continuing it as a new session`,
+      );
+      return onConflictContinue(retry);
     }
     if (
       err instanceof SessionConflict &&

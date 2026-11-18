@@ -140,14 +140,16 @@ Everything else is in [docs/](docs/README.md).
 | Claude Managed Agents, and Messages API calls | ✓ | A Claude Console [OpenTelemetry destination](docs/otlp.md) |
 | Claude Code, Codex or Cursor CLI in your own sandboxes, CI or eval harnesses | ✓ | `seshi capture install` in the sandbox, or transcripts written to a bucket an [S3 source](docs/s3-sync.md) polls |
 | Any agent that writes OpenTelemetry GenAI spans | ✓ | The [OTLP endpoint](docs/otlp.md) |
-| Cursor Cloud Agents | Planned | See the roadmap |
+| Cursor Cloud Agents | ✓ | Hooks committed to the repository, and seshi installed and signed in by its environment setup: `seshi capture install cursor --project` ([capture.md](docs/capture.md#cursor-cloud-agents)). Tool results are not captured yet |
 | Codex cloud, GitHub Copilot coding agent | — | |
 
 A new agent is an [integration](integrations).
 
 ## Roadmap
 
-- [ ] Cursor Cloud Agents sync
+- [x] Cursor Cloud Agents through hooks committed to the repository
+- [ ] Cursor Cloud Agents through Cursor's API, for runs whose repository has no hooks (F7)
+- [ ] Tool results in Cursor transcripts (from `postToolUse`)
 - [ ] Publishing the Cursor status bar extension on Open VSX (it is built and attached to each
       release)
 

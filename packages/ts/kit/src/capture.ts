@@ -96,6 +96,32 @@ export interface Installer {
   install(context: InstallContext): Promise<InstallReport>;
   uninstall(context: InstallContext): Promise<InstallReport>;
   status(context: InstallContext): Promise<InstallStatus>;
+  /** Hooks committed to a repository, for an agent that runs in a cloud VM built from it and
+   * reads only the repository's config there (Cursor Cloud). */
+  readonly project?: ProjectInstaller;
+  /** Mark or unmark this machine as the agent's cloud VM: its repository hooks act only on a
+   * marked machine, and its user-level hooks there stand aside. */
+  readonly cloud?: CloudMarker;
+}
+
+export interface ProjectContext {
+  /** The repository's root folder. */
+  dir: string;
+  /** The seshi release the VM installs. */
+  version: string;
+}
+
+export interface ProjectInstaller {
+  install(context: ProjectContext): Promise<InstallReport>;
+  uninstall(context: ProjectContext): Promise<InstallReport>;
+  status(context: ProjectContext): Promise<InstallStatus>;
+}
+
+export interface CloudMarker {
+  /** Whether this machine is the agent's cloud VM. */
+  is(host: CaptureHost): boolean;
+  mark(host: CaptureHost): InstallReport;
+  unmark(host: CaptureHost): InstallReport;
 }
 
 export interface CaptureAgent {

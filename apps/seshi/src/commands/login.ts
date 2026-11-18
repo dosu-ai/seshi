@@ -273,6 +273,7 @@ export async function run(ctx: CommandContext): Promise<number> {
         ...(me.role ? { role: me.role } : {}),
         ...(me.scopes ? { scopes: me.scopes } : {}),
         ...(me.credential_id ? { credential_id: me.credential_id } : {}),
+        ...(me.expires_at ? { token_expires_at: me.expires_at } : {}),
         signed_in_at: now,
       };
       secrets = { token };
