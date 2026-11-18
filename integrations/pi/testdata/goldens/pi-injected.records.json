@@ -1,55 +1,55 @@
 [
   {
-    "role": "meta",
-    "source": "pi",
     "cwd": "/repo/app",
-    "model": "fake-1"
+    "model": "fake-1",
+    "role": "meta",
+    "source": "pi"
   },
   {
-    "role": "user",
     "content": "Why does auth read KEY?",
+    "role": "user",
     "timestamp": "2026-11-17T10:00:01.000Z"
   },
   {
-    "role": "user",
     "content": "Repository rule: never edit generated files.",
+    "role": "user",
     "timestamp": "2026-11-17T10:00:01.100Z",
     "synthetic": true
   },
   {
-    "role": "user",
     "content": "",
+    "role": "user",
     "timestamp": "2026-11-17T10:00:01.200Z",
     "synthetic": true,
     "omitted": 1
   },
   {
-    "role": "assistant",
     "content": "Checking where KEY is set.",
+    "role": "assistant",
     "timestamp": "2026-11-17T10:00:02.000Z"
   },
   {
-    "role": "assistant",
     "content": null,
+    "role": "assistant",
+    "timestamp": "2026-11-17T10:00:02.000Z",
     "tool_calls": [
       {
+        "args": "{\"pattern\":\"KEY =\"}",
         "id": "call_injected_1",
-        "name": "grep",
-        "args": "{\"pattern\":\"KEY =\"}"
+        "name": "grep"
       }
-    ],
-    "timestamp": "2026-11-17T10:00:02.000Z"
+    ]
   },
   {
-    "role": "tool",
-    "tool_call_id": "call_injected_1",
     "content": "src/auth.ts:1:export const KEY = 1;",
     "ok": true,
-    "timestamp": "2026-11-17T10:00:03.000Z"
+    "role": "tool",
+    "timestamp": "2026-11-17T10:00:03.000Z",
+    "tool_call_id": "call_injected_1"
   },
   {
-    "role": "assistant",
     "content": "KEY is a constant in src/auth.ts, set to 1.",
+    "role": "assistant",
     "timestamp": "2026-11-17T10:00:04.000Z"
   }
 ]

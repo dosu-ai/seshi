@@ -124,6 +124,36 @@ describe.each([
   });
 });
 
+describe("a flagged item without an id", () => {
+  const withoutIds = (text: string, pattern: RegExp) => text.replace(pattern, "");
+
+  it("is left out of an OpenCode export whole: no record, no placeholder", () => {
+    const log = withoutIds(
+      transcript("opencode-injected.opencode.json"),
+      /"id": "prt_ses_0ff3fixture00002_4",\n\s*/,
+    );
+    expect(log).not.toContain("prt_ses_0ff3fixture00002_4");
+    const records = parseTrace(normalizeTranscript({ source: "opencode", transcript: log }).records)
+      .records as unknown as Labelled[];
+    const text = JSON.stringify(records);
+    expect(text).not.toContain(DIGEST);
+    expect(text).not.toContain(OMITTED_TEXT);
+    expect(records.filter((r) => r.omitted !== undefined)).toEqual([]);
+    expect(records.filter((r) => r.role === "user")).toHaveLength(2);
+  });
+
+  it("in pi is left as the library reads it, which stores nothing of it", () => {
+    const log = withoutIds(transcript("pi-injected.pi.jsonl"), /"id":"c1000004",/);
+    expect(log).not.toContain('"id":"c1000004"');
+    const records = parseTrace(normalizeTranscript({ source: "pi", transcript: log }).records)
+      .records as unknown as Labelled[];
+    const text = JSON.stringify(records);
+    expect(text).not.toContain(DIGEST);
+    expect(text).not.toContain(OMITTED_TEXT);
+    expect(records.filter((r) => r.omitted !== undefined)).toEqual([]);
+  });
+});
+
 describe("pi custom messages", () => {
   it("are stored as the user messages the model saw, where it saw them", () => {
     const users = stored("pi", "pi-injected.pi.jsonl").filter((r) => r.role === "user");

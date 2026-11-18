@@ -130,8 +130,11 @@ reaches redaction or the store, and stores a user record in its place with empty
 | `opencode` | A user message's text part with `synthetic: true` (a file read for an `@` mention, a plugin's context) | The part's `metadata` | An assistant message's parts: its text, reasoning, tool calls and their results |
 | `pi` | A `custom_message` entry: what an extension added to the context (`pi.sendMessage`, a `before_agent_start` message), stored as the user message the model saw | The entry's `details` | `message` entries: the user's prompts, the assistant's messages and tool results (a tool result's own `details` included) |
 
-Nothing else about synthetic content changes: no kind of it is rewritten, reclassified or
-dropped unless flagged. The other formats keep no per-item metadata, so the flag does not apply
+Labels are matched to records by the item's id (an OpenCode part's `id`, a pi entry's `id`), so
+an item without one cannot be labelled: a flagged OpenCode part without an id is dropped
+without a record, and a pi `custom_message` without an id is not stored, as before. Nothing else
+about synthetic content changes: no kind of it is rewritten, reclassified or dropped unless
+flagged. The other formats keep no per-item metadata, so the flag does not apply
 to them. The labels are part of the canonical trace only: the `letta` render drops them, and
 they are outside the content hash.
 

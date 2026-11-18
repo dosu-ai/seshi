@@ -26,6 +26,15 @@ export interface RecordLabels {
   omitted?: number;
 }
 
+/** A transcript ready for the library, with labels for the records its items normalize to, keyed
+ * by the item's id in the source (the library's `stable_source_record_id`: an OpenCode part id,
+ * a pi entry id). Produced in one pass, so what is left out and what is labelled are decided in
+ * one place. */
+export interface Injected {
+  transcript: string;
+  labels: ReadonlyMap<string, RecordLabels>;
+}
+
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 

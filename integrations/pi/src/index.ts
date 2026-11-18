@@ -1,4 +1,10 @@
-import { lettaAdapter, OMITTED_TEXT, omitRequested, type RecordLabels } from "@seshi/formats";
+import {
+  type Injected,
+  lettaAdapter,
+  OMITTED_TEXT,
+  omitRequested,
+  type RecordLabels,
+} from "@seshi/formats";
 import { defineIntegration, type FormatAdapter, type JsonObject } from "@seshi/kit";
 import { PI_CAPTURE } from "./capture";
 
@@ -21,39 +27,26 @@ function entry(line: string): JsonObject | undefined {
  * `before_agent_start` message) as a `custom_message` entry, which the model sees as a user
  * message and the library does not read. Each becomes the user message the model saw, with the
  * same id and time, so it is stored, labelled `synthetic`; one whose `details` flag it
- * (`session_capture.omit`) keeps none of its text. Line for line, so a chunk normalizes as the
- * whole log does. */
-function withInjected(transcript: string): string {
-  if (!transcript.includes('"custom_message"')) return transcript;
-  return transcript
-    .split("\n")
-    .map((line) => {
-      const row = entry(line);
-      if (!row) return line;
-      const content = omitRequested(row.details) ? OMITTED_TEXT : row.content;
-      return JSON.stringify({
-        type: "message",
-        id: row.id,
-        parentId: row.parentId,
-        timestamp: row.timestamp,
-        message: { role: "user", content },
-      });
-    })
-    .join("\n");
-}
-
-function labels(transcript: string): Map<string, RecordLabels> {
-  const out = new Map<string, RecordLabels>();
-  if (!transcript.includes('"custom_message"')) return out;
-  for (const line of transcript.split("\n")) {
+ * (`session_capture.omit`) keeps none of its text. An entry without an id, whose record could not
+ * be labelled, is left as it was, which the library skips. Line for line, so a chunk normalizes
+ * as the whole log does. */
+function injected(transcript: string): Injected {
+  const labels = new Map<string, RecordLabels>();
+  if (!transcript.includes('"custom_message"')) return { transcript, labels };
+  const lines = transcript.split("\n").map((line) => {
     const row = entry(line);
-    if (!row || typeof row.id !== "string" || row.id === "") continue;
-    out.set(
-      row.id,
-      omitRequested(row.details) ? { synthetic: true, omitted: 1 } : { synthetic: true },
-    );
-  }
-  return out;
+    if (!row || typeof row.id !== "string" || row.id === "") return line;
+    const omit = omitRequested(row.details);
+    labels.set(row.id, omit ? { synthetic: true, omitted: 1 } : { synthetic: true });
+    return JSON.stringify({
+      type: "message",
+      id: row.id,
+      parentId: row.parentId,
+      timestamp: row.timestamp,
+      message: { role: "user", content: omit ? OMITTED_TEXT : row.content },
+    });
+  });
+  return { transcript: lines.join("\n"), labels };
 }
 
 export const PI_FORMAT: FormatAdapter = lettaAdapter({
@@ -65,8 +58,7 @@ export const PI_FORMAT: FormatAdapter = lettaAdapter({
       (row.type === "session" && typeof row.id === "string" && typeof row.cwd === "string") ||
       (row.type === "message" && isObject(row.message) && typeof row.message.role === "string"),
   },
-  prepare: withInjected,
-  label: labels,
+  inject: injected,
 });
 
 export const pi = defineIntegration({
