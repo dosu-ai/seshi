@@ -86,6 +86,14 @@ of being stored; a new owner's first session within a minute (the list of owners
 again every minute). Sessions model review dropped never reach the feed, so they are never
 indexed.
 
+The index also keeps a copy of every change entry it reads, which is what `GET
+/v1/changes/all` serves: every owner's feed as one, to service tokens and admins
+([server.md](server.md#every-owners-change-feed)). The feed serves entries up to
+how far every owner's feed has been read, and no further than when the list of owners was
+taken, so an owner it has not read yet, or one that is new, has no entries behind a reader's
+cursor (up to the skew of writers' clocks, which readers' lag window covers). The copy is kept
+only on a server; a laptop's index keeps none.
+
 A new or wiped instance builds its index from the feeds before it answers: until then search
 answers `503 index_building` with `Retry-After`. The file survives restarts, and deleting it
 only costs a rebuild; so does `seshi search --rebuild` where the config is. Changing

@@ -46,6 +46,10 @@ export interface IndexerOptions {
   /** Only sessions this admits are indexed; one it stops admitting is removed (F11.9, scope
    * `visible`: others' owner-only sessions are left out). */
   admit?: (session: { owner: string; visibility?: SessionMetadata["visibility"] }) => boolean;
+  /** Keep a copy of every change entry read, and how far every feed has been read, for the
+   * cross-owner feed (`FeedState.record`, `readThrough`). Only an index of every owner's
+   * whole feed can serve it. */
+  feed?: boolean;
 }
 
 export interface IndexerRun {
@@ -187,8 +191,17 @@ export class Indexer {
   private readonly ownerRefreshMs: number;
   private readonly fixedOwners: readonly string[] | undefined;
   private readonly admit: IndexerOptions["admit"];
+  private readonly keepFeed: boolean;
   private owners: { list: string[]; at: number } | undefined;
   private running: Promise<IndexerRun> | undefined;
+  /** For the cross-owner feed: how far each owner's feed has been read (epoch ms), under the
+   * index generation it was read for. An owner read to its end by a listing at `t` has had
+   * every entry written before `t` read; one stopped at its budget, every entry stamped up to
+   * its cursor. */
+  private readTo: { generation: string; owners: Map<string, number> } | undefined;
+  /** The owner a pass stopped at for its budget: the next pass starts after it, so the owners
+   * behind a busy one are not left waiting. */
+  private resumeAfter: string | undefined;
 
   constructor(options: IndexerOptions) {
     this.store = options.store;
@@ -202,6 +215,7 @@ export class Indexer {
     this.ownerRefreshMs = options.ownerRefreshMs ?? OWNER_REFRESH_MS;
     this.fixedOwners = options.owners;
     this.admit = options.admit;
+    this.keepFeed = options.feed ?? false;
   }
 
   /** One pass over every owner's feed, up to the run's budget. A second call while one runs
@@ -240,12 +254,14 @@ export class Indexer {
     this.owners = undefined;
   }
 
-  private async ownerList(): Promise<string[]> {
-    if (this.fixedOwners) return [...this.fixedOwners];
+  /** The owners to read, and when that list was taken: an owner not on it had written
+   * nothing then, so each of its entries was written after `at`. */
+  private async ownerList(): Promise<{ list: string[]; at: number }> {
     const now = this.now().getTime();
+    if (this.fixedOwners) return { list: [...this.fixedOwners], at: now };
     const cached = this.owners;
     if (cached && cached.list.length > 0 && now - cached.at < this.ownerRefreshMs) {
-      return cached.list;
+      return cached;
     }
     const list: string[] = [];
     let after: string | undefined;
@@ -256,7 +272,7 @@ export class Indexer {
       after = page.cursor;
     }
     this.owners = { list, at: now };
-    return list;
+    return this.owners;
   }
 
   private async pass(signal: AbortSignal): Promise<IndexerRun> {
@@ -269,15 +285,26 @@ export class Indexer {
       removed: 0,
     };
     const generation = this.index.generation();
-    const owners = await this.ownerList();
-    run.owners = owners.length;
-    for (const owner of owners) {
-      if (signal.aborted) return run;
-      const more = await this.drain(owner, run, signal, generation);
-      if (more) {
-        run.more = true;
-        return run;
+    const { list, at: listedAt } = await this.ownerList();
+    run.owners = list.length;
+    if (this.readTo?.generation !== generation) {
+      this.readTo = { generation, owners: new Map() };
+    }
+    const readTo = this.readTo.owners;
+    const start = this.resumeAfter === undefined ? 0 : list.indexOf(this.resumeAfter) + 1;
+    this.resumeAfter = undefined;
+    try {
+      for (const owner of [...list.slice(start), ...list.slice(0, start)]) {
+        if (signal.aborted) return run;
+        const more = await this.drain(owner, run, signal, generation, readTo);
+        if (more) {
+          this.resumeAfter = owner;
+          run.more = true;
+          return run;
+        }
       }
+    } finally {
+      this.feedRead(list, listedAt, readTo, generation);
     }
     if (signal.aborted) return run;
     const caughtUp = this.index.transaction(() => {
@@ -288,6 +315,28 @@ export class Indexer {
     run.more = !caughtUp;
     run.caught_up = caughtUp;
     return run;
+  }
+
+  /** Move the cross-owner feed's bound to the least any listed owner's feed has been read to,
+   * and no later than when the list was taken (an owner not on it had written nothing then).
+   * One owner with more than a pass can read holds it back without stopping it. */
+  private feedRead(
+    list: readonly string[],
+    listedAt: number,
+    readTo: ReadonlyMap<string, number>,
+    generation: string,
+  ): void {
+    if (!this.keepFeed) return;
+    let through = listedAt;
+    for (const owner of list) {
+      const at = readTo.get(owner);
+      if (at === undefined) return;
+      through = Math.min(through, at);
+    }
+    this.index.transaction(() => {
+      if (this.index.generation() !== generation) return;
+      this.index.readThrough(new Date(through).toISOString());
+    });
   }
 
   private windowStart(prefix: string, cursor: string): string {
@@ -301,12 +350,18 @@ export class Indexer {
     run: IndexerRun,
     signal: AbortSignal,
     generation: string,
+    readTo: Map<string, number>,
   ): Promise<boolean> {
     const prefix = keys.changes(owner);
+    const reached = (at: number | null | undefined) => {
+      if (at === null || at === undefined) return;
+      readTo.set(owner, Math.max(readTo.get(owner) ?? at, at));
+    };
     const cursor = this.index.cursor(owner);
     let startAfter = cursor === undefined ? undefined : this.windowStart(prefix, cursor);
     for (;;) {
       if (signal.aborted) return false;
+      const listedAt = this.now().getTime();
       const page = await this.store.list(prefix, { startAfter, limit: this.pageSize });
       const listed = page.keys.filter((k) => parseChangeKey(k.slice(prefix.length)) !== null);
       const seen = this.index.seen(owner, listed);
@@ -344,6 +399,15 @@ export class Indexer {
             refused.push(plan.update.session.archive_id);
           }
         }
+        if (this.keepFeed) {
+          this.index.record(
+            owner,
+            fresh.flatMap((key, i) => {
+              const entry = entries[i];
+              return entry ? [{ name: key.slice(prefix.length), entry }] : [];
+            }),
+          );
+        }
         this.index.advance(
           owner,
           next,
@@ -357,9 +421,15 @@ export class Indexer {
         this.applyPlan(await this.plan(owner, archive, replaced.get(archive)), run);
       }
       run.entries += fresh.length;
-      if (!page.truncated || last === undefined) return false;
+      if (!page.truncated || last === undefined) {
+        reached(listedAt);
+        return false;
+      }
       startAfter = last;
-      if (run.entries >= this.budget) return true;
+      if (run.entries >= this.budget) {
+        reached(nextAt);
+        return true;
+      }
     }
   }
 

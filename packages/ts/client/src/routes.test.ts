@@ -218,3 +218,18 @@ describe("before there is a token (X5.7)", () => {
     expect(seen[0]?.headers["x-seshi-user"]).toBe("alice");
   });
 });
+
+describe("every owner's change feed", () => {
+  it("reads GET /v1/changes/all with its cursor, and maps a refusal to Forbidden", async () => {
+    const page = { entries: [], truncated: false, through: "2026-11-14T09:00:00.000Z" };
+    const { db, seen } = routed({ "GET /v1/changes/all": [200, page] });
+    expect(await db.allChanges({ after: "c1", limit: 50 })).toEqual(page);
+    expect(param(seen[0], "after")).toBe("c1");
+    expect(param(seen[0], "limit")).toBe("50");
+    expect(param(seen[0], "owner")).toBeNull();
+    const refused = routed({
+      "GET /v1/changes/all": [403, { error: { code: "forbidden", message: "no" } }],
+    });
+    await expect(refused.db.allChanges()).rejects.toBeInstanceOf(Forbidden);
+  });
+});

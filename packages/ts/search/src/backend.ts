@@ -1,4 +1,4 @@
-import type { EventRole, SearchSort, Visibility } from "@seshi/model";
+import type { ChangeEntry, EventRole, SearchSort, Visibility } from "@seshi/model";
 import type { Viewer } from "./viewer";
 
 export interface IndexedSession {
@@ -120,6 +120,19 @@ export interface FeedState {
     processed: readonly { key: string; at: number }[],
     forgetBefore: number,
   ): void;
+  /** Keep change entries as listed from `owner`'s feed (`name` is the key under `changes/`),
+   * for the cross-owner feed. One already kept is left as it is. */
+  record(owner: string, entries: readonly { name: string; entry: ChangeEntry }[]): void;
+  /** The kept entries after `after` (in stamp, owner, name order), stamped no later than
+   * `through`: at most `limit`, whether more follow, and the `through` used. `through` is the
+   * time every owner's feed has been read up to (`readThrough`); null before there is one. */
+  feed(
+    after: FeedPosition | undefined,
+    limit: number,
+  ): { entries: FeedRow[]; more: boolean; through: string } | null;
+  /** Every owner's feed has been read after `through`, and an owner not listed then had
+   * written nothing: the cross-owner feed may serve entries up to it. Never moves back. */
+  readThrough(through: string): void;
   /** When the index first caught up with the whole feed; undefined while it is building. */
   readyAt(): string | undefined;
   caughtUpAt(): string | undefined;
@@ -133,6 +146,18 @@ export interface FeedState {
   transaction<T>(fn: () => T): T;
   /** Forget everything: sessions, events, cursors and readiness (a rebuild). */
   reset(): void;
+}
+
+/** A place in the cross-owner feed: entries sort by stamp, then owner, then name (the key
+ * under `changes/`, which starts with the stamp). */
+export interface FeedPosition {
+  stamp: string;
+  owner: string;
+  name: string;
+}
+
+export interface FeedRow extends FeedPosition {
+  entry: ChangeEntry;
 }
 
 export type IndexStore = SearchBackend & FeedState;

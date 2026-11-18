@@ -1,12 +1,15 @@
 import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import type { EventRole, Visibility } from "@seshi/model";
+import type { ChangeEntry, EventRole, Visibility } from "@seshi/model";
+import { changeStamp } from "@seshi/store";
 import type {
   BackendHit,
   BackendMatch,
   BackendQuery,
   BackendResults,
+  FeedPosition,
+  FeedRow,
   IndexedSession,
   IndexStore,
   SessionUpdate,
@@ -26,6 +29,13 @@ CREATE TABLE IF NOT EXISTS seen (
   key TEXT NOT NULL,
   at INTEGER NOT NULL,
   PRIMARY KEY (owner, key)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS changes (
+  stamp TEXT NOT NULL,
+  owner TEXT NOT NULL,
+  name TEXT NOT NULL,
+  entry TEXT NOT NULL,
+  PRIMARY KEY (stamp, owner, name)
 ) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS sessions (
   id INTEGER PRIMARY KEY,
@@ -70,6 +80,7 @@ DROP TABLE IF EXISTS events;
 DROP TABLE IF EXISTS sessions;
 DROP TABLE IF EXISTS seen;
 DROP TABLE IF EXISTS feeds;
+DROP TABLE IF EXISTS changes;
 DROP TABLE IF EXISTS meta;
 `;
 
@@ -143,6 +154,9 @@ export interface SqliteIndexOptions {
   /** What the indexer admits, named (F11.9: a serverless laptop's search scope and owner): a
    * file built under another scope is wiped, so it holds nothing this one would leave out. */
   scope?: string;
+  /** The file keeps a copy of every change entry read, for the cross-owner feed. A file built
+   * without it is wiped when it is turned on, so the copy starts from every feed's start. */
+  feed?: boolean;
 }
 
 export class SqliteIndex implements IndexStore {
@@ -166,6 +180,7 @@ export class SqliteIndex implements IndexStore {
       deployment: options.deployment,
       events: JSON.stringify([...options.events].sort()),
       ...(options.scope !== undefined ? { scope: options.scope } : {}),
+      ...(options.feed ? { feed: "kept" } : {}),
     };
     this.transaction(() => {
       const stored = this.metaAll();
@@ -509,6 +524,67 @@ export class SqliteIndex implements IndexStore {
     });
   }
 
+  record(owner: string, entries: readonly { name: string; entry: ChangeEntry }[]): void {
+    if (entries.length === 0) return;
+    this.transaction(() => {
+      const insert = this.db.query(
+        "INSERT INTO changes (stamp, owner, name, entry) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING",
+      );
+      for (const { name, entry } of entries) {
+        insert.run(name.slice(0, name.indexOf("-")), owner, name, JSON.stringify(entry));
+      }
+    });
+  }
+
+  feed(
+    after: FeedPosition | undefined,
+    limit: number,
+  ): { entries: FeedRow[]; more: boolean; through: string } | null {
+    // One read snapshot: the bound reported is the one the rows were read under.
+    return this.db.transaction(() => this.feedPage(after, limit)).deferred();
+  }
+
+  private feedPage(
+    after: FeedPosition | undefined,
+    limit: number,
+  ): { entries: FeedRow[]; more: boolean; through: string } | null {
+    const through = this.meta("feed_through");
+    if (through === undefined) return null;
+    const last = changeStamp(through);
+    const from = after ?? { stamp: "", owner: "", name: "" };
+    const rows = this.db
+      .query(
+        `SELECT stamp, owner, name, entry FROM changes
+          WHERE (stamp, owner, name) > (?, ?, ?) AND stamp <= ?
+          ORDER BY stamp, owner, name LIMIT ?`,
+      )
+      .all(from.stamp, from.owner, from.name, last, limit + 1) as {
+      stamp: string;
+      owner: string;
+      name: string;
+      entry: string;
+    }[];
+    return {
+      entries: rows.slice(0, limit).map((r) => ({
+        stamp: r.stamp,
+        owner: r.owner,
+        name: r.name,
+        entry: JSON.parse(r.entry) as ChangeEntry,
+      })),
+      more: rows.length > limit,
+      through,
+    };
+  }
+
+  readThrough(through: string): void {
+    this.transaction(() => {
+      const held = this.meta("feed_through");
+      if (held === undefined || Date.parse(through) > Date.parse(held)) {
+        this.setMeta("feed_through", through);
+      }
+    });
+  }
+
   readyAt(): string | undefined {
     return this.meta("ready_at");
   }
@@ -536,7 +612,8 @@ export class SqliteIndex implements IndexStore {
       this.db.run("DELETE FROM sessions");
       this.db.run("DELETE FROM seen");
       this.db.run("DELETE FROM feeds");
-      this.db.run("DELETE FROM meta WHERE key IN ('ready_at', 'caught_up_at')");
+      this.db.run("DELETE FROM changes");
+      this.db.run("DELETE FROM meta WHERE key IN ('ready_at', 'caught_up_at', 'feed_through')");
     });
   }
 }

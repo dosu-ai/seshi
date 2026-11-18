@@ -605,6 +605,78 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "502": { $ref: "#/components/responses/StorageError" }
 
+  /v1/changes/all:
+    get:
+      tags: [changes]
+      summary: Every owner's change feed, as one.
+      operationId: allChanges
+      description: |
+        Every owner's entries in one feed with one cursor, for a reader that reads every
+        session: a service token or an admin. Any other caller is refused (`403`), never
+        served a filtered feed, so a session one may not read never shows up in it.
+
+        Entries are ordered by stamp, then owner, then key; each names its owner and its key.
+        The feed is read from this instance's search index, which keeps a copy of every
+        owner's feed (so `search.enabled` must be on). It serves only entries stamped no later
+        than `through`: a time up to which every owner's feed had been read, and no later than
+        when the indexer's owner list was taken. An owner that first writes later stamps its
+        entries after that time (up to the skew of its clock, which the lag window below
+        covers), so a cursor does not move past them. The cursor is
+        opaque but names a place in that order, not a row: it survives restarts, rebuilds and
+        a move to another instance.
+
+        The feed's contract is the per-owner one: stamps come from the clocks of the machines
+        that wrote, so a consumer re-reads a lag window (`since` a few minutes before the last
+        entry it processed) and dedupes by key. An entry is written before the session
+        changes, so it may name a change not made yet, or one that failed: read the session
+        for what it is now. `tombstone` and `visibility_changed` entries come through like
+        `published` ones.
+      parameters:
+        - name: after
+          in: query
+          description: The last page's `cursor`.
+          schema: { type: string }
+        - name: since
+          in: query
+          description: |
+            Start at this time instead (RFC 3339): entries stamped at or after it. Ignored when
+            `after` is given.
+          schema: { type: string, format: date-time }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 100 }
+      responses:
+        "200":
+          description: A page of the feed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AllChangesPage" }
+        "400":
+          description: |
+            `bad_query`: a cursor this feed did not give, a `since` that is not a time, a
+            `limit` that is not a whole number, or `owner` (this feed is every owner's).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: "`search_disabled`: this server has `search.enabled = false`, and the feed is read from the index."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "503":
+          description: |
+            `index_building`: this instance's index has not read every owner's feed yet (it was
+            just started, or wiped). `Retry-After` says when to ask again.
+          headers:
+            Retry-After:
+              description: Seconds to wait.
+              schema: { type: integer }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
   /v1/tokens:
     post:
       tags: [tokens]
@@ -2102,6 +2174,36 @@ components:
           type: string
           description: The last key on the page; pass as `after`. Absent when the page is empty.
         truncated: { type: boolean }
+
+    AllChangesPage:
+      type: object
+      required: [entries, truncated, through]
+      properties:
+        entries:
+          type: array
+          items:
+            type: object
+            required: [owner, key, entry]
+            properties:
+              owner:
+                type: string
+                description: The owner whose feed the entry is in (a person, `svc:<source-id>` or `h-…`).
+              key:
+                type: string
+                description: The entry's object key, `owners/<owner>/changes/…`; dedupe by it.
+              entry: { $ref: "#/components/schemas/ChangeEntry" }
+        cursor:
+          type: string
+          description: Opaque; pass as `after`. Absent when the page is empty.
+        truncated:
+          type: boolean
+          description: More entries up to `through` follow this page.
+        through:
+          type: string
+          format: date-time
+          description: |
+            Every owner's feed had been read up to this time; entries stamped later wait until
+            it moves past them.
 
     RedactionRules:
       description: |

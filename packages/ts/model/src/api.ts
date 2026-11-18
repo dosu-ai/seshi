@@ -139,8 +139,21 @@ export interface ChangesPage {
   truncated: boolean;
 }
 
+/** A page of the cross-owner change feed (`GET /v1/changes/all`): every owner's entries, by
+ * stamp, then owner, then key. */
+export interface AllChangesPage {
+  entries: { owner: string; key: string; entry: ChangeEntry }[];
+  /** Opaque. Pass as `after` to continue; absent when the page is empty. */
+  cursor?: string;
+  truncated: boolean;
+  /** Every owner's feed had been read up to this time when the page was served: entries
+   * stamped later wait until it moves past them. */
+  through: string;
+}
+
 export interface ReadChangesOptions {
-  /** The last key already processed; omit to start from the beginning. */
+  /** The last key already processed (the cross-owner feed: the last page's `cursor`); omit
+   * to start from the beginning. */
   after?: string;
   /** Alternative to `after`: start from this time (ISO 8601). Ignored when `after` is given. */
   since?: string;

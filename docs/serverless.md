@@ -410,6 +410,14 @@ A result whose session the key may not read is left out. With search off, `seshi
 and says how to turn it on. Turning it off does not delete the index file yet. See
 [search.md](search.md).
 
+Every owner's change feed as one (`GET /v1/changes/all`) is a server route, so serverless mode
+has none: there is no API to call, and each laptop's index is its own, often limited to its
+scope. Writing an org-wide index at publish time instead would need every laptop to write
+outside `owners/<owner>/`, and a member's key is limited to that folder
+([Credentials](#credentials)). A reader with a key that reads
+every folder tails each owner's `changes/` itself, as [layout.md](../spec/layout.md#reading)
+describes.
+
 ## What a laptop writes and keeps
 
 A laptop writes only under `owners/<owner>/`: sessions, traces, the change feed, review records,

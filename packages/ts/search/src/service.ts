@@ -1,6 +1,8 @@
 import { OwnerAliases } from "@seshi/auth";
 import {
+  type AllChangesPage,
   type EventRole,
+  type ReadChangesOptions,
   SEARCH_SORTS,
   type SearchRequest,
   type SearchResult,
@@ -10,6 +12,7 @@ import {
 } from "@seshi/model";
 import { accessDeniedIn, decodeJson, getBytes, isOwner, keys, type Store } from "@seshi/store";
 import type { BackendHit, BackendQuery, IndexStore } from "./backend";
+import { readFeed } from "./feed";
 import { Indexer, type IndexerLogger, type IndexerOptions, type IndexerRun } from "./indexer";
 import { defaultIndexPath } from "./paths";
 import { parseQuery, SearchQueryError } from "./query";
@@ -50,6 +53,9 @@ export interface SearchServiceOptions {
   /** What `indexer.owners` and `indexer.admit` let in, named: an index file built under
    * another scope is wiped and built again (F11.9). */
   scope?: string;
+  /** Keep a copy of every owner's change feed in the index, which `changes()` serves (the
+   * server; never an index limited by `indexer.owners` or `indexer.admit`). */
+  feed?: boolean;
   indexer?: {
     lagMs?: number;
     pageSize?: number;
@@ -220,6 +226,7 @@ export class SearchService {
         deployment: this.options.deployment,
         events: this.options.settings.events,
         ...(this.options.scope !== undefined ? { scope: this.options.scope } : {}),
+        ...(this.options.feed ? { feed: true } : {}),
       });
       const indexer = new Indexer({
         store: this.options.store,
@@ -228,6 +235,7 @@ export class SearchService {
         ...(this.options.now ? { now: this.options.now } : {}),
         ...(this.options.log ? { log: this.options.log } : {}),
         ...this.options.indexer,
+        ...(this.options.feed ? { feed: true } : {}),
       });
       this.opened = { index, indexer };
     }
@@ -321,6 +329,27 @@ export class SearchService {
         sessions: index.counts().sessions,
       },
     };
+  }
+
+  /** Every owner's change feed as one, read from this index's copy of it (`GET
+   * /v1/changes/all`). Throws `SearchQueryError` for a cursor it did not give and
+   * `SearchUnavailable` until the index has read every feed once. Only a service built with
+   * `feed` has one; an index limited to some owners or sessions (F11.9) never does. */
+  changes(options: ReadChangesOptions = {}): AllChangesPage {
+    if (
+      !this.options.feed ||
+      this.options.indexer?.owners !== undefined ||
+      this.options.indexer?.admit !== undefined
+    ) {
+      throw new Error("this index keeps no copy of every owner's feed");
+    }
+    const page = readFeed(this.open().index, options);
+    if (page === null) {
+      throw new SearchUnavailable(
+        "the search index is reading every owner's change feed for the first time; try again shortly",
+      );
+    }
+    return page;
   }
 
   /** Close the index file. The service is not used after this. */

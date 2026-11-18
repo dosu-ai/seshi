@@ -1,5 +1,6 @@
 import { gzipSync } from "node:zlib";
 import {
+  type AllChangesPage,
   type ChangesPage,
   type Fetch,
   Forbidden,
@@ -364,6 +365,19 @@ export class HttpSessionDB implements SessionDB {
     });
     if (status !== 200) refuse(status, body);
     return body as ChangesPage;
+  }
+
+  /** Every owner's change feed as one (`GET /v1/changes/all`), by stamp, then owner, then
+   * key; each entry names its owner. Only for a credential that reads every session (a
+   * service token or an admin): any other is `Forbidden`. `after` is the last page's opaque
+   * `cursor`. While the server's search index is first being built it is a `ServerError` with
+   * status 503 (`index_building`), and 404 (`search_disabled`) when search is turned off. */
+  async allChanges(options: ReadChangesOptions = {}): Promise<AllChangesPage> {
+    const { status, body } = await this.request("GET", "/v1/changes/all", {
+      query: { after: options.after, since: options.since, limit: options.limit },
+    });
+    if (status !== 200) refuse(status, body);
+    return body as AllChangesPage;
   }
 
   /** Keyword search over the sessions this credential may read (F10, `GET /v1/search`). A

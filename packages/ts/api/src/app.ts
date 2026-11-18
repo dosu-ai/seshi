@@ -8,6 +8,7 @@ import {
   requireScope,
   requireVisibilityChange,
   type Scope,
+  seesEverything,
   serviceSourceId,
   type TokenRequest,
   tokenInfo,
@@ -53,7 +54,13 @@ import {
   tombstone,
 } from "@seshi/pipeline";
 import { rulesDocument } from "@seshi/redact";
-import { SearchQueryError, SearchUnavailable, viewerFor } from "@seshi/search";
+import {
+  FEED_DEFAULT_LIMIT,
+  FEED_MAX_LIMIT,
+  SearchQueryError,
+  SearchUnavailable,
+  viewerFor,
+} from "@seshi/search";
 import {
   archiveId,
   isOwner,
@@ -707,15 +714,39 @@ export function createApp(instance: Instance) {
     return json({ ...page, entries });
   });
 
-  route("GET", "/v1/search", async ({ request, url }) => {
-    const principal = await caller(request, "search");
+  // Every owner's feed as one (`GET /v1/changes/all`), for readers that read everything. It
+  // is served from the search index's copy of the feeds, so a poll costs no bucket request.
+  route("GET", "/v1/changes/all", async ({ request, url }) => {
+    const principal = await caller(request, "sessions:read");
+    if (!seesEverything(principal)) {
+      throw new HttpError(
+        403,
+        "forbidden",
+        "every owner's change feed is for callers that read every session: a service token or an admin",
+      );
+    }
+    if (url.searchParams.has("owner")) {
+      throw new HttpError(400, "bad_query", "owner: this feed is every owner's; use /v1/changes");
+    }
+    return fromSearch((search) =>
+      search.changes({
+        after: url.searchParams.get("after") ?? undefined,
+        since: url.searchParams.get("since") ?? undefined,
+        limit: intParam(url, "limit", FEED_DEFAULT_LIMIT, FEED_MAX_LIMIT),
+      }),
+    );
+  });
+
+  /** Run `fn` against the search index, mapping its refusals: `404 search_disabled` with
+   * search off, `400` for a request it cannot run, `503` with `Retry-After` while it builds. */
+  async function fromSearch(
+    fn: (search: NonNullable<Instance["search"]>) => unknown | Promise<unknown>,
+  ): Promise<Response> {
     if (!instance.search) {
       throw new HttpError(404, "search_disabled", "search is turned off on this server");
     }
     try {
-      return json(
-        await instance.search.search(viewerFor(principal, aliases), searchRequestOf(url)),
-      );
+      return json(await fn(instance.search));
     } catch (err) {
       if (err instanceof SearchQueryError) throw new HttpError(400, err.code, err.message);
       if (err instanceof SearchUnavailable) {
@@ -725,6 +756,13 @@ export function createApp(instance: Instance) {
       }
       throw err;
     }
+  }
+
+  route("GET", "/v1/search", async ({ request, url }) => {
+    const principal = await caller(request, "search");
+    return fromSearch((search) =>
+      search.search(viewerFor(principal, aliases), searchRequestOf(url)),
+    );
   });
 
   function tokenKind(value: unknown): TokenKind {

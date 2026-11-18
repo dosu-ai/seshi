@@ -1,4 +1,5 @@
 export type {
+  AllChangesPage,
   ChangesPage,
   Fetch,
   Identity,

@@ -307,6 +307,7 @@ export class Instance {
                 aliases: this.auth.aliases,
                 now: this.now,
                 log: this.log,
+                feed: true,
               })
             : undefined));
 
