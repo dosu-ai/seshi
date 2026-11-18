@@ -618,9 +618,10 @@ paths:
         Entries are ordered by stamp, then owner, then key; each names its owner and its key.
         The feed is read from this instance's search index, which keeps a copy of every
         owner's feed (so `search.enabled` must be on). It serves only entries stamped no later
-        than `through`: when the owner list of the indexer's last full pass was taken, and so
-        a time up to which every owner's feed had been read. An owner that first writes later
-        stamps its entries after that time, so a cursor never moves past them. The cursor is
+        than `through`: a time up to which every owner's feed had been read, and no later than
+        when the indexer's owner list was taken. An owner that first writes later stamps its
+        entries after that time (up to the skew of its clock, which the lag window below
+        covers), so a cursor does not move past them. The cursor is
         opaque but names a place in that order, not a row: it survives restarts, rebuilds and
         a move to another instance.
 

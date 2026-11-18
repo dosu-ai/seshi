@@ -69,6 +69,7 @@ function server(indexPath?: string): {
           search: new SearchService({
             store,
             deployment: "test",
+            feed: true,
             settings: { path: indexPath, events: ["user", "assistant", "tool_call"] },
           }),
         }

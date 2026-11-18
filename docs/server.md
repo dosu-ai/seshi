@@ -273,12 +273,17 @@ poll is one SQLite range read and no bucket request, however many owners there a
 be on (`404 search_disabled` otherwise), and until the index has read every owner's feed once
 the route answers `503 index_building` with `Retry-After`.
 
-A page holds only entries stamped no later than its `through`: when the owner list of the
-indexer's last full pass was taken. Every feed on that list was read after then, and an owner
-not on it had written nothing yet, so an entry that turns up later is stamped after `through`
-and lands ahead of any cursor issued so far, a new owner's first entries included. `through`
-trails the bucket by up to a minute and a half (the owner list is read again every minute, then
-a pass every `search.interval`).
+A page holds only entries stamped no later than its `through`: the least of how far each
+owner's feed has been read (a feed read to its end, up to when it was listed; one a pass
+stopped in for its budget, up to its cursor) and when the indexer's owner list was taken (an
+owner not on it had written nothing yet). So an entry that turns up later is normally stamped
+after `through` and lands ahead of any cursor issued so far, a new owner's first entries
+included, and an owner that writes faster than a pass reads holds `through` back without
+stopping it. "Normally" because stamps come from writers' clocks: a writer whose clock runs
+behind can stamp an entry before `through`, behind a cursor, which only the lag-window re-read
+below finds; keep that re-read for every owner, new ones included. `through` trails the bucket
+by up to a minute and a half (the owner list is read again every minute, then a pass every
+`search.interval`).
 
 The cursor names a place in that order, not a row of the index, so it works after a restart, a
 rebuild, and on another instance. The contract is otherwise the per-owner feed's: stamps come

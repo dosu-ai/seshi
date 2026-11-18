@@ -34,28 +34,32 @@ export function decodeFeedCursor(cursor: string): FeedPosition {
   return { stamp, owner, name };
 }
 
+const RFC3339 = /^\d{4}-\d{2}-\d{2}[Tt ]\d{2}:\d{2}:\d{2}(\.\d+)?([Zz]|[+-]\d{2}:\d{2})$/;
+
 /** Where `since` starts: before the first entry stamped at that time. */
 function sincePosition(since: string): FeedPosition {
-  if (!Number.isFinite(Date.parse(since))) {
+  if (!RFC3339.test(since) || !Number.isFinite(Date.parse(since))) {
     throw new SearchQueryError("since must be an RFC 3339 time");
   }
   return { stamp: changeStamp(since), owner: "", name: "" };
 }
 
-/** A page of every owner's change feed, read from the index's copy (`FeedState.feed`). */
-export function readFeed(index: IndexStore, options: ReadChangesOptions = {}): AllChangesPage {
-  const limit = options.limit ?? FEED_DEFAULT_LIMIT;
-  if (!Number.isInteger(limit) || limit < 1) {
-    throw new SearchQueryError("limit must be a whole number of at least 1");
-  }
+/** A page of every owner's change feed, read from the index's copy (`FeedState.feed`); null
+ * until every owner's feed has been read once. `limit` is the caller's to check (the route's
+ * `intParam`); it is only capped here. */
+export function readFeed(
+  index: IndexStore,
+  options: ReadChangesOptions = {},
+): AllChangesPage | null {
+  const limit = Math.min(options.limit ?? FEED_DEFAULT_LIMIT, FEED_MAX_LIMIT);
   const after =
     options.after !== undefined
       ? decodeFeedCursor(options.after)
       : options.since !== undefined
         ? sincePosition(options.since)
         : undefined;
-  const through = index.feedThrough() as string;
-  const page = index.feed(after, Math.min(limit, FEED_MAX_LIMIT));
+  const page = index.feed(after, limit);
+  if (page === null) return null;
   const last = page.entries.at(-1);
   return {
     entries: page.entries.map((row) => ({
@@ -65,6 +69,6 @@ export function readFeed(index: IndexStore, options: ReadChangesOptions = {}): A
     })),
     ...(last !== undefined ? { cursor: encodeFeedCursor(last) } : {}),
     truncated: page.more,
-    through,
+    through: page.through,
   };
 }

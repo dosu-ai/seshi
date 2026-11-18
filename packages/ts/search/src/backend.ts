@@ -124,17 +124,20 @@ export interface FeedState {
    * for the cross-owner feed. One already kept is left as it is. */
   record(owner: string, entries: readonly { name: string; entry: ChangeEntry }[]): void;
   /** The kept entries after `after` (in stamp, owner, name order), stamped no later than
-   * `feedThrough()`: at most `limit`, and whether more follow. */
-  feed(after: FeedPosition | undefined, limit: number): { entries: FeedRow[]; more: boolean };
-  /** The time every owner's feed has been read up to: the owner list of the last full pass
-   * was taken then, and every feed on it was read after. Undefined while building. */
-  feedThrough(): string | undefined;
+   * `through`: at most `limit`, whether more follow, and the `through` used. `through` is the
+   * time every owner's feed has been read up to (`readThrough`); null before there is one. */
+  feed(
+    after: FeedPosition | undefined,
+    limit: number,
+  ): { entries: FeedRow[]; more: boolean; through: string } | null;
+  /** Every owner's feed has been read after `through`, and an owner not listed then had
+   * written nothing: the cross-owner feed may serve entries up to it. Never moves back. */
+  readThrough(through: string): void;
   /** When the index first caught up with the whole feed; undefined while it is building. */
   readyAt(): string | undefined;
   caughtUpAt(): string | undefined;
-  /** A full pass over every owner finished at `at`; the first one makes the index ready.
-   * `through`: when that pass's owner list was taken (`feedThrough`). */
-  caughtUp(at: string, through?: string): void;
+  /** A full pass over every owner finished at `at`; the first one makes the index ready. */
+  caughtUp(at: string): void;
   /** Changes on every `reset`. A run that started before a reset (in this process or another
    * sharing the file) writes nothing once it sees it change, so a page it read earlier never
    * moves the rebuilt index's cursors past entries the rebuild has not read. */

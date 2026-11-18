@@ -34,16 +34,24 @@ afterEach(() => {
 const at = (seconds: number) => new Date(T0 + seconds * 1000).toISOString();
 
 function service(
-  options: { path?: string; ownerRefreshMs?: number; lagMs?: number } = {},
+  options: {
+    path?: string;
+    ownerRefreshMs?: number;
+    budget?: number;
+    pageSize?: number;
+    feed?: boolean;
+  } = {},
 ): SearchService {
   const s = new SearchService({
     store,
     deployment: "d",
     settings: { path: options.path ?? MEMORY_INDEX, events: ["user", "assistant"] },
     now: () => clock,
+    feed: options.feed ?? true,
     indexer: {
       ownerRefreshMs: options.ownerRefreshMs ?? 0,
-      ...(options.lagMs !== undefined ? { lagMs: options.lagMs } : {}),
+      ...(options.budget !== undefined ? { budget: options.budget } : {}),
+      ...(options.pageSize !== undefined ? { pageSize: options.pageSize } : {}),
     },
   });
   services.push(s);
@@ -249,6 +257,54 @@ describe("every owner's change feed", () => {
     expect(drain(restarted, { after: page.cursor as string }).keys).toEqual(whole.slice(2));
   });
 
+  it("keeps moving while one owner gets more than a pass can read", async () => {
+    // alice writes faster than a pass reads her feed, for as long as the test runs; bob and
+    // carol come after her in the owner list.
+    for (let i = 0; i < 6; i++) await change("alice", 1 + i, `a${i}`);
+    const bob = await change("bob", 2, "b1");
+    const carol = await change("carol", 4, "c1");
+    // Past the indexer's lag window, so each entry read is done with (these name no session,
+    // so a younger one would be read again until it ages out).
+    clock = new Date(T0 + 600_000);
+    const s = service({ budget: 2, pageSize: 1 });
+    const seen: string[] = [];
+    let cursor: string | undefined;
+    for (let round = 0; round < 12; round++) {
+      for (let i = 0; i < 3; i++) await change("alice", 600 + round + i / 10, `late${round}-${i}`);
+      clock = new Date(clock.getTime() + 1000);
+      expect((await s.run()).more).toBe(true);
+      try {
+        const page = s.changes({ limit: 1000, ...(cursor ? { after: cursor } : {}) });
+        seen.push(...page.entries.map((e) => e.key));
+        cursor = page.cursor ?? cursor;
+      } catch (err) {
+        if (!(err instanceof SearchUnavailable)) throw err;
+      }
+    }
+    // alice's feed is never read to its end, yet bob's and carol's entries come through, in
+    // order among hers, with no gap or repeat.
+    expect(seen).toContain(bob);
+    expect(seen).toContain(carol);
+    expect(new Set(seen).size).toBe(seen.length);
+    const whole = s.changes({ limit: 1000 }).entries.map((e) => e.key);
+    expect(seen).toEqual(whole.slice(0, seen.length));
+  });
+
+  it("keeps no copy in an index built without the feed", async () => {
+    await change("alice", 1, "a1");
+    clock = new Date(T0 + 10_000);
+    const path = join(dir, "laptop", "search.sqlite");
+    const laptop = service({ path, feed: false });
+    await laptop.catchUp();
+    expect(() => laptop.changes()).toThrow(/no copy/);
+    laptop.close();
+    // Turning it on later starts the file again, so the copy holds every feed from its start.
+    const server = service({ path });
+    expect(() => server.changes()).toThrow(SearchUnavailable);
+    await server.catchUp();
+    expect(server.changes().entries.map((e) => e.owner)).toEqual(["alice"]);
+  });
+
   it("refuses a cursor it did not give, and answers only once every feed was read", async () => {
     const s = service();
     expect(() => s.changes()).toThrow(SearchUnavailable);
@@ -261,7 +317,10 @@ describe("every owner's change feed", () => {
     ]) {
       expect(() => s.changes({ after: bad }), bad).toThrow(SearchQueryError);
     }
-    expect(() => s.changes({ since: "yesterday" })).toThrow(SearchQueryError);
+    for (const since of ["yesterday", "2026", "Nov 1 2026", "2026-11-01"]) {
+      expect(() => s.changes({ since }), since).toThrow(SearchQueryError);
+    }
+    expect(s.changes({ since: "2026-11-01T00:00:00+01:00" }).entries).toEqual([]);
     const key = await change("svc:otlp", 1, "o1");
     const name = key.slice(key.lastIndexOf("/") + 1);
     const position = { stamp: name.slice(0, name.indexOf("-")), owner: "svc:otlp", name };

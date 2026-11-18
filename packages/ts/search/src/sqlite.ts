@@ -17,7 +17,7 @@ import type {
 import { MEMORY_INDEX, tryRestrictToOwner } from "./paths";
 import { indexText, MATCH_END, MATCH_START } from "./snippet";
 
-export const INDEX_SCHEMA = "seshi/search-index/3";
+export const INDEX_SCHEMA = "seshi/search-index/2";
 
 const SNIPPET_TOKENS = 24;
 
@@ -154,6 +154,9 @@ export interface SqliteIndexOptions {
   /** What the indexer admits, named (F11.9: a serverless laptop's search scope and owner): a
    * file built under another scope is wiped, so it holds nothing this one would leave out. */
   scope?: string;
+  /** The file keeps a copy of every change entry read, for the cross-owner feed. A file built
+   * without it is wiped when it is turned on, so the copy starts from every feed's start. */
+  feed?: boolean;
 }
 
 export class SqliteIndex implements IndexStore {
@@ -177,6 +180,7 @@ export class SqliteIndex implements IndexStore {
       deployment: options.deployment,
       events: JSON.stringify([...options.events].sort()),
       ...(options.scope !== undefined ? { scope: options.scope } : {}),
+      ...(options.feed ? { feed: "kept" } : {}),
     };
     this.transaction(() => {
       const stored = this.metaAll();
@@ -532,9 +536,20 @@ export class SqliteIndex implements IndexStore {
     });
   }
 
-  feed(after: FeedPosition | undefined, limit: number): { entries: FeedRow[]; more: boolean } {
+  feed(
+    after: FeedPosition | undefined,
+    limit: number,
+  ): { entries: FeedRow[]; more: boolean; through: string } | null {
+    // One read snapshot: the bound reported is the one the rows were read under.
+    return this.db.transaction(() => this.feedPage(after, limit)).deferred();
+  }
+
+  private feedPage(
+    after: FeedPosition | undefined,
+    limit: number,
+  ): { entries: FeedRow[]; more: boolean; through: string } | null {
     const through = this.meta("feed_through");
-    if (through === undefined) return { entries: [], more: false };
+    if (through === undefined) return null;
     const last = changeStamp(through);
     const from = after ?? { stamp: "", owner: "", name: "" };
     const rows = this.db
@@ -557,11 +572,17 @@ export class SqliteIndex implements IndexStore {
         entry: JSON.parse(r.entry) as ChangeEntry,
       })),
       more: rows.length > limit,
+      through,
     };
   }
 
-  feedThrough(): string | undefined {
-    return this.meta("feed_through");
+  readThrough(through: string): void {
+    this.transaction(() => {
+      const held = this.meta("feed_through");
+      if (held === undefined || Date.parse(through) > Date.parse(held)) {
+        this.setMeta("feed_through", through);
+      }
+    });
   }
 
   readyAt(): string | undefined {
@@ -572,16 +593,10 @@ export class SqliteIndex implements IndexStore {
     return this.meta("caught_up_at");
   }
 
-  caughtUp(at: string, through?: string): void {
+  caughtUp(at: string): void {
     this.transaction(() => {
       if (this.meta("ready_at") === undefined) this.setMeta("ready_at", at);
       this.setMeta("caught_up_at", at);
-      if (through !== undefined) {
-        const held = this.meta("feed_through");
-        if (held === undefined || Date.parse(through) > Date.parse(held)) {
-          this.setMeta("feed_through", through);
-        }
-      }
     });
   }
 
