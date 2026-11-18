@@ -24,6 +24,8 @@ import {
 } from "./capture";
 import { EXTENSION_MARKER, piExtension } from "./extension";
 
+// These waits cover a real child process, which can take over a second to start on a Windows runner.
+const SPAWNED = { timeout: 10_000 };
 const TESTDATA = join(import.meta.dirname, "../testdata");
 const payload = (name: string) =>
   JSON.parse(readFileSync(join(TESTDATA, "hooks", `${name}.json`), "utf8"));
@@ -270,7 +272,7 @@ process.stdin.on("end", () => {
     expect(pi.handlers.get("agent_end")?.({}, pi.ctx(forkFile))).toBeUndefined();
     await pi.handlers.get("session_shutdown")?.({ reason: "quit" }, pi.ctx(forkFile));
     expect(pi.calls().map((c) => c.args)).toContainEqual(["hook", "pi", "SessionEnd"]);
-    await vi.waitFor(() => expect(pi.calls()).toHaveLength(3));
+    await vi.waitFor(() => expect(pi.calls()).toHaveLength(3), SPAWNED);
     const hooks = pi.calls().filter((c) => c.args[0] === "hook");
     expect(hooks.map((c) => c.args[2]).sort()).toEqual(["SessionEnd", "Stop"]);
     expect(JSON.parse(hooks[0]?.input ?? "")).toEqual({
@@ -295,7 +297,7 @@ process.stdin.on("end", () => {
     const pi = await load();
     process.env.FAKE_SESHI_LOG = pi.log;
     await pi.handlers.get("session_start")?.({ reason: "startup" }, pi.ctx(forkFile));
-    await vi.waitFor(() => expect(pi.status).toEqual(["Session Capture ◉"]));
+    await vi.waitFor(() => expect(pi.status).toEqual(["Session Capture ◉"]), SPAWNED);
     const [call] = pi.calls();
     expect(call?.args).toEqual(["statusline", "--agent", "pi"]);
     expect(JSON.parse(call?.input ?? "")).toEqual({ session_id: FORK, cwd: home });
@@ -318,7 +320,7 @@ process.stdin.on("end", () => {
     await pi.handlers.get("agent_end")?.({}, pi.ctx(undefined));
     await pi.handlers.get("session_start")?.({}, pi.ctx(forkFile, false));
     await pi.handlers.get("agent_end")?.({}, pi.ctx(forkFile, false));
-    await vi.waitFor(() => expect(pi.calls()).toHaveLength(1));
+    await vi.waitFor(() => expect(pi.calls()).toHaveLength(1), SPAWNED);
     expect(pi.calls()[0]?.args).toEqual(["hook", "pi", "Stop"]);
     // The session with no file clears the footer; the one without a UI draws nothing.
     expect(pi.status).toEqual([undefined]);
@@ -359,6 +361,6 @@ process.stdin.on("end", () => {
         ui: { setStatus: (_k: string, t: unknown) => status.push(t), notify: () => {} },
       },
     );
-    await vi.waitFor(() => expect(status).toEqual([undefined]));
+    await vi.waitFor(() => expect(status).toEqual([undefined]), SPAWNED);
   });
 });
