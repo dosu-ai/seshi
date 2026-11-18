@@ -126,7 +126,7 @@ Everything else is in [docs/](docs/README.md).
 | Codex CLI | ✓ | A notice when the session starts | `$session-capture` | ✓ |
 | Cursor (editor) | ✓ | Status bar extension | `/session-capture`, or a click on the status bar | ✓ |
 | Cursor CLI | ✓ | Status line | `/session-capture` | ✓ |
-| OpenCode | ✓ | A notice when the session starts | `/session-capture` | ✓ |
+| OpenCode (1.x and 2.x) | ✓ | Beside the prompt; a notice when the session starts | `/session-capture` | ✓ |
 | pi | ✓ | Footer | `/session-capture` | ✓ |
 | Oh My Pi, OpenClaw | — | — | — | ✓ |
 | Gemini CLI | — | — | — | ✓ |

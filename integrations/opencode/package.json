@@ -9,6 +9,9 @@
     },
     "./capture": {
       "bun": "./src/capture.ts"
+    },
+    "./testing": {
+      "bun": "./src/testing.ts"
     }
   },
   "dependencies": {

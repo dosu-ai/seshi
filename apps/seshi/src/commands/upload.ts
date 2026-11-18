@@ -72,6 +72,8 @@ interface Candidate {
   path: string;
   agent: CaptureAgent;
   info: TranscriptInfo;
+  /** For a session found in the agent's own store: writes it to `path`, once it is captured. */
+  keep?: () => void;
 }
 
 interface Outcome {
@@ -176,8 +178,12 @@ async function upload(
   if (options.sinceMs !== undefined) {
     const floor = now.getTime() - options.sinceMs;
     for (const agent of agents) {
-      for (const f of sweepAgent(agent, host, floor))
-        candidates.push({ path: f.path, agent, info: f.info });
+      const found = await sweepAgent(agent, host, floor, {
+        onProblem: (problem) =>
+          outcomes.push({ path: agent.name, result: "skipped", reason: problem }),
+      });
+      for (const f of found)
+        candidates.push({ path: f.path, agent, info: f.info, ...(f.keep ? { keep: f.keep } : {}) });
     }
   }
 
@@ -186,7 +192,7 @@ async function upload(
   const keys = new Map<string, string>();
   const additions: SessionState[] = [];
   const stopped: { session: SessionState; offset: number }[] = [];
-  for (const { path, agent, info } of candidates) {
+  for (const { path, agent, info, keep } of candidates) {
     const key = sessionKey(agent.name, info.session_id);
     if (keys.has(key)) continue;
     const known = state.sessions[key];
@@ -219,6 +225,14 @@ async function upload(
         });
       }
       continue;
+    }
+    if (keep) {
+      try {
+        keep();
+      } catch (err) {
+        outcomes.push({ path, key, result: "skipped", reason: (err as Error).message });
+        continue;
+      }
     }
     keys.set(key, path);
     additions.push({

@@ -56,6 +56,7 @@
     "@seshi/config": "workspace:*",
     "@seshi/formats": "workspace:*",
     "@seshi/instance": "workspace:*",
+    "@seshi/integration-opencode": "workspace:*",
     "@seshi/kit": "workspace:*",
     "@seshi/model": "workspace:*",
     "@seshi/pipeline": "workspace:*",

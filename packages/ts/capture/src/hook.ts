@@ -1,10 +1,9 @@
-import { appendFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { appendFileSync, rmSync, utimesSync } from "node:fs";
 import {
   type CaptureAgent,
   type CaptureHost,
   type HookCapture,
-  handedTranscriptDir,
+  handedTranscriptPath,
   hookHandler,
 } from "@seshi/kit";
 import { writeRecent } from "./current";
@@ -36,6 +35,9 @@ export interface HookOutcome {
   requested?: { action: "off" | "on"; session: HookCapture };
   /** What the handler asked to tell the person. */
   said?: string;
+  /** Why a captured session's transcript could not be read (it is spooled all the same, and a
+   * sweep finds it where the agent keeps it). */
+  problems?: string[];
 }
 
 /** A value as one shell word: single-quoted, with any single quote in it closed and escaped. */
@@ -99,7 +101,7 @@ export async function runHook(run: HookRun): Promise<HookOutcome> {
   for (const capture of result.captures) {
     const { known, decision } = judge(capture);
     if (!decision.capture) {
-      if (capture.transcript !== undefined)
+      if (capture.transcript !== undefined || capture.read)
         forgetHandedTranscript(run.host, run.agent, capture.session_id);
       outcome.skipped.push({ session_id: capture.session_id, decision });
       if (respoolPausedSession(run, capture, known, decision, now)) continue;
@@ -121,7 +123,10 @@ export async function runHook(run: HookRun): Promise<HookOutcome> {
       }
       continue;
     }
-    const path = capture.transcript === undefined ? capture.transcript_path : keep(run, capture);
+    const path =
+      capture.transcript === undefined && !capture.read
+        ? capture.transcript_path
+        : await keep(run, capture, outcome);
     appendSpool(
       run.paths,
       {
@@ -138,29 +143,44 @@ export async function runHook(run: HookRun): Promise<HookOutcome> {
       },
       now,
     );
-    const { transcript: _, ...spooled } = capture;
+    const { transcript: _, read: _read, ...spooled } = capture;
     outcome.spooled.push(path ? { ...spooled, transcript_path: path } : spooled);
   }
   return outcome;
 }
 
-/** Where a transcript the hook was handed whole is kept; undefined for an unusable session id. */
-function handedTranscriptPath(
-  host: CaptureHost,
-  agent: Pick<CaptureAgent, "name" | "encoding">,
-  sessionId: string,
-): string | undefined {
-  if (!/^[\w.-]+$/.test(sessionId)) return undefined;
-  const ext = agent.encoding === "json" ? "json" : "jsonl";
-  return join(handedTranscriptDir(host, agent.name), `${sessionId}.${ext}`);
-}
-
-/** A transcript the hook was handed whole, written where the uploader reads it, readable only by
- * this user. Only a captured session's is written: one turned off never reaches the disk. */
-function keep(run: HookRun, capture: HookCapture): string {
+/** A transcript the hook was handed whole, or read once the session is captured, written where
+ * the uploader reads it, readable only by this user. Only a captured session's is written: one
+ * turned off never reaches the disk. A transcript that cannot be read now (the agent's store
+ * busy, or the session not in it yet) is left to the uploader, which finds it there (`locate`,
+ * the sweep): the session is spooled all the same, and the problem said. */
+async function keep(
+  run: HookRun,
+  capture: HookCapture,
+  outcome: HookOutcome,
+): Promise<string | undefined> {
   const path = handedTranscriptPath(run.host, run.agent, capture.session_id);
   if (!path) throw new Error(`${run.agent.name}: unusable session id '${capture.session_id}'`);
-  writePrivateFile(path, capture.transcript as string);
+  if (capture.transcript !== undefined) {
+    writePrivateFile(path, capture.transcript);
+    return path;
+  }
+  let read: Awaited<ReturnType<NonNullable<HookCapture["read"]>>>;
+  try {
+    read = await (capture.read as NonNullable<HookCapture["read"]>)();
+  } catch (err) {
+    const why = err instanceof Error ? err.message : String(err);
+    outcome.problems = [
+      ...(outcome.problems ?? []),
+      `${run.agent.name}: could not read session ${capture.session_id} yet: ${why}`,
+    ];
+    return undefined;
+  }
+  writePrivateFile(path, read.transcript);
+  if (read.changedMs !== undefined) {
+    const changed = new Date(read.changedMs);
+    utimesSync(path, changed, changed);
+  }
   return path;
 }
 
