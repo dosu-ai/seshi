@@ -15,6 +15,8 @@ export interface Chunk {
 export interface HeadValue {
   kind: "string" | "object" | "array" | "scalar";
   text?: string;
+  /** For an array whose first element is an object: that object's own head. */
+  first?: DocumentHead;
 }
 
 /** The top-level keys of a JSON document, read from its start (a truncated sample still has

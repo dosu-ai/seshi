@@ -165,3 +165,105 @@ export function opencodeSessionAt(
     })),
   };
 }
+
+/** One OpenCode 2.x session as its rows: the session, and its message rows in order (`seq`), with
+ * an assistant row's content inline in `data.content`. */
+export interface OpencodeV2Session {
+  session: {
+    id: string;
+    directory: string;
+    parentID?: string;
+    title?: string;
+    time: { created: number; updated: number };
+  };
+  rows: { id: string; type: string; time: number; data: Row }[];
+}
+
+const SCHEMA_V2 = `
+CREATE TABLE migration (id text PRIMARY KEY, time_completed integer NOT NULL);
+CREATE TABLE session_v2 (
+  id text PRIMARY KEY, project_id text NOT NULL, workspace_id text, parent_id text,
+  fork_session_id text, fork_boundary text, slug text NOT NULL, directory text NOT NULL, path text,
+  title text, version text NOT NULL, share_url text, summary_additions integer,
+  summary_deletions integer, summary_files integer, summary_diffs text, metadata text,
+  cost real DEFAULT 0 NOT NULL, tokens_input integer DEFAULT 0 NOT NULL,
+  tokens_output integer DEFAULT 0 NOT NULL, tokens_reasoning integer DEFAULT 0 NOT NULL,
+  tokens_cache_read integer DEFAULT 0 NOT NULL, tokens_cache_write integer DEFAULT 0 NOT NULL,
+  revert text, permission text, agent text, model text, time_created integer NOT NULL,
+  time_updated integer NOT NULL, time_idle integer, time_viewed integer, idle_outcome text,
+  time_compacting integer, time_archived integer, time_suspended integer,
+  resume_attempts integer DEFAULT 0 NOT NULL
+);
+CREATE TABLE session_message (
+  id text PRIMARY KEY, session_id text NOT NULL, type text NOT NULL, seq integer NOT NULL,
+  time_created integer NOT NULL, time_updated integer NOT NULL, data text NOT NULL
+);
+CREATE UNIQUE INDEX session_message_session_seq_idx ON session_message (session_id, seq);
+`;
+
+const SCHEMA_PART = `
+CREATE TABLE session_part (
+  message_id text NOT NULL, session_id text NOT NULL, ordinal integer NOT NULL, type text NOT NULL,
+  call_id text, time_created integer NOT NULL, time_updated integer NOT NULL, data text NOT NULL,
+  PRIMARY KEY (message_id, ordinal)
+);
+`;
+
+/** Create (or add to) a database at `path` with OpenCode 2.x's tables holding `sessions`: as
+ * 2.0–2.2.1 keep them (content inline), or with `parts`, as 2.2.2 and later can (assistant content
+ * in `session_part` rows). `v1` also writes OpenCode 1.x's tables with those sessions, as a
+ * database 2.x opened after 1.x looks. */
+export function writeOpencodeDbV2(
+  path: string,
+  sessions: OpencodeV2Session[],
+  options: { parts?: boolean; v1?: OpencodeExport[] } = {},
+): void {
+  if (options.v1) writeOpencodeDb(path, options.v1);
+  mkdirSync(dirname(path), { recursive: true });
+  const db = new Database(path, { create: true });
+  try {
+    db.run("PRAGMA journal_mode = WAL");
+    db.run(SCHEMA_V2);
+    if (options.parts) db.run(SCHEMA_PART);
+    for (const { session, rows } of sessions) {
+      db.query(
+        `INSERT INTO session_v2 (id, project_id, parent_id, slug, directory, title, version,
+           time_created, time_updated) VALUES (?, 'project', ?, 'slug', ?, ?, '2.3.0', ?, ?)`,
+      ).run(
+        session.id,
+        session.parentID ?? null,
+        session.directory,
+        session.title ?? null,
+        session.time.created,
+        session.time.updated,
+      );
+      rows.forEach((row, seq) => {
+        const content = Array.isArray(row.data.content) ? (row.data.content as Row[]) : [];
+        const split = options.parts && row.type === "assistant";
+        const data = split ? { ...row.data, content: [] } : row.data;
+        db.query(
+          `INSERT INTO session_message (id, session_id, type, seq, time_created, time_updated, data)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        ).run(row.id, session.id, row.type, seq, row.time, row.time, JSON.stringify(data));
+        if (!split) return;
+        content.forEach((part, ordinal) => {
+          db.query(
+            `INSERT INTO session_part (message_id, session_id, ordinal, type, call_id, time_created,
+               time_updated, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          ).run(
+            row.id,
+            session.id,
+            ordinal,
+            String(part.type),
+            (part.id as string | undefined) ?? null,
+            row.time,
+            row.time,
+            JSON.stringify(part),
+          );
+        });
+      });
+    }
+  } finally {
+    db.close();
+  }
+}

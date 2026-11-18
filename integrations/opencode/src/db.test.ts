@@ -1,16 +1,20 @@
 import { Database } from "bun:sqlite";
-import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { detectFormat } from "@seshi/formats";
 import type { CaptureHost } from "@seshi/kit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { identifyOpencodeExport, OPENCODE_CAPTURE } from "./capture";
-import { opencodeDatabase, storedOpencodeSessions } from "./db";
+import { opencodeDatabase, readOpencodeSession, storedOpencodeSessions } from "./db";
+import { OPENCODE_FORMAT } from "./index";
 import {
   addOpencodeTurn,
   type OpencodeExport,
+  type OpencodeV2Session,
   opencodeSessionAt,
   writeOpencodeDb,
+  writeOpencodeDbV2,
 } from "./testing";
 
 const EXPORT = JSON.parse(
@@ -111,7 +115,7 @@ describe("OpenCode's database (the sweep's source for sessions never handed over
     other.close();
     host.env = { OPENCODE_DB: join(home, "x.db") };
     expect(() => storedOpencodeSessions(host, 0)).toThrow(
-      /not an OpenCode database seshi can read \(no session table\)/,
+      /not an OpenCode database seshi can read \(no session_v2.parent_id/,
     );
     writeOpencodeDb(db);
     const changed = new Database(db);
@@ -140,5 +144,219 @@ describe("OpenCode's database (the sweep's source for sessions never handed over
     ).toContain("msg_wal");
     expect(statSync(db).mtimeMs).toBe(before);
     running.close();
+  });
+});
+
+/** The fixture's conversation as OpenCode 2.x keeps it: a prompt, a step that reads a file, an
+ * answer; and the markers 2.x writes around them. */
+const V2: OpencodeV2Session = {
+  session: {
+    id: EXPORT.info.id,
+    directory: "/repo/app",
+    title: "Auth walkthrough",
+    time: { created: 1790963932400, updated: 1790963941200 },
+  },
+  rows: [
+    {
+      id: "msg_v2_0",
+      type: "model-switched",
+      time: 1790963932440,
+      data: {
+        model: { id: "claude-haiku-4-5", providerID: "anthropic" },
+        time: { created: 1790963932440 },
+      },
+    },
+    {
+      id: "msg_v2_1",
+      type: "user",
+      time: 1790963932445,
+      data: {
+        text: 'How does auth work? password: "hunter2secretvalue42"',
+        time: { created: 1790963932445 },
+      },
+    },
+    {
+      id: "msg_v2_2",
+      type: "assistant",
+      time: 1790963934500,
+      data: {
+        agent: "build",
+        model: { id: "claude-haiku-4-5", providerID: "anthropic" },
+        content: [
+          { type: "text", text: "Reading the auth module first." },
+          {
+            type: "tool",
+            id: "toolu_0156L5aHDegRahdNMdG7zTv9",
+            name: "read",
+            state: {
+              status: "completed",
+              input: { filePath: "/repo/app/auth.ts" },
+              content: [{ type: "text", text: "export const KEY = 1;" }],
+            },
+            time: { created: 1790963935000, ran: 1790963935000, completed: 1790963935100 },
+          },
+        ],
+        finish: "tool-calls",
+        cost: 0.001,
+        tokens: { input: 10, output: 5, reasoning: 0, cache: { read: 0, write: 0 } },
+        time: { created: 1790963934500, completed: 1790963936000 },
+      },
+    },
+    {
+      id: "msg_v2_3",
+      type: "assistant",
+      time: 1790963937000,
+      data: {
+        agent: "build",
+        model: { id: "claude-haiku-4-5", providerID: "anthropic" },
+        content: [
+          {
+            type: "text",
+            text: String(EXPORT.messages[2]?.parts[0]?.text),
+          },
+        ],
+        finish: "stop",
+        time: { created: 1790963937000, completed: 1790963941100 },
+      },
+    },
+    {
+      id: "msg_v2_4",
+      type: "idle",
+      time: 1790963941150,
+      data: { outcome: "succeeded", time: { created: 1790963941150 } },
+    },
+  ],
+};
+
+/** The conversation a transcript normalizes to, without the times (1.x keeps a time per part,
+ * 2.x per message). */
+const conversation = (transcript: string) => {
+  const normalized = OPENCODE_FORMAT.normalize(transcript);
+  const records = Array.isArray(normalized) ? normalized : normalized.records;
+  return records.map((record) => {
+    const { timestamp: _t, ...rest } = record as unknown as Record<string, unknown>;
+    return rest;
+  });
+};
+
+describe("OpenCode 2.x's database", () => {
+  it("rebuilds a 2.x session in 1.x's export shape, to the same conversation", () => {
+    for (const parts of [false, true]) {
+      rmSync(db, { force: true });
+      writeOpencodeDbV2(db, [V2], { parts });
+      const [found, ...rest] = storedOpencodeSessions(host, 0);
+      expect(rest).toEqual([]);
+      expect(found?.info).toEqual({
+        session_id: EXPORT.info.id,
+        cwd: "/repo/app",
+        started_at: new Date(V2.session.time.created).toISOString(),
+      });
+      const text = found?.transcript() as string;
+      expect(identifyOpencodeExport(`/x/${EXPORT.info.id}.json`, text)?.session_id).toBe(
+        EXPORT.info.id,
+      );
+      expect(detectFormat([OPENCODE_FORMAT], text)).toBe("opencode");
+      expect(conversation(text)).toEqual(conversation(JSON.stringify(EXPORT)));
+      const doc = JSON.parse(text);
+      // Usage stays on the step, as 1.x's step-finish part.
+      expect(doc.messages[1].info).toMatchObject({
+        role: "assistant",
+        modelID: "claude-haiku-4-5",
+      });
+      expect(doc.messages[1].parts.at(-1)).toMatchObject({ type: "step-finish", cost: 0.001 });
+      // The markers are left out.
+      expect(doc.messages).toHaveLength(3);
+    }
+  });
+
+  it("reads a 2.x copy of a 1.x session only when the session went on in 2.x", () => {
+    // OpenCode 2.x copied the 1.x session over and nothing more was said: 1.x's copy is whole.
+    writeOpencodeDbV2(db, [V2], { v1: [EXPORT] });
+    let [found] = storedOpencodeSessions(host, 0);
+    expect(JSON.parse(found?.transcript() as string).messages[0].info.id).toBe(
+      EXPORT.messages[0]?.info.id,
+    );
+    // Then a turn in 2.x: its copy holds the newer messages.
+    rmSync(db, { force: true });
+    rmSync(`${db}-wal`, { force: true });
+    rmSync(`${db}-shm`, { force: true });
+    const later = {
+      id: "msg_v2_5",
+      type: "user",
+      time: 1790963999000,
+      data: { text: "And logout?", time: { created: 1790963999000 } },
+    };
+    writeOpencodeDbV2(db, [{ ...V2, rows: [...V2.rows, later] }], { v1: [EXPORT] });
+    [found] = storedOpencodeSessions(host, 0);
+    const doc = JSON.parse(found?.transcript() as string);
+    expect(doc.messages.at(-1).info.id).toBe("msg_v2_5");
+    expect(found?.updatedMs).toBe(1790963999000);
+  });
+
+  it("keeps seshi's copy when OpenCode only totals the session after the turn", () => {
+    writeOpencodeDbV2(db, [V2]);
+    const copy = storedOpencodeSessions(host, 0)[0]?.transcript() as string;
+    const write = new Database(db);
+    write.run(
+      "UPDATE session_v2 SET cost = 0.25, tokens_input = 900, summary_additions = 3, time_updated = time_updated + 5000",
+    );
+    expect(storedOpencodeSessions(host, 0)[0]?.transcript(copy)).toBe(copy);
+    // A new title is something to send.
+    write.run("UPDATE session_v2 SET title = 'Login page fix'");
+    write.close();
+    const retitled = storedOpencodeSessions(host, 0)[0]?.transcript(copy) as string;
+    expect(JSON.parse(retitled).info.title).toBe("Login page fix");
+  });
+
+  it("chooses between the copies before the cutoff, so a cutoff never picks the lossy one", () => {
+    writeOpencodeDbV2(db, [V2], { v1: [EXPORT] });
+    const [whole] = storedOpencodeSessions(host, 0);
+    const cutoff = (whole?.updatedMs as number) + 1;
+    // Only 2.x's copy changed after the cutoff (OpenCode retitled it), with nothing new said: the
+    // session is 1.x's copy, which has not changed since.
+    for (const file of [db, `${db}-wal`, `${db}-shm`]) rmSync(file, { force: true });
+    const retitled = {
+      ...V2,
+      session: { ...V2.session, time: { ...V2.session.time, updated: cutoff + DAY } },
+    };
+    writeOpencodeDbV2(db, [retitled], { v1: [EXPORT] });
+    expect(storedOpencodeSessions(host, cutoff)).toEqual([]);
+    expect(storedOpencodeSessions(host, 0).map((s) => s.updatedMs)).toEqual([whole?.updatedMs]);
+  });
+
+  it("reads one session for the hook, from the channel's own database", () => {
+    const channel = join(home, ".local", "share", "opencode", "opencode-local.db");
+    writeOpencodeDbV2(channel, [V2]);
+    expect(() => readOpencodeSession(host, EXPORT.info.id)).toThrow("no OpenCode database");
+    const read = readOpencodeSession(host, EXPORT.info.id, "local");
+    expect(read.changedMs).toBe(V2.session.time.updated);
+    expect(JSON.parse(read.transcript).info.id).toBe(EXPORT.info.id);
+    expect(() => readOpencodeSession(host, "ses_nope", "local")).toThrow("has no messages");
+    // Unless OpenCode was told to keep every channel in opencode.db.
+    host.env = { OPENCODE_DISABLE_CHANNEL_DB: "1" };
+    expect(opencodeDatabase(host, "local")).toBeUndefined();
+    writeOpencodeDbV2(db, [V2]);
+    expect(opencodeDatabase(host, "local")).toBe(db);
+  });
+
+  it("does not take OpenCode 2.x's own export (flat message rows) for 1.x's", () => {
+    const own = JSON.stringify({
+      info: { id: V2.session.id, location: { directory: "/repo/app" } },
+      messages: V2.rows.map((row) => ({ id: row.id, type: row.type, ...row.data })),
+    });
+    expect(detectFormat([OPENCODE_FORMAT], own)).toBeNull();
+    expect(detectFormat([OPENCODE_FORMAT], JSON.stringify(EXPORT))).toBe("opencode");
+    expect(detectFormat([OPENCODE_FORMAT], '{"info":{"id":"ses_x"},"messages":[]}')).toBe(
+      "opencode",
+    );
+  });
+
+  it("refuses an early 2.x preview database, which OpenCode 2.x imports itself", () => {
+    mkdirSync(join(db, ".."), { recursive: true });
+    const preview = new Database(db, { create: true });
+    preview.run("CREATE TABLE session (id text PRIMARY KEY)");
+    preview.run("CREATE TABLE session_message (id text PRIMARY KEY)");
+    preview.close();
+    expect(() => storedOpencodeSessions(host, 0)).toThrow(/early OpenCode 2.x preview database/);
   });
 });

@@ -85,6 +85,7 @@ async function hook(
   const agent = await load;
   const outcome = await runHook({ agent, event, payload, host, paths });
   if (outcome.ignored) log(outcome.ignored);
+  for (const problem of outcome.problems ?? []) log(problem);
   const reply = (message: string) =>
     ctx.stdout(
       JSON.stringify(hookHandler(agent, event)?.reply?.(message) ?? { systemMessage: message }),

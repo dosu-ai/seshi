@@ -35,7 +35,7 @@ seshi capture install --service  # also keep the uploader running between sessio
 | Codex | `notify` in `~/.codex/config.toml` (`CODEX_HOME` moves it); a `notify` program already there keeps running, after seshi's. SessionStart and UserPromptSubmit hooks in `~/.codex/hooks.json` for the notice and `$session-capture`, and the `$session-capture` skill in `~/.agents/skills/session-capture/` | notify, plus the sweep of `~/.codex/sessions`; SessionStart and UserPromptSubmit only for the notice and `$session-capture` |
 | Cursor (IDE and CLI) | hooks in `~/.cursor/hooks.json`, the Cursor CLI's status line in `~/.cursor/cli-config.json`, and the `/session-capture` skill in `~/.cursor/skills/session-capture/`; it suggests the status bar extension ([below](#the-cursor-status-bar)) | stop, sessionEnd; beforeSubmitPrompt for `/session-capture` and the last chat prompted |
 | pi | the extension `~/.pi/agent/extensions/seshi.ts` (`PI_CODING_AGENT_DIR` moves it) | agent_end (Stop), session_shutdown (SessionEnd, not on `/reload`); `/session-capture`, a command of its own; plus the sweep of `~/.pi/agent/sessions`, or of the folder `PI_CODING_AGENT_SESSION_DIR` or `sessionDir` in pi's settings names |
-| OpenCode | the plugin `~/.config/opencode/plugins/seshi.js`, the TUI plugin `~/.config/opencode/seshi/tui.js` with its entry in `tui.json`'s `plugin` list, and the `/session-capture` command `~/.config/opencode/command/session-capture.md` (`XDG_CONFIG_HOME` moves them) | session.idle (Stop), with the whole session; session.created (SessionStart) for the notice; `/session-capture` |
+| OpenCode (1.x and 2.x) | the plugin `~/.config/opencode/plugins/seshi.js`, the TUI plugin `~/.config/opencode/seshi/tui.js` with its entry in `tui.json`'s `plugin` list (1.x) and the folder's in `cli.json`'s `plugins` list (2.x), and the `/session-capture` command `~/.config/opencode/command/session-capture.md` (`XDG_CONFIG_HOME` moves them) | 1.x: session.idle (Stop), with the whole session. 2.x: the `experimental.idle` hook, or the end of a run that failed or was interrupted (Stop), naming the session. session.created (SessionStart) for the notice; `/session-capture` |
 
 pi and OpenCode run no shell hooks: they load code at start-up, so seshi installs a file each
 loads, written whole (and rewritten by the next `install`, so edits do not last) and removed by
@@ -45,28 +45,51 @@ that is not seshi's is left alone, and that agent is not captured. Restart pi (o
 OpenCode after `install`. Started with `--no-extensions` (pi) or `--pure` (OpenCode), or with
 `--no-session` (pi), they capture nothing. pi's session files are append-only JSONL with the
 folder in their first line, so they upload in chunks and the sweep and `seshi upload --since`
-find sessions no hook saw. OpenCode keeps its sessions in a database, not in files: after each
-turn the plugin reads the session through OpenCode's own client and hands it to seshi whole (the
-`{info, messages}` export `opencode export` prints), and seshi writes it to
-`transcripts/opencode/` in the capture folder, only for a session it captures, and uploads it
-whole each time. OpenCode has no end-of-session event, so its sessions end when the uploader
-finds them quiet. A subagent's session (OpenCode's task tool) is captured as its own session with
-its parent's id. The sweep and `seshi upload --since` also read OpenCode's database, read-only,
-for the sessions the plugin never handed over (from before `install`, or a run without the
-plugin) and for turns it missed: `opencode.db` in OpenCode's data folder (`XDG_DATA_HOME` moves
-it), or the file `OPENCODE_DB` names in the environment seshi runs in. A captured session found
-there is written to the same `transcripts/opencode/<id>.json` the plugin writes, rebuilt as
-`opencode export` prints it, only when that copy is missing or older than the database, so a
-session is uploaded once whichever way seshi found it. seshi reads OpenCode 1.x's `session`,
-`message` and `part` tables and never runs OpenCode for this; a database without them is skipped,
-and `seshi upload --since` says why.
+find sessions no hook saw. OpenCode keeps its sessions in a database, not in files, and seshi
+keeps each one in the shape OpenCode 1.x's `opencode export` prints (`{info, messages}`), whichever
+OpenCode wrote it. The same two plugin files serve both of OpenCode's release lines (one default
+export each: 1.x reads its `server` or `tui`, 2.x its `setup`). On 1.x, after each turn the plugin
+reads the session through OpenCode's own client and hands it to seshi whole. On 2.x a plugin can
+read no whole session, so it names the session, in the hook OpenCode awaits before a session goes
+idle (`experimental.idle`, from 2.2.1; before that, and for a run that failed or was
+interrupted, when the run ends), and seshi reads it from OpenCode's database. Either way seshi
+writes it to `transcripts/opencode/` in the capture folder, only for a session it captures, and
+uploads it whole each time. OpenCode has no end-of-session event, so its sessions end when the
+uploader finds them quiet. A subagent's session (OpenCode's task tool) is captured as its own
+session with its parent's id.
 
-OpenCode's TUI loads its plugins from the `plugin` list in `tui.json`, so `install` adds seshi's
-TUI plugin there and keeps every other entry and setting; `uninstall` takes out only that entry
-(and the file, when nothing but its `$schema` is left). OpenCode also reads a `tui.jsonc`, but a
-`tui.json` with comments is left alone, since rewriting it would drop them: `install` and
-`capture status` say what to add to its `plugin` list by hand. Capture works without the TUI
-plugin; only the status and `/session-capture` without a model turn need it.
+The sweep and `seshi upload --since` also read OpenCode's database, read-only, for the sessions
+the plugin never handed over (from before `install`, or a run without the plugin) and for turns
+it missed: `opencode.db` in OpenCode's data folder (`XDG_DATA_HOME` moves it), or the file
+`OPENCODE_DB` names in the environment seshi runs in (a 2.x plugin also says its release channel,
+whose own `opencode-<channel>.db` seshi then reads). A captured session found there is written to
+the same `transcripts/opencode/<id>.json` the plugin writes, only when that copy is missing or
+older than the database and holds something else (keys in another order, a newer
+`time.updated`, or the session's totals OpenCode works out after a turn, its `cost`, `tokens` and
+`summary`, do not count; a new title does), so a session is uploaded once whichever way seshi
+found it.
+seshi tells which OpenCode wrote the database from its tables: 1.x's `session`, `message` and
+`part`, 2.x's `session_v2` and `session_message` (and `session_part`, from 2.2.2). OpenCode 2.x
+copies a 1.x database's sessions into its own tables once, keeping only each message's last step
+of usage, so a session in both is read from 2.x's copy only when it went on there. seshi never
+runs OpenCode for this; a database it does not know (an early 2.x preview's among them) is
+skipped, and `seshi upload --since` says why.
+
+OpenCode 1.x's TUI loads its plugins from the `plugin` list in `tui.json`, so `install` adds
+seshi's TUI plugin there and keeps every other entry and setting; `uninstall` takes out only that
+entry (and the file, when nothing but its `$schema` is left). OpenCode also reads a `tui.jsonc`,
+but a `tui.json` with comments is left alone, since rewriting it would drop them: `install` and
+`capture status` say what to add to its `plugin` list by hand. OpenCode 2.x's TUI reads the
+`plugins` list in `cli.json` instead, and loads a local plugin from its folder (`tui.js` in it):
+`install` lists `~/.config/opencode/seshi` there, in place of the file entry 2.x copies over from
+`tui.json`, which it cannot load. 2.x writes `cli.json` when it first starts, and seshi never
+creates it (2.x would then not copy your `tui.json` over), so after a first start of OpenCode
+2.x, run `seshi capture install opencode` again; `capture status` says so until then. seshi
+changes `cli.json` holding the lock OpenCode 2.x holds on it, so neither undoes the other's
+change; if OpenCode holds it for more than a few seconds, `install` leaves the file alone and
+says to run it again. Capture
+works without the TUI plugin; only the status and `/session-capture` without a model turn need
+it.
 
 `install` merges: every hook already in those files stays, and running it twice is the same as
 once. A status line someone else set up, in Claude Code or the Cursor CLI, still shows, with
@@ -196,7 +219,12 @@ after `/session-capture`, and `/session-capture` where there is no TUI plugin (`
 web UI) or no session yet (OpenCode's home screen), goes to the command file, which OpenCode
 always sends to the model; seshi's server plugin does what it asks first and puts the answer,
 with a request for a one-line acknowledgement, in place of the command, so the model's reply is
-the only cost. Once seshi has said a session is not captured (at its start, or by `/session-capture`), the
+the only cost. OpenCode 2.x does the same: its TUI plugin puts the status in the prompt's footer
+and takes `/session-capture` as a slash command of its own (nothing is sent), and its toasts come
+from the TUI plugin; `/session-capture` that reaches 2.x's server (the command file, from the web
+UI, or typed into `opencode run`) is carried out by seshi's server plugin before the prompt is
+sent, and the model gets the answer instead, as on 1.x. Once seshi has said a 1.x session is not
+captured (at its start, or by `/session-capture`), the
 server plugin stops reading and handing over its turns, until seshi's status line says it is
 captured again (after the TUI's `/session-capture on`, or `seshi capture on --session`). In both agents,
 the extension and the plugins pass the session's id themselves: seshi's own `SESHI_SESSION_ID`,
@@ -447,8 +475,9 @@ the server stored them.
 - Session Capture in Cursor's Agents Window, which shows no extension's status bar item.
 - A first-run notice inside Cursor that capture is on.
 - Datadog Trajectory's local files.
-- OpenCode 2.x's database, which keeps sessions in other tables, and a development build's own
-  `opencode-<channel>.db`: the sweep skips them (name one with `OPENCODE_DB` for a 1.x channel
-  database); `opencode export <id> > s.json && seshi upload s.json` sends one session by hand.
+- A release channel's own `opencode-<channel>.db` in the sweep (a 2.x plugin's hand-over reads
+  it; name one with `OPENCODE_DB` for the sweep). OpenCode 2.x's own `opencode session export`
+  is not an upload format: seshi tells it from 1.x's and leaves it out.
+- An OpenCode 2.x fork carries a copy of its source session's messages, uploaded with both.
 - pi's forks Oh My Pi and OpenClaw: their session files upload by hand; whether they load pi's
   extensions from the same folder is not checked.

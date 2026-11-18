@@ -147,8 +147,9 @@ export async function sweepAgent(
 /** Write a stored session's transcript to seshi's copy, dated when the session last changed: a
  * copy that is already the same is left as it is, so nothing is sent again. */
 function keepStored(path: string, session: StoredSession): void {
-  const text = session.transcript();
-  if (readText(path) !== text) writePrivateFile(path, text);
+  const copy = readText(path);
+  const text = session.transcript(copy);
+  if (copy !== text) writePrivateFile(path, text);
   const changed = new Date(session.updatedMs);
   utimesSync(path, changed, changed);
 }

@@ -22,6 +22,7 @@ import {
   type OpencodeExport,
   opencodeSessionAt,
   writeOpencodeDb,
+  writeOpencodeDbV2,
 } from "@seshi/integration-opencode/testing";
 import { VERSION } from "@seshi/model";
 import { getSession } from "@seshi/pipeline";
@@ -1101,6 +1102,51 @@ describe("seshi upload --since and the sweep, from OpenCode's database", () => {
         reason: expect.stringContaining("not an OpenCode database seshi can read"),
       },
     ]);
+  });
+
+  it("takes an OpenCode 2.x session its plugin only names, from the database, once captured", async () => {
+    const at = Date.now() - 60_000;
+    const v2 = (id: string) => ({
+      session: { id, directory: project, time: { created: at, updated: at + 2000 } },
+      rows: [
+        {
+          id: `msg_${id}_1`,
+          type: "user",
+          time: at + 100,
+          data: { text: "How does auth work?", time: { created: at + 100 } },
+        },
+        {
+          id: `msg_${id}_2`,
+          type: "assistant",
+          time: at + 1000,
+          data: {
+            agent: "build",
+            model: { id: "fake-1", providerID: "fake" },
+            content: [{ type: "text", text: `The auth flow: ${"details ".repeat(400)}` }],
+            time: { created: at + 1000, completed: at + 2000 },
+          },
+        },
+      ],
+    });
+    writeOpencodeDbV2(database(), [v2("ses_two"), v2("ses_quiet")]);
+    const stop = (session: string) =>
+      machine.seshi(["hook", "opencode", "Stop"], {
+        stdin: JSON.stringify({ session_id: session, cwd: project, opencode_channel: "latest" }),
+      });
+    expect((await stop("ses_two")).code).toBe(0);
+    const doc = JSON.parse(readFileSync(copy("ses_two"), "utf8"));
+    expect(doc.info.id).toBe("ses_two");
+    expect(doc.messages.map((m: { info: { role: string } }) => m.info.role)).toEqual([
+      "user",
+      "assistant",
+    ]);
+    expect((await daemon()).summary).toMatchObject({ uploaded: 1 });
+    expect((await storedOpencode("ses_two"))?.status).toBe("stored");
+
+    // Turned off: seshi neither reads it nor keeps a copy.
+    await machine.seshi(["capture", "off", "--session", "ses_quiet", "--agent", "opencode"]);
+    expect((await stop("ses_quiet")).code).toBe(0);
+    expect(existsSync(copy("ses_quiet"))).toBe(false);
   });
 
   it("the uploader's sweep finds a session the plugin never handed over", async () => {
