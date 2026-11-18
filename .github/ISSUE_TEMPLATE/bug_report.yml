@@ -1,0 +1,113 @@
+name: Bug report
+description: The server, the SDK, or the bucket layout behaves differently from what the docs say.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        # Do not paste real session transcripts
+
+        **This issue is public.** A coding-agent transcript holds your source code, file paths,
+        prompts, tool output, and often credentials. Redaction is best-effort, so a redacted
+        transcript or trace is not safe to paste either.
+
+        Reproduce the bug with a **synthetic** transcript. Hand-write the smallest log that
+        triggers it, and run it through a local server with a file store:
+
+        ```sh
+        SESSIONDB_TOKEN=repro-token-0123456789 SESSIONDB_STORE_URL=file:///tmp/sessiondb-repro bun start
+        curl -s localhost:7200/v1/sessions -H 'authorization: Bearer repro-token-0123456789' \
+          -H 'content-type: application/json' -d @repro.json
+        ```
+
+        `spec/testdata/transcripts/` shows the shape of each agent's format. If you cannot
+        reproduce it synthetically, describe the *structure* of the input that breaks (record
+        types, field names, sizes, encodings) without its content.
+
+        If a secret reached the bucket unredacted, that is a vulnerability: report it through
+        the [security policy](https://github.com/dosu-ai/sessiondb/security/policy), not here.
+
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Transcript privacy
+      options:
+        - label: This report contains no content from a real session, redacted or not.
+          required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: The actual behavior, with the request or SDK call you made and the exact response or error.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+      description: What should have happened, and where the docs (`docs/server.md`, `spec/layout.md`, `spec/openapi.yaml`) say so if they do.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Numbered steps from an empty store. Inline the synthetic transcript if the bug depends on its shape.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The `version` field from `GET /healthz`, or the `@dosu/sessiondb` version from your lockfile.
+      placeholder: "0.9.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Where it happens
+      multiple: true
+      options:
+        - Server (HTTP API or Docker image)
+        - SDK (@dosu/sessiondb)
+        - Redaction
+        - Normalizing a transcript
+        - Bucket layout or change feed
+        - Docs
+    validations:
+      required: true
+
+  - type: dropdown
+    id: agent
+    attributes:
+      label: Agent format
+      description: Which transcript format is involved, if any.
+      multiple: true
+      options:
+        - Claude Code
+        - Codex
+        - Cursor
+        - OpenCode
+        - pi
+        - Gemini CLI
+        - Datadog Trajectory
+        - ATIF
+        - trajectory-v1 records
+        - Not applicable
+
+  - type: dropdown
+    id: store
+    attributes:
+      label: Store
+      options:
+        - file://
+        - s3:// (AWS)
+        - s3:// (another S3-compatible service)
+        - r2://
+        - Not applicable
