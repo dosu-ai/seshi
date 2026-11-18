@@ -207,16 +207,31 @@ const setup = async (ctx) => {
     });
   } catch {}
   const stop = new AbortController();
+  // A stream that ends or fails is subscribed to again, after a wait that grows while it keeps
+  // failing, until the plugin is disposed: every run's end goes on being heard.
+  const wait = (ms) =>
+    new Promise((resolve) => {
+      const timer = setTimeout(resolve, ms);
+      timer.unref?.();
+      stop.signal.addEventListener("abort", () => {
+        clearTimeout(timer);
+        resolve();
+      }, { once: true });
+    });
   void (async () => {
-    try {
-      for await (const event of ctx.event.subscribe({ signal: stop.signal })) {
-        if (!ENDED.has(event?.type)) continue;
-        const id = event.data?.sessionID ?? event.properties?.sessionID;
-        if (typeof id !== "string") continue;
-        if (handed.delete(id) && event.type === "session.execution.succeeded") continue;
-        await handOver(id);
-      }
-    } catch {}
+    for (let delay = 1000; !stop.signal.aborted; delay = Math.min(delay * 2, 60000)) {
+      try {
+        for await (const event of ctx.event.subscribe({ signal: stop.signal })) {
+          delay = 1000;
+          if (!ENDED.has(event?.type)) continue;
+          const id = event.data?.sessionID ?? event.properties?.sessionID;
+          if (typeof id !== "string") continue;
+          if (handed.delete(id) && event.type === "session.execution.succeeded") continue;
+          await handOver(id);
+        }
+      } catch {}
+      if (!stop.signal.aborted) await wait(delay);
+    }
   })();
   // /session-capture: 2.x runs seshi's command file as a prompt (its text, with seshi's marker),
   // and \`opencode run\` sends a typed /session-capture as plain text; seshi carries out either here,

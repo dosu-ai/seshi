@@ -14,6 +14,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -1143,10 +1144,91 @@ describe("seshi upload --since and the sweep, from OpenCode's database", () => {
     expect((await daemon()).summary).toMatchObject({ uploaded: 1 });
     expect((await storedOpencode("ses_two"))?.status).toBe("stored");
 
+    // OpenCode then marks the run idle and totals the session: the sweep reads it again and
+    // finds nothing new to send.
+    const idle = Date.now() + 1000;
+    const { Database } = await import("bun:sqlite");
+    const write = new Database(database());
+    write
+      .query(
+        `INSERT INTO session_message (id, session_id, type, seq, time_created, time_updated, data)
+           VALUES ('msg_ses_two_idle', 'ses_two', 'idle', 2, ?1, ?1, ?2)`,
+      )
+      .run(idle, JSON.stringify({ outcome: "succeeded", time: { created: idle } }));
+    write
+      .query(
+        `UPDATE session_v2 SET time_updated = ?1, time_idle = ?1, idle_outcome = 'succeeded',
+           cost = 0.01, tokens_input = 50 WHERE id = 'ses_two'`,
+      )
+      .run(idle);
+    write.close();
+    const kept = readFileSync(copy("ses_two"), "utf8");
+    const s = state();
+    delete s.uploader.last_sweep;
+    writeFileSync(join(stateDir(), "state.json"), JSON.stringify(s), { mode: 0o600 });
+    expect((await daemon()).summary).toMatchObject({ uploaded: 0 });
+    expect(statSync(copy("ses_two")).mtimeMs).toBe(idle);
+    expect(readFileSync(copy("ses_two"), "utf8")).toBe(kept);
+
     // Turned off: seshi neither reads it nor keeps a copy.
     await machine.seshi(["capture", "off", "--session", "ses_quiet", "--agent", "opencode"]);
     expect((await stop("ses_quiet")).code).toBe(0);
     expect(existsSync(copy("ses_quiet"))).toBe(false);
+  });
+
+  it("the uploader's sweep catches up a session whose turn its 2.x hook could not read", async () => {
+    // The plugin handing one session over records OpenCode as installed now.
+    const first = session("ses_first", Date.now() - 1000);
+    await machine.seshi(["hook", "opencode", "Stop"], {
+      stdin: JSON.stringify({ session_id: "ses_first", cwd: project, export: first }),
+    });
+    expect((await daemon()).summary).toMatchObject({ uploaded: 1 });
+    // A session started before that, resumed, whose turn was not in the database yet when the
+    // hook ran.
+    const at = Date.now() + 1000;
+    const late = {
+      session: {
+        id: "ses_late",
+        directory: project,
+        time: { created: at - 60 * DAY, updated: at + 2000 },
+      },
+      rows: [
+        {
+          id: "msg_late_1",
+          type: "user",
+          time: at + 100,
+          data: { text: "How does auth work?", time: { created: at + 100 } },
+        },
+        {
+          id: "msg_late_2",
+          type: "assistant",
+          time: at + 1000,
+          data: {
+            agent: "build",
+            model: { id: "fake-1", providerID: "fake" },
+            content: [{ type: "text", text: `The auth flow: ${"details ".repeat(400)}` }],
+            time: { created: at + 1000, completed: at + 2000 },
+          },
+        },
+      ],
+    };
+    writeOpencodeDbV2(database(), []);
+    const stop = await machine.seshi(["hook", "opencode", "Stop"], {
+      stdin: JSON.stringify({ session_id: "ses_late", cwd: project, opencode_channel: "latest" }),
+    });
+    expect(stop.code).toBe(0);
+    expect(existsSync(copy("ses_late"))).toBe(false);
+    expect((await daemon()).summary).toMatchObject({ uploaded: 0 });
+    // The turn lands in the database; the next sweep reads it, though it started before install.
+    for (const file of [database(), `${database()}-wal`, `${database()}-shm`]) {
+      rmSync(file, { force: true });
+    }
+    writeOpencodeDbV2(database(), [late]);
+    const s = state();
+    delete s.uploader.last_sweep;
+    writeFileSync(join(stateDir(), "state.json"), JSON.stringify(s), { mode: 0o600 });
+    expect((await daemon()).summary).toMatchObject({ uploaded: 1 });
+    expect((await storedOpencode("ses_late"))?.status).toBe("stored");
   });
 
   it("the uploader's sweep finds a session the plugin never handed over", async () => {

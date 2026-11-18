@@ -10,15 +10,16 @@
  * - `session` + `message` + `part`: OpenCode 1.x.
  * - `session_v2` + `session_message` (+ `session_part` from 2.2.2): OpenCode 2.x.
  * - both: OpenCode 2.x opened a 1.x database and copied its sessions over once, under the same
- *   ids, keeping only each message's last step of usage. A session in both is read from 2.x's
- *   copy when it went on there (it holds newer messages), else from 1.x's, which is whole.
+ *   ids, keeping only each message's last step of usage. A session in both is read from 1.x's
+ *   copy, which is whole, and when it went on in 2.x (2.x's copy holds newer messages), with the
+ *   messages said since read from 2.x's.
  * - `session` + `session_message` alone: an early 2.x preview database, which OpenCode 2.x
  *   imports itself. Refused, as is anything else, saying why.
  *
  * Every session is rebuilt in 1.x's export shape (`./db-export.ts`). */
 
 import { Database } from "bun:sqlite";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import type { CaptureHost, StoredSession } from "@seshi/kit";
 import { opencodeDataDir } from "./capture";
@@ -76,9 +77,12 @@ function columnsOf(db: Database, table: string): Set<string> {
   );
 }
 
-function refused(path: string, why: string): Error {
-  return new Error(
-    `${path} is not an OpenCode database seshi can read (${why}); seshi reads OpenCode 1.x's session, message and part tables and 2.x's session_v2 and session_message`,
+function refused(path: string, why: string, preview = false): Error & { preview: boolean } {
+  return Object.assign(
+    new Error(
+      `${path} is not an OpenCode database seshi can read (${why}); seshi reads OpenCode 1.x's session, message and part tables and 2.x's session_v2 and session_message`,
+    ),
+    { preview },
   );
 }
 
@@ -102,11 +106,13 @@ function open(path: string): Opened {
     const v2 = tables.has("session_v2");
     const v1 = tables.has("session") && tables.has("message") && tables.has("part");
     if (!v1 && !v2) {
+      const preview = tables.has("session") && tables.has("session_message");
       throw refused(
         path,
-        tables.has("session") && tables.has("session_message")
+        preview
           ? "an early OpenCode 2.x preview database, which OpenCode 2.x imports itself"
           : "no session or session_v2 table",
+        preview,
       );
     }
     const gaps = [...(v1 ? missing(db, V1_COLUMNS) : []), ...(v2 ? missing(db, V2_COLUMNS) : [])];
@@ -200,9 +206,21 @@ function list(opened: Opened, sinceMs: number, id?: string): Listed[] {
 }
 
 function exportOf(opened: Opened, session: Listed, host: CaptureHost): string {
-  return session.copy === "v2"
-    ? exportV2(opened.db, session.id, host, opened.parts)
-    : exportV1(opened.db, session.id, host);
+  if (session.copy === "v1") return exportV1(opened.db, session.id, host);
+  const now = exportV2(opened.db, session.id, host, opened.parts);
+  if (!opened.v1 || !opened.db.query("SELECT 1 FROM session WHERE id = ?").get(session.id)) {
+    return now;
+  }
+  // A 1.x session that went on in 2.x: the messages 2.x copied over (under their own ids, with
+  // only each one's last step of usage and without subtasks) are read from 1.x's tables, whole,
+  // and only those said since from 2.x's.
+  const old = JSON.parse(exportV1(opened.db, session.id, host)) as { messages: { info: Row }[] };
+  const doc = JSON.parse(now) as { info: Row; messages: { info: Row }[] };
+  const copied = new Set(old.messages.map((m) => m.info.id));
+  return JSON.stringify({
+    info: doc.info,
+    messages: [...old.messages, ...doc.messages.filter((m) => !copied.has(m.info.id))],
+  });
 }
 
 /** Read `session`'s export in one read transaction, from the database at `path`. */
@@ -229,8 +247,9 @@ function sorted(value: unknown): unknown {
 /** Whether two exports hold the same session: the plugin's copy has OpenCode's server's key
  * order and what the session looked like when it was handed over, and once a turn is over
  * OpenCode goes on to total the session's usage and changes (`cost`, `tokens`, `summary`) and
- * moves its `time.updated`, all from what its messages already hold: nothing new to send. A new
- * title is sent. */
+ * moves its `time.updated`, all from what its messages already hold: nothing new to send. OpenCode
+ * 1.x also works out each prompt's file changes (its message's `summary`) after the turn, in the
+ * background: not new either. A new title is sent. */
 function sameSession(a: string, b: string): boolean {
   try {
     const [x, y] = [JSON.parse(a), JSON.parse(b)];
@@ -241,6 +260,9 @@ function sameSession(a: string, b: string): boolean {
       delete info.tokens;
       delete info.summary;
       delete info.time?.updated;
+      for (const message of Array.isArray(doc.messages) ? doc.messages : []) {
+        if (message?.info?.role === "user") delete message.info.summary;
+      }
     }
     return JSON.stringify(sorted(x)) === JSON.stringify(sorted(y));
   } catch {
@@ -248,35 +270,70 @@ function sameSession(a: string, b: string): boolean {
   }
 }
 
-/** OpenCode's sessions with at least one message that changed (the session, a message or a part)
- * at or after `sinceMs`. None when OpenCode keeps no database here. */
-export function storedOpencodeSessions(host: CaptureHost, sinceMs: number): StoredSession[] {
-  const path = opencodeDatabase(host);
-  if (!path) return [];
-  const opened = open(path);
-  let sessions: Listed[];
+/** The channels' own databases beside `opencode.db` (`opencode-<channel>.db`, which 2.x keeps for
+ * some release channels), unless `$OPENCODE_DB` names the one database OpenCode uses. */
+function channelDatabases(host: CaptureHost): string[] {
+  if (host.env.OPENCODE_DB !== undefined) return [];
+  const data = opencodeDataDir(host);
+  let names: string[];
   try {
-    sessions = list(opened, sinceMs);
-  } finally {
-    opened.db.close();
+    names = readdirSync(data);
+  } catch {
+    return [];
   }
-  return sessions.map((session) => {
-    const cwd = directoryOf(session as unknown as Row, host);
-    const parent = text(session.parent_id);
-    return {
-      info: {
-        session_id: session.id,
-        ...(cwd ? { cwd } : {}),
-        started_at: new Date(session.time_created).toISOString(),
-        ...(parent ? { parent_session_id: parent } : {}),
-      },
-      updatedMs: session.changed,
-      transcript: (copy?: string) => {
-        const text = readExport(path, session, host);
-        return copy !== undefined && sameSession(copy, text) ? copy : text;
-      },
-    };
-  });
+  return names
+    .filter((name) => /^opencode-[\w.-]+\.db$/.test(name))
+    .sort()
+    .map((name) => join(data, name));
+}
+
+/** OpenCode's sessions with at least one message that changed (the session, a message or a part)
+ * at or after `sinceMs`, from its database and each channel's own. None when OpenCode keeps no
+ * database here. A session in more than one is read from the one where it changed last. */
+export function storedOpencodeSessions(host: CaptureHost, sinceMs: number): StoredSession[] {
+  const main = opencodeDatabase(host);
+  const found = new Map<string, StoredSession>();
+  for (const path of [...(main ? [main] : []), ...channelDatabases(host)]) {
+    let opened: Opened;
+    try {
+      opened = open(path);
+    } catch (err) {
+      // An early 2.x preview's own file (`opencode-next.db`), which OpenCode 2.x imports itself.
+      if (path !== main && (err as { preview?: boolean }).preview) continue;
+      throw err;
+    }
+    let sessions: Listed[];
+    try {
+      sessions = list(opened, sinceMs);
+    } finally {
+      opened.db.close();
+    }
+    for (const session of sessions) {
+      const known = found.get(session.id);
+      if (!known || known.updatedMs < session.changed) {
+        found.set(session.id, storedSession(path, session, host));
+      }
+    }
+  }
+  return [...found.values()];
+}
+
+function storedSession(path: string, session: Listed, host: CaptureHost): StoredSession {
+  const cwd = directoryOf(session as unknown as Row, host);
+  const parent = text(session.parent_id);
+  return {
+    info: {
+      session_id: session.id,
+      ...(cwd ? { cwd } : {}),
+      started_at: new Date(session.time_created).toISOString(),
+      ...(parent ? { parent_session_id: parent } : {}),
+    },
+    updatedMs: session.changed,
+    transcript: (copy?: string) => {
+      const text = readExport(path, session, host);
+      return copy !== undefined && sameSession(copy, text) ? copy : text;
+    },
+  };
 }
 
 /** One session's export and when it last changed, for `seshi hook opencode Stop` from a plugin

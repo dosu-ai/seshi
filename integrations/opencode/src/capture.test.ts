@@ -780,7 +780,9 @@ describe("OpenCode 2.x", () => {
       default: { setup: (ctx: unknown) => Promise<() => void> };
     };
     type Hook = (input: Record<string, unknown>) => Promise<void> | void;
-    const make = () => {
+    /** `drops`: the first event stream fails before it says anything, as a dropped connection
+     * does; the plugin subscribes again. */
+    const make = (drops = false) => {
       const hooks: Record<string, Hook> = {};
       const events = [
         { type: "session.created", data: { sessionID: ID } },
@@ -790,6 +792,7 @@ describe("OpenCode 2.x", () => {
       ];
       // The run's end is announced once the test says so (after the idle hook, as OpenCode does).
       let announce = () => {};
+      let subscriptions = 0;
       const announced = new Promise<void>((resolve) => {
         announce = resolve;
       });
@@ -809,15 +812,26 @@ describe("OpenCode 2.x", () => {
           },
         },
         event: {
-          subscribe: () => ({
-            async *[Symbol.asyncIterator]() {
-              await announced;
-              yield* events;
-            },
-          }),
+          subscribe: ({ signal }: { signal: AbortSignal }) => {
+            const n = subscriptions++;
+            return {
+              async *[Symbol.asyncIterator]() {
+                if (drops && n === 0) throw new Error("the stream dropped");
+                if (n > (drops ? 1 : 0)) {
+                  // Nothing more to say, until the plugin is disposed.
+                  await new Promise((resolve) =>
+                    signal.addEventListener("abort", resolve, { once: true }),
+                  );
+                  return;
+                }
+                await announced;
+                yield* events;
+              },
+            };
+          },
         },
       };
-      return { ctx, hooks, announce };
+      return { ctx, hooks, announce, subscriptions: () => subscriptions };
     };
     const stops = () =>
       seshiCalls()
@@ -840,11 +854,20 @@ describe("OpenCode 2.x", () => {
     expect(stops()).toEqual([own, child]);
     cleanup();
 
+    // A stream that drops is subscribed to again, and the run's end still heard.
+    rmSync(process.env.FAKE_SESHI_LOG as string, { force: true });
+    const dropped = make(true);
+    const undrop = await module.default.setup(dropped.ctx);
+    dropped.announce();
+    await vi.waitFor(() => expect(stops()).toEqual([own, child]), { timeout: 5000 });
+    expect(dropped.subscriptions()).toBeGreaterThanOrEqual(2);
+    undrop();
+
     // From 2.2.1: a finished run in the idle hook, which OpenCode awaits before it announces the
     // run's end; only a run that failed or was interrupted from the event.
     rmSync(process.env.FAKE_SESHI_LOG as string, { force: true });
     const now = make();
-    await module.default.setup(now.ctx);
+    const cleanupNow = await module.default.setup(now.ctx);
     await now.hooks["experimental.idle"]?.({ sessionID: ID, background: [] });
     expect(stops()).toEqual([own]);
     now.announce();
@@ -877,6 +900,7 @@ describe("OpenCode 2.x", () => {
     await now.hooks.prompt?.(other);
     expect(other.prompt.text).toBe("explain /session-capture to me");
     expect(seshiCalls()).toHaveLength(before);
+    cleanupNow();
   });
 
   it("shows the status, takes /session-capture, and toasts a new session in the TUI", async () => {

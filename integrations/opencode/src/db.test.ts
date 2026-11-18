@@ -24,6 +24,7 @@ const EXPORT = JSON.parse(
   ),
 ) as OpencodeExport;
 const DAY = 86_400_000;
+type Row = Record<string, unknown>;
 
 /** One more answer, at `at`, with ids of its own. */
 const lateTurn = (at: number): OpencodeExport["messages"][number] => ({
@@ -269,14 +270,129 @@ describe("OpenCode 2.x's database", () => {
     }
   });
 
+  it("rebuilds every kind of 2.x row, with content inline and in session_part in one session", () => {
+    const at = V2.session.time.created;
+    const row = (id: string, type: string, data: Row, inline?: boolean) => ({
+      id,
+      type,
+      time: at + Number(id.slice(-2)),
+      data: { time: { created: at + Number(id.slice(-2)) }, ...data },
+      ...(inline ? { inline } : {}),
+    });
+    const model = { id: "claude-haiku-4-5", providerID: "anthropic" };
+    const shell = (exit: number | undefined, status: string) => ({
+      shellID: "sh_1",
+      command: "bun test",
+      status,
+      ...(exit === undefined ? {} : { exit }),
+      output: { output: "1 pass", cursor: 6, size: 6, truncated: false },
+    });
+    const kinds: OpencodeV2Session = {
+      session: { ...V2.session, id: "ses_kinds" },
+      rows: [
+        row("msg_k01", "user", { text: "Run the tests" }),
+        // Written before OpenCode moved assistant content to session_part: still inline.
+        row(
+          "msg_k02",
+          "assistant",
+          { agent: "build", model, content: [{ type: "text", text: "Older answer" }] },
+          true,
+        ),
+        row("msg_k03", "assistant", {
+          agent: "build",
+          model,
+          content: [
+            { type: "reasoning", text: "Thinking", time: { created: at, completed: at + 1 } },
+            {
+              type: "tool",
+              id: "call_1",
+              name: "bash",
+              state: { status: "streaming", input: '{"command":"bun' },
+              time: { created: at },
+            },
+            {
+              type: "tool",
+              id: "call_2",
+              name: "read",
+              state: {
+                status: "error",
+                input: { filePath: "/x" },
+                error: { type: "fs", message: "no such file" },
+              },
+              time: { created: at, completed: at + 2 },
+            },
+          ],
+        }),
+        row("msg_k04", "shell", shell(0, "exited")),
+        row("msg_k05", "shell", shell(1, "exited")),
+        row("msg_k06", "shell", shell(undefined, "killed")),
+        row("msg_k07", "compaction", {
+          status: "completed",
+          reason: "auto",
+          summary: "So far: tests run",
+        }),
+        row("msg_k08", "compaction", { status: "running", reason: "auto", summary: "" }),
+        row("msg_k09", "synthetic", { text: "A file changed" }),
+        row("msg_k10", "skill", { skill: "sk_1", name: "review", text: "Review rules" }),
+        row("msg_k11", "idle", { outcome: "succeeded" }),
+      ],
+    };
+    writeOpencodeDbV2(db, [kinds], { parts: true });
+    const doc = JSON.parse(storedOpencodeSessions(host, 0)[0]?.transcript() as string);
+    const parts = (i: number) => doc.messages[i].parts as Row[];
+    expect(doc.messages.map((m: { info: Row }) => [m.info.id, m.info.role])).toEqual([
+      ["msg_k01", "user"],
+      ["msg_k02", "assistant"],
+      ["msg_k03", "assistant"],
+      ["msg_k04", "assistant"],
+      ["msg_k05", "assistant"],
+      ["msg_k06", "assistant"],
+      ["msg_k07", "assistant"],
+      ["msg_k09", "user"],
+      ["msg_k10", "user"],
+    ]);
+    expect(parts(1)).toMatchObject([{ type: "text", text: "Older answer" }]);
+    expect(parts(2)).toMatchObject([
+      { type: "reasoning", text: "Thinking" },
+      {
+        type: "tool",
+        tool: "bash",
+        state: { status: "running", input: { raw: '{"command":"bun' } },
+      },
+      { type: "tool", tool: "read", state: { status: "error", error: "no such file" } },
+    ]);
+    expect(parts(3)).toMatchObject([
+      { tool: "shell", state: { status: "completed", output: "1 pass" } },
+    ]);
+    expect(parts(4)).toMatchObject([
+      { tool: "shell", state: { status: "error", error: "exit 1" } },
+    ]);
+    expect(parts(5)).toMatchObject([
+      { tool: "shell", state: { status: "error", error: "exit killed" } },
+    ]);
+    expect(doc.messages[6].info.summary).toBe(true);
+    expect(parts(6)).toMatchObject([{ type: "text", text: "So far: tests run" }]);
+    expect(parts(7)).toMatchObject([{ type: "text", text: "A file changed", synthetic: true }]);
+    expect(parts(8)).toMatchObject([{ type: "text", text: "Review rules", synthetic: true }]);
+  });
+
   it("reads a 2.x copy of a 1.x session only when the session went on in 2.x", () => {
-    // OpenCode 2.x copied the 1.x session over and nothing more was said: 1.x's copy is whole.
-    writeOpencodeDbV2(db, [V2], { v1: [EXPORT] });
+    // OpenCode 2.x copied the 1.x session over, under the same message ids, and nothing more was
+    // said: 1.x's copy is whole.
+    const ids = new Map(
+      ["msg_v2_1", "msg_v2_2", "msg_v2_3"].map((id, i) => [id, EXPORT.messages[i]?.info.id]),
+    );
+    const migrated = {
+      ...V2,
+      rows: V2.rows.map((row) => ({ ...row, id: ids.get(row.id) ?? row.id })),
+    };
+    writeOpencodeDbV2(db, [migrated], { v1: [EXPORT] });
     let [found] = storedOpencodeSessions(host, 0);
     expect(JSON.parse(found?.transcript() as string).messages[0].info.id).toBe(
       EXPORT.messages[0]?.info.id,
     );
-    // Then a turn in 2.x: its copy holds the newer messages.
+    // Then a turn in 2.x: its copy holds the newer messages, which follow 1.x's whole copy of the
+    // ones it copied over (2.x's keeps only each one's last step).
     rmSync(db, { force: true });
     rmSync(`${db}-wal`, { force: true });
     rmSync(`${db}-shm`, { force: true });
@@ -286,11 +402,53 @@ describe("OpenCode 2.x's database", () => {
       time: 1790963999000,
       data: { text: "And logout?", time: { created: 1790963999000 } },
     };
-    writeOpencodeDbV2(db, [{ ...V2, rows: [...V2.rows, later] }], { v1: [EXPORT] });
+    writeOpencodeDbV2(db, [{ ...migrated, rows: [...migrated.rows, later] }], { v1: [EXPORT] });
     [found] = storedOpencodeSessions(host, 0);
     const doc = JSON.parse(found?.transcript() as string);
-    expect(doc.messages.at(-1).info.id).toBe("msg_v2_5");
+    expect(doc.messages.map((m: { info: { id: string } }) => m.info.id)).toEqual([
+      ...EXPORT.messages.map((m) => m.info.id),
+      "msg_v2_5",
+    ]);
+    expect(doc.messages.slice(0, -1)).toEqual(JSON.parse(JSON.stringify(EXPORT.messages)));
     expect(found?.updatedMs).toBe(1790963999000);
+  });
+
+  it("keeps seshi's copy when OpenCode 1.x works out a prompt's file changes after the turn", () => {
+    writeOpencodeDb(db, [EXPORT]);
+    const copy = storedOpencodeSessions(host, 0)[0]?.transcript() as string;
+    const write = new Database(db);
+    write
+      .query(
+        `UPDATE message SET data = json_set(data, '$.summary', json(?)),
+           time_updated = time_updated + 5000 WHERE id = ?`,
+      )
+      .run(
+        JSON.stringify({ diffs: [{ file: "auth.ts", additions: 1, deletions: 0 }] }),
+        EXPORT.messages[0]?.info.id as string,
+      );
+    write.close();
+    const [found] = storedOpencodeSessions(host, 0);
+    expect(JSON.parse(found?.transcript() as string).messages[0].info.summary).toBeDefined();
+    expect(found?.transcript(copy)).toBe(copy);
+  });
+
+  it("sweeps each channel's own database too, and skips an early preview's", () => {
+    writeOpencodeDb(db, [EXPORT]);
+    const data = join(home, ".local", "share", "opencode");
+    writeOpencodeDbV2(join(data, "opencode-local.db"), [
+      { ...V2, session: { ...V2.session, id: "ses_channel" } },
+    ]);
+    const preview = new Database(join(data, "opencode-next.db"), { create: true });
+    preview.run("CREATE TABLE session (id text PRIMARY KEY)");
+    preview.run("CREATE TABLE session_message (id text PRIMARY KEY)");
+    preview.close();
+    expect(storedOpencodeSessions(host, 0).map((s) => s.info.session_id)).toEqual([
+      EXPORT.info.id,
+      "ses_channel",
+    ]);
+    // OPENCODE_DB names the one database OpenCode uses.
+    host.env = { OPENCODE_DB: db };
+    expect(storedOpencodeSessions(host, 0).map((s) => s.info.session_id)).toEqual([EXPORT.info.id]);
   });
 
   it("keeps seshi's copy when OpenCode only totals the session after the turn", () => {

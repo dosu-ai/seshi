@@ -31,6 +31,10 @@ export interface FoundTranscript {
 export interface SweepOptions {
   /** Told why an agent's store could not be read (its sessions there are left out). */
   onProblem?(message: string): void;
+  /** Whether seshi already knows the session (a hook or an earlier sweep found it): one found in
+   * the agent's store is then taken however long ago it started, so a turn its hook could not
+   * read is caught up. */
+  known?(sessionId: string): boolean;
 }
 
 /** The first `HEAD_BYTES` of a file as text; empty when it cannot be read. */
@@ -127,7 +131,7 @@ export async function sweepAgent(
     const copied = statSync(path, { throwIfNoEntry: false })?.mtimeMs;
     if (copied !== undefined && copied >= session.updatedMs) continue;
     const started = startedMs(session.info, 0, session.updatedMs);
-    if (started < sinceMs) continue;
+    if (started < sinceMs && !options.known?.(session.info.session_id)) continue;
     const entry: FoundTranscript = {
       agent,
       path,
