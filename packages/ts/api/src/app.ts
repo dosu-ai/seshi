@@ -809,6 +809,29 @@ export function createApp(instance: Instance) {
     return json(await instance.status());
   });
 
+  route("GET", "/v1/admin/reload", async ({ request }) => {
+    await caller(request, "sources:admin");
+    return json(instance.configStatus());
+  });
+
+  route("POST", "/v1/admin/reload", async ({ request }) => {
+    await caller(request, "sources:admin");
+    if (!instance.configStatus().reloadable) {
+      throw new HttpError(
+        409,
+        "not_reloadable",
+        "this server was not started from a config file it can read again",
+      );
+    }
+    const report = await instance.reload("api");
+    const body = { reload: report, config: instance.configStatus() };
+    if (report.outcome === "rejected") {
+      const message = `the config was not applied; the running one stays: ${(report.errors ?? []).join("; ")}`;
+      return json({ error: { code: "reload_rejected", message }, ...body }, 422);
+    }
+    return json(body);
+  });
+
   route("GET", "/v1/redaction/rules", async ({ request }) => {
     await authenticate(request);
     const document = rulesDocument(instance.redaction);

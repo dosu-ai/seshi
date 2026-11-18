@@ -16,6 +16,10 @@ path = "{email}/{session}.jsonl"           # optional: what a key says about its
 interval = "5m"
 ```
 
+A new or changed source applies without a restart: save the file (or a drop-in in
+`seshi.d/`, one file per bucket) and send the server `SIGHUP` or `POST /v1/admin/reload`
+([config.md](config.md#reloading)). Other sources keep polling and every checkpoint is kept.
+
 Each run lists the prefix and compares every key's ETag and size with the manifest in the
 source's checkpoint, so an unchanged object is never read again (F6.2).
 

@@ -1,4 +1,4 @@
-import { join, posix, resolve, win32 } from "node:path";
+import { dirname, join, posix, resolve, win32 } from "node:path";
 
 export const CONFIG_ENV = "SESHI_CONFIG";
 
@@ -7,9 +7,18 @@ export const NOT_SETTINGS_ENV: readonly string[] = [
   "SESHI_SESSION_ID",
   "SESHI_AGENT",
   "SESHI_NO_UPLOADER",
+  // Cursor Cloud's secret for `seshi login --token -`, read by its setup step, never by seshi.
+  "SESHI_TOKEN",
 ];
 export const SERVER_CONFIG_NAME = "seshi.toml";
 export const SYSTEM_CONFIG_PATH = "/etc/seshi/seshi.toml";
+export const DROP_IN_DIR_NAME = "seshi.d";
+
+/** The drop-in folder beside a server config file: `/etc/seshi/seshi.d` for
+ * `/etc/seshi/seshi.toml`. */
+export function serverDropInDir(configFile: string): string {
+  return join(dirname(configFile), DROP_IN_DIR_NAME);
+}
 
 export interface ServerConfigLookup {
   flag?: string;

@@ -28,6 +28,8 @@ import {
   TUI_PLUGIN_MARKER,
 } from "./plugin";
 
+// These waits cover a real child process, which can take over a second to start on a Windows runner.
+const SPAWNED = { timeout: 10_000 };
 const TESTDATA = join(import.meta.dirname, "../testdata");
 const payload = (name: string) =>
   JSON.parse(readFileSync(join(TESTDATA, "hooks", `${name}.json`), "utf8"));
@@ -476,7 +478,7 @@ describe("the OpenCode plugin", () => {
         properties: { info: { ...EXPORT.info, id: "ses_child", parentID: ID } },
       },
     });
-    await vi.waitFor(() => expect(oc.toasts).toHaveLength(1));
+    await vi.waitFor(() => expect(oc.toasts).toHaveLength(1), SPAWNED);
     expect(oc.calls().map((c) => c.args)).toEqual([["hook", "opencode", "SessionStart"]]);
     expect(oc.toasts).toEqual([
       expect.objectContaining({
@@ -635,7 +637,7 @@ describe("the OpenCode TUI plugin", () => {
     const tui = await load();
     const node = tui.show(ID);
     expect(node.tag).toBe("text");
-    await vi.waitFor(() => expect(node.text()).toBe("Session Capture ◉"));
+    await vi.waitFor(() => expect(node.text()).toBe("Session Capture ◉"), SPAWNED);
     expect(node.props.fg).toBe("muted");
     const [call] = tui.calls();
     expect(call?.args).toEqual(["statusline", "--agent", "opencode"]);
@@ -644,14 +646,14 @@ describe("the OpenCode TUI plugin", () => {
 
     // A subagent's session is captured with its parent's: the status is the parent's.
     const child = tui.show("ses_child");
-    await vi.waitFor(() => expect(child.text()).toBe("Session Capture ◉"));
+    await vi.waitFor(() => expect(child.text()).toBe("Session Capture ◉"), SPAWNED);
     expect(JSON.parse(tui.calls()[1]?.input ?? "")).toEqual({ session_id: ID, cwd: "/repo/app" });
 
     // After a turn, the session in view is read again: for its own turn or a subagent's, not
     // another session's.
     tui.events["session.idle"]?.({ properties: { sessionID: "ses_other" } });
     tui.events["session.idle"]?.({ properties: { sessionID: "ses_child" } });
-    await vi.waitFor(() => expect(tui.calls()).toHaveLength(3));
+    await vi.waitFor(() => expect(tui.calls()).toHaveLength(3), SPAWNED);
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect(tui.calls()).toHaveLength(3);
   });
@@ -659,10 +661,10 @@ describe("the OpenCode TUI plugin", () => {
   it("carries out /session-capture off from the prompt, so nothing reaches the model", async () => {
     const tui = await load();
     const node = tui.show(ID);
-    await vi.waitFor(() => expect(node.text()).toBe("Session Capture ◉"));
+    await vi.waitFor(() => expect(node.text()).toBe("Session Capture ◉"), SPAWNED);
     expect(tui.submit("  /session-capture off ")).toBe(true);
     expect(tui.dispatched).toEqual(["prompt.clear"]);
-    await vi.waitFor(() => expect(node.text()).toBe("Session Capture ⏸"));
+    await vi.waitFor(() => expect(node.text()).toBe("Session Capture ⏸"), SPAWNED);
     const command = tui.calls().find((c) => c.args[2] === "Command");
     expect(command?.args).toEqual(["hook", "opencode", "Command"]);
     expect(JSON.parse(command?.input ?? "")).toEqual({
@@ -684,9 +686,9 @@ describe("the OpenCode TUI plugin", () => {
     const tui = await load();
     writeFileSync(join(home, "slow"), "");
     const node = tui.show(ID);
-    await vi.waitFor(() => expect(existsSync(join(home, "slow"))).toBe(false));
+    await vi.waitFor(() => expect(existsSync(join(home, "slow"))).toBe(false), SPAWNED);
     expect(tui.submit("/session-capture off")).toBe(true);
-    await vi.waitFor(() => expect(node.text()).toBe("Session Capture ⏸"));
+    await vi.waitFor(() => expect(node.text()).toBe("Session Capture ⏸"), SPAWNED);
     await new Promise((resolve) => setTimeout(resolve, 1200));
     expect(node.text()).toBe("Session Capture ⏸");
   });

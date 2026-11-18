@@ -29,6 +29,8 @@ export interface LoginProfile {
   delete_fresh_seconds?: number;
   /** The device token's id and expiry: it is renewed by signing in again (X5.9). */
   device?: { id: string; expires_at: string };
+  /** With a pasted token: when the server said it stops working (a device token's 90 days). */
+  token_expires_at?: string;
   /** Where the secrets went: `keychain` or `file`. */
   stored_in: string;
   signed_in_at: string;

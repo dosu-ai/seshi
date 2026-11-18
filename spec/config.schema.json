@@ -38,6 +38,11 @@
           "description": "This instance's stable name in source health shards and the worker heartbeat; the host name when unset.",
           "type": "string",
           "pattern": "^[A-Za-z0-9_-]{1,64}$"
+        },
+        "watch_config": {
+          "default": false,
+          "description": "Reload when the config file, a drop-in in seshi.d/, a redaction pack or a review prompt file changes, a second after the last change. Off by default: SIGHUP and POST /v1/admin/reload apply changes when you say so and report the result.",
+          "type": "boolean"
         }
       },
       "additionalProperties": false
@@ -673,7 +678,7 @@
                     "minLength": 1
                   },
                   "prompt_file": {
-                    "description": "The prompt, from a file read at start.",
+                    "description": "The prompt, from a file read at start and again on every config reload.",
                     "type": "string",
                     "minLength": 1
                   },
@@ -781,7 +786,7 @@
                     "minLength": 1
                   },
                   "prompt_file": {
-                    "description": "The prompt, from a file read at start.",
+                    "description": "The prompt, from a file read at start and again on every config reload.",
                     "type": "string",
                     "minLength": 1
                   },

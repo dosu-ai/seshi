@@ -102,7 +102,7 @@ export class Auth {
   readonly sessions: SessionTokens | undefined;
   readonly oidc: OidcVerifier | undefined;
   private readonly now: () => Date;
-  private readonly sources: ReadonlySet<string> | undefined;
+  private sources: ReadonlySet<string> | undefined;
 
   constructor(
     readonly settings: AuthSettings,
@@ -136,6 +136,11 @@ export class Auth {
         })
       : undefined;
     this.sources = options.sources ? new Set(options.sources) : undefined;
+  }
+
+  /** The configured source ids a writing service token may act for (a config reload). */
+  setSources(ids: readonly string[]): void {
+    this.sources = new Set(ids);
   }
 
   modes(): AuthModes {

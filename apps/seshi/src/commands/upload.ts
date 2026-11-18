@@ -34,6 +34,7 @@ import { emit, fail, helpOrUsageError, takeJson } from "../cli/output";
 import { printable, styleFor } from "../cli/style";
 import { pathsOf } from "./capture-host";
 import type { CommandContext } from "./index";
+import { passUntilSettled } from "./passes";
 
 const USAGE = [
   "usage: seshi upload <path>… [--agent <agent>] [--json]",
@@ -270,15 +271,7 @@ async function upload(
     const lock = acquireUploaderLock(paths);
     if (lock) {
       try {
-        for (let i = 0; i < 50; i++) {
-          if (!lock.beat()) break;
-          const summary = await runtime.uploader.pass({ only });
-          if (summary.signIn) {
-            signIn = summary.signIn;
-            break;
-          }
-          if (summary.uploaded === 0) break;
-        }
+        signIn = await passUntilSettled(runtime.uploader, lock, only);
       } finally {
         lock.release();
       }

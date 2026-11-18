@@ -88,6 +88,25 @@ function nonEmptyOptional(
 
 const WITHHELD = new Set(["sensitive-file", "secret-output", "review"]);
 
+/** A user record's labels for content the agent or a plugin added to the turn: `synthetic`, and
+ * `omitted`, the items left out there at their integrator's request. */
+function injected(index: number, record: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  const synthetic = record.synthetic;
+  if (synthetic !== undefined && synthetic !== null) {
+    if (synthetic !== true) fail(index, "synthetic must be true");
+    out.synthetic = true;
+  }
+  const omitted = record.omitted;
+  if (omitted !== undefined && omitted !== null) {
+    if (!Number.isInteger(omitted) || (omitted as number) < 1) {
+      fail(index, "omitted must be an integer ≥ 1");
+    }
+    out.omitted = omitted;
+  }
+  return out;
+}
+
 function extensions(
   index: number,
   record: Record<string, unknown>,
@@ -104,6 +123,7 @@ function extensions(
   if (role !== "tool") {
     const call = nonEmptyOptional(index, record, "llm_call");
     if (call !== undefined) out.llm_call = call;
+    if (role === "user") Object.assign(out, injected(index, record));
     return out;
   }
   const withheld = record.withheld;

@@ -136,6 +136,12 @@ export async function credentialFor(
     case "token": {
       const token = await options.logins.secret(profile.server, "token");
       if (!token) throw missing();
+      if (profile.token_expires_at !== undefined && msUntil(profile.token_expires_at, now) <= 0) {
+        throw new NotSignedIn(
+          profile.server,
+          `the token for ${profile.server}${profile.owner ? ` (${profile.owner})` : ""} expired ${profile.token_expires_at.slice(0, 10)}; an admin makes a new one (seshi tokens create device --owner ${profile.owner ?? "<owner>"} --expires 365d) to sign in with (on Cursor Cloud: put it in the SESHI_TOKEN secret)`,
+        );
+      }
       return { server: profile.server, token, profile };
     }
     case "oidc": {

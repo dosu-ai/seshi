@@ -12,6 +12,13 @@ export {
 export { asTranscript, attachCalls, type CallSite, isoTimestamp, type SourceCalls } from "./calls";
 export { detectFormat } from "./detect";
 export {
+  type Injected,
+  OMITTED_TEXT,
+  omitRequested,
+  type RecordLabels,
+  SESSION_CAPTURE_KEY,
+} from "./injected";
+export {
   type LettaAdapterOptions,
   type LettaSource,
   lettaAdapter,

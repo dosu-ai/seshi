@@ -6,6 +6,10 @@
 
 [server]
 listen = ":7200"
+# Changes to sources, rule packs and the other live settings apply on SIGHUP or
+# POST /v1/admin/reload, without a restart (docs/config.md#reloading). Set this to reload by
+# itself when this file, a drop-in in seshi.d/ or a rule pack changes.
+# watch_config = true
 
 [store]
 url = "s3://acme-sessions/prod"

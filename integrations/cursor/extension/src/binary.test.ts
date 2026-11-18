@@ -40,5 +40,20 @@ describe("the seshi program", () => {
         }),
       ),
     ).toBe("/Users/me/.local/bin/seshi");
+    // The hook committed to a repository for Cursor Cloud is a shell line, not a program: never
+    // taken, even in a home folder that is also a repository. Its exact text is checked where it
+    // is written (`projectHookCommand`).
+    const committed =
+      '[ -e "${XDG_STATE_HOME:-$HOME/.local/state}/seshi/cursor-cloud" ] || exit 0; s=$(command -v seshi || echo "$HOME/.local/bin/seshi"); [ -x "$s" ] || exit 0; exec "$s" hook cursor stop --cloud';
+    expect(programFromHooks(hooks(committed))).toBeUndefined();
+    expect(
+      programFromHooks(
+        JSON.stringify({
+          hooks: {
+            stop: [{ command: committed }, { command: "/opt/seshi/seshi hook cursor stop" }],
+          },
+        }),
+      ),
+    ).toBe("/opt/seshi/seshi");
   });
 });

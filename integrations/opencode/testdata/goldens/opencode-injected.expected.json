@@ -1,0 +1,60 @@
+{
+  "rejected": false,
+  "content_hash": "38f111f79f4c27681e07e8e7f47fdb0abc509e8e6dcecaa8c9d224ba150e238e",
+  "source": "opencode",
+  "started_at": "2026-10-02T18:00:00.100Z",
+  "ended_at": "2026-10-02T18:00:08.000Z",
+  "metadata": {
+    "cwd": "/repo/app",
+    "model": "claude-haiku-4-5"
+  },
+  "events": [
+    {
+      "index": 0,
+      "role": "user",
+      "text": "Why does @src/auth.ts read KEY?",
+      "timestamp": "2026-10-02T18:00:00.100Z"
+    },
+    {
+      "index": 1,
+      "role": "user",
+      "text": "Called the Read tool with the following input: {\"filePath\":\"/repo/app/src/auth.ts\"}",
+      "timestamp": "2026-10-02T18:00:00.100Z"
+    },
+    {
+      "index": 2,
+      "role": "user",
+      "text": "",
+      "timestamp": "2026-10-02T18:00:00.100Z"
+    },
+    {
+      "index": 3,
+      "role": "assistant",
+      "text": "Checking where KEY is set.",
+      "timestamp": "2026-10-02T18:00:02.100Z"
+    },
+    {
+      "index": 4,
+      "role": "tool_call",
+      "text": "grep {\"pattern\":\"KEY =\"}",
+      "timestamp": "2026-10-02T18:00:03.000Z",
+      "tool_name": "grep",
+      "tool_call_id": "toolu_01InjectedFixture00000001"
+    },
+    {
+      "index": 5,
+      "role": "tool_result",
+      "text": "src/auth.ts:1:export const KEY = 1;",
+      "timestamp": "2026-10-02T18:00:03.200Z",
+      "tool_call_id": "toolu_01InjectedFixture00000001",
+      "tool_name": "grep",
+      "ok": true
+    },
+    {
+      "index": 6,
+      "role": "assistant",
+      "text": "KEY is a constant in src/auth.ts, set to 1.",
+      "timestamp": "2026-10-02T18:00:08.000Z"
+    }
+  ]
+}

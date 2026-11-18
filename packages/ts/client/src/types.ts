@@ -141,6 +141,38 @@ export interface JobsStatus {
   warnings: string[];
 }
 
+/** One config reload (`POST /v1/admin/reload`); `spec/openapi.yaml`'s `ReloadReport`. */
+export interface ReloadReport {
+  trigger: "signal" | "api" | "watch" | "manual";
+  started_at: string;
+  finished_at: string;
+  outcome: "applied" | "unchanged" | "rejected";
+  generation: number;
+  config_hash: string;
+  rule_set: string;
+  review_set: string | null;
+  errors?: string[];
+  changed: string[];
+  sources?: { added: string[]; removed: string[]; changed: string[]; unchanged: string[] };
+  restart_required: string[];
+}
+
+/** `GET /v1/admin/reload`: the running config's generation and hash, and the last reload. */
+export interface ConfigStatus {
+  generation: number;
+  config_hash: string;
+  rule_set: string;
+  /** A hash of the running review policies (their prompt text included); null for a reviewer
+   * seshi did not build. */
+  review_set: string | null;
+  loaded_at: string;
+  reloadable: boolean;
+  restart_required: string[];
+  last_reload: ReloadReport | null;
+  live_sections: string[];
+  restart_only_sections: string[];
+}
+
 /** One stored write's model review (`GET /v1/sessions/{agent}/{id}/reviews`, F3.8). Callers
  * who are not admins get `schema`, `n`, `at`, `content_hash` and `decision` only. */
 export interface ReviewDecision {

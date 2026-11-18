@@ -51,75 +51,75 @@ function overlaps(a: string, b: string): boolean {
   return inside(a, b) || inside(b, a);
 }
 
+type Sections = z.output<typeof sections>;
+
+/** The checks that span sections: unique source ids, a source reading seshi's own bucket,
+ * session keys, review policies naming sources. The schema runs them; a reload runs them again
+ * on the config it would apply, whose restart-only sections are the running ones. */
+function crossCheck(
+  config: Sections,
+  issue: (path: (string | number)[], message: string) => void,
+): void {
+  const seen = new Set<string>();
+  config.sources.forEach((source, i) => {
+    if (seen.has(source.id)) issue(["sources", i, "id"], `id '${source.id}' is used twice`);
+    seen.add(source.id);
+    if (source.type === "s3") {
+      const own = bucketOf(config.store.url);
+      const read = bucketOf(source.url, source.prefix);
+      if (own && read && own.at === read.at && overlaps(own.prefix, read.prefix)) {
+        issue(
+          ["sources", i, "url"],
+          "reads seshi's own bucket and prefix (store.url); a source must point elsewhere (F6.4)",
+        );
+      }
+    }
+  });
+  const keys = Object.keys(config.auth.session_keys);
+  const keyId = config.auth.session_key_id;
+  if (keyId !== undefined && !keys.includes(keyId)) {
+    issue(
+      ["auth", "session_key_id"],
+      `names no key in auth.session_keys (${keys.join(", ") || "none"})`,
+    );
+  }
+  if (config.auth.oidc !== undefined && keys.length === 0) {
+    issue(["auth", "session_keys"], "auth.oidc needs a key here to sign session tokens (X5.9)");
+  }
+  if (keyId === undefined && keys.length > 1) {
+    issue(
+      ["auth", "session_key_id"],
+      "required when auth.session_keys holds more than one key: which one signs",
+    );
+  }
+  const policies = new Set<string>();
+  config.review.policies.forEach((policy, i) => {
+    if (policies.has(policy.id)) {
+      issue(["review", "policies", i, "id"], `id '${policy.id}' is used twice`);
+    }
+    policies.add(policy.id);
+    policy.sources.forEach((id, j) => {
+      if (id !== UPLOAD_SOURCE_ID && !seen.has(id)) {
+        issue(
+          ["review", "policies", i, "sources", j],
+          `no source with id '${id}' (or '${UPLOAD_SOURCE_ID}' for uploads)`,
+        );
+      }
+    });
+  });
+}
+
+/** What `crossCheck` finds in a parsed config, as `path: message` lines. */
+export function serverConfigProblems(config: ServerConfig): string[] {
+  const problems: string[] = [];
+  crossCheck(config, (path, message) => problems.push(`${path.join(".")}: ${message}`));
+  return problems;
+}
+
 export const serverConfigSchema = sections
-  .superRefine((config, ctx) => {
-    const seen = new Set<string>();
-    config.sources.forEach((source, i) => {
-      if (seen.has(source.id)) {
-        ctx.addIssue({
-          code: "custom",
-          path: ["sources", i, "id"],
-          message: `id '${source.id}' is used twice`,
-        });
-      }
-      seen.add(source.id);
-      if (source.type === "s3") {
-        const own = bucketOf(config.store.url);
-        const read = bucketOf(source.url, source.prefix);
-        if (own && read && own.at === read.at && overlaps(own.prefix, read.prefix)) {
-          ctx.addIssue({
-            code: "custom",
-            path: ["sources", i, "url"],
-            message:
-              "reads seshi's own bucket and prefix (store.url); a source must point elsewhere (F6.4)",
-          });
-        }
-      }
-    });
-    const keys = Object.keys(config.auth.session_keys);
-    const keyId = config.auth.session_key_id;
-    if (keyId !== undefined && !keys.includes(keyId)) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["auth", "session_key_id"],
-        message: `names no key in auth.session_keys (${keys.join(", ") || "none"})`,
-      });
-    }
-    if (config.auth.oidc !== undefined && keys.length === 0) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["auth", "session_keys"],
-        message: "auth.oidc needs a key here to sign session tokens (X5.9)",
-      });
-    }
-    if (keyId === undefined && keys.length > 1) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["auth", "session_key_id"],
-        message: "required when auth.session_keys holds more than one key: which one signs",
-      });
-    }
-    const policies = new Set<string>();
-    config.review.policies.forEach((policy, i) => {
-      if (policies.has(policy.id)) {
-        ctx.addIssue({
-          code: "custom",
-          path: ["review", "policies", i, "id"],
-          message: `id '${policy.id}' is used twice`,
-        });
-      }
-      policies.add(policy.id);
-      policy.sources.forEach((id, j) => {
-        if (id !== UPLOAD_SOURCE_ID && !seen.has(id)) {
-          ctx.addIssue({
-            code: "custom",
-            path: ["review", "policies", i, "sources", j],
-            message: `no source with id '${id}' (or '${UPLOAD_SOURCE_ID}' for uploads)`,
-          });
-        }
-      });
-    });
-  })
+  .superRefine((config, ctx) =>
+    crossCheck(config, (path, message) => ctx.addIssue({ code: "custom", path, message })),
+  )
   .describe(
     "seshi server configuration (seshi.toml). Precedence: flags, then SESHI_* env, then this file, then defaults.",
   );
@@ -166,6 +166,7 @@ export {
   type ReviewSection,
   type ReviewStepConfig,
   resolveSteps,
+  reviewPromptFiles,
   reviewSection,
 } from "./review";
 export { type SearchSection, searchSection } from "./search";

@@ -1,7 +1,7 @@
 import type { FormatRegistry } from "@seshi/formats";
 import { type AssembleReport, assemblePending, type Pipeline } from "@seshi/pipeline";
 import type { SearchService } from "@seshi/search";
-import type { Sources } from "@seshi/sources";
+import type { SourceInfo, Sources } from "@seshi/sources";
 import {
   type Heartbeat,
   listPending,
@@ -104,13 +104,14 @@ export function heartbeatJob(host: JobHost): Job {
 }
 
 export function retentionJob(host: JobHost): Job {
-  const { records } = host.config;
   return {
     name: "retention",
     kind: "retention",
     placement: "worker",
     intervalMs: RETENTION_INTERVAL_MS,
     async run(signal) {
+      // Read at each run: [records] can change on a reload.
+      const { records } = host.config;
       const now = () => host.now();
       const summary = { dropped: 0, failed: 0, health: 0 };
       for (const source of await sourcesWithRecords(host.store)) {
@@ -134,35 +135,43 @@ export function retentionJob(host: JobHost): Job {
   };
 }
 
+export const POLLER_PREFIX = "source:";
+
+/** The job that polls one source, named `source:<id>`. */
+export function pollerJob(
+  host: Pick<JobHost, "sources" | "store" | "now">,
+  source: SourceInfo,
+): Job {
+  return {
+    name: `${POLLER_PREFIX}${source.id}`,
+    kind: "poller",
+    placement: "worker",
+    intervalMs: source.interval_ms ?? 5 * 60 * 1000,
+    source: source.id,
+    async run(signal) {
+      const report = await host.sources.run(source.id, { signal });
+      return {
+        outcome: report.outcome,
+        ...(report.error ? { error: report.error } : {}),
+        more: report.more,
+        summary: {
+          submitted: report.submitted,
+          ...report.outcomes,
+          ...(report.lag_ms !== undefined ? { lag_ms: report.lag_ms } : {}),
+        },
+      };
+    },
+    async backlog(): Promise<Record<string, number>> {
+      const checkpoint = await readCheckpoint(host.store, source.id);
+      if (!checkpoint) return { no_checkpoint: 1 };
+      const age = host.now().getTime() - Date.parse(checkpoint.value.updated_at);
+      return { checkpoint_age_ms: Math.max(0, age) };
+    },
+  };
+}
+
 export function pollerJobs(host: JobHost): Job[] {
-  return host.sources.polled().map(
-    (source): Job => ({
-      name: `source:${source.id}`,
-      kind: "poller",
-      placement: "worker",
-      intervalMs: source.interval_ms ?? 5 * 60 * 1000,
-      source: source.id,
-      async run(signal) {
-        const report = await host.sources.run(source.id, { signal });
-        return {
-          outcome: report.outcome,
-          ...(report.error ? { error: report.error } : {}),
-          more: report.more,
-          summary: {
-            submitted: report.submitted,
-            ...report.outcomes,
-            ...(report.lag_ms !== undefined ? { lag_ms: report.lag_ms } : {}),
-          },
-        };
-      },
-      async backlog(): Promise<Record<string, number>> {
-        const checkpoint = await readCheckpoint(host.store, source.id);
-        if (!checkpoint) return { no_checkpoint: 1 };
-        const age = host.now().getTime() - Date.parse(checkpoint.value.updated_at);
-        return { checkpoint_age_ms: Math.max(0, age) };
-      },
-    }),
-  );
+  return host.sources.polled().map((source) => pollerJob(host, source));
 }
 
 export const DEFAULT_QUIET_PERIOD_MS = 10 * 60 * 1000;

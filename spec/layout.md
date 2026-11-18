@@ -159,7 +159,10 @@ Nothing else of a session's content is stored (X6.3): no raw transcript, no payl
 Records may carry `id` (the record's id in its source), `llm_call` (the call in `llm_calls`
 that produced it), and on tool results `withheld` (`sensitive-file` or `secret-output` from the
 rules, `review` when model review withheld it) and `duration_ms`; the meta record may carry
-`agent_version`. Every `llm_call` must name an entry of `llm_calls`. `events[i].index` is
+`agent_version`; a user record may carry `synthetic` (`true`: the agent or a plugin added it,
+not the member) and `omitted` (how many injected items the integrator that added them asked
+seshi to leave out there; their text is not stored, so the record's content is empty). Every
+`llm_call` must name an entry of `llm_calls`. `events[i].index` is
 stable for the object's lifetime; anything that addresses a span of a session does so by event
 index range.
 
