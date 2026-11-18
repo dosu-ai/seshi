@@ -8,6 +8,7 @@ import {
   requireScope,
   requireVisibilityChange,
   type Scope,
+  seesEverything,
   serviceSourceId,
   type TokenRequest,
   tokenInfo,
@@ -705,6 +706,46 @@ export function createApp(instance: Instance) {
       if (ok) entries.push(item);
     }
     return json({ ...page, entries });
+  });
+
+  // Every owner's feed as one (`GET /v1/changes/all`), for readers that read everything. It
+  // is served from the search index's copy of the feeds, so a poll costs no bucket request.
+  route("GET", "/v1/changes/all", async ({ request, url }) => {
+    const principal = await caller(request, "sessions:read");
+    if (!seesEverything(principal)) {
+      throw new HttpError(
+        403,
+        "forbidden",
+        "every owner's change feed is for callers that read every session: a service token or an admin",
+      );
+    }
+    if (url.searchParams.has("owner")) {
+      throw new HttpError(400, "bad_query", "owner: this feed is every owner's; use /v1/changes");
+    }
+    if (!instance.search) {
+      throw new HttpError(
+        404,
+        "search_disabled",
+        "every owner's change feed is read from the search index, and search is turned off on this server",
+      );
+    }
+    try {
+      return json(
+        instance.search.changes({
+          after: url.searchParams.get("after") ?? undefined,
+          since: url.searchParams.get("since") ?? undefined,
+          limit: intParam(url, "limit", 100, 1000),
+        }),
+      );
+    } catch (err) {
+      if (err instanceof SearchQueryError) throw new HttpError(400, err.code, err.message);
+      if (err instanceof SearchUnavailable) {
+        return json({ error: { code: err.code, message: err.message } }, 503, {
+          "retry-after": String(SEARCH_RETRY_AFTER_S),
+        });
+      }
+      throw err;
+    }
   });
 
   route("GET", "/v1/search", async ({ request, url }) => {

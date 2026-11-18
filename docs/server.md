@@ -104,7 +104,7 @@ One job runs on every instance with the `api` role instead, worker or not:
 
 | Job | Every | What it does |
 |---|---|---|
-| `search-index` | `search.interval` (15s) | Reads every owner's change feed into this instance's own search index ([search.md](search.md#how-the-index-works)) |
+| `search-index` | `search.interval` (15s) | Reads every owner's change feed into this instance's own search index ([search.md](search.md#how-the-index-works)), which also keeps the copy of the feeds `GET /v1/changes/all` serves |
 
 A failed run is retried after 5 seconds, doubling per failure in a row up to the job's
 interval. A poll whose envelope failed transiently (the bucket) never saves its checkpoint
@@ -228,7 +228,10 @@ A session is `org` (the default) or `owner` (X5.10). Its visibility is the uploa
 owner or an admin can change it later (`PATCH /v1/sessions/:agent/:session_id`), which writes a
 `visibility_changed` change entry. Members read their own sessions and every `org` session;
 admins and service readers read everything. Reads name another owner with `?owner=`; a
-session the caller may not read answers 404, as if it were not there.
+session the caller may not read answers 404, as if it were not there. Another owner's change
+feed (`GET /v1/changes?owner=`) shows only the entries of sessions the caller may read. Every
+owner's feed at once (`GET /v1/changes/all`) is only for callers that read everything, service
+tokens and admins: anyone else gets `403`, never a filtered feed.
 
 Without an IdP anyone with the org key can state any username, so `owner` visibility keeps
 nothing from another member; `seshi config check` says so.
@@ -249,12 +252,40 @@ bucket or prefix. Isolation between teams comes from the deployment, not the cod
 A reader reads through the API with a service token (`seshi tokens create service --service
 <name>`, or `POST /v1/tokens {kind: "service", service: "<name>"}`) and
 [`@seshi/client`](client.md): it reads and searches every session, and tails each owner's
-`/v1/changes`. With a server, bucket keys stay on the server (X5.6); in serverless mode each
+`/v1/changes`, or every owner's at once with `/v1/changes/all` (below). With a server, bucket
+keys stay on the server (X5.6); in serverless mode each
 laptop holds one, and the bucket's permissions decide what it may do
 ([serverless.md](serverless.md#credentials)). A read-only bucket credential
 (`s3:ListBucket` on the prefix, `s3:GetObject` under it) still works for a reader that tails
 `changes/` itself, but it skips every check, so it counts as org-wide read; `GET /v1/me` tells a
 client which bucket that is.
+
+### Every owner's change feed
+
+A reader that follows every session can tail one feed instead of one per owner: `GET
+/v1/changes/all` (`allChanges()` in [`@seshi/client`](client.md)) pages through every owner's
+entries by stamp, then owner, then key, with one opaque cursor. Each entry names its `owner`
+and its `key`; `tombstone` and `visibility_changed` entries come through like `published` ones,
+from people, `svc:<source-id>` service accounts and `h-…` owners alike.
+
+It is served from this instance's search index, which keeps a copy of every entry it reads, so a
+poll is one SQLite range read and no bucket request, however many owners there are. Search must
+be on (`404 search_disabled` otherwise), and until the index has read every owner's feed once
+the route answers `503 index_building` with `Retry-After`.
+
+A page holds only entries stamped no later than its `through`: when the owner list of the
+indexer's last full pass was taken. Every feed on that list was read after then, and an owner
+not on it had written nothing yet, so an entry that turns up later is stamped after `through`
+and lands ahead of any cursor issued so far, a new owner's first entries included. `through`
+trails the bucket by up to a minute and a half (the owner list is read again every minute, then
+a pass every `search.interval`).
+
+The cursor names a place in that order, not a row of the index, so it works after a restart, a
+rebuild, and on another instance. The contract is otherwise the per-owner feed's: stamps come
+from the clocks of the machines that wrote, so a reader re-reads a lag window (`since` a few
+minutes before the last entry it processed, then `after` the cursors that follow) and dedupes by
+key; and an entry may be read before its change is in the session, or name one that failed, so
+the reader reads the session for what it is now.
 
 ## API
 
@@ -285,6 +316,7 @@ allow.
 | `GET /v1/sessions/:agent/:session_id/export?hash&format` | The same trace as a download: `Content-Disposition: attachment; filename="<agent>-<session>-<hash>.<format>.json"` |
 | `DELETE /v1/sessions/:agent/:session_id?owner` | Tombstone: drop the trace objects, append a tombstone change. Irreversible; a later upload of the same session is refused. Needs `sessions:delete`: the owner with a fresh session token or a static token, or an admin. With `X-Seshi-Retract` it is a [retraction](#retraction-f97) by the machine that uploaded the session |
 | `GET /v1/changes?owner&after&since&limit` | An owner's change feed; another owner's shows the entries of sessions the caller may read |
+| `GET /v1/changes/all?after&since&limit` | Every owner's change feed as one: `{entries: [{owner, key, entry}], cursor?, truncated, through}`, by stamp, then owner, then key ([above](#every-owners-change-feed)). Service tokens and admins only, `403` for anyone else; `400 bad_query`, `404 search_disabled`, `503 index_building` |
 | `POST /v1/tokens` | `{kind: org\|admin\|device\|service, owner?, service?, scopes?, visibility?, expires_at?, label?}`: a new token, shown once (`tokens:admin`) |
 | `GET /v1/tokens?owner&kind&all` | Token records without their hashes (`tokens:admin`) |
 | `DELETE /v1/tokens/:id` | Revoke one (`tokens:admin`) |

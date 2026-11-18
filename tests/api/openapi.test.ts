@@ -260,6 +260,7 @@ describe("the document itself", () => {
         "GET /v1/sessions/{agent}/{session_id}/trace",
         "GET /v1/sessions/{agent}/{session_id}/export",
         "GET /v1/changes",
+        "GET /v1/changes/all",
         "GET /v1/admin/jobs",
         "GET /v1/redaction/rules",
         "GET /v1/sessions/{agent}/{session_id}/reviews",
@@ -1072,6 +1073,52 @@ describe("search (F10)", () => {
     expect((await call("GET", "/v1/search?q=auth", { app: off })).status).toBe(404);
     down = true;
     expect((await call("GET", "/v1/search?q=auth", as)).status).toBe(502);
+    await instance.close();
+  });
+});
+
+describe("every owner's change feed", () => {
+  it("answers, refuses and waits as documented", async () => {
+    const auth = new Auth(
+      {
+        staticTokens: [{ token: TOKEN, owner: "acme" }],
+        orgKey: true,
+        admins: [],
+        aliases: {},
+        sessionKeys: { k1: "k".repeat(32) },
+      },
+      { store, deployment: "test" },
+    );
+    const instance = testInstance({ store, storage: { url: store.url }, auth });
+    const { admin } = await auth.initAdmin({ owner: "ops" });
+    const as = { app: appOver(instance), token: admin?.token };
+
+    expect((await call("GET", "/v1/changes/all", as)).status).toBe(503);
+    const body = { agent: "claude-code", session_id: "feed1", transcript: CLAUDE };
+    expect((await call("POST", "/v1/sessions", { ...as, token: TOKEN, body })).status).toBe(201);
+    await instance.search?.catchUp();
+    const first = await call("GET", "/v1/changes/all?limit=1", as);
+    expect(first.status).toBe(200);
+    const cursor = (first.body as { cursor: string }).cursor;
+    expect(
+      (await call("GET", `/v1/changes/all?after=${encodeURIComponent(cursor)}`, as)).status,
+    ).toBe(200);
+    expect((await call("GET", "/v1/changes/all?since=2020-01-01T00:00:00Z", as)).status).toBe(200);
+    for (const bad of ["after=nope", "since=yesterday", "limit=0", "owner=acme"]) {
+      expect((await call("GET", `/v1/changes/all?${bad}`, as)).status, bad).toBe(400);
+    }
+    expect((await call("GET", "/v1/changes/all", { ...as, token: null })).status).toBe(401);
+    // A static token reads one owner's sessions, not everyone's.
+    expect((await call("GET", "/v1/changes/all", { ...as, token: TOKEN })).status).toBe(403);
+    const off = appOver(
+      testInstance({
+        store,
+        storage: { url: store.url },
+        auth,
+        config: "[search]\nenabled = false\n",
+      }),
+    );
+    expect((await call("GET", "/v1/changes/all", { ...as, app: off })).status).toBe(404);
     await instance.close();
   });
 });

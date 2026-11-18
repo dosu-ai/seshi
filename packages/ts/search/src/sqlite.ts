@@ -1,12 +1,15 @@
 import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import type { EventRole, Visibility } from "@seshi/model";
+import type { ChangeEntry, EventRole, Visibility } from "@seshi/model";
+import { changeStamp } from "@seshi/store";
 import type {
   BackendHit,
   BackendMatch,
   BackendQuery,
   BackendResults,
+  FeedPosition,
+  FeedRow,
   IndexedSession,
   IndexStore,
   SessionUpdate,
@@ -14,7 +17,7 @@ import type {
 import { MEMORY_INDEX, tryRestrictToOwner } from "./paths";
 import { indexText, MATCH_END, MATCH_START } from "./snippet";
 
-export const INDEX_SCHEMA = "seshi/search-index/2";
+export const INDEX_SCHEMA = "seshi/search-index/3";
 
 const SNIPPET_TOKENS = 24;
 
@@ -26,6 +29,13 @@ CREATE TABLE IF NOT EXISTS seen (
   key TEXT NOT NULL,
   at INTEGER NOT NULL,
   PRIMARY KEY (owner, key)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS changes (
+  stamp TEXT NOT NULL,
+  owner TEXT NOT NULL,
+  name TEXT NOT NULL,
+  entry TEXT NOT NULL,
+  PRIMARY KEY (stamp, owner, name)
 ) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS sessions (
   id INTEGER PRIMARY KEY,
@@ -70,6 +80,7 @@ DROP TABLE IF EXISTS events;
 DROP TABLE IF EXISTS sessions;
 DROP TABLE IF EXISTS seen;
 DROP TABLE IF EXISTS feeds;
+DROP TABLE IF EXISTS changes;
 DROP TABLE IF EXISTS meta;
 `;
 
@@ -509,6 +520,50 @@ export class SqliteIndex implements IndexStore {
     });
   }
 
+  record(owner: string, entries: readonly { name: string; entry: ChangeEntry }[]): void {
+    if (entries.length === 0) return;
+    this.transaction(() => {
+      const insert = this.db.query(
+        "INSERT INTO changes (stamp, owner, name, entry) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING",
+      );
+      for (const { name, entry } of entries) {
+        insert.run(name.slice(0, name.indexOf("-")), owner, name, JSON.stringify(entry));
+      }
+    });
+  }
+
+  feed(after: FeedPosition | undefined, limit: number): { entries: FeedRow[]; more: boolean } {
+    const through = this.meta("feed_through");
+    if (through === undefined) return { entries: [], more: false };
+    const last = changeStamp(through);
+    const from = after ?? { stamp: "", owner: "", name: "" };
+    const rows = this.db
+      .query(
+        `SELECT stamp, owner, name, entry FROM changes
+          WHERE (stamp, owner, name) > (?, ?, ?) AND stamp <= ?
+          ORDER BY stamp, owner, name LIMIT ?`,
+      )
+      .all(from.stamp, from.owner, from.name, last, limit + 1) as {
+      stamp: string;
+      owner: string;
+      name: string;
+      entry: string;
+    }[];
+    return {
+      entries: rows.slice(0, limit).map((r) => ({
+        stamp: r.stamp,
+        owner: r.owner,
+        name: r.name,
+        entry: JSON.parse(r.entry) as ChangeEntry,
+      })),
+      more: rows.length > limit,
+    };
+  }
+
+  feedThrough(): string | undefined {
+    return this.meta("feed_through");
+  }
+
   readyAt(): string | undefined {
     return this.meta("ready_at");
   }
@@ -517,10 +572,16 @@ export class SqliteIndex implements IndexStore {
     return this.meta("caught_up_at");
   }
 
-  caughtUp(at: string): void {
+  caughtUp(at: string, through?: string): void {
     this.transaction(() => {
       if (this.meta("ready_at") === undefined) this.setMeta("ready_at", at);
       this.setMeta("caught_up_at", at);
+      if (through !== undefined) {
+        const held = this.meta("feed_through");
+        if (held === undefined || Date.parse(through) > Date.parse(held)) {
+          this.setMeta("feed_through", through);
+        }
+      }
     });
   }
 
@@ -536,7 +597,8 @@ export class SqliteIndex implements IndexStore {
       this.db.run("DELETE FROM sessions");
       this.db.run("DELETE FROM seen");
       this.db.run("DELETE FROM feeds");
-      this.db.run("DELETE FROM meta WHERE key IN ('ready_at', 'caught_up_at')");
+      this.db.run("DELETE FROM changes");
+      this.db.run("DELETE FROM meta WHERE key IN ('ready_at', 'caught_up_at', 'feed_through')");
     });
   }
 }

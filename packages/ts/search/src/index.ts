@@ -3,6 +3,8 @@ export type {
   BackendMatch,
   BackendQuery,
   BackendResults,
+  FeedPosition,
+  FeedRow,
   FeedState,
   IndexedEvent,
   IndexedSession,
@@ -10,6 +12,13 @@ export type {
   SearchBackend,
   SessionUpdate,
 } from "./backend";
+export {
+  decodeFeedCursor,
+  encodeFeedCursor,
+  FEED_DEFAULT_LIMIT,
+  FEED_MAX_LIMIT,
+  readFeed,
+} from "./feed";
 export {
   currentTraces,
   FEED_LAG_MS,

@@ -46,6 +46,7 @@ const session = await db.getSession("claude-code", "8f1c…");
 const trace = await db.getTrace("claude-code", "8f1c…", undefined, "otlp");
 const page = await db.listSessions({ limit: 50 });
 const feed = await db.changes({ after: cursor });
+const everyone = await db.allChanges({ after: allCursor });   // a service token or an admin
 const found = await db.search({ q: "flaky checkout test", repo: "widget", sort: "recent" });
 ```
 
@@ -70,6 +71,7 @@ answer back.
 | `setVisibility(agent, id, visibility, {owner})` | `PATCH /v1/sessions/:agent/:id` |
 | `reviews(agent, id, {owner})` | `GET …/reviews`: what model review decided for each write |
 | `changes({after, since, limit})` | `GET /v1/changes`: the caller's change feed |
+| `allChanges({after, since, limit})` | `GET /v1/changes/all`: every owner's change feed as one, each entry with its `owner`; `after` is the last page's opaque `cursor`. For service tokens and admins (`Forbidden` for anyone else); a `ServerError` with status 503 while the server's search index is first built, 404 with search off ([server.md](server.md#every-owners-change-feed)) |
 | `search(request)` | `GET /v1/search` ([search.md](search.md)) |
 | `me()` | `GET /v1/me`: who the credential is, and which bucket the server writes |
 | `owners({after, limit})` | `GET /v1/owners` |

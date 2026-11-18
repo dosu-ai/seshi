@@ -1,6 +1,8 @@
 import { OwnerAliases } from "@seshi/auth";
 import {
+  type AllChangesPage,
   type EventRole,
+  type ReadChangesOptions,
   SEARCH_SORTS,
   type SearchRequest,
   type SearchResult,
@@ -10,6 +12,7 @@ import {
 } from "@seshi/model";
 import { accessDeniedIn, decodeJson, getBytes, isOwner, keys, type Store } from "@seshi/store";
 import type { BackendHit, BackendQuery, IndexStore } from "./backend";
+import { readFeed } from "./feed";
 import { Indexer, type IndexerLogger, type IndexerOptions, type IndexerRun } from "./indexer";
 import { defaultIndexPath } from "./paths";
 import { parseQuery, SearchQueryError } from "./query";
@@ -321,6 +324,23 @@ export class SearchService {
         sessions: index.counts().sessions,
       },
     };
+  }
+
+  /** Every owner's change feed as one, read from this index's copy of it (`GET
+   * /v1/changes/all`). Throws `SearchQueryError` for a cursor it did not give and
+   * `SearchUnavailable` until the index has read every feed once. An index limited to some
+   * owners or sessions (F11.9) has no such feed. */
+  changes(options: ReadChangesOptions = {}): AllChangesPage {
+    if (this.options.indexer?.owners !== undefined || this.options.indexer?.admit !== undefined) {
+      throw new Error("this index does not read every owner's feed, so it has no feed of them all");
+    }
+    const { index } = this.open();
+    if (index.feedThrough() === undefined) {
+      throw new SearchUnavailable(
+        "the search index is reading every owner's change feed for the first time; try again shortly",
+      );
+    }
+    return readFeed(index, options);
   }
 
   /** Close the index file. The service is not used after this. */

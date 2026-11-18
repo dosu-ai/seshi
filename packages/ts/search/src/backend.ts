@@ -1,4 +1,4 @@
-import type { EventRole, SearchSort, Visibility } from "@seshi/model";
+import type { ChangeEntry, EventRole, SearchSort, Visibility } from "@seshi/model";
 import type { Viewer } from "./viewer";
 
 export interface IndexedSession {
@@ -120,11 +120,21 @@ export interface FeedState {
     processed: readonly { key: string; at: number }[],
     forgetBefore: number,
   ): void;
+  /** Keep change entries as listed from `owner`'s feed (`name` is the key under `changes/`),
+   * for the cross-owner feed. One already kept is left as it is. */
+  record(owner: string, entries: readonly { name: string; entry: ChangeEntry }[]): void;
+  /** The kept entries after `after` (in stamp, owner, name order), stamped no later than
+   * `feedThrough()`: at most `limit`, and whether more follow. */
+  feed(after: FeedPosition | undefined, limit: number): { entries: FeedRow[]; more: boolean };
+  /** The time every owner's feed has been read up to: the owner list of the last full pass
+   * was taken then, and every feed on it was read after. Undefined while building. */
+  feedThrough(): string | undefined;
   /** When the index first caught up with the whole feed; undefined while it is building. */
   readyAt(): string | undefined;
   caughtUpAt(): string | undefined;
-  /** A full pass over every owner finished at `at`; the first one makes the index ready. */
-  caughtUp(at: string): void;
+  /** A full pass over every owner finished at `at`; the first one makes the index ready.
+   * `through`: when that pass's owner list was taken (`feedThrough`). */
+  caughtUp(at: string, through?: string): void;
   /** Changes on every `reset`. A run that started before a reset (in this process or another
    * sharing the file) writes nothing once it sees it change, so a page it read earlier never
    * moves the rebuilt index's cursors past entries the rebuild has not read. */
@@ -133,6 +143,18 @@ export interface FeedState {
   transaction<T>(fn: () => T): T;
   /** Forget everything: sessions, events, cursors and readiness (a rebuild). */
   reset(): void;
+}
+
+/** A place in the cross-owner feed: entries sort by stamp, then owner, then name (the key
+ * under `changes/`, which starts with the stamp). */
+export interface FeedPosition {
+  stamp: string;
+  owner: string;
+  name: string;
+}
+
+export interface FeedRow extends FeedPosition {
+  entry: ChangeEntry;
 }
 
 export type IndexStore = SearchBackend & FeedState;

@@ -491,7 +491,9 @@ bytes, and the sweep checks an object's age once more just before it deletes it.
   rather than from the entry alone makes entries read twice, out of order, early, for a change
   that failed, or missing harmless.
   The seshi server's search index is such a reader: an SQLite file on each instance's local
-  disk, never in the bucket, derived and rebuildable (X6.1).
+  disk, never in the bucket, derived and rebuildable (X6.1). It also keeps a copy of the
+  entries it reads, from which the server serves every owner's feed as one (`GET
+  /v1/changes/all`); nothing about it is written to the bucket.
 
 `seshi store check` (`checkStore` in `@seshi/store`) reads a prefix and reports where it breaks
 the rules on this page: the marker, every pointer against its schema, its key and its traces,

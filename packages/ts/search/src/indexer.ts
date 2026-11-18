@@ -240,12 +240,14 @@ export class Indexer {
     this.owners = undefined;
   }
 
-  private async ownerList(): Promise<string[]> {
-    if (this.fixedOwners) return [...this.fixedOwners];
+  /** The owners to read, and when that list was taken: an owner not on it had written
+   * nothing then, so each of its entries was written after `at`. */
+  private async ownerList(): Promise<{ list: string[]; at: number }> {
     const now = this.now().getTime();
+    if (this.fixedOwners) return { list: [...this.fixedOwners], at: now };
     const cached = this.owners;
     if (cached && cached.list.length > 0 && now - cached.at < this.ownerRefreshMs) {
-      return cached.list;
+      return cached;
     }
     const list: string[] = [];
     let after: string | undefined;
@@ -256,7 +258,7 @@ export class Indexer {
       after = page.cursor;
     }
     this.owners = { list, at: now };
-    return list;
+    return this.owners;
   }
 
   private async pass(signal: AbortSignal): Promise<IndexerRun> {
@@ -269,7 +271,7 @@ export class Indexer {
       removed: 0,
     };
     const generation = this.index.generation();
-    const owners = await this.ownerList();
+    const { list: owners, at: listedAt } = await this.ownerList();
     run.owners = owners.length;
     for (const owner of owners) {
       if (signal.aborted) return run;
@@ -282,7 +284,9 @@ export class Indexer {
     if (signal.aborted) return run;
     const caughtUp = this.index.transaction(() => {
       if (this.index.generation() !== generation) return false;
-      this.index.caughtUp(this.now().toISOString());
+      // Every owner on the list had its feed read after the list was taken, and an owner not
+      // on it wrote nothing before then: the cross-owner feed is whole up to `listedAt`.
+      this.index.caughtUp(this.now().toISOString(), new Date(listedAt).toISOString());
       return true;
     });
     run.more = !caughtUp;
@@ -344,6 +348,13 @@ export class Indexer {
             refused.push(plan.update.session.archive_id);
           }
         }
+        this.index.record(
+          owner,
+          fresh.flatMap((key, i) => {
+            const entry = entries[i];
+            return entry ? [{ name: key.slice(prefix.length), entry }] : [];
+          }),
+        );
         this.index.advance(
           owner,
           next,
