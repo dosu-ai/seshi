@@ -1,5 +1,5 @@
 import { appendLog, runHook, sessionKey } from "@seshi/capture/fast";
-import { CAPTURE_COMMAND, hookHandler } from "@seshi/kit";
+import { CAPTURE_COMMAND, CLOUD_FLAG, hookHandler } from "@seshi/kit";
 import { captureAgent } from "../capture-agents";
 import { EXIT } from "../cli/exit";
 import { hostOf, NO_UPLOADER_ENV, pathsOf, startUploader } from "./capture-host";
@@ -19,13 +19,6 @@ async function readInput(ctx: CommandContext): Promise<string> {
     clearTimeout(timer);
   }
 }
-
-/** The flag seshi's hooks committed to a repository pass (Cursor Cloud): act only on the
- * agent's cloud VM, and upload there before returning. */
-export const CLOUD_FLAG = "--cloud";
-
-/** How long a cloud hook keeps uploading, inside the timeout the committed hook gives it. */
-export const CLOUD_UPLOAD_MS = 45_000;
 
 export async function run(ctx: CommandContext): Promise<number> {
   const { paths } = pathsOf(ctx);
@@ -113,14 +106,14 @@ async function hook(
   // ends, so the hook uploads (or retracts) before it returns.
   const toggled = cloud ? { ...ctx, env: { ...ctx.env, [NO_UPLOADER_ENV]: "1" } } : ctx;
   if (outcome.requested) reply(await carryOut(toggled, agentName, outcome.requested));
-  if (cloud) {
+  if (cloud && marker) {
     const keys = [
       ...outcome.spooled.map((c) => sessionKey(agent.name, c.session_id)),
       ...(outcome.requested ? [sessionKey(agent.name, outcome.requested.session.session_id)] : []),
     ];
     if (keys.length > 0) {
       const { uploadNow } = await import("./upload-now");
-      await uploadNow(ctx, paths, keys, { deadlineMs: CLOUD_UPLOAD_MS });
+      await uploadNow(ctx, paths, keys, { deadlineMs: marker.budgetMs(event) });
     }
     return;
   }

@@ -23,12 +23,14 @@ import { Machine, startServer, type TestServer } from "../tooling/cli";
 const OWNER = "cursor-cloud";
 const CONVERSATION = "c0ffee00-1111-4222-8333-444455556666";
 
-const turn = (n: number) =>
+const turn = (n: number, details = 400) =>
   `${JSON.stringify({ role: "user", message: { content: [{ type: "text", text: `Step ${n}: how does auth work?` }] } })}\n${JSON.stringify(
     {
       role: "assistant",
       message: {
-        content: [{ type: "text", text: `Step ${n}, the auth flow: ${"details ".repeat(400)}` }],
+        content: [
+          { type: "text", text: `Step ${n}, the auth flow: ${"details ".repeat(details)}` },
+        ],
       },
     },
   )}\n`;
@@ -209,7 +211,7 @@ describe("the committed hooks on any other machine", () => {
     }
   });
 
-  it("run the seshi on the PATH, or where the setup script puts it, with --cloud", async () => {
+  it("start no seshi off a marked VM, and on one run the seshi on the PATH or where the setup script puts it", async () => {
     const home = join(vm.dir, "fake-home");
     const bin = join(home, ".local", "bin");
     mkdirSync(bin, { recursive: true });
@@ -217,13 +219,24 @@ describe("the committed hooks on any other machine", () => {
     const fake = join(bin, "seshi");
     writeFileSync(fake, `#!/bin/sh\nprintf '%s\\n' "$*" > "${seen}"\ncat >> "${seen}"\n`);
     chmodSync(fake, 0o755);
-    const run = spawnSync("/bin/sh", ["-c", await committed("stop")], {
-      cwd: workspace,
-      env: { PATH: "/usr/bin:/bin", HOME: home },
-      input: "{}",
-      encoding: "utf8",
-    });
-    expect(run.status).toBe(0);
+    const command = await committed("stop");
+    const run = (env: Record<string, string> = {}) =>
+      spawnSync("/bin/sh", ["-c", command], {
+        cwd: workspace,
+        env: { PATH: "/usr/bin:/bin", HOME: home, ...env },
+        input: "{}",
+        encoding: "utf8",
+      });
+    // A teammate's laptop: seshi is there, but no marker, so it never starts.
+    expect(run().status).toBe(0);
+    expect(existsSync(seen)).toBe(false);
+    // A marked VM, the marker where seshi's state folder is (XDG_STATE_HOME moves it).
+    const state = join(home, "state");
+    mkdirSync(join(state, "seshi"), { recursive: true });
+    writeFileSync(join(state, "seshi", "cursor-cloud"), "");
+    expect(run().status).toBe(0);
+    expect(existsSync(seen)).toBe(false);
+    expect(run({ XDG_STATE_HOME: state }).status).toBe(0);
     expect(readFileSync(seen, "utf8")).toBe("hook cursor stop --cloud\n{}");
   });
 
@@ -232,6 +245,38 @@ describe("the committed hooks on any other machine", () => {
     expect(run).toEqual({ code: 0, out: "", err: "" });
     expect(vm.spawned).toEqual([]);
     expect(await stored()).toBeNull();
+  });
+});
+
+describe("a cloud VM whose uploads failed or whose transcript was rewritten", () => {
+  const statePath = () => join(stateDir(vm), "state.json");
+  const key = `cursor:${CONVERSATION}`;
+
+  it("tries again at the next stop, not after the background uploader's backoff", async () => {
+    await hook(vm, "stop");
+    const first = await stored();
+    const s = JSON.parse(readFileSync(statePath(), "utf8"));
+    s.sessions[key].next_attempt_at = new Date(Date.now() + 3600_000).toISOString();
+    writeFileSync(statePath(), JSON.stringify(s), { mode: 0o600 });
+    writeFileSync(transcriptFile, turn(1) + turn(2));
+    expect(await hook(vm, "stop")).toEqual({ code: 0, out: "", err: "" });
+    expect((await stored())?.normalized?.records).toBeGreaterThan(first?.normalized?.records ?? 0);
+  });
+
+  it("retracts what it stored before a continuation too, when the chat turns capture off", async () => {
+    await hook(vm, "stop");
+    // The VM keeps its state, but the transcript, now shorter, no longer starts with what was
+    // stored.
+    writeFileSync(transcriptFile, turn(2, 300));
+    await hook(vm, "stop");
+    expect((await stored(`${CONVERSATION}~r1`))?.status).toBe("stored");
+    expect(JSON.parse(readFileSync(statePath(), "utf8")).sessions[key].retract_also).toEqual([
+      CONVERSATION,
+    ]);
+    const off = await hook(vm, "beforeSubmitPrompt", { prompt: "/session-capture off" });
+    expect(off.err).toBe("");
+    expect((await stored())?.status).toBe("redacted");
+    expect((await stored(`${CONVERSATION}~r1`))?.status).toBe("redacted");
   });
 });
 

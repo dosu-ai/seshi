@@ -344,6 +344,8 @@ function onConflictContinue(retry: Retry): Handled {
   return {
     saves: [
       (s) => {
+        // What this machine stored under the old id is still its own to retract.
+        if (s.stored) s.retract_also = [...(s.retract_also ?? []), uploadId(s)];
         s.fork_of = uploadId(s);
         s.continuation = (s.continuation ?? 0) + 1;
         for (const field of [
@@ -1282,6 +1284,7 @@ export class Uploader {
         "error",
         "failures",
         "next_attempt_at",
+        "retract_also",
       ] as const) {
         delete s[field];
       }
@@ -1292,11 +1295,19 @@ export class Uploader {
       return { ok: true };
     }
     try {
-      const outcome = await (await this.getSink()).retract(
-        agent.format,
-        uploadId(session),
-        session.secret,
-      );
+      const sink = await this.getSink();
+      // Earlier ids first: once the current one is retracted, a retry finds nothing to redo.
+      for (const earlier of session.retract_also ?? []) {
+        const gone = await sink.retract(agent.format, earlier, session.secret);
+        this.log(
+          `${key}: ${earlier}: ${gone === "retracted" ? "retracted" : "nothing to retract"}`,
+        );
+        await this.save(key, (s) => {
+          s.retract_also = s.retract_also?.filter((id) => id !== earlier);
+          if (s.retract_also?.length === 0) delete s.retract_also;
+        });
+      }
+      const outcome = await sink.retract(agent.format, uploadId(session), session.secret);
       if (outcome === "absent" && session.stored) {
         const text = `${uploadId(session)} was stored from here, but the server has no such session for this credential's owner (was it uploaded under another username?); remove it with seshi sessions rm, or ask an admin`;
         this.log(`${key}: retraction found nothing: ${text}`);

@@ -1,5 +1,5 @@
 import { existsSync, rmSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { resolve } from "node:path";
 import {
   appendSpool,
   type CapturePaths,
@@ -7,6 +7,7 @@ import {
   captureRules,
   decide,
   endPause,
+  findRepo,
   forgetHandedTranscript,
   freeze,
   isPaused,
@@ -411,23 +412,12 @@ async function uninstall(ctx: CommandContext, json: boolean, args: Args): Promis
   return failed.length > 0 ? EXIT.failure : EXIT.ok;
 }
 
-/** The repository root around `from`: the nearest folder with a `.git`. */
-export function repositoryRoot(from: string): string | undefined {
-  let dir = resolve(from);
-  for (;;) {
-    if (existsSync(join(dir, ".git"))) return dir;
-    const up = dirname(dir);
-    if (up === dir) return undefined;
-    dir = up;
-  }
-}
-
 /** The repository `--project` names: the folder given, else the repository around this one.
  * Never the home folder, whose `.cursor` is the user-level config. */
 function projectDir(ctx: CommandContext, args: Args): string {
   const dir =
     args.project === true || args.project === undefined
-      ? repositoryRoot(process.cwd())
+      ? findRepo(process.cwd())?.root
       : resolve(expandTilde(args.project, hostOf(ctx).home));
   if (!dir) {
     throw new Refused(

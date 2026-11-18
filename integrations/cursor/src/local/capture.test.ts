@@ -1,10 +1,9 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type CaptureHost, commandLine, hookHandler } from "@seshi/kit";
+import { type CaptureHost, CLOUD_FLAG, commandLine, hookHandler } from "@seshi/kit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
-  CLOUD_FLAG,
   CURSOR_CAPTURE,
   cloudMarkerPath,
   cursorCloud,
@@ -296,6 +295,9 @@ describe("the hooks committed to a repository, for Cursor Cloud", () => {
     // The setup script reads the secrets from Cursor's environment only, and pins the release.
     const setup = setupScript("1.2.3");
     expect(setup).toContain('version="1.2.3"');
+    // The installer of the pinned release, never whichever is latest.
+    expect(setup).toContain('releases/download/v$version/install.sh"');
+    expect(setup).not.toContain("latest");
     expect(setup).toContain(
       'printf %s "$SESHI_TOKEN" | seshi login --server "$SESHI_SERVER" --token -',
     );
@@ -322,6 +324,21 @@ describe("the Cursor Cloud marker", () => {
     expect(cursorCloud.mark(host).changed).toEqual([]);
     expect(cursorCloud.unmark(host).changed).toEqual([cloudMarkerPath(host)]);
     expect(cursorCloud.is(host)).toBe(false);
+  });
+
+  it("is checked by the committed hook's shell where seshi keeps it, before seshi starts", () => {
+    expect(cloudMarkerPath(host)).toBe(join(home, ".local", "state", "seshi", "cursor-cloud"));
+    expect(projectHookCommand("stop")).toMatch(
+      /^\[ -e "\$\{XDG_STATE_HOME:-\$HOME\/\.local\/state\}\/seshi\/cursor-cloud" \] \|\| exit 0; /,
+    );
+  });
+
+  it("leaves each hook time to answer inside its timeout", () => {
+    expect(cursorCloud.budgetMs("stop")).toBe(45_000);
+    expect(cursorCloud.budgetMs("beforeSubmitPrompt")).toBe(15_000);
+    for (const [event, seconds] of Object.entries(PROJECT_TIMEOUTS)) {
+      expect(cursorCloud.budgetMs(event)).toBeLessThan(seconds * 1000);
+    }
   });
 
   it("goes with a transcript Cursor names only in the hook's environment", () => {

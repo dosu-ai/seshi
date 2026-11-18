@@ -117,9 +117,16 @@ export interface ProjectInstaller {
   status(context: ProjectContext): Promise<InstallStatus>;
 }
 
+/** The flag the hooks committed to a repository pass to `seshi hook`: act only on the agent's
+ * cloud VM, and upload there before returning. */
+export const CLOUD_FLAG = "--cloud";
+
 export interface CloudMarker {
   /** Whether this machine is the agent's cloud VM. */
   is(host: CaptureHost): boolean;
+  /** How long a committed hook for `event` may spend uploading: inside the timeout the
+   * committed hook gives it, with room to answer and exit. */
+  budgetMs(event: string): number;
   mark(host: CaptureHost): InstallReport;
   unmark(host: CaptureHost): InstallReport;
 }

@@ -17,6 +17,7 @@ import {
   attachStatusLine,
   type CaptureAgent,
   type CaptureHost,
+  CLOUD_FLAG,
   type CloudMarker,
   captureCommandPrompt,
   captureDir,
@@ -233,9 +234,6 @@ const list = (value: unknown): CursorHook[] => (Array.isArray(value) ? value : [
  * step that runs only on the VM, and costs one file check. The user-level hooks stand aside on a
  * marked machine, so the two never both upload a conversation. */
 
-/** The flag the committed hooks pass: act only on a Cursor Cloud VM. */
-export const CLOUD_FLAG = "--cloud";
-
 /** Seconds Cursor gives each committed hook: `stop` uploads before it returns. */
 export const PROJECT_TIMEOUTS: Readonly<Record<(typeof CURSOR_EVENTS)[number], number>> = {
   stop: 60,
@@ -247,19 +245,29 @@ export const PROJECT_TIMEOUTS: Readonly<Record<(typeof CURSOR_EVENTS)[number], n
 export const SETUP_SCRIPT = "seshi-cloud.sh";
 const SETUP_MARKER = "seshi-cursor-cloud-setup";
 
-/** A committed hook's command: `seshi` from the PATH (or where the setup script puts it), never
- * this machine's path; without seshi, it exits 0 with nothing said. POSIX sh: Cursor runs hooks
- * through PowerShell on Windows, where it fails open. */
+/** The marker's name in seshi's state folder. */
+const MARKER = "cursor-cloud";
+
+/** Room a cloud hook leaves itself inside its timeout to answer and exit. */
+const ANSWER_MS = 15_000;
+
+/** A committed hook's command. Off a marked VM it exits 0 at the marker check, without starting
+ * seshi (every teammate's prompts pass through it); on one it runs `seshi` from the PATH (or where
+ * the setup script puts it), never this machine's path, and without seshi exits 0 with nothing
+ * said. The marker's folder is seshi's state folder, as `captureDir` finds it. POSIX sh: Cursor
+ * runs hooks through PowerShell on Windows, where it fails open. */
 export function projectHookCommand(event: string): string {
-  return `s=$(command -v seshi || echo "$HOME/.local/bin/seshi"); [ -x "$s" ] || exit 0; exec "$s" hook ${AGENT} ${event} ${CLOUD_FLAG}`;
+  return `[ -e "\${XDG_STATE_HOME:-$HOME/.local/state}/seshi/${MARKER}" ] || exit 0; s=$(command -v seshi || echo "$HOME/.local/bin/seshi"); [ -x "$s" ] || exit 0; exec "$s" hook ${AGENT} ${event} ${CLOUD_FLAG}`;
 }
 
 export function cloudMarkerPath(host: CaptureHost): string {
-  return join(captureDir(host), "cursor-cloud");
+  return join(captureDir(host), MARKER);
 }
 
 export const cursorCloud: CloudMarker = {
   is: (host) => existsSync(cloudMarkerPath(host)),
+  budgetMs: (event) =>
+    ((PROJECT_TIMEOUTS as Record<string, number>)[event] ?? 30) * 1000 - ANSWER_MS,
   mark(host) {
     const path = cloudMarkerPath(host);
     if (existsSync(path)) return { changed: [], notes: [] };
@@ -303,7 +311,7 @@ say() {
 ensure() {
   [ "$(seshi --version 2>/dev/null)" = "seshi $version" ] && return 0
   mkdir -p "$dir"
-  curl -fsSL https://github.com/dosu-ai/sessiondb/releases/latest/download/install.sh |
+  curl -fsSL "https://github.com/dosu-ai/sessiondb/releases/download/v$version/install.sh" |
     sh -s -- --version "$version" --dir "$dir" --no-modify-path >&2
   [ "$(seshi --version 2>/dev/null)" = "seshi $version" ] && return 0
   say "could not install seshi $version; cloud sessions are not captured"

@@ -44,7 +44,7 @@ describe("the seshi program", () => {
     // taken, even in a home folder that is also a repository. Its exact text is checked where it
     // is written (`projectHookCommand`).
     const committed =
-      's=$(command -v seshi || echo "$HOME/.local/bin/seshi"); [ -x "$s" ] || exit 0; exec "$s" hook cursor stop --cloud';
+      '[ -e "${XDG_STATE_HOME:-$HOME/.local/state}/seshi/cursor-cloud" ] || exit 0; s=$(command -v seshi || echo "$HOME/.local/bin/seshi"); [ -x "$s" ] || exit 0; exec "$s" hook cursor stop --cloud';
     expect(programFromHooks(hooks(committed))).toBeUndefined();
     expect(
       programFromHooks(

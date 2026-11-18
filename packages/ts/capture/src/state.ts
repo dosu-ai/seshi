@@ -47,6 +47,9 @@ export interface SessionState {
    * `fork_of`, the id uploaded to before. */
   continuation?: number;
   fork_of?: string;
+  /** Upload ids this machine stored before a continuation moved it on: turning the session off
+   * retracts them too, with the same secret. */
+  retract_also?: string[];
   /** The retraction secret: made before the first upload; only its hash is ever sent. */
   secret?: string;
   /** An upload carrying the secret's hash was sent (whatever came back): a retraction must ask

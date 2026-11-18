@@ -23,6 +23,7 @@ export {
   CAPTURE_COMMAND,
   type CaptureAgent,
   type CaptureHost,
+  CLOUD_FLAG,
   type CloudMarker,
   captureCommandPrompt,
   captureDir,
