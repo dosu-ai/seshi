@@ -114,13 +114,37 @@ an ATIF, OpenCode or Gemini CLI document is read from its opening keys) and refu
 that more than one format would read. It tells apart every format above, except that pi's
 session format is shared by its forks (OMP, OpenClaw), which it reports as `pi`.
 
+## Content an agent or a plugin adds
+
+Some agents keep text the person never typed in the user's turn: what the agent or a plugin
+added, which the model saw. seshi stores it on a user record of its own, labelled
+`synthetic: true`, with its text as it was. An integrator that adds content it does not want
+stored flags it with `session_capture.omit = true` in the metadata the agent keeps beside the
+content (the key is `SESSION_CAPTURE_KEY` in `@seshi/formats`). The flag counts only when it is
+exactly `true`. seshi then replaces the content's text before anything reads it, so it never
+reaches redaction or the store, and stores a user record in its place with empty content,
+`synthetic: true` (when the agent marked it so) and `omitted: 1`.
+
+| `agent` | Labelled `synthetic` | Where the flag goes | Ignored on |
+|---|---|---|---|
+| `opencode` | A user message's text part with `synthetic: true` (a file read for an `@` mention, a plugin's context) | The part's `metadata` | An assistant message's parts: its text, reasoning, tool calls and their results |
+| `pi` | A `custom_message` entry: what an extension added to the context (`pi.sendMessage`, a `before_agent_start` message), stored as the user message the model saw | The entry's `details` | `message` entries: the user's prompts, the assistant's messages and tool results (a tool result's own `details` included) |
+
+Labels are matched to records by the item's id (an OpenCode part's `id`, a pi entry's `id`), so
+an item without one cannot be labelled: a flagged OpenCode part without an id is dropped
+without a record, and a pi `custom_message` without an id is not stored, as before. Nothing else
+about synthetic content changes: no kind of it is rewritten, reclassified or dropped unless
+flagged. The other formats keep no per-item metadata, so the flag does not apply
+to them. The labels are part of the canonical trace only: the `letta` render drops them, and
+they are outside the content hash.
+
 ## What seshi writes
 
 Every input is stored in one canonical format, `seshi/trace/1`
 ([`spec/schemas/trace.schema.json`](../spec/schemas/trace.schema.json), X6.2): the
 trajectory-v1 records, their events and content hash, plus what a raw transcript used to keep:
-the model and token usage per LLM call, record ids, tool call ids and timings, and where the
-data came from. The model and token usage come from what each source records: a Claude Code
+the model and token usage per LLM call, record ids, tool call ids and timings, which user
+records an agent or a plugin added (`synthetic`, `omitted`), and where the data came from. The model and token usage come from what each source records: a Claude Code
 transcript's `message.model` and `message.usage` per request, a Codex rollout's `turn_context`
 model and `token_count` per model response, an OTLP or Datadog span's usage attributes. A
 Codex chunk cut between a response and its `token_count` leaves that response's records

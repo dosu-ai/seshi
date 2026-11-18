@@ -56,6 +56,10 @@ export interface TraceTextRecord {
   timestamp: string;
   id?: RecordId;
   llm_call?: LlmCallRef;
+  /** User records only: the agent or a plugin added this text to the user's turn, not the member (an OpenCode part marked `synthetic`, a pi extension's custom message). The model saw it. */
+  synthetic?: true;
+  /** User records only: how many injected items the integrator that added them asked seshi to leave out (`session_capture.omit`), here. Their text is not stored: the record's content is empty. */
+  omitted?: number;
 }
 
 /** What the assistant said, or the tools it called (or both). */
@@ -227,6 +231,8 @@ export const JSON_SCHEMA = {
         timestamp: { type: "string" },
         id: { $ref: "#/$defs/RecordId" },
         llm_call: { $ref: "#/$defs/LlmCallRef" },
+        synthetic: { const: true },
+        omitted: { type: "integer", minimum: 1 },
       },
       required: ["role", "content", "timestamp"],
       additionalProperties: false,

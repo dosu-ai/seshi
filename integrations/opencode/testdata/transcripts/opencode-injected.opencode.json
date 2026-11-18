@@ -1,0 +1,134 @@
+{
+  "info": {
+    "id": "ses_0ff3fixture00002",
+    "slug": "quiet-heron",
+    "projectID": "15d496110225279d",
+    "directory": "/repo/app",
+    "path": "",
+    "title": "Injected context",
+    "version": "1.18.34",
+    "time": {
+      "created": 1790964000000,
+      "updated": 1790964009000
+    }
+  },
+  "messages": [
+    {
+      "info": {
+        "role": "user",
+        "time": {
+          "created": 1790964000100
+        },
+        "agent": "build",
+        "id": "msg_ses_0ff3fixture00002_1",
+        "sessionID": "ses_0ff3fixture00002"
+      },
+      "parts": [
+        {
+          "type": "text",
+          "text": "Why does @src/auth.ts read KEY?",
+          "id": "prt_ses_0ff3fixture00002_1",
+          "messageID": "msg_ses_0ff3fixture00002_1",
+          "sessionID": "ses_0ff3fixture00002"
+        },
+        {
+          "type": "text",
+          "synthetic": true,
+          "text": "Called the Read tool with the following input: {\"filePath\":\"/repo/app/src/auth.ts\"}",
+          "id": "prt_ses_0ff3fixture00002_2",
+          "messageID": "msg_ses_0ff3fixture00002_1",
+          "sessionID": "ses_0ff3fixture00002"
+        },
+        {
+          "type": "file",
+          "mime": "text/plain",
+          "filename": "auth.ts",
+          "url": "file:///repo/app/src/auth.ts",
+          "id": "prt_ses_0ff3fixture00002_3",
+          "messageID": "msg_ses_0ff3fixture00002_1",
+          "sessionID": "ses_0ff3fixture00002"
+        },
+        {
+          "type": "text",
+          "synthetic": true,
+          "text": "<memory>Team knowledge: KEY comes from the vault; sessions stored in ADX say so.</memory>",
+          "metadata": {
+            "dosu_memory": true,
+            "session_capture": {
+              "omit": true
+            }
+          },
+          "id": "prt_ses_0ff3fixture00002_4",
+          "messageID": "msg_ses_0ff3fixture00002_1",
+          "sessionID": "ses_0ff3fixture00002"
+        }
+      ]
+    },
+    {
+      "info": {
+        "role": "assistant",
+        "parentID": "msg_ses_0ff3fixture00002_1",
+        "modelID": "claude-haiku-4-5",
+        "time": {
+          "created": 1790964002000,
+          "completed": 1790964008000
+        },
+        "id": "msg_ses_0ff3fixture00002_2",
+        "sessionID": "ses_0ff3fixture00002"
+      },
+      "parts": [
+        {
+          "type": "text",
+          "text": "Checking where KEY is set.",
+          "metadata": {
+            "session_capture": {
+              "omit": true
+            }
+          },
+          "time": {
+            "start": 1790964002100,
+            "end": 1790964002500
+          },
+          "id": "prt_ses_0ff3fixture00002_5",
+          "messageID": "msg_ses_0ff3fixture00002_2",
+          "sessionID": "ses_0ff3fixture00002"
+        },
+        {
+          "type": "tool",
+          "tool": "grep",
+          "callID": "toolu_01InjectedFixture00000001",
+          "metadata": {
+            "session_capture": {
+              "omit": true
+            }
+          },
+          "state": {
+            "status": "completed",
+            "input": {
+              "pattern": "KEY ="
+            },
+            "output": "src/auth.ts:1:export const KEY = 1;",
+            "time": {
+              "start": 1790964003000,
+              "end": 1790964003200
+            }
+          },
+          "id": "prt_ses_0ff3fixture00002_6",
+          "messageID": "msg_ses_0ff3fixture00002_2",
+          "sessionID": "ses_0ff3fixture00002"
+        },
+        {
+          "type": "text",
+          "text": "KEY is a constant in src/auth.ts, set to 1.",
+          "time": {
+            "start": 1790964008000,
+            "end": 1790964008000
+          },
+          "id": "prt_ses_0ff3fixture00002_7",
+          "messageID": "msg_ses_0ff3fixture00002_2",
+          "sessionID": "ses_0ff3fixture00002"
+        }
+      ]
+    }
+  ]
+}

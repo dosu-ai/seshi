@@ -52,7 +52,7 @@ describe("normalizeTranscript for Claude Code", () => {
 });
 
 describe("normalizeTranscript in chunks", () => {
-  const LOGS: [string, "claude-code" | "codex" | "datadog-trajectory"][] = [
+  const LOGS: [string, "claude-code" | "codex" | "datadog-trajectory" | "pi"][] = [
     ["claude-basic.claude-code.jsonl", "claude-code"],
     ["claude-queued-input.claude-code.jsonl", "claude-code"],
     ["claude-task-notification.claude-code.jsonl", "claude-code"],
@@ -61,10 +61,12 @@ describe("normalizeTranscript in chunks", () => {
     ["codex-forked-subagent.codex.jsonl", "codex"],
     ["datadog-claude-session.datadog-trajectory.jsonl", "datadog-trajectory"],
     ["datadog-backfilled-session.datadog-trajectory.jsonl", "datadog-trajectory"],
+    ["pi-injected.pi.jsonl", "pi"],
   ];
   const sessionOf = (source: string, log: string): string => {
     const first = JSON.parse(log.slice(0, log.indexOf("\n"))) as Record<string, unknown>;
     if (source === "codex") return (first.payload as Record<string, string>).id;
+    if (source === "pi") return first.id as string;
     return (first.sessionId ?? first.session_id) as string;
   };
 
