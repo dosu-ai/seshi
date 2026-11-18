@@ -139,6 +139,37 @@ commands Claude Code runs. Without it, `--session` alone means the one session s
 current folder in the past day; when more than one ran there it lists them and asks for
 `--session <id>` rather than guess (a subagent never counts: its parent's toggle covers it).
 
+### Content an agent or a plugin adds
+
+Agents and their plugins add text to a user's turn that the person never typed: a file read
+for an `@` mention, a repository rule, a digest of what a memory service already knows. The
+model sees it, so seshi stores it, labelled `synthetic: true` on its user record, so readers can
+tell it apart from what the member typed. OpenCode marks such text parts `synthetic`; pi keeps
+what its extensions add as `custom_message` entries, which seshi stores as the user messages the
+model saw.
+
+An integrator that adds content it does not want stored (its own output coming back, say) sets
+`session_capture.omit = true` in the metadata the agent keeps beside it: an OpenCode part's
+`metadata`, a pi `custom_message`'s `details`. An OpenCode part, for example:
+
+```json
+{ "type": "text", "synthetic": true, "text": "…", "metadata": { "session_capture": { "omit": true } } }
+```
+
+seshi then leaves its text out before redaction, so it reaches neither the server nor the
+store, and keeps a user record in its place with empty content and `omitted: 1`, which counts
+it. This works the same for live capture, `seshi upload`, `seshi normalize`, S3 sources, and
+in server and serverless mode, since all of them read transcripts through the same formats. The
+flag counts only when it is exactly `true`, and only on user-side input and injected context:
+on what the model wrote or a tool returned it is ignored, so a model cannot hide its own output
+and a tool result is never lost. Claude Code, Codex and Cursor keep no such metadata, so the
+flag does not apply to them. See [formats.md](formats.md#content-an-agent-or-a-plugin-adds) for
+the details per format.
+
+Sessions stored before seshi honoured the flag keep the injected text until they are sent
+again. A format change like this makes them stale, so the uploader resends them within a day
+(`seshi capture resend` does it now).
+
 ## The status line
 
 ```
