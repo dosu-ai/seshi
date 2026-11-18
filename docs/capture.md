@@ -60,18 +60,21 @@ session with its parent's id.
 
 The sweep and `seshi upload --since` also read OpenCode's database, read-only, for the sessions
 the plugin never handed over (from before `install`, or a run without the plugin) and for turns
-it missed: `opencode.db` in OpenCode's data folder (`XDG_DATA_HOME` moves it), or the file
+it missed: `opencode.db` in OpenCode's data folder (`XDG_DATA_HOME` moves it) and each
+`opencode-<channel>.db` beside it, which 2.x keeps for some release channels, or only the file
 `OPENCODE_DB` names in the environment seshi runs in (a 2.x plugin also says its release channel,
-whose own `opencode-<channel>.db` seshi then reads). A captured session found there is written to
+so its hook reads that channel's file). A captured session found there is written to
 the same `transcripts/opencode/<id>.json` the plugin writes, only when that copy is missing or
 older than the database and holds something else (keys in another order, a newer
 `time.updated`, or the session's totals OpenCode works out after a turn, its `cost`, `tokens` and
-`summary`, do not count; a new title does), so a session is uploaded once whichever way seshi
-found it.
+`summary`, and the file changes 1.x works out for each prompt, do not count; a new title does),
+so a session is uploaded once whichever way seshi found it. The uploader's sweep also catches up
+a session it already knows however long ago it started, when its hook could not read a turn.
 seshi tells which OpenCode wrote the database from its tables: 1.x's `session`, `message` and
 `part`, 2.x's `session_v2` and `session_message` (and `session_part`, from 2.2.2). OpenCode 2.x
 copies a 1.x database's sessions into its own tables once, keeping only each message's last step
-of usage, so a session in both is read from 2.x's copy only when it went on there. seshi never
+of usage, so a session in both is read from 1.x's copy, with only the messages said since in
+2.x read from 2.x's. seshi never
 runs OpenCode for this; a database it does not know (an early 2.x preview's among them) is
 skipped, and `seshi upload --since` says why.
 

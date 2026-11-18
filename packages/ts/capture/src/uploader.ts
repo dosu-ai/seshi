@@ -675,6 +675,7 @@ export class Uploader {
       if (!floor) continue;
       const swept = await sweepAgent(agent, this.host, floor.getTime(), {
         onProblem: (problem) => this.logOnce(`sweep: ${problem}`),
+        known: (id) => state.sessions[sessionKey(agent.name, id)] !== undefined,
       });
       for (const found of swept) {
         const key = sessionKey(agent.name, found.info.session_id);

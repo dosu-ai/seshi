@@ -176,7 +176,9 @@ export interface OpencodeV2Session {
     title?: string;
     time: { created: number; updated: number };
   };
-  rows: { id: string; type: string; time: number; data: Row }[];
+  /** `inline`: an assistant row whose content stays in the row even with `parts`, as one written
+   * before OpenCode moved it to `session_part`. */
+  rows: { id: string; type: string; time: number; data: Row; inline?: boolean }[];
 }
 
 const SCHEMA_V2 = `
@@ -239,7 +241,7 @@ export function writeOpencodeDbV2(
       );
       rows.forEach((row, seq) => {
         const content = Array.isArray(row.data.content) ? (row.data.content as Row[]) : [];
-        const split = options.parts && row.type === "assistant";
+        const split = options.parts && row.type === "assistant" && !row.inline;
         const data = split ? { ...row.data, content: [] } : row.data;
         db.query(
           `INSERT INTO session_message (id, session_id, type, seq, time_created, time_updated, data)
