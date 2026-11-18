@@ -1,8 +1,8 @@
-import { appendLog, runHook } from "@seshi/capture/fast";
-import { CAPTURE_COMMAND, hookHandler } from "@seshi/kit";
+import { appendLog, runHook, sessionKey } from "@seshi/capture/fast";
+import { CAPTURE_COMMAND, CLOUD_FLAG, hookHandler } from "@seshi/kit";
 import { captureAgent } from "../capture-agents";
 import { EXIT } from "../cli/exit";
-import { pathsOf, startUploader } from "./capture-host";
+import { hostOf, NO_UPLOADER_ENV, pathsOf, startUploader } from "./capture-host";
 import type { CommandContext } from "./index";
 
 const STDIN_TIMEOUT_MS = 5000;
@@ -22,11 +22,16 @@ async function readInput(ctx: CommandContext): Promise<string> {
 
 export async function run(ctx: CommandContext): Promise<number> {
   const { paths } = pathsOf(ctx);
-  const [agentName, event, ...rest] = ctx.argv;
+  const [agentName, event, ...argv] = ctx.argv;
+  // `--cloud` comes before any `--`, after which Codex's own program and payload follow.
+  const dash = argv.indexOf("--");
+  const flag = argv.indexOf(CLOUD_FLAG);
+  const cloud = flag !== -1 && (dash === -1 || flag < dash);
+  const rest = cloud ? argv.filter((_, i) => i !== flag) : argv;
   const log = (line: string) =>
     appendLog(paths.log, `hook ${agentName ?? "?"} ${event ?? "?"}: ${line}`);
   try {
-    await hook(ctx, agentName, event, rest, log);
+    await hook(ctx, agentName, event, rest, log, cloud);
   } catch (err) {
     log(err instanceof Error ? err.message : String(err));
   }
@@ -39,11 +44,18 @@ async function hook(
   event: string | undefined,
   rest: string[],
   log: (line: string) => void,
+  cloud: boolean,
 ): Promise<void> {
   if (!agentName || !event) {
     log("usage: seshi hook <agent> <event>");
     return;
   }
+  const load = captureAgent(agentName);
+  // A hook committed to a repository acts only on the agent's cloud VM, and a user-level one
+  // stands aside there: on every other machine the committed one does nothing at all, so a
+  // conversation is never captured by both.
+  const marker = load ? (await load).installer?.cloud : undefined;
+  if (cloud !== (marker?.is(hostOf(ctx)) ?? false)) return;
   // After `--`, the program Codex's `notify` named before seshi, run with the same payload:
   // Codex runs only one `notify` program.
   const dash = rest.indexOf("--");
@@ -69,7 +81,6 @@ async function hook(
   }
   if (!text.trim()) return;
 
-  const load = captureAgent(agentName);
   if (!load) {
     log(`this seshi does not capture '${agentName}'`);
     return;
@@ -91,7 +102,21 @@ async function hook(
     );
   if (outcome.said) reply(outcome.said);
   if (outcome.announced) reply(notice(outcome.announced, agentName));
-  if (outcome.requested) reply(await carryOut(ctx, agentName, outcome.requested));
+  // On a cloud VM nothing is left to a background uploader: the VM can be gone once the run
+  // ends, so the hook uploads (or retracts) before it returns.
+  const toggled = cloud ? { ...ctx, env: { ...ctx.env, [NO_UPLOADER_ENV]: "1" } } : ctx;
+  if (outcome.requested) reply(await carryOut(toggled, agentName, outcome.requested));
+  if (cloud && marker) {
+    const keys = [
+      ...outcome.spooled.map((c) => sessionKey(agent.name, c.session_id)),
+      ...(outcome.requested ? [sessionKey(agent.name, outcome.requested.session.session_id)] : []),
+    ];
+    if (keys.length > 0) {
+      const { uploadNow } = await import("./upload-now");
+      await uploadNow(ctx, paths, keys, { deadlineMs: marker.budgetMs(event) });
+    }
+    return;
+  }
   if (outcome.spooled.length > 0) await startUploader(ctx, paths);
 }
 

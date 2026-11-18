@@ -42,6 +42,14 @@ export interface SessionState {
   /** How many times the session was retracted: each later upload is a new session on the
    * server (`<id>~<n>`), since a retracted one is never stored again (F9.7). */
   generation?: number;
+  /** How many times the server held a session this log did not extend, on a machine that
+   * continues rather than replaces (`continueOnConflict`): uploads go to `<id>~r<n>`, forking
+   * `fork_of`, the id uploaded to before. */
+  continuation?: number;
+  fork_of?: string;
+  /** Upload ids this machine stored before a continuation moved it on: turning the session off
+   * retracts them too, with the same secret. */
+  retract_also?: string[];
   /** The retraction secret: made before the first upload; only its hash is ever sent. */
   secret?: string;
   /** An upload carrying the secret's hash was sent (whatever came back): a retraction must ask
@@ -134,8 +142,13 @@ export function sessionKey(agent: string, sessionId: string): string {
 }
 
 /** The session id an upload uses: the agent's own, or `<id>~<n>` after `n` retractions. */
-export function uploadId(session: Pick<SessionState, "session_id" | "generation">): string {
-  return session.generation ? `${session.session_id}~${session.generation}` : session.session_id;
+export function uploadId(
+  session: Pick<SessionState, "session_id" | "generation" | "continuation">,
+): string {
+  const id = session.continuation
+    ? `${session.session_id}~r${session.continuation}`
+    : session.session_id;
+  return session.generation ? `${id}~${session.generation}` : id;
 }
 
 /** A new retraction secret (F9.7): 32 random bytes, base64url. */
