@@ -41,53 +41,58 @@ function jsonLines(text: string): Json[] | null {
   return rows;
 }
 
-function documentHead(text: string): DocumentHead | null {
-  let at = skipSpace(text, 0);
+/** The keys of the object at `from` in `text` (read no further than `end`) and what each holds.
+ * An array's first element, when an object, is read too, one level down only (`first`). */
+function documentHead(
+  text: string,
+  from = 0,
+  end = text.length,
+  nested = false,
+): DocumentHead | null {
+  let at = skipSpace(text, from, end);
   if (text[at] !== "{") return null;
   const head = new Map<string, HeadValue>();
+  const array = (start: number, stop: number): HeadValue => {
+    const element = skipSpace(text, start + 1, stop);
+    const first = nested || text[element] !== "{" ? null : documentHead(text, element, stop, true);
+    return first && first.size > 0 ? { kind: "array", first } : { kind: "array" };
+  };
   at += 1;
   for (;;) {
-    at = skipSpace(text, at);
-    if (text[at] === ",") at = skipSpace(text, at + 1);
-    if (text[at] !== '"') return head;
-    const keyEnd = skipValue(text, at);
+    at = skipSpace(text, at, end);
+    if (text[at] === ",") at = skipSpace(text, at + 1, end);
+    if (at >= end || text[at] !== '"') return head;
+    const keyEnd = skipValue(text, at, end);
     if (keyEnd < 0) return head;
     const key = JSON.parse(text.slice(at, keyEnd)) as string;
-    at = skipSpace(text, keyEnd);
+    at = skipSpace(text, keyEnd, end);
     if (text[at] !== ":") return head;
-    at = skipSpace(text, at + 1);
-    const end = skipValue(text, at);
-    if (end < 0) {
+    at = skipSpace(text, at + 1, end);
+    const valueEnd = skipValue(text, at, end);
+    if (valueEnd < 0) {
       if (text[at] === "{") head.set(key, { kind: "object" });
-      else if (text[at] === "[") head.set(key, arrayHead(text, at));
+      else if (text[at] === "[") head.set(key, array(at, end));
       return head;
     }
     const first = text[at];
-    if (first === '"') head.set(key, { kind: "string", text: JSON.parse(text.slice(at, end)) });
-    else if (first === "{") head.set(key, { kind: "object" });
-    else if (first === "[") head.set(key, arrayHead(text.slice(0, end), at));
+    if (first === '"') {
+      head.set(key, { kind: "string", text: JSON.parse(text.slice(at, valueEnd)) });
+    } else if (first === "{") head.set(key, { kind: "object" });
+    else if (first === "[") head.set(key, array(at, valueEnd));
     else head.set(key, { kind: "scalar" });
-    at = end;
+    at = valueEnd;
   }
 }
 
-/** An array starting at `at`, with the head of its first element when that is an object. */
-function arrayHead(text: string, at: number): HeadValue {
-  const start = skipSpace(text, at + 1);
-  if (text[start] !== "{") return { kind: "array" };
-  const first = documentHead(text.slice(start));
-  return first && first.size > 0 ? { kind: "array", first } : { kind: "array" };
-}
-
-function skipSpace(text: string, at: number): number {
-  while (at < text.length && /\s/.test(text[at])) at += 1;
+function skipSpace(text: string, at: number, end = text.length): number {
+  while (at < end && /\s/.test(text[at])) at += 1;
   return at;
 }
 
-function skipValue(text: string, at: number): number {
+function skipValue(text: string, at: number, end = text.length): number {
   let depth = 0;
   let inString = false;
-  for (let i = at; i < text.length; i += 1) {
+  for (let i = at; i < end; i += 1) {
     const c = text[i];
     if (inString) {
       if (c === "\\") i += 1;

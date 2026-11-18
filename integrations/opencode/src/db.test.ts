@@ -293,6 +293,37 @@ describe("OpenCode 2.x's database", () => {
     expect(found?.updatedMs).toBe(1790963999000);
   });
 
+  it("keeps seshi's copy when OpenCode only totals the session after the turn", () => {
+    writeOpencodeDbV2(db, [V2]);
+    const copy = storedOpencodeSessions(host, 0)[0]?.transcript() as string;
+    const write = new Database(db);
+    write.run(
+      "UPDATE session_v2 SET cost = 0.25, tokens_input = 900, summary_additions = 3, time_updated = time_updated + 5000",
+    );
+    expect(storedOpencodeSessions(host, 0)[0]?.transcript(copy)).toBe(copy);
+    // A new title is something to send.
+    write.run("UPDATE session_v2 SET title = 'Login page fix'");
+    write.close();
+    const retitled = storedOpencodeSessions(host, 0)[0]?.transcript(copy) as string;
+    expect(JSON.parse(retitled).info.title).toBe("Login page fix");
+  });
+
+  it("chooses between the copies before the cutoff, so a cutoff never picks the lossy one", () => {
+    writeOpencodeDbV2(db, [V2], { v1: [EXPORT] });
+    const [whole] = storedOpencodeSessions(host, 0);
+    const cutoff = (whole?.updatedMs as number) + 1;
+    // Only 2.x's copy changed after the cutoff (OpenCode retitled it), with nothing new said: the
+    // session is 1.x's copy, which has not changed since.
+    for (const file of [db, `${db}-wal`, `${db}-shm`]) rmSync(file, { force: true });
+    const retitled = {
+      ...V2,
+      session: { ...V2.session, time: { ...V2.session.time, updated: cutoff + DAY } },
+    };
+    writeOpencodeDbV2(db, [retitled], { v1: [EXPORT] });
+    expect(storedOpencodeSessions(host, cutoff)).toEqual([]);
+    expect(storedOpencodeSessions(host, 0).map((s) => s.updatedMs)).toEqual([whole?.updatedMs]);
+  });
+
   it("reads one session for the hook, from the channel's own database", () => {
     const channel = join(home, ".local", "share", "opencode", "opencode-local.db");
     writeOpencodeDbV2(channel, [V2]);
@@ -301,6 +332,11 @@ describe("OpenCode 2.x's database", () => {
     expect(read.changedMs).toBe(V2.session.time.updated);
     expect(JSON.parse(read.transcript).info.id).toBe(EXPORT.info.id);
     expect(() => readOpencodeSession(host, "ses_nope", "local")).toThrow("has no messages");
+    // Unless OpenCode was told to keep every channel in opencode.db.
+    host.env = { OPENCODE_DISABLE_CHANNEL_DB: "1" };
+    expect(opencodeDatabase(host, "local")).toBeUndefined();
+    writeOpencodeDbV2(db, [V2]);
+    expect(opencodeDatabase(host, "local")).toBe(db);
   });
 
   it("does not take OpenCode 2.x's own export (flat message rows) for 1.x's", () => {

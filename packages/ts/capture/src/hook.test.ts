@@ -155,6 +155,47 @@ describe("runHook (F9.1)", () => {
     await expect(run("../escape")).rejects.toThrow("unusable session id");
   });
 
+  it("spools a captured session whose transcript cannot be read yet, and says why", async () => {
+    // OpenCode 2.x's plugin names only the session; seshi reads it from OpenCode's database.
+    const named: CaptureAgent = {
+      ...agent,
+      name: "named",
+      encoding: "json",
+      chunkable: false,
+      hooks: [
+        {
+          event: "Stop",
+          parse: (p) => {
+            const { id, cwd } = p as { id: string; cwd: string };
+            return {
+              captures: [
+                {
+                  session_id: id,
+                  cwd,
+                  read: async () => {
+                    if (id === "busy") throw new Error("database is locked");
+                    return { transcript: `{"id":"${id}"}`, changedMs: 1_700_000_000_000 };
+                  },
+                },
+              ],
+            };
+          },
+        },
+      ],
+    };
+    const run = (id: string) =>
+      runHook({ agent: named, event: "Stop", payload: { id, cwd: dir }, host, paths });
+    const busy = await run("busy");
+    expect(busy.spooled).toEqual([{ session_id: "busy", cwd: dir }]);
+    expect(busy.problems).toEqual(["named: could not read session busy yet: database is locked"]);
+    expect(existsSync(join(paths.dir, "transcripts", "named", "busy.json"))).toBe(false);
+    const read = await run("s1");
+    const file = join(paths.dir, "transcripts", "named", "s1.json");
+    expect(read.spooled).toEqual([{ session_id: "s1", cwd: dir, transcript_path: file }]);
+    expect(read.problems).toBeUndefined();
+    expect(statSync(file).mtimeMs).toBe(1_700_000_000_000);
+  });
+
   it("skips what the rules exclude, by any level, and says why", async () => {
     mkdirSync(join(dir, "repo", ".git"), { recursive: true });
     mkdirSync(join(dir, "repo", ".seshi"));

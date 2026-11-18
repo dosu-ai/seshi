@@ -158,10 +158,12 @@ const server = async ({ client }) => {
 // OpenCode 2.x: no session.idle, and a plugin can neither read a whole session nor toast. When a
 // session's run is over, seshi is told which session it was and reads it from OpenCode's database
 // (the release channel says which file). From 2.2.1 that is in the experimental.idle hook, which
-// OpenCode awaits before the session goes idle, so \`opencode run\` does not exit (and stop its
-// server) before seshi has the session; a run that failed or was interrupted skips that hook, and
-// before 2.2.1 there is none, so the end of a run (an event, not awaited) does it then. A session
-// missed even so is found by seshi's sweep of the database. /session-capture is a command of the
+// OpenCode awaits before the session goes idle (and before the run's end is announced), so
+// \`opencode run\` does not exit (and stop its server) before seshi has the session. A run the hook
+// did not hand over does it at its end (an event, not awaited): one that failed or was
+// interrupted, which skips that hook, and every run before 2.2.1, which takes the hook's name
+// without complaint and never calls it. A session missed even so is found by seshi's sweep of the
+// database. /session-capture is a command of the
 // plugin's own, run here and never sent to the model; in the TUI, seshi's TUI plugin takes it
 // first and says the result.
 const ENDED = new Set([
@@ -196,19 +198,23 @@ const setup = async (ctx) => {
       }),
     );
   };
-  let idle = false;
+  // The sessions the idle hook handed over whose run's end has not been announced yet.
+  const handed = new Set();
   try {
-    await ctx.session.hook("experimental.idle", (input) => handOver(input.sessionID));
-    idle = true;
+    await ctx.session.hook("experimental.idle", async (input) => {
+      await handOver(input.sessionID);
+      handed.add(input.sessionID);
+    });
   } catch {}
   const stop = new AbortController();
   void (async () => {
     try {
       for await (const event of ctx.event.subscribe({ signal: stop.signal })) {
         if (!ENDED.has(event?.type)) continue;
-        if (idle && event.type === "session.execution.succeeded") continue;
         const id = event.data?.sessionID ?? event.properties?.sessionID;
-        if (typeof id === "string") await handOver(id);
+        if (typeof id !== "string") continue;
+        if (handed.delete(id) && event.type === "session.execution.succeeded") continue;
+        await handOver(id);
       }
     } catch {}
   })();
@@ -417,16 +423,19 @@ const setup = async (ctx) => {
   let reads = 0;
   const cleanups = [];
 
+  // The session /session-capture and the status are about (a subagent's is captured with its
+  // parent's), with its own folder when the TUI has it loaded; never the TUI's folder, which may
+  // be another project's: without one, seshi goes by the folder it already knows for the session.
   const which = (id) => {
     let top = id;
     try {
       top = ctx.data.session.root(id) || id;
     } catch {}
-    const cwd =
-      ctx.data.session.get(top)?.location?.directory ||
-      ctx.location?.directory ||
-      process.cwd();
-    return { session_id: top, ...(cwd ? { cwd } : {}) };
+    let cwd;
+    try {
+      cwd = ctx.data.session.get(top)?.location?.directory;
+    } catch {}
+    return { session_id: top, ...(typeof cwd === "string" && cwd ? { cwd } : {}) };
   };
 
   const refresh = async (id) => {

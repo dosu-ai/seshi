@@ -17,7 +17,9 @@
  * the sessions the plugin never handed over, and writes a captured one's export to that same
  * file: a session is one file, and one upload, whichever way seshi found it. */
 
-import { existsSync, rmdirSync, rmSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
+import { hostname } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
@@ -281,6 +283,58 @@ function cliEntry(host: CaptureHost) {
   return { path, folder, file, current, listed, stale };
 }
 
+/** OpenCode's state folder: `$XDG_STATE_HOME/opencode`, else `~/.local/state/opencode`. */
+function opencodeStateDir(host: CaptureHost): string {
+  const configured = host.env.XDG_STATE_HOME;
+  return join(
+    configured ? expandTilde(configured, host.home) : join(host.home, ".local", "state"),
+    "opencode",
+  );
+}
+
+/** Run `change` holding the lock OpenCode 2.x holds while it reads or rewrites `cli.json` (its
+ * `Flock`: a folder `<state>/locks/<sha1 of the file's path>.lock` with `heartbeat` and
+ * `meta.json` in it), so neither overwrites the other's change. Waits up to `waitMs` for
+ * OpenCode to let go; false, with nothing changed, if it did not. A lock OpenCode left behind
+ * when it crashed is OpenCode's to clear (it does when it next starts). */
+export async function withCliConfigLock(
+  host: CaptureHost,
+  change: () => void,
+  waitMs = 5000,
+): Promise<boolean> {
+  const locks = join(opencodeStateDir(host), "locks");
+  const lock = join(locks, `${createHash("sha1").update(cliConfigPath(host)).digest("hex")}.lock`);
+  mkdirSync(locks, { recursive: true });
+  const until = Date.now() + waitMs;
+  for (let delay = 50; ; delay = Math.min(delay * 2, 500)) {
+    try {
+      mkdirSync(lock, { mode: 0o700 });
+      break;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      if (Date.now() >= until) return false;
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+  try {
+    writeFileSync(join(lock, "heartbeat"), "", { flag: "wx" });
+    const meta = {
+      token: randomUUID(),
+      pid: process.pid,
+      hostname: hostname(),
+      createdAt: new Date().toISOString(),
+    };
+    writeFileSync(join(lock, "meta.json"), JSON.stringify(meta, null, 2), { flag: "wx" });
+    change();
+    return true;
+  } finally {
+    rmSync(lock, { recursive: true, force: true });
+  }
+}
+
+const cliBusy = (path: string, command: "install" | "uninstall") =>
+  `${path} is being changed by OpenCode: left alone; run seshi capture ${command} opencode again`;
+
 const byHand = (path: string, file: string, problem: string, key = "plugin") =>
   `${path} ${problem}: left alone, so OpenCode shows no Session Capture status; add "${file}" to its "${key}" list`;
 
@@ -301,14 +355,20 @@ export const opencodeInstaller: Installer = {
       writeJsonConfig(path, config);
       changed.push(path);
     }
-    const cli = cliEntry(context);
-    if ("problem" in cli.current)
-      notes.push(byHand(cli.path, cli.folder, cli.current.problem, "plugins"));
-    else if (cli.current.present && (!cli.listed || cli.stale)) {
-      const plugins = cli.current.plugins.filter((entry) => !isOurEntry(entry, cli.file));
-      if (!cli.listed) plugins.push(cli.folder);
-      writeJsonConfig(cli.path, { ...cli.current.config, plugins });
-      changed.push(cli.path);
+    // OpenCode 2.x's cli.json, once 2.x has written it: read and changed under OpenCode's lock.
+    if (existsSync(cliConfigPath(context))) {
+      const locked = await withCliConfigLock(context, () => {
+        const cli = cliEntry(context);
+        if ("problem" in cli.current)
+          notes.push(byHand(cli.path, cli.folder, cli.current.problem, "plugins"));
+        else if (cli.current.present && (!cli.listed || cli.stale)) {
+          const plugins = cli.current.plugins.filter((entry) => !isOurEntry(entry, cli.file));
+          if (!cli.listed) plugins.push(cli.folder);
+          writeJsonConfig(cli.path, { ...cli.current.config, plugins });
+          changed.push(cli.path);
+        }
+      });
+      if (!locked) notes.push(cliBusy(cliConfigPath(context), "install"));
     }
     if (changed.length > 0)
       notes.push("OpenCode loads the plugin when it starts: restart OpenCode");
@@ -336,19 +396,24 @@ export const opencodeInstaller: Installer = {
       } else writeJsonConfig(path, config);
       changed.push(path);
     }
-    const cli = cliEntry(context);
-    if (!("problem" in cli.current) && (cli.listed || cli.stale)) {
-      const config = { ...cli.current.config };
-      const plugins = cli.current.plugins.filter(
-        (entry) => !isOurEntry(entry, cli.folder) && !isOurEntry(entry, cli.file),
-      );
-      if (plugins.length > 0) config.plugins = plugins;
-      else delete config.plugins;
-      // OpenCode's own file, with its other settings: it stays.
-      writeJsonConfig(cli.path, config);
-      changed.push(cli.path);
+    const notes: string[] = [];
+    if (existsSync(cliConfigPath(context))) {
+      const locked = await withCliConfigLock(context, () => {
+        const cli = cliEntry(context);
+        if ("problem" in cli.current || !(cli.listed || cli.stale)) return;
+        const config = { ...cli.current.config };
+        const plugins = cli.current.plugins.filter(
+          (entry) => !isOurEntry(entry, cli.folder) && !isOurEntry(entry, cli.file),
+        );
+        if (plugins.length > 0) config.plugins = plugins;
+        else delete config.plugins;
+        // OpenCode's own file, with its other settings: it stays.
+        writeJsonConfig(cli.path, config);
+        changed.push(cli.path);
+      });
+      if (!locked) notes.push(cliBusy(cliConfigPath(context), "uninstall"));
     }
-    return { changed, notes: [] };
+    return { changed, notes };
   },
 
   async status(context: InstallContext): Promise<InstallStatus> {

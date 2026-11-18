@@ -35,6 +35,9 @@ export interface HookOutcome {
   requested?: { action: "off" | "on"; session: HookCapture };
   /** What the handler asked to tell the person. */
   said?: string;
+  /** Why a captured session's transcript could not be read (it is spooled all the same, and a
+   * sweep finds it where the agent keeps it). */
+  problems?: string[];
 }
 
 /** A value as one shell word: single-quoted, with any single quote in it closed and escaped. */
@@ -123,7 +126,7 @@ export async function runHook(run: HookRun): Promise<HookOutcome> {
     const path =
       capture.transcript === undefined && !capture.read
         ? capture.transcript_path
-        : await keep(run, capture);
+        : await keep(run, capture, outcome);
     appendSpool(
       run.paths,
       {
@@ -148,15 +151,31 @@ export async function runHook(run: HookRun): Promise<HookOutcome> {
 
 /** A transcript the hook was handed whole, or read once the session is captured, written where
  * the uploader reads it, readable only by this user. Only a captured session's is written: one
- * turned off never reaches the disk. */
-async function keep(run: HookRun, capture: HookCapture): Promise<string> {
+ * turned off never reaches the disk. A transcript that cannot be read now (the agent's store
+ * busy, or the session not in it yet) is left to the uploader, which finds it there (`locate`,
+ * the sweep): the session is spooled all the same, and the problem said. */
+async function keep(
+  run: HookRun,
+  capture: HookCapture,
+  outcome: HookOutcome,
+): Promise<string | undefined> {
   const path = handedTranscriptPath(run.host, run.agent, capture.session_id);
   if (!path) throw new Error(`${run.agent.name}: unusable session id '${capture.session_id}'`);
   if (capture.transcript !== undefined) {
     writePrivateFile(path, capture.transcript);
     return path;
   }
-  const read = await (capture.read as NonNullable<HookCapture["read"]>)();
+  let read: Awaited<ReturnType<NonNullable<HookCapture["read"]>>>;
+  try {
+    read = await (capture.read as NonNullable<HookCapture["read"]>)();
+  } catch (err) {
+    const why = err instanceof Error ? err.message : String(err);
+    outcome.problems = [
+      ...(outcome.problems ?? []),
+      `${run.agent.name}: could not read session ${capture.session_id} yet: ${why}`,
+    ];
+    return undefined;
+  }
   writePrivateFile(path, read.transcript);
   if (read.changedMs !== undefined) {
     const changed = new Date(read.changedMs);

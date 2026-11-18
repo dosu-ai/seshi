@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -16,6 +17,7 @@ import {
   tuiConfigPath,
   tuiPluginPath,
   UNKNOWN_COMMAND,
+  withCliConfigLock,
 } from "./capture";
 import { OPENCODE_FORMAT } from "./index";
 import {
@@ -40,7 +42,10 @@ beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), "seshi-opencode-"));
   host = { env: {}, home, platform: "linux" };
 });
-afterEach(() => rmSync(home, { recursive: true, force: true }));
+afterEach(() => {
+  rmSync(home, { recursive: true, force: true });
+  delete process.env.FAKE_SESHI_LOG;
+});
 
 describe("OpenCode's hooks, from seshi's plugin (F9.2)", () => {
   it("hands the whole session over as its transcript once a turn is over", () => {
@@ -302,10 +307,9 @@ describe("seshi capture install opencode", () => {
   });
 });
 
-/** The plugin as OpenCode loads it, run against a stand-in for OpenCode's client and a stand-in
- * seshi that records each call. */
-describe("the OpenCode plugin", () => {
-  const FAKE_SESHI = `
+/** What a stand-in seshi answers the server plugin: an "on" file beside its log says the
+ * session was turned on elsewhere (the TUI plugin, the CLI). */
+const PLUGIN_SESHI = `
 const { appendFileSync } = require("node:fs");
 let input = "";
 process.stdin.on("data", (c) => (input += c));
@@ -322,6 +326,83 @@ process.stdin.on("end", () => {
 });
 `;
 
+/** What it answers the TUI plugin: an "off" file beside its log (written by a `Command`) says
+ * the session is off; a "slow" one makes the next status read answer late. */
+const TUI_SESHI = `
+const { appendFileSync, existsSync, writeFileSync } = require("node:fs");
+const { join } = require("node:path");
+let input = "";
+process.stdin.on("data", (c) => (input += c));
+process.stdin.on("end", () => {
+  const args = process.argv.slice(2);
+  const log = process.env.FAKE_SESHI_LOG;
+  const off = join(log, "..", "off");
+  appendFileSync(log, JSON.stringify({ args, input, inherited: process.env.SESHI_SESSION_ID ?? null, noColor: process.env.NO_COLOR ?? null }) + "\\n");
+  if (args[0] === "statusline") {
+    const line = existsSync(off) ? "Session Capture ⏸ · turned off for this session\\n" : "Session Capture ◉\\n";
+    // A "slow" file makes this one read answer late, with what it read now.
+    const slow = join(log, "..", "slow");
+    if (!existsSync(slow)) return process.stdout.write(line);
+    require("node:fs").rmSync(slow);
+    setTimeout(() => process.stdout.write(line), 800);
+  }
+  if (args[2] === "SessionStart") process.stdout.write(JSON.stringify({ message: "Session Capture ◉ · uploaded as you work" }) + "\\n");
+  if (args[2] === "Command") {
+    writeFileSync(off, "");
+    process.stdout.write(JSON.stringify({ message: "Session Capture ⏸ · turned off for this session" }) + "\\n");
+  }
+});
+`;
+
+const SOLID = `
+export const createElement = (tag) => ({ tag, props: {} });
+export const setProp = (node, name, value) => { node.props[name] = value; return value; };
+export const insert = (node, accessor) => { node.text = accessor; };
+`;
+const SOLID_JS = `
+export function createSignal(value) {
+  return [() => value, (next) => { value = typeof next === "function" ? next(value) : next; }];
+}
+globalThis.__effects = [];
+export function createEffect(fn) { globalThis.__effects.push(fn); fn(); }
+`;
+
+/** A stand-in seshi running `script`: each call is logged to `calls.jsonl` in the test's home,
+ * read back by `seshiCalls`. Returns the command that runs it. */
+function fakeSeshi(script: string): string[] {
+  const file = join(home, "fake-seshi.cjs");
+  writeFileSync(file, script);
+  process.env.FAKE_SESHI_LOG = join(home, "calls.jsonl");
+  return [process.execPath, file];
+}
+
+function seshiCalls<T = { args: string[]; input: string }>(): T[] {
+  const log = process.env.FAKE_SESHI_LOG as string;
+  return existsSync(log)
+    ? readFileSync(log, "utf8")
+        .trim()
+        .split("\n")
+        .map((l) => JSON.parse(l) as T)
+    : [];
+}
+
+/** `@opentui/solid` and `solid-js` stand-ins in a `node_modules` beside the TUI plugin (the
+ * stand-in effect runs once, the signal is read through the text's accessor). */
+function stubSolid(): void {
+  for (const [name, source] of [
+    ["@opentui/solid", SOLID],
+    ["solid-js", SOLID_JS],
+  ] as const) {
+    const dir = join(home, "node_modules", ...name.split("/"));
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ type: "module", main: "index.js" }));
+    writeFileSync(join(dir, "index.js"), source);
+  }
+}
+
+/** The plugin as OpenCode loads it, run against a stand-in for OpenCode's client and a stand-in
+ * seshi that records each call. */
+describe("the OpenCode plugin", () => {
   interface Call {
     args: string[];
     input: string;
@@ -329,13 +410,10 @@ process.stdin.on("end", () => {
   }
 
   async function load() {
-    const fake = join(home, "fake-seshi.cjs");
-    writeFileSync(fake, FAKE_SESHI);
-    const log = join(home, "calls.jsonl");
-    process.env.FAKE_SESHI_LOG = log;
+    const fake = fakeSeshi(PLUGIN_SESHI);
     const file = join(home, "plugins", "seshi.js");
     mkdirSync(join(home, "plugins"), { recursive: true });
-    writeFileSync(file, opencodePlugin([process.execPath, fake]));
+    writeFileSync(file, opencodePlugin(fake));
     const module = (await import(pathToFileURL(file).href)) as {
       default: { id: string; server: (input: unknown) => Promise<unknown> };
     };
@@ -363,13 +441,7 @@ process.stdin.on("end", () => {
         output: { parts: unknown[] },
       ) => Promise<void>;
     };
-    const calls = (): Call[] =>
-      existsSync(log)
-        ? readFileSync(log, "utf8")
-            .trim()
-            .split("\n")
-            .map((l) => JSON.parse(l) as Call)
-        : [];
+    const calls = () => seshiCalls<Call>();
     return { hooks, calls, toasts };
   }
 
@@ -377,7 +449,6 @@ process.stdin.on("end", () => {
     process.env.SESHI_SESSION_ID = "the-claude-code-session-opencode-was-started-in";
   });
   afterEach(() => {
-    delete process.env.FAKE_SESHI_LOG;
     delete process.env.SESHI_SESSION_ID;
   });
 
@@ -466,47 +537,9 @@ process.stdin.on("end", () => {
   });
 });
 
-/** The TUI plugin as OpenCode's TUI loads it: `@opentui/solid` and `solid-js` stand-ins in a
- * `node_modules` beside it (the stand-in effect runs once, the signal is read through the
- * text's accessor), a stand-in for the TUI's plugin API, and a stand-in seshi. */
+/** The TUI plugin as OpenCode's TUI loads it: `@opentui/solid` and `solid-js` stand-ins
+ * (`stubSolid`), a stand-in for the TUI's plugin API, and a stand-in seshi. */
 describe("the OpenCode TUI plugin", () => {
-  const FAKE_SESHI = `
-const { appendFileSync, existsSync, writeFileSync } = require("node:fs");
-const { join } = require("node:path");
-let input = "";
-process.stdin.on("data", (c) => (input += c));
-process.stdin.on("end", () => {
-  const args = process.argv.slice(2);
-  const log = process.env.FAKE_SESHI_LOG;
-  const off = join(log, "..", "off");
-  appendFileSync(log, JSON.stringify({ args, input, inherited: process.env.SESHI_SESSION_ID ?? null, noColor: process.env.NO_COLOR ?? null }) + "\\n");
-  if (args[0] === "statusline") {
-    const line = existsSync(off) ? "Session Capture ⏸ · turned off for this session\\n" : "Session Capture ◉\\n";
-    // A "slow" file makes this one read answer late, with what it read now.
-    const slow = join(log, "..", "slow");
-    if (!existsSync(slow)) return process.stdout.write(line);
-    require("node:fs").rmSync(slow);
-    setTimeout(() => process.stdout.write(line), 800);
-  }
-  if (args[2] === "Command") {
-    writeFileSync(off, "");
-    process.stdout.write(JSON.stringify({ message: "Session Capture ⏸ · turned off for this session" }) + "\\n");
-  }
-});
-`;
-  const SOLID = `
-export const createElement = (tag) => ({ tag, props: {} });
-export const setProp = (node, name, value) => { node.props[name] = value; return value; };
-export const insert = (node, accessor) => { node.text = accessor; };
-`;
-  const SOLID_JS = `
-export function createSignal(value) {
-  return [() => value, (next) => { value = typeof next === "function" ? next(value) : next; }];
-}
-globalThis.__effects = [];
-export function createEffect(fn) { globalThis.__effects.push(fn); fn(); }
-`;
-
   interface Call {
     args: string[];
     input: string;
@@ -520,25 +553,14 @@ export function createEffect(fn) { globalThis.__effects.push(fn); fn(); }
   }
   type Binding = { key: unknown; cmd: (ctx: { focused: unknown }) => boolean };
 
-  function stub(name: string, source: string) {
-    const dir = join(home, "node_modules", ...name.split("/"));
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, "package.json"), JSON.stringify({ type: "module", main: "index.js" }));
-    writeFileSync(join(dir, "index.js"), source);
-  }
-
   async function load(
     options: { keybinds?: Record<string, unknown[]>; clearFails?: boolean } = {},
   ) {
-    stub("@opentui/solid", SOLID);
-    stub("solid-js", SOLID_JS);
-    const fake = join(home, "fake-seshi.cjs");
-    writeFileSync(fake, FAKE_SESHI);
-    const log = join(home, "calls.jsonl");
-    process.env.FAKE_SESHI_LOG = log;
+    stubSolid();
+    const fake = fakeSeshi(TUI_SESHI);
     const file = join(home, "seshi", "tui.js");
     mkdirSync(join(home, "seshi"), { recursive: true });
-    writeFileSync(file, opencodeTuiPlugin([process.execPath, fake]));
+    writeFileSync(file, opencodeTuiPlugin(fake));
     const module = (await import(pathToFileURL(file).href)) as {
       default: { id: string; tui: (api: unknown) => Promise<void> };
     };
@@ -592,13 +614,7 @@ export function createEffect(fn) { globalThis.__effects.push(fn); fn(); }
       },
     };
     await module.default.tui(api);
-    const calls = (): Call[] =>
-      existsSync(log)
-        ? readFileSync(log, "utf8")
-            .trim()
-            .split("\n")
-            .map((l) => JSON.parse(l) as Call)
-        : [];
+    const calls = () => seshiCalls<Call>();
     const show = (session_id: string) =>
       slots[0]?.slots.session_prompt_right?.({}, { session_id }) as Node;
     const submit = (text: unknown) => layers[0]?.bindings[0]?.cmd({ focused: { plainText: text } });
@@ -612,7 +628,6 @@ export function createEffect(fn) { globalThis.__effects.push(fn); fn(); }
     process.env.SESHI_SESSION_ID = "the-claude-code-session-opencode-was-started-in";
   });
   afterEach(() => {
-    delete process.env.FAKE_SESHI_LOG;
     delete process.env.SESHI_SESSION_ID;
   });
 
@@ -729,37 +744,6 @@ export function createEffect(fn) { globalThis.__effects.push(fn); fn(); }
 /** OpenCode 2.x reads the same two files as 1.x (`plugins/seshi.js`, `seshi/tui.js`), through the
  * other half of their one default export (`setup`), and finds the TUI plugin from `cli.json`. */
 describe("OpenCode 2.x", () => {
-  const FAKE_SESHI = `
-const { appendFileSync } = require("node:fs");
-let input = "";
-process.stdin.on("data", (c) => (input += c));
-process.stdin.on("end", () => {
-  const args = process.argv.slice(2);
-  appendFileSync(process.env.FAKE_SESHI_LOG, JSON.stringify({ args, input }) + "\\n");
-  if (args[2] === "SessionStart") process.stdout.write(JSON.stringify({ message: "Session Capture ◉ · uploaded as you work" }) + "\\n");
-  if (args[2] === "Command") process.stdout.write(JSON.stringify({ message: "Session Capture ⏸ · turned off for this session" }) + "\\n");
-  if (args[0] === "statusline") process.stdout.write("Session Capture ◉ · uploaded\\n");
-});
-`;
-  const calls = () => {
-    const log = process.env.FAKE_SESHI_LOG as string;
-    return existsSync(log)
-      ? readFileSync(log, "utf8")
-          .trim()
-          .split("\n")
-          .map((l) => JSON.parse(l) as { args: string[]; input: string })
-      : [];
-  };
-  const fake = () => {
-    const file = join(home, "fake-seshi.cjs");
-    writeFileSync(file, FAKE_SESHI);
-    process.env.FAKE_SESHI_LOG = join(home, "calls.jsonl");
-    return [process.execPath, file];
-  };
-  afterEach(() => {
-    delete process.env.FAKE_SESHI_LOG;
-  });
-
   /** OpenCode 1.18's rules for a plugin module (`readV1Plugin` in "detect" mode, then its legacy
    * per-export fallback), and 2.x's (`PluginModule`'s decode, and the TUI's `isPlugin`): each
    * reads only its own keys of the default export. */
@@ -780,7 +764,7 @@ process.stdin.on("end", () => {
   it("loads the server plugin through the same default export as 1.x", async () => {
     const file = join(home, "plugins", "seshi.js");
     mkdirSync(join(home, "plugins"), { recursive: true });
-    writeFileSync(file, opencodePlugin(fake()));
+    writeFileSync(file, opencodePlugin(fakeSeshi(PLUGIN_SESHI)));
     const module = (await import(pathToFileURL(file).href)) as Record<string, unknown>;
     expect(v1Reads(module, "server")).toBe(true);
     expect(v2Reads(module)).toBe(true);
@@ -789,12 +773,12 @@ process.stdin.on("end", () => {
   it("names the session when its run is over, and carries out /session-capture", async () => {
     const file = join(home, "plugins", "seshi.js");
     mkdirSync(join(home, "plugins"), { recursive: true });
-    writeFileSync(file, opencodePlugin(fake()));
+    writeFileSync(file, opencodePlugin(fakeSeshi(PLUGIN_SESHI)));
     const module = (await import(pathToFileURL(file).href)) as {
       default: { setup: (ctx: unknown) => Promise<() => void> };
     };
     type Hook = (input: Record<string, unknown>) => Promise<void> | void;
-    const make = (options: { idleHook: boolean }) => {
+    const make = () => {
       const hooks: Record<string, Hook> = {};
       const events = [
         { type: "session.created", data: { sessionID: ID } },
@@ -802,6 +786,11 @@ process.stdin.on("end", () => {
         { type: "session.execution.succeeded", data: { sessionID: ID } },
         { type: "session.execution.interrupted", data: { sessionID: "ses_child" } },
       ];
+      // The run's end is announced once the test says so (after the idle hook, as OpenCode does).
+      let announce = () => {};
+      const announced = new Promise<void>((resolve) => {
+        announce = resolve;
+      });
       const ctx = {
         app: { name: "opencode", version: "2.3.0", channel: "latest" },
         session: {
@@ -810,9 +799,9 @@ process.stdin.on("end", () => {
             location: { directory: "/repo/app" },
             ...(sessionID === "ses_child" ? { parentID: ID } : {}),
           }),
+          // Any name registers, as in OpenCode (its hooks are keyed by name): before 2.2.1
+          // experimental.idle is taken and never called.
           hook: async (name: string, fn: Hook) => {
-            // Before 2.2.1 OpenCode has no experimental.idle hook.
-            if (name === "experimental.idle" && !options.idleHook) throw new Error("unknown hook");
             hooks[name] = fn;
             return { dispose: async () => {} };
           },
@@ -820,15 +809,16 @@ process.stdin.on("end", () => {
         event: {
           subscribe: () => ({
             async *[Symbol.asyncIterator]() {
+              await announced;
               yield* events;
             },
           }),
         },
       };
-      return { ctx, hooks };
+      return { ctx, hooks, announce };
     };
     const stops = () =>
-      calls()
+      seshiCalls()
         .filter((c) => c.args[2] === "Stop")
         .map((c) => JSON.parse(c.input));
     const child = {
@@ -839,21 +829,26 @@ process.stdin.on("end", () => {
     };
     const own = { session_id: ID, cwd: "/repo/app", opencode_channel: "latest" };
 
-    // Before 2.2.1: the end of each run, of every kind, is the event.
-    const old = make({ idleHook: false });
+    // Before 2.2.1: the idle hook never runs, so the end of each run, of every kind, is the event.
+    const old = make();
     const cleanup = await module.default.setup(old.ctx);
+    expect(old.hooks["experimental.idle"]).toBeDefined();
+    old.announce();
     await vi.waitFor(() => expect(stops()).toHaveLength(2));
     expect(stops()).toEqual([own, child]);
     cleanup();
 
-    // From 2.2.1: a finished run in the idle hook, which OpenCode awaits; only a run that failed or
-    // was interrupted from the event.
+    // From 2.2.1: a finished run in the idle hook, which OpenCode awaits before it announces the
+    // run's end; only a run that failed or was interrupted from the event.
     rmSync(process.env.FAKE_SESHI_LOG as string, { force: true });
-    const now = make({ idleHook: true });
+    const now = make();
     await module.default.setup(now.ctx);
-    await vi.waitFor(() => expect(stops()).toEqual([child]));
     await now.hooks["experimental.idle"]?.({ sessionID: ID, background: [] });
-    expect(stops()).toEqual([child, own]);
+    expect(stops()).toEqual([own]);
+    now.announce();
+    await vi.waitFor(() => expect(stops()).toEqual([own, child]));
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(stops()).toEqual([own, child]);
 
     // seshi's command file, as 2.x prompts it, and a typed /session-capture: carried out, and the
     // model gets seshi's answer instead.
@@ -864,7 +859,7 @@ process.stdin.on("end", () => {
       },
     };
     await now.hooks.prompt?.(filed);
-    expect(JSON.parse(calls().at(-1)?.input ?? "")).toEqual({
+    expect(JSON.parse(seshiCalls().at(-1)?.input ?? "")).toEqual({
       session_id: ID,
       cwd: "/repo/app",
       arguments: "off",
@@ -873,42 +868,20 @@ process.stdin.on("end", () => {
     expect(filed.prompt.text).toContain("Reply with one short sentence");
     const typed = { sessionID: ID, prompt: { text: "/session-capture status" } };
     await now.hooks.prompt?.(typed);
-    expect(JSON.parse(calls().at(-1)?.input ?? "").arguments).toBe("status");
+    expect(JSON.parse(seshiCalls().at(-1)?.input ?? "").arguments).toBe("status");
     // Anything else is left alone.
-    const before = calls().length;
+    const before = seshiCalls().length;
     const other = { sessionID: ID, prompt: { text: "explain /session-capture to me" } };
     await now.hooks.prompt?.(other);
     expect(other.prompt.text).toBe("explain /session-capture to me");
-    expect(calls()).toHaveLength(before);
+    expect(seshiCalls()).toHaveLength(before);
   });
 
   it("shows the status, takes /session-capture, and toasts a new session in the TUI", async () => {
-    for (const [name, source] of [
-      [
-        "@opentui/solid",
-        `export const createElement = (tag) => ({ tag, props: {} });
-export const setProp = (node, name, value) => { node.props[name] = value; return value; };
-export const insert = (node, accessor) => { node.text = accessor; };`,
-      ],
-      [
-        "solid-js",
-        `export function createSignal(value) {
-  return [() => value, (next) => { value = typeof next === "function" ? next(value) : next; }];
-}
-export function createEffect(fn) { fn(); }`,
-      ],
-    ] as const) {
-      const dir = join(home, "node_modules", ...name.split("/"));
-      mkdirSync(dir, { recursive: true });
-      writeFileSync(
-        join(dir, "package.json"),
-        JSON.stringify({ type: "module", main: "index.js" }),
-      );
-      writeFileSync(join(dir, "index.js"), source);
-    }
+    stubSolid();
     const file = join(home, "seshi", "tui.js");
     mkdirSync(join(home, "seshi"), { recursive: true });
-    writeFileSync(file, opencodeTuiPlugin(fake()));
+    writeFileSync(file, opencodeTuiPlugin(fakeSeshi(TUI_SESHI)));
     const module = (await import(pathToFileURL(file).href)) as Record<string, unknown> & {
       default: { setup: (ctx: unknown) => Promise<() => void> };
     };
@@ -954,19 +927,27 @@ export function createEffect(fn) { fn(); }`,
     const node = slots[0]?.render({ sessionID: "ses_child" }) as Node;
     await vi.waitFor(() => expect(node.text()).toBe("Session Capture ◉"));
     expect(node.props.fg).toBe("muted");
-    expect(JSON.parse(calls()[0]?.input ?? "")).toEqual({ session_id: ID, cwd: "/repo/app" });
+    expect(JSON.parse(seshiCalls()[0]?.input ?? "")).toEqual({ session_id: ID, cwd: "/repo/app" });
 
     // /session-capture is the TUI's own slash command: carried out, toasted, never sent.
     const command = layers[0]?.commands[0];
     expect(command?.slash).toEqual({ name: "session-capture", arguments: true });
     await command?.run(" OFF ");
-    const asked = calls().find((c) => c.args[2] === "Command");
+    const asked = seshiCalls().find((c) => c.args[2] === "Command");
     expect(JSON.parse(asked?.input ?? "")).toEqual({
       session_id: ID,
       cwd: "/repo/app",
       arguments: "off",
     });
     expect(toasts.at(-1)).toMatchObject({ variant: "warning" });
+    // A session the TUI has not loaded: no folder, rather than the TUI's own.
+    route = { type: "session", sessionID: "ses_unloaded" };
+    await command?.run("status");
+    const unloaded = seshiCalls().filter((c) => c.args[2] === "Command");
+    expect(JSON.parse(unloaded.at(-1)?.input ?? "")).toEqual({
+      session_id: "ses_unloaded",
+      arguments: "status",
+    });
     route = { type: "home" };
     await command?.run("off");
     expect(toasts.at(-1)?.message).toContain("open a session first");
@@ -979,7 +960,7 @@ export function createEffect(fn) { fn(); }`,
     await vi.waitFor(() =>
       expect(toasts.map((t) => t.message)).toContain("Session Capture ◉ · uploaded as you work"),
     );
-    const started = calls().filter((c) => c.args[2] === "SessionStart");
+    const started = seshiCalls().filter((c) => c.args[2] === "SessionStart");
     expect(started.map((c) => JSON.parse(c.input))).toEqual([{ session_id: "ses_new", cwd: "/x" }]);
   });
 
@@ -1011,7 +992,20 @@ export function createEffect(fn) { fn(); }`,
     expect(await opencodeInstaller.install(context)).toEqual({ changed: [], notes: [] });
     expect((await opencodeInstaller.status(context)).notes).toEqual([]);
 
+    // OpenCode holds its lock on cli.json (rewriting it): seshi waits for it to let go.
+    const lock = join(
+      home,
+      ".local",
+      "state",
+      "opencode",
+      "locks",
+      `${createHash("sha1").update(cli).digest("hex")}.lock`,
+    );
+    mkdirSync(lock, { recursive: true });
+    expect(await withCliConfigLock(host, () => {}, 100)).toBe(false);
+    setTimeout(() => rmSync(lock, { recursive: true, force: true }), 300);
     expect((await opencodeInstaller.uninstall(context)).changed).toContain(cli);
+    expect(existsSync(lock)).toBe(false);
     expect(JSON.parse(readFileSync(cli, "utf8"))).toEqual({
       ...theirs,
       plugins: ["opencode-wakatime", { package: "./mine", options: {} }],

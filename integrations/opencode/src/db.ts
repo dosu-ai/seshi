@@ -42,17 +42,19 @@ const SHARED_CHANNELS = ["latest", "dev", "beta", "next", "prod"];
 
 /** The database OpenCode uses here: `$OPENCODE_DB` (a path, or a name in OpenCode's data folder),
  * else, in its data folder (`$XDG_DATA_HOME/opencode`, else `~/.local/share/opencode`),
- * `opencode-<channel>.db` for a `channel` that keeps its own, else `opencode.db`. Undefined when
- * there is none. */
+ * `opencode-<channel>.db` for a `channel` that keeps its own (unless
+ * `$OPENCODE_DISABLE_CHANNEL_DB` says not to), else `opencode.db`. Undefined when there is none. */
 export function opencodeDatabase(host: CaptureHost, channel?: string): string | undefined {
   const configured = host.env.OPENCODE_DB;
   if (configured === ":memory:") return undefined;
   const data = opencodeDataDir(host);
+  const shared =
+    !channel ||
+    SHARED_CHANNELS.includes(channel) ||
+    ["1", "true"].includes(host.env.OPENCODE_DISABLE_CHANNEL_DB ?? "");
   const name =
     configured ??
-    (channel && !SHARED_CHANNELS.includes(channel)
-      ? `opencode-${channel.replace(/[^a-zA-Z0-9._-]/g, "-")}.db`
-      : "opencode.db");
+    (shared ? "opencode.db" : `opencode-${channel.replace(/[^a-zA-Z0-9._-]/g, "-")}.db`);
   const path = isAbsolute(name) ? name : join(data, name);
   return existsSync(path) ? path : undefined;
 }
@@ -170,18 +172,31 @@ function listV2(db: Database, parts: boolean, sinceMs: number, id?: string): Lis
 
 /** Every session changed at or after `sinceMs` (or only `id`), one copy each. */
 function list(opened: Opened, sinceMs: number, id?: string): Listed[] {
-  const v1 = opened.v1 ? listV1(opened.db, sinceMs, id) : [];
+  const { db, parts } = opened;
+  const v1 = opened.v1 ? listV1(db, sinceMs, id) : [];
   if (!opened.v2) return v1;
-  const v2 = listV2(opened.db, opened.parts, sinceMs, id);
-  const byId = new Map(v1.map((s) => [s.id, s]));
-  for (const session of v2) {
-    const old = byId.get(session.id);
-    // 2.x's copy of a 1.x session is lossy: read it only when the session went on in 2.x.
-    if (!old || session.newest > old.newest) byId.set(session.id, session);
+  const v2 = listV2(db, parts, sinceMs, id);
+  if (!opened.v1) return v2;
+  // Which copy a session is read from does not depend on the cutoff: a session whose one copy
+  // changed since is weighed against its other copy, changed since or not, and listed only if
+  // the copy chosen changed since.
+  const one = new Map(v1.map((s) => [s.id, s]));
+  const two = new Map(v2.map((s) => [s.id, s]));
+  for (const s of v2) {
+    if (!one.has(s.id)) for (const o of listV1(db, 0, s.id)) one.set(o.id, o);
   }
-  return [...byId.values()].sort(
-    (a, b) => a.time_created - b.time_created || (a.id < b.id ? -1 : 1),
-  );
+  for (const s of v1) {
+    if (!two.has(s.id)) for (const o of listV2(db, parts, 0, s.id)) two.set(o.id, o);
+  }
+  const chosen: Listed[] = [];
+  for (const sessionId of new Set([...one.keys(), ...two.keys()])) {
+    const old = one.get(sessionId);
+    const now = two.get(sessionId);
+    // 2.x's copy of a 1.x session is lossy: read it only when the session went on in 2.x.
+    const session = now && (!old || now.newest > old.newest) ? now : old;
+    if (session && session.changed >= sinceMs) chosen.push(session);
+  }
+  return chosen.sort((a, b) => a.time_created - b.time_created || (a.id < b.id ? -1 : 1));
 }
 
 function exportOf(opened: Opened, session: Listed, host: CaptureHost): string {
@@ -212,12 +227,21 @@ function sorted(value: unknown): unknown {
 }
 
 /** Whether two exports hold the same session: the plugin's copy has OpenCode's server's key
- * order and the time it was handed over, and the session's `time.updated` moves on after a turn
- * (its title, its summary) without anything new to send. */
+ * order and what the session looked like when it was handed over, and once a turn is over
+ * OpenCode goes on to total the session's usage and changes (`cost`, `tokens`, `summary`) and
+ * moves its `time.updated`, all from what its messages already hold: nothing new to send. A new
+ * title is sent. */
 function sameSession(a: string, b: string): boolean {
   try {
     const [x, y] = [JSON.parse(a), JSON.parse(b)];
-    for (const doc of [x, y]) delete doc?.info?.time?.updated;
+    for (const doc of [x, y]) {
+      const info = doc?.info;
+      if (!info || typeof info !== "object") continue;
+      delete info.cost;
+      delete info.tokens;
+      delete info.summary;
+      delete info.time?.updated;
+    }
     return JSON.stringify(sorted(x)) === JSON.stringify(sorted(y));
   } catch {
     return false;

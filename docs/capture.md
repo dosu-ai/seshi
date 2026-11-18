@@ -64,8 +64,10 @@ it missed: `opencode.db` in OpenCode's data folder (`XDG_DATA_HOME` moves it), o
 `OPENCODE_DB` names in the environment seshi runs in (a 2.x plugin also says its release channel,
 whose own `opencode-<channel>.db` seshi then reads). A captured session found there is written to
 the same `transcripts/opencode/<id>.json` the plugin writes, only when that copy is missing or
-older than the database and holds something else (keys in another order, or a newer
-`time.updated` alone, do not count), so a session is uploaded once whichever way seshi found it.
+older than the database and holds something else (keys in another order, a newer
+`time.updated`, or the session's totals OpenCode works out after a turn, its `cost`, `tokens` and
+`summary`, do not count; a new title does), so a session is uploaded once whichever way seshi
+found it.
 seshi tells which OpenCode wrote the database from its tables: 1.x's `session`, `message` and
 `part`, 2.x's `session_v2` and `session_message` (and `session_part`, from 2.2.2). OpenCode 2.x
 copies a 1.x database's sessions into its own tables once, keeping only each message's last step
@@ -82,7 +84,10 @@ but a `tui.json` with comments is left alone, since rewriting it would drop them
 `install` lists `~/.config/opencode/seshi` there, in place of the file entry 2.x copies over from
 `tui.json`, which it cannot load. 2.x writes `cli.json` when it first starts, and seshi never
 creates it (2.x would then not copy your `tui.json` over), so after a first start of OpenCode
-2.x, run `seshi capture install opencode` again; `capture status` says so until then. Capture
+2.x, run `seshi capture install opencode` again; `capture status` says so until then. seshi
+changes `cli.json` holding the lock OpenCode 2.x holds on it, so neither undoes the other's
+change; if OpenCode holds it for more than a few seconds, `install` leaves the file alone and
+says to run it again. Capture
 works without the TUI plugin; only the status and `/session-capture` without a model turn need
 it.
 
