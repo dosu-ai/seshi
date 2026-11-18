@@ -58,7 +58,8 @@ function pager(options: { hold?: boolean } = {}): Connector & {
       await ctx.checkpoint.write({ page });
       if (options.hold) {
         await new Promise<void>((resolve) => {
-          ctx.signal.addEventListener("abort", () => resolve(), { once: true });
+          if (ctx.signal.aborted) resolve();
+          else ctx.signal.addEventListener("abort", () => resolve(), { once: true });
         });
         connector.aborted.push(id);
       }
