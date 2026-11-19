@@ -87,7 +87,7 @@ afterEach(async () => {
 describe("seshi sessions against a server", () => {
   it("names itself seshi/<version> to the server, not the client library's default", async () => {
     const ingests = server.requests.filter((r) => r.path === "/v1/sessions");
-    expect(ingests[0]?.headers["user-agent"]).toBe(`@seshi/client/${VERSION}`);
+    expect(ingests[0]?.headers["user-agent"]).toBe(`@dosu/seshi-client/${VERSION}`);
     const login = server.requests.filter((r) => r.path === "/v1/me");
     expect(login.length).toBeGreaterThan(0);
     const from = server.requests.length;

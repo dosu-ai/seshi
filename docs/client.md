@@ -93,7 +93,7 @@ there is a token: which ways in the server takes, and an IdP ID token for a sesh
 | `user` | With the org key: the username to write as, sent as `X-Seshi-User` |
 | `timeoutMs` | Per request; default 120 s, the server's own idle timeout; 0 disables |
 | `gzipFrom` | Bodies larger than this many bytes are sent gzipped; default 8 KiB |
-| `userAgent` | Sent as `User-Agent`, so the server's logs name your program (default `@seshi/client/<version>`) |
+| `userAgent` | Sent as `User-Agent`, so the server's logs name your program (default `@dosu/seshi-client/<version>`) |
 | `fetch` | A `fetch` of your own, for tests and custom transports |
 
 ### Errors
