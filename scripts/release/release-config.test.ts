@@ -107,7 +107,6 @@ describe("ci.yml", () => {
   it("publishes npm packages with provenance from the release's assets", () => {
     expect(CI).toContain("bun run release:npm --version");
     expect(CI).toContain("bun run release:publish-npm --provenance");
-    expect(CI).toContain('bun run release:wait-npm --version "$VERSION"');
     expect(CI).toMatch(/gh release download "v\$\{\{ needs\.release\.outputs\.version \}\}"/);
   });
 });

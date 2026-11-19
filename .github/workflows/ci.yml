@@ -468,9 +468,6 @@ jobs:
           if ((& $exe --version) -ne "seshi $env:VERSION") { exit 1 }
           bun run release:smoke $exe --version $env:VERSION --keychain ${{ matrix.keychain }}
           if ($LASTEXITCODE -ne 0) { exit 1 }
-      # npm can take minutes to serve a new package's first versions after `npm publish`
-      # returns (0.10.0's install got E404 16s after publishing): wait, bounded, until it
-      # serves this version of the launcher and every platform package.
       - name: Wait for npm to serve the release
         shell: bash
         run: bun run release:wait-npm --version "$VERSION"

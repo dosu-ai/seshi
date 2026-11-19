@@ -1,9 +1,7 @@
-/** Waits until the npm registry serves a release to `npm install`. `npm publish` returns once
- * the registry has the version, but a package's first versions can take minutes to reach the
- * registry's CDN: 0.10.0's `npm i -g @dosu/seshi` got E404 for every new package 16 seconds after
- * they were published, and installed five minutes later. A platform package that 404s is worse
- * than a launcher that does: npm skips a missing optional dependency and installs a launcher
- * with no binary. So the `verify` job waits for the launcher and every platform package. */
+/** Waits until the npm registry serves a release to `npm install`. `npm publish` can return
+ * before the registry serves the new version everywhere, which can take minutes for a new
+ * package. It waits for every platform package as well as the launcher: npm skips a missing
+ * optional dependency, so it would install a launcher with no binary. */
 
 import { parseArgs } from "node:util";
 import { LAUNCHER } from "./npm";
