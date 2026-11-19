@@ -1,3 +1,10 @@
+# [0.11.0](https://github.com/dosu-ai/seshi/compare/v0.10.0...v0.11.0) (2026-11-19)
+
+
+### Features
+
+* **client:** a Python client for the seshi API ([#38](https://github.com/dosu-ai/seshi/issues/38)) ([daa28ac](https://github.com/dosu-ai/seshi/commit/daa28ac2626d542b25cf05cfa8cf5cc1310b51e8)), closes [docs/releasing.md#pypi](https://github.com/docs/releasing.md/issues/pypi)
+
 # [0.10.0](https://github.com/dosu-ai/sessiondb/compare/v0.9.0...v0.10.0) (2026-11-19)
 
 
