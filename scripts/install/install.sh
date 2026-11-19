@@ -3,7 +3,7 @@
 # machine, checks it against the release's SHA256SUMS, puts `seshi` in ~/.local/bin and, when
 # that folder is not on the PATH, adds it in your shell's startup file.
 #
-#   curl -fsSL https://github.com/dosu-ai/sessiondb/releases/latest/download/install.sh | sh
+#   curl -fsSL https://github.com/dosu-ai/seshi/releases/latest/download/install.sh | sh
 #   curl -fsSL …/install.sh | sh -s -- --version 1.2.3 --dir /usr/local/bin --no-modify-path
 #
 # Options:
@@ -18,7 +18,7 @@
 
 set -eu
 
-REPOSITORY="dosu-ai/sessiondb"
+REPOSITORY="dosu-ai/seshi"
 CHECKSUMS="SHA256SUMS"
 
 version=""
@@ -42,7 +42,7 @@ usage: install.sh [--version <X.Y.Z>] [--dir <folder>] [--no-modify-path] [--bas
   --version <X.Y.Z>   a release (the latest by default)
   --dir <folder>      where to put seshi ($XDG_BIN_HOME, else ~/.local/bin)
   --no-modify-path    never edit a shell startup file
-  --base-url <url>    where releases are (default https://github.com/dosu-ai/sessiondb/releases)
+  --base-url <url>    where releases are (default https://github.com/dosu-ai/seshi/releases)
 EOF
 }
 

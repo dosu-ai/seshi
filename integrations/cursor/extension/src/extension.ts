@@ -10,7 +10,7 @@ import { type Action, LABEL, toggled, viewOf } from "./view";
 const SELECTED = "composer.getOrderedSelectedComposerIds";
 const POLL_MS = 2_000;
 const SAFETY_MS = 30_000;
-const DOCS = "https://github.com/dosu-ai/sessiondb/blob/main/docs/capture.md";
+const DOCS = "https://github.com/dosu-ai/seshi/blob/main/docs/capture.md";
 
 let item: vscode.StatusBarItem;
 let output: vscode.OutputChannel;

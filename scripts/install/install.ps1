@@ -7,11 +7,11 @@ Downloads the release archive for this machine (seshi-windows-x64.zip or
 seshi-windows-arm64.zip), checks it against the release's SHA256SUMS, puts seshi.exe in
 %LOCALAPPDATA%\Programs\seshi and adds that folder to your user PATH.
 
-  irm https://github.com/dosu-ai/sessiondb/releases/latest/download/install.ps1 | iex
+  irm https://github.com/dosu-ai/seshi/releases/latest/download/install.ps1 | iex
 
 With options:
 
-  & ([scriptblock]::Create((irm https://github.com/dosu-ai/sessiondb/releases/latest/download/install.ps1))) -Version 1.2.3
+  & ([scriptblock]::Create((irm https://github.com/dosu-ai/seshi/releases/latest/download/install.ps1))) -Version 1.2.3
 
 Settings are parameters rather than SESHI_* variables on purpose: seshi refuses SESHI_* names
 it does not know, so an installer variable left in the environment would break every seshi
@@ -27,14 +27,14 @@ Where to put seshi.exe (%LOCALAPPDATA%\Programs\seshi by default).
 Leave the user PATH alone.
 
 .PARAMETER BaseUrl
-Where releases are (a mirror); https://github.com/dosu-ai/sessiondb/releases by default.
+Where releases are (a mirror); https://github.com/dosu-ai/seshi/releases by default.
 #>
 [CmdletBinding()]
 param(
   [string]$Version = "",
   [string]$InstallDir = "",
   [switch]$NoModifyPath,
-  [string]$BaseUrl = "https://github.com/dosu-ai/sessiondb/releases"
+  [string]$BaseUrl = "https://github.com/dosu-ai/seshi/releases"
 )
 
 # Everything runs in a child scope: `irm … | iex` evaluates this text in the caller's own
@@ -46,7 +46,7 @@ param(
   # Invoke-WebRequest's progress bar makes downloads many times slower in Windows PowerShell.
   $ProgressPreference = 'SilentlyContinue'
 
-  $Repository = 'dosu-ai/sessiondb'
+  $Repository = 'dosu-ai/seshi'
   $Checksums = 'SHA256SUMS'
 
   function Install-Seshi {

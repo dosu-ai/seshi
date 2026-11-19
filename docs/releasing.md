@@ -101,7 +101,7 @@ first upload, or with a pending trusted publisher (below), before someone else t
 publish it from the release, as the `npm` job publishes the npm packages:
 
 1. **A trusted publisher.** On PyPI, add a pending publisher for the project `seshi`: owner
-   `dosu-ai`, repository `seshi` (or `sessiondb` until the rename), workflow `ci.yml`,
+   `dosu-ai`, repository `seshi`, workflow `ci.yml`,
    environment `pypi`. No token is stored anywhere: the job proves itself with GitHub's OIDC
    token, which needs `id-token: write`.
 2. **A `pypi` environment** in the repository's settings, limited to `main`, so only the
@@ -127,9 +127,12 @@ equal to `packages/ts/model/package.json`'s, so the published wheel's version is
   other, as it builds the packages. CI's `NPM_TOKEN` secret must be able to publish new
   packages to the `@dosu` scope. npm trusted publishing is set up per package, so it can
   replace the token only once each package exists.
-- **Repository name.** `REPOSITORY` in `scripts/release/targets.ts` and the two install scripts
-  name `dosu-ai/sessiondb`; if the repository is renamed (X3.8's open question), change all
-  three (a test keeps them equal). GitHub redirects old release URLs after a rename.
+- **Repository name.** The repository was `dosu-ai/sessiondb` and is now `dosu-ai/seshi`.
+  `REPOSITORY` in `scripts/release/targets.ts` and the two install scripts name it (a test
+  keeps them equal); GitHub redirects the old URLs, including sessiondb's release downloads.
+  The release job's app token is scoped to the repository by name, which `ci.yml` reads from
+  the event, so a rename needs no change there. The image moves with it to
+  `ghcr.io/dosu-ai/seshi`; the old `ghcr.io/dosu-ai/sessiondb` keeps sessiondb's tags.
 - **The old package.** Give `@dosu/sessiondb` its last release pointing to seshi (X3.8): publish
   one more patch whose README says it moved to `@dosu/seshi` and `@dosu/seshi-client`, then
   `npm deprecate @dosu/sessiondb "moved to seshi: npm i -g @dosu/seshi; the client is @dosu/seshi-client"`.

@@ -61,11 +61,8 @@ export function configJsonSchemas(): { server: object; cli: object } {
   return {
     server: generate(
       serverConfigSchema,
-      "https://github.com/dosu-ai/sessiondb/spec/config.schema.json",
+      "https://github.com/dosu-ai/seshi/spec/config.schema.json",
     ),
-    cli: generate(
-      cliConfigSchema,
-      "https://github.com/dosu-ai/sessiondb/spec/cli-config.schema.json",
-    ),
+    cli: generate(cliConfigSchema, "https://github.com/dosu-ai/seshi/spec/cli-config.schema.json"),
   };
 }

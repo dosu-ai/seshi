@@ -1,5 +1,5 @@
 blank_issues_enabled: false
 contact_links:
   - name: Security vulnerability or a secret that redaction missed
-    url: https://github.com/dosu-ai/sessiondb/security/policy
+    url: https://github.com/dosu-ai/seshi/security/policy
     about: Report privately through GitHub's advisory flow. Do not open a public issue.

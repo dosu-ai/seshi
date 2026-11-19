@@ -21,12 +21,12 @@ what the installer writes.
 At the prompt of a Claude Code terminal session:
 
 ```
-/plugin install seshi --marketplace dosu-ai/sessiondb
+/plugin install seshi --marketplace dosu-ai/seshi
 ```
 
-From a shell: `claude plugin install seshi --marketplace dosu-ai/sessiondb`. In the desktop app,
+From a shell: `claude plugin install seshi --marketplace dosu-ai/seshi`. In the desktop app,
 where `/plugin` does not run: click + next to the prompt box, then Plugins, Add marketplace with
-`dosu-ai/sessiondb`, then Add plugin. A plugin installed from a terminal at the user scope loads
+`dosu-ai/seshi`, then Add plugin. A plugin installed from a terminal at the user scope loads
 in the desktop app's sessions too.
 
 ## The desktop chip

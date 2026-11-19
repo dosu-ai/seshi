@@ -178,7 +178,7 @@ Sources are added, changed and removed without a restart: edit the file (or a dr
 
 ## Deploying
 
-Every release is published as a container image, `ghcr.io/dosu-ai/sessiondb:<version>`, built
+Every release is published as a container image, `ghcr.io/dosu-ai/seshi:<version>`, built
 from `apps/seshi/Dockerfile` in this repository (`docker build -f apps/seshi/Dockerfile .` from the
 root). The image is the compiled `seshi` binary (X2.2, `bun run build`) on a slim Debian base:
 a release's image holds the very Linux binaries attached to its GitHub release

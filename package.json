@@ -1,9 +1,9 @@
 {
-  "name": "sessiondb-workspace",
+  "name": "seshi-workspace",
   "private": true,
   "description": "seshi: capture, ingest, redact, store and search coding-agent sessions. One binary (apps/seshi), its TypeScript packages (packages/ts), the vendor integrations (integrations), and the contract they honour (spec).",
   "license": "MIT",
-  "repository": "github:dosu-ai/sessiondb",
+  "repository": "github:dosu-ai/seshi",
   "type": "module",
   "workspaces": [
     "apps/*",

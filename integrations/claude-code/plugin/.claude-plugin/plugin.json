@@ -4,7 +4,7 @@
   "author": {
     "name": "Dosu"
   },
-  "homepage": "https://github.com/dosu-ai/sessiondb",
+  "homepage": "https://github.com/dosu-ai/seshi",
   "license": "MIT",
   "version": "0.1.0",
   "types": "./types/index.d.ts",

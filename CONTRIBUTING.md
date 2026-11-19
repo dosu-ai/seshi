@@ -164,6 +164,7 @@ so the subject line follows [Conventional Commits](https://www.conventionalcommi
 `fix(redact): …` releases a patch, `feat(capture): …` a minor, a `BREAKING CHANGE:` footer a
 major. A commit with another shape is not seen by the release pipeline at all; it ships with the
 next one that is. Each release writes the version into `packages/ts/model/package.json`, the
-Python client's `src/seshi/_version.py` and `CHANGELOG.md`, tags `vX.Y.Z`, attaches the binaries, install scripts and `SHA256SUMS` to the
-GitHub release, publishes the npm packages, and pushes `ghcr.io/dosu-ai/sessiondb`. Nobody edits
+Python client's `src/seshi/_version.py` and `CHANGELOG.md`, tags `vX.Y.Z`, attaches the
+binaries, install scripts and `SHA256SUMS` to the GitHub release, publishes the npm packages,
+and pushes `ghcr.io/dosu-ai/seshi`. Nobody edits
 a version field by hand.
