@@ -1,0 +1,15 @@
+{
+  "conversation_id": "c0ffee00-9999-4222-8333-444455556666",
+  "generation_id": "ec12e18c-ed1a-4f3a-a6f2-b0177ce34db4",
+  "model": "auto-smart",
+  "prompt": "Run the shell command: echo stop-probe. Then reply OK.",
+  "attachments": [],
+  "session_id": "c0ffee00-9999-4222-8333-444455556666",
+  "hook_event_name": "beforeSubmitPrompt",
+  "cursor_version": "2026.11.19-f005e9d",
+  "workspace_roots": [
+    "/Users/dev/code/app"
+  ],
+  "user_email": "dev@example.com",
+  "transcript_path": null
+}

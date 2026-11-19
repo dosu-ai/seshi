@@ -31,6 +31,7 @@ export {
   type HookCapture,
   type HookHandler,
   type HookResult,
+  type HookToolResult,
   handedTranscriptDir,
   handedTranscriptPath,
   hookHandler,
@@ -38,12 +39,15 @@ export {
   type Installer,
   type InstallReport,
   type InstallStatus,
+  keptAgentDir,
+  keptSessionDir,
   type ProjectContext,
   type ProjectInstaller,
   payloadObject,
   type StoredSession,
   type SweepPath,
   stringField,
+  type TranscriptComposer,
   type TranscriptInfo,
 } from "./capture";
 export {

@@ -23,6 +23,7 @@ export const LAPTOP_TESTS = [
   "integrations/claude-code/src/**/capture.test.ts",
   "integrations/codex/src/**/capture.test.ts",
   "integrations/cursor/src/**/capture.test.ts",
+  "integrations/cursor/src/**/results.test.ts",
   "integrations/cursor/extension/src/**/*.test.ts",
   "integrations/opencode/src/**/capture.test.ts",
   "integrations/pi/src/**/capture.test.ts",

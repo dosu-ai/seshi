@@ -1,16 +1,19 @@
+import { randomBytes } from "node:crypto";
 import { appendFileSync, rmSync, utimesSync } from "node:fs";
+import { join } from "node:path";
 import {
   type CaptureAgent,
   type CaptureHost,
   type HookCapture,
   handedTranscriptPath,
   hookHandler,
+  keptSessionDir,
 } from "@seshi/kit";
 import { writeRecent } from "./current";
 import { writePrivateFile } from "./files";
 import type { CapturePaths } from "./paths";
 import { placeOf } from "./place";
-import { type Decision, decide } from "./rules";
+import { type Decision, decide, turnedOff } from "./rules";
 import { captureRules } from "./rules-cache";
 import { appendSpool } from "./spool";
 import { otherFolders, readState, type SessionState, sessionKey, stateFacts } from "./state";
@@ -38,6 +41,8 @@ export interface HookOutcome {
   /** Why a captured session's transcript could not be read (it is spooled all the same, and a
    * sweep finds it where the agent keeps it). */
   problems?: string[];
+  /** Where a tool's result was kept, for a captured session (`HookResult.toolResult`). */
+  kept?: string;
 }
 
 /** A value as one shell word: single-quoted, with any single quote in it closed and escaped. */
@@ -71,7 +76,7 @@ export async function runHook(run: HookRun): Promise<HookOutcome> {
   }
   if (result.request) outcome.requested = result.request;
   if (result.say) outcome.said = result.say;
-  if (result.captures.length === 0 && !result.announce) return outcome;
+  if (result.captures.length === 0 && !result.announce && !result.toolResult) return outcome;
 
   const now = run.now ?? new Date();
   const [{ rules, error }, state] = [await captureRules(run.host, run.paths), readState(run.paths)];
@@ -146,7 +151,37 @@ export async function runHook(run: HookRun): Promise<HookOutcome> {
     const { transcript: _, read: _read, ...spooled } = capture;
     outcome.spooled.push(path ? { ...spooled, transcript_path: path } : spooled);
   }
+  if (result.toolResult) {
+    // Judged like the session's own captures: a session turned off or paused, or in a folder the
+    // rules exclude, keeps nothing of what its tools return.
+    const { session, entry } = result.toolResult;
+    const { decision } = judge(session);
+    if (decision.capture) outcome.kept = keepToolResult(run, session.session_id, entry, now);
+    else {
+      outcome.skipped.push({ session_id: session.session_id, decision });
+      // Turned off by a rule since (a folder, the repo): what was kept of it goes too.
+      if (turnedOff(decision)) forgetHandedTranscript(run.host, run.agent, session.session_id);
+    }
+  }
   return outcome;
+}
+
+/** One tool result, as a file of its own beside the session (parallel tools finish at once),
+ * readable only by this user; named so that a listing sorts them in the order they came, to the
+ * microsecond (each hook is a process of its own, and two can finish in one millisecond). */
+function keepToolResult(
+  run: HookRun,
+  sessionId: string,
+  entry: Record<string, unknown>,
+  now: Date,
+): string {
+  const dir = keptSessionDir(run.host, run.agent.name, sessionId);
+  if (!dir) throw new Error(`${run.agent.name}: unusable session id '${sessionId}'`);
+  const micros = Math.floor((performance.timeOrigin + performance.now()) * 1000);
+  const name = `${micros.toString().padStart(17, "0")}-${randomBytes(6).toString("hex")}.json`;
+  const path = join(dir, "results", name);
+  writePrivateFile(path, JSON.stringify({ ...entry, at: now.toISOString() }));
+  return path;
 }
 
 /** A transcript the hook was handed whole, or read once the session is captured, written where
@@ -184,7 +219,8 @@ async function keep(
   return path;
 }
 
-/** Remove seshi's copy of a session it was handed whole (a session turned off keeps none). */
+/** Remove seshi's copy of a session it was handed whole, and whatever its hooks kept beside it
+ * (tool results, and the file built from them): a session turned off keeps none. */
 export function forgetHandedTranscript(
   host: CaptureHost,
   agent: Pick<CaptureAgent, "name" | "encoding">,
@@ -192,6 +228,8 @@ export function forgetHandedTranscript(
 ): void {
   const path = handedTranscriptPath(host, agent, sessionId);
   if (path) rmSync(path, { force: true });
+  const kept = keptSessionDir(host, agent.name, sessionId);
+  if (kept) rmSync(kept, { recursive: true, force: true });
 }
 
 function respoolPausedSession(

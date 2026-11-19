@@ -35,7 +35,7 @@ describe("Cursor's hooks (F9.2)", () => {
         {
           session_id: "c0ffee00-1111-4222-8333-444455556666",
           transcript_path:
-            "/Users/dev/.cursor/projects/Users-dev-code-app/agent-transcripts/c0ffee00-1111-4222-8333-444455556666.jsonl",
+            "/Users/dev/.cursor/projects/Users-dev-code-app/agent-transcripts/c0ffee00-1111-4222-8333-444455556666/c0ffee00-1111-4222-8333-444455556666.jsonl",
           cwd: "/Users/dev/code/app",
         },
       ],
@@ -141,6 +141,9 @@ describe("the installer (F9.6)", () => {
         beforeShellExecution: [{ command: "./guard.sh" }],
         sessionEnd: [{ command: "seshi hook cursor sessionEnd" }],
         beforeSubmitPrompt: [{ command: "seshi hook cursor beforeSubmitPrompt" }],
+        postToolUse: [{ command: "seshi hook cursor postToolUse" }],
+        postToolUseFailure: [{ command: "seshi hook cursor postToolUseFailure" }],
+        beforeReadFile: [{ command: "seshi hook cursor beforeReadFile" }],
       },
     });
     expect((await cursorInstaller.status(context())).installed).toBe(true);
@@ -153,6 +156,27 @@ describe("the installer (F9.6)", () => {
       },
     });
     expect((await cursorInstaller.uninstall(context())).changed).toEqual([]);
+  });
+
+  it("adds the tool-result hooks to an install from before them, and says they are missing", async () => {
+    mkdirSync(join(home, ".cursor"));
+    const before = Object.fromEntries(
+      ["stop", "sessionEnd", "beforeSubmitPrompt"].map((e) => [
+        e,
+        [{ command: `seshi hook cursor ${e}` }],
+      ]),
+    );
+    writeFileSync(file(), JSON.stringify({ version: 1, hooks: before }));
+    const status = await cursorInstaller.status(context());
+    expect(status.installed).toBe(false);
+    expect(status.notes).toContain(
+      "hooks missing for postToolUse, postToolUseFailure, beforeReadFile: run seshi capture install cursor",
+    );
+    await cursorInstaller.install(context());
+    const hooks = JSON.parse(readFileSync(file(), "utf8")).hooks;
+    expect(hooks.stop).toEqual([{ command: "seshi hook cursor stop" }]);
+    expect(hooks.postToolUse).toEqual([{ command: "seshi hook cursor postToolUse" }]);
+    expect((await cursorInstaller.status(context())).installed).toBe(true);
   });
 
   it("writes a new hooks.json with version 1", async () => {
@@ -226,7 +250,7 @@ describe("the hooks committed to a repository, for Cursor Cloud", () => {
   const file = () => join(repo, ".cursor", "hooks.json");
   const script = () => join(repo, ".cursor", SETUP_SCRIPT);
   const context = () => ({ dir: repo, version: "1.2.3" });
-  const ours = (event: "stop" | "sessionEnd" | "beforeSubmitPrompt") => ({
+  const ours = (event: keyof typeof PROJECT_TIMEOUTS) => ({
     command: projectHookCommand(event),
     timeout: PROJECT_TIMEOUTS[event],
   });
@@ -253,6 +277,9 @@ describe("the hooks committed to a repository, for Cursor Cloud", () => {
         afterFileEdit: [{ command: "npx prettier --write" }],
         sessionEnd: [ours("sessionEnd")],
         beforeSubmitPrompt: [ours("beforeSubmitPrompt")],
+        postToolUse: [ours("postToolUse")],
+        postToolUseFailure: [ours("postToolUseFailure")],
+        beforeReadFile: [ours("beforeReadFile")],
       },
     });
     expect((await cursorProjectInstaller.status(context())).installed).toBe(true);

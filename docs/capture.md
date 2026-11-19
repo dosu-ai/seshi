@@ -33,7 +33,7 @@ seshi capture install --service  # also keep the uploader running between sessio
 |---|---|---|
 | Claude Code | hooks, the status line and the `/session-capture` skill in `~/.claude/settings.json` and `~/.claude/skills/session-capture/` (`CLAUDE_CONFIG_DIR` moves them) | SessionStart, Stop, SubagentStop, PreCompact, SessionEnd |
 | Codex | `notify` in `~/.codex/config.toml` (`CODEX_HOME` moves it); a `notify` program already there keeps running, after seshi's. SessionStart and UserPromptSubmit hooks in `~/.codex/hooks.json` for the notice and `$session-capture`, and the `$session-capture` skill in `~/.agents/skills/session-capture/` | notify, plus the sweep of `~/.codex/sessions`; SessionStart and UserPromptSubmit only for the notice and `$session-capture` |
-| Cursor (IDE and CLI) | hooks in `~/.cursor/hooks.json`, the Cursor CLI's status line in `~/.cursor/cli-config.json`, and the `/session-capture` skill in `~/.cursor/skills/session-capture/`; it suggests the status bar extension ([below](#the-cursor-status-bar)) | stop, sessionEnd; beforeSubmitPrompt for `/session-capture` and the last chat prompted |
+| Cursor (IDE and CLI) | hooks in `~/.cursor/hooks.json`, the Cursor CLI's status line in `~/.cursor/cli-config.json`, and the `/session-capture` skill in `~/.cursor/skills/session-capture/`; it suggests the status bar extension ([below](#the-cursor-status-bar)) | stop, sessionEnd; postToolUse, postToolUseFailure and beforeReadFile for tool results ([below](#tool-results-in-cursor)); beforeSubmitPrompt for `/session-capture` and the last chat prompted |
 | pi | the extension `~/.pi/agent/extensions/seshi.ts` (`PI_CODING_AGENT_DIR` moves it) | agent_end (Stop), session_shutdown (SessionEnd, not on `/reload`); `/session-capture`, a command of its own; plus the sweep of `~/.pi/agent/sessions`, or of the folder `PI_CODING_AGENT_SESSION_DIR` or `sessionDir` in pi's settings names |
 | OpenCode (1.x and 2.x) | the plugin `~/.config/opencode/plugins/seshi.js`, the TUI plugin `~/.config/opencode/seshi/tui.js` with its entry in `tui.json`'s `plugin` list (1.x) and the folder's in `cli.json`'s `plugins` list (2.x), and the `/session-capture` command `~/.config/opencode/command/session-capture.md` (`XDG_CONFIG_HOME` moves them) | 1.x: session.idle (Stop), with the whole session. 2.x: the `experimental.idle` hook, or the end of a run that failed or was interrupted (Stop), naming the session. session.created (SessionStart) for the notice; `/session-capture` |
 
@@ -137,7 +137,8 @@ seshi capture install cursor --project ~/code/app
 git add .cursor/hooks.json .cursor/seshi-cloud.sh && git commit -m "Capture Cursor Cloud agents"
 ```
 
-This merges three hooks into `.cursor/hooks.json`, keeping everyone else's, and writes the setup
+This merges six hooks into `.cursor/hooks.json` (stop, sessionEnd, beforeSubmitPrompt and the
+three that keep tool results, [below](#tool-results-in-cursor)), keeping everyone else's, and writes the setup
 script `.cursor/seshi-cloud.sh`:
 
 ```json
@@ -245,8 +246,15 @@ that runs only on the VM, and the committed line checks it in the shell before i
   uploaded before the hook returns, a continuation's earlier session (below) included when this
   VM stored it. A VM rebuilt for a follow-up (below) no longer holds the
   retraction secret of what an earlier VM uploaded: an admin removes that with `seshi sessions rm`.
-- **Tool results are not captured yet**: Cursor's transcripts hold the agent's tool calls but not
-  what they returned, and seshi's Cursor adapter does not yet add them from `postToolUse`.
+- Tool results: the committed result hooks keep them on the VM as on a laptop
+  ([below](#tool-results-in-cursor)), and each `stop` uploads them with the transcript. They
+  upload nothing themselves. Every source agrees that `postToolUse` fires in cloud agents; if a
+  real run shows that `stop` does not (a forum reply says only tool-level hooks fire there),
+  nothing of a cloud session is uploaded, results or not. Uploading from `postToolUse` instead
+  would take: a budget per tool call (its timeout is 10 s, and Cursor waits for it), uploading
+  only every so often (say once a minute, on whichever `postToolUse` comes after), the transcript
+  read without `transcript_path` (null in the cloud), and the last turn's tail sent by nothing,
+  since no hook follows the last tool call of a run.
 - Who started the agent is not recorded: the session's owner is `cursor-cloud`.
 
 ### Follow-ups
@@ -265,6 +273,80 @@ uploaded, and replacing it with a shorter log would lose history. It **continues
 a new session `<id>~r1` whose `parent_session_id` (and `fork_of`) is the stored one, and later
 stops on that VM extend `<id>~r1`. A later rebuild that does not extend that either goes on to
 `~r2`.
+
+## Tool results in Cursor
+
+Cursor's agent transcript records each tool call, never what it returned. Its hooks see the
+results, so seshi installs three more hooks for Cursor, and Cursor runs them on every tool call:
+
+| Hook | What seshi keeps from it |
+|---|---|
+| `postToolUse` | the tool's output: a shell command's output (`tool_output.output`; an exit code other than 0 marks it an error), an MCP tool's text, and for other tools Cursor's JSON as it is: `{"file_path":…,"success":true}` for an edit, `{"pattern":…,"success":true}` for a Grep or Glob (Cursor gives no matches), the subagent's id and status for a Task |
+| `postToolUseFailure` | the error message of a call that failed (a command that exited non-zero, a file not found), as an error |
+| `beforeReadFile` | the text of a file the agent reads: a Read's `postToolUse` gives only `{"file_path":…,"content_length":…}`. Cursor gives at most 100,000 characters. The hook prints nothing, so it never blocks a read (a `beforeReadFile` hook that prints nothing, or fails, lets the read go ahead) |
+
+**What a result costs**: each tool call starts `seshi hook cursor <event>` once (twice for a
+read), which judges the session as any hook does and writes one file of at most 32,000
+characters. It reaches no network and starts no uploader. Measured on an M-series Mac with the
+compiled binary: 16 ms for a short result, 31 ms for a 1.4 MB one (seshi's `--version` alone
+takes 20 ms). Cursor waits for it before the agent goes on.
+
+**What is kept, and where**: one file per hook in `kept/cursor/<conversation>/results/`, readable
+only by you, and only for a captured session: a session turned off (`/session-capture off`),
+paused, or in a folder the capture rules exclude keeps nothing. Turning a session off removes
+what it kept, and so does a rule that turns it off later (a folder, the repo), at its next tool
+call or the next sweep. A command or MCP arguments are kept only as a digest, to tell calls apart;
+a result is removed once it is in the uploaded file. A result longer than 32,000 characters keeps its head and tail with
+`[… N characters cut by seshi …]` between them (the normalizer stores at most 2,500 characters of
+any result, as for every agent). A conversation that never shows up in the state file (a Task's
+subagent, whose tools carry its own conversation id) is removed a day after its last result.
+
+**What is uploaded**: before it reads a Cursor session, the uploader brings
+`kept/cursor/<conversation>/transcript.jsonl` up to date and uploads it instead of the
+transcript: the transcript's complete lines as they are, except that a line whose calls have
+results gets each answered call's `tool_use_id`, and is followed by one
+`{"role":"user","message":{"content":[{"type":"tool_result",…}]}}` line per result. These are
+Cursor's own shapes, so every reader of Cursor transcripts (the normalizer, redaction,
+`seshi normalize`) takes them as they are. The session's upload positions are kept in that
+file; a session uploaded before this change goes on where it was, since the file holds the
+transcript's bytes until the first result.
+
+- **Matching**: the transcript's calls carry no id, and the hooks' names and inputs often differ
+  from the transcript's (a StrReplace is a Read and a Write under one id; an MCP call is
+  `MCP:<tool>` to the hook and `CallDynamicTool` with a `toolName` in the transcript; a Glob is a
+  Grep with an empty pattern). The hooks of one call share its `tool_use_id`. Each call takes the
+  first result, in the order they came, of the same kind of tool, and of the same command, path,
+  pattern or MCP arguments when both sides say (a path the model wrote relative matches the
+  absolute one the hooks give). Cursor runs a call's hooks before it writes the
+  line holding the call, so a line's results are all kept by the time the line can be read; calls
+  in one line (parallel tools) are matched however their results came.
+- **A call whose result never came** (a tool without a hook, such as GetDynamicTools, or a hook
+  that failed) is uploaded without one. **A result no call takes** is let go once a later result
+  has been taken, or after a minute. **A result kept after its call was uploaded** (only if its hook outlived its
+  timeout) is let go too: a result is never added before a line already sent, so the server's
+  stored prefix never changes.
+- **Uploaded twice**: the file only grows, so a session sent again, or whole (`seshi capture
+  resend`), carries each result once. If Cursor rewrites the transcript (it no longer starts with
+  what was composed), the file is composed again from the start, as the transcript would have been
+  sent, with only the results no call had taken yet. A session where neither the transcript nor
+  its results changed is not composed again.
+- **Redaction** works on these lines as on any transcript's, before upload and again on the
+  server: secrets in a result are replaced, and a call that reads a sensitive file or runs a
+  secret command keeps its call while its result is withheld (it has the call's id).
+- Not captured: Grep and Glob matches (Cursor's hook gives none), a subagent's own transcript and
+  results (seshi does not capture Cursor subagents yet), and what the agent read through tools
+  that fire no hook.
+- A Read Cursor refused as too large reports success to its hooks, with the file's first 100,000
+  characters, while the model was told it failed: seshi keeps that text.
+
+Cursor's own database (`~/Library/Application Support/Cursor/User/globalStorage/state.vscdb` on a
+Mac) also keeps tool results, per IDE conversation (not the CLI's). Its `bubbleId:<conversation>:
+<bubble>` rows hold `toolFormerData.result`: a shell command's output and an MCP tool's result
+(JSON in a JSON string), but for a read only `{"totalLinesInFile":N}`. Opened with `immutable=1`
+it misses what is still in the write-ahead log (recent conversations); `mode=ro` reads it while
+Cursor runs. seshi does not read it: filling in sessions stored before this change from it would
+add shell and MCP results to IDE sessions on the laptop that ran them, never a read's text, a
+CLI or cloud session's results.
 
 ## What is captured
 
@@ -444,7 +526,8 @@ instead).
 ## The uploader
 
 Hooks only append a small file per event to the spool and exit, always with 0 and no output, in
-a few milliseconds (X3.3). The uploader (`seshi daemon`) is started by a hook when it is not
+a few milliseconds (X3.3); Cursor's tool-result hooks write the result beside the session instead,
+and start no uploader ([above](#tool-results-in-cursor)). The uploader (`seshi daemon`) is started by a hook when it is not
 running and stops after five idle minutes; one runs per machine. While uploads or retractions
 wait to retry (the server is down, the network is out), it is not idle: it keeps running and
 retrying for up to 30 minutes after its last successful upload or retraction, then stops; what
@@ -576,10 +659,16 @@ seshi doctor --session 1f2e… --deep
 seshi doctor                      # every session seen in the past day; --since 7d for more
 ```
 
+Before the sessions, a **Hooks** section warns about an agent whose hooks are only partly
+installed, such as Cursor's installed before seshi kept tool results (`hooks missing for
+postToolUse, postToolUseFailure, beforeReadFile`): `seshi capture install <agent>` adds them,
+keeping everything else. `seshi capture status` says the same.
+
 `seshi doctor` reads the three views of a session that only this machine has together: the
 transcript, the capture state (the decision and why, offsets, a pause's stop, the toggle and
 retraction, a waiting rebuild, the spool, errors and retries, the uploader's log lines for it)
-and what the server, or the bucket in serverless mode, stored. Each check says `ok`, `warn`, `fail` or
+and what the server, or the bucket in serverless mode, stored. For a Cursor session the transcript
+it checks against is the one uploaded, with the tool results added. Each check says `ok`, `warn`, `fail` or
 `skip`, with a hint when something needs doing:
 
 | Check | What it looks at |
@@ -645,6 +734,7 @@ the server stored them.
 | `redaction-rules.json` | your server's redaction rules as last fetched, with their ETag |
 | `capture.log` | errors from hooks and the uploader (hooks never print, except a Cursor Cloud hook saying what it could not upload) |
 | `cursor-cloud` | the mark of a Cursor Cloud VM ([above](#hooks-on-everyone-elses-machines)) |
+| `kept/cursor/<conversation>/` | a captured Cursor session's tool results as its hooks kept them (`results/`), and the file uploaded for it, its transcript with the results added (`transcript.jsonl`, `compose.json`) ([above](#tool-results-in-cursor)). Removed when the session is turned off, and a day after the session leaves the state file |
 | `transcripts/opencode/` | OpenCode sessions as seshi was handed them, or read them from OpenCode's database in a sweep, one `<id>.json` each, for captured sessions only: OpenCode keeps its own in a database. A session's copy goes when it is turned off, and the folder when OpenCode is uninstalled |
 | `serverless/<id>/` | serverless mode, per bucket: the cached shared settings, the storage test's result, this machine's drop and failure records, the daemon's upkeep times ([serverless.md](serverless.md#what-a-laptop-writes-and-keeps)) |
 
@@ -653,7 +743,11 @@ the server stored them.
 ## Not yet
 
 - Cursor Cloud runs in a repository without seshi's committed hooks, through Cursor's API (F7).
-- Tool results in Cursor sessions, local or cloud (from `postToolUse`).
+- Cursor subagents (`agent-transcripts/<id>/subagents/`), and their tool results.
+- Tool results for Cursor sessions stored before seshi kept them, from Cursor's database
+  ([above](#tool-results-in-cursor)): shell and MCP results only, IDE sessions only.
+- Uploading a Cursor Cloud session from `postToolUse`, should `stop` not fire there
+  ([above](#what-a-cloud-run-uploads-and-when)).
 - Session Capture in Cursor's Agents Window, which shows no extension's status bar item.
 - A first-run notice inside Cursor that capture is on.
 - Datadog Trajectory's local files.

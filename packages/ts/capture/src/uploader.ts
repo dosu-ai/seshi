@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
-import { closeSync, existsSync, openSync, readSync, statSync } from "node:fs";
-import { basename } from "node:path";
+import { closeSync, existsSync, openSync, readdirSync, readSync, rmSync, statSync } from "node:fs";
+import { basename, join } from "node:path";
 import { ServerError } from "@seshi/client";
-import type { CaptureAgent, CaptureHost } from "@seshi/kit";
+import { type CaptureAgent, type CaptureHost, keptAgentDir } from "@seshi/kit";
 import {
   type Claims,
   Forbidden,
@@ -16,7 +16,14 @@ import {
 import { appendLog } from "./files";
 import type { CapturePaths } from "./paths";
 import { placeOf } from "./place";
-import { type Decision, decide, type Place, type RepoConfig, turnedOnSince } from "./rules";
+import {
+  type Decision,
+  decide,
+  type Place,
+  type RepoConfig,
+  turnedOff,
+  turnedOnSince,
+} from "./rules";
 import { captureRules, type RulesSnapshot } from "./rules-cache";
 import { type HoldWord, RetractRefused, type SessionSink, SignInNeeded } from "./sink";
 import { readSpool, removeSpool, type SpoolEntry } from "./spool";
@@ -578,8 +585,15 @@ export class Uploader {
       if (!agent || !this.due(session)) continue;
       const path = await this.transcriptOf(key, session, agent);
       if (!path) continue;
-      const size = this.sizeOf(path);
-      if (size === undefined || !this.pending(session, size)) continue;
+      // An agent whose upload is composed (`compose`) is judged before it is composed (a session
+      // not captured gets no copy here), unless nothing changed since and all of it was sent.
+      const composed = agent.compose?.current?.(session.session_id, path, this.host)
+        ? agent.compose.path(session.session_id, this.host)
+        : undefined;
+      if (!agent.compose || composed) {
+        const size = this.sizeOf(composed ?? path);
+        if (size === undefined || !this.pending(session, size)) continue;
+      }
       session = await this.startOf(key, session, agent, path, state);
       const place = placeOf(session.cwd);
       const decision = this.decision(snapshot, session, place, state);
@@ -593,9 +607,15 @@ export class Uploader {
         this.log(`${key}: stopped by a pause at ${offset} bytes`);
       }
       if (!decision.capture && decision.frozen === undefined) continue;
-      if (!this.pending(session, size)) continue;
+      // A paused session sends no more than it had, so its upload is not composed further.
+      const from = decision.capture
+        ? this.composed(key, agent, session, path)
+        : (agent.compose?.path(session.session_id, this.host) ?? path);
+      if (from === undefined) continue;
+      const size = this.sizeOf(from);
+      if (size === undefined || !this.pending(session, size)) continue;
       if (!this.stillHeld()) break;
-      const outcome = await this.sync(key, agent, place, path, size);
+      const outcome = await this.sync(key, agent, place, path, size, from);
       summary.uploaded += outcome.uploaded;
       if (outcome.uploaded > 0) succeeded = true;
       if (outcome.signIn) summary.signIn = outcome.signIn;
@@ -756,7 +776,46 @@ export class Uploader {
       st.uploader = { ...st.uploader, last_sweep: now.toISOString() };
     });
     if (additions.length > 0) this.log(`sweep found ${additions.length} session(s)`);
+    this.pruneKept(readState(this.paths), snapshot, now);
     return additions.length;
+  }
+
+  /** Remove what agents' hooks kept beside sessions a rule has turned off since, and beside sessions
+   * the state file no longer holds (gone, or never captured from here: a Cursor subagent's tool
+   * results) a day after it last changed. */
+  private pruneKept(state: CaptureState, snapshot: RulesSnapshot, now: Date): void {
+    for (const agent of this.agents.values()) {
+      if (!agent.compose) continue;
+      const root = keptAgentDir(this.host, agent.name);
+      let names: string[];
+      try {
+        names = readdirSync(root);
+      } catch {
+        continue;
+      }
+      for (const id of names) {
+        const dir = join(root, id);
+        const session = state.sessions[sessionKey(agent.name, id)];
+        if (session) {
+          const place = placeOf(session.cwd);
+          if (turnedOff(this.decision(snapshot, session, place, state))) {
+            rmSync(dir, { recursive: true, force: true });
+          }
+          continue;
+        }
+        const changed = Math.max(...[dir, join(dir, "results")].map((p) => this.mtimeOf(p) ?? 0));
+        if (now.getTime() - changed < 24 * 3600 * SECOND) continue;
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  }
+
+  private mtimeOf(path: string): number | undefined {
+    try {
+      return statSync(path).mtimeMs;
+    } catch {
+      return undefined;
+    }
   }
 
   /** Write out a session found in its agent's store; false, logged, when that fails. */
@@ -889,6 +948,25 @@ export class Uploader {
     );
   }
 
+  /** The file to read `session` from: its transcript, or for an agent that composes its upload
+   * (`compose`), that file brought up to date. Undefined, logged, when it cannot be composed; the
+   * session waits for the next pass rather than go from the transcript, whose bytes may differ from
+   * what was sent. */
+  private composed(
+    key: string,
+    agent: CaptureAgent,
+    session: SessionState,
+    path: string,
+  ): string | undefined {
+    if (!agent.compose) return path;
+    try {
+      return agent.compose.update(session.session_id, path, this.host);
+    } catch (err) {
+      this.logOnce(`${key}: could not add what the hooks kept to the transcript: ${message(err)}`);
+      return undefined;
+    }
+  }
+
   private sizeOf(path: string): number | undefined {
     try {
       return statSync(path).size;
@@ -926,7 +1004,8 @@ export class Uploader {
         continue;
       }
       if (this.off(state, session) || !session.path) continue;
-      const size = this.sizeOf(session.path);
+      const composed = this.agents.get(session.agent)?.compose?.path(session.session_id, this.host);
+      const size = this.sizeOf(composed ?? session.path);
       if (size === undefined || !this.pending(session, size)) continue;
       const decision = this.decision(snapshot, session, placeOf(session.cwd), state);
       if (!decision.capture && decision.frozen === undefined) continue;
@@ -1076,6 +1155,7 @@ export class Uploader {
     place: Place,
     path: string,
     size: number,
+    from: string = path,
   ): Promise<SyncOutcome> {
     let uploaded = 0;
     let retry: Retry = { replace: false, forceWhole: false, recoveries: 0 };
@@ -1090,7 +1170,15 @@ export class Uploader {
           rebuilding = true;
         }
       }
-      const prepared = await this.prepare(key, agent, path, size, session, retry, rebuilding);
+      const prepared = await this.prepare(
+        key,
+        agent,
+        { path, from },
+        size,
+        session,
+        retry,
+        rebuilding,
+      );
       if ("stop" in prepared) return { uploaded, ...prepared.stop };
       const attempt = prepared.attempt;
       const answer = await this.send(key, agent, place, attempt).then(
@@ -1109,10 +1197,12 @@ export class Uploader {
     }
   }
 
+  /** `path` is the session's transcript, which names it (`sent_path`); `from` is the file its
+   * bytes are read from: the transcript, or the upload composed from it (`compose`). */
   private async prepare(
     key: string,
     agent: CaptureAgent,
-    path: string,
+    { path, from }: { path: string; from: string },
     size: number,
     session: SessionState,
     retry: Retry,
@@ -1134,7 +1224,7 @@ export class Uploader {
       await this.refuse(key, "not_a_transcript", notTranscript, size);
       return { stop: { failed: true } };
     }
-    const piece = this.piece(path, whole ? 0 : fileOffset, limit, agent.encoding, whole);
+    const piece = this.piece(from, whole ? 0 : fileOffset, limit, agent.encoding, whole);
     if (!piece) return { stop: {} };
     let secret = session.secret;
     if (!secret || !session.sent) {

@@ -20,6 +20,15 @@ export interface TranscriptFacts {
   mtime?: string;
   identified_as?: string;
   error?: Failure;
+  /** The file the uploader sends in its place, for an agent that adds to its transcript what its
+   * hooks kept (Cursor's tool results): offsets and records are its. */
+  uploaded?: { path: string; size: number };
+}
+
+/** The file whose bytes were sent for the session, and its size: the transcript, or the upload
+ * composed from it. */
+export function sentFile(t: TranscriptFacts): { path?: string; size: number } {
+  return t.uploaded ?? { ...(t.path ? { path: t.path } : {}), size: t.size ?? 0 };
 }
 
 export interface SpoolFact {

@@ -28,6 +28,8 @@ export interface AgentInfo {
   chunkable: boolean;
   identify(path: string): string | undefined;
   locate?(sessionId: string): string | undefined;
+  /** The file uploaded in place of the session's transcript, when the agent composes one. */
+  uploaded?(sessionId: string): string | undefined;
 }
 
 export interface FileReader {

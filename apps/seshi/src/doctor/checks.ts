@@ -1,11 +1,12 @@
 import { isStub, type NormalizedRecord, prefixSha256, type SessionMetadata } from "@seshi/model";
 import type { DoctorDeps } from "./deps";
-import type {
-  CheckResult,
-  CheckStatus,
-  SecretlessStateEntry,
-  SessionEvidence,
-  TraceEvidence,
+import {
+  type CheckResult,
+  type CheckStatus,
+  type SecretlessStateEntry,
+  type SessionEvidence,
+  sentFile,
+  type TraceEvidence,
 } from "./types";
 
 export const SPOOL_STUCK_MS = 10 * 60 * 1000;
@@ -103,7 +104,7 @@ export function transcriptCheck(ev: SessionEvidence): CheckResult {
     }
     return result(id, title, "fail", `${t.path} is gone and nothing of it was stored`);
   }
-  const size = t.size ?? 0;
+  const size = sentFile(t).size;
   const sent = s?.file_offset ?? 0;
   const problems: { status: CheckStatus; text: string }[] = [];
   if (ev.capture && t.identified_as !== ev.session_id) {
@@ -139,7 +140,9 @@ export function transcriptCheck(ev: SessionEvidence): CheckResult {
       text: `the offsets were taken in ${s.sent_path}: the next upload sends the file whole`,
     });
   }
-  const summary = `${t.path}: ${bytes(size)}, modified ${t.mtime ?? "?"}; ${bytes(sent)} sent`;
+  const summary = t.uploaded
+    ? `${t.path}: ${bytes(t.size ?? 0)}, modified ${t.mtime ?? "?"}; sent from ${t.uploaded.path} (with what the hooks kept): ${bytes(size)}, ${bytes(sent)} sent`
+    : `${t.path}: ${bytes(size)}, modified ${t.mtime ?? "?"}; ${bytes(sent)} sent`;
   if (problems.length === 0) return result(id, title, "ok", summary);
   const status = problems.some((p) => p.status === "fail") ? "fail" : "warn";
   return result(id, title, status, (problems[0] as { text: string }).text, {
@@ -565,11 +568,12 @@ function localRecords(ev: SessionEvidence, deps: DoctorDeps): LocalRecords {
       skip: "pre-redaction changed lengths and the offsets disagree: the server's offset cannot be found in the transcript",
     };
   }
-  if (end > (ev.transcript.size ?? 0)) {
+  const file = sentFile(ev.transcript);
+  if (end > file.size) {
     return { end, skip: `the transcript is shorter than the ${bytes(end)} the server holds` };
   }
   try {
-    const text = deps.files.read(ev.transcript.path, end);
+    const text = deps.files.read(file.path ?? ev.transcript.path, end);
     const sent = deps.redaction.transcript(text, ev.capture.encoding);
     return { end, records: deps.normalizer.records(ev.capture.format, sent) };
   } catch (err) {
