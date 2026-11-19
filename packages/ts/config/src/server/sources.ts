@@ -162,7 +162,7 @@ export const cursorCloudSource = z
     lookback: duration()
       .prefault("25h")
       .describe(
-        "Agents untouched for longer are not read on the first poll: Cursor keeps a run's events for 24 hours (F7).",
+        "How far back Cursor still has a run's events (it keeps them 24 hours, F7): agents untouched for longer are not read on the first poll, and a run carried past the session filter is read again only within it.",
       ),
     max_streams: z
       .int()

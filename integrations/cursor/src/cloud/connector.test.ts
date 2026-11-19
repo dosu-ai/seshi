@@ -131,6 +131,8 @@ class FakeContext {
   logs: string[] = [];
   /** Each session's log length, as the store keeps it. */
   stored = new Map<string, number>();
+  /** Answers already given, by idempotency key: a resend gets the same answer (X4.7). */
+  answers = new Map<string, SubmitOutcome>();
   /** A first upload shorter than this is filtered (kept nothing of), as the session filter does. */
   filterUnder = 0;
   cursor: Cursor | null = null;
@@ -145,6 +147,8 @@ class FakeContext {
       source: { id: "cursor-team", type: "cursor-cloud", config: this.config },
       submit: async (envelope): Promise<SubmitOutcome> => {
         this.submitted.push(envelope);
+        const earlier = this.answers.get(envelope.idempotency_key);
+        if (earlier) return { ...earlier, status: "duplicate" } as SubmitOutcome;
         const payload = envelope.payload as { text: string; offset: number };
         const length = this.stored.get(envelope.session_key) ?? 0;
         if (payload.offset !== length) {
@@ -406,6 +410,87 @@ describe("the cursor-cloud poller", () => {
     await poller.run(ctx.context());
     expect(ctx.submitted.map((e) => e.session_key)).toEqual(["bc-open"]);
     expect(ctx.logs.some((l) => l.includes("bc-quiet") && l.includes("sent nothing"))).toBe(true);
+  });
+
+  it("waits with the next run while a carried run cannot be read whole", async () => {
+    const api = new FakeCursor();
+    const ctx = new FakeContext(api, { api_key: "k", max_streams: 1 });
+    ctx.cursor = {
+      v: 1,
+      agents: {
+        "bc-a": {
+          bytes: 0,
+          carry: [{ at: iso(NOW.getTime() - 3 * HOUR), id: "run-1" }],
+          through: { at: iso(NOW.getTime() - 3 * HOUR), id: "run-1" },
+        },
+      },
+    };
+    api.agent("bc-a", iso(NOW.getTime() - HOUR), [finished("run-1", 3), finished("run-2", 1)]);
+    // The one stream this poll has goes to the carried run; run-2 waits, carry and all.
+    expect(await poller.run(ctx.context())).toEqual({ more: true });
+    expect(ctx.submitted).toHaveLength(0);
+    expect(readCursorCloudCursor(ctx.cursor).agents["bc-a"]?.carry).toHaveLength(1);
+
+    const roomy = new FakeContext(api);
+    roomy.cursor = ctx.cursor;
+    await poller.run(roomy.context());
+    const text = ((roomy.submitted[0] as Envelope).payload as { text: string }).text;
+    expect(
+      text
+        .trim()
+        .split("\n")
+        .map((l) => JSON.parse(l).run_id),
+    ).toEqual(["run-1", "run-2"]);
+  });
+
+  it("records a carried run Cursor no longer has, and stores the next run without it", async () => {
+    const api = new FakeCursor();
+    const ctx = new FakeContext(api);
+    const long = iso(NOW.getTime() - 30 * HOUR);
+    ctx.cursor = {
+      v: 1,
+      agents: {
+        "bc-a": {
+          bytes: 0,
+          carry: [{ at: long, id: "run-1" }],
+          through: { at: long, id: "run-1" },
+        },
+      },
+    };
+    api.agent("bc-a", iso(NOW.getTime() - HOUR), [
+      finished("run-1", 30, 410),
+      finished("run-2", 1),
+    ]);
+    await poller.run(ctx.context());
+    expect(ctx.failures.map((f) => f.idempotency_key)).toEqual(["cursor-cloud:bc-a/run-1~expired"]);
+    expect(ctx.submitted.map((e) => e.idempotency_key)).toEqual(["cursor-cloud:bc-a/run-2"]);
+    expect(readCursorCloudCursor(ctx.cursor).agents["bc-a"]?.carry).toBeUndefined();
+  });
+
+  it("never moves an agent's log length back on an answer given earlier", async () => {
+    const api = new FakeCursor();
+    const ctx = new FakeContext(api);
+    // Released after a conflict at 1000 bytes; run-1 was stored long ago, at 400.
+    ctx.cursor = { v: 1, agents: { "bc-a": { bytes: 1000 } } };
+    ctx.stored.set("bc-a", 1000);
+    ctx.answers.set("cursor-cloud:bc-a/run-1", {
+      status: "stored",
+      archive_id: "a",
+      content_hash: "h",
+      session_id: "bc-a",
+      records: 1,
+      events: 1,
+      records_total: 1,
+      prefix_sha256: "p",
+      bytes_total: 400,
+    });
+    api.agent("bc-a", iso(NOW.getTime() - HOUR), [finished("run-1", 3), finished("run-2", 1)]);
+    await poller.run(ctx.context());
+    expect(ctx.failures).toEqual([]);
+    expect(ctx.submitted.map((e) => (e.payload as { offset: number }).offset)).toEqual([
+      1000, 1000,
+    ]);
+    expect(readCursorCloudCursor(ctx.cursor).agents["bc-a"]?.bytes).toBe(ctx.stored.get("bc-a"));
   });
 
   it("sends a run the filter kept nothing of again, ahead of the agent's next run", async () => {

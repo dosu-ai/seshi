@@ -21,7 +21,7 @@ no transcript file for a hook to upload ([capture.md](capture.md#cursor-cloud-ag
    type = "cursor-cloud"
    api_key = { env = "CURSOR_API_KEY" }
    # interval = "5m"       # how often it polls
-   # lookback = "25h"      # the first poll skips agents untouched for longer
+   # lookback = "25h"      # how far back Cursor still has a run's events
    # max_streams = 25      # run streams one poll opens at most (Cursor allows 60 a minute)
    # usage = true          # also read each run's token usage
    # visibility = "owner"  # default: default_visibility (org)
@@ -29,6 +29,10 @@ no transcript file for a hook to upload ([capture.md](capture.md#cursor-cloud-ag
 
    `api_url` replaces `https://api.cursor.com` (a test server); it must be `https`, or `http` to
    localhost only, since the key travels in a request header.
+
+   Give each agent one source. Sessions belong to the source that read them, so two sources whose
+   keys see the same agent (each member's key and a service account's key, say) store it twice,
+   once per source. Use either one source per member key or one service-account source, not both.
 3. Restart `seshi serve` (with the worker role). `seshi sync status cursor-cloud` says the source
    is polled; `seshi sync run cursor-cloud` polls it once.
 
@@ -68,8 +72,10 @@ the session's log length and the last run handled. It is saved after each agent.
 was stored of leaves it after 90 days untouched.
 
 A run the session filter keeps nothing of (too short, X4.10) is carried: it is read again and
-sent ahead of the agent's next run, while Cursor still has it, so a session that grows past the
-filter starts at its first run. A run the pipeline refuses (`sync failed`) is not sent again.
+sent ahead of the agent's next run, while Cursor still has it (`lookback`), so a session that
+grows past the filter starts at its first run. A poll that cannot read a carried run whole leaves
+the next run for a later poll rather than store it without the carried one; a carried run Cursor
+no longer has is recorded as `stream_expired`. A run the pipeline refuses (`sync failed`) is not sent again.
 
 If the stored session is not the length the checkpoint says (the checkpoint was lost or
 restored, or another source writes the same agent), the poller holds that agent and records

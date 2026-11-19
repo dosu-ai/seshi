@@ -357,7 +357,7 @@ a Datadog span it cannot parse, a Cursor run whose events expired) is recorded u
 |---|---|
 | `otlp` | `quiet_period` (`"10m"`): a session is published once its spans have been quiet this long (F4.4). The destination posts to `POST /otlp/v1/traces` with a service token for this source ([docs/otlp.md](otlp.md)) |
 | `datadog` | `site` (`"datadoghq.com"`), `api_url` (instead of `https://api.<site>`: a proxy; `https`, or `http` to localhost only), `api_key`, `app_key` (secrets), `ml_app`, `tags` (each `key:value`; a span must carry all), `interval` (`"5m"`), `overlap` (`"10m"`), `lag` (`"2m"`), `backfill` (`"7d"`), `page_size` (`500`, at most 5000), `quiet_period` (`"10m"`): polls Datadog LLM Observability ([docs/datadog.md](datadog.md)) |
-| `cursor-cloud` | `api_key` (secret), `api_url` (instead of `https://api.cursor.com`: a test server; `https`, or `http` to localhost only), `interval` (`"5m"`), `lookback` (`"25h"`), `max_streams` (`25`, at most 60), `usage` (`true`): polls Cursor's Cloud Agents API ([docs/cursor-cloud.md](cursor-cloud.md)) |
+| `cursor-cloud` | `api_key` (secret), `api_url` (instead of `https://api.cursor.com`: a test server; `https`, or `http` to localhost only), `interval` (`"5m"`), `lookback` (`"25h"`, how far back Cursor still has a run's events), `max_streams` (`25`, at most 60), `usage` (`true`): polls Cursor's Cloud Agents API ([docs/cursor-cloud.md](cursor-cloud.md)) |
 | `s3` | `url`, `prefix`, `credentials` or `role` (`arn`, `external_id`), `region`, `endpoint`, `account_id`, `include` globs, `format` (`"auto"`), `ordered_keys` (`false`), `interval` (`"5m"`), `path` |
 
 Ids are unique, and an `s3` source may not read seshi's own bucket and prefix, or its own

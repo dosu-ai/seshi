@@ -296,24 +296,23 @@ export function cursorCloudConnector(options: CursorCloudConnectorOptions = {}):
 
       /** The run as one line of the log. */
       async function lineOf(agentId: string, listed: CursorRun, events: CursorStreamEvent[]) {
-        const run =
+        // Both are extras: a refused key fails the poll, anything else leaves them out.
+        const extra = <T>(err: unknown, fallback: T): T => {
+          if (err instanceof CursorApiError && (err.status === 401 || err.status === 403)) {
+            throw err;
+          }
+          return fallback;
+        };
+        const [run, usage] = await Promise.all([
           listed.git !== undefined && listed.durationMs !== undefined
             ? listed
-            : await api.getRun(agentId, listed.id).catch((err: unknown) => {
-                if (err instanceof CursorApiError && (err.status === 401 || err.status === 403)) {
-                  throw err;
-                }
-                return listed;
-              });
-        let usage: Record<string, unknown> | undefined;
-        if (config.usage) {
-          usage = await api.runUsage(agentId, listed.id).catch((err: unknown) => {
-            if (err instanceof CursorApiError && (err.status === 401 || err.status === 403)) {
-              throw err;
-            }
-            return undefined;
-          });
-        }
+            : api.getRun(agentId, listed.id).catch((err: unknown) => extra(err, listed)),
+          config.usage
+            ? api
+                .runUsage(agentId, listed.id)
+                .catch((err: unknown) => extra<Record<string, unknown> | undefined>(err, undefined))
+            : undefined,
+        ]);
         const line: CursorRunLine = {
           type: "cursor_cloud_run",
           agent_id: agentId,
@@ -340,19 +339,50 @@ export function cursorCloudConnector(options: CursorCloudConnectorOptions = {}):
         } else ctx.log.warn(message);
       }
 
-      /** The carried runs' lines, read again, oldest first; runs Cursor no longer has drop out. */
+      /** The carried runs' lines, read again, oldest first, or undefined when one Cursor still
+       * has cannot be read whole this poll (out of streams, or a replay that ended early): the
+       * agent then waits, carry and all. A run Cursor no longer has drops out, recorded as
+       * expired. */
       async function carriedLines(agentId: string, carry: readonly RunRef[]) {
         const kept: RunRef[] = [];
         let text = "";
         for (const ref of carry) {
-          if (Date.parse(ref.at) < now - DAY || budget.streams <= 0) continue;
-          const events = await replay(agentId, ref.id);
-          if (!events || !replayComplete(events)) continue;
+          const events =
+            Date.parse(ref.at) < now - config.lookback
+              ? undefined
+              : await readable(agentId, ref.id);
+          if (events === "wait") return undefined;
+          if (events === undefined) {
+            await recordExpired(agentId, ref.id);
+            continue;
+          }
           const line = await lineOf(agentId, { id: ref.id, createdAt: ref.at }, events);
           text += line.text;
           kept.push(ref);
         }
         return { kept, text };
+      }
+
+      /** A run's whole replay; undefined once Cursor no longer has it; "wait" when it cannot be
+       * read whole this poll. */
+      async function readable(
+        agentId: string,
+        runId: string,
+      ): Promise<CursorStreamEvent[] | undefined | "wait"> {
+        if (budget.streams <= 0) {
+          budget.more = true;
+          return "wait";
+        }
+        const events = await replay(agentId, runId);
+        if (events === undefined) return undefined;
+        if (!replayComplete(events)) {
+          ctx.log.warn(
+            `run ${runId} of agent ${agentId}: Cursor's replay ended before the run's result; asked again next poll`,
+          );
+          if (budget.streams <= 0) budget.more = true;
+          return "wait";
+        }
+        return events;
       }
 
       /** Reads the agent's new runs into `entry`; true when every run listed was handled. */
@@ -365,28 +395,22 @@ export function cursorCloudConnector(options: CursorCloudConnectorOptions = {}):
             tally.waiting++;
             return false;
           }
-          if (budget.streams <= 0) {
-            budget.more = true;
-            return false;
-          }
-          const events = await replay(agent.id, listed.id);
-          if (events === undefined) {
-            await recordExpired(agent.id, listed.id);
-            entry.through = refOf(listed);
-            continue;
-          }
-          if (!replayComplete(events)) {
-            ctx.log.warn(
-              `run ${listed.id} of agent ${agent.id}: Cursor's replay ended before the run's result; asked again next poll`,
-            );
-            if (budget.streams <= 0) budget.more = true;
-            return false;
-          }
-          const { run, text: own } = await lineOf(agent.id, listed, events);
+          // The carried runs first: a poll that cannot read them whole leaves this run for the
+          // next one too, rather than store it without them.
           const carried =
             entry.bytes === 0 && entry.carry
               ? await carriedLines(agent.id, entry.carry)
               : { kept: [], text: "" };
+          if (carried === undefined) return false;
+          const events = await readable(agent.id, listed.id);
+          if (events === "wait") return false;
+          if (events === undefined) {
+            await recordExpired(agent.id, listed.id);
+            if (entry.carry) entry.carry = carried.kept;
+            entry.through = refOf(listed);
+            continue;
+          }
+          const { run, text: own } = await lineOf(agent.id, listed, events);
           const where = `${agent.id}/${listed.id}`;
           const branch = branchOf(run);
           const envelope: Envelope = {
@@ -443,7 +467,9 @@ export function cursorCloudConnector(options: CursorCloudConnectorOptions = {}):
             if (outcome.status === "dropped") tally.dropped++;
             else tally.stored++;
             delete entry.carry;
-            if (typeof total === "number") entry.bytes = total;
+            // A resend the session already holds (after a release) is answered as it was then:
+            // its length is no further than where the log ends now.
+            if (typeof total === "number") entry.bytes = Math.max(entry.bytes, total);
           }
           entry.through = refOf(listed);
         }
