@@ -106,7 +106,14 @@ The Python client (`packages/py/client`) is published as `seshi` by the `pypi` j
 `release` and beside `npm`: it checks out the release's tag, builds the wheel and sdist with
 `uv build` (their version is the one `scripts/release-version.ts` wrote into
 `src/seshi/_version.py`) and uploads them with `uv publish`. A file already on PyPI is skipped,
-so the job can be re-run.
+so the job can be re-run. To publish a release that is already cut (one from before the job
+existed, or one whose upload failed), run the workflow by hand on `main` with its version:
+
+```sh
+gh workflow run ci.yml --ref main -f pypi_version=0.11.0
+```
+
+That runs the `pypi` job for tag `v0.11.0`, beside the usual test jobs; no release is cut.
 
 It holds no token. PyPI trusts the workflow through trusted publishing: a publisher for the
 project `seshi`, repository `dosu-ai/seshi`, workflow `ci.yml`, environment `pypi`, registered

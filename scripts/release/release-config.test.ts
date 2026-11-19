@@ -92,7 +92,11 @@ describe("ci.yml", () => {
     expect(job).toContain("needs: release");
     expect(job).toContain("environment: pypi");
     expect(job).toContain("id-token: write");
-    expect(job).toContain("ref: v${{ needs.release.outputs.version }}");
+    expect(job).toContain("VERSION: ${{ needs.release.outputs.version || inputs.pypi_version }}");
+    expect(job).toContain("ref: v${{ env.VERSION }}");
+    // By hand, only for a release already cut: the tag it names, never a branch.
+    expect(job).toContain("github.event_name == 'workflow_dispatch' && inputs.pypi_version != ''");
+    expect(CI).toMatch(/workflow_dispatch:\n {4}inputs:\n {6}pypi_version:/);
     expect(job).toContain("uv build packages/py/client --out-dir dist/py");
     expect(job).toContain("uv publish --trusted-publishing always");
     expect(job).not.toMatch(/PYPI_TOKEN|password:/);

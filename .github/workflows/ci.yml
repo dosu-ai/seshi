@@ -7,7 +7,14 @@ on:
   # The process-mode scenarios (scenarios-process below), nightly or by hand.
   schedule:
     - cron: "17 3 * * *"
+  # By hand: the scenarios, and, with pypi_version, the pypi job for a release already cut
+  # (a release from before that job existed, or one whose upload failed).
   workflow_dispatch:
+    inputs:
+      pypi_version:
+        description: "Publish this release's Python client (X.Y.Z, tag vX.Y.Z) to PyPI"
+        required: false
+        default: ""
 
 # Every job's GITHUB_TOKEN can read the repository and nothing more, unless the job grants
 # itself more: release, image, npm and pypi do, each only what it uses. Checkouts keep no
@@ -418,24 +425,31 @@ jobs:
   # packages/py/client/src/seshi/_version.py the release wrote) and published with trusted
   # publishing: PyPI trusts this workflow's OIDC token in the `pypi` environment, which only
   # main may deploy to, so no token is stored (docs/releasing.md#pypi). A file already on PyPI
-  # is skipped (--check-url), so the job can be re-run.
+  # is skipped (--check-url), so the job can be re-run. Run by hand with `pypi_version`
+  # (`gh workflow run ci.yml --ref main -f pypi_version=X.Y.Z`), it publishes that release.
   pypi:
     needs: release
-    if: needs.release.outputs.released == 'true'
+    # The release is skipped on a run by hand; !cancelled() lets this job run without it.
+    if: >-
+      ${{ !cancelled() && (needs.release.outputs.released == 'true' ||
+      (github.event_name == 'workflow_dispatch' && inputs.pypi_version != '')) }}
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
       contents: read
       id-token: write
+    env:
+      VERSION: ${{ needs.release.outputs.version || inputs.pypi_version }}
     steps:
+      - name: Check the version names a release
+        run: |
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo "not a version: $VERSION"; exit 1; }
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: v${{ needs.release.outputs.version }}
+          ref: v${{ env.VERSION }}
           persist-credentials: false
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       - name: Build the wheel and sdist
-        env:
-          VERSION: ${{ needs.release.outputs.version }}
         run: |
           uv build packages/py/client --out-dir dist/py
           test -f "dist/py/seshi-$VERSION-py3-none-any.whl"
