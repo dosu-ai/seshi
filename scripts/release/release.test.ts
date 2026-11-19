@@ -223,7 +223,7 @@ describe.skipIf(!supported || process.platform === "win32")("the host's release"
       });
       const project = join(dir, "project");
       installPackages(project, packages);
-      const launcher = join(project, "node_modules/seshi/bin/seshi.js");
+      const launcher = join(project, "node_modules/@dosu/seshi/bin/seshi.js");
       const version = await exec([Bun.which("node") as string, launcher, "--version"]);
       expect(version).toMatchObject({ code: 0, out: `seshi ${VERSION}\n` });
       const unknown = await exec([Bun.which("node") as string, launcher, "no-such-command"]);

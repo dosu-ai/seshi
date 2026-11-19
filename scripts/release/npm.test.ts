@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   statSync,
@@ -17,6 +18,7 @@ import {
   addDeclarationExtensions,
   badgeUrl,
   buildNpm,
+  LAUNCHER,
   LIBRARIES,
   launcherManifest,
   libraryDependencies,
@@ -64,7 +66,7 @@ describe("addDeclarationExtensions", () => {
           "export * from './schemas';",
           'export type { T } from "./schemas/store";',
           'export { x } from "./already.js";',
-          'export type { Ext } from "@seshi/model";',
+          'export type { Ext } from "@dosu/seshi-model";',
           "",
         ].join("\n"),
       );
@@ -75,7 +77,7 @@ describe("addDeclarationExtensions", () => {
           "export * from './schemas/index.js';",
           'export type { T } from "./schemas/store.js";',
           'export { x } from "./already.js";',
-          'export type { Ext } from "@seshi/model";',
+          'export type { Ext } from "@dosu/seshi-model";',
           "",
         ].join("\n"),
       );
@@ -93,7 +95,7 @@ describe("addDeclarationExtensions", () => {
 describe("manifests", () => {
   it("platform packages install only on their own os, cpu and libc", () => {
     expect(platformManifest(targetById("linux-arm64"), "1.2.3")).toMatchObject({
-      name: "@seshi/cli-linux-arm64",
+      name: "@dosu/seshi-linux-arm64",
       version: "1.2.3",
       os: ["linux"],
       cpu: ["arm64"],
@@ -109,7 +111,7 @@ describe("manifests", () => {
 
   it("the launcher pins every platform package at its own version", () => {
     const manifest = launcherManifest("1.2.3");
-    expect(manifest).toMatchObject({ name: "seshi", bin: { seshi: "bin/seshi.js" } });
+    expect(manifest).toMatchObject({ name: "@dosu/seshi", bin: { seshi: "bin/seshi.js" } });
     expect(manifest.optionalDependencies).toEqual(
       Object.fromEntries(TARGETS.map((t) => [t.npm, "1.2.3"])),
     );
@@ -119,7 +121,7 @@ describe("manifests", () => {
 
   it("libraries depend on published workspace packages at the release's version", () => {
     expect(libraryDependencies({ "@seshi/model": "workspace:*" }, "1.2.3")).toEqual({
-      "@seshi/model": "1.2.3",
+      "@dosu/seshi-model": "1.2.3",
     });
     expect(libraryDependencies({ "@letta-ai/trajectory": "^0.3.0" }, "1.2.3")).toEqual({
       "@letta-ai/trajectory": "^0.3.0",
@@ -156,7 +158,7 @@ describe.skipIf(!posix)("buildNpm", () => {
   });
 
   it("builds every package in publish order, the launcher last", () => {
-    const names = [...TARGETS.map((t) => t.npm), ...LIBRARIES.map((l) => l.name), "seshi"];
+    const names = [...TARGETS.map((t) => t.npm), ...LIBRARIES.map((l) => l.name), LAUNCHER];
     expect(packages.map((p) => p.name)).toEqual(names);
     const listed = JSON.parse(readFileSync(join(out, "packages.json"), "utf8"));
     expect(listed.map((p: { name: string }) => p.name)).toEqual(names);
@@ -176,6 +178,21 @@ describe.skipIf(!posix)("buildNpm", () => {
       expect(text.startsWith(`<img src="${badgeUrl(VERSION)}"`)).toBe(true);
       expect(text).toContain(`# ${p.name}\n`);
     }
+  });
+
+  it("publishes under @dosu, with no import of an unpublished workspace name left", () => {
+    for (const p of packages) expect(p.name.startsWith("@dosu/seshi")).toBe(true);
+    const client = join(out, "client");
+    const manifest = JSON.parse(readFileSync(join(client, "package.json"), "utf8"));
+    expect(manifest.dependencies).toMatchObject({ "@dosu/seshi-model": VERSION });
+    expect(manifest.dependencies).not.toHaveProperty("@seshi/model");
+    const files = readdirSync(client, { recursive: true, encoding: "utf8" }).filter((f) =>
+      /\.(?:js|d\.ts)$/.test(f),
+    );
+    for (const f of files) {
+      expect(readFileSync(join(client, f), "utf8")).not.toMatch(/["']@seshi\/model["']/);
+    }
+    expect(readFileSync(join(client, "dist/index.js"), "utf8")).toContain('"@dosu/seshi-model"');
   });
 
   it("puts each release archive's binary, executable, in its platform package", () => {
@@ -217,7 +234,7 @@ describe.skipIf(!posix)("buildNpm", () => {
       project = mkdtempSync(join(tmpdir(), "seshi-npm-project-"));
       lonely = mkdtempSync(join(tmpdir(), "seshi-npm-lonely-"));
       const host = hostTarget();
-      const wanted = new Set(["seshi", host.npm, ...LIBRARIES.map((l) => l.name)]);
+      const wanted = new Set([LAUNCHER, host.npm, ...LIBRARIES.map((l) => l.name)]);
       installPackages(
         project,
         packages.filter((p) => wanted.has(p.name)),
@@ -226,7 +243,7 @@ describe.skipIf(!posix)("buildNpm", () => {
       // cannot climb into the project's node_modules).
       installPackages(
         lonely,
-        packages.filter((p) => p.name === "seshi"),
+        packages.filter((p) => p.name === LAUNCHER),
       );
     });
     afterAll(() => {
@@ -234,7 +251,7 @@ describe.skipIf(!posix)("buildNpm", () => {
       rmSync(lonely, { recursive: true, force: true });
     });
 
-    const launcher = () => join(project, "node_modules/seshi/bin/seshi.js");
+    const launcher = () => join(project, "node_modules/@dosu/seshi/bin/seshi.js");
 
     it("runs this machine's binary with the same arguments, stdin and exit status", async () => {
       const version = await exec([node as string, launcher(), "--version"]);
@@ -260,20 +277,20 @@ describe.skipIf(!posix)("buildNpm", () => {
     });
 
     it("says what to do when the platform package is missing", async () => {
-      const alone = join(lonely, "node_modules/seshi/bin/seshi.js");
+      const alone = join(lonely, "node_modules/@dosu/seshi/bin/seshi.js");
       const ran = await exec([node as string, alone, "--version"]);
       expect(ran.code).toBe(1);
       expect(ran.err).toContain(`the package ${hostTarget().npm}`);
       expect(ran.err).toContain("--omit=optional");
     });
 
-    it("imports @seshi/client and @seshi/model as ES modules", async () => {
+    it("imports @dosu/seshi-client and @dosu/seshi-model as ES modules", async () => {
       const script = join(project, "use.mjs");
       writeFileSync(
         script,
         [
-          'import { HttpSessionDB, SessionRejected, authConfig } from "@seshi/client";',
-          'import { VERSION, canonicalText, parseTrace } from "@seshi/model";',
+          'import { HttpSessionDB, SessionRejected, authConfig } from "@dosu/seshi-client";',
+          'import { VERSION, canonicalText, parseTrace } from "@dosu/seshi-model";',
           "const db = new HttpSessionDB({ server: 'http://127.0.0.1:1', token: 't' });",
           "console.log(JSON.stringify({ VERSION, db: typeof db.getSession, fns: [typeof authConfig, typeof canonicalText, typeof parseTrace], err: new SessionRejected('x', 'y') instanceof Error }));",
         ].join("\n"),
@@ -293,8 +310,8 @@ describe.skipIf(!posix)("buildNpm", () => {
       writeFileSync(
         file,
         [
-          'import { HttpSessionDB, type StoredTrace } from "@seshi/client";',
-          'import type { Visibility } from "@seshi/model";',
+          'import { HttpSessionDB, type StoredTrace } from "@dosu/seshi-client";',
+          'import type { Visibility } from "@dosu/seshi-model";',
           "const db: HttpSessionDB = new HttpSessionDB({ server: 'http://x', token: 't' });",
           "const v: Visibility = 'org';",
           // Proves the types are real: an unresolved declaration import makes them `any`, and

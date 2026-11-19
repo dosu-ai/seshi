@@ -11,7 +11,7 @@
  *    install scripts download from it, and `…/releases/latest/download/install.sh` is a stable
  *    URL.
  * 3. ci.yml's later jobs take it from there, from the release's own assets: `npm` publishes
- *    the platform packages, @seshi/model, @seshi/client and the `seshi` launcher; `image`
+ *    the platform packages, @dosu/seshi-model, @dosu/seshi-client and the @dosu/seshi launcher; `image`
  *    builds ghcr.io/<repo> from the two Linux binaries; `openvsx` publishes the Cursor
  *    extension; `verify` installs the release on every platform through each channel.
  *

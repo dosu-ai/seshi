@@ -33,7 +33,7 @@ session's visibility (X5.10); see [Who sees what](#who-sees-what).
 Inside, the server is an Instance (`packages/ts/instance/`, X1.2): the bucket, identity and
 access (`packages/ts/auth/`, X5), the pipeline (`packages/ts/pipeline/`) and the background jobs
 (X7), built from one config, with the HTTP routes (`packages/ts/api/`) over it.
-[`@seshi/client`](client.md) speaks the API from the other side.
+[`@dosu/seshi-client`](client.md) speaks the API from the other side.
 
 ## Running it
 
@@ -251,7 +251,7 @@ bucket or prefix. Isolation between teams comes from the deployment, not the cod
 
 A reader reads through the API with a service token (`seshi tokens create service --service
 <name>`, or `POST /v1/tokens {kind: "service", service: "<name>"}`) and
-[`@seshi/client`](client.md): it reads and searches every session, and tails each owner's
+[`@dosu/seshi-client`](client.md): it reads and searches every session, and tails each owner's
 `/v1/changes`, or every owner's at once with `/v1/changes/all` (below). With a server, bucket
 keys stay on the server (X5.6); in serverless mode each
 laptop holds one, and the bucket's permissions decide what it may do
@@ -263,7 +263,7 @@ client which bucket that is.
 ### Every owner's change feed
 
 A reader that follows every session can tail one feed instead of one per owner: `GET
-/v1/changes/all` (`allChanges()` in [`@seshi/client`](client.md)) pages through every owner's
+/v1/changes/all` (`allChanges()` in [`@dosu/seshi-client`](client.md)) pages through every owner's
 entries by stamp, then owner, then key, with one opaque cursor. Each entry names its `owner`
 and its `key`; `tombstone` and `visibility_changed` entries come through like `published` ones,
 from people, `svc:<source-id>` service accounts and `h-…` owners alike.

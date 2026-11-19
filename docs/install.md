@@ -7,7 +7,7 @@ the same compiled file, built once per release (F8.4):
 |---|---|---|
 | Install script (macOS, Linux) | `curl -fsSL https://github.com/dosu-ai/sessiondb/releases/latest/download/install.sh \| sh` | Run it again |
 | Install script (Windows) | `irm https://github.com/dosu-ai/sessiondb/releases/latest/download/install.ps1 \| iex` | Run it again |
-| npm | `npm i -g seshi`, or `npx seshi …` | `npm i -g seshi@latest` |
+| npm | `npm i -g @dosu/seshi`, or `npx @dosu/seshi …` | `npm i -g @dosu/seshi@latest` |
 | GitHub release | Download the archive for your platform and `SHA256SUMS` | By hand |
 | Docker (the server) | `docker run ghcr.io/dosu-ai/sessiondb` ([server.md](server.md)) | New tag |
 
@@ -17,12 +17,12 @@ Homebrew, and signed or notarized binaries, come later.
 
 | Platform | Archive | npm package |
 |---|---|---|
-| macOS, Apple silicon | `seshi-darwin-arm64.tar.gz` | `@seshi/cli-darwin-arm64` |
-| macOS, Intel | `seshi-darwin-x64.tar.gz` | `@seshi/cli-darwin-x64` |
-| Linux x64 (glibc) | `seshi-linux-x64.tar.gz` | `@seshi/cli-linux-x64` |
-| Linux arm64 (glibc) | `seshi-linux-arm64.tar.gz` | `@seshi/cli-linux-arm64` |
-| Windows x64 | `seshi-windows-x64.zip` | `@seshi/cli-windows-x64` |
-| Windows arm64 | `seshi-windows-arm64.zip` | `@seshi/cli-windows-arm64` |
+| macOS, Apple silicon | `seshi-darwin-arm64.tar.gz` | `@dosu/seshi-darwin-arm64` |
+| macOS, Intel | `seshi-darwin-x64.tar.gz` | `@dosu/seshi-darwin-x64` |
+| Linux x64 (glibc) | `seshi-linux-x64.tar.gz` | `@dosu/seshi-linux-x64` |
+| Linux arm64 (glibc) | `seshi-linux-arm64.tar.gz` | `@dosu/seshi-linux-arm64` |
+| Windows x64 | `seshi-windows-x64.zip` | `@dosu/seshi-windows-x64` |
+| Windows arm64 | `seshi-windows-arm64.zip` | `@dosu/seshi-windows-arm64` |
 
 Each archive holds `seshi` (`seshi.exe` on Windows) and `LICENSE`. The x64 builds run on any
 x64 CPU, including older ones without AVX2 and Intel builds under Rosetta 2, though the install
@@ -89,12 +89,12 @@ Parameters: `-Version`, `-InstallDir`, `-NoModifyPath`, `-BaseUrl` (as the shell
 ## npm
 
 ```sh
-npm i -g seshi
-npx seshi --help
+npm i -g @dosu/seshi
+npx @dosu/seshi --help
 ```
 
-The `seshi` package is a small launcher; npm also installs the one optional dependency that
-matches your machine (`@seshi/cli-darwin-arm64` and so on, chosen by their `os`, `cpu` and
+The `@dosu/seshi` package is a small launcher; npm also installs the one optional dependency that
+matches your machine (`@dosu/seshi-darwin-arm64` and so on, chosen by their `os`, `cpu` and
 `libc` fields), which holds the binary. The launcher runs it with your arguments and passes its
 exit status back. Node only starts it: hook commands that `seshi capture install` writes name
 the binary itself, so agents do not start Node on every turn. Run `seshi capture install` from
@@ -105,7 +105,7 @@ If npm was told to skip optional dependencies (`--omit=optional`), or a lock fil
 another platform, the binary is missing and `seshi` says so; reinstall with optional
 dependencies or use the install script.
 
-The libraries `@seshi/client` (the typed HTTP client) and `@seshi/model` (the shared types,
+The libraries `@dosu/seshi-client` (the typed HTTP client) and `@dosu/seshi-model` (the shared types,
 canonical text and hashing) are published at the same version, as ES modules for Node 20+ and
 Bun with TypeScript declarations.
 

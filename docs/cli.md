@@ -6,7 +6,7 @@ few milliseconds; `bun run check:hook` holds it to that in CI.
 
 `seshi --help` lists the commands, `seshi <command> --help` prints that command's usage, and
 `seshi --version` prints the release. Install it with the install script, npm
-(`npm i -g seshi`) or a GitHub release binary ([install.md](install.md)); build it with
+(`npm i -g @dosu/seshi`) or a GitHub release binary ([install.md](install.md)); build it with
 `bun run build` (`dist/seshi`); from a checkout, `bun run seshi <command>` runs the same thing
 from source.
 
@@ -126,7 +126,7 @@ when one is named, else the `[serverless]` bucket.
 ## Talking to a server, or to a bucket (F8.3, F11)
 
 The session commands and the uploader (14) talk to a seshi server over HTTP
-(`@seshi/client`) when the CLI config sets `server`, with the credential `seshi login` stored.
+(`@dosu/seshi-client`) when the CLI config sets `server`, with the credential `seshi login` stored.
 In serverless mode (`[serverless]`, or its old name `[local]`) they run the pipeline in-process
 and read and write the bucket directly, with the key `seshi init --serverless` stored
 ([serverless.md](serverless.md)). `--server <url>` on any of them talks to that server instead.

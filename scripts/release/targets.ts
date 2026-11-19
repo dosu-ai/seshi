@@ -1,7 +1,7 @@
 /** The platforms seshi ships a binary for (F8.4): macOS arm64 and x64, Linux arm64 and x64
  * (glibc), Windows x64, and Windows arm64, which Bun's compiler supports. Every channel ships
  * the same files: the GitHub release archives, the npm platform packages
- * (`@seshi/cli-<id>`) and the install scripts all use the ids below.
+ * (`@dosu/seshi-<id>`) and the install scripts all use the ids below.
  *
  * x64 builds use Bun's `-baseline` target: it runs on CPUs without AVX2, and under Rosetta 2
  * on Apple silicon, which has no AVX. (Bun 1.4 ships one x64 runtime for both names; the
@@ -33,7 +33,7 @@ function target(os: Os, cpu: Cpu): Target {
     nodePlatform: windows ? "win32" : os,
     binary: windows ? "seshi.exe" : "seshi",
     asset: `seshi-${id}.${windows ? "zip" : "tar.gz"}`,
-    npm: `@seshi/cli-${id}`,
+    npm: `@dosu/seshi-${id}`,
     ...(os === "linux" ? { libc: "glibc" as const } : {}),
   };
 }

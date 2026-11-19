@@ -348,10 +348,10 @@ jobs:
           cache-to: type=gha,mode=max
 
   # F8.4, X3.8: the npm packages, built from the release's archives (so npm carries the very
-  # binaries GitHub does) and published with provenance: @seshi/cli-<target> for every target,
-  # @seshi/model, @seshi/client, then the `seshi` launcher. A package already on the registry
-  # is skipped, so the job can be re-run. Publishing needs NPM_TOKEN (an automation token for
-  # the @seshi scope and the seshi name), or npm trusted publishing set up for this workflow.
+  # binaries GitHub does) and published with provenance: @dosu/seshi-<target> for every target,
+  # @dosu/seshi-model, @dosu/seshi-client, then the @dosu/seshi launcher. A package already on the registry
+  # is skipped, so the job can be re-run. Publishing needs NPM_TOKEN (a token that can publish
+  # to the @dosu scope), or npm trusted publishing set up for this workflow.
   npm:
     needs: release
     if: needs.release.outputs.released == 'true'
@@ -468,9 +468,9 @@ jobs:
           if ((& $exe --version) -ne "seshi $env:VERSION") { exit 1 }
           bun run release:smoke $exe --version $env:VERSION --keychain ${{ matrix.keychain }}
           if ($LASTEXITCODE -ne 0) { exit 1 }
-      - name: npm i -g seshi
+      - name: npm i -g @dosu/seshi
         shell: bash
         run: |
-          npm install -g "seshi@$VERSION"
+          npm install -g "@dosu/seshi@$VERSION"
           test "$(seshi --version)" = "seshi $VERSION"
-          test "$(npx --yes "seshi@$VERSION" --version)" = "seshi $VERSION"
+          test "$(npx --yes "@dosu/seshi@$VERSION" --version)" = "seshi $VERSION"

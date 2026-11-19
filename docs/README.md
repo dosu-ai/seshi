@@ -33,7 +33,7 @@ Start with the [README](../README.md) for what it is, the
 | Page | For |
 |---|---|
 | [formats.md](formats.md) | The transcript formats seshi reads, and the trace formats it writes and renders |
-| [client.md](client.md) | `@seshi/client` and `@seshi/model`, and the contract for other languages |
+| [client.md](client.md) | `@dosu/seshi-client` and `@dosu/seshi-model`, and the contract for other languages |
 | [`spec/openapi.yaml`](../spec/openapi.yaml) | The HTTP API, route by route |
 | [`spec/layout.md`](../spec/layout.md) | The object layout in the bucket: what readers may rely on |
 

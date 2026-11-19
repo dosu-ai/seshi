@@ -297,7 +297,7 @@ async function install(ctx: CommandContext, json: boolean, args: Args): Promise<
   }
   if (command[0] !== undefined && inNpxCache(command[0])) {
     ctx.stderr(
-      `seshi: warning: this seshi runs from npx's cache (${command[0]}), which npx may delete; hooks would stop working. Install seshi (npm install -g seshi, or the install script) and run seshi capture install again`,
+      `seshi: warning: this seshi runs from npx's cache (${command[0]}), which npx may delete; hooks would stop working. Install seshi (npm install -g @dosu/seshi, or the install script) and run seshi capture install again`,
     );
   }
   const results: { agent: string; changed: string[]; notes: string[] }[] = [];

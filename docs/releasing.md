@@ -34,16 +34,17 @@ from any other branch, and nothing is published by hand.
 
 3. **`npm`** downloads that release's archives, checks them against `SHA256SUMS`, builds the npm
    packages from them (`scripts/release/npm.ts`) and publishes them with provenance
-   (`scripts/release/publish-npm.ts`), in this order: `@seshi/cli-<target>` for each target,
-   `@seshi/model`, `@seshi/client`, then the `seshi` launcher, so `npm i seshi` never resolves a
+   (`scripts/release/publish-npm.ts`), in this order: `@dosu/seshi-<target>` for each target,
+   `@dosu/seshi-model`, `@dosu/seshi-client`, then the `@dosu/seshi` launcher, so
+   `npm i @dosu/seshi` never resolves a
    platform package that is not there yet. A version already on the registry is skipped, so
    the job can be re-run. Prereleases go under the `next` tag.
 4. **`image`** downloads the two Linux archives, checks them, and builds
    `ghcr.io/<repo>` for linux/amd64 and linux/arm64 from those binaries
    (`--build-arg BINARY=prebuilt`), tagged `X.Y.Z`, `X.Y` and `latest`.
 5. **`verify`** installs the published release on all six platforms with `install.sh` or
-   `install.ps1` from GitHub, smoke tests it, then `npm i -g seshi@X.Y.Z` and
-   `npx seshi@X.Y.Z --version`.
+   `install.ps1` from GitHub, smoke tests it, then `npm i -g @dosu/seshi@X.Y.Z` and
+   `npx @dosu/seshi@X.Y.Z --version`.
 
 ## Targets
 
@@ -92,15 +93,19 @@ host's real binary built, installed and smoke tested.
 
 ## Before the first release
 
-- **Names.** Register the `seshi` package and the `@seshi` scope on npm (X3.8), and give CI an
-  `NPM_TOKEN` secret that can publish both, or set up npm trusted publishing for this
-  workflow and drop the token.
+- **Names.** Every package is published under the `@dosu` scope (`@dosu/seshi`,
+  `@dosu/seshi-<target>`, `@dosu/seshi-model`, `@dosu/seshi-client`): the `seshi` name and
+  the `@seshi` scope are taken on npm. The workspace keeps its `@seshi/*` names, which are
+  never published; `scripts/release/npm.ts` renames them, and the libraries' imports of each
+  other, as it builds the packages. CI's `NPM_TOKEN` secret must be able to publish new
+  packages to the `@dosu` scope. npm trusted publishing is set up per package, so it can
+  replace the token only once each package exists.
 - **Repository name.** `REPOSITORY` in `scripts/release/targets.ts` and the two install scripts
   name `dosu-ai/sessiondb`; if the repository is renamed (X3.8's open question), change all
   three (a test keeps them equal). GitHub redirects old release URLs after a rename.
 - **The old package.** Give `@dosu/sessiondb` its last release pointing to seshi (X3.8): publish
-  one more patch whose README says it moved to `seshi` and `@seshi/client`, then
-  `npm deprecate @dosu/sessiondb "moved to seshi: npm i -g seshi; the client is @seshi/client"`.
+  one more patch whose README says it moved to `@dosu/seshi` and `@dosu/seshi-client`, then
+  `npm deprecate @dosu/sessiondb "moved to seshi: npm i -g @dosu/seshi; the client is @dosu/seshi-client"`.
   This is a one-off, done by hand from the last sessiondb tag.
 - **Open VSX** (the Cursor extension). Create an Eclipse account, sign the Open VSX publisher
   agreement, create the `dosu` namespace (`bunx ovsx@1.3.0 create-namespace dosu -p <token>`)

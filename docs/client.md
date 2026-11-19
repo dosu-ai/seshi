@@ -6,8 +6,8 @@ declarations:
 
 | Package | What it is |
 |---|---|
-| `@seshi/client` | The typed HTTP client for a seshi server. Depends only on `@seshi/model` |
-| `@seshi/model` | The types every part of seshi shares (the canonical trace, the stored objects, the session API), canonical text and hashing, and trace validation |
+| `@dosu/seshi-client` | The typed HTTP client for a seshi server. Depends only on `@dosu/seshi-model` |
+| `@dosu/seshi-model` | The types every part of seshi shares (the canonical trace, the stored objects, the session API), canonical text and hashing, and trace validation |
 
 They are for programs that talk to a server: an uploader of your own, a reader that tails the
 change feed, a tool that searches. To capture sessions on a laptop, use the `seshi` binary
@@ -16,14 +16,14 @@ change feed, a tool that searches. To capture sessions on a laptop, use the `ses
 (X3.5): the server, or the in-process Instance serverless mode builds, is the only writer, so
 redaction always runs.
 
-## `@seshi/client`
+## `@dosu/seshi-client`
 
 ```sh
-npm i @seshi/client      # or bun add @seshi/client
+npm i @dosu/seshi-client      # or bun add @dosu/seshi-client
 ```
 
 ```ts
-import { HttpSessionDB, OffsetMismatch } from "@seshi/client";
+import { HttpSessionDB, OffsetMismatch } from "@dosu/seshi-client";
 
 const db = new HttpSessionDB({
   server: "https://seshi.acme.internal",
@@ -109,7 +109,7 @@ A refusal the server maps to a status comes back as the error the pipeline would
 | `StoreError` | The server's bucket failed; retry |
 | `ServerError` (`status`, `code`) | Any other answer |
 
-## `@seshi/model`
+## `@dosu/seshi-model`
 
 The shared types (`SessionMetadata`, `ChangeEntry`, `StoredTrace`, the envelope, the search
 types), and the functions every implementation must agree on: `canonicalText` and

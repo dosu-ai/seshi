@@ -18,21 +18,32 @@ export const ROOT = resolve(import.meta.dirname, "../..");
 
 const SEMVER = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
 
+/** The launcher's npm name: what `npm i -g` installs. Every published package is under the
+ * `@dosu` scope; the workspace keeps its own `@seshi/*` names, which are never published. */
+export const LAUNCHER = "@dosu/seshi";
+
 export const LIBRARIES = [
   {
-    name: "@seshi/model",
+    workspace: "@seshi/model",
+    name: "@dosu/seshi-model",
     dir: "packages/ts/model",
     out: "model",
     description:
       "seshi's shared types: the canonical trace, stored objects and the session API; canonical text and hashing.",
   },
   {
-    name: "@seshi/client",
+    workspace: "@seshi/client",
+    name: "@dosu/seshi-client",
     dir: "packages/ts/client",
     out: "client",
     description: "The typed HTTP client for a seshi server. Runs on Node 20+ and Bun.",
   },
 ] as const;
+
+/** Workspace name to published name, for each published library. */
+export const PUBLISHED_NAMES: ReadonlyMap<string, string> = new Map(
+  LIBRARIES.map((l) => [l.workspace, l.name]),
+);
 
 export interface NpmPackage {
   name: string;
@@ -59,7 +70,7 @@ export function platformManifest(target: Target, version: string): Record<string
   return {
     name: target.npm,
     ...common(version),
-    description: `The seshi binary for ${OS_NAMES[target.os]} ${target.cpu}. Install seshi, not this package.`,
+    description: `The seshi binary for ${OS_NAMES[target.os]} ${target.cpu}. Install ${LAUNCHER}, not this package.`,
     os: [target.nodePlatform],
     cpu: [target.cpu],
     ...(target.libc ? { libc: [target.libc] } : {}),
@@ -73,7 +84,7 @@ export function launcherManifest(
   targets: readonly Target[] = TARGETS,
 ): Record<string, unknown> {
   return {
-    name: "seshi",
+    name: LAUNCHER,
     ...common(version),
     description:
       "seshi: capture, ingest, redact, store and search coding-agent sessions. The one seshi binary for this platform.",
@@ -123,7 +134,7 @@ export function writePlatformPackage(
     join(dir, "README.md"),
     readme(
       target.npm,
-      `The \`seshi\` binary for ${OS_NAMES[target.os]} ${target.cpu}. It is installed by the \`seshi\` package (\`npm i -g seshi\`); you do not need to install it yourself.`,
+      `The \`seshi\` binary for ${OS_NAMES[target.os]} ${target.cpu}. It is installed by the \`${LAUNCHER}\` package (\`npm i -g ${LAUNCHER}\`); you do not need to install it yourself.`,
       version,
     ),
   );
@@ -156,21 +167,21 @@ export async function writeLauncherPackage(
   writeFileSync(
     join(dir, "README.md"),
     readme(
-      "seshi",
+      LAUNCHER,
       [
         "Capture, ingest, redact, store and search coding-agent sessions: one binary for the CLI, the agent hooks and the server.",
         "",
         "```sh",
-        "npm i -g seshi",
+        `npm i -g ${LAUNCHER}`,
         "seshi --help",
         "```",
         "",
-        "npm installs the binary for your platform through one of the optional `@seshi/cli-*` packages; Node only starts it. Other ways in: the install scripts and the binaries on GitHub releases.",
+        `npm installs the binary for your platform through one of the optional \`${LAUNCHER}-<os>-<cpu>\` packages; Node only starts it. Other ways in: the install scripts and the binaries on GitHub releases.`,
       ].join("\n"),
       version,
     ),
   );
-  return { name: "seshi", dir };
+  return { name: LAUNCHER, dir };
 }
 
 async function run(argv: string[], cwd: string): Promise<void> {
@@ -187,14 +198,14 @@ export function libraryDependencies(
   declared: Record<string, string> | undefined,
   version: string,
 ): Record<string, string> {
-  const published = new Set<string>(LIBRARIES.map((l) => l.name));
   const deps: Record<string, string> = {};
   for (const [name, range] of Object.entries(declared ?? {})) {
     if (range.startsWith("workspace:")) {
-      if (!published.has(name)) {
+      const published = PUBLISHED_NAMES.get(name);
+      if (!published) {
         throw new Error(`${name} is a workspace package that is not published to npm`);
       }
-      deps[name] = version;
+      deps[published] = version;
     } else {
       deps[name] = range;
     }
@@ -231,7 +242,7 @@ export async function writeLibraryPackage(
   const temp = mkdtempSync(join(tmpdir(), "seshi-dts-"));
   try {
     const paths: Record<string, string[]> = {};
-    if (library.name !== "@seshi/model") {
+    if (library.workspace !== "@seshi/model") {
       paths["@seshi/model"] = [join(out, "model/types/index.d.ts")];
     }
     const tsconfig = join(temp, "tsconfig.json");
@@ -260,6 +271,7 @@ export async function writeLibraryPackage(
     rmSync(temp, { recursive: true, force: true });
   }
   addDeclarationExtensions(join(dir, "types"));
+  renameWorkspaceImports(dir);
 
   writeJson(join(dir, "package.json"), {
     name: library.name,
@@ -280,6 +292,29 @@ export async function writeLibraryPackage(
   writeFileSync(join(dir, "LICENSE"), license);
   writeFileSync(join(dir, "README.md"), readme(library.name, library.description, version));
   return { name: library.name, dir };
+}
+
+const WORKSPACE_SPECIFIER = /(["'])(@seshi\/[a-z-]+)(\/[^"']*)?\1/g;
+
+/** Points the built code's and declarations' imports of a workspace library (`@seshi/model`,
+ * kept external by the bundle) at its published name (`@dosu/seshi-model`), which is what a
+ * consumer's node_modules holds. An import of a workspace package that is not published is an
+ * error, as it is in `libraryDependencies`. */
+export function renameWorkspaceImports(dir: string): void {
+  for (const entry of readdirSync(dir, { recursive: true, encoding: "utf8" })) {
+    if (!/\.(?:js|d\.ts)$/.test(entry)) continue;
+    const file = join(dir, entry);
+    const text = readFileSync(file, "utf8");
+    const fixed = text.replace(
+      WORKSPACE_SPECIFIER,
+      (_all, quote: string, name: string, rest: string | undefined) => {
+        const published = PUBLISHED_NAMES.get(name);
+        if (!published) throw new Error(`${file}: imports ${name}, which is not published to npm`);
+        return `${quote}${published}${rest ?? ""}${quote}`;
+      },
+    );
+    if (fixed !== text) writeFileSync(file, fixed);
+  }
 }
 
 const RELATIVE_SPECIFIER = /(\bfrom\s*|\bimport\s*\(\s*)(["'])(\.{1,2}\/[^"']*)\2/g;

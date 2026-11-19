@@ -57,7 +57,7 @@ build with.
 
 ```sh
 curl -fsSL https://github.com/dosu-ai/sessiondb/releases/latest/download/install.sh | sh   # macOS, Linux
-npm i -g seshi                                                                             # or with npm
+npm i -g @dosu/seshi                                                                       # or with npm
 ```
 
 On Windows: `irm https://github.com/dosu-ai/sessiondb/releases/latest/download/install.ps1 | iex`.
@@ -151,7 +151,7 @@ A new agent is an [integration](integrations).
 - [ ] Cursor Cloud Agents through Cursor's API, for runs whose repository has no hooks (F7)
 - [ ] Tool results in Cursor transcripts (from `postToolUse`)
 - [ ] Devin Cloud sync: a source that pulls Devin cloud sessions through Devin's API
-- [ ] A Python SDK for the seshi API, published to PyPI next to `@seshi/client`
+- [ ] A Python SDK for the seshi API, published to PyPI next to `@dosu/seshi-client`
 - [ ] Publishing the Cursor status bar extension on Open VSX (it is built and attached to each
       release)
 

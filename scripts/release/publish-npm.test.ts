@@ -45,8 +45,8 @@ describe("publishAll", () => {
   }
 
   const PACKAGES = [
-    { name: "@seshi/cli-darwin-arm64", dir: "cli-darwin-arm64" },
-    { name: "@seshi/model", dir: "model" },
+    { name: "@dosu/seshi-darwin-arm64", dir: "cli-darwin-arm64" },
+    { name: "@dosu/seshi-model", dir: "model" },
     { name: "seshi", dir: "seshi" },
   ];
 
@@ -73,7 +73,7 @@ describe("publishAll", () => {
     layout("1.2.3", PACKAGES);
     const first = fakeNpm([], "seshi");
     await expect(publishAll({ dir, exec: first.exec })).rejects.toThrow(/npm publish seshi@1.2.3/);
-    const second = fakeNpm(["@seshi/cli-darwin-arm64@1.2.3", "@seshi/model@1.2.3"]);
+    const second = fakeNpm(["@dosu/seshi-darwin-arm64@1.2.3", "@dosu/seshi-model@1.2.3"]);
     const done = await publishAll({ dir, exec: second.exec });
     expect(done.map((d) => d.action)).toEqual(["skipped", "skipped", "published"]);
     expect(second.calls.filter((c) => c[0] === "publish")).toHaveLength(1);
@@ -100,10 +100,10 @@ describe("publishAll", () => {
     layout("1.2.3", [{ name: "seshi", dir: "seshi" }]);
     writeFileSync(
       join(dir, "packages.json"),
-      JSON.stringify([{ name: "@seshi/client", dir: "seshi" }]),
+      JSON.stringify([{ name: "@dosu/seshi-client", dir: "seshi" }]),
     );
     await expect(publishAll({ dir, exec: fakeNpm().exec })).rejects.toThrow(
-      /expected @seshi\/client/,
+      /expected @dosu\/seshi-client/,
     );
   });
 });

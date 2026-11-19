@@ -39,26 +39,26 @@ describe("binaryPath and locate", () => {
 
   it("finds the binary next to the platform package's manifest", () => {
     const resolve = (request: string) => {
-      expect(request).toBe("@seshi/cli-linux-x64/package.json");
-      return "/g/node_modules/@seshi/cli-linux-x64/package.json";
+      expect(request).toBe("@dosu/seshi-linux-x64/package.json");
+      return "/g/node_modules/@dosu/seshi-linux-x64/package.json";
     };
     expect(binaryPath(target, resolve)).toEqual({
-      path: join("/g/node_modules/@seshi/cli-linux-x64", "bin", "seshi"),
+      path: join("/g/node_modules/@dosu/seshi-linux-x64", "bin", "seshi"),
     });
     expect(
       locate({
         platform: "win32",
         arch: "x64",
-        resolve: () => "/n/@seshi/cli-windows-x64/package.json",
+        resolve: () => "/n/@dosu/seshi-windows-x64/package.json",
       }),
-    ).toEqual({ path: join("/n/@seshi/cli-windows-x64", "bin", "seshi.exe") });
+    ).toEqual({ path: join("/n/@dosu/seshi-windows-x64", "bin", "seshi.exe") });
   });
 
   it("says how to recover when npm skipped the optional dependency", () => {
     const missing = binaryPath(target, () => {
       throw new Error("Cannot find module");
     });
-    expect("error" in missing && missing.error).toMatch(/@seshi\/cli-linux-x64.*--omit=optional/);
+    expect("error" in missing && missing.error).toMatch(/@dosu\/seshi-linux-x64.*--omit=optional/);
     expect(locate({ platform: "aix", arch: "ppc64", resolve: () => "" })).toHaveProperty("error");
   });
 });
