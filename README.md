@@ -56,11 +56,11 @@ build with.
 ## Getting started
 
 ```sh
-curl -fsSL https://github.com/dosu-ai/sessiondb/releases/latest/download/install.sh | sh   # macOS, Linux
+curl -fsSL https://github.com/dosu-ai/seshi/releases/latest/download/install.sh | sh   # macOS, Linux
 npm i -g @dosu/seshi                                                                       # or with npm
 ```
 
-On Windows: `irm https://github.com/dosu-ai/sessiondb/releases/latest/download/install.ps1 | iex`.
+On Windows: `irm https://github.com/dosu-ai/seshi/releases/latest/download/install.ps1 | iex`.
 [docs/install.md](docs/install.md) has the platforms, options and checksums.
 
 ### Run it locally
@@ -100,7 +100,7 @@ seshi login --server https://seshi.acme.com   # the org key, or sign in through 
 seshi capture install
 ```
 
-The container image is `ghcr.io/dosu-ai/sessiondb` ([docs/server.md](docs/server.md#deploying)).
+The container image is `ghcr.io/dosu-ai/seshi` ([docs/server.md](docs/server.md#deploying)).
 
 **2. Serverless.** Nothing to run: each laptop runs the pipeline and writes its own folder of a
 shared bucket with its own key. Use it when the team trusts its laptops

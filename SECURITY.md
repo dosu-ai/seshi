@@ -2,7 +2,7 @@
 
 ## Reporting a vulnerability
 
-Open a [private security advisory](https://github.com/dosu-ai/sessiondb/security/advisories/new)
+Open a [private security advisory](https://github.com/dosu-ai/seshi/security/advisories/new)
 on GitHub. Do not open a public issue for anything that could expose a session transcript or a
 credential.
 

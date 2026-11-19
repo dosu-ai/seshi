@@ -1,6 +1,6 @@
 # seshi Session Capture for Cursor
 
-Shows in Cursor's status bar whether [seshi](https://github.com/dosu-ai/sessiondb) captures the
+Shows in Cursor's status bar whether [seshi](https://github.com/dosu-ai/seshi) captures the
 chat you have open: `Session Capture ◉` while it does, `Session Capture ⏸` when it does not,
 with anything that needs action after it (`sign in`, `upload failing`). Click it to turn capture
 off or on for that chat.

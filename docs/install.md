@@ -5,11 +5,11 @@ the same compiled file, built once per release (F8.4):
 
 | Channel | Command | Updates |
 |---|---|---|
-| Install script (macOS, Linux) | `curl -fsSL https://github.com/dosu-ai/sessiondb/releases/latest/download/install.sh \| sh` | Run it again |
-| Install script (Windows) | `irm https://github.com/dosu-ai/sessiondb/releases/latest/download/install.ps1 \| iex` | Run it again |
+| Install script (macOS, Linux) | `curl -fsSL https://github.com/dosu-ai/seshi/releases/latest/download/install.sh \| sh` | Run it again |
+| Install script (Windows) | `irm https://github.com/dosu-ai/seshi/releases/latest/download/install.ps1 \| iex` | Run it again |
 | npm | `npm i -g @dosu/seshi`, or `npx @dosu/seshi …` | `npm i -g @dosu/seshi@latest` |
 | GitHub release | Download the archive for your platform and `SHA256SUMS` | By hand |
-| Docker (the server) | `docker run ghcr.io/dosu-ai/sessiondb` ([server.md](server.md)) | New tag |
+| Docker (the server) | `docker run ghcr.io/dosu-ai/seshi` ([server.md](server.md)) | New tag |
 
 Homebrew, and signed or notarized binaries, come later.
 
@@ -35,7 +35,7 @@ Docker image there, or a glibc-based image.
 ## The install script (macOS and Linux)
 
 ```sh
-curl -fsSL https://github.com/dosu-ai/sessiondb/releases/latest/download/install.sh | sh
+curl -fsSL https://github.com/dosu-ai/seshi/releases/latest/download/install.sh | sh
 ```
 
 It picks the archive for your machine, downloads it with `SHA256SUMS` from the same release,
@@ -56,7 +56,7 @@ curl -fsSL …/install.sh | sh -s -- --version 1.2.3 --dir /usr/local/bin --no-m
 | `--version <X.Y.Z>` | A release; the latest by default |
 | `--dir <folder>` | Where to put `seshi` |
 | `--no-modify-path` | Never edit a startup file; just say when the folder is not on `PATH` |
-| `--base-url <url>` | Where releases are, for a mirror: `<url>/latest/download/<asset>` and `<url>/download/v<X.Y.Z>/<asset>`. `https://github.com/dosu-ai/sessiondb/releases` by default |
+| `--base-url <url>` | Where releases are, for a mirror: `<url>/latest/download/<asset>` and `<url>/download/v<X.Y.Z>/<asset>`. `https://github.com/dosu-ai/seshi/releases` by default |
 
 It needs `curl` (or `wget`), `tar`, and one of `sha256sum`, `shasum` or `openssl`.
 
@@ -69,7 +69,7 @@ profile would break every seshi command.
 In PowerShell (Windows PowerShell 5.1 or PowerShell 7):
 
 ```powershell
-irm https://github.com/dosu-ai/sessiondb/releases/latest/download/install.ps1 | iex
+irm https://github.com/dosu-ai/seshi/releases/latest/download/install.ps1 | iex
 ```
 
 It downloads `seshi-windows-x64.zip` (or `-arm64`), checks it against `SHA256SUMS`, puts
@@ -81,7 +81,7 @@ than overwritten, so upgrading works while seshi runs.
 With options:
 
 ```powershell
-& ([scriptblock]::Create((irm https://github.com/dosu-ai/sessiondb/releases/latest/download/install.ps1))) -Version 1.2.3 -NoModifyPath
+& ([scriptblock]::Create((irm https://github.com/dosu-ai/seshi/releases/latest/download/install.ps1))) -Version 1.2.3 -NoModifyPath
 ```
 
 Parameters: `-Version`, `-InstallDir`, `-NoModifyPath`, `-BaseUrl` (as the shell script's).
@@ -115,8 +115,8 @@ Each release carries `SHA256SUMS`, in `sha256sum`'s format, covering every archi
 install scripts:
 
 ```sh
-curl -fsSLO https://github.com/dosu-ai/sessiondb/releases/latest/download/seshi-linux-x64.tar.gz
-curl -fsSLO https://github.com/dosu-ai/sessiondb/releases/latest/download/SHA256SUMS
+curl -fsSLO https://github.com/dosu-ai/seshi/releases/latest/download/seshi-linux-x64.tar.gz
+curl -fsSLO https://github.com/dosu-ai/seshi/releases/latest/download/SHA256SUMS
 sha256sum --ignore-missing -c SHA256SUMS    # macOS: shasum -a 256 --ignore-missing -c SHA256SUMS
 tar -xzf seshi-linux-x64.tar.gz
 ```

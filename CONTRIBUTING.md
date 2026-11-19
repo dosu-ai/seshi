@@ -149,5 +149,5 @@ so the subject line follows [Conventional Commits](https://www.conventionalcommi
 major. A commit with another shape is not seen by the release pipeline at all; it ships with the
 next one that is. Each release writes the version into `packages/ts/model/package.json` and
 `CHANGELOG.md`, tags `vX.Y.Z`, attaches the binaries, install scripts and `SHA256SUMS` to the
-GitHub release, publishes the npm packages, and pushes `ghcr.io/dosu-ai/sessiondb`. Nobody edits
+GitHub release, publishes the npm packages, and pushes `ghcr.io/dosu-ai/seshi`. Nobody edits
 a version field by hand.

@@ -25,7 +25,7 @@ body:
         types, field names, sizes, encodings) without its content.
 
         If a secret reached the bucket unredacted, that is a vulnerability: report it through
-        the [security policy](https://github.com/dosu-ai/sessiondb/security/policy), not here.
+        the [security policy](https://github.com/dosu-ai/seshi/security/policy), not here.
 
   - type: checkboxes
     id: privacy

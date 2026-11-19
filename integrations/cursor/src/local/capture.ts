@@ -311,7 +311,7 @@ say() {
 ensure() {
   [ "$(seshi --version 2>/dev/null)" = "seshi $version" ] && return 0
   mkdir -p "$dir"
-  curl -fsSL "https://github.com/dosu-ai/sessiondb/releases/download/v$version/install.sh" |
+  curl -fsSL "https://github.com/dosu-ai/seshi/releases/download/v$version/install.sh" |
     sh -s -- --version "$version" --dir "$dir" --no-modify-path >&2
   [ "$(seshi --version 2>/dev/null)" = "seshi $version" ] && return 0
   say "could not install seshi $version; cloud sessions are not captured"

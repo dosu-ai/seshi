@@ -56,7 +56,7 @@ export function extensionAsset(version: string): string {
   return `seshi-cursor-${version}.vsix`;
 }
 
-export const REPOSITORY = "dosu-ai/sessiondb";
+export const REPOSITORY = "dosu-ai/seshi";
 
 export function targetById(id: string): Target {
   const found = TARGETS.find((t) => t.id === id);
