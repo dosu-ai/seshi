@@ -14,6 +14,16 @@ bun run seshi -- <command>     # the binary, from source
 bun run build                  # the compiled binary, dist/seshi
 ```
 
+The Python client (`packages/py/client`) needs [uv](https://docs.astral.sh/uv/); its tests
+start a seshi server from this checkout, so they need `bun install` first:
+
+```sh
+cd packages/py/client
+uv sync
+uv run pytest                  # unit, spec drift and live-server tests
+uv run ruff check . && uv run ruff format --check . && uv run mypy
+```
+
 `bun install` also points git at `.githooks/`, whose pre-commit hook runs Biome on the staged
 files. `bun run format` fixes most of what it reports; `git commit --no-verify` skips it. The rest
 of `bun run check`, the type check and the tests run in CI.
@@ -27,6 +37,7 @@ A Bun workspace, laid out as in the design decisions (X3,
 |---|---|
 | `apps/seshi/` | The one binary: `src/main.ts` (the command router; each command's module loads only when it runs), the commands (`src/commands/`), the CLI's output and colours (`src/cli/`), the integration registry (`src/integrations.ts`). The `Dockerfile` is here, built from the repository root |
 | `packages/ts/` | One package per domain, `@seshi/<name>`, private and source-only, in layers: `model` (0); `kit`, `formats`, `redact`, `config`, `store`, `client` (1); `pipeline`, `auth` (2); `sources`, `review`, `search` (3); `instance` (4); `api`, `capture` (5) |
+| `packages/py/client/` | The Python client, `seshi` on PyPI: the Python counterpart of `@seshi/client`, with its own `pyproject.toml` (uv, hatchling, ruff, mypy, pytest). Python 3.10+ |
 | `integrations/` | Everything specific to one agent or vendor (`claude-code`, `claude-platform`, `codex`, `cursor`, `datadog-trajectory`, `gemini-cli`, `opencode`, `pi`), each exporting one `Integration` from `@seshi/kit`, with its fixtures in `testdata/`. Two carry an editor add-on beside it: `claude-code/plugin` (the Claude desktop app's chip) and `cursor/extension` (Cursor's status bar; `bun run ext:build`) |
 | `spec/` | The cross-language contract: `layout.md` (the object layout), `openapi.yaml` (the HTTP API), `schemas/` (the trace, the envelope, the stored objects), the config schemas, and `testdata/` (the record sets and goldens every language must pass) |
 | `tests/` | Tests that cross packages, and the fixture and golden tooling (`tests/tooling/`) |
@@ -112,6 +123,11 @@ for each user-facing feature; keep it up to date when a feature's behaviour chan
 - A route change is a `spec/openapi.yaml` change. `tests/api/openapi.test.ts` validates every
   response the server gives against the document and fails on a documented status it never
   observed, so a new status, field or route needs the document and a request in that test.
+- A route change is a client change too, in both languages: `@seshi/client` and the Python
+  client (`packages/py/client`). The Python client's `tests/test_spec_drift.py` fails when the
+  document gains, moves or drops a route or a parameter, or a body it sends or reads gains,
+  renames or drops a property, until the client (`src/seshi/_routes.py`, `src/seshi/models.py`)
+  follows.
 
 ## The goldens
 
@@ -147,7 +163,7 @@ from the commits that land on `main` (`release.config.js`, [docs/releasing.md](d
 so the subject line follows [Conventional Commits](https://www.conventionalcommits.org/):
 `fix(redact): …` releases a patch, `feat(capture): …` a minor, a `BREAKING CHANGE:` footer a
 major. A commit with another shape is not seen by the release pipeline at all; it ships with the
-next one that is. Each release writes the version into `packages/ts/model/package.json` and
-`CHANGELOG.md`, tags `vX.Y.Z`, attaches the binaries, install scripts and `SHA256SUMS` to the
+next one that is. Each release writes the version into `packages/ts/model/package.json`, the
+Python client's `src/seshi/_version.py` and `CHANGELOG.md`, tags `vX.Y.Z`, attaches the binaries, install scripts and `SHA256SUMS` to the
 GitHub release, publishes the npm packages, and pushes `ghcr.io/dosu-ai/sessiondb`. Nobody edits
 a version field by hand.

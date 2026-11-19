@@ -1,8 +1,10 @@
-# The TypeScript libraries
+# The client libraries
 
-Two libraries are published to npm at every release, at the same version as the binary
-([install.md](install.md#npm)), as ES modules for Node 20+ and Bun with TypeScript
-declarations:
+A client for the seshi API in TypeScript and in Python, both at the same version as the binary:
+[`@dosu/seshi-client`](#dosuseshi-client) and [`seshi`](#python-seshi), the Python one.
+
+Two TypeScript libraries are published to npm at every release ([install.md](install.md#npm)),
+as ES modules for Node 20+ and Bun with TypeScript declarations:
 
 | Package | What it is |
 |---|---|
@@ -117,6 +119,114 @@ types), and the functions every implementation must agree on: `canonicalText` an
 `parseTrace`, which checks a canonical trace. A reader that tails the change feed and reads
 traces uses these to understand what it reads.
 
+## Python: `seshi`
+
+The Python client lives in [`packages/py/client`](../packages/py/client): Python 3.10+, on
+[httpx](https://www.python-httpx.org/) and [pydantic](https://docs.pydantic.dev/) v2, with a sync
+client (`SeshiClient`) and an async one (`AsyncSeshiClient`) that have the same calls. It is
+not on PyPI yet ([releasing.md](releasing.md#pypi)); until it is, install it from a checkout:
+
+```sh
+pip install ./packages/py/client      # or: uv add ./packages/py/client
+```
+
+```python
+import os
+from seshi import OffsetMismatch, SeshiClient, Upload
+
+with SeshiClient(
+    "https://seshi.acme.internal",
+    os.environ["ACME_SESHI_TOKEN"],   # a device, service, admin or static token, or the org key
+    user="alice@acme.com",            # with the org key only: the username to write as
+) as db:
+    answer = db.ingest(Upload(agent="claude-code", session_id="8f1c…", transcript=log))
+    # Stored(status='stored', content_hash='…', records_total=41, bytes_total=48213, …)
+
+    # As the log grows, send only what it gained, from where the last answer ended.
+    try:
+        db.ingest(Upload(agent="claude-code", session_id="8f1c…", transcript=tail,
+                         offset=answer.bytes_total))
+    except OffsetMismatch as err:
+        ...                                # resend from err.expected
+
+    session = db.get_session("claude-code", "8f1c…")
+    trace = db.get_trace("claude-code", "8f1c…", format="otlp")   # an OtlpTrace
+    page = db.list_sessions(limit=50)
+    for change in db.iter_changes(after=cursor):                 # every page to the end
+        cursor = change.key
+    for change in db.iter_all_changes(since="2026-11-01T00:00:00.000Z"):   # a service token or an admin
+        ...
+    found = db.search("flaky checkout test", repo="widget", sort="recent")
+```
+
+```python
+from seshi import AsyncSeshiClient
+
+async with AsyncSeshiClient(server, token) as db:
+    async for change in db.iter_changes():
+        ...
+```
+
+Every request and response body is a pydantic model (`seshi.models`) with the JSON's field
+names, except `schema`, which is `schema_`, and OTLP's camelCase, which is snake_case; both
+are read and written under their JSON names (`model_dump(by_alias=True)`). Times stay the RFC
+3339 strings the server writes, so a stamp or cursor round-trips exactly; a `since` or `until`
+may also be a `datetime`. Response models keep fields they do not know (in `model_extra`), so
+an older client reads a newer server; request models refuse them. A call that takes a body
+takes its model or a plain mapping (`db.ingest({"agent": "codex", …})`).
+
+### Calls
+
+The same calls as `@dosu/seshi-client`, in snake_case:
+
+| Python | TypeScript | Route |
+|---|---|---|
+| `ingest(upload, retract_secret=, idempotency_key=)` | `ingest(upload, {retractSecret})` | `POST /v1/sessions`; `idempotency_key` is sent as `Idempotency-Key` |
+| `get_session(agent, id, owner=)` | `getSession` | `GET /v1/sessions/:agent/:id`; None when not stored or not readable |
+| `get_trace(agent, id, hash=, format=, owner=)` | `getTrace` | `GET …/trace`; the model `format` names (`Trace`, `LettaTrace`, `OtlpTrace`, `AtifDocument`), None when not stored or redacted |
+| `list_sessions(owner=, after=, limit=)`, `iter_sessions(owner=, limit=)` | `listSessions` | `GET /v1/sessions`, a page or every page |
+| `stale_sessions(after=, limit=)` | `staleSessions` | `GET /v1/sessions/stale` |
+| `tombstone(agent, id, owner=, retract_secret=)` | `tombstone` | `DELETE /v1/sessions/:agent/:id` |
+| `set_visibility(agent, id, visibility, owner=)` | `setVisibility` | `PATCH /v1/sessions/:agent/:id` |
+| `reviews(agent, id, owner=)` | `reviews` | `GET …/reviews` |
+| `changes(owner=, after=, since=, limit=)`, `iter_changes(…)` | `changes` | `GET /v1/changes`, a page or every page to the end |
+| `all_changes(after=, since=, limit=)`, `iter_all_changes(…)` | `allChanges` | `GET /v1/changes/all`, a page or every page up to `through` |
+| `search(q, owner=, agent=, repo=, branch=, source=, since=, until=, sort=, limit=, matches=, cursor=)` | `search` | `GET /v1/search` |
+| `me()` | `me` | `GET /v1/me` |
+| `owners(after=, limit=)` | `owners` | `GET /v1/owners` |
+| `redaction_rules()`, `redaction_rules_since(etag)` | `redactionRules`, `redactionRulesSince` | `GET /v1/redaction/rules`, as a `RedactionRules` model |
+| `create_token`, `list_tokens(owner=, kind=, all=)`, `revoke_token`, `revoke_owner_tokens` | the same | `/v1/tokens` (admins) |
+| `jobs()`, `sources(days=)`, `source(id, days=)`, `records(kind, id, since=, after=, limit=)` | the same | `/v1/admin/jobs` and `/v1/admin/sources` (admins) |
+| `reload()`, `config_status()` | the same | `POST` and `GET /v1/admin/reload` (admins); a rejected reload is returned, not raised |
+| `health()` | | `GET /healthz` |
+| `auth_config()`, `exchange_id_token(request)` | `authConfig`, `exchangeIdToken` | Sent without a credential: a client built without a token makes them, as do the module functions `seshi.auth_config(server)` and `seshi.exchange_id_token(server, request)` |
+
+Two routes are left out on purpose: `GET …/export` (the trace `get_trace` returns, as a browser
+download) and `POST /otlp/v1/traces` (where OTLP exporters push spans).
+
+### Options
+
+`SeshiClient(server, token=None, *, …)` and `AsyncSeshiClient` take:
+
+| Option | |
+|---|---|
+| `user` | With the org key: the username to write as, sent as `X-Seshi-User` |
+| `timeout` | Seconds per request; default 120, the server's own idle timeout; 0 or None disables |
+| `gzip_from` | Bodies of this many bytes or more are sent gzipped; default 8 KiB |
+| `user_agent` | Sent as `User-Agent` (default `seshi-python/<version>`) |
+| `http_client` | An `httpx.Client` (`httpx.AsyncClient`) of your own; `close()` leaves it open |
+| `transport` | An httpx transport, for tests (`httpx.MockTransport`) and custom transports |
+
+Use a client as a context manager (`with` / `async with`), or call `close()` / `aclose()`.
+
+### Errors
+
+The same errors as `@dosu/seshi-client`, in `seshi.errors` and at the top level, all
+`SeshiError`s: `SessionRejected` (`code`), `OffsetMismatch` (`offset`, `expected`),
+`SessionConflict`, `Forbidden`, `StoreError` (also a server that cannot be reached), and
+`ServerError` (`status`, `code`) for any other answer. A response that does not match its model
+is pydantic's `ValidationError`.
+
 ## Other languages
 
 The contract is in [`spec/`](../spec): the object layout ([`layout.md`](../spec/layout.md)), the
@@ -125,3 +235,25 @@ and the stored objects ([`schemas/`](../spec/schemas)), and the record sets and 
 implementation must reproduce ([`testdata/`](../spec/testdata)). `seshi normalize` turns any
 transcript the binary reads into canonical, redacted records on stdout, for tools that want
 seshi's normalizer without linking it (X3.10).
+
+A client of the API in another language lives in this repository beside the two above
+(`packages/<language>/client`), is released at the binary's version, and follows what they do:
+
+- The calls of `@dosu/seshi-client`, under the language's own naming, with typed request and
+  response bodies.
+- The same errors for the same answers: `409 offset_mismatch` is `OffsetMismatch` (with the
+  offset sent and `expected`), `409 conflict` `SessionConflict`, `403 forbidden` `Forbidden`,
+  `422` `SessionRejected` (with its `code`), `502` and an unreachable server `StoreError`, and
+  anything else a `ServerError` with its status and code. A read of something not there
+  (`404`, and `410` for a trace) is the language's null, not an error.
+- The credential as `Authorization: Bearer`, `X-Seshi-User` with the org key, none on
+  `/healthz`, `/v1/auth/config` and `/v1/auth/exchange`; bodies of 8 KiB or more gzipped; a
+  120-second default timeout; a `User-Agent` naming the client and its version.
+- A test that holds it to `spec/openapi.yaml`, as the Python client's
+  [`tests/test_spec_drift.py`](../packages/py/client/tests/test_spec_drift.py) does: every route
+  either called or listed as left out with a reason, each route's method, path and parameters,
+  and each body's properties and which are required. A route change then fails CI until every
+  client follows.
+- Tests against a real server started from the repository, as
+  [`tests/conftest.py`](../packages/py/client/tests/conftest.py) does (`seshi admin init`, then
+  `seshi serve` on a folder store), and a CI job that runs them.

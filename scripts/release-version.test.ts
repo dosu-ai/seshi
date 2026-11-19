@@ -2,7 +2,13 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { setVersion, syncLock, VERSIONED } from "./release-version";
+import {
+  PYTHON_VERSION_FILE,
+  setVersion,
+  syncLock,
+  syncPythonVersion,
+  VERSIONED,
+} from "./release-version";
 
 const LOCK = `{
   "workspaces": {
@@ -40,6 +46,8 @@ describe("setVersion", () => {
       JSON.stringify({ name: "seshi-cursor", version: "0.9.0" }),
     );
     writeFileSync(join(root, "bun.lock"), LOCK);
+    mkdirSync(join(root, "packages/py/client/src/seshi"), { recursive: true });
+    writeFileSync(join(root, PYTHON_VERSION_FILE), '"""The release."""\n\n__version__ = "0.9.0"\n');
   });
   afterEach(() => rmSync(root, { recursive: true, force: true }));
 
@@ -52,10 +60,21 @@ describe("setVersion", () => {
     );
     expect(extension.version).toBe("1.0.0");
     expect(readFileSync(join(root, "bun.lock"), "utf8")).toContain('"version": "1.0.0"');
+    expect(readFileSync(join(root, PYTHON_VERSION_FILE), "utf8")).toBe(
+      '"""The release."""\n\n__version__ = "1.0.0"\n',
+    );
   });
 
   it("refuses something that is not a version", async () => {
     await expect(setVersion(root, "v1")).rejects.toThrow(/not a version/);
+  });
+
+  it("names the Python client's version file, which holds the same version", () => {
+    const root = resolve(import.meta.dirname, "..");
+    const python = readFileSync(join(root, PYTHON_VERSION_FILE), "utf8");
+    const model = JSON.parse(readFileSync(join(root, "packages/ts/model/package.json"), "utf8"));
+    expect(syncPythonVersion(python, model.version)).toBe(python);
+    expect(() => syncPythonVersion("VERSION = 1\n", "1.0.0")).toThrow(/no __version__ line/);
   });
 
   it("names folders that exist in this repository and hold a version", () => {
