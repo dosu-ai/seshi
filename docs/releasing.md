@@ -46,7 +46,11 @@ from any other branch, and nothing is published by hand.
    (`--build-arg BINARY=prebuilt`), tagged `X.Y.Z`, `X.Y` and `latest`.
 5. **`verify`** installs the published release on all six platforms with `install.sh` or
    `install.ps1` from GitHub, smoke tests it, then `npm i -g @dosu/seshi@X.Y.Z` and
-   `npx @dosu/seshi@X.Y.Z --version`.
+   `npx @dosu/seshi@X.Y.Z --version`. Before installing it waits, for up to 15 minutes, until
+   the registry serves X.Y.Z of the launcher and every platform package to `npm install`
+   (`scripts/release/wait-npm.ts`): npm can take minutes to serve a new package's first
+   versions after `npm publish` returns, and npm skips an optional dependency it cannot find,
+   which would install a launcher with no binary.
 
 ## Targets
 
