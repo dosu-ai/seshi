@@ -38,6 +38,29 @@ export interface HookResult {
   active?: HookCapture;
   /** Something to tell the person as it is, such as a `/session-capture` it could not read. */
   say?: string;
+  /** What a tool returned, for an agent whose transcript leaves it out (Cursor writes each call,
+   * never its result). Kept beside the session, only while the session is captured, and added to
+   * what is uploaded by the agent's `compose`. Nothing is spooled and no uploader starts. */
+  toolResult?: HookToolResult;
+}
+
+export interface HookToolResult {
+  /** The session it belongs to, judged by the capture rules like any capture. */
+  session: HookCapture;
+  /** What `compose` reads back: JSON, already as small as it is to be kept. */
+  entry: Record<string, unknown>;
+}
+
+/** For an agent whose transcript leaves out what its hooks saw (`HookResult.toolResult`): the
+ * file seshi uploads in place of the transcript. It only ever grows, so what was uploaded of it
+ * stays as it was, and it holds the transcript's lines as they are except where it adds to them;
+ * the session's place in it is kept as in the transcript (`file_offset`). */
+export interface TranscriptComposer {
+  /** Bring the file up to date from the agent's `transcript` and what was kept, and return its
+   * path. Called by the uploader, which holds its lock, before it reads the session. */
+  update(sessionId: string, transcript: string, host: CaptureHost): string;
+  /** The file, without writing it; undefined until `update` wrote it. */
+  path(sessionId: string, host: CaptureHost): string | undefined;
 }
 
 export interface HookHandler {
@@ -164,6 +187,8 @@ export interface CaptureAgent {
   stored?(host: CaptureHost, sinceMs: number): Promise<StoredSession[]>;
   accountIds?(host: CaptureHost): Record<string, string>;
   readonly installer?: Installer;
+  /** For an agent whose hooks keep what its transcript leaves out: the file uploaded instead. */
+  readonly compose?: TranscriptComposer;
 }
 
 /** seshi's own folder for capture state: `$XDG_STATE_HOME/seshi` (`~/.local/state/seshi`), or
@@ -194,6 +219,25 @@ export function handedTranscriptPath(
   const at = host.platform === "win32" ? win32.join : posix.join;
   const ext = agent.encoding === "json" ? "json" : "jsonl";
   return at(handedTranscriptDir(host, agent.name), `${sessionId}.${ext}`);
+}
+
+/** seshi's folder for what an agent's hooks kept of one session beside its transcript
+ * (`HookResult.toolResult`) and the file `compose` builds from both: `<capture dir>/kept/<agent>/
+ * <session>`. Undefined for an unusable session id. */
+export function keptSessionDir(
+  host: CaptureHost,
+  agent: string,
+  sessionId: string,
+): string | undefined {
+  if (!/^[\w.-]+$/.test(sessionId) || sessionId === "." || sessionId === "..") return undefined;
+  const at = host.platform === "win32" ? win32.join : posix.join;
+  return at(captureDir(host), "kept", agent, sessionId);
+}
+
+/** Where `keptSessionDir` keeps every session of an agent. */
+export function keptAgentDir(host: CaptureHost, agent: string): string {
+  const at = host.platform === "win32" ? win32.join : posix.join;
+  return at(captureDir(host), "kept", agent);
 }
 
 export function expandTilde(path: string, home: string): string {

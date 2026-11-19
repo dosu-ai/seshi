@@ -9,7 +9,11 @@
  * conversation's first prompt (F9.2). So a session is keyed by its conversation id, and the
  * uploader finds its transcript, `~/.cursor/projects/<project>/agent-transcripts/<id>.jsonl`
  * (`<id>/<id>.jsonl` from Cursor 3), when the hook did not say. The transcript does not say where the agent ran, so the sweep
- * captures only conversations a hook has seen (the capture rules need the folder). */
+ * captures only conversations a hook has seen (the capture rules need the folder).
+ *
+ * The transcript holds no tool results: `postToolUse`, `postToolUseFailure` and `beforeReadFile`
+ * keep them beside the session, and the uploader sends the transcript with them added
+ * (`./results`). */
 
 import { existsSync, readdirSync, rmSync } from "node:fs";
 import { basename, join } from "node:path";
@@ -50,10 +54,16 @@ import {
   writeFileAtomic,
   writeJsonConfig,
 } from "@seshi/kit";
+import { cursorComposer, keptResult, RESULT_EVENTS } from "./results";
 
 export const AGENT = "cursor";
 
-export const CURSOR_EVENTS = ["stop", "sessionEnd", "beforeSubmitPrompt"] as const;
+export const CURSOR_EVENTS = [
+  "stop",
+  "sessionEnd",
+  "beforeSubmitPrompt",
+  ...RESULT_EVENTS,
+] as const;
 
 export function cursorDir(host: CaptureHost): string {
   return join(host.home, ".cursor");
@@ -80,6 +90,24 @@ function capture(payload: unknown, final: boolean, host?: CaptureHost): HookCapt
   };
 }
 
+/** A hook that keeps what a tool returned, for the session's upload: nothing for a payload with no
+ * tool id or result (`./results`). It prints nothing, so it never answers for Cursor: a
+ * `beforeReadFile` hook that says nothing lets the read go ahead. */
+function resultHook(event: (typeof RESULT_EVENTS)[number]): HookHandler {
+  return {
+    event,
+    parse(payload, host) {
+      const entry = keptResult(event, payloadObject(payload, AGENT));
+      if (!entry) return { captures: [] };
+      const { session_id, cwd } = capture(payload, false, host);
+      return {
+        captures: [],
+        toolResult: { session: { session_id, ...(cwd ? { cwd } : {}) }, entry: { ...entry } },
+      };
+    },
+  };
+}
+
 export const CURSOR_HOOKS: readonly HookHandler[] = [
   { event: "stop", parse: (payload, host) => ({ captures: [capture(payload, false, host)] }) },
   { event: "sessionEnd", parse: (payload, host) => ({ captures: [capture(payload, true, host)] }) },
@@ -101,6 +129,7 @@ export const CURSOR_HOOKS: readonly HookHandler[] = [
         : { captures: [], active: which, request: { action: asked, session: which } };
     },
   },
+  ...RESULT_EVENTS.map(resultHook),
 ];
 
 /** Which conversation an agent transcript is: its file name. The first records must look like
@@ -234,11 +263,15 @@ const list = (value: unknown): CursorHook[] => (Array.isArray(value) ? value : [
  * step that runs only on the VM, and costs one file check. The user-level hooks stand aside on a
  * marked machine, so the two never both upload a conversation. */
 
-/** Seconds Cursor gives each committed hook: `stop` uploads before it returns. */
+/** Seconds Cursor gives each committed hook: `stop` uploads before it returns; the result hooks
+ * only keep a file, in milliseconds, and Cursor waits for them on every tool call. */
 export const PROJECT_TIMEOUTS: Readonly<Record<(typeof CURSOR_EVENTS)[number], number>> = {
   stop: 60,
   sessionEnd: 60,
   beforeSubmitPrompt: 30,
+  postToolUse: 10,
+  postToolUseFailure: 10,
+  beforeReadFile: 10,
 };
 
 /** The setup script, beside the hooks; `.cursor/environment.json` runs it. */
@@ -544,4 +577,5 @@ export const CURSOR_CAPTURE: CaptureAgent = {
   identify: identifyCursorTranscript,
   locate: locateCursorTranscript,
   installer: cursorInstaller,
+  compose: cursorComposer,
 };

@@ -1,6 +1,6 @@
 import { canonicalJson, isStub, type NormalizedRecord, type SessionMetadata } from "@seshi/model";
 import type { DoctorDeps } from "../doctor/deps";
-import type { SessionEvidence } from "../doctor/types";
+import { type SessionEvidence, sentFile } from "../doctor/types";
 import type { Pipeline, RecordRow, RecordsView, RowFilter, RowState } from "./types";
 
 export const MARKER = /\[redacted:([a-z0-9]+(?:-[a-z0-9]+)*)\]/g;
@@ -33,7 +33,7 @@ function unredactedRecordsUpTo(
   deps: DoctorDeps,
   end: number,
 ): NormalizedRecord[] {
-  const path = ev.transcript.path as string;
+  const path = sentFile(ev.transcript).path ?? (ev.transcript.path as string);
   const capture = ev.capture as NonNullable<SessionEvidence["capture"]>;
   const text = deps.files.read(path, end);
   return deps.normalizer.records(capture.format, deps.redaction.transcript(text, capture.encoding));
@@ -100,7 +100,7 @@ export function alignRecords(ev: SessionEvidence, deps: DoctorDeps): Aligned {
   };
 
   let local: NormalizedRecord[] = [];
-  const size = ev.transcript.size ?? 0;
+  const size = sentFile(ev.transcript).size;
   const readable = ev.transcript.exists && ev.transcript.path && ev.capture;
   let sentUntil: number | undefined;
   let frozenAt: number | undefined;

@@ -1,0 +1,18 @@
+{"role":"user","message":{"content":[{"type":"text","text":"<timestamp>Thursday, Nov 19, 2026, 1:20 PM (UTC-8)</timestamp>\n<user_query>\nHook-recording test 2. Do exactly these steps in order and nothing else: 1) Use the Glob tool to find *.txt files. 2) Use the Grep tool to search for 'alpha' in this folder. 3) In ONE message, run these two shell commands in parallel: 'sleep 3; echo slow' and 'echo fast'. 4) Create a new file new.txt containing 'hello new' with the Write tool. 5) Delete the file new.txt with the Delete tool. 6) Use the Task tool to start a subagent that reads b.txt and reports its first line. 7) Run the shell command: printenv HOME. Then reply DONE.\n</user_query>"}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"I'll follow those steps in order, starting by finding `*.txt` files."},{"type":"tool_use","name":"Glob","input":{"glob_pattern":"*.txt"}}]}}
+{"role":"assistant","message":{"content":[{"type":"tool_use","name":"Grep","input":{"path":"/Users/dev/code/app","pattern":"alpha"}}]}}
+{"role":"assistant","message":{"content":[{"type":"tool_use","name":"Shell","input":{"command":"sleep 3; echo slow","description":"Sleep then echo slow"}},{"type":"tool_use","name":"Shell","input":{"command":"echo fast","description":"Echo fast immediately"}}]}}
+{"role":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"path":"/Users/dev/code/app/new.txt","contents":"hello new\n"}}]}}
+{"role":"assistant","message":{"content":[{"type":"tool_use","name":"GetDynamicTools","input":{"namespace":"cursor","toolName":"Delete"}}]}}
+{"role":"assistant","message":{"content":[{"type":"tool_use","name":"CallDynamicTool","input":{"namespace":"cursor","toolName":"Delete","arguments":{"path":"/Users/dev/code/app/new.txt"}}}]}}
+{"role":"assistant","message":{"content":[{"type":"tool_use","name":"GetDynamicTools","input":{"namespace":"cursor","toolName":"Task"}}]}}
+{"role":"assistant","message":{"content":[{"type":"tool_use","name":"CallDynamicTool","input":{"namespace":"cursor","toolName":"Task","arguments":{"description":"Read b.txt first line","prompt":"Read the file b.txt in the workspace root (absolute path: /Users/dev/code/app/b.txt). Report only its first line, exactly as written. Do nothing else.","subagent_type":"generalPurpose","model":"inherit"}}}]}}
+{"role":"assistant","message":{"content":[{"type":"tool_use","name":"Shell","input":{"command":"printenv HOME","description":"Print HOME environment variable"}}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"DONE"}]}}
+{"role":"user","message":{"content":[{"type":"text","text":"Your previous response was interrupted. Continue from where you left off."}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"DONE"}]}}
+{"role":"user","message":{"content":[{"type":"text","text":"Your previous response was interrupted. Continue from where you left off."}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"DONE"}]}}
+{"role":"user","message":{"content":[{"type":"text","text":"Your previous response was interrupted. Continue from where you left off."}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"DONE"}]}}
+{"type":"turn_ended","status":"error","error":"WritableIterable is closed"}

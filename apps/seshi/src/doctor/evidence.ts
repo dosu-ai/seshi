@@ -199,6 +199,9 @@ export async function gatherEvidence(
     } catch {}
   }
   evidence.transcript = transcriptFacts(deps, target.agent, path);
+  const uploaded = evidence.transcript.exists ? info?.uploaded?.(target.session_id) : undefined;
+  const stat = uploaded ? deps.files.stat(uploaded) : null;
+  if (uploaded && stat) evidence.transcript.uploaded = { path: uploaded, size: stat.size };
 
   try {
     evidence.spool.entries = deps

@@ -2,8 +2,10 @@ import { type CaptureState, readState, StateUnreadable } from "@seshi/capture";
 import { parseDuration } from "@seshi/config";
 import { type Account, openAccount } from "../account/account";
 import { type Backend, openBackend, ServerlessBackend } from "../backend";
+import { allCaptureAgents } from "../capture-agents";
 import { EXIT, type ExitCode } from "../cli/exit";
 import { emit, fail, helpOrUsageError, takeJson } from "../cli/output";
+import { hookCommand } from "../cli/spawn";
 import { printable, type Role, type Style, styleFor } from "../cli/style";
 import {
   type CheckResult,
@@ -18,7 +20,7 @@ import {
 } from "../doctor/index";
 import { serverlessChecks } from "../doctor/serverless";
 import { resolveSession } from "./capture";
-import { pathsOf } from "./capture-host";
+import { hostOf, pathsOf } from "./capture-host";
 import type { CommandContext } from "./index";
 
 const USAGE = `usage: seshi doctor [--session [<id>]] [--agent <agent>] [--since <duration>] [--deep]
@@ -122,10 +124,38 @@ function sessionLines(report: SessionReport, style: Style): string[] {
   return lines;
 }
 
-function bucketLines(checks: readonly CheckResult[], style: Style): string[] {
+/** An agent whose hooks are only partly installed: one installed before seshi took more of its
+ * events (Cursor's tool-result hooks), or one whose config someone edited. What its missing hooks
+ * would capture is not. */
+export async function hookChecks(ctx: CommandContext): Promise<CheckResult[]> {
+  const host = hostOf(ctx);
+  const checks: CheckResult[] = [];
+  for (const agent of await allCaptureAgents()) {
+    const status = await agent.installer
+      ?.status({ ...host, command: hookCommand() })
+      .catch(() => undefined);
+    if (!status || status.installed || !status.files.some((f) => f.ours)) continue;
+    const missing = status.notes.filter((n) => n.startsWith("hooks missing"));
+    if (missing.length === 0) continue;
+    checks.push({
+      id: `hooks-${agent.name}`,
+      title: agent.name,
+      status: "warn",
+      summary: missing.join("; "),
+      hint: `seshi capture install ${agent.name} adds them, keeping everything else`,
+    });
+  }
+  return checks;
+}
+
+function bucketLines(
+  checks: readonly CheckResult[],
+  style: Style,
+  heading = "Serverless bucket",
+): string[] {
   if (checks.length === 0) return [];
   const width = Math.max(...checks.map((c) => c.title.length));
-  const lines = [style.bold("Serverless bucket")];
+  const lines = [style.bold(heading)];
   for (const check of checks) {
     lines.push(
       `  ${word(style, check.status)}  ${check.title.padEnd(width)}  ${printable(check.summary)}`,
@@ -256,6 +286,7 @@ export async function run(ctx: CommandContext): Promise<number> {
       backend instanceof ServerlessBackend && account
         ? await serverlessChecks(backend.bucket, account.cli.search.scope, now)
         : [];
+    const hooks = await hookChecks(ctx);
     const reports: SessionReport[] = [];
     for (const target of targets) {
       const evidence = await gatherEvidence(target, deps, { deep: args.deep === true });
@@ -272,10 +303,11 @@ export async function run(ctx: CommandContext): Promise<number> {
       json,
       {
         ...(bucket.length > 0 ? { bucket } : {}),
+        ...(hooks.length > 0 ? { hooks } : {}),
         sessions: reports.map((r) => ({ ...r, evidence: forJson(r.evidence) })),
       },
       () => {
-        const head = bucketLines(bucket, style);
+        const head = [...bucketLines(bucket, style), ...bucketLines(hooks, style, "Hooks")];
         if (reports.length === 0) {
           return [
             ...head,

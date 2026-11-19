@@ -1,10 +1,15 @@
 {
   "conversation_id": "c0ffee00-1111-4222-8333-444455556666",
-  "generation_id": "g-7",
+  "generation_id": "c0ffee00-1111-4222-8333-444455556666",
+  "model": "auto-smart",
+  "hook_event_name": "stop",
+  "cursor_version": "2026.11.13-eacade1",
   "workspace_roots": [
     "/Users/dev/code/app"
   ],
-  "hook_event_name": "stop",
+  "user_email": "dev@example.com",
+  "transcript_path": null,
+  "session_id": "c0ffee00-1111-4222-8333-444455556666",
   "status": "completed",
-  "transcript_path": ""
+  "loop_count": 0
 }

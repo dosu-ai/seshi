@@ -1,8 +1,17 @@
 {
   "conversation_id": "c0ffee00-1111-4222-8333-444455556666",
-  "generation_id": "g-7",
+  "generation_id": "c0ffee00-1111-4222-8333-444455556666",
+  "model": "auto-smart",
+  "reason": "completed",
+  "duration_ms": 50575,
+  "is_background_agent": false,
+  "final_status": "completed",
+  "session_id": "c0ffee00-1111-4222-8333-444455556666",
+  "hook_event_name": "sessionEnd",
+  "cursor_version": "2026.11.13-eacade1",
   "workspace_roots": [
     "/Users/dev/code/app"
   ],
-  "hook_event_name": "sessionEnd"
+  "user_email": "dev@example.com",
+  "transcript_path": "/Users/dev/.cursor/projects/Users-dev-code-app/agent-transcripts/c0ffee00-1111-4222-8333-444455556666/c0ffee00-1111-4222-8333-444455556666.jsonl"
 }
