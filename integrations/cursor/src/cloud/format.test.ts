@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { CURSOR_CLOUD_FORMAT } from ".";
-import { eventTime, normalizeCursorCloud, resultText } from "./format";
+import { eventTime, MISSING_PROMPT, normalizeCursorCloud, resultText } from "./format";
 
 const FIXTURES = join(import.meta.dirname, "..", "..", "testdata", "cloud");
 const fixture = (name: string) => readFileSync(join(FIXTURES, name), "utf8");
@@ -105,6 +105,20 @@ describe("cursor-cloud-api", () => {
       timeout: 600000,
     });
     expect(records.at(-1)).toMatchObject({ role: "assistant", content: "All done." });
+  });
+
+  it("gives a run without a user message a placeholder turn", () => {
+    const line = JSON.parse(fixture("cancelled.jsonl").split("\n")[0] as string);
+    line.events = line.events.filter(
+      (e: { data: { type?: string } }) => e.data.type !== "user-message-appended",
+    );
+    const records = normalizeCursorCloud(`${JSON.stringify(line)}\n`);
+    expect(records[1]).toEqual({
+      role: "user",
+      content: MISSING_PROMPT,
+      timestamp: "2026-11-18T02:18:50.000Z",
+      synthetic: true,
+    });
   });
 
   it("dates records from their events' ids", () => {

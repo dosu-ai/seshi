@@ -63,26 +63,15 @@ export interface CursorApiOptions {
   retries?: number;
   /** The wait before a retry when Cursor names none (default 2 s, doubling). */
   backoffMs?: number;
+  /** How long a stream may send nothing before it counts as stalled (default 60 s). */
+  readTimeoutMs?: number;
 }
 
 const PAGE = 100;
-const MAX_PAGES = 50;
+/** Pages read for one listing: 20,000 items. Past it the listing fails rather than leave the
+ * rest out unsaid. */
+const MAX_PAGES = 200;
 const MAX_WAIT_MS = 60_000;
-
-export function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal.aborted) return reject(signal.reason);
-    const timer = setTimeout(() => {
-      signal.removeEventListener("abort", onAbort);
-      resolve();
-    }, ms);
-    const onAbort = () => {
-      clearTimeout(timer);
-      reject(signal.reason);
-    };
-    signal.addEventListener("abort", onAbort, { once: true });
-  });
-}
 
 function retryAfter(response: Response, fallback: number): number {
   const header = response.headers.get("retry-after");
@@ -176,20 +165,61 @@ export class CursorApi {
       throw new StreamExpired();
     }
     if (!response.ok) throw await failure(response);
-    let body: string;
-    try {
-      body = await response.text();
-    } catch (err) {
-      if (this.options.signal.aborted) throw err;
-      throw new CursorApiError(`Cursor's stream broke off (${(err as Error).name})`);
-    }
+    return this.readEvents(response, runId);
+  }
+
+  /** The stream's events as they arrive, up to `done`. Cursor closes the stream after `done`,
+   * but the read does not wait for that, and a stream that sends nothing (not even a
+   * heartbeat) for `readTimeoutMs` counts as stalled. */
+  private async readEvents(response: Response, runId: string): Promise<CursorStreamEvent[]> {
     const events: CursorStreamEvent[] = [];
-    for (const event of parseSse(body)) {
-      if (event.event === "heartbeat") continue;
-      events.push(event);
-      if (event.event === "done") break;
+    if (!response.body) return events;
+    const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+    const timeout = this.options.readTimeoutMs ?? 60_000;
+    let buffer = "";
+    const take = (text: string): boolean => {
+      for (const event of parseSse(text)) {
+        if (event.event === "heartbeat") continue;
+        events.push(event);
+        if (event.event === "done") return true;
+      }
+      return false;
+    };
+    try {
+      for (;;) {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const stalled = new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () =>
+              reject(
+                new CursorApiError(
+                  `Cursor's stream for ${runId} sent nothing for ${timeout / 1000} s`,
+                ),
+              ),
+            timeout,
+          );
+        });
+        let chunk: Awaited<ReturnType<typeof reader.read>>;
+        try {
+          chunk = await Promise.race([reader.read(), stalled]);
+        } finally {
+          clearTimeout(timer);
+        }
+        if (chunk.done) break;
+        buffer = (buffer + chunk.value).replace(/\r\n/g, "\n");
+        const cut = buffer.lastIndexOf("\n\n");
+        if (cut === -1) continue;
+        if (take(buffer.slice(0, cut + 2))) return events;
+        buffer = buffer.slice(cut + 2);
+      }
+      take(buffer);
+      return events;
+    } catch (err) {
+      if (this.options.signal.aborted || err instanceof CursorApiError) throw err;
+      throw new CursorApiError(`Cursor's stream broke off (${(err as Error).name})`);
+    } finally {
+      reader.cancel().catch(() => {});
     }
-    return events;
   }
 
   private async pages<T>(path: string): Promise<T[]> {
@@ -203,7 +233,9 @@ export class CursorApi {
       cursor = answer.nextCursor;
       if (!cursor) return items;
     }
-    return items;
+    throw new CursorApiError(
+      `${path} lists more than ${MAX_PAGES * PAGE} items; seshi reads at most that many`,
+    );
   }
 }
 

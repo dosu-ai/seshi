@@ -9,6 +9,7 @@ import type { Envelope } from "@seshi/model";
 import { describe, expect, it } from "vitest";
 import {
   cursorCloudConnector,
+  expectedOffset,
   keptEvents,
   readCursorCloudConfig,
   readCursorCloudCursor,
@@ -16,6 +17,19 @@ import {
   STREAM_EXPIRED,
 } from "./connector";
 import { normalizeCursorCloud } from "./format";
+
+/** A stream that sends `text` and then nothing, never closing. */
+function hanging(text: string): () => Response {
+  return () =>
+    new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(text));
+        },
+      }),
+      { headers: { "content-type": "text/event-stream" } },
+    );
+}
 
 const NOW = new Date("2026-11-19T12:00:00Z");
 const HOUR = 3_600_000;
@@ -55,7 +69,7 @@ interface FakeRun {
   id: string;
   status: string;
   createdAt: string;
-  stream: string | number | (() => string | number);
+  stream: string | number | (() => string | number | Response);
 }
 
 class FakeCursor {
@@ -96,6 +110,7 @@ class FakeCursor {
     if (!run) return Response.json({ error: { message: "no such run" } }, { status: 404 });
     if (parts[5] === "stream") {
       const body = typeof run.stream === "function" ? run.stream() : run.stream;
+      if (body instanceof Response) return body;
       if (typeof body === "number") return new Response("", { status: body });
       return new Response(body, { headers: { "content-type": "text/event-stream" } });
     }
@@ -116,6 +131,8 @@ class FakeContext {
   logs: string[] = [];
   /** Each session's log length, as the store keeps it. */
   stored = new Map<string, number>();
+  /** A first upload shorter than this is filtered (kept nothing of), as the session filter does. */
+  filterUnder = 0;
   cursor: Cursor | null = null;
 
   constructor(
@@ -134,9 +151,12 @@ class FakeContext {
           return {
             status: "failed",
             code: "offset_mismatch",
-            message: `expected ${length}`,
+            message: `chunk starts at byte ${payload.offset}; the session's log ends at ${length}`,
             record: "r",
           };
+        }
+        if (length === 0 && Buffer.byteLength(payload.text) < this.filterUnder) {
+          return { status: "filtered", records_total: 0, prefix_sha256: "p", bytes_total: 0 };
         }
         const total = length + Buffer.byteLength(payload.text);
         this.stored.set(envelope.session_key, total);
@@ -175,7 +195,7 @@ class FakeContext {
   }
 }
 
-const poller = cursorCloudConnector({ sleep: async () => {}, backoffMs: 1 });
+const poller = cursorCloudConnector({ sleep: async () => {}, backoffMs: 1, readTimeoutMs: 50 });
 const finished = (id: string, hoursAgo: number, stream?: FakeRun["stream"]): FakeRun => ({
   id,
   status: "FINISHED",
@@ -342,12 +362,93 @@ describe("the cursor-cloud poller", () => {
     ctx.stored.set("bc-a", 99);
     await poller.run(ctx.context());
     expect(ctx.failures.map((f) => f.code)).toEqual([SESSION_CONFLICT]);
-    expect(readCursorCloudCursor(ctx.cursor).agents["bc-a"]?.conflict).toContain(
-      "not 0 bytes long",
-    );
+    const held = readCursorCloudCursor(ctx.cursor).agents["bc-a"];
+    expect(held?.conflict).toContain("99 bytes long, not 0");
+    expect(held?.expected).toBe(99);
     api.calls = [];
     await poller.run(ctx.context());
     expect(api.calls).toEqual(["/v1/agents"]);
+
+    // seshi reprocess --since releases it: it goes on after where the stored session ends.
+    ctx.cursor = poller.rewind?.(ctx.cursor, NOW, {}) ?? null;
+    expect(readCursorCloudCursor(ctx.cursor).agents["bc-a"]).toEqual({ bytes: 99 });
+    await poller.run(ctx.context());
+    expect(ctx.submitted.at(-1)?.payload).toMatchObject({ offset: 99 });
+    expect(readCursorCloudCursor(ctx.cursor).agents["bc-a"]?.conflict).toBeUndefined();
+  });
+
+  it("goes on to the other agents when one fails, and reads it again next poll", async () => {
+    const api = new FakeCursor();
+    api.agent("bc-ok", iso(NOW.getTime() - HOUR), [finished("run-ok", 2)]);
+    api.agent("bc-bad", iso(NOW.getTime() - 0.5 * HOUR), [finished("run-bad", 1, 500)]);
+    const ctx = new FakeContext(api);
+    await poller.run(ctx.context());
+    expect(ctx.submitted.map((e) => e.session_key)).toEqual(["bc-ok"]);
+    expect(ctx.logs.some((l) => l.includes("bc-bad") && l.includes("read again next poll"))).toBe(
+      true,
+    );
+    expect(readCursorCloudCursor(ctx.cursor).agents["bc-bad"]?.updated).toBeUndefined();
+
+    ((api.runs.get("bc-bad") as FakeRun[])[0] as FakeRun).stream = runStream("run-bad", "p", "r");
+    await poller.run(ctx.context());
+    expect(ctx.submitted.map((e) => e.session_key)).toEqual(["bc-ok", "bc-bad"]);
+  });
+
+  it("stops reading a stream at done, and counts one that goes quiet as stalled", async () => {
+    const api = new FakeCursor();
+    api.agent("bc-open", iso(NOW.getTime() - HOUR), [
+      finished("run-1", 2, hanging(runStream("run-1", "p", "r"))),
+    ]);
+    api.agent("bc-quiet", iso(NOW.getTime() - 0.5 * HOUR), [
+      finished("run-2", 1, hanging(runStream("run-2", "p", "r", false))),
+    ]);
+    const ctx = new FakeContext(api);
+    await poller.run(ctx.context());
+    expect(ctx.submitted.map((e) => e.session_key)).toEqual(["bc-open"]);
+    expect(ctx.logs.some((l) => l.includes("bc-quiet") && l.includes("sent nothing"))).toBe(true);
+  });
+
+  it("sends a run the filter kept nothing of again, ahead of the agent's next run", async () => {
+    const api = new FakeCursor();
+    api.agent("bc-a", iso(NOW.getTime() - 3 * HOUR), [finished("run-1", 3)]);
+    const ctx = new FakeContext(api);
+    ctx.filterUnder = 2000;
+    await poller.run(ctx.context());
+    expect(readCursorCloudCursor(ctx.cursor).agents["bc-a"]).toMatchObject({
+      bytes: 0,
+      carry: [{ id: "run-1" }],
+    });
+    expect(ctx.logs.at(-1)).toContain("1 too short to keep yet");
+
+    api.agent("bc-a", iso(NOW.getTime() - HOUR), [finished("run-1", 3), finished("run-2", 1)]);
+    ctx.filterUnder = 0;
+    await poller.run(ctx.context());
+    const last = ctx.submitted.at(-1) as Envelope;
+    const text = (last.payload as { text: string }).text;
+    expect(last.payload).toMatchObject({ offset: 0 });
+    expect(
+      text
+        .trim()
+        .split("\n")
+        .map((l) => JSON.parse(l).run_id),
+    ).toEqual(["run-1", "run-2"]);
+    expect(readCursorCloudCursor(ctx.cursor).agents["bc-a"]?.carry).toBeUndefined();
+  });
+
+  it("drops an agent nothing was stored of from the checkpoint after 90 days", async () => {
+    const api = new FakeCursor();
+    const ctx = new FakeContext(api);
+    const old = iso(NOW.getTime() - 100 * 24 * HOUR);
+    ctx.cursor = {
+      v: 1,
+      agents: { "bc-gone": { bytes: 0, updated: old }, "bc-kept": { bytes: 40, updated: old } },
+    };
+    api.agent("bc-new", iso(NOW.getTime() - HOUR), [finished("run-1", 2)]);
+    await poller.run(ctx.context());
+    expect(Object.keys(readCursorCloudCursor(ctx.cursor).agents).sort()).toEqual([
+      "bc-kept",
+      "bc-new",
+    ]);
   });
 
   it("stops at its stream budget and says there is more", async () => {
@@ -398,6 +499,11 @@ describe("its config and checkpoint", () => {
       max_streams: 25,
       usage: true,
     });
+  });
+
+  it("reads where the stored log ends from the pipeline's refusal", () => {
+    expect(expectedOffset("chunk starts at byte 0; the session's log ends at 4096")).toBe(4096);
+    expect(expectedOffset("something else")).toBeUndefined();
   });
 
   it("refuses a checkpoint it did not write", () => {

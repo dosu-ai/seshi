@@ -12,12 +12,22 @@
  * hold back the runs after it.
  *
  * The checkpoint keeps, per agent: the `updatedAt` it last saw, the session's log length (where
- * the next run is appended), and the last run stored. */
+ * the next run is appended), the last run stored, and the runs the server kept nothing of yet
+ * (a session filtered as too short), which are sent again ahead of the agent's next run while
+ * Cursor still has them. An error reading one agent is logged and that agent read again next
+ * poll; the others go on. */
 
-import type { Connector, ConnectorContext, Cursor } from "@seshi/kit";
-import { ENVELOPE_SCHEMA, type Envelope } from "@seshi/model";
 import {
   abortableSleep,
+  apiUrlOverride,
+  type Connector,
+  type ConnectorContext,
+  type Cursor,
+  secretValue,
+  serviceEnvelopeIdentity,
+} from "@seshi/kit";
+import { ENVELOPE_SCHEMA, type Envelope } from "@seshi/model";
+import {
   type CursorAgent,
   CursorApi,
   CursorApiError,
@@ -39,6 +49,13 @@ export const STREAM_EXPIRED = "stream_expired";
 /** The failure recorded for an agent whose stored session is not the length the checkpoint says. */
 export const SESSION_CONFLICT = "session_conflict";
 
+const DAY = 86_400_000;
+/** An agent nothing was stored of, untouched this long, leaves the checkpoint. One with a stored
+ * session stays: its log length is where its next run goes. */
+const PRUNE_AFTER_MS = 90 * DAY;
+/** Most filtered runs an agent carries towards its next submission. */
+const MAX_CARRIED = 20;
+
 /** The fields of a `type = "cursor-cloud"` source this connector reads (`cursorCloudSource` in
  * `@seshi/config`; durations in milliseconds). */
 export interface CursorCloudSourceConfig {
@@ -49,15 +66,25 @@ export interface CursorCloudSourceConfig {
   usage: boolean;
 }
 
+interface RunRef {
+  at: string;
+  id: string;
+}
+
 interface AgentEntry {
-  /** The agent's `updatedAt` when its runs were last all stored. */
+  /** The agent's `updatedAt` when its runs were last all read. */
   updated?: string;
   /** Bytes of the session's log: where the next run's line is appended. */
   bytes: number;
-  /** The last run stored (or skipped as expired), by creation time and id. */
-  through?: { at: string; id: string };
+  /** The last run handled (stored, filtered, refused or expired), by creation time and id. */
+  through?: RunRef;
+  /** Runs the server kept nothing of (filtered as too short), sent again ahead of the next run
+   * while Cursor still has them, so a session that grows past the filter starts at its first. */
+  carry?: RunRef[];
   /** Why the agent is held: its stored session is not what the checkpoint says. */
   conflict?: string;
+  /** Where the stored session's log ends, from the refusal that held the agent. */
+  expected?: number;
 }
 
 export interface CursorCloudCursor {
@@ -70,41 +97,8 @@ export interface CursorCloudConnectorOptions {
   backoffMs?: number;
   /** How many times an empty or unfinished replay is asked for again (default 3). */
   streamAttempts?: number;
-}
-
-type SecretLike = string | { reveal(): string };
-
-function secretValue(value: unknown, field: string): string {
-  const text =
-    typeof value === "string"
-      ? value
-      : typeof value === "object" && value !== null && "reveal" in value
-        ? (value as { reveal(): string }).reveal()
-        : undefined;
-  if (typeof text !== "string" || text === "") {
-    throw new Error(`the cursor-cloud source needs ${field}`);
-  }
-  return text;
-}
-
-function apiUrl(raw: unknown): string | undefined {
-  if (typeof raw !== "string" || raw === "") return undefined;
-  let url: URL;
-  try {
-    url = new URL(raw);
-  } catch {
-    throw new Error("the cursor-cloud source's api_url is not a URL");
-  }
-  const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
-  if (url.protocol === "http:" && !loopback) {
-    throw new Error(
-      "the cursor-cloud source's api_url must be https (plain http would send the key in clear); http is allowed for localhost only",
-    );
-  }
-  if (url.protocol !== "https:" && url.protocol !== "http:") {
-    throw new Error("the cursor-cloud source's api_url must be https");
-  }
-  return raw;
+  /** How long a stream may send nothing before it counts as stalled (default 60 s). */
+  readTimeoutMs?: number;
 }
 
 /** The source's config, checked: what the connector needs, the key revealed. */
@@ -119,9 +113,9 @@ export function readCursorCloudConfig(
   if (typeof streams !== "number" || !Number.isInteger(streams) || streams < 1 || streams > 60) {
     throw new Error("the cursor-cloud source's max_streams must be 1 to 60");
   }
-  const url = apiUrl(raw.api_url);
+  const url = apiUrlOverride(raw.api_url, "cursor-cloud", "the key");
   return {
-    api_key: secretValue(raw.api_key as SecretLike, "api_key"),
+    api_key: secretValue(raw.api_key, "cursor-cloud", "api_key"),
     ...(url ? { api_url: url } : {}),
     lookback,
     max_streams: streams,
@@ -131,6 +125,11 @@ export function readCursorCloudConfig(
 
 const isObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
+
+const runRef = (v: unknown): RunRef | undefined =>
+  isObject(v) && typeof v.at === "string" && typeof v.id === "string"
+    ? { at: v.at, id: v.id }
+    : undefined;
 
 /** The checkpoint as this connector wrote it; null before the first run. Another shape is
  * refused, so a source never silently starts over and appends runs twice. */
@@ -147,23 +146,25 @@ export function readCursorCloudCursor(raw: Cursor | null): CursorCloudCursor {
     }
     const entry: AgentEntry = { bytes: value.bytes };
     if (typeof value.updated === "string") entry.updated = value.updated;
-    if (
-      isObject(value.through) &&
-      typeof value.through.at === "string" &&
-      typeof value.through.id === "string"
-    ) {
-      entry.through = { at: value.through.at, id: value.through.id };
+    const through = runRef(value.through);
+    if (through) entry.through = through;
+    if (Array.isArray(value.carry)) {
+      const carry = value.carry.map(runRef).filter((r): r is RunRef => r !== undefined);
+      if (carry.length > 0) entry.carry = carry;
     }
     if (typeof value.conflict === "string") entry.conflict = value.conflict;
+    if (typeof value.expected === "number" && value.expected >= 0) entry.expected = value.expected;
     agents[id] = entry;
   }
   return { v: 1, agents };
 }
 
-const after = (run: CursorRun, through: AgentEntry["through"]) =>
+const after = (run: CursorRun, through: RunRef | undefined) =>
   !through ||
   (run.createdAt ?? "") > through.at ||
   ((run.createdAt ?? "") === through.at && run.id > through.id);
+
+const refOf = (run: CursorRun): RunRef => ({ at: run.createdAt ?? "", id: run.id });
 
 /** The agent's repository as a project, `host/owner/name`. */
 export function projectOf(agent: CursorAgent): string | undefined {
@@ -199,6 +200,48 @@ export function keptEvents(events: readonly CursorStreamEvent[]): CursorStreamEv
   );
 }
 
+/** Where a refused chunk's session log ends, from the pipeline's `offset_mismatch` message
+ * (`chunk starts at byte N; the session's log ends at M`). */
+export function expectedOffset(message: string): number | undefined {
+  const match = /log ends at (\d+)/.exec(message);
+  return match ? Number(match[1]) : undefined;
+}
+
+/** Release agents held by a session conflict (X4.9, `seshi reprocess --source <id> --since …`):
+ * each goes on after where its stored session ends, and every agent's runs are listed again.
+ * Runs already handled are not sent again: Cursor keeps their events for a day only, so
+ * `since` cannot reach further back than the checkpoint already does. */
+export function rewindCursorCloud(cursor: Cursor | null): Cursor {
+  let current: CursorCloudCursor;
+  try {
+    current = readCursorCloudCursor(cursor);
+  } catch {
+    current = { v: 1, agents: {} };
+  }
+  for (const entry of Object.values(current.agents)) {
+    if (entry.conflict !== undefined) {
+      if (entry.expected !== undefined) entry.bytes = entry.expected;
+      delete entry.conflict;
+      delete entry.expected;
+      delete entry.carry;
+    }
+    delete entry.updated;
+  }
+  return current as unknown as Cursor;
+}
+
+interface Tally {
+  agents: number;
+  stored: number;
+  filtered: number;
+  dropped: number;
+  expired: number;
+  refused: number;
+  waiting: number;
+  held: number;
+  errors: number;
+}
+
 export function cursorCloudConnector(options: CursorCloudConnectorOptions = {}): Connector {
   const attempts = options.streamAttempts ?? 3;
 
@@ -215,13 +258,197 @@ export function cursorCloudConnector(options: CursorCloudConnectorOptions = {}):
         signal: ctx.signal,
         sleep: options.sleep ?? abortableSleep,
         ...(options.backoffMs !== undefined ? { backoffMs: options.backoffMs } : {}),
+        ...(options.readTimeoutMs !== undefined ? { readTimeoutMs: options.readTimeoutMs } : {}),
       });
       const id = ctx.source.id;
       const now = ctx.now().getTime();
-      let streams = config.max_streams;
-      let more = false;
-      const tally = { agents: 0, stored: 0, expired: 0, failed: 0, waiting: 0, held: 0 };
-      const save = () => ctx.checkpoint.write(cursor as unknown as Cursor);
+      const budget = { streams: config.max_streams, more: false };
+      const tally: Tally = {
+        agents: 0,
+        stored: 0,
+        filtered: 0,
+        dropped: 0,
+        expired: 0,
+        refused: 0,
+        waiting: 0,
+        held: 0,
+        errors: 0,
+      };
+
+      /** One stream replay, asked again while it ends early; undefined once Cursor has none. */
+      async function replay(
+        agentId: string,
+        runId: string,
+      ): Promise<CursorStreamEvent[] | undefined> {
+        let events: CursorStreamEvent[] = [];
+        for (let attempt = 0; attempt < attempts && budget.streams > 0; attempt++) {
+          budget.streams--;
+          try {
+            events = await api.stream(agentId, runId);
+          } catch (err) {
+            if (err instanceof StreamExpired) return undefined;
+            throw err;
+          }
+          if (replayComplete(events)) break;
+        }
+        return events;
+      }
+
+      /** The run as one line of the log. */
+      async function lineOf(agentId: string, listed: CursorRun, events: CursorStreamEvent[]) {
+        const run =
+          listed.git !== undefined && listed.durationMs !== undefined
+            ? listed
+            : await api.getRun(agentId, listed.id).catch((err: unknown) => {
+                if (err instanceof CursorApiError && (err.status === 401 || err.status === 403)) {
+                  throw err;
+                }
+                return listed;
+              });
+        let usage: Record<string, unknown> | undefined;
+        if (config.usage) {
+          usage = await api.runUsage(agentId, listed.id).catch((err: unknown) => {
+            if (err instanceof CursorApiError && (err.status === 401 || err.status === 403)) {
+              throw err;
+            }
+            return undefined;
+          });
+        }
+        const line: CursorRunLine = {
+          type: "cursor_cloud_run",
+          agent_id: agentId,
+          run_id: listed.id,
+          run: run as Record<string, unknown>,
+          ...(usage ? { usage } : {}),
+          events: keptEvents(events),
+        };
+        return { run, text: `${JSON.stringify(line)}\n` };
+      }
+
+      async function recordExpired(agentId: string, runId: string) {
+        tally.expired++;
+        const where = `${agentId}/${runId}`;
+        const message = `run ${runId} of agent ${agentId} ended more than Cursor keeps its events (24 h) before it was read; it is not in the session`;
+        if (ctx.fail) {
+          await ctx.fail({
+            code: STREAM_EXPIRED,
+            message,
+            session_key: agentId,
+            idempotency_key: `cursor-cloud:${where}~expired`,
+            provenance: { cursor: where },
+          });
+        } else ctx.log.warn(message);
+      }
+
+      /** The carried runs' lines, read again, oldest first; runs Cursor no longer has drop out. */
+      async function carriedLines(agentId: string, carry: readonly RunRef[]) {
+        const kept: RunRef[] = [];
+        let text = "";
+        for (const ref of carry) {
+          if (Date.parse(ref.at) < now - DAY || budget.streams <= 0) continue;
+          const events = await replay(agentId, ref.id);
+          if (!events || !replayComplete(events)) continue;
+          const line = await lineOf(agentId, { id: ref.id, createdAt: ref.at }, events);
+          text += line.text;
+          kept.push(ref);
+        }
+        return { kept, text };
+      }
+
+      /** Reads the agent's new runs into `entry`; true when every run listed was handled. */
+      async function syncAgent(agent: CursorAgent, entry: AgentEntry): Promise<boolean> {
+        const runs = (await api.listRuns(agent.id)).filter((run) => after(run, entry.through));
+        const project = projectOf(agent);
+        for (const listed of runs) {
+          ctx.signal.throwIfAborted();
+          if (!TERMINAL_STATUSES.has(listed.status ?? "")) {
+            tally.waiting++;
+            return false;
+          }
+          if (budget.streams <= 0) {
+            budget.more = true;
+            return false;
+          }
+          const events = await replay(agent.id, listed.id);
+          if (events === undefined) {
+            await recordExpired(agent.id, listed.id);
+            entry.through = refOf(listed);
+            continue;
+          }
+          if (!replayComplete(events)) {
+            ctx.log.warn(
+              `run ${listed.id} of agent ${agent.id}: Cursor's replay ended before the run's result; asked again next poll`,
+            );
+            if (budget.streams <= 0) budget.more = true;
+            return false;
+          }
+          const { run, text: own } = await lineOf(agent.id, listed, events);
+          const carried =
+            entry.bytes === 0 && entry.carry
+              ? await carriedLines(agent.id, entry.carry)
+              : { kept: [], text: "" };
+          const where = `${agent.id}/${listed.id}`;
+          const branch = branchOf(run);
+          const envelope: Envelope = {
+            schema: ENVELOPE_SCHEMA,
+            source: CURSOR_CLOUD_SOURCE,
+            source_id: id,
+            format: CURSOR_CLOUD_API,
+            session_key: agent.id,
+            payload: {
+              kind: "log",
+              encoding: "jsonl",
+              text: carried.text + own,
+              offset: entry.bytes,
+            },
+            ...serviceEnvelopeIdentity(id),
+            idempotency_key: `cursor-cloud:${where}`,
+            provenance: { cursor: where },
+            received_at: ctx.now().toISOString(),
+            ...(project ? { project } : {}),
+            ...(branch ? { branch } : {}),
+          };
+          const outcome = await ctx.submit(envelope);
+          if (outcome.status === "failed" && outcome.code === "offset_mismatch") {
+            const expected = expectedOffset(outcome.message);
+            const release = `its runs are held until seshi reprocess --source ${id} --since <time> releases them`;
+            entry.conflict =
+              expected !== undefined
+                ? `the stored session's log is ${expected} bytes long, not ${entry.bytes} as the checkpoint says; ${release}`
+                : `the stored session's log is not ${entry.bytes} bytes long, as the checkpoint says; ${release}`;
+            if (expected !== undefined) entry.expected = expected;
+            ctx.log.error(`agent ${agent.id}: ${entry.conflict}`);
+            if (ctx.fail) {
+              await ctx.fail({
+                code: SESSION_CONFLICT,
+                message: entry.conflict,
+                session_key: agent.id,
+                idempotency_key: `cursor-cloud:${where}~conflict`,
+                provenance: { cursor: where },
+              });
+            }
+            return false;
+          }
+          const total = "bytes_total" in outcome ? outcome.bytes_total : undefined;
+          // A refusal is final (the pipeline throws what is worth trying again): the run is
+          // recorded under sync failed and the agent goes on.
+          if (outcome.status === "failed") {
+            tally.refused++;
+            delete entry.carry;
+          } else if (outcome.status === "filtered") {
+            tally.filtered++;
+            entry.carry = [...carried.kept, refOf(listed)].slice(-MAX_CARRIED);
+            entry.bytes = 0;
+          } else {
+            if (outcome.status === "dropped") tally.dropped++;
+            else tally.stored++;
+            delete entry.carry;
+            if (typeof total === "number") entry.bytes = total;
+          }
+          entry.through = refOf(listed);
+        }
+        return true;
+      }
 
       const agents = await api.listAgents();
       for (const agent of agents) {
@@ -235,157 +462,62 @@ export function cursorCloudConnector(options: CursorCloudConnectorOptions = {}):
         const updated = agent.updatedAt ? Date.parse(agent.updatedAt) : Number.NaN;
         // Nothing of an agent untouched since before the lookback can be had any more.
         if (!known && !Number.isNaN(updated) && updated < now - config.lookback) continue;
-        if (streams <= 0) {
-          more = true;
+        if (budget.streams <= 0) {
+          budget.more = true;
           break;
         }
         tally.agents++;
-        const entry: AgentEntry = known ? { ...known } : { bytes: 0 };
+        const entry: AgentEntry = known ? structuredClone(known) : { bytes: 0 };
         delete entry.updated;
-        let settled = true;
-        const runs = (await api.listRuns(agent.id)).filter((run) => after(run, entry.through));
-        for (const listed of runs) {
-          ctx.signal.throwIfAborted();
-          if (!TERMINAL_STATUSES.has(listed.status ?? "")) {
-            settled = false;
-            tally.waiting++;
-            break;
-          }
-          if (streams <= 0) {
-            settled = false;
-            more = true;
-            break;
-          }
-          let events: CursorStreamEvent[] = [];
-          let expired = false;
-          for (let attempt = 0; attempt < attempts && streams > 0; attempt++) {
-            streams--;
-            try {
-              events = await api.stream(agent.id, listed.id);
-            } catch (err) {
-              if (err instanceof StreamExpired) {
-                expired = true;
-                break;
-              }
-              throw err;
-            }
-            if (replayComplete(events)) break;
-          }
-          const where = `${agent.id}/${listed.id}`;
-          if (expired) {
-            tally.expired++;
-            const message = `run ${listed.id} of agent ${agent.id} ended more than Cursor keeps its events (24 h) before it was read; it is not in the session`;
-            if (ctx.fail) {
-              await ctx.fail({
-                code: STREAM_EXPIRED,
-                message,
-                session_key: agent.id,
-                idempotency_key: `cursor-cloud:${where}~expired`,
-                provenance: { cursor: where },
-              });
-            } else ctx.log.warn(message);
-            entry.through = { at: listed.createdAt ?? "", id: listed.id };
-            cursor.agents[agent.id] = { ...entry };
-            await save();
-            continue;
-          }
-          if (!replayComplete(events)) {
-            ctx.log.warn(
-              `run ${listed.id} of agent ${agent.id}: Cursor's replay ended before the run's result; asked again next poll`,
-            );
-            settled = false;
-            more = streams <= 0 || more;
-            break;
-          }
-          const run =
-            listed.git !== undefined && listed.durationMs !== undefined
-              ? listed
-              : await api.getRun(agent.id, listed.id).catch(() => listed);
-          let usage: Record<string, unknown> | undefined;
-          if (config.usage) {
-            usage = await api.runUsage(agent.id, listed.id).catch((err: unknown) => {
-              if (err instanceof CursorApiError && (err.status === 401 || err.status === 403))
-                throw err;
-              return undefined;
-            });
-          }
-          const line: CursorRunLine = {
-            type: "cursor_cloud_run",
-            agent_id: agent.id,
-            run_id: listed.id,
-            run: run as Record<string, unknown>,
-            ...(usage ? { usage } : {}),
-            events: keptEvents(events),
-          };
-          const project = projectOf(agent);
-          const branch = branchOf(run);
-          const envelope: Envelope = {
-            schema: ENVELOPE_SCHEMA,
-            source: CURSOR_CLOUD_SOURCE,
-            source_id: id,
-            format: CURSOR_CLOUD_API,
-            session_key: agent.id,
-            payload: {
-              kind: "log",
-              encoding: "jsonl",
-              text: `${JSON.stringify(line)}\n`,
-              offset: entry.bytes,
-            },
-            caller: { kind: "service", principal: `svc:${id}` },
-            owner: `svc:${id}`,
-            owner_basis: "service",
-            idempotency_key: `cursor-cloud:${where}`,
-            provenance: { cursor: where },
-            received_at: ctx.now().toISOString(),
-            ...(project ? { project } : {}),
-            ...(branch ? { branch } : {}),
-          };
-          const outcome = await ctx.submit(envelope);
-          if (outcome.status === "failed" && outcome.code === "offset_mismatch") {
-            entry.conflict = `the stored session is not ${entry.bytes} bytes long, as the checkpoint says; its runs are held (${outcome.message.slice(0, 200)})`;
-            ctx.log.error(`agent ${agent.id}: ${entry.conflict}`);
-            if (ctx.fail) {
-              await ctx.fail({
-                code: SESSION_CONFLICT,
-                message: entry.conflict,
-                session_key: agent.id,
-                idempotency_key: `cursor-cloud:${where}~conflict`,
-                provenance: { cursor: where },
-              });
-            }
-            settled = false;
-            break;
-          }
-          if (outcome.status === "failed") {
-            tally.failed++;
-          } else {
-            tally.stored++;
-            if ("bytes_total" in outcome && typeof outcome.bytes_total === "number") {
-              entry.bytes = outcome.bytes_total;
-            }
-          }
-          entry.through = { at: listed.createdAt ?? "", id: listed.id };
-          cursor.agents[agent.id] = { ...entry };
-          await save();
+        let settled = false;
+        try {
+          settled = await syncAgent(agent, entry);
+        } catch (err) {
+          if (ctx.signal.aborted) throw err;
+          if (err instanceof CursorApiError && (err.status === 401 || err.status === 403))
+            throw err;
+          tally.errors++;
+          ctx.log.error(
+            `agent ${agent.id}: ${(err as Error).message}; its runs are read again next poll`,
+          );
+        } finally {
+          if (settled && agent.updatedAt) entry.updated = agent.updatedAt;
+          cursor.agents[agent.id] = entry;
+          // Saved per agent, not per run: a run sent again after a crash between the two carries
+          // the same idempotency key, and the server answers it as before.
+          await ctx.checkpoint.write(cursor as unknown as Cursor);
         }
-        if (settled && agent.updatedAt) entry.updated = agent.updatedAt;
-        cursor.agents[agent.id] = entry;
-        await save();
       }
+
+      let pruned = false;
+      for (const [agentId, entry] of Object.entries(cursor.agents)) {
+        const seen = entry.updated ? Date.parse(entry.updated) : Number.NaN;
+        if (entry.bytes === 0 && !entry.conflict && !entry.carry && seen < now - PRUNE_AFTER_MS) {
+          delete cursor.agents[agentId];
+          pruned = true;
+        }
+      }
+      if (pruned) await ctx.checkpoint.write(cursor as unknown as Cursor);
 
       const parts = [
         `looked at ${tally.agents} of ${agents.length} agent(s)`,
         `stored ${tally.stored} run(s)`,
       ];
+      if (tally.filtered) parts.push(`${tally.filtered} too short to keep yet (carried)`);
+      if (tally.dropped) parts.push(`${tally.dropped} dropped by review`);
       if (tally.waiting) parts.push(`${tally.waiting} still running`);
-      if (tally.expired)
+      if (tally.expired) {
         parts.push(`${tally.expired} expired before they were read (see sync failed)`);
-      if (tally.failed) parts.push(`${tally.failed} failed (see sync failed)`);
+      }
+      if (tally.refused) parts.push(`${tally.refused} refused (see sync failed)`);
       if (tally.held) parts.push(`${tally.held} agent(s) held by a session conflict`);
-      if (more) parts.push("more next poll");
+      if (tally.errors) parts.push(`${tally.errors} agent(s) failed, read again next poll`);
+      if (budget.more) parts.push("more next poll");
       ctx.log.info(parts.join("; "));
-      return more ? { more: true } : {};
+      return budget.more ? { more: true } : {};
     },
+
+    rewind: (cursor) => rewindCursorCloud(cursor),
   };
 }
 

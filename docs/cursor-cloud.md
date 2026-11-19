@@ -65,12 +65,26 @@ A follow-up to an idle agent, even days later, is a new run appended to the same
 subagent's steps arrive inside its parent's run.
 
 The checkpoint (`sources/<id>/checkpoint.json`) keeps, per agent, the `updatedAt` it last saw,
-the session's log length and the last run stored. If the stored session is not the length the
-checkpoint says (the checkpoint was lost, or another source writes the same agent), the poller
-holds that agent and records `session_conflict` rather than append out of place.
+the session's log length and the last run handled. It is saved after each agent. An agent nothing
+was stored of leaves it after 90 days untouched.
 
-Cursor's 429 and 5xx answers are tried again twice, waiting as long as `Retry-After` asks (up to
-a minute). A refused key (401, 403) fails the poll.
+A run the session filter keeps nothing of (too short, X4.10) is carried: it is read again and
+sent ahead of the agent's next run, while Cursor still has it, so a session that grows past the
+filter starts at its first run. A run the pipeline refuses (`sync failed`) is not sent again.
+
+If the stored session is not the length the checkpoint says (the checkpoint was lost or
+restored, or another source writes the same agent), the poller holds that agent and records
+`session_conflict` rather than append out of place. Once nothing else writes it,
+`seshi reprocess --source <id> --since <time>` releases held agents: each goes on after where
+its stored session ends. Do not rewind the source to the start (without `--since`): the
+checkpoint would forget every session's length, and every agent with a run in the last day would
+be held.
+
+An error reading one agent (a 404, a stream that broke off) is logged and that agent is read
+again next poll; the other agents go on. Cursor's 429 and 5xx answers are tried again twice,
+waiting as long as `Retry-After` asks (up to a minute). A stream that sends nothing, not even a
+heartbeat, for 60 seconds counts as stalled. A refused key (401, 403) fails the poll. A listing
+of more than 20,000 agents, or runs of one agent, fails rather than leave the rest out.
 
 ## What a session holds
 
@@ -79,6 +93,9 @@ run as Get A Run describes it, its token usage, and its stream events as Cursor 
 heartbeats and the text, thinking and token deltas other events repeat. From it a session gets
 the user's message, the agent's thinking and replies, and every tool call with its arguments and
 result, each dated by its event.
+
+A run whose stream has no user message (none seen so far) gets a placeholder user turn,
+`[this run's prompt is not in Cursor's stream]`, marked synthetic.
 
 What Cursor's API does not carry is not in it:
 

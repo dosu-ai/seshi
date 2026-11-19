@@ -30,6 +30,9 @@ import type {
 
 export const CURSOR_CLOUD_API = "cursor-cloud-api" as const;
 
+/** The user record of a run whose stream has no user message. */
+export const MISSING_PROMPT = "[this run's prompt is not in Cursor's stream]";
+
 /** One stream event: Cursor's SSE `id`, `event` and parsed `data`. */
 export interface CursorStreamEvent {
   id?: string;
@@ -245,6 +248,16 @@ function runRecords(line: CursorRunLine): NormalizedRecord[] {
     }
   }
   settle();
+  // Cursor's stream has carried every user message seen so far; a run without one still gets a
+  // user record at its start, so its replies have a turn to belong to.
+  if (records.length > 0 && !records.some((r) => r.role === "user")) {
+    records.unshift({
+      role: "user",
+      content: MISSING_PROMPT,
+      timestamp: created,
+      synthetic: true,
+    } as UserRecord);
+  }
   return records;
 }
 

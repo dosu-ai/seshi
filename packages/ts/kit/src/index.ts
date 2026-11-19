@@ -47,6 +47,12 @@ export {
   type TranscriptInfo,
 } from "./capture";
 export {
+  abortableSleep,
+  apiUrlOverride,
+  secretValue,
+  serviceEnvelopeIdentity,
+} from "./connector";
+export {
   commandLine,
   isSeshiHook,
   isSeshiStatusline,
