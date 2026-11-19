@@ -123,156 +123,20 @@ moved agent folder, which a Task Scheduler task cannot carry.
 
 ## Cursor Cloud agents
 
-Cursor Cloud agents run in a VM Cursor builds from the repository, and run only the
-repository's hooks (`.cursor/hooks.json` at its root), never `~/.cursor/hooks.json`. So for them
-seshi's hooks are committed to the repository, the repository's environment setup installs seshi
-on the VM and signs it in, and each hook uploads to your team's seshi server before it returns.
-Cursor's API for cloud agents (F7) is not used.
+seshi does not capture Cursor Cloud agents through hooks. A cloud agent's VM writes no transcript
+file for a hook to upload, and committed hooks would need a seshi install and secrets in every
+repository. Cloud agents will be read from Cursor's Cloud Agents API instead (F7, not built yet):
+a poller lists each agent's runs and stores their event streams, with nothing in the repository
+and nothing on the VM.
 
-### 1. The hooks, committed
-
-```sh
-seshi capture install cursor --project            # the repository around this folder
-seshi capture install cursor --project ~/code/app
-git add .cursor/hooks.json .cursor/seshi-cloud.sh && git commit -m "Capture Cursor Cloud agents"
-```
-
-This merges six hooks into `.cursor/hooks.json` (stop, sessionEnd, beforeSubmitPrompt and the
-three that keep tool results, [below](#tool-results-in-cursor)), keeping everyone else's, and writes the setup
-script `.cursor/seshi-cloud.sh`:
-
-```json
-{ "command": "[ -e \"${XDG_STATE_HOME:-$HOME/.local/state}/seshi/cursor-cloud\" ] || exit 0; s=$(command -v seshi || echo \"$HOME/.local/bin/seshi\"); [ -x \"$s\" ] || exit 0; exec \"$s\" hook cursor stop --cloud", "timeout": 60 }
-```
-
-for `stop` and `sessionEnd` (60 s each) and `beforeSubmitPrompt` (30 s), so `/session-capture`
-works in cloud chats. Off a marked cloud VM ([below](#hooks-on-everyone-elses-machines)) the
-line exits at its first check, without starting seshi; on one it runs `seshi` from the PATH (or
-where the setup script puts it), never the installing machine's path. Neither file holds a token,
-a server URL or anything else secret. `install` again rewrites seshi's entries and the script (a new seshi pins its own
-version); `seshi capture uninstall cursor --project` takes out only seshi's, and
-`seshi capture status --project` says whether they are in and current. `--project` never takes
-the home folder, whose `.cursor` is the user-level config.
-
-### 2. The VM's setup
-
-Add the script's two steps to `.cursor/environment.json`, after any steps of your own:
-
-```json
-{
-  "install": "npm ci && sh .cursor/seshi-cloud.sh install",
-  "start": "sh .cursor/seshi-cloud.sh start"
-}
-```
-
-- `install` runs when Cursor builds the environment: it puts the seshi release the script pins
-  (the version that wrote it) in `/usr/local/bin`, or `~/.local/bin` when that is not writable,
-  with that release's own [install script](install.md).
-- `start` runs at the start of every agent run: it makes sure that seshi is there, marks the VM
-  (`seshi capture install cursor --cloud`, below), and signs in:
-  `printf %s "$SESHI_TOKEN" | seshi login --server "$SESHI_SERVER" --token -`. Cursor adds
-  secrets only when an agent starts, not to the build, so signing in is this step's.
-
-Neither step fails the environment: without seshi or the secrets they say why on stderr, and
-cloud sessions are not captured. If your team sets the environment up in Cursor's dashboard
-(Environments) instead, add the same two commands there: a saved environment reads
-`.cursor/environment.json` only when it is pointed at it.
-
-### 3. The cloud owner, its token and the secrets
-
-The server decides a session's owner from the credential, never from what the data says, so cloud
-sessions are all stored under one owner, `cursor-cloud`, whoever started the agent. An admin
-mints a device token for it, the kind a laptop gets when someone signs in:
-
-```sh
-seshi tokens create device --owner cursor-cloud --expires 365d --label "Cursor Cloud agents"
-```
-
-A device token writes sessions as its owner (`owner_basis: verified`) and reads nothing else. It
-lasts 90 days unless `--expires` says otherwise. Add `--visibility org` if your deployment's
-default visibility is `owner`, or only admins will read cloud sessions.
-
-In Cursor's dashboard (Cloud Agents, Secrets), add:
-
-| Secret | Value |
-|---|---|
-| `SESHI_SERVER` | your seshi server's URL |
-| `SESHI_TOKEN` | the token; a **Runtime Secret**, so Cursor redacts it from transcripts and tool output |
-
-seshi never reads `SESHI_TOKEN` itself (it passes over the name, as it does `SESHI_SESSION_ID`);
-only the start step pipes it to `seshi login`. `SESHI_SERVER` is seshi's own `server` setting,
-with the same meaning.
-
-**Rotating the token.** Before it expires, mint a new one, put it in `SESHI_TOKEN`, then revoke the
-old one (`seshi tokens ls --owner cursor-cloud`, `seshi tokens revoke <id>`). The start step signs
-in on every run, so the next run uses the new token. Cursor does not renew a secret, so a token
-that lapses stops cloud capture: each stop says so on its stderr and in `capture.log`
-(`the token for <server> (cursor-cloud) expired 2027-11-17; an admin makes a new one …`), as
-`seshi capture status` and `seshi doctor` do on the VM. seshi knows the expiry from
-`seshi login`, which records it.
-
-### Hooks on everyone else's machines
-
-Cursor runs a repository's hooks beside each person's own, so every teammate's Cursor runs the
-committed hooks too. They do nothing there. Cursor documents no environment variable or payload
-field that says a hook runs in a cloud agent (`is_background_agent` comes only with `sessionStart`
-and `sessionEnd`, which cloud agents never fire), so the start step **marks the VM**: the file
-`cursor-cloud` in seshi's state folder. The marker is seshi's own and is written only by a step
-that runs only on the VM, and the committed line checks it in the shell before it starts seshi
-(seshi checks it again).
-
-- A teammate's laptop, with or without seshi: the shell finds no marker and exits 0, with nothing
-  started, spooled or said; seshi's user-level Cursor hooks capture as before.
-- Windows: Cursor runs hooks in PowerShell, where the committed line (POSIX `sh`) fails. Cursor
-  lets the prompt through and logs the failure in its Hooks output; nothing else happens.
-- On a marked VM, seshi's user-level Cursor hooks (if any) stand aside, so the two never both
-  upload a conversation.
-
-### What a cloud run uploads, and when
-
-- Cloud agents fire `stop`, not `sessionEnd`. Each `stop` uploads in the hook, before it returns,
-  instead of leaving it to a background uploader: the VM can be gone as soon as the run ends. It
-  takes up to 45 s of its 60 (`/session-capture` up to 15 s of its 30), waits at most half of that
-  for another hook's upload to finish, and tries again at once after an earlier failure (no
-  backoff). Whatever is not done by then is said on the hook's stderr
-  (`seshi: cursor:<id> was not uploaded: …`) and in `capture.log`, and the next stop sends the
-  rest. Where Cursor shows a cloud hook's stderr is not documented.
-- The transcript: Cursor Cloud has sent an empty `transcript_path`, so seshi also takes the
-  `CURSOR_TRANSCRIPT_PATH` Cursor sets for hooks, then looks under `~/.cursor/projects`. When it
-  finds none, the hook says so.
-- The capture rules apply as on a laptop: the folder is the VM's checkout, so the repository's
-  `.seshi/config.toml` and the server's rules decide, and pre-redaction happens before upload.
-- `/session-capture off`, `on` and `status` work in a cloud chat, and `off` retracts what was
-  uploaded before the hook returns, a continuation's earlier session (below) included when this
-  VM stored it. A VM rebuilt for a follow-up (below) no longer holds the
-  retraction secret of what an earlier VM uploaded: an admin removes that with `seshi sessions rm`.
-- Tool results: the committed result hooks keep them on the VM as on a laptop
-  ([below](#tool-results-in-cursor)), and each `stop` uploads them with the transcript. They
-  upload nothing themselves. Every source agrees that `postToolUse` fires in cloud agents; if a
-  real run shows that `stop` does not (a forum reply says only tool-level hooks fire there),
-  nothing of a cloud session is uploaded, results or not. Uploading from `postToolUse` instead
-  would take: a budget per tool call (its timeout is 10 s, and Cursor waits for it), uploading
-  only every so often (say once a minute, on whichever `postToolUse` comes after), the transcript
-  read without `transcript_path` (null in the cloud), and the last turn's tail sent by nothing,
-  since no hook follows the last tool call of a run.
-- Who started the agent is not recorded: the session's owner is `cursor-cloud`.
-
-### Follow-ups
-
-A follow-up to an agent that has gone idle, even days later, is a new run. Cursor resumes the VM
-from its disk snapshot (kept for 30 days of inactivity) or, when that is gone, builds a new one
-from the environment. On a resumed VM the transcript and seshi's upload state are as the last run
-left them, and the upload goes on from where it was. On a rebuilt one seshi's state is gone, and
-what Cursor puts in the transcript there is not documented (nor checked yet): the whole
-conversation, only the new run, or nothing.
-
-So with no state, seshi sends the whole transcript. When it starts with what the server stored
-(the whole conversation), the server extends the stored session. When it does not, seshi does
-not replace the stored session: the VM's file is not to be trusted over what an earlier VM
-uploaded, and replacing it with a shorter log would lose history. It **continues** it instead, as
-a new session `<id>~r1` whose `parent_session_id` (and `fork_of`) is the stored one, and later
-stops on that VM extend `<id>~r1`. A later rebuild that does not extend that either goes on to
-`~r2`.
+An earlier seshi could commit hooks for cloud agents (`seshi capture install cursor --project`).
+If a repository has them, remove `.cursor/seshi-cloud.sh`, its two steps in
+`.cursor/environment.json`, and the `seshi hook cursor … --cloud` entries in `.cursor/hooks.json`.
+Off a cloud VM they do nothing: the shell line exits before it starts seshi, and this seshi ignores
+a hook that passes `--cloud`. On a cloud VM they keep capturing: `.cursor/seshi-cloud.sh` installs
+the seshi release that wrote it, which still marks the VM and uploads every run under
+`cursor-cloud`. To stop that at once, revoke the token from the server
+(`seshi tokens revoke --owner cursor-cloud`), then remove the files.
 
 ## Tool results in Cursor
 
@@ -732,8 +596,7 @@ the server stored them.
 | `uploader.json` | the running uploader's process id and heartbeat; `uploader.json.takeover` exists for a moment while an uploader takes over a dead one's lock, so two never both do |
 | `rules.json` | the capture rules as last read from the CLI config |
 | `redaction-rules.json` | your server's redaction rules as last fetched, with their ETag |
-| `capture.log` | errors from hooks and the uploader (hooks never print, except a Cursor Cloud hook saying what it could not upload) |
-| `cursor-cloud` | the mark of a Cursor Cloud VM ([above](#hooks-on-everyone-elses-machines)) |
+| `capture.log` | errors from hooks and the uploader (hooks never print) |
 | `kept/cursor/<conversation>/` | a captured Cursor session's tool results as its hooks kept them (`results/`), and the file uploaded for it, its transcript with the results added (`transcript.jsonl`, `compose.json`) ([above](#tool-results-in-cursor)). Removed when the session is turned off, and a day after the session leaves the state file |
 | `transcripts/opencode/` | OpenCode sessions as seshi was handed them, or read them from OpenCode's database in a sweep, one `<id>.json` each, for captured sessions only: OpenCode keeps its own in a database. A session's copy goes when it is turned off, and the folder when OpenCode is uninstalled |
 | `serverless/<id>/` | serverless mode, per bucket: the cached shared settings, the storage test's result, this machine's drop and failure records, the daemon's upkeep times ([serverless.md](serverless.md#what-a-laptop-writes-and-keeps)) |
@@ -742,12 +605,10 @@ the server stored them.
 
 ## Not yet
 
-- Cursor Cloud runs in a repository without seshi's committed hooks, through Cursor's API (F7).
+- Cursor Cloud agents, through Cursor's API (F7).
 - Cursor subagents (`agent-transcripts/<id>/subagents/`), and their tool results.
 - Tool results for Cursor sessions stored before seshi kept them, from Cursor's database
   ([above](#tool-results-in-cursor)): shell and MCP results only, IDE sessions only.
-- Uploading a Cursor Cloud session from `postToolUse`, should `stop` not fire there
-  ([above](#what-a-cloud-run-uploads-and-when)).
 - Session Capture in Cursor's Agents Window, which shows no extension's status bar item.
 - A first-run notice inside Cursor that capture is on.
 - Datadog Trajectory's local files.

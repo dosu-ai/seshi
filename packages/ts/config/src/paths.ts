@@ -7,7 +7,7 @@ export const NOT_SETTINGS_ENV: readonly string[] = [
   "SESHI_SESSION_ID",
   "SESHI_AGENT",
   "SESHI_NO_UPLOADER",
-  // Cursor Cloud's secret for `seshi login --token -`, read by its setup step, never by seshi.
+  // A token scripts pipe to `seshi login --token -`; seshi never reads one from the environment.
   "SESHI_TOKEN",
 ];
 export const SERVER_CONFIG_NAME = "seshi.toml";

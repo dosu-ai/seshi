@@ -15,16 +15,13 @@
  * keep them beside the session, and the uploader sends the transcript with them added
  * (`./results`). */
 
-import { existsSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import {
   attachStatusLine,
   type CaptureAgent,
   type CaptureHost,
-  CLOUD_FLAG,
-  type CloudMarker,
   captureCommandPrompt,
-  captureDir,
   commandLine,
   detachStatusLine,
   type HookCapture,
@@ -33,25 +30,17 @@ import {
   type Installer,
   type InstallReport,
   type InstallStatus,
-  installOwnedFiles,
   installSkill,
   isOurSkill,
   isSeshiHook,
-  type OwnedFile,
-  ownedFileNotes,
-  ownedFileState,
-  type ProjectContext,
-  type ProjectInstaller,
   payloadObject,
   readJsonConfig,
-  removeOwnedFiles,
   removeSkill,
   type StatusLineTarget,
   skillFile,
   statusLineNotes,
   stringField,
   type TranscriptInfo,
-  writeFileAtomic,
   writeJsonConfig,
 } from "@seshi/kit";
 import { cursorComposer, keptResult, RESULT_EVENTS } from "./results";
@@ -73,8 +62,7 @@ function capture(payload: unknown, final: boolean, host?: CaptureHost): HookCapt
   const object = payloadObject(payload, AGENT);
   const conversation = stringField(object, "conversation_id") ?? stringField(object, "session_id");
   if (!conversation) throw new Error(`${AGENT}: the hook payload has no conversation_id`);
-  // Cursor Cloud has sent a null `transcript_path`; Cursor also names the transcript in the
-  // hook's environment.
+  // `transcript_path` can be null; Cursor also names the transcript in the hook's environment.
   const path =
     stringField(object, "transcript_path") ?? (host?.env.CURSOR_TRANSCRIPT_PATH || undefined);
   const roots = object.workspace_roots;
@@ -249,238 +237,6 @@ function hooksTable(config: Record<string, unknown>, path: string): Record<strin
 
 const list = (value: unknown): CursorHook[] => (Array.isArray(value) ? value : []);
 
-/* Cursor Cloud agents run in a VM Cursor builds from the repository, and run only the
- * repository's hooks (`<repo>/.cursor/hooks.json`), never `~/.cursor/hooks.json`. So for them
- * seshi's hooks are committed to the repository, and the repository's environment setup
- * (`.cursor/environment.json`) installs seshi on the VM and signs it in.
- *
- * Every teammate's Cursor runs those committed hooks too, beside their own. They must do nothing
- * there: Cursor documents no hook payload field or environment variable that says a hook runs
- * in a cloud agent (`is_background_agent` comes only with `sessionStart` and `sessionEnd`,
- * which cloud agents never fire), so the VM's setup step marks the machine
- * (`seshi capture install cursor --cloud` writes `cursor-cloud` in seshi's state folder) and the
- * committed hooks act only on a marked machine. The marker is seshi's own, written only by a
- * step that runs only on the VM, and costs one file check. The user-level hooks stand aside on a
- * marked machine, so the two never both upload a conversation. */
-
-/** Seconds Cursor gives each committed hook: `stop` uploads before it returns; the result hooks
- * only keep a file, in milliseconds, and Cursor waits for them on every tool call. */
-export const PROJECT_TIMEOUTS: Readonly<Record<(typeof CURSOR_EVENTS)[number], number>> = {
-  stop: 60,
-  sessionEnd: 60,
-  beforeSubmitPrompt: 30,
-  postToolUse: 10,
-  postToolUseFailure: 10,
-  beforeReadFile: 10,
-};
-
-/** The setup script, beside the hooks; `.cursor/environment.json` runs it. */
-export const SETUP_SCRIPT = "seshi-cloud.sh";
-const SETUP_MARKER = "seshi-cursor-cloud-setup";
-
-/** The marker's name in seshi's state folder. */
-const MARKER = "cursor-cloud";
-
-/** Room a cloud hook leaves itself inside its timeout to answer and exit. */
-const ANSWER_MS = 15_000;
-
-/** A committed hook's command. Off a marked VM it exits 0 at the marker check, without starting
- * seshi (every teammate's prompts pass through it); on one it runs `seshi` from the PATH (or where
- * the setup script puts it), never this machine's path, and without seshi exits 0 with nothing
- * said. The marker's folder is seshi's state folder, as `captureDir` finds it. POSIX sh: Cursor
- * runs hooks through PowerShell on Windows, where it fails open. */
-export function projectHookCommand(event: string): string {
-  return `[ -e "\${XDG_STATE_HOME:-$HOME/.local/state}/seshi/${MARKER}" ] || exit 0; s=$(command -v seshi || echo "$HOME/.local/bin/seshi"); [ -x "$s" ] || exit 0; exec "$s" hook ${AGENT} ${event} ${CLOUD_FLAG}`;
-}
-
-export function cloudMarkerPath(host: CaptureHost): string {
-  return join(captureDir(host), MARKER);
-}
-
-export const cursorCloud: CloudMarker = {
-  is: (host) => existsSync(cloudMarkerPath(host)),
-  budgetMs: (event) =>
-    ((PROJECT_TIMEOUTS as Record<string, number>)[event] ?? 30) * 1000 - ANSWER_MS,
-  mark(host) {
-    const path = cloudMarkerPath(host);
-    if (existsSync(path)) return { changed: [], notes: [] };
-    writeFileAtomic(
-      path,
-      "This machine is a Cursor Cloud agent VM: seshi's hooks committed to the repository capture here, and seshi's user-level Cursor hooks stand aside (seshi capture install cursor --cloud).\n",
-    );
-    return { changed: [path], notes: [] };
-  },
-  unmark(host) {
-    const path = cloudMarkerPath(host);
-    if (!existsSync(path)) return { changed: [], notes: [] };
-    rmSync(path, { force: true });
-    return { changed: [path], notes: [] };
-  },
-};
-
-export function setupScript(version: string): string {
-  return `#!/bin/sh
-# ${SETUP_MARKER}: Session Capture for Cursor Cloud agents.
-# Written by \`seshi capture install cursor --project\`, which rewrites it: change the version there.
-#
-# .cursor/environment.json runs it:
-#   "install": "sh .cursor/${SETUP_SCRIPT} install"   puts seshi ${version} on the VM (in the build)
-#   "start":   "sh .cursor/${SETUP_SCRIPT} start"     marks the VM and signs seshi in, every run
-#
-# It reads two Cursor secrets, SESHI_SERVER (the seshi server's URL) and SESHI_TOKEN (a device
-# token for the cloud owner, cursor-cloud), and writes neither anywhere in the repository. Cursor
-# adds secrets only when an agent starts, so signing in is the start step's. It never fails the
-# environment: without seshi or the secrets, cloud sessions are just not captured.
-set -u
-version="${version}"
-dir=/usr/local/bin
-[ -w "$dir" ] || dir="$HOME/.local/bin"
-PATH="$dir:$PATH"
-
-say() {
-  printf 'seshi (Cursor Cloud): %s\\n' "$*" >&2
-}
-
-ensure() {
-  [ "$(seshi --version 2>/dev/null)" = "seshi $version" ] && return 0
-  mkdir -p "$dir"
-  curl -fsSL "https://github.com/dosu-ai/seshi/releases/download/v$version/install.sh" |
-    sh -s -- --version "$version" --dir "$dir" --no-modify-path >&2
-  [ "$(seshi --version 2>/dev/null)" = "seshi $version" ] && return 0
-  say "could not install seshi $version; cloud sessions are not captured"
-  return 1
-}
-
-case "\${1:-}" in
-  install)
-    ensure || true
-    ;;
-  start)
-    ensure || exit 0
-    seshi capture install cursor --cloud >&2 || exit 0
-    if [ -z "\${SESHI_SERVER:-}" ] || [ -z "\${SESHI_TOKEN:-}" ]; then
-      say "the SESHI_SERVER and SESHI_TOKEN secrets are not set; cloud sessions are not uploaded"
-      exit 0
-    fi
-    printf %s "$SESHI_TOKEN" | seshi login --server "$SESHI_SERVER" --token - >&2 ||
-      say "could not sign in to $SESHI_SERVER; cloud sessions are not uploaded (seshi doctor says why)"
-    ;;
-  *)
-    say "usage: sh .cursor/${SETUP_SCRIPT} install|start"
-    exit 2
-    ;;
-esac
-exit 0
-`;
-}
-
-function projectFiles(dir: string) {
-  const cursor = join(dir, ".cursor");
-  return { hooks: join(cursor, "hooks.json"), script: join(cursor, SETUP_SCRIPT) };
-}
-
-function setupFile(context: ProjectContext): OwnedFile {
-  return {
-    path: projectFiles(context.dir).script,
-    text: setupScript(context.version),
-    marker: SETUP_MARKER,
-  };
-}
-
-/** Whether a committed hook is seshi's: its command runs `seshi hook cursor <event> --cloud`. */
-function isProjectHook(command: unknown): boolean {
-  return (
-    isSeshiHook(command, AGENT) ||
-    (typeof command === "string" &&
-      command.includes(` hook ${AGENT} `) &&
-      command.includes(CLOUD_FLAG))
-  );
-}
-
-/** What to add to `.cursor/environment.json` (or the Environments page's setup): seshi never
- * edits that file, which decides how the whole VM is built. */
-export function environmentNote(): string {
-  return `add to .cursor/environment.json (or your Cursor environment's setup): "install": "sh .cursor/${SETUP_SCRIPT} install" and "start": "sh .cursor/${SETUP_SCRIPT} start", run after your own; add the Cursor secrets SESHI_SERVER and SESHI_TOKEN (docs/capture.md#cursor-cloud-agents)`;
-}
-
-export const cursorProjectInstaller: ProjectInstaller = {
-  async install(context) {
-    const { hooks: path } = projectFiles(context.dir);
-    const config = readJsonConfig(path);
-    const before = existsSync(path) ? JSON.stringify(config) : undefined;
-    const table = hooksTable(config, path);
-    for (const event of CURSOR_EVENTS) {
-      const entry = { command: projectHookCommand(event), timeout: PROJECT_TIMEOUTS[event] };
-      const hooks = list(table[event]);
-      const at = hooks.findIndex((h) => isProjectHook(h.command));
-      if (at === -1) hooks.push(entry);
-      else {
-        hooks[at] = { ...hooks[at], ...entry };
-        table[event] = hooks.filter((h, i) => i <= at || !isProjectHook(h.command));
-        continue;
-      }
-      table[event] = hooks;
-    }
-    const next = { version: config.version ?? 1, ...config, hooks: table };
-    const changed: string[] = [];
-    if (before !== JSON.stringify(next)) {
-      writeJsonConfig(path, next);
-      changed.push(path);
-    }
-    const script = installOwnedFiles([setupFile(context)], `${AGENT} (cloud)`);
-    return {
-      changed: [...changed, ...script.changed],
-      notes: [...script.notes, environmentNote()],
-    };
-  },
-
-  async uninstall(context) {
-    const { hooks: path } = projectFiles(context.dir);
-    const removed = removeOwnedFiles([setupFile(context)]);
-    if (!existsSync(path)) return { changed: removed, notes: [] };
-    const config = readJsonConfig(path);
-    const table = hooksTable(config, path);
-    let touched = false;
-    for (const event of Object.keys(table)) {
-      const hooks = list(table[event]);
-      const kept = hooks.filter((h) => !isProjectHook(h.command));
-      if (kept.length === hooks.length) continue;
-      touched = true;
-      if (kept.length > 0) table[event] = kept;
-      else delete table[event];
-    }
-    if (!touched) return { changed: removed, notes: [] };
-    writeJsonConfig(path, { ...config, hooks: table });
-    return {
-      changed: [path, ...removed],
-      notes: [`take seshi's install and start steps out of .cursor/environment.json`],
-    };
-  },
-
-  async status(context) {
-    const { hooks: path } = projectFiles(context.dir);
-    const present = existsSync(path);
-    const table = present ? hooksTable(readJsonConfig(path), path) : {};
-    const missing = CURSOR_EVENTS.filter(
-      (e) => !list(table[e]).some((h) => isProjectHook(h.command)),
-    );
-    const script = ownedFileState(setupFile(context));
-    return {
-      installed: present && missing.length === 0 && script.ours,
-      files: [
-        { path, present, ours: present && missing.length < CURSOR_EVENTS.length },
-        { path: script.path, present: script.present, ours: script.ours },
-      ],
-      notes: [
-        ...(present && missing.length > 0 && missing.length < CURSOR_EVENTS.length
-          ? [`hooks missing for ${missing.join(", ")}: run seshi capture install cursor --project`]
-          : []),
-        ...ownedFileNotes([script], `${AGENT} --project`),
-      ],
-    };
-  },
-};
-
 export const cursorInstaller: Installer = {
   detect: (host) => existsSync(cursorDir(host)),
 
@@ -555,9 +311,6 @@ export const cursorInstaller: Installer = {
       ],
     };
   },
-
-  project: cursorProjectInstaller,
-  cloud: cursorCloud,
 };
 
 export const CURSOR_CAPTURE: CaptureAgent = {

@@ -140,15 +140,14 @@ Everything else is in [docs/](docs/README.md).
 | Claude Managed Agents, and Messages API calls | ✓ | A Claude Console [OpenTelemetry destination](docs/otlp.md) |
 | Claude Code, Codex or Cursor CLI in your own sandboxes, CI or eval harnesses | ✓ | `seshi capture install` in the sandbox, or transcripts written to a bucket an [S3 source](docs/s3-sync.md) polls |
 | Any agent that writes OpenTelemetry GenAI spans | ✓ | The [OTLP endpoint](docs/otlp.md) |
-| Cursor Cloud Agents | ✓ | Hooks committed to the repository, and seshi installed and signed in by its environment setup: `seshi capture install cursor --project` ([capture.md](docs/capture.md#cursor-cloud-agents)). Tool results are not captured yet |
+| Cursor Cloud Agents | — | Through Cursor's Cloud Agents API (F7), not built yet ([capture.md](docs/capture.md#cursor-cloud-agents)) |
 | Codex cloud, GitHub Copilot coding agent | — | |
 
 A new agent is an [integration](integrations).
 
 ## Roadmap
 
-- [x] Cursor Cloud Agents through hooks committed to the repository
-- [ ] Cursor Cloud Agents through Cursor's API, for runs whose repository has no hooks (F7)
+- [ ] Cursor Cloud Agents through Cursor's API (F7)
 - [ ] Tool results in Cursor transcripts (from `postToolUse`)
 - [ ] Devin Cloud sync: a source that pulls Devin cloud sessions through Devin's API
 - [x] A Python SDK for the seshi API ([`packages/py/client`](packages/py/client), [docs](docs/client.md#python-seshi))
