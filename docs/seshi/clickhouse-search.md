@@ -13,10 +13,14 @@ stays the default and the only backend in serverless mode. ClickHouse holds a de
 rebuildable copy built from the change feed, like the SQLite file (X6.1). It is never the store
 of record, and the API never writes to it.
 
-The seam already exists: `IndexStore = SearchBackend & FeedState` in `backend.ts`. Three things
-in it are SQLite-shaped, and they need changing first, with SQLite still the only backend:
+The seam already exists: `IndexStore = SearchBackend & FeedState` in `backend.ts`. But it is
+shaped for an embedded database, and it needs changing first, with SQLite still the only
+backend:
 
-1. The interface is synchronous (`bun:sqlite`). A network backend needs it async.
+1. It is synchronous (`bun:sqlite`) and chatty: one conditional call per session, and a
+   `transaction(fn)` callback that ClickHouse cannot honour. It becomes an async
+   [`IndexReader` and `IndexWriter`](#proposed-interface), and the indexer writes one feed page
+   per `commit()`.
 2. `BackendQuery.match` is an FTS5 expression string. It should be a small parsed tree that each
    backend compiles.
 3. Excerpts come from FTS5's `snippet()`. ClickHouse has nothing like it, so its excerpts are
@@ -43,7 +47,7 @@ then deployment. The details are in the [plan](#phased-plan).
 | | Proposal |
 |---|---|
 | F10.6 | `[search] backend = "clickhouse"` is a server-only option. SQLite stays the default. Serverless mode always uses SQLite, and laptops ignore the shared config's backend. |
-| F10.7 | The interface `IndexStore` becomes async and takes a parsed query. The behaviour of the SQLite backend does not change. |
+| F10.7 | `IndexStore` splits into an async `IndexReader` (queries, state, the cross-owner feed) and `IndexWriter` (the indexer). The indexer writes one feed page per `commit()`, every write names its generation, and queries take a parsed tree. The behaviour of the SQLite backend does not change. |
 | F10.8 | With ClickHouse, one indexer (the worker role) writes the index and every API instance reads it. The search job's placement becomes `worker` for this backend. |
 | F10.9 | Text is normalized in TypeScript, the same way for documents and queries, and indexed with `text(tokenizer = splitByNonAlpha)`. The original text is kept for excerpts. |
 | F10.10 | Writes are idempotent, not transactional: content first, then the feed state, then the cursor. A session's events belong to an *epoch*. Old epochs stop matching as soon as the session row moves on, and are then deleted. |
@@ -66,38 +70,220 @@ then deployment. The details are in the [plan](#phased-plan).
 `SqliteIndex` implements both. `Indexer` and `SearchService` only use the interface, except in
 one place: `SearchService.open()` constructs `SqliteIndex` directly.
 
-What has to change, in order:
+That shape suits an embedded database, where every call is cheap and `transaction(fn)` makes a
+callback atomic. Against ClickHouse it breaks down in five places:
 
-1. **Make it async.** Every method returns a `Promise`. `transaction(fn)` becomes
-   `transaction(async fn)`. `SqliteIndex` keeps its synchronous body and returns resolved
-   values. Callers follow:
-   - `Indexer.drain` and `plan`;
-   - `SearchService.status`, `ready`, `search` and `changes`;
-   - `readFeed`;
-   - the `search-index` job's `backlog()`, which is already async;
-   - `seshi search --status`.
+- **`transaction(fn)` takes a callback.** ClickHouse has no transactions, so the backend would
+  have to buffer the writes made inside `fn`. But reads inside `fn` (`generation()`, the held
+  session) go to the server and do not see those buffered writes. Today's indexer reads inside
+  the transaction, so that is a trap waiting to happen.
+- **`apply()` and `remove()` are conditional and per session.** Each needs the held state (a
+  read per session, or a hidden cache), and each `remove()` would be one lightweight `DELETE`.
+  That is a mutation, and ClickHouse advises against many small ones.
+- **A search costs four calls:** `readyAt()`, `query()`, `caughtUpAt()` and `counts()`. That is
+  four round trips, and `counts()` is a `count()` over `sessions FINAL` on every search.
+- **`cursor(owner)` is read once per owner per pass:** with many owners, one round trip each,
+  every `search.interval`.
+- **Nothing names a backend that cannot be reached.** A timeout should answer 503, not 500.
 
-   It is mechanical but touches every call site.
-2. **Pass a parsed query.** `parseQuery` already has the structure: groups of items ANDed, items
+So the seam changes in five ways, with SQLite still the only backend:
+
+1. **Split it into a reader and a writer, both async.** `SearchService.search`, `status` and
+   `changes` use only `IndexReader`. The indexer uses only `IndexWriter`. That also matches the
+   two ClickHouse users: read-only for API instances, read-write for the indexer.
+2. **Write one feed page at a time, as data.** `drain()` already plans a page and then applies
+   it. The plan becomes a `PageCommit` that the backend writes in one call. SQLite writes it in
+   one transaction, as today. ClickHouse writes it in a fixed order, cursor last. Every writer
+   call names the generation it was read for, which replaces the generation check inside the
+   transaction.
+3. **Pass a parsed query.** `parseQuery` already has the structure: groups of items ANDed, items
    inside a group ORed, negated items, and each item a phrase and/or prefix. Return that as a
    `MatchTree` and have `BackendQuery` carry it in place of `match`. SQLite compiles it to the
    same FTS5 string as today (`quoted()` moves into `sqlite.ts`). ClickHouse compiles it to SQL
    with bound parameters. `ParsedQuery.terms` stays as it is.
-3. **Look sessions up in batches.** `Indexer.plan` calls `index.session()` once per archive.
-   That is free in SQLite and an HTTP round trip in ClickHouse. Add `sessions(owner, archives[])`
-   and call it once per page.
-4. **Build the backend from config.** `SearchService` gets a `backend` factory, or a
-   `backend: "sqlite" | "clickhouse"` setting. Instance and serverless wiring choose it.
-   `SearchStatus.path` becomes `location`: the file path, or the ClickHouse URL without
-   credentials plus the database.
+4. **Build the backend from config.** `SearchService` takes an `OpenIndex` factory where it now
+   writes `new SqliteIndex(...)`. Instance and serverless wiring choose the factory.
+   `SearchStatus.path` becomes `location`: the file path, or the ClickHouse host and database
+   with no credentials.
 5. **Let the backend supply excerpts.** `BackendMatch.marked` stays as it is. SQLite fills it from
    `snippet()`. ClickHouse returns the record's text and a shared `excerpt(text, tree)` in
    `snippet.ts` marks it. This is the one piece of new search logic outside the backend.
 
-The indexer's logic does not change. That covers reading metadata, `currentTraces` and
-`tracesFrom`, `shows()`, the lag window, owner discovery, and refused continuations. So does the
-API, and `GET /v1/changes/all` keeps working because the ClickHouse backend implements
-`FeedState` too. The alternative was a hybrid that keeps `FeedState` in a local SQLite file and
+The call sites that become async are mechanical but many: `Indexer.pass`, `drain` and `plan`;
+`SearchService.status`, `ready`, `search` and `changes`; `readFeed`; the `search-index` job's
+`backlog()` (already async); and `seshi search --status`.
+
+## Proposed interface
+
+These replace `SearchBackend`, `FeedState` and `transaction()` in `backend.ts`. `IndexedSession`,
+`IndexedEvent`, `SessionUpdate`, `BackendMatch`, `BackendHit`, `BackendResults`, `FeedPosition`
+and `FeedRow` stay as they are.
+
+```ts
+// query.ts: parseQuery returns this, and each backend compiles it.
+export interface MatchItem {
+  /** Words after the shared normalizer (lower case, no accents, split on anything that is not
+   * a letter or digit). More than one word is a phrase: `src/app.ts` → ["src", "app", "ts"]. */
+  tokens: string[];
+  /** `word*` or `"a phrase"*`: the last word is a prefix. */
+  prefix: boolean;
+}
+
+export interface MatchTree {
+  /** Every group must match one record; within a group, any item will do. */
+  all: MatchItem[][];
+  /** A record holding any of these does not match. */
+  none: MatchItem[];
+}
+
+// backend.ts
+export interface BackendQuery {
+  match: MatchTree; // was the FTS5 string
+  viewer: Viewer;
+  owners?: readonly string[];
+  agent?: string;
+  repo?: string;
+  branch?: string;
+  source?: string;
+  since?: number;
+  until?: number;
+  sort: SearchSort;
+  limit: number;
+  offset: number;
+  matches: number;
+}
+
+/** What a search reports about the index, read in one go. */
+export interface IndexState {
+  /** When the live generation first caught up; undefined before any has. */
+  ready_at?: string;
+  caught_up_at?: string;
+  sessions: number;
+  events: number;
+  generation: string;
+  /** A rebuild in progress: the generation being built and how far it has read. */
+  building?: { generation: string; read_through?: string };
+}
+
+/** The API's side: SearchService.search, status and changes. Reads the live generation. */
+export interface IndexReader {
+  /** A file path, or a ClickHouse host and database. Never credentials. */
+  location(): string;
+  /** One read. The backend may cache it for a few seconds: a search reports it, nothing
+   * decides on it. */
+  state(): Promise<IndexState>;
+  /** `BackendMatch.marked` is filled by the backend: from FTS5's snippet() for SQLite, from
+   * the shared excerpt(text, tree) for ClickHouse. */
+  query(query: BackendQuery): Promise<BackendResults>;
+  /** The cross-owner feed (`GET /v1/changes/all`); null until every feed has been read once. */
+  feed(
+    after: FeedPosition | undefined,
+    limit: number,
+  ): Promise<{ entries: FeedRow[]; more: boolean; through: string } | null>;
+  close(): Promise<void>;
+}
+
+/** The indexer's side. Every call names the generation it reads or writes, so a run that
+ * started before a reset writes only to the generation it read: never into a rebuild. */
+export interface IndexWriter {
+  /** The generation writes go to: the live one, or the one being built. */
+  generation(): Promise<string>;
+  /** Every owner's cursor, once a pass. */
+  cursors(gen: string): Promise<Map<string, string>>;
+  /** Which of `keys` were already processed (within the lag window). */
+  seen(gen: string, owner: string, keys: readonly string[]): Promise<Set<string>>;
+  /** What the index holds of these sessions; missing and removed ones are absent. */
+  sessions(
+    gen: string,
+    owner: string,
+    archives: readonly string[],
+  ): Promise<Map<string, IndexedSession>>;
+  /** One feed page. SQLite writes it in one transaction. ClickHouse writes sessions, events,
+   * one batched delete, the feed copy, seen keys, then the cursor last. Writing a page twice
+   * changes nothing, so a crash part-way is repaired by reading the page again. */
+  commit(page: PageCommit): Promise<CommitResult>;
+  /** Every owner's feed has been read after `through` (for the cross-owner feed). */
+  readThrough(gen: string, through: string): Promise<void>;
+  /** A full pass over every owner ended at `at`. The first one for a generation that is being
+   * built makes it the live one. False when `gen` is no longer the one writes go to. */
+  passDone(gen: string, at: string): Promise<boolean>;
+  /** Start a new generation and return it. SQLite empties the file, so searches answer 503
+   * until it catches up. ClickHouse builds new tables while searches read the old ones. */
+  reset(): Promise<string>;
+}
+
+export interface PageCommit {
+  generation: string;
+  owner: string;
+  /** Sessions to index: a replace, or a continuation checked against its `base`. */
+  updates: SessionUpdate[];
+  /** Tombstones, and sessions no longer admitted. */
+  removals: { archive: string; read_at: number }[];
+  /** For the cross-owner feed; empty unless the index keeps it. */
+  feed: { name: string; entry: ChangeEntry }[];
+  seen: { key: string; at: number }[];
+  cursor: string | undefined;
+  /** Forget processed keys stamped before this (epoch ms). */
+  forgetBefore: number;
+}
+
+export interface CommitResult {
+  /** `generation` is no longer the one writes go to; nothing that matters was written. */
+  stale: boolean;
+  /** Continuations whose `base` was not what the index held: plan these again. */
+  refused: string[];
+  /** Sessions removed that the index held. */
+  removed: number;
+}
+
+export type IndexStore = IndexReader & IndexWriter;
+
+export interface IndexOptions {
+  deployment: string;
+  events: readonly EventRole[];
+  scope?: string;
+  feed?: boolean;
+}
+
+/** What SearchService calls in place of `new SqliteIndex(...)`. */
+export type OpenIndex = (options: IndexOptions) => Promise<IndexStore>;
+// sqliteIndex({ path }): OpenIndex
+// clickhouseIndex(config.search.clickhouse): OpenIndex
+
+/** The backend cannot be reached, or timed out: the API answers 503, the CLI exits 7. */
+export class IndexUnavailable extends Error {
+  readonly code = "index_unavailable";
+}
+```
+
+How the indexer uses it:
+
+- **A pass** reads `generation()` and `cursors(gen)` once.
+- **Each page** reads `seen(gen, owner, keys)` and `sessions(gen, owner, archives)`, plans,
+  then calls `commit()`. A `refused` continuation is planned again and sent in a second
+  `commit()` holding only those sessions, as `drain()` does today. `stale` ends the pass, as a
+  changed generation does today.
+- **At the end of a pass** it calls `readThrough(gen, …)` and `passDone(gen, at)`.
+
+`SqliteIndex` implements `commit()` as today's transaction body: `apply` and `remove` per plan,
+`record`, `advance`. Its behaviour does not change; the conformance suite (see
+[CI and tests](#config-and-deployment)) holds it to that. `generation()` is the same for writing
+and reading in SQLite, since a reset empties the one file.
+
+Why this shape:
+
+- **Writes are data, not callbacks.** Nothing reads inside a write, so the backend never has to
+  pretend to read its own buffered writes. Each backend commits a page the way it does best.
+- **Generations are explicit.** Blue-green rebuilds need no lock: a stale run's writes land in
+  the old tables, which are dropped. SQLite gets the same guarantee from its existing check.
+- **A search costs two calls,** `state()` and `query()`, and `state()` may be cached.
+- **Counts are reported, not computed per search.** ClickHouse can keep them in `meta` at the end
+  of each pass.
+
+The indexer's logic does not change, only how it hands a page over. That covers reading
+metadata, `currentTraces` and `tracesFrom`, `shows()`, the lag window, owner discovery, and
+refused continuations. The API does not change either, and `GET /v1/changes/all` keeps working
+because the ClickHouse backend implements `feed()` too. The alternative was a hybrid that keeps `FeedState` in a local SQLite file and
 puts only search data in ClickHouse. It is rejected: every API instance would still tail every
 feed, which is the cost a shared index is meant to remove.
 
@@ -248,15 +434,20 @@ Two workers' `read_at` values come from different clocks. A skew can let an olde
 the session's next change entry or the next rebuild. `seshi workers status` already warns about a
 second worker.
 
-**No transactions, so order and idempotency do the work.** `transaction(fn)` becomes a unit of
-work. It buffers the writes `fn` makes and flushes them in a fixed order:
+**No transactions, so order and idempotency do the work.** `commit(page)` writes the page in a
+fixed order, into the tables of the generation the page names:
 
-1. `sessions` rows (upsert, versioned by `read_at`);
+1. `sessions` rows (upsert, versioned by `read_at`), after checking each continuation's `base`
+   against the held traces, which the indexer already read with `sessions()`;
 2. `events` rows (inserted under an `insert_deduplication_token` derived from
    `(owner, archive_id, epoch, traces)`, so a retried batch is dropped);
-3. `changes` rows (the feed copy);
-4. `seen` rows, then `cursors`;
-5. `meta` (`caught_up_at`, `feed_through`) last.
+3. one lightweight `DELETE` for the page's replaced and removed sessions (see below);
+4. `changes` rows (the feed copy);
+5. `seen` rows, then the cursor.
+
+`readThrough()` and `passDone()` write `meta` (`feed_through`, `caught_up_at`, and the
+switch to a new generation) at the end of a pass. They also keep the session and event counts
+there, so `state()` never counts at query time.
 
 A crash anywhere leaves the cursor behind the content. The next run reads the same entries
 again and indexes each session from its metadata as it is now, which is idempotent by design
@@ -297,14 +488,17 @@ so the old rows must be removed too:
 catches up. ClickHouse instead builds the new generation beside the old one:
 
 1. Create the `_<newgen>` tables and set `building_gen` in `meta`.
-2. The worker builds the new generation from every feed's start, as a first build does. It keeps
-   writing the old generation during that time, or pauses it; either is safe.
+2. The worker builds the new generation from every feed's start, as a first build does. As the
+   interface is sketched, `generation()` names the one being built, so the old generation stops
+   being updated until the switch. Keeping both current is possible but costs a second pass
+   (open question 2).
 3. When the new generation has caught up, set `active_gen = newgen`, clear `building_gen`, and
    drop the old tables after a grace period (say 10 minutes) so queries already running can
    finish.
 
-The existing `generation()` check means a run that started against the old generation writes
-nothing once it sees `active_gen` change. Searches answer from the old generation the whole time.
+Every writer call names its generation, so a run that started against the old generation keeps
+writing only the old tables. `commit()` reports `stale` once the generation is no longer the one
+writes go to, and the run ends. Searches answer from the old generation the whole time.
 Only a database that has never had an active generation answers `503 index_building`.
 
 Changing `search.events`, or a new `INDEX_SCHEMA`, triggers a rebuild in the same way, as a file
@@ -461,8 +655,8 @@ covers search, not totals) and is listed below.
 1. **Who builds on `--rebuild`?** The proposal is that the worker builds on request. Should the
    CLI also be able to build in-process when no worker runs (a cron-only deployment, X7.1)?
 2. **During a rebuild, does the worker keep the old generation current, or pause it?** Keeping it
-   current doubles the indexing load while the rebuild runs; pausing leaves search stale by the
-   length of the rebuild.
+   current doubles the indexing load while the rebuild runs, and needs `IndexWriter` to offer
+   both generations. Pausing it, as sketched, leaves search stale by the length of the rebuild.
 3. **Is a relevance cap acceptable?** Or should `sort = "relevance"` fall back to recent order
    above some number of matches, and say so in the response?
 4. **Does the normalizer move to SQLite too?** That would mean SQLite indexing `norm` with the
@@ -479,7 +673,7 @@ covers search, not totals) and is listed below.
 | Phase | What | Size |
 |---|---|---|
 | 0. Spike | One script against `clickhouse-server:26.3`. Load about 1M real-shaped events. Check `hasAllTokens`, `hasPhrase` (hint mode), the prefix pattern and the BM25 SQL. Measure p50 and p95 for 10 representative queries, and check lightweight delete with the text index. Decide on the client library and between a stored `norm` column and a preprocessor. | 2–3 days |
-| 1. Seam | Make `IndexStore` async, add `MatchTree`, `sessions()` batch lookup, a backend factory, `SearchStatus.location`, and `excerpt()` in `snippet.ts`. SQLite only, with no change in behaviour; the existing tests pass unchanged apart from `await`s. | 3–5 days |
+| 1. Seam | Replace `SearchBackend` and `FeedState` with `IndexReader` and `IndexWriter`, and move `drain()` onto `commit()`. Add `MatchTree`, `state()`, `IndexUnavailable`, the `OpenIndex` factory, `SearchStatus.location`, and `excerpt()` in `snippet.ts`. SQLite only, with no change in behaviour; the existing tests keep their assertions, with calls ported to the new interface. | 4–6 days |
 | 2. Backend | `ClickHouseIndex`: DDL and meta checks, the unit-of-work flush, sessions, events and epochs, batched deletes, the `FeedState` tables, the query compiler, grouping and BM25. The conformance suite, the CI service and crash tests. | 1.5–2 weeks |
 | 3. Deploy | The config schema, a `worker` placement for this backend, blue-green rebuild, `--status`, `--rebuild` and `--wait`, `doctor` checks, the delete-mask job, and docs (`docs/search.md` operator section, `docs/config.md`, F10 in `design-decisions.html`). | 1 week |
 | 4. Native ranking | Switch to ClickHouse's top-K BM25 when it ships, behind the same sort. | Small, later |
