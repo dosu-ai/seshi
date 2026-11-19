@@ -1,0 +1,28 @@
+# Guards the doctor while a replace review dropped waits (33, found by the scenario explorer,
+# seeds 104 and 1322): review dropped the replace of a compacted session, so the server keeps
+# the session it had, which the transcript no longer extends, and the uploader waits for the
+# transcript to grow before it replaces again (`replace_next`, 20 × 21). The doctor failed
+# `offsets` and `records` for it meanwhile; it warns now, and the next turn replaces for good.
+name: a dropped replace, then the doctor
+description: >
+  A stored session is compacted shorter, so its next upload is a whole log that conflicts and
+  goes again as a replace; review drops the replace and the server keeps what it had. Once
+  quiet the doctor fails no check. The next turn goes whole as a replace and is stored.
+guards: "33: the doctor warns, not fails, while a dropped replace waits for the transcript to grow"
+setup:
+  review: true
+steps:
+  - turns: { session: main, count: 2 }
+  - pass
+  - review: [drop]
+  - compact: { session: main, mode: shrink, keep: 1 }
+  - pass
+  - expect:
+      sessions:
+        main: { server: present, records: 11, last-status: dropped, doctor: ok }
+  - settle
+  - turns: { session: main, count: 1 }
+  - settle
+  - expect:
+      sessions:
+        main: { last-status: stored, matches-transcript: true, sent-all: true, doctor: ok }

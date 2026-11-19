@@ -1,0 +1,16 @@
+{
+  "name": "@seshi/integration-datadog-trajectory",
+  "private": true,
+  "description": "Datadog Trajectory: the daemon's session-file adapter, and the LLM Observability poller with its datadog-llmobs span format (F5).",
+  "type": "module",
+  "exports": {
+    ".": {
+      "bun": "./src/index.ts"
+    }
+  },
+  "dependencies": {
+    "@seshi/formats": "workspace:*",
+    "@seshi/kit": "workspace:*",
+    "@seshi/model": "workspace:*"
+  }
+}

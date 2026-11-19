@@ -1,0 +1,15 @@
+{
+  "name": "@seshi/redact",
+  "private": true,
+  "description": "Layer 1: the redaction rule engine over trajectory-v1 records (the pipeline's redaction stage) and raw transcripts.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "bun": "./src/index.ts"
+    }
+  },
+  "dependencies": {
+    "@seshi/model": "workspace:*",
+    "re2js": "2.10.0"
+  }
+}

@@ -1,0 +1,39 @@
+# Guards X4.7 and X6.3 across a process death: the uploader is SIGKILLed after its whole request
+# reached the server, so the server commits while the laptop never learns of it (its state still
+# says the old offset). The next uploader resends what the server already holds: a first upload
+# repeated whole is a duplicate, a chunk at the old offset is told where the server is; either
+# way one trace per piece and no record twice.
+name: the uploader killed after the server committed
+description: >
+  The first upload, then a chunk, each reach the server whole, and the uploader is SIGKILLed
+  before it reads the answer. The server commits both times. Each time the next uploader takes
+  the stale lock over and resends; the server ends with two traces and exactly the transcript's
+  records.
+guards: "X4.7 × X6.3: a resend after a dead uploader's committed request is idempotent"
+setup: { mode: process }
+steps:
+  - turns: { session: main, count: 2 }
+  - fault: { http: POST /v1/sessions, kill-client: all }
+  - pass
+  - expect:
+      sessions:
+        main: { server: present, traces: 1, records: 11, sent-all: false }
+      uploader-lock: stale
+  - pass
+  - expect:
+      pass: { uploaded: 1, failed: 0 }
+      sessions:
+        main: { traces: 1, matches-transcript: true, sent-all: true }
+  - turns: { session: main, count: 3, mark: committed-chunk }
+  - fault: { http: POST /v1/sessions, kill-client: all }
+  - pass
+  - expect:
+      sessions:
+        main: { traces: 2, sent-all: false }
+      bucket: { has: [committed-chunk] }
+  - pass
+  - expect:
+      pass: { failed: 0 }
+      sessions:
+        main: { traces: 2, matches-transcript: true, sent-all: true }
+  - settle

@@ -1,0 +1,15 @@
+{
+  "name": "@seshi/integration-gemini-cli",
+  "private": true,
+  "description": "Gemini CLI: the session document adapter.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "bun": "./src/index.ts"
+    }
+  },
+  "dependencies": {
+    "@seshi/formats": "workspace:*",
+    "@seshi/kit": "workspace:*"
+  }
+}

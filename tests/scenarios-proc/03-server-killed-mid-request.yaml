@@ -1,0 +1,43 @@
+# Guards the uploader's backoff and the server's restart across a real process death: `seshi
+# serve` is SIGKILLed while a chunk is in flight, first with only the head on the wire (nothing
+# can commit), then with the whole request in (the kill lands wherever the server is: reading,
+# redacting or writing the bucket). Brought back on the same port over the same bucket, the
+# uploader's retries converge: the bucket checks clean, every record once, the doctor passes.
+name: the server killed mid-request, restarted, converges
+description: >
+  A stored session grows; seshi serve is SIGKILLed when the chunk's head reaches it. Passes
+  fail and back off while it is down; restarted, the chunk goes once. Then it is SIGKILLed with
+  a whole chunk inside it, restarted, and the uploader converges whatever the kill interrupted.
+guards: "F9.1 × X6.3: a server killed mid-request, restarted, converges"
+setup: { mode: process }
+steps:
+  - turns: { session: main, count: 2 }
+  - pass
+  - turns: { session: main, count: 2, mark: chunk-one }
+  - fault: { http: POST /v1/sessions, kill-server: 0 }
+  - pass
+  - expect:
+      pass: { uploaded: 0, failed: 1, retrying: 1 }
+  - turns: { session: main, count: 1, mark: written-while-down }
+  - pass
+  - expect:
+      pass: { uploaded: 0 }
+      log: ["will retry"]
+  - restart-server
+  - expect:
+      sessions:
+        main: { traces: 1, records: 11 }
+      bucket: { lacks: [chunk-one, written-while-down] }
+  - settle
+  - expect:
+      sessions:
+        main: { traces: 2, matches-transcript: true, sent-all: true }
+  - turns: { session: main, count: 3, mark: chunk-two }
+  - fault: { http: POST /v1/sessions, kill-server: all }
+  - pass
+  - restart-server
+  - settle
+  - expect:
+      sessions:
+        main: { matches-transcript: true, sent-all: true }
+      bucket: { has: [chunk-two] }

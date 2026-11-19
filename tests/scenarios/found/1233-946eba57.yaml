@@ -1,0 +1,20 @@
+# Found by the scenario explorer (tests/tooling/scenario/explore.ts); see tests/scenarios/README.md.
+# seed: 1233 (bun run scenarios:explore --seed 1233 --runs 1 --max-steps 25)
+# original length: 15 steps; shrunk to 6 in 54 runs
+# failure:
+#   step 6 (settle max=40): once quiet, the server does not match the laptop
+#     claude-code:main: never stored from here, but the server holds main
+#     faults fired:
+#       store put owners/me/sessions/a40d5f79786facfbb0389dcac9dbb5f3a92980bed8517574779723b503b81808/metadata.json: store put owners/*/sessions/*/metadata.json #1 ×2 → fail after the write
+#     capture log (last lines):
+#       2026-09-01T09:00:00.010Z uploader: claude-code:main: will retry: injected store failure for owners/me/sessions/a40d5f79786facfbb0389dcac9dbb5f3a92980bed8517574779723b503b81808/metadata.json (store put owners/*/sessions/*/metadata.json #1 ×…
+name: found by seed 1233
+description: "A generated scenario (seed 1233) shrunk from 15 to 6 steps; the header says how it failed."
+setup: { mode: local }
+steps:
+  - fault: { store: put, key: "owners/*/sessions/*/metadata.json", after: true, times: 2 }
+  - turns: { session: main, count: 2 }
+  - pass
+  - capture: pause 2h
+  - heal
+  - settle

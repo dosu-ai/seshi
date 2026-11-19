@@ -1,0 +1,60 @@
+# Guards 20 × F9.7 and 21: a stub (nothing readable stored) is still retracted with its secret,
+# and turned on again starts a fresh `~1` session; a rebuild that review drops leaves the stored
+# session as it was and marks the next send a replace (`replace_next`), which converges once the
+# transcript grows, through an outage and a server restart.
+name: a stub retracted, a rebuild review drops
+description: >
+  Review drops one session's first upload (a stub), which is then turned off and retracted. A
+  format bump makes the other session stale; review drops its rebuild, so the session stays as
+  stored. Its next turn meets three 503s and a server restart, then goes. The stub's session,
+  turned on again, is stored whole as stubby~1.
+guards: "20 × F9.7 × 21: retracting a stub; a dropped rebuild then an outage converge"
+setup:
+  review: true
+steps:
+  - review: [drop]
+  - turns: { session: stubby, count: 2, mark: s-dropped }
+  - turns: { session: main, count: 2 }
+  - pass
+  - expect:
+      sessions:
+        stubby: { server: stub }
+        main: { server: present }
+  - capture: off --session stubby
+  - pass
+  - expect:
+      pass: { retracted: 1 }
+      sessions:
+        stubby: { server: redacted, retract: done }
+  - format-bump: claude-code
+  - clock: +2h
+  - pass
+  - clock: +1d
+  - review: [drop]
+  - pass
+  - expect:
+      pass: { uploaded: 1 }
+      sessions:
+        main: { server: present, traces: 1, rebuild: none, last-status: dropped }
+  - turns: { session: main, count: 1 }
+  - fault: { http: POST /v1/sessions, status: 503, times: 3 }
+  - pass
+  - clock: +1m
+  - pass
+  - restart-server
+  - clock: +2m
+  - pass
+  - clock: +5m
+  - pass
+  - expect:
+      sessions:
+        main: { server: present, matches-transcript: true, sent-all: true }
+  - capture: on --session stubby
+  - turns: { session: stubby, count: 1, mark: s-back }
+  - settle
+  - expect:
+      sessions:
+        stubby: { id: stubby~1 }
+        stubby~1: { server: present, matches-transcript: true }
+      bucket:
+        has: [s-dropped, s-back]

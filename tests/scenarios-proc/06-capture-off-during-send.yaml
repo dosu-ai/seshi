@@ -1,0 +1,38 @@
+# Guards F9.5 × F9.7 across processes: `seshi capture off --session` runs while another process,
+# the uploader, has that session's chunk on the wire. The chunk was written before the toggle
+# and may land; nothing written after the toggle is ever sent; the uploader's own state write
+# after the answer must not undo the toggle or the pending retraction; and the next pass
+# retracts the session, so none of its text stays on the server. In-process the toggle can only
+# come between passes.
+name: capture off while a pass is sending
+description: >
+  A stored session grows; its chunk is held 2 s at the proxy while `capture off --session main`
+  runs in its own process, and the session writes another turn. The held chunk lands, the
+  uploader records it without clearing the toggle, sends nothing more, and the next pass
+  retracts the session: the server keeps only a tombstone.
+guards: "F9.5 × F9.7: capture off during a send; nothing after it stored, the retraction lands"
+setup: { mode: process }
+steps:
+  - turns: { session: main, count: 2, mark: before-off }
+  - pass
+  - turns: { session: main, count: 2, mark: in-flight }
+  - fault: { http: POST /v1/sessions, delay: 2s }
+  - background: { as: sending, step: pass }
+  - await: { request: POST /v1/sessions }
+  - capture: off --session main
+  - turns: { session: main, count: 1, mark: after-off }
+  - join: sending
+  - expect:
+      runs:
+        sending: { started: true, pass: { uploaded: 1, failed: 0 } }
+      sessions:
+        main: { toggle: off, retract: pending, traces: 2 }
+      bucket: { has: [in-flight], lacks: [after-off] }
+  - pass
+  - expect:
+      pass: { retracted: 1, uploaded: 0 }
+      sessions:
+        main: { server: redacted, retract: done, toggle: off }
+      bucket: { lacks: [before-off, in-flight, after-off] }
+      requests: { "POST /v1/sessions": 2 }
+  - settle

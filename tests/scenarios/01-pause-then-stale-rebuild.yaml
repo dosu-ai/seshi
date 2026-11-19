@@ -1,0 +1,40 @@
+# Guards 21 × 24: a rebuild of a session a pause stopped is sent only up to where it stopped.
+# A rebuild goes whole, from byte 0, so it must still be cut at the frozen offset (sendLimit);
+# otherwise the turns written during the pause reach the server through the stale resend.
+name: pause, then a stale rebuild
+description: >
+  A session is uploaded, a pause stops it, it keeps growing, then a format bump makes it stale.
+  The rebuild waits its turn, goes whole, and stops at the frozen offset: the turns written
+  during and after the pause are never stored.
+guards: "21 × 24: a stale rebuild stops at the frozen offset"
+steps:
+  - turns: { session: main, count: 2 }
+  - pass
+  - expect:
+      pass: { uploaded: 1 }
+      sessions:
+        main: { server: present, sent-all: true }
+  - capture: pause 2h
+  - turns: { session: main, count: 2, mark: written-while-paused }
+  - pass
+  - expect:
+      pass: { uploaded: 0 }
+      sessions:
+        main: { frozen: true, records: 11 }
+  - format-bump: claude-code
+  - clock: +3h
+  - turns: { session: main, count: 1, mark: written-after-the-pause }
+  # This pass asks the server which sessions are stale; the rebuild waits within the day.
+  - pass
+  - expect:
+      sessions:
+        main: { rebuild: waiting, frozen: true }
+  - clock: +1d
+  - pass
+  - expect:
+      pass: { uploaded: 1, failed: 0 }
+      sessions:
+        main: { rebuild: none, frozen: true, server: present, records: 11, traces: 1 }
+      bucket:
+        lacks: [written-while-paused, written-after-the-pause]
+  - settle

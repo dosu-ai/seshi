@@ -1,0 +1,268 @@
+# The built-in redaction rule pack (F2.1). Every seshi server and client runs it, before or after
+# the operator's own packs ([redaction] packs). An operator pack can turn a rule off by its id
+# (disable = ["entropy"]) but cannot change it.
+#
+# Rules marked implementation = "builtin" are matched by reviewed code
+# (packages/ts/redact/src/secrets.ts) in JavaScript regular expressions; F2.2 allows that for
+# built-in rules. This file names them, says what each catches, and holds test strings that
+# packages/ts/redact tests run against the code. The sensitive-file globs and secret commands
+# below are data: what is listed here is what runs.
+#
+# After editing, run `bun run packs` (it regenerates src/generated/builtin-pack.ts) and bump
+# `version` whenever what the rules match changes, so metadata.redaction.rule_set tells sessions
+# redacted before the change from those after.
+#
+# Some test strings spell a token's first character as a \u escape, so the file holds no string
+# that secret scanners take for a real credential.
+
+id = "builtin"
+version = "seshi/rules/3"
+description = "Secrets in the shapes credentials take, files that hold secrets, and commands that print them."
+
+# --- Text rules, in the order they run (after the operator's text rules). ---
+
+[[rules]]
+id = "private-key"
+description = "PEM private key blocks, delimiters included."
+implementation = "builtin"
+tests.match = ["-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA0Zx0FAKE\n-----END RSA PRIVATE KEY-----"]
+tests.no_match = ["-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----"]
+
+[[rules]]
+id = "url-credentials"
+description = "The password in a URL's user:password@host; the user and host are kept."
+implementation = "builtin"
+tests.match = ["DATABASE_URL is postgres://admin:s3cr3t@db.internal:5432/app"]
+tests.no_match = ["https://example.com/docs:intro"]
+
+[[rules]]
+id = "aws-secret"
+description = "An AWS secret access key assigned to its variable."
+implementation = "builtin"
+tests.match = ["AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY00"]
+tests.no_match = ["aws configure list"]
+
+[[rules]]
+id = "seshi-token"
+description = "seshi's own opaque tokens (seshi_<id>_<secret>)."
+implementation = "builtin"
+tests.match = ["my token is seshi_0123456789abcdef0123_aB3_-aB3_-aB3_-aB3_-aB3_-aB3_-aB3_-aB3_-xY- ok"]
+tests.no_match = ["seshi_status is fine"]
+
+[[rules]]
+id = "aws-access-key"
+description = "AWS access key ids (AKIA…, ASIA…)."
+implementation = "builtin"
+tests.match = ["creds AKIAIOSFODNN7EXAMPLE end"]
+tests.no_match = ["AKIA is a prefix"]
+
+[[rules]]
+id = "quoted-secret"
+description = "A password, secret, token or API key named in prose and quoted."
+implementation = "builtin"
+tests.match = ['FATAL: password authentication failed with password "S3cr3tP@ssw0rd!"']
+tests.no_match = ["the password rules require 8 characters"]
+
+[[rules]]
+id = "bearer-token"
+description = "The token after Bearer or Basic; the scheme is kept."
+implementation = "builtin"
+tests.match = ["Authorization: Bearer abc.def-ghi_jkl~mno123456"]
+tests.no_match = ["a bearer of bad news"]
+
+[[rules]]
+id = "jwt"
+description = "JSON Web Tokens, including ones glued to a preceding word character."
+implementation = "builtin"
+tests.match = ["anon key eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abc123def456ghi"]
+tests.no_match = ["keyJsonSchema.properties.name"]
+
+[[rules]]
+id = "credential"
+description = "A value assigned to a key that names a credential (api_key, *_TOKEN, password, …, in several languages), or shown on the line under such a label."
+implementation = "builtin"
+tests.match = [
+  "export DATABASE_PASSWORD=hunter2hunter2hunter2",
+  '{"api_key": "abcd1234efgh5678ijkl"}',
+  "пароль: abcd1234efgh5678ijkl",
+]
+tests.no_match = ["cache_key: build-artifacts-v2", "the token count was 42"]
+
+[[rules]]
+id = "github-token"
+description = "GitHub tokens: ghp_, gho_, ghs_, ghu_, ghr_ and github_pat_."
+implementation = "builtin"
+tests.match = ["push with \u0067hp_abcdefghijklmnopqrstuvwx0123456789"]
+tests.no_match = ["ghp_short"]
+
+[[rules]]
+id = "gitlab-token"
+description = "GitLab personal access tokens (glpat-)."
+implementation = "builtin"
+tests.match = ["ci \u0067lpat-abcdefghij0123456789"]
+
+[[rules]]
+id = "stripe-key"
+description = "Stripe secret and restricted keys (sk_live_, sk_test_, rk_live_, rk_test_)."
+implementation = "builtin"
+tests.match = ["stripe \u0073k_live_abcdefghijklmnop"]
+
+[[rules]]
+id = "user-key"
+description = "Per-user keys shaped sk_user_…."
+implementation = "builtin"
+tests.match = ["key \u0073k_user_abcdef1234567890"]
+
+[[rules]]
+id = "anthropic-key"
+description = "Anthropic API keys (sk-ant-)."
+implementation = "builtin"
+tests.match = ["llm \u0073k-ant-api03-abcdefghijklmnopqrstuvwxyz"]
+
+[[rules]]
+id = "openai-key"
+description = "OpenAI-style keys (sk-, sk-proj-)."
+implementation = "builtin"
+tests.match = ["openai \u0073k-proj-abcdefghijklmnopqrstuvwxyz"]
+tests.no_match = ["sk-learn is a library"]
+
+[[rules]]
+id = "groq-key"
+description = "Groq API keys (gsk_)."
+implementation = "builtin"
+tests.match = ["groq \u0067sk_abcdefghijklmnopqrstuvwxyz"]
+
+[[rules]]
+id = "xai-key"
+description = "xAI API keys (xai-)."
+implementation = "builtin"
+tests.match = ["xai \u0078ai-abcdefghijklmnopqrstuvwxyz"]
+
+[[rules]]
+id = "huggingface-token"
+description = "Hugging Face tokens (hf_)."
+implementation = "builtin"
+tests.match = ["hf \u0068f_abcdefghijklmnopqrstuvwxyz"]
+
+[[rules]]
+id = "npm-token"
+description = "npm access tokens (npm_)."
+implementation = "builtin"
+tests.match = ["publish \u006epm_abcdefghijklmnopqrstuvwxyz0123456789"]
+
+[[rules]]
+id = "slack-token"
+description = "Slack tokens (xoxb-, xoxp-, xoxc-, xoxs-)."
+implementation = "builtin"
+tests.match = ["hook \u0078oxb-1234567890-abcdefghij"]
+
+[[rules]]
+id = "google-api-key"
+description = "Google API keys (AIza…)."
+implementation = "builtin"
+tests.match = ["maps \u0041IzaSyA1234567890abcdefghijklmnopqrstuv"]
+
+[[rules]]
+id = "pulumi-token"
+description = "Pulumi access tokens (pul- and 40 hex digits)."
+implementation = "builtin"
+tests.match = ["login \u0070ul-0123456789abcdef0123456789abcdef01234567"]
+
+[[rules]]
+id = "supabase-token"
+description = "Supabase access tokens (sbp_ and 40 hex digits)."
+implementation = "builtin"
+tests.match = ["deploy \u0073bp_0123456789abcdef0123456789abcdef01234567"]
+
+[[rules]]
+id = "provider-token"
+description = "Any other provider token shape the provider pattern finds (a fallback name)."
+implementation = "builtin"
+
+[[rules]]
+id = "entropy"
+description = "A long high-entropy string where a secret would sit: the value of an assignment, or alone on its line. Hex, paths and lowercase-only words are left alone."
+implementation = "builtin"
+tests.match = ["DEPLOY_CRED=aB3xY7pQ9zK2mN8vR4tWcD5f", "paste:\n  aB3xY7pQ9zK2mN8vR4tWcD5fGh6J\ndone"]
+tests.no_match = ["commit d3b07384d113edec49eaa6238ad5ff00d3b07384", "moved to: aB3xY7pQ9zK2mN8vR4tWcD5f"]
+
+# --- Sensitive files: a tool call that names one keeps its call, and its result is withheld. ---
+
+[[sensitive_files]]
+id = "sensitive-file"
+description = "Files that hold secrets in nearly every project and machine."
+globs = [
+  ".env",
+  ".env.*",
+  "!.env.example",
+  "!.env.sample",
+  "!.env.template",
+  "!.env.dist",
+  "*.pem",
+  "*.key",
+  "*.p12",
+  "*.pfx",
+  "*.keystore",
+  "*.jks",
+  "id_rsa",
+  "id_dsa",
+  "id_ecdsa",
+  "id_ed25519",
+  ".netrc",
+  "_netrc",
+  ".pgpass",
+  ".npmrc",
+  ".pypirc",
+  ".git-credentials",
+  ".dockercfg",
+  ".docker/config.json",
+  ".aws/credentials",
+  ".azure/accessTokens.json",
+  ".config/gcloud/**/*credentials*.json",
+  "application_default_credentials.json",
+  "service-account*.json",
+  ".kube/config",
+  "*.tfvars",
+  "*.tfstate",
+  "secrets.yml",
+  "secrets.yaml",
+  ".vault-token",
+]
+tests.match = [".env", "app/.env.local", "/home/a/.aws/credentials", "deploy/prod.tfvars"]
+tests.no_match = [".env.example", "src/env.ts", "README.md"]
+
+# --- Secret commands: a tool call that runs one keeps its call, and its output is withheld. ---
+
+[[secret_commands]]
+id = "secret-output"
+description = "Commands whose output is a secret, or the environment that holds them."
+patterns = [
+  'printenv\b',
+  'env(?:\s+-0)?\s*$',
+  'set\s*$',
+  'export\s+-p\s*$',
+  'gh\s+auth\s+token\b',
+  '(?:gh|glab)\s+auth\s+status\b.*(?:--show-token|\s-t\b)',
+  'git\s+credential\s+fill\b',
+  'aws\s+configure\s+(?:get|export-credentials)\b',
+  'aws\s+sts\s+(?:get-session-token|get-federation-token|assume-role\S*)\b',
+  'aws\s+ecr(?:-public)?\s+get-login-password\b',
+  'aws\s+secretsmanager\s+get-secret-value\b',
+  'aws\s+ssm\s+get-parameters?(?:-by-path)?\b.*--with-decryption',
+  'gcloud\s+auth\s+(?:application-default\s+)?print-(?:access|identity)-token\b',
+  'gcloud\s+secrets\s+versions\s+access\b',
+  'az\s+(?:account\s+get-access-token|keyvault\s+secret\s+show)\b',
+  'kubectl\s+get\s+secrets?\b',
+  'kubectl\s+config\s+view\b.*--raw',
+  'vault\s+(?:kv\s+get|read|token\s+create|print\s+token)\b',
+  'op\s+(?:read|inject|item\s+get)\b',
+  'security\s+find-(?:generic|internet)-password\b',
+  'doppler\s+secrets\b',
+  'heroku\s+(?:auth:token|config)\b',
+  'fly(?:ctl)?\s+auth\s+token\b',
+  'sops\s+(?:-d|--decrypt|decrypt)\b',
+  'ansible-vault\s+(?:view|decrypt)\b',
+  'pass\s+show\b',
+]
+tests.match = ["printenv", "sudo kubectl get secret db -o yaml", "cd x && gh auth token"]
+tests.no_match = ["env FOO=1 make", "kubectl get pods", "echo printenv"]

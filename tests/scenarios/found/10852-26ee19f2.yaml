@@ -1,0 +1,23 @@
+# Found by the scenario explorer (tests/tooling/scenario/explore.ts); see tests/scenarios/README.md.
+# seed: 10852 (bun run scenarios:explore --seed 10852 --runs 1 --max-steps 25)
+# original length: 25 steps; shrunk to 9 in 114 runs
+# failure:
+#   step 6 (clock ms=7200000): checkStore found errors
+#     error redacted_trace_object: trace b20a2094b1ea… is still here (written 2026-09-01T09:00:00.019Z) (owners/alice@acme.com/sessions/8953f8500d62223eeb070edfd3dd34d13ac0a023369df67a2fd371d6b69e3cb3/trace.b20a2094b1eaf712588857611c968036df61a706…
+#     faults fired:
+#       store put owners/alice@acme.com/sessions/8953f8500d62223eeb070edfd3dd34d13ac0a023369df67a2fd371d6b69e3cb3/metadata.json: store put owners/*/sessions/*/metadata.json #1 → precondition after the write
+#     capture log (last lines):
+#       2026-09-01T09:00:00.036Z uploader: claude-code:main: retracted
+name: found by seed 10852
+description: "A generated scenario (seed 10852) shrunk from 25 to 9 steps; the header says how it failed."
+steps:
+  - turns: { session: main, count: 2 }
+  - pass
+  - capture: off --session main
+  - fault:
+      { store: put, key: "owners/*/sessions/*/metadata.json", after: true, error: precondition }
+  - pass
+  - clock: +2h
+  - subagent: { parent: main, id: x, turns: 2 }
+  - heal
+  - settle

@@ -1,0 +1,23 @@
+# Found by the scenario explorer (tests/tooling/scenario/explore.ts); see tests/scenarios/README.md.
+# seed: 1169 (bun run scenarios:explore --seed 1169 --runs 1 --max-steps 25)
+# original length: 18 steps; shrunk to 7 in 50 runs
+# failure:
+#   step 7 (settle max=40): once quiet, seshi doctor fails a check
+#     main: queue: refused (conflict): the upload does not extend the stored session (its records do not start with what is stored); send it with replace to rewrite the session
+#         3146 bytes not uploaded yet
+#     faults fired:
+#       store put owners/me/sessions/a40d5f79786facfbb0389dcac9dbb5f3a92980bed8517574779723b503b81808/metadata.json: store put owners/*/sessions/*/metadata.json #1 → fail after the write
+#     capture log (last lines):
+#       2026-09-01T09:00:00.010Z uploader: claude-code:main: will retry: injected store failure for owners/me/sessions/a40d5f79786facfbb0389dcac9dbb5f3a92980bed8517574779723b503b81808/metadata.json (store put owners/*/sessions/*/metadata.json #1 →…
+#       2026-09-01T09:00:06.013Z uploader: claude-code:main: conflict: the upload does not extend the stored session (its records do not start with what is stored); send it with replace to rewrite the session
+name: found by seed 1169
+description: "A generated scenario (seed 1169) shrunk from 18 to 7 steps; the header says how it failed."
+setup: { mode: local }
+steps:
+  - turns: { session: main, count: 2 }
+  - fault: { store: put, key: "owners/*/sessions/*/metadata.json", after: true }
+  - pass
+  - compact: { session: main, mode: shrink, keep: 1 }
+  - fault: { store: put, key: "owners/*/sessions/*/metadata.json" }
+  - heal
+  - settle

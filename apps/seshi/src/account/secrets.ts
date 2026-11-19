@@ -1,0 +1,174 @@
+import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
+import { ConfigError } from "@seshi/config";
+
+export const KEYCHAIN_SERVICE = "seshi";
+
+export interface SecretBackend {
+  /** What holds the secrets, for `whoami` and messages: `keychain`, `file`, or a test's own. */
+  readonly kind: string;
+  get(name: string): Promise<string | null>;
+  set(name: string, value: string): Promise<void>;
+  /** Whether there was one to delete. */
+  delete(name: string): Promise<boolean>;
+}
+
+export function keychainSecrets(service = KEYCHAIN_SERVICE): SecretBackend {
+  return {
+    kind: "keychain",
+    async get(name) {
+      return (await Bun.secrets.get({ service, name })) ?? null;
+    },
+    async set(name, value) {
+      await Bun.secrets.set({ service, name, value });
+    },
+    async delete(name) {
+      return Bun.secrets.delete({ service, name });
+    },
+  };
+}
+
+export function writePrivateFile(path: string, text: string): void {
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  const temp = `${path}.${process.pid}.${Date.now()}.tmp`;
+  writeFileSync(temp, text, { mode: 0o600 });
+  try {
+    chmodSync(temp, 0o600);
+    renameSync(temp, path);
+  } catch (err) {
+    rmSync(temp, { force: true });
+    throw err;
+  }
+}
+
+export function parseJsonFile(path: string, text: string): Record<string, unknown> {
+  const refuse = (why: string) =>
+    new ConfigError([`${path} is not a JSON object (${why}); remove it and run seshi login again`]);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (err) {
+    throw refuse(err instanceof Error ? err.message : String(err));
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw refuse(parsed === null ? "null" : Array.isArray(parsed) ? "an array" : typeof parsed);
+  }
+  return parsed as Record<string, unknown>;
+}
+
+/** A JSON file of name → secret, mode 0600. On Windows the mode is not enforced; the file is
+ * under the user's own `%APPDATA%`. */
+export class FileSecrets implements SecretBackend {
+  readonly kind = "file";
+
+  constructor(readonly path: string) {}
+
+  private read(): Record<string, string> {
+    let text: string;
+    try {
+      text = readFileSync(this.path, "utf8");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return {};
+      throw err;
+    }
+    const parsed = parseJsonFile(this.path, text) as { secrets?: Record<string, string> };
+    return parsed.secrets ?? {};
+  }
+
+  private write(secrets: Record<string, string>): void {
+    if (Object.keys(secrets).length === 0) {
+      rmSync(this.path, { force: true });
+      return;
+    }
+    writePrivateFile(
+      this.path,
+      `${JSON.stringify({ schema: "seshi/secrets/1", secrets }, null, 2)}\n`,
+    );
+  }
+
+  async get(name: string): Promise<string | null> {
+    return this.read()[name] ?? null;
+  }
+
+  async set(name: string, value: string): Promise<void> {
+    const secrets = this.read();
+    secrets[name] = value;
+    this.write(secrets);
+  }
+
+  async delete(name: string): Promise<boolean> {
+    const secrets = this.read();
+    if (!(name in secrets)) return false;
+    delete secrets[name];
+    this.write(secrets);
+    return true;
+  }
+}
+
+export class MemorySecrets implements SecretBackend {
+  readonly kind = "memory";
+  readonly values = new Map<string, string>();
+
+  async get(name: string): Promise<string | null> {
+    return this.values.get(name) ?? null;
+  }
+  async set(name: string, value: string): Promise<void> {
+    this.values.set(name, value);
+  }
+  async delete(name: string): Promise<boolean> {
+    return this.values.delete(name);
+  }
+}
+
+async function tryUnusableBackend<T>(op: () => Promise<T>): Promise<T | undefined> {
+  try {
+    return await op();
+  } catch {
+    return undefined;
+  }
+}
+
+/** The keychain first, the file when the keychain cannot be used. Reads look in both, so a
+ * secret written to the file while the keychain was locked is still found. `fellBack` says
+ * why the last write went to the file, for a warning. */
+/** Each secret is its own keychain entry, so a long IdP refresh token never pushes a short key
+ * over a keychain's size limit; one the keychain refuses goes to the file alone. */
+export class FallbackSecrets implements SecretBackend {
+  /** Why a secret went to the file, when one did. */
+  fellBack: string | undefined;
+  /** Which backend took each secret written in this process. */
+  readonly placed = new Map<string, string>();
+
+  constructor(
+    readonly primary: SecretBackend,
+    readonly fallback: SecretBackend,
+  ) {}
+
+  get kind(): string {
+    return this.fellBack === undefined ? this.primary.kind : this.fallback.kind;
+  }
+
+  async get(name: string): Promise<string | null> {
+    const value = await tryUnusableBackend(() => this.primary.get(name));
+    if (typeof value === "string") return value;
+    return this.fallback.get(name);
+  }
+
+  async set(name: string, value: string): Promise<void> {
+    try {
+      await this.primary.set(name, value);
+      this.placed.set(name, this.primary.kind);
+      await this.fallback.delete(name);
+      return;
+    } catch (err) {
+      this.fellBack = err instanceof Error ? err.message : String(err);
+    }
+    await this.fallback.set(name, value);
+    this.placed.set(name, this.fallback.kind);
+  }
+
+  async delete(name: string): Promise<boolean> {
+    const deleted = (await tryUnusableBackend(() => this.primary.delete(name))) ?? false;
+    return (await this.fallback.delete(name)) || deleted;
+  }
+}

@@ -1,0 +1,19 @@
+# Found by the scenario explorer (tests/tooling/scenario/explore.ts); see tests/scenarios/README.md.
+# seed: 12775 (bun run scenarios:explore --seed 12775 --runs 1 --max-steps 25)
+# original length: 18 steps; shrunk to 6 in 38 runs
+# failure:
+#   step 6 (settle max=40): once quiet, seshi doctor fails a check
+#     main: records: the transcript's first 4087 bytes normalize to 10 records; the server counts 11
+#     faults fired:
+#       http POST /v1/sessions: POST /v1/sessions #1 → drop-response
+#     capture log (last lines):
+#       2026-09-01T09:00:00.023Z uploader: claude-code:main: will retry: cannot reach <server>: fetch failed: the connection closed before the response (injected)
+name: found by seed 12775
+description: "A generated scenario (seed 12775) shrunk from 18 to 6 steps; the header says how it failed."
+steps:
+  - fault: { http: POST /v1/sessions, drop-response: true }
+  - turns: { session: main, count: 2, secret: true }
+  - pass
+  - capture: pause 2h
+  - heal
+  - settle

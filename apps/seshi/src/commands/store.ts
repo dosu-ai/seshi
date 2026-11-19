@@ -1,0 +1,166 @@
+import { existsSync } from "node:fs";
+import { type ParseArgsConfig, parseArgs } from "node:util";
+import { ConfigError, findServerConfig, loadServerConfig } from "@seshi/config";
+import { storeOptions } from "@seshi/instance";
+import {
+  type CheckReport,
+  checkStore,
+  type Finding,
+  isOwner,
+  openStore,
+  type Store,
+} from "@seshi/store";
+import { openAccount } from "../account/account";
+import { EXIT } from "../cli/exit";
+import { emit, fail, helpOrUsageError, takeJson } from "../cli/output";
+import { printable, type Style, styleFor } from "../cli/style";
+import { openServerlessStore } from "../serverless/open";
+import { isServerless } from "../serverless/settings";
+import type { CommandContext } from "./index";
+import { configFlags } from "./serve-settings";
+import { cwdConfigHint, SERVER_OPTIONS, serverFailure } from "./server-instance";
+
+const USAGE =
+  "usage: seshi store check [--owner <id>]… [--json] [--config <file>] [--set path=value]…";
+
+class UsageError extends Error {}
+
+interface CheckValues {
+  config?: string;
+  set?: string[];
+  owner?: string[];
+}
+
+export async function run(ctx: CommandContext): Promise<number> {
+  const { json, rest } = takeJson(ctx.argv);
+  const [sub, ...args] = rest;
+  if (sub !== "check") {
+    return helpOrUsageError(
+      ctx,
+      json,
+      sub === undefined ? "store needs check" : `unknown store command '${sub}'`,
+      USAGE,
+    );
+  }
+  try {
+    return await check(ctx, json, args);
+  } catch (err) {
+    if (err instanceof UsageError) return helpOrUsageError(ctx, json, err.message, USAGE);
+    const code = serverFailure(ctx, json, err);
+    if (code !== undefined) return code;
+    throw err;
+  }
+}
+
+function parse(args: string[], options: NonNullable<ParseArgsConfig["options"]>) {
+  try {
+    return parseArgs({ args, options, strict: true, allowPositionals: true }) as unknown as {
+      values: CheckValues;
+      positionals: string[];
+    };
+  } catch (err) {
+    throw new UsageError((err as Error).message);
+  }
+}
+
+/** The serverless bucket the CLI config names, when no server config is given or found. */
+function serverlessHere(ctx: CommandContext, values: CheckValues): boolean {
+  if (values.config !== undefined || (values.set?.length ?? 0) > 0) return false;
+  const found = findServerConfig({ env: ctx.env, cwd: process.cwd(), exists: existsSync });
+  if (found.path !== undefined) return false;
+  cwdConfigHint(ctx, undefined);
+  return isServerless(openAccount(ctx).cli);
+}
+
+async function check(ctx: CommandContext, json: boolean, args: string[]): Promise<number> {
+  const { values, positionals } = parse(args, {
+    ...SERVER_OPTIONS,
+    owner: { type: "string", multiple: true },
+  });
+  if (positionals.length > 0) throw new UsageError(`unexpected argument '${positionals[0]}'`);
+  for (const owner of values.owner ?? []) {
+    if (!isOwner(owner)) throw new UsageError(`'${owner}' is not an owner id`);
+  }
+  let store: Store;
+  if (serverlessHere(ctx, values)) {
+    const account = openAccount(ctx);
+    ({ store } = await openServerlessStore({
+      cli: account.cli,
+      env: ctx.env,
+      home: account.home,
+      secrets: account.secrets,
+    }));
+  } else {
+    const loaded = loadServerConfig({
+      configFlag: values.config,
+      env: ctx.env,
+      flags: configFlags(values),
+    });
+    for (const warning of loaded.warnings) ctx.stderr(`seshi: warning: ${warning}`);
+    try {
+      store = openStore(loaded.config.store.url, {
+        ...storeOptions(loaded.config),
+        env: ctx.env,
+      }).store;
+    } catch (err) {
+      if (err instanceof ConfigError) throw err;
+      return fail(ctx, json, EXIT.config, "config", (err as Error).message);
+    }
+  }
+  const report = await checkStore(store, values.owner ? { owners: values.owner } : {});
+  const style = await styleFor(ctx, { json });
+  emit(ctx, json, { store: store.url, ...report }, () => lines(store.url, report, style));
+  return report.counts.errors > 0 ? EXIT.attention : EXIT.ok;
+}
+
+function plural(n: number, word: string, many = `${word}s`): string {
+  return `${n} ${n === 1 ? word : many}`;
+}
+
+export function lines(url: string, report: CheckReport, style: Style): string[] {
+  const c = report.counts;
+  const kinds = [
+    c.stubs > 0 ? plural(c.stubs, "stub") : "",
+    c.redacted > 0 ? `${c.redacted} deleted` : "",
+  ].filter(Boolean);
+  const looked = [
+    plural(c.owners, "owner"),
+    `${plural(c.sessions, "session")}${kinds.length > 0 ? ` (${kinds.join(", ")})` : ""}`,
+    plural(c.trace_objects, "trace object"),
+    plural(c.change_entries, "change entry", "change entries"),
+    plural(c.span_records, "span record"),
+    plural(c.tokens, "token"),
+  ].join(", ");
+  const verdict =
+    c.errors === 0 && c.warns === 0
+      ? style.success("no problems")
+      : [
+          c.errors > 0 ? style.error(plural(c.errors, "error")) : "",
+          c.warns > 0 ? style.warn(plural(c.warns, "warning")) : "",
+        ]
+          .filter(Boolean)
+          .join(", ");
+  const out = [`checked ${printable(url)}: ${looked}: ${verdict}`];
+  const groups = new Map<string, Finding[]>();
+  for (const f of report.findings) {
+    const group =
+      f.owner === undefined
+        ? "the bucket"
+        : f.archive_id === undefined
+          ? `${f.owner} (change feed)`
+          : `${f.owner} ${f.archive_id}`;
+    groups.set(group, [...(groups.get(group) ?? []), f]);
+  }
+  const width = Math.max(0, ...report.findings.map((f) => f.code.length));
+  for (const [group, findings] of groups) {
+    out.push("", style.bold(printable(group)));
+    for (const f of findings) {
+      const word = f.severity.padEnd(5);
+      const painted = style.status(word, f.severity === "error" ? "error" : "warn");
+      out.push(`  ${painted}  ${f.code.padEnd(width)}  ${printable(f.message)}`);
+      if (f.key !== undefined)
+        out.push(`         ${" ".repeat(width)}  ${style.muted(printable(f.key))}`);
+    }
+  }
+  return out;
+}

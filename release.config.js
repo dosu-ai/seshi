@@ -1,14 +1,19 @@
-/** Every push to main that carries a Conventional Commit is a release, the way dosu-cli
- * releases: semantic-release reads the commits since the last `vX.Y.Z` tag, picks the next
- * version, and publishes @dosu/sessiondb to npm; the `release` job in ci.yml then builds
- * ghcr.io/dosu-ai/sessiondb at the same version. The SDK and the server share one version
- * (what traces record as their normalizer, and what /healthz reports), so one tag is one
- * release of both.
+/** Every push to main that carries a Conventional Commit is a release (F8.4, X3.8).
+ * semantic-release reads the commits since the last `vX.Y.Z` tag and picks the next version;
+ * then, in this order:
  *
- * npm is driven directly rather than through @semantic-release/npm: that plugin runs
- * `npm version` inside sdks/typescript, where npm finds the Bun workspace root above it, loads
- * the whole tree and rejects server/package.json's `workspace:*` dependency. `--workspaces=false`
- * keeps npm inside the SDK directory, and only the command line can set it.
+ * 1. prepare: scripts/release-version.ts writes it into packages/ts/model/package.json (the
+ *    repository's one version: what traces record as their normalizer, what /healthz and
+ *    `seshi --version` report) and bun.lock; scripts/release/build.ts cross-compiles `seshi`
+ *    for every target (scripts/release/targets.ts) into dist/release/: one archive per target,
+ *    install.sh, install.ps1, the Cursor extension's .vsix and SHA256SUMS. @semantic-release/git commits the version files.
+ * 2. The tag `vX.Y.Z` is pushed, and the GitHub release is published with those assets. The
+ *    install scripts download from it, and `…/releases/latest/download/install.sh` is a stable
+ *    URL.
+ * 3. ci.yml's later jobs take it from there, from the release's own assets: `npm` publishes
+ *    the platform packages, @dosu/seshi-model, @dosu/seshi-client and the @dosu/seshi launcher; `image`
+ *    builds ghcr.io/<repo> from the two Linux binaries; `openvsx` publishes the Cursor
+ *    extension; `verify` installs the release on every platform through each channel.
  *
  * @type {import('semantic-release').GlobalConfig} */
 export default {
@@ -20,25 +25,34 @@ export default {
     [
       "@semantic-release/exec",
       {
-        // actions/setup-node writes the npm token from NODE_AUTH_TOKEN into the user .npmrc.
-        verifyConditionsCmd:
-          "test -n \"$NODE_AUTH_TOKEN\" || { echo 'NODE_AUTH_TOKEN (the npm token) is not set' >&2; exit 1; }",
-        // Write the version into both package.json files and bun.lock, and build dist/ so it
-        // carries the new version. (@semantic-release/git commits those files below.)
         prepareCmd:
-          "bun run scripts/release-version.ts ${nextRelease.version} && bun run --cwd sdks/typescript build",
-        // Scripts are off for this publish (NPM_CONFIG_IGNORE_SCRIPTS in ci.yml): dist/ was just
-        // built, so prepack must not rebuild it. Provenance comes from NPM_CONFIG_PROVENANCE.
-        publishCmd: "cd sdks/typescript && npm publish --workspaces=false --access public",
+          "bun run scripts/release-version.ts ${nextRelease.version} && bun run scripts/release/build.ts --version ${nextRelease.version} --out dist/release",
         successCmd:
           "echo 'released=true' >> $GITHUB_OUTPUT && echo 'version=${nextRelease.version}' >> $GITHUB_OUTPUT",
       },
     ],
-    "@semantic-release/github",
+    [
+      "@semantic-release/github",
+      {
+        assets: [
+          { path: "dist/release/seshi-*.tar.gz" },
+          { path: "dist/release/seshi-*.zip" },
+          { path: "dist/release/install.sh" },
+          { path: "dist/release/install.ps1" },
+          { path: "dist/release/seshi-cursor-*.vsix" },
+          { path: "dist/release/SHA256SUMS" },
+        ],
+      },
+    ],
     [
       "@semantic-release/git",
       {
-        assets: ["sdks/typescript/package.json", "server/package.json", "bun.lock", "CHANGELOG.md"],
+        assets: [
+          "packages/ts/model/package.json",
+          "integrations/cursor/extension/package.json",
+          "bun.lock",
+          "CHANGELOG.md",
+        ],
         message: "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}",
       },
     ],

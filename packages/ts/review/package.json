@@ -1,0 +1,21 @@
+{
+  "name": "@seshi/review",
+  "private": true,
+  "description": "Layer 3: model review (F3): the decision model and the redactor LLM behind a provider interface, as the pipeline's review stage.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "bun": "./src/index.ts"
+    },
+    "./testing": {
+      "bun": "./src/testing.ts"
+    }
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "1.3.0",
+    "@seshi/config": "workspace:*",
+    "@seshi/model": "workspace:*",
+    "@seshi/pipeline": "workspace:*",
+    "@seshi/store": "workspace:*"
+  }
+}

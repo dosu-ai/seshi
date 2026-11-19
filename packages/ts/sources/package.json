@@ -1,0 +1,22 @@
+{
+  "name": "@seshi/sources",
+  "private": true,
+  "description": "Layer 3: Connector scheduler and checkpoints; the generic S3 poller (X7, F6).",
+  "type": "module",
+  "exports": {
+    ".": {
+      "bun": "./src/index.ts"
+    },
+    "./testing": {
+      "bun": "./src/testing.ts"
+    }
+  },
+  "dependencies": {
+    "@seshi/auth": "workspace:*",
+    "@seshi/config": "workspace:*",
+    "@seshi/formats": "workspace:*",
+    "@seshi/kit": "workspace:*",
+    "@seshi/model": "workspace:*",
+    "@seshi/store": "workspace:*"
+  }
+}

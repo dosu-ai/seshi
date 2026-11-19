@@ -1,0 +1,662 @@
+import {
+  Attributes,
+  argsOf,
+  assembleSpanParts,
+  isoFromNanos,
+  jsonAttribute,
+  messagesRecords,
+  textOf,
+} from "@seshi/formats";
+import type {
+  AssembledSpans,
+  Claims,
+  FormatAdapter,
+  LlmCall,
+  NormalizedRecord,
+  NormalizedTranscript,
+  ReceivedSpan,
+  SpanAdapter,
+  SpanPart,
+  SpanResource,
+  SpanTool,
+  TokenUsage,
+} from "@seshi/model";
+import type { DatadogMessage, DatadogSpanResource } from "./api-types";
+import { ATTR, sessionOf, tagsOf, tagValue, toReceivedSpan } from "./spans";
+
+/** The format Datadog sessions are filed under; archive ids derive from it. */
+export const DATADOG_LLMOBS = "datadog-llmobs";
+
+export const OPERATION = {
+  turn: "turn",
+  agentMessage: "agent_message",
+  tool: "tool",
+  llm: "llm",
+  placeholder: "llm_placeholder",
+  compaction: "compaction",
+  permissionWait: "permission_wait",
+} as const;
+
+type Json = Record<string, unknown>;
+const isObject = (v: unknown): v is Json =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
+
+interface DatadogView {
+  span: ReceivedSpan;
+  attrs: Attributes;
+  tags: string[];
+  kind?: string;
+  operation: string;
+  metadata: Json;
+}
+
+function viewOf(span: ReceivedSpan): DatadogView {
+  const attrs = new Attributes(span.attributes);
+  const tags = tagsOf(span);
+  const kind = attrs.string(ATTR.spanKind)?.toLowerCase();
+  const parsed = jsonAttribute(attrs.get(ATTR.metadata));
+  return {
+    span,
+    attrs,
+    tags,
+    ...(kind ? { kind } : {}),
+    operation: operationOf(tags, kind),
+    metadata: isObject(parsed) ? parsed : {},
+  };
+}
+
+function operationOf(tags: readonly string[], kind: string | undefined): string {
+  if (tagValue(tags, "trajectory.placeholder_llm_span") === "true") return OPERATION.placeholder;
+  const semantic = tagValue(tags, "trajectory.semantic_type");
+  if (semantic === "turn") return OPERATION.turn;
+  if (semantic === "agent_message") return OPERATION.agentMessage;
+  if (semantic === "compaction") return OPERATION.compaction;
+  if (semantic === "permission_wait") return OPERATION.permissionWait;
+  if (tagValue(tags, "trajectory.llm_call") === "true") return OPERATION.llm;
+  return kind ?? "span";
+}
+
+const text = (v: unknown): string | undefined =>
+  typeof v === "string" && v !== "" ? v : undefined;
+
+function messagesOf(view: DatadogView, key: string): DatadogMessage[] | undefined {
+  const parsed = jsonAttribute(view.attrs.get(key));
+  return Array.isArray(parsed) && parsed.length > 0 ? (parsed as DatadogMessage[]) : undefined;
+}
+
+function genAiMessages(messages: readonly DatadogMessage[], defaultRole: string): Json[] {
+  return messages.filter(isObject).map((message) => {
+    const role = (text(message.role) ?? defaultRole).toLowerCase();
+    if (role === "reasoning" || role === "thinking") {
+      return { role: "assistant", content: [{ type: "reasoning", text: message.content ?? "" }] };
+    }
+    const content: Json[] = [];
+    if (text(message.content)) content.push({ type: "text", text: message.content });
+    for (const result of Array.isArray(message.tool_results) ? message.tool_results : []) {
+      if (!isObject(result)) continue;
+      content.push({
+        type: "tool_result",
+        ...(text(result.tool_id) ? { tool_use_id: result.tool_id } : {}),
+        content: typeof result.result === "string" ? result.result : textOf(result.result),
+      });
+    }
+    const calls = (Array.isArray(message.tool_calls) ? message.tool_calls : [])
+      .filter((call) => isObject(call) && text(call.name))
+      .map((call) => ({
+        ...(text(call.tool_id) ? { id: call.tool_id } : {}),
+        name: call.name,
+        arguments: call.arguments ?? {},
+      }));
+    return { role, content, ...(calls.length > 0 ? { tool_calls: calls } : {}) };
+  });
+}
+
+function ioRecords(
+  view: DatadogView,
+  side: "input" | "output",
+  timestamp: string,
+): NormalizedRecord[] {
+  const isInput = side === "input";
+  const messages = messagesOf(view, isInput ? ATTR.inputMessages : ATTR.outputMessages);
+  const ctx = { timestamp, idPrefix: `${view.span.spanId}:${isInput ? "in" : "out"}` };
+  if (messages)
+    return messagesRecords(genAiMessages(messages, isInput ? "user" : "assistant"), ctx);
+  const value = view.attrs.string(isInput ? ATTR.inputValue : ATTR.outputValue);
+  if (!value || value.trim() === "") return [];
+  return [{ role: isInput ? "user" : "assistant", content: value, timestamp }];
+}
+
+function hasContent(view: DatadogView): boolean {
+  return [ATTR.inputValue, ATTR.inputMessages, ATTR.outputValue, ATTR.outputMessages].some((key) =>
+    view.attrs.has(key),
+  );
+}
+
+const metric = (view: DatadogView, name: string) => {
+  const value = view.attrs.get(`${ATTR.metricPrefix}${name}`);
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? Math.round(value)
+    : undefined;
+};
+
+function usageOf(view: DatadogView): TokenUsage | undefined {
+  const usage: TokenUsage = {};
+  const set = (key: keyof TokenUsage, ...names: string[]) => {
+    for (const name of names) {
+      const value = metric(view, name);
+      if (value !== undefined) {
+        usage[key] = value;
+        return;
+      }
+    }
+  };
+  set("input_tokens", "input_tokens", "prompt_tokens");
+  set("output_tokens", "output_tokens", "completion_tokens");
+  set("cache_read_input_tokens", "cache_read_input_tokens");
+  set("cache_creation_input_tokens", "cache_write_input_tokens", "cache_creation_input_tokens");
+  set("reasoning_tokens", "reasoning_output_tokens", "reasoning_tokens");
+  set("total_tokens", "total_tokens");
+  return Object.keys(usage).length > 0 ? usage : undefined;
+}
+
+const PARAMETERS = ["temperature", "max_tokens", "top_p", "top_k", "reasoning_effort"] as const;
+
+function errorOf(view: DatadogView): string | undefined {
+  if (view.span.status?.code !== 2) return undefined;
+  const nested = isObject(view.metadata.error) ? view.metadata.error : {};
+  const type = text(view.metadata["error.type"]) ?? text(nested.type);
+  const message =
+    text(view.metadata["error.message"]) ?? text(nested.message) ?? text(view.metadata.error);
+  if (type && message) return `${type}: ${message}`;
+  return type ?? message ?? "error";
+}
+
+function llmCallOf(view: DatadogView, started: string, ended: string | undefined) {
+  const usage = usageOf(view);
+  const llmish =
+    view.kind === "llm" ||
+    view.operation === OPERATION.llm ||
+    view.operation === OPERATION.placeholder;
+  if (!usage && !llmish) return undefined;
+  const call: LlmCall = { id: view.span.spanId, started_at: started };
+  const model = view.attrs.string(ATTR.modelName);
+  if (model) call.model = model;
+  const provider = view.attrs.string(ATTR.modelProvider);
+  if (provider) call.provider = provider;
+  if (ended) {
+    call.ended_at = ended;
+    call.duration_ms = Math.max(0, Date.parse(ended) - Date.parse(started));
+  }
+  if (usage) call.usage = usage;
+  const stop = text(view.metadata.finish_reason) ?? text(view.metadata.stop_reason);
+  if (stop) call.stop_reason = stop;
+  const request = text(view.metadata.request_id) ?? text(view.metadata.response_id);
+  if (request) call.request_id = request;
+  const parameters: NonNullable<LlmCall["parameters"]> = {};
+  for (const key of PARAMETERS) {
+    const value = view.metadata[key];
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+      parameters[key] = value;
+    }
+  }
+  if (Object.keys(parameters).length > 0) call.parameters = parameters;
+  const error = errorOf(view);
+  if (error) call.error = error;
+  return call;
+}
+
+const TOOL_ID_KEYS = ["tool_call_id", "tool_use_id", "tool_id", "call_id"] as const;
+
+function toolOf(view: DatadogView): SpanTool {
+  const name = text(view.metadata.tool_name) ?? view.span.name;
+  const tool: SpanTool = { name };
+  for (const key of TOOL_ID_KEYS) {
+    const id = text(view.metadata[key]);
+    if (id) {
+      tool.call_id = id;
+      break;
+    }
+  }
+  const input =
+    view.attrs.string(ATTR.inputValue) ??
+    messagesOf(view, ATTR.inputMessages)
+      ?.map((m) => m.content ?? "")
+      .join("\n");
+  if (input !== undefined && input !== "") tool.args = argsOf(jsonAttribute(input));
+  const output =
+    view.attrs.string(ATTR.outputValue) ??
+    messagesOf(view, ATTR.outputMessages)
+      ?.map((m) => m.content ?? "")
+      .join("\n");
+  if (output !== undefined && output !== "") tool.result = output;
+  if (view.span.status?.code === 2) tool.ok = false;
+  return tool;
+}
+
+const ABSOLUTE = /^(?:\/|~(?:\/|$)|[A-Za-z]:[\\/]|\\\\)/;
+
+function metaOf(view: DatadogView): SpanPart["meta"] {
+  const meta: NonNullable<SpanPart["meta"]> = {};
+  const model = view.attrs.string(ATTR.modelName) ?? tagValue(view.tags, "gen_ai.request.model");
+  if (model) meta.model = model;
+  const version = tagValue(view.tags, "trajectory.client_version");
+  if (version) meta.agent_version = version;
+  const cwd = text(view.metadata.cwd) ?? text(view.metadata.project_dir);
+  if (cwd && ABSOLUTE.test(cwd)) meta.cwd = cwd;
+  return Object.keys(meta).length > 0 ? meta : undefined;
+}
+
+/** One converted Datadog span → its part of the session. Throws for a span without a start. */
+export function datadogPart(span: ReceivedSpan): SpanPart {
+  const view = viewOf(span);
+  const started = isoFromNanos(span.startTimeUnixNano);
+  if (!started) throw new Error(`span ${span.spanId} has no start time`);
+  const ended = isoFromNanos(span.endTimeUnixNano);
+  const part: SpanPart = {
+    trace_id: span.traceId,
+    span_id: span.spanId,
+    name: span.name,
+    started_at: started,
+    start_unix_nano: String(span.startTimeUnixNano),
+    status: span.status?.code === 2 ? "error" : span.status?.code === 1 ? "ok" : "unset",
+    operation: view.operation,
+    content: hasContent(view),
+  };
+  if (span.parentSpanId) part.parent_span_id = span.parentSpanId;
+  if (span.kind !== undefined) part.kind = span.kind;
+  if (ended) {
+    part.ended_at = ended;
+    part.end_unix_nano = String(span.endTimeUnixNano);
+  }
+  if (view.operation === OPERATION.tool) {
+    part.tool = toolOf(view);
+  } else if (view.operation === OPERATION.compaction) {
+    const said = ioRecords(view, "output", ended ?? started)
+      .map((r) => ("content" in r && typeof r.content === "string" ? r.content : ""))
+      .filter((t) => t !== "")
+      .join("\n");
+    if (said !== "")
+      part.output = [{ role: "observation", content: said, timestamp: ended ?? started }];
+  } else if (view.operation !== OPERATION.permissionWait) {
+    const input = ioRecords(view, "input", started);
+    if (input.length > 0) part.input = input;
+    const output = ioRecords(view, "output", ended ?? started);
+    if (output.length > 0) part.output = output;
+  }
+  const call = llmCallOf(view, started, ended);
+  if (call) part.llm_call = call;
+  const meta = metaOf(view);
+  if (meta) part.meta = meta;
+  return part;
+}
+
+const startNs = (p: SpanPart) => BigInt(p.start_unix_nano ?? Date.parse(p.started_at) * 1e6);
+const byStart = (a: SpanPart, b: SpanPart) => {
+  const d = startNs(a) - startNs(b);
+  return d < 0n ? -1 : d > 0n ? 1 : a.span_id < b.span_id ? -1 : a.span_id > b.span_id ? 1 : 0;
+};
+
+function keep(part: SpanPart, what: Partial<Pick<SpanPart, "input" | "output" | "tool">>) {
+  const { input: _i, output: _o, tool: _t, llm_call: _c, thread: _th, ...rest } = part;
+  const out: SpanPart = { ...rest };
+  if (what.input && what.input.length > 0) out.input = what.input;
+  if (what.output && what.output.length > 0) out.output = what.output;
+  if (what.tool) out.tool = what.tool;
+  return out;
+}
+
+const spoke = (records: readonly NormalizedRecord[] | undefined) =>
+  (records ?? []).some((r) => r.role === "assistant" || r.role === "reasoning");
+
+function addUsage(a: TokenUsage | undefined, b: TokenUsage | undefined): TokenUsage | undefined {
+  if (!a && !b) return undefined;
+  const out: TokenUsage = { ...a };
+  for (const [key, value] of Object.entries(b ?? {}) as [keyof TokenUsage, number][]) {
+    out[key] = (out[key] ?? 0) + value;
+  }
+  return out;
+}
+
+/** Several model requests counted as one: the first's id and model, summed usage, the earliest
+ * start and the latest end. */
+export function mergeCalls(calls: readonly LlmCall[]): LlmCall {
+  const [first, ...rest] = calls as [LlmCall, ...LlmCall[]];
+  let merged: LlmCall = { ...first };
+  for (const call of rest) {
+    const usage = addUsage(merged.usage, call.usage);
+    merged = {
+      ...merged,
+      ...(usage ? { usage } : {}),
+      ...(!merged.model && call.model ? { model: call.model } : {}),
+      ...(!merged.provider && call.provider ? { provider: call.provider } : {}),
+      ...(call.started_at && (!merged.started_at || call.started_at < merged.started_at)
+        ? { started_at: call.started_at }
+        : {}),
+      ...(call.ended_at && (!merged.ended_at || call.ended_at > merged.ended_at)
+        ? { ended_at: call.ended_at }
+        : {}),
+      ...(call.stop_reason ? { stop_reason: call.stop_reason } : {}),
+      ...(!merged.error && call.error ? { error: call.error } : {}),
+    };
+  }
+  if (rest.length > 0 && merged.started_at && merged.ended_at) {
+    merged.duration_ms = Math.max(0, Date.parse(merged.ended_at) - Date.parse(merged.started_at));
+  }
+  return merged;
+}
+
+type TurnCall = { part: SpanPart; call: LlmCall };
+
+function messageOutputOf(parts: readonly SpanPart[]): (p: SpanPart) => NormalizedRecord[] {
+  const tools = parts.some((p) => p.operation === OPERATION.tool && p.tool);
+  return (p) =>
+    (p.output ?? []).flatMap((r): NormalizedRecord[] => {
+      if (!tools) return [r];
+      if (r.role === "tool") return [];
+      if (r.role === "assistant" && "tool_calls" in r && r.tool_calls) {
+        const call = r as { content?: unknown; timestamp?: string };
+        return typeof call.content === "string" && call.content !== ""
+          ? [
+              {
+                role: "assistant",
+                content: call.content,
+                timestamp: call.timestamp,
+              } as NormalizedRecord,
+            ]
+          : [];
+      }
+      return [r];
+    });
+}
+
+function keptTurnParts(parts: readonly SpanPart[]): Map<SpanPart, SpanPart> {
+  const thread = parts[0]?.trace_id ?? "";
+  const messageOutput = messageOutputOf(parts);
+  const messages = parts.filter(
+    (p) => p.operation === OPERATION.agentMessage && spoke(messageOutput(p)),
+  );
+  const keepFrom = (p: SpanPart): SpanPart => {
+    switch (p.operation) {
+      case OPERATION.turn:
+        return keep(p, { input: p.input, ...(messages.length === 0 ? { output: p.output } : {}) });
+      case OPERATION.agentMessage:
+        return keep(p, { output: messageOutput(p) });
+      case OPERATION.tool:
+        return keep(p, p.tool ? { tool: p.tool } : {});
+      case OPERATION.compaction:
+        return keep(p, { output: p.output });
+      default:
+        return keep(p, {});
+    }
+  };
+  const kept = new Map<SpanPart, SpanPart>();
+  for (const p of parts) {
+    const out = keepFrom(p);
+    out.thread = thread;
+    kept.set(p, out);
+  }
+  return kept;
+}
+
+function promptFromFirstRequest(parts: readonly SpanPart[], kept: Map<SpanPart, SpanPart>): void {
+  const prompted = [...kept.values()].some((p) => (p.input ?? []).some((r) => r.role === "user"));
+  if (prompted) return;
+  const first = parts.find(
+    (p) =>
+      (p.operation === OPERATION.llm || p.operation === OPERATION.placeholder) &&
+      (p.input ?? []).length > 0,
+  );
+  if (!first?.input) return;
+  const input = first.input;
+  let from = input.length;
+  while (from > 0 && input[from - 1]?.role === "user") from--;
+  const prompt = input.slice(from);
+  const target = kept.get(first);
+  if (target && prompt.length > 0) target.input = prompt;
+}
+
+const CALL_TIERS: { holds: (p: SpanPart) => boolean; totals: boolean }[] = [
+  { holds: (p) => p.operation === OPERATION.llm, totals: false },
+  { holds: (p) => p.operation === OPERATION.agentMessage, totals: false },
+  { holds: (p) => p.operation === OPERATION.placeholder, totals: true },
+  { holds: (p) => p.operation === OPERATION.turn, totals: true },
+  { holds: () => true, totals: false },
+];
+
+function turnCalls(parts: readonly SpanPart[]): { calls: TurnCall[]; totals: boolean } {
+  for (const counted of [true, false]) {
+    for (const tier of CALL_TIERS) {
+      const calls = parts
+        .filter((p) => p.llm_call && tier.holds(p) && (!counted || p.llm_call.usage))
+        .map((p) => ({ part: p, call: p.llm_call as LlmCall }));
+      if (calls.length > 0) return { calls, totals: tier.totals };
+    }
+  }
+  return { calls: [], totals: false };
+}
+
+function nameTotals(
+  kept: Map<SpanPart, SpanPart>,
+  carriers: readonly SpanPart[],
+  calls: readonly TurnCall[],
+): void {
+  const target = kept.get(carriers[carriers.length - 1] as SpanPart);
+  if (target) target.llm_call = mergeCalls(calls.map((c) => c.call));
+}
+
+function nameEachCall(
+  parts: readonly SpanPart[],
+  kept: Map<SpanPart, SpanPart>,
+  carriers: readonly SpanPart[],
+  calls: readonly TurnCall[],
+): void {
+  const byId = new Map(parts.map((p) => [p.span_id, p]));
+  const above = (part: SpanPart): SpanPart | undefined => {
+    const seen = new Set<string>();
+    for (let id = part.parent_span_id; id && !seen.has(id); ) {
+      seen.add(id);
+      const parent = byId.get(id);
+      if (!parent) return undefined;
+      if (carriers.includes(parent)) return parent;
+      id = parent.parent_span_id;
+    }
+    return undefined;
+  };
+  const assigned = new Map<SpanPart, LlmCall[]>();
+  const rest: LlmCall[] = [];
+  for (const { part, call } of calls) {
+    const home = carriers.includes(part) ? part : above(part);
+    if (home) assigned.set(home, [...(assigned.get(home) ?? []), call]);
+    else rest.push(call);
+  }
+  const free = carriers.filter((c) => !assigned.has(c));
+  rest.forEach((call, i) => {
+    const carrier = free[i] ?? (carriers[carriers.length - 1] as SpanPart);
+    assigned.set(carrier, [...(assigned.get(carrier) ?? []), call]);
+  });
+  for (const [carrier, list] of assigned) {
+    const target = kept.get(carrier);
+    if (target) target.llm_call = mergeCalls(list);
+  }
+}
+
+function nameCalls(parts: readonly SpanPart[], kept: Map<SpanPart, SpanPart>): void {
+  const { calls, totals } = turnCalls(parts);
+  const carriers = [...kept.entries()]
+    .filter(([, k]) => spoke(k.output))
+    .map(([original]) => original);
+  if (carriers.length === 0 || calls.length === 0) return;
+  if (totals) nameTotals(kept, carriers, calls);
+  else nameEachCall(parts, kept, carriers, calls);
+}
+
+function turnParts(trace: readonly SpanPart[]): SpanPart[] {
+  const parts = [...trace].sort(byStart);
+  const kept = keptTurnParts(parts);
+  promptFromFirstRequest(parts, kept);
+  nameCalls(parts, kept);
+  return [...kept.values()];
+}
+
+function genericParts(trace: readonly SpanPart[]): SpanPart[] {
+  const parts = [...trace].sort(byStart);
+  const llm = (p: SpanPart) =>
+    p.operation === OPERATION.llm || p.operation === OPERATION.placeholder;
+  const talking = parts.filter((p) => llm(p) && (p.input || p.output));
+  if (talking.length > 0) {
+    const held = new Set<string>();
+    for (const p of talking) {
+      for (const r of [...(p.input ?? []), ...(p.output ?? [])]) {
+        if (r.role === "assistant" && "tool_calls" in r) {
+          for (const call of r.tool_calls ?? []) held.add(call.id);
+        }
+      }
+    }
+    const includesTool = (tool: SpanTool) =>
+      held.size === 0 || (!!tool.call_id && held.has(tool.call_id));
+    return parts.map((p) => {
+      if (llm(p)) {
+        const out = keep(p, { input: p.input, output: p.output });
+        if (p.llm_call) out.llm_call = p.llm_call;
+        return out;
+      }
+      if (p.tool && includesTool(p.tool)) {
+        return keep(p, { tool: p.tool });
+      }
+      return keep(p, {});
+    });
+  }
+  const ids = new Set(parts.map((p) => p.span_id));
+  const root = parts.find((p) => !p.parent_span_id || !ids.has(p.parent_span_id));
+  const calls = parts.some((p) => llm(p) && p.llm_call);
+  return parts.map((p) => {
+    const out =
+      p === root
+        ? keep(p, { input: p.input, output: p.output })
+        : keep(p, p.tool ? { tool: p.tool } : {});
+    if (p.llm_call && (llm(p) || (p === root && !calls))) out.llm_call = p.llm_call;
+    return out;
+  });
+}
+
+export function assembleDatadogParts(
+  input: readonly SpanPart[],
+  session: { source: string },
+): AssembledSpans {
+  const bySpan = new Map<string, SpanPart>();
+  for (const part of input) bySpan.set(`${part.trace_id}-${part.span_id}`, part);
+  const traces = new Map<string, SpanPart[]>();
+  for (const part of bySpan.values()) {
+    const list = traces.get(part.trace_id) ?? [];
+    list.push(part);
+    traces.set(part.trace_id, list);
+  }
+  const parts: SpanPart[] = [];
+  for (const trace of traces.values()) {
+    const turn = trace.some(
+      (p) => p.operation === OPERATION.turn || p.operation === OPERATION.agentMessage,
+    );
+    parts.push(...(turn ? turnParts(trace) : genericParts(trace)));
+  }
+  return assembleSpanParts(parts, session);
+}
+
+const MAX_CLAIM = 320;
+const bounded = (v: string | undefined) =>
+  v !== undefined && v.trim() !== "" && v.length <= MAX_CLAIM ? v.trim() : undefined;
+
+/** Identity a span's tags assert (X5.5), recorded and never trusted (F5.4): Trajectory's
+ * resolved user and email, the git email, the GitHub username. */
+export function datadogClaims(span: ReceivedSpan): Claims | undefined {
+  const tags = tagsOf(span);
+  const claims: Claims = {};
+  const email = bounded(tagValue(tags, "trajectory.user_email"));
+  if (email) claims.email = email;
+  const git = bounded(tagValue(tags, "git.email"));
+  if (git) claims.git_email = git;
+  const user = bounded(tagValue(tags, "trajectory.user"));
+  if (user) claims.username = user;
+  const github = tagValue(tags, "github.username");
+  if (github && github.length <= 256) claims.account_ids = { github };
+  return Object.keys(claims).length > 0 ? claims : undefined;
+}
+
+export const DATADOG_SPANS: SpanAdapter = {
+  sessionKey: (span: ReceivedSpan, _resource: SpanResource) => sessionOf(span) ?? span.traceId,
+  hasContent: (span) => hasContent(viewOf(span)),
+  claims: (span) => datadogClaims(span),
+  normalize: (span) => datadogPart(span),
+  assemble: (parts, session) => assembleDatadogParts(parts, session),
+};
+
+function tryReceivedSpan(attributes: DatadogSpanResource["attributes"]): ReceivedSpan | undefined {
+  try {
+    return toReceivedSpan(attributes);
+  } catch {
+    return undefined;
+  }
+}
+
+function tryDatadogPart(span: ReceivedSpan): SpanPart | undefined {
+  try {
+    return datadogPart(span);
+  } catch {
+    return undefined;
+  }
+}
+
+/** Spans of a saved Export API answer (`{ data: [...] }`, or the list itself). */
+export function spansOfDocument(value: unknown): ReceivedSpan[] {
+  const list = Array.isArray(value) ? value : isObject(value) ? value.data : undefined;
+  if (!Array.isArray(list)) {
+    throw Object.assign(new Error("a Datadog LLM Observability export has a data list"), {
+      code: "invalid_input",
+    });
+  }
+  const spans: ReceivedSpan[] = [];
+  for (const item of list as DatadogSpanResource[]) {
+    if (!isObject(item) || !isObject(item.attributes)) continue;
+    const span = tryReceivedSpan(item.attributes);
+    if (span !== undefined) spans.push(span);
+  }
+  return spans;
+}
+
+export const DATADOG_LLMOBS_FORMAT: FormatAdapter = {
+  source: DATADOG_LLMOBS,
+  chunkable: false,
+  detect: {
+    document: (head) => head.get("data")?.kind === "array" && head.get("meta")?.kind === "object",
+  },
+  spans: DATADOG_SPANS,
+  normalize(transcript: string): NormalizedTranscript {
+    let value: unknown;
+    try {
+      value = JSON.parse(transcript);
+    } catch {
+      throw Object.assign(
+        new Error("a Datadog LLM Observability export must be one JSON document"),
+        {
+          code: "invalid_json",
+        },
+      );
+    }
+    const spans = spansOfDocument(value);
+    const sessions = new Set(spans.map(sessionOf).filter((s) => s !== undefined));
+    if (sessions.size > 1) {
+      throw Object.assign(
+        new Error(
+          `the export holds ${sessions.size} sessions; a log must hold one (filter the export by session)`,
+        ),
+        { code: "invalid_input" },
+      );
+    }
+    const parts: SpanPart[] = [];
+    for (const span of sessions.size === 1 ? spans.filter((s) => sessionOf(s)) : spans) {
+      const part = tryDatadogPart(span);
+      if (part !== undefined) parts.push(part);
+    }
+    const { records, llm_calls } = assembleDatadogParts(parts, { source: DATADOG_LLMOBS });
+    return llm_calls.length > 0 ? { records, llm_calls } : { records };
+  },
+};

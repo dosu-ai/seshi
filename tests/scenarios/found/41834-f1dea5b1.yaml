@@ -1,0 +1,21 @@
+# Found by the scenario explorer (tests/tooling/scenario/explore.ts); see tests/scenarios/README.md.
+# seed: 41834 (bun run scenarios:explore --seed 41834 --runs 1 --max-steps 25)
+# original length: 20 steps; shrunk to 11 in 300 runs
+# failure:
+#   step 11 (settle max=40): once quiet, seshi doctor fails a check
+#     main: secret: the secret here is not the one the session was stored with
+name: found by seed 41834
+description: "A generated scenario (seed 41834) shrunk from 20 to 11 steps; the header says how it failed."
+setup: { repos: { code/private: { config: "capture = false\n" } } }
+steps:
+  - turns: { session: main, count: 3 }
+  - pass
+  - sweep
+  - turns: { session: main, count: 2, in: code/private }
+  - pass
+  - move-transcript: { session: main, to: code/moved }
+  - turns: { session: main, count: 1 }
+  - pass
+  - pass
+  - subagent: { parent: main, id: x, turns: 2 }
+  - settle

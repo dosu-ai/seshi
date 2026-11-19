@@ -1,0 +1,14 @@
+# A second pack beside a JSON rule file: its exception applies to every file rule, the built-in
+# ones included, and it runs after the JSON file's patterns.
+id = "team"
+
+[[rules]]
+id = "ticket-email"
+description = "Customer emails in support tickets"
+pattern = '(?i)[a-z0-9._%+-]+@customer\.example'
+tests.match = ["from Jane.Doe@Customer.example"]
+
+[[sensitive_files]]
+id = "dev-env-allowed"
+description = "The dev env file holds no secrets here"
+globs = ["!.env.dev"]

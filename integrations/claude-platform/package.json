@@ -1,0 +1,16 @@
+{
+  "name": "@seshi/integration-claude-platform",
+  "private": true,
+  "description": "Claude Platform: the anthropic.* span attributes the OTLP receiver reads from Claude Console destinations (F4).",
+  "type": "module",
+  "exports": {
+    ".": {
+      "bun": "./src/index.ts"
+    }
+  },
+  "dependencies": {
+    "@seshi/formats": "workspace:*",
+    "@seshi/kit": "workspace:*",
+    "@seshi/model": "workspace:*"
+  }
+}

@@ -1,0 +1,38 @@
+[
+  { "role": "meta", "source": "claude-code", "git_branch": "feat/ABC-1234-x7Kq9aB3xY7pQ9zK2mN8" },
+  {
+    "role": "user",
+    "content": "deploy with AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY00 and the db at postgres://admin:s3cr3t@db.internal:5432/app",
+    "timestamp": "2026-11-14T09:00:00Z"
+  },
+  {
+    "role": "assistant",
+    "content": null,
+    "tool_calls": [
+      { "id": "toolu_01AbCdEfGhJkLmNpQrStUvWx", "name": "Read", "args": "{\"file_path\":\"/repo/.env\"}" }
+    ],
+    "timestamp": "2026-11-14T09:00:01Z"
+  },
+  {
+    "role": "tool",
+    "tool_call_id": "toolu_01AbCdEfGhJkLmNpQrStUvWx",
+    "content": "STRIPE_KEY=plainvalue\nDB_PASSWORD=hunter2",
+    "timestamp": "2026-11-14T09:00:02Z"
+  },
+  {
+    "role": "assistant",
+    "content": null,
+    "tool_calls": [
+      { "id": "call_gh", "name": "Bash", "args": "{\"command\":\"gh auth token\"}" },
+      { "id": "call_curl", "name": "Bash", "args": "{\"command\":\"curl -H 'Authorization: Bearer abc.def-ghi_jkl~mno123456' https://api.example.com\"}" }
+    ],
+    "timestamp": "2026-11-14T09:00:03Z"
+  },
+  { "role": "tool", "tool_call_id": "call_gh", "content": "gho_notreallyatokenbutwithheldanyway", "timestamp": "2026-11-14T09:00:04Z" },
+  { "role": "tool", "tool_call_id": "call_curl", "content": "{\"ok\": true, \"token\": \"eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abc123def456ghi\"}", "timestamp": "2026-11-14T09:00:05Z" },
+  {
+    "role": "assistant",
+    "content": "Done. The key AKIAIOSFODNN7EXAMPLE is now rotated; the commit is d3b07384d113edec49eaa6238ad5ff00d3b07384.",
+    "timestamp": "2026-11-14T09:00:06Z"
+  }
+]

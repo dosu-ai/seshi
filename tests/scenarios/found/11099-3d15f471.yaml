@@ -1,0 +1,19 @@
+# Found by the scenario explorer (tests/tooling/scenario/explore.ts); see tests/scenarios/README.md.
+# seed: 11099 (bun run scenarios:explore --seed 11099 --runs 1 --max-steps 25)
+# original length: 26 steps; shrunk to 10 in 189 runs
+# failure:
+#   step 10 (settle max=40): once quiet, the server does not match the laptop
+#     claude-code:main: never stored from here, but the server holds main
+name: found by seed 11099
+description: "A generated scenario (seed 11099) shrunk from 26 to 10 steps; the header says how it failed."
+steps:
+  - turns: { session: main, count: 2 }
+  - pass
+  - capture: pause 2h
+  - move-transcript: { session: main, to: code/other }
+  - turns: { session: main, count: 1 }
+  - pass
+  - pass
+  - turns: { session: main, count: 2, mark: m1 }
+  - subagent: { parent: main, id: x, turns: 1 }
+  - settle

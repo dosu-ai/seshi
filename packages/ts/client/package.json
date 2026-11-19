@@ -1,0 +1,14 @@
+{
+  "name": "@seshi/client",
+  "private": true,
+  "description": "The typed HTTP client for a seshi server. Depends only on @seshi/model.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "bun": "./src/index.ts"
+    }
+  },
+  "dependencies": {
+    "@seshi/model": "workspace:*"
+  }
+}

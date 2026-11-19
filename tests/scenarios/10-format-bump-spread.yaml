@@ -1,0 +1,43 @@
+# Guards 26 (X4.9): one format bump makes every session stale at once. Each rebuild waits a
+# random time within a day (`not_before`), new turns still go as chunks meanwhile, and a pass
+# sends at most two rebuilds.
+name: a format bump spreads the rebuilds
+description: >
+  Three sessions are stored, then a format bump makes them stale. The stale check marks each
+  with a wait; nothing is rebuilt before its time, a new turn goes as a chunk meanwhile, and
+  once due the rebuilds go two in one pass and one in the next.
+guards: "26: stale rebuilds wait for not_before, at most two per pass"
+steps:
+  - turns: { session: a, count: 2 }
+  - turns: { session: b, count: 2 }
+  - turns: { session: c, count: 2 }
+  - pass
+  - expect:
+      pass: { uploaded: 3 }
+  - format-bump: claude-code
+  - clock: +2h
+  - pass
+  - expect:
+      pass: { uploaded: 0 }
+      sessions:
+        a: { rebuild: waiting }
+        b: { rebuild: waiting }
+        c: { rebuild: waiting }
+  - turns: { session: a, count: 1 }
+  - pass
+  - expect:
+      pass: { uploaded: 1 }
+      sessions:
+        a: { rebuild: waiting, traces: 2 }
+  - clock: +25h
+  - pass
+  - expect:
+      pass: { uploaded: 2 }
+  - pass
+  - expect:
+      pass: { uploaded: 1 }
+      sessions:
+        a: { rebuild: none, traces: 1, matches-transcript: true }
+        b: { rebuild: none, traces: 1 }
+        c: { rebuild: none, traces: 1 }
+  - settle

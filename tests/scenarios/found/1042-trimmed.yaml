@@ -1,0 +1,22 @@
+# Found by the scenario explorer (seeds 1042 and 1337, 22 and 24 steps, trimmed by hand): a
+# chunk's change entry lands but its write answers as failed; the transcript grows before the
+# retry, which publishes another trace, so the first entry is never applied. checkStore warns
+# `change_not_applied` for good, by design (19, X6.4 decision 7), and the quiet check allows it
+# once such a store fault fired.
+name: a change entry whose write failed, never applied
+description: >
+  The store fails a chunk's change entry after it landed; the transcript grows and the retry
+  publishes a different trace. The leftover entry is a warning, never an error, and quiet.
+steps:
+  - turns: { session: main, count: 2 }
+  - pass
+  - fault: { store: put, key: "owners/*/changes/*", after: true }
+  - turns: { session: main, count: 1 }
+  - pass
+  - turns: { session: main, count: 1 }
+  - clock: +1m
+  - settle
+  - expect:
+      sessions:
+        main: { matches-transcript: true, sent-all: true }
+      store-check: { warn: [change_not_applied] }

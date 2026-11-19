@@ -1,0 +1,64 @@
+{
+  "name": "seshi-cursor",
+  "displayName": "seshi Session Capture",
+  "description": "Shows in Cursor's status bar whether seshi captures the chat you have open, and turns it off or on with a click.",
+  "version": "0.9.0",
+  "private": true,
+  "publisher": "dosu",
+  "license": "MIT",
+  "homepage": "https://github.com/dosu-ai/sessiondb",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dosu-ai/sessiondb"
+  },
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "cursor",
+    "seshi",
+    "session capture",
+    "agents"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "seshi.toggle",
+        "title": "seshi: Turn Session Capture off or on for this chat"
+      },
+      {
+        "command": "seshi.chooseChat",
+        "title": "seshi: Choose the chat to turn off or on"
+      },
+      {
+        "command": "seshi.showStatus",
+        "title": "seshi: Show Session Capture status"
+      }
+    ],
+    "configuration": {
+      "title": "seshi",
+      "properties": {
+        "seshi.command": {
+          "type": "string",
+          "default": "",
+          "description": "The seshi program to run. Empty: the one seshi capture install wrote into ~/.cursor/hooks.json, else seshi on the PATH."
+        },
+        "seshi.useCursorInternals": {
+          "type": "boolean",
+          "default": true,
+          "description": "Ask Cursor which chats are open through an undocumented command, to show the chat you are looking at. Off: the chat you last sent a message in."
+        }
+      }
+    }
+  }
+}

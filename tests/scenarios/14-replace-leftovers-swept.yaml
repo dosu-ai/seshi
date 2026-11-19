@@ -1,0 +1,49 @@
+# Guards 23 (F2.5, decision 6): a replace whose deletes of the old trace objects fail leaves
+# them in the bucket, named by nothing. Within the hour they are young (no finding); past it
+# checkStore warns `orphan_trace`, and the sweep deletes them, never a named object.
+name: a replace leaves old objects; the sweep removes them
+description: >
+  A rule change and a moved transcript make the uploader replace a two-trace session. The store
+  fails the deletes of the two old trace objects, so they stay. Two hours later checkStore
+  warns about them; the sweep deletes them and keeps the session's own trace.
+guards: "23: leftovers of a replace are swept after an hour; checkStore stays clean"
+steps:
+  - turns: { session: main, count: 2 }
+  - pass
+  - turns: { session: main, count: 1 }
+  - pass
+  - expect:
+      sessions:
+        main: { traces: 2 }
+  - rules:
+      add: [{ id: typed-constant, pattern: "typed constant" }]
+  - move-transcript: { session: main, to: code/moved, hook: none }
+  - turns: { session: main, count: 1 }
+  # The replace lands (entry, pointer), then deleting the first old object fails: the server
+  # answers 500 although the session is replaced, and the second old object is never tried.
+  - fault: { store: delete, key: "owners/*/sessions/*/trace.*.json.gz" }
+  - pass
+  - expect:
+      pass: { uploaded: 0, failed: 1 }
+      sessions:
+        main: { server: present, traces: 1, records: 21 }
+  # The retry finds the session already as this log makes it: nothing is written again.
+  - clock: +1m
+  - pass
+  - expect:
+      pass: { uploaded: 1, failed: 0 }
+      sessions:
+        main: { server: present, traces: 1, matches-transcript: true, sent-all: true }
+  - clock: +30m
+  - sweep
+  - expect:
+      sessions:
+        main: { server: present, traces: 1 }
+  - clock: +2h
+  - expect:
+      store-check: { warn: [orphan_trace] }
+  - sweep
+  - settle
+  - expect:
+      sessions:
+        main: { server: present, traces: 1, matches-transcript: true, doctor: ok }

@@ -1,0 +1,17 @@
+# Found by the scenario explorer (tests/tooling/scenario/explore.ts); see tests/scenarios/README.md.
+# seed: 21278 (bun run scenarios:explore --seed 21278 --runs 1 --max-steps 25)
+# original length: 23 steps; shrunk to 7 in 76 runs
+# failure:
+#   step 7 (settle max=40): once quiet, seshi doctor fails a check
+#     main: prefix: the transcript's records hash to d59cde4b2c2d; the server's prefix is f116fc78fd57
+name: found by seed 21278
+description: "A generated scenario (seed 21278) shrunk from 23 to 7 steps; the header says how it failed."
+setup: { review: true }
+steps:
+  - review: [drop]
+  - turns: { session: main, count: 2 }
+  - pass
+  - compact: { session: main }
+  - rules: { add: [{ id: r1, pattern: typed constant }] }
+  - backfill
+  - settle

@@ -1,0 +1,38 @@
+# Guards 20 × 21 ("Meeting 20"): a replace after a rule change leaves out the records review
+# dropped from the session's first envelope (`dropped_prefix`). The replace path used to
+# redact, review and write the whole log, the dropped records included.
+name: a stub, then a rule change that forces a replace
+description: >
+  Review drops the first envelope (a stub), later turns are stored, then the org adds a rule
+  that changes what is stored and the transcript moves, so the whole log goes again, conflicts,
+  and is sent with replace. The replace skips the dropped part: it is never stored and never
+  sent to review again.
+guards: "20 × 21: a replace skips the dropped prefix and never re-reviews it"
+setup:
+  review: true
+steps:
+  - review: [drop]
+  - turns: { session: main, count: 2, mark: dropped-part }
+  - pass
+  - turns: { session: main, count: 2, mark: kept-part }
+  - pass
+  - expect:
+      sessions:
+        main: { server: present, traces: 1 }
+  # A rule that matches every closing message: the stored records no longer hash the same.
+  - rules:
+      add: [{ id: typed-constant, pattern: "typed constant" }]
+  # A moved transcript goes whole once it has something new to send.
+  - move-transcript: { session: main, to: code/renamed, hook: none }
+  - turns: { session: main, count: 1, mark: after-the-move }
+  - pass
+  - expect:
+      pass: { uploaded: 1, failed: 0 }
+      sessions:
+        main: { server: present, traces: 1, matches-transcript: true }
+      bucket:
+        has: [kept-part, "[redacted:typed-constant]"]
+        lacks: [dropped-part]
+      reviewed:
+        - { text: dropped-part, times: 1 }
+  - settle

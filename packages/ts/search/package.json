@@ -1,0 +1,20 @@
+{
+  "name": "@seshi/search",
+  "private": true,
+  "description": "Layer 3: The search indexer and query layer (F10).",
+  "type": "module",
+  "exports": {
+    ".": {
+      "bun": "./src/index.ts"
+    }
+  },
+  "dependencies": {
+    "@seshi/auth": "workspace:*",
+    "@seshi/model": "workspace:*",
+    "@seshi/store": "workspace:*"
+  },
+  "devDependencies": {
+    "@seshi/formats": "workspace:*",
+    "@seshi/pipeline": "workspace:*"
+  }
+}

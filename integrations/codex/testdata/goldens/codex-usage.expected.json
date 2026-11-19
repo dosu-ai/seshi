@@ -1,0 +1,94 @@
+{
+  "rejected": false,
+  "content_hash": "da2a249bc304b3691931c539c1b96fbd67510b5b831f787072f4d9906e27ad5e",
+  "source": "codex",
+  "started_at": "2026-10-03T10:00:01.000Z",
+  "ended_at": "2026-10-03T10:01:02.000Z",
+  "metadata": {
+    "cwd": "/repo/app",
+    "model": "gpt-9-codex"
+  },
+  "events": [
+    {
+      "index": 0,
+      "role": "user",
+      "text": "List the files",
+      "timestamp": "2026-10-03T10:00:01.000Z"
+    },
+    {
+      "index": 1,
+      "role": "reasoning",
+      "text": "Run ls.",
+      "timestamp": "2026-10-03T10:00:02.000Z"
+    },
+    {
+      "index": 2,
+      "role": "tool_call",
+      "text": "shell {\"command\":[\"ls\"]}",
+      "timestamp": "2026-10-03T10:00:02.500Z",
+      "tool_name": "shell",
+      "tool_call_id": "call_1"
+    },
+    {
+      "index": 3,
+      "role": "tool_result",
+      "text": "a.txt",
+      "timestamp": "2026-10-03T10:00:03.000Z",
+      "tool_call_id": "call_1",
+      "tool_name": "shell"
+    },
+    {
+      "index": 4,
+      "role": "assistant",
+      "text": "One file: a.txt",
+      "timestamp": "2026-10-03T10:00:04.000Z"
+    },
+    {
+      "index": 5,
+      "role": "user",
+      "text": "Thanks",
+      "timestamp": "2026-10-03T10:01:01.000Z"
+    },
+    {
+      "index": 6,
+      "role": "assistant",
+      "text": "You're welcome.",
+      "timestamp": "2026-10-03T10:01:02.000Z"
+    }
+  ],
+  "llm_calls": [
+    {
+      "id": "call@845",
+      "model": "gpt-9-codex",
+      "usage": {
+        "input_tokens": 1200,
+        "output_tokens": 40,
+        "cache_read_input_tokens": 800,
+        "reasoning_tokens": 12,
+        "total_tokens": 1240
+      }
+    },
+    {
+      "id": "call@1562",
+      "model": "gpt-9-codex",
+      "usage": {
+        "input_tokens": 1300,
+        "output_tokens": 10,
+        "cache_read_input_tokens": 1100,
+        "reasoning_tokens": 0,
+        "total_tokens": 1310
+      }
+    },
+    {
+      "id": "call@2415",
+      "model": "gpt-9-codex-mini",
+      "usage": {
+        "input_tokens": 1500,
+        "output_tokens": 5,
+        "cache_read_input_tokens": 500,
+        "reasoning_tokens": 0,
+        "total_tokens": 1505
+      }
+    }
+  ]
+}

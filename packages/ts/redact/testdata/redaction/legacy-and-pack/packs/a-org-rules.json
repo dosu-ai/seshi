@@ -1,0 +1,7 @@
+{
+  "patterns": ["internal-key: (?P<secret>\\S+)", "PRJ-[0-9]{5}"],
+  "sensitive_files": ["secrets/**", "!secrets/README.md"],
+  "secret_commands": ["vaultctl\\s+read\\b"],
+  "excluded": ["acme/payments"],
+  "fetched_at": "2026-11-11T00:00:00Z"
+}

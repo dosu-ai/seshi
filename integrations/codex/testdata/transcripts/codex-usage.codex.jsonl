@@ -1,0 +1,14 @@
+{"timestamp":"2026-10-03T10:00:00.000Z","type":"session_meta","payload":{"id":"01a0ff74-0000-7ad0-83ee-000000000001","timestamp":"2026-10-03T10:00:00.000Z","cwd":"/repo/app"}}
+{"timestamp":"2026-10-03T10:00:00.100Z","type":"turn_context","payload":{"cwd":"/repo/app","model":"gpt-9-codex"}}
+{"timestamp":"2026-10-03T10:00:01.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"List the files"}]}}
+{"timestamp":"2026-10-03T10:00:01.500Z","type":"event_msg","payload":{"type":"token_count","info":null}}
+{"timestamp":"2026-10-03T10:00:02.000Z","type":"event_msg","payload":{"type":"agent_reasoning","text":"Run ls."}}
+{"timestamp":"2026-10-03T10:00:02.500Z","type":"response_item","payload":{"type":"function_call","name":"shell","arguments":"{\"command\":[\"ls\"]}","call_id":"call_1"}}
+{"timestamp":"2026-10-03T10:00:02.600Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1200,"cached_input_tokens":800,"output_tokens":40,"reasoning_output_tokens":12,"total_tokens":1240},"last_token_usage":{"input_tokens":1200,"cached_input_tokens":800,"output_tokens":40,"reasoning_output_tokens":12,"total_tokens":1240},"model_context_window":272000}}}
+{"timestamp":"2026-10-03T10:00:03.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_1","output":"a.txt"}}
+{"timestamp":"2026-10-03T10:00:04.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"One file: a.txt"}]}}
+{"timestamp":"2026-10-03T10:00:04.100Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":2500,"cached_input_tokens":1900,"output_tokens":50,"reasoning_output_tokens":12,"total_tokens":2550},"last_token_usage":{"input_tokens":1300,"cached_input_tokens":1100,"output_tokens":10,"reasoning_output_tokens":0,"total_tokens":1310},"model_context_window":272000}}}
+{"timestamp":"2026-10-03T10:01:00.000Z","type":"turn_context","payload":{"cwd":"/repo/app","model":"gpt-9-codex-mini"}}
+{"timestamp":"2026-10-03T10:01:01.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Thanks"}]}}
+{"timestamp":"2026-10-03T10:01:02.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"You're welcome."}]}}
+{"timestamp":"2026-10-03T10:01:02.100Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":4000,"cached_input_tokens":2400,"output_tokens":55,"reasoning_output_tokens":12,"total_tokens":4055},"last_token_usage":{"input_tokens":1500,"cached_input_tokens":500,"output_tokens":5,"reasoning_output_tokens":0,"total_tokens":1505},"model_context_window":272000}}}

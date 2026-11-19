@@ -1,0 +1,18 @@
+# Found by the scenario explorer (tests/tooling/scenario/explore.ts); see tests/scenarios/README.md.
+# seed: 23825 (bun run scenarios:explore --seed 23825 --runs 1 --max-steps 25)
+# original length: 24 steps; shrunk to 8 in 184 runs
+# failure:
+#   step 8 (settle max=40): once quiet, checkStore is not clean
+#     warn chain_gap: records 11–20 are in no trace (normalized says 21), and no drop in applied explains it (owners/alice@acme.com/sessions/8953f8500d62223eeb070edfd3dd34d13ac0a023369df67a2fd371d6b69e3cb3/metadata.json)
+name: found by seed 23825
+description: "A generated scenario (seed 23825) shrunk from 24 to 8 steps; the header says how it failed."
+setup: { review: true }
+steps:
+  - turns: { session: main, count: 2 }
+  - pass
+  - turns: { session: main, count: 2 }
+  - review: [drop]
+  - rules: { add: [{ id: r1, pattern: typed constant }] }
+  - pass
+  - backfill
+  - settle

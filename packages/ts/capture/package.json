@@ -1,0 +1,20 @@
+{
+  "name": "@seshi/capture",
+  "private": true,
+  "description": "Layer 5: Spool, uploader, sweep runner, scope rules, status-line state (F9; branch 14). Uses ts/client, ts/config, ts/redact, ts/kit, never ts/instance.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "bun": "./src/index.ts"
+    },
+    "./fast": {
+      "bun": "./src/fast.ts"
+    }
+  },
+  "dependencies": {
+    "@seshi/client": "workspace:*",
+    "@seshi/config": "workspace:*",
+    "@seshi/kit": "workspace:*",
+    "@seshi/model": "workspace:*"
+  }
+}

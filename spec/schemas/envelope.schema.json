@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "envelope.schema.json",
+  "title": "Envelope",
+  "description": "`seshi/envelope/1`: the only input to the pipeline (X4.1). Every source builds one: the HTTP routes from requests, integrations through the submit() context. It carries the payload, which session it is, who sent it and whom it belongs to, and enough provenance to fetch it again. Never stored: the pipeline normalizes, redacts, filters and reviews it in memory and writes the trace (X4.3).",
+  "type": "object",
+  "properties": {
+    "schema": { "const": "seshi/envelope/1" },
+    "source": { "$ref": "common.schema.json#/$defs/SourceKind" },
+    "source_id": { "$ref": "common.schema.json#/$defs/SourceId" },
+    "format": {
+      "description": "The format adapter for the payload (`claude-code`, `codex`, `otlp-genai`, …).",
+      "type": "string",
+      "minLength": 1
+    },
+    "session_key": {
+      "description": "The session's id as the source names it (the agent's session id; `anthropic.session.id` for OTLP).",
+      "type": "string",
+      "minLength": 1
+    },
+    "payload": { "$ref": "#/$defs/Payload" },
+    "caller": { "$ref": "#/$defs/Caller" },
+    "claims": { "$ref": "common.schema.json#/$defs/Claims" },
+    "owner": {
+      "description": "The owner the session belongs to, resolved from the caller (X5.4, X5.8).",
+      "type": "string",
+      "minLength": 1
+    },
+    "owner_basis": { "$ref": "common.schema.json#/$defs/OwnerBasis" },
+    "idempotency_key": {
+      "description": "Identifies the envelope across resends (X4.7): a resend with the same key gets the same answer and is processed once. Session, byte offset and a digest of the text for a hook or upload; bucket, key and ETag for S3; trace and span ids for OTLP and Datadog; agent and run id for Cursor Cloud.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048
+    },
+    "provenance": { "$ref": "common.schema.json#/$defs/SourceLocation" },
+    "received_at": { "$ref": "common.schema.json#/$defs/Timestamp" },
+    "visibility": {
+      "description": "The visibility the request asked for, if any (X5.10).",
+      "$ref": "common.schema.json#/$defs/Visibility"
+    },
+    "replace": {
+      "description": "A whole upload that may replace the session rather than extend it (X4.6). Only the session's original writer or an admin may set it.",
+      "type": "boolean"
+    },
+    "rebuild": {
+      "description": "A whole upload that rebuilds the session from the whole log and reviews it again, even when the log only extends what is stored (X4.9): the session is replaced as with `replace`, which it needs the same permission as. The uploader sends it for sessions the server marks stale, and `seshi capture resend` by hand.",
+      "type": "boolean"
+    },
+    "shipped": {
+      "description": "What the uploader says shipped of the session before, from an earlier answer. The server's own state decides whether a whole upload extends the session; this is used only for a session that has none.",
+      "$ref": "#/$defs/ShippedPrefix"
+    },
+    "project": { "type": "string" },
+    "branch": { "type": "string" },
+    "parent_session_id": { "type": "string" },
+    "fork_of": { "type": "string" },
+    "retract_hash": {
+      "description": "The hash of the uploader's retraction secret (F9.7), sent with a session's first upload.",
+      "$ref": "common.schema.json#/$defs/Sha256"
+    }
+  },
+  "required": [
+    "schema",
+    "source",
+    "source_id",
+    "format",
+    "session_key",
+    "payload",
+    "caller",
+    "owner",
+    "owner_basis",
+    "idempotency_key",
+    "received_at"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "Payload": {
+      "description": "An append-only log (X4.2), whole or a chunk from `offset`, or a batch of spans for the span assembler.",
+      "oneOf": [{ "$ref": "#/$defs/LogPayload" }, { "$ref": "#/$defs/SpanPayload" }]
+    },
+    "LogPayload": {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "log" },
+        "encoding": { "$ref": "common.schema.json#/$defs/LogEncoding" },
+        "text": { "description": "The log's text from `offset`.", "type": "string" },
+        "offset": {
+          "description": "The byte offset of `text` in the session's log: 0 for the whole log.",
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": ["kind", "encoding", "text", "offset"],
+      "additionalProperties": false
+    },
+    "SpanPayload": {
+      "description": "A batch of spans for the span assembler (X4.2, F4.4): the call returns once they are in the span store, and the assembler publishes the session later.",
+      "type": "object",
+      "properties": {
+        "kind": { "const": "spans" },
+        "spans": {
+          "description": "OTLP spans in their JSON mapping, as received or as a poller built them.",
+          "type": "array",
+          "items": { "type": "object" }
+        },
+        "resource": {
+          "description": "The batch's OTLP resource attributes (`service.name`, …) in their JSON mapping, when the spans came with one.",
+          "type": "array",
+          "items": { "type": "object" }
+        }
+      },
+      "required": ["kind", "spans"],
+      "additionalProperties": false
+    },
+    "ShippedPrefix": {
+      "type": "object",
+      "properties": {
+        "records": {
+          "description": "How many normalized records shipped, from the start.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "prefix_sha256": { "$ref": "common.schema.json#/$defs/Sha256" }
+      },
+      "required": ["records", "prefix_sha256"],
+      "additionalProperties": false
+    },
+    "Caller": {
+      "description": "The verified principal that sent the envelope and the credential it used; pollers act as their source's service account (X5.4).",
+      "type": "object",
+      "properties": {
+        "kind": { "$ref": "common.schema.json#/$defs/CallerKind" },
+        "principal": { "type": "string", "minLength": 1 },
+        "credential_id": { "type": "string", "minLength": 1 }
+      },
+      "required": ["kind", "principal"],
+      "additionalProperties": false
+    }
+  }
+}

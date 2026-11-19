@@ -1,0 +1,29 @@
+# Guards the uploader's 409 conflict recovery after a lost answer (33, found by the scenario
+# explorer, seed 1169, in local mode with a pointer write that landed but failed): the first
+# upload is stored but its answer never arrives, so the laptop never marks the session stored;
+# the transcript is then compacted shorter, the retry is a whole log that no longer extends what
+# is stored, and the server answers 409 conflict. The uploader replaced only sessions it knew it
+# had stored, so it refused this one for good ("conflict") and the doctor failed `queue`. It now
+# replaces any session it sent with its secret; the server checks the secret.
+name: a lost answer, then a rewrite
+description: >
+  The server stores a session's first upload but the answer is lost. The transcript is then
+  compacted shorter; the retry conflicts and goes again as a replace, as the session's own
+  writer, and the server ends up holding the compacted transcript.
+guards: "33: a 409 conflict after a lost answer is replaced, not refused for good"
+steps:
+  - turns: { session: main, count: 2 }
+  - fault: { http: POST /v1/sessions, drop-response: true }
+  - pass
+  - expect:
+      pass: { failed: 1 }
+      sessions:
+        main: { server: present, records: 11 }
+  - compact: { session: main, mode: shrink, keep: 1 }
+  - clock: +1m
+  - pass
+  - expect:
+      pass: { uploaded: 1, failed: 0 }
+      sessions:
+        main: { last-status: stored, matches-transcript: true, sent-all: true, doctor: ok }
+  - settle

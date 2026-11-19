@@ -1,0 +1,35 @@
+# Guards 27 #13: subagents are judged with their parent's folders. A subagent spawned after
+# its parent visited a repo that turns capture off must not be captured, even though the
+# subagent itself runs in a folder that captures.
+name: a subagent after the parent visited an excluded repo
+description: >
+  The main session runs in code/app, visits code/secret (whose committed config turns capture
+  off) and comes back. A subagent it spawns from code/app is not captured, and nothing written
+  in or after the excluded repo is stored.
+guards: "27 #13: a subagent is judged by its parent's folders"
+setup:
+  repos:
+    code/app: {}
+    code/secret: { config: "capture = false\n" }
+steps:
+  - turns: { session: main, count: 2, in: code/app }
+  - pass
+  - expect:
+      sessions:
+        main: { server: present }
+  - turns: { session: main, count: 1, in: code/secret, mark: in-the-secret-repo }
+  - turns: { session: main, count: 1, in: code/app, mark: back-in-app }
+  - subagent: { parent: main, id: helper, turns: 2, in: code/app, mark: from-the-subagent }
+  - pass
+  - expect:
+      sessions:
+        agent-helper: { server: absent }
+      bucket:
+        lacks: [in-the-secret-repo, from-the-subagent]
+  - subagent: { parent: main, id: helper, turns: 1, mark: subagent-later }
+  - settle
+  - expect:
+      sessions:
+        agent-helper: { server: absent }
+      bucket:
+        lacks: [in-the-secret-repo, from-the-subagent, subagent-later]

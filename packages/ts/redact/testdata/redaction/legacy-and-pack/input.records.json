@@ -1,0 +1,23 @@
+[
+  { "role": "meta", "source": "claude-code" },
+  {
+    "role": "user",
+    "content": "Ticket PRJ-00042 from jane.doe@customer.example: our internal-key: zz9-plural-z-alpha leaked",
+    "timestamp": "2026-11-14T11:00:00Z"
+  },
+  {
+    "role": "assistant",
+    "content": null,
+    "tool_calls": [
+      { "id": "r1", "name": "Read", "args": "{\"file_path\":\"secrets/prod/db.yaml\"}" },
+      { "id": "r2", "name": "Read", "args": "{\"file_path\":\"secrets/README.md\"}" },
+      { "id": "r3", "name": "Read", "args": "{\"file_path\":\".env.dev\"}" },
+      { "id": "r4", "name": "Bash", "args": "{\"command\":\"vaultctl read db/prod\"}" }
+    ],
+    "timestamp": "2026-11-14T11:00:01Z"
+  },
+  { "role": "tool", "tool_call_id": "r1", "content": "password: correct-horse", "timestamp": "2026-11-14T11:00:02Z" },
+  { "role": "tool", "tool_call_id": "r2", "content": "How we keep secrets.", "timestamp": "2026-11-14T11:00:03Z" },
+  { "role": "tool", "tool_call_id": "r3", "content": "LOG_LEVEL=debug", "timestamp": "2026-11-14T11:00:04Z" },
+  { "role": "tool", "tool_call_id": "r4", "content": "db-pass", "timestamp": "2026-11-14T11:00:05Z" }
+]

@@ -1,0 +1,46 @@
+# Guards the uploader's 409 recovery (14, X4.6, X6.3): a moved transcript goes whole; a whole
+# log that no longer extends what is stored is a 409 conflict, resent with replace by the
+# machine that stored it; a 409 offset_mismatch with expected 0 resends from the start. Each
+# path must converge on one copy of the transcript's records.
+name: a moved transcript, or a server that answers 409
+description: >
+  After a rule change the transcript moves, so the whole log goes, conflicts, and goes again
+  with replace. Later the server answers a chunk with 409 offset_mismatch (expected 0) and a
+  whole log with 409 conflict; each time the uploader resends whole and converges.
+guards: "14 × 21: a whole resend with replace converges after a move or a 409"
+steps:
+  - turns: { session: main, count: 2 }
+  - pass
+  - turns: { session: main, count: 1 }
+  - pass
+  - expect:
+      sessions:
+        main: { traces: 2 }
+  - rules:
+      add: [{ id: typed-constant, pattern: "typed constant" }]
+  # A moved transcript goes whole once it has something new to send.
+  - move-transcript: { session: main, to: code/moved, hook: none }
+  - turns: { session: main, count: 1 }
+  - pass
+  - expect:
+      pass: { uploaded: 1, failed: 0 }
+      sessions:
+        main: { server: present, traces: 1, matches-transcript: true, sent-all: true }
+  # The server says it holds nothing at this offset: the uploader starts again from 0.
+  - turns: { session: main, count: 1 }
+  - fault: { http: POST /v1/sessions, status: 409, code: offset_mismatch, expected: 0 }
+  - pass
+  - expect:
+      pass: { failed: 0 }
+      sessions:
+        main: { server: present, matches-transcript: true, sent-all: true }
+  # A whole log answered 409 conflict: replace, as its writer.
+  - move-transcript: { session: main, to: code/moved-again, hook: none }
+  - turns: { session: main, count: 1 }
+  - fault: { http: POST /v1/sessions, status: 409, code: conflict }
+  - pass
+  - expect:
+      pass: { failed: 0 }
+      sessions:
+        main: { server: present, matches-transcript: true, sent-all: true }
+  - settle

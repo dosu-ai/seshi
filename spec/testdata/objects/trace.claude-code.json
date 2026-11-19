@@ -1,0 +1,121 @@
+{
+  "schema": "seshi/trace/1",
+  "content_hash": "02c00844e3840c6ba88c3e000805f52881ec34a7db8156e1d55ead27a302d8af",
+  "source": "claude-code",
+  "agent": "claude-code",
+  "session_id": "0b1c7e9a-5f2d-4b8e-9a61-3c0f5e2d7a14",
+  "started_at": "2026-09-01T00:00:00.000Z",
+  "ended_at": "2026-09-01T00:00:07.000Z",
+  "records": [
+    {
+      "role": "meta",
+      "source": "claude-code",
+      "cwd": "/repo/app",
+      "git_branch": "main",
+      "model": "claude-x"
+    },
+    {
+      "role": "user",
+      "content": "How does auth work? password: \"[redacted:credential]\"",
+      "timestamp": "2026-09-01T00:00:00.000Z"
+    },
+    {
+      "role": "assistant",
+      "content": "Token is [redacted:github-token] here.",
+      "timestamp": "2026-09-01T00:00:05.000Z",
+      "id": "msg_2",
+      "llm_call": "call_1"
+    },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "toolu_01AbCdEfGhJkLmNpQr",
+          "name": "Read",
+          "args": "{\"file_path\":\"/repo/app/auth.ts\"}"
+        }
+      ],
+      "timestamp": "2026-09-01T00:00:06.000Z",
+      "id": "msg_3",
+      "llm_call": "call_2"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_01AbCdEfGhJkLmNpQr",
+      "content": "export const KEY = 1;  \r\n",
+      "timestamp": "2026-09-01T00:00:07.000Z",
+      "duration_ms": 31
+    }
+  ],
+  "events": [
+    {
+      "index": 0,
+      "role": "user",
+      "text": "How does auth work? password: \"[redacted:credential]\"",
+      "timestamp": "2026-09-01T00:00:00.000Z"
+    },
+    {
+      "index": 1,
+      "role": "assistant",
+      "text": "Token is [redacted:github-token] here.",
+      "timestamp": "2026-09-01T00:00:05.000Z"
+    },
+    {
+      "index": 2,
+      "role": "tool_call",
+      "text": "Read {\"file_path\":\"/repo/app/auth.ts\"}",
+      "timestamp": "2026-09-01T00:00:06.000Z",
+      "tool_name": "Read",
+      "tool_call_id": "toolu_01AbCdEfGhJkLmNpQr"
+    },
+    {
+      "index": 3,
+      "role": "tool_result",
+      "text": "export const KEY = 1;\n",
+      "timestamp": "2026-09-01T00:00:07.000Z",
+      "tool_call_id": "toolu_01AbCdEfGhJkLmNpQr",
+      "tool_name": "Read"
+    }
+  ],
+  "metadata": {
+    "cwd": "/repo/app",
+    "git_branch": "main",
+    "model": "claude-x",
+    "normalizer": {
+      "name": "@dosu/sessiondb",
+      "version": "0.9.0+trajectory.0.3.0"
+    }
+  },
+  "project": "github.com/acme/widget",
+  "branch": "main",
+  "llm_calls": [
+    {
+      "id": "call_1",
+      "model": "claude-sonnet-4-5",
+      "provider": "anthropic",
+      "usage": {
+        "input_tokens": 1200,
+        "output_tokens": 80,
+        "cache_read_input_tokens": 9000
+      },
+      "stop_reason": "tool_use"
+    },
+    {
+      "id": "call_2",
+      "model": "claude-sonnet-4-5",
+      "provider": "anthropic",
+      "usage": {
+        "input_tokens": 1201,
+        "output_tokens": 80,
+        "cache_read_input_tokens": 9000
+      },
+      "stop_reason": "end_turn"
+    }
+  ],
+  "provenance": {
+    "source": "hook",
+    "source_id": "upload",
+    "format": "claude-code"
+  }
+}

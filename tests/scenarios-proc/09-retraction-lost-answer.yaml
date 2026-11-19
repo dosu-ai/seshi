@@ -1,0 +1,41 @@
+# Guards F9.7's retraction over real TCP and a process death: the server tombstones the session
+# but the answer is lost, then the retrying uploader is SIGKILLed with its DELETE fully sent. The
+# next uploader asks again; the server answers that the session is already gone (410), which
+# the laptop takes as done. The retraction lands once, the session stays a tombstone, and its
+# text never comes back.
+name: a retraction whose answer is lost, then whose uploader dies
+description: >
+  A session is turned off. Its retraction is committed by the server but the answer dropped;
+  the retry's whole DELETE reaches the server and the uploader is SIGKILLed before the answer.
+  The next uploader takes the stale lock over, retracts again, and is told the session is gone.
+guards: "F9.7: a retraction is idempotent across a lost answer and a dead uploader"
+setup: { mode: process }
+steps:
+  - turns: { session: main, count: 2, mark: retracted-text }
+  - pass
+  - capture: off --session main
+  - fault: { http: "DELETE /v1/sessions/*", drop-response: true }
+  - pass
+  - expect:
+      pass: { retracted: 0, failed: 1, retrying: 1 }
+      sessions:
+        main: { server: redacted, retract: pending }
+      bucket: { lacks: [retracted-text] }
+  - wait: 6s
+  - fault: { http: "DELETE /v1/sessions/*", kill-client: all }
+  - pass
+  - expect:
+      sessions:
+        main: { server: redacted, retract: pending }
+      uploader-lock: stale
+  - pass
+  - expect:
+      pass: { retracted: 1, failed: 0 }
+      sessions:
+        main: { server: redacted, retract: done, toggle: off }
+      log: ["already removed on the server"]
+      requests: { "DELETE /v1/sessions/*": 3 }
+  - turns: { session: main, count: 1, mark: after-retraction }
+  - settle
+  - expect:
+      bucket: { lacks: [retracted-text, after-retraction] }

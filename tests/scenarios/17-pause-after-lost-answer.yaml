@@ -1,0 +1,42 @@
+# Guards 24 (F9.5) meeting the offset protocol (X6.3): a pause stops a session at what the
+# uploader knows it uploaded, but a piece whose answer was lost may already be on the server.
+# Nothing more may go while it is stopped; turned on again, the next chunk learns the server's
+# offset from a 409 and goes on from there, with no record lost or stored twice.
+name: a pause after a lost answer, then capture on
+description: >
+  A chunk commits on the server but its answer is lost; then capture pauses, stopping the
+  session at the offset before that chunk. Nothing written during the pause is sent. Turned on
+  again, the uploader finds where the server is and sends the rest.
+guards: "24 × X6.3: a stop behind what the server holds; capture on converges"
+steps:
+  - turns: { session: main, count: 2 }
+  - pass
+  - turns: { session: main, count: 1, mark: in-flight }
+  - fault: { http: POST /v1/sessions, drop-response: true }
+  - pass
+  - capture: pause 1h
+  - turns: { session: main, count: 1, mark: written-while-paused }
+  - clock: +5m
+  - pass
+  - expect:
+      pass: { uploaded: 0 }
+      sessions:
+        main: { frozen: true, traces: 2 }
+      bucket:
+        has: [in-flight]
+        lacks: [written-while-paused]
+  - capture: resume
+  - pass
+  - expect:
+      pass: { uploaded: 0 }
+      bucket:
+        lacks: [written-while-paused]
+  - capture: on --session main
+  - turns: { session: main, count: 1, mark: after }
+  - pass
+  - expect:
+      sessions:
+        main: { frozen: false, traces: 3, matches-transcript: true, sent-all: true }
+      bucket:
+        has: [written-while-paused, after]
+  - settle

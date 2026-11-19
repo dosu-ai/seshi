@@ -1,0 +1,58 @@
+{
+  "name": "seshi",
+  "private": true,
+  "description": "Layer 6: the one seshi binary: entry point, command router, integration registry.",
+  "type": "module",
+  "bin": {
+    "seshi": "./src/main.ts"
+  },
+  "exports": {
+    "./integrations": {
+      "bun": "./src/integrations.ts"
+    },
+    "./connect": {
+      "bun": "./src/connect.ts"
+    },
+    "./main": {
+      "bun": "./src/main.ts"
+    },
+    "./account": {
+      "bun": "./src/account/index.ts"
+    },
+    "./explore": {
+      "bun": "./src/commands/explore.ts"
+    },
+    "./capture-runtime": {
+      "bun": "./src/capture-runtime.ts"
+    }
+  },
+  "scripts": {
+    "start": "bun run src/main.ts serve",
+    "dev": "bun --watch run src/main.ts serve"
+  },
+  "dependencies": {
+    "@seshi/api": "workspace:*",
+    "@seshi/auth": "workspace:*",
+    "@seshi/capture": "workspace:*",
+    "@seshi/client": "workspace:*",
+    "@seshi/config": "workspace:*",
+    "@seshi/formats": "workspace:*",
+    "@seshi/instance": "workspace:*",
+    "@seshi/integration-claude-code": "workspace:*",
+    "@seshi/integration-claude-platform": "workspace:*",
+    "@seshi/integration-codex": "workspace:*",
+    "@seshi/integration-cursor": "workspace:*",
+    "@seshi/integration-datadog-trajectory": "workspace:*",
+    "@seshi/integration-gemini-cli": "workspace:*",
+    "@seshi/integration-opencode": "workspace:*",
+    "@seshi/integration-pi": "workspace:*",
+    "@seshi/kit": "workspace:*",
+    "@seshi/model": "workspace:*",
+    "@seshi/pipeline": "workspace:*",
+    "@seshi/redact": "workspace:*",
+    "@seshi/review": "workspace:*",
+    "@seshi/search": "workspace:*",
+    "@seshi/sources": "workspace:*",
+    "@seshi/store": "workspace:*"
+  }
+}

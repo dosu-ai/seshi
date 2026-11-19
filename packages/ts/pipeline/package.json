@@ -1,0 +1,17 @@
+{
+  "name": "@seshi/pipeline",
+  "private": true,
+  "description": "Layer 2: the ingest pipeline (envelope, normalize, regex redaction, session filter, model review, write) the reads over a store, and the session API over a pipeline.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "bun": "./src/index.ts"
+    }
+  },
+  "dependencies": {
+    "@seshi/formats": "workspace:*",
+    "@seshi/model": "workspace:*",
+    "@seshi/redact": "workspace:*",
+    "@seshi/store": "workspace:*"
+  }
+}

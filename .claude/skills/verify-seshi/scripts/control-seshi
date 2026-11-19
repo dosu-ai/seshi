@@ -1,0 +1,281 @@
+#!/usr/bin/env bash
+# control-seshi: drive a real, isolated seshi for verification.
+#
+# Every run lives in its own folder (a throwaway HOME, config, state, agent folders and
+# file:// bucket) under $VERIFY_SESHI_ROOT (default $TMPDIR/seshi-verify), so runs never touch
+# the real home, keychain or agents, and two runs can go side by side. Evidence goes to
+# <repo>/.verify/seshi/<run-id>/ and survives `down`.
+#
+#   control-seshi up [--server] [--binary]      start a run; prints VERIFY_SESHI_RUN=<id>
+#   control-seshi doctor                        is this run worth driving? (read-only)
+#   control-seshi env                           print the run's environment as export lines
+#   control-seshi cli [--name <label>] -- <seshi args…>
+#                                               run seshi in the run; saves cmd/out/err/code
+#   control-seshi agent claude-code <session-id> [--turns N] [--secret]
+#                                               append turns to a transcript, fire the hooks,
+#                                               flush the uploader once
+#   control-seshi explore                       start `seshi explore`; prints its URL
+#   control-seshi stop <serve|explore>          stop one process this run started
+#   control-seshi down                          stop what the run started, delete its folder
+#
+# Every command but `up` needs VERIFY_SESHI_RUN (printed by `up`) or `--run <id>` first.
+set -euo pipefail
+
+SKILL_DIR=$(cd "$(dirname "$0")/.." && pwd)
+REPO=$(cd "$SKILL_DIR/../../.." && pwd)
+ROOT=${VERIFY_SESHI_ROOT:-${TMPDIR:-/tmp}}
+ROOT=${ROOT%/}/seshi-verify
+[[ -n ${VERIFY_SESHI_ROOT:-} ]] && ROOT=${VERIFY_SESHI_ROOT%/}
+
+die() { echo "control-seshi: $*" >&2; exit 1; }
+
+if [[ ${1:-} == --run ]]; then VERIFY_SESHI_RUN=${2:?--run needs an id}; shift 2; fi
+cmd=${1:-help}; shift || true
+
+run_dir() { echo "$ROOT/$VERIFY_SESHI_RUN"; }
+need_run() {
+  [[ -n ${VERIFY_SESHI_RUN:-} ]] || die "no run: export VERIFY_SESHI_RUN=<id> (printed by up) or pass --run <id>"
+  [[ $VERIFY_SESHI_RUN =~ ^[A-Za-z0-9._-]+$ ]] || die "bad run id: $VERIFY_SESHI_RUN"
+  RUN=$(run_dir)
+  [[ -f $RUN/.seshi-verify ]] || die "no run at $RUN (already down?)"
+  EVIDENCE="$REPO/.verify/seshi/$VERIFY_SESHI_RUN"
+  mkdir -p "$EVIDENCE"
+}
+
+# The run's environment: a throwaway home for seshi and every agent it knows.
+run_env() {
+  local r=$1
+  cat <<EOF
+export HOME="$r/home"
+export XDG_CONFIG_HOME="$r/home/.config"
+export XDG_STATE_HOME="$r/home/.local/state"
+export XDG_CACHE_HOME="$r/home/.cache"
+export CLAUDE_CONFIG_DIR="$r/home/.claude"
+export CODEX_HOME="$r/home/.codex"
+export SESHI_KEYCHAIN=false
+export SESHI_NO_UPLOADER=1
+export NO_COLOR=1
+export PATH="$r/bin:$PATH"
+EOF
+}
+
+in_run() { ( cd "$RUN/app" && eval "$(run_env "$RUN")" && "$@" ); }
+
+free_port() {
+  bun -e 'const s = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } }); console.log(s.port); s.stop(true);'
+}
+
+# A pid file holds the pid and its start time, so `down` never kills a reused pid.
+proc_start() { # pid → its start time, trimmed (ps pads it, and `read` would strip the padding)
+  local t
+  t=$(ps -o lstart= -p "$1" 2>/dev/null) || return 1
+  t=$(echo "$t" | tr -s ' ')
+  t=${t# }; t=${t% }
+  [[ -n $t ]] && echo "$t"
+}
+start_bg() { # name, logfile, command…
+  local name=$1 log=$2; shift 2
+  ( cd "$RUN/app" && eval "$(run_env "$RUN")" && exec "$@" ) >"$log" 2>&1 &
+  local pid=$!
+  echo "$pid $(proc_start "$pid")" >"$RUN/$name.pid"
+}
+alive() { # name → 0 when its process is the one this run started
+  local f="$RUN/$1.pid"
+  [[ -f $f ]] || return 1
+  local pid start now
+  read -r pid start <"$f"
+  now=$(proc_start "$pid") || return 1
+  [[ -n $now && $now == "$start" ]]
+}
+stop_bg() {
+  local f="$RUN/$1.pid"
+  [[ -f $f ]] || return 0
+  if alive "$1"; then
+    local pid; read -r pid _ <"$f"
+    kill "$pid" 2>/dev/null || true
+    for _ in $(seq 1 50); do alive "$1" || break; sleep 0.1; done
+    alive "$1" && kill -9 "$pid" 2>/dev/null || true
+    echo "stopped $1 (pid $pid)"
+  fi
+  rm -f "$f"
+}
+# A failed `up` never printed its run id, so nobody could `down` it: stop what it started, keep
+# its logs as evidence, and delete its folder.
+up_failed() {
+  local evidence="$REPO/.verify/seshi/$VERIFY_SESHI_RUN"
+  stop_bg serve >/dev/null 2>&1 || true
+  mkdir -p "$evidence" && cp -R "$RUN/logs" "$evidence/up-logs" 2>/dev/null || true
+  case $RUN in "$ROOT"/*) rm -rf -- "$RUN" ;; esac
+  echo "control-seshi: up failed; run folder removed, its logs kept in $evidence/up-logs" >&2
+}
+
+case $cmd in
+up)
+  mode=local binary=0
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --server) mode=server ;;
+      --binary) binary=1 ;;
+      *) die "up: unknown option $1" ;;
+    esac
+    shift
+  done
+  VERIFY_SESHI_RUN="$(date +%Y%m%d-%H%M%S)-$$"
+  RUN=$(run_dir)
+  mkdir -p "$RUN"/{home/.config/seshi,home/.claude/projects,bin,app,bucket,logs}
+  touch "$RUN/.seshi-verify"
+  trap up_failed EXIT
+  git -C "$RUN/app" init -q
+  if [[ $binary == 1 ]]; then
+    [[ -x $REPO/dist/seshi ]] || die "no $REPO/dist/seshi: run bun run build first"
+    ln -s "$REPO/dist/seshi" "$RUN/bin/seshi"
+  else
+    printf '#!/bin/sh\nexec bun run "%s/apps/seshi/src/main.ts" "$@"\n' "$REPO" >"$RUN/bin/seshi"
+    chmod +x "$RUN/bin/seshi"
+  fi
+  EVIDENCE="$REPO/.verify/seshi/$VERIFY_SESHI_RUN"
+  mkdir -p "$EVIDENCE"
+  port=""
+  if [[ $mode == server ]]; then
+    port=$(free_port)
+    cat >"$RUN/seshi.toml" <<EOF
+[server]
+listen = "127.0.0.1:$port"
+
+[store]
+url = "file://$RUN/bucket"
+EOF
+    in_run seshi admin init --config "$RUN/seshi.toml" --json >"$RUN/admin.json"
+    chmod 600 "$RUN/admin.json"
+    start_bg serve "$RUN/logs/serve.log" seshi serve --config "$RUN/seshi.toml"
+    url="http://127.0.0.1:$port"
+    for _ in $(seq 1 120); do
+      curl -sf "$url/healthz" >/dev/null 2>&1 && break
+      alive serve || { cat "$RUN/logs/serve.log" >&2; die "seshi serve exited"; }
+      sleep 0.25
+    done
+    curl -sf "$url/healthz" >/dev/null || { cat "$RUN/logs/serve.log" >&2; die "seshi serve not ready after 30 s"; }
+    key=$(bun -e 'console.log(JSON.parse(await Bun.file(process.argv[1]).text()).org_key.token)' "$RUN/admin.json")
+    printf '%s' "$key" | in_run seshi login --server "$url" --key - --user verifier >"$RUN/logs/login.log" 2>&1 \
+      || { cat "$RUN/logs/login.log" >&2; die "login failed"; }
+  else
+    # Local mode is serverless mode against the run's folder bucket: init writes the bucket's
+    # layout marker and `[serverless]` in the run's CLI config, and no shared settings, so the
+    # run sees seshi's built-in defaults. The owner is the OS username, or `verifier` without one.
+    in_run seshi init --serverless --url "file://$RUN/bucket" --owner "${USER:-verifier}" \
+      >"$RUN/logs/init.log" 2>&1 \
+      || { cat "$RUN/logs/init.log" >&2; die "seshi init --serverless failed"; }
+  fi
+  trap - EXIT
+  commit=$(git -C "$REPO" rev-parse --short HEAD)
+  printf '{"run":"%s","mode":"%s","port":"%s","repo":"%s","commit":"%s","binary":%s}\n' \
+    "$VERIFY_SESHI_RUN" "$mode" "$port" "$REPO" "$commit" "$([[ $binary == 1 ]] && echo true || echo false)" >"$RUN/run.json"
+  cp "$RUN/run.json" "$EVIDENCE/run.json"
+  echo "run $VERIFY_SESHI_RUN: $mode mode at commit $commit${port:+, server http://127.0.0.1:$port}"
+  echo "folder   $RUN"
+  echo "evidence $EVIDENCE"
+  echo "export VERIFY_SESHI_RUN=$VERIFY_SESHI_RUN"
+  ;;
+
+env)
+  need_run
+  run_env "$RUN"
+  ;;
+
+doctor)
+  need_run
+  ok=1
+  mode=$(bun -e 'console.log(JSON.parse(await Bun.file(process.argv[1]).text()).mode)' "$RUN/run.json")
+  port=$(bun -e 'console.log(JSON.parse(await Bun.file(process.argv[1]).text()).port)' "$RUN/run.json")
+  echo "run      $VERIFY_SESHI_RUN ($mode mode)"
+  echo "folder   $RUN"
+  echo "commit   run started at $(bun -e 'console.log(JSON.parse(await Bun.file(process.argv[1]).text()).commit)' "$RUN/run.json"), repo now at $(git -C "$REPO" rev-parse --short HEAD)"
+  version=$(in_run seshi --version 2>&1) || { echo "FAIL seshi --version: $version"; ok=0; }
+  echo "seshi    $version"
+  if [[ $mode == server ]]; then
+    if alive serve; then echo "serve    running (pid $(cut -d' ' -f1 "$RUN/serve.pid"))"; else echo "FAIL serve is not running"; ok=0; fi
+    health=$(curl -sf "http://127.0.0.1:$port/healthz" 2>&1) || { health="no answer"; ok=0; }
+    echo "healthz  $health"
+    owner=$(lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null | head -1 || true)
+    if [[ -n $owner && -f $RUN/serve.pid && $owner == "$(cut -d' ' -f1 "$RUN/serve.pid")" ]]; then
+      echo "port     $port held by this run's serve"
+    else
+      echo "FAIL port $port is held by pid '${owner:-none}', not this run's serve"; ok=0
+    fi
+  fi
+  who=$(in_run seshi whoami 2>&1) || { echo "FAIL whoami: $who"; ok=0; }
+  echo "whoami   $who"
+  if alive explore; then echo "explore  running: $(grep -o 'http://[^ ]*' "$RUN/logs/explore.log" | head -1)"; fi
+  [[ $ok == 1 ]] && echo "ready" || { echo "NOT READY"; exit 1; }
+  ;;
+
+cli)
+  need_run
+  label=cli
+  if [[ ${1:-} == --name ]]; then label=$2; shift 2; fi
+  [[ ${1:-} == -- ]] && shift
+  [[ $# -gt 0 ]] || die "cli: give seshi's arguments after --"
+  n=$(find "$EVIDENCE" -maxdepth 1 -name '*.cmd' | wc -l | tr -d ' ')
+  base="$EVIDENCE/$(printf '%02d' $((n + 1)))-$label"
+  printf 'seshi' >"$base.cmd"; printf ' %q' "$@" >>"$base.cmd"; echo >>"$base.cmd"
+  set +e
+  in_run seshi "$@" >"$base.out" 2>"$base.err"
+  code=$?
+  set -e
+  echo "$code" >"$base.code"
+  cat "$base.out"
+  cat "$base.err" >&2
+  echo "[exit $code; evidence $base.{cmd,out,err,code}]" >&2
+  exit "$code"
+  ;;
+
+agent)
+  need_run
+  [[ ${1:-} == claude-code ]] || die "agent: only claude-code is scripted (got '${1:-}')"
+  session=${2:?agent claude-code <session-id> [--turns N] [--secret]}
+  shift 2
+  transcript="$RUN/home/.claude/projects/-verify-app/$session.jsonl"
+  first=0; [[ -f $transcript ]] || first=1
+  bun "$SKILL_DIR/scripts/transcript.ts" "$transcript" "$session" "$RUN/app" "$@"
+  payload() { printf '{"session_id":"%s","transcript_path":"%s","cwd":"%s","hook_event_name":"%s"}' "$session" "$transcript" "$RUN/app" "$1"; }
+  [[ $first == 1 ]] && payload SessionStart | in_run seshi hook claude-code SessionStart
+  payload Stop | in_run seshi hook claude-code Stop
+  exec "$0" --run "$VERIFY_SESHI_RUN" cli --name "daemon-$session" -- daemon --once --json
+  ;;
+
+explore)
+  need_run
+  alive explore && { grep -o 'http://[^ ]*' "$RUN/logs/explore.log" | head -1; exit 0; }
+  port=$(free_port)
+  start_bg explore "$RUN/logs/explore.log" seshi explore --no-open --port "$port"
+  for _ in $(seq 1 120); do
+    url=$(grep -o 'http://127.0.0.1:[0-9]*/?token=[A-Za-z0-9_-]*' "$RUN/logs/explore.log" | head -1 || true)
+    [[ -n $url ]] && break
+    alive explore || { cat "$RUN/logs/explore.log" >&2; die "seshi explore exited"; }
+    sleep 0.25
+  done
+  [[ -n ${url:-} ]] || die "seshi explore printed no URL (see $RUN/logs/explore.log)"
+  echo "$url"
+  ;;
+
+stop)
+  need_run
+  [[ ${1:-} == serve || ${1:-} == explore ]] || die "stop serve|explore"
+  stop_bg "$1"
+  ;;
+
+down)
+  need_run
+  stop_bg explore
+  stop_bg serve
+  case $RUN in "$ROOT"/*) ;; *) die "refusing to delete $RUN: not under $ROOT" ;; esac
+  rm -rf -- "$RUN"
+  echo "run $VERIFY_SESHI_RUN removed; evidence kept in $EVIDENCE"
+  ;;
+
+help | -h | --help)
+  sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'
+  ;;
+
+*) die "unknown command '$cmd' (try control-seshi help)" ;;
+esac

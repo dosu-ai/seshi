@@ -1,0 +1,33 @@
+# Guards 27 #13 across a moved transcript (33, found by the scenario explorer, seed 41834): a
+# session that ran in a repo whose config turns capture off is judged by every folder it was
+# seen in, so leaving the repo does not capture it again. But a hook names no transcript path
+# for a session not captured, so when its transcript then moved the uploader still had the old
+# path, the sweep forgot the session (its folders and its secret with it), and the next hook
+# captured it as new: what it wrote in the excluded repo was uploaded, under a new secret. The
+# sweep now finds a known session's moved transcript by its id.
+name: an excluded repo, then a moved transcript
+description: >
+  A stored session runs in a repo that turns capture off, which stops it; its transcript then
+  moves and it goes on. It stays stopped: nothing written in the excluded repo, or after, is
+  ever uploaded, and the machine keeps the secret it was stored with.
+guards: "27 #13 × 33: a session seen in an excluded repo stays uncaptured after its transcript moves"
+setup:
+  repos: { code/private: { config: "capture = false\n" } }
+steps:
+  - turns: { session: main, count: 3, mark: before-the-repo }
+  - pass
+  - turns: { session: main, count: 2, in: code/private, mark: in-the-repo }
+  - pass
+  - move-transcript: { session: main, to: code/moved }
+  - turns: { session: main, count: 1, mark: after-the-move }
+  - pass
+  - subagent: { parent: main, id: x, turns: 2 }
+  - pass
+  - expect:
+      sessions:
+        main: { server: present, records: 16, doctor: ok }
+        agent-x: { server: absent }
+      bucket:
+        has: [before-the-repo]
+        lacks: [in-the-repo, after-the-move]
+  - settle

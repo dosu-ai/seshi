@@ -1,0 +1,74 @@
+{
+  "records": [
+    {
+      "role": "meta",
+      "source": "codex"
+    },
+    {
+      "role": "user",
+      "content": "Customer cust_ab12cd says key [redacted:acme-key] stopped working. The entropy rule is off: DEPLOY_ID=aB3xY7pQ9zK2mN8vR4tWcD5f",
+      "timestamp": "2026-11-14T10:00:00Z"
+    },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "c1",
+          "name": "shell",
+          "args": "{\"command\":\"acme deploy --deploy-key=<deploy-key> cust_ab12cd\"}"
+        },
+        {
+          "id": "c2",
+          "name": "shell",
+          "args": "{\"command\":\"cat app/config/master.key\"}"
+        },
+        {
+          "id": "c3",
+          "name": "shell",
+          "args": "{\"command\":\"acme-cli token\"}"
+        }
+      ],
+      "timestamp": "2026-11-14T10:00:01Z"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "c1",
+      "content": "deployed for [redacted:customer-row] with --deploy-key=k3y-v4lue",
+      "timestamp": "2026-11-14T10:00:02Z"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "c2",
+      "content": "[redacted:sensitive-file]",
+      "timestamp": "2026-11-14T10:00:03Z",
+      "withheld": "sensitive-file"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "c3",
+      "content": "[redacted:secret-output]",
+      "timestamp": "2026-11-14T10:00:04Z",
+      "withheld": "secret-output"
+    },
+    {
+      "role": "assistant",
+      "content": "Rotated [redacted:acme-key].",
+      "timestamp": "2026-11-14T10:00:05Z"
+    }
+  ],
+  "withheld": {
+    "c2": "sensitive-file",
+    "c3": "secret-output"
+  },
+  "summary": {
+    "rule_set": "e8e035986c6910ee7ecd005efa775cf9ebf94ad9c63f23737e2f5c4d473f015e",
+    "counts": {
+      "acme-key": 2,
+      "acme-master-key": 1,
+      "acme-token": 1,
+      "deploy-flag": 1,
+      "customer-row": 1
+    }
+  }
+}

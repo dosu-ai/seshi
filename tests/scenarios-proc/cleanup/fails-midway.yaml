@@ -1,0 +1,19 @@
+# Not a scenario of the set: the cleanup proof `bun run scenarios:process` runs after it. It is
+# made to fail at an expectation while seshi serve, a long-running seshi daemon and a background
+# pass held at the proxy are all running; the runner must then leave no process behind.
+name: fails with processes running
+description: >
+  Starts the server, a pass whose upload the proxy holds for 30 s, and a service daemon
+  (--keep-alive) waiting for that pass's lock, then fails an expectation. Every process must be
+  gone once the runner returns.
+setup: { mode: process }
+steps:
+  - turns: { session: main, count: 2 }
+  - fault: { http: POST /v1/sessions, delay: 30s }
+  - background: { as: held, step: pass }
+  - await: { request: POST /v1/sessions }
+  - daemon: { as: long, keep-alive: true }
+  - wait: 500ms
+  - expect:
+      sessions:
+        main: { records: 999 }

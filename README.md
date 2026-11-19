@@ -1,207 +1,173 @@
-# sessiondb
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="brand/lockup/seshi-lockup-dark-outlined.svg">
+  <img src="brand/lockup/seshi-lockup-light-outlined.svg" alt="seshi" width="272" height="80">
+</picture>
 
-A small server that turns coding-agent sessions into a durable, redacted, content-addressed
-archive in your own bucket.
+**Seshi is an open-source toolkit for capturing, redacting, storing, and analyzing coding agent sessions.** It works across agents and environments within your infrastructure.
 
-Claude Code, Codex, Cursor, OpenCode, pi and Gemini CLI each write a log of what they did, in
-their own format, on the machine they ran on. Those logs are the record of how the work was
-done, and they are also full of secrets, scattered across laptops, and shaped six different
-ways. sessiondb takes a log over HTTP, normalizes it to one format
-([Letta trajectory-v1](https://github.com/letta-ai/trajectory)), scrubs credentials out of it,
-decides whether it is worth keeping, and writes it to S3, Cloudflare R2, any S3-compatible
-store, or a folder, under a documented layout that anything can read.
+## Who is Seshi for?
 
-```
-client ──POST /v1/sessions (raw transcript, bearer token)──▶ sessiondb
-                                                               store raw · normalize · trace
-                                                                    │
-                                                                    ▼
-                                                   your bucket (s3:// r2:// file://)
-                                                                    ▲
-                                                 readers tail changes/ with their own key
-```
+Teams that want to get the most out of coding agents. Agent sessions are incredibly rich with information. In many ways they are the new PR. They tell you how work was done, what decisions were made, what went wrong, etc.
 
-Three properties follow from that shape:
+Seshi is the easiest way for teams to create a secure shared session store for building downstream applications like
 
-- The machine running the agent never holds a bucket credential. It holds a token for one
-  person, which can post that person's sessions and read them back, and nothing else.
-- The bucket never holds an unredacted byte. Redaction happens on the server, before anything
-  is written, and there is no switch to turn it off.
-- Readers never talk to the server. A read-only key on the bucket is enough to tail the change
-  feed, so the archive outlives any particular deployment of this code.
+- Token usage and spend insights
+- Shared memory layer
+- Team decision log
+- Measuring agent friction
+- and much much more.
 
-## Quick start
+## Why Seshi?
 
-```sh
-git clone https://github.com/dosu-ai/sessiondb && cd sessiondb
-cp .env.example .env        # tokens, the bucket URL and its keys
-bun install
-bun start                   # http://localhost:7200
-```
+- **One format for every coding agent.** Capture sessions from Claude Code, Codex, Cursor,
+  OpenCode, pi, Gemini CLI, and Datadog Trajectory ([supported agents](#supported-agents)). Normalize everything into a common format and
+  export as OpenTelemetry spans or ATIF. Extend support with
+  [your own integrations](integrations).
+- **Local and cloud agents.** Collect sessions from developer machines, cloud sandboxes, and eval
+  harnesses through native integrations, OpenTelemetry, Datadog LLM Observability, or S3.
+- **Your data, your storage.** Store sessions in AWS S3, Cloudflare R2, any compatible object
+  store with conditional writes, or a local folder. Your storage is the source of truth, with an
+  open, [documented layout](spec/layout.md) that any tool can read.
+- **Redaction by default.** Remove secrets before they're stored. Customize redaction rules and
+  LLM-based redaction to fit your needs.
+- **Privacy and control.** Keep sessions private or share them with your organization. Disable
+  capture for individual sessions, folders, or repositories, with automatic retraction of
+  disabled sessions.
+- **Your identity provider.** Authenticate with Okta, Microsoft Entra, any OIDC provider, or a
+  shared organization key. Tokens are scoped, hashed, and revocable.
+- **Search across sessions.** Find exactly what agents said and did, including prompts,
+  responses, tool calls, file paths, and commands.
 
-Or in a container, with the same `.env`:
+## How is this different from agent observability tools?
 
-```sh
-docker compose up -d
-```
+LLM observability tools trace the agents you build. Seshi keeps the sessions of the agents you
+build with.
 
-At boot the server writes a layout marker and a probe object, so a wrong bucket or key fails
-immediately rather than on the first upload. Then post a session:
+- **A different audience.** Observability is for teams shipping LLM products and debugging them
+  in production. Seshi is for teams using coding agents to get work done.
+- **Built for coding agents.** Hooks in the agents on each laptop and syncs from cloud agents with skills to allow developers to toggle capture on/off whenever they want.
+- **You own the data.** Sessions live in your bucket, in an open layout that can be read without
+  Seshi.
+- **Kept as long as you want.** Observability tools keep traces for a retention window, often a
+  few weeks. Seshi keeps sessions until you delete them.
+- **Works alongside them.** Seshi reads OpenTelemetry and syncs Datadog LLM Observability, and
+  writes sessions back out as OpenTelemetry spans.
 
-```sh
-jq -n --rawfile transcript ~/.claude/projects/-repo-app/8f1c….jsonl \
-  '{agent: "claude-code", session_id: "8f1c…", transcript: $transcript,
-    project: "github.com/acme/widget", branch: "main"}' |
-curl -sS http://localhost:7200/v1/sessions \
-  -H "Authorization: Bearer $SESSIONDB_TOKEN" -H "Content-Type: application/json" --data-binary @-
-```
-
-```json
-{ "status": "stored", "archive_id": "…", "content_hash": "…", "session_id": "8f1c…",
-  "records": 41, "events": 38, "records_total": 41, "prefix_sha256": "…", "bytes_total": 48213,
-  "raw": { "status": "stored", "part": 0 } }
-```
-
-As the session goes on, send only what the log gained since, as a chunk from `bytes_total`:
+## Getting started
 
 ```sh
-tail -c +48214 ~/.claude/projects/-repo-app/8f1c….jsonl |
-jq -Rs '{agent: "claude-code", session_id: "8f1c…", transcript: ., offset: 48213}' |
-curl -sS http://localhost:7200/v1/sessions \
-  -H "Authorization: Bearer $SESSIONDB_TOKEN" -H "Content-Type: application/json" --data-binary @-
+curl -fsSL https://github.com/dosu-ai/sessiondb/releases/latest/download/install.sh | sh   # macOS, Linux
+npm i -g @dosu/seshi                                                                       # or with npm
 ```
 
-The chunk is normalized on its own and stored as a continuation of the session's trace; the
-server keeps where the log stands, so a large session costs each time only what was appended.
+On Windows: `irm https://github.com/dosu-ai/sessiondb/releases/latest/download/install.ps1 | iex`.
+[docs/install.md](docs/install.md) has the platforms, options and checksums.
 
-The full API, every environment variable, and the rules for chunks, continuations and forks
-are in [`docs/server.md`](docs/server.md); the API as a document is
-[`spec/openapi.yaml`](spec/openapi.yaml).
+### Run it locally
 
-### Datadog Trajectory's format
+With no server, the CLI writes your own bucket directly:
 
-[Datadog Trajectory](https://github.com/datadog-labs/trajectory) records coding-agent sessions
-in a format of its own, one file per session under `~/.trajectory/trajectories/sessions/`.
-sessiondb reads that format: post the file as `agent: "datadog-trajectory"`, whole or in chunks
-as the daemon appends to it, and it is normalized to Letta trajectory-v1 like any other
-transcript. Nothing in sessiondb depends on the Trajectory daemon or CLI; it is one more input
-format.
-
-### ATIF documents
-
-[ATIF](https://github.com/harbor-framework/harbor/blob/main/rfcs/0001-trajectory-format.md),
-Harbor's Agent Trajectory Interchange Format, is one JSON document per session from any harness.
-Post it as `agent: "atif"` with `format: "json"`, whole (never in chunks). The trace's `source`
-is the harness the document names in `agent.name`, and each embedded subagent is posted as its
-own session with `parent_session_id`. The rules are in
-[`docs/server.md`](docs/server.md#atif-documents).
-
-## What the server does with a session
-
-Storage first, then normalize, then the trace. The trace is always made from what is in the
-bucket, so the second step can run again on its own.
-
-1. **Store.** The native log passes through redaction and is written as the session's raw
-   part. What a tool call returned is withheld when the call read a secrets file (`.env`, keys,
-   cloud credentials) or ran a command that prints one (`printenv`, `gh auth token`); then your
-   own patterns, if you set any; then the built-in ones (provider tokens, key/value credentials
-   in several languages, bearer headers, JWTs, connection URLs, PEM blocks, and a
-   Shannon-entropy pass for what no pattern knows).
-   That creates the session; nothing else has happened yet.
-2. **Normalize.** The stored log becomes trajectory-v1 records via
-   [`@letta-ai/trajectory`](https://github.com/letta-ai/trajectory), plus the fixups its
-   adapters need (Claude Code's queued and background-task input, Codex's inherited history and
-   subagent reports, an ATIF document's harness name and tool errors). `agent` is the adapter
-   name, one of `claude-code`, `codex`, `cursor`, `opencode`, `pi`, `gemini-cli`, `atif`,
-   `datadog-trajectory`, the server's own adapter that turns a Trajectory session file into the
-   same Letta records as everything else, or `trajectory`, records already in trajectory-v1
-   that pass through checked. The SDK's `detectSource` names the format from a file's first
-   bytes. The records get the
-   redaction pass too, with identifiers that link a tool call to its result left alone so they
-   stay coherent.
-3. **Decide what is new.** A conversation under 2000 characters, or with no user turn, or with
-   nothing answering it, is reported as `trivial`: the raw part stays, no trace is written. A
-   session uploaded before writes only its tail (the client sends back `records_total` and
-   `prefix_sha256` from the last answer); a fork writes only what it added past the history it
-   copied.
-4. **Hash and publish.** `content_hash` is a hash of what was said, independent of timestamps,
-   so re-exporting the same conversation writes nothing. The trace is written under its hash,
-   the session's pointer gets it as head, and an entry is appended to the change feed.
-
-The layout is the contract, documented in [`spec/layout.md`](spec/layout.md): raw transcript
-parts, immutable content-addressed traces made from them, one mutable pointer per session, and
-an append-only change feed.
-
-## Storage
-
-`SESSIONDB_STORE_URL` selects the store:
-
-| URL | Credentials |
-|---|---|
-| `r2://bucket/prefix` | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` |
-| `s3://bucket/prefix` | `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
-| `s3://bucket/prefix` + `S3_ENDPOINT` | MinIO, RustFS, Backblaze B2, Wasabi, and other S3-compatible services |
-| `file:///path` | None. A folder on the server's disk, for development or a single box |
-
-Every write is verified (ETag against MD5 where the service reports one, a read-back otherwise)
-before the pointer and change feed are updated, so a reader never sees a change entry for an
-object that is not there.
-
-## Trace format
-
-Every input is normalized the same way. What the trace objects are written as is a choice,
-`SESSIONDB_FORMAT` on the server or `format` on the SDK client:
-
-| Format | Trace object |
-|---|---|
-| `letta` (default) | `sessionstorage/trace/1`: the [Letta trajectory-v1](https://github.com/letta-ai/trajectory) records, their events and hash |
-| `otlp` | The same trace as an OTLP/HTTP JSON `ExportTraceServiceRequest`: OpenTelemetry GenAI spans (`invoke_agent`, a `chat` span per model turn, an `execute_tool` span per tool call) that any OpenTelemetry backend reads, and that can be posted as-is to a collector |
-
-```ts
-const db = connect({ store: "r2://sessions/team", owner: "alice", format: "otlp" });
+```sh
+seshi init --serverless --url file:///Users/alice/seshi   # or s3://bucket/prefix (with --region), r2://bucket/prefix (with --account-id)
+seshi capture install              # hooks into every agent found on this machine
+seshi upload --since 30d           # the last 30 days of those agents' sessions
+seshi sessions ls
+seshi search flaky checkout test
 ```
 
-A bucket holds one format, recorded in its layout marker by its first writer; a writer
-configured for the other refuses it. Writers default to `letta`, so only a writer that opts in
-writes an `otlp` bucket; reads follow whatever the bucket holds. Redaction, dedupe, chunks and forks work the same in both.
-An `otlp` object is lossless: its spans carry the records they were made from, so `fromOtlp(trace)` gives back the `letta` trace with the same `content_hash`. Readers that only know `letta` (Dosu's backend) convert this way. Trajectory-v1 has no token usage, so OTLP spans carry none. See
-[`spec/layout.md`](spec/layout.md) for both objects.
+From then on each session is uploaded as it goes. Claude Code's status line says
+`Session Capture ◉` while a session is captured; `/session-capture` (`$session-capture` in Codex) turns it off or on
+for the session you are in.
 
-## Access model
+### Run it for a team
 
-A token is bound to a name and every request is scoped to `owners/<name>/` in the bucket. Two
-people on one server never see each other's sessions; a token leaked from one laptop exposes one
-person's archive. A reader with its own bucket key sees every folder, which is the point: the
-team's archive is the bucket, a person's view is their folder.
+There are two modes.
 
-The server sees transcripts before redaction. Run it behind TLS, and read [`SECURITY.md`](SECURITY.md)
-before exposing it.
+**1. Server (recommended).** One server holds the bucket's keys; laptops hold only a revocable
+Seshi credential. It adds identity-provider sign-in, redaction a laptop cannot skip, one shared
+search index, and the OpenTelemetry, Datadog and S3 sources.
+
+```sh
+# on the server, with a seshi.toml naming the bucket ([store] url = "s3://acme-sessions/seshi")
+seshi config check --config seshi.toml   # every problem at once, with where each value came from
+seshi admin init --config seshi.toml     # prints the first admin token and the org key, once each
+seshi serve                              # listens on :7200; put TLS in front
+```
+
+```sh
+# on each laptop
+seshi login --server https://seshi.acme.com   # the org key, or sign in through your IdP
+seshi capture install
+```
+
+The container image is `ghcr.io/dosu-ai/sessiondb` ([docs/server.md](docs/server.md#deploying)).
+
+**2. Serverless.** Nothing to run: each laptop runs the pipeline and writes its own folder of a
+shared bucket with its own key. Use it when the team trusts its laptops
+([docs/serverless.md](docs/serverless.md) says what needs a server).
+
+```sh
+seshi init --serverless --url s3://acme-seshi/seshi --region us-east-1 --admin   # an admin, once
+seshi init --serverless --url s3://acme-seshi/seshi --region us-east-1           # each member
+seshi capture install
+```
+
+Everything else is in [docs/](docs/README.md).
+
+## How it works
+
+![How a session moves through seshi: agent hooks and the uploader on the developer laptop, the seshi serve API, pipeline and worker, the bucket, and the readers](docs/architecture.svg)
+
+## Supported agents
+
+| Client | Live capture | Capture state shown in | Turn off or on in the session | Upload its session files |
+|---|:-:|---|---|:-:|
+| Claude Code, including the Claude desktop app | ✓ | Status line; a chip in the desktop app | `/session-capture` | ✓ |
+| Codex CLI | ✓ | A notice when the session starts | `$session-capture` | ✓ |
+| Cursor (editor) | ✓ | Status bar extension | `/session-capture`, or a click on the status bar | ✓ |
+| Cursor CLI | ✓ | Status line | `/session-capture` | ✓ |
+| OpenCode (1.x and 2.x) | ✓ | Beside the prompt; a notice when the session starts | `/session-capture` | ✓ |
+| pi | ✓ | Footer | `/session-capture` | ✓ |
+| Oh My Pi, OpenClaw | — | — | — | ✓ |
+| Gemini CLI | — | — | — | ✓ |
+| Devin | — | — | — | — |
+| Factory Droid | — | — | — | — |
+
+### Cloud and managed agents
+
+| Agent | Supported | How |
+|---|:-:|---|
+| Claude Managed Agents, and Messages API calls | ✓ | A Claude Console [OpenTelemetry destination](docs/otlp.md) |
+| Claude Code, Codex or Cursor CLI in your own sandboxes, CI or eval harnesses | ✓ | `seshi capture install` in the sandbox, or transcripts written to a bucket an [S3 source](docs/s3-sync.md) polls |
+| Any agent that writes OpenTelemetry GenAI spans | ✓ | The [OTLP endpoint](docs/otlp.md) |
+| Cursor Cloud Agents | ✓ | Hooks committed to the repository, and seshi installed and signed in by its environment setup: `seshi capture install cursor --project` ([capture.md](docs/capture.md#cursor-cloud-agents)). Tool results are not captured yet |
+| Codex cloud, GitHub Copilot coding agent | — | |
+
+A new agent is an [integration](integrations).
+
+## Roadmap
+
+- [x] Cursor Cloud Agents through hooks committed to the repository
+- [ ] Cursor Cloud Agents through Cursor's API, for runs whose repository has no hooks (F7)
+- [ ] Tool results in Cursor transcripts (from `postToolUse`)
+- [ ] Devin Cloud sync: a source that pulls Devin cloud sessions through Devin's API
+- [ ] A Python SDK for the seshi API, published to PyPI next to `@dosu/seshi-client`
+- [ ] Publishing the Cursor status bar extension on Open VSX (it is built and attached to each
+      release)
 
 ## Development
 
 ```sh
 bun install
-bun run test          # the S3 store test needs SESSIONDB_TEST_S3_* and skips without them
+bun run test
 bun run typecheck
-bun run check         # biome lint + format
-bun run goldens       # regenerate spec/testdata/goldens after a deliberate change to hashing or events
+bun run check
+bun run seshi -- --help     # the binary, from source
 ```
 
-The repository is a Bun workspace: `sdks/typescript/` is `@dosu/sessiondb`, the pipeline
-(redact, normalize, store, read) with no HTTP in it; `server/` is the HTTP server over it;
-`spec/` is the contract both honour, the layout and the goldens.
-
-A push to `main` with a [Conventional Commit](https://www.conventionalcommits.org/) in it is a
-release: CI picks the version from the commits, publishes `@dosu/sessiondb` to npm and
-`ghcr.io/dosu-ai/sessiondb` at the same version, and tags `vX.Y.Z`. The SDK and the server
-share the version; it is what every trace records as its normalizer and what `/healthz` reports.
-
-`spec/testdata/goldens/` pins the normalized records of every fixture transcript and the
-`content_hash` and events each parses to. The goldens test fails on any change to the hash
-derivation, so such a change is a reviewed diff and never an accident. Fixture transcripts are
-generated by `sdks/typescript/scripts/fixtures.ts`, so they contain no real sessions.
-
-See [`CONTRIBUTING.md`](CONTRIBUTING.md) for how changes are reviewed.
+[CONTRIBUTING.md](CONTRIBUTING.md) has the repository layout and what a change needs, and
+[docs/releasing.md](docs/releasing.md) how releases are cut. The decisions behind the design are
+in [docs/seshi/design-decisions.html](docs/seshi/design-decisions.html).
 
 ## License
 

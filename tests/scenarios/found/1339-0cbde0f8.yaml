@@ -1,0 +1,20 @@
+# Found by the scenario explorer (tests/tooling/scenario/explore.ts); see tests/scenarios/README.md.
+# seed: 1339 (bun run scenarios:explore --seed 1339 --runs 1 --max-steps 25)
+# original length: 22 steps; shrunk to 6 in 44 runs
+# failure:
+#   step 6 (settle max=40): not quiet after 40 passes
+#     last pass: {"taken":0,"found":0,"uploaded":0,"retracted":0,"failed":0,"queued":1,"retrying":1}
+#     claude-code:main: {"agent":"claude-code","session_id":"main","path":"<home>/.claude/projects/-<home>-code-app/main.jsonl","cwd":"<home>/code/app","last_seen":"2026-09-01T09:00:00.010Z","sent":true,"failures":1,"next_attempt_at":"2026-09-01T0…
+#     faults fired:
+#       http POST /v1/sessions: POST /v1/sessions #1 → 503
+#     capture log (last lines):
+#       2026-09-01T09:00:00.017Z uploader: claude-code:main: will retry: injected 503 unavailable
+name: found by seed 1339
+description: "A generated scenario (seed 1339) shrunk from 22 to 6 steps; the header says how it failed."
+steps:
+  - turns: { session: main, count: 2 }
+  - fault: { http: POST /v1/sessions, status: 503 }
+  - pass
+  - capture: off --session main
+  - heal
+  - settle

@@ -1,0 +1,19 @@
+{
+  "name": "seshi",
+  "description": "Session Capture: uploads Claude Code sessions to your team's seshi server as they happen, with a /session-capture skill, and in the desktop app a Session Capture chip and /session-capture, to turn capture off or on for a session.",
+  "author": {
+    "name": "Dosu"
+  },
+  "homepage": "https://github.com/dosu-ai/sessiondb",
+  "license": "MIT",
+  "version": "0.1.0",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "command": {
+      "type": "string",
+      "title": "seshi command",
+      "description": "The seshi program the Session Capture chip runs: a name on the app's PATH, or a full path when the desktop app does not see your shell's PATH (`which seshi` prints it).",
+      "default": "seshi"
+    }
+  }
+}

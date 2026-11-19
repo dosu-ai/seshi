@@ -1,0 +1,35 @@
+# Guards F9.1, one uploader per machine: two `seshi daemon --once` processes started at the same
+# moment race for the uploader lock. Exactly one takes it and sends; the other says an uploader
+# is running and exits. Each piece reaches the server once: one request for the first upload,
+# one for the chunk. In-process there is only ever one uploader, so the lock is never contested.
+name: two uploaders at once send each byte once
+description: >
+  Twice, a session has something to send and two uploaders start together while the server is
+  slowed by a 1.5 s delay, so the winner's pass is still sending when the loser looks. Each
+  time exactly one takes the lock, the proxy sees one upload, and the server holds every record
+  once.
+guards: "F9.1: the uploader lock lets one of two concurrent uploaders send"
+setup: { mode: process }
+steps:
+  - turns: { session: main, count: 2 }
+  - fault: { http: POST /v1/sessions, delay: 1500ms }
+  - background: { as: first-a, step: pass }
+  - background: { as: first-b, step: pass }
+  - join: [first-a, first-b]
+  - expect:
+      started: { of: [first-a, first-b], count: 1 }
+      requests: { "POST /v1/sessions": 1 }
+      sessions:
+        main: { server: present, traces: 1, matches-transcript: true, sent-all: true }
+      uploader-lock: absent
+  - turns: { session: main, count: 2, mark: chunk }
+  - fault: { http: POST /v1/sessions, delay: 1500ms }
+  - background: { as: chunk-a, step: pass }
+  - background: { as: chunk-b, step: pass }
+  - join: [chunk-a, chunk-b]
+  - expect:
+      started: { of: [chunk-a, chunk-b], count: 1 }
+      requests: { "POST /v1/sessions": 2 }
+      sessions:
+        main: { traces: 2, matches-transcript: true, sent-all: true }
+  - settle

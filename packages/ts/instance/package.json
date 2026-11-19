@@ -1,0 +1,24 @@
+{
+  "name": "@seshi/instance",
+  "private": true,
+  "description": "Layer 4: builds an Instance from one config; runs worker jobs (X1.2, X7).",
+  "type": "module",
+  "exports": {
+    ".": {
+      "bun": "./src/index.ts"
+    }
+  },
+  "dependencies": {
+    "@seshi/auth": "workspace:*",
+    "@seshi/config": "workspace:*",
+    "@seshi/formats": "workspace:*",
+    "@seshi/kit": "workspace:*",
+    "@seshi/model": "workspace:*",
+    "@seshi/pipeline": "workspace:*",
+    "@seshi/redact": "workspace:*",
+    "@seshi/review": "workspace:*",
+    "@seshi/search": "workspace:*",
+    "@seshi/sources": "workspace:*",
+    "@seshi/store": "workspace:*"
+  }
+}

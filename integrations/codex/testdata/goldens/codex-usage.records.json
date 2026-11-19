@@ -1,0 +1,55 @@
+[
+  {
+    "role": "meta",
+    "source": "codex",
+    "cwd": "/repo/app",
+    "model": "gpt-9-codex"
+  },
+  {
+    "role": "user",
+    "content": "List the files",
+    "timestamp": "2026-10-03T10:00:01.000Z"
+  },
+  {
+    "role": "reasoning",
+    "content": "Run ls.",
+    "timestamp": "2026-10-03T10:00:02.000Z",
+    "llm_call": "call@845"
+  },
+  {
+    "role": "assistant",
+    "content": null,
+    "tool_calls": [
+      {
+        "id": "call_1",
+        "name": "shell",
+        "args": "{\"command\":[\"ls\"]}"
+      }
+    ],
+    "timestamp": "2026-10-03T10:00:02.500Z",
+    "llm_call": "call@845"
+  },
+  {
+    "role": "tool",
+    "tool_call_id": "call_1",
+    "content": "a.txt",
+    "timestamp": "2026-10-03T10:00:03.000Z"
+  },
+  {
+    "role": "assistant",
+    "content": "One file: a.txt",
+    "timestamp": "2026-10-03T10:00:04.000Z",
+    "llm_call": "call@1562"
+  },
+  {
+    "role": "user",
+    "content": "Thanks",
+    "timestamp": "2026-10-03T10:01:01.000Z"
+  },
+  {
+    "role": "assistant",
+    "content": "You're welcome.",
+    "timestamp": "2026-10-03T10:01:02.000Z",
+    "llm_call": "call@2415"
+  }
+]

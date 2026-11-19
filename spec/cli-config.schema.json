@@ -1,0 +1,160 @@
+{
+  "$id": "https://github.com/dosu-ai/sessiondb/spec/cli-config.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "server": {
+      "description": "The seshi server this CLI talks to (seshi login --server).",
+      "type": "string",
+      "format": "uri"
+    },
+    "local": {
+      "description": "The old name of [serverless] (F11.1): config names a server config whose [store] gives the bucket. Still read; seshi config check prints the new table.",
+      "type": "object",
+      "properties": {
+        "config": {
+          "type": "string",
+          "minLength": 1,
+          "description": "A server config (seshi.toml) naming the bucket; ~ is the home folder. Its keys must be able to write the bucket."
+        },
+        "owner": {
+          "description": "The owner id sessions are stored under; user, else the OS user, when unset.",
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "config"
+      ],
+      "additionalProperties": false
+    },
+    "serverless": {
+      "description": "Serverless mode (F11): this machine runs the pipeline and writes its owner's folder of a shared bucket directly; the bucket's permissions decide what it may do. Set server or serverless, not both.",
+      "type": "object",
+      "properties": {
+        "url": {
+          "description": "The bucket and prefix sessions are written to: s3://bucket/prefix, r2://bucket/prefix or file:///path. Required unless config names a server config with a [store].",
+          "type": "string",
+          "pattern": "^(s3|r2|file):\\/\\/"
+        },
+        "region": {
+          "description": "The bucket's region, as [store] region.",
+          "type": "string",
+          "minLength": 1
+        },
+        "endpoint": {
+          "description": "An S3-compatible endpoint, as [store] endpoint.",
+          "type": "string",
+          "format": "uri"
+        },
+        "account_id": {
+          "description": "Cloudflare account id for r2://, as [store] account_id.",
+          "type": "string",
+          "minLength": 1
+        },
+        "owner": {
+          "description": "The owner id sessions are stored under; user, else the OS user, when unset.",
+          "type": "string",
+          "minLength": 1
+        },
+        "config": {
+          "description": "A local server config (seshi.toml) layered over the bucket's shared config/seshi.toml; ~ is the home folder.",
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "search": {
+      "description": "This machine's search index in serverless mode (F11.9).",
+      "default": {},
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Serverless mode: whether this machine keeps a search index (F11.9); the shared config's search.enabled when unset.",
+          "type": "boolean"
+        },
+        "scope": {
+          "default": "visible",
+          "description": "Serverless mode: which sessions the index holds: mine, visible (yours and the org's) or all (also others' owner-only sessions).",
+          "type": "string",
+          "enum": [
+            "mine",
+            "visible",
+            "all"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "user": {
+      "description": "The username stated with the org key (X5.7); else git user.email, then the OS user.",
+      "type": "string",
+      "minLength": 1
+    },
+    "theme": {
+      "default": "auto",
+      "description": "Terminal colours (B1.4): auto detects the background.",
+      "type": "string",
+      "enum": [
+        "auto",
+        "dark",
+        "light"
+      ]
+    },
+    "keychain": {
+      "default": true,
+      "description": "Keep credentials in the OS keychain (F8.2). false keeps them in credentials.json (mode 0600) next to this file, for machines whose keychain prompts, hangs or is absent.",
+      "type": "boolean"
+    },
+    "capture": {
+      "description": "Personal capture rules (F9.5).",
+      "default": {},
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "description": "Capture for this user (F9.5, global level).",
+          "type": "boolean"
+        },
+        "paths": {
+          "default": [],
+          "description": "Rules by folder; the longest match decides.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "description": "A folder; ~ is the home folder. Matched by path prefix."
+              },
+              "capture": {
+                "type": "boolean",
+                "description": "Capture sessions under it, or not."
+              }
+            },
+            "required": [
+              "path",
+              "capture"
+            ],
+            "additionalProperties": false,
+            "description": "A personal capture rule for a folder (F9.5)."
+          }
+        },
+        "remotes": {
+          "default": [],
+          "description": "The org rule (F9.5): when set, only repos with a git remote matching one of these patterns are captured (github.com/acme, github.com/acme/*). It can only turn capture off.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "description": "seshi CLI configuration (~/.config/seshi/config.toml)."
+}

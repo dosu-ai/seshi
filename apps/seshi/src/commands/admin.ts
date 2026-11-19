@@ -1,0 +1,104 @@
+import { parseArgs } from "node:util";
+import { AdminInitError } from "@seshi/auth";
+import { EXIT } from "../cli/exit";
+import { failWith } from "../cli/failures";
+import { emit, fail, helpOrUsageError, takeJson } from "../cli/output";
+import { BUCKET_USAGE, bucketAdmin } from "./admin-bucket";
+import type { CommandContext } from "./index";
+import { openServer, SERVER_OPTIONS, serverFailure } from "./server-instance";
+
+const USAGE = `usage: seshi admin init [--config <file>] [--set path=value]… [--owner <id>] [--force] [--rotate-org-key] [--json]
+${BUCKET_USAGE}`;
+
+const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
+async function init(ctx: CommandContext, argv: string[], json: boolean): Promise<number> {
+  let values: {
+    config?: string;
+    set?: string[];
+    owner?: string;
+    force?: boolean;
+    "rotate-org-key"?: boolean;
+  };
+  try {
+    ({ values } = parseArgs({
+      args: argv,
+      options: {
+        ...SERVER_OPTIONS,
+        owner: { type: "string" },
+        force: { type: "boolean" },
+        "rotate-org-key": { type: "boolean" },
+      },
+      strict: true,
+      allowPositionals: false,
+    }));
+  } catch (err) {
+    return helpOrUsageError(ctx, json, message(err), USAGE);
+  }
+  const { instance } = await openServer(ctx, values, { roles: [], probe: [] });
+  let result: Awaited<ReturnType<typeof instance.auth.initAdmin>>;
+  try {
+    result = await instance.auth.initAdmin({
+      owner: values.owner ?? "admin",
+      force: values.force === true,
+      rotateOrgKey: values["rotate-org-key"] === true,
+    });
+  } finally {
+    await instance.close();
+  }
+  const { admin, org_key, revoked } = result;
+  const document = {
+    ...(admin
+      ? { admin: { id: admin.record.id, owner: admin.record.owner, token: admin.token } }
+      : {}),
+    ...(org_key ? { org_key: { id: org_key.record.id, token: org_key.token } } : {}),
+    revoked: revoked.map((old) => old.id),
+  };
+  emit(ctx, json, document, () => [
+    ...revoked.map((old) => `revoked the old org key ${old.id}`),
+    ...(admin
+      ? [
+          `admin token for ${admin.record.owner} (id ${admin.record.id}); shown once, keep it safe:`,
+          `  ${admin.token}`,
+        ]
+      : []),
+    ...(org_key
+      ? [
+          `org key (id ${org_key.record.id}); give it to every member (seshi login --key); shown once:`,
+          `  ${org_key.token}`,
+        ]
+      : []),
+  ]);
+  return EXIT.ok;
+}
+
+export async function run(ctx: CommandContext): Promise<number> {
+  const { json, rest: argv } = takeJson(ctx.argv);
+  const [sub, ...rest] = argv;
+  if (sub === "mode" || sub === "layout" || sub === "config") {
+    try {
+      return (await bucketAdmin(ctx, json, sub, rest, USAGE)) as number;
+    } catch (err) {
+      const code = serverFailure(ctx, json, err);
+      if (code !== undefined) return code;
+      return failWith(ctx, json, err);
+    }
+  }
+  if (sub !== "init") {
+    return helpOrUsageError(
+      ctx,
+      json,
+      sub === undefined ? "admin needs a subcommand" : `unknown admin command '${sub}'`,
+      USAGE,
+    );
+  }
+  try {
+    return await init(ctx, rest, json);
+  } catch (err) {
+    if (err instanceof AdminInitError)
+      return fail(ctx, json, EXIT.conflict, "conflict", err.message);
+    const code = serverFailure(ctx, json, err);
+    if (code === undefined) throw err;
+    return code;
+  }
+}

@@ -1,0 +1,80 @@
+#:schema ./spec/config.schema.json
+# seshi server configuration. Copy to seshi.toml (or /etc/seshi/seshi.toml) and edit; every
+# setting is in docs/config.md. Any value can be overridden with a SESHI_* env variable
+# ([store] url is SESHI_STORE__URL) or a flag (--set store.url=...). Secrets are references,
+# so this file can be committed. Check it with `seshi config check`.
+
+[server]
+listen = ":7200"
+# Changes to sources, rule packs and the other live settings apply on SIGHUP or
+# POST /v1/admin/reload, without a restart (docs/config.md#reloading). Set this to reload by
+# itself when this file, a drop-in in seshi.d/ or a rule pack changes.
+# watch_config = true
+
+[store]
+url = "s3://acme-sessions/prod"
+region = "us-east-1"
+
+[store.credentials]
+access_key_id = { env = "AWS_ACCESS_KEY_ID" }
+secret_access_key = { file = "/run/secrets/bucket-secret-key" }
+
+# Who may call the server (X5). For a team, run `seshi admin init` once: it prints the first
+# admin token and the org key. With an IdP, people sign in instead; uncomment [auth.oidc] and
+# give session tokens a key to be signed with.
+[auth]
+admins = ["ops@acme.com"]
+
+# [auth.oidc]
+# issuer = "https://acme.okta.com"
+# client_id = "0oa1seshicli"
+# owner_claim = "email"
+# admin_group = "seshi-admins"
+
+# [auth.session_keys]
+# k1 = { file = "/run/secrets/seshi-session-key" }
+
+[auth.tokens]
+# owner = token: static tokens, for single-user and development setups.
+alice = { env = "ALICE_TOKEN" }
+
+[filter]
+min_chars = 2000
+
+[limits]
+max_upload_bytes = "256MiB"
+
+[redaction]
+packs = ["/etc/seshi/redaction.json"]
+
+# Model review (F3): off until a policy names a provider key. Both steps default to Claude
+# Haiku 5.5 on the Anthropic API; `seshi config check` names where envelopes are sent, and
+# `seshi review eval` scores a policy before you change it.
+# [[review.policies]]
+# id = "default"
+# decision = { api_key = { env = "ANTHROPIC_API_KEY" } }
+# redactor = { provider = "openai-compatible", model = "local-guard", base_url = "http://gpu:8000/v1" }
+
+# Sources the worker polls on its own; each writes as its service account (svc:<id>) and
+# `seshi sync status` shows how far it got. Datadog LLM Observability (F5, docs/datadog.md):
+# the application key needs llm_observability_read.
+[[sources]]
+id = "datadog-prod"
+type = "datadog"
+site = "datadoghq.com"
+api_key = { env = "DD_API_KEY" }
+app_key = { env = "DD_APP_KEY" }
+ml_app = "coding-agents"   # Trajectory's default ml_app; use your app's
+tags = ["env:prod"]
+
+# A bucket other systems write agent logs to (F6, docs/s3-sync.md): the
+# built-in S3 poller reads new and grown objects. It may not be seshi's own bucket and prefix.
+[[sources]]
+id = "eval-logs"
+type = "s3"
+url = "s3://acme-agent-logs"
+prefix = "harness"
+region = "us-east-1"
+include = ["**/*.jsonl"]
+path = "{username}/{session}.jsonl"
+role = { arn = "arn:aws:iam::123456789012:role/seshi-read-agent-logs", external_id = { env = "AGENT_LOGS_EXTERNAL_ID" } }

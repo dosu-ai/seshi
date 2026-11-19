@@ -1,0 +1,31 @@
+# Guards 27 #2 (X5.10): a repo's committed `.seshi/config.toml` may only narrow who reads its
+# sessions. `visibility = "org"` in a cloned repo must not widen the sessions of someone whose
+# server keeps them private; `visibility = "owner"` does narrow an org-default session.
+name: a repo's visibility only narrows
+description: >
+  The server keeps sessions private by default. A session in a repo whose committed config
+  says visibility = "org" is still stored owner-only, as are one in a plain folder and one in
+  a repo that says visibility = "owner"; a later chunk does not widen it either.
+guards: "27 #2: a repo's visibility = org does not widen an owner-default session"
+setup:
+  server: |
+    default_visibility = "owner"
+  repos:
+    code/cloned: { config: "visibility = \"org\"\n" }
+    code/private: { config: "visibility = \"owner\"\n" }
+steps:
+  - turns: { session: cloned, count: 2, in: code/cloned }
+  - turns: { session: plain, count: 2, in: code/plain }
+  - turns: { session: private, count: 2, in: code/private }
+  - pass
+  - expect:
+      pass: { uploaded: 3 }
+      sessions:
+        cloned: { server: present, visibility: owner }
+        plain: { server: present, visibility: owner }
+        private: { server: present, visibility: owner }
+  - turns: { session: cloned, count: 1 }
+  - settle
+  - expect:
+      sessions:
+        cloned: { visibility: owner, traces: 2 }

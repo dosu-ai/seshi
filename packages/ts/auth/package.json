@@ -1,0 +1,20 @@
+{
+  "name": "@seshi/auth",
+  "private": true,
+  "description": "Layer 2: identity and access (X5): credentials, owner ids, scopes, roles, visibility.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "bun": "./src/index.ts"
+    },
+    "./testing": {
+      "bun": "./src/testing.ts"
+    }
+  },
+  "dependencies": {
+    "@seshi/config": "workspace:*",
+    "@seshi/model": "workspace:*",
+    "@seshi/store": "workspace:*",
+    "jose": "6.2.14"
+  }
+}

@@ -1,0 +1,35 @@
+[
+  {
+    "id": "call@845",
+    "model": "gpt-9-codex",
+    "usage": {
+      "input_tokens": 1200,
+      "cache_read_input_tokens": 800,
+      "output_tokens": 40,
+      "reasoning_tokens": 12,
+      "total_tokens": 1240
+    }
+  },
+  {
+    "id": "call@1562",
+    "model": "gpt-9-codex",
+    "usage": {
+      "input_tokens": 1300,
+      "cache_read_input_tokens": 1100,
+      "output_tokens": 10,
+      "reasoning_tokens": 0,
+      "total_tokens": 1310
+    }
+  },
+  {
+    "id": "call@2415",
+    "model": "gpt-9-codex-mini",
+    "usage": {
+      "input_tokens": 1500,
+      "cache_read_input_tokens": 500,
+      "output_tokens": 5,
+      "reasoning_tokens": 0,
+      "total_tokens": 1505
+    }
+  }
+]

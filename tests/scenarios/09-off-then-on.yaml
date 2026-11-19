@@ -1,0 +1,32 @@
+# Guards F9.7: a session turned off is retracted; turned on again it is uploaded from the start
+# as a new session, `<id>~1`, which holds all of it (what was written while it was off too).
+name: turn off, then on
+description: >
+  A stored session is turned off and retracted, grows while off, then is turned on. The
+  uploader sends the whole transcript as main~1; main stays tombstoned.
+guards: "F9.7: turned on again, a fresh ~1 session holds all of it"
+setup:
+  mode: local
+steps:
+  - turns: { session: main, count: 2, mark: first-life }
+  - pass
+  - capture: off --session main
+  - turns: { session: main, count: 1, mark: while-off }
+  - pass
+  - expect:
+      pass: { retracted: 1, uploaded: 0 }
+      sessions:
+        main: { server: redacted, toggle: off }
+      bucket:
+        lacks: [first-life, while-off]
+  - capture: on --session main
+  - turns: { session: main, count: 1, mark: second-life }
+  - pass
+  - expect:
+      pass: { uploaded: 1 }
+      sessions:
+        main: { server: redacted, id: main~1, toggle: on }
+        main~1: { server: present, matches-transcript: true, sent-all: true }
+      bucket:
+        has: [first-life, while-off, second-life]
+  - settle

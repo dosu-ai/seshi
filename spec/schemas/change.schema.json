@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "change.schema.json",
+  "title": "ChangeEntry",
+  "description": "`seshi/change/1`: one entry of an owner's change feed, `owners/<owner>/changes/<stamp>-<archive_id>-<suffix>-<content_hash|tombstone|visibility>.json` (unique: a random suffix). Append-only; written before the session pointer moves, so an entry may name a change that did not happen (readers read the current metadata). Readers tail the feed by key. Every entry records its writer (X5.5).",
+  "type": "object",
+  "properties": {
+    "schema": { "const": "seshi/change/1" },
+    "kind": {
+      "description": "`published`: a new trace is the head. `tombstone`: the session's traces were removed (see `reason`). `visibility_changed`: who may read it changed (X5.10).",
+      "enum": ["published", "tombstone", "visibility_changed"]
+    },
+    "at": { "$ref": "common.schema.json#/$defs/Timestamp" },
+    "owner": { "type": "string", "minLength": 1 },
+    "archive_id": { "$ref": "common.schema.json#/$defs/Sha256" },
+    "session_id": { "type": "string" },
+    "content_hash": {
+      "description": "The trace the entry is about; for a tombstone or a visibility change, the head at the time (null when there was none).",
+      "oneOf": [{ "$ref": "common.schema.json#/$defs/Sha256" }, { "type": "null" }]
+    },
+    "continuation": { "$ref": "common.schema.json#/$defs/Continuation" },
+    "replace": {
+      "description": "On `published`: the trace replaces the session's earlier traces instead of extending them (X4.6), and they were removed; a reader drops what it held of the session. Absent otherwise.",
+      "const": true
+    },
+    "writer": { "$ref": "common.schema.json#/$defs/Writer" },
+    "owner_basis": {
+      "description": "How the session's owner was established (X5.5), as metadata records it.",
+      "$ref": "common.schema.json#/$defs/OwnerBasis"
+    },
+    "reason": {
+      "description": "Why a session was tombstoned: `deleted` by its owner or an admin, `retracted` by the machine that uploaded it (F9.7), or `redacted` by an operator. On a `published` entry with `replace`, `redacted` says a redaction backfill rewrote the session's traces with new rules (F2.5); absent on other publishes.",
+      "enum": ["deleted", "retracted", "redacted"]
+    },
+    "visibility": {
+      "description": "On `visibility_changed`: the new visibility.",
+      "$ref": "common.schema.json#/$defs/Visibility"
+    }
+  },
+  "required": ["schema", "kind", "at", "owner", "archive_id", "session_id", "content_hash", "writer"],
+  "additionalProperties": false
+}

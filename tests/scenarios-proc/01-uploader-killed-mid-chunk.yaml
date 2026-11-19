@@ -1,0 +1,36 @@
+# Guards X6.3 across a process death: an uploader SIGKILLed while a chunk is half on the wire
+# leaves the server with none of it (a torn request is never committed), leaves its lock behind
+# with a dead pid, and the next uploader takes the lock over and sends the chunk once: no record
+# lost, none twice. In-process, the uploader cannot die mid-request.
+name: the uploader killed mid-chunk resumes
+description: >
+  A stored session grows by six turns. The proxy lets 300 bytes of the chunk's body reach the
+  server, then SIGKILLs the uploader. The server stores nothing of it, the lock file is left
+  with a dead pid, and the next `seshi daemon --once` takes the lock over and sends the chunk
+  exactly once.
+guards: "X6.3 × F9.1: a chunk torn by a dead uploader is resent once, by the next uploader"
+setup: { mode: process }
+steps:
+  - turns: { session: main, count: 2, mark: first-upload }
+  - pass
+  - expect:
+      pass: { uploaded: 1 }
+      sessions:
+        main: { server: present, records: 11, sent-all: true }
+  - turns: { session: main, count: 6, mark: torn-chunk }
+  - fault: { http: POST /v1/sessions, kill-client: 300 }
+  - pass
+  - expect:
+      sessions:
+        main: { traces: 1, records: 11, sent-all: false }
+      bucket: { has: [first-upload], lacks: [torn-chunk] }
+      uploader-lock: stale
+  - pass
+  - expect:
+      pass: { uploaded: 1, failed: 0 }
+      sessions:
+        main: { traces: 2, matches-transcript: true, sent-all: true }
+      bucket: { has: [torn-chunk] }
+      uploader-lock: absent
+      requests: { "POST /v1/sessions": 3 }
+  - settle

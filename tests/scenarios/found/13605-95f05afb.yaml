@@ -1,0 +1,21 @@
+# Found by the scenario explorer (tests/tooling/scenario/explore.ts); see tests/scenarios/README.md.
+# seed: 13605 (bun run scenarios:explore --seed 13605 --runs 1 --max-steps 25)
+# original length: 24 steps; shrunk to 7 in 151 runs
+# failure:
+#   step 7 (settle max=40): once quiet, the server does not match the laptop
+#     claude-code:main: never stored from here, but the server holds main
+#     faults fired:
+#       http POST /v1/sessions: POST /v1/sessions #1 → drop-response
+#     capture log (last lines):
+#       2026-09-01T09:00:00.024Z uploader: claude-code:main: will retry: cannot reach <server>: fetch failed: the connection closed before the response (injected)
+name: found by seed 13605
+description: "A generated scenario (seed 13605) shrunk from 24 to 7 steps; the header says how it failed."
+setup: { repos: { code/private: { config: "capture = false\n" } } }
+steps:
+  - fault: { http: POST /v1/sessions, drop-response: true }
+  - turns: { session: main, count: 2 }
+  - pass
+  - turns: { session: main, count: 2, in: code/private }
+  - fault: { http: POST /v1/sessions, status: 503 }
+  - heal
+  - settle

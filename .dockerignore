@@ -1,6 +1,18 @@
-node_modules
+**/node_modules
 .git
+.claude
 spec/testdata
+**/testdata
 **/*.test.ts
+tests
+scripts/*
+!scripts/build-binary.ts
+docs
+brand
+# The explore page's favicon (apps/seshi/src/explore/page/index.html) is bundled into the binary.
+!brand/glyph/seshi-glyph-badge.svg
 *.md
 .env
+dist
+# The release binaries the image job unpacks for `--build-arg BINARY=prebuilt`.
+!dist/docker

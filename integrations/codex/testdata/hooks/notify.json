@@ -1,0 +1,10 @@
+{
+  "type": "agent-turn-complete",
+  "thread-id": "01a0ff74-a68d-7ad0-83ee-80cf02c29b14",
+  "turn-id": "12",
+  "cwd": "/Users/dev/code/app",
+  "input-messages": [
+    "Write the tests"
+  ],
+  "last-assistant-message": "Done: added test_calc.py."
+}

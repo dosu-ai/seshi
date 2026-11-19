@@ -1,0 +1,21 @@
+{
+  "schema": "seshi/envelope/1",
+  "source": "hook",
+  "source_id": "upload",
+  "format": "claude-code",
+  "session_key": "0b1c7e9a-5f2d-4b8e-9a61-3c0f5e2d7a14",
+  "payload": {
+    "kind": "log",
+    "encoding": "jsonl",
+    "text": "{\"type\":\"user\",\"uuid\":\"u9\",\"timestamp\":\"2026-11-14T09:05:00.000Z\",\"message\":{\"role\":\"user\",\"content\":\"and the tests?\"}}\n",
+    "offset": 4334
+  },
+  "caller": { "kind": "device", "principal": "alice", "credential_id": "tok_7fJ2kQ9x" },
+  "claims": { "git_email": "alice@example.com", "account_ids": { "anthropic": "acct_01" } },
+  "owner": "alice",
+  "owner_basis": "verified",
+  "idempotency_key": "0b1c7e9a-5f2d-4b8e-9a61-3c0f5e2d7a14@4334",
+  "received_at": "2026-11-14T09:05:01.000Z",
+  "project": "github.com/acme/widget",
+  "branch": "main"
+}

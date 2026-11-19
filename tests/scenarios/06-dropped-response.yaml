@@ -1,0 +1,39 @@
+# Guards idempotency (X4.7) and the offset protocol (X6.3): the server commits an upload but
+# the answer never reaches the uploader. The retry must not store the session twice: a whole
+# log that repeats what is stored is a duplicate, and a chunk resent at an old offset is told
+# where the server is.
+name: the server commits, the answer is lost
+description: >
+  The first upload and a later chunk each commit on the server while the uploader sees a
+  connection error. The uploader backs off and retries; the server ends with one trace per
+  piece and no record twice. The server restarts in between, which changes nothing.
+guards: "X4.7: a resend after a lost answer is idempotent; no duplicate trace"
+steps:
+  - turns: { session: main, count: 2 }
+  - fault: { http: POST /v1/sessions, drop-response: true }
+  - pass
+  - expect:
+      pass: { uploaded: 0, failed: 1, retrying: 1 }
+      sessions:
+        main: { server: present, traces: 1 }
+  - clock: +1m
+  - pass
+  - expect:
+      pass: { uploaded: 1, failed: 0 }
+      sessions:
+        main: { server: present, traces: 1, matches-transcript: true, sent-all: true }
+  - restart-server
+  - turns: { session: main, count: 1 }
+  - fault: { http: POST /v1/sessions, drop-response: true }
+  - pass
+  - expect:
+      pass: { failed: 1 }
+      sessions:
+        main: { traces: 2 }
+  - clock: +1m
+  - pass
+  - expect:
+      pass: { failed: 0 }
+      sessions:
+        main: { server: present, traces: 2, matches-transcript: true, sent-all: true }
+  - settle

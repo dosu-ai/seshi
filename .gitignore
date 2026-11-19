@@ -4,3 +4,9 @@ node_modules/
 !.env.example
 .DS_Store
 dist/
+
+# Claude Code lays the plugin API types here when it loads the plugin from this folder.
+integrations/claude-code/plugin/.claude-plugin/types/
+
+# Evidence from .claude/skills/verify-seshi (control-seshi).
+.verify/

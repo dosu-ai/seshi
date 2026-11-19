@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+  <Name>eval-runs</Name>
+  <Prefix>harness/</Prefix>
+  <KeyCount>2</KeyCount>
+  <MaxKeys>2</MaxKeys>
+  <IsTruncated>true</IsTruncated>
+  <Contents>
+    <Key>harness/alice/run&amp;1.jsonl</Key>
+    <LastModified>2026-11-01T09:00:00.000Z</LastModified>
+    <ETag>&quot;9b2cf535f27731c974343645a3985328&quot;</ETag>
+    <ChecksumAlgorithm>CRC64NVME</ChecksumAlgorithm>
+    <ChecksumType>FULL_OBJECT</ChecksumType>
+    <Size>938</Size>
+    <StorageClass>STANDARD</StorageClass>
+  </Contents>
+  <Contents>
+    <Key>harness/bob/run2.json</Key>
+    <LastModified>2026-11-02T10:30:00.000Z</LastModified>
+    <ETag>&quot;3858f62230ac3c915f300c664312c11f-2&quot;</ETag>
+    <Size>10485760</Size>
+    <StorageClass>STANDARD</StorageClass>
+  </Contents>
+  <NextContinuationToken>1ueGcxLPRx1Tr/XYExHnhbYLgveDs2J/wm36Hy4vbOwM=</NextContinuationToken>
+  <StartAfter>harness/a</StartAfter>
+</ListBucketResult>

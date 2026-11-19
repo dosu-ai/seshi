@@ -1,0 +1,79 @@
+{
+  "rejected": false,
+  "content_hash": "fb3624a5c763a6ad4cc011bcdffde2857c9c43f229d61da9bd684219b3a29951",
+  "source": "claude-code",
+  "started_at": "2026-09-02T00:00:00.000Z",
+  "ended_at": "2026-09-02T00:00:05.000Z",
+  "metadata": {
+    "cwd": "/repo/app",
+    "git_branch": "main",
+    "model": "claude-opus-9"
+  },
+  "events": [
+    {
+      "index": 0,
+      "role": "user",
+      "text": "List the files, then say done.",
+      "timestamp": "2026-09-02T00:00:00.000Z"
+    },
+    {
+      "index": 1,
+      "role": "assistant",
+      "text": "Listing them.",
+      "timestamp": "2026-09-02T00:00:01.000Z"
+    },
+    {
+      "index": 2,
+      "role": "tool_call",
+      "text": "Bash {\"command\":\"ls\"}",
+      "timestamp": "2026-09-02T00:00:02.000Z",
+      "tool_name": "Bash",
+      "tool_call_id": "toolu_01Usage0001"
+    },
+    {
+      "index": 3,
+      "role": "tool_result",
+      "text": "a.txt",
+      "timestamp": "2026-09-02T00:00:03.000Z",
+      "tool_call_id": "toolu_01Usage0001",
+      "tool_name": "Bash"
+    },
+    {
+      "index": 4,
+      "role": "assistant",
+      "text": "Done: a.txt",
+      "timestamp": "2026-09-02T00:00:04.000Z"
+    },
+    {
+      "index": 5,
+      "role": "assistant",
+      "text": "API Error: overloaded",
+      "timestamp": "2026-09-02T00:00:05.000Z"
+    }
+  ],
+  "llm_calls": [
+    {
+      "id": "req_011CUsage0001",
+      "model": "claude-opus-9",
+      "stop_reason": "tool_use",
+      "request_id": "req_011CUsage0001",
+      "usage": {
+        "input_tokens": 1234,
+        "output_tokens": 56,
+        "cache_read_input_tokens": 789,
+        "cache_creation_input_tokens": 10
+      }
+    },
+    {
+      "id": "req_011CUsage0002",
+      "model": "claude-haiku-9",
+      "stop_reason": "end_turn",
+      "request_id": "req_011CUsage0002",
+      "usage": {
+        "input_tokens": 4321,
+        "output_tokens": 65,
+        "cache_read_input_tokens": 789
+      }
+    }
+  ]
+}
