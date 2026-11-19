@@ -5,9 +5,8 @@ polls the API with a Cursor API key, replays each run's event stream once the ru
 appends it to the agent's session (F7). Nothing is committed to repositories and nothing runs on
 Cursor's VMs.
 
-The hooks in [capture.md](capture.md#cursor-cloud-agents) are not needed for this, and do not
-capture cloud sessions on their own: a cloud agent's VM writes no transcript file for them to
-upload.
+This is the only way seshi captures Cursor Cloud agents. Hooks cannot: a cloud agent's VM writes
+no transcript file for a hook to upload ([capture.md](capture.md#cursor-cloud-agents)).
 
 ## Set it up
 
