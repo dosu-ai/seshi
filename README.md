@@ -150,6 +150,8 @@ A new agent is an [integration](integrations).
 - [x] Cursor Cloud Agents through hooks committed to the repository
 - [ ] Cursor Cloud Agents through Cursor's API, for runs whose repository has no hooks (F7)
 - [ ] Tool results in Cursor transcripts (from `postToolUse`)
+- [ ] Devin Cloud sync: a source that pulls Devin cloud sessions through Devin's API
+- [ ] A Python SDK for the seshi API, published to PyPI next to `@seshi/client`
 - [ ] Publishing the Cursor status bar extension on Open VSX (it is built and attached to each
       release)
 
