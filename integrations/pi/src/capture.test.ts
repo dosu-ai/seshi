@@ -50,7 +50,22 @@ beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), "seshi-pi-"));
   host = { env: {}, home, platform: "linux" };
 });
-afterEach(() => rmSync(home, { recursive: true, force: true }));
+// agent_end starts seshi without waiting for it, so a fake seshi can still be exiting, and on
+// Windows still holding the folder, when a test ends: retry while the folder is busy.
+afterEach(async () => {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      rmSync(home, { recursive: true, force: true });
+      return;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (attempt >= 20 || (code !== "EBUSY" && code !== "EPERM" && code !== "ENOTEMPTY")) {
+        throw err;
+      }
+      await new Promise((done) => setTimeout(done, 100));
+    }
+  }
+});
 
 describe("pi's hooks, from seshi's extension (F9.2)", () => {
   it("captures the session after each agent run, with the parent a fork names", () => {
