@@ -66,6 +66,37 @@ jobs:
           SESSIONDB_TEST_S3_SECRET_KEY: rustfsadmin
         run: bun --bun vitest run tests/store/s3-live.test.ts
 
+  # The Python client (packages/py/client) on its oldest and newest Python: ruff, mypy, and its
+  # tests, which hold it to spec/openapi.yaml and run it against a seshi server started from
+  # this checkout (bun run apps/seshi/src/main.ts serve, on a folder store).
+  python-client:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.14"]
+    env:
+      UV_PYTHON: ${{ matrix.python }}
+    defaults:
+      run:
+        working-directory: packages/py/client
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+      - run: bun install --frozen-lockfile
+        working-directory: .
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - run: uv sync --locked
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy
+      - run: uv run pytest
+
   # F8.4 (revised 15 Nov 2026): the tests of what runs on laptops (capture's hooks, spool,
   # uploader, sweep and state; the agents' hook handlers and installers; the CLI config; the
   # client; the CLI's wiring) on Windows. vitest.laptop.config.ts lists them. The server's tests
@@ -251,7 +282,7 @@ jobs:
   # release bot (its credentials are the org-wide ABBS_BOT_* secrets): main only takes pull
   # requests, and that app is the ruleset's one bypass actor.
   release:
-    needs: [test, test-windows, docker, binaries, darwin-cross-check]
+    needs: [test, test-windows, python-client, docker, binaries, darwin-cross-check]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:

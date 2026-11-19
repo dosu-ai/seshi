@@ -10,3 +10,10 @@ integrations/claude-code/plugin/.claude-plugin/types/
 
 # Evidence from .claude/skills/verify-seshi (control-seshi).
 .verify/
+
+# The Python client's (packages/py/client) environment and tool caches.
+.venv/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/

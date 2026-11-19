@@ -4,7 +4,7 @@
  *
  * 1. prepare: scripts/release-version.ts writes it into packages/ts/model/package.json (the
  *    repository's one version: what traces record as their normalizer, what /healthz and
- *    `seshi --version` report) and bun.lock; scripts/release/build.ts cross-compiles `seshi`
+ *    `seshi --version` report), bun.lock and the Python client's `__version__`; scripts/release/build.ts cross-compiles `seshi`
  *    for every target (scripts/release/targets.ts) into dist/release/: one archive per target,
  *    install.sh, install.ps1, the Cursor extension's .vsix and SHA256SUMS. @semantic-release/git commits the version files.
  * 2. The tag `vX.Y.Z` is pushed, and the GitHub release is published with those assets. The
@@ -50,6 +50,7 @@ export default {
         assets: [
           "packages/ts/model/package.json",
           "integrations/cursor/extension/package.json",
+          "packages/py/client/src/seshi/_version.py",
           "bun.lock",
           "CHANGELOG.md",
         ],

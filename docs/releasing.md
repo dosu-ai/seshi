@@ -6,7 +6,8 @@ from any other branch, and nothing is published by hand.
 
 ## What a release does
 
-1. **Gates.** The `test`, `docker`, `binaries` and `darwin-cross-check` jobs pass. `binaries` builds `seshi` natively
+1. **Gates.** The `test`, `test-windows`, `python-client`, `docker`, `binaries` and
+   `darwin-cross-check` jobs pass. `binaries` builds `seshi` natively
    on a runner for each of the six targets and runs `scripts/release/smoke.ts` on it: serve on a
    folder store, `admin init`, `login --key` (which stores the org key through `Bun.secrets` in
    the macOS Keychain or Windows Credential Manager, required there; the 0600 file is accepted on
@@ -21,7 +22,8 @@ from any other branch, and nothing is published by hand.
    longer matches, so `scripts/release/build.ts` gives both darwin binaries a fresh ad-hoc
    signature (`scripts/release/macho-sign.ts`, no `codesign` needed) before archiving them.
 2. **`release`** runs semantic-release. It picks the version from the commits, writes it into
-   `packages/ts/model/package.json` and `bun.lock` (`scripts/release-version.ts`),
+   `packages/ts/model/package.json`, `bun.lock` and the Python client's
+   `packages/py/client/src/seshi/_version.py` (`scripts/release-version.ts`),
    cross-compiles every target with `scripts/release/build.ts` into `dist/release/`, commits the
    version, pushes the tag, and publishes the GitHub release with these assets:
 
@@ -94,6 +96,31 @@ bun run scripts/release/serve-dir.ts /tmp/site 8765   # for install.ps1: -BaseUr
 script path against file:// and local HTTP fixtures, the npm packages installed into a
 temporary `node_modules` and run with Node, the libraries imported and type-checked, and the
 host's real binary built, installed and smoke tested.
+
+## PyPI
+
+The Python client (`packages/py/client`) is versioned with every release but not published yet.
+The name `seshi` was free on PyPI when the client was added (unlike npm's); register it with the
+first upload, or with a pending trusted publisher (below), before someone else takes it. To
+publish it from the release, as the `npm` job publishes the npm packages:
+
+1. **A trusted publisher.** On PyPI, add a pending publisher for the project `seshi`: owner
+   `dosu-ai`, repository `seshi`, workflow `ci.yml`,
+   environment `pypi`. No token is stored anywhere: the job proves itself with GitHub's OIDC
+   token, which needs `id-token: write`.
+2. **A `pypi` environment** in the repository's settings, limited to `main`, so only the
+   release run can use the publisher.
+3. **A `pypi` job** in `ci.yml`, after `release` and on the same condition as `npm`:
+   `permissions: {contents: read, id-token: write}`, `environment: pypi`, a checkout of
+   `v<version>`, `astral-sh/setup-uv` (pinned like every action), then
+   `uv build --project packages/py/client --out-dir dist/py` and
+   `uv publish --trusted-publishing always dist/py/*` (or `pypa/gh-action-pypi-publish`, which
+   also attests the files). A version already on PyPI is refused, so a re-run should skip it
+   (`uv publish --check-url https://pypi.org/simple/`).
+4. **`verify`** can then `pip install seshi==<version>` and import it.
+
+`scripts/release-version.ts` already writes the version, and `tests/test_version.py` keeps it
+equal to `packages/ts/model/package.json`'s, so the published wheel's version is the release's.
 
 ## Before the first release
 

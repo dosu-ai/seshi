@@ -61,6 +61,7 @@ describe("release.config.js", () => {
     expect(options("@semantic-release/git").assets).toEqual([
       "packages/ts/model/package.json",
       "integrations/cursor/extension/package.json",
+      "packages/py/client/src/seshi/_version.py",
       "bun.lock",
       "CHANGELOG.md",
     ]);
@@ -81,7 +82,23 @@ describe("ci.yml", () => {
   it("checks the Linux-built macOS binaries on a Mac before releasing", () => {
     expect(CI).toContain("bun run release:build --target darwin-arm64 --target darwin-x64");
     expect(CI).toContain('codesign --verify --verbose "cross/$id/seshi"');
-    expect(CI).toMatch(/needs: \[test, test-windows, docker, binaries, darwin-cross-check\]/);
+    expect(CI).toMatch(
+      /needs: \[test, test-windows, python-client, docker, binaries, darwin-cross-check\]/,
+    );
+  });
+
+  it("runs the Python client's checks and tests, against a server from this checkout", () => {
+    const job = CI.slice(CI.indexOf("  python-client:"), CI.indexOf("  test-windows:"));
+    expect(job).toContain("working-directory: packages/py/client");
+    expect(job).toContain("bun install --frozen-lockfile");
+    for (const step of [
+      "uv sync --locked",
+      "uv run ruff check .",
+      "uv run mypy",
+      "uv run pytest",
+    ]) {
+      expect(job).toContain(`run: ${step}`);
+    }
   });
 
   it("runs the laptop packages' tests on Windows before releasing (F8.4, decision 9)", () => {

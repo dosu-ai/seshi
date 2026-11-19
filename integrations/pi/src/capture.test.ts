@@ -50,7 +50,30 @@ beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), "seshi-pi-"));
   host = { env: {}, home, platform: "linux" };
 });
-afterEach(() => rmSync(home, { recursive: true, force: true }));
+// agent_end starts seshi without waiting for it, so a fake seshi can still be exiting when a
+// test ends, and on Windows a running process holds its folder: wait for every one that
+// logged a call (each logs its pid) to exit before removing the folder.
+afterEach(async () => {
+  const log = join(home, "calls.jsonl");
+  const pids = existsSync(log)
+    ? readFileSync(log, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => (JSON.parse(line) as { pid?: number }).pid)
+    : [];
+  const running = (pid: number) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  await vi.waitFor(() => {
+    expect(pids.filter((pid) => pid !== undefined && running(pid))).toEqual([]);
+  }, 10_000);
+  rmSync(home, { recursive: true, force: true });
+});
 
 describe("pi's hooks, from seshi's extension (F9.2)", () => {
   it("captures the session after each agent run, with the parent a fork names", () => {
@@ -194,7 +217,7 @@ let input = "";
 process.stdin.on("data", (c) => (input += c));
 process.stdin.on("end", () => {
   const args = process.argv.slice(2);
-  appendFileSync(process.env.FAKE_SESHI_LOG, JSON.stringify({ args, input, inherited: process.env.SESHI_SESSION_ID ?? null, color: process.env.NO_COLOR ?? null }) + "\\n");
+  appendFileSync(process.env.FAKE_SESHI_LOG, JSON.stringify({ args, input, inherited: process.env.SESHI_SESSION_ID ?? null, color: process.env.NO_COLOR ?? null, pid: process.pid }) + "\\n");
   if (args[0] === "statusline") process.stdout.write("Session Capture ◉\\n");
   if (args[0] === "hook" && args[2] === "Command") process.stdout.write(JSON.stringify({ message: "Session Capture ⏸ · turned off for this session" }) + "\\n");
 });
