@@ -46,6 +46,11 @@ build-backend = "hatchling.build"
 [tool.hatch.version]
 path = "src/seshi/_version.py"
 
+# Rebuild the editable install when the version file changes (a release writes it), so the
+# installed metadata says the version the source does.
+[tool.uv]
+cache-keys = [{ file = "pyproject.toml" }, { file = "src/seshi/_version.py" }]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/seshi"]
 
