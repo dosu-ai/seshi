@@ -439,9 +439,8 @@ loaded again whenever the file or a `SESHI_CAPTURE__*` variable changes.
 `SESHI_SESSION_ID`, `SESHI_AGENT` and `SESHI_NO_UPLOADER` are capture's own variables, not
 settings; both loaders pass over them (with `SESHI_CONFIG`). Claude Code sets the first two for
 every command it runs in a captured session, so the `/session-capture` skill can name the session.
-They also pass over `SESHI_TOKEN`, the Cursor Cloud secret the VM's setup step pipes to
-`seshi login --token -` ([capture.md](capture.md#cursor-cloud-agents)): seshi never reads a
-token from the environment itself.
+They also pass over `SESHI_TOKEN`, a name scripts use for the token they pipe to
+`seshi login --token -`: seshi never reads a token from the environment itself.
 
 `seshi login --server <url>` writes `server` here, and `--user` writes `user`; everything else
 in the file is left as written. The credentials themselves are never in this file: they go in

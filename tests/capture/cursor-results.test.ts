@@ -354,3 +354,27 @@ describe("a Cursor session's tool results", () => {
 /** What a result hook may take in-process, beyond starting seshi: Cursor waits for it on every
  * tool call. docs/capture.md gives the whole hook's cost, the process included. */
 const HOOK_BUDGET_MS = 100;
+
+describe("a Cursor Cloud hook an earlier seshi committed to a repository", () => {
+  it("does nothing: nothing spooled, kept or uploaded", async () => {
+    const s = session("session-1");
+    const stop = s.hooks.find((h) => h.event === "stop") ?? (s.hooks.at(-1) as Recorded);
+    for (const h of [...s.hooks, stop]) {
+      const run = await machine.seshi(["hook", "cursor", h.event, "--cloud"], {
+        stdin: JSON.stringify({
+          ...h.payload,
+          transcript_path: s.file,
+          workspace_roots: [project],
+        }),
+      });
+      expect(run.code).toBe(0);
+      expect(run.out).toBe("");
+    }
+    expect(kept(s.id)).toEqual([]);
+    await daemon();
+    expect(await stored(s.id)).toEqual([]);
+    expect(readFileSync(join(stateDir(), "capture.log"), "utf8")).toContain(
+      "seshi no longer captures through it",
+    );
+  });
+});

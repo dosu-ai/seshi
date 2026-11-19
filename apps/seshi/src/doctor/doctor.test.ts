@@ -260,12 +260,10 @@ const expectStatus = (check: CheckResult | undefined, status: string) =>
   expect(check?.status, `${check?.id}: ${check?.summary}`).toBe(status);
 
 describe("the upload id a retraction left behind", () => {
-  it("is the one before the last retraction, a continuation's suffix included", () => {
+  it("is the one before the last retraction", () => {
     expect(retractedUploadId({ session_id: "s" })).toBeUndefined();
     expect(retractedUploadId({ session_id: "s", generation: 1 })).toBe("s");
     expect(retractedUploadId({ session_id: "s", generation: 3 })).toBe("s~2");
-    expect(retractedUploadId({ session_id: "s", generation: 1, continuation: 1 })).toBe("s~r1");
-    expect(retractedUploadId({ session_id: "s", generation: 2, continuation: 1 })).toBe("s~r1~1");
   });
 });
 

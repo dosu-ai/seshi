@@ -42,17 +42,11 @@ export function localEntry(entry: SessionState): SecretlessStateEntry {
     : rest;
 }
 
-/** The id the session uploaded to before its last retraction (continuation included). */
-export function retractedUploadId(
-  entry: Pick<SessionState, "session_id" | "generation" | "continuation">,
-) {
+/** The id the session uploaded to before its last retraction. */
+export function retractedUploadId(entry: Pick<SessionState, "session_id" | "generation">) {
   const generation = entry.generation ?? 0;
   if (generation === 0) return undefined;
-  return uploadId({
-    session_id: entry.session_id,
-    generation: generation - 1,
-    ...(entry.continuation ? { continuation: entry.continuation } : {}),
-  });
+  return uploadId({ session_id: entry.session_id, generation: generation - 1 });
 }
 
 function transcriptFacts(

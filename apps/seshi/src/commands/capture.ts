@@ -60,10 +60,8 @@ import type { CommandContext } from "./index";
 
 const USAGE = [
   "usage: seshi capture install [<agent>…] [--service] [--command <program>]",
-  "       seshi capture install cursor --project [<dir>] | --cloud",
   "       seshi capture uninstall [<agent>…] [--service] [--command <program>]",
-  "       seshi capture uninstall cursor --project [<dir>] | --cloud",
-  "       seshi capture status [--session [<id>]] [--agent <agent>] [--project [<dir>]]",
+  "       seshi capture status [--session [<id>]] [--agent <agent>]",
   "       seshi capture pause [<duration>]",
   "       seshi capture resume",
   "       seshi capture off|on [--session [<id>]] [--agent <agent>]",
@@ -79,9 +77,6 @@ interface Args {
   service?: boolean;
   command?: string;
   all?: boolean;
-  /** The repository whose committed hooks to work on; true: the one around this folder. */
-  project?: string | true;
-  cloud?: boolean;
 }
 
 /** The flags, by hand: `--session` takes an optional value, which `parseArgs` cannot. */
@@ -119,12 +114,6 @@ export function parseCaptureArgs(argv: readonly string[]): Args | string {
       }
       case "--service":
         args.service = true;
-        break;
-      case "--project":
-        args.project = value() ?? true;
-        break;
-      case "--cloud":
-        args.cloud = true;
         break;
       case "--all":
         args.all = true;
@@ -278,7 +267,6 @@ function serviceCommand(hook: readonly string[]): string[] {
 }
 
 async function install(ctx: CommandContext, json: boolean, args: Args): Promise<number> {
-  if (args.project !== undefined || args.cloud) return projectOrCloud(ctx, json, args, "install");
   const agents = await namedAgents(ctx, json, args.positionals);
   if (typeof agents === "number") return agents;
   const host = hostOf(ctx);
@@ -352,9 +340,6 @@ async function install(ctx: CommandContext, json: boolean, args: Args): Promise<
 }
 
 async function uninstall(ctx: CommandContext, json: boolean, args: Args): Promise<number> {
-  if (args.project !== undefined || args.cloud) {
-    return projectOrCloud(ctx, json, args, "uninstall");
-  }
   const agents = await namedAgents(ctx, json, args.positionals);
   if (typeof agents === "number") return agents;
   const host = hostOf(ctx);
@@ -412,109 +397,7 @@ async function uninstall(ctx: CommandContext, json: boolean, args: Args): Promis
   return failed.length > 0 ? EXIT.failure : EXIT.ok;
 }
 
-/** The repository `--project` names: the folder given, else the repository around this one.
- * Never the home folder, whose `.cursor` is the user-level config. */
-function projectDir(ctx: CommandContext, args: Args): string {
-  const dir =
-    args.project === true || args.project === undefined
-      ? findRepo(process.cwd())?.root
-      : resolve(expandTilde(args.project, hostOf(ctx).home));
-  if (!dir) {
-    throw new Refused(
-      EXIT.usage,
-      "usage",
-      "this folder is not in a git repository; name it: --project <dir>",
-    );
-  }
-  if (resolve(dir) === resolve(hostOf(ctx).home)) {
-    throw new Refused(
-      EXIT.usage,
-      "usage",
-      "--project is a repository, not the home folder (whose .cursor is the user-level config: seshi capture install cursor)",
-    );
-  }
-  return dir;
-}
-
-/** `install|uninstall <agent> --project` (the hooks committed to a repository, for the agent's
- * cloud VMs) and `--cloud` (marking this machine as one). */
-async function projectOrCloud(
-  ctx: CommandContext,
-  json: boolean,
-  args: Args,
-  which: "install" | "uninstall",
-): Promise<number> {
-  if (args.project !== undefined && args.cloud) {
-    return helpOrUsageError(ctx, json, "--project and --cloud cannot go together", USAGE);
-  }
-  if (args.service || args.command !== undefined) {
-    return helpOrUsageError(
-      ctx,
-      json,
-      `${args.cloud ? "--cloud" : "--project"} takes no --service or --command`,
-      USAGE,
-    );
-  }
-  const flag = args.cloud ? "--cloud" : "--project";
-  const [name, ...extra] = args.positionals;
-  if (!name || extra.length > 0) {
-    return helpOrUsageError(
-      ctx,
-      json,
-      `${flag} needs one agent: seshi capture ${which} cursor ${flag}`,
-      USAGE,
-    );
-  }
-  const agent = await captureAgent(name);
-  const installer = agent?.installer;
-  if (!agent || !installer)
-    return helpOrUsageError(ctx, json, `seshi does not capture '${name}'`, USAGE);
-  const style = await styleFor(ctx, { json });
-  if (args.cloud) {
-    if (!installer.cloud) {
-      return helpOrUsageError(
-        ctx,
-        json,
-        `${name} has no cloud agents seshi captures (only cursor)`,
-        USAGE,
-      );
-    }
-    const host = hostOf(ctx);
-    const report = which === "install" ? installer.cloud.mark(host) : installer.cloud.unmark(host);
-    emit(ctx, json, { agent: name, cloud: which === "install", ...report }, () => [
-      which === "install"
-        ? `${style.status("marked", "success")}: this machine is a ${name} cloud VM: the hooks committed to its repositories capture here, and seshi's user-level ${name} hooks stand aside`
-        : `${style.status("unmarked", "success")}: this machine is not a ${name} cloud VM`,
-    ]);
-    return EXIT.ok;
-  }
-  if (!installer.project) {
-    return helpOrUsageError(
-      ctx,
-      json,
-      `${name} takes no hooks committed to a repository (only cursor)`,
-      USAGE,
-    );
-  }
-  const dir = projectDir(ctx, args);
-  const report =
-    which === "install"
-      ? await installer.project.install({ dir, version: VERSION })
-      : await installer.project.uninstall({ dir, version: VERSION });
-  emit(ctx, json, { agent: name, project: dir, ...report }, () => [
-    report.changed.length > 0
-      ? `${style.status(which === "install" ? "installed" : "removed", "success")} ${name} (repository ${printable(dir)}): ${report.changed.map(printable).join(", ")}`
-      : `${name} (repository ${printable(dir)}): ${which === "install" ? "already installed" : "nothing of seshi's was there"}`,
-    ...report.notes.map((n) => `  ${style.warn("note")}: ${n}`),
-    ...(which === "install" && report.changed.length > 0
-      ? ["Commit the changed files. They hold no token or server URL."]
-      : []),
-  ]);
-  return EXIT.ok;
-}
-
 async function status(ctx: CommandContext, json: boolean, args: Args): Promise<number> {
-  if (args.project !== undefined) return projectStatus(ctx, json, args);
   const { host, paths } = pathsOf(ctx);
   const now = new Date();
   const state = readState(paths);
@@ -561,11 +444,6 @@ async function status(ctx: CommandContext, json: boolean, args: Args): Promise<n
     const status = agent.installer
       ? await agent.installer.status({ ...host, command: hookCommand() }).catch(() => undefined)
       : undefined;
-    if (status && agent.installer?.cloud?.is(host)) {
-      status.notes.push(
-        `this machine is a ${agent.name} cloud VM: the hooks committed to its repositories capture here`,
-      );
-    }
     installs.push({
       agent: agent.name,
       installed: status?.installed ?? false,
@@ -669,38 +547,6 @@ async function status(ctx: CommandContext, json: boolean, args: Args): Promise<n
     ],
   );
   return attention ? EXIT.attention : EXIT.ok;
-}
-
-/** `status --project`: whether the repository's committed hooks are in, for each agent that
- * takes them, and whether this machine is marked as that agent's cloud VM. */
-async function projectStatus(ctx: CommandContext, json: boolean, args: Args): Promise<number> {
-  const dir = projectDir(ctx, args);
-  const host = hostOf(ctx);
-  const agents = (await allCaptureAgents()).filter(
-    (a) => a.installer?.project && (args.agent === undefined || a.name === args.agent),
-  );
-  const rows: { agent: string; cloud_vm: boolean; status: InstallStatus }[] = [];
-  for (const agent of agents) {
-    const installer = agent.installer as NonNullable<CaptureAgent["installer"]>;
-    const status = await (installer.project as NonNullable<typeof installer.project>).status({
-      dir,
-      version: VERSION,
-    });
-    rows.push({ agent: agent.name, cloud_vm: installer.cloud?.is(host) ?? false, status });
-  }
-  const style = await styleFor(ctx, { json });
-  emit(ctx, json, { project: dir, agents: rows }, () => [
-    `repository ${printable(dir)}:`,
-    ...rows.flatMap((r) => [
-      `  ${r.agent.padEnd(12)} ${r.status.installed ? style.status("installed", "success") : "not installed"}${r.cloud_vm ? ` · this machine is a ${r.agent} cloud VM` : ""}`,
-      ...r.status.files.map(
-        (f) =>
-          `    ${printable(f.path)}: ${f.present ? (f.ours ? "seshi's" : "not seshi's") : "missing"}`,
-      ),
-      ...r.status.notes.map((n) => `    ${style.warn("note")}: ${printable(n)}`),
-    ]),
-  ]);
-  return EXIT.ok;
 }
 
 async function pause(ctx: CommandContext, json: boolean, args: Args): Promise<number> {
