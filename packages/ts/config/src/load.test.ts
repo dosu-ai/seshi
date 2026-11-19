@@ -439,7 +439,7 @@ describe("the strict schema (F1.4)", () => {
       'auth.tokens.alice: expected a string, { env = "NAME" } or { file = "/path" } (in /work/seshi.toml)',
     );
     expect(found).toContain(
-      "sources[x].type: must be one of otlp, datadog, s3 (in /work/seshi.toml)",
+      "sources[x].type: must be one of otlp, datadog, s3, cursor-cloud (in /work/seshi.toml)",
     );
   });
 });

@@ -341,21 +341,23 @@ A server never starts without its policies' keys, so it ignores this.
 
 ### `[[sources]]`
 
-What the server ingests from on its own (F4–F6). Each has an `id` (lower-case letters and
+What the server ingests from on its own (F4–F7). Each has an `id` (lower-case letters and
 digits, words joined by single `-`; not `upload`, which uploads use), a `type`, `enabled` (`true`), `visibility`, and `filter`
 overrides. Each writes as its service account `svc:<id>` (X5.4). The worker polls a source on
 its `interval` once a connector for its type is in the binary (`seshi sync status` says which
 are polled). The binary polls `datadog` sources ([docs/datadog.md](datadog.md)) through the
-datadog-trajectory integration and `s3` sources with its built-in S3 poller
+datadog-trajectory integration, `cursor-cloud` sources through the cursor integration
+([cursor-cloud.md](cursor-cloud.md)), and `s3` sources with its built-in S3 poller
 ([s3-sync.md](s3-sync.md)); `otlp` sources are not polled, their
 destination posts to them. What a poller cannot turn into a session (an object it cannot read,
-a Datadog span it cannot parse) is recorded under `sources/<id>/failed/` and listed by
+a Datadog span it cannot parse, a Cursor run whose events expired) is recorded under `sources/<id>/failed/` and listed by
 `seshi sync failed <id>`.
 
 | Type | Fields |
 |---|---|
 | `otlp` | `quiet_period` (`"10m"`): a session is published once its spans have been quiet this long (F4.4). The destination posts to `POST /otlp/v1/traces` with a service token for this source ([docs/otlp.md](otlp.md)) |
 | `datadog` | `site` (`"datadoghq.com"`), `api_url` (instead of `https://api.<site>`: a proxy; `https`, or `http` to localhost only), `api_key`, `app_key` (secrets), `ml_app`, `tags` (each `key:value`; a span must carry all), `interval` (`"5m"`), `overlap` (`"10m"`), `lag` (`"2m"`), `backfill` (`"7d"`), `page_size` (`500`, at most 5000), `quiet_period` (`"10m"`): polls Datadog LLM Observability ([docs/datadog.md](datadog.md)) |
+| `cursor-cloud` | `api_key` (secret), `api_url` (instead of `https://api.cursor.com`: a test server; `https`, or `http` to localhost only), `interval` (`"5m"`), `lookback` (`"25h"`), `max_streams` (`25`, at most 60), `usage` (`true`): polls Cursor's Cloud Agents API ([docs/cursor-cloud.md](cursor-cloud.md)) |
 | `s3` | `url`, `prefix`, `credentials` or `role` (`arn`, `external_id`), `region`, `endpoint`, `account_id`, `include` globs, `format` (`"auto"`), `ordered_keys` (`false`), `interval` (`"5m"`), `path` |
 
 Ids are unique, and an `s3` source may not read seshi's own bucket and prefix, or its own

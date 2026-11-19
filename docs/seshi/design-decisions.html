@@ -183,7 +183,7 @@ pre.tree .d { color: var(--accent); font-weight: 500; }
       <tr><td><span class="k">F4</span> OTLP ingestion</td><td>Push, <code>POST /otlp/v1/traces</code></td><td>Org-level ingest token</td><td>The destination's service account</td><td>Settled; still to check whether spans carry workspace identity</td></tr>
       <tr><td><span class="k">F5</span> Datadog sync</td><td>Poll, LLM Obs Export API</td><td>Connector (DD keys)</td><td>The source's service account</td><td>API is preview; capture level</td></tr>
       <tr><td><span class="k">F6</span> S3 sync</td><td>Poll, ListObjectsV2</td><td>Connector (bucket keys)</td><td>The source's service account</td><td>Large buckets: listing cost per run</td></tr>
-      <tr><td><span class="k">F7</span> Cursor Cloud sync</td><td>Poll, Cloud Agents API</td><td>Connector (Cursor key)</td><td>The source's service account</td><td>Deferred: no public transcript endpoint</td></tr>
+      <tr><td><span class="k">F7</span> Cursor Cloud sync</td><td>Poll, Cloud Agents API</td><td>Connector (Cursor key)</td><td>The source's service account</td><td>Settled; whether the 24 h stream window counts from a run's start or its finish</td></tr>
       <tr><td><span class="k">F8</span> Session CLI</td><td>Push, HTTP API</td><td>Person (IdP sign-in, or org key with a stated username)</td><td>The signed-in person</td><td>Settled</td></tr>
       <tr><td><span class="k">F9</span> Capture integrations</td><td>Push via hooks and spool</td><td>Device token, or the org key</td><td>The signed-in person</td><td>Settled; how the session toggle learns the session ID</td></tr>
       <tr><td><span class="k">F10</span> Search</td><td>Reads the change feed</td><td>Person or service</td><td>Filtered by visibility</td><td>Settled; ClickHouse and semantic search later</td></tr>
@@ -339,7 +339,7 @@ pre.tree .d { color: var(--accent); font-weight: 500; }
 │  ├─ <span class="d">codex/</span>             <span class="c"># rollout adapter, notify hook, sweep paths, installer</span>
 │  ├─ <span class="d">cursor/</span>
 │  │  ├─ <span class="d">local/</span>          <span class="c"># agent-transcripts adapter, hooks, installer</span>
-│  │  └─ <span class="d">cloud/</span>          <span class="c"># Cloud Agents poller (F7, deferred)</span>
+│  │  └─ <span class="d">cloud/</span>          <span class="c"># Cloud Agents poller (F7)</span>
 │  ├─ <span class="d">datadog-trajectory/</span>
 │  │  ├─ <span class="d">daemon/</span>         <span class="c"># adapter for ~/.trajectory session files, sweep paths</span>
 │  │  └─ <span class="d">llmobs/</span>         <span class="c"># LLM Observability Export API poller, turn spans → session (F5)</span>
@@ -1380,7 +1380,7 @@ pre.tree .d { color: var(--accent); font-weight: 500; }
 
 <section id="f7">
   <h2><span class="k">F7</span>Cursor Cloud sync</h2>
-  <p class="intro"><span class="chip deferred">Deferred</span> Not in the first version. The public REST API has no prompts, and the only full transcript comes through the Cursor SDK over an undocumented call, so this waits until Cursor publishes a transcript endpoint or the checks below are done with a real key. The notes stay as the starting point.</p>
+  <p class="intro"><span class="chip agreed">Agreed</span> Built as a REST poller, without the Cursor SDK (<a href="../cursor-cloud.md">docs/cursor-cloud.md</a>). A trial against the real API (18–19 Nov 2026) settled the open checks below: the run stream (<code>GET /v1/agents/{id}/runs/{runId}/stream</code>) does carry the user's message (<code>interaction_update</code> <code>user-message-appended</code>), so REST alone gives the whole run: prompt, thinking, replies and every tool call with its result. The stream is kept for 24 hours, and the SDK's <code>conversation()</code> reads the same events, so it is no longer-lived. Each finished run is stored as one line of a new format, <code>cursor-cloud-api</code>: its raw stream events, run and usage. Polling caught every run in the trial, a median of 3 minutes after it ended, with no 429. A cloud VM writes no transcript file, so the committed hooks of F9 do not capture cloud sessions; the poller is the only path. The notes below are the plan as it stood before the trial.</p>
   <p class="intro">Cursor Cloud Agents run in Cursor's cloud, so local hooks and transcripts do not cover them. The public Cloud Agents REST API (v1) lists agents and runs but returns no user prompts anywhere. The Cursor SDK's <code>run.conversation()</code> returns the full structured transcript of a run, so the poller lists with REST and reads each run's transcript through the SDK.</p>
   <h3 style="margin-top:8px">What Cursor exposes</h3>
   <div class="scroll">

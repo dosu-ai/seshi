@@ -67,6 +67,13 @@ app_key = { env = "DD_APP_KEY" }
 ml_app = "coding-agents"   # Trajectory's default ml_app; use your app's
 tags = ["env:prod"]
 
+# Cursor Cloud agents (F7, docs/cursor-cloud.md): a Cursor API key; each poll replays the runs
+# that ended since the last one. Cursor keeps a run's events for 24 hours.
+[[sources]]
+id = "cursor-cloud"
+type = "cursor-cloud"
+api_key = { env = "CURSOR_API_KEY" }
+
 # A bucket other systems write agent logs to (F6, docs/s3-sync.md): the
 # built-in S3 poller reads new and grown objects. It may not be seshi's own bucket and prefix.
 [[sources]]

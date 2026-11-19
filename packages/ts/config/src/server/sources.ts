@@ -146,12 +146,50 @@ export const s3Source = z
   })
   .describe("An S3-compatible bucket other systems write sessions to (F6), polled.");
 
-export const source = z.discriminatedUnion("type", [otlpSource, datadogSource, s3Source]);
+export const cursorCloudSource = z
+  .strictObject({
+    type: z.literal("cursor-cloud"),
+    ...base,
+    api_key: secret().describe(
+      "A Cursor API key (a member's, or a service account's): the poller reads the cloud agents it can see.",
+    ),
+    api_url: httpUrl
+      .optional()
+      .describe(
+        "The Cloud Agents API's base URL, instead of https://api.cursor.com (a test server).",
+      ),
+    interval: duration().prefault("5m").describe("How often it polls."),
+    lookback: duration()
+      .prefault("25h")
+      .describe(
+        "Agents untouched for longer are not read on the first poll: Cursor keeps a run's events for 24 hours (F7).",
+      ),
+    max_streams: z
+      .int()
+      .min(1)
+      .max(60)
+      .default(25)
+      .describe(
+        "Run streams one poll opens at most (Cursor allows 60 a minute); the rest wait for the next.",
+      ),
+    usage: z
+      .boolean()
+      .default(true)
+      .describe("Also read each run's token usage (one more call per run)."),
+  })
+  .describe("Cursor Cloud agents (F7), polled through the Cloud Agents API.");
+
+export const source = z.discriminatedUnion("type", [
+  otlpSource,
+  datadogSource,
+  s3Source,
+  cursorCloudSource,
+]);
 
 export const sourcesSection = z
   .array(source)
   .default([])
-  .describe("Sources the server ingests from on its own (F4–F6).");
+  .describe("Sources the server ingests from on its own (F4–F7).");
 
 export type SourceConfig = z.output<typeof source>;
 export type SourceType = SourceConfig["type"];

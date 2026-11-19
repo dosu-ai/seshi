@@ -1,7 +1,7 @@
 {
   "name": "@seshi/integration-cursor",
   "private": true,
-  "description": "Cursor: the local agent-transcripts adapter (later: hooks, installer; the Cloud Agents poller is deferred).",
+  "description": "Cursor: the local agent-transcripts adapter, hooks and installer, and the Cloud Agents poller (F7).",
   "type": "module",
   "exports": {
     ".": {
@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@seshi/formats": "workspace:*",
-    "@seshi/kit": "workspace:*"
+    "@seshi/kit": "workspace:*",
+    "@seshi/model": "workspace:*"
   }
 }

@@ -96,7 +96,7 @@ The worker's jobs:
 |---|---|---|
 | `heartbeat` | `worker.heartbeat_interval` (1m) | Writes `worker/heartbeat.json`: who runs, since when, and each job's last run and error (X7.5) |
 | `retention` | 6h | Prunes drop and failure records and source health days past `[records]` retention |
-| `source:<id>` | the source's `interval` | Polls a source through its connector (X3.11), from its checkpoint (X7.4): Datadog LLM Observability for `type = "datadog"` ([datadog.md](datadog.md)), a bucket for `type = "s3"` ([s3-sync.md](s3-sync.md)) |
+| `source:<id>` | the source's `interval` | Polls a source through its connector (X3.11), from its checkpoint (X7.4): Datadog LLM Observability for `type = "datadog"` ([datadog.md](datadog.md)), a bucket for `type = "s3"` ([s3-sync.md](s3-sync.md)), Cursor's Cloud Agents API for `type = "cursor-cloud"` ([cursor-cloud.md](cursor-cloud.md)) |
 | `assembler` | `worker.assembly_interval` (30s) | Publishes sessions whose spans (OTLP, F4; Datadog, F5) have been quiet for their source's `quiet_period`, from the pending markers (X7.4); its backlog is the sessions waiting |
 | `sweep` | 1d, and when the worker starts | Deletes trace objects no session's metadata names that are over an hour old: what a redaction backfill, replace or publish that stopped partway left behind (F2.5, [redaction.md](redaction.md#trying-and-applying-rules)) |
 
@@ -171,6 +171,7 @@ visibility, checkpoint and health ([config.md](config.md#sources)):
 | `otlp` | Pushed: OpenTelemetry GenAI spans to `POST /otlp/v1/traces` (a Claude Console destination, or any OTLP/HTTP exporter), assembled into sessions | [otlp.md](otlp.md) |
 | `datadog` | Polled: Datadog LLM Observability's Export API, the turns Datadog Trajectory published | [datadog.md](datadog.md) |
 | `s3` | Polled: transcripts other systems drop into a bucket (eval harnesses, ATIF exports, sandboxes) | [s3-sync.md](s3-sync.md) |
+| `cursor-cloud` | Polled: Cursor's Cloud Agents API, each run of a Cursor Cloud agent | [cursor-cloud.md](cursor-cloud.md) |
 
 Sources are added, changed and removed without a restart: edit the file (or a drop-in in
 `seshi.d/`) and reload with `SIGHUP` or `POST /v1/admin/reload`

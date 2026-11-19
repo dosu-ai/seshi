@@ -98,6 +98,7 @@
       "dependencies": {
         "@seshi/formats": "workspace:*",
         "@seshi/kit": "workspace:*",
+        "@seshi/model": "workspace:*",
       },
     },
     "integrations/datadog-trajectory": {
