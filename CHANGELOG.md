@@ -1,3 +1,10 @@
+# [0.13.0](https://github.com/dosu-ai/seshi/compare/v0.12.0...v0.13.0) (2026-11-19)
+
+
+### Features
+
+* **cursor:** drop Cursor Cloud hook mode; F7 is the only Cursor Cloud path ([#44](https://github.com/dosu-ai/seshi/issues/44)) ([bf8c914](https://github.com/dosu-ai/seshi/commit/bf8c9149c842230d034f6f6ee4a580dd277966b8))
+
 # [0.12.0](https://github.com/dosu-ai/seshi/compare/v0.11.0...v0.12.0) (2026-11-19)
 
 
