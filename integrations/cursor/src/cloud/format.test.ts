@@ -13,7 +13,7 @@ describe("cursor-cloud-api", () => {
     expect(records[0]).toEqual({
       role: "meta",
       source: "cursor-cloud-api",
-      git_branch: "cursor/seshi-trial-ok-e13a",
+      git_branch: "cursor/demo-ok-1a2b",
     });
     const roles = records.slice(1).map((r) => r.role);
     expect(roles).toEqual([
@@ -27,22 +27,22 @@ describe("cursor-cloud-api", () => {
       "assistant",
     ]);
     const [, user, call, result, reply, followup] = records;
-    expect(user).toMatchObject({ role: "user", timestamp: "2026-11-18T02:17:32.927Z" });
-    expect((user as { content: string }).content).toContain("echo seshi-trial-ok");
+    expect(user).toMatchObject({ role: "user", timestamp: "2026-11-18T02:17:30.040Z" });
+    expect((user as { content: string }).content).toContain("echo hello-demo");
     expect(call).toMatchObject({
       role: "assistant",
       content: null,
-      tool_calls: [{ id: "toolu_vrtx_01StiJsmHuh2JTEutH4rYXax", name: "run_terminal_cmd" }],
+      tool_calls: [{ id: "toolu_demo_00b1", name: "run_terminal_cmd" }],
     });
     const args = JSON.parse((call as { tool_calls: { args: string }[] }).tool_calls[0]?.args ?? "");
-    expect(args).toMatchObject({ command: "echo seshi-trial-ok", timeout: 600000 });
+    expect(args).toMatchObject({ command: "echo hello-demo", timeout: 600000 });
     for (const noise of ["toolCallId", "conversationId", "requestId", "parsingResult"]) {
       expect(args).not.toHaveProperty(noise);
     }
     expect(result).toMatchObject({
       role: "tool",
-      tool_call_id: "toolu_vrtx_01StiJsmHuh2JTEutH4rYXax",
-      content: "seshi-trial-ok\n",
+      tool_call_id: "toolu_demo_00b1",
+      content: "hello-demo\n",
       ok: true,
     });
     expect(reply).toMatchObject({ role: "assistant", content: "done." });
