@@ -69,6 +69,9 @@ class Settings:
     user: str | None
     user_agent: str
     gzip_from: int
+    timeout: float | None
+    """Seconds per request; 0 or None disables. Set on each request, so it holds whatever
+    httpx client sends it."""
 
 
 def _query_value(value: QueryValue) -> str:
@@ -125,6 +128,7 @@ def prepare(call: Call[Any], settings: Settings) -> httpx.Request:
         params=params,
         headers=headers,
         content=content,
+        extensions={"timeout": httpx.Timeout(settings.timeout or None).as_dict()},
     )
 
 
@@ -201,7 +205,14 @@ def _or_none(model: type[M], *none_on: int) -> Callable[[Answer], M | None]:
 
 
 def _dump(value: BaseModel | Mapping[str, Any], model: type[BaseModel]) -> dict[str, Any]:
-    checked = value if isinstance(value, BaseModel) else model.model_validate(value)
+    """The body `model` sends: `value` checked as one, whatever it was given as (another model
+    is checked by its fields, so a stray field is refused here, not by the server)."""
+    if isinstance(value, model):
+        checked: BaseModel = value
+    elif isinstance(value, BaseModel):
+        checked = model.model_validate(value.model_dump(by_alias=True, exclude_none=True))
+    else:
+        checked = model.model_validate(value)
     return checked.model_dump(mode="json", by_alias=True, exclude_none=True)
 
 

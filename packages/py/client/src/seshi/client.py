@@ -21,10 +21,6 @@ from ._calls import DEFAULT_GZIP_FROM, DEFAULT_TIMEOUT, DEFAULT_USER_AGENT, Call
 T = TypeVar("T")
 
 
-def _timeout(timeout: float | None) -> httpx.Timeout:
-    return httpx.Timeout(timeout if timeout else None)
-
-
 def _search_request(
     q: str,
     owner: str | None,
@@ -67,13 +63,13 @@ class _Base:
         gzip_from: int,
     ) -> None:
         self.server = server.rstrip("/")
-        self.timeout = timeout
         self._settings = Settings(
             server=self.server,
             token=token,
             user=user,
             user_agent=user_agent or DEFAULT_USER_AGENT,
             gzip_from=gzip_from,
+            timeout=timeout,
         )
 
     def __repr__(self) -> str:
@@ -88,10 +84,11 @@ class SeshiClient(_Base):
     `auth_config` and `exchange_id_token` answer.
 
     `timeout` is per request, in seconds (default 120, the server's own idle timeout; 0 or
-    None disables). Bodies of `gzip_from` bytes or more (default 8 KiB) are sent
-    `Content-Encoding: gzip`. `user_agent` names your program in the server's logs (default
-    `seshi-python/<version>`). Pass `http_client` to bring your own `httpx.Client` (it is not
-    closed by `close()`), or `transport` for a custom or mock transport.
+    None disables), with an `http_client` of your own too. Bodies of `gzip_from` bytes or more
+    (default 8 KiB) are sent `Content-Encoding: gzip`. `user_agent` names your program in the
+    server's logs (default `seshi-python/<version>`). Pass `http_client` to bring your own
+    `httpx.Client` (it is not closed by `close()`), or `transport` for a custom or mock
+    transport; not both.
 
     Use it as a context manager, or call `close()`, to release its connections.
     """
@@ -111,8 +108,10 @@ class SeshiClient(_Base):
         super().__init__(
             server, token, user=user, timeout=timeout, user_agent=user_agent, gzip_from=gzip_from
         )
+        if http_client is not None and transport is not None:
+            raise ValueError("pass http_client or transport, not both")
         self._owns_client = http_client is None
-        self._http = http_client or httpx.Client(transport=transport, timeout=_timeout(timeout))
+        self._http = http_client or httpx.Client(transport=transport)
 
     def close(self) -> None:
         if self._owns_client:
@@ -478,10 +477,10 @@ class AsyncSeshiClient(_Base):
         super().__init__(
             server, token, user=user, timeout=timeout, user_agent=user_agent, gzip_from=gzip_from
         )
+        if http_client is not None and transport is not None:
+            raise ValueError("pass http_client or transport, not both")
         self._owns_client = http_client is None
-        self._http = http_client or httpx.AsyncClient(
-            transport=transport, timeout=_timeout(timeout)
-        )
+        self._http = http_client or httpx.AsyncClient(transport=transport)
 
     async def aclose(self) -> None:
         if self._owns_client:

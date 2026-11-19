@@ -6,17 +6,25 @@ written `schema_`, and OTLP's camelCase names, written in snake_case; both are r
 under their JSON names. Times are kept as the RFC 3339 strings the server writes
 (`2026-11-14T09:00:00.000Z`), so a cursor or a stamp round-trips byte for byte.
 
-Response models keep fields they do not know (`extra="allow"`), so a newer server's additions
-do not break an older client; request models refuse them, so a typo fails before it is sent.
+Response models keep fields they do not know (`extra="allow"`), and an enum value they do not
+know (`Open`), so a newer server's additions do not break an older client; request models
+refuse unknown fields, so a typo fails before it is sent.
 `tests/test_spec_drift.py` holds these models to the spec: a property the spec adds, renames or
 removes fails it.
 """
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    ValidatorFunctionWrapHandler,
+    WrapValidator,
+)
 from pydantic.alias_generators import to_camel
 
 Agent = Literal[
@@ -50,6 +58,22 @@ EventRole = Literal[
 ]
 RecordKind = Literal["failed", "dropped"]
 SearchSort = Literal["relevance", "recent"]
+
+_Known = TypeVar("_Known")
+
+
+def _known_or_new(value: Any, handler: ValidatorFunctionWrapHandler) -> Any:
+    try:
+        return handler(value)
+    except ValidationError:
+        if isinstance(value, str | int) and not isinstance(value, bool):
+            return value
+        raise
+
+
+Open = Annotated[_Known, WrapValidator(_known_or_new)]
+"""An enum the server answers with: one of the values this client knows, or, from a newer
+server, one it does not, kept as the string (or number) the server sent."""
 
 
 class Response(BaseModel):
@@ -120,8 +144,8 @@ class ExchangeResult(Response):
     session_token: str
     expires_at: str
     owner: str
-    role: Literal["member", "admin"]
-    scopes: list[Scope]
+    role: Open[Literal["member", "admin"]]
+    scopes: list[Open[Scope]]
     device_token: DeviceToken | None = None
 
 
@@ -145,12 +169,12 @@ class TokenInfo(Response):
 
     schema_: Literal["seshi/token/1"] = Field(alias="schema")
     id: str
-    kind: TokenKind
+    kind: Open[TokenKind]
     owner: str
     """The owner id, or `*` for the org key."""
-    scopes: list[Scope]
-    visibility: Visibility | None = None
-    owner_basis: OwnerBasis | None = None
+    scopes: list[Open[Scope]]
+    visibility: Open[Visibility] | None = None
+    owner_basis: Open[OwnerBasis] | None = None
     created_at: str
     expires_at: str | None
     revoked: bool
@@ -197,7 +221,7 @@ class RevokedTokens(Response):
 
 
 class Writer(Response):
-    kind: CallerKind
+    kind: Open[CallerKind]
     principal: str
     credential_id: str | None = None
     source_id: str
@@ -232,7 +256,7 @@ class SourceLocation(Response):
 
 
 class Provenance(Response):
-    source: SourceKind
+    source: Open[SourceKind]
     source_id: str
     format: str | None = None
     location: SourceLocation | None = None
@@ -270,12 +294,12 @@ class Identity(Response):
 
     owner: str
     storage: StorageView
-    kind: Literal["person", "device", "service", "admin", "static"]
-    role: Literal["member", "admin", "service"]
-    scopes: list[Scope]
-    owner_basis: OwnerBasis
+    kind: Open[Literal["person", "device", "service", "admin", "static"]]
+    role: Open[Literal["member", "admin", "service"]]
+    scopes: list[Open[Scope]]
+    owner_basis: Open[OwnerBasis]
     credential_id: str
-    visibility: Visibility | None = None
+    visibility: Open[Visibility] | None = None
     expires_at: str | None = None
 
 
@@ -302,7 +326,8 @@ class Upload(Request):
     the last answer's `bytes_total` ended. The server's rules for whole uploads, chunks,
     continuations, forks and resends are in docs/server.md."""
 
-    agent: Agent
+    agent: Agent | str
+    """One of `Agent`, or a format a newer server knows: the server decides."""
     session_id: str
     transcript: str
     format: Literal["jsonl", "json"] | None = None
@@ -374,7 +399,7 @@ class DroppedPrefix(Response):
 class AppliedEnvelope(Response):
     idempotency_key: str
     at: str
-    status: Literal["stored", "duplicate", "unchanged", "dropped"]
+    status: Open[Literal["stored", "duplicate", "unchanged", "dropped"]]
     content_hash: str | None = None
     records: int | None = None
     events: int | None = None
@@ -395,16 +420,16 @@ class SessionMetadata(Response):
     project: str | None = None
     branch: str | None = None
     parent_session_id: str | None = None
-    status: Literal["stored", "redacted"]
+    status: Open[Literal["stored", "redacted"]]
     head: str | None = None
     traces: list[SessionTraceRef]
     normalized: NormalizedState | None = None
     dropped_prefix: DroppedPrefix | None = None
-    withheld_calls: dict[str, Literal["sensitive-file", "secret-output"]] | None = None
+    withheld_calls: dict[str, Open[Literal["sensitive-file", "secret-output"]]] | None = None
     applied: list[AppliedEnvelope] | None = None
     writer: Writer
-    owner_basis: OwnerBasis
-    visibility: Visibility
+    owner_basis: Open[OwnerBasis]
+    visibility: Open[Visibility]
     claims: Claims | None = None
     redaction: RedactionSummary | None = None
     provenance: Provenance | None = None
@@ -500,7 +525,7 @@ class ToolResultRecord(Response):
     ok: bool | None = None
     timestamp: str
     id: str | None = None
-    withheld: Literal["sensitive-file", "secret-output", "review"] | None = None
+    withheld: Open[Literal["sensitive-file", "secret-output", "review"]] | None = None
     duration_ms: float | None = None
 
 
@@ -513,7 +538,7 @@ class TraceEvent(Response):
     """One unit of a trace; `index` is stable for the object's lifetime."""
 
     index: int
-    role: EventRole
+    role: Open[EventRole]
     text: str
     timestamp: str | None
     tool_name: str | None = None
@@ -597,7 +622,7 @@ class AtifAgent(Response):
 
 class AtifStep(Response):
     step_id: int
-    source: Literal["system", "user", "agent"]
+    source: Open[Literal["system", "user", "agent"]]
     message: str
 
 
@@ -631,7 +656,7 @@ class OtlpKeyValue(_Otlp):
 
 
 class OtlpSpanStatus(_Otlp):
-    code: Literal[0, 1, 2]
+    code: Open[Literal[0, 1, 2]]
     message: str | None = None
 
 
@@ -684,7 +709,7 @@ class ChangeEntry(Response):
     """`seshi/change/1`: one entry of an owner's change feed."""
 
     schema_: Literal["seshi/change/1"] = Field(alias="schema")
-    kind: Literal["published", "tombstone", "visibility_changed"]
+    kind: Open[Literal["published", "tombstone", "visibility_changed"]]
     at: str
     owner: str
     archive_id: str
@@ -693,9 +718,9 @@ class ChangeEntry(Response):
     continuation: Continuation | None = None
     replace: bool | None = None
     writer: Writer
-    owner_basis: OwnerBasis | None = None
-    reason: Literal["deleted", "retracted", "redacted"] | None = None
-    visibility: Visibility | None = None
+    owner_basis: Open[OwnerBasis] | None = None
+    reason: Open[Literal["deleted", "retracted", "redacted"]] | None = None
+    visibility: Open[Visibility] | None = None
 
 
 class Change(Response):
@@ -740,7 +765,7 @@ class PackRule(Response):
     description: str | None = None
     patterns: list[str]
     replacement: str | None = None
-    applies_to: list[Literal["text", "tool_input", "tool_output"]]
+    applies_to: list[Open[Literal["text", "tool_input", "tool_output"]]]
     tests: RuleTests | None = None
 
 
@@ -791,11 +816,11 @@ class ReviewFinding(Response):
     record: int
     field: str
     category: str
-    action: Literal["redact", "withhold"]
+    action: Open[Literal["redact", "withhold"]]
 
 
 class ReviewFailure(Response):
-    step: Literal["decision", "redactor"]
+    step: Open[Literal["decision", "redactor"]]
     code: str
     attempts: int
 
@@ -808,7 +833,7 @@ class ReviewDecision(Response):
     n: int
     at: str
     content_hash: str
-    decision: Literal["allow", "redact", "skipped"]
+    decision: Open[Literal["allow", "redact", "skipped"]]
     policy: str | None = None
     policy_hash: str | None = None
     decision_model: str | None = None
@@ -851,7 +876,7 @@ class SearchRequest(Request):
 class SearchMatch(Response):
     content_hash: str
     event_index: int
-    role: EventRole
+    role: Open[EventRole]
     tool_name: str | None = None
     timestamp: str | None = None
     snippet: str
@@ -869,7 +894,7 @@ class SearchResult(Response):
     project: str | None = None
     branch: str | None = None
     source_id: str | None = None
-    visibility: Visibility
+    visibility: Open[Visibility]
     started_at: str | None = None
     ended_at: str | None = None
     updated_at: str
@@ -937,7 +962,7 @@ class SourceRecord(Response):
     provenance: dict[str, Any] | None = None
     code: str | None = None
     message: str | None = None
-    reason: Literal["review_drop", "review_failed"] | None = None
+    reason: Open[Literal["review_drop", "review_failed"]] | None = None
     policy: str | None = None
     policy_hash: str | None = None
     decision_model: str | None = None
@@ -950,7 +975,7 @@ class SourceRecordItem(Response):
 
 class RecordsPage(Response):
     source: str
-    kind: RecordKind
+    kind: Open[RecordKind]
     records: list[SourceRecordItem]
     cursor: str | None = None
     """The last key on the page; pass as `after`."""
@@ -965,7 +990,7 @@ class JobError(Response):
 class JobRecord(Response):
     last_started: str | None = None
     last_finished: str | None = None
-    last_outcome: Literal["ok", "error", "discarded"] | None = None
+    last_outcome: Open[Literal["ok", "error", "discarded"]] | None = None
     last_ok: str | None = None
     last_error: JobError | None = None
     runs: int
@@ -976,7 +1001,7 @@ class JobRecord(Response):
 class JobStatus(Response):
     name: str
     kind: str
-    placement: Literal["worker", "every"]
+    placement: Open[Literal["worker", "every"]]
     interval_ms: int
     source: str | None = None
     last: JobRecord | None = None
@@ -991,7 +1016,7 @@ class OtherWorker(Response):
 
 
 class WorkerStatus(Response):
-    state: Literal["running", "stopped", "never", "several"]
+    state: Open[Literal["running", "stopped", "never", "several"]]
     instance: str | None = None
     host: str | None = None
     version: str | None = None
@@ -1005,7 +1030,7 @@ class WorkerStatus(Response):
 class InstanceInfo(Response):
     id: str
     process: str
-    roles: list[Literal["api", "worker"]]
+    roles: list[Open[Literal["api", "worker"]]]
     version: str
 
 
@@ -1031,10 +1056,10 @@ class ReloadSources(Response):
 class ReloadReport(Response):
     """One config reload (F1.5)."""
 
-    trigger: Literal["signal", "api", "watch", "manual"]
+    trigger: Open[Literal["signal", "api", "watch", "manual"]]
     started_at: str
     finished_at: str
-    outcome: Literal["applied", "unchanged", "rejected"]
+    outcome: Open[Literal["applied", "unchanged", "rejected"]]
     generation: int
     config_hash: str
     rule_set: str

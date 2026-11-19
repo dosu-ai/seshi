@@ -25,6 +25,7 @@ from seshi import (
     SessionRejected,
     Stored,
     StoreError,
+    TokenInfo,
     Trace,
     Upload,
     __version__,
@@ -295,7 +296,7 @@ class TestRequests:
         with pytest.raises(ValueError, match="extra"):
             db.ingest({"agent": "codex", "session_id": "s", "transcript": "x", "ofset": 4})
         with pytest.raises(ValueError, match="agent"):
-            db.ingest({"agent": "not-an-agent", "session_id": "s", "transcript": "x"})
+            db.ingest({"agent": 7, "session_id": "s", "transcript": "x"})
 
     def test_reads_a_stored_answer(self) -> None:
         fake = Fake({"POST /v1/sessions": (201, STORED)})
@@ -559,3 +560,39 @@ async def test_the_async_client_makes_the_same_calls() -> None:
         assert [c.key async for c in db.iter_changes()] == ["k1"]
     assert fake.seen[0].headers["x-seshi-user"] == "alice"
     assert fake.seen[0].headers["user-agent"] == f"seshi-python/{__version__}"
+
+
+class TestReviewFixes:
+    def test_sets_the_timeout_on_every_request_even_with_its_own_http_client(self) -> None:
+        fake = Fake({"GET /v1/owners": (200, {"owners": [], "truncated": False})})
+        shared = httpx.Client(transport=httpx.MockTransport(fake.handle))
+        SeshiClient(SERVER, "t", http_client=shared, timeout=600).owners()
+        assert fake.last.extensions["timeout"]["read"] == 600
+        SeshiClient(SERVER, "t", http_client=shared, timeout=0).owners()
+        assert fake.last.extensions["timeout"]["read"] is None
+        with pytest.raises(ValueError, match="not both"):
+            SeshiClient(SERVER, "t", http_client=shared, transport=httpx.MockTransport(fake.handle))
+
+    def test_reads_an_enum_value_from_a_newer_server(self) -> None:
+        fake = Fake(
+            {
+                "GET /v1/tokens": (
+                    200,
+                    {"tokens": [{**TOKEN, "scopes": ["sessions:export"], "kind": "robot"}]},
+                )
+            }
+        )
+        [token] = fake.client().list_tokens()
+        assert (token.scopes, token.kind) == (["sessions:export"], "robot")
+
+    def test_sends_an_agent_a_newer_server_knows(self) -> None:
+        fake = Fake({"POST /v1/sessions": (201, STORED)})
+        fake.client().ingest({"agent": "amp", "session_id": "s", "transcript": "x"})
+        assert sent(fake.last)["agent"] == "amp"
+
+    def test_checks_another_model_given_as_a_body(self) -> None:
+        fake = Fake({"POST /v1/tokens": (201, {"token": "x", "record": TOKEN})})
+        record = TokenInfo.model_validate(TOKEN)
+        with pytest.raises(ValueError, match="extra"):
+            fake.client().create_token(record)  # type: ignore[arg-type]
+        assert fake.seen == []

@@ -11,7 +11,6 @@ from __future__ import annotations
 import os
 import re
 import shutil
-import socket
 import subprocess
 import time
 import uuid
@@ -69,13 +68,6 @@ def _command() -> list[str] | None:
     return [bun, "run", str(ROOT / "apps" / "seshi" / "src" / "main.ts")]
 
 
-def _free_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        port: int = sock.getsockname()[1]
-        return port
-
-
 def _env(home: Path) -> dict[str, str]:
     """The test runner's environment without any SESHI_* setting (the server refuses to start
     on one it does not know), and with a home and cache of its own."""
@@ -103,13 +95,14 @@ def live_server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[LiveServer
     home.mkdir()
     pack = work / "pack.toml"
     pack.write_text(PACK)
-    port = _free_port()
     config = work / "seshi.toml"
     config.write_text(
         "\n".join(
             [
                 "[server]",
-                f'listen = "127.0.0.1:{port}"',
+                # Port 0: the server picks a free one and prints it (no port taken between a
+                # probe and the server binding it).
+                'listen = "127.0.0.1:0"',
                 "[store]",
                 f'url = "{(work / "store").as_uri()}"',
                 "[auth.tokens]",
@@ -143,9 +136,7 @@ def live_server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[LiveServer
         pytest.fail(f"seshi admin init printed no admin token and org key:\n{init.stdout}")
     admin_token, org_key = tokens
 
-    url = f"http://127.0.0.1:{port}"
-    log = work / "serve.log"
-    server = _serve(command, config, env, url, log)
+    server, url = _serve(command, config, env, work / "serve-1.log")
     # Every owner's change feed serves entries stamped before the search indexer listed the
     # owners, which it does when it starts and then once a minute. A session stored before a
     # restart is there at once; one stored after waits up to that minute.
@@ -153,17 +144,21 @@ def live_server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[LiveServer
     with SeshiClient(url, ALICE) as alice:
         alice.ingest(Upload(agent="claude-code", session_id=seed, transcript=transcript(seed)))
     _stop(server)
-    server = _serve(command, config, env, url, log)
+    server, url = _serve(command, config, env, work / "serve-2.log")
     try:
         yield LiveServer(url, admin_token, org_key, ALICE, BOB, config, pack, seed)
     finally:
         _stop(server)
 
 
+LISTENING = re.compile(r"listening on (http://127\.0\.0\.1:\d+)")
+
+
 def _serve(
-    command: list[str], config: Path, env: dict[str, str], url: str, log: Path
-) -> Popen[bytes]:
-    with log.open("a") as out:
+    command: list[str], config: Path, env: dict[str, str], log: Path
+) -> tuple[Popen[bytes], str]:
+    """`seshi serve`, once it answers `/healthz`, and the address it printed."""
+    with log.open("w") as out:
         server = subprocess.Popen(
             [*command, "serve", "--config", str(config)],
             cwd=ROOT,
@@ -173,11 +168,14 @@ def _serve(
         )
     deadline = time.monotonic() + 60
     while True:
-        try:
-            if httpx.get(f"{url}/healthz", timeout=2).is_success:
-                return server
-        except httpx.TransportError:
-            pass
+        printed = LISTENING.search(log.read_text())
+        if printed:
+            url = printed.group(1)
+            try:
+                if httpx.get(f"{url}/healthz", timeout=2).is_success:
+                    return server, url
+            except httpx.TransportError:
+                pass
         if server.poll() is not None or time.monotonic() > deadline:
             _stop(server)
             pytest.fail(f"seshi serve did not come up:\n{log.read_text()}")

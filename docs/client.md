@@ -171,8 +171,10 @@ Every request and response body is a pydantic model (`seshi.models`) with the JS
 names, except `schema`, which is `schema_`, and OTLP's camelCase, which is snake_case; both
 are read and written under their JSON names (`model_dump(by_alias=True)`). Times stay the RFC
 3339 strings the server writes, so a stamp or cursor round-trips exactly; a `since` or `until`
-may also be a `datetime`. Response models keep fields they do not know (in `model_extra`), so
-an older client reads a newer server; request models refuse them. A call that takes a body
+may also be a `datetime`. Response models keep fields they do not know (in `model_extra`), and
+an enum value they do not know as the string the server sent, so an older client reads a newer
+server; request models refuse unknown fields, but `Upload.agent` takes any format name, which
+the server decides on. A call that takes a body
 takes its model or a plain mapping (`db.ingest({"agent": "codex", …})`).
 
 ### Calls

@@ -13,7 +13,7 @@ import types
 import typing
 from functools import cache
 from pathlib import Path
-from typing import Any, Union, get_args, get_origin
+from typing import Any, Literal, Union, get_args, get_origin
 
 import pytest
 import yaml
@@ -212,9 +212,77 @@ def _item_schema(schema: Any, base: str) -> tuple[Any, str]:
     return schema, base
 
 
+SCALARS: dict[str, type] = {"string": str, "integer": int, "number": float, "boolean": bool}
+
+
+def _strip(annotation: Any) -> Any:
+    """A field's type through Optional and Annotated (`Open`)."""
+    while True:
+        origin = get_origin(annotation)
+        if origin is typing.Annotated:
+            annotation = get_args(annotation)[0]
+            continue
+        if origin in (Union, types.UnionType):
+            rest = [a for a in get_args(annotation) if a is not type(None)]
+            if len(rest) == 1:
+                annotation = rest[0]
+                continue
+        return annotation
+
+
+def _literals(annotation: Any) -> set[Any] | None:
+    """The values a field's Literal allows (`Agent | str` allows Agent's), or None."""
+    annotation = _strip(annotation)
+    origin = get_origin(annotation)
+    if origin is Literal:
+        return set(get_args(annotation))
+    if origin in (Union, types.UnionType):
+        found = [_literals(a) for a in get_args(annotation) if a is not type(None)]
+        known = [values for values in found if values is not None]
+        return set().union(*known) if known else None
+    return None
+
+
+def _types(annotation: Any) -> set[Any]:
+    annotation = _strip(annotation)
+    origin = get_origin(annotation)
+    if origin is Literal:
+        return {type(v) for v in get_args(annotation)}
+    if origin in (Union, types.UnionType):
+        return set().union(*(_types(a) for a in get_args(annotation) if a is not type(None)))
+    return {origin or annotation}
+
+
+def _scalar(schema: Any, base: str, annotation: Any, where: str) -> list[str]:
+    """A scalar property's enum (or const) and type against the field's Literal and type."""
+    schema, base = resolve(schema, base)
+    if not isinstance(schema, dict):
+        return []
+    problems: list[str] = []
+    allowed = set(schema["enum"]) if "enum" in schema else None
+    if "const" in schema:
+        allowed = {schema["const"]}
+    known = _literals(annotation)
+    if allowed is not None and known is not None and allowed != known:
+        problems.append(f"{where}: the spec allows {sorted(allowed)}; the model {sorted(known)}")
+    spec_types = schema.get("type", [])
+    held = _types(annotation)
+    for spec_type in [spec_types] if isinstance(spec_types, str) else spec_types:
+        wanted = SCALARS.get(spec_type)
+        if wanted is not None and Any not in held and wanted not in held:
+            problems.append(f"{where}: the spec says {spec_type}; the model holds {held}")
+    return problems
+
+
+def _list_item(annotation: Any) -> Any:
+    annotation = _strip(annotation)
+    return get_args(annotation)[0] if get_origin(annotation) is list else None
+
+
 def compare(schema: Any, base: str, model: type[BaseModel], where: str) -> list[str]:
     """Every difference between an object schema and a model: properties missing on either side,
-    and required-ness. Nested objects are compared with the models their fields hold."""
+    required-ness, and each scalar's enum, const and type (a list's items too). Nested objects
+    are compared with the models their fields hold."""
     properties, required = flatten(schema, base)
     fields = {(info.alias or name): info for name, info in model.model_fields.items()}
     problems = [f"{where}: the spec has {p!r}; {model.__name__} does not" for p in properties]
@@ -233,6 +301,11 @@ def compare(schema: Any, base: str, model: type[BaseModel], where: str) -> list[
             problems.append(
                 f"{where}.{name}: required in the {'spec' if is_required else 'model'} only"
             )
+        problems += _scalar(prop, prop_base, info.annotation, f"{where}.{name}")
+        resolved, resolved_base = resolve(prop, prop_base)
+        element = _list_item(info.annotation)
+        if element is not None and isinstance(resolved, dict) and "items" in resolved:
+            problems += _scalar(resolved["items"], resolved_base, element, f"{where}.{name}[]")
         nested = _models_in(info.annotation)
         item, item_base = _item_schema(prop, prop_base)
         if (
@@ -350,3 +423,26 @@ def test_the_drift_check_looks_into_nested_objects() -> None:
     assert compare(schema, "openapi.yaml", m.JobsStatus, "JobsStatus") == [
         "JobsStatus.worker.others: the spec has 'host'; OtherWorker does not"
     ]
+
+
+def test_the_drift_check_notices_an_enum_value_or_type_the_spec_changes() -> None:
+    schema = copy.deepcopy(resolve({"$ref": "#/components/schemas/Upload"}, "openapi.yaml")[0])
+    schema["properties"]["agent"] = {"enum": ["claude-code", "amp"]}
+    schema["properties"]["offset"] = {"type": "string"}
+    problems = compare(schema, "openapi.yaml", m.Upload, "Upload")
+    assert any(p.startswith("Upload.agent: the spec allows") for p in problems)
+    assert any(p.startswith("Upload.offset: the spec says string") for p in problems)
+    identity = copy.deepcopy(resolve({"$ref": "#/components/schemas/Identity"}, "openapi.yaml")[0])
+    identity["properties"]["scopes"]["items"] = {"enum": ["sessions:read"]}
+    assert [p for p in compare(identity, "openapi.yaml", m.Identity, "I") if "scopes" in p] != []
+
+
+def test_a_rejected_reload_is_read_as_the_spec_defines_it() -> None:
+    """`reload()` returns the 422 `reload_rejected` answer's `reload` and `config`."""
+    response = operations()["adminReload"][2]["responses"]["422"]
+    schema = response["content"]["application/json"]["schema"]
+    properties, required = flatten(schema, "openapi.yaml")
+    assert {"reload", "config"} <= required
+    for name, model in (("reload", m.ReloadReport), ("config", m.ConfigStatus)):
+        prop, prop_base = properties[name]
+        assert compare(prop, prop_base, model, f"adminReload 422.{name}") == []
