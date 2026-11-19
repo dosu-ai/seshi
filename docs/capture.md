@@ -412,7 +412,7 @@ set in a shell another agent started, is ignored.
 The Claude desktop app's Code tab has no status line. There, seshi's Claude Code plugin draws the
 same words as a chip in the prompt footer; clicking it turns capture off or on for the session,
 and `/session-capture [on|off|status]` does the same by command. It needs the plugin installed
-(`/plugin install seshi --marketplace dosu-ai/sessiondb`), not just `seshi capture install`; see
+(`/plugin install seshi --marketplace dosu-ai/seshi`), not just `seshi capture install`; see
 [the plugin's README](../integrations/claude-code/plugin/README.md#the-desktop-chip).
 
 ### The Cursor status bar

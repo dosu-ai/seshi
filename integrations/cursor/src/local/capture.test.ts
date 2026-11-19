@@ -291,7 +291,7 @@ describe("the hooks committed to a repository, for Cursor Cloud", () => {
     const text = `${readFileSync(file(), "utf8")}${readFileSync(script(), "utf8")}`;
     expect(projectHookCommand("stop")).toContain(`exec "$s" hook cursor stop ${CLOUD_FLAG}`);
     expect(text).not.toContain(home.replace(/[/\\]repo$/, ""));
-    expect(text).not.toMatch(/https?:\/\/(?!github\.com\/dosu-ai\/sessiondb)/);
+    expect(text).not.toMatch(/https?:\/\/(?!github\.com\/dosu-ai\/seshi)/);
     // The setup script reads the secrets from Cursor's environment only, and pins the release.
     const setup = setupScript("1.2.3");
     expect(setup).toContain('version="1.2.3"');

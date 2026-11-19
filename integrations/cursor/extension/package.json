@@ -6,10 +6,10 @@
   "private": true,
   "publisher": "dosu",
   "license": "MIT",
-  "homepage": "https://github.com/dosu-ai/sessiondb",
+  "homepage": "https://github.com/dosu-ai/seshi",
   "repository": {
     "type": "git",
-    "url": "https://github.com/dosu-ai/sessiondb"
+    "url": "https://github.com/dosu-ai/seshi"
   },
   "engines": {
     "vscode": "^1.96.0"
