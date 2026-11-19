@@ -12,8 +12,9 @@
  *    URL.
  * 3. ci.yml's later jobs take it from there, from the release's own assets: `npm` publishes
  *    the platform packages, @dosu/seshi-model, @dosu/seshi-client and the @dosu/seshi launcher; `image`
- *    builds ghcr.io/<repo> from the two Linux binaries; `openvsx` publishes the Cursor
- *    extension; `verify` installs the release on every platform through each channel.
+ *    builds ghcr.io/<repo> from the two Linux binaries; `pypi` publishes the Python client;
+ *    `openvsx` publishes the Cursor extension; `verify` installs the release on every platform
+ *    through each channel.
  *
  * @type {import('semantic-release').GlobalConfig} */
 export default {

@@ -124,10 +124,11 @@ traces uses these to understand what it reads.
 The Python client lives in [`packages/py/client`](../packages/py/client): Python 3.10+, on
 [httpx](https://www.python-httpx.org/) and [pydantic](https://docs.pydantic.dev/) v2, with a sync
 client (`SeshiClient`) and an async one (`AsyncSeshiClient`) that have the same calls. It is
-not on PyPI yet ([releasing.md](releasing.md#pypi)); until it is, install it from a checkout:
+published to PyPI as `seshi` at every release, at the binary's version
+([releasing.md](releasing.md#pypi)):
 
 ```sh
-pip install ./packages/py/client      # or: uv add ./packages/py/client
+pip install seshi        # or: uv add seshi
 ```
 
 ```python

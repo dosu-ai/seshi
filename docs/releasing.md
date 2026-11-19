@@ -44,7 +44,9 @@ from any other branch, and nothing is published by hand.
 4. **`image`** downloads the two Linux archives, checks them, and builds
    `ghcr.io/<repo>` for linux/amd64 and linux/arm64 from those binaries
    (`--build-arg BINARY=prebuilt`), tagged `X.Y.Z`, `X.Y` and `latest`.
-5. **`verify`** installs the published release on all six platforms with `install.sh` or
+5. **`pypi`** builds the Python client from the release's tag and publishes it to PyPI as
+   `seshi` ([below](#pypi)).
+6. **`verify`** installs the published release on all six platforms with `install.sh` or
    `install.ps1` from GitHub, smoke tests it, then `npm i -g @dosu/seshi@X.Y.Z` and
    `npx @dosu/seshi@X.Y.Z --version`. Before installing it waits, for up to 15 minutes, until
    the registry serves X.Y.Z of the launcher and every platform package to `npm install`
@@ -64,7 +66,8 @@ the install script's detection.
 ## The workflow's own security
 
 `ci.yml` gives every job a read-only `GITHUB_TOKEN`; `release`, `image` (`packages: write`)
-and `npm` (`id-token: write`, for provenance) grant themselves more. No checkout keeps its
+`npm` (`id-token: write`, for provenance) and `pypi` (`id-token: write`, for PyPI's trusted
+publishing, in the `pypi` environment) grant themselves more. No checkout keeps its
 credentials: semantic-release pushes the release commit and tag with the abbs-bot app token
 it is handed. Every action is pinned to a commit SHA with its release in a trailing comment
 (`uses: owner/action@<sha> # vX.Y.Z`), as are the S3 test service image (by digest) and
@@ -99,28 +102,20 @@ host's real binary built, installed and smoke tested.
 
 ## PyPI
 
-The Python client (`packages/py/client`) is versioned with every release but not published yet.
-The name `seshi` was free on PyPI when the client was added (unlike npm's); register it with the
-first upload, or with a pending trusted publisher (below), before someone else takes it. To
-publish it from the release, as the `npm` job publishes the npm packages:
+The Python client (`packages/py/client`) is published as `seshi` by the `pypi` job, after
+`release` and beside `npm`: it checks out the release's tag, builds the wheel and sdist with
+`uv build` (their version is the one `scripts/release-version.ts` wrote into
+`src/seshi/_version.py`) and uploads them with `uv publish`. A file already on PyPI is skipped,
+so the job can be re-run.
 
-1. **A trusted publisher.** On PyPI, add a pending publisher for the project `seshi`: owner
-   `dosu-ai`, repository `seshi`, workflow `ci.yml`,
-   environment `pypi`. No token is stored anywhere: the job proves itself with GitHub's OIDC
-   token, which needs `id-token: write`.
-2. **A `pypi` environment** in the repository's settings, limited to `main`, so only the
-   release run can use the publisher.
-3. **A `pypi` job** in `ci.yml`, after `release` and on the same condition as `npm`:
-   `permissions: {contents: read, id-token: write}`, `environment: pypi`, a checkout of
-   `v<version>`, `astral-sh/setup-uv` (pinned like every action), then
-   `uv build --project packages/py/client --out-dir dist/py` and
-   `uv publish --trusted-publishing always dist/py/*` (or `pypa/gh-action-pypi-publish`, which
-   also attests the files). A version already on PyPI is refused, so a re-run should skip it
-   (`uv publish --check-url https://pypi.org/simple/`).
-4. **`verify`** can then `pip install seshi==<version>` and import it.
-
-`scripts/release-version.ts` already writes the version, and `tests/test_version.py` keeps it
-equal to `packages/ts/model/package.json`'s, so the published wheel's version is the release's.
+It holds no token. PyPI trusts the workflow through trusted publishing: a publisher for the
+project `seshi`, repository `dosu-ai/seshi`, workflow `ci.yml`, environment `pypi`, registered
+as a "pending" publisher until the first upload creates the project, and an ordinary one after.
+The job proves itself with GitHub's OIDC token (`id-token: write`) in the repository's `pypi`
+environment, which only `main` may deploy to. A pending publisher does not reserve the name:
+until the first release uploads it, anyone can register `seshi`. If the repository, the
+workflow file or the environment is renamed, update the publisher on PyPI (the project's
+Publishing page) to match, or the upload is refused.
 
 ## Before the first release
 
