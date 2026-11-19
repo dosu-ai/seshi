@@ -152,7 +152,6 @@ A new agent is an [integration](integrations).
 - [ ] Tool results in Cursor transcripts (from `postToolUse`)
 - [ ] Devin Cloud sync: a source that pulls Devin cloud sessions through Devin's API
 - [x] A Python SDK for the seshi API ([`packages/py/client`](packages/py/client), [docs](docs/client.md#python-seshi))
-- [ ] Publishing the Python SDK to PyPI as `seshi`, next to `@dosu/seshi-client`
 - [ ] Publishing the Cursor status bar extension on Open VSX (it is built and attached to each
       release)
 
