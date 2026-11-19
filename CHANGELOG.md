@@ -1,3 +1,10 @@
+# [0.12.0](https://github.com/dosu-ai/seshi/compare/v0.11.0...v0.12.0) (2026-11-19)
+
+
+### Features
+
+* **cursor:** tool results in Cursor sessions, from postToolUse ([#42](https://github.com/dosu-ai/seshi/issues/42)) ([5e1b364](https://github.com/dosu-ai/seshi/commit/5e1b3647f35a9417e295079653b5a3e08fc3d7d1))
+
 # [0.11.0](https://github.com/dosu-ai/seshi/compare/v0.10.0...v0.11.0) (2026-11-19)
 
 
