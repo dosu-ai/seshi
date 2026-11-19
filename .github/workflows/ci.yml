@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 # Every job's GITHUB_TOKEN can read the repository and nothing more, unless the job grants
-# itself more: release, image and npm do, each only what it uses. Checkouts keep no
+# itself more: release, image, npm and pypi do, each only what it uses. Checkouts keep no
 # credentials in .git/config (persist-credentials: false): no job pushes with the checkout's
 # token; semantic-release pushes the release commit and tag with the GitHub App token it is
 # handed. Actions are pinned to commit SHAs, the release in the comment; Dependabot
@@ -413,6 +413,33 @@ jobs:
       - run: bun run release:publish-npm --provenance --dir dist/npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # The Python client, `seshi` on PyPI, built from the release commit (whose
+  # packages/py/client/src/seshi/_version.py the release wrote) and published with trusted
+  # publishing: PyPI trusts this workflow's OIDC token in the `pypi` environment, which only
+  # main may deploy to, so no token is stored (docs/releasing.md#pypi). A file already on PyPI
+  # is skipped (--check-url), so the job can be re-run.
+  pypi:
+    needs: release
+    if: needs.release.outputs.released == 'true'
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: v${{ needs.release.outputs.version }}
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - name: Build the wheel and sdist
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
+        run: |
+          uv build packages/py/client --out-dir dist/py
+          test -f "dist/py/seshi-$VERSION-py3-none-any.whl"
+      - run: uv publish --trusted-publishing always --check-url https://pypi.org/simple/ dist/py/*
 
   # The Cursor extension, from the release's own .vsix (checked against SHA256SUMS), to Open
   # VSX, where Cursor installs extensions from. Needs the OVSX_PAT secret (docs/releasing.md);

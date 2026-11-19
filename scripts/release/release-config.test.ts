@@ -87,6 +87,17 @@ describe("ci.yml", () => {
     );
   });
 
+  it("publishes the Python client from the release's tag, with trusted publishing", () => {
+    const job = CI.slice(CI.indexOf("\n  pypi:"), CI.indexOf("\n  openvsx:"));
+    expect(job).toContain("needs: release");
+    expect(job).toContain("environment: pypi");
+    expect(job).toContain("id-token: write");
+    expect(job).toContain("ref: v${{ needs.release.outputs.version }}");
+    expect(job).toContain("uv build packages/py/client --out-dir dist/py");
+    expect(job).toContain("uv publish --trusted-publishing always");
+    expect(job).not.toMatch(/PYPI_TOKEN|password:/);
+  });
+
   it("runs the Python client's checks and tests, against a server from this checkout", () => {
     const job = CI.slice(CI.indexOf("  python-client:"), CI.indexOf("  test-windows:"));
     expect(job).toContain("working-directory: packages/py/client");
