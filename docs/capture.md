@@ -132,8 +132,11 @@ and nothing on the VM.
 An earlier seshi could commit hooks for cloud agents (`seshi capture install cursor --project`).
 If a repository has them, remove `.cursor/seshi-cloud.sh`, its two steps in
 `.cursor/environment.json`, and the `seshi hook cursor … --cloud` entries in `.cursor/hooks.json`.
-Until then they do nothing: off a cloud VM the shell line exits before it starts seshi, and this
-seshi ignores a hook that passes `--cloud`.
+Off a cloud VM they do nothing: the shell line exits before it starts seshi, and this seshi ignores
+a hook that passes `--cloud`. On a cloud VM they keep capturing: `.cursor/seshi-cloud.sh` installs
+the seshi release that wrote it, which still marks the VM and uploads every run under
+`cursor-cloud`. To stop that at once, revoke the token from the server
+(`seshi tokens revoke --owner cursor-cloud`), then remove the files.
 
 ## Tool results in Cursor
 

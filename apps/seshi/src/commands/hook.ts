@@ -26,12 +26,12 @@ export async function run(ctx: CommandContext): Promise<number> {
   const [agentName, event, ...rest] = ctx.argv;
   const log = (line: string) =>
     appendLog(paths.log, `hook ${agentName ?? "?"} ${event ?? "?"}: ${line}`);
-  // A hook an earlier seshi committed to a repository for Cursor Cloud passes `--cloud` (before
-  // any `--`). Cursor Cloud is now read from Cursor's API, so such a hook does nothing.
-  const dash = rest.indexOf("--");
-  const cloud = rest.indexOf(STALE_CLOUD_FLAG);
-  if (cloud !== -1 && (dash === -1 || cloud < dash)) {
-    log("a Cursor Cloud hook committed to a repository; seshi no longer captures through it");
+  // A Cursor hook an earlier seshi committed to a repository for Cursor Cloud passes `--cloud`.
+  // seshi no longer captures Cursor Cloud through hooks, so such a hook does nothing.
+  if (agentName === "cursor" && rest.includes(STALE_CLOUD_FLAG)) {
+    log(
+      "a Cursor Cloud hook committed to a repository; seshi no longer captures through it (remove it: docs/capture.md#cursor-cloud-agents)",
+    );
     return EXIT.ok;
   }
   try {
