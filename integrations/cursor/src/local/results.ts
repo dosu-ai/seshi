@@ -27,6 +27,7 @@ import {
   readFileSync,
   readSync,
   renameSync,
+  rmSync,
   statSync,
   truncateSync,
   writeFileSync,
@@ -120,23 +121,45 @@ function canonical(value: unknown): string {
 const str = (value: unknown): string | undefined =>
   typeof value === "string" && value !== "" ? value : undefined;
 
+const PATH_KINDS = new Set(["read", "edit", "delete"]);
+
+/** A path as `/`-separated, without a leading `./`. */
+const slashed = (path: string) => path.replace(/\\/g, "/").replace(/^(?:\.\/)+/, "");
+
+/** A digest of a key that can be long (a command, MCP arguments): it tells calls apart as well,
+ * and keeps no second copy of the command line beside the session. */
+const digest = (text: string) => createHash("sha256").update(text).digest("hex").slice(0, 32);
+
 /** What a call ran on, for its kind: the same value from the hook's input and the transcript's. */
 function keyOf(kind: string, input: unknown): string | undefined {
   if (!isObject(input)) return undefined;
-  if (kind.startsWith("mcp:")) return canonical(input);
+  if (kind.startsWith("mcp:")) return digest(canonical(input));
   switch (kind) {
-    case "shell":
-      return str(input.command);
+    case "shell": {
+      const command = str(input.command);
+      return command ? digest(command) : undefined;
+    }
     case "read":
     case "edit":
-    case "delete":
-      return str(input.file_path) ?? str(input.path);
-    case "search":
+    case "delete": {
+      const path = str(input.file_path) ?? str(input.path);
+      return path ? slashed(path) : undefined;
+    }
+    case "search": {
       // A Glob is a Grep with no pattern to its hook; only a real pattern tells calls apart.
-      return str(input.pattern);
+      const pattern = str(input.pattern);
+      return pattern ? digest(pattern) : undefined;
+    }
     default:
       return undefined;
   }
+}
+
+/** Two keys name the same thing: equal, or for a path, one the other's tail (the transcript keeps
+ * the path as the model wrote it, relative or not; the hooks give it absolute). */
+function sameKey(kind: string, a: string, b: string): boolean {
+  if (a === b) return true;
+  return PATH_KINDS.has(kind) && (a.endsWith(`/${b}`) || b.endsWith(`/${a}`));
 }
 
 /** A result's text from what `postToolUse` gives, a JSON string for most tools. */
@@ -178,7 +201,7 @@ export function keptResult(event: string, payload: Json): KeptResult | undefined
     const content = payload.content;
     if (typeof content !== "string") return undefined;
     const path = str(payload.file_path);
-    return { v: 1, event, id, ...(path ? { key: path } : {}), ...capText(content) };
+    return { v: 1, event, id, ...(path ? { key: slashed(path) } : {}), ...capText(content) };
   }
   if (event !== "postToolUse" && event !== "postToolUseFailure") return undefined;
   const tool = str(payload.tool_name) ?? "unknown";
@@ -260,7 +283,7 @@ function callOf(block: Json): { kind: string; key?: string } {
     const namespace = str(input.namespace);
     const kind = namespace === "cursor" ? family(tool) : `mcp:${tool}`;
     const args = input.arguments ?? input.args;
-    const key = kind.startsWith("mcp:") ? canonical(args ?? {}) : keyOf(kind, args);
+    const key = kind.startsWith("mcp:") ? digest(canonical(args ?? {})) : keyOf(kind, args);
     return { kind, ...(key ? { key } : {}) };
   }
   const kind = family(name);
@@ -270,7 +293,7 @@ function callOf(block: Json): { kind: string; key?: string } {
 
 const fits = (call: { kind: string; key?: string }, group: Group): boolean =>
   call.kind === group.kind &&
-  (call.key === undefined || group.key === undefined || call.key === group.key);
+  (call.key === undefined || group.key === undefined || sameKey(call.kind, call.key, group.key));
 
 /** One transcript line as uploaded: as it is, or, when results answer its calls, with each answered
  * call given its tool id, followed by the results, one line each. */
@@ -323,34 +346,57 @@ function composeLine(
 
 interface ComposeState {
   v: 1;
-  /** Bytes of the transcript composed so far, and the hash of the last line among them. */
+  /** Bytes of the transcript composed so far; where the last of its lines starts, and its hash. */
   offset: number;
+  tailAt: number;
   tail: string;
   /** Bytes of the composed file this state was saved with. */
   size: number;
-  /** Result files taken: matched to a call, or never to be. */
+  /** Result files taken (matched to a call, or let go), removed once this state is saved. */
   done: string[];
+  /** Result files no call has taken yet, with when compose first saw them. */
+  waiting: Record<string, number>;
+  /** What was composed from: the transcript's size and the results folder's mtime, so a session
+   * where neither changed is not read again. */
+  seen?: { size: number; results: number };
 }
 
-const fresh = (): ComposeState => ({ v: 1, offset: 0, tail: "", size: 0, done: [] });
+/** How long a result no call takes is kept waiting for its call's line: Cursor writes the line as
+ * soon as the hook returns, so one still waiting after this never gets one. */
+export const WAIT_MS = 60_000;
+
+const fresh = (): ComposeState => ({
+  v: 1,
+  offset: 0,
+  tailAt: 0,
+  tail: "",
+  size: 0,
+  done: [],
+  waiting: {},
+});
 
 const hash = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
 
 function readState(path: string): ComposeState {
   try {
     const s = JSON.parse(readFileSync(path, "utf8")) as ComposeState;
-    if (s?.v === 1 && Number.isSafeInteger(s.offset) && Array.isArray(s.done)) return s;
+    if (s?.v === 1 && Number.isSafeInteger(s.offset) && Number.isSafeInteger(s.tailAt)) {
+      return { ...fresh(), ...s };
+    }
   } catch {}
   return fresh();
 }
 
-function sizeOf(path: string): number | undefined {
+function statOf(path: string): { size: number; mtimeMs: number } | undefined {
   try {
-    return statSync(path).size;
+    const st = statSync(path);
+    return { size: st.size, mtimeMs: st.mtimeMs };
   } catch {
     return undefined;
   }
 }
+
+const sizeOf = (path: string) => statOf(path)?.size;
 
 function readRange(path: string, start: number, end: number): Buffer {
   const length = Math.max(0, end - start);
@@ -374,11 +420,8 @@ function readRange(path: string, start: number, end: number): Buffer {
  * since. */
 function sameTail(transcript: string, state: ComposeState): boolean {
   if (state.offset === 0) return true;
-  const back = Math.min(state.offset, 1 << 20);
-  const before = readRange(transcript, state.offset - back, state.offset);
-  if (before.length !== back || before[before.length - 1] !== 0x0a) return false;
-  const start = before.lastIndexOf(0x0a, before.length - 2) + 1;
-  return hash(before.subarray(start)) === state.tail;
+  const last = readRange(transcript, state.tailAt, state.offset);
+  return last.length === state.offset - state.tailAt && hash(last) === state.tail;
 }
 
 function writePrivate(path: string, text: string): void {
@@ -387,7 +430,7 @@ function writePrivate(path: string, text: string): void {
   renameSync(temp, path);
 }
 
-function readKept(dir: string, done: ReadonlySet<string>): { file: string; result: KeptResult }[] {
+function readKept(dir: string): { file: string; result: KeptResult }[] {
   let names: string[];
   try {
     names = readdirSync(dir);
@@ -395,7 +438,7 @@ function readKept(dir: string, done: ReadonlySet<string>): { file: string; resul
     return [];
   }
   const out: { file: string; result: KeptResult }[] = [];
-  for (const name of names.filter((n) => n.endsWith(".json") && !done.has(n)).sort()) {
+  for (const name of names.filter((n) => n.endsWith(".json")).sort()) {
     try {
       const result = JSON.parse(readFileSync(join(dir, name), "utf8")) as KeptResult;
       if (result?.v === 1 && typeof result.id === "string" && typeof result.text === "string") {
@@ -406,36 +449,61 @@ function readKept(dir: string, done: ReadonlySet<string>): { file: string; resul
   return out;
 }
 
+const removeAll = (dir: string, names: readonly string[]) => {
+  for (const name of names) rmSync(join(dir, name), { force: true });
+};
+
 export function composedPath(sessionId: string, host: CaptureHost): string | undefined {
   const dir = keptSessionDir(host, "cursor", sessionId);
   return dir ? join(dir, "transcript.jsonl") : undefined;
 }
 
+/** Nothing for `composeCursorTranscript` to do: the transcript and the kept results are as they
+ * were when it last ran. */
+export function composedIsCurrent(sessionId: string, transcript: string, host: CaptureHost) {
+  const dir = keptSessionDir(host, "cursor", sessionId);
+  if (!dir) return false;
+  const state = readState(join(dir, "compose.json"));
+  const total = sizeOf(transcript);
+  return (
+    state.seen !== undefined &&
+    total === state.seen.size &&
+    (statOf(join(dir, "results"))?.mtimeMs ?? 0) === state.seen.results &&
+    sizeOf(join(dir, "transcript.jsonl")) === state.size
+  );
+}
+
 /** Bring the file uploaded for a Cursor session up to date: the transcript's new complete lines,
  * each call in them that a kept result answers given that result's tool id and followed by it.
  * It only ever appends, except when the transcript no longer starts with what was composed (Cursor
- * rewrote it), when it starts over, as the transcript itself would have. A result kept after its
- * call was composed, or one no call takes, is let go: Cursor runs the hook before it writes the
- * call, so neither happens unless the hook failed. */
+ * rewrote it), when it starts over, as the transcript itself would have, with the results not yet
+ * taken: a taken result is removed once composed. A result kept after its call was composed, or one
+ * no call takes, is let go: Cursor runs the hook before it writes the call, so neither happens
+ * unless the hook failed. */
 export function composeCursorTranscript(
   sessionId: string,
   transcript: string,
   host: CaptureHost,
+  now: number = Date.now(),
 ): string {
   const dir = keptSessionDir(host, "cursor", sessionId);
   if (!dir) return transcript;
   const out = join(dir, "transcript.jsonl");
   const statePath = join(dir, "compose.json");
+  const resultsDir = join(dir, "results");
+  const total = sizeOf(transcript);
+  if (total === undefined) return sizeOf(out) === undefined ? transcript : out;
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   let state = readState(statePath);
-  const size = sizeOf(out) ?? 0;
-  const total = sizeOf(transcript);
-  if (total === undefined) {
-    if (sizeOf(out) !== undefined) return out;
-    return transcript;
-  }
-  const grew = total >= state.offset && sameTail(transcript, state);
-  if (!grew || size < state.size) {
+  // Taken before a crash cut this short of removing them.
+  removeAll(resultsDir, state.done);
+  const size = sizeOf(out);
+  if (
+    size === undefined ||
+    size < state.size ||
+    total < state.offset ||
+    !sameTail(transcript, state)
+  ) {
     // Cursor rewrote the transcript, or the composed file is gone: start over.
     state = fresh();
     writeFileSync(out, "", { mode: 0o600 });
@@ -445,51 +513,54 @@ export function composeCursorTranscript(
     truncateSync(out, state.size);
   }
   const bytes = readRange(transcript, state.offset, total);
-  const cut = bytes.lastIndexOf(0x0a);
-  const resultsDir = join(dir, "results");
-  const done = new Set(state.done);
-  const kept = readKept(resultsDir, done);
-  if (cut === -1 && kept.length === 0) {
-    if (sizeOf(out) === undefined) writeFileSync(out, "", { mode: 0o600 });
-    return out;
-  }
-  const complete = cut === -1 ? Buffer.alloc(0) : bytes.subarray(0, cut + 1);
-  const groups = groupsOf(kept);
+  const complete = bytes.subarray(0, bytes.lastIndexOf(0x0a) + 1);
+  const groups = groupsOf(readKept(resultsDir));
   const used = new Set<Group>();
   let text = "";
-  let start = 0;
-  let lastLine = "";
-  while (start < complete.length) {
+  let tailAt = state.tailAt;
+  let tail = state.tail;
+  for (let start = 0; start < complete.length; ) {
     const end = complete.indexOf(0x0a, start);
-    const raw = complete.subarray(start, end);
-    lastLine = hash(complete.subarray(start, end + 1));
+    tailAt = state.offset + start;
+    tail = hash(complete.subarray(start, end + 1));
+    const line = complete.subarray(start, end).toString("utf8");
     start = end + 1;
-    const line = raw.toString("utf8");
-    if (line.trim() === "" || groups.length === 0) {
-      text += `${line}\n`;
-      continue;
-    }
-    text += composeLine(line, groups, used).text;
+    text +=
+      line.trim() === "" || groups.length === 0
+        ? `${line}\n`
+        : composeLine(line, groups, used).text;
   }
-  // Results that came before the last one taken were for calls already written: none of the lines
-  // still to come is theirs.
+  // Results that came before the last one taken were for calls already written, and one left
+  // waiting past WAIT_MS has no call coming: none of the lines still to come is theirs.
   const latest = Math.max(-1, ...[...used].map((g) => g.order));
-  const finished = groups.filter((g) => used.has(g) || g.order < latest);
+  const waiting: Record<string, number> = {};
+  const done: string[] = [];
+  for (const g of groups) {
+    const since = Math.min(...g.files.map((f) => state.waiting[f] ?? now));
+    if (used.has(g) || g.order < latest || now - since >= WAIT_MS) done.push(...g.files);
+    else for (const f of g.files) waiting[f] = since;
+  }
   if (text) appendFileSync(out, text, { mode: 0o600 });
-  else if (sizeOf(out) === undefined) writeFileSync(out, "", { mode: 0o600 });
   const next: ComposeState = {
     v: 1,
     offset: state.offset + complete.length,
-    tail: complete.length > 0 ? lastLine : state.tail,
+    tailAt,
+    tail,
     size: sizeOf(out) ?? 0,
-    done: [...state.done, ...finished.flatMap((g) => g.files)],
+    done,
+    waiting,
   };
+  writePrivate(statePath, JSON.stringify(next));
+  removeAll(resultsDir, done);
+  next.done = [];
+  next.seen = { size: total, results: statOf(resultsDir)?.mtimeMs ?? 0 };
   writePrivate(statePath, JSON.stringify(next));
   return out;
 }
 
 export const cursorComposer: TranscriptComposer = {
-  update: composeCursorTranscript,
+  update: (sessionId, transcript, host) => composeCursorTranscript(sessionId, transcript, host),
+  current: composedIsCurrent,
   path(sessionId, host) {
     const path = composedPath(sessionId, host);
     return path && sizeOf(path) !== undefined ? path : undefined;

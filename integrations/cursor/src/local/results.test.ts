@@ -1,8 +1,10 @@
+import { createHash } from "node:crypto";
 import {
   appendFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -16,10 +18,12 @@ import { CURSOR_CAPTURE } from "./capture";
 import {
   capText,
   composeCursorTranscript,
+  composedIsCurrent,
   cursorComposer,
   type KeptResult,
   keptResult,
   RESULT_MAX_CHARS,
+  WAIT_MS,
 } from "./results";
 
 const HOOKS = join(import.meta.dirname, "../../testdata/hooks");
@@ -72,7 +76,15 @@ function keep({ event, payload }: Recorded): void {
   writeFileSync(join(dir, "results", name), JSON.stringify(result.entry));
 }
 
-const compose = (id: string) => composeCursorTranscript(id, transcript, host);
+const compose = (id: string, now?: number) => composeCursorTranscript(id, transcript, host, now);
+const sha = (text: string) => createHash("sha256").update(text).digest("hex").slice(0, 32);
+const kept = (id: string) => {
+  try {
+    return readdirSync(join(keptSessionDir(host, "cursor", id) as string, "results"));
+  } catch {
+    return [];
+  }
+};
 const records = (path: string) =>
   CURSOR_FORMAT.normalize(readFileSync(path, "utf8")) as NormalizedRecord[];
 
@@ -100,12 +112,13 @@ describe("what a result hook keeps", () => {
   it("is the shell's output, an MCP tool's text, a failure's message, a read file's text", () => {
     expect(keptResult("postToolUse", of("postToolUse", "Shell").payload)).toMatchObject({
       tool: "Shell",
-      key: "echo hello-from-shell && ls",
+      // A digest of the command: it tells calls apart without a second copy of the command.
+      key: sha("echo hello-from-shell && ls"),
       text: "hello-from-shell\nb.txt\nbig.txt\nnotes.txt\n",
     });
     expect(keptResult("postToolUse", of("postToolUse", "MCP:probe_echo").payload)).toMatchObject({
       text: "ECHO:PING",
-      key: '{"text":"ping"}',
+      key: sha('{"text":"ping"}'),
     });
     expect(keptResult("postToolUseFailure", of("postToolUseFailure").payload)).toMatchObject({
       text: "ls: /does-not-exist: No such file or directory",
@@ -251,6 +264,65 @@ describe("the upload composed from the transcript and the kept results", () => {
     expect(strReplace?.result).toBe('{"file_path":"/Users/dev/code/app/notes.txt","success":true}');
   });
 
+  it("matches a path the model wrote relative to the absolute one the hooks give", () => {
+    const { hooks, lines, id } = recorded("session-1");
+    for (const h of hooks) keep(h);
+    const relative = lines.map((l) => l.replaceAll('"path":"/Users/dev/code/app/', '"path":"./'));
+    writeFileSync(transcript, `${relative.join("\n")}\n`);
+    const reads = answered(records(compose(id))).filter((c) => c.name === "Read");
+    expect(reads.map((c) => [JSON.parse(c.args).path, c.result?.slice(0, 10)])).toEqual([
+      ["./notes.txt", "alpha line"],
+      ["./b.txt", "beta file\n"],
+      ["./notes.txt", "alpha line"],
+      ["./big.txt", "line 0 yyy"],
+    ]);
+  });
+
+  it("goes on appending after a line longer than a megabyte", () => {
+    const { lines, id } = recorded("session-1");
+    const long = JSON.stringify({
+      role: "assistant",
+      message: { content: [{ type: "text", text: "w".repeat(2 << 20) }] },
+    });
+    writeFileSync(transcript, `${lines[0]}\n${long}\n`);
+    const first = readFileSync(compose(id), "utf8");
+    appendFileSync(transcript, `${lines[1]}\n`);
+    const next = readFileSync(compose(id), "utf8");
+    expect(next).toBe(`${first}${lines[1]}\n`);
+  });
+
+  it("lets a result no call takes go after a while, and removes what it took", () => {
+    const { hooks, lines, id } = recorded("session-1");
+    // The call's line is not written: its result waits, then goes.
+    for (const h of hooks.filter((h) => h.payload.tool_name === "MCP:probe_echo")) keep(h);
+    writeFileSync(transcript, `${lines[0]}\n`);
+    compose(id, 1_000);
+    expect(kept(id)).toHaveLength(1);
+    compose(id, 1_000 + WAIT_MS - 1);
+    expect(kept(id)).toHaveLength(1);
+    compose(id, 1_000 + WAIT_MS);
+    expect(kept(id)).toEqual([]);
+    // A result taken is removed once composed.
+    for (const h of hooks.filter((h) => h.payload.tool_name === "Shell").slice(0, 1)) keep(h);
+    appendFileSync(transcript, `${lines[1]}\n`);
+    expect(readFileSync(compose(id), "utf8")).toContain("hello-from-shell");
+    expect(kept(id)).toEqual([]);
+  });
+
+  it("says when nothing changed since it last composed, cheaply", () => {
+    const { hooks, lines, id } = recorded("session-1");
+    writeFileSync(transcript, `${lines.slice(0, 2).join("\n")}\n`);
+    expect(composedIsCurrent(id, transcript, host)).toBe(false);
+    compose(id);
+    expect(composedIsCurrent(id, transcript, host)).toBe(true);
+    keep(hooks.find((h) => h.payload.tool_name === "Read") as Recorded);
+    expect(composedIsCurrent(id, transcript, host)).toBe(false);
+    compose(id);
+    expect(composedIsCurrent(id, transcript, host)).toBe(true);
+    appendFileSync(transcript, `${lines[2]}\n`);
+    expect(composedIsCurrent(id, transcript, host)).toBe(false);
+  });
+
   it("keeps the transcript's own bytes where it adds nothing", () => {
     const { lines, id } = recorded("session-1");
     writeFileSync(transcript, `${lines.join("\n")}\n`);
@@ -282,11 +354,12 @@ describe("the upload composed from the transcript and the kept results", () => {
     // Written but not recorded (the uploader died between the two): written again, the same.
     appendFileSync(out, "half a line");
     expect(readFileSync(compose(id), "utf8")).toBe(whole);
-    // Cursor rewrote the transcript (a restored checkpoint): composed again from its start.
+    // Cursor rewrote the transcript (a restored checkpoint): composed again from its start, with
+    // only the results no call took yet (a result taken, or let go, is gone once composed).
     writeFileSync(transcript, `${lines.slice(0, 2).join("\n")}\n`);
     const again = readFileSync(compose(id), "utf8");
-    expect(whole.startsWith(again)).toBe(true);
-    expect(again).toContain("hello-from-shell\\nb.txt");
+    expect(again).toBe(readFileSync(transcript, "utf8"));
+    expect(kept(id)).toEqual([]);
   });
 
   it("is the transcript itself for an unusable id, and nothing before it is written", () => {

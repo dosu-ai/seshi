@@ -16,7 +16,14 @@ import {
 import { appendLog } from "./files";
 import type { CapturePaths } from "./paths";
 import { placeOf } from "./place";
-import { type Decision, decide, type Place, type RepoConfig, turnedOnSince } from "./rules";
+import {
+  type Decision,
+  decide,
+  type Place,
+  type RepoConfig,
+  turnedOff,
+  turnedOnSince,
+} from "./rules";
 import { captureRules, type RulesSnapshot } from "./rules-cache";
 import { type HoldWord, RetractRefused, type SessionSink, SignInNeeded } from "./sink";
 import { readSpool, removeSpool, type SpoolEntry } from "./spool";
@@ -578,10 +585,13 @@ export class Uploader {
       if (!agent || !this.due(session)) continue;
       const path = await this.transcriptOf(key, session, agent);
       if (!path) continue;
-      // An agent whose upload is composed (`compose`) is judged before it is composed: a session
-      // not captured gets no copy here.
-      if (!agent.compose) {
-        const size = this.sizeOf(path);
+      // An agent whose upload is composed (`compose`) is judged before it is composed (a session
+      // not captured gets no copy here), unless nothing changed since and all of it was sent.
+      const composed = agent.compose?.current?.(session.session_id, path, this.host)
+        ? agent.compose.path(session.session_id, this.host)
+        : undefined;
+      if (!agent.compose || composed) {
+        const size = this.sizeOf(composed ?? path);
         if (size === undefined || !this.pending(session, size)) continue;
       }
       session = await this.startOf(key, session, agent, path, state);
@@ -766,13 +776,14 @@ export class Uploader {
       st.uploader = { ...st.uploader, last_sweep: now.toISOString() };
     });
     if (additions.length > 0) this.log(`sweep found ${additions.length} session(s)`);
-    this.pruneKept(readState(this.paths), now);
+    this.pruneKept(readState(this.paths), snapshot, now);
     return additions.length;
   }
 
-  /** Remove what agents' hooks kept beside sessions the state file no longer holds (gone, or never
-   * captured from here: a Cursor subagent's tool results), a day after it last changed. */
-  private pruneKept(state: CaptureState, now: Date): void {
+  /** Remove what agents' hooks kept beside sessions a rule has turned off since, and beside sessions
+   * the state file no longer holds (gone, or never captured from here: a Cursor subagent's tool
+   * results) a day after it last changed. */
+  private pruneKept(state: CaptureState, snapshot: RulesSnapshot, now: Date): void {
     for (const agent of this.agents.values()) {
       if (!agent.compose) continue;
       const root = keptAgentDir(this.host, agent.name);
@@ -783,8 +794,15 @@ export class Uploader {
         continue;
       }
       for (const id of names) {
-        if (state.sessions[sessionKey(agent.name, id)]) continue;
         const dir = join(root, id);
+        const session = state.sessions[sessionKey(agent.name, id)];
+        if (session) {
+          const place = placeOf(session.cwd);
+          if (turnedOff(this.decision(snapshot, session, place, state))) {
+            rmSync(dir, { recursive: true, force: true });
+          }
+          continue;
+        }
         const changed = Math.max(...[dir, join(dir, "results")].map((p) => this.mtimeOf(p) ?? 0));
         if (now.getTime() - changed < 24 * 3600 * SECOND) continue;
         rmSync(dir, { recursive: true, force: true });

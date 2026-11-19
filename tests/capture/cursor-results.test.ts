@@ -300,6 +300,17 @@ describe("a Cursor session's tool results", () => {
     await s.replay(shell);
     expect(kept(s.id)).toEqual([]);
 
+    // Kept while captured, then the folder is turned off: the next result removes what was kept.
+    const fresh = "c0ffee00-5555-4222-8333-444455556666";
+    const again = { ...shell, payload: { ...shell.payload, conversation_id: fresh } };
+    await s.replay(again);
+    expect(kept(fresh)).toHaveLength(1);
+    const rule = await machine.seshi(["capture", "off", "--path", project]);
+    expect(rule.code, rule.err).toBe(0);
+    await s.replay(again);
+    expect(existsSync(join(stateDir(), "kept", "cursor", fresh))).toBe(false);
+    await machine.seshi(["capture", "on", "--path", project]);
+
     const other = session("session-2");
     mkdirSync(join(project, ".git"));
     mkdirSync(join(project, ".seshi"));

@@ -61,6 +61,9 @@ export interface TranscriptComposer {
   update(sessionId: string, transcript: string, host: CaptureHost): string;
   /** The file, without writing it; undefined until `update` wrote it. */
   path(sessionId: string, host: CaptureHost): string | undefined;
+  /** Whether `update` would change nothing (neither the transcript nor what was kept changed since
+   * it last ran), cheaply: the uploader then skips a session it has sent all of. */
+  current?(sessionId: string, transcript: string, host: CaptureHost): boolean;
 }
 
 export interface HookHandler {

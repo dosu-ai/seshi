@@ -293,8 +293,10 @@ takes 20 ms). Cursor waits for it before the agent goes on.
 
 **What is kept, and where**: one file per hook in `kept/cursor/<conversation>/results/`, readable
 only by you, and only for a captured session: a session turned off (`/session-capture off`),
-paused, or in a folder the capture rules exclude keeps nothing, and turning a session off
-removes what it kept. A result longer than 32,000 characters keeps its head and tail with
+paused, or in a folder the capture rules exclude keeps nothing. Turning a session off removes
+what it kept, and so does a rule that turns it off later (a folder, the repo), at its next tool
+call or the next sweep. A command or MCP arguments are kept only as a digest, to tell calls apart;
+a result is removed once it is in the uploaded file. A result longer than 32,000 characters keeps its head and tail with
 `[… N characters cut by seshi …]` between them (the normalizer stores at most 2,500 characters of
 any result, as for every agent). A conversation that never shows up in the state file (a Task's
 subagent, whose tools carry its own conversation id) is removed a day after its last result.
@@ -314,18 +316,20 @@ transcript's bytes until the first result.
   `MCP:<tool>` to the hook and `CallDynamicTool` with a `toolName` in the transcript; a Glob is a
   Grep with an empty pattern). The hooks of one call share its `tool_use_id`. Each call takes the
   first result, in the order they came, of the same kind of tool, and of the same command, path,
-  pattern or MCP arguments when both sides say. Cursor runs a call's hooks before it writes the
+  pattern or MCP arguments when both sides say (a path the model wrote relative matches the
+  absolute one the hooks give). Cursor runs a call's hooks before it writes the
   line holding the call, so a line's results are all kept by the time the line can be read; calls
   in one line (parallel tools) are matched however their results came.
 - **A call whose result never came** (a tool without a hook, such as GetDynamicTools, or a hook
   that failed) is uploaded without one. **A result no call takes** is let go once a later result
-  has been taken. **A result kept after its call was uploaded** (only if its hook outlived its
+  has been taken, or after a minute. **A result kept after its call was uploaded** (only if its hook outlived its
   timeout) is let go too: a result is never added before a line already sent, so the server's
   stored prefix never changes.
 - **Uploaded twice**: the file only grows, so a session sent again, or whole (`seshi capture
   resend`), carries each result once. If Cursor rewrites the transcript (it no longer starts with
   what was composed), the file is composed again from the start, as the transcript would have been
-  sent.
+  sent, with only the results no call had taken yet. A session where neither the transcript nor
+  its results changed is not composed again.
 - **Redaction** works on these lines as on any transcript's, before upload and again on the
   server: secrets in a result are replaced, and a call that reads a sensitive file or runs a
   secret command keeps its call while its result is withheld (it has the call's id).

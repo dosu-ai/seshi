@@ -13,7 +13,7 @@ import { writeRecent } from "./current";
 import { writePrivateFile } from "./files";
 import type { CapturePaths } from "./paths";
 import { placeOf } from "./place";
-import { type Decision, decide } from "./rules";
+import { type Decision, decide, turnedOff } from "./rules";
 import { captureRules } from "./rules-cache";
 import { appendSpool } from "./spool";
 import { otherFolders, readState, type SessionState, sessionKey, stateFacts } from "./state";
@@ -157,7 +157,11 @@ export async function runHook(run: HookRun): Promise<HookOutcome> {
     const { session, entry } = result.toolResult;
     const { decision } = judge(session);
     if (decision.capture) outcome.kept = keepToolResult(run, session.session_id, entry, now);
-    else outcome.skipped.push({ session_id: session.session_id, decision });
+    else {
+      outcome.skipped.push({ session_id: session.session_id, decision });
+      // Turned off by a rule since (a folder, the repo): what was kept of it goes too.
+      if (turnedOff(decision)) forgetHandedTranscript(run.host, run.agent, session.session_id);
+    }
   }
   return outcome;
 }

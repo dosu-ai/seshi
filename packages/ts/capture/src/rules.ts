@@ -50,6 +50,18 @@ export type Level =
   | "folder"
   | "global";
 
+/** A session a rule turns off (not a pause, which keeps what was sent, nor rules that could not be
+ * read): what its hooks kept beside it goes. */
+export function turnedOff(decision: Decision): boolean {
+  return (
+    !decision.capture &&
+    decision.frozen === undefined &&
+    decision.level !== "pause" &&
+    decision.level !== "config" &&
+    decision.level !== "unknown"
+  );
+}
+
 export interface Decision {
   capture: boolean;
   level: Level;
