@@ -299,7 +299,7 @@ describe("the request itself", () => {
       userAgent: "dosu-cli/1.0.0",
     }).me();
     expect(seen[0]?.input).toBe("http://s.test/v1/me");
-    expect(seen[0]?.agent).toMatch(/^@seshi\/client\/\d/);
+    expect(seen[0]?.agent).toMatch(/^@dosu\/seshi-client\/\d/);
     expect(seen[1]?.agent).toBe("dosu-cli/1.0.0");
   });
 
