@@ -468,6 +468,9 @@ jobs:
           if ((& $exe --version) -ne "seshi $env:VERSION") { exit 1 }
           bun run release:smoke $exe --version $env:VERSION --keychain ${{ matrix.keychain }}
           if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: Wait for npm to serve the release
+        shell: bash
+        run: bun run release:wait-npm --version "$VERSION"
       - name: npm i -g @dosu/seshi
         shell: bash
         run: |
