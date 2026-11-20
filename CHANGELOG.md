@@ -1,3 +1,10 @@
+# [0.16.0](https://github.com/dosu-ai/seshi/compare/v0.15.0...v0.16.0) (2026-11-20)
+
+
+### Features
+
+* name the session's format `format`, and read sessions by owner and archive id ([#48](https://github.com/dosu-ai/seshi/issues/48)) ([4ef6169](https://github.com/dosu-ai/seshi/commit/4ef616960765dd53a9fbdcf1729b66aacce3bad7))
+
 # [0.15.0](https://github.com/dosu-ai/seshi/compare/v0.14.0...v0.15.0) (2026-11-20)
 
 
