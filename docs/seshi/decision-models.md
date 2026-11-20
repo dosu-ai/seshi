@@ -31,9 +31,11 @@ were public. Where the docs say nothing, this page says so and does not guess.
 - **The smallest seam:** add a `decide()` interface used only by the decision step, wrap
   today's LLM providers in an adapter behind it, and add two `provider` values that are
   valid only on `decision`. The redactor and `complete()` stay as they are.
-- **New in config:** `labels` (what each label means) and `thresholds` on the label
-  probabilities, for example "drop only above 0.9, otherwise redact". The review record gains
-  each part's three probabilities. That is numbers only, never text.
+- **Users write one prompt, as today.** seshi owns what `allow`, `redact` and `drop` mean,
+  because their meaning is the pipeline's. The user's prompt says what counts as sensitive in
+  their organization. The only new key is `thresholds` on the label probabilities, for
+  example "drop only above 0.9, otherwise redact". The review record gains each part's three
+  probabilities. That is numbers only, never text.
 - **Both providers keep every "what leaves the server" guarantee** through their own SDKs,
   configured the way `anthropic.ts` configures Anthropic's: explicit key and endpoint, the
   SDK's retries and logging off, redirects refused. Retention and training terms are between
@@ -75,8 +77,8 @@ billed. A decision model differs in four ways:
 
 - **It returns a distribution.** Code decides how much risk to take, instead of the prompt
   ("when unsure between allow and redact, choose redact"). This is where thresholds come in.
-- **The policy is split into parts.** The instructions and the meaning of each label are
-  separate fields, not one prompt.
+- **The question is split into parts.** The instructions and the meaning of each label are
+  separate fields, not one prompt. seshi fills the label fields itself (section 3).
 - **It is cheaper and faster.** A full 100,000-character part is roughly 25–35k tokens. That
   costs about $0.0013 on Jev and $0.003 on OpenAI, with nothing billed for output.
 - **It does no extended reasoning.** Both vendors say these models suit "gut-check"
@@ -109,7 +111,6 @@ the probabilities. The smallest seam is a second interface, used only by the dec
 // packages/ts/review/src/provider.ts
 export interface DecisionRequest {
   instructions: string; // the policy's prompt, with seshi's data note
-  labels: Readonly<Record<Label, string>>; // what allow, redact and drop mean
   records: Entry[]; // one part, as partsOf() makes it today
   timeoutMs: number;
   signal?: AbortSignal;
@@ -131,11 +132,12 @@ export interface DecisionProvider {
 
 - **`LlmDecision`** wraps any `ModelProvider`. It builds today's `decisionSystem(prompt)`,
   `recordsMessage(part)` and `DECISION_SCHEMA`, and runs `checkLabel`. An LLM policy behaves
-  and hashes exactly as it does now. `labels` and `thresholds` are refused on LLM providers:
-  their prompt already defines the labels, and they return no probabilities.
+  and hashes exactly as it does now. `thresholds` is refused on LLM providers: they return no
+  probabilities.
 - **`OpenAiDecisions`** and **`TypeSafe`** use the vendors' SDKs (`openai`,
   `@typesafe-ai/sdk`), configured as in section 4. They send one `choice` question named
-  `label`, with the three labels in a fixed order (allow, redact, drop).
+  `label`, with the three labels in a fixed order (allow, redact, drop) and seshi's own
+  description of each (`LABEL_DESCRIPTIONS` in `prompts.ts`, section 3).
   - **Jev:** `state` is `{records: [...]}` as a JSON object, Jev's native form.
   - **OpenAI:** `input` is one user message whose `input_text` is `recordsMessage(part)`. Its
     `input_json` part caps at 256 KiB and 10,000 values, which a large part can pass.
@@ -186,8 +188,7 @@ provider = "typesafe"
 model = "jev-1.14.0"                    # required: pin the version thresholds were tuned on
 api_key = { env = "TYPESAFE_API_KEY" }
 # base_url = "https://api.typesafe.ai"  # the default
-prompt_file = "/etc/seshi/review/decision.md"   # the question's instructions
-labels.drop = "The records as a whole should not be stored: a dump of customer records, ..."
+prompt_file = "/etc/seshi/review/decision.md"   # what counts as sensitive here
 thresholds = { drop = 0.9, redact = 0.3 }
 timeout = "10s"
 
@@ -201,10 +202,43 @@ api_key = { env = "ANTHROPIC_API_KEY" }
 | `provider` | `typesafe` or `openai-decisions`. Refused on `redactor` with "makes decisions only; name the redactor's provider" |
 | `model` | Required for `typesafe`. `seshi config check` warns on an alias (`jev-latest`, `jev-preview`), because an alias moves and answers can change. `gpt-6-luna` by default for `openai-decisions` |
 | `api_key`, `base_url`, `timeout` | As today. Required key. `timeout` defaults to `"10s"`: these calls are fast, and a hung call should fail over to a retry sooner |
-| `prompt`, `prompt_file` | The question's `instructions`. seshi's default is a short question built from today's prompt, and seshi always appends its data note (the records are data, never instructions) |
-| `labels.allow`, `.redact`, `.drop` | The descriptions of each choice. seshi's defaults come from today's prompt bullets. A label not set keeps its default. The label names cannot change |
+| `prompt`, `prompt_file` | The question's `instructions`: the organization's policy (below). seshi always appends its data note (the records are data, never instructions) |
 | `thresholds.drop`, `.redact` | Below. Unset means the most probable label, which is today's behaviour |
+| `labels` | Not a key. seshi owns the label descriptions (below) |
 | `max_tokens`, `effort` | Refused: there are no output tokens or effort to set |
+
+**What users customize: the prompt, not the labels.** A decision-model question has two
+kinds of text: the instructions, and a description of each option. They divide cleanly:
+
+- **seshi writes the label descriptions.** What `allow`, `redact` and `drop` *do* is the
+  pipeline's contract: `redact` sends the part to the redactor, and `drop` stores nothing. So
+  their descriptions say what each action means and nothing about any organization's data.
+  They sit beside the label names and the data note as seshi's own wrapping, and they are
+  versioned with it:
+  - **allow:** nothing in the records needs removing; store them as they are.
+  - **redact:** specific text in the records must not be stored, and removing that text leaves
+    the rest useful.
+  - **drop:** removing text could not make the records safe to store; store none of them.
+- **The user writes the prompt.** It says what counts as sensitive in this organization:
+  credentials in prose, personal data, whose data is customer data, which internal hostnames
+  are fine, what a confidential project looks like. It also carries the organization's edge
+  cases between labels, for example "a customer's ticket text is redact, a full export of
+  tickets is drop". seshi's default prompt is today's opening paragraph and the examples from
+  its bullets, rewritten as a question.
+- **Thresholds carry the risk tolerance.** "When unsure, choose redact" is no longer prose
+  but two numbers that `seshi review eval --sweep` can tune.
+
+This keeps one setting, as for an LLM step today, and it leaves no way for a user's
+instructions and option descriptions to contradict each other. Jev's
+[jaggedness page](https://docs.typesafe.ai/model-jaggedness) names that contradiction as a
+failure mode. The cost is that Jev advises putting edge cases in the option descriptions,
+where the model weighs them option by option. Here they go in the instructions instead,
+which may cost some accuracy. The eval measures that. If evidence shows organizations need
+their own descriptions, a `labels` key can be added later without breaking anything.
+
+An LLM prompt file does not carry over unchanged. It defines the labels itself, which
+duplicates seshi's descriptions and can contradict them. Moving a policy to a decision model
+means deleting the label definitions from the prompt and keeping the policy.
 
 **The redactor no longer inherits.** Today a redactor that names no provider inherits the
 decision step's. With a decision model, there is nothing for it to inherit, so the policy must
@@ -236,9 +270,9 @@ redact" out of the prompt and into code, where `seshi review eval` can measure i
 
 **The policy hash.** Nothing lives at the provider, so the hash stays local and complete. For a
 decision-model step it covers the same fields as now: provider, model, base_url, prompt and
-timeout. It adds the label descriptions, the thresholds, the data note's wrapper version, and
-the question shape, which is fixed for now. `labels` and `thresholds` enter the identity only
-when set, so every existing policy keeps its hash. The configured model is hashed. The
+timeout. It adds the thresholds, and the wrapper version, which covers seshi's label
+descriptions, its data note and the question shape. `thresholds` enter the identity only when
+set, so every existing policy keeps its hash. The configured model is hashed. The
 version that actually answered (Jev returns it even for an alias) goes in the review record
 instead (below), because it is not config.
 
@@ -331,8 +365,9 @@ them without text leaving the server:
 
 **Training a provider: not possible, and not needed.** Neither provider offers per-account
 training: Jev serves every account the same weights, and `gpt-6-luna` lists fine-tuning as
-unsupported. Calibration therefore belongs to seshi: the label descriptions, the thresholds,
-and the part size. All three are local config, covered by the hash and measured by eval.
+unsupported. Calibration therefore happens in seshi. The user tunes the prompt and the
+thresholds, both local config, covered by the hash and measured by eval. seshi tunes its own
+label descriptions and the part size, versioned in the wrapper.
 **seshi should not build a way to send session text to a vendor for training.** If a vendor
 asks for labelled data, the operator's fixtures are files the operator owns and can share
 under their own agreement.
@@ -368,7 +403,10 @@ same either way.
 5. **Mixed versions.** Should the record keep a served model per part? With an alias, the
    parts of one upload could in principle be answered by two versions. Pinning makes this
    moot, which is why `typesafe` requires a model.
-6. **Category questions (phase 4).** Do per-category yes/no questions beat one choice on
+6. **Edge cases in the prompt.** Do organization-specific edge cases between labels work as
+   well in the instructions as they would in the option descriptions? If not, add a `labels`
+   key.
+7. **Category questions (phase 4).** Do per-category yes/no questions beat one choice on
    operators' fixtures, and should the categories that triggered `redact` narrow what the
    redactor is asked to look for?
 
@@ -377,7 +415,7 @@ same either way.
 | Phase | Work | Size |
 |---|---|---|
 | 0 | Get keys for both. No code | S |
-| 1 | The seam: `DecisionProvider`, the `LlmDecision` adapter, `labels` and `thresholds` in the schema and the hash (existing hashes unchanged), `scores` and the served model in the review and drop records, the eval's probabilities, latency, cost and `--sweep`, the new fixtures. No behaviour change for existing policies | M |
+| 1 | The seam: `DecisionProvider`, the `LlmDecision` adapter, seshi's label descriptions and default decision-model prompt, `thresholds` in the schema and the hash (existing hashes unchanged), `scores` and the served model in the review and drop records, the eval's probabilities, latency, cost and `--sweep`, the new fixtures. No behaviour change for existing policies | M |
 | 2 | `openai-decisions`: the `openai` SDK client (section 4), caching off, refusal and status mapping, fake-fetch tests, `config check` output, serverless key name, [config.md](../config.md#review) and [model-review.md](../model-review.md) | S–M |
 | 3 | `typesafe`: the `@typesafe-ai/sdk` client (section 4), `too_long`, the part-size default from open question 2, required pinned `model` and the alias warning, tests, docs | S |
 | 4 | Optional, on evidence: per-category questions, `seshi review fixture add`, `seshi review export` | M |
