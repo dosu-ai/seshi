@@ -89,12 +89,8 @@ matter for coding-agent sessions:
 
 - It reads instructions literally.
 - Accuracy falls when the state is large and mostly irrelevant.
-- **Adversarial content in the state "can move the answer"**: a session can contain text that
-  argues for its own classification.
+- Adversarial content in the state "can move the answer", as it can for an LLM.
 - Choice option order can matter.
-
-The LLM decision step faces the same prompt-injection risk. The eval needs a fixture for it
-either way (section 5).
 
 ## 2. Where they fit
 
@@ -185,7 +181,7 @@ id = "strict"
 
 [review.policies.decision]
 provider = "typesafe"
-model = "jev-1.14.0"                    # required: pin the version thresholds were tuned on
+model = "jev-1.14.0"                    # or an alias; the version that answered is recorded
 api_key = { env = "TYPESAFE_API_KEY" }
 # base_url = "https://api.typesafe.ai"  # the default
 prompt_file = "/etc/seshi/review/decision.md"   # what counts as sensitive here
@@ -200,7 +196,7 @@ api_key = { env = "ANTHROPIC_API_KEY" }
 | Key on a decision-model step | |
 |---|---|
 | `provider` | `typesafe` or `openai-decisions`. Refused on `redactor` with "makes decisions only; name the redactor's provider" |
-| `model` | Required for `typesafe`. `seshi config check` warns on an alias (`jev-latest`, `jev-preview`), because an alias moves and answers can change. `gpt-6-luna` by default for `openai-decisions` |
+| `model` | Any model the provider serves, a version or an alias: the user's choice. `jev-latest` by default for `typesafe`, `gpt-6-luna` for `openai-decisions`. The record names the version that answered, so a moved alias shows |
 | `api_key`, `base_url`, `timeout` | As today. Required key. `timeout` defaults to `"10s"`: these calls are fast, and a hung call should fail over to a retry sooner |
 | `prompt`, `prompt_file` | The question's `instructions`: the organization's policy (below). seshi always appends its data note (the records are data, never instructions) |
 | `thresholds.drop`, `.redact` | Below. Unset means the most probable label, which is today's behaviour |
@@ -249,7 +245,7 @@ parts labelled `redact`), and `config check` already lists both.
 **Mapping seshi's labels and categories.** The three labels map to one `choice` with options
 `allow`, `redact` and `drop`. The redactor categories (`secret`, `personal`, `customer-data`)
 do not need to reach the decision model at all: they are the redactor's to apply. A later
-option (phase 4) asks one yes/no question per category plus one for "inseparable", and
+option (phase 5) asks one yes/no question per category plus one for "inseparable", and
 derives the label in code. That follows both vendors' "decompose the judgment" advice, and
 records which category triggered `redact`. It is a second request shape, so it waits for eval
 evidence that it beats the single choice.
@@ -344,8 +340,9 @@ unchanged. It needs four additions:
   labels at each pair of thresholds, with no new calls. Report the pairs with zero missed
   drops and zero leaks, and the fewest false drops. This is how an operator sets
   `thresholds`.
-- Fixtures that test the risks above: a record that argues for its own label (injection), and
-  each fixture with its records reordered.
+- **A compare mode** (`--against <policy>`): run two policies on the same records and report
+  how often their labels agree, by label, with each disagreement's scores. It needs no
+  labels, so it runs on unlabelled sessions (below).
 
 **The built-in fixtures are too few to calibrate.** There are ten (3 allow, 5 redact,
 2 drop), enough to catch a broken policy but not to pick a threshold. A threshold sweep needs
@@ -362,6 +359,43 @@ them without text leaving the server:
   happened afterwards (retracted, deleted). It shows how labels and scores are distributed on
   real traffic, and how many writes a threshold change would flip. It gives no ground truth,
   because it has no text to label.
+
+**Calibrating thresholds without labelled data.** Nobody has to read session text to set
+thresholds. Four ways, from cheapest to most reliable:
+
+1. **From costs.** Both vendors train for calibrated probabilities. If they are calibrated,
+   a threshold follows from what each mistake costs: drop when `p.drop` exceeds
+   `cost of a false drop / (cost of a false drop + cost of a missed drop)`. "Drop only above
+   0.9" says losing a session wrongly is nine times worse than storing, redacted, one that
+   should have been dropped. The vendors' calibration holds on their data, not necessarily
+   on seshi's question, so this is a starting point.
+2. **From synthetic fixtures.** Generate sessions with known sensitive text planted in them.
+   The label is known by construction, as it is for seshi's built-in fixtures. This scales to
+   the few hundred fixtures a sweep needs, and no real text is involved.
+3. **From the current policy, in shadow.** Run the decision model beside the live LLM policy
+   on real uploads, on the server, without acting on its answer. Record its label and scores
+   in the review record next to the LLM's label, which is numbers and labels only. Then sweep
+   thresholds for agreement with the LLM, and count the disagreements in each direction. The
+   LLM is not ground truth, but it is the behaviour being replaced, and the text never
+   leaves where it already goes.
+4. **From target rates.** From exported scores (no text), pick thresholds that give a drop
+   rate and a redact rate the operator can accept. This fixes how often each action happens,
+   not whether it is right.
+
+**Where eval data can come from.**
+
+- **Local sessions.** A developer's own raw transcripts on their laptop. These are the best
+  source of real positives, because nothing has removed anything yet. Sending them to a
+  provider is the developer's own call under their contract. They are unlabelled, so they
+  suit compare mode, and part-size measurement (open question 2). `seshi review eval` needs a
+  way to read them: `--sessions <path>`, normalized with the same formats capture uses.
+- **A deployment's stored sessions.** These suit measuring false positives (most stored
+  traffic is `allow`) and token counts. They are a poor source of positives: regex redaction
+  and any earlier review already removed what we most want to catch, and their
+  `[redacted:<category>]` markers tell the model where it was. They usually hold other
+  people's sessions too. So the place to use them is shadow mode on the server that already
+  holds them, not exported to a laptop.
+- **Synthetic fixtures.** For leaks and drops, which real stored data under-represents.
 
 **Training a provider: not possible, and not needed.** Neither provider offers per-account
 training: Jev serves every account the same weights, and `gpt-6-luna` lists fine-tuning as
@@ -389,26 +423,25 @@ same either way.
 
 **Open questions**
 
-1. **Prompt injection.** How well each model resists records that argue for their own label.
-   TypeSafe's guidance is "test edge cases"; the eval's injection fixture should measure both.
-2. **Jev's part size.** How many tokens a 100,000-character part of JSON-escaped session text
-   comes to, and so what `max_input_chars` default fits 32k per question. Measure on the
-   built-in fixtures.
-3. **Rate limits.** Whether OpenAI's `/v1/decisions` shares the `gpt-6-luna` tier limits.
-   Jev's limits are only visible in its console.
-4. **Default thresholds.** Should seshi ship with thresholds set, for example
-   `{drop = 0.9, redact = 0.3}`, or with none (the most probable label, today's behaviour)
-   until an operator runs a sweep? This page leans to none, because a number nobody measured
+Rate limits, retention and model choice are the user's, under their contract with the
+provider. Prompt injection is not treated separately from today's LLM step.
+
+1. **Default thresholds.** Ship with none (the most probable label, today's behaviour), or
+   with thresholds derived from costs (section 5) and checked in shadow against the LLM
+   policy? This page leans to none until shadow data exists, because a number nobody measured
    looks calibrated when it isn't.
-5. **Mixed versions.** Should the record keep a served model per part? With an alias, the
-   parts of one upload could in principle be answered by two versions. Pinning makes this
-   moot, which is why `typesafe` requires a model.
-6. **Edge cases in the prompt.** Do organization-specific edge cases between labels work as
+
+To verify with the eval once phase 1 is built:
+
+2. **Jev's part size.** How many tokens a 100,000-character part of JSON-escaped session text
+   comes to, and so what `max_input_chars` default fits 32k per question. Measure on local
+   sessions.
+3. **Edge cases in the prompt.** Do organization-specific edge cases between labels work as
    well in the instructions as they would in the option descriptions? If not, add a `labels`
    key.
-7. **Category questions (phase 4).** Do per-category yes/no questions beat one choice on
-   operators' fixtures, and should the categories that triggered `redact` narrow what the
-   redactor is asked to look for?
+4. **Category questions (phase 5).** Do per-category yes/no questions beat one choice, and
+   should the categories that triggered `redact` narrow what the redactor is asked to look
+   for?
 
 **Plan** (S = up to a day, M = two to four days)
 
@@ -417,5 +450,6 @@ same either way.
 | 0 | Get keys for both. No code | S |
 | 1 | The seam: `DecisionProvider`, the `LlmDecision` adapter, seshi's label descriptions and default decision-model prompt, `thresholds` in the schema and the hash (existing hashes unchanged), `scores` and the served model in the review and drop records, the eval's probabilities, latency, cost and `--sweep`, the new fixtures. No behaviour change for existing policies | M |
 | 2 | `openai-decisions`: the `openai` SDK client (section 4), caching off, refusal and status mapping, fake-fetch tests, `config check` output, serverless key name, [config.md](../config.md#review) and [model-review.md](../model-review.md) | S–M |
-| 3 | `typesafe`: the `@typesafe-ai/sdk` client (section 4), `too_long`, the part-size default from open question 2, required pinned `model` and the alias warning, tests, docs | S |
-| 4 | Optional, on evidence: per-category questions, `seshi review fixture add`, `seshi review export` | M |
+| 3 | `typesafe`: the `@typesafe-ai/sdk` client (section 4), `too_long`, the part-size default from open question 2, tests, docs | S |
+| 4 | Calibration data: `seshi review eval --sessions` and `--against`, shadow mode for a candidate decision step on the server, synthetic fixture generation | M |
+| 5 | Optional, on evidence: per-category questions, `seshi review fixture add`, `seshi review export` | M |
