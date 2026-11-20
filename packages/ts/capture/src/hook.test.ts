@@ -118,7 +118,7 @@ describe("runHook (F9.1)", () => {
 
   it("resolves labels in the agent's environment at first sight, and only then", async () => {
     cliConfig(
-      `[labels]\n"dosu.project" = { env = "DOSU_PROJECT" }\nteam = "platform"\nBad = "x"\n[[labels.paths]]\npath = "${dir}"\nfolder = "here"\n`,
+      `[labels]\n"dosu.project" = { env = "DOSU_PROJECT" }\nteam = "platform"\nBad = "x"\n[[labels.paths]]\npath = ${JSON.stringify(dir)}\nfolder = "here"\n`,
     );
     const stop = (env: Record<string, string>) =>
       runHook({
