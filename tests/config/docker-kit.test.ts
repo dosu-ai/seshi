@@ -94,6 +94,11 @@ describe("deploy/docker compose files", () => {
     expect(seshi.security_opt).toContain("no-new-privileges:true");
   });
 
+  it("publish no seshi port beside Caddy, so plain HTTP cannot bypass it", () => {
+    expect(parse("compose.tls.yaml").services.seshi).toEqual({ ports: [] });
+    expect(read("compose.tls.yaml")).toContain("ports: !reset []");
+  });
+
   it("pin every third-party image by digest", () => {
     for (const file of COMPOSE_FILES) {
       for (const [name, service] of Object.entries(parse(file).services)) {

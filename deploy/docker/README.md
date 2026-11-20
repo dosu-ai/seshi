@@ -6,7 +6,7 @@ Docker volume. Two add-on files swap in a bundled S3-compatible bucket or put Ca
 for HTTPS. The repository root's `compose.yaml` is different: it builds the image from a
 checkout, for working on seshi itself.
 
-You need Docker Engine with Compose v2.20 or later. [docs/server.md](../../docs/server.md)
+You need Docker Engine with Compose v2.24 or later. [docs/server.md](../../docs/server.md)
 covers what the server does, and [docs/config.md](../../docs/config.md) lists every setting.
 
 ## Quick start
@@ -21,7 +21,9 @@ docker compose exec seshi seshi admin init     # prints the first admin token an
 ```
 
 The server answers on `http://127.0.0.1:7200`. Each release tag pins its own image version in
-`compose.yaml`, so the tag you clone is the version you run. Keep the admin token and the org
+`compose.yaml`, so the tag you clone is the version you run. A release's image is published a
+few minutes after its tag: if `up` or `pull` reports `manifest unknown` for a tag that is
+minutes old, wait, or use the previous release. Keep the admin token and the org
 key somewhere safe: `admin init` prints them once. Then, on each laptop:
 
 ```sh
@@ -81,7 +83,8 @@ anything over a network.
 docker compose -f compose.yaml -f compose.tls.yaml up -d --wait
 ```
 
-Caddy gets a certificate for the name from a public CA (Let's Encrypt, or ZeroSSL as a
+With this add-on seshi publishes no port on the host at all, whatever `BIND_ADDRESS` says, so
+nothing reaches it except through Caddy. Caddy gets a certificate for the name from a public CA (Let's Encrypt, or ZeroSSL as a
 fallback) and renews it. Keep the
 `seshi_caddy-data` volume, which holds the certificates. `SITE_ADDRESS=localhost` uses Caddy's
 own CA instead, which is enough to try it. Caddy sets no response timeout and no body limit by
@@ -133,7 +136,9 @@ more than this.
 
 The `seshi` container runs as uid 1000 with a read-only root filesystem. `/data` (the volume)
 and `/tmp` (in memory) are its only writable paths. It drops every Linux capability, cannot
-gain new privileges, and publishes its port on loopback unless `BIND_ADDRESS` says otherwise.
+gain new privileges, and publishes its port on loopback unless `BIND_ADDRESS` says otherwise. On Docker Engine
+before 28.0, other Linux hosts on the same network segment can still reach a port published on
+`127.0.0.1`: upgrade Docker, or firewall the host.
 Third-party images are pinned by digest.
 
 The kit sets no CPU or memory limits. One upload can be 256 MiB, and the server holds it in

@@ -17,6 +17,15 @@ services:
       SESHI_STORE__REGION: us-east-1
       SESHI_STORE__CREDENTIALS__ACCESS_KEY_ID: ${BUCKET_ACCESS_KEY:?set BUCKET_ACCESS_KEY in .env}
       SESHI_STORE__CREDENTIALS__SECRET_ACCESS_KEY: ${BUCKET_SECRET_KEY:?set BUCKET_SECRET_KEY in .env}
+      # Cleared, so credentials .env keeps for another bucket cannot win over the two above
+      # (the server applies a __FILE or __ENV reference after the plain value; empty is unset).
+      SESHI_STORE__CREDENTIALS__ACCESS_KEY_ID__FILE: ""
+      SESHI_STORE__CREDENTIALS__ACCESS_KEY_ID__ENV: ""
+      SESHI_STORE__CREDENTIALS__SECRET_ACCESS_KEY__FILE: ""
+      SESHI_STORE__CREDENTIALS__SECRET_ACCESS_KEY__ENV: ""
+      SESHI_STORE__CREDENTIALS__SESSION_TOKEN: ""
+      SESHI_STORE__CREDENTIALS__SESSION_TOKEN__FILE: ""
+      SESHI_STORE__CREDENTIALS__SESSION_TOKEN__ENV: ""
 
   bucket:
     image: rustfs/rustfs:1.0.5@sha256:b81d16a90ee25bd9511280127ca1471788c6e874cf0f0da759645f46b2dc1d74

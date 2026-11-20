@@ -5,8 +5,12 @@
 # certificate from Caddy's own CA instead, for trying it out.
 #
 # Caddy's reverse proxy sets no response timeout and no body limit by default, which meets
-# docs/server.md's 120 s rule. seshi itself stays published on loopback only.
+# docs/server.md's 120 s rule. seshi itself publishes no host port here, whatever BIND_ADDRESS
+# says, so plain HTTP never bypasses Caddy (`docker compose exec seshi …` still works).
 services:
+  seshi:
+    ports: !reset []
+
   caddy:
     image: caddy:2.11.9-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0
     command:

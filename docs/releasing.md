@@ -46,7 +46,10 @@ from any other branch, and nothing is published by hand.
    `ghcr.io/<repo>` for linux/amd64 and linux/arm64 from those binaries
    (`--build-arg BINARY=prebuilt`), tagged `X.Y.Z`, `X.Y` and `latest`. Then **`verify-kit`**
    checks out the tag and runs `scripts/docker-kit-smoke.sh`: it pulls that image without a
-   login, as a user would, and boots the Docker kit in each variant against it.
+   login, as a user would, and boots the Docker kit in each variant against it. Until `image`
+   finishes, the kit at the new tag names an image that does not exist yet (the release
+   commit carries the new pin). If `image` fails, re-run the workflow's failed jobs once the
+   cause is fixed: `image` builds the same tag again, and `verify-kit` follows it.
 5. **`pypi`** builds the Python client from the release's tag and publishes it to PyPI as
    `seshi` ([below](#pypi)).
 6. **`verify`** installs the published release on all six platforms with `install.sh` or
