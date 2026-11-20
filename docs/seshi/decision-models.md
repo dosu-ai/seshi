@@ -34,12 +34,17 @@ were public. Where the docs say nothing, this page says so and does not guess.
 - **New in config:** `labels` (what each label means) and `thresholds` on the label
   probabilities, for example "drop only above 0.9, otherwise redact". The review record gains
   each part's three probabilities. That is numbers only, never text.
-- **Recommendation:** build the seam and **OpenAI Decisions first**, then **Jev**. OpenAI's
-  retention terms are published, its context is large enough that `max_input_chars` keeps its
-  default, and many operators already have an OpenAI agreement. Jev is cheaper per token and
-  explicitly calibrated, but it publishes no retention period and its default context
-  (32k tokens per question) is below seshi's default part size. Once the seam exists, Jev is a
-  small follow-up.
+- **Both providers keep every "what leaves the server" guarantee** through their own SDKs,
+  configured the way `anthropic.ts` configures Anthropic's: explicit key and endpoint, the
+  SDK's retries and logging off, redirects refused. Retention and training terms are between
+  the user and the provider they choose, under the user's own contract; seshi's part is to
+  send only record text, only to the endpoint configured.
+- **Recommendation:** build the seam and **OpenAI Decisions first**, then **Jev**. It is
+  close. OpenAI's context fits seshi's default part size, so the first eval compares a
+  decision model with today's LLM on exactly the same parts. Jev's default context (32k
+  tokens per question) needs a smaller part size, which is its own measurement. Jev is cheaper
+  per token and publishes latency figures. Once the seam exists, it is a small follow-up, and
+  the order can swap if Jev matters more to the first users.
 
 ## 1. What these APIs are
 
@@ -60,7 +65,7 @@ were public. Where the docs say nothing, this page says so and does not guess.
 | Latency (published) | "Most calls complete in about 100 ms" ([how to build](https://docs.typesafe.ai/concepts/how-to-build-with-system-one)), and 70–500 ms end to end ([launch blog](https://typesafe.ai/blog/introducing-system-one-models-and-jev)) | "About 10x faster than the Responses API". No absolute figure |
 | Rate limits | Set per organization and shown in the console (behind a login, so not read) | `gpt-6-luna` tiers start at 5,000 RPM and 2M TPM. The docs don't say whether `/v1/decisions` shares those limits |
 | Training on your data | "Will not train or fine tune ... on Input" ([privacy policy](https://typesafe.ai/legal/privacy-policy)) | Not used for training ([data controls](https://developers.openai.com/api/docs/guides/your-data)) |
-| Retention | **Not published.** The [DPA](https://typesafe.ai/legal/data-processing) says data is kept "as long as necessary". Zero data retention (ZDR) is available for enterprise customers on request | Abuse-monitoring logs are kept for 30 days. No application state is kept, apart from the prompt cache. ZDR is available to eligible organizations. Regional processing in the US and EU, and Private Link |
+| Retention | Set by the [DPA](https://typesafe.ai/legal/data-processing) ("as long as necessary"); no period is published. Zero data retention (ZDR) is available for enterprise customers on request | Abuse-monitoring logs are kept for 30 days. No application state is kept, apart from the prompt cache. ZDR is available to eligible organizations. Regional processing in the US and EU, and Private Link |
 
 **Compared with today.** Today's decision step sends a system prompt that defines the three
 labels, plus the records as JSON. It constrains the answer with a JSON schema
@@ -128,9 +133,9 @@ export interface DecisionProvider {
   `recordsMessage(part)` and `DECISION_SCHEMA`, and runs `checkLabel`. An LLM policy behaves
   and hashes exactly as it does now. `labels` and `thresholds` are refused on LLM providers:
   their prompt already defines the labels, and they return no probabilities.
-- **`OpenAiDecisions`** and **`TypeSafe`** are written on `fetch` the way `openai.ts` is. They
-  send one `choice` question named `label`, with the three labels in a fixed order (allow,
-  redact, drop).
+- **`OpenAiDecisions`** and **`TypeSafe`** use the vendors' SDKs (`openai`,
+  `@typesafe-ai/sdk`), configured as in section 4. They send one `choice` question named
+  `label`, with the three labels in a fixed order (allow, redact, drop).
   - **Jev:** `state` is `{records: [...]}` as a JSON object, Jev's native form.
   - **OpenAI:** `input` is one user message whose `input_text` is `recordsMessage(part)`. Its
     `input_json` part caps at 256 KiB and 10,000 values, which a large part can pass.
@@ -251,11 +256,16 @@ label, as it does today.
 
 ## 4. Guarantees seshi must keep
 
-| Guarantee ([model-review.md](../model-review.md)) | Jev | OpenAI Decisions |
+Both SDKs fall back to environment variables only for options left unset, so seshi sets
+every one of them explicitly, as `anthropic.ts` does for Anthropic's SDK.
+
+| Guarantee ([model-review.md](../model-review.md)) | Jev (`@typesafe-ai/sdk`) | OpenAI Decisions (`openai`) |
 |---|---|---|
 | Only record text leaves, and only to the configured endpoint | Kept. seshi sends the same entries an LLM gets, and never sends `assets` or the `TypeSafe-Danger-Zone-*` headers, so no image placeholder is ever expanded | Kept. seshi never sends `input_image` (a URL there is fetched by OpenAI), `safety_identifier` (an id) or `prompt_cache_key` |
-| No implicit environment keys; redirects refused | Kept by not using the SDK. The SDK reads `TYPESAFE_API_KEY` from the environment, retries on its own, and takes a logger. Plain `fetch` with `redirect: "error"`, as in `openai.ts` | Kept by not using the `openai` SDK, which reads `OPENAI_API_KEY`, `OPENAI_BASE_URL` and `OPENAI_LOG`. Plain `fetch` with `redirect: "error"` |
-| Provider error text never logged | Kept, and it matters here: a `422` body echoes "a text preview of the rejected input". seshi cancels error bodies. Only a `400` body is read, to detect `max_tokens_exceeded`, and never recorded | Kept the same way. A `refusal` answer carries no text |
+| No implicit environment keys; redirects refused | Kept. Set `apiKey`, `baseURL` and `defaultModel`, so `TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL` and `TYPESAFE_DEFAULT_MODEL` are never read. The SDK has no fetch options, so pass a `fetch` that sets `redirect: "error"` | Kept. Set `apiKey` and `baseURL`, and `organization: null` and `project: null` (else `OPENAI_ORG_ID` and `OPENAI_PROJECT_ID` become headers). Set `fetchOptions: { redirect: "error" }` |
+| The SDK's own retries off (the reviewer's retries are F3.4's) | `retry: { maxRetries: 0 }` | `maxRetries: 0` |
+| The client never logs requests | `logLevel: "off"`. Otherwise `TYPESAFE_LOG_LEVEL=debug` logs request bodies, which "are not" redacted | `logLevel: "off"`, so `OPENAI_LOG` is never read |
+| Provider error text never logged | Kept. The SDK's error messages carry the provider's text, so errors are mapped to codes from their class and status only, as `mapError` in `anthropic.ts` does. This matters here: a `422` body echoes "a text preview of the rejected input". `max_tokens_exceeded` is read from the error to set the code, and never recorded | Kept the same way. A `refusal` answer carries no text |
 | Review record stores labels and findings, never text | Kept. Probabilities are added, never text | Kept |
 
 **Prompt caching (OpenAI).** Caching is on by default: OpenAI places a cache breakpoint at
@@ -265,18 +275,19 @@ minutes, and data controls says it is gone within 24 hours. It also bills a cach
 ($0.125/M) above the normal input rate, for a prefix that is never reused. seshi should send
 `prompt_cache_options: {mode: "explicit"}` with no breakpoints, which turns caching off.
 
-**What retention means for users.**
+**Retention and training are the user's contract.** seshi assumes users have contracts with
+the providers they choose, as it already does for Anthropic and OpenAI-compatible endpoints.
+Retention, training and residency terms come from that contract, not from seshi. seshi's part
+is unchanged: only record text, only to the endpoint configured, and `seshi config check`
+names that endpoint. For reference, the published defaults:
 
-- **OpenAI.** The text of every reviewed upload sits in OpenAI's abuse-monitoring logs for 30
-  days and is not used for training. Organizations approved for ZDR keep nothing.
-  Organizations under data-residency rules can use OpenAI's regional processing.
-- **TypeSafe.** Input is not used for training, but no retention period is published, and ZDR
-  is for enterprise customers only. An operator choosing Jev should ask TypeSafe for those
-  terms in writing. Our docs should say plainly that we could not find them.
+- **OpenAI:** abuse-monitoring logs kept 30 days, no training, ZDR for eligible
+  organizations, regional processing in the US and EU.
+- **TypeSafe:** no training on input. Retention follows its DPA. ZDR is offered to enterprise
+  customers.
 
-Either way, `seshi config check` names the endpoint. The docs keep pointing people who must
-keep transcripts in-house to a local model on `openai-compatible`. Neither decision model
-can run locally.
+Neither decision model runs locally. Users who must keep transcripts in-house stay on a local
+model through `openai-compatible`.
 
 **Serverless mode.**
 
@@ -331,23 +342,20 @@ under their own agreement.
 **Recommendation.** Build the `decide()` seam with thresholds and recorded scores, then
 **OpenAI Decisions**, then **Jev**. The two APIs are nearly the same shape (one choice,
 probabilities, no text), so most of the work is the seam, not the providers. OpenAI goes
-first for four reasons:
+first, narrowly:
 
-- Its retention and ZDR terms are published.
-- Its context fits seshi's default part size.
-- It is generally available.
-- Many operators can use it under an agreement they already have.
+- Its context fits seshi's default part size, so the first eval isolates the model: same
+  parts, same fixtures, LLM against decision model.
+- It is generally available, with one model to target.
 
-Jev follows as a small change once TypeSafe answers the open questions below. It is cheaper
-per token, publishes latency figures, and documents its calibration.
+Jev follows as a small change. It is cheaper per token, publishes latency figures, and
+documents its calibration. The order can swap if the first users want Jev; the seam is the
+same either way.
 
 **Open questions**
 
-1. **TypeSafe.** Four things to ask:
-   - The retention period for `/v1/systemone` request bodies.
-   - Whether bodies are logged, and where they are processed.
-   - Whether ZDR is available below enterprise.
-   - Their guidance on prompt-injection robustness, beyond "test edge cases".
+1. **Prompt injection.** How well each model resists records that argue for their own label.
+   TypeSafe's guidance is "test edge cases"; the eval's injection fixture should measure both.
 2. **Jev's part size.** How many tokens a 100,000-character part of JSON-escaped session text
    comes to, and so what `max_input_chars` default fits 32k per question. Measure on the
    built-in fixtures.
@@ -368,8 +376,8 @@ per token, publishes latency figures, and documents its calibration.
 
 | Phase | Work | Size |
 |---|---|---|
-| 0 | Get keys for both. Ask TypeSafe the retention questions. No code | S |
+| 0 | Get keys for both. No code | S |
 | 1 | The seam: `DecisionProvider`, the `LlmDecision` adapter, `labels` and `thresholds` in the schema and the hash (existing hashes unchanged), `scores` and the served model in the review and drop records, the eval's probabilities, latency, cost and `--sweep`, the new fixtures. No behaviour change for existing policies | M |
-| 2 | `openai-decisions`: the `fetch` client, caching off, refusal and status mapping, fake-fetch tests, `config check` output, serverless key name, [config.md](../config.md#review) and [model-review.md](../model-review.md) | S–M |
-| 3 | `typesafe`: the `fetch` client, `too_long`, the part-size default from open question 2, required pinned `model` and the alias warning, tests, docs | S |
+| 2 | `openai-decisions`: the `openai` SDK client (section 4), caching off, refusal and status mapping, fake-fetch tests, `config check` output, serverless key name, [config.md](../config.md#review) and [model-review.md](../model-review.md) | S–M |
+| 3 | `typesafe`: the `@typesafe-ai/sdk` client (section 4), `too_long`, the part-size default from open question 2, required pinned `model` and the alias warning, tests, docs | S |
 | 4 | Optional, on evidence: per-category questions, `seshi review fixture add`, `seshi review export` | M |
