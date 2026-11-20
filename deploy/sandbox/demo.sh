@@ -50,7 +50,7 @@ fake_token() { cat "$STATE/fake-token" 2>/dev/null || true; }
 # The newest session's ID. A sandbox chose it, so anything but a plain ID is dropped.
 latest() {
   s sessions ls --owner "$OWNER" --json 2>/dev/null |
-    jq -r '.sessions[0].session_id // empty | select(test("^[A-Za-z0-9._-]+$"))'
+    jq -r '.sessions[0].session_id // empty | select(test("\\A[A-Za-z0-9._-]+\\z"))'
 }
 box_exists() { sbx ls 2>/dev/null | awk 'NR > 1 {print $1}' | grep -qx "$BOX"; }
 # Waits up to $2 seconds for the command after it to succeed, printing a dot every 2 seconds.
