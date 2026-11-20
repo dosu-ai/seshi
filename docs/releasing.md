@@ -127,12 +127,19 @@ Publishing page) to match, or the upload is refused.
 ## Before the first release
 
 - **Names.** Every package is published under the `@dosu` scope (`@dosu/seshi`,
-  `@dosu/seshi-<target>`, `@dosu/seshi-model`, `@dosu/seshi-client`): the `seshi` name and
-  the `@seshi` scope are taken on npm. The workspace keeps its `@seshi/*` names, which are
-  never published; `scripts/release/npm.ts` renames them, and the libraries' imports of each
-  other, as it builds the packages. CI's `NPM_TOKEN` secret must be able to publish new
-  packages to the `@dosu` scope. npm trusted publishing is set up per package, so it can
-  replace the token only once each package exists.
+  `@dosu/seshi-<target>`, `@dosu/seshi-model`, `@dosu/seshi-client`): the `@seshi` scope is
+  taken on npm. The workspace keeps its `@seshi/*` names, which are never published;
+  `scripts/release/npm.ts` renames them, and the libraries' imports of each other, as it builds
+  the packages. CI's `NPM_TOKEN` secret must be able to publish new packages to the `@dosu`
+  scope. npm trusted publishing is set up per package, so it can replace the token only once
+  each package exists.
+- **The bare `seshi` name.** The launcher is also published as `seshi`, last, so `npm i -g
+  seshi` works: the same manifest and `bin/seshi.js`, depending on the same
+  `@dosu/seshi-<target>` packages. It is marked optional in `packages.json`, so if npm refuses
+  it (CI's `NPM_TOKEN` limited to `@dosu`, or npm judging the name too close to another),
+  `publish-npm` logs why and the release goes on. For it to publish, the token must be allowed
+  to publish new packages outside `@dosu` as well. Until `seshi` is out, the docs name
+  `@dosu/seshi` only.
 - **Repository name.** The repository was `dosu-ai/sessiondb` and is now `dosu-ai/seshi`.
   `REPOSITORY` in `scripts/release/targets.ts` and the two install scripts name it (a test
   keeps them equal); GitHub redirects the old URLs, including sessiondb's release downloads.

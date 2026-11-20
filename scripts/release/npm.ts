@@ -22,6 +22,11 @@ const SEMVER = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
  * `@dosu` scope; the workspace keeps its own `@seshi/*` names, which are never published. */
 export const LAUNCHER = "@dosu/seshi";
 
+/** The same launcher under the bare name, so `npm i -g seshi` works too. It runs the same
+ * `@dosu/seshi-<os>-<cpu>` binaries. It is published last and may fail without failing the
+ * release: CI's token may not reach a name outside `@dosu` (docs/releasing.md#names). */
+export const BARE_LAUNCHER = "seshi";
+
 export const LIBRARIES = [
   {
     workspace: "@seshi/model",
@@ -48,6 +53,8 @@ export const PUBLISHED_NAMES: ReadonlyMap<string, string> = new Map(
 export interface NpmPackage {
   name: string;
   dir: string;
+  /** A failed publish of it is reported, not fatal. */
+  optional?: boolean;
 }
 
 function common(version: string) {
@@ -82,9 +89,10 @@ export function platformManifest(target: Target, version: string): Record<string
 export function launcherManifest(
   version: string,
   targets: readonly Target[] = TARGETS,
+  name: string = LAUNCHER,
 ): Record<string, unknown> {
   return {
-    name: LAUNCHER,
+    name,
     ...common(version),
     description:
       "seshi: capture, ingest, redact, store and search coding-agent sessions. The one seshi binary for this platform.",
@@ -146,8 +154,9 @@ export async function writeLauncherPackage(
   version: string,
   license: Uint8Array,
   targets: readonly Target[] = TARGETS,
+  name: string = LAUNCHER,
 ): Promise<NpmPackage> {
-  const dir = join(out, "seshi");
+  const dir = join(out, name === LAUNCHER ? "seshi" : `launcher-${name}`);
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(join(dir, "bin"), { recursive: true });
   const built = await Bun.build({
@@ -163,25 +172,28 @@ export async function writeLauncherPackage(
   writeFileSync(bin, `#!/usr/bin/env node\n${code.replace(/^#!.*\n/, "")}`);
   chmodSync(bin, 0o755);
   writeFileSync(join(dir, "LICENSE"), license);
-  writeJson(join(dir, "package.json"), launcherManifest(version, targets));
+  writeJson(join(dir, "package.json"), launcherManifest(version, targets, name));
   writeFileSync(
     join(dir, "README.md"),
     readme(
-      LAUNCHER,
+      name,
       [
         "Capture, ingest, redact, store and search coding-agent sessions: one binary for the CLI, the agent hooks and the server.",
         "",
         "```sh",
-        `npm i -g ${LAUNCHER}`,
+        `npm i -g ${name}`,
         "seshi --help",
         "```",
         "",
         `npm installs the binary for your platform through one of the optional \`${LAUNCHER}-<os>-<cpu>\` packages; Node only starts it. Other ways in: the install scripts and the binaries on GitHub releases.`,
+        ...(name === LAUNCHER
+          ? []
+          : ["", `\`${name}\` and \`${LAUNCHER}\` are the same launcher; install one of them.`]),
       ].join("\n"),
       version,
     ),
   );
-  return { name: LAUNCHER, dir };
+  return { name, dir, ...(name === LAUNCHER ? {} : { optional: true }) };
 }
 
 async function run(argv: string[], cwd: string): Promise<void> {
@@ -392,9 +404,16 @@ export async function buildNpm(options: BuildNpmOptions): Promise<NpmPackage[]> 
     }
   }
   packages.push(await writeLauncherPackage(options.out, options.version, license, targets));
+  packages.push(
+    await writeLauncherPackage(options.out, options.version, license, targets, BARE_LAUNCHER),
+  );
   writeJson(
     join(options.out, "packages.json"),
-    packages.map((p) => ({ name: p.name, dir: relative(options.out, p.dir) })),
+    packages.map((p) => ({
+      name: p.name,
+      dir: relative(options.out, p.dir),
+      ...(p.optional ? { optional: true } : {}),
+    })),
   );
   return packages;
 }

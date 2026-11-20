@@ -18,7 +18,7 @@ export interface PublishOptions {
 export interface Published {
   name: string;
   version: string;
-  action: "published" | "skipped";
+  action: "published" | "skipped" | "failed";
 }
 
 export const spawnNpm: Exec = async (argv) => {
@@ -63,6 +63,7 @@ export async function publishAll(options: PublishOptions): Promise<Published[]> 
   const order = JSON.parse(readFileSync(join(options.dir, "packages.json"), "utf8")) as {
     name: string;
     dir: string;
+    optional?: boolean;
   }[];
   const results: Published[] = [];
   for (const entry of order) {
@@ -81,14 +82,26 @@ export async function publishAll(options: PublishOptions): Promise<Published[]> 
     const argv = ["publish", dir, "--access", "public", "--tag", distTag(version)];
     if (options.provenance) argv.push("--provenance");
     if (options.dryRun) argv.push("--dry-run");
+    let failed: string | undefined;
     for (let attempt = 1; ; attempt++) {
       const { code, out, err } = await exec(argv);
       if (code === 0) break;
       const failure = `npm publish ${entry.name}@${version} failed (${code}):\n${out}${err}`;
-      if (attempt >= attempts || !isTransient(out + err)) throw new Error(failure);
+      if (attempt >= attempts || !isTransient(out + err)) {
+        if (!entry.optional) throw new Error(failure);
+        failed = failure;
+        break;
+      }
       log(`${entry.name}@${version}: try ${attempt} of ${attempts} failed, retrying`);
       await sleep(attempt * 10_000);
       if (!options.dryRun && (await isPublished(exec, entry.name, version))) break;
+    }
+    if (failed) {
+      log(
+        `${entry.name}@${version}: not published, and optional, so the release goes on. ${failed}`,
+      );
+      results.push({ name: entry.name, version, action: "failed" });
+      continue;
     }
     log(`${entry.name}@${version}: ${options.dryRun ? "dry run" : "published"}`);
     results.push({ name: entry.name, version, action: "published" });
