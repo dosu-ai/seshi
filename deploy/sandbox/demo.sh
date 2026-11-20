@@ -1,16 +1,13 @@
 #!/bin/sh
-# Runs the Docker Sandboxes demo (DEMO.md) the same way every time, from any directory.
+# The Docker Sandboxes demo (DEMO.md) in one terminal, the same way every time, from any directory.
 #
-#   demo.sh start     wipe everything, then start a fresh server and store a fresh upload token
-#   demo.sh prompt    print the prompt to paste into Claude, with a new fake GitHub token
-#   demo.sh watch     a live view of the sessions arriving on the server (leave it running)
-#   demo.sh proof     the agent's file in the sandbox beside the server's copy, the token the
-#                     sandbox holds, and what the sandbox may reach
-#   demo.sh finish    flush the sandbox, remove it, and show the sessions are still there
-#   demo.sh stop      remove the sandbox, the server and its data, and the stored token
+#   demo.sh           the whole demo: starts from scratch, then runs each scene and waits for Enter
+#   demo.sh reset     remove the sandbox, the server and its sessions, and the stored token
+#   demo.sh watch     a live list of the sessions on the server, for a second terminal (optional)
 #
-# The host's seshi runs with its own config in $DEMO_STATE (default ~/.seshi-demo), so the
-# demo never touches your own seshi login. Your sbx sign-in and Claude sign-in are kept.
+# DEMO_AUTO=1 runs it without waiting for Enter, to rehearse. The host's seshi uses its own config
+# in $DEMO_STATE (default ~/.seshi-demo), so the demo never touches your own seshi login. Your sbx
+# sign-in and Claude's sign-in are kept.
 set -eu
 
 KIT_DIR=$(cd "$(dirname "$0")" && pwd)
@@ -33,67 +30,64 @@ s() {
   XDG_CONFIG_HOME="$STATE/config" XDG_STATE_HOME="$STATE/state" SESHI_KEYCHAIN=false seshi "$@"
 }
 compose() { docker compose -f "$DOCKER_DIR/compose.yaml" --project-directory "$DOCKER_DIR" "$@"; }
-heading() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
-token() { cat "$STATE/fake-token" 2>/dev/null || true; }
+# Anything the sandbox prints is the agent's to control: keep tab, newline and printable ASCII
+# only, so nothing in it can drive the presenter's terminal.
+clean() { LC_ALL=C tr -cd '\11\12\40-\176'; }
+in_box() { sbx exec "$BOX" -- "$@" 2>/dev/null; }
+scene() { printf '\n\033[1;36m━━ %s\033[0m\n' "$*"; }
+caption() { printf '\033[2m%s\033[0m\n\n' "$*"; }
+ok() { printf '  \033[32m✓\033[0m %s\n' "$*"; }
+fail() {
+  printf '  \033[31m✗\033[0m %s\n' "$*" >&2
+  exit 1
+}
+pause() {
+  [ "${DEMO_AUTO:-}" = 1 ] && return 0
+  printf '\n\033[2m[Enter] %s\033[0m' "$1"
+  read -r _ </dev/tty || true
+}
+fake_token() { cat "$STATE/fake-token" 2>/dev/null || true; }
 latest() { s sessions ls --owner "$OWNER" --json 2>/dev/null | jq -r '.sessions[0].session_id // empty'; }
 box_exists() { sbx ls 2>/dev/null | awk 'NR > 1 {print $1}' | grep -qx "$BOX"; }
+# Waits up to $2 seconds for the command after it to succeed, printing a dot every 2 seconds.
+wait_for() {
+  what=$1 limit=$2
+  shift 2
+  printf '  waiting for %s ' "$what"
+  waited=0
+  until "$@" >/dev/null 2>&1; do
+    waited=$((waited + 2))
+    [ "$waited" -le "$limit" ] || { echo; return 1; }
+    printf '.'
+    sleep 2
+  done
+  echo
+}
 
-stop() {
-  if box_exists; then sbx rm --force "$BOX" >/dev/null && echo "removed sandbox $BOX"; fi
-  compose down -v --remove-orphans 2>/dev/null && echo "removed the server and its sessions"
+reset() {
+  if box_exists; then sbx rm --force "$BOX" >/dev/null 2>&1 && ok "removed sandbox $BOX"; fi
+  running=$(compose ps -aq 2>/dev/null || true)
+  compose down -v --remove-orphans >/dev/null 2>&1 || true
+  [ -z "$running" ] || ok "removed the seshi server and its sessions"
   if sbx secret ls 2>/dev/null | grep -q ' seshi '; then
     sbx secret rm seshi --force >/dev/null 2>&1 || sbx secret rm seshi >/dev/null
-    echo "removed the stored seshi token"
+    ok "removed the seshi token stored in sbx"
   fi
   rm -rf "$STATE"
 }
 
-start() {
-  heading "Clearing the last run"
-  stop
-  mkdir -p "$STATE" && chmod 700 "$STATE"
-  heading "Starting a fresh seshi server on $SERVER"
-  [ -e "$DOCKER_DIR/.env" ] || { cp "$DOCKER_DIR/.env.example" "$DOCKER_DIR/.env" && chmod 600 "$DOCKER_DIR/.env"; }
-  compose up -d --wait
-  compose exec -T seshi seshi admin init --json | jq -r .admin.token |
-    s login --server "$SERVER" --token - >/dev/null
-  heading "Storing an upload-only token for $OWNER in sbx"
-  s tokens create device --owner "$OWNER" --expires 1d --json | jq -r .token |
-    sbx secret set seshi >/dev/null
-  sbx secret ls
-  heading "Ready"
-  cat <<EOF
-Next:
-  pane 2:  $0 watch
-  pane 3:  sbx env run $ENV_FILE
-  pane 1:  $0 prompt
-EOF
-}
-
-prompt() {
-  mkdir -p "$STATE"
-  fake="ghp_$(openssl rand -hex 18)"
-  printf '%s' "$fake" >"$STATE/fake-token"
-  heading "Paste this into Claude"
-  cat <<EOF
-Create a file named .env in the current folder containing exactly one line:
-GITHUB_TOKEN=$fake
-Then write deploy.sh that loads .env and prints "deploying as" followed by the first 8
-characters of the token. Run deploy.sh, then show me both files.
-EOF
-}
-
+# One line per session on the server: when, which, how big, the model, what was redacted, and
+# how often the fake token appears in the server's copy.
 render() {
-  printf 'seshi server %s · sessions uploaded by %s · %s\n\n' "$SERVER" "$OWNER" "$(date +%T)"
   list=$(s sessions ls --owner "$OWNER" --json 2>/dev/null) || {
-    echo "the server is not answering: run $0 start"
+    echo "the server is not answering: run $0"
     return
   }
   if [ "$(echo "$list" | jq '.sessions | length')" = 0 ]; then
     echo "No sessions yet. They arrive a second or two after Claude finishes a turn."
     return
   fi
-  fake=$(token)
+  fake=$(fake_token)
   # Fields come from what a sandbox uploaded: strip control characters before they reach the
   # terminal, so an agent cannot plant escape sequences in the presenter's screen.
   echo "$list" | jq -r '.sessions[:5][] | [.session_id, (.normalized.records|tostring), ((.models // [])[0] // "-"), .active_at] | map(gsub("[[:cntrl:]]"; "")) | @tsv' |
@@ -112,64 +106,149 @@ watch_sessions() {
   while :; do
     frame=$(render 2>&1)
     clear
-    printf '%s\n' "$frame"
+    printf 'seshi server %s · sessions uploaded by %s · %s\n\n%s\n' "$SERVER" "$OWNER" "$(date +%T)" "$frame"
     sleep 2
   done
 }
 
-proof() {
-  fake=$(token)
+# Claude's stream-json events as a transcript: what it says, each tool it runs, and the first
+# lines of what each tool returned.
+RENDER_CLAUDE='
+def clean: split("\n") | map(gsub("[[:cntrl:]]"; "")) | join("\n");
+def indent: split("\n") | .[:6] | map("      " + .) | join("\n");
+if .type == "assistant" then
+  .message.content[]? |
+  if .type == "text" then "\n" + (.text | clean)
+  elif .type == "tool_use" then
+    "  > \(.name) \((.input.file_path // .input.command // "") | tostring | split("\n")[0] | clean)"
+  else empty end
+elif .type == "user" then
+  .message.content[]? | select(.type? == "tool_result") |
+  (.content | if type == "array" then map(.text? // "") | join("\n") else tostring end) | clean | indent
+elif .type == "result" and .is_error then "Claude failed: \(.result | tostring | clean)"
+else empty end'
+
+run() {
+  scene "0. Starting from scratch"
+  caption "Last run's sandbox, server, sessions and token go; a fresh server and token take their place."
+  reset
+  mkdir -p "$STATE" && chmod 700 "$STATE"
+  [ -e "$DOCKER_DIR/.env" ] || { cp "$DOCKER_DIR/.env.example" "$DOCKER_DIR/.env" && chmod 600 "$DOCKER_DIR/.env"; }
+  compose up -d --wait >"$STATE/compose.log" 2>&1 || { cat "$STATE/compose.log"; fail "the seshi server did not start"; }
+  compose exec -T seshi seshi admin init --json | jq -r .admin.token |
+    s login --server "$SERVER" --token - >/dev/null
+  ok "seshi server running on $SERVER"
+  s tokens create device --owner "$OWNER" --expires 1d --json | jq -r .token |
+    sbx secret set seshi >/dev/null 2>&1
+  ok "upload-only token for $OWNER stored in sbx as the secret 'seshi'"
+  pause "show the environment file"
+
+  scene "1. The definition"
+  caption "One file: an agent, the seshi kit, and where the server is."
+  grep -v '^ *#' "$ENV_FILE" | sed '/^$/d; s/^/  /'
+  pause "ask Docker what this sandbox will get"
+  echo
+  sbx env plan "$ENV_FILE" 2>&1 | sed "s#$KIT_DIR/##g" | sed '/^$/d'
+  echo
+  caption "Before the sandbox exists: the kit, a credential the proxy adds only for the seshi server, and a flush before removal."
+  pause "create the sandbox"
+
+  scene "2. Create the sandbox"
+  caption "Creating it installs seshi's capture hooks in Claude Code. Booting it signs seshi in, in the background."
+  sbx env run --detach --force "$ENV_FILE" >"$STATE/create.log" 2>&1 ||
+    { clean <"$STATE/create.log"; fail "sbx could not create the sandbox"; }
+  ok "created sandbox $BOX from docker.io/sbx/claude and the seshi kit"
+  ok "seshi's capture hooks added to Claude Code"
+  wait_for "seshi to sign in inside the sandbox" 120 in_box seshi whoami ||
+    fail "seshi did not sign in: sbx exec $BOX -- seshi capture status"
+  in_box seshi whoami | clean | sed 's/^/  /'
+  in_box seshi capture status | clean | sed -n '1,4p' | sed 's/^/  /'
+  pause "give Claude a secret"
+
+  scene "3. Claude handles a secret"
+  fake="ghp_$(openssl rand -hex 18)"
+  printf '%s' "$fake" >"$STATE/fake-token"
+  prompt="Create a file named .env in the current folder containing exactly one line:
+GITHUB_TOKEN=$fake
+Then write deploy.sh that loads .env, stops if the token is empty, and prints \"deploying as\"
+followed by the first 8 characters of the token, and a README.md with setup steps for a new
+teammate. Run deploy.sh. Finish with a short review, about 200 words, of how safely this setup
+handles the token."
+  caption "Claude Code runs in the sandbox with this prompt and a made-up GitHub token:"
+  printf '%s\n' "$prompt" | sed 's/^/  │ /'
+  echo
+  in_box claude -p "$prompt" --dangerously-skip-permissions --output-format stream-json --verbose |
+    jq --unbuffered -r "$RENDER_CLAUDE"
+  echo
+  caption "The token is in a file in the sandbox and in Claude's session transcript."
+  pause "look at the seshi server"
+
+  scene "4. The session arrives on the server"
+  caption "The turn's Stop hook queued the session. seshi redacted it inside the sandbox, then uploaded it."
+  # seshi keeps back a session under 2,000 characters once redacted; the prompt's review keeps
+  # this one over that however Claude splits its tool calls.
+  wait_for "the session to reach the server" 60 latest_present ||
+    fail "no session on the server: sbx exec $BOX -- seshi capture status"
+  render | sed 's/^/  /'
+  pause "compare the sandbox's copy with the server's"
+
   id=$(latest)
-  [ -n "$id" ] || { echo "No session on the server yet: finish a turn in Claude first."; exit 1; }
-  heading "1. In the sandbox: the file the agent wrote"
-  if [ -n "$fake" ]; then
-    sbx exec "$BOX" -- sh -c "grep -rIl --exclude-dir=.claude --exclude-dir=.local '$fake' /home/agent 2>/dev/null | while read -r f; do echo \"\$f:\"; grep -h '$fake' \"\$f\"; done" |
-      LC_ALL=C tr -cd '\11\12\40-\176' || true
-  else
-    echo "(run '$0 prompt' to plant a fake token)"
-  fi
-  heading "2. On the seshi server: the same session, claude-code/$id"
   export_text=$(s sessions export claude-code "$id" --owner "$OWNER")
-  found=$(printf '%s' "$export_text" | grep -o '[A-Za-z_]*=\[redacted:[a-z-]*\]' | sort | uniq -c)
-  [ -n "$found" ] || found=$(printf '%s' "$export_text" | grep -o '.\{0,24\}\[redacted:[a-z-]*\]' | sort -u | head -5)
-  printf '%s\n' "${found:-(nothing redacted in this session)}"
-  if [ -n "$fake" ]; then
-    echo "the fake token appears on the server $(printf '%s' "$export_text" | grep -c "$fake" || true) times"
-  fi
-  heading "3. The upload token inside the sandbox"
+  scene "5a. The secret stayed in the sandbox"
+  caption "In the sandbox, the file Claude wrote:"
   # shellcheck disable=SC2016 # expanded in the sandbox, not here
-  sbx exec "$BOX" -- sh -c 'echo "SESHI_TOKEN=$(printenv SESHI_TOKEN | cut -c1-20)…"; seshi whoami | head -1'
-  echo "(a placeholder: the proxy on the host swaps in the real token, only for localhost:7200)"
-  heading "4. What the sandbox may reach"
+  in_box sh -c 'grep -rIl --exclude-dir=.claude --exclude-dir=.local "$1" /home/agent | while read -r f; do echo "$f:"; grep -h "$1" "$f"; done' sh "$fake" |
+    clean | sed 's/^/  /' || true
+  echo
+  caption "On the seshi server, the same session, claude-code/$id:"
+  found=$(printf '%s' "$export_text" | grep -o '\[redacted:[a-z-]*\]' | sort | uniq -c | sort -rn || true)
+  printf '%s\n' "${found:-(nothing redacted in this session)}" | clean | sed 's/^ */  /'
+  example=$(printf '%s' "$export_text" | grep -o 'GITHUB_TOKEN=\[redacted:[a-z-]*\]' | head -1 || true)
+  [ -z "$example" ] || echo "  for example: $example"
+  echo "  the fake token appears on the server $(printf '%s' "$export_text" | grep -c "$fake" || true) times"
+  echo
+  caption "credential is the token itself. sensitive-file is each tool call that read or wrote .env, withheld whole."
+  pause "show the token the sandbox holds"
+
+  scene "5b. The sandbox never sees the upload token"
+  # shellcheck disable=SC2016 # expanded in the sandbox, not here
+  in_box sh -c 'echo "SESHI_TOKEN=$(printenv SESHI_TOKEN | cut -c1-20)..."' | clean | sed 's/^/  /'
+  echo
+  caption "A placeholder. The proxy on the host adds the real token, and only to requests to localhost:7200."
+  pause "show what the sandbox may reach"
+
+  scene "5c. The sandbox reaches the model and seshi, nothing else"
   for url in https://example.com http://host.docker.internal:7201 http://host.docker.internal:7200/healthz; do
-    code=$(sbx exec "$BOX" -- curl -s -m 5 -o /dev/null -w '%{http_code}' "$url" || true)
-    echo "$code  $url"
+    code=$(in_box curl -s -m 5 -o /dev/null -w '%{http_code}' "$url" | clean || true)
+    echo "  ${code:-???}  $url"
   done
-  echo "sbx policy log, this sandbox only:"
+  echo
+  caption "sbx policy log, this sandbox only:"
   sbx policy log 2>/dev/null | awk -v box="$BOX" '
     /BLOCKED REQUESTS/ { verdict = "blocked" }
     /ALLOWED REQUESTS/ { verdict = "allowed" }
-    $1 == box { print "  " verdict "  " $3 }' | sort -u
-}
+    $1 == box { print "  " verdict "  " $3 }' | sort -u | clean
+  pause "remove the sandbox"
 
-finish() {
-  box_exists || { echo "No sandbox $BOX to remove."; exit 1; }
-  heading "Flushing $BOX, then removing it"
-  sbx exec "$BOX" -- seshi-sandbox flush
-  sbx rm --force "$BOX"
-  heading "The sessions outlive the sandbox"
-  s sessions ls --owner "$OWNER"
-}
+  scene "6. Remove the sandbox, keep the sessions"
+  caption "Removing a sandbox deletes its disk, so seshi first sends anything still queued, and fails if it can't."
+  sbx exec "$BOX" -- seshi-sandbox flush 2>&1 | clean | sed 's/^/  /'
+  sbx rm --force "$BOX" >/dev/null 2>&1
+  ok "removed sandbox $BOX"
+  echo
+  caption "On the server:"
+  s sessions ls --owner "$OWNER" | clean | sed 's/^/  /'
 
-case "${1:-}" in
-  start) start ;;
-  prompt) prompt ;;
+  printf '\n\033[1mDone.\033[0m Run it again: %s    Clear everything: %s reset\n' "$0" "$0"
+}
+latest_present() { [ -n "$(latest)" ]; }
+
+case "${1:-run}" in
+  run) run ;;
+  reset) reset ;;
   watch) watch_sessions ;;
-  proof) proof ;;
-  finish) finish ;;
-  stop) stop ;;
   *)
-    sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
     exit 2
     ;;
 esac

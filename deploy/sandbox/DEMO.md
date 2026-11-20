@@ -1,138 +1,68 @@
 # Demo: capturing agents in Docker Sandboxes
 
-About ten minutes, and the same every time. A seshi server runs on this machine, Claude Code runs
-in a sandbox that carries the seshi kit, and the audience watches the session arrive on the server
-with the agent's secret redacted, while the sandbox can reach nothing but the model and seshi.
+About ten minutes in one terminal, the same every time. A seshi server runs on this machine, and
+Claude Code runs in a sandbox that carries the seshi kit. The audience sees the agent's session
+arrive on the server with its secret redacted, while the sandbox can reach only the model and seshi.
 
-`demo.sh` beside this file does the setup, the evidence and the reset. It runs from any directory.
+`demo.sh` beside this file runs the whole thing. It starts from scratch, drives Claude for you,
+and waits for Enter between scenes so you can talk.
 
 ## Once per machine
 
-You need `sbx` signed in (`sbx login`), Docker, `seshi` (`curl -fsSL
-https://github.com/dosu-ai/seshi/releases/latest/download/install.sh | sh`), and `jq`. Sign
-Claude in once in any sandbox (`sbx run claude`, then `/login`): `sbx` keeps that sign-in on the
-host, and every later sandbox starts signed in.
+You need `sbx` signed in (`sbx login`), Docker, `jq`, and `seshi` (`curl -fsSL
+https://github.com/dosu-ai/seshi/releases/latest/download/install.sh | sh`). Sign Claude in once
+in any sandbox (`sbx run claude`, then `/login`, then `/exit`). `sbx` keeps that sign-in, and
+every later sandbox starts signed in.
 
-Lay out three terminals, or three tmux panes, and in each:
+In the terminal you will present from:
 
 ```sh
 eval "$(/opt/homebrew/bin/brew shellenv)"        # Homebrew's sbx and jq, on macOS
 export PATH="$HOME/.local/bin:$PATH"              # where install.sh puts seshi
-DEMO=~/seshi-demo/deploy/sandbox/demo.sh          # wherever the checkout is
 ```
 
-Pane 1 is where you talk, pane 2 is the live view, pane 3 is Claude.
-
-## Each run
-
-### 0. Reset (before the audience, about 20 seconds)
+## Run it
 
 ```sh
-$DEMO start        # pane 1
-$DEMO watch        # pane 2: leave it running
+~/seshi-demo/deploy/sandbox/demo.sh               # wherever the checkout is
 ```
 
-`start` removes the last run's sandbox, server, sessions and token, starts a fresh server on
-`127.0.0.1:7200`, and stores a fresh upload-only token as the `seshi` secret in `sbx`. Pane 2 says
-"No sessions yet".
+Press Enter to move to the next scene.
 
-### 1. The definition
+| Scene | On screen | Say |
+| --- | --- | --- |
+| 0. Starting from scratch | Last run cleared; a fresh server on `127.0.0.1:7200` and an upload-only token stored in `sbx` | Nothing is left over from a previous run. |
+| 1. The definition | The environment file, then `sbx env plan` | One file: an agent, the seshi kit, and the server. Docker shows what the sandbox gets before it exists, including a credential the proxy adds only for the seshi server. |
+| 2. Create the sandbox | The sandbox is created, then `seshi whoami` from inside it | Creating it hooked seshi into Claude Code. Booting it signed seshi in. |
+| 3. Claude handles a secret | The prompt with a fresh fake GitHub token, then Claude's tool calls and reply | The agent put a GitHub token in a file and in its transcript. |
+| 4. The session arrives | One line per session on the server, with its redaction count | Each finished turn is captured, redacted inside the sandbox, then uploaded. |
+| 5a. The secret stayed in the sandbox | `.env` in the sandbox beside the server's redaction counts; the token found 0 times | The secret is where the agent put it. It never reached the team's store. |
+| 5b. The upload token | `SESHI_TOKEN=proxy-managed...` | The sandbox holds a placeholder. The proxy on the host adds the real token. |
+| 5c. What the sandbox may reach | `403` for example.com and port 7201, `200` for seshi, then `sbx policy log` | The model and seshi, nothing else. Even the next port on the same host is refused. |
+| 6. Remove the sandbox | The flush, the removal, and the session still listed on the server | Removing a sandbox deletes its disk, so seshi sends what is queued first. The sandbox is gone; its sessions are not. |
 
-```sh
-cat ~/seshi-demo/deploy/sandbox/examples/claude.sbxenv.yaml        # pane 1
-```
+## Again, and after
 
-> This file is everything a sandbox needs to be captured: an agent, the seshi kit, and where the
-> server is. The kit is one folder: a descriptor, a Dockerfile that downloads a checksummed seshi
-> release, and a short script.
+Run `demo.sh` again for the next audience: it clears the last run first. `demo.sh reset` clears
+everything when you're done. Neither touches your `sbx` sign-in, Claude's sign-in, or your own
+seshi login, because the demo's seshi config lives in `~/.seshi-demo`.
 
-### 2. Start Claude in a sandbox
+To rehearse without pressing Enter: `DEMO_AUTO=1 demo.sh`.
 
-```sh
-sbx env run ~/seshi-demo/deploy/sandbox/examples/claude.sbxenv.yaml   # pane 3
-```
-
-Approve the plan. Point out the `seshi` credential for `localhost:7200` in it.
-
-> Docker shows what this sandbox will get before it exists: the kit, one network rule for the
-> seshi server, and a credential the proxy will put on requests to that server only. When the
-> sandbox was created, the kit hooked seshi into Claude Code. When it booted, it signed in.
-
-### 3. The agent handles a secret
-
-```sh
-$DEMO prompt       # pane 1: copy the prompt, paste it into Claude in pane 3
-```
-
-The prompt asks Claude to write a `.env` with a freshly made-up GitHub token, a script that reads
-it, and to show both files. The token is visible on screen in pane 3.
-
-> The agent just put a GitHub token in a file and printed it. That is in the session transcript
-> now.
-
-### 4. Watch it arrive
-
-When Claude finishes the turn, pane 2 shows the session within a couple of seconds, for example:
-
-```text
-08:31:02  claude-code/4b1e9c2a  14 records  claude-opus-5-5  · 3 redacted · fake token on the server: 0
-```
-
-> Each finished turn is captured and uploaded. seshi redacted it inside the sandbox before
-> anything left: the token appeared in several places, and the server holds none of them.
-
-### 5. The proof
-
-```sh
-$DEMO proof        # pane 1
-```
-
-It prints four short sections:
-
-1. The `.env` in the sandbox, with the token in the clear.
-2. The same session on the server: `GITHUB_TOKEN=[redacted:github-token]`, and the token found
-   0 times.
-3. `SESHI_TOKEN` in the sandbox: `proxy-managed…`, a placeholder. The real upload token stays on
-   the host, and the proxy adds it only to requests to `localhost:7200`.
-4. `403` for `https://example.com` and for port 7201 on the host, `200` for seshi, then each
-   host the sandbox tried, allowed or blocked, from `sbx policy log`.
-
-> The secret is still in the sandbox, where the agent put it. It never reached the team's store.
-> The sandbox can't read the upload token, and it can reach the model and seshi, nothing else:
-> even the next port on the same host is refused.
-
-### 6. Remove it without losing anything
-
-Exit Claude in pane 3 (`/exit`), then:
-
-```sh
-$DEMO finish       # pane 1
-```
-
-`finish` runs `seshi-sandbox flush` in the sandbox, removes the sandbox only if the flush
-succeeds, and lists the sessions on the server.
-
-> Removing a sandbox deletes its disk. The flush sends anything still queued and fails if it
-> can't, and only then does the sandbox go. The sandbox is gone; its sessions are not.
-
-### Run it again
-
-`$DEMO start` in pane 1 resets everything, and pane 2 keeps watching. `$DEMO stop` clears it all
-when you're done. Neither touches your `sbx` sign-in, Claude's sign-in, or your own seshi login:
-the demo's seshi config lives in `~/.seshi-demo`.
+A second terminal can show the server live during the run: `demo.sh watch`.
 
 ## Codex
 
-The same with `examples/codex.sbxenv.yaml` (sandbox `seshi-codex`), after `sbx secret set openai
---oauth`. `demo.sh` drives the Claude sandbox only.
+The same kit works with `examples/codex.sbxenv.yaml` (sandbox `seshi-codex`), after `sbx secret
+set openai --oauth`. `demo.sh` drives the Claude sandbox only.
 
 ## If something goes wrong
 
-- Pane 2 stays empty after a turn: `sbx exec seshi-claude -- seshi capture status` shows the queue,
-  the server and whether it is signed in. "Not signed in" right after boot clears in a few
-  seconds; the startup hook signs in in the background.
-- "does not accept that credential": the `seshi` credential was not approved. `$DEMO start`, then
-  step 2 again, and approve the credential.
-- `sbx secret set` or `seshi` hangs over SSH: a keychain prompt is waiting. `security
-  unlock-keychain ~/Library/Keychains/login.keychain-db`, then retry.
-- A session under about 2,000 characters is not stored yet: give Claude one more turn.
+- Scene 2 never signs in: `sbx exec seshi-claude -- seshi capture status` shows the server and the
+  sign-in state.
+- Scene 3 prints "Claude failed": sign Claude in again (`sbx exec -it seshi-claude claude`, then
+  `/login`), then run `demo.sh` again.
+- Scene 4 times out: `sbx exec seshi-claude -- seshi capture status`. "Too small yet" means the
+  session held under 2,000 characters after redaction, and seshi kept it back.
+- `sbx secret set` or `seshi` hangs over SSH: a keychain prompt is waiting. Run `security
+  unlock-keychain ~/Library/Keychains/login.keychain-db`, then run `demo.sh` again.
