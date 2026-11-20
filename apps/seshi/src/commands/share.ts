@@ -214,7 +214,7 @@ export async function run(ctx: CommandContext, verb: "share" | "unshare"): Promi
       ...(parsed.server ? { server: parsed.server } : {}),
       // Another owner's session is an admin's to change, with the sign-in; one's own, with the
       // device token the uploader sends with, so no renewal through the IdP is needed.
-      purpose: parsed.owner ? "read" : "share",
+      purpose: parsed.owner ? "read_others" : "share",
     });
     let metadata: SessionMetadata;
     try {

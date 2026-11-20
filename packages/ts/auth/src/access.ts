@@ -31,23 +31,39 @@ export function seesEverything(principal: Principal): boolean {
   return principal.role === "admin" || principal.role === "service";
 }
 
-/** Whether the principal's credential reads sessions at all (`sessions:read` or `search`). */
-function readsSessions(principal: Principal): boolean {
-  return principal.scopes.has("sessions:read") || principal.scopes.has("search");
-}
+/** The scope a read route checks: `sessions:read` for the session routes, listings and change
+ * feeds, `search` for search. */
+export type ReadScope = "sessions:read" | "search";
 
-/** Whether the principal may find the session (X5.10). A credential that reads nothing (a
- * device token, a writing service) finds only its own owner's sessions, so a lookup tells it
- * nothing of anyone else's. Which routes need which scope is checked separately. */
+/** Whether the principal may find the session through a route that reads with `scope` (X5.10).
+ * Its own owner's sessions it always may: being the owner is enough, as for a visibility
+ * change. A credential without `scope` (a device token, a writing service) finds no one
+ * else's, so a lookup tells it nothing of anyone else's sessions. */
 export function canRead(
   principal: Principal,
   session: SessionAccess,
   aliases: OwnerAliases = NO_ALIASES,
+  scope: ReadScope = "sessions:read",
 ): boolean {
   if (isOwnSession(principal, session.owner, aliases)) return true;
-  if (!readsSessions(principal)) return false;
+  if (!principal.scopes.has(scope)) return false;
   if (seesEverything(principal)) return true;
   return (session.visibility ?? "org") === "org";
+}
+
+/** Throws `Forbidden` unless the principal may read `owner`'s sessions as a whole: a listing,
+ * a change feed, or a search limited to that owner. Its own owner's it always may; another
+ * owner's need `scope`. */
+export function requireReadOwner(
+  principal: Principal,
+  owner: string,
+  aliases: OwnerAliases = NO_ALIASES,
+  scope: ReadScope = "sessions:read",
+): void {
+  if (principal.scopes.has(scope) || isOwnSession(principal, owner, aliases)) return;
+  throw new Forbidden(
+    `this credential reads only its own sessions: another owner's need the ${scope} scope`,
+  );
 }
 
 /** Throws `Forbidden` unless the principal may delete a session of `owner` at `now` (X5.3). */

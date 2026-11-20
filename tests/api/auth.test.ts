@@ -296,9 +296,8 @@ describe("visibility (X5.10)", () => {
     expect((await patch(bob, "owner", "?owner=u-alice")).status).toBe(404);
     expect((await patch(writer, "owner", "?owner=u-alice")).status).toBe(404);
     expect(await stored()).toBe("org");
-    // Sharing gave the device nothing to read with: its PATCH answers with this session's
-    // metadata, and a GET is still refused.
-    expect((await call("GET", "/v1/sessions/claude-code/s1", alice)).status).toBe(403);
+    // Being the owner is enough to read it too, shared or not.
+    expect((await call("GET", "/v1/sessions/claude-code/s1", alice)).status).toBe(200);
 
     expect((await patch(alice, "owner")).body.visibility).toBe("owner");
     expect((await patch(bob, "org", "?owner=u-alice")).status).toBe(404);
@@ -313,6 +312,82 @@ describe("visibility (X5.10)", () => {
       ["device", "owner"],
       ["admin", "org"],
     ]);
+  });
+});
+
+describe("reading one's own sessions without sessions:read (X5.10)", () => {
+  it("lets a device token read its own sessions, and find no one else's, even shared", async () => {
+    build({}, { visibility: "owner" });
+    const { admin, mint } = await setUp();
+    const alice = { token: await mint({ kind: "device", owner: "u-alice" }) };
+    const bob = { token: await mint({ kind: "device", owner: "u-bob" }) };
+    expect((await upload(alice, "mine")).status).toBe(201);
+    expect((await upload(bob, "theirs", { visibility: "org" })).status).toBe(201);
+    const mine = archiveId("u-alice", "claude-code", "mine");
+    const theirs = archiveId("u-bob", "claude-code", "theirs");
+
+    // Its own session, private as it is: show, trace, export, reviews, by format and by archive.
+    for (const path of [
+      "/v1/sessions/claude-code/mine",
+      "/v1/sessions/claude-code/mine/trace",
+      "/v1/sessions/claude-code/mine/export",
+      "/v1/sessions/claude-code/mine/reviews",
+      `/v1/owners/u-alice/sessions/${mine}`,
+      `/v1/owners/u-alice/sessions/${mine}/trace`,
+      `/v1/owners/u-alice/sessions/${mine}/export`,
+    ]) {
+      expect([path, (await call("GET", path, alice)).status]).toEqual([path, 200]);
+    }
+    const listed = await call("GET", "/v1/sessions", alice);
+    expect(listed.status).toBe(200);
+    expect(listed.body.sessions.map((m: { session_id: string }) => m.session_id)).toEqual(["mine"]);
+    expect((await call("GET", "/v1/sessions?owner=u-alice", alice)).status).toBe(200);
+    const feed = await call("GET", "/v1/changes", alice);
+    expect(feed.status).toBe(200);
+    expect(feed.body.entries.length).toBeGreaterThan(0);
+
+    // Another owner's org-visible session is not there for it: 404, as for one that is not.
+    for (const path of [
+      "/v1/sessions/claude-code/theirs?owner=u-bob",
+      "/v1/sessions/claude-code/theirs/trace?owner=u-bob",
+      "/v1/sessions/claude-code/theirs/export?owner=u-bob",
+      `/v1/owners/u-bob/sessions/${theirs}`,
+      `/v1/owners/u-bob/sessions/${theirs}/trace`,
+    ]) {
+      expect([path, (await call("GET", path, alice)).status]).toEqual([path, 404]);
+    }
+    // A listing or change feed naming another owner is refused outright.
+    for (const path of ["/v1/sessions?owner=u-bob", "/v1/changes?owner=u-bob"]) {
+      const refused = await call("GET", path, alice);
+      expect([path, refused.status]).toEqual([path, 403]);
+      expect(refused.body.error.message).toContain("reads only its own sessions");
+    }
+    expect((await call("GET", "/v1/owners", alice)).status).toBe(403);
+    // Deleting still takes a fresh sign-in.
+    const deleted = await call("DELETE", "/v1/sessions/claude-code/mine", alice);
+    expect(deleted.status).toBe(403);
+    expect(deleted.body.error.message).toContain("sessions:delete");
+    // An admin reads both, as before.
+    expect((await call("GET", "/v1/sessions/claude-code/theirs?owner=u-bob", admin)).status).toBe(
+      200,
+    );
+  });
+
+  it("keeps a service token that only writes to the sessions it wrote", async () => {
+    const { alice, mint } = await setUp();
+    const writer = {
+      token: await mint({ kind: "service", service: "otlp", scopes: ["sessions:write"] }),
+    };
+    expect((await upload(alice, "s1")).status).toBe(201);
+    expect((await upload(writer, "s2")).status).toBe(201);
+    // A service, yet without sessions:read it is no reader of the org.
+    expect((await call("GET", "/v1/sessions/claude-code/s1?owner=alice", writer)).status).toBe(404);
+    expect((await call("GET", "/v1/sessions?owner=alice", writer)).status).toBe(403);
+    expect((await call("GET", "/v1/changes?owner=alice", writer)).status).toBe(403);
+    expect((await call("GET", "/v1/changes/all", writer)).status).toBe(403);
+    expect((await call("GET", "/v1/sessions/claude-code/s2", writer)).status).toBe(200);
+    const own = await call("GET", "/v1/sessions", writer);
+    expect(own.body.sessions.map((m: { owner: string }) => m.owner)).toEqual(["svc:otlp"]);
   });
 });
 
@@ -346,7 +421,7 @@ describe("the IdP exchange (X5.2) and deletes (X5.3)", () => {
       writer: { kind: "device", principal: "00uAlice", credential_id: signed.device_token.id },
       claims: { email: "alice@acme.com" },
     });
-    expect((await call("GET", "/v1/sessions/claude-code/s1", device)).status).toBe(403);
+    expect((await call("GET", "/v1/sessions/claude-code/s1", device)).status).toBe(200);
     expect((await call("GET", "/v1/sessions/claude-code/s1", session)).status).toBe(200);
     expect((await upload(session, "s2")).status).toBe(403);
   });

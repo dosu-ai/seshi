@@ -138,17 +138,18 @@ export class Logins {
     return saved;
   }
 
-  /** Change a server's profile; the secrets given are written, the rest kept. */
+  /** Change a server's profile; the secrets given are written (deleted when null), the rest
+   * kept. */
   async update(
     server: string,
     patch: Partial<Omit<LoginProfile, "server">>,
-    secrets: Partial<Record<SecretName, string>> = {},
+    secrets: Partial<Record<SecretName, string | null>> = {},
   ): Promise<LoginProfile | undefined> {
     const key = normalizeServer(server);
     for (const [name, value] of Object.entries(secrets)) {
-      if (value !== undefined) {
-        await this.secrets.set(Logins.secretName(key, name as SecretName), value);
-      }
+      const secretName = Logins.secretName(key, name as SecretName);
+      if (value === null) await this.secrets.delete(secretName);
+      else if (value !== undefined) await this.secrets.set(secretName, value);
     }
     const file = this.read();
     const current = file.logins[key];

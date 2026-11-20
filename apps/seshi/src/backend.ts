@@ -362,6 +362,7 @@ export async function openBackend(
   const server = serverOf(account, options.server);
   if (server === undefined) throw new NotSignedIn(undefined);
   const credential = await accountCredential(account, server, options.purpose ?? "read");
+  if (credential.fallback) ctx.stderr(`seshi: warning: ${credential.fallback}`);
   return new ServerBackend(
     new HttpSessionDB({
       server,
