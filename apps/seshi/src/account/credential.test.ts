@@ -63,6 +63,26 @@ describe("the credential for a purpose", () => {
     expect((await credentialFor(options(), SERVER, "upload")).token).toBe("seshi_d");
   });
 
+  it("shares with the device token, never renewing through the IdP while it lasts", async () => {
+    // The sign-in has expired and the IdP no longer renews it.
+    await logins.save(oidcProfile({ session: { issued_at: at(-70), expires_at: at(-10) } }), {
+      session: "old",
+      device: "seshi_d",
+      refresh: "rt",
+    });
+    const fetch = async () => Response.json({ error: "invalid_grant" }, { status: 400 });
+    expect((await credentialFor(options({ fetch }), SERVER, "share")).token).toBe("seshi_d");
+    await expect(credentialFor(options({ fetch }), SERVER, "read")).rejects.toThrow(
+      /no longer renews the session/,
+    );
+    // Without a usable device token it falls back to the sign-in.
+    await logins.save(oidcProfile({ device: { id: "d1", expires_at: at(-1) } }), {
+      session: "jwt",
+      device: "seshi_d",
+    });
+    expect((await credentialFor(options(), SERVER, "share")).token).toBe("jwt");
+  });
+
   it("refuses an expired device token: signing in renews it", async () => {
     await logins.save(oidcProfile({ device: { id: "d1", expires_at: at(-1) } }), {
       device: "seshi_d",

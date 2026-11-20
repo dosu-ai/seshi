@@ -296,7 +296,8 @@ describe("visibility (X5.10)", () => {
     expect((await patch(bob, "owner", "?owner=u-alice")).status).toBe(404);
     expect((await patch(writer, "owner", "?owner=u-alice")).status).toBe(404);
     expect(await stored()).toBe("org");
-    // Sharing gave the device nothing to read with.
+    // Sharing gave the device nothing to read with: its PATCH answers with this session's
+    // metadata, and a GET is still refused.
     expect((await call("GET", "/v1/sessions/claude-code/s1", alice)).status).toBe(403);
 
     expect((await patch(alice, "owner")).body.visibility).toBe("owner");
@@ -572,6 +573,16 @@ describe("service accounts (X5.4)", () => {
     expect((await call("GET", "/v1/sessions/claude-code/s1?owner=svc:otlp", alice)).status).toBe(
       200,
     );
+    // Its source's visibility decides its sessions': the writer cannot change one it wrote.
+    const patched = await call("PATCH", "/v1/sessions/claude-code/s1", {
+      ...writer,
+      body: { visibility: "owner" },
+    });
+    expect(patched.status).toBe(403);
+    expect(
+      (await readMetadata(store, "svc:otlp", archiveId("svc:otlp", "claude-code", "s1")))
+        ?.visibility,
+    ).toBe("org");
     const owners = await call("GET", "/v1/owners", alice);
     expect(owners.body.owners).toEqual(["svc:otlp"]);
   });

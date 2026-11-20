@@ -212,7 +212,9 @@ export async function run(ctx: CommandContext, verb: "share" | "unshare"): Promi
     const style = await styleFor(ctx, { json, theme: account.cli.theme });
     backend = await openBackend(ctx, account, {
       ...(parsed.server ? { server: parsed.server } : {}),
-      purpose: "read",
+      // Another owner's session is an admin's to change, with the sign-in; one's own, with the
+      // device token the uploader sends with, so no renewal through the IdP is needed.
+      purpose: parsed.owner ? "read" : "share",
     });
     let metadata: SessionMetadata;
     try {

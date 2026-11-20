@@ -685,7 +685,7 @@ pre.tree .d { color: var(--accent); font-weight: 500; }
         <h3>Scopes and roles</h3>
         <dl>
           <dt>Scopes</dt><dd><code>sessions:write</code>, <code>sessions:read</code>, <code>sessions:delete</code>, <code>search</code>, <code>sources:admin</code>, <code>tokens:admin</code>.</dd>
-          <dt>Roles</dt><dd><b>member</b>: write own sessions; read and search what visibility allows (<a href="#identity">X5.10</a>); delete own sessions. <b>admin</b>: everything, org-wide. <b>service</b>: read and search org-wide, or write as its service account. With an IdP, a person's role comes from an IdP group named in config (<code>admin_group</code>) or an <code>admins</code> list of emails (Google Workspace ID tokens carry no groups). Without one, everyone holding the org key is a member and admins use admin tokens.</dd>
+          <dt>Roles</dt><dd><b>member</b>: write own sessions; read and search what visibility allows (<a href="#identity">X5.10</a>); delete own sessions. <b>admin</b>: everything, org-wide. <b>service</b>: read and search org-wide, or write as its service account (never changing a session's visibility: its source's setting decides it). With an IdP, a person's role comes from an IdP group named in config (<code>admin_group</code>) or an <code>admins</code> list of emails (Google Workspace ID tokens carry no groups). Without one, everyone holding the org key is a member and admins use admin tokens.</dd>
           <dt>Deletes</dt><dd>With an IdP, a delete needs a session token issued within the last 10 minutes. Without one, the org key cannot delete (anyone could claim to be the owner); deletes need an admin token.</dd>
         </dl>
       </div>
@@ -777,7 +777,7 @@ pre.tree .d { color: var(--accent); font-weight: 500; }
               <li>The server's <code>default_visibility</code>, which is <code>org</code>.</li>
             </ul></dd>
           <dt>Without an IdP</dt><dd>The org key reads org-wide, so <code>owner</code> visibility cannot keep anything from another member. Seshi accepts the field but says so in <code>seshi config check</code>.</dd>
-          <dt>Changing it</dt><dd>The owner or an admin can change a session's visibility later (<code>PATCH /v1/sessions/&lt;id&gt;</code>; <code>seshi share</code> and <code>seshi unshare</code> from the CLI). The owner may with any of their credentials that writes or reads sessions, so the device token a laptop uploads with shares and unshares that owner's sessions without being able to read anyone's; a credential that cannot read finds only its owner's sessions there. The change writes a change entry so the search index updates (<a href="#f10">F10.4</a>).</dd>
+          <dt>Changing it</dt><dd>The owner or an admin can change a session's visibility later (<code>PATCH /v1/sessions/&lt;id&gt;</code>; <code>seshi share</code> and <code>seshi unshare</code> from the CLI). The owner may with any of their credentials that writes or reads sessions, so the device token a laptop uploads with shares and unshares that owner's sessions without being able to read anyone's (the change answers with that session's metadata only); a service token that only writes may not change visibility; a credential that cannot read finds only its owner's sessions there. The change writes a change entry so the search index updates (<a href="#f10">F10.4</a>).</dd>
         </dl>
       </div>
     </div>

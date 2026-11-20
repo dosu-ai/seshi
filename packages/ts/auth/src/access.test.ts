@@ -117,6 +117,18 @@ describe("visibility changes and scopes", () => {
     expect(() => requireVisibilityChange(device, "alice")).not.toThrow();
     expect(() => requireVisibilityChange(device, "bob")).toThrow("owner or an admin");
     expect(() => requireVisibilityChange(reader, "alice")).toThrow("owner or an admin");
+    // A writing service (an OTLP source) may not, even on the sessions it wrote.
+    const writer = principal({
+      kind: "service",
+      owner: "svc:otlp",
+      role: "service",
+      credential: "service",
+      owner_basis: "service",
+      scopes: CREDENTIAL_SCOPES.service_write,
+    });
+    expect(() => requireVisibilityChange(writer, "svc:otlp")).toThrow(
+      "a service token cannot change a session's visibility",
+    );
     const searcher = principal({ scopes: ["search"] });
     expect(() => requireVisibilityChange(searcher, "alice")).toThrow(
       "it needs the sessions:write or sessions:read scope",

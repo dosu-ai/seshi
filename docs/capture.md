@@ -288,7 +288,8 @@ seshi share claude-code <id>        # any session of yours, by its stored name
 With no session named, `share` finds it as `capture off --session` does, and acts on it as this
 machine uploaded it (`<id>~<n>` after a `capture off` and `on`), with its subagents' sessions.
 It needs no sign-in beyond the one the uploader uses: the device token a laptop uploads with may
-share and unshare its owner's own sessions, and still reads nothing (X5.10). A session not
+share and unshare its owner's own sessions, and still reads no session or trace: a share
+answers with only that session's metadata (X5.10). A session not
 uploaded yet (before its first turn ends) or turned off has nothing on the server to share, and
 `share` says so. It is `seshi sessions visibility <format> <id> org|owner` underneath; an admin
 shares anyone's with `--owner <id>`.

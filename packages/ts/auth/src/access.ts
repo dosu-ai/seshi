@@ -72,9 +72,16 @@ export function requireDelete(
 }
 
 /** Throws `Forbidden` unless the principal's credential may change a session's visibility at
- * all: one that writes sessions (a device token, on its owner's own sessions) or one that reads
- * them (a sign-in, an admin). Which sessions it may change is `requireVisibilityChange`'s. */
+ * all: a person's that writes sessions (a device token, on its owner's own sessions) or one that
+ * reads them (a sign-in, an admin). A service token that writes may not: its source's
+ * `visibility` decides its sessions'. Which sessions it may change is
+ * `requireVisibilityChange`'s. */
 export function requireVisibilityScope(principal: Principal): void {
+  if (principal.role === "service" && !principal.scopes.has("sessions:read")) {
+    throw new Forbidden(
+      "a service token cannot change a session's visibility: its source's visibility setting decides it, or an admin does",
+    );
+  }
   if (!principal.scopes.has("sessions:write") && !principal.scopes.has("sessions:read")) {
     throw new Forbidden(
       "this credential cannot do that: it needs the sessions:write or sessions:read scope",

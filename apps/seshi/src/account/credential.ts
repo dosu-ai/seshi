@@ -5,8 +5,9 @@ import { type ConfiguredUser, resolveUser } from "./user";
 
 type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
 
-/** What a credential is for: reading (and changing) sessions, deleting one, or uploading. */
-export type Purpose = "read" | "delete" | "upload";
+/** What a credential is for: reading (and changing) sessions, deleting one, uploading, or
+ * sharing and unsharing one's own sessions (the device token, which may, else the sign-in). */
+export type Purpose = "read" | "delete" | "upload" | "share";
 
 /** There is no usable credential for the server: never signed in, or it ran out. */
 export class NotSignedIn extends Error {
@@ -145,6 +146,14 @@ export async function credentialFor(
       return { server: profile.server, token, profile };
     }
     case "oidc": {
+      if (purpose === "share") {
+        // The device token the uploader sends with may share its owner's sessions (X5.10), so
+        // sharing needs no renewal through the IdP while it lasts.
+        const device = await options.logins.secret(profile.server, "device");
+        if (device && msUntil(profile.device?.expires_at, now) > 0) {
+          return { server: profile.server, token: device, profile };
+        }
+      }
       if (purpose === "upload") {
         const device = await options.logins.secret(profile.server, "device");
         if (!device) throw missing();
