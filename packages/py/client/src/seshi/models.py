@@ -334,6 +334,18 @@ class Upload(Request):
     offset: int | None = None
     project: str | None = None
     branch: str | None = None
+    repo: str | None = None
+    """The repository's origin remote, normalized without credentials (`github.com/acme/app`).
+    The session keeps the first one it is sent."""
+    commit: str | None = None
+    path_in_repo: str | None = None
+    """The working folder relative to the repository's root; never absolute."""
+    client: str | None = None
+    """The program that sent the upload (`seshi/0.15.0 darwin-arm64`)."""
+    harness_version: str | None = None
+    """A hint for a log that names no harness version; the log's own wins."""
+    model: str | None = None
+    """A hint for a log that names no model; the log's own wins."""
     parent_session_id: str | None = None
     fork_of: str | None = None
     shipped: Shipped | None = None
@@ -417,8 +429,15 @@ class SessionMetadata(Response):
     session_id: str
     agent: str
     source: str | None = None
+    """The harness: the meta record's `source`."""
     project: str | None = None
     branch: str | None = None
+    repo: str | None = None
+    """The repository's normalized remote, fixed by the first write that names one."""
+    agent_version: str | None = None
+    """The harness's version, from the latest trace."""
+    models: list[str] | None = None
+    """Every model the session used."""
     parent_session_id: str | None = None
     status: Open[Literal["stored", "redacted"]]
     head: str | None = None
@@ -573,6 +592,10 @@ class TraceMetadata(Response):
     cwd: str | None = None
     git_branch: str | None = None
     model: str | None = None
+    agent_version: str | None = None
+    commit: str | None = None
+    path_in_repo: str | None = None
+    client: str | None = None
     parent_session_id: str | None = None
     continuation: Continuation | None = None
     normalizer: Normalizer | None = None
@@ -860,8 +883,14 @@ class SearchRequest(Request):
     owner: str | None = None
     agent: str | None = None
     repo: str | None = None
-    """The session's `project`, exactly or as its last path segments."""
+    """The session's `repo` (its normalized remote), exactly or as its last path segments; its
+    `project` for a session without one."""
     branch: str | None = None
+    harness: str | None = None
+    """The meta record's `source` (`claude-code`, `codex`, `cursor`)."""
+    agent_version: str | None = None
+    model: str | None = None
+    """Any model the session used."""
     source: str | None = None
     since: str | None = None
     until: str | None = None
@@ -893,6 +922,10 @@ class SearchResult(Response):
     native_session_id: str | None = None
     project: str | None = None
     branch: str | None = None
+    repo: str | None = None
+    harness: str | None = None
+    agent_version: str | None = None
+    models: list[str] | None = None
     source_id: str | None = None
     visibility: Open[Visibility]
     started_at: str | None = None

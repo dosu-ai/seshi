@@ -25,10 +25,17 @@ export interface SessionMetadata {
   session_id: string;
   /** The format the session is filed under. */
   agent: string;
-  /** What the trace's meta record says it came from; absent until a trace is stored. */
+  /** The harness: what the trace's meta record says it came from (`claude-code`, `codex`, `cursor`); absent until a trace is stored. */
   source?: string;
+  /** seshi's own label for the session: the repository's folder name for a laptop upload, the repository's name for Cursor Cloud. Independent of `repo`. */
   project?: string;
   branch?: string;
+  /** The repository the session ran in, as its origin remote normalized without credentials (`github.com/acme/app`; the first remote when there is no `origin`). Fixed by the first write that names one: a later remote change does not move the session. */
+  repo?: string;
+  /** The version of the harness (`source`) that wrote the session, from the latest trace: the log's own, else the uploader's hint (`harness_version`). */
+  agent_version?: string;
+  /** Every model the session used, deduplicated in the order first seen: each LLM call's `model`, and the meta record's `model` (or the uploader's hint) when no call names one. Summed over every write; a replace starts it over. */
+  models?: string[];
   parent_session_id?: string;
   /** `stored`, or `redacted` once tombstoned: a redacted session is never stored again. */
   status: "stored" | "redacted";
@@ -127,6 +134,9 @@ export const JSON_SCHEMA = {
     source: { type: "string" },
     project: { type: "string" },
     branch: { type: "string" },
+    repo: { type: "string" },
+    agent_version: { type: "string" },
+    models: { type: "array", items: { type: "string" } },
     parent_session_id: { type: "string" },
     status: { enum: ["stored", "redacted"] },
     head: { $ref: "common.schema.json#/$defs/Sha256" },

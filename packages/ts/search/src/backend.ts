@@ -10,6 +10,14 @@ export interface IndexedSession {
   native_session_id?: string;
   project?: string;
   branch?: string;
+  /** The repository's normalized remote (`github.com/acme/app`). */
+  repo?: string;
+  /** What ran the session: the meta record's `source` (`claude-code`). */
+  harness?: string;
+  /** The harness's version, from the latest trace. */
+  agent_version?: string;
+  /** Every model the session used. */
+  models?: string[];
   source_id?: string;
   visibility: Visibility;
   /** Epoch ms of the earliest and latest event, when the traces say. */
@@ -59,6 +67,9 @@ export interface BackendQuery {
   agent?: string;
   repo?: string;
   branch?: string;
+  harness?: string;
+  agent_version?: string;
+  model?: string;
   source?: string;
   since?: number;
   until?: number;

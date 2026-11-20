@@ -20,6 +20,8 @@ export type SpoolEntry =
       cwd?: string;
       parent_session_id?: string;
       final?: boolean;
+      harness_version?: string;
+      model?: string;
     }
   | {
       v: typeof SPOOL_VERSION;

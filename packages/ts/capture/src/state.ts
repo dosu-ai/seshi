@@ -22,6 +22,9 @@ export interface SessionState {
   cwd?: string;
   folders?: string[];
   parent_session_id?: string;
+  /** What the agent's hooks last said of its version and model (Cursor's), sent as hints. */
+  harness_version?: string;
+  model?: string;
   first_seen: string;
   last_seen?: string;
   /** The agent said the session ended. */

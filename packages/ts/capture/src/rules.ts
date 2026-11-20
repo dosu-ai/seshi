@@ -51,6 +51,14 @@ export interface Place {
     /** Its remotes, as `host/path` (`github.com/acme/app`). */
     remotes: string[];
     branch?: string;
+    /** Its `origin` remote, else its first, as `host/path`; none when that remote is a local
+     * folder. What the uploader sends as the session's `repo`. */
+    remote?: string;
+    /** The commit `HEAD` names. */
+    commit?: string;
+    /** The working folder relative to the root (`packages/api`, `/`-separated); none at the
+     * root. */
+    path?: string;
   };
 }
 
@@ -126,8 +134,22 @@ export function normalizeRemote(remote: string): string {
   } else {
     const url = tryParseUrl(text);
     if (url) text = `${url.hostname.toLowerCase()}${url.pathname}`;
+    else text = withoutCredentials(text);
   }
   return text.replace(/\/+$/, "").replace(/\.git$/i, "");
+}
+
+/** A remote no URL parser would read (`https://user:pa/ss@host/x`), without its scheme and
+ * whatever user info and port precede its host: a remote never carries a credential on. */
+function withoutCredentials(text: string): string {
+  const scheme = /^[a-z][a-z0-9+.-]*:\/\/(.*)$/i.exec(text);
+  if (!scheme) return text;
+  const rest = scheme[1] as string;
+  const at = rest.lastIndexOf("@");
+  const hostAndPath = at === -1 ? rest : rest.slice(at + 1);
+  const slash = hostAndPath.indexOf("/");
+  const host = (slash === -1 ? hostAndPath : hostAndPath.slice(0, slash)).replace(/:\d*$/, "");
+  return `${host.toLowerCase()}${slash === -1 ? "" : hostAndPath.slice(slash)}`;
 }
 
 function tryParseUrl(text: string): URL | undefined {

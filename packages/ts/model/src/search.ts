@@ -18,10 +18,17 @@ export interface SearchRequest {
   owner?: string;
   /** Only sessions filed under this format or run by this agent (`origin_agent`). */
   agent?: string;
-  /** Only sessions of this repository: the session's `project`, exactly or as its last path
-   * segments (`widget` matches `github.com/acme/widget`). */
+  /** Only sessions of this repository: the session's `repo` (its normalized remote), exactly
+   * or as its last path segments (`widget` and `acme/widget` match `github.com/acme/widget`). A
+   * session that has no `repo` is matched by its `project`. */
   repo?: string;
   branch?: string;
+  /** Only sessions run by this harness: the meta record's `source` (`claude-code`, `cursor`). */
+  harness?: string;
+  /** Only sessions whose latest trace was written by this version of their harness. */
+  agent_version?: string;
+  /** Only sessions that used this model, among any they used. */
+  model?: string;
   /** Only sessions written through this source (`upload`, or a configured source id). */
   source?: string;
   /** Only records at or after this time (RFC 3339). Records without a timestamp use their
@@ -64,6 +71,13 @@ export interface SearchResult {
   native_session_id?: string;
   project?: string;
   branch?: string;
+  /** The repository's normalized remote (`github.com/acme/app`). */
+  repo?: string;
+  /** What ran the session: its meta record's `source`. */
+  harness?: string;
+  agent_version?: string;
+  /** Every model the session used. */
+  models?: string[];
   source_id?: string;
   visibility: "org" | "owner";
   started_at?: string;

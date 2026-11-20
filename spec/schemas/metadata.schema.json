@@ -14,11 +14,27 @@
     "session_id": { "type": "string" },
     "agent": { "description": "The format the session is filed under.", "type": "string" },
     "source": {
-      "description": "What the trace's meta record says it came from; absent until a trace is stored.",
+      "description": "The harness: what the trace's meta record says it came from (`claude-code`, `codex`, `cursor`); absent until a trace is stored.",
       "type": "string"
     },
-    "project": { "type": "string" },
+    "project": {
+      "description": "seshi's own label for the session: the repository's folder name for a laptop upload, the repository's name for Cursor Cloud. Independent of `repo`.",
+      "type": "string"
+    },
     "branch": { "type": "string" },
+    "repo": {
+      "description": "The repository the session ran in, as its origin remote normalized without credentials (`github.com/acme/app`; the first remote when there is no `origin`). Fixed by the first write that names one: a later remote change does not move the session.",
+      "type": "string"
+    },
+    "agent_version": {
+      "description": "The version of the harness (`source`) that wrote the session, from the latest trace: the log's own, else the uploader's hint (`harness_version`).",
+      "type": "string"
+    },
+    "models": {
+      "description": "Every model the session used, deduplicated in the order first seen: each LLM call's `model`, and the meta record's `model` (or the uploader's hint) when no call names one. Summed over every write; a replace starts it over.",
+      "type": "array",
+      "items": { "type": "string" }
+    },
     "parent_session_id": { "type": "string" },
     "status": {
       "description": "`stored`, or `redacted` once tombstoned: a redacted session is never stored again.",

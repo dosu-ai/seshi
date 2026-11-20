@@ -17,7 +17,7 @@ import type {
 import { MEMORY_INDEX, tryRestrictToOwner } from "./paths";
 import { indexText, MATCH_END, MATCH_START } from "./snippet";
 
-export const INDEX_SCHEMA = "seshi/search-index/2";
+export const INDEX_SCHEMA = "seshi/search-index/3";
 
 const SNIPPET_TOKENS = 24;
 
@@ -47,6 +47,10 @@ CREATE TABLE IF NOT EXISTS sessions (
   native_session_id TEXT,
   project TEXT,
   branch TEXT,
+  repo TEXT,
+  harness TEXT,
+  agent_version TEXT,
+  models TEXT,
   source_id TEXT,
   visibility TEXT NOT NULL,
   started_at INTEGER,
@@ -94,6 +98,10 @@ interface SessionRow {
   native_session_id: string | null;
   project: string | null;
   branch: string | null;
+  repo: string | null;
+  harness: string | null;
+  agent_version: string | null;
+  models: string | null;
   source_id: string | null;
   visibility: string;
   started_at: number | null;
@@ -115,6 +123,10 @@ function sessionOf(row: SessionRow): IndexedSession {
     ...(row.native_session_id !== null ? { native_session_id: row.native_session_id } : {}),
     ...(row.project !== null ? { project: row.project } : {}),
     ...(row.branch !== null ? { branch: row.branch } : {}),
+    ...(row.repo !== null ? { repo: row.repo } : {}),
+    ...(row.harness !== null ? { harness: row.harness } : {}),
+    ...(row.agent_version !== null ? { agent_version: row.agent_version } : {}),
+    ...(row.models !== null ? { models: JSON.parse(row.models) as string[] } : {}),
     ...(row.source_id !== null ? { source_id: row.source_id } : {}),
     visibility: row.visibility as Visibility,
     ...(row.started_at !== null ? { started_at: row.started_at } : {}),
@@ -258,6 +270,10 @@ export class SqliteIndex implements IndexStore {
         session.native_session_id ?? null,
         session.project ?? null,
         session.branch ?? null,
+        session.repo ?? null,
+        session.harness ?? null,
+        session.agent_version ?? null,
+        session.models && session.models.length > 0 ? JSON.stringify(session.models) : null,
         session.source_id ?? null,
         session.visibility,
         session.started_at ?? null,
@@ -272,9 +288,10 @@ export class SqliteIndex implements IndexStore {
         const row = this.db
           .query(
             `INSERT INTO sessions (owner, archive_id, agent, session_id, origin_agent,
-               native_session_id, project, branch, source_id, visibility, started_at, ended_at,
-               updated_at, updated_ms, traces, read_ms)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+               native_session_id, project, branch, repo, harness, agent_version, models,
+               source_id, visibility, started_at, ended_at, updated_at, updated_ms, traces,
+               read_ms)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
           )
           .get(session.owner, session.archive_id, ...values) as { id: number };
         id = row.id;
@@ -284,7 +301,8 @@ export class SqliteIndex implements IndexStore {
         this.db
           .query(
             `UPDATE sessions SET agent = ?, session_id = ?, origin_agent = ?,
-               native_session_id = ?, project = ?, branch = ?, source_id = ?, visibility = ?,
+               native_session_id = ?, project = ?, branch = ?, repo = ?, harness = ?,
+               agent_version = ?, models = ?, source_id = ?, visibility = ?,
                started_at = ?, ended_at = ?, updated_at = ?, updated_ms = ?, traces = ?,
                read_ms = ?, removed = 0
              WHERE id = ?`,
@@ -356,12 +374,28 @@ export class SqliteIndex implements IndexStore {
       params.push(q.agent, q.agent);
     }
     if (q.repo !== undefined) {
-      where.push("(s.project = ? COLLATE NOCASE OR s.project LIKE ? ESCAPE '\\')");
+      // A session written before `repo` was recorded is matched by its `project`, which held the
+      // repository's URL for Cursor Cloud and its name for a laptop.
+      where.push(
+        "(coalesce(s.repo, s.project) = ? COLLATE NOCASE OR coalesce(s.repo, s.project) LIKE ? ESCAPE '\\')",
+      );
       params.push(q.repo, `%/${likeLiteral(q.repo)}`);
     }
     if (q.branch !== undefined) {
       where.push("s.branch = ?");
       params.push(q.branch);
+    }
+    if (q.harness !== undefined) {
+      where.push("s.harness = ?");
+      params.push(q.harness);
+    }
+    if (q.agent_version !== undefined) {
+      where.push("s.agent_version = ?");
+      params.push(q.agent_version);
+    }
+    if (q.model !== undefined) {
+      where.push("EXISTS (SELECT 1 FROM json_each(s.models) WHERE json_each.value = ?)");
+      params.push(q.model);
     }
     if (q.source !== undefined) {
       where.push("s.source_id = ?");

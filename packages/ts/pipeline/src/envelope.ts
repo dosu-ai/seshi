@@ -7,6 +7,7 @@ import {
   type LogPayload,
   MAX_IDEMPOTENCY_KEY_LENGTH,
   type OwnerBasis,
+  SCOPE_FIELDS,
   SessionRejected,
   type SessionUpload,
   type SourceKind,
@@ -101,6 +102,7 @@ export function checkEnvelope(envelope: Envelope): void {
   ) {
     refuse("retract_hash must be a sha256 in lowercase hex");
   }
+  checkScope(envelope);
   const payload = envelope.payload as LogPayload | SpanPayload | undefined;
   if (payload?.kind === "log") {
     if (typeof payload.text !== "string") refuse("payload.text must be a string");
@@ -114,6 +116,34 @@ export function checkEnvelope(envelope: Envelope): void {
     if (!Array.isArray(payload.spans)) refuse("payload.spans must be an array");
   } else {
     refuse("payload.kind must be log or spans");
+  }
+}
+
+const MAX_SCOPE_LENGTH = 1024;
+
+/** The scope fields are labels, never secrets or a machine's paths: `repo` holds no user info
+ * (`user:token@`), and `path_in_repo` is relative and stays inside the repository. */
+function checkScope(envelope: Envelope): void {
+  for (const key of SCOPE_FIELDS) {
+    const value = envelope[key];
+    if (value === undefined) continue;
+    if (typeof value !== "string" || value === "") refuse(`${key} must be a non-empty string`);
+    if (value.length > MAX_SCOPE_LENGTH) {
+      refuse(`${key} must be at most ${MAX_SCOPE_LENGTH} characters`);
+    }
+  }
+  const { repo, commit, path_in_repo: path } = envelope;
+  if (repo !== undefined && (repo.includes("@") || repo.includes("://") || /\s/.test(repo))) {
+    refuse("repo must be a normalized remote (host/path), without credentials");
+  }
+  if (commit !== undefined && !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(commit)) {
+    refuse("commit must be a sha1 or sha256 in lowercase hex");
+  }
+  if (
+    path !== undefined &&
+    (/^(?:[\\/]|[A-Za-z]:)/.test(path) || path.split(/[\\/]/).some((part) => part === ".."))
+  ) {
+    refuse("path_in_repo must be relative to the repository's root");
   }
 }
 
@@ -161,6 +191,10 @@ export function uploadEnvelope(upload: SessionUpload, options: UploadEnvelopeOpt
   if (upload.shipped) envelope.shipped = upload.shipped;
   if (upload.project !== undefined) envelope.project = upload.project;
   if (upload.branch !== undefined) envelope.branch = upload.branch;
+  for (const key of SCOPE_FIELDS) {
+    const value = upload[key];
+    if (value !== undefined) envelope[key] = value;
+  }
   if (upload.parent_session_id !== undefined) envelope.parent_session_id = upload.parent_session_id;
   if (upload.fork_of !== undefined) envelope.fork_of = upload.fork_of;
   if (upload.retract_hash !== undefined) envelope.retract_hash = upload.retract_hash;

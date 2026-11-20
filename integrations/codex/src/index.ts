@@ -1,4 +1,4 @@
-import { lettaAdapter } from "@seshi/formats";
+import { firstJsonlField, lettaAdapter } from "@seshi/formats";
 import { defineIntegration, type FormatAdapter } from "@seshi/kit";
 import type { JsonObject } from "@seshi/model";
 import { CODEX_CAPTURE } from "./capture";
@@ -14,6 +14,8 @@ const isObject = (value: unknown): value is JsonObject =>
 
 export const CODEX_FORMAT: FormatAdapter = lettaAdapter({
   source: "codex",
+  // 2: the meta record names the Codex CLI's version (`agent_version`).
+  revision: 2,
   // `{ timestamp, type: "session_meta" | "response_item" | …, payload: {…} }`.
   detect: {
     record: (row) =>
@@ -24,6 +26,12 @@ export const CODEX_FORMAT: FormatAdapter = lettaAdapter({
   prepare: withoutInheritedHistoryInHead,
   finish: (records) => subagentReportsAsObservations(records),
   calls: codexCalls,
+  // `{ type: "session_meta", payload: { cli_version: "0.169.0", … } }`: the rollout's own (first)
+  // `session_meta` says which Codex wrote it.
+  agentVersion: (transcript) =>
+    firstJsonlField(transcript, (row) =>
+      row.type === "session_meta" && isObject(row.payload) ? row.payload.cli_version : undefined,
+    ),
 });
 
 export const codex = defineIntegration({

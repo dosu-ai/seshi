@@ -463,6 +463,19 @@ stale; a release that changes no adapter makes nothing stale.
 **Which branch?** The one the transcript recorded as it began (Claude Code's `gitBranch`,
 Codex's `session_meta`), else the client's `branch`.
 
+**Where and with what it ran.** seshi's uploader also sends `repo` (the origin remote, else the
+first, normalized without credentials or port: `github.com/acme/widget`), `commit` (the sha
+`HEAD` names), `path_in_repo` (the working folder relative to the repository's root, absent at
+the root) and `client` (`seshi/0.15.0 darwin-arm64`), all read from `.git` without running git.
+The session keeps the first `repo` it is sent, so a remote renamed mid-session does not move it;
+`commit`, `path_in_repo` and `client` go on each upload's trace metadata. `project` stays the
+client's own label (the repository's folder name). A `repo` with user info, an absolute
+`path_in_repo` or one with `..` is refused (`422 bad_envelope`). For a log that names no
+harness version or model (Cursor's), the uploader sends what Cursor's hooks said as
+`harness_version` and `model`: the server uses them only where the log has none. The session's
+metadata then carries `agent_version` (the latest trace's) and `models` (every model its LLM
+calls named, or its meta record's when none did); the harness is its `source`.
+
 `201` when a trace was written, `200` otherwise:
 
 ```json

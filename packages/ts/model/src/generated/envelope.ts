@@ -45,6 +45,18 @@ export interface Envelope {
   shipped?: ShippedPrefix;
   project?: string;
   branch?: string;
+  /** The repository's origin remote, normalized without credentials (`github.com/acme/app`). Kept on the session by the first write that names one. */
+  repo?: string;
+  /** The commit `HEAD` named when the upload was made. */
+  commit?: string;
+  /** The working folder relative to the repository's root (`packages/api`); absent at the root. Never an absolute path. */
+  path_in_repo?: string;
+  /** The program that sent the upload and where it ran (`seshi/0.15.0 darwin-arm64`). */
+  client?: string;
+  /** A hint: the harness's version as the uploader knows it (from Cursor's hooks). Used only when the log names none. */
+  harness_version?: string;
+  /** A hint: the session's model as the uploader knows it. Used only when the log names none. */
+  model?: string;
   parent_session_id?: string;
   fork_of?: string;
   /** The hash of the uploader's retraction secret (F9.7), sent with a session's first upload. */
@@ -109,6 +121,12 @@ export const JSON_SCHEMA = {
     shipped: { $ref: "#/$defs/ShippedPrefix" },
     project: { type: "string" },
     branch: { type: "string" },
+    repo: { type: "string" },
+    commit: { type: "string" },
+    path_in_repo: { type: "string" },
+    client: { type: "string" },
+    harness_version: { type: "string" },
+    model: { type: "string" },
     parent_session_id: { type: "string" },
     fork_of: { type: "string" },
     retract_hash: { $ref: "common.schema.json#/$defs/Sha256" },

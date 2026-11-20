@@ -1,4 +1,4 @@
-{"timestamp":"2026-10-03T10:00:00.000Z","type":"session_meta","payload":{"id":"01a0ff74-0000-7ad0-83ee-000000000001","timestamp":"2026-10-03T10:00:00.000Z","cwd":"/repo/app"}}
+{"timestamp":"2026-10-03T10:00:00.000Z","type":"session_meta","payload":{"id":"01a0ff74-0000-7ad0-83ee-000000000001","timestamp":"2026-10-03T10:00:00.000Z","cwd":"/repo/app","originator":"codex_cli_rs","cli_version":"0.169.0"}}
 {"timestamp":"2026-10-03T10:00:00.100Z","type":"turn_context","payload":{"cwd":"/repo/app","model":"gpt-9-codex"}}
 {"timestamp":"2026-10-03T10:00:01.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"List the files"}]}}
 {"timestamp":"2026-10-03T10:00:01.500Z","type":"event_msg","payload":{"type":"token_count","info":null}}

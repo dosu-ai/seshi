@@ -38,6 +38,21 @@ export interface SessionUpload {
   offset?: number;
   project?: string;
   branch?: string;
+  /** The repository's origin remote, normalized without credentials (`github.com/acme/app`).
+   * The session keeps the first one it is sent. */
+  repo?: string;
+  /** The commit `HEAD` named, recorded on this upload's trace. */
+  commit?: string;
+  /** The working folder relative to the repository's root (`packages/api`), recorded on this
+   * upload's trace; absent at the root. Never an absolute path. */
+  path_in_repo?: string;
+  /** The program that sent the upload and where (`seshi/0.15.0 darwin-arm64`), recorded on this
+   * upload's trace. */
+  client?: string;
+  /** Hints from the uploader, for a log that names neither (Cursor's): the harness's version and
+   * the session's model. The log's own values win. */
+  harness_version?: string;
+  model?: string;
   parent_session_id?: string;
   fork_of?: string;
   /** What the client stored from the last answer for this session, if it was stored before.
@@ -64,6 +79,17 @@ export interface SessionUpload {
    * then retract the session with its normal upload credential. */
   retract_hash?: string;
 }
+
+/** The upload's optional strings that say where and with what the session ran, carried as is
+ * to its envelope, then to its trace and session. */
+export const SCOPE_FIELDS = [
+  "repo",
+  "commit",
+  "path_in_repo",
+  "client",
+  "harness_version",
+  "model",
+] as const satisfies readonly (keyof SessionUpload)[];
 
 /** A session to store: `SessionUpload` without the owner, which the backend knows. `format`
  * defaults to `jsonl`. */

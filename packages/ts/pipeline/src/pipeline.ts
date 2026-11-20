@@ -58,6 +58,7 @@ import { type FilterSetting, filterRulesFor, isFiltered } from "./filter";
 import {
   getSession,
   getTrace,
+  type IngestMetadata,
   ingest,
   recordProgress,
   type StubInput,
@@ -218,6 +219,24 @@ function recordedBranch(value: unknown): string | undefined {
 
 function metaOf(records: readonly NormalizedRecord[]): NormalizedRecord | undefined {
   return records[0]?.role === "meta" ? records[0] : undefined;
+}
+
+/** What the envelope says about where and with what the session ran, for its trace and
+ * session: the uploader's hints only fill what the log leaves out (`ingest`). */
+function scopeOf(
+  envelope: Envelope,
+): Pick<IngestMetadata, "repo" | "commit" | "path_in_repo" | "client" | "hints"> {
+  const hints = {
+    ...(envelope.harness_version !== undefined ? { agent_version: envelope.harness_version } : {}),
+    ...(envelope.model !== undefined ? { model: envelope.model } : {}),
+  };
+  return {
+    ...(envelope.repo !== undefined ? { repo: envelope.repo } : {}),
+    ...(envelope.commit !== undefined ? { commit: envelope.commit } : {}),
+    ...(envelope.path_in_repo !== undefined ? { path_in_repo: envelope.path_in_repo } : {}),
+    ...(envelope.client !== undefined ? { client: envelope.client } : {}),
+    ...(Object.keys(hints).length > 0 ? { hints } : {}),
+  };
 }
 
 function stubMeta(envelope: Envelope): NormalizedRecord {
@@ -989,6 +1008,7 @@ export class Pipeline {
         agent: envelope.format,
         project: plan.project,
         branch: plan.branch,
+        ...scopeOf(envelope),
         parent_session_id: envelope.parent_session_id,
         ...(plan.continuation ? { continuation: plan.continuation } : {}),
         normalizer: this.formats.normalizerFor(envelope.format),

@@ -30,6 +30,10 @@ export interface LettaAdapterOptions {
    * `omitted` has its content emptied. Applied to user records only. */
   inject?: (transcript: string) => Injected;
   finish?: (records: NormalizedRecord[], transcript: string) => NormalizedRecord[];
+  /** The version of the harness that wrote the transcript, which the library leaves out of the
+   * meta record: set as its `agent_version`. Read from the whole transcript only (a chunk has no
+   * meta record), so the first version the log names, which stays as the log grows. */
+  agentVersion?: (transcript: string) => string | undefined;
   calls?: (transcript: string, chunk?: Chunk) => SourceCalls;
 }
 
@@ -102,6 +106,39 @@ function applyLabels(
   });
 }
 
+/** `records` with the meta record's `agent_version` set to `version`, when both are there. */
+export function withAgentVersion(
+  records: NormalizedRecord[],
+  version: string | undefined,
+): NormalizedRecord[] {
+  const meta = records[0];
+  if (!version || meta?.role !== "meta") return records;
+  return [{ ...meta, agent_version: version } as NormalizedRecord, ...records.slice(1)];
+}
+
+/** The first value of a top-level string field across a JSONL log's lines, reading at most
+ * `limit` lines: `pick` takes each parsed line and says the field's value. */
+export function firstJsonlField(
+  transcript: string,
+  pick: (row: Record<string, unknown>) => unknown,
+  limit = 200,
+): string | undefined {
+  let start = 0;
+  for (let n = 0; n < limit && start < transcript.length; n++) {
+    const end = transcript.indexOf("\n", start);
+    const line = transcript.slice(start, end === -1 ? undefined : end).trim();
+    start = end === -1 ? transcript.length : end + 1;
+    if (line === "") continue;
+    try {
+      const row = JSON.parse(line) as unknown;
+      if (typeof row !== "object" || row === null || Array.isArray(row)) continue;
+      const value = pick(row as Record<string, unknown>);
+      if (typeof value === "string" && value !== "") return value;
+    } catch {}
+  }
+  return undefined;
+}
+
 export function lettaAdapter(options: LettaAdapterOptions): FormatAdapter {
   const { source, prepare, inject, finish, calls } = options;
   return {
@@ -126,7 +163,10 @@ export function lettaAdapter(options: LettaAdapterOptions): FormatAdapter {
       } else {
         records = letta({ source, transcript: prepared }).records;
       }
-      const finished = finish ? finish(records, transcript) : records;
+      const finished = withAgentVersion(
+        finish ? finish(records, transcript) : records,
+        chunk ? undefined : options.agentVersion?.(transcript),
+      );
       return calls ? attachCalls(finished, calls(transcript, chunk)) : finished;
     },
   };

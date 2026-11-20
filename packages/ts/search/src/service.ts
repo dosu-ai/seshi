@@ -137,6 +137,9 @@ export function checkRequest(request: SearchRequest, aliases = new OwnerAliases(
   const agent = text(request.agent, "agent");
   const repo = text(request.repo, "repo");
   const branch = text(request.branch, "branch");
+  const harness = text(request.harness, "harness");
+  const agentVersion = text(request.agent_version, "agent_version");
+  const model = text(request.model, "model");
   const source = text(request.source, "source");
   return {
     q: request.q,
@@ -146,6 +149,9 @@ export function checkRequest(request: SearchRequest, aliases = new OwnerAliases(
       ...(agent !== undefined ? { agent } : {}),
       ...(repo !== undefined ? { repo } : {}),
       ...(branch !== undefined ? { branch } : {}),
+      ...(harness !== undefined ? { harness } : {}),
+      ...(agentVersion !== undefined ? { agent_version: agentVersion } : {}),
+      ...(model !== undefined ? { model } : {}),
       ...(source !== undefined ? { source } : {}),
       ...(since !== undefined ? { since } : {}),
       ...(until !== undefined ? { until } : {}),
@@ -184,6 +190,10 @@ function resultOf(hit: BackendHit): SearchResult {
     ...(s.native_session_id !== undefined ? { native_session_id: s.native_session_id } : {}),
     ...(s.project !== undefined ? { project: s.project } : {}),
     ...(s.branch !== undefined ? { branch: s.branch } : {}),
+    ...(s.repo !== undefined ? { repo: s.repo } : {}),
+    ...(s.harness !== undefined ? { harness: s.harness } : {}),
+    ...(s.agent_version !== undefined ? { agent_version: s.agent_version } : {}),
+    ...(s.models !== undefined ? { models: s.models } : {}),
     ...(s.source_id !== undefined ? { source_id: s.source_id } : {}),
     visibility: s.visibility,
     ...(started !== undefined ? { started_at: started } : {}),

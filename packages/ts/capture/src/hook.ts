@@ -145,6 +145,8 @@ export async function runHook(run: HookRun): Promise<HookOutcome> {
         ...(capture.cwd ? { cwd: capture.cwd } : {}),
         ...(capture.parent_session_id ? { parent_session_id: capture.parent_session_id } : {}),
         ...(capture.final ? { final: true } : {}),
+        ...(capture.harness_version ? { harness_version: capture.harness_version } : {}),
+        ...(capture.model ? { model: capture.model } : {}),
       },
       now,
     );

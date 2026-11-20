@@ -284,6 +284,62 @@ describe("SqliteIndex: filters, sorting and pages (F10.1)", () => {
     expect(ids(query(index, "cache", { until: nov1 }))).toEqual(["s1"]);
   });
 
+  it("filters by repo, harness, its version and any model the session used", () => {
+    const index = memory();
+    index.apply({
+      session: session(1, {
+        project: "widget",
+        repo: "github.com/acme/widget",
+        harness: "claude-code",
+        agent_version: "2.1.326",
+        models: ["claude-opus-9", "claude-haiku-9"],
+      }),
+      events: [event("cache")],
+      replace: true,
+    });
+    index.apply({
+      session: session(2, {
+        agent: "cursor",
+        project: "widget",
+        repo: "github.com/other/widget-fork",
+        harness: "cursor",
+        agent_version: "2026.11.13-eacade1",
+        models: ["auto-smart"],
+      }),
+      events: [event("cache")],
+      replace: true,
+    });
+    // Written before `repo` was recorded: matched by its project.
+    index.apply({
+      session: session(3, { project: "github.com/acme/gadget" }),
+      events: [event("cache")],
+      replace: true,
+    });
+    const ids = (extra: Partial<BackendQuery>) =>
+      query(index, "cache", extra)
+        .hits.map((h) => h.session.session_id)
+        .sort();
+    expect(ids({ repo: "github.com/acme/widget" })).toEqual(["s1"]);
+    expect(ids({ repo: "acme/widget" })).toEqual(["s1"]);
+    // `repo` wins over a project of the same name.
+    expect(ids({ repo: "widget" })).toEqual(["s1"]);
+    expect(ids({ repo: "widget-fork" })).toEqual(["s2"]);
+    expect(ids({ repo: "gadget" })).toEqual(["s3"]);
+    expect(ids({ harness: "cursor" })).toEqual(["s2"]);
+    expect(ids({ harness: "claude-code", agent_version: "2.1.326" })).toEqual(["s1"]);
+    expect(ids({ agent_version: "1.0.0" })).toEqual([]);
+    expect(ids({ model: "claude-haiku-9" })).toEqual(["s1"]);
+    expect(ids({ model: "auto-smart" })).toEqual(["s2"]);
+    expect(ids({ model: "claude" })).toEqual([]);
+    expect(index.session("alice", H(1))).toMatchObject({
+      repo: "github.com/acme/widget",
+      harness: "claude-code",
+      agent_version: "2.1.326",
+      models: ["claude-opus-9", "claude-haiku-9"],
+    });
+    expect(index.session("alice", H(3))).not.toHaveProperty("models");
+  });
+
   it("sorts by relevance or by recency, and pages", () => {
     const index = seeded();
     expect(ids(query(index, "cache bug"))).toEqual(["s2", "s1"]);

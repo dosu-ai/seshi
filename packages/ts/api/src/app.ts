@@ -29,6 +29,7 @@ import {
   type RawFormat,
   RENDER_FORMATS,
   type RenderFormat,
+  SCOPE_FIELDS,
   SessionConflict,
   type SessionMetadata,
   SessionRejected,
@@ -181,6 +182,18 @@ async function readJson(request: Request, max: number): Promise<Record<string, u
     throw new HttpError(400, "bad_json", "body must be a JSON object");
   }
   return parsed as Record<string, unknown>;
+}
+
+function optionalStrings<K extends string>(
+  body: Record<string, unknown>,
+  keys: readonly K[],
+): Partial<Record<K, string>> {
+  const out: Partial<Record<K, string>> = {};
+  for (const key of keys) {
+    const value = str(body, key);
+    if (value !== undefined) out[key] = value;
+  }
+  return out;
 }
 
 function str(body: Record<string, unknown>, key: string, required = false): string | undefined {
@@ -453,6 +466,7 @@ export function createApp(instance: Instance) {
       offset: offset as number,
       project: str(body, "project"),
       branch: str(body, "branch"),
+      ...optionalStrings(body, SCOPE_FIELDS),
       parent_session_id: str(body, "parent_session_id"),
       fork_of: str(body, "fork_of"),
       ...(replace ? { replace } : {}),

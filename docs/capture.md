@@ -406,6 +406,13 @@ is left waits, with its place kept, for the next hook to start it again (or for 
 - then only the new complete lines, as a chunk at the server's offset, which the session filter
   never judges, so an agent-only tail is never lost.
 
+With each upload go where the session ran, read from `.git` without running git: the repository's
+remote (`origin`, else the first, without credentials: `github.com/acme/app`), the commit `HEAD`
+names, the folder relative to the repository's root (never the absolute path), the repository's
+folder name as `project`, the branch, and seshi's version and platform. Cursor's transcripts name
+neither Cursor's version nor the model, so its hooks keep what their payloads say
+(`cursor_version`, `model`) and the uploader sends them too.
+
 It follows the server's answers: a `409 offset_mismatch` resends from where the server says (the
 whole log when it says 0); a `409 conflict` on a session this machine wrote (the rules or the
 normalizer changed) resends it with `replace`; `403` and `422` wait until the transcript changes;

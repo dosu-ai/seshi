@@ -325,7 +325,7 @@ describe("toAtif", () => {
     expect(atif).toMatchObject({
       schema_version: "ATIF-v1.7",
       session_id: "sess1",
-      agent: { name: "claude-code", version: "unknown" },
+      agent: { name: "claude-code", version: "2.1.326" },
       extra: { seshi: { content_hash: trace.content_hash, agent: "claude-code" } },
     });
     expect(atif.steps.map((s) => s.step_id)).toEqual(atif.steps.map((_, i) => i + 1));

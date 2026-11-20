@@ -32,8 +32,11 @@ export interface ParseOptions {
   /** The harness name; defaults to the meta record's `source`. */
   agent?: string;
   session_id?: string;
-  /** Merged over the meta record's `cwd` / `git_branch` / `model`. */
+  /** Merged over the meta record's `cwd` / `git_branch` / `model` / `agent_version`. */
   metadata?: TraceMetadata;
+  /** What the uploader knows of the harness's version and the model, for a log that names
+   * neither: used only where the meta record has none. */
+  hints?: { agent_version?: string; model?: string };
   project?: string;
   branch?: string;
   /** The LLM calls the records' `llm_call` fields name. */
@@ -223,6 +226,12 @@ export function parseTrace(input: unknown, options: ParseOptions = {}): Trace {
   if (meta.cwd !== undefined) metadata.cwd = meta.cwd;
   if (meta.git_branch !== undefined) metadata.git_branch = meta.git_branch;
   if (meta.model !== undefined) metadata.model = meta.model;
+  if (meta.agent_version !== undefined) metadata.agent_version = meta.agent_version;
+  const hints = options.hints ?? {};
+  if (metadata.model === undefined && hints.model) metadata.model = hints.model;
+  if (metadata.agent_version === undefined && hints.agent_version) {
+    metadata.agent_version = hints.agent_version;
+  }
   Object.assign(metadata, options.metadata ?? {});
 
   const trace: Trace = {

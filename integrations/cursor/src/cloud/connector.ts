@@ -166,23 +166,44 @@ const after = (run: CursorRun, through: RunRef | undefined) =>
 
 const refOf = (run: CursorRun): RunRef => ({ at: run.createdAt ?? "", id: run.id });
 
-/** The agent's repository as a project, `host/owner/name`. */
-export function projectOf(agent: CursorAgent): string | undefined {
-  const url = agent.repos?.find((r) => typeof r?.url === "string" && r.url !== "")?.url;
-  if (!url) return undefined;
-  return url
-    .replace(/^[a-z+]+:\/\//i, "")
-    .replace(/^[^@/]+@([^:]+):/, "$1/")
-    .replace(/\.git$/i, "")
-    .replace(/\/+$/, "");
+/** A repository URL as a session's `repo`, `host/owner/name`, as a laptop's uploader names its
+ * origin remote: no scheme, user info or port, no `.git`. */
+export function normalizedRepo(url: string): string | undefined {
+  const text = url
+    .trim()
+    .replace(/^[a-z][a-z0-9+.-]*:\/\//i, "")
+    .replace(/^[^/]*@/, "")
+    .replace(/^([^/:]+):(?:\d+\/|(?!\/))/, "$1/")
+    .replace(/\/+$/, "")
+    .replace(/\.git$/i, "");
+  const slash = text.indexOf("/");
+  if (slash <= 0) return undefined;
+  return `${text.slice(0, slash).toLowerCase()}${text.slice(slash)}`;
+}
+
+/** The agent's repository, `host/owner/name`: the one it was started on, else the one its run's
+ * branch is in. */
+export function repoOf(agent: CursorAgent, run?: CursorRun): string | undefined {
+  const url =
+    agent.repos?.find((r) => typeof r?.url === "string" && r.url !== "")?.url ??
+    runBranches(run).find((b) => typeof b.repoUrl === "string" && b.repoUrl !== "")?.repoUrl;
+  return typeof url === "string" ? normalizedRepo(url) : undefined;
+}
+
+/** The session's `project`: the repository's name, as a laptop names it after its folder. */
+export function projectOf(repo: string | undefined): string | undefined {
+  return repo?.split("/").at(-1) || undefined;
+}
+
+function runBranches(run: CursorRun | undefined): Record<string, unknown>[] {
+  const git = isObject(run?.git) ? run.git : {};
+  return (Array.isArray(git.branches) ? git.branches : []).filter(isObject);
 }
 
 /** The branch the run worked on, from its `git.branches`. */
 export function branchOf(run: CursorRun): string | undefined {
-  const git = isObject(run.git) ? run.git : {};
-  const branches = Array.isArray(git.branches) ? git.branches : [];
-  for (const b of branches) {
-    if (isObject(b) && typeof b.branch === "string" && b.branch !== "") return b.branch;
+  for (const b of runBranches(run)) {
+    if (typeof b.branch === "string" && b.branch !== "") return b.branch;
   }
   return undefined;
 }
@@ -388,7 +409,6 @@ export function cursorCloudConnector(options: CursorCloudConnectorOptions = {}):
       /** Reads the agent's new runs into `entry`; true when every run listed was handled. */
       async function syncAgent(agent: CursorAgent, entry: AgentEntry): Promise<boolean> {
         const runs = (await api.listRuns(agent.id)).filter((run) => after(run, entry.through));
-        const project = projectOf(agent);
         for (const listed of runs) {
           ctx.signal.throwIfAborted();
           if (!TERMINAL_STATUSES.has(listed.status ?? "")) {
@@ -413,6 +433,9 @@ export function cursorCloudConnector(options: CursorCloudConnectorOptions = {}):
           const { run, text: own } = await lineOf(agent.id, listed, events);
           const where = `${agent.id}/${listed.id}`;
           const branch = branchOf(run);
+          // The Cloud Agents API names no commit for a run (Nov 2026), so none is sent.
+          const repo = repoOf(agent, run);
+          const project = projectOf(repo);
           const envelope: Envelope = {
             schema: ENVELOPE_SCHEMA,
             source: CURSOR_CLOUD_SOURCE,
@@ -429,6 +452,7 @@ export function cursorCloudConnector(options: CursorCloudConnectorOptions = {}):
             idempotency_key: `cursor-cloud:${where}`,
             provenance: { cursor: where },
             received_at: ctx.now().toISOString(),
+            ...(repo ? { repo } : {}),
             ...(project ? { project } : {}),
             ...(branch ? { branch } : {}),
           };

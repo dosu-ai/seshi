@@ -12,6 +12,7 @@ import {
   type StaleSession,
   type StoreSessionResult,
   type Upload,
+  VERSION,
 } from "@seshi/model";
 import { appendLog } from "./files";
 import type { CapturePaths } from "./paths";
@@ -70,6 +71,11 @@ export interface PreRedactor {
 export const NO_PREREDACTION: PreRedactor = {
   redact: ({ text, carried }) => ({ text, ...(carried ? { carried } : {}) }),
 };
+
+/** The uploader as an upload names it: `seshi/0.15.0 darwin-arm64`. */
+export function clientOf(host: Pick<CaptureHost, "platform">, arch: string = process.arch): string {
+  return `seshi/${VERSION} ${host.platform}-${arch}`;
+}
 
 export type GitIdentity = (cwd: string) => Promise<{ email?: string; name?: string }>;
 
@@ -634,6 +640,10 @@ export class Uploader {
         if (entry.cwd) seenIn(session, entry.cwd);
         if (entry.parent_session_id) session.parent_session_id = entry.parent_session_id;
         if (entry.kind === "capture" && entry.final) session.final = true;
+        if (entry.kind === "capture" && entry.harness_version) {
+          session.harness_version = entry.harness_version;
+        }
+        if (entry.kind === "capture" && entry.model) session.model = entry.model;
         if (
           entry.kind === "paused" &&
           !turnedOnSince(session.toggle, session.toggled_at, entry.at)
@@ -1087,6 +1097,12 @@ export class Uploader {
     return {
       ...(repo ? { project: repo.name } : folder ? { project: basename(folder) } : {}),
       ...(repo?.branch ? { branch: repo.branch } : {}),
+      ...(repo?.remote ? { repo: repo.remote } : {}),
+      ...(repo?.commit ? { commit: repo.commit } : {}),
+      ...(repo?.path ? { path_in_repo: repo.path } : {}),
+      client: clientOf(this.host),
+      ...(session.harness_version ? { harness_version: session.harness_version } : {}),
+      ...(session.model ? { model: session.model } : {}),
       ...repoVisibilityClaim(repo?.config),
       ...(session.parent_session_id ? { parent_session_id: session.parent_session_id } : {}),
       ...(Object.keys(claims).length > 0 ? { claims } : {}),

@@ -70,11 +70,16 @@ function capture(payload: unknown, final: boolean, host?: CaptureHost): HookCapt
     Array.isArray(roots) && typeof roots[0] === "string" && roots[0] !== ""
       ? (roots[0] as string)
       : stringField(object, "cwd");
+  // Cursor's transcript names neither its version nor the model; every hook payload does.
+  const version = stringField(object, "cursor_version");
+  const model = stringField(object, "model");
   return {
     session_id: conversation,
     ...(path ? { transcript_path: path } : {}),
     ...(cwd ? { cwd } : {}),
     ...(final ? { final } : {}),
+    ...(version ? { harness_version: version } : {}),
+    ...(model ? { model } : {}),
   };
 }
 
