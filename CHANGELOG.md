@@ -1,3 +1,10 @@
+# [0.14.0](https://github.com/dosu-ai/seshi/compare/v0.13.0...v0.14.0) (2026-11-20)
+
+
+### Features
+
+* **cursor:** poll Cursor Cloud agents through the Cloud Agents API (F7) ([#46](https://github.com/dosu-ai/seshi/issues/46)) ([2648e7a](https://github.com/dosu-ai/seshi/commit/2648e7a85b6c76006acf78d3a8444f3d5df90090))
+
 # [0.13.0](https://github.com/dosu-ai/seshi/compare/v0.12.0...v0.13.0) (2026-11-19)
 
 

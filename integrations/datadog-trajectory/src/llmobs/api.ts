@@ -1,3 +1,4 @@
+import { abortableSleep } from "@seshi/kit";
 import type {
   DatadogSearchRequest,
   DatadogSearchResponse,
@@ -195,20 +196,7 @@ export interface ExportApiOptions {
   now?: () => number;
 }
 
-export function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal.aborted) return reject(signal.reason);
-    const timer = setTimeout(() => {
-      signal.removeEventListener("abort", onAbort);
-      resolve();
-    }, ms);
-    const onAbort = () => {
-      clearTimeout(timer);
-      reject(signal.reason);
-    };
-    signal.addEventListener("abort", onAbort, { once: true });
-  });
-}
+export { abortableSleep };
 
 /** How long a 429 asks to wait, in milliseconds: `Retry-After` (seconds or an HTTP date), else
  * Datadog's `X-RateLimit-Reset` (seconds until the window resets). */

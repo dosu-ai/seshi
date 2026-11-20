@@ -125,9 +125,9 @@ moved agent folder, which a Task Scheduler task cannot carry.
 
 seshi does not capture Cursor Cloud agents through hooks. A cloud agent's VM writes no transcript
 file for a hook to upload, and committed hooks would need a seshi install and secrets in every
-repository. Cloud agents will be read from Cursor's Cloud Agents API instead (F7, not built yet):
-a poller lists each agent's runs and stores their event streams, with nothing in the repository
-and nothing on the VM.
+repository. Cloud agents are read from Cursor's Cloud Agents API instead, by a
+[Cursor Cloud source](cursor-cloud.md) (F7): a poller lists each agent's runs and stores their
+event streams, with nothing in the repository and nothing on the VM.
 
 An earlier seshi could commit hooks for cloud agents (`seshi capture install cursor --project`).
 If a repository has them, remove `.cursor/seshi-cloud.sh`, its two steps in

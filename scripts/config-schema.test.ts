@@ -34,6 +34,6 @@ describe("config JSON Schemas", () => {
     );
     expect(server.properties.filter.properties.min_chars.default).toBe(2000);
     expect(server.properties.records.properties.dropped_retention.default).toBe("30d");
-    expect(server.properties.sources.items.oneOf).toHaveLength(3);
+    expect(server.properties.sources.items.oneOf).toHaveLength(4);
   });
 });

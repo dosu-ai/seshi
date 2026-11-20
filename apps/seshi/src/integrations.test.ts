@@ -9,6 +9,7 @@ describe("the integration registry", () => {
       [
         "claude-code",
         "cursor",
+        "cursor-cloud-api",
         "codex",
         "opencode",
         "pi",
@@ -28,8 +29,8 @@ describe("the integration registry", () => {
     expect(sources[0]).toBe("claude-code");
   });
 
-  it("schedules the Datadog LLM Observability poller for datadog sources", () => {
-    expect(connectorsOf(INTEGRATIONS).map((c) => c.kind)).toEqual(["datadog"]);
+  it("schedules the Cursor Cloud and Datadog LLM Observability pollers for their sources", () => {
+    expect(connectorsOf(INTEGRATIONS).map((c) => c.kind)).toEqual(["cursor-cloud", "datadog"]);
   });
 
   it("builds a registry from any list of integrations", () => {

@@ -1,5 +1,12 @@
 import { createHash } from "node:crypto";
-import type { Connector, ConnectorContext, Cursor } from "@seshi/kit";
+import {
+  apiUrlOverride,
+  type Connector,
+  type ConnectorContext,
+  type Cursor,
+  secretValue,
+  serviceEnvelopeIdentity,
+} from "@seshi/kit";
 import { type Claims, ENVELOPE_SCHEMA, type Envelope, type ReceivedSpan } from "@seshi/model";
 import {
   abortableSleep,
@@ -10,11 +17,12 @@ import {
   searchPage,
 } from "./api";
 import { DATADOG_LLMOBS, datadogClaims } from "./format";
+
+export { serviceEnvelopeIdentity };
+
 import { sessionOf, tagsOf, tagValue, toReceivedSpan } from "./spans";
 
 export const DATADOG_SOURCE = "datadog";
-
-type SecretLike = string | { reveal(): string };
 
 /** The fields of a `type = "datadog"` source this connector reads (`datadogSource` in
  * `@seshi/config`; durations in milliseconds). */
@@ -50,19 +58,6 @@ export interface DatadogConnectorOptions {
   backoffMs?: number;
 }
 
-function secretValue(value: unknown, field: string): string {
-  const text =
-    typeof value === "string"
-      ? value
-      : typeof value === "object" && value !== null && "reveal" in value
-        ? (value as { reveal(): string }).reveal()
-        : undefined;
-  if (typeof text !== "string" || text === "") {
-    throw new Error(`the datadog source needs ${field}`);
-  }
-  return text;
-}
-
 const duration = (value: unknown, field: string): number => {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
     throw new Error(`the datadog source's ${field} is not a duration`);
@@ -81,12 +76,12 @@ export function readDatadogConfig(raw: Readonly<Record<string, unknown>>): Datad
     throw new Error("the datadog source's page_size must be 1 to 5000");
   }
   assertValidTags(tags);
-  const api_url = apiUrl(raw.api_url);
+  const api_url = apiUrlOverride(raw.api_url, "datadog", "the keys");
   return {
     site,
     ...(api_url ? { api_url } : {}),
-    api_key: secretValue(raw.api_key as SecretLike, "api_key"),
-    app_key: secretValue(raw.app_key as SecretLike, "app_key"),
+    api_key: secretValue(raw.api_key, "datadog", "api_key"),
+    app_key: secretValue(raw.app_key, "datadog", "app_key"),
     ...(typeof raw.ml_app === "string" && raw.ml_app !== "" ? { ml_app: raw.ml_app } : {}),
     tags,
     overlap: duration(raw.overlap ?? 600_000, "overlap"),
@@ -94,26 +89,6 @@ export function readDatadogConfig(raw: Readonly<Record<string, unknown>>): Datad
     backfill: duration(raw.backfill ?? 7 * 86_400_000, "backfill"),
     page_size: page,
   };
-}
-
-function apiUrl(raw: unknown): string | undefined {
-  if (typeof raw !== "string" || raw === "") return undefined;
-  let url: URL;
-  try {
-    url = new URL(raw);
-  } catch {
-    throw new Error("the datadog source's api_url is not a URL");
-  }
-  const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
-  if (url.protocol === "http:" && !loopback) {
-    throw new Error(
-      "the datadog source's api_url must be https (plain http would send the keys in clear); http is allowed for localhost only",
-    );
-  }
-  if (url.protocol !== "https:" && url.protocol !== "http:") {
-    throw new Error("the datadog source's api_url must be https");
-  }
-  return raw;
 }
 
 const isIso = (v: unknown): v is string => typeof v === "string" && !Number.isNaN(Date.parse(v));
@@ -166,13 +141,6 @@ export function nextWindow(
 export function batchKey(spans: readonly ReceivedSpan[]): string {
   const ids = spans.map((s) => `${s.traceId}:${s.spanId}`).sort();
   return `datadog:${createHash("sha256").update(ids.join("\n")).digest("hex")}`;
-}
-
-export function serviceEnvelopeIdentity(
-  sourceId: string,
-): Pick<Envelope, "caller" | "owner" | "owner_basis"> {
-  const owner = `svc:${sourceId}`;
-  return { caller: { kind: "service", principal: owner }, owner, owner_basis: "service" };
 }
 
 function mergeClaims(a: Claims | undefined, b: Claims | undefined): Claims | undefined {

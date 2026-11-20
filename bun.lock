@@ -98,6 +98,7 @@
       "dependencies": {
         "@seshi/formats": "workspace:*",
         "@seshi/kit": "workspace:*",
+        "@seshi/model": "workspace:*",
       },
     },
     "integrations/datadog-trajectory": {
@@ -203,7 +204,7 @@
     },
     "packages/ts/model": {
       "name": "@seshi/model",
-      "version": "0.13.0",
+      "version": "0.14.0",
       "dependencies": {
         "@letta-ai/trajectory": "^0.3.0",
       },
