@@ -424,7 +424,8 @@ export class HttpSessionDB implements SessionDB {
     return body as AllChangesPage;
   }
 
-  /** Keyword search over the sessions this credential may read (F10, `GET /v1/search`). A
+  /** Keyword search over the sessions this credential may read (F10, `GET /v1/search`). Without
+   * `q`, a browse: the sessions the filters allow, most recently active first. A
    * request the server cannot run is a `ServerError` with status 400 (`bad_query`); while the
    * server's index is first being built, status 503 (`index_building`), and 404
    * (`search_disabled`) when the server has search turned off. */

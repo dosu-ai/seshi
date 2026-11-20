@@ -178,6 +178,7 @@ milliseconds. Sizes are `<n><unit>` with `B`, `KB`, `MB`, `GB`, `KiB`, `MiB` or 
 | `public_url` | | The URL clients reach the server at, behind any proxy. Accepted but unused: sign-in goes from the CLI to the IdP directly (X5.7), so nothing reads it, and `config check` warns when it is set |
 | `roles` | `["api", "worker"]` | What this instance runs (X7.1). Flag `--roles`. `api` serves the HTTP API; `worker` runs the background jobs (pollers, retention, the heartbeat). Run exactly one worker (X7.2); an instance without `api` answers `/healthz` only |
 | `instance_id` | the host name | This instance's stable name: its source health shard and the heartbeat's `host` (letters, digits, `_`, `-`, up to 64) |
+| `ui` | `true` | Serve the team's web page at `/ui/` (and send `/` there) on instances with the `api` role ([ui.md](ui.md)). It reads only the API, with the credential of the person signed in. A restart applies it |
 | `watch_config` | `false` | Reload when the config file, a drop-in in `seshi.d/`, a rule pack or a review `prompt_file` changes, a second after the last change ([Reloading](#reloading)). Off by default: an editor saving half a change would be applied or refused at once, and `SIGHUP` or `POST /v1/admin/reload` say when, and report the result |
 
 ### `[store]`

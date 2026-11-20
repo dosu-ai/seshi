@@ -1,6 +1,13 @@
 import type { ChangeEntry, EventRole, Labels, SearchSort, Visibility } from "@seshi/model";
 import type { Viewer } from "./viewer";
 
+export interface SessionTokens {
+  input: number;
+  output: number;
+  cache_read: number;
+  cache_write: number;
+}
+
 export interface IndexedSession {
   owner: string;
   archive_id: string;
@@ -30,6 +37,19 @@ export interface IndexedSession {
   /** The metadata's `updated_at`, shown and sorted on. It is stamped by whichever machine wrote
    * the session, so it does not order updates (see `SessionUpdate.read_at`). */
   updated_at: string;
+  /** The person's first prompt as one line, the harness's own blocks stripped
+   * (`@seshi/model/prompts`): what the session was about. */
+  title?: string;
+  /** How many events its traces hold, of every role (indexed or not). */
+  events?: number;
+  /** Tool calls by tool name. */
+  tools?: Record<string, number>;
+  /** What redaction replaced, by rule (the metadata's `redaction.counts`). */
+  redactions?: Record<string, number>;
+  /** Tool results whose outcome the trace records, by outcome. */
+  tool_outcomes?: { ok: number; failed: number };
+  /** Tokens the session's model calls record (`llm_calls[].usage`), summed. */
+  tokens?: SessionTokens;
   /** The traces indexed, in the session's order. */
   traces: string[];
 }
@@ -65,7 +85,9 @@ export interface SessionUpdate {
 /** A query as the backend runs it: the match expression already parsed, filters already
  * resolved (owner aliases folded, times in epoch ms). */
 export interface BackendQuery {
-  match: string;
+  /** The FTS5 match expression; undefined for a browse (no keywords: the filters alone, most
+   * recently active first, no matches). */
+  match?: string;
   viewer: Viewer;
   owners?: readonly string[];
   /** Sessions filed under this format or run by this agent (`origin_agent`). */
@@ -83,7 +105,17 @@ export interface BackendQuery {
   sort: SearchSort;
   limit: number;
   offset: number;
+  /** A browse's place: the page starts after this session. A browse pages by position, not
+   * offset, so sessions that arrive or move while someone pages never shift the pages. */
+  after?: BrowsePosition;
   matches: number;
+}
+
+/** A session's place in a browse: its activity (the last event, or the last update when the
+ * traces carry no times; epoch ms), then its row in the index. */
+export interface BrowsePosition {
+  activity: number;
+  id: number;
 }
 
 export interface BackendMatch {
@@ -107,6 +139,8 @@ export interface BackendHit {
 export interface BackendResults {
   total: number;
   hits: BackendHit[];
+  /** A browse with more to read: where the next page starts. */
+  after?: BrowsePosition;
 }
 
 export interface SearchBackend {

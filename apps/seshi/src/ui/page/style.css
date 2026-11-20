@@ -1,0 +1,1882 @@
+/* seshi team UI. Colours are brand/tokens.json: deep teal on paper (light), thread mint on
+ * night ink (dark). One bold element, the thread a session's events hang from; everything
+ * else stays quiet. A role or an outcome is always a word; colour and shape only repeat it.
+ * Errors take a plain red, which is not a brand token (the CLI uses the terminal's own). */
+
+:root {
+  --paper: #f6f4ee;
+  --night-ink: #171d2a;
+  --light-ink: #173a41;
+  --deep-teal: #247c73;
+  --thread-mint: #76d6c6;
+  --memory-lilac: #9c8add;
+  --searching: #9380d7;
+  --spark: #ffca86;
+  --thinking: #d79e52;
+  --protected: #5a9fc6;
+  --resting: #8b96ab;
+
+  --bg: var(--paper);
+  --fg: var(--light-ink);
+  --raised: #fdfcf8;
+  --line: #dcd8cd;
+  --muted: #4f6267;
+  --accent: var(--deep-teal);
+  --thread: #9fd3ca;
+  --hit-bg: #e4ddf7;
+  --redaction-bg: #dceaf4;
+  --redaction-fg: #1f5878;
+  --fail: #b3261e;
+  --focus: var(--deep-teal);
+
+  --sans: Manrope, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  color-scheme: light;
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: var(--night-ink);
+    --fg: var(--paper);
+    --raised: #1e2635;
+    --line: #313c52;
+    --muted: #a9b3c3;
+    --accent: var(--thread-mint);
+    --thread: #2f6f68;
+    --hit-bg: #3d3566;
+    --redaction-bg: #1e3a4f;
+    --redaction-fg: #a9d4ef;
+    --fail: #ff8a80;
+    --focus: var(--thread-mint);
+    color-scheme: dark;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+a {
+  color: var(--accent);
+  text-underline-offset: 0.2em;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+code,
+pre,
+.mono {
+  font-family: var(--mono);
+  font-size: 0.85rem;
+}
+
+h1,
+h2 {
+  line-height: 1.2;
+  margin: 0;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+button {
+  font: inherit;
+  color: var(--fg);
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.4rem 0.85rem;
+  cursor: pointer;
+}
+
+button:hover {
+  border-color: var(--accent);
+}
+
+button[disabled] {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg);
+  font-weight: 700;
+}
+
+button.quiet {
+  background: none;
+  border-color: transparent;
+  color: var(--accent);
+  padding-inline: 0.4rem;
+}
+
+input,
+select {
+  font: inherit;
+  color: var(--fg);
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.45rem 0.6rem;
+  line-height: 1.4;
+  min-width: 0;
+}
+
+input:focus-visible,
+select:focus-visible {
+  border-color: var(--focus);
+}
+
+/* One chevron for everything that opens, in place of the three arrows browsers draw (a select's,
+ * a suggestion list's, a disclosure's). It is a line icon like dosu-adx's: a 1.5px stroke with
+ * nothing filled. It points down on a field that opens a list, right on a closed disclosure and
+ * down on an open one. */
+.pick {
+  position: relative;
+  display: grid;
+}
+
+.pick::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 0.85rem;
+  width: 0.4rem;
+  height: 0.4rem;
+  border-right: 1.5px solid var(--muted);
+  border-bottom: 1.5px solid var(--muted);
+  transform: translateY(-70%) rotate(45deg);
+  pointer-events: none;
+}
+
+.pick select,
+.pick input {
+  appearance: none;
+  line-height: 1.4;
+  padding-right: 2.2rem;
+}
+
+/* The suggestion list's own button stays where the chevron is, unseen, so a click there still
+ * opens the list. */
+.pick input::-webkit-calendar-picker-indicator {
+  opacity: 0;
+}
+
+summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+summary::-webkit-details-marker {
+  display: none;
+}
+
+summary::before {
+  content: "";
+  flex: none;
+  width: 0.36rem;
+  height: 0.36rem;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 0.12s;
+}
+
+details[open] > summary::before {
+  transform: translateY(-0.12rem) rotate(45deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  summary::before {
+    transition: none;
+  }
+}
+
+/* The bar. */
+
+/* Night ink in both modes, the brand's dark lockup: mint glyph, paper wordmark. */
+.top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem clamp(1rem, 4vw, 2.5rem);
+  background: var(--night-ink);
+  color: var(--paper);
+  border-bottom: 1px solid var(--line);
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--paper);
+  text-decoration: none;
+}
+
+.glyph {
+  width: 28px;
+  height: 28px;
+  color: var(--thread-mint);
+}
+
+.top button.quiet {
+  color: var(--thread-mint);
+}
+
+.top :focus-visible {
+  outline-color: var(--thread-mint);
+}
+
+.wordmark {
+  font-weight: 800;
+  font-size: 1.25rem;
+  letter-spacing: -0.02em;
+}
+
+.who {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.9rem;
+  min-width: 0;
+}
+
+.me {
+  display: inline-flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.me .owner {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.me .role {
+  color: var(--resting);
+}
+
+main {
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 1.5rem clamp(1rem, 4vw, 2.5rem) 4rem;
+}
+
+main:focus {
+  outline: none;
+}
+
+.problem {
+  color: var(--fail);
+}
+
+.notice {
+  border-left: 3px solid var(--thinking);
+  padding: 0.35rem 0 0.35rem 0.75rem;
+}
+
+.hint,
+.empty,
+.loading,
+.empty-text {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+/* Sign-in. */
+
+.signin {
+  max-width: 30rem;
+  margin: 8vh auto 0;
+  display: grid;
+  gap: 1rem;
+}
+
+.signin h1 {
+  font-size: 1.75rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.lede {
+  margin: 0;
+  color: var(--muted);
+}
+
+.signin .primary {
+  justify-self: start;
+  padding: 0.6rem 1.1rem;
+}
+
+.or {
+  margin: 0.5rem 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.token-form {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.token-form label {
+  font-weight: 600;
+  font-size: 0.9rem;
+  margin-top: 0.4rem;
+}
+
+.token-form .hint {
+  margin: 0;
+}
+
+.token-form button {
+  justify-self: start;
+  margin-top: 0.6rem;
+}
+
+/* The list. */
+
+.search {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.query {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.query input {
+  flex: 1;
+  font-size: 1.05rem;
+  padding: 0.6rem 0.8rem;
+}
+
+.filters summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-size: 0.9rem;
+  width: max-content;
+}
+
+.fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: 0.6rem 0.9rem;
+  padding: 0.75rem 0 0.25rem;
+}
+
+.field {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.field label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.active-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  margin-top: 0.9rem;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.chip {
+  font-size: 0.8rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  color: var(--muted);
+  background: transparent;
+  max-width: 22rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chip:hover {
+  color: var(--accent);
+}
+
+.chip.active {
+  color: var(--fg);
+  border-color: var(--accent);
+  display: inline-flex;
+  gap: 0.35rem;
+}
+
+.chip .x {
+  color: var(--accent);
+}
+
+.clear {
+  font-size: 0.85rem;
+}
+
+.summary {
+  margin: 1.4rem 0 0.4rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--line);
+}
+
+/* A row: when it was last active in a gutter, then what and whose. */
+.row {
+  display: grid;
+  grid-template-columns: 7rem minmax(0, 1fr);
+  column-gap: 1rem;
+  padding: 0.65rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.row-head {
+  display: contents;
+}
+
+.row .title {
+  grid-column: 2;
+  grid-row: 1;
+  font-weight: 700;
+  font-size: 1rem;
+  color: var(--fg);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.row .title:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.branch {
+  font-family: var(--mono);
+  font-weight: 400;
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-left: 0.6rem;
+}
+
+.row time {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  padding-top: 0.15rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.facts {
+  grid-column: 2;
+  grid-row: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.1rem 0.9rem;
+  margin-top: 0.1rem;
+}
+
+.facts .chip {
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  font-size: 0.82rem;
+}
+
+.facts .chip:hover {
+  text-decoration: underline;
+}
+
+.private {
+  font-size: 0.8rem;
+  color: var(--muted);
+  border-left: 2px solid var(--resting);
+  padding-left: 0.4rem;
+  margin-left: 0.2rem;
+}
+
+.snippets {
+  grid-column: 2;
+  grid-row: 4;
+  list-style: none;
+  margin: 0.6rem 0 0;
+  padding: 0 0 0 0.9rem;
+  border-left: 2px solid var(--thread);
+  display: grid;
+  gap: 0.45rem;
+}
+
+.snippets a {
+  display: grid;
+  grid-template-columns: minmax(7.5rem, max-content) 1fr;
+  gap: 0.75rem;
+  color: var(--fg);
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+
+.excerpt {
+  overflow-wrap: anywhere;
+}
+
+.snippets a:hover .excerpt {
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+}
+
+.snippets .role {
+  color: var(--muted);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.snippets .node {
+  margin-right: 0.35rem;
+  color: var(--accent);
+}
+
+mark {
+  background: var(--hit-bg);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 0.1em;
+}
+
+mark.redaction {
+  background: var(--redaction-bg);
+  color: var(--redaction-fg);
+  font-family: var(--mono);
+  font-size: 0.85em;
+  border-radius: 3px;
+  padding: 0 0.25em;
+}
+
+.more {
+  margin: 1rem 0;
+}
+
+/* A session. */
+
+.back {
+  font-size: 0.9rem;
+}
+
+.back::before {
+  content: "← ";
+}
+
+.session-head h1 {
+  margin-top: 0.9rem;
+  font-size: clamp(1.5rem, 3vw, 2rem);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
+}
+
+.session-head .branch {
+  font-size: 0.9rem;
+}
+
+.session-id {
+  margin: 0.3rem 0 0;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.facts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+  gap: 0.75rem 1.5rem;
+  margin: 1.25rem 0 0;
+}
+
+.facts-grid dt {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.facts-grid dd {
+  margin: 0.1rem 0 0;
+  overflow-wrap: anywhere;
+}
+
+.tabs {
+  display: flex;
+  gap: 1.5rem;
+  margin: 1.75rem 0 0;
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+}
+
+.tabs a {
+  padding: 0.5rem 0;
+  color: var(--muted);
+  text-decoration: none;
+  border-bottom: 3px solid transparent;
+  margin-bottom: -1px;
+  white-space: nowrap;
+}
+
+.tabs a:hover {
+  color: var(--fg);
+}
+
+.tabs a[aria-current="page"] {
+  color: var(--fg);
+  font-weight: 700;
+  border-bottom-color: var(--accent);
+}
+
+.panel {
+  padding-top: 1.5rem;
+}
+
+.panel h2 {
+  font-size: 1.05rem;
+  margin: 1.5rem 0 0.5rem;
+}
+
+.part {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+
+.part time {
+  font-size: 0.85rem;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+/* The thread: one ribbon down the left, a node on it for each event. */
+
+.thread {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  position: relative;
+}
+
+.thread::before {
+  content: "";
+  position: absolute;
+  left: 0.7rem;
+  top: 0.6rem;
+  bottom: 0.6rem;
+  width: 6px;
+  margin-left: -3px;
+  border-radius: 3px;
+  background: var(--thread);
+}
+
+.event {
+  position: relative;
+  padding: 0.35rem 0 1.1rem 2.4rem;
+}
+
+.event .node {
+  position: absolute;
+  left: 0;
+  top: 0.3rem;
+  width: 1.4rem;
+  height: 1.4rem;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--bg);
+  border: 2px solid var(--thread);
+  color: var(--accent);
+  font-size: 0.75rem;
+  line-height: 1;
+}
+
+.event-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.6rem;
+}
+
+.event-head .role {
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.event-head time {
+  color: var(--muted);
+  font-size: 0.8rem;
+  margin-left: auto;
+}
+
+.tool {
+  color: var(--accent);
+}
+
+.ok {
+  font-size: 0.8rem;
+  color: var(--accent);
+}
+
+.failed {
+  font-size: 0.8rem;
+  color: var(--fail);
+  font-weight: 700;
+}
+
+.event pre.text {
+  margin: 0.3rem 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--sans);
+  font-size: 0.95rem;
+  line-height: 1.55;
+  max-width: 52rem;
+}
+
+.role-tool_call pre.text,
+.role-tool_result pre.text {
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.role-user .node {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg);
+}
+
+.role-user pre.text {
+  font-weight: 500;
+}
+
+.role-reasoning pre.text {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.event.target pre.text,
+.event.target .event-head {
+  background: var(--hit-bg);
+  border-radius: 4px;
+}
+
+.event.target:focus {
+  outline: none;
+}
+
+.unfold {
+  margin-top: 0.2rem;
+  font-size: 0.85rem;
+}
+
+/* Records, reviews and details. */
+
+.records,
+.reviews {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.9rem;
+}
+
+.record-head,
+.review-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.75rem;
+  font-size: 0.9rem;
+}
+
+.record-head .index {
+  font-family: var(--mono);
+  color: var(--muted);
+}
+
+.record-head .role,
+.review-head .write {
+  font-weight: 700;
+}
+
+.record-head time,
+.review-head time {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.withheld {
+  color: var(--thinking);
+}
+
+pre.json {
+  margin: 0.3rem 0 0;
+  padding: 0.75rem;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.8rem;
+}
+
+.review {
+  padding-left: 0.75rem;
+  border-left: 3px solid var(--thread);
+}
+
+.decision-redact {
+  border-left-color: var(--protected);
+}
+
+.decision-skipped {
+  border-left-color: var(--resting);
+}
+
+.audit {
+  margin: 0.25rem 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.downloads ul {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem 1.25rem;
+}
+
+@media (max-width: 40rem) {
+  .who .owner {
+    max-width: 10rem;
+  }
+
+  .row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .row .title,
+  .facts,
+  .row-stats,
+  .snippets {
+    grid-column: 1;
+  }
+
+  .row time {
+    grid-column: 1;
+    grid-row: 5;
+    padding-top: 0.2rem;
+  }
+
+  .snippets a {
+    grid-template-columns: 1fr;
+    gap: 0.1rem;
+  }
+
+  .event-head time {
+    margin-left: 0;
+  }
+}
+
+/* The views in the bar. */
+
+.nav {
+  display: flex;
+  gap: 1.25rem;
+  margin-right: auto;
+  margin-left: 1.5rem;
+}
+
+.nav a {
+  color: var(--resting);
+  text-decoration: none;
+  font-size: 0.95rem;
+  padding: 0.2rem 0;
+  border-bottom: 2px solid transparent;
+}
+
+.nav a:hover {
+  color: var(--paper);
+}
+
+.nav a[aria-current="page"] {
+  color: var(--paper);
+  border-bottom-color: var(--thread-mint);
+}
+
+/* A row's title is what the person asked; the stats under it say what the session did. */
+
+.row .title.untitled {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.row-stats {
+  grid-column: 2;
+  grid-row: 3;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 0.9rem;
+  margin: 0.15rem 0 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+/* Markdown in prompts and answers. */
+
+.md {
+  max-width: 52rem;
+  font-size: 0.95rem;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.md > :first-child {
+  margin-top: 0.3rem;
+}
+
+.md > :last-child {
+  margin-bottom: 0;
+}
+
+.md p,
+.md ul,
+.md ol,
+.md blockquote {
+  margin: 0.5rem 0;
+}
+
+.md ul,
+.md ol {
+  padding-left: 1.4rem;
+}
+
+.md li + li {
+  margin-top: 0.15rem;
+}
+
+.md .md-h {
+  font-size: 1rem;
+  font-weight: 800;
+  margin: 0.9rem 0 0.3rem;
+}
+
+.md code {
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0 0.25em;
+  font-size: 0.85em;
+}
+
+.md pre.code {
+  margin: 0.5rem 0;
+  padding: 0.6rem 0.75rem;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.md pre.code code {
+  border: 0;
+  padding: 0;
+  background: none;
+}
+
+.md blockquote {
+  border-left: 3px solid var(--line);
+  padding-left: 0.75rem;
+  color: var(--muted);
+}
+
+.md hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
+.role-user .md {
+  font-weight: 500;
+}
+
+.role-reasoning .md {
+  color: var(--muted);
+  font-style: italic;
+}
+
+pre.mono-text {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  color: var(--muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0.35rem 0 0;
+}
+
+/* What a harness added, and a step's input and output: closed until opened. */
+
+details.context,
+details.io {
+  margin-top: 0.3rem;
+}
+
+details.context > summary,
+details.io > summary {
+  cursor: pointer;
+  width: max-content;
+  max-width: 100%;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+details.context > summary:hover,
+details.io > summary:hover {
+  color: var(--accent);
+}
+
+.context-only .node {
+  background: var(--bg);
+  border-style: dashed;
+  color: var(--muted);
+}
+
+.event.step .event-head {
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+.step .summary-line {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  color: var(--muted);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.step .event-head time,
+.step .event-head .ok,
+.step .event-head .failed {
+  flex: none;
+}
+
+.step {
+  padding-bottom: 0.7rem;
+}
+
+.step .event-head .tool {
+  font-weight: 700;
+  flex: none;
+}
+
+/* The thread beside the session at a glance. */
+
+.panel.with-aside {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 17rem;
+  gap: 2.5rem;
+  align-items: start;
+}
+
+.glance {
+  position: sticky;
+  top: 1rem;
+  font-size: 0.88rem;
+  border-left: 1px solid var(--line);
+  padding-left: 1.25rem;
+}
+
+.glance h2 {
+  font-size: 0.85rem;
+  font-weight: 700;
+  margin: 1.25rem 0 0.5rem;
+}
+
+.glance h2:first-child {
+  margin-top: 0;
+}
+
+dl.stats {
+  display: grid;
+  gap: 0.3rem;
+  margin: 0;
+}
+
+.stat {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.stat dt {
+  color: var(--muted);
+}
+
+.stat dd {
+  margin: 0;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+/* Ranked lists: a name, its count, and a bar for the count. */
+
+.ranked {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.45rem;
+}
+
+ol.ranked > li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 0.75rem;
+  row-gap: 0.15rem;
+  align-items: baseline;
+}
+
+.rank-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.files .rank-name,
+.tools .rank-name {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+}
+
+.rank-count {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.85rem;
+}
+
+.rank-bar {
+  grid-column: 1 / -1;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.rank-fill {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.w1 {
+  width: 5%;
+}
+.w2 {
+  width: 10%;
+}
+.w3 {
+  width: 15%;
+}
+.w4 {
+  width: 20%;
+}
+.w5 {
+  width: 25%;
+}
+.w6 {
+  width: 30%;
+}
+.w7 {
+  width: 35%;
+}
+.w8 {
+  width: 40%;
+}
+.w9 {
+  width: 45%;
+}
+.w10 {
+  width: 50%;
+}
+.w11 {
+  width: 55%;
+}
+.w12 {
+  width: 60%;
+}
+.w13 {
+  width: 65%;
+}
+.w14 {
+  width: 70%;
+}
+.w15 {
+  width: 75%;
+}
+.w16 {
+  width: 80%;
+}
+.w17 {
+  width: 85%;
+}
+.w18 {
+  width: 90%;
+}
+.w19 {
+  width: 95%;
+}
+.w20 {
+  width: 100%;
+}
+
+/* The overview: an engineering panel. Hairlines, not boxes; numbers in tabular figures and
+ * right-aligned; one ink colour for data; every number next to what it compares with. */
+
+.panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem 1.5rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.panel-head h1 {
+  font-size: 1.35rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.as-of {
+  margin: 0 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 1rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.segmented {
+  display: inline-flex;
+  font-weight: 400;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+  font-size: 0.82rem;
+}
+
+.segmented a {
+  padding: 0.2rem 0.65rem;
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.segmented a + a {
+  border-left: 1px solid var(--line);
+}
+
+.segmented a:hover {
+  color: var(--fg);
+}
+
+.segmented a[aria-current="page"] {
+  background: var(--fg);
+  color: var(--bg);
+}
+
+/* The metric strip: label, value, change, sparkline; one row, ruled between. */
+
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin: 0;
+  border-bottom: 1px solid var(--line);
+}
+
+/* Each headline number is a link to its page. */
+.metric {
+  display: grid;
+  grid-template-rows: auto auto auto auto;
+  padding: 0.9rem 1rem 0.8rem;
+  border-left: 1px solid var(--line);
+  min-width: 0;
+  color: var(--fg);
+  text-decoration: none;
+}
+
+.metric:first-child {
+  border-left: 0;
+}
+
+.metric:hover {
+  background: var(--raised);
+}
+
+.metric-label {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.metric:hover .metric-label {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.metric-value {
+  font-size: 1.6rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+}
+
+.metric-delta {
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.metric-spark {
+  margin-top: 0.35rem;
+  line-height: 0;
+}
+
+svg.spark {
+  overflow: visible;
+}
+
+svg.spark polyline {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.25;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+svg.spark circle {
+  fill: var(--accent);
+}
+
+.compare-note {
+  margin: 0.4rem 0 0;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.panel-section {
+  margin-top: 1.75rem;
+  min-width: 0;
+}
+
+.panel-section > h2,
+.top-list > h2 {
+  font-size: 0.92rem;
+  font-weight: 700;
+  margin: 0 0 0.6rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.see-all {
+  margin-left: auto;
+  font-size: 0.8rem;
+  font-weight: 400;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.see-all:hover {
+  text-decoration: underline;
+}
+
+.h2-note {
+  font-size: 0.8rem;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.tops {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0 2.5rem;
+  margin-top: 1.75rem;
+}
+
+.top-table td.name {
+  width: 55%;
+}
+
+.status-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 1.25rem;
+  margin: 1.75rem 0 0;
+  padding: 0.6rem 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  font-size: 0.84rem;
+  color: var(--muted);
+}
+
+.status-line strong {
+  color: var(--fg);
+}
+
+p.status-line > a {
+  margin-left: auto;
+  text-decoration: none;
+}
+
+p.status-line > a:hover {
+  text-decoration: underline;
+}
+
+.headline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem 1rem;
+  padding: 1rem 0 0.25rem;
+}
+
+.metric-value.big {
+  font-size: 2.25rem;
+}
+
+.crumb {
+  flex-basis: 100%;
+  font-size: 0.85rem;
+}
+
+.panel-grid.two {
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+}
+
+.panel-section > .segmented {
+  margin-bottom: 0.6rem;
+}
+
+h3.sub {
+  font-size: 0.85rem;
+  font-weight: 700;
+  margin: 1.1rem 0 0.4rem;
+}
+
+.panel-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.8fr) minmax(0, 1.1fr);
+  gap: 0 2.25rem;
+}
+
+/* Small multiples: one strip of bars per series on a shared time axis. */
+
+.timeline {
+  margin: 0;
+}
+
+.strip-row {
+  display: grid;
+  grid-template-columns: 8.5rem minmax(0, 1fr) 3.5rem;
+  align-items: end;
+  gap: 0.75rem;
+  border-top: 1px solid var(--line);
+  padding-top: 0.35rem;
+}
+
+.strip-row:first-child {
+  border-top: 0;
+}
+
+.strip-label {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 0.15rem;
+  font-size: 0.8rem;
+}
+
+.strip-name {
+  font-weight: 600;
+}
+
+.strip-sum,
+.strip-max {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.strip-max {
+  align-self: start;
+  text-align: right;
+}
+
+svg.strip {
+  display: block;
+  width: 100%;
+  height: 3.5rem;
+}
+
+.timeline.tall svg.strip {
+  height: 7.5rem;
+}
+
+/* One series under its own heading: no label column to repeat it. */
+.timeline.tall .strip-row {
+  grid-template-columns: minmax(0, 1fr) 3rem;
+}
+
+.timeline.tall .strip-label {
+  display: none;
+}
+
+svg.strip .bar {
+  fill: var(--accent);
+}
+
+svg.strip .hit {
+  fill: transparent;
+}
+
+svg.strip .bucket:hover .bar {
+  opacity: 0.7;
+}
+
+svg.strip .axis {
+  stroke: var(--line);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.strip-ticks {
+  border-top: 0;
+  padding-top: 0.2rem;
+}
+
+.ticks {
+  display: flex;
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+
+.ticks span {
+  flex: 1 1 0;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: visible;
+  display: flex;
+  justify-content: center;
+}
+
+details.as-table > summary {
+  cursor: pointer;
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-top: 0.4rem;
+  width: max-content;
+}
+
+/* Tables: the panel's main form. */
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+table.plain {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.84rem;
+  font-variant-numeric: tabular-nums;
+}
+
+table.plain th {
+  text-align: left;
+  font-weight: 600;
+  font-size: 0.76rem;
+  color: var(--muted);
+  padding: 0 0.75rem 0.35rem 0;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+table.plain td {
+  padding: 0.32rem 0.75rem 0.32rem 0;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+table.plain .num {
+  text-align: right;
+}
+
+table.plain td.name {
+  max-width: 16rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+table.plain td.name a {
+  color: var(--fg);
+  text-decoration: none;
+}
+
+table.plain td.name a:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+table.plain .mono-cell {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+}
+
+table.plain .share {
+  width: 22%;
+  padding-right: 1rem;
+}
+
+.share-bar {
+  display: block;
+  height: 6px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--line) 55%, transparent);
+  overflow: hidden;
+}
+
+.share-bar .rank-fill {
+  border-radius: 1px;
+}
+
+table.plain .trend {
+  width: 1%;
+  line-height: 0;
+}
+
+table.health th {
+  color: var(--fg);
+  font-size: 0.84rem;
+  font-weight: 400;
+  border-bottom: 1px solid var(--line);
+  padding: 0.32rem 0.75rem 0.32rem 0;
+}
+
+table.health td {
+  white-space: normal;
+}
+
+.health-value {
+  display: block;
+  font-weight: 600;
+}
+
+.health-note {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+table.plain td.name.muted {
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+table.plain td.muted,
+table.health td.muted {
+  color: var(--muted);
+  font-size: 0.78rem;
+  white-space: normal;
+}
+
+table.plain tbody tr:last-child > td,
+table.plain tbody tr:last-child > th {
+  border-bottom: 0;
+}
+
+.table-note {
+  margin: 0.35rem 0 0;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+/* Search as you type, and find within a session. */
+
+.q-help {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.find-bar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0;
+  margin-bottom: 0.75rem;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+
+.find-bar input {
+  flex: 1 1 14rem;
+}
+
+.find-count {
+  font-size: 0.85rem;
+  color: var(--muted);
+  min-width: 6rem;
+}
+
+mark.find {
+  background: var(--spark);
+  color: var(--night-ink);
+  border-radius: 2px;
+}
+
+mark.find.current {
+  outline: 2px solid var(--thinking);
+  outline-offset: 1px;
+}
+
+.event.found > .event-head {
+  text-decoration: underline;
+  text-decoration-color: var(--thinking);
+  text-underline-offset: 0.3em;
+}
+
+/* Middle widths: the lower panels in two columns. */
+@media (max-width: 80rem) and (min-width: 56.01rem) {
+  .panel-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Narrow screens: the glance goes above the thread, and the bar wraps. */
+@media (max-width: 56rem) {
+  .strip-row {
+    grid-template-columns: 5.5rem minmax(0, 1fr) 2.75rem;
+    gap: 0.5rem;
+  }
+
+  .metric {
+    border-left: 0;
+    padding-left: 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .as-of {
+    margin-left: 0;
+    flex-basis: 100%;
+  }
+
+  .metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .panel-grid,
+  .panel-grid.two,
+  .tops {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .metric:nth-child(odd) {
+    border-left: 0;
+  }
+
+  .panel.with-aside {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1.5rem;
+  }
+
+  .glance {
+    position: static;
+    order: -1;
+    border-left: 0;
+    padding-left: 0;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 1rem;
+  }
+
+  .top {
+    flex-wrap: wrap;
+    row-gap: 0.5rem;
+  }
+
+  .nav {
+    margin-left: 0.5rem;
+  }
+
+  .event.step .event-head {
+    flex-wrap: wrap;
+  }
+
+  .step .summary-line {
+    flex-basis: 100%;
+    order: 5;
+  }
+
+  .md code,
+  .event-head code {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .event.step .event-head .tool {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+}

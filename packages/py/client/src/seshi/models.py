@@ -911,8 +911,9 @@ class SearchRequest(Request):
     """A search: keywords plus filters. Every filter narrows; none widens what the caller may
     read, which the server decides (F10.4)."""
 
-    q: str
-    """Words (all in one record), `"a phrase"`, `word*`, `a OR b`, `-word`."""
+    q: str | None = None
+    """Words (all in one record), `"a phrase"`, `word*`, `a OR b`, `-word`. Empty or left out,
+    the search is a browse: the filters alone, most recently active first, no matches."""
     owner: str | None = None
     agent: str | None = None
     repo: str | None = None
@@ -966,6 +967,18 @@ class SearchResult(Response):
     started_at: str | None = None
     ended_at: str | None = None
     updated_at: str
+    title: str | None = None
+    """The person's first prompt as one line, the harness's own blocks left out."""
+    events: int | None = None
+    """How many events the session's traces hold, of every role."""
+    tools: dict[str, int] | None = None
+    """The session's tool calls, by tool name."""
+    redactions: dict[str, int] | None = None
+    """What redaction replaced in the session, by rule."""
+    tool_outcomes: dict[str, int] | None = None
+    """Tool results whose outcome the trace records: `ok` and `failed`."""
+    tokens: dict[str, int] | None = None
+    """Tokens the session's model calls record: `input`, `output`, `cache_read`, `cache_write`."""
     score: float
     hits: int
     matches: list[SearchMatch]

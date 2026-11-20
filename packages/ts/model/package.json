@@ -14,6 +14,10 @@
     "./labels": {
       "bun": "./src/labels.ts"
     },
+    "./prompts": {
+      "bun": "./src/prompts.ts",
+      "default": "./src/prompts.ts"
+    },
     "./tool-calls": {
       "bun": "./src/tool-calls.ts"
     }

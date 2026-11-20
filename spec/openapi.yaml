@@ -1219,12 +1219,19 @@ paths:
         `q` takes words (all must appear in one record), `"a phrase"`, `word*` (a prefix), `a OR b`, and
         `-word` or `NOT word` (excluded). Case and accents are ignored; punctuation separates
         words, so `src/app.ts` matches those words in that order.
+
+        Without `q` (or with it empty) the search is a browse: every session the filters and
+        the caller's visibility allow, the most recently active first (by the last event,
+        or the last update when the traces carry no times), each with `hits` 0 and no
+        `matches`. `since` and `until` then keep sessions whose span (first to last event,
+        or that update) overlaps them, and `sort` has no effect. A browse's `cursor` marks
+        the last session of the page, not an offset, so sessions that arrive or move while
+        a client pages neither repeat nor push others off a page.
       parameters:
         - name: q
           in: query
-          required: true
-          description: What to search for (up to 1000 characters, 32 words and phrases).
-          schema: { type: string, minLength: 1, maxLength: 1000 }
+          description: What to search for (up to 1000 characters, 32 words and phrases). Left out or empty, a browse.
+          schema: { type: string, maxLength: 1000 }
         - name: owner
           in: query
           description: Only this owner's sessions (`[auth.owner_aliases]` folded in).
@@ -1299,13 +1306,13 @@ paths:
           schema: { type: string }
       responses:
         "200":
-          description: The sessions that match, best first.
+          description: The sessions that match, best first (a browse, most recently active first).
           content:
             application/json:
               schema: { $ref: "#/components/schemas/SearchResults" }
         "400":
           description: |
-            `bad_query`: no words to look for, an unknown or repeated parameter, a value that is
+            `bad_query`: a `q` with no words in it (only punctuation), an unknown or repeated parameter, a value that is
             not one (an owner id, a time, a number), `since` after `until`, a cursor this server
             did not give.
           content:
@@ -2765,13 +2772,47 @@ components:
         started_at: { type: string, format: date-time }
         ended_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+        title:
+          type: string
+          description: |
+            The person's first prompt as one line, with the blocks their agent's harness added
+            (AGENTS.md, environment context, command wrappers) left out: what the session was
+            about. Absent when no prompt of the person's was found.
+        events:
+          type: integer
+          minimum: 0
+          description: How many events the session's traces hold, of every role.
+        tools:
+          type: object
+          description: The session's tool calls, by tool name.
+          additionalProperties: { type: integer, minimum: 1 }
+        redactions:
+          type: object
+          description: What redaction replaced in the session, by rule.
+          additionalProperties: { type: integer, minimum: 1 }
+        tool_outcomes:
+          type: object
+          description: The session's tool results whose outcome its trace records, by outcome. Absent for agents that report no outcomes (Codex).
+          required: [ok, failed]
+          properties:
+            ok: { type: integer, minimum: 0 }
+            failed: { type: integer, minimum: 0 }
+        tokens:
+          type: object
+          description: Tokens the session's model calls record (`llm_calls[].usage`), summed. Absent when its agent reports none.
+          required: [input, output, cache_read, cache_write]
+          properties:
+            input: { type: integer, minimum: 0 }
+            output: { type: integer, minimum: 0 }
+            cache_read: { type: integer, minimum: 0 }
+            cache_write: { type: integer, minimum: 0 }
         score:
           type: number
-          description: How well it matched; higher is better, comparable within one answer only.
+          description: How well it matched; higher is better, comparable within one answer only (0 in a browse).
         hits:
           type: integer
-          minimum: 1
-          description: How many of its records matched.
+          minimum: 0
+          description: How many of its records matched (0 in a browse, which has no keywords).
         matches:
           type: array
           items: { $ref: "#/components/schemas/SearchMatch" }

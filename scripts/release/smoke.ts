@@ -193,6 +193,28 @@ export async function smokeExplore(
   }
 }
 
+/** The team UI that `seshi serve` carries (`server.ui`): `/` sends the browser to `/ui/`, the
+ * page links a script the server holds under `/ui/`, and the page comes with its policy. */
+export async function smokeUi(url: string): Promise<void> {
+  const root = await fetch(`${url}/`, { redirect: "manual" });
+  if (root.status !== 302 || root.headers.get("location") !== "/ui/") {
+    throw new Error(`/ answered ${root.status}, not a redirect to /ui/`);
+  }
+  const page = await fetch(`${url}/ui/`);
+  const html = await page.text();
+  const script = /src="(\/ui\/chunk-[^"]+\.js)"/.exec(html)?.[1];
+  if (page.status !== 200 || !script) {
+    throw new Error(`the team UI's page (${page.status}) links no script under /ui/:\n${html}`);
+  }
+  if (!page.headers.get("content-security-policy")?.includes("script-src 'self'")) {
+    throw new Error("the team UI's page came without its content security policy");
+  }
+  const js = await fetch(`${url}${script}`);
+  if (js.status !== 200 || !js.headers.get("content-type")?.includes("javascript")) {
+    throw new Error(`the team UI's script answered ${js.status}`);
+  }
+}
+
 /** Set, read and delete one entry in the OS keychain, each step with a deadline. */
 async function probeKeychain(): Promise<string> {
   const entry = { service: "seshi-smoke-probe", name: "probe" };
@@ -314,6 +336,8 @@ export async function smoke(options: SmokeOptions): Promise<SmokeResult> {
       await Bun.sleep(100);
     }
     log("ok: serve");
+    await smokeUi(url);
+    log("ok: serve carries the team UI");
 
     const loginArgs = ["login", "--server", url, "--user", "smoke@example.com", "--json"];
     const login = await run([...loginArgs, "--key", "-"], `${orgKey}\n`);

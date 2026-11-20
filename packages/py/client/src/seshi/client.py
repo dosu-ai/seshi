@@ -22,7 +22,7 @@ T = TypeVar("T")
 
 
 def _search_request(
-    q: str,
+    q: str | None,
     *,
     owner: str | None,
     agent: str | None,
@@ -428,7 +428,7 @@ class SeshiClient(_Base):
 
     def search(
         self,
-        q: str,
+        q: str | None = None,
         *,
         owner: str | None = None,
         agent: str | None = None,
@@ -446,7 +446,8 @@ class SeshiClient(_Base):
         matches: int | None = None,
         cursor: str | None = None,
     ) -> m.SearchResults:
-        """`GET /v1/search`: keyword search over the sessions this credential may read (F10). A
+        """`GET /v1/search`: keyword search over the sessions this credential may read (F10).
+        Without `q`, a browse: the sessions the filters allow, most recently active first. A
         query the server cannot run is `ServerError` 400 `bad_query`; 503 `index_building` while
         the index is first built; 404 `search_disabled` with search off."""
         request = _search_request(
@@ -867,7 +868,7 @@ class AsyncSeshiClient(_Base):
 
     async def search(
         self,
-        q: str,
+        q: str | None = None,
         *,
         owner: str | None = None,
         agent: str | None = None,

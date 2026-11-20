@@ -13,7 +13,7 @@ import {
   type SessionMetadata,
 } from "@seshi/model";
 import { accessDeniedIn, decodeMetadata, getBytes, isOwner, keys, type Store } from "@seshi/store";
-import type { BackendHit, BackendQuery, IndexStore } from "./backend";
+import type { BackendHit, BackendQuery, BrowsePosition, IndexStore } from "./backend";
 import { readFeed } from "./feed";
 import { Indexer, type IndexerLogger, type IndexerOptions, type IndexerRun } from "./indexer";
 import { defaultIndexPath } from "./paths";
@@ -112,10 +112,12 @@ function iso(ms: number | undefined): string | undefined {
 }
 
 export function checkRequest(request: SearchRequest, aliases = new OwnerAliases()): Checked {
-  if (typeof request.q !== "string" || request.q.trim() === "") {
-    throw new SearchQueryError("q is required: the words to search for");
+  if (request.q !== undefined && request.q !== null && typeof request.q !== "string") {
+    throw new SearchQueryError("q must be a string");
   }
-  const { match } = parseQuery(request.q);
+  const q = request.q ?? "";
+  // No keywords is a browse: the filters alone, most recently active first.
+  const match = q.trim() === "" ? undefined : parseQuery(q).match;
   const owner = text(request.owner, "owner");
   if (owner !== undefined && !isOwner(owner)) {
     throw new SearchQueryError("owner is not an owner id");
@@ -130,11 +132,21 @@ export function checkRequest(request: SearchRequest, aliases = new OwnerAliases(
     throw new SearchQueryError(`sort must be one of ${SEARCH_SORTS.join(", ")}`);
   }
   let offset = 0;
+  let after: BrowsePosition | undefined;
   if (request.cursor !== undefined && request.cursor !== "") {
-    if (!/^\d{1,9}$/.test(request.cursor) || Number(request.cursor) > MAX_OFFSET) {
+    // A search's cursor is an offset; a browse's is the place of its last session.
+    const place = /^(\d{1,15})\.(\d{1,15})$/.exec(request.cursor);
+    if (match === undefined && place) {
+      after = { activity: Number(place[1]), id: Number(place[2]) };
+    } else if (
+      match === undefined ||
+      !/^\d{1,9}$/.test(request.cursor) ||
+      Number(request.cursor) > MAX_OFFSET
+    ) {
       throw new SearchQueryError("cursor is not one this server gave");
+    } else {
+      offset = Number(request.cursor);
     }
-    offset = Number(request.cursor);
   }
   const agent = text(request.agent, "agent");
   const repo = text(request.repo, "repo");
@@ -145,9 +157,9 @@ export function checkRequest(request: SearchRequest, aliases = new OwnerAliases(
   const labels = labelFilter(request.labels);
   const source = text(request.source, "source");
   return {
-    q: request.q,
+    q,
     query: {
-      match,
+      ...(match !== undefined ? { match } : {}),
       ...(owner !== undefined ? { owners: aliases.storedAs(owner) } : {}),
       ...(agent !== undefined ? { agent } : {}),
       ...(repo !== undefined ? { repo } : {}),
@@ -163,6 +175,7 @@ export function checkRequest(request: SearchRequest, aliases = new OwnerAliases(
       limit: count(request.limit, "limit", DEFAULT_LIMIT, 1, MAX_LIMIT),
       matches: count(request.matches, "matches", DEFAULT_MATCHES, 0, MAX_MATCHES),
       offset,
+      ...(after ? { after } : {}),
     },
   };
 }
@@ -212,6 +225,12 @@ function resultOf(hit: BackendHit): SearchResult {
     ...(started !== undefined ? { started_at: started } : {}),
     ...(ended !== undefined ? { ended_at: ended } : {}),
     updated_at: s.updated_at,
+    ...(s.title !== undefined ? { title: s.title } : {}),
+    ...(s.events !== undefined ? { events: s.events } : {}),
+    ...(s.tools !== undefined ? { tools: s.tools } : {}),
+    ...(s.redactions !== undefined ? { redactions: s.redactions } : {}),
+    ...(s.tool_outcomes !== undefined ? { tool_outcomes: s.tool_outcomes } : {}),
+    ...(s.tokens !== undefined ? { tokens: s.tokens } : {}),
     score: hit.score,
     hits: hit.hits,
     matches: hit.matches.map((m) => {
@@ -340,12 +359,18 @@ export class SearchService {
             )
           ).filter((h): h is BackendHit => h !== null);
     const next = checked.query.offset + checked.query.limit;
+    const cursor =
+      checked.query.match === undefined
+        ? found.after && `${found.after.activity}.${found.after.id}`
+        : next < found.total && next <= MAX_OFFSET
+          ? String(next)
+          : undefined;
     const caughtUpAt = index.caughtUpAt();
     return {
       query: checked.q,
       total: found.total,
       results: verified.map(resultOf),
-      ...(next < found.total && next <= MAX_OFFSET ? { cursor: String(next) } : {}),
+      ...(cursor ? { cursor } : {}),
       index: {
         ready_at: readyAt,
         ...(caughtUpAt !== undefined ? { caught_up_at: caughtUpAt } : {}),

@@ -13,8 +13,9 @@ export interface SearchRequest {
   /** The keywords, matched per record (a prompt, an answer, one tool call). Words must all
    * appear in one record (in any order); `"a phrase"` must appear as written;
    * `word*` matches words that start with it; `a OR b` matches either; `-word` excludes
-   * records with it. Case and accents are ignored. */
-  q: string;
+   * records with it. Case and accents are ignored. Empty or left out, the search is a browse:
+   * the filters alone, the most recently active sessions first, with no matches. */
+  q?: string;
   /** Only this owner's sessions (`[auth.owner_aliases]` folded in). */
   owner?: string;
   /** Only sessions filed under this format or run by this agent (`origin_agent`). */
@@ -90,6 +91,21 @@ export interface SearchResult {
   started_at?: string;
   ended_at?: string;
   updated_at: string;
+  /** The person's first prompt as one line, with the blocks their agent's harness added
+   * (AGENTS.md, environment context, command wrappers) left out: what the session was about.
+   * Absent when no prompt of the person's was found. */
+  title?: string;
+  /** How many events the session's traces hold, of every role. */
+  events?: number;
+  /** The session's tool calls, by tool name. */
+  tools?: Record<string, number>;
+  /** What redaction replaced in the session, by rule. */
+  redactions?: Record<string, number>;
+  /** The session's tool results whose outcome its trace records, by outcome (agents that do
+   * not report outcomes, such as Codex, have none). */
+  tool_outcomes?: { ok: number; failed: number };
+  /** Tokens the session's model calls record, summed (absent when its agent reports none). */
+  tokens?: { input: number; output: number; cache_read: number; cache_write: number };
   /** How well the session matched: higher is better, comparable within one answer only. */
   score: number;
   /** How many of its records matched. */

@@ -6,6 +6,8 @@ import { VERSION } from "@seshi/model";
 import { readLayout } from "@seshi/store";
 import { EXIT } from "../cli/exit";
 import { fail, helpOrUsageError } from "../cli/output";
+import { loadUiAssets } from "../ui/assets";
+import { UI_PATH, uiHandler, withUi } from "../ui/server";
 import { watchConfig } from "./config-watch";
 import type { CommandContext } from "./index";
 import { openServer, serverFailure } from "./server-instance";
@@ -62,6 +64,14 @@ async function start(ctx: CommandContext, argv: string[]): Promise<number | unde
   }
 
   const app = createApp(instance);
+  // The team UI (server.ui): static files at /ui/ in front of the API, on api instances only.
+  const ui =
+    instance.api && loaded.config.server.ui
+      ? uiHandler({
+          assets: await loadUiAssets(),
+          issuer: () => instance.auth.modes().oidc?.issuer,
+        })
+      : undefined;
   let server: ReturnType<typeof Bun.serve>;
   try {
     server = Bun.serve({
@@ -70,7 +80,7 @@ async function start(ctx: CommandContext, argv: string[]): Promise<number | unde
       maxRequestBodySize: requestBodyCap(settings.limits),
       // A large upload or a long list against a bucket can take more than Bun's 10s default.
       idleTimeout: 120,
-      fetch: app.fetch,
+      fetch: ui ? withUi(app.fetch, ui) : app.fetch,
     });
   } catch (err) {
     await instance.close(1000);
@@ -98,7 +108,9 @@ async function start(ctx: CommandContext, argv: string[]): Promise<number | unde
     ...(owners.length > 0 ? [`static tokens for ${owners.join(", ")}`] : []),
     "seshi tokens",
   ].join(", ");
-  const serving = instance.api ? `accepting ${who}` : "worker only: /healthz and nothing else";
+  const serving = instance.api
+    ? `accepting ${who}${ui ? `; the team UI at http://${host}:${server.port}${UI_PATH}` : ""}`
+    : "worker only: /healthz and nothing else";
   const jobs = instance.jobs
     .list()
     .filter((job) => instance.jobs.runsHere(job))

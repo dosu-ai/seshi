@@ -20,8 +20,9 @@ import { indexText, MATCH_END, MATCH_START } from "./snippet";
 /** The index's own schema: a file built under another is wiped and rebuilt from the change
  * feeds. 3: sessions' `agent` column is `format`, and the feed's copies of entries written
  * before seshi 0.16 carry the format filled in from the session. 4: sessions gained `labels`. 5:
- * sessions' `repo`, `harness`, `agent_version` and `models`. */
-export const INDEX_SCHEMA = "seshi/search-index/5";
+ * sessions' `repo`, `harness`, `agent_version` and `models`. 6: sessions' `title`, `events`,
+ * `tools` and `redactions`. 7: sessions' `tool_outcomes` and `tokens`. */
+export const INDEX_SCHEMA = "seshi/search-index/7";
 
 const SNIPPET_TOKENS = 24;
 
@@ -62,6 +63,12 @@ CREATE TABLE IF NOT EXISTS sessions (
   ended_at INTEGER,
   updated_at TEXT NOT NULL,
   updated_ms INTEGER NOT NULL,
+  title TEXT,
+  events INTEGER,
+  tools TEXT,
+  redactions TEXT,
+  tool_outcomes TEXT,
+  tokens TEXT,
   traces TEXT NOT NULL,
   read_ms INTEGER NOT NULL DEFAULT 0,
   removed INTEGER NOT NULL DEFAULT 0,
@@ -77,6 +84,7 @@ CREATE TABLE IF NOT EXISTS events (
   ts INTEGER
 );
 CREATE INDEX IF NOT EXISTS events_by_session ON events (session);
+CREATE INDEX IF NOT EXISTS sessions_by_activity ON sessions (coalesce(ended_at, updated_ms));
 CREATE VIRTUAL TABLE IF NOT EXISTS events_text USING fts5 (
   text,
   tokenize = 'unicode61 remove_diacritics 2'
@@ -114,6 +122,12 @@ interface SessionRow {
   ended_at: number | null;
   updated_at: string;
   updated_ms: number;
+  title: string | null;
+  events: number | null;
+  tools: string | null;
+  redactions: string | null;
+  tool_outcomes: string | null;
+  tokens: string | null;
   traces: string;
   read_ms: number;
   removed: number;
@@ -139,9 +153,80 @@ function sessionOf(row: SessionRow): IndexedSession {
     ...(row.started_at !== null ? { started_at: row.started_at } : {}),
     ...(row.ended_at !== null ? { ended_at: row.ended_at } : {}),
     updated_at: row.updated_at,
+    ...(row.title !== null ? { title: row.title } : {}),
+    ...(row.events !== null ? { events: row.events } : {}),
+    ...(row.tools !== null ? { tools: JSON.parse(row.tools) as Record<string, number> } : {}),
+    ...(row.redactions !== null
+      ? { redactions: JSON.parse(row.redactions) as Record<string, number> }
+      : {}),
+    ...(row.tool_outcomes !== null
+      ? { tool_outcomes: JSON.parse(row.tool_outcomes) as IndexedSession["tool_outcomes"] }
+      : {}),
+    ...(row.tokens !== null ? { tokens: JSON.parse(row.tokens) as IndexedSession["tokens"] } : {}),
     traces: JSON.parse(row.traces) as string[],
   };
 }
+
+/** A count map as a column: null when it counts nothing. */
+function counts(map: Record<string, number> | undefined): string | null {
+  return map && Object.keys(map).length > 0 ? JSON.stringify(map) : null;
+}
+
+/** Push the session filters every query shares (live sessions only, what the viewer may
+ * read, owner, agent, repo and the rest) onto `where` and `params`, for a `sessions` table
+ * aliased `s`. False when nothing can match (an owner filter that names no folder). */
+function filtersOf(q: BackendQuery, where: string[], params: SQLQueryBindings[]): boolean {
+  where.push("s.removed = 0");
+  if (!q.viewer.everything) {
+    if (q.viewer.own.length > 0) {
+      where.push(`(s.visibility = 'org' OR s.owner IN (${placeholders(q.viewer.own.length)}))`);
+      params.push(...q.viewer.own);
+    } else {
+      where.push("s.visibility = 'org'");
+    }
+  }
+  if (q.owners !== undefined) {
+    if (q.owners.length === 0) return false;
+    where.push(`s.owner IN (${placeholders(q.owners.length)})`);
+    params.push(...q.owners);
+  }
+  if (q.agent !== undefined) {
+    where.push("(s.format = ? OR s.origin_agent = ?)");
+    params.push(q.agent, q.agent);
+  }
+  if (q.repo !== undefined) {
+    where.push("(s.repo = ? COLLATE NOCASE OR s.repo LIKE ? ESCAPE '\\')");
+    params.push(q.repo, `%/${likeLiteral(q.repo)}`);
+  }
+  if (q.branch !== undefined) {
+    where.push("s.branch = ?");
+    params.push(q.branch);
+  }
+  if (q.harness !== undefined) {
+    where.push("s.harness = ?");
+    params.push(q.harness);
+  }
+  if (q.agent_version !== undefined) {
+    where.push("s.agent_version = ?");
+    params.push(q.agent_version);
+  }
+  if (q.model !== undefined) {
+    where.push("EXISTS (SELECT 1 FROM json_each(s.models) WHERE json_each.value = ?)");
+    params.push(q.model);
+  }
+  for (const [key, value] of Object.entries(q.labels ?? {})) {
+    where.push("EXISTS (SELECT 1 FROM json_each(s.labels) AS l WHERE l.key = ? AND l.value = ?)");
+    params.push(key, value);
+  }
+  if (q.source !== undefined) {
+    where.push("s.source_id = ?");
+    params.push(q.source);
+  }
+  return true;
+}
+
+/** When a session last did something, as a browse orders it. */
+const ACTIVITY = "coalesce(s.ended_at, s.updated_ms)";
 
 function likeLiteral(value: string): string {
   return value.replace(/[\\%_]/g, (c) => `\\${c}`);
@@ -290,6 +375,12 @@ export class SqliteIndex implements IndexStore {
         session.ended_at ?? null,
         session.updated_at,
         Date.parse(session.updated_at) || 0,
+        session.title ?? null,
+        session.events ?? null,
+        counts(session.tools),
+        counts(session.redactions),
+        session.tool_outcomes ? JSON.stringify(session.tool_outcomes) : null,
+        session.tokens ? JSON.stringify(session.tokens) : null,
         JSON.stringify(session.traces),
         readAt,
       ];
@@ -300,8 +391,9 @@ export class SqliteIndex implements IndexStore {
             `INSERT INTO sessions (owner, archive_id, format, session_id, origin_agent,
                native_session_id, project, branch, repo, harness, agent_version, models,
                labels, source_id, visibility, started_at, ended_at, updated_at, updated_ms,
-               traces, read_ms)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+               title, events, tools, redactions, tool_outcomes, tokens, traces, read_ms)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             RETURNING id`,
           )
           .get(session.owner, session.archive_id, ...values) as { id: number };
         id = row.id;
@@ -313,7 +405,8 @@ export class SqliteIndex implements IndexStore {
             `UPDATE sessions SET format = ?, session_id = ?, origin_agent = ?,
                native_session_id = ?, project = ?, branch = ?, repo = ?, harness = ?,
                agent_version = ?, models = ?, labels = ?, source_id = ?, visibility = ?,
-               started_at = ?, ended_at = ?, updated_at = ?, updated_ms = ?, traces = ?,
+               started_at = ?, ended_at = ?, updated_at = ?, updated_ms = ?, title = ?,
+               events = ?, tools = ?, redactions = ?, tool_outcomes = ?, tokens = ?, traces = ?,
                read_ms = ?, removed = 0
              WHERE id = ?`,
           )
@@ -364,53 +457,10 @@ export class SqliteIndex implements IndexStore {
   }
 
   query(q: BackendQuery): BackendResults {
-    const where: string[] = ["events_text MATCH ?", "s.removed = 0"];
+    if (q.match === undefined) return this.browse(q);
+    const where: string[] = ["events_text MATCH ?"];
     const params: SQLQueryBindings[] = [q.match];
-    if (!q.viewer.everything) {
-      if (q.viewer.own.length > 0) {
-        where.push(`(s.visibility = 'org' OR s.owner IN (${placeholders(q.viewer.own.length)}))`);
-        params.push(...q.viewer.own);
-      } else {
-        where.push("s.visibility = 'org'");
-      }
-    }
-    if (q.owners !== undefined) {
-      if (q.owners.length === 0) return { total: 0, hits: [] };
-      where.push(`s.owner IN (${placeholders(q.owners.length)})`);
-      params.push(...q.owners);
-    }
-    if (q.agent !== undefined) {
-      where.push("(s.format = ? OR s.origin_agent = ?)");
-      params.push(q.agent, q.agent);
-    }
-    if (q.repo !== undefined) {
-      where.push("(s.repo = ? COLLATE NOCASE OR s.repo LIKE ? ESCAPE '\\')");
-      params.push(q.repo, `%/${likeLiteral(q.repo)}`);
-    }
-    if (q.branch !== undefined) {
-      where.push("s.branch = ?");
-      params.push(q.branch);
-    }
-    if (q.harness !== undefined) {
-      where.push("s.harness = ?");
-      params.push(q.harness);
-    }
-    if (q.agent_version !== undefined) {
-      where.push("s.agent_version = ?");
-      params.push(q.agent_version);
-    }
-    if (q.model !== undefined) {
-      where.push("EXISTS (SELECT 1 FROM json_each(s.models) WHERE json_each.value = ?)");
-      params.push(q.model);
-    }
-    for (const [key, value] of Object.entries(q.labels ?? {})) {
-      where.push("EXISTS (SELECT 1 FROM json_each(s.labels) AS l WHERE l.key = ? AND l.value = ?)");
-      params.push(key, value);
-    }
-    if (q.source !== undefined) {
-      where.push("s.source_id = ?");
-      params.push(q.source);
-    }
+    if (!filtersOf(q, where, params)) return { total: 0, hits: [] };
     if (q.since !== undefined) {
       where.push("coalesce(e.ts, s.updated_ms) >= ?");
       params.push(q.since);
@@ -465,6 +515,50 @@ export class SqliteIndex implements IndexStore {
       matches: matches.get(row.id) ?? [],
     }));
     return { total, hits };
+  }
+
+  /** Sessions without keywords (a browse): the filters alone, the most recently active first
+   * (by the last event, or the last update when the traces carry no times). `since` and
+   * `until` keep sessions whose span (first to last event, or that update) overlaps them. */
+  private browse(q: BackendQuery): BackendResults {
+    const where: string[] = [];
+    const params: SQLQueryBindings[] = [];
+    if (!filtersOf(q, where, params)) return { total: 0, hits: [] };
+    if (q.since !== undefined) {
+      where.push("coalesce(s.ended_at, s.updated_ms) >= ?");
+      params.push(q.since);
+    }
+    if (q.until !== undefined) {
+      where.push("coalesce(s.started_at, s.updated_ms) <= ?");
+      params.push(q.until);
+    }
+    const total = (
+      this.db
+        .query(`SELECT count(*) AS n FROM sessions s WHERE ${where.join(" AND ")}`)
+        .get(...params) as { n: number }
+    ).n;
+    const page = [...where];
+    const pageParams = [...params];
+    if (q.after) {
+      page.push(`(${ACTIVITY} < ? OR (${ACTIVITY} = ? AND s.id < ?))`);
+      pageParams.push(q.after.activity, q.after.activity, q.after.id);
+    }
+    const rows = this.db
+      .query(
+        `SELECT s.*, ${ACTIVITY} AS activity FROM sessions s
+         WHERE ${page.join(" AND ")}
+         ORDER BY ${ACTIVITY} DESC, s.id DESC
+         LIMIT ?`,
+      )
+      .all(...pageParams, q.limit + 1) as (SessionRow & { activity: number })[];
+    const more = rows.length > q.limit;
+    const shown = more ? rows.slice(0, q.limit) : rows;
+    const last = shown.at(-1);
+    return {
+      total,
+      hits: shown.map((row) => ({ session: sessionOf(row), score: 0, hits: 0, matches: [] })),
+      ...(more && last ? { after: { activity: last.activity, id: last.id } } : {}),
+    };
   }
 
   /** The best `limit` matching events of each session, with snippets. FTS5 refuses

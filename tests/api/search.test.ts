@@ -132,6 +132,109 @@ describe("GET /v1/search (F10)", () => {
     ]);
   });
 
+  it("browses without q: what each caller may read, latest activity first, no matches", async () => {
+    await seed();
+    const asBob = await client(orgKey, "bob").search({});
+    expect(ids(asBob)).toEqual(["alice/pay", "bob/docs"]);
+    expect(asBob.query).toBe("");
+    expect(asBob.results.every((r) => r.hits === 0 && r.matches.length === 0)).toBe(true);
+    expect(ids(await client(orgKey, "alice").search({ q: "  " }))).toEqual([
+      "alice/pay",
+      "alice/rot",
+      "bob/docs",
+      "old-alice/legacy",
+    ]);
+    const admin = client(adminToken);
+    const all = await admin.search({ limit: 2 });
+    expect(all.total).toBe(4);
+    expect(all.results).toHaveLength(2);
+    const stamps = all.results.map((r) => r.ended_at ?? r.updated_at);
+    expect([...stamps].sort().reverse()).toEqual(stamps);
+    expect(all.cursor).toMatch(/^\d+\.\d+$/);
+    const rest = await admin.search({ cursor: all.cursor });
+    expect(rest.results).toHaveLength(2);
+    expect(rest.cursor).toBeUndefined();
+    expect(new Set([...ids(all), ...ids(rest)]).size).toBe(4);
+    // A browse's cursor is not a search's, nor the other way round.
+    await expect(admin.search({ cursor: "2" })).rejects.toMatchObject({ status: 400 });
+    await expect(admin.search({ q: "deploy", cursor: all.cursor })).rejects.toMatchObject({
+      status: 400,
+    });
+    // The filters narrow a browse as they narrow a search.
+    expect(ids(await admin.search({ owner: "alice", repo: "payments" }))).toEqual(["alice/pay"]);
+    expect(ids(await admin.search({ labels: { team: "platform" } }))).toEqual([
+      "alice/pay",
+      "bob/docs",
+    ]);
+    expect(ids(await admin.search({ until: "2026-10-15T00:00:00Z" }))).toEqual(["alice/rot"]);
+    expect(ids(await admin.search({ since: "2026-10-15T00:00:00Z", owner: "alice" }))).toEqual([
+      "alice/pay",
+      "old-alice/legacy",
+    ]);
+    // Punctuation alone is still a query with no words in it.
+    await expect(admin.search({ q: "--" })).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("says what each session was about: its first prompt, events and tools", async () => {
+    const alice = client(orgKey, "alice");
+    const at = "2026-11-01T10:00:00Z";
+    await alice.ingest({
+      format: "trajectory",
+      session_id: "tools",
+      transcript:
+        line({ role: "meta", source: "trajectory" }) +
+        line({
+          role: "user",
+          content: `<environment_context>\n<cwd>/work</cwd>\n</environment_context>\nFix the flaky checkout test\n${"context ".repeat(300)}`,
+          timestamp: at,
+        }) +
+        line({
+          role: "assistant",
+          content: null,
+          tool_calls: [{ id: "c1", name: "Bash", args: '{"command":"bun test"}' }],
+          timestamp: at,
+        }) +
+        line({ role: "tool", tool_call_id: "c1", content: "ok", ok: false, timestamp: at }) +
+        line({
+          role: "assistant",
+          content: "Fixed: [redacted:github-token] removed",
+          timestamp: at,
+        }),
+    });
+    await instance.search?.catchUp();
+    const [result] = (await client(adminToken).search({})).results;
+    expect(result).toMatchObject({
+      session_id: "tools",
+      title: "Fix the flaky checkout test",
+      events: 4,
+      tools: { Bash: 1 },
+      tool_outcomes: { ok: 0, failed: 1 },
+    });
+  });
+
+  it("pages a browse by place: a session arriving between pages repeats nothing", async () => {
+    await seed();
+    const admin = client(adminToken);
+    const first = await admin.search({ limit: 2 });
+    await client(orgKey, "bob").ingest({
+      format: "trajectory",
+      session_id: "late",
+      transcript: log("deploy the late one", "2026-11-05T10:00:00Z"),
+    });
+    await instance.search?.catchUp();
+    let seen = ids(first);
+    let cursor = first.cursor;
+    while (cursor) {
+      const page = await admin.search({ limit: 2, cursor });
+      seen = [...seen, ...ids(page)];
+      cursor = page.cursor;
+    }
+    // The four seeded sessions, each once. The new one sorts above the first page's cursor, so
+    // it waits for the next browse from the top instead of shifting these pages.
+    expect(seen.sort()).toEqual(["alice/pay", "alice/rot", "bob/docs", "old-alice/legacy"]);
+    expect(ids(await admin.search({}))).toContain("bob/late");
+  });
+
   it("filters by owner (aliases folded), repo, agent, branch, source and time", async () => {
     await seed();
     const admin = client(adminToken);

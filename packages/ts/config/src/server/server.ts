@@ -40,6 +40,12 @@ export const serverSection = z
       .describe(
         "This instance's stable name in source health shards and the worker heartbeat; the host name when unset.",
       ),
+    ui: z
+      .boolean()
+      .default(true)
+      .describe(
+        "Serve the team's web page at /ui/ on instances with the api role: browse, search and read the sessions the person signed in may read. It only reads the API, with that person's own credential.",
+      ),
     watch_config: z
       .boolean()
       .default(false)

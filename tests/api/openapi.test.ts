@@ -1154,7 +1154,15 @@ describe("search (F10)", () => {
       total: 1,
       results: [{ owner: "acme", session_id: "sess1" }],
     });
-    for (const bad of ["q=", "q=x&limit=two", "q=x&q=y", "q=x&page=2", "q=x&owner=a/b", "q=--"]) {
+    // No keywords is a browse: every session the caller may read, most recently active first.
+    const browsed = await call("GET", "/v1/search?q=&limit=5", as);
+    expect(browsed.status).toBe(200);
+    expect(browsed.body).toMatchObject({
+      query: "",
+      total: 1,
+      results: [{ hits: 0, matches: [] }],
+    });
+    for (const bad of ["q=x&limit=two", "q=x&q=y", "q=x&page=2", "q=x&owner=a/b", "q=--"]) {
       expect((await call("GET", `/v1/search?${bad}`, as)).status, bad).toBe(400);
     }
     expect((await call("GET", "/v1/search?q=auth", { ...as, token: null })).status).toBe(401);
