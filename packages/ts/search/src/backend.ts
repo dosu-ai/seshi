@@ -65,7 +65,9 @@ export interface SessionUpdate {
 /** A query as the backend runs it: the match expression already parsed, filters already
  * resolved (owner aliases folded, times in epoch ms). */
 export interface BackendQuery {
-  match: string;
+  /** The FTS5 match expression; undefined for a browse (no keywords: the filters alone, most
+   * recently active first, no matches). */
+  match?: string;
   viewer: Viewer;
   owners?: readonly string[];
   /** Sessions filed under this format or run by this agent (`origin_agent`). */

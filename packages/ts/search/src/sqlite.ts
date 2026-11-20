@@ -77,6 +77,7 @@ CREATE TABLE IF NOT EXISTS events (
   ts INTEGER
 );
 CREATE INDEX IF NOT EXISTS events_by_session ON events (session);
+CREATE INDEX IF NOT EXISTS sessions_by_activity ON sessions (coalesce(ended_at, updated_ms));
 CREATE VIRTUAL TABLE IF NOT EXISTS events_text USING fts5 (
   text,
   tokenize = 'unicode61 remove_diacritics 2'
@@ -141,6 +142,59 @@ function sessionOf(row: SessionRow): IndexedSession {
     updated_at: row.updated_at,
     traces: JSON.parse(row.traces) as string[],
   };
+}
+
+/** Push the session filters every query shares (live sessions only, what the viewer may
+ * read, owner, agent, repo and the rest) onto `where` and `params`, for a `sessions` table
+ * aliased `s`. False when nothing can match (an owner filter that names no folder). */
+function filtersOf(q: BackendQuery, where: string[], params: SQLQueryBindings[]): boolean {
+  where.push("s.removed = 0");
+  if (!q.viewer.everything) {
+    if (q.viewer.own.length > 0) {
+      where.push(`(s.visibility = 'org' OR s.owner IN (${placeholders(q.viewer.own.length)}))`);
+      params.push(...q.viewer.own);
+    } else {
+      where.push("s.visibility = 'org'");
+    }
+  }
+  if (q.owners !== undefined) {
+    if (q.owners.length === 0) return false;
+    where.push(`s.owner IN (${placeholders(q.owners.length)})`);
+    params.push(...q.owners);
+  }
+  if (q.agent !== undefined) {
+    where.push("(s.format = ? OR s.origin_agent = ?)");
+    params.push(q.agent, q.agent);
+  }
+  if (q.repo !== undefined) {
+    where.push("(s.repo = ? COLLATE NOCASE OR s.repo LIKE ? ESCAPE '\\')");
+    params.push(q.repo, `%/${likeLiteral(q.repo)}`);
+  }
+  if (q.branch !== undefined) {
+    where.push("s.branch = ?");
+    params.push(q.branch);
+  }
+  if (q.harness !== undefined) {
+    where.push("s.harness = ?");
+    params.push(q.harness);
+  }
+  if (q.agent_version !== undefined) {
+    where.push("s.agent_version = ?");
+    params.push(q.agent_version);
+  }
+  if (q.model !== undefined) {
+    where.push("EXISTS (SELECT 1 FROM json_each(s.models) WHERE json_each.value = ?)");
+    params.push(q.model);
+  }
+  for (const [key, value] of Object.entries(q.labels ?? {})) {
+    where.push("EXISTS (SELECT 1 FROM json_each(s.labels) AS l WHERE l.key = ? AND l.value = ?)");
+    params.push(key, value);
+  }
+  if (q.source !== undefined) {
+    where.push("s.source_id = ?");
+    params.push(q.source);
+  }
+  return true;
 }
 
 function likeLiteral(value: string): string {
@@ -364,53 +418,10 @@ export class SqliteIndex implements IndexStore {
   }
 
   query(q: BackendQuery): BackendResults {
-    const where: string[] = ["events_text MATCH ?", "s.removed = 0"];
+    if (q.match === undefined) return this.browse(q);
+    const where: string[] = ["events_text MATCH ?"];
     const params: SQLQueryBindings[] = [q.match];
-    if (!q.viewer.everything) {
-      if (q.viewer.own.length > 0) {
-        where.push(`(s.visibility = 'org' OR s.owner IN (${placeholders(q.viewer.own.length)}))`);
-        params.push(...q.viewer.own);
-      } else {
-        where.push("s.visibility = 'org'");
-      }
-    }
-    if (q.owners !== undefined) {
-      if (q.owners.length === 0) return { total: 0, hits: [] };
-      where.push(`s.owner IN (${placeholders(q.owners.length)})`);
-      params.push(...q.owners);
-    }
-    if (q.agent !== undefined) {
-      where.push("(s.format = ? OR s.origin_agent = ?)");
-      params.push(q.agent, q.agent);
-    }
-    if (q.repo !== undefined) {
-      where.push("(s.repo = ? COLLATE NOCASE OR s.repo LIKE ? ESCAPE '\\')");
-      params.push(q.repo, `%/${likeLiteral(q.repo)}`);
-    }
-    if (q.branch !== undefined) {
-      where.push("s.branch = ?");
-      params.push(q.branch);
-    }
-    if (q.harness !== undefined) {
-      where.push("s.harness = ?");
-      params.push(q.harness);
-    }
-    if (q.agent_version !== undefined) {
-      where.push("s.agent_version = ?");
-      params.push(q.agent_version);
-    }
-    if (q.model !== undefined) {
-      where.push("EXISTS (SELECT 1 FROM json_each(s.models) WHERE json_each.value = ?)");
-      params.push(q.model);
-    }
-    for (const [key, value] of Object.entries(q.labels ?? {})) {
-      where.push("EXISTS (SELECT 1 FROM json_each(s.labels) AS l WHERE l.key = ? AND l.value = ?)");
-      params.push(key, value);
-    }
-    if (q.source !== undefined) {
-      where.push("s.source_id = ?");
-      params.push(q.source);
-    }
+    if (!filtersOf(q, where, params)) return { total: 0, hits: [] };
     if (q.since !== undefined) {
       where.push("coalesce(e.ts, s.updated_ms) >= ?");
       params.push(q.since);
@@ -465,6 +476,44 @@ export class SqliteIndex implements IndexStore {
       matches: matches.get(row.id) ?? [],
     }));
     return { total, hits };
+  }
+
+  /** Sessions without keywords (a browse): the filters alone, the most recently active first
+   * (by the last event, or the last update when the traces carry no times). `since` and
+   * `until` keep sessions whose span (first to last event, or that update) overlaps them. */
+  private browse(q: BackendQuery): BackendResults {
+    const where: string[] = [];
+    const params: SQLQueryBindings[] = [];
+    if (!filtersOf(q, where, params)) return { total: 0, hits: [] };
+    if (q.since !== undefined) {
+      where.push("coalesce(s.ended_at, s.updated_ms) >= ?");
+      params.push(q.since);
+    }
+    if (q.until !== undefined) {
+      where.push("coalesce(s.started_at, s.updated_ms) <= ?");
+      params.push(q.until);
+    }
+    const rows = this.db
+      .query(
+        `SELECT s.*, count(*) OVER () AS total FROM sessions s
+         WHERE ${where.join(" AND ")}
+         ORDER BY coalesce(s.ended_at, s.updated_ms) DESC, s.id DESC
+         LIMIT ? OFFSET ?`,
+      )
+      .all(...params, q.limit, q.offset) as (SessionRow & { total: number })[];
+    const total =
+      rows[0]?.total ??
+      (q.offset > 0
+        ? (
+            this.db
+              .query(`SELECT count(*) AS n FROM sessions s WHERE ${where.join(" AND ")}`)
+              .get(...params) as { n: number }
+          ).n
+        : 0);
+    return {
+      total,
+      hits: rows.map((row) => ({ session: sessionOf(row), score: 0, hits: 0, matches: [] })),
+    };
   }
 
   /** The best `limit` matching events of each session, with snippets. FTS5 refuses

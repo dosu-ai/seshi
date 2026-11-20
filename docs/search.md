@@ -58,6 +58,14 @@ Where it searches:
   ([serverless.md](serverless.md#search)). `seshi search --status` says where the index file is and what it holds;
   `seshi search --rebuild` drops it and builds it again.
 
+### Browsing
+
+`GET /v1/search` without `q` (or with it empty) is a browse: every session the filters and the
+caller's visibility allow, the most recently active first (by the last event, or the last
+update when the traces carry no times), with no matches. `since` and `until` then keep sessions
+whose span overlaps them, and `sort` has no effect. The [team UI](ui.md) lists sessions this
+way. `seshi search` still needs words.
+
 The output is plain text; `--json` prints the API's `SearchResults`. Exit 0 also when nothing
 matches; 2 for a query with nothing to look for; 3 when nothing is configured or search is
 turned off; 5 when not signed in or not allowed (the credential lacks the `search` scope); 7

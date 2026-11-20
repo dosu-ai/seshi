@@ -13,6 +13,7 @@ Start with the [README](../README.md) for what it is, the
 | [cli.md](cli.md) | Every command, its flags and exit codes; signing in; serverless mode |
 | [serverless.md](serverless.md) | Running with no server: each laptop writes the shared bucket; setup, permissions, example policies, switching modes |
 | [search.md](search.md) | `seshi search` and `GET /v1/search`: queries, filters, the index |
+| [ui.md](ui.md) | The team UI `seshi serve` serves at `/ui/`: signing in, browsing, searching and reading sessions |
 
 ## Running a server
 

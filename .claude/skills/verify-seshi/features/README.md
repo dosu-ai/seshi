@@ -59,6 +59,8 @@ behaviour. It then has exactly four H2 sections, in this order:
   test` shows what each rule takes out.
 - [Doctor and explore](./doctor-explore.md): `seshi doctor` checks a session end to end, and the
   `seshi explore` page shows the same evidence read-only.
+- [Team UI](./team-ui.md): the page `seshi serve` serves at `/ui/`: sign-in, the list, search,
+  filters and a session's thread, read-only.
 
 For behaviour across capture paths (a pause meeting a rebuild, a review stub meeting a replace, a
 resend after a lost answer, faults in the server or the bucket), see the scenario runner in

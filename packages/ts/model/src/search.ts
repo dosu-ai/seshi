@@ -13,8 +13,9 @@ export interface SearchRequest {
   /** The keywords, matched per record (a prompt, an answer, one tool call). Words must all
    * appear in one record (in any order); `"a phrase"` must appear as written;
    * `word*` matches words that start with it; `a OR b` matches either; `-word` excludes
-   * records with it. Case and accents are ignored. */
-  q: string;
+   * records with it. Case and accents are ignored. Empty or left out, the search is a browse:
+   * the filters alone, the most recently active sessions first, with no matches. */
+  q?: string;
   /** Only this owner's sessions (`[auth.owner_aliases]` folded in). */
   owner?: string;
   /** Only sessions filed under this format or run by this agent (`origin_agent`). */

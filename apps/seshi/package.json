@@ -22,6 +22,9 @@
     "./explore": {
       "bun": "./src/commands/explore.ts"
     },
+    "./ui": {
+      "bun": "./src/ui/index.ts"
+    },
     "./capture-runtime": {
       "bun": "./src/capture-runtime.ts"
     }

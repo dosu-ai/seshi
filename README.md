@@ -85,7 +85,8 @@ There are two modes.
 
 **1. Server (recommended).** One server holds the bucket's keys; laptops hold only a revocable
 Seshi credential. It adds identity-provider sign-in, redaction a laptop cannot skip, one shared
-search index, and the OpenTelemetry, Datadog and S3 sources.
+search index, a web page where the team browses and reads its sessions
+([docs/ui.md](docs/ui.md)), and the OpenTelemetry, Datadog and S3 sources.
 
 ```sh
 # on the server, with a seshi.toml naming the bucket ([store] url = "s3://acme-sessions/seshi")

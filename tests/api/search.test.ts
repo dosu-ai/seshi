@@ -132,6 +132,41 @@ describe("GET /v1/search (F10)", () => {
     ]);
   });
 
+  it("browses without q: what each caller may read, latest activity first, no matches", async () => {
+    await seed();
+    const asBob = await client(orgKey, "bob").search({});
+    expect(ids(asBob)).toEqual(["alice/pay", "bob/docs"]);
+    expect(asBob.query).toBe("");
+    expect(asBob.results.every((r) => r.hits === 0 && r.matches.length === 0)).toBe(true);
+    expect(ids(await client(orgKey, "alice").search({ q: "  " }))).toEqual([
+      "alice/pay",
+      "alice/rot",
+      "bob/docs",
+      "old-alice/legacy",
+    ]);
+    const admin = client(adminToken);
+    const all = await admin.search({ limit: 2 });
+    expect(all.total).toBe(4);
+    expect(all.results).toHaveLength(2);
+    const stamps = all.results.map((r) => r.ended_at ?? r.updated_at);
+    expect([...stamps].sort().reverse()).toEqual(stamps);
+    expect(all.cursor).toBe("2");
+    expect((await admin.search({ cursor: all.cursor })).results).toHaveLength(2);
+    // The filters narrow a browse as they narrow a search.
+    expect(ids(await admin.search({ owner: "alice", repo: "payments" }))).toEqual(["alice/pay"]);
+    expect(ids(await admin.search({ labels: { team: "platform" } }))).toEqual([
+      "alice/pay",
+      "bob/docs",
+    ]);
+    expect(ids(await admin.search({ until: "2026-10-15T00:00:00Z" }))).toEqual(["alice/rot"]);
+    expect(ids(await admin.search({ since: "2026-10-15T00:00:00Z", owner: "alice" }))).toEqual([
+      "alice/pay",
+      "old-alice/legacy",
+    ]);
+    // Punctuation alone is still a query with no words in it.
+    await expect(admin.search({ q: "--" })).rejects.toMatchObject({ status: 400 });
+  });
+
   it("filters by owner (aliases folded), repo, agent, branch, source and time", async () => {
     await seed();
     const admin = client(adminToken);

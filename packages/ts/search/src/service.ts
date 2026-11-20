@@ -112,10 +112,12 @@ function iso(ms: number | undefined): string | undefined {
 }
 
 export function checkRequest(request: SearchRequest, aliases = new OwnerAliases()): Checked {
-  if (typeof request.q !== "string" || request.q.trim() === "") {
-    throw new SearchQueryError("q is required: the words to search for");
+  if (request.q !== undefined && request.q !== null && typeof request.q !== "string") {
+    throw new SearchQueryError("q must be a string");
   }
-  const { match } = parseQuery(request.q);
+  const q = request.q ?? "";
+  // No keywords is a browse: the filters alone, most recently active first.
+  const match = q.trim() === "" ? undefined : parseQuery(q).match;
   const owner = text(request.owner, "owner");
   if (owner !== undefined && !isOwner(owner)) {
     throw new SearchQueryError("owner is not an owner id");
@@ -145,9 +147,9 @@ export function checkRequest(request: SearchRequest, aliases = new OwnerAliases(
   const labels = labelFilter(request.labels);
   const source = text(request.source, "source");
   return {
-    q: request.q,
+    q,
     query: {
-      match,
+      ...(match !== undefined ? { match } : {}),
       ...(owner !== undefined ? { owners: aliases.storedAs(owner) } : {}),
       ...(agent !== undefined ? { agent } : {}),
       ...(repo !== undefined ? { repo } : {}),

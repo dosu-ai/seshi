@@ -1,32 +1,14 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { contentSecurityPolicy, securityHeaders } from "../web/headers";
 import type { ExploreApi } from "./api";
 import type { Assets } from "./assets";
 import type { RowFilter } from "./types";
 
 export const TOKEN_HEADER = "x-seshi-token";
 
-export const CSP = [
-  "default-src 'self'",
-  "script-src 'self'",
-  "style-src 'self'",
-  "img-src 'self'",
-  "connect-src 'self'",
-  "font-src 'none'",
-  "object-src 'none'",
-  "base-uri 'none'",
-  "form-action 'none'",
-  "frame-ancestors 'none'",
-].join("; ");
+export const CSP = contentSecurityPolicy();
 
-const HEADERS: Readonly<Record<string, string>> = {
-  "content-security-policy": CSP,
-  "x-content-type-options": "nosniff",
-  "x-frame-options": "DENY",
-  "referrer-policy": "no-referrer",
-  "cache-control": "no-store",
-  "cross-origin-opener-policy": "same-origin",
-  "cross-origin-resource-policy": "same-origin",
-};
+const HEADERS: Readonly<Record<string, string>> = securityHeaders(CSP);
 
 export function newToken(): string {
   return randomBytes(32).toString("base64url");

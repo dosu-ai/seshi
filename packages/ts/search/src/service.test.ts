@@ -181,10 +181,19 @@ describe("checkRequest", () => {
     });
   });
 
+  it("reads no keywords as a browse, with no match expression", () => {
+    for (const request of [{}, { q: "" }, { q: "   " }]) {
+      const checked = checkRequest(request as never);
+      expect(checked.query.match).toBeUndefined();
+      expect(checked.query.limit).toBe(20);
+    }
+    expect(checkRequest({ owner: "alice" } as never).query.owners).toEqual(["alice"]);
+  });
+
   it("refuses what it cannot run", () => {
     const bad = [
-      { q: "" },
-      { q: "   " },
+      { q: 5 },
+      { q: "--" },
       { q: "x", owner: "a/b" },
       { q: "x", since: "yesterday" },
       { q: "x", since: "2026-11-02T00:00:00Z", until: "2026-11-01T00:00:00Z" },

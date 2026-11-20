@@ -312,8 +312,12 @@ def test_search_and_every_owners_feed(live_server: LiveServer, admin: SeshiClien
         snippet = eventually(found, "the session to be searchable")
         assert word in snippet.lower()
 
+        # No words is a browse: the sessions alice may read, with no matches.
+        browsed = alice.search(repo="widget")
+        assert sid in [r.session_id for r in browsed.results]
+        assert all(r.hits == 0 and not r.matches for r in browsed.results)
         with pytest.raises(ServerError) as raised:
-            alice.search("")
+            alice.search("--")
         assert (raised.value.status, raised.value.code) == (400, "bad_query")
         with pytest.raises(Forbidden):
             alice.all_changes()

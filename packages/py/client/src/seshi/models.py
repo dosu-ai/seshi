@@ -911,8 +911,9 @@ class SearchRequest(Request):
     """A search: keywords plus filters. Every filter narrows; none widens what the caller may
     read, which the server decides (F10.4)."""
 
-    q: str
-    """Words (all in one record), `"a phrase"`, `word*`, `a OR b`, `-word`."""
+    q: str | None = None
+    """Words (all in one record), `"a phrase"`, `word*`, `a OR b`, `-word`. Empty or left out,
+    the search is a browse: the filters alone, most recently active first, no matches."""
     owner: str | None = None
     agent: str | None = None
     repo: str | None = None

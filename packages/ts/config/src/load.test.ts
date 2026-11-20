@@ -78,6 +78,7 @@ describe("precedence (F1.1)", () => {
     expect(config.server).toEqual({
       listen: ":7200",
       roles: ["api", "worker"],
+      ui: true,
       watch_config: false,
     });
     expect(config.store).toEqual({ url: "file:///data" });

@@ -51,6 +51,9 @@ seshi admin init --config seshi.toml     # prints the first admin token and the 
 seshi serve                              # http://localhost:7200
 ```
 
+Open `http://localhost:7200` in a browser for the [team UI](ui.md): sign in and browse, search
+and read the sessions you may read.
+
 The config is `./seshi.toml` (read unasked by `seshi serve` only: every other command needs
 `--config` or `SESHI_CONFIG` for it), `/etc/seshi/seshi.toml`, or the file `--config` names, with
 `SESHI_*` env over it and flags over env; [`seshi.example.toml`](../seshi.example.toml) is a
@@ -330,6 +333,7 @@ allow.
 | | |
 |---|---|
 | `GET /healthz` | `{ok, version}`, no auth |
+| `GET /ui/` | The [team UI](ui.md)'s page and its files (`server.ui`, on by default), no auth: the files hold no data. `GET /` and `GET /ui` redirect there. Not in the OpenAPI document, which covers the API |
 | `GET /v1/auth/config` | Which ways in the server takes (X5.7): `org_key`, `oidc` (`issuer`, `client_id`, `audience`, `scopes`) or null, and token lifetimes. No auth |
 | `POST /v1/auth/exchange` | `{id_token, nonce?, machine?: {id, name?}, visibility?}`: an IdP ID token for a session token, and with `machine` a device token for it (earlier device tokens for that machine are revoked). `401` for an ID token that does not check out, `404 no_idp` without an IdP. No bearer |
 | `GET /v1/me` | `{owner, storage, kind, role, scopes, owner_basis, credential_id, visibility?, expires_at?}`: who the credential is, and which bucket this server writes, so a client can point a reader at it. Never a secret |
@@ -353,7 +357,7 @@ allow.
 | `GET /v1/capture/rules` | The org's exclude list (`[capture] exclude`, every file's entries, as written, blanks and `#` comments left out) and its tool-call redaction list (`[capture] redact_tool_calls`, the same way): `{schema: "seshi/capture-rules/1", exclude: [...], redact_tool_calls: [...]}`, which laptops apply before upload ([config.md](config.md#the-orgs-exclude-list-capture-exclude), [capture.md](capture.md#the-orgs-exclude-list-on-a-laptop)). Any signed-in caller; `ETag` is a hash of the answer, `If-None-Match` gets `304`; a reload changes it at once. A server older than the route answers `404`, which a laptop reads as no list |
 | `GET /v1/sessions/:format/:session_id/reviews?owner` | What model review decided for each stored write (`sessions:read`, F3.8): the whole audit record for admins, only `n`, `at`, `content_hash` and `decision` for anyone else who may read the session |
 | `POST /otlp/v1/traces` | OTLP/HTTP trace ingest (F4): `ExportTraceServiceRequest` as protobuf or JSON from an OTLP destination's service token. Outside `/v1`, and its errors are OTLP's (`google.rpc.Status`). See [otlp.md](otlp.md) |
-| `GET /v1/search?q&owner&agent&repo&branch&source&since&until&sort&limit&matches&cursor` | Keyword search over what the caller may read (`search`, F10; [search.md](search.md)): `{query, total, results: [{owner, format, session_id, …, score, hits, matches: [{content_hash, event_index, role, snippet, highlights}]}], cursor?, index}`. `400 bad_query`, `404 search_disabled`, `503 index_building` |
+| `GET /v1/search?q&owner&agent&repo&branch&source&since&until&sort&limit&matches&cursor` | Keyword search over what the caller may read (`search`, F10; [search.md](search.md)): `{query, total, results: [{owner, format, session_id, …, score, hits, matches: [{content_hash, event_index, role, snippet, highlights}]}], cursor?, index}`. Without `q`, a browse: the most recently active sessions, with no matches ([search.md](search.md#browsing)). `400 bad_query`, `404 search_disabled`, `503 index_building` |
 | `GET /v1/admin/sources?days` | Every configured source and `upload`: checkpoint, drop and failure counts, health over the last `days` (7) days, as `seshi sync status --json` prints them (`sources:admin`) |
 | `GET /v1/admin/sources/:id?days` | One source's status; `404 unknown_source` for an id no source has (`sources:admin`) |
 | `GET /v1/admin/sources/:id/failed`, `…/dropped` `?since&after&limit` | A source's failure or drop records, oldest first, as `seshi sync failed\|dropped --json` prints them; never content. A source no longer configured can still have its records read (`sources:admin`, X6.4) |

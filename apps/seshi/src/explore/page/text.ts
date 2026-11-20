@@ -1,5 +1,7 @@
 import type { ListStatus, RowState, TimelineKind } from "../types";
 
+export { splitMarkers } from "../../web/markers";
+
 export const STATUS: Readonly<Record<ListStatus, { icon: string; word: string }>> = {
   fail: { icon: "✕", word: "fail" },
   warn: { icon: "▲", word: "warn" },
@@ -32,20 +34,6 @@ export const KIND_WORD: Readonly<Record<TimelineKind, string>> = {
   retraction: "retraction",
   rebuild: "rebuild",
 };
-
-export function splitMarkers(text: string): { text: string; rule?: string }[] {
-  const parts: { text: string; rule?: string }[] = [];
-  const re = /\[redacted:([a-z0-9]+(?:-[a-z0-9]+)*)\]/g;
-  let last = 0;
-  for (const m of text.matchAll(re)) {
-    const at = m.index ?? 0;
-    if (at > last) parts.push({ text: text.slice(last, at) });
-    parts.push({ text: m[0], rule: m[1] as string });
-    last = at + m[0].length;
-  }
-  if (last < text.length) parts.push({ text: text.slice(last) });
-  return parts;
-}
 
 export function fold(text: string, max: number): { head: string; lines: number; folded: boolean } {
   const lines = text.split("\n");

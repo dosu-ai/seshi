@@ -131,7 +131,7 @@ jobs:
         with:
           persist-credentials: false
       - run: docker build -f apps/seshi/Dockerfile -t sessiondb .
-      - name: Boot against a file store and hit /healthz
+      - name: Boot against a file store and hit /healthz and /ui/
         run: |
           docker run --rm sessiondb --version
           docker run -d --name sessiondb -p 7200:7200 \
@@ -143,6 +143,10 @@ jobs:
               docker exec sessiondb seshi healthcheck
               sleep 2
               docker exec sessiondb seshi workers status --json | grep -q '"state": "running"'
+              # The team UI ships in the image: its page and the script it links.
+              script=$(curl -fsS http://127.0.0.1:7200/ui/ | grep -o '/ui/chunk-[a-z0-9]*\.js' | head -1)
+              test -n "$script"
+              curl -fsS -o /dev/null "http://127.0.0.1:7200$script"
               exit 0
             fi
             sleep 1
