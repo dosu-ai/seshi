@@ -1211,108 +1211,255 @@ ol.ranked > li {
   width: 100%;
 }
 
-/* The overview. */
+/* The overview: an engineering panel. Hairlines, not boxes; numbers in tabular figures and
+ * right-aligned; one ink colour for data; every number next to what it compares with. */
 
-.overview-head {
+.panel-head {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  justify-content: space-between;
-  gap: 0.75rem 1.5rem;
+  gap: 0.5rem 1.5rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--line);
 }
 
-.overview-head h1 {
-  font-size: clamp(1.5rem, 3vw, 2rem);
-  font-weight: 800;
-  letter-spacing: -0.02em;
-}
-
-.spans {
-  display: flex;
-  gap: 1rem;
-  font-size: 0.9rem;
-}
-
-.spans a {
-  color: var(--muted);
-  text-decoration: none;
-  border-bottom: 2px solid transparent;
-}
-
-.spans a[aria-current="page"] {
-  color: var(--fg);
-  font-weight: 700;
-  border-bottom-color: var(--accent);
-}
-
-.figures {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
-  gap: 1rem 2rem;
-  margin: 1.75rem 0;
-}
-
-.figure {
-  display: flex;
-  flex-direction: column;
-}
-
-.figure dd {
-  margin: 0;
-  font-size: 2rem;
-  font-weight: 800;
-  letter-spacing: -0.02em;
-  font-variant-numeric: tabular-nums;
-}
-
-.figure dt {
-  color: var(--muted);
-  font-size: 0.85rem;
-}
-
-.figure .note {
-  display: block;
-  font-size: 0.78rem;
-  margin-top: 0.1rem;
-}
-
-.card {
-  border-top: 1px solid var(--line);
-  padding-top: 1rem;
-  min-width: 0;
-}
-
-.card h3 {
-  font-size: 0.95rem;
-  margin: 0 0 0.75rem;
-}
-
-.card-note {
-  margin: -0.5rem 0 0.75rem;
-  font-size: 0.8rem;
-}
-
-.overview-part {
-  margin-top: 2.5rem;
-}
-
-.overview-part > h2 {
-  font-size: 1.25rem;
+.panel-head h1 {
+  font-size: 1.35rem;
   font-weight: 800;
   letter-spacing: -0.01em;
 }
 
-.overview-part > .hint {
-  margin: 0.25rem 0 0;
+.as-of {
+  margin: 0 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 1rem;
+  font-size: 0.8rem;
+  color: var(--muted);
 }
 
-.overview-part > .figures {
-  margin: 1.25rem 0 0;
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+  font-size: 0.82rem;
 }
 
-.cards.cards-2 {
-  grid-template-columns: repeat(auto-fit, minmax(min(26rem, 100%), 1fr));
+.segmented a {
+  padding: 0.2rem 0.65rem;
+  color: var(--muted);
+  text-decoration: none;
 }
+
+.segmented a + a {
+  border-left: 1px solid var(--line);
+}
+
+.segmented a:hover {
+  color: var(--fg);
+}
+
+.segmented a[aria-current="page"] {
+  background: var(--fg);
+  color: var(--bg);
+}
+
+/* The metric strip: label, value, change, sparkline; one row, ruled between. */
+
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  margin: 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.metric {
+  display: grid;
+  grid-template-rows: auto auto auto auto;
+  padding: 0.85rem 0.9rem 0.75rem;
+  border-left: 1px solid var(--line);
+  min-width: 0;
+}
+
+.metric:first-child {
+  border-left: 0;
+  padding-left: 0;
+}
+
+.metric dt {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.metric dd {
+  margin: 0;
+}
+
+.metric-value {
+  font-size: 1.45rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+}
+
+.metric-delta {
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.metric-spark {
+  margin-top: 0.35rem;
+  line-height: 0;
+}
+
+svg.spark {
+  overflow: visible;
+}
+
+svg.spark polyline {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.25;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+svg.spark circle {
+  fill: var(--accent);
+}
+
+.compare-note {
+  margin: 0.4rem 0 0;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.panel-section {
+  margin-top: 1.75rem;
+  min-width: 0;
+}
+
+.panel-section > h2 {
+  font-size: 0.92rem;
+  font-weight: 700;
+  margin: 0 0 0.6rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.panel-section > .segmented {
+  margin-bottom: 0.6rem;
+}
+
+h3.sub {
+  font-size: 0.85rem;
+  font-weight: 700;
+  margin: 1.1rem 0 0.4rem;
+}
+
+.panel-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.8fr) minmax(0, 1.1fr);
+  gap: 0 2.25rem;
+}
+
+/* Small multiples: one strip of bars per series on a shared time axis. */
+
+.timeline {
+  margin: 0;
+}
+
+.strip-row {
+  display: grid;
+  grid-template-columns: 8.5rem minmax(0, 1fr) 3.5rem;
+  align-items: end;
+  gap: 0.75rem;
+  border-top: 1px solid var(--line);
+  padding-top: 0.35rem;
+}
+
+.strip-row:first-child {
+  border-top: 0;
+}
+
+.strip-label {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 0.15rem;
+  font-size: 0.8rem;
+}
+
+.strip-name {
+  font-weight: 600;
+}
+
+.strip-sum,
+.strip-max {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.strip-max {
+  align-self: start;
+  text-align: right;
+}
+
+svg.strip {
+  display: block;
+  width: 100%;
+  height: 3.5rem;
+}
+
+svg.strip .bar {
+  fill: var(--accent);
+}
+
+svg.strip .hit {
+  fill: transparent;
+}
+
+svg.strip .bucket:hover .bar {
+  opacity: 0.7;
+}
+
+svg.strip .axis {
+  stroke: var(--line);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.strip-ticks {
+  border-top: 0;
+  padding-top: 0.2rem;
+}
+
+.ticks {
+  display: flex;
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+
+.ticks span {
+  flex: 1 1 0;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: visible;
+}
+
+details.as-table > summary {
+  cursor: pointer;
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-top: 0.4rem;
+  width: max-content;
+}
+
+/* Tables: the panel's main form. */
 
 .table-wrap {
   overflow-x: auto;
@@ -1321,85 +1468,113 @@ ol.ranked > li {
 table.plain {
   border-collapse: collapse;
   width: 100%;
-  font-size: 0.85rem;
+  font-size: 0.84rem;
   font-variant-numeric: tabular-nums;
 }
 
 table.plain th {
   text-align: left;
   font-weight: 600;
+  font-size: 0.76rem;
   color: var(--muted);
-  padding: 0 0.75rem 0.4rem 0;
-  border-bottom: 1px solid var(--line);
-}
-
-table.plain td {
-  padding: 0.35rem 0.75rem 0.35rem 0;
+  padding: 0 0.75rem 0.35rem 0;
   border-bottom: 1px solid var(--line);
   white-space: nowrap;
 }
 
-.cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr));
-  gap: 1.75rem 2.5rem;
-  margin-top: 1.75rem;
-}
-
-.chart {
-  margin: 0;
-}
-
-svg.daily {
-  display: block;
-  width: 100%;
-  height: auto;
-  overflow: visible;
-}
-
-svg.daily .bar {
-  fill: var(--accent);
-}
-
-svg.daily .hit {
-  fill: transparent;
-}
-
-svg.daily .day:hover .bar {
-  opacity: 0.75;
-}
-
-svg.daily .baseline {
-  stroke: var(--line);
-  stroke-width: 1;
-}
-
-svg.daily .tick,
-svg.daily .peak {
-  fill: var(--muted);
-  font-size: 11px;
-  font-family: var(--sans);
-}
-
-details.as-table > summary {
-  cursor: pointer;
-  font-size: 0.82rem;
-  color: var(--muted);
-  margin-top: 0.5rem;
-  width: max-content;
-}
-
-.as-table table {
-  border-collapse: collapse;
-  font-size: 0.85rem;
-  margin-top: 0.5rem;
-}
-
-details.as-table th,
-details.as-table td {
-  text-align: left;
-  padding: 0.15rem 1.5rem 0.15rem 0;
+table.plain td {
+  padding: 0.32rem 0.75rem 0.32rem 0;
   border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+table.plain .num {
+  text-align: right;
+}
+
+table.plain td.name {
+  max-width: 16rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+table.plain td.name a {
+  color: var(--fg);
+  text-decoration: none;
+}
+
+table.plain td.name a:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+table.plain .mono-cell {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+}
+
+table.plain .share {
+  width: 22%;
+  padding-right: 1rem;
+}
+
+.share-bar {
+  display: block;
+  height: 6px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--line) 55%, transparent);
+  overflow: hidden;
+}
+
+.share-bar .rank-fill {
+  border-radius: 1px;
+}
+
+table.plain .trend {
+  width: 1%;
+  line-height: 0;
+}
+
+table.health th {
+  color: var(--fg);
+  font-size: 0.84rem;
+  font-weight: 400;
+  border-bottom: 1px solid var(--line);
+  padding: 0.32rem 0.75rem 0.32rem 0;
+}
+
+table.health td {
+  white-space: normal;
+}
+
+.health-value {
+  display: block;
+  font-weight: 600;
+}
+
+.health-note {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+table.plain td.muted,
+table.health td.muted {
+  color: var(--muted);
+  font-size: 0.78rem;
+  white-space: normal;
+}
+
+table.plain tbody tr:last-child > td,
+table.plain tbody tr:last-child > th {
+  border-bottom: 0;
+}
+
+.table-note {
+  margin: 0.35rem 0 0;
+  font-size: 0.75rem;
+  color: var(--muted);
 }
 
 /* Search as you type, and find within a session. */
@@ -1450,9 +1625,49 @@ mark.find.current {
   text-underline-offset: 0.3em;
 }
 
+/* Middle widths: the metrics in two rows of four, the lower panels in two columns. */
+@media (max-width: 80rem) and (min-width: 56.01rem) {
+  .metrics {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .metric:nth-child(4n + 1) {
+    border-left: 0;
+    padding-left: 0;
+  }
+
+  .metric:nth-child(n + 5) {
+    border-top: 1px solid var(--line);
+  }
+
+  .panel-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 /* Narrow screens: the glance goes above the thread, and the bar wraps. */
 @media (max-width: 56rem) {
-  .cards.cards-2 {
+  .strip-row {
+    grid-template-columns: 5.5rem minmax(0, 1fr) 2.75rem;
+    gap: 0.5rem;
+  }
+
+  .metric {
+    border-left: 0;
+    padding-left: 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .as-of {
+    margin-left: 0;
+    flex-basis: 100%;
+  }
+
+  .metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .panel-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 

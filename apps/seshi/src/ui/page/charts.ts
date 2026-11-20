@@ -1,12 +1,13 @@
-/** The page's two charts, built from DOM and SVG nodes (no HTML strings, no inline styles: the
- * policy allows neither). One series each, in the accent colour; every value is also written
- * out, so nothing is told by colour or length alone. */
+/** The page's charts, built from DOM and SVG nodes (no HTML strings, no inline styles: the
+ * policy allows neither). Small and quiet: one ink colour for data, a hairline for the axis,
+ * every value also written out (a title on hover, a table on request), so nothing is told by
+ * colour, length or position alone. */
 
 import { h } from "../../web/dom";
 import { plural } from "./text";
 
-/** A ranked list with a bar for each count. `href` makes each name a link (to the sessions
- * it filters to). Past `limit` rows, a button shows the rest. */
+/** A ranked list with a bar for each count: the tools a session used, the files it touched.
+ * `href` makes each name a link. Past `limit` rows, a button shows the rest. */
 export function ranked(
   rows: [string, number][],
   cls: string,
@@ -61,96 +62,162 @@ function svg<K extends keyof SVGElementTagNameMap>(
   return el;
 }
 
-/** A big number in a few characters: 950, 12k, 3.4M. */
+/** A big number in a few characters: 950, 3,352, 12k, 3.4M. */
 export function compact(n: number): string {
   if (n >= 1e9) return `${(n / 1e9).toFixed(1)}B`;
   if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
   if (n >= 1e4) return `${Math.round(n / 1e3)}k`;
-  return n.toLocaleString();
+  return Math.round(n).toLocaleString();
 }
 
-/** A count per day as bars, oldest on the left, each with its date and count on hover (and in
- * the table under it). The tallest day is labelled. `unit` names what is counted. */
-export function dailyBars(
-  days: { day: string; label: string; count: number }[],
-  unit: { one: string; many: string; heading: string } = {
-    one: "session",
-    many: "sessions",
-    heading: "Sessions",
-  },
-): HTMLElement {
-  // Drawn at about the size it is shown, so its labels read at the page's own small size.
-  const width = 480;
-  const height = 150;
-  const bottom = 22;
-  const gap = 2;
-  const max = Math.max(1, ...days.map((d) => d.count));
-  const top = 18;
-  const slot = width / Math.max(1, days.length);
-  // Thin bars, centred in their day: a week does not become seven slabs.
-  const bar = Math.min(36, Math.max(2, slot - gap));
-  const peak = days.reduce(
-    (best, d) => (d.count > best.count ? d : best),
-    days[0] ?? { day: "", label: "", count: 0 },
-  );
+/** A word-sized line of a series (Tufte's sparkline): no axes, the last value dotted. Gaps
+ * (`null`, a bucket with nothing to measure) break the line. */
+export function sparkline(values: (number | null)[], label: string): SVGSVGElement {
+  const width = 88;
+  const height = 22;
+  const pad = 2;
+  const known = values.filter((v): v is number => v !== null);
+  const max = Math.max(...known, 0);
+  const min = Math.min(...known, 0);
+  const x = (i: number) => pad + (i * (width - 2 * pad)) / Math.max(1, values.length - 1);
+  const y = (v: number) =>
+    max === min ? height / 2 : height - pad - ((v - min) / (max - min)) * (height - 2 * pad);
   const chart = svg("svg", {
-    class: "daily",
+    class: "spark",
     viewBox: `0 0 ${width} ${height}`,
+    width,
+    height,
     role: "img",
-    "aria-label": `${unit.heading} per day, ${days[0]?.label ?? ""} to ${days.at(-1)?.label ?? ""}; most on ${peak.label}: ${peak.count.toLocaleString()}`,
+    "aria-label": label,
   });
-  chart.append(
-    svg("line", { class: "baseline", x1: 0, x2: width, y1: height - bottom, y2: height - bottom }),
-  );
-  days.forEach((d, i) => {
-    const plot = height - bottom - top;
-    const hgt = d.count === 0 ? 0 : Math.max(3, (d.count / max) * plot);
-    const x = i * slot + (slot - bar) / 2;
-    const y = height - bottom - hgt;
-    const group = svg("g", { class: "day" });
-    group.append(
-      svg("title", {}, `${d.label}: ${plural(d.count, unit.one, unit.many)}`),
-      svg("rect", { class: "hit", x: i * slot, y: 0, width: slot, height: height - bottom }),
-    );
-    if (hgt > 0)
-      group.append(
-        svg("rect", { class: "bar", x, y, width: bar, height: hgt, rx: Math.min(4, bar / 2) }),
-      );
-    if (d === peak && d.count > 0) {
-      group.append(
-        svg(
-          "text",
-          { class: "peak", x: x + bar / 2, y: y - 4, "text-anchor": "middle" },
-          compact(d.count),
-        ),
-      );
-    }
-    chart.append(group);
+  let run: string[] = [];
+  const flush = () => {
+    if (run.length > 1) chart.append(svg("polyline", { points: run.join(" ") }));
+    run = [];
+  };
+  values.forEach((v, i) => {
+    if (v === null) flush();
+    else run.push(`${x(i).toFixed(1)},${y(v).toFixed(1)}`);
   });
-  const ticks = [0, Math.floor((days.length - 1) / 2), days.length - 1];
-  for (const i of new Set(ticks)) {
-    const d = days[i];
-    if (!d) continue;
-    const anchor = i === 0 ? "start" : i === days.length - 1 ? "end" : "middle";
-    const x = i === 0 ? 0 : i === days.length - 1 ? width : i * slot + slot / 2;
-    chart.append(svg("text", { class: "tick", x, y: height - 6, "text-anchor": anchor }, d.label));
+  flush();
+  const lastIndex = values.findLastIndex((v) => v !== null);
+  const last = values[lastIndex];
+  if (last !== null && last !== undefined) {
+    chart.append(svg("circle", { cx: x(lastIndex), cy: y(last), r: 2 }));
   }
+  return chart;
+}
+
+export interface Series {
+  label: string;
+  /** The span's total or summary, written beside the label. */
+  summary: string;
+  values: number[];
+  format: (n: number) => string;
+  unit: string;
+}
+
+/** Several series over the same buckets, one thin row of bars each, sharing the time axis
+ * (small multiples): each row has its own scale, labelled by its maximum. */
+export function timeline(
+  series: Series[],
+  buckets: { label: string; tick?: string }[],
+): HTMLElement {
+  const width = 960;
+  const rowHeight = 56;
+  const gap = 1;
+  const slot = width / Math.max(1, buckets.length);
+  const bar = Math.max(1, Math.min(28, slot - gap * 2));
+  const rows = series.map((s) => {
+    const max = Math.max(1, ...s.values);
+    const chart = svg("svg", {
+      class: "strip",
+      viewBox: `0 0 ${width} ${rowHeight}`,
+      preserveAspectRatio: "none",
+      role: "img",
+      "aria-label": `${s.label} per ${buckets.length === 24 ? "hour" : "day"}; ${s.summary}`,
+    });
+    chart.append(
+      svg("line", { class: "axis", x1: 0, x2: width, y1: rowHeight - 0.5, y2: rowHeight - 0.5 }),
+    );
+    s.values.forEach((v, i) => {
+      const hgt = v === 0 ? 0 : Math.max(2, (v / max) * (rowHeight - 6));
+      const g = svg("g", { class: "bucket" });
+      g.append(
+        svg("title", {}, `${buckets[i]?.label ?? ""}: ${s.format(v)} ${s.unit}`),
+        svg("rect", { class: "hit", x: i * slot, y: 0, width: slot, height: rowHeight }),
+      );
+      if (hgt > 0) {
+        g.append(
+          svg("rect", {
+            class: "bar",
+            x: i * slot + (slot - bar) / 2,
+            y: rowHeight - hgt,
+            width: bar,
+            height: hgt,
+          }),
+        );
+      }
+      chart.append(g);
+    });
+    return h(
+      "div",
+      { class: "strip-row" },
+      h(
+        "div",
+        { class: "strip-label" },
+        h("span", { class: "strip-name" }, s.label),
+        h("span", { class: "strip-sum" }, s.summary),
+      ),
+      h("div", { class: "strip-plot" }, chart),
+      h("div", { class: "strip-max", title: "The tallest bar" }, s.format(max)),
+    );
+  });
+  const ticks = h(
+    "div",
+    { class: "strip-row strip-ticks", "aria-hidden": "true" },
+    h("div", { class: "strip-label" }),
+    h(
+      "div",
+      { class: "strip-plot ticks" },
+      buckets.map((b) => h("span", null, b.tick ?? "")),
+    ),
+    h("div", { class: "strip-max" }),
+  );
   const table = h(
     "details",
     { class: "as-table" },
     h("summary", null, "Show as a table"),
     h(
-      "table",
-      null,
-      h("thead", null, h("tr", null, h("th", null, "Day"), h("th", null, unit.heading))),
+      "div",
+      { class: "table-wrap" },
       h(
-        "tbody",
-        null,
-        days.map((d) =>
-          h("tr", null, h("td", null, d.label), h("td", null, d.count.toLocaleString())),
+        "table",
+        { class: "plain" },
+        h(
+          "thead",
+          null,
+          h(
+            "tr",
+            null,
+            h("th", null, ""),
+            series.map((s) => h("th", { class: "num" }, s.label)),
+          ),
+        ),
+        h(
+          "tbody",
+          null,
+          buckets.map((b, i) =>
+            h(
+              "tr",
+              null,
+              h("td", null, b.label),
+              series.map((s) => h("td", { class: "num" }, s.format(s.values[i] ?? 0))),
+            ),
+          ),
         ),
       ),
     ),
   );
-  return h("figure", { class: "chart" }, chart, table);
+  return h("figure", { class: "timeline" }, ...rows, ticks, table);
 }
