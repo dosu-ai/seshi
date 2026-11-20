@@ -18,6 +18,13 @@ describe("the session-capture command", () => {
     expect(captureSkill(["seshi"])).toMatch(/^---\nname: session-capture\n/);
   });
 
+  it("shares and unshares this session with the command it was installed with", () => {
+    const skill = captureSkill(["/opt/seshi/bin/seshi"]);
+    expect(skill).toContain("run `/opt/seshi/bin/seshi share --session --agent <agent>`");
+    expect(skill).toContain("run `/opt/seshi/bin/seshi unshare --session --agent <agent>`");
+    expect(skill).toMatch(/^description: .*share it with the team/m);
+  });
+
   it("reads /session-capture and $session-capture (and the old name) alone in the prompt", () => {
     expect(captureCommandPrompt("/session-capture off")).toBe("off");
     expect(captureCommandPrompt("$session-capture On!")).toBe("on");

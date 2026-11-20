@@ -1,10 +1,12 @@
 export {
   canRead,
+  changesOnlyOwn,
   DELETE_FRESH_MS,
   isOwnSession,
   requireDelete,
   requireScope,
   requireVisibilityChange,
+  requireVisibilityScope,
   type SessionAccess,
   seesEverything,
 } from "./access";

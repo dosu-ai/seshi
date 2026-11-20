@@ -256,8 +256,8 @@ describe("visibility (X5.10)", () => {
       });
     };
     expect((await patch(bob, "owner")).status).toBe(403);
-    const device = { token: await mint({ kind: "device", owner: "alice" }) };
-    expect((await patch(device, "owner")).status).toBe(403);
+    const reader = { token: await mint({ kind: "service", service: "sync" }) };
+    expect((await patch(reader, "owner")).status).toBe(403);
     expect((await patch(alice, "sideways")).status).toBe(400);
     const changed = await patch(alice, "owner");
     expect(changed.status).toBe(200);
@@ -268,6 +268,50 @@ describe("visibility (X5.10)", () => {
     expect(
       entries.filter((e) => e.entry.kind === "visibility_changed").map((e) => e.entry.writer.kind),
     ).toEqual(["person", "admin"]);
+  });
+
+  it("lets a member's device token share and unshare its own sessions, and find no one else's", async () => {
+    build({}, { visibility: "owner" });
+    const { admin, mint } = await setUp();
+    const alice = { token: await mint({ kind: "device", owner: "u-alice" }) };
+    const bob = { token: await mint({ kind: "device", owner: "u-bob" }) };
+    const writer = {
+      token: await mint({ kind: "service", service: "otlp", scopes: ["sessions:write"] }),
+    };
+    expect((await upload(alice, "s1")).status).toBe(201);
+    const patch = (as: Call, visibility: string, query = "") => {
+      clock = new Date(clock.getTime() + 1000);
+      return call("PATCH", `/v1/sessions/claude-code/s1${query}`, { ...as, body: { visibility } });
+    };
+    const stored = async () =>
+      (await readMetadata(store, "u-alice", archiveId("u-alice", "claude-code", "s1")))?.visibility;
+    expect(await stored()).toBe("owner");
+
+    const shared = await patch(alice, "org");
+    expect(shared.status).toBe(200);
+    expect(shared.body.visibility).toBe("org");
+    expect(await stored()).toBe("org");
+    // Another device, or a service that only writes, finds nothing there to change, shared or
+    // not, so it learns nothing of the session.
+    expect((await patch(bob, "owner", "?owner=u-alice")).status).toBe(404);
+    expect((await patch(writer, "owner", "?owner=u-alice")).status).toBe(404);
+    expect(await stored()).toBe("org");
+    // Sharing gave the device nothing to read with.
+    expect((await call("GET", "/v1/sessions/claude-code/s1", alice)).status).toBe(403);
+
+    expect((await patch(alice, "owner")).body.visibility).toBe("owner");
+    expect((await patch(bob, "org", "?owner=u-alice")).status).toBe(404);
+    expect((await patch(admin, "org", "?owner=u-alice")).body.visibility).toBe("org");
+    const { entries } = await readChanges(store, "u-alice");
+    expect(
+      entries
+        .filter((e) => e.entry.kind === "visibility_changed")
+        .map((e) => [e.entry.writer.kind, (e.entry as { visibility?: string }).visibility]),
+    ).toEqual([
+      ["device", "org"],
+      ["device", "owner"],
+      ["admin", "org"],
+    ]);
   });
 });
 

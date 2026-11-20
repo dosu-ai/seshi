@@ -817,7 +817,8 @@ describe("identity and access (X5)", () => {
         })
       ).status,
     ).toBe(401);
-    expect((await patch(device, "org")).status).toBe(403);
+    // The owner's device token reads nothing, but shares the owner's own session.
+    expect((await patch(device, "org")).status).toBe(200);
     expect((await patch(alice, "org", "/v1/sessions/claude-code/nope")).status).toBe(404);
     expect((await call("DELETE", "/v1/sessions/claude-code/s1?owner=alice", admin)).status).toBe(
       200,

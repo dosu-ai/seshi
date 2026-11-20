@@ -549,8 +549,11 @@ paths:
       operationId: setVisibility
       description: |
         The session's owner or an admin changes its visibility (X5.10), with a credential
-        that can read (not a write-only device token). An org-key caller cannot change a
-        session whose owner was verified (X5.12). A change appends a
+        that writes sessions or reads them: the owner's device token (`sessions:write`) shares
+        and unshares the owner's own sessions. A credential that cannot read finds only its
+        own owner's sessions here (404 for anyone else's), so it learns nothing of others'.
+        An org-key caller cannot change a session whose owner was verified (X5.12). A change
+        appends a
         `visibility_changed` entry to the change feed; setting what it already is writes
         nothing. It works on a stub (F3.4) too, for its owner or an admin: the session's
         first trace then has that visibility.

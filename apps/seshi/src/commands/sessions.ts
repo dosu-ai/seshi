@@ -9,6 +9,7 @@ import {
   type SessionMetadata,
   type SessionsPage,
   type Trace,
+  type Visibility,
 } from "@seshi/model";
 import { type Account, openAccount } from "../account/account";
 import { type Backend, type DeleteConfirmation, openBackend } from "../backend";
@@ -476,6 +477,35 @@ async function rm(
   return EXIT.ok;
 }
 
+/** Who may read a session of `visibility`, said for the backend's mode. */
+export function whoReads(visibility: Visibility, backend: Pick<Backend, "mode">): string {
+  return visibility === "org"
+    ? "every member may read it"
+    : backend.mode === "serverless"
+      ? "seshi shows it only to its owner, but any key that can read the bucket can read it"
+      : "only its owner (and admins) may read it";
+}
+
+/** Set a session's visibility; its metadata as it now is. Throws `Refused` (exit 4, not_found)
+ * when the backend has no such session, or none this credential may change. */
+export async function changeVisibility(
+  backend: Backend,
+  ref: { format: string; sessionId: string },
+  visibility: Visibility,
+  owner?: string,
+): Promise<SessionMetadata> {
+  const metadata = await backend.setVisibility(
+    ref.format,
+    ref.sessionId,
+    visibility,
+    owner ? { owner } : {},
+  );
+  if (!metadata) {
+    throw new Refused(EXIT.notFound, "not_found", `no session ${ref.format}/${ref.sessionId}`);
+  }
+  return metadata;
+}
+
 async function visibility(
   ctx: CommandContext,
   json: boolean,
@@ -486,23 +516,9 @@ async function visibility(
   style: Style,
 ) {
   if (value !== "org" && value !== "owner") throw new UsageError("visibility is org or owner");
-  const metadata = await backend.setVisibility(
-    ref.format,
-    ref.sessionId,
-    value,
-    values.owner ? { owner: values.owner } : {},
-  );
-  if (!metadata) {
-    throw new Refused(EXIT.notFound, "not_found", `no session ${ref.format}/${ref.sessionId}`);
-  }
-  const who =
-    value === "org"
-      ? "every member may read it"
-      : backend.mode === "serverless"
-        ? "seshi shows it only to its owner, but any key that can read the bucket can read it"
-        : "only its owner (and admins) may read it";
+  const metadata = await changeVisibility(backend, ref, value, values.owner);
   emit(ctx, json, metadata, () => [
-    `${style.status("Visibility", "success")} of ${ref.format}/${ref.sessionId} is ${value}: ${who}.`,
+    `${style.status("Visibility", "success")} of ${ref.format}/${ref.sessionId} is ${value}: ${whoReads(value, backend)}.`,
   ]);
   return EXIT.ok;
 }

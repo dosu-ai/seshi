@@ -777,7 +777,7 @@ pre.tree .d { color: var(--accent); font-weight: 500; }
               <li>The server's <code>default_visibility</code>, which is <code>org</code>.</li>
             </ul></dd>
           <dt>Without an IdP</dt><dd>The org key reads org-wide, so <code>owner</code> visibility cannot keep anything from another member. Seshi accepts the field but says so in <code>seshi config check</code>.</dd>
-          <dt>Changing it</dt><dd>The owner or an admin can change a session's visibility later (<code>PATCH /v1/sessions/&lt;id&gt;</code>). The change writes a change entry so the search index updates (<a href="#f10">F10.4</a>).</dd>
+          <dt>Changing it</dt><dd>The owner or an admin can change a session's visibility later (<code>PATCH /v1/sessions/&lt;id&gt;</code>; <code>seshi share</code> and <code>seshi unshare</code> from the CLI). The owner may with any of their credentials that writes or reads sessions, so the device token a laptop uploads with shares and unshares that owner's sessions without being able to read anyone's; a credential that cannot read finds only its owner's sessions there. The change writes a change entry so the search index updates (<a href="#f10">F10.4</a>).</dd>
         </dl>
       </div>
     </div>
