@@ -1,3 +1,10 @@
+# [0.20.0](https://github.com/dosu-ai/seshi/compare/v0.19.0...v0.20.0) (2026-11-20)
+
+
+### Features
+
+* **capture:** hold the org's exclude list on the server ([#51](https://github.com/dosu-ai/seshi/issues/51)) ([63ea768](https://github.com/dosu-ai/seshi/commit/63ea7684a33b25c46091145fb845e0a3b9b8b0ae)), closes [dosu-ai/seshi#49](https://github.com/dosu-ai/seshi/issues/49) [dosu-ai/seshi#49](https://github.com/dosu-ai/seshi/issues/49)
+
 # [0.19.0](https://github.com/dosu-ai/seshi/compare/v0.18.0...v0.19.0) (2026-11-20)
 
 
