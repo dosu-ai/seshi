@@ -283,6 +283,9 @@ interface Attempt {
   rebuild: Rebuild | undefined;
   piece: { text: string; end: number };
   secret: string;
+  /** The org redacts this session's tool calls (`capture.redact_tool_calls`): the agent's pass
+   * runs on the piece before pre-redaction. */
+  redactToolCalls: boolean;
 }
 
 interface Sent {
@@ -580,7 +583,10 @@ export class Uploader {
       const size = this.sizeOf(from);
       if (size === undefined || !this.pending(session, size)) continue;
       if (!this.stillHeld()) break;
-      const outcome = await this.sync(key, agent, place, path, size, from);
+      const outcome = await this.sync(key, agent, place, path, size, {
+        from,
+        redactToolCalls: decision.redact_tool_calls !== undefined,
+      });
       summary.uploaded += outcome.uploaded;
       if (outcome.uploaded > 0) succeeded = true;
       if (outcome.signIn) summary.signIn = outcome.signIn;
@@ -1120,8 +1126,10 @@ export class Uploader {
     place: Place,
     path: string,
     size: number,
-    from: string = path,
+    how: { from?: string; redactToolCalls?: boolean } = {},
   ): Promise<SyncOutcome> {
+    const from = how.from ?? path;
+    const redactToolCalls = how.redactToolCalls === true;
     let uploaded = 0;
     let retry: Retry = { replace: false, forceWhole: false, recoveries: 0 };
     let rebuilding = false;
@@ -1138,7 +1146,7 @@ export class Uploader {
       const prepared = await this.prepare(
         key,
         agent,
-        { path, from },
+        { path, from, redactToolCalls },
         size,
         session,
         retry,
@@ -1167,7 +1175,7 @@ export class Uploader {
   private async prepare(
     key: string,
     agent: CaptureAgent,
-    { path, from }: { path: string; from: string },
+    { path, from, redactToolCalls }: { path: string; from: string; redactToolCalls: boolean },
     size: number,
     session: SessionState,
     retry: Retry,
@@ -1189,6 +1197,11 @@ export class Uploader {
       await this.refuse(key, "not_a_transcript", notTranscript, size);
       return { stop: { failed: true } };
     }
+    if (redactToolCalls && !agent.redactToolCalls) {
+      const why = `the org redacts tool calls here (capture.redact_tool_calls), and seshi cannot redact ${agent.name}'s: nothing of it is uploaded`;
+      await this.refuse(key, "tool_calls_not_redactable", why, size);
+      return { stop: { failed: true } };
+    }
     const piece = this.piece(from, whole ? 0 : fileOffset, limit, agent.encoding, whole);
     if (!piece) return { stop: {} };
     let secret = session.secret;
@@ -1196,7 +1209,9 @@ export class Uploader {
       secret ??= newSecret();
       if (!(await this.keepSecretUnlessTurnedOff(key, secret))) return { stop: {} };
     }
-    return { attempt: { session, limit, whole, replacing, rebuild, piece, secret } };
+    return {
+      attempt: { session, limit, whole, replacing, rebuild, piece, secret, redactToolCalls },
+    };
   }
 
   private async send(
@@ -1206,10 +1221,15 @@ export class Uploader {
     attempt: Attempt,
   ): Promise<Sent> {
     const { session, whole, replacing, rebuild, piece, secret } = attempt;
+    // Tool calls go first, so the org's patterns and sensitive-file rules run on what is left.
+    const text =
+      attempt.redactToolCalls && agent.redactToolCalls
+        ? agent.redactToolCalls(piece.text)
+        : piece.text;
     const redacted = await this.preRedact.redact({
       agent: agent.format,
       encoding: agent.encoding,
-      text: piece.text,
+      text,
       ...(!whole && session.carried ? { carried: session.carried } : {}),
     });
     const keptLength = bytesOf(redacted.text) === bytesOf(piece.text);

@@ -124,6 +124,12 @@ export const cliConfigSchema = z
           .describe(
             "The org's exclude list: sessions in these repositories (owner/name on any host, host/owner/name on one) or folders (starting with /, ~, a drive or \\\\server, and everything under them) are never captured. * matches within a path segment, ** across any number of them; blank entries and # comments are skipped. It can only turn capture off.",
           ),
+        redact_tool_calls: z
+          .array(z.string())
+          .default([])
+          .describe(
+            "The org's list of places whose sessions are uploaded with every tool call's input and output replaced by [redacted:tool-call]: prompts, replies, reasoning, tool names, call ids, their order and whether each failed are kept. Entries are written and matched as in capture.exclude, which wins for a place on both lists.",
+          ),
       })
       .prefault({})
       .describe("Personal capture rules (F9.5)."),

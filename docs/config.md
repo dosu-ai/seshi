@@ -405,6 +405,7 @@ keychain = true                          # SESHI_KEYCHAIN: false keeps credentia
 enabled = true                           # SESHI_CAPTURE__ENABLED: the global level (F9.5)
 remotes = ["github.com/acme"]            # SESHI_CAPTURE__REMOTES: the org rule, see below
 exclude = ["acme/payments", "~/clients"] # SESHI_CAPTURE__EXCLUDE: the org's exclude list, see below
+redact_tool_calls = ["acme/research"]    # SESHI_CAPTURE__REDACT_TOOL_CALLS: uploaded without tool detail
 
 [[capture.paths]]                        # personal rules by folder, longest match wins (F9.5)
 path = "~/clients/acme"
@@ -436,6 +437,17 @@ In both, `*` matches within one path segment and `**` across any number of them,
 (`~/work/**/secrets` is `~/work/secrets` too). Blank entries and `#` comments are skipped. From
 the environment the list is comma-separated (`SESHI_CAPTURE__EXCLUDE=acme/payments,~/clients`).
 `seshi capture status` names the entry that turned a session off.
+
+`capture.redact_tool_calls` is the org's middle ground between capturing a place and excluding
+it, delivered the same way and written and matched exactly as `capture.exclude` is (repositories
+and folders, wildcards, comments, comma-separated from `SESHI_CAPTURE__REDACT_TOOL_CALLS`). A
+session in a place it names is still uploaded, but with every string of every tool call's input
+and result replaced by `[redacted:tool-call]`: what the person asked, what the agent said and
+thought, which tools ran, their ids, their order and whether each failed are kept; code, file
+contents and command output are not ([capture.md](capture.md#tool-calls-redacted)). A place on
+both lists is excluded. Like the exclude list it holds for every folder a session was seen in,
+and it turns nothing on: a session it names that another rule turns off stays off.
+`seshi capture status` names the entry and says the session goes with its tool calls redacted.
 
 Like a repo's own `capture = false`, the org rules can only turn capture off. A repo opts out
 for everyone who works in it with its own committed `.seshi/config.toml`:

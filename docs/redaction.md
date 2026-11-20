@@ -31,6 +31,20 @@ paths and results are already separate fields; the transcript itself is never st
 3. **The built-in secret patterns**: provider tokens, credential assignments, bearer headers,
    JWTs, connection URLs, private-key blocks, and the entropy pass.
 
+A session from a place the org lists in `capture.redact_tool_calls` goes through one pass more
+first, on the laptop before upload: every string of every tool call's input and result becomes
+`[redacted:tool-call]`, keeping the calls' names, ids, order and failures
+([capture.md](capture.md#tool-calls-redacted)). The passes above then run on what is left, as
+for any session: a sensitive-file or secret-command call no longer has a path or command to
+match, so its result is already `[redacted:tool-call]`, while the text rules and secret patterns
+still catch what the prompts and replies say. The markers are:
+
+| Marker | Written by |
+| --- | --- |
+| `[redacted:tool-call]` | the tool-call pass (`capture.redact_tool_calls`) |
+| `[redacted:sensitive-file]`, `[redacted:secret-output]` | pass 1 |
+| `[redacted:<rule id>]` | passes 2 and 3 (or the rule's own `replacement`) |
+
 Passes 2 and 3 skip the structural fields (ids, roles, timestamps, tool names, the source and
 the branch). They also run, as `text`, over what an LLM call says in free text (its `error` and
 string `parameters`), for sources that record calls (OTLP). The session's `metadata.json` records the rule set's hash and how often each rule

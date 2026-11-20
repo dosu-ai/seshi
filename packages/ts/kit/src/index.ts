@@ -85,6 +85,17 @@ export {
   savedStatusLine,
   statusLineNotes,
 } from "./statusline";
+export {
+  blankEncoded,
+  blankResult,
+  blankStrings,
+  blankUnknown,
+  isJsonObject,
+  type RecordShape,
+  redactRecords,
+  reshape,
+  TOOL_CALL_MARKER,
+} from "./tool-calls";
 
 export type SubmitOutcome =
   | StoreSessionResult

@@ -16,9 +16,14 @@ export interface CaptureRules {
   remotes: string[];
   /** The org's exclude list: sessions in these repositories or folders are never captured. */
   exclude: ExcludeRule[];
+  /** The org's list of places whose sessions are uploaded with their tool calls redacted
+   * (`capture.redact_tool_calls`); entries as in `exclude`. Absent in a rules cache written before
+   * it. */
+  redactToolCalls?: ExcludeRule[];
 }
 
-/** One entry of `capture.exclude`: a repository when `repo` is set, else a folder. */
+/** One entry of `capture.exclude` (or `capture.redact_tool_calls`, written the same way): a
+ * repository when `repo` is set, else a folder. */
 export interface ExcludeRule {
   /** As the admin wrote it (control characters replaced), for messages. */
   entry: string;
@@ -30,7 +35,13 @@ export interface ExcludeRule {
   real?: string;
 }
 
-export const DEFAULT_RULES: CaptureRules = { enabled: true, paths: [], remotes: [], exclude: [] };
+export const DEFAULT_RULES: CaptureRules = {
+  enabled: true,
+  paths: [],
+  remotes: [],
+  exclude: [],
+  redactToolCalls: [],
+};
 
 export interface RepoConfig {
   capture?: boolean;
@@ -85,6 +96,9 @@ export interface Decision {
    * transcript, a replace); nothing past it ever is. A caller that keeps state records it as the
    * session's `frozen` offset, so the session stays stopped after the pause ends. */
   frozen?: number;
+  /** Set when what is sent of the session goes with its tool calls redacted
+   * (`capture.redact_tool_calls`): why, naming the entry. */
+  redact_tool_calls?: string;
 }
 
 /** A pause, from `seshi capture pause` to its end (`until`; none while it is open-ended). */
@@ -266,8 +280,26 @@ export function excludedBy(
   place: Place,
   platform: NodeJS.Platform,
 ): ExcludeRule | undefined {
+  return listedIn(rules.exclude, place, platform);
+}
+
+/** The entry of `capture.redact_tool_calls` that `place` is in, if any, matched as
+ * `excludedBy` matches. */
+export function toolCallsRedactedBy(
+  rules: CaptureRules,
+  place: Place,
+  platform: NodeJS.Platform,
+): ExcludeRule | undefined {
+  return listedIn(rules.redactToolCalls ?? [], place, platform);
+}
+
+function listedIn(
+  entries: readonly ExcludeRule[],
+  place: Place,
+  platform: NodeJS.Platform,
+): ExcludeRule | undefined {
   const remotes = place.repo?.remotes ?? [];
-  return rules.exclude.find((rule) => {
+  return entries.find((rule) => {
     const repo = rule.repo;
     if (repo !== undefined) return remotes.some((r) => repoExcluded(r, repo));
     return longestBase(place, rule, (f, b) => folderExcluded(f, b, platform)) !== undefined;
@@ -466,9 +498,29 @@ const PRECEDENCE: readonly LevelRule[] = [
 ];
 
 export function decide(input: DecideInput, platform: NodeJS.Platform = process.platform): Decision {
+  let decision: Decision | undefined;
   for (const level of PRECEDENCE) {
-    const decision = level(input, platform);
-    if (decision) return decision;
+    decision = level(input, platform);
+    if (decision) break;
   }
-  return globalLevel(input.rules);
+  decision ??= globalLevel(input.rules);
+  const sends = decision.capture || decision.frozen !== undefined;
+  const redacting = sends ? toolCallsRedacted(input, platform) : undefined;
+  return redacting ? { ...decision, redact_tool_calls: redacting } : decision;
+}
+
+/** Why the session's tool calls are redacted, when they are: it ran in a place the org lists in
+ * `capture.redact_tool_calls`, here or in any other folder it was seen in (what it did there
+ * stays in it wherever it goes next). Exclusion is decided first, so it wins. */
+function toolCallsRedacted(input: DecideInput, platform: NodeJS.Platform): string | undefined {
+  const here = toolCallsRedactedBy(input.rules, input.place, platform);
+  if (here) return `the org redacts tool calls in ${here.entry} (capture.redact_tool_calls)`;
+  for (const other of input.seen ?? []) {
+    if (other.cwd === undefined || other.cwd === input.place.cwd) continue;
+    const there = toolCallsRedactedBy(input.rules, other, platform);
+    if (there) {
+      return `it also ran in ${other.repo?.root ?? other.cwd}, where the org redacts tool calls in ${there.entry} (capture.redact_tool_calls)`;
+    }
+  }
+  return undefined;
 }

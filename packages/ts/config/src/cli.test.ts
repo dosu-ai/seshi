@@ -93,6 +93,7 @@ describe("the CLI's config", () => {
         paths: [{ path: "~/clients/acme", capture: false }],
         remotes: [],
         exclude: [],
+        redact_tool_calls: [],
       },
     });
   });
@@ -104,7 +105,7 @@ describe("the CLI's config", () => {
       theme: "auto",
       keychain: true,
       search: { scope: "visible" },
-      capture: { enabled: true, paths: [], remotes: [], exclude: [] },
+      capture: { enabled: true, paths: [], remotes: [], exclude: [], redact_tool_calls: [] },
     });
   });
 
