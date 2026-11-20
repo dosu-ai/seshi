@@ -304,25 +304,26 @@ function ourHook(command: readonly string[]) {
 }
 
 /** seshi's lifecycle hooks: the notice when a session starts, and `$session-capture
- * off|on|status|share|unshare`. */
-const LIFECYCLE: readonly { event: string; matcher?: string }[] = [
-  { event: "SessionStart", matcher: "startup|resume" },
-  { event: "UserPromptSubmit" },
+ * off|on|status|share|unshare`, with how many seconds Codex gives each. Every other prompt
+ * returns at once; a share waits on the server, for the session and each subagent's. */
+const LIFECYCLE: readonly { event: string; matcher?: string; timeout: number }[] = [
+  { event: "SessionStart", matcher: "startup|resume", timeout: 5 },
+  { event: "UserPromptSubmit", timeout: 20 },
 ];
 
 function installNotice(context: InstallContext): string {
   const path = hooksPath(context);
   const config = readJsonConfig(path);
   const table = hooksTable(config, path);
-  for (const { event, matcher } of LIFECYCLE) {
+  for (const { event, matcher, timeout } of LIFECYCLE) {
     const command = `${commandLine(context.command)} hook ${AGENT} ${event}`;
     const groups = groupsOf(table[event]);
     const ours = groups.flatMap((g) => (g.hooks ?? []).filter(ourHook(context.command)));
-    if (ours.length > 0) for (const hook of ours) hook.command = command;
+    if (ours.length > 0) for (const hook of ours) Object.assign(hook, { command, timeout });
     else
       groups.push({
         ...(matcher ? { matcher } : {}),
-        hooks: [{ type: "command", command, timeout: 5 }],
+        hooks: [{ type: "command", command, timeout }],
       });
     table[event] = groups;
   }

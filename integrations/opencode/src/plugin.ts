@@ -52,7 +52,7 @@ const server = async ({ client }) => {
         body: {
           title: "Session Capture",
           message,
-          variant: message.includes("◉") ? "info" : "warning",
+          variant: /[◉✓]/.test(message) ? "info" : "warning",
           duration: 6000,
         },
       });
@@ -363,7 +363,7 @@ const tui = async (api) => {
       api.ui.toast({
         title: "Session Capture",
         message: said,
-        variant: said.includes("◉") ? "info" : "warning",
+        variant: /[◉✓]/.test(said) ? "info" : "warning",
         duration: 6000,
       });
       await refresh(id);
@@ -469,7 +469,7 @@ const setup = async (ctx) => {
       ctx.ui.toast.show({
         title: "Session Capture",
         message,
-        variant: message.includes("◉") ? "info" : "warning",
+        variant: /[◉✓]/.test(message) ? "info" : "warning",
         duration: 6000,
       });
     } catch {}

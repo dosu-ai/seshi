@@ -32,8 +32,9 @@ In Codex and Cursor, when the user's whole message is `$session-capture` with `o
 `status`, `share` or `unshare` after it (`/session-capture …` in Cursor), seshi's own hook has
 already done it before you see the message, and shown the user the result: do not run it again.
 After off, on or status, run `seshi capture status --session --agent <agent>`, which only
-reads, and confirm in one sentence; after share or unshare, run nothing and say in one sentence
-that seshi's hook did it.
+reads, and confirm in one sentence; after share or unshare, run nothing: the user has seshi's
+answer (shared, or why not), so say in one sentence that seshi's hook took the request, without
+saying whether it worked.
 
 Share and unshare change the session in the session store, so they need the network. Until its
 first turn has finished, seshi has not uploaded the session and says so: tell the user to ask

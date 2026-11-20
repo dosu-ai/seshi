@@ -300,9 +300,11 @@ the skill runs `seshi share --session`. In Codex and Cursor, typed as a message 
 prompt hook does it before the model sees the message, outside the agent's sandbox (Codex's
 gives the agent's commands no network by default). In pi and OpenCode, seshi's extension and
 plugins do it as they do `off` and `on` ([below](#the-status-line)). The answer is what
-`seshi share` says (`Session Capture ◉ · Shared pi/<id>: visibility is org, so every member may
-read it.`), or why it could not: not uploaded yet, Session Capture off, or a subagent's session
-it could not change.
+`seshi share` did (`Session Capture ✓ · shared this session: visibility is org, so every member
+may read it`), marked ✓ rather than ◉ since who may read a session says nothing of whether it is
+captured; or, unmarked, why it could not (not uploaded yet, Session Capture off), or the
+subagent sessions it could not change. Codex gives its prompt hook 20 seconds for this (an older
+install gave it 5: `seshi capture install codex` raises it).
 
 ### Tool calls redacted
 

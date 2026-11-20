@@ -265,11 +265,13 @@ describe("/session-capture share and unshare, carried out by the hook", () => {
       command("pi", "Command", { session_id: PI_ID, cwd: machine.dir, prompt });
 
     expect(await pi("/session-capture share")).toEqual({
-      message: `Session Capture ◉ · Shared pi/${PI_ID}: visibility is org, so every member may read it.`,
+      message:
+        "Session Capture ✓ · shared this session: visibility is org, so every member may read it",
     });
     expect(await piStored()).toBe("org");
     expect(await pi("/session-capture unshare")).toEqual({
-      message: `Session Capture ◉ · Unshared pi/${PI_ID}: visibility is owner, so only its owner (and admins) may read it.`,
+      message:
+        "Session Capture ✓ · unshared this session: visibility is owner, so only its owner (and admins) may read it",
     });
     expect(await piStored()).toBe("owner");
   });
