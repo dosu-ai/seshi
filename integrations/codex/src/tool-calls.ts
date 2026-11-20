@@ -25,8 +25,8 @@ import {
   byType,
   isJsonObject,
   type RecordShape,
+  redactCommandOutput,
   redactRecords,
-  redactTagBodies,
   reshape,
 } from "@seshi/kit";
 
@@ -54,12 +54,10 @@ function output(value: unknown): unknown {
   return blankUnknown(value);
 }
 
-/** A command the person ran (`!cmd`) is logged as a user message holding its output. */
-const SHELL_COMMAND = /<user_shell_command>[\s\S]*?(?:<\/user_shell_command>|$)/g;
-
+/** What was said, with what a command the person ran (`!cmd`, logged as a user message holding
+ * its output) printed replaced (as the server's pass does too). */
 function said(text: unknown): unknown {
-  if (typeof text !== "string") return blankUnknown(text);
-  return text.replace(SHELL_COMMAND, (block) => redactTagBodies(block, ["result"]));
+  return typeof text === "string" ? redactCommandOutput(text) : blankUnknown(text);
 }
 
 /** A message's content: its text items with what a command the person ran printed replaced. */

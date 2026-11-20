@@ -116,7 +116,7 @@ export async function loadRules(host: CaptureHost): Promise<RulesSnapshot> {
  * loaded again (and the cache rewritten), with the server's exclude list (the copy the uploader
  * fetched last) ahead of this machine's own. */
 export async function captureRules(host: CaptureHost, paths: CapturePaths): Promise<RulesSnapshot> {
-  return withServerExcludes(await localRules(host, paths), paths, host.home);
+  return withServerLists(await localRules(host, paths), paths, host.home);
 }
 
 async function localRules(host: CaptureHost, paths: CapturePaths): Promise<RulesSnapshot> {
@@ -145,7 +145,7 @@ export function compileExcludes(
 /** `snapshot` with the server's lists first: the org's exclude list and this machine's are one
  * list, and an entry from either turns capture off; so are the two tool-call redaction lists, and
  * an entry from either redacts. The server's entries are named first. */
-export function withServerExcludes(
+export function withServerLists(
   snapshot: RulesSnapshot,
   paths: CapturePaths,
   home: string,

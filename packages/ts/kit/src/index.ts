@@ -94,6 +94,7 @@ export {
   byType,
   isJsonObject,
   type RecordShape,
+  redactCommandOutput,
   redactRecords,
   redactTagBodies,
   reshape,

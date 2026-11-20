@@ -2,7 +2,7 @@
  * server's config, `GET /v1/capture/rules`) and its tool-call redaction list
  * (`[capture] redact_tool_calls`), fetched by the uploader and kept in
  * `capture-rules.json` with its ETag. Hooks, the status line and `seshi capture status` read the
- * copy (`withServerExcludes`); only the uploader fetches.
+ * copy (`withServerLists`); only the uploader fetches.
  *
  * - Before this machine holds a copy from the server it uploads to, that server's uploads wait:
  *   nothing goes up that its list may exclude.

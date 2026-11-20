@@ -222,28 +222,20 @@ export class Instance {
     return written(this.config.capture.redact_tool_calls);
   }
 
-  private redactionsFor: { from: readonly string[]; redactions: RepoExcludes } | undefined;
+  private readonly redactions = byIdentity(repoExcludes);
 
   /** The repository entries of the tool-call redaction list, read once per config: a session
    * whose `repo` one names is stored with its tool calls redacted. */
   get repoToolCallRedactions(): RepoExcludes {
-    const from = this.config.capture.redact_tool_calls;
-    if (this.redactionsFor?.from !== from) {
-      this.redactionsFor = { from, redactions: repoExcludes(from) };
-    }
-    return this.redactionsFor.redactions;
+    return this.redactions(this.config.capture.redact_tool_calls);
   }
 
-  private excludesFor: { from: readonly string[]; excludes: RepoExcludes } | undefined;
+  private readonly excludes = byIdentity(repoExcludes);
 
   /** The repository entries of that list, read once per config: what the server's own sources
    * match against (folder entries are a laptop's). */
   get repoExcludes(): RepoExcludes {
-    const from = this.config.capture.exclude;
-    if (this.excludesFor?.from !== from) {
-      this.excludesFor = { from, excludes: repoExcludes(from) };
-    }
-    return this.excludesFor.excludes;
+    return this.excludes(this.config.capture.exclude);
   }
 
   constructor(parts: InstanceParts) {
@@ -874,4 +866,14 @@ export async function buildInstance(
 /** A list's entries as written, blanks and `#` comments left out. */
 function written(entries: readonly string[]): string[] {
   return entries.map((entry) => entry.trim()).filter((e) => e !== "" && !e.startsWith("#"));
+}
+
+/** `read` remembering its last answer for as long as it is asked about the same list (one config
+ * generation: a reload's list is a new array). */
+function byIdentity<T>(read: (entries: readonly string[]) => T): (entries: readonly string[]) => T {
+  let last: { from: readonly string[]; value: T } | undefined;
+  return (entries) => {
+    if (last?.from !== entries) last = { from: entries, value: read(entries) };
+    return last.value;
+  };
 }

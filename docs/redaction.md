@@ -36,10 +36,11 @@ a laptop's own `capture.redact_tool_calls`) goes through one pass more first: ev
 every tool call's input and result becomes `[redacted:tool-call]`, keeping the calls' names,
 ids, order and failures ([capture.md](capture.md#tool-calls-redacted)). A laptop runs it on the
 raw log before upload, per agent. The server runs it on the normalized records, before the
-passes below, for its own sources' sessions (Cursor Cloud) and any upload whose `repo` the list
-names, as a backstop for a laptop that did not; records a laptop already redacted are left as
-they are, and what it replaced is counted under `tool-call` in the session's
-`redaction.counts`. The passes above then run on what is left, as
+passes below, for its own sources' sessions (Cursor Cloud, span sets included) and any upload
+whose `repo` the list names, as a backstop for a laptop that did not: tool calls' arguments and
+results, command output and background tasks' results in what was said, and all of a subagent's
+session. Records a laptop already redacted are left as they are, and what it replaced is
+counted under `tool-call` in the session's `redaction.counts`. The passes above then run on what is left, as
 for any session: a sensitive-file or secret-command call no longer has a path or command to
 match, so its result is already `[redacted:tool-call]`, while the text rules and secret patterns
 still catch what the prompts and replies say. The markers are:

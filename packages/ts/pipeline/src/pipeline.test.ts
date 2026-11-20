@@ -1394,6 +1394,68 @@ describe("the org's tool-call redaction list at ingest", () => {
     );
   });
 
+  it("redacts a listed session's span parts before the assembler keeps them", async () => {
+    const kept: unknown[] = [];
+    const assembler: SpanAssembler = {
+      accept: async (batch) => {
+        kept.push(...batch.parts.map((p) => p.part));
+        return { status: "accepted", archive_id: batch.archive_id, spans: batch.parts.length };
+      },
+    };
+    const attr = (key: string, value: string) => ({ key, value: { stringValue: value } });
+    const toolSpan = (repo: string): Envelope => ({
+      ...upload(HEAD),
+      repo,
+      source: "otlp",
+      source_id: "console",
+      format: "otlp-genai",
+      session_key: "sesn_1",
+      caller: { kind: "service", principal: "svc-console" },
+      owner: "svc-console",
+      owner_basis: "service",
+      payload: {
+        kind: "spans",
+        spans: [
+          {
+            traceId: "ab".repeat(16),
+            spanId: "cd".repeat(8),
+            name: "execute_tool shell",
+            startTimeUnixNano: "1790000000000000000",
+            attributes: [
+              attr("gen_ai.operation.name", "execute_tool"),
+              attr("gen_ai.tool.name", "shell"),
+              attr("gen_ai.tool.call.id", "call-1"),
+              attr("gen_ai.tool.call.arguments", '{"command":"psql -c count_customers"}'),
+              attr("gen_ai.tool.call.result", "4812 customers in sk_live_span"),
+            ],
+          },
+        ],
+      },
+      idempotency_key: "ab/cd",
+    });
+    const p = pipeline({ assembler, toolCallsRedactedFor });
+    await p.submit(toolSpan("github.com/acme/web"));
+    expect(JSON.stringify(kept)).toContain("sk_live_span");
+    kept.length = 0;
+    await p.submit(toolSpan("github.com/acme/research"));
+    expect(kept).toHaveLength(1);
+    expect(JSON.stringify(kept)).not.toContain("sk_live_span");
+    expect(JSON.stringify(kept)).not.toContain("count_customers");
+    expect(JSON.stringify(kept)).toContain("shell");
+  });
+
+  it("stores nothing a listed subagent's session said: it is all its parent's tool call", async () => {
+    const p = pipeline({ toolCallsRedactedFor });
+    await p.submit({ ...inRepo("github.com/acme/research"), parent_session_id: "parent-1" });
+    // With its text gone the session is usually below the filter: either way, none of it is kept.
+    const everything = objects()
+      .map((key) => readFileSync(join(dir, key), "utf8"))
+      .join("\n");
+    expect(everything).not.toContain("x".repeat(50));
+    expect(everything).not.toContain("read c1");
+    expect(everything).not.toContain("KEY_c1");
+  });
+
   it("refuses a repo on both lists: exclusion wins", async () => {
     const p = pipeline({
       toolCallsRedactedFor,

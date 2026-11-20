@@ -320,9 +320,11 @@ reason and `redacted` is `{ entry, from: "server" | "config", server? }`).
 The server applies the list too, to what no laptop redacted: its own sources (a Cursor Cloud
 agent, [cursor-cloud.md](cursor-cloud.md#the-orgs-tool-call-redaction-list)) and, as a backstop,
 any upload whose `repo` an entry names (a laptop running an older seshi, or one whose copy of
-the list is old). It redacts the normalized records: a tool call's arguments and its result,
-nothing else, so what only a laptop's pass catches (a command the person ran, a compaction's
-summary, a subagent's session) comes through from an older laptop as it was.
+the list is old). It redacts the normalized records the same way: a tool call's arguments and
+its result, what a background task or a command the person ran returned in the conversation,
+and every text of a subagent's session (usually leaving too little to keep). What is only in a
+raw log's structure, a compaction's summary, cannot be told apart in the records and comes
+through from an older laptop as it was.
 
 ### Content an agent or a plugin adds
 

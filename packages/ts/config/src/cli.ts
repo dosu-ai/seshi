@@ -167,8 +167,10 @@ export const cliConfigSchema = z
           .describe(
             "An exclude list of this machine's, added to the server's (the org's list, [capture] exclude, which the uploader downloads): sessions in these repositories (owner/name on any host, host/owner/name on one) or folders (starting with /, ~, a drive or \\\\server, and everything under them) are never captured. * matches within a path segment, ** across any number of them; blank entries and # comments are skipped. It can only turn capture off.",
           ),
+        // Plain strings, as since 0.19: an entry the server's list would refuse (a URL with a
+        // credential) never matches here, rather than make the whole config unreadable.
         redact_tool_calls: z
-          .array(excludeEntry)
+          .array(z.string())
           .default([])
           .describe(
             "A list of this machine's, added to the server's ([capture] redact_tool_calls, which the uploader downloads), of places whose sessions are uploaded with every tool call's input and output replaced by [redacted:tool-call]: prompts, replies, reasoning, tool names, call ids, their order and whether each failed are kept. Entries are written and matched as in capture.exclude, which wins for a place on both lists.",

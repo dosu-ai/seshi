@@ -55,4 +55,58 @@ describe("the tool-call pass over records (redact_tool_calls)", () => {
     expect(JSON.stringify(out.records)).not.toContain("psql");
     expect(out.records[4]).toMatchObject({ content: "There are 4812." });
   });
+
+  it("takes out what tools and the person's commands returned in what was said for them", () => {
+    const said = [
+      {
+        role: "user",
+        content: "<bash-input>cat .env</bash-input><bash-stdout>KEY=1</bash-stdout>",
+      },
+      {
+        role: "observation",
+        content: "<task-notification><result>KEY=2</result></task-notification>",
+      },
+      {
+        role: "user",
+        content:
+          "<user_shell_command><command>ls</command><result>secret.txt</result></user_shell_command>",
+      },
+      { role: "user", content: "a plain prompt" },
+      { role: "assistant", content: "a reply quoting KEY=3" },
+    ] as unknown as NormalizedRecord[];
+    const { records: out, count } = redactToolCallRecords(said);
+    expect(out.map((r) => (r as { content: string }).content)).toEqual([
+      `<bash-input>cat .env</bash-input><bash-stdout>${TOOL_CALL_MARKER}</bash-stdout>`,
+      `<task-notification>${TOOL_CALL_MARKER}</task-notification>`,
+      `<user_shell_command><command>ls</command><result>${TOOL_CALL_MARKER}</result></user_shell_command>`,
+      "a plain prompt",
+      "a reply quoting KEY=3",
+    ]);
+    expect(count).toBe(3);
+  });
+
+  it("blanks everything a subagent's session said", () => {
+    const { records: out } = redactToolCallRecords(records, { subagent: true });
+    expect(out[1]).toMatchObject({ content: TOOL_CALL_MARKER });
+    expect(out[4]).toMatchObject({ content: TOOL_CALL_MARKER });
+    expect(out[0]).toBe(records[0]);
+  });
+
+  it("keeps arguments a laptop already redacted as written, however they are spaced", () => {
+    const sent = [
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          { id: "c1", name: "Read", args: `{"path": "${TOOL_CALL_MARKER}", "n": 1.0}` },
+          { id: "c2", name: "Grep", args: TOOL_CALL_MARKER },
+        ],
+      },
+      { role: "tool", tool_call_id: "c1", content: TOOL_CALL_MARKER },
+    ] as unknown as NormalizedRecord[];
+    const { records: out, count } = redactToolCallRecords(sent);
+    expect(out[0]).toBe(sent[0]);
+    expect(out[1]).toBe(sent[1]);
+    expect(count).toBe(0);
+  });
 });

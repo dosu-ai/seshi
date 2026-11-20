@@ -32,7 +32,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type CaptureRulesAnswer, readOrgRules } from "./org-rules";
 import { type CapturePaths, capturePaths } from "./paths";
 import { DEFAULT_RULES, decide } from "./rules";
-import { excludeRule, type RulesSnapshot, withServerExcludes } from "./rules-cache";
+import { excludeRule, type RulesSnapshot, withServerLists } from "./rules-cache";
 import { type RetractOutcome, RetractRefused, type SessionSink, SignInNeeded } from "./sink";
 import { appendSpool } from "./spool";
 import {
@@ -1046,7 +1046,7 @@ describe("the server's exclude list (GET /v1/capture/rules)", () => {
   const listed = (options: Partial<UploaderOptions> = {}) =>
     uploader({
       rules: async () =>
-        withServerExcludes(
+        withServerLists(
           {
             rules: {
               ...DEFAULT_RULES,
@@ -1433,7 +1433,7 @@ describe("the server's exclude list (GET /v1/capture/rules)", () => {
       listing.redact = ["~/labs"];
       sessionIn("s1", "labs");
       await listed({ agents: [redacting] }).pass();
-      const snapshot = withServerExcludes({ rules: DEFAULT_RULES }, paths, dir);
+      const snapshot = withServerLists({ rules: DEFAULT_RULES }, paths, dir);
       const decision = decide(
         { rules: snapshot.rules, place: { cwd: join(dir, "labs") } },
         "linux",

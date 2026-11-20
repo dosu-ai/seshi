@@ -447,12 +447,20 @@ export class Pipeline {
     this.toolCallsRedactedFor = options.toolCallsRedactedFor;
   }
 
-  /** The entry of the org's tool-call redaction list this session's write redacts for, if any:
-   * the source's own match, else its `repo`'s. */
-  private toolCallsFor(envelope: Envelope, options: SubmitOptions): string | undefined {
-    if (options.redactToolCalls !== undefined) return options.redactToolCalls;
+  /** The redactor this envelope's write uses, chosen once for every path it takes (a log, a span
+   * batch, an assembled session): the rules, with the tool-call pass first when the org's list
+   * names the session (the source's own match, else its `repo`). A subagent's session there is
+   * all its parent's tool call. */
+  private redactorFor(envelope: Envelope, options: SubmitOptions): Redactor {
     const repo = envelope.repo;
-    return repo === undefined ? undefined : this.toolCallsRedactedFor?.(repo);
+    const entry =
+      options.redactToolCalls ??
+      (repo === undefined ? undefined : this.toolCallsRedactedFor?.(repo));
+    if (entry === undefined) return this.redactor;
+    return withToolCallsRedacted(
+      this.redactor,
+      envelope.parent_session_id !== undefined ? { subagent: true } : {},
+    );
   }
 
   /** Refuse a session in a repository the org's exclude list names: nothing of it is stored. */
@@ -489,13 +497,11 @@ export class Pipeline {
       checkEnvelope(envelope);
       this.checkExcluded(envelope);
       const auth = await this.authorizer.authorize(envelope);
-      if (!isLogEnvelope(envelope)) return await this.spans(envelope as SpanEnvelope, auth);
-      const { result, replay } = await this.log(
-        envelope,
-        auth,
-        options.retractSecret,
-        this.toolCallsFor(envelope, options),
-      );
+      const redactor = this.redactorFor(envelope, options);
+      if (!isLogEnvelope(envelope)) {
+        return await this.spans(envelope as SpanEnvelope, auth, redactor);
+      }
+      const { result, replay } = await this.log(envelope, auth, options.retractSecret, redactor);
       this.health.count(envelope.source_id, replay ? "duplicate" : result.status);
       return result;
     } catch (err) {
@@ -529,7 +535,7 @@ export class Pipeline {
             ...(input.llm_calls ? { llm_calls: input.llm_calls } : {}),
             ...(input.redaction ? { arrived: input.redaction } : {}),
           }),
-        this.toolCallsFor(envelope, options),
+        this.redactorFor(envelope, options),
       );
       this.health.count(envelope.source_id, outcome.replay ? "duplicate" : outcome.result.status);
       return outcome.result;
@@ -565,7 +571,11 @@ export class Pipeline {
     return { status: "failed", code: err.code, message, record };
   }
 
-  private async spans(envelope: SpanEnvelope, auth: Authorization): Promise<SpanBatchResult> {
+  private async spans(
+    envelope: SpanEnvelope,
+    auth: Authorization,
+    redactor: Redactor,
+  ): Promise<SpanBatchResult> {
     if (!this.assembler) {
       throw new SessionRejected(
         "unsupported_payload",
@@ -581,7 +591,6 @@ export class Pipeline {
       );
     }
     const { spans, resource = [] } = envelope.payload;
-    const redactor = this.redactor;
     const parts: { part: SpanPart; redaction: RedactionSummary }[] = [];
     let rejected = 0;
     for (const span of spans as unknown as ReceivedSpan[]) {
@@ -626,8 +635,8 @@ export class Pipeline {
   private async log(
     envelope: LogEnvelope,
     auth: Authorization,
-    retractSecret?: string,
-    toolCalls?: string,
+    retractSecret: string | undefined,
+    redactor: Redactor,
   ): Promise<Outcome> {
     const { payload } = envelope;
     if (!this.formats.has(envelope.format)) this.unsupported(envelope.format);
@@ -655,7 +664,7 @@ export class Pipeline {
         envelope,
         auth,
         (run) => this.chunk(run, payload.text, payload.offset),
-        toolCalls,
+        redactor,
       );
     }
     if (payload.text.trim() === "") throw new SessionRejected("empty", "transcript is empty");
@@ -675,7 +684,7 @@ export class Pipeline {
           ...(llm_calls ? { llm_calls } : {}),
           recordsBeforeCut: (bytes) => this.recordsBeforeCut(envelope, bytes),
         }),
-      toolCalls,
+      redactor,
     );
   }
 
@@ -701,14 +710,12 @@ export class Pipeline {
     envelope: Envelope,
     auth: Authorization,
     body: (run: Run) => Promise<StoreSessionResult>,
-    toolCalls?: string,
+    redactor: Redactor,
   ): Promise<Outcome> {
     await this.layout();
     const owner = auth.owner;
     const archive = archiveId(owner, envelope.format, envelope.session_key);
     const { reviewer } = this;
-    // A session in a place the org lists: its tool calls go before any rule runs.
-    const redactor = toolCalls ? withToolCallsRedacted(this.redactor) : this.redactor;
     for (let attempt = 1; ; attempt++) {
       const session = await readMetadata(this.store, owner, archive);
       if (session?.status === "redacted") {
