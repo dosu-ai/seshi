@@ -35,9 +35,9 @@ export interface HookResult {
   /** A session that just started: the hook tells the agent whether it is captured, and spools
    * nothing (Codex shows it as a notice). */
   announce?: HookCapture;
-  /** The person asked, in their own prompt, to turn capture off or on for this session: the
-   * hook does it, outside any sandbox the agent's commands run in. */
-  request?: { action: "off" | "on"; session: HookCapture };
+  /** The person asked, in their own prompt, to turn capture off or on for this session, or to
+   * share or unshare it: the hook does it, outside any sandbox the agent's commands run in. */
+  request?: { action: CaptureRequest; session: HookCapture };
   /** The person just prompted this session: recorded as the folder's current conversation, for
    * an editor that cannot say which one it shows. */
   active?: HookCapture;
@@ -84,17 +84,22 @@ export interface HookHandler {
  * name, so any product can install the same hooks under it. */
 export const CAPTURE_COMMAND = "session-capture";
 
-/** What a prompt that is only `$session-capture` or `/session-capture`, with `off`, `on` or
- * `status` after it, asks for (bare: status); undefined for any other prompt. The old name,
- * `seshi`, is still read: until `seshi capture install` runs again, the skill it wrote under that
- * name tells the agent the hook has already done `$seshi off`. */
-export function captureCommandPrompt(prompt: string): "off" | "on" | "status" | undefined {
+/** What a `/session-capture` the hook carries out does to the session: turn capture off or on,
+ * or share it with the org or unshare it (`seshi share|unshare --session`). */
+export type CaptureRequest = "off" | "on" | "share" | "unshare";
+
+/** What a prompt that is only `$session-capture` or `/session-capture`, with `off`, `on`,
+ * `status`, `share` or `unshare` after it, asks for (bare: status); undefined for any other
+ * prompt. The old name, `seshi`, is still read: until `seshi capture install` runs again, the
+ * skill it wrote under that name tells the agent the hook has already done `$seshi off`. */
+export function captureCommandPrompt(prompt: string): CaptureRequest | "status" | undefined {
   const match =
-    /^\s*[$/](?:session-capture|seshi)(?:\s+(?:capture\s+)?(off|on|status))?\s*[.!]?\s*$/i.exec(
+    /^\s*[$/](?:session-capture|seshi)(?:\s+(?:(?:capture\s+)?(off|on|status)|(share|unshare)))?\s*[.!]?\s*$/i.exec(
       prompt,
     );
   if (!match) return undefined;
-  return (match[1]?.toLowerCase() as "off" | "on" | "status" | undefined) ?? "status";
+  const word = (match[1] ?? match[2])?.toLowerCase() as CaptureRequest | "status" | undefined;
+  return word ?? "status";
 }
 
 export interface SweepPath {

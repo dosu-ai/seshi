@@ -57,6 +57,7 @@ async function captured(
   m: Machine,
   sessions: {
     id: string;
+    agent?: string;
     parent?: string;
     generation?: number;
     toggle?: "off" | "on";
@@ -67,8 +68,9 @@ async function captured(
   const paths = capturePaths({ env: m.env, home: m.dir, platform: process.platform });
   await updateState(paths, (state) => {
     for (const s of sessions) {
-      state.sessions[sessionKey("claude-code", s.id)] = {
-        agent: "claude-code",
+      const agent = s.agent ?? "claude-code";
+      state.sessions[sessionKey(agent, s.id)] = {
+        agent,
         session_id: s.id,
         cwd: s.cwd ?? m.dir,
         first_seen: new Date().toISOString(),
@@ -229,5 +231,82 @@ describe("seshi share and unshare", () => {
     const help = await machine.seshi(["unshare", "--help"]);
     expect(help.code).toBe(0);
     expect(help.out).toContain("usage: seshi unshare");
+  });
+});
+
+describe("/session-capture share and unshare, carried out by the hook", () => {
+  // Padded, as the Claude Code session above is, past the size a session is kept from.
+  const PI = `${transcript("pi-injected.pi.jsonl").trim()}\n${JSON.stringify({
+    type: "message",
+    id: "c1000099",
+    parentId: "c1000007",
+    timestamp: "2026-11-17T10:00:09.000Z",
+    message: {
+      role: "assistant",
+      content: [{ type: "text", text: `The auth flow: ${"details ".repeat(400)}` }],
+      provider: "fake",
+      model: "fake-1",
+    },
+  })}\n`;
+  const PI_ID = "01a1ea8b-0000-7000-8000-000000000003";
+  const piStored = async () =>
+    (await readMetadata(server.instance.store, ALICE, archiveId(ALICE, "pi", PI_ID)))?.visibility;
+  const command = async (agent: string, event: string, payload: Record<string, unknown>) => {
+    const run = await machine.seshi(["hook", agent, event], { stdin: JSON.stringify(payload) });
+    expect(run.code, run.err).toBe(0);
+    return JSON.parse(run.out);
+  };
+
+  it("share and unshare a pi session from /session-capture, saying what seshi share said", async () => {
+    const db = new HttpSessionDB({ server: server.url, token: await mint(ALICE) });
+    await db.ingest({ format: "pi", session_id: PI_ID, transcript: PI, visibility: "owner" });
+    await captured(machine, [{ id: PI_ID, agent: "pi" }]);
+    const pi = (prompt: string) =>
+      command("pi", "Command", { session_id: PI_ID, cwd: machine.dir, prompt });
+
+    expect(await pi("/session-capture share")).toEqual({
+      message:
+        "Session Capture ✓ · shared this session: visibility is org, so every member may read it",
+    });
+    expect(await piStored()).toBe("org");
+    expect(await pi("/session-capture unshare")).toEqual({
+      message:
+        "Session Capture ✓ · unshared this session: visibility is owner, so only its owner (and admins) may read it",
+    });
+    expect(await piStored()).toBe("owner");
+  });
+
+  it("say why a session cannot be shared yet, in OpenCode, Codex and Cursor too", async () => {
+    await captured(machine, [
+      { id: "ses_fresh", agent: "opencode", sent: false },
+      { id: "t-off", agent: "codex", toggle: "off" },
+    ]);
+    expect(
+      await command("opencode", "Command", {
+        session_id: "ses_fresh",
+        cwd: machine.dir,
+        arguments: "share",
+      }),
+    ).toEqual({
+      message:
+        "Session Capture · could not share this session: opencode/ses_fresh is not in the session store yet: seshi uploads it as it runs, so try again after its next turn (seshi capture status --session shows why not)",
+    });
+    const codex = await command("codex", "UserPromptSubmit", {
+      session_id: "t-off",
+      cwd: machine.dir,
+      prompt: "$session-capture unshare",
+    });
+    expect(codex.systemMessage).toBe(
+      "Session Capture · could not unshare this session: Session Capture is off for codex t-off, so nothing of it is in the session store to share: turn it on first (seshi capture on --session t-off --agent codex)",
+    );
+    const cursor = await command("cursor", "beforeSubmitPrompt", {
+      conversation_id: "c-new",
+      workspace_roots: [machine.dir],
+      prompt: "/session-capture share",
+    });
+    expect(cursor).toMatchObject({ continue: false });
+    expect(cursor.user_message).toMatch(
+      /^Session Capture · could not share this session: cursor\/c-new is not in the session store yet/,
+    );
   });
 });

@@ -46,22 +46,22 @@ finished a turn yet seshi may not know it: say so. When seshi answers that more 
 here, show the user the sessions it lists and ask which, then run the command again with
 \`--session <id>\`.
 
-In Codex and Cursor, when the user's whole message is \`$${name} off\`, \`$${name} on\` or
-\`$${name} status\` (\`/${name} …\` in Cursor), seshi's own hook has already done it before
-you see the message, and shown the user the result: do not run off or on. Run
-\`${seshi} capture status --session --agent <agent>\`, which only reads, and confirm in one
-sentence.
+In Codex and Cursor, when the user's whole message is \`$${name}\` with \`off\`, \`on\`,
+\`status\`, \`share\` or \`unshare\` after it (\`/${name} …\` in Cursor), seshi's own hook has
+already done it before you see the message, and shown the user the result: do not run it again.
+After off, on or status, run \`${seshi} capture status --session --agent <agent>\`, which only
+reads, and confirm in one sentence; after share or unshare, run nothing: the user has seshi's
+answer (shared, or why not), so say in one sentence that seshi's hook took the request, without
+saying whether it worked.
 
 Share and unshare change the session in the session store, so they need the network. Until its
 first turn has finished, seshi has not uploaded the session and says so: tell the user to ask
-again after this turn. In a sandbox, run them with escalated permissions, saying they change who
-may read this session.
-
-Otherwise, off and on write seshi's state folder (\`~/.local/state/seshi\`, outside the
-workspace), which a sandbox blocks. In a sandbox, run the command with escalated permissions,
-saying it changes Session Capture for this session, and let the user approve it. If that is
-refused, tell the user to type \`$${name} off\` or \`$${name} on\` as a message of its own in
-Codex (\`/${name} off\` in Cursor), or to run the command in a terminal.
+again after this turn. Off and on write seshi's state folder (\`~/.local/state/seshi\`, outside
+the workspace). A sandbox blocks both. In a sandbox, run the command with escalated permissions,
+saying it changes Session Capture for this session (or who may read it), and let the user
+approve it. If that is refused, tell the user to type the command as a message of its own
+(\`$${name} off\`, \`$${name} share\`, … in Codex; \`/${name} off\`, \`/${name} share\`, … in
+Cursor), or to run it in a terminal.
 
 Report the command's output to the user in one or two sentences. Do not run any other seshi
 command unless the user asks for it.

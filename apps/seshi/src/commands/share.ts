@@ -233,8 +233,9 @@ export async function run(ctx: CommandContext, verb: "share" | "unshare"): Promi
       changed.length > 0
         ? `, with its ${changed.length} subagent session${changed.length === 1 ? "" : "s"}`
         : "";
-    emit(ctx, json, { ...metadata, subagents: changed, failed }, () => [
-      `${style.status(verb === "share" ? "Shared" : "Unshared", "success")} ${name}${also}: visibility is ${visibility}, so ${whoReads(visibility, backend as Backend)}.`,
+    const readers = whoReads(visibility, backend);
+    emit(ctx, json, { ...metadata, subagents: changed, failed, readers }, () => [
+      `${style.status(verb === "share" ? "Shared" : "Unshared", "success")} ${name}${also}: visibility is ${visibility}, so ${readers}.`,
       ...failed.map(
         (f) =>
           `  ${style.warn("not changed")}: subagent ${printable(`${target.format}/${f.session_id}`)}: ${printable(f.error)}`,

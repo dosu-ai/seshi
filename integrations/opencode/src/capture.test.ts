@@ -101,6 +101,13 @@ describe("OpenCode's hooks, from seshi's plugin (F9.2)", () => {
     expect(command?.parse({ ...payload("Command"), arguments: "on" }, host)?.request?.action).toBe(
       "on",
     );
+    expect(command?.parse({ ...payload("Command"), arguments: "share" }, host)).toEqual({
+      captures: [],
+      request: { action: "share", session: which },
+    });
+    expect(
+      command?.parse({ ...payload("Command"), arguments: "unshare" }, host)?.request?.action,
+    ).toBe("unshare");
     expect(command?.parse({ ...payload("Command"), arguments: "pause 2h" }, host)).toEqual({
       captures: [],
       say: UNKNOWN_COMMAND,
@@ -186,9 +193,9 @@ describe("seshi capture install opencode", () => {
       command,
       config,
     ]);
-    expect(readFileSync(plugin, "utf8")).toContain(`// ${PLUGIN_MARKER} v5`);
+    expect(readFileSync(plugin, "utf8")).toContain(`// ${PLUGIN_MARKER} v6`);
     expect(readFileSync(plugin, "utf8")).toContain('const SESHI = ["/opt/seshi/bin/seshi"];');
-    expect(readFileSync(tui, "utf8")).toContain(`// ${TUI_PLUGIN_MARKER} v3`);
+    expect(readFileSync(tui, "utf8")).toContain(`// ${TUI_PLUGIN_MARKER} v4`);
     expect(readFileSync(tui, "utf8")).toContain('const SESHI = ["/opt/seshi/bin/seshi"];');
     expect(readFileSync(command, "utf8")).toContain(COMMAND_MARKER);
     expect(JSON.parse(readFileSync(config, "utf8"))).toEqual({
@@ -680,6 +687,22 @@ describe("the OpenCode TUI plugin", () => {
     ]);
     tui.rerun();
     expect(node.props.fg).toBe("warning");
+  });
+
+  it("takes /session-capture share and unshare from the prompt too", async () => {
+    const tui = await load();
+    expect(tui.submit("/session-capture share")).toBe(true);
+    expect(tui.submit("/session-capture UNSHARE")).toBe(true);
+    await vi.waitFor(
+      () => expect(tui.calls().filter((c) => c.args[2] === "Command")).toHaveLength(2),
+      SPAWNED,
+    );
+    const asked = tui
+      .calls()
+      .filter((c) => c.args[2] === "Command")
+      .map((c) => JSON.parse(c.input ?? "").arguments)
+      .sort();
+    expect(asked).toEqual(["share", "unshare"]);
   });
 
   it("shows the latest read when an earlier one answers late", async () => {

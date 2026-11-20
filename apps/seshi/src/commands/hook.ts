@@ -1,5 +1,5 @@
 import { appendLog, runHook } from "@seshi/capture/fast";
-import { CAPTURE_COMMAND, hookHandler } from "@seshi/kit";
+import { CAPTURE_COMMAND, type CaptureRequest, hookHandler } from "@seshi/kit";
 import { captureAgent } from "../capture-agents";
 import { EXIT } from "../cli/exit";
 import { pathsOf, startUploader } from "./capture-host";
@@ -117,38 +117,73 @@ export function notice(
     : `Session Capture ⏸ · ${decision.reason}`;
 }
 
+/** What a command seshi runs on the person's behalf printed, and its exit code. */
+export interface Ran {
+  code: number;
+  /** Its `--json` answer: on stdout, or on stderr when it refused. */
+  said: Record<string, unknown>;
+}
+
+/** Run one of seshi's commands in this process with `--json`, as the person would have from a
+ * terminal; an error it does not classify counts as a failure, with its message. */
+async function runQuietly(
+  ctx: CommandContext,
+  run: (ctx: CommandContext) => Promise<number>,
+  argv: string[],
+): Promise<Ran> {
+  let out = "";
+  let err = "";
+  let code: number;
+  try {
+    code = await run({
+      ...ctx,
+      argv: [...argv, "--json"],
+      stdout: (line) => {
+        out += line;
+      },
+      stderr: (line) => {
+        err += line;
+      },
+    });
+  } catch (error) {
+    return {
+      code: EXIT.failure,
+      said: { error: { message: error instanceof Error ? error.message : String(error) } },
+    };
+  }
+  try {
+    return { code, said: JSON.parse(out || err) };
+  } catch {
+    return { code, said: err.trim() ? { error: { message: err.trim() } } : {} };
+  }
+}
+
+/** Why a command refused, from its `--json` answer: a usage error's message without the usage
+ * that follows it. */
+function refusal({ code, said }: Ran): string {
+  const error = said.error as { code?: string; message?: string } | undefined;
+  const message = error?.message?.trim();
+  if (!message) return `exit ${code}`;
+  return error?.code === "usage" ? (message.split("\n")[0] ?? message) : message;
+}
+
 /** Turn capture off or on for the session the person asked about, as `seshi capture off|on
- * --session <id>` would, and say what happened. */
+ * --session <id>` would, or share or unshare it, as `seshi share|unshare --session <id>` would,
+ * and say what happened. */
 async function carryOut(
   ctx: CommandContext,
   agent: string,
-  { action, session }: { action: "off" | "on"; session: { session_id: string } },
+  { action, session }: { action: CaptureRequest; session: { session_id: string } },
 ): Promise<string> {
-  const { run } = await import("./capture");
-  let out = "";
-  let err = "";
-  const code = await run({
-    ...ctx,
-    argv: [action, "--session", session.session_id, "--agent", agent, "--json"],
-    stdout: (line) => {
-      out += line;
-    },
-    stderr: (line) => {
-      err += line;
-    },
-  });
-  let said: {
-    retracting?: boolean;
-    fresh?: boolean;
-    unfrozen?: boolean;
-    error?: { message?: string };
-  } = {};
-  try {
-    said = JSON.parse(out || err);
-  } catch {}
-  if (code !== 0) {
-    return `Session Capture could not be turned ${action}: ${said.error?.message ?? (err.trim() || `exit ${code}`)}`;
+  const which = ["--session", session.session_id, "--agent", agent];
+  if (action === "share" || action === "unshare") {
+    const { run } = await import("./share");
+    return shared(action, await runQuietly(ctx, (c) => run(c, action), which));
   }
+  const { run } = await import("./capture");
+  const ran = await runQuietly(ctx, run, [action, ...which]);
+  if (ran.code !== 0) return `Session Capture could not be turned ${action}: ${refusal(ran)}`;
+  const said = ran.said as { retracting?: boolean; fresh?: boolean; unfrozen?: boolean };
   if (action === "off") {
     return `Session Capture ⏸ · turned off for this session; ${said.retracting ? "what it uploaded is being retracted" : "nothing of it was uploaded"}`;
   }
@@ -157,4 +192,28 @@ async function carryOut(
     ...(said.unfrozen ? ["a pause had stopped it, so all of it is uploaded now"] : []),
   ];
   return `Session Capture ◉ · turned on for this session${more.length > 0 ? `; ${more.join("; ")}` : ""}`;
+}
+
+/** What `seshi share|unshare` did, said for the session the person is in. Marked ✓, not ◉:
+ * who may read a session says nothing about whether it is captured, and an agent's plugin reads
+ * ◉ and ⏸ as that. A subagent's session it could not change, or a refusal, is unmarked. */
+export function shared(action: "share" | "unshare", ran: Ran): string {
+  if (ran.code !== EXIT.ok && ran.code !== EXIT.attention) {
+    return `Session Capture · could not ${action} this session: ${refusal(ran)}`;
+  }
+  const said = ran.said as {
+    visibility?: string;
+    readers?: string;
+    subagents?: string[];
+    failed?: { session_id: string; error: string }[];
+  };
+  const count = said.subagents?.length ?? 0;
+  const also = count > 0 ? `, with its ${count} subagent session${count === 1 ? "" : "s"}` : "";
+  const done = `${action === "share" ? "shared" : "unshared"} this session${also}: visibility is ${said.visibility ?? (action === "share" ? "org" : "owner")}${said.readers ? `, so ${said.readers}` : ""}`;
+  const failed = (said.failed ?? []).map(
+    (f) => `subagent session ${f.session_id} not changed: ${f.error}`,
+  );
+  return failed.length > 0
+    ? `Session Capture · ${done}; ${failed.join("; ")}`
+    : `Session Capture ✓ · ${done}`;
 }

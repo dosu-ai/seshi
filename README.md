@@ -77,7 +77,8 @@ seshi search flaky checkout test
 
 From then on each session is uploaded as it goes. Claude Code's status line says
 `Session Capture ◉` while a session is captured; `/session-capture` (`$session-capture` in Codex) turns it off or on
-for the session you are in, and `/session-capture share` shares it with the team.
+for the session you are in, and `/session-capture share` (or `unshare`) shares it with the team, in
+every agent below that captures live.
 
 ### Run it for a team
 
@@ -120,7 +121,7 @@ Everything else is in [docs/](docs/README.md).
 
 ## Supported agents
 
-| Client | Live capture | Capture state shown in | Turn off or on in the session | Upload its session files |
+| Client | Live capture | Capture state shown in | Turn off or on, or share, in the session | Upload its session files |
 |---|:-:|---|---|:-:|
 | Claude Code, including the Claude desktop app | ✓ | Status line; a chip in the desktop app | `/session-capture` | ✓ |
 | Codex CLI | ✓ | A notice when the session starts | `$session-capture` | ✓ |

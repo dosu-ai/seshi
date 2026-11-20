@@ -32,6 +32,11 @@ describe("the session-capture command", () => {
     expect(captureCommandPrompt("/session-capture capture off")).toBe("off");
     expect(captureCommandPrompt("/seshi off")).toBe("off");
     expect(captureCommandPrompt("/session-capture pause")).toBeUndefined();
+    expect(captureCommandPrompt("/session-capture share")).toBe("share");
+    expect(captureCommandPrompt("$session-capture Unshare.")).toBe("unshare");
+    // `capture` goes only with off, on and status, as in `seshi capture off`.
+    expect(captureCommandPrompt("/session-capture capture share")).toBeUndefined();
+    expect(captureCommandPrompt("/session-capture share it with bob")).toBeUndefined();
   });
 });
 

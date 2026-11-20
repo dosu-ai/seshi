@@ -196,6 +196,10 @@ describe("the installer (F9.6)", () => {
     };
     writeFileSync(hooks(), JSON.stringify(theirs));
     await codexInstaller.install({ ...host, ...context });
+    // An install from before `$session-capture share` gave the prompt hook 5 s: raised again.
+    const before = JSON.parse(readFileSync(hooks(), "utf8"));
+    before.hooks.UserPromptSubmit[0].hooks[0].timeout = 5;
+    writeFileSync(hooks(), JSON.stringify(before));
     await codexInstaller.install({ ...host, ...context });
     expect(JSON.parse(readFileSync(hooks(), "utf8")).hooks).toEqual({
       ...theirs.hooks,
@@ -207,7 +211,7 @@ describe("the installer (F9.6)", () => {
         },
       ],
       UserPromptSubmit: [
-        { hooks: [{ type: "command", command: "seshi hook codex UserPromptSubmit", timeout: 5 }] },
+        { hooks: [{ type: "command", command: "seshi hook codex UserPromptSubmit", timeout: 20 }] },
       ],
     });
     expect((await codexInstaller.status({ ...host, ...context })).notes).toEqual([]);
@@ -236,6 +240,12 @@ describe("the installer (F9.6)", () => {
       captures: [],
       announce: { session_id: "t1", cwd: "/w" },
     });
+    // Sharing needs the network, which Codex's sandbox keeps from the model's commands.
+    expect(prompt("$session-capture share")).toEqual({
+      captures: [],
+      request: { action: "share", session: { session_id: "t1", cwd: "/w" } },
+    });
+    expect(prompt("$session-capture unshare")?.request?.action).toBe("unshare");
     expect(prompt("fix the build")).toEqual({ captures: [] });
   });
 

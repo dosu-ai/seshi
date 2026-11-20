@@ -106,7 +106,7 @@ export const CURSOR_HOOKS: readonly HookHandler[] = [
   { event: "stop", parse: (payload, host) => ({ captures: [capture(payload, false, host)] }) },
   { event: "sessionEnd", parse: (payload, host) => ({ captures: [capture(payload, true, host)] }) },
   {
-    // `/session-capture off|on|status` typed as a message of its own: the hook does it, outside the
+    // `/session-capture off|on|status|share|unshare` typed as a message of its own: the hook does it, outside the
     // agent's sandbox, and stops the message there. Cursor shows a hook's `user_message` only
     // when the hook blocks the prompt, and the model has nothing to do.
     event: "beforeSubmitPrompt",

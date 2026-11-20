@@ -94,7 +94,7 @@ function which(payload: unknown): HookCapture {
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-export const UNKNOWN_COMMAND = `Session Capture: /${CAPTURE_COMMAND} takes off, on or status; nothing was changed. For a pause, run seshi capture pause in a terminal.`;
+export const UNKNOWN_COMMAND = `Session Capture: /${CAPTURE_COMMAND} takes off, on, status, share or unshare; nothing was changed. For a pause, run seshi capture pause in a terminal.`;
 
 /** What the plugin shows for a message seshi has for the person: it toasts `message`. */
 const reply = (message: string) => ({ message });
@@ -131,7 +131,8 @@ export const OPENCODE_HOOKS: readonly HookHandler[] = [
     },
   },
   {
-    // `/session-capture off|on|status`: the plugin hands it over before OpenCode sends it to the model.
+    // `/session-capture off|on|status|share|unshare`: the plugin hands it over before OpenCode
+    // sends it to the model.
     event: "Command",
     reply,
     parse(payload) {

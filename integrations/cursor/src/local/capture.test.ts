@@ -62,6 +62,12 @@ describe("/session-capture typed in Cursor", () => {
       request: { action: "off", session: which },
     });
     expect(prompt("/session-capture")).toEqual({ captures: [], active: which, announce: which });
+    expect(prompt("/session-capture share")).toEqual({
+      captures: [],
+      active: which,
+      request: { action: "share", session: which },
+    });
+    expect(prompt("/session-capture unshare")?.request?.action).toBe("unshare");
     // Every prompt marks its conversation as the folder's current one, for the editor.
     expect(prompt("/session-capture off and then fix the tests")).toEqual({
       captures: [],
