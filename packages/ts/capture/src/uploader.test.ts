@@ -2368,3 +2368,128 @@ describe("resending stale sessions (X4.9)", () => {
     expect(session().rebuilt_for).toBeUndefined();
   });
 });
+
+describe("redacting tool calls (capture.redact_tool_calls)", () => {
+  /** A stand-in for an agent's pass: every `text` field replaced, so nearly every line changes
+   * length, as a real pass changes every tool call's. */
+  const pass = (text: string) => text.replace(/"text":"[^"]*"/g, '"text":"[redacted:tool-call]"');
+  const redacting: CaptureAgent = { ...agent, redactToolCalls: pass };
+  const listed = (extra: Partial<RulesSnapshot["rules"]> = {}): RulesSnapshot => ({
+    rules: { ...DEFAULT_RULES, redactToolCalls: [{ entry: "~/labs", path: dir }], ...extra },
+  });
+  const redactingUploader = (options: Partial<UploaderOptions> = {}) =>
+    uploader({ agents: [redacting], rules: async () => listed(), ...options });
+  const texts = ["one", "a much longer line of tool output", "x", "and a fourth one", "five"];
+
+  it("runs the agent's pass on every piece of a long session, before pre-redaction, at the server's offsets", async () => {
+    const seen: string[] = [];
+    const preRedact: PreRedactor = {
+      redact: ({ text }) => {
+        seen.push(text);
+        return { text };
+      },
+    };
+    const whole = texts
+      .slice(0, 4)
+      .map((t) => line(t))
+      .join("");
+    writeFileSync(transcript(), whole);
+    hooked();
+    await redactingUploader({ preRedact, maxChunkBytes: 1 }).pass();
+    // Sent whole first; the rest goes in chunks once the server holds it.
+    appendFileSync(transcript(), line(texts[4] as string) + line("six") + line("seven"));
+    hooked();
+    await redactingUploader({ preRedact, maxChunkBytes: 1 }).pass();
+    const all = [...texts, "six", "seven"].map((t) => line(t)).join("");
+    expect(server.uploads.length).toBeGreaterThanOrEqual(4);
+    // Pre-redaction (the org's patterns, sensitive files) only ever saw what the pass left.
+    for (const text of seen) for (const t of texts) expect(text).not.toContain(`"${t}"`);
+    // Each chunk went at the end of what the server held, counted in redacted bytes.
+    let end = 0;
+    for (const upload of server.uploads) {
+      expect(upload.offset ?? 0).toBe(end);
+      end += Buffer.byteLength(upload.transcript);
+    }
+    expect(server.sessions.get("s1")?.text).toBe(pass(all));
+    expect(session()).toMatchObject({
+      aligned: false,
+      file_offset: Buffer.byteLength(all),
+      server_offset: Buffer.byteLength(pass(all)),
+    });
+  });
+
+  it("replaces whole, through the pass, when the transcript was rewritten", async () => {
+    writeFileSync(transcript(), line("one") + line("two"));
+    hooked();
+    await redactingUploader().pass();
+    writeFileSync(transcript(), line("uno"));
+    await redactingUploader().pass();
+    expect(server.uploads.at(-1)).toMatchObject({
+      offset: 0,
+      replace: true,
+      transcript: pass(line("uno")),
+    });
+    expect(server.sessions.get("s1")?.text).toBe(pass(line("uno")));
+  });
+
+  it("resends whole through the pass (seshi capture resend), extending nothing it did not send", async () => {
+    writeFileSync(transcript(), line("one") + line("two"));
+    hooked();
+    await redactingUploader().pass();
+    appendFileSync(transcript(), line("three"));
+    hooked();
+    await redactingUploader().pass();
+    const stored = server.sessions.get("s1")?.text;
+    await updateState(paths, (s) => {
+      (s.sessions["fake:s1"] as SessionState).rebuild = { at: clock.toISOString(), key: "k1" };
+    });
+    await redactingUploader().pass();
+    const rebuild = server.uploads.filter((u) => u.rebuild);
+    expect(rebuild).toHaveLength(1);
+    // The pass gives a log what it gave its pieces: the rebuild is what the server held.
+    expect(rebuild[0]?.transcript).toBe(stored);
+    expect(stored).toBe(pass(line("one") + line("two") + line("three")));
+    expect(session().aligned).toBe(false);
+    expect(session().rebuild).toBeUndefined();
+  });
+
+  it("recovers from an offset the server disagrees with by sending the whole log again", async () => {
+    writeFileSync(transcript(), line("one") + line("two"));
+    hooked();
+    await redactingUploader().pass();
+    // The server lost the end of what it held.
+    const held = server.sessions.get("s1") as { text: string };
+    held.text = held.text.slice(0, held.text.indexOf("\n") + 1);
+    appendFileSync(transcript(), line("three"));
+    hooked();
+    await redactingUploader().pass();
+    expect(server.sessions.get("s1")?.text).toBe(pass(line("one") + line("two") + line("three")));
+  });
+
+  it("sends nothing of such a session when the agent has no pass, and says why", async () => {
+    writeFileSync(transcript(), line("one") + line("two"));
+    hooked();
+    const outcome = await uploader({ rules: async () => listed() }).pass();
+    expect(server.uploads).toHaveLength(0);
+    expect(outcome.failed).toBe(1);
+    expect(session().error).toMatchObject({ code: "tool_calls_not_redactable", permanent: true });
+  });
+
+  it("sends nothing of a place on both lists: exclusion wins", async () => {
+    writeFileSync(transcript(), line("one") + line("two"));
+    hooked();
+    const both = listed({ exclude: [{ entry: "~/labs", path: dir }] });
+    await uploader({ agents: [redacting], rules: async () => both }).pass();
+    expect(server.uploads).toHaveLength(0);
+  });
+
+  it("leaves a session elsewhere as it is", async () => {
+    writeFileSync(transcript(), line("one") + line("two"));
+    hooked();
+    const elsewhere: RulesSnapshot = {
+      rules: { ...DEFAULT_RULES, redactToolCalls: [{ entry: "/other", path: "/other" }] },
+    };
+    await uploader({ agents: [redacting], rules: async () => elsewhere }).pass();
+    expect(server.uploads[0]?.transcript).toBe(line("one") + line("two"));
+  });
+});

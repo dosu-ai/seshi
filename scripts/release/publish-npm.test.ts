@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { distTag, type Exec, isPublished, publishAll } from "./publish-npm";
+import { distTag, type Exec, isPublished, isTransient, publishAll } from "./publish-npm";
 
 /** A stand-in npm: records every call; `published` lists `name@version`s the registry has. */
 function fakeNpm(published: string[] = [], failPublish?: string) {
@@ -94,6 +94,65 @@ describe("publishAll", () => {
     ]);
   });
 
+  const TLOG =
+    "npm error code TLOG_CREATE_ENTRY_ERROR\nnpm error error creating tlog entry - (409) an equivalent entry already exists in the transparency log";
+
+  /** npm whose publish fails with `errors` in turn, then succeeds; `lands` marks a failure
+   * after which the registry has the package anyway. */
+  function flakyNpm(errors: string[], lands = false) {
+    const calls: string[][] = [];
+    let landed = false;
+    const exec: Exec = async (argv) => {
+      calls.push(argv);
+      if (argv[0] === "view") {
+        return landed
+          ? { code: 0, out: '"1.2.3"\n', err: "" }
+          : { code: 1, out: "", err: "npm error code E404" };
+      }
+      const err = errors.shift();
+      if (err === undefined) return { code: 0, out: "", err: "" };
+      landed = lands;
+      return { code: 1, out: "", err };
+    };
+    return { exec, calls, publishes: () => calls.filter((c) => c[0] === "publish").length };
+  }
+  const noSleep = async () => {};
+
+  it("retries a publish that Sigstore's transparency log or the registry failed", async () => {
+    layout("1.2.3", PACKAGES.slice(0, 1));
+    const npm = flakyNpm([TLOG, "npm error code E503"]);
+    const lines: string[] = [];
+    const done = await publishAll({
+      dir,
+      exec: npm.exec,
+      sleep: noSleep,
+      log: (l) => lines.push(l),
+    });
+    expect(done.map((d) => d.action)).toEqual(["published"]);
+    expect(npm.publishes()).toBe(3);
+    expect(lines.filter((l) => l.includes("retrying"))).toHaveLength(2);
+  });
+
+  it("does not publish again when the failed try reached the registry", async () => {
+    layout("1.2.3", PACKAGES.slice(0, 1));
+    const npm = flakyNpm(["npm error code ETIMEDOUT"], true);
+    const done = await publishAll({ dir, exec: npm.exec, sleep: noSleep });
+    expect(done.map((d) => d.action)).toEqual(["published"]);
+    expect(npm.publishes()).toBe(1);
+  });
+
+  it("gives up after its tries, and never retries a failure of the package itself", async () => {
+    layout("1.2.3", PACKAGES.slice(0, 1));
+    const always = flakyNpm([TLOG, TLOG, TLOG, TLOG]);
+    await expect(
+      publishAll({ dir, exec: always.exec, sleep: noSleep, attempts: 3 }),
+    ).rejects.toThrow(/TLOG_CREATE_ENTRY_ERROR/);
+    expect(always.publishes()).toBe(3);
+    const forbidden = flakyNpm(["npm error code E403\nnpm error 403 Forbidden"]);
+    await expect(publishAll({ dir, exec: forbidden.exec, sleep: noSleep })).rejects.toThrow(/403/);
+    expect(forbidden.publishes()).toBe(1);
+  });
+
   it("refuses a private package or a folder holding another package", async () => {
     layout("1.2.3", [{ name: "seshi", dir: "seshi", private: true }]);
     await expect(publishAll({ dir, exec: fakeNpm().exec })).rejects.toThrow(/private/);
@@ -114,6 +173,13 @@ describe("isPublished", () => {
     await expect(isPublished(outage, "seshi", "1.0.0")).rejects.toThrow(/ETIMEDOUT/);
     expect(await isPublished(fakeNpm().exec, "seshi", "1.0.0")).toBe(false);
     expect(await isPublished(fakeNpm(["seshi@1.0.0"]).exec, "seshi", "1.0.0")).toBe(true);
+  });
+
+  it("isTransient tells a registry or Sigstore failure from a package's", () => {
+    expect(isTransient("npm error code TLOG_CREATE_ENTRY_ERROR")).toBe(true);
+    expect(isTransient("npm error 502 Bad Gateway")).toBe(true);
+    expect(isTransient("npm error code E403")).toBe(false);
+    expect(isTransient("npm error code EPUBLISHCONFLICT")).toBe(false);
   });
 
   it("distTag keeps prereleases off latest", () => {

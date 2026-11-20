@@ -54,6 +54,7 @@ import {
   PLUGIN_MARKER,
   TUI_PLUGIN_MARKER,
 } from "./plugin";
+import { redactOpencodeToolCalls } from "./tool-calls";
 
 export const AGENT = "opencode";
 
@@ -469,4 +470,5 @@ export const OPENCODE_CAPTURE: CaptureAgent = {
   // the top: `seshi hook` loads this module and never sweeps.
   stored: async (host, sinceMs) => (await import("./db")).storedOpencodeSessions(host, sinceMs),
   installer: opencodeInstaller,
+  redactToolCalls: redactOpencodeToolCalls,
 };

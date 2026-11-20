@@ -243,6 +243,9 @@ One decision function judges every session, the same for hooks, the sweep, the s
    matching folder rule (`[[capture.paths]]`), then the global `capture.enabled` (on by default
    once capture is installed).
 
+A session the rules capture is uploaded whole, unless it ran in a place the org lists in
+`capture.redact_tool_calls`: then it goes with its tool calls redacted, below.
+
 So a session can be turned on in a folder that is off, but not in a repo the team excluded. A
 session whose folder is not known is not captured, since its repo's rule cannot be checked
 (Cursor's transcripts do not say where they ran, so the sweep captures only Cursor conversations
@@ -268,6 +271,45 @@ these for the current session: seshi's SessionStart hook sets `SESHI_SESSION_ID`
 commands Claude Code runs. Without it, `--session` alone means the one session seen in the
 current folder in the past day; when more than one ran there it lists them and asks for
 `--session <id>` rather than guess (a subagent never counts: its parent's toggle covers it).
+
+### Tool calls redacted
+
+For a repository or folder whose code should not be stored, but whose sessions still teach how
+people work there, the org lists it in `capture.redact_tool_calls`
+([config.md](config.md#the-clis-config)) instead of `capture.exclude`. Its sessions are uploaded
+with every tool call's input and output replaced by `[redacted:tool-call]`, on the laptop,
+before anything else redacts them and before a byte leaves:
+
+| Part of the session | Uploaded |
+| --- | --- |
+| The person's prompts | as written, then redacted as usual |
+| The agent's replies and reasoning | as written, then redacted as usual |
+| Each tool call's name and id, and their order | kept |
+| Whether a call failed (`is_error`, `isError`, a status) | kept |
+| A call's input | its keys, numbers and booleans kept; every string replaced |
+| A call's result, also where the log repeats it (Claude Code's `toolUseResult`, Cursor's results from its hooks) | every string replaced; an output that is not the agent's own structure is replaced whole, keys and numbers included |
+| The output of a command the person ran themselves (Claude Code's `!`, Codex's `<user_shell_command>`, pi's `bashExecution`; the command is kept), a background task's result (`<task-notification>`), text a tool or plugin added to the conversation (a skill's body, OpenCode's synthetic parts, pi's extension messages) | replaced |
+| A compaction's summary of the conversation so far (Claude Code's, Codex's, pi's), which quotes what tools read and printed | replaced |
+| A subagent's session (Claude Code's, Codex's) | not uploaded: all of it is its parent's tool call, whose name, id and failure the parent's log keeps |
+| Anything else in the log the pass does not know (a new record kind, a new field) | replaced |
+
+Each agent has its own pass, which knows where its format keeps tool calls (Claude Code, Codex,
+Cursor, OpenCode, pi); there is no generic fallback. What a pass does not recognize is blanked
+rather than sent, so a format that adds a record kind loses text from it instead of leaking a
+tool's output. An agent without a pass sends nothing from such a place (`seshi capture status`
+shows the session as refused, `tool_calls_not_redactable`).
+
+What this does not catch: **the agent's own words can quote what a tool returned** ("the query
+returned 4,812 rows", a stack trace it pastes back, a diff it describes), and a person can paste
+code into a prompt. The org's redaction patterns still run on that text, as on any session. The
+rule applies at upload time: sessions uploaded before a place was listed keep what they had, and
+a session that ran there before the list reached the laptop has only its later pieces redacted.
+
+The pass changes the length of nearly every line, so the uploader keeps its place in your file
+apart from the server's offset in redacted bytes, as for any pre-redaction; a log sent again
+whole (`seshi capture resend`, a `replace`) redacts to exactly the pieces sent before. On the
+server, the rule is not applied yet: a Cursor Cloud agent (the server polls those) or a laptop
+running an older seshi uploads such a session as it is.
 
 ### Content an agent or a plugin adds
 
@@ -523,7 +565,9 @@ transcript changes.
 
 ### Redacting before upload (F2.4)
 
-Nothing a rule knows leaves the machine. Before each piece is sent, the uploader redacts it with
+Nothing a rule knows leaves the machine. Before each piece is sent, the uploader replaces its
+tool calls' detail when the org lists the session's place in `capture.redact_tool_calls` (see
+[Tool calls redacted](#tool-calls-redacted)), then redacts what is left with
 your server's rule packs and the built-in pack, the same rules the server runs
 ([redaction.md](redaction.md)): secrets become `[redacted:<rule>]`, and a call
 that reads a sensitive file (`.env`, keys) or runs a secret command keeps its call while its

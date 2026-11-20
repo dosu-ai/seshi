@@ -1,3 +1,10 @@
+# [0.18.0](https://github.com/dosu-ai/seshi/compare/v0.17.0...v0.18.0) (2026-11-20)
+
+
+### Features
+
+* record where and with what a session ran (repo, commit, folder, client, harness version, models) ([#49](https://github.com/dosu-ai/seshi/issues/49)) ([e7b0653](https://github.com/dosu-ai/seshi/commit/e7b065372fda974c58316e4eacb1339145b30887))
+
 # [0.17.0](https://github.com/dosu-ai/seshi/compare/v0.16.0...v0.17.0) (2026-11-20)
 
 

@@ -36,6 +36,7 @@ import {
   writeFileAtomic,
   writeJsonConfig,
 } from "@seshi/kit";
+import { redactCodexToolCalls } from "./tool-calls";
 
 export const AGENT = "codex";
 
@@ -446,4 +447,5 @@ export const CODEX_CAPTURE: CaptureAgent = {
   identify: identifyRollout,
   locate: locateRollout,
   installer: codexInstaller,
+  redactToolCalls: redactCodexToolCalls,
 };

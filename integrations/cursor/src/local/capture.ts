@@ -44,6 +44,7 @@ import {
   writeJsonConfig,
 } from "@seshi/kit";
 import { cursorComposer, keptResult, RESULT_EVENTS } from "./results";
+import { redactCursorToolCalls } from "./tool-calls";
 
 export const AGENT = "cursor";
 
@@ -336,4 +337,5 @@ export const CURSOR_CAPTURE: CaptureAgent = {
   locate: locateCursorTranscript,
   installer: cursorInstaller,
   compose: cursorComposer,
+  redactToolCalls: redactCursorToolCalls,
 };

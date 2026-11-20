@@ -530,7 +530,7 @@ describe("serverless mode, by its old name [local] (F11.1)", () => {
           search: { scope: "visible" },
           theme: "auto",
           keychain: true,
-          capture: { enabled: true, paths: [], remotes: [], exclude: [] },
+          capture: { enabled: true, paths: [], remotes: [], exclude: [], redact_tool_calls: [] },
           labels: { paths: [] },
         },
         env: {},

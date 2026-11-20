@@ -484,6 +484,7 @@ async function status(ctx: CommandContext, json: boolean, args: Args): Promise<n
   const style = await styleFor(ctx, { json, ...(account ? { theme: account.cli.theme } : {}) });
   const word = (capture: boolean) =>
     capture ? style.status("capturing", "success") : style.status("not capturing", "warn");
+  const redacting = (session ? session.decision : here).redact_tool_calls;
   emit(
     ctx,
     json,
@@ -524,6 +525,11 @@ async function status(ctx: CommandContext, json: boolean, args: Args): Promise<n
           ]
         : []),
       ...(session ? [] : [`  here (${printable(cwd)}): ${here.reason} (${here.level})`]),
+      ...(redacting
+        ? [
+            `  tool calls: redacted, ${printable(redacting)}; the session is uploaded with every tool call's input and output replaced by [redacted:tool-call]`,
+          ]
+        : []),
       ...(paused && state.paused
         ? [
             `  ${style.warn("paused")} ${state.paused.until ? `until ${state.paused.until}` : "until seshi capture resume"}: sessions stop where they are; new ones are not captured`,

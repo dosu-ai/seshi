@@ -559,6 +559,7 @@ describe("the rules cache", () => {
         paths: [{ path: join(dir, "x"), capture: true }],
         remotes: ["github.com/acme"],
         exclude: [],
+        redactToolCalls: [],
       },
       theme: "light",
       labels: { labels: {}, paths: [] },
@@ -663,6 +664,19 @@ describe("the rules cache", () => {
     );
     expect((await captureRules(host, paths)).rules.exclude).toEqual([
       { entry: "acme/payments", repo: "acme/payments" },
+    ]);
+  });
+
+  it("reads the org's redact_tool_calls list from the file or SESHI_CAPTURE__REDACT_TOOL_CALLS", async () => {
+    cliConfig(`[capture]\nredact_tool_calls = ["# research", "acme/research", "~/labs"]\n`);
+    expect((await captureRules(host, paths)).rules.redactToolCalls).toEqual([
+      { entry: "acme/research", repo: "acme/research" },
+      { entry: "~/labs", path: join(dir, "labs") },
+    ]);
+    const env = { ...host.env, SESHI_CAPTURE__REDACT_TOOL_CALLS: "github.com/Acme/*,/srv/lab" };
+    expect((await captureRules({ ...host, env }, paths)).rules.redactToolCalls).toEqual([
+      { entry: "github.com/Acme/*", repo: "github.com/acme/*" },
+      { entry: "/srv/lab", path: "/srv/lab" },
     ]);
   });
 

@@ -164,6 +164,12 @@ export interface CaptureAgent {
   readonly installer?: Installer;
   /** For an agent whose hooks keep what its transcript leaves out: the file uploaded instead. */
   readonly compose?: TranscriptComposer;
+  /** What is uploaded of a session the org lists in `capture.redact_tool_calls`: `text` (a piece
+   * of the upload, cut at line boundaries) with every string in each tool call's input and
+   * result replaced by `TOOL_CALL_MARKER`, and any record or field the pass does not know
+   * blanked too. One line out per line in, so a log redacts as its chunks do. An agent without
+   * it uploads nothing from such a session. */
+  redactToolCalls?(text: string): string;
 }
 
 /** seshi's own folder for capture state: `$XDG_STATE_HOME/seshi` (`~/.local/state/seshi`), or
