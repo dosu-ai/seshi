@@ -9,7 +9,8 @@
  * the file once the session has its first message. It runs no shell hooks, so seshi installs an
  * extension (`extensions/seshi.ts`, `./extension.ts`) that runs `seshi hook pi <event>` with
  * `{session_id, transcript_path, cwd, parent_session?}` on stdin: `Stop` after each agent run,
- * `SessionEnd` when the session ends, and `Command` for `/session-capture`. */
+ * `SessionEnd` when the session ends, and `Command` for `/session-capture` (off, on, status, share,
+ * unshare). */
 
 import { existsSync, readdirSync } from "node:fs";
 import { basename, isAbsolute, join } from "node:path";
@@ -91,7 +92,7 @@ function capture(payload: unknown, final: boolean): HookCapture {
   };
 }
 
-export const UNKNOWN_COMMAND = `Session Capture: /${CAPTURE_COMMAND} takes off, on or status; nothing was changed. For a pause, run seshi capture pause in a terminal.`;
+export const UNKNOWN_COMMAND = `Session Capture: /${CAPTURE_COMMAND} takes off, on, status, share or unshare; nothing was changed. For a pause, run seshi capture pause in a terminal.`;
 
 /** What the extension prints for a message seshi has for the person: it shows `message`. */
 const reply = (message: string) => ({ message });
@@ -100,7 +101,8 @@ export const PI_HOOKS: readonly HookHandler[] = [
   { event: "Stop", reply, parse: (payload) => ({ captures: [capture(payload, false)] }) },
   { event: "SessionEnd", reply, parse: (payload) => ({ captures: [capture(payload, true)] }) },
   {
-    // `/session-capture off|on|status`, a command the extension registers: pi never sends it to the model.
+    // `/session-capture off|on|status|share|unshare`, a command the extension registers: pi never
+    // sends it to the model.
     event: "Command",
     reply,
     parse(payload) {

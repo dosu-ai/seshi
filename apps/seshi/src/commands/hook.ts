@@ -1,5 +1,5 @@
 import { appendLog, runHook } from "@seshi/capture/fast";
-import { CAPTURE_COMMAND, hookHandler } from "@seshi/kit";
+import { CAPTURE_COMMAND, type CaptureRequest, hookHandler } from "@seshi/kit";
 import { captureAgent } from "../capture-agents";
 import { EXIT } from "../cli/exit";
 import { pathsOf, startUploader } from "./capture-host";
@@ -118,12 +118,14 @@ export function notice(
 }
 
 /** Turn capture off or on for the session the person asked about, as `seshi capture off|on
- * --session <id>` would, and say what happened. */
+ * --session <id>` would, or share or unshare it, as `seshi share|unshare --session <id>` would,
+ * and say what happened. */
 async function carryOut(
   ctx: CommandContext,
   agent: string,
-  { action, session }: { action: "off" | "on"; session: { session_id: string } },
+  { action, session }: { action: CaptureRequest; session: { session_id: string } },
 ): Promise<string> {
+  if (action === "share" || action === "unshare") return shareOut(ctx, agent, action, session);
   const { run } = await import("./capture");
   let out = "";
   let err = "";
@@ -157,4 +159,46 @@ async function carryOut(
     ...(said.unfrozen ? ["a pause had stopped it, so all of it is uploaded now"] : []),
   ];
   return `Session Capture ◉ · turned on for this session${more.length > 0 ? `; ${more.join("; ")}` : ""}`;
+}
+
+/** Share or unshare the session the person asked about, as `seshi share|unshare --session <id>`
+ * would, and say what it said: its own line when it did (with any subagent it could not change),
+ * its own refusal when it did not (not uploaded yet, capture off, signed out). */
+async function shareOut(
+  ctx: CommandContext,
+  agent: string,
+  action: "share" | "unshare",
+  { session_id }: { session_id: string },
+): Promise<string> {
+  const { run } = await import("./share");
+  const out: string[] = [];
+  const err: string[] = [];
+  let code: number;
+  try {
+    code = await run(
+      {
+        ...ctx,
+        argv: ["--session", session_id, "--agent", agent],
+        tty: { stdout: false, stdin: false },
+        noColor: true,
+        stdout: (line) => out.push(line),
+        stderr: (line) => err.push(line),
+      },
+      action,
+    );
+  } catch (error) {
+    code = EXIT.failure;
+    err.push(error instanceof Error ? error.message : String(error));
+  }
+  const said = (lines: string[]) =>
+    lines
+      .flatMap((l) => l.split("\n"))
+      .map((l) => l.trim().replace(/^seshi: /, ""))
+      .filter((l) => l !== "");
+  if (code === EXIT.ok) return `Session Capture ◉ · ${said(out).join(" ")}`;
+  // The session changed, but not every subagent's: what it says names each one left as it was.
+  if (code === EXIT.attention) return `Session Capture · ${said(out).join("; ")}`;
+  // A usage error goes on to print the usage, which says nothing to the person here.
+  const why = said(err)[0] ?? `exit ${code}`;
+  return `Session Capture · could not ${action} this session: ${why}`;
 }

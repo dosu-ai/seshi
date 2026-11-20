@@ -11,8 +11,8 @@
  * `seshi hook opencode Stop` once a turn is over. On 1.x (`session.idle`) it reads the session
  * through OpenCode's own client and hands it over whole, as an export (`{info, messages}`, the
  * shape `opencode export` prints), so seshi writes it to disk only for a captured session; it
- * also toasts whether a new session is captured, and carries out `/session-capture off|on|status`,
- * a command file, before OpenCode sends it to the model (`opencode run --command
+ * also toasts whether a new session is captured, and carries out `/session-capture
+ * off|on|status|share|unshare`, a command file, before OpenCode sends it to the model (`opencode run --command
  * session-capture`, the web UI, and the TUI's home screen; in a session, the TUI plugin takes it
  * first). On 2.x a plugin cannot read a whole session or toast, so it names the session (in the
  * `experimental.idle` hook, which OpenCode awaits, or when a run ends) and seshi reads it from
@@ -24,9 +24,9 @@ import { bridgeRuntime, CAPTURE_COMMAND } from "@seshi/kit";
 
 export const PLUGIN_MARKER = "seshi:opencode-plugin";
 export const COMMAND_MARKER = "seshi:opencode-command";
-export const PLUGIN_VERSION = 5;
+export const PLUGIN_VERSION = 6;
 export const TUI_PLUGIN_MARKER = "seshi:opencode-tui-plugin";
-export const TUI_PLUGIN_VERSION = 3;
+export const TUI_PLUGIN_VERSION = 4;
 
 export function opencodePlugin(command: readonly string[]): string {
   return `// ${PLUGIN_MARKER} v${PLUGIN_VERSION} -- written by "seshi capture install opencode", which
@@ -34,8 +34,8 @@ export function opencodePlugin(command: readonly string[]): string {
 //
 // Session Capture for OpenCode: once each turn is over, the session is handed to seshi, which
 // uploads it to your team's session store, or leaves it out as your capture rules say. A toast
-// says whether a new session is captured, and /session-capture off|on|status turns it off or on for this
-// session. OpenCode started with --pure captures nothing. One default export serves OpenCode 1.x
+// says whether a new session is captured; /session-capture off|on|status turns it off or on for this
+// session, and /session-capture share|unshare lets your team read it (or not). OpenCode started with --pure captures nothing. One default export serves OpenCode 1.x
 // (server) and 2.x (setup).
 
 import { spawn } from "node:child_process";
@@ -129,7 +129,7 @@ const server = async ({ client }) => {
         );
       }
     },
-    // /session-capture off|on|status: seshi does it here, and the model gets the result instead of the
+    // /session-capture off|on|status|share|unshare: seshi does it here, and the model gets the result instead of the
     // command (OpenCode sends a command's text to the model; it cannot be stopped).
     "command.execute.before": async (input, output) => {
       if (input.command !== "${CAPTURE_COMMAND}") return;
@@ -266,7 +266,7 @@ export default { id: "seshi", server, setup };
 
 export function opencodeCommand(): string {
   return `---
-description: "Session Capture: turn it off or on for this session, or show whether it is captured (off, on, status)"
+description: "Session Capture: turn it off or on for this session, show whether it is captured, or share it with your team (off, on, status, share, unshare)"
 ---
 <!-- ${COMMAND_MARKER}: written by "seshi capture install opencode"; seshi's plugin carries it out. -->
 /${CAPTURE_COMMAND} $ARGUMENTS
@@ -277,7 +277,8 @@ description: "Session Capture: turn it off or on for this session, or show wheth
  * (OpenCode's TUI loads no plugin folder of its own, and its server would load this file as a
  * server plugin from `plugins/`). It shows `Session Capture ◉/⏸` beside the prompt for the
  * session in view, from `seshi statusline --agent opencode`, refreshed when the session comes into
- * view and after each turn. And it takes `/session-capture off|on|status` from the prompt itself, on the
+ * view and after each turn. And it takes `/session-capture off|on|status|share|unshare` from the
+ * prompt itself, on the
  * keys that submit it, so the command never reaches the server and the model does not answer.
  * On the home screen, with no session yet, `/session-capture` goes on to the server's command as before.
  *
@@ -287,7 +288,7 @@ export function opencodeTuiPlugin(command: readonly string[]): string {
 // rewrites it; "seshi capture uninstall opencode" removes it, so edits do not last.
 //
 // Session Capture in OpenCode's TUI: beside the prompt, whether the session in view is captured
-// (◉) or not (⏸); and /session-capture off|on|status, typed in the prompt, carried out by seshi before
+// (◉) or not (⏸); and /session-capture off|on|status|share|unshare, typed in the prompt, carried out by seshi before
 // OpenCode sends anything to the model. seshi's server plugin (plugins/seshi.js) does the
 // capturing; tui.json's "plugin" list names this file.
 
@@ -301,7 +302,7 @@ ${bridgeRuntime()}
 
 // Only these are taken from the prompt; anything else (an attachment's placeholder text, an
 // unknown word) goes on to the server's /session-capture command, attachments and all.
-const COMMAND_PATTERN = /^\\/${CAPTURE_COMMAND}(?:\\s+(off|on|status))?$/i;
+const COMMAND_PATTERN = /^\\/${CAPTURE_COMMAND}(?:\\s+(off|on|status|share|unshare))?$/i;
 
 // seshi's status line up to its first " · ", so it fits beside the prompt.
 function short(line) {
@@ -398,7 +399,7 @@ const tui = async (api) => {
       }),
     );
 
-    // /session-capture off|on|status, on the keys that submit the prompt, before the prompt sends it. A
+    // /session-capture off|on|status|share|unshare, on the keys that submit the prompt, before the prompt sends it. A
     // binding that returns false passes the key on to the prompt.
     // The textarea submits on input.submit ("return" by default); prompt.submit is unbound by
     // default.
@@ -503,7 +504,8 @@ const setup = async (ctx) => {
       {
         id: "seshi.session-capture",
         title: "Session Capture",
-        description: "Turn Session Capture off or on for this session, or show whether it is captured",
+        description:
+          "Turn Session Capture off or on for this session, show whether it is captured, or share it with your team",
         group: "Session",
         slash: { name: "${CAPTURE_COMMAND}", arguments: true },
         async run(input) {

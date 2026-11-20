@@ -4,6 +4,7 @@ import { join } from "node:path";
 import {
   type CaptureAgent,
   type CaptureHost,
+  type CaptureRequest,
   type HookCapture,
   handedTranscriptPath,
   hookHandler,
@@ -43,7 +44,7 @@ export interface HookOutcome {
   /** For a session the hook announced: whether it is captured, and why. */
   announced?: { session_id: string; decision: Decision };
   /** What the person asked the hook to do for their session (the command carries it out). */
-  requested?: { action: "off" | "on"; session: HookCapture };
+  requested?: { action: CaptureRequest; session: HookCapture };
   /** What the handler asked to tell the person. */
   said?: string;
   /** Why a captured session's transcript could not be read (it is spooled all the same, and a

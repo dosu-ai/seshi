@@ -236,6 +236,12 @@ describe("the installer (F9.6)", () => {
       captures: [],
       announce: { session_id: "t1", cwd: "/w" },
     });
+    // Sharing needs the network, which Codex's sandbox keeps from the model's commands.
+    expect(prompt("$session-capture share")).toEqual({
+      captures: [],
+      request: { action: "share", session: { session_id: "t1", cwd: "/w" } },
+    });
+    expect(prompt("$session-capture unshare")?.request?.action).toBe("unshare");
     expect(prompt("fix the build")).toEqual({ captures: [] });
   });
 

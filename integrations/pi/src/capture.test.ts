@@ -104,6 +104,11 @@ describe("pi's hooks, from seshi's extension (F9.2)", () => {
       request: { action: "off", session: which },
     });
     expect(command("/session-capture on")?.request?.action).toBe("on");
+    expect(command("/session-capture share")).toEqual({
+      captures: [],
+      request: { action: "share", session: which },
+    });
+    expect(command("/session-capture unshare")?.request?.action).toBe("unshare");
     expect(command("/session-capture")).toEqual({ captures: [], announce: which });
     // An argument it does not know changes nothing, and says so.
     expect(command("/session-capture pause 2h")).toEqual({ captures: [], say: UNKNOWN_COMMAND });
@@ -181,7 +186,7 @@ describe("seshi capture install pi", () => {
     const path = extensionPath(host);
     expect(await piInstaller.install(context())).toMatchObject({ changed: [path] });
     const text = readFileSync(path, "utf8");
-    expect(text.startsWith(`// ${EXTENSION_MARKER} v3`)).toBe(true);
+    expect(text.startsWith(`// ${EXTENSION_MARKER} v4`)).toBe(true);
     expect(text).toContain('const SESHI = ["/opt/seshi/bin/seshi"];');
     expect(await piInstaller.install(context())).toEqual({ changed: [], notes: [] });
     expect(await piInstaller.status(context())).toMatchObject({ installed: true, notes: [] });

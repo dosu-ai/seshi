@@ -72,8 +72,9 @@ export const CODEX_HOOKS: readonly HookHandler[] = [
     },
   },
   {
-    // Codex's sandbox keeps the agent's commands from writing seshi's state, so `$session-capture off|on`
-    // typed by the person is done here, by the hook, before the model sees the prompt.
+    // Codex's sandbox keeps the agent's commands from writing seshi's state (and, by default,
+    // from the network), so `$session-capture off|on|share|unshare` typed by the person is done
+    // here, by the hook, before the model sees the prompt.
     event: "UserPromptSubmit",
     reply: (message) => ({ systemMessage: message }),
     parse(payload) {
@@ -302,7 +303,8 @@ function ourHook(command: readonly string[]) {
   return (h: { command?: unknown }) => isSeshiHook(h.command, AGENT, own);
 }
 
-/** seshi's lifecycle hooks: the notice when a session starts, and `$session-capture off|on|status`. */
+/** seshi's lifecycle hooks: the notice when a session starts, and `$session-capture
+ * off|on|status|share|unshare`. */
 const LIFECYCLE: readonly { event: string; matcher?: string }[] = [
   { event: "SessionStart", matcher: "startup|resume" },
   { event: "UserPromptSubmit" },

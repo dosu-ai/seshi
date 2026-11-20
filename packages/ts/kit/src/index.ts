@@ -23,6 +23,7 @@ export {
   CAPTURE_COMMAND,
   type CaptureAgent,
   type CaptureHost,
+  type CaptureRequest,
   captureCommandPrompt,
   captureDir,
   expandTilde,

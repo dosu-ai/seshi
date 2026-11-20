@@ -34,8 +34,8 @@ seshi capture install --service  # also keep the uploader running between sessio
 | Claude Code | hooks, the status line and the `/session-capture` skill in `~/.claude/settings.json` and `~/.claude/skills/session-capture/` (`CLAUDE_CONFIG_DIR` moves them) | SessionStart, Stop, SubagentStop, PreCompact, SessionEnd |
 | Codex | `notify` in `~/.codex/config.toml` (`CODEX_HOME` moves it); a `notify` program already there keeps running, after seshi's. SessionStart and UserPromptSubmit hooks in `~/.codex/hooks.json` for the notice and `$session-capture`, and the `$session-capture` skill in `~/.agents/skills/session-capture/` | notify, plus the sweep of `~/.codex/sessions`; SessionStart and UserPromptSubmit only for the notice and `$session-capture` |
 | Cursor (IDE and CLI) | hooks in `~/.cursor/hooks.json`, the Cursor CLI's status line in `~/.cursor/cli-config.json`, and the `/session-capture` skill in `~/.cursor/skills/session-capture/`; it suggests the status bar extension ([below](#the-cursor-status-bar)) | stop, sessionEnd; postToolUse, postToolUseFailure and beforeReadFile for tool results ([below](#tool-results-in-cursor)); beforeSubmitPrompt for `/session-capture` and the last chat prompted |
-| pi | the extension `~/.pi/agent/extensions/seshi.ts` (`PI_CODING_AGENT_DIR` moves it) | agent_end (Stop), session_shutdown (SessionEnd, not on `/reload`); `/session-capture`, a command of its own; plus the sweep of `~/.pi/agent/sessions`, or of the folder `PI_CODING_AGENT_SESSION_DIR` or `sessionDir` in pi's settings names |
-| OpenCode (1.x and 2.x) | the plugin `~/.config/opencode/plugins/seshi.js`, the TUI plugin `~/.config/opencode/seshi/tui.js` with its entry in `tui.json`'s `plugin` list (1.x) and the folder's in `cli.json`'s `plugins` list (2.x), and the `/session-capture` command `~/.config/opencode/command/session-capture.md` (`XDG_CONFIG_HOME` moves them) | 1.x: session.idle (Stop), with the whole session. 2.x: the `experimental.idle` hook, or the end of a run that failed or was interrupted (Stop), naming the session. session.created (SessionStart) for the notice; `/session-capture` |
+| pi | the extension `~/.pi/agent/extensions/seshi.ts` (`PI_CODING_AGENT_DIR` moves it) | agent_end (Stop), session_shutdown (SessionEnd, not on `/reload`); `/session-capture` (off, on, status, share, unshare), a command of its own; plus the sweep of `~/.pi/agent/sessions`, or of the folder `PI_CODING_AGENT_SESSION_DIR` or `sessionDir` in pi's settings names |
+| OpenCode (1.x and 2.x) | the plugin `~/.config/opencode/plugins/seshi.js`, the TUI plugin `~/.config/opencode/seshi/tui.js` with its entry in `tui.json`'s `plugin` list (1.x) and the folder's in `cli.json`'s `plugins` list (2.x), and the `/session-capture` command `~/.config/opencode/command/session-capture.md` (`XDG_CONFIG_HOME` moves them) | 1.x: session.idle (Stop), with the whole session. 2.x: the `experimental.idle` hook, or the end of a run that failed or was interrupted (Stop), naming the session. session.created (SessionStart) for the notice; `/session-capture` (off, on, status, share, unshare) |
 
 pi and OpenCode run no shell hooks: they load code at start-up, so seshi installs a file each
 loads, written whole (and rewritten by the next `install`, so edits do not last) and removed by
@@ -294,6 +294,16 @@ uploaded yet (before its first turn ends) or turned off has nothing on the serve
 `share` says so. It is `seshi sessions visibility <format> <id> org|owner` underneath; an admin
 shares anyone's with `--owner <id>`.
 
+Inside an agent, `/session-capture share` and `/session-capture unshare` (`$session-capture …`
+in Codex) do it for the session you are in, in every agent seshi captures live. In Claude Code
+the skill runs `seshi share --session`. In Codex and Cursor, typed as a message of its own, the
+prompt hook does it before the model sees the message, outside the agent's sandbox (Codex's
+gives the agent's commands no network by default). In pi and OpenCode, seshi's extension and
+plugins do it as they do `off` and `on` ([below](#the-status-line)). The answer is what
+`seshi share` says (`Session Capture ◉ · Shared pi/<id>: visibility is org, so every member may
+read it.`), or why it could not: not uploaded yet, Session Capture off, or a subagent's session
+it could not change.
+
 ### Tool calls redacted
 
 For a repository or folder whose code should not be stored, but whose sessions still teach how
@@ -400,14 +410,16 @@ resumes, as a notice: `Session Capture ◉ · this session is uploaded to your t
 store as you work; $session-capture off stops it`, or `Session Capture ⏸ · <why not>`. Codex asks you to
 trust a new hook the first time it runs.
 
-Codex's sandbox keeps the commands its agent runs from writing seshi's state folder, so in
-Codex `$session-capture off`, `$session-capture on` and `$session-capture status` (or `$session-capture`), typed as a message of its
-own, are done by seshi's UserPromptSubmit hook, which runs outside the sandbox, before the
+Codex's sandbox keeps the commands its agent runs from writing seshi's state folder (and, by
+default, from the network), so in Codex `$session-capture off`, `$session-capture on`,
+`$session-capture status` (or `$session-capture`), `$session-capture share` and
+`$session-capture unshare`, typed as a message of its own, are done by seshi's UserPromptSubmit
+hook, which runs outside the sandbox, before the
 model sees the message; the result shows as a notice.
 
 The Cursor IDE has no status line, and shows a hook's message only when the hook stops a
-prompt. So Cursor's beforeSubmitPrompt hook does the same for `/session-capture off`, `/session-capture on` and `/session-capture status`
-(or `/session-capture`) typed as a message of its own: it stops the message, the answer appears in its
+prompt. So Cursor's beforeSubmitPrompt hook does the same for `/session-capture off`, `on`,
+`status` (or `/session-capture`), `share` and `unshare` typed as a message of its own: it stops the message, the answer appears in its
 place, and the model never runs. Every other message passes.
 
 Elsewhere the skill runs `seshi capture off|on`, asking to leave a sandbox when there is one.
@@ -416,13 +428,13 @@ decided, the queue, the last errors).
 
 pi has no status line of its own to run, so seshi's extension puts `seshi statusline --agent pi`
 in pi's footer, refreshed when a session starts and after each agent run, and registers
-`/session-capture off|on|status` as a pi command: seshi does it, the answer shows as a notification, and
+`/session-capture off|on|status|share|unshare` as a pi command: seshi does it, the answer shows as a notification, and
 the model never sees it (any other argument changes nothing, and says so). OpenCode shows the
 start notice above in a toast when a new session starts, and seshi's TUI plugin puts
 `seshi statusline --agent opencode` (up to its first `·`) on the right of the prompt, for the
 session in view, refreshed when it comes into view and after each turn: `Session Capture ◉`, or
-`⏸` in the theme's warning colour. `/session-capture`, `/session-capture off`, `/session-capture on` or `/session-capture status`
-typed in a session's prompt is taken by the TUI plugin when you submit it: seshi does it, the
+`⏸` in the theme's warning colour. `/session-capture` alone or with `off`, `on`, `status`,
+`share` or `unshare`, typed in a session's prompt, is taken by the TUI plugin when you submit it: seshi does it, the
 prompt is cleared, the answer shows in a toast, and nothing reaches the model. Anything else
 after `/session-capture`, and `/session-capture` where there is no TUI plugin (`opencode run --command session-capture`, the
 web UI) or no session yet (OpenCode's home screen), goes to the command file, which OpenCode
