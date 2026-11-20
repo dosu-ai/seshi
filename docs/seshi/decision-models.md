@@ -41,12 +41,15 @@ were public. Where the docs say nothing, this page says so and does not guess.
   SDK's retries and logging off, redirects refused. Retention and training terms are between
   the user and the provider they choose, under the user's own contract; seshi's part is to
   send only record text, only to the endpoint configured.
-- **Recommendation:** build the seam and **OpenAI Decisions first**, then **Jev**. It is
-  close. OpenAI's context fits seshi's default part size, so the first eval compares a
-  decision model with today's LLM on exactly the same parts. Jev's default context (32k
-  tokens per question) needs a smaller part size, which is its own measurement. Jev is cheaper
-  per token and publishes latency figures. Once the seam exists, it is a small follow-up, and
-  the order can swap if Jev matters more to the first users.
+- **A first eval** ran on 10 fixtures, 40 local sessions and 40 Dosu production sessions
+  (section 6):
+  - **Jev**, with no thresholds, was about as accurate as today's Haiku step (81% against
+    85%) at about an eighth of the latency.
+  - **OpenAI Decisions** flagged far too much until given `redact = 0.8`, then matched
+    Haiku.
+- **Recommendation:** build the seam, then **Jev**, then **OpenAI Decisions**. Jev needs a
+  40,000-character part size; OpenAI needs its threshold documented. Neither is clearly more
+  accurate than today's LLM step; the gain is speed and cost.
 
 ## 1. What these APIs are
 
@@ -151,8 +154,9 @@ export interface DecisionProvider {
 and only parts labelled `redact` reach the redactor. Jev's 32k tokens per question is below
 what a 100,000-character part of JSON-escaped code can reach. Two options:
 
-- Use a provider default of **60,000** for `typesafe` (to be measured: see open questions).
-- Have `seshi config check` refuse a larger `max_input_chars` on `typesafe`.
+- Use a provider default of **40,000** for `typesafe`, measured in section 6.
+- When Jev still answers `too_long`, split that part in two and ask again rather than fail:
+  token density varies by up to 3x between parts.
 
 Smaller parts also help Jev's accuracy, and cost about the same, since only input tokens are
 billed. OpenAI needs no change.
@@ -387,7 +391,7 @@ thresholds. Four ways, from cheapest to most reliable:
 - **Local sessions.** A developer's own raw transcripts on their laptop. These are the best
   source of real positives, because nothing has removed anything yet. Sending them to a
   provider is the developer's own call under their contract. They are unlabelled, so they
-  suit compare mode, and part-size measurement (open question 2). `seshi review eval` needs a
+  suit compare mode, and part-size measurement (section 6). `seshi review eval` needs a
   way to read them: `--sessions <path>`, normalized with the same formats capture uses.
 - **A deployment's stored sessions.** These suit measuring false positives (most stored
   traffic is `allow`) and token counts. They are a poor source of positives: regex redaction
@@ -406,40 +410,107 @@ label descriptions and the part size, versioned in the wrapper.
 asks for labelled data, the operator's fixtures are files the operator owns and can share
 under their own agreement.
 
-## 6. Recommendation, open questions and plan
+## 6. A first eval (2026-11-20)
+
+A scratch harness (not in the repo) ran the decision step three ways on the same parts:
+
+- **Today's LLM step:** Claude Haiku 5.5 with seshi's default decision prompt.
+- **OpenAI Decisions:** `gpt-6-luna`.
+- **Jev:** `jev-1.14.0`.
+
+Both decision models got the design in section 3: seshi's fixed label descriptions, a policy
+prompt rewritten from today's default, no thresholds (the most probable label), and OpenAI's
+caching off. The inputs:
+
+- **The 10 built-in fixtures**, labelled.
+- **40 local Claude Code sessions** from one developer's laptop, spread across two months,
+  normalized and regex-redacted the way capture does it.
+- **40 production sessions** from the Dosu organization only, a random sample of
+  `memory.trace` (33 Claude Code, 6 Codex, 1 Cursor), already regex-redacted. The sample was
+  deleted after the run.
+
+The harness recorded labels, probabilities, sizes, tokens and latency, never text.
+
+There is no ground truth for real sessions, so the target is a proxy. Where all three agreed
+on a session (35 of 80), that label stands. Where they disagreed (45 of 80), **Claude Opus
+5.5 at high effort** judged every part with today's decision prompt. The judge shares the
+LLM step's prompt, which may favour it. Treat the figures as a first read on 80 sessions,
+not a benchmark.
+
+**Accuracy**
+
+| | Fixtures (expected label) | Real sessions (consensus or judge) | Missed: allowed where the target flagged | Over-flagged: flagged where the target allowed |
+|---|---|---|---|---|
+| Today's LLM (Haiku 5.5) | 10/10 | 68/80 (85%) | 6 | 6 (1 a drop) |
+| Jev, most probable label | 10/10 | 65/80 (81%) | 5 | 9 |
+| OpenAI, most probable label | 9/10 | 48/80 (60%) | 0 | 31 (1 a drop) |
+| OpenAI, `thresholds = {drop = 0.5, redact = 0.8}` | | 66/80 (83%) | 7 | 6 |
+
+**Speed and cost**
+
+| | Median call | p95 call | Input tokens per session | Cost per session |
+|---|---|---|---|---|
+| Today's LLM | 1.6 s | 4.0 s | ~39k, plus thinking | (Haiku rates) |
+| OpenAI Decisions | 0.4 s | 1.1 s | ~39k | ~$0.004 |
+| Jev | 0.2 s | 0.4 s | ~45k (smaller parts repeat the instructions) | ~$0.002 |
+
+**What it shows**
+
+- **Jev is about as good as today's LLM, unchanged.** It sits within a few sessions of Haiku
+  on both accuracy and misses, with no thresholds, and is about 8x faster per call. On the
+  production sample it matched the judge on 19 of 25 disputed sessions, against Haiku's 18.
+- **OpenAI over-flags until it is calibrated.** With the most probable label it never missed
+  anything, but it flagged 31 sessions the target allowed. A `redact` sends the part to the
+  redactor LLM, so this throws away most of the savings. With `redact = 0.8` it lands at
+  Haiku's level. So thresholds must be **per provider and per policy**: a single default
+  would be wrong for one of them.
+- **Drops are rare and the decision models are cautious about them.** One session was
+  judged `drop`. Haiku dropped it. Both decision models called it `redact`, so it still went
+  to the redactor and was not stored raw. Two sessions were dropped wrongly: one by Haiku,
+  and one by OpenAI that `drop = 0.5` removes. 80 sessions are too few to set a drop
+  threshold.
+- **Consistency.** OpenAI returned identical probabilities on a second run over the same
+  production parts. Haiku gave the same part label on 76 of 80 parts. Jev was run at
+  different part sizes in the two runs, so its consistency was not measured.
+- **Jev's part size.** Jev used about 0.31 tokens per character of seshi's part budget
+  (text plus 120 per entry) at the median, and up to 0.53 at the 95th percentile. At a
+  60,000 budget, 2 of 115 production parts exceeded its 32k-token limit. At 50,000 none did,
+  but the largest part reached 31.4k tokens. The `typesafe` default should be **40,000**.
+  And `too_long` should split the part in two and ask again rather than fail, since
+  token density varies by up to 3x between parts.
+
+## 7. Recommendation, open questions and plan
 
 **Recommendation.** Build the `decide()` seam with thresholds and recorded scores, then
-**OpenAI Decisions**, then **Jev**. The two APIs are nearly the same shape (one choice,
-probabilities, no text), so most of the work is the seam, not the providers. OpenAI goes
-first, narrowly:
+**Jev**, then **OpenAI Decisions**. The eval reverses the earlier order:
 
-- Its context fits seshi's default part size, so the first eval isolates the model: same
-  parts, same fixtures, LLM against decision model.
-- It is generally available, with one model to target.
+- Jev is as accurate as today's LLM step with no thresholds to tune.
+- Jev is the fastest and cheapest of the three.
+- Its one real constraint, part size, is now measured.
 
-Jev follows as a small change. It is cheaper per token, publishes latency figures, and
-documents its calibration. The order can swap if the first users want Jev; the seam is the
-same either way.
+OpenAI follows as a small change, documented with the threshold it needs: about
+`redact = 0.8` on this data. The two APIs are nearly the same shape (one choice,
+probabilities, no text), so most of the work is the seam, not the providers.
 
 **Open questions**
 
 Rate limits, retention and model choice are the user's, under their contract with the
 provider. Prompt injection is not treated separately from today's LLM step.
 
-1. **Default thresholds.** Ship with none (the most probable label, today's behaviour), or
-   with thresholds derived from costs (section 5) and checked in shadow against the LLM
-   policy? This page leans to none until shadow data exists, because a number nobody measured
-   looks calibrated when it isn't.
+1. **Default thresholds.** The eval answers part of this: one default cannot serve both
+   providers. Ship none, and document per-provider starting points measured by the sweep:
+   none for Jev, `redact = 0.8` and `drop = 0.5` for OpenAI. Revisit on more data, and on
+   ground truth rather than a judge.
+
+Answered by the eval: **Jev's part size** is 40,000, with `too_long` splitting the part
+(section 6).
 
 To verify with the eval once phase 1 is built:
 
-2. **Jev's part size.** How many tokens a 100,000-character part of JSON-escaped session text
-   comes to, and so what `max_input_chars` default fits 32k per question. Measure on local
-   sessions.
-3. **Edge cases in the prompt.** Do organization-specific edge cases between labels work as
+2. **Edge cases in the prompt.** Do organization-specific edge cases between labels work as
    well in the instructions as they would in the option descriptions? If not, add a `labels`
    key.
-4. **Category questions (phase 5).** Do per-category yes/no questions beat one choice, and
+3. **Category questions (phase 5).** Do per-category yes/no questions beat one choice, and
    should the categories that triggered `redact` narrow what the redactor is asked to look
    for?
 
@@ -449,7 +520,7 @@ To verify with the eval once phase 1 is built:
 |---|---|---|
 | 0 | Get keys for both. No code | S |
 | 1 | The seam: `DecisionProvider`, the `LlmDecision` adapter, seshi's label descriptions and default decision-model prompt, `thresholds` in the schema and the hash (existing hashes unchanged), `scores` and the served model in the review and drop records, the eval's probabilities, latency, cost and `--sweep`, the new fixtures. No behaviour change for existing policies | M |
-| 2 | `openai-decisions`: the `openai` SDK client (section 4), caching off, refusal and status mapping, fake-fetch tests, `config check` output, serverless key name, [config.md](../config.md#review) and [model-review.md](../model-review.md) | S–M |
-| 3 | `typesafe`: the `@typesafe-ai/sdk` client (section 4), `too_long`, the part-size default from open question 2, tests, docs | S |
+| 2 | `typesafe`: the `@typesafe-ai/sdk` client (section 4), a 40,000 `max_input_chars` default, `too_long` splitting the part and asking again, fake-fetch tests, `config check` output, serverless key name, [config.md](../config.md#review) and [model-review.md](../model-review.md) | S–M |
+| 3 | `openai-decisions`: the `openai` SDK client (section 4), caching off, refusal and status mapping, tests, docs with its measured starting thresholds | S |
 | 4 | Calibration data: `seshi review eval --sessions` and `--against`, shadow mode for a candidate decision step on the server, synthetic fixture generation | M |
 | 5 | Optional, on evidence: per-category questions, `seshi review fixture add`, `seshi review export` | M |
