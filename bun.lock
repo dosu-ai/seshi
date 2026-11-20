@@ -204,7 +204,7 @@
     },
     "packages/ts/model": {
       "name": "@seshi/model",
-      "version": "0.14.0",
+      "version": "0.15.0",
       "dependencies": {
         "@letta-ai/trajectory": "^0.3.0",
       },
