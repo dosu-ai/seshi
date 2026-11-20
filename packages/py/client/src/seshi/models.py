@@ -18,6 +18,7 @@ from __future__ import annotations
 from typing import Annotated, Any, Literal, TypeVar
 
 from pydantic import (
+    AliasChoices,
     BaseModel,
     ConfigDict,
     Field,
@@ -27,7 +28,7 @@ from pydantic import (
 )
 from pydantic.alias_generators import to_camel
 
-Agent = Literal[
+Format = Literal[
     "claude-code",
     "codex",
     "cursor",
@@ -38,7 +39,9 @@ Agent = Literal[
     "datadog-trajectory",
     "trajectory",
 ]
-"""A transcript format, by its trajectory source name."""
+"""A transcript format `POST /v1/sessions` takes, by its trajectory source name: the format the
+session is filed under. Sessions other routes file (`otlp-genai`, `cursor-cloud-api`, …) have
+formats outside this list."""
 
 Visibility = Literal["org", "owner"]
 """`org`: every member reads it. `owner`: only its owner (admins and services read everything)."""
@@ -326,11 +329,13 @@ class Upload(Request):
     the last answer's `bytes_total` ended. The server's rules for whole uploads, chunks,
     continuations, forks and resends are in docs/server.md."""
 
-    agent: Agent | str
-    """One of `Agent`, or a format a newer server knows: the server decides."""
+    format: Format | str
+    """The format the session is filed under: one of `Format`, or one a newer server knows (the
+    server decides)."""
     session_id: str
     transcript: str
-    format: Literal["jsonl", "json"] | None = None
+    encoding: Literal["jsonl", "json"] | None = None
+    """How the log is encoded; `jsonl` by default."""
     offset: int | None = None
     project: str | None = None
     branch: str | None = None
@@ -415,7 +420,8 @@ class SessionMetadata(Response):
     owner: str
     archive_id: str
     session_id: str
-    agent: str
+    format: str = Field(validation_alias=AliasChoices("format", "agent"))
+    """The format the session is filed under (`agent` from a server older than 0.16)."""
     source: str | None = None
     project: str | None = None
     branch: str | None = None
@@ -450,7 +456,7 @@ class SessionsPage(Response):
 
 
 class StaleSession(Response):
-    agent: str
+    format: str = Field(validation_alias=AliasChoices("format", "agent"))
     session_id: str
     built_with: str | None = None
     """The format version that built it; absent when none was recorded."""
@@ -465,13 +471,13 @@ class StaleSessionsPage(Response):
 
 
 class VisibilityChange(Request):
-    """`PATCH /v1/sessions/{agent}/{session_id}`'s body."""
+    """`PATCH /v1/sessions/{format}/{session_id}`'s body."""
 
     visibility: Visibility
 
 
 class Removed(Response):
-    """`DELETE /v1/sessions/{agent}/{session_id}`: how many objects were deleted."""
+    """`DELETE /v1/sessions/{format}/{session_id}`: how many objects were deleted."""
 
     removed: int
 
@@ -584,7 +590,8 @@ class Trace(Response):
     schema_: Literal["seshi/trace/1"] = Field(alias="schema")
     content_hash: str
     source: str
-    agent: str
+    format: str = Field(validation_alias=AliasChoices("format", "agent"))
+    """The format the session is filed under (`agent` from a server older than 0.16)."""
     project: str | None = None
     branch: str | None = None
     session_id: str | None
@@ -714,6 +721,8 @@ class ChangeEntry(Response):
     owner: str
     archive_id: str
     session_id: str
+    format: str
+    """The format the session is filed under, which the session routes take."""
     content_hash: str | None
     continuation: Continuation | None = None
     replace: bool | None = None
@@ -900,7 +909,7 @@ class SearchMatch(Response):
 
 class SearchResult(Response):
     owner: str
-    agent: str
+    format: str = Field(validation_alias=AliasChoices("format", "agent"))
     session_id: str
     archive_id: str
     origin_agent: str | None = None

@@ -298,10 +298,10 @@ describe("the upload protocol", () => {
     const first = await uploader().pass();
     expect(first).toMatchObject({ taken: 1, uploaded: 1, queued: 0 });
     expect(server.uploads[0]).toMatchObject({
-      agent: "claude-code",
+      format: "claude-code",
       session_id: "s1",
       offset: 0,
-      format: "jsonl",
+      encoding: "jsonl",
       project: basename(dir),
       claims: { git_email: "me@acme.com", account_ids: { anthropic: "acct-1" } },
     });
@@ -1768,7 +1768,7 @@ describe("resending stale sessions (X4.9)", () => {
     clock = new Date(clock.getTime() + ms);
   };
   const staleAt = (current: string) => {
-    server.staleList = [{ agent: "claude-code", session_id: "s1", built_with: "1", current }];
+    server.staleList = [{ format: "claude-code", session_id: "s1", built_with: "1", current }];
   };
   const rebuilds = () => server.uploads.filter((u) => u.rebuild);
 
@@ -1833,8 +1833,8 @@ describe("resending stale sessions (X4.9)", () => {
     hooked("s2");
     await uploader().pass();
     server.staleList = [
-      { agent: "claude-code", session_id: "s1", current: "2" },
-      { agent: "claude-code", session_id: "s2", current: "2" },
+      { format: "claude-code", session_id: "s1", current: "2" },
+      { format: "claude-code", session_id: "s2", current: "2" },
     ];
     await updateState(paths, (s) => {
       (s.sessions["fake:s1"] as SessionState).toggle = "off";

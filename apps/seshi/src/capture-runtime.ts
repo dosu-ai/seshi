@@ -110,7 +110,7 @@ export async function serverlessSink(ctx: CommandContext, account: Account): Pro
         const sessions = opened.instance.localSessions(opened.owner, SERVERLESS_BASIS);
         return allStale((after) => sessions.staleSessions(after !== undefined ? { after } : {}));
       }),
-    async retract(agent, sessionId, secret) {
+    async retract(format, sessionId, secret) {
       // Retraction does not wait on a review key or a newer seshi: open the bucket for it alone.
       let opened: ServerlessBucket;
       try {
@@ -127,7 +127,7 @@ export async function serverlessSink(ctx: CommandContext, account: Account): Pro
         throw holdOf(err);
       }
       try {
-        return await retractIn(opened, agent, sessionId, secret);
+        return await retractIn(opened, format, sessionId, secret);
       } catch (err) {
         const refused = refusalOf(err, opened.owner);
         if (refused instanceof Refused) throw new SignInNeeded(refused.message, "bucket refused");
@@ -139,7 +139,7 @@ export async function serverlessSink(ctx: CommandContext, account: Account): Pro
   };
   async function retractIn(
     opened: ServerlessBucket,
-    agent: string,
+    format: string,
     sessionId: string,
     secret: string,
   ): Promise<"retracted" | "gone" | "absent"> {
@@ -151,10 +151,10 @@ export async function serverlessSink(ctx: CommandContext, account: Account): Pro
       );
     }
     const { finishTombstone, getSession, tombstone } = await import("@seshi/pipeline");
-    const metadata = await getSession(instance.store, owner, agent, sessionId);
+    const metadata = await getSession(instance.store, owner, format, sessionId);
     if (!metadata) return "absent";
     if (metadata.status === "redacted") {
-      await finishTombstone({ store: instance.store, owner, agent, session_id: sessionId });
+      await finishTombstone({ store: instance.store, owner, format, session_id: sessionId });
       return "gone";
     }
     if (metadata.retract_hash !== retractHash(secret)) {
@@ -166,7 +166,7 @@ export async function serverlessSink(ctx: CommandContext, account: Account): Pro
     await tombstone({
       store: instance.store,
       owner,
-      agent,
+      format,
       session_id: sessionId,
       now: instance.now,
       reason: "retracted",

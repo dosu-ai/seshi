@@ -213,7 +213,7 @@ describe("POST /otlp/v1/traces", () => {
     expect(found.results).toEqual([
       expect.objectContaining({
         owner: OWNER,
-        agent: "otlp-genai",
+        format: "otlp-genai",
         session_id: SESSION,
         source_id: "console",
       }),
@@ -441,8 +441,8 @@ describe("POST /otlp/v1/traces", () => {
         method: "POST",
         headers: { authorization: `Bearer ${UPLOADER}`, "content-type": "application/json" },
         body: JSON.stringify({
-          agent: "otlp-genai",
-          format: "json",
+          format: "otlp-genai",
+          encoding: "json",
           session_id: "export-1",
           transcript,
         }),

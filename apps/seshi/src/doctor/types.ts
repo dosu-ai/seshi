@@ -56,7 +56,8 @@ export interface ServerEvidence {
   where?: string;
   error?: Failure & { exit?: number };
   upload_id?: string;
-  agent?: string;
+  /** The format the server files the session under. */
+  format?: string;
   metadata?: SessionMetadata | null;
   metadata_error?: Failure;
   pointer?: SessionMetadata | null;

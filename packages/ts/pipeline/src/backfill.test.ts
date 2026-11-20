@@ -73,10 +73,10 @@ async function store1(
     uploadEnvelope(
       {
         owner,
-        agent: "trajectory",
+        format: "trajectory",
         session_id: sessionId,
         transcript,
-        format: "jsonl",
+        encoding: "jsonl",
         offset,
         ...(replace ? { replace: true } : {}),
       },
@@ -354,7 +354,7 @@ describe("backfillRedaction (F2.5)", () => {
 
   it("skips a tombstoned session", async () => {
     await store1("s1", meta() + user(`ACME-1234 ${LONG}`) + reply("ok"));
-    await tombstone({ store, owner: "alice", agent: "trajectory", session_id: "s1" });
+    await tombstone({ store, owner: "alice", format: "trajectory", session_id: "s1" });
     expect((await run()).outcomes).toMatchObject({ skipped: 1, rewritten: 0 });
   });
 
@@ -430,10 +430,10 @@ describe("backfillRedaction (F2.5)", () => {
       uploadEnvelope(
         {
           owner: "alice",
-          agent: "trajectory",
+          format: "trajectory",
           session_id: "s1",
           transcript: parent + user(`fork with ACME-1234 ${LONG}`) + reply("forked"),
-          format: "jsonl",
+          encoding: "jsonl",
           offset: 0,
           fork_of: "s0",
         },
@@ -507,10 +507,10 @@ describe("backfillRedaction (F2.5)", () => {
       uploadEnvelope(
         {
           owner: "alice",
-          agent: "trajectory",
+          format: "trajectory",
           session_id: "s1",
           transcript: user("more") + reply("yes"),
-          format: "jsonl",
+          encoding: "jsonl",
           offset: first.bytes_total,
         },
         { caller: { kind: "static", principal: "alice" }, owner_basis: "verified" },
@@ -536,7 +536,7 @@ describe("backfillRedaction (F2.5)", () => {
         { role: "user", content: LONG, timestamp: ts },
         { role: "assistant", content: "ok", timestamp: ts, llm_call: "c1" },
       ] as never,
-      metadata: { session_id: "s1", agent: "trajectory" },
+      metadata: { session_id: "s1", format: "trajectory" },
       llm_calls: [
         {
           id: "c1",
@@ -800,10 +800,10 @@ describe("backfillRedaction (F2.5)", () => {
       uploadEnvelope(
         {
           owner: "alice",
-          agent: "trajectory",
+          format: "trajectory",
           session_id: "s9",
           transcript: meta() + user(LONG) + reply("ok"),
-          format: "jsonl",
+          encoding: "jsonl",
           offset: 0,
         },
         { caller: { kind: "static", principal: "alice" }, owner_basis: "verified" },

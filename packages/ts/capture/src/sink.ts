@@ -46,7 +46,7 @@ export interface SessionSink {
   /** Retract a session this machine uploaded, with its secret (F9.7): `retracted` when the
    * server removed it, `gone` when it was already removed, `absent` when the server holds no
    * such session for this credential (never stored, or stored under another owner). */
-  retract(agent: string, sessionId: string, secret: string): Promise<RetractOutcome>;
+  retract(format: string, sessionId: string, secret: string): Promise<RetractOutcome>;
   /** The sessions of this credential's owner that an older normalizer built (X4.9), every
    * page of them: the uploader sends the ones it holds again whole with `rebuild`. A sink
    * without it is never asked. */
@@ -151,10 +151,10 @@ export function httpSink(options: HttpSinkOptions): SessionSink {
         return signIn(err);
       }
     },
-    async retract(agent, sessionId, secret) {
+    async retract(format, sessionId, secret) {
       const db = await client();
       try {
-        const removed = await db.tombstone(agent, sessionId, { retractSecret: secret });
+        const removed = await db.tombstone(format, sessionId, { retractSecret: secret });
         return removed === null ? "absent" : "retracted";
       } catch (err) {
         if (err instanceof ServerError) {

@@ -226,7 +226,7 @@ rotating the org key, which every member then sets again.
 
 A session is `org` (the default) or `owner` (X5.10). Its visibility is the upload's
 `visibility`, else the token's default, else the source's, else `default_visibility`, and the
-owner or an admin can change it later (`PATCH /v1/sessions/:agent/:session_id`), which writes a
+owner or an admin can change it later (`PATCH /v1/sessions/:format/:session_id`), which writes a
 `visibility_changed` change entry. Members read their own sessions and every `org` session;
 admins and service readers read everything. Reads name another owner with `?owner=`; a
 session the caller may not read answers 404, as if it were not there. Another owner's change
@@ -266,8 +266,13 @@ client which bucket that is.
 A reader that follows every session can tail one feed instead of one per owner: `GET
 /v1/changes/all` (`allChanges()` in [`@dosu/seshi-client`](client.md)) pages through every owner's
 entries by stamp, then owner, then key, with one opaque cursor. Each entry names its `owner`
-and its `key`; `tombstone` and `visibility_changed` entries come through like `published` ones,
-from people, `svc:<source-id>` service accounts and `h-…` owners alike.
+and its `key`, and the entry its session's `format`, so a reader can call
+`/v1/sessions/:format/:session_id` from the entry alone; `tombstone` and `visibility_changed`
+entries come through like `published` ones, from people, `svc:<source-id>` service accounts and
+`h-…` owners alike. Entries written before seshi 0.16 carry no `format` in the bucket: both
+feeds fill it in from the session's metadata (this one when the index reads the entry), and
+leave out an entry whose session has no metadata to read it from (a first write that failed
+after its entry), so every entry served has one.
 
 It is served from this instance's search index, which keeps a copy of every entry it reads, so a
 poll is one SQLite range read and no bucket request, however many owners there are. Search must
@@ -316,11 +321,12 @@ allow.
 | `GET /v1/owners?limit&after` | The owners the bucket holds sessions for (`sessions:read`) |
 | `POST /v1/sessions` | Store a session (`sessions:write`); see below |
 | `GET /v1/sessions?owner&limit&after` | List an owner's sessions (the caller's own by default), as far as visibility allows; never a stub (F3.4) |
-| `GET /v1/sessions/:agent/:session_id?owner` | The session's `metadata.json`; `404` for a stub |
-| `PATCH /v1/sessions/:agent/:session_id?owner` | `{visibility}`: change who may read it. The owner or an admin |
-| `GET /v1/sessions/:agent/:session_id/trace?hash&format` | The head trace (or another of the session's `traces`, by hash; `404` for a hash it does not name) as the stored canonical trace (`format=seshi`, the default) or rendered as `letta`, `otlp` or `atif`; `400 bad_query` for another format, `404` for a session not stored (a filtered one included), `410` once redacted |
-| `GET /v1/sessions/:agent/:session_id/export?hash&format` | The same trace as a download: `Content-Disposition: attachment; filename="<agent>-<session>-<hash>.<format>.json"` |
-| `DELETE /v1/sessions/:agent/:session_id?owner` | Tombstone: drop the trace objects, append a tombstone change. Irreversible; a later upload of the same session is refused. Needs `sessions:delete`: the owner with a fresh session token or a static token, or an admin. With `X-Seshi-Retract` it is a [retraction](#retraction-f97) by the machine that uploaded the session |
+| `GET /v1/sessions/:format/:session_id?owner` | The session's `metadata.json`; `404` for a stub |
+| `PATCH /v1/sessions/:format/:session_id?owner` | `{visibility}`: change who may read it. The owner or an admin |
+| `GET /v1/sessions/:format/:session_id/trace?hash&render` | The head trace (or another of the session's `traces`, by hash; `404` for a hash it does not name) as the stored canonical trace (`render=seshi`, the default) or rendered as `letta`, `otlp` or `atif` (until 0.17 also read as `?format=`, its name before 0.16); `400 bad_query` for another render, `404` for a session not stored (a filtered one included), `410` once redacted |
+| `GET /v1/sessions/:format/:session_id/export?hash&render` | The same trace as a download: `Content-Disposition: attachment; filename="<format>-<session>-<hash>.<render>.json"` |
+| `DELETE /v1/sessions/:format/:session_id?owner` | Tombstone: drop the trace objects, append a tombstone change. Irreversible; a later upload of the same session is refused. Needs `sessions:delete`: the owner with a fresh session token or a static token, or an admin. With `X-Seshi-Retract` it is a [retraction](#retraction-f97) by the machine that uploaded the session |
+| `GET /v1/owners/:owner/sessions/:archive_id`, `…/trace?hash&render`, `…/export?hash&render`, `…/reviews` | The same session, trace, download and reviews, by the owner and archive id a change entry, a search result or a listing names: that owner's folder exactly (no `[auth.owner_aliases]` folded in), no default owner. For readers that hold sessions the API gave them; `400 bad_query` for an owner or archive id that is not one, `404` as above |
 | `GET /v1/changes?owner&after&since&limit` | An owner's change feed; another owner's shows the entries of sessions the caller may read |
 | `GET /v1/changes/all?after&since&limit` | Every owner's change feed as one: `{entries: [{owner, key, entry}], cursor?, truncated, through}`, by stamp, then owner, then key ([above](#every-owners-change-feed)). Service tokens and admins only, `403` for anyone else; `400 bad_query`, `404 search_disabled`, `503 index_building` |
 | `POST /v1/tokens` | `{kind: org\|admin\|device\|service, owner?, service?, scopes?, visibility?, expires_at?, label?}`: a new token, shown once (`tokens:admin`) |
@@ -330,9 +336,9 @@ allow.
 | `GET /v1/admin/jobs` | The worker, its jobs and every source, as `seshi workers status --json` prints them (`sources:admin`, X7.5) |
 | `GET /v1/redaction/rules` | The operator's rule packs and the rule-set hash, for redacting before upload (F2.4). Any signed-in caller; `ETag` is the hash, `If-None-Match` gets `304` |
 | `GET /v1/capture/rules` | The org's exclude list (`[capture] exclude`, every file's entries, as written, blanks and `#` comments left out): `{schema: "seshi/capture-rules/1", exclude: [...]}`, which laptops apply before upload ([config.md](config.md#the-orgs-exclude-list-capture-exclude), [capture.md](capture.md#the-orgs-exclude-list-on-a-laptop)). Any signed-in caller; `ETag` is a hash of the answer, `If-None-Match` gets `304`; a reload changes it at once. A server older than the route answers `404`, which a laptop reads as no list |
-| `GET /v1/sessions/:agent/:session_id/reviews?owner` | What model review decided for each stored write (`sessions:read`, F3.8): the whole audit record for admins, only `n`, `at`, `content_hash` and `decision` for anyone else who may read the session |
+| `GET /v1/sessions/:format/:session_id/reviews?owner` | What model review decided for each stored write (`sessions:read`, F3.8): the whole audit record for admins, only `n`, `at`, `content_hash` and `decision` for anyone else who may read the session |
 | `POST /otlp/v1/traces` | OTLP/HTTP trace ingest (F4): `ExportTraceServiceRequest` as protobuf or JSON from an OTLP destination's service token. Outside `/v1`, and its errors are OTLP's (`google.rpc.Status`). See [otlp.md](otlp.md) |
-| `GET /v1/search?q&owner&agent&repo&branch&source&since&until&sort&limit&matches&cursor` | Keyword search over what the caller may read (`search`, F10; [search.md](search.md)): `{query, total, results: [{owner, agent, session_id, …, score, hits, matches: [{content_hash, event_index, role, snippet, highlights}]}], cursor?, index}`. `400 bad_query`, `404 search_disabled`, `503 index_building` |
+| `GET /v1/search?q&owner&agent&repo&branch&source&since&until&sort&limit&matches&cursor` | Keyword search over what the caller may read (`search`, F10; [search.md](search.md)): `{query, total, results: [{owner, format, session_id, …, score, hits, matches: [{content_hash, event_index, role, snippet, highlights}]}], cursor?, index}`. `400 bad_query`, `404 search_disabled`, `503 index_building` |
 | `GET /v1/admin/sources?days` | Every configured source and `upload`: checkpoint, drop and failure counts, health over the last `days` (7) days, as `seshi sync status --json` prints them (`sources:admin`) |
 | `GET /v1/admin/sources/:id?days` | One source's status; `404 unknown_source` for an id no source has (`sources:admin`) |
 | `GET /v1/admin/sources/:id/failed`, `…/dropped` `?since&after&limit` | A source's failure or drop records, oldest first, as `seshi sync failed\|dropped --json` prints them; never content. A source no longer configured can still have its records read (`sources:admin`, X6.4) |
@@ -350,7 +356,7 @@ random secret and keeps it in its capture state file; every upload sends only it
 `metadata.json`. A later upload never sets one: a session first uploaded without a hash cannot
 be retracted, or replaced with the org key.
 
-To retract, the machine sends `DELETE /v1/sessions/:agent/:session_id` with its normal upload
+To retract, the machine sends `DELETE /v1/sessions/:format/:session_id` with its normal upload
 credential (`sessions:write`) and the secret in `X-Seshi-Retract`. The server compares the
 secret's hash with the stored one (in constant time) and runs the normal delete: trace objects
 removed, the session marked redacted, a tombstone with reason `retracted` and the caller as its
@@ -373,13 +379,13 @@ id; turning it back on uploads it as a new session (`<id>~1`).
 
 ```jsonc
 {
-  "agent": "claude-code",          // the transcript format: claude-code, codex, cursor, opencode, pi, gemini-cli,
+  "format": "claude-code",         // the transcript format: claude-code, codex, cursor, opencode, pi, gemini-cli,
                                    // datadog-trajectory (a Trajectory session file, see below),
                                    // atif (an ATIF document, see below), or trajectory
                                    // (records already in trajectory-v1, see below)
   "session_id": "…",
   "transcript": "…",               // the native log, verbatim
-  "format": "jsonl",               // or "json" (OpenCode exports, ATIF): how the log is encoded
+  "encoding": "jsonl",             // or "json" (OpenCode exports, ATIF): how the log is encoded
   "project": "github.com/acme/widget",
   "branch": "main",                // the client's best guess; the transcript's own record wins
   "parent_session_id": "…",        // the session this one was resumed or forked from
@@ -452,7 +458,7 @@ itself (it keeps no raw logs), so `GET /v1/sessions/stale` (`sessions:write`, th
 credential) lists the caller's own stale sessions, paged by key like `GET /v1/sessions`:
 
 ```jsonc
-{ "sessions": [ { "agent": "claude-code", "session_id": "…",
+{ "sessions": [ { "format": "claude-code", "session_id": "…",
                   "built_with": "1+trajectory.0.3.0", "current": "2+trajectory.0.3.0" } ],
   "cursor": "…", "truncated": false }
 ```
@@ -499,7 +505,7 @@ A session's log only grows while the session runs (every harness appends a line 
 a client need not send the whole of it each time: it sends the bytes past what the server has.
 
 ```jsonc
-{ "agent": "claude-code", "session_id": "…",
+{ "format": "claude-code", "session_id": "…",
   "transcript": "<the log from byte 48213 on, whole lines>",
   "offset": 48213 }                // the bytes_total of the last answer
 ```
@@ -533,6 +539,8 @@ rewrote in place (Claude Code and Codex rewrite nothing; a harness that compacts
 might) is the client's to notice, by keeping a hash of what it sent: the whole log is then
 sent with `replace`, since it no longer extends what the server holds.
 
-`agent` is part of the archive id (`sha256(owner, agent, session_id)`), which is why only the
+`format` is part of the archive id (`sha256(owner, format, session_id)`), which is why only the
 trajectory source name is accepted (`claude-code`, not `claude`): one spelling, one archive.
+Before seshi 0.16 the body named the format `agent` and the encoding `format`; the server still
+reads a body with `agent` that way, so uploaders installed before keep working.
 

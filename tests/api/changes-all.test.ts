@@ -97,18 +97,18 @@ async function serviceToken(): Promise<string> {
 
 async function seed(as: ReturnType<typeof server>["as"]): Promise<void> {
   await as(orgKey, "alice").ingest({
-    agent: "trajectory",
+    format: "trajectory",
     session_id: "open",
     transcript: log("deploy the payments service"),
   });
   await as(orgKey, "alice").ingest({
-    agent: "trajectory",
+    format: "trajectory",
     session_id: "private",
     transcript: log("rotate the secrets"),
     visibility: "owner",
   });
   await as(orgKey, "bob").ingest({
-    agent: "trajectory",
+    format: "trajectory",
     session_id: "docs",
     transcript: log("deploy the docs site"),
   });

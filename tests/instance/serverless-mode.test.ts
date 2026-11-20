@@ -83,7 +83,7 @@ describe("connect", () => {
   });
 
   it("writes as the owner, a local writer with a claimed owner (F11.4)", async () => {
-    await db.ingest({ agent: "claude-code", session_id: "sess1", transcript: CLAUDE });
+    await db.ingest({ format: "claude-code", session_id: "sess1", transcript: CLAUDE });
     expect(await db.getSession("claude-code", "sess1")).toMatchObject({
       owner: "acme",
       owner_basis: "claimed",
@@ -164,7 +164,7 @@ describe("over a store", () => {
   it("stores, reads back, lists, and feeds changes", async () => {
     const result = stored(
       await db.ingest({
-        agent: "claude-code",
+        format: "claude-code",
         session_id: "sess1",
         transcript: CLAUDE,
         project: "github.com/acme/widget",
@@ -201,12 +201,12 @@ describe("over a store", () => {
   });
 
   it("tombstones, and refuses the session after", async () => {
-    await db.ingest({ agent: "claude-code", session_id: "sess1", transcript: CLAUDE });
+    await db.ingest({ format: "claude-code", session_id: "sess1", transcript: CLAUDE });
     expect(await db.tombstone("claude-code", "sess1")).toEqual({ removed: 1 });
     expect(await db.getTrace("claude-code", "sess1")).toBeNull();
     expect(await db.getSession("claude-code", "sess1")).toMatchObject({ status: "redacted" });
 
-    const again = db.ingest({ agent: "claude-code", session_id: "sess1", transcript: CLAUDE });
+    const again = db.ingest({ format: "claude-code", session_id: "sess1", transcript: CLAUDE });
     await expect(again).rejects.toBeInstanceOf(IngestRejected);
     // One vocabulary: the store's refusals are SessionRejected too, with their code.
     await expect(again).rejects.toBeInstanceOf(SessionRejected);

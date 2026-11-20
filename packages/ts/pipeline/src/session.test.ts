@@ -14,14 +14,14 @@ beforeEach(() => {
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 describe("storeSession", () => {
-  it("refuses an agent the registry has no format for, before writing anything", async () => {
+  it("refuses a format the registry has no adapter for, before writing anything", async () => {
     const upload = storeSession(
       {
         owner: "alice",
-        agent: "claude",
+        format: "claude",
         session_id: "s1",
         transcript: '{"role":"user","content":"hi"}\n',
-        format: "jsonl",
+        encoding: "jsonl",
       },
       { store: new FsStore(dir), formats: new FormatRegistry(BUILTIN_FORMATS) },
     );
@@ -51,10 +51,10 @@ describe("the retraction hash (F9.7)", () => {
       storeSession(
         {
           owner: "alice",
-          agent: "trajectory",
+          format: "trajectory",
           session_id: "s1",
           transcript,
-          format: "jsonl",
+          encoding: "jsonl",
           offset,
           retract_hash,
         },
@@ -83,10 +83,10 @@ describe("when a session was last active", () => {
       storeSession(
         {
           owner: "alice",
-          agent: "trajectory",
+          format: "trajectory",
           session_id: "s1",
           transcript,
-          format: "jsonl",
+          encoding: "jsonl",
           offset,
         },
         { store, formats },
@@ -117,10 +117,10 @@ describe("the session filter and limits from config", () => {
   const formats = new FormatRegistry(BUILTIN_FORMATS);
   const upload = (transcript: string, offset = 0) => ({
     owner: "alice",
-    agent: "trajectory",
+    format: "trajectory",
     session_id: "s1",
     transcript,
-    format: "jsonl" as const,
+    encoding: "jsonl" as const,
     offset,
   });
 

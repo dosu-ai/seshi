@@ -4,7 +4,8 @@ import type { Viewer } from "./viewer";
 export interface IndexedSession {
   owner: string;
   archive_id: string;
-  agent: string;
+  /** The format the session is filed under. */
+  format: string;
   session_id: string;
   origin_agent?: string;
   native_session_id?: string;
@@ -56,6 +57,7 @@ export interface BackendQuery {
   match: string;
   viewer: Viewer;
   owners?: readonly string[];
+  /** Sessions filed under this format or run by this agent (`origin_agent`). */
   agent?: string;
   repo?: string;
   branch?: string;

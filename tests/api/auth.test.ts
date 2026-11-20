@@ -111,7 +111,7 @@ const upload = (as: Call, sessionId: string, extra: Record<string, unknown> = {}
   clock = new Date(clock.getTime() + 1000);
   return call("POST", "/v1/sessions", {
     ...as,
-    body: { agent: "claude-code", session_id: sessionId, transcript: CLAUDE(sessionId), ...extra },
+    body: { format: "claude-code", session_id: sessionId, transcript: CLAUDE(sessionId), ...extra },
   });
 };
 
@@ -371,7 +371,7 @@ describe("replace with real roles (X4.6)", () => {
     const extended = await call("POST", "/v1/sessions", {
       ...alice,
       body: {
-        agent: "claude-code",
+        format: "claude-code",
         session_id: "s1",
         transcript: `${CLAUDE("s1").trim()}\n${JSON.stringify({ type: "user", uuid: "u9", timestamp: "2026-09-01T00:00:09.000Z", sessionId: "sess1", message: { role: "user", content: "injected" } })}\n`,
       },

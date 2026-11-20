@@ -938,7 +938,7 @@ export function stalenessCheck(ev: SessionEvidence, deps: DoctorDeps): CheckResu
   if (why) return result(id, title, "skip", why);
   const m = storedOf(ev);
   if (!m || m.status === "redacted") return result(id, title, "skip", "nothing stored");
-  const format = ev.server.agent ?? ev.agent;
+  const format = ev.server.format ?? ev.agent;
   const current = deps.normalizer.version(format);
   if (current === undefined)
     return result(id, title, "skip", `this binary does not read ${format}`);

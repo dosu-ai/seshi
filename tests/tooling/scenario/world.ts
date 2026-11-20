@@ -343,15 +343,15 @@ export class World {
             .localSessions(owner)
             .staleSessions(after !== undefined ? { after } : {}),
         ),
-      async retract(agent, sessionId, secret) {
+      async retract(format, sessionId, secret) {
         const inst = instance();
         if (!inst.config.capture.allow_retract) {
           throw new RetractRefused("retract_disabled", "retraction is turned off");
         }
-        const metadata = await getSession(inst.store, owner, agent, sessionId);
+        const metadata = await getSession(inst.store, owner, format, sessionId);
         if (!metadata) return "absent";
         if (metadata.status === "redacted") {
-          await finishTombstone({ store: inst.store, owner, agent, session_id: sessionId });
+          await finishTombstone({ store: inst.store, owner, format, session_id: sessionId });
           return "gone";
         }
         if (metadata.retract_hash !== retractHash(secret)) {
@@ -360,7 +360,7 @@ export class World {
         await tombstone({
           store: inst.store,
           owner,
-          agent,
+          format,
           session_id: sessionId,
           now: inst.now,
           reason: "retracted",

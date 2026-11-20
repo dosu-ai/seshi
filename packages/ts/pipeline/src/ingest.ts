@@ -28,11 +28,11 @@ import {
   accessDeniedIn,
   archiveId,
   type ChangeUpdate,
-  decodeJson,
+  decodeMetadata,
+  decodeTrace,
   deleteSpans,
   ensureLayout,
   getBytes,
-  gunzipJson,
   gzipJsonDeterministic,
   keys,
   publishObject,
@@ -80,7 +80,7 @@ function newSession(
   owner: string,
   archive: string,
   sessionId: string,
-  agent: string,
+  format: string,
   at: string,
   context: WriteContext,
 ): SessionMetadata {
@@ -89,7 +89,7 @@ function newSession(
     owner,
     archive_id: archive,
     session_id: sessionId,
-    agent,
+    format,
     status: "stored",
     traces: [],
     writer: context.writer ?? localWriter(owner),
@@ -128,7 +128,8 @@ function addRedaction(
 
 export interface IngestMetadata {
   session_id: string;
-  agent: string;
+  /** The format the session is filed under; the archive id derives from it. */
+  format: string;
   project?: string;
   branch?: string;
   parent_session_id?: string;
@@ -246,12 +247,12 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
   const provenance: Provenance = input.provenance ?? {
     source: "upload",
     source_id: writer.source_id,
-    format: metadata.agent,
+    format: metadata.format,
   };
   let trace: Trace;
   try {
     trace = parseTrace(input.records, {
-      agent: metadata.agent,
+      format: metadata.format,
       session_id: metadata.session_id,
       project: metadata.project,
       branch: metadata.branch,
@@ -264,7 +265,7 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
     throw err;
   }
 
-  const archive = archiveId(owner, metadata.agent, metadata.session_id);
+  const archive = archiveId(owner, metadata.format, metadata.session_id);
   const at = now().toISOString();
   if (!input.layout_checked) await ensureLayout(store, { createdBy: input.client ?? "seshi" });
 
@@ -299,7 +300,7 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
     if (input.redaction) ref.rule_set = input.redaction.rule_set;
 
     const base =
-      existing ?? newSession(owner, archive, metadata.session_id, metadata.agent, at, context);
+      existing ?? newSession(owner, archive, metadata.session_id, metadata.format, at, context);
     const replaced = input.replace
       ? base.traces.map((t) => t.content_hash).filter((h) => h !== trace.content_hash)
       : [];
@@ -374,6 +375,7 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
             owner,
             archive_id: archive,
             session_id: metadata.session_id,
+            format: metadata.format,
             content_hash: trace.content_hash,
             writer,
             owner_basis: basis,
@@ -412,7 +414,7 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
 
 export interface StubInput {
   session_id: string;
-  agent: string;
+  format: string;
   writer?: Writer;
   owner_basis?: OwnerBasis;
   visibility?: Visibility;
@@ -420,7 +422,7 @@ export interface StubInput {
 }
 
 function newStub(owner: string, archive: string, stub: StubInput, at: string): SessionMetadata {
-  const metadata = newSession(owner, archive, stub.session_id, stub.agent, at, stub);
+  const metadata = newSession(owner, archive, stub.session_id, stub.format, at, stub);
   if (stub.retract_hash) metadata.retract_hash = stub.retract_hash;
   return metadata;
 }
@@ -477,7 +479,7 @@ export async function recordProgress(input: {
 export interface TombstoneInput {
   store: Store;
   owner: string;
-  agent: string;
+  format: string;
   session_id: string;
   now?: () => Date;
   /** Why: `deleted` (the default) by the owner or an admin, `retracted` by the uploading
@@ -507,7 +509,7 @@ function tracesEveryAttemptRead(attempts: readonly TombstoneDecision[]): string[
  * removed; null when there was nothing to remove. */
 export async function tombstone(input: TombstoneInput): Promise<{ removed: number } | null> {
   const { store, owner } = input;
-  const archive = archiveId(owner, input.agent, input.session_id);
+  const archive = archiveId(owner, input.format, input.session_id);
   const at = (input.now ?? (() => new Date()))().toISOString();
   const { attempts } = await updateMetadataWithChange(
     store,
@@ -531,6 +533,7 @@ export async function tombstone(input: TombstoneInput): Promise<{ removed: numbe
           owner,
           archive_id: archive,
           session_id: input.session_id,
+          format: existing.format,
           content_hash: existing.head ?? null,
           writer: input.writer ?? localWriter(owner),
           owner_basis: existing.owner_basis,
@@ -573,11 +576,11 @@ async function deletePending(store: Store, archive: string): Promise<void> {
 export async function finishTombstone(input: {
   store: Store;
   owner: string;
-  agent: string;
+  format: string;
   session_id: string;
 }): Promise<number> {
   const { store, owner } = input;
-  const archive = archiveId(owner, input.agent, input.session_id);
+  const archive = archiveId(owner, input.format, input.session_id);
   const metadata = await readMetadata(store, owner, archive);
   if (metadata?.status !== "redacted") return 0;
   const prefix = `${keys.session(owner, archive)}/trace.`;
@@ -598,7 +601,7 @@ export async function finishTombstone(input: {
 export interface SetVisibilityInput {
   store: Store;
   owner: string;
-  agent: string;
+  format: string;
   session_id: string;
   visibility: Visibility;
   now?: () => Date;
@@ -612,7 +615,7 @@ export interface SetVisibilityInput {
  * session refuses (`IngestRejected` `redacted`): nothing of it is left to read. */
 export async function setVisibility(input: SetVisibilityInput): Promise<SessionMetadata | null> {
   const { store, owner } = input;
-  const archive = archiveId(owner, input.agent, input.session_id);
+  const archive = archiveId(owner, input.format, input.session_id);
   const at = (input.now ?? (() => new Date()))().toISOString();
   const result = await updateMetadataWithChange(store, owner, archive, (existing) => {
     if (!existing) return { next: null, change: null };
@@ -628,6 +631,7 @@ export async function setVisibility(input: SetVisibilityInput): Promise<SessionM
         owner,
         archive_id: archive,
         session_id: input.session_id,
+        format: existing.format,
         content_hash: existing.head ?? null,
         writer: input.writer ?? localWriter(owner),
         owner_basis: existing.owner_basis,
@@ -649,16 +653,16 @@ export async function getTrace(
   contentHash: string,
 ): Promise<Trace | null> {
   const bytes = await getBytes(store, keys.trace(owner, archive, contentHash));
-  return bytes === null ? null : gunzipJson<Trace>(bytes);
+  return bytes === null ? null : decodeTrace(bytes);
 }
 
 export async function getSession(
   store: Store,
   owner: string,
-  agent: string,
+  format: string,
   sessionId: string,
 ): Promise<SessionMetadata | null> {
-  return readMetadata(store, owner, archiveId(owner, agent, sessionId));
+  return readMetadata(store, owner, archiveId(owner, format, sessionId));
 }
 
 /** Every session's metadata under an owner, by walking `sessions/`. A full listing, paged by
@@ -677,7 +681,7 @@ export async function listSessions(
     await Promise.all(
       metadataKeys.map(async (k) => {
         const bytes = await getBytes(store, k);
-        return bytes === null ? null : decodeJson<SessionMetadata>(bytes);
+        return bytes === null ? null : decodeMetadata(bytes);
       }),
     )
   ).filter((m): m is SessionMetadata => m !== null);

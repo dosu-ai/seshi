@@ -37,11 +37,11 @@ function db(options: Partial<ConstructorParameters<typeof StoreSessionDB>[0]> = 
 
 describe("setVisibility (X5.10)", () => {
   it("changes who may read a session and appends a visibility_changed entry", async () => {
-    await db().ingest({ agent: "trajectory", session_id: "s1", transcript: LOG });
+    await db().ingest({ format: "trajectory", session_id: "s1", transcript: LOG });
     const changed = await setVisibility({
       store,
       owner: "alice",
-      agent: "trajectory",
+      format: "trajectory",
       session_id: "s1",
       visibility: "owner",
       now,
@@ -64,12 +64,12 @@ describe("setVisibility (X5.10)", () => {
   });
 
   it("writes nothing for a session already so, and answers null for one not stored", async () => {
-    await db().ingest({ agent: "trajectory", session_id: "s1", transcript: LOG });
+    await db().ingest({ format: "trajectory", session_id: "s1", transcript: LOG });
     const before = (await readChanges(store, "alice")).entries.length;
     const same = await setVisibility({
       store,
       owner: "alice",
-      agent: "trajectory",
+      format: "trajectory",
       session_id: "s1",
       visibility: "org",
     });
@@ -79,7 +79,7 @@ describe("setVisibility (X5.10)", () => {
       await setVisibility({
         store,
         owner: "alice",
-        agent: "trajectory",
+        format: "trajectory",
         session_id: "nope",
         visibility: "owner",
       }),
@@ -87,13 +87,13 @@ describe("setVisibility (X5.10)", () => {
   });
 
   it("refuses a redacted session", async () => {
-    await db().ingest({ agent: "trajectory", session_id: "s1", transcript: LOG });
-    await tombstone({ store, owner: "alice", agent: "trajectory", session_id: "s1" });
+    await db().ingest({ format: "trajectory", session_id: "s1", transcript: LOG });
+    await tombstone({ store, owner: "alice", format: "trajectory", session_id: "s1" });
     await expect(
       setVisibility({
         store,
         owner: "alice",
-        agent: "trajectory",
+        format: "trajectory",
         session_id: "s1",
         visibility: "owner",
       }),
@@ -112,7 +112,7 @@ describe("StoreSessionDB as a credential's client (X5.5, X5.10)", () => {
       visibility: "owner",
     });
     await client.ingest({
-      agent: "trajectory",
+      format: "trajectory",
       session_id: "s1",
       transcript: LOG,
       claims: { username: "mallory", git_email: "a@acme.com" },
@@ -125,7 +125,7 @@ describe("StoreSessionDB as a credential's client (X5.5, X5.10)", () => {
       writer: { kind: "person", principal: "alice", credential_id: "org" },
     });
     await client.ingest({
-      agent: "trajectory",
+      format: "trajectory",
       session_id: "s2",
       transcript: LOG,
       visibility: "org",
