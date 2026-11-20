@@ -24,7 +24,7 @@ const session: SessionMetadata = {
   owner: "alice",
   archive_id: archive,
   session_id: "s1",
-  agent: "trajectory",
+  format: "trajectory",
   status: "stored",
   traces: [],
   writer: { kind: "local", principal: "alice", source_id: "upload" },
@@ -39,6 +39,7 @@ const change = (visibility: "org" | "owner"): Omit<ChangeEntry, "schema"> => ({
   owner: "alice",
   archive_id: archive,
   session_id: "s1",
+  format: "trajectory",
   content_hash: null,
   writer: session.writer,
   visibility,
@@ -115,5 +116,18 @@ describe("updateMetadataWithChange (decision 7 of 18)", () => {
       visibility: "owner",
       project: "github.com/acme/widget",
     });
+  });
+});
+
+describe("reading metadata", () => {
+  it("reads one written before 0.16 with `format`, and a `null` one as no session", async () => {
+    const { format, ...old } = session;
+    const encode = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
+    await store.put(keys.metadata("alice", archive), encode({ ...old, agent: format }));
+    const read = await readMetadata(store, "alice", archive);
+    expect(read).toMatchObject({ format: "trajectory" });
+    expect(read).not.toHaveProperty("agent");
+    await store.put(keys.metadata("alice", archive), encode(null));
+    expect(await readMetadata(store, "alice", archive)).toBeNull();
   });
 });

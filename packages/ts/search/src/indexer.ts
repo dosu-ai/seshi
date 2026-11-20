@@ -8,8 +8,10 @@ import {
 import {
   changeStamp,
   decodeJson,
+  decodeMetadata,
+  decodeTrace,
+  entryWithFormat,
   getBytes,
-  gunzipJson,
   keys,
   listOwners,
   parseChangeKey,
@@ -403,7 +405,7 @@ export class Indexer {
           this.index.record(
             owner,
             fresh.flatMap((key, i) => {
-              const entry = entries[i];
+              const entry = entries[i] && this.named(owner, entries[i], metadata);
               return entry ? [{ name: key.slice(prefix.length), entry }] : [];
             }),
           );
@@ -431,6 +433,21 @@ export class Indexer {
         return true;
       }
     }
+  }
+
+  /** The entry as the cross-owner feed serves it: one written before seshi 0.16 has no
+   * `format`, so it gets its session's, from the metadata just read or else from what the index
+   * holds of the session. Without either it names a write that never landed (its entry is
+   * written first), as `readChanges` has it, and is left out of the feed. */
+  private named(
+    owner: string,
+    entry: ChangeEntry,
+    metadata: ReadonlyMap<string, SessionMetadata | null>,
+  ): ChangeEntry | null {
+    if (entry.format !== undefined) return entry;
+    const format =
+      metadata.get(entry.archive_id)?.format || this.index.session(owner, entry.archive_id)?.format;
+    return format ? entryWithFormat(entry, format) : null;
   }
 
   private async entry(key: string): Promise<ChangeEntry | null> {
@@ -512,12 +529,12 @@ export class Indexer {
     const bytes = await getBytes(this.store, keys.metadata(owner, archive));
     if (bytes === null) return { readAt, metadata: null };
     try {
-      const metadata = decodeJson<SessionMetadata>(bytes);
+      const metadata = decodeMetadata(bytes);
       if (
         typeof metadata !== "object" ||
         metadata === null ||
         !Array.isArray(metadata.traces) ||
-        typeof metadata.agent !== "string" ||
+        typeof metadata.format !== "string" ||
         typeof metadata.session_id !== "string"
       ) {
         throw new Error("not session metadata");
@@ -533,7 +550,7 @@ export class Indexer {
     const bytes = await getBytes(this.store, keys.trace(owner, archive, hash));
     if (bytes === null) return null;
     try {
-      const trace = gunzipJson<Trace>(bytes);
+      const trace = decodeTrace(bytes);
       if (!Array.isArray(trace?.events) || !Array.isArray(trace.records)) {
         throw new Error("not a trace");
       }
@@ -564,7 +581,7 @@ export class Indexer {
     return {
       owner,
       archive_id: metadata.archive_id,
-      agent: metadata.agent,
+      format: metadata.format,
       session_id: metadata.session_id,
       ...(metadata.origin_agent ? { origin_agent: metadata.origin_agent } : {}),
       ...(metadata.native_session_id ? { native_session_id: metadata.native_session_id } : {}),

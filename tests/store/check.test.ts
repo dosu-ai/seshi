@@ -191,8 +191,8 @@ describe.each([
   });
   afterEach(() => backend.close());
 
-  const archive = (sessionId: string, owner = "alice", agent = "trajectory") =>
-    archiveId(owner, agent, sessionId);
+  const archive = (sessionId: string, owner = "alice", format = "trajectory") =>
+    archiveId(owner, format, sessionId);
   const metadataKey = (sessionId: string, owner = "alice") =>
     keys.metadata(owner, archive(sessionId, owner));
 
@@ -200,7 +200,14 @@ describe.each([
     const pipeline = new Pipeline({ store, formats, reviewer });
     return (await pipeline.submit(
       uploadEnvelope(
-        { owner, agent: "trajectory", session_id: sessionId, transcript, format: "jsonl", offset },
+        {
+          owner,
+          format: "trajectory",
+          session_id: sessionId,
+          transcript,
+          encoding: "jsonl",
+          offset,
+        },
         { caller: { kind: "static", principal: owner }, owner_basis: "verified" },
       ),
     )) as StoreSessionResult;
@@ -226,12 +233,12 @@ describe.each([
     await setVisibility({
       store,
       owner: "alice",
-      agent: "trajectory",
+      format: "trajectory",
       session_id: "s2",
       visibility: "owner",
     });
     await upload("s3", meta() + user("deleted") + reply("ok"));
-    await tombstone({ store, owner: "alice", agent: "trajectory", session_id: "s3" });
+    await tombstone({ store, owner: "alice", format: "trajectory", session_id: "s3" });
     // A stub, and a stub continued: its first trace starts past the dropped records.
     const dropped = meta() + user("the customer table") + reply("listed");
     expect((await upload("s4", dropped, 0, "bob")).status).toBe("dropped");
@@ -434,6 +441,7 @@ describe.each([
         at,
         owner: "alice",
         session_id: "ghost",
+        format: "trajectory",
         writer,
         owner_basis: "verified" as const,
       };
@@ -487,6 +495,7 @@ describe.each([
         owner: "alice",
         archive_id: archive("s1"),
         session_id: "s1",
+        format: "trajectory",
         content_hash: null,
         writer,
         owner_basis: "verified",

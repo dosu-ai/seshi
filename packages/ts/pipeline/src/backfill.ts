@@ -52,7 +52,7 @@ export type BackfillOutcome =
 export interface BackfillSession {
   owner: string;
   archive_id: string;
-  agent: string;
+  format: string;
   session_id: string;
   outcome: BackfillOutcome;
   /** What the current rules took out that the old ones had not, by rule id. */
@@ -241,7 +241,7 @@ async function backfillSession(
   const base = {
     owner,
     archive_id: archive,
-    agent: session.agent,
+    format: session.format,
     session_id: session.session_id,
   };
   if (session.status !== "stored" || !session.head || session.traces.length === 0) {
@@ -324,7 +324,7 @@ async function backfillSession(
   let trace: Trace;
   try {
     trace = parseTrace(redacted.records, {
-      agent: session.agent,
+      format: session.format,
       session_id: session.session_id,
       ...(head.project !== undefined ? { project: head.project } : {}),
       ...(head.branch !== undefined ? { branch: head.branch } : {}),
@@ -390,6 +390,7 @@ async function backfillSession(
             owner,
             archive_id: archive,
             session_id: session.session_id,
+            format: next.format,
             content_hash: trace.content_hash,
             writer: options.writer,
             owner_basis: next.owner_basis,

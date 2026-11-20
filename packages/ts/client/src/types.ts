@@ -173,7 +173,7 @@ export interface ConfigStatus {
   restart_only_sections: string[];
 }
 
-/** One stored write's model review (`GET /v1/sessions/{agent}/{id}/reviews`, F3.8). Callers
+/** One stored write's model review (`GET /v1/sessions/{format}/{id}/reviews`, F3.8). Callers
  * who are not admins get `schema`, `n`, `at`, `content_hash` and `decision` only. */
 export interface ReviewDecision {
   schema: "seshi/review/1";

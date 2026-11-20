@@ -110,22 +110,22 @@ def test_who_each_credential_is(live_server: LiveServer, alice: SeshiClient) -> 
 def test_a_session_from_upload_to_tombstone(alice: SeshiClient) -> None:
     sid = new_id()
     log = transcript(sid)
-    first = stored(alice.ingest(Upload(agent="claude-code", session_id=sid, transcript=log)))
+    first = stored(alice.ingest(Upload(format="claude-code", session_id=sid, transcript=log)))
     assert first.status == "stored"
     assert first.bytes_total == len(log.encode())
 
     # A resend gets the answer its idempotency key got; under another key, nothing is new.
-    again = alice.ingest(Upload(agent="claude-code", session_id=sid, transcript=log))
+    again = alice.ingest(Upload(format="claude-code", session_id=sid, transcript=log))
     assert again == first
     other_key = alice.ingest(
-        Upload(agent="claude-code", session_id=sid, transcript=log), idempotency_key=new_id()
+        Upload(format="claude-code", session_id=sid, transcript=log), idempotency_key=new_id()
     )
     assert other_key.status == "unchanged"
 
     tail = transcript(sid, turns=1, start=1)
     second = stored(
         alice.ingest(
-            Upload(agent="claude-code", session_id=sid, transcript=tail, offset=first.bytes_total)
+            Upload(format="claude-code", session_id=sid, transcript=tail, offset=first.bytes_total)
         )
     )
     assert second.records_total > first.records_total
@@ -145,11 +145,11 @@ def test_a_session_from_upload_to_tombstone(alice: SeshiClient) -> None:
     head = alice.get_trace("claude-code", sid, hash=first.content_hash)
     assert head is not None
     assert head.content_hash == first.content_hash
-    assert isinstance(alice.get_trace("claude-code", sid, format="letta"), LettaTrace)
-    otlp = alice.get_trace("claude-code", sid, format="otlp")
+    assert isinstance(alice.get_trace("claude-code", sid, render="letta"), LettaTrace)
+    otlp = alice.get_trace("claude-code", sid, render="otlp")
     assert isinstance(otlp, OtlpTrace)
     assert otlp.resource_spans[0].scope_spans[0].spans
-    assert isinstance(alice.get_trace("claude-code", sid, format="atif"), AtifDocument)
+    assert isinstance(alice.get_trace("claude-code", sid, render="atif"), AtifDocument)
 
     assert sid in {s.session_id for s in alice.iter_sessions(limit=1)}
     page = alice.list_sessions(limit=1000)
@@ -170,7 +170,7 @@ def test_a_session_from_upload_to_tombstone(alice: SeshiClient) -> None:
     assert gone.status == "redacted"
     assert alice.get_trace("claude-code", sid) is None
     with pytest.raises(SessionRejected) as raised:
-        alice.ingest(Upload(agent="claude-code", session_id=sid, transcript=log))
+        alice.ingest(Upload(format="claude-code", session_id=sid, transcript=log))
     assert raised.value.code == "redacted"
 
 
@@ -185,28 +185,28 @@ def test_what_is_not_there(alice: SeshiClient) -> None:
 def test_the_server_refuses_as_the_pipeline_would(alice: SeshiClient) -> None:
     sid = new_id()
     with pytest.raises(OffsetMismatch) as mismatch:
-        alice.ingest(Upload(agent="claude-code", session_id=sid, transcript="{}\n", offset=10))
+        alice.ingest(Upload(format="claude-code", session_id=sid, transcript="{}\n", offset=10))
     assert (mismatch.value.offset, mismatch.value.expected) == (10, 0)
 
     short = alice.ingest(
-        Upload(agent="claude-code", session_id=sid, transcript=record("user", sid, "u", 0, "hi"))
+        Upload(format="claude-code", session_id=sid, transcript=record("user", sid, "u", 0, "hi"))
     )
     assert isinstance(short, NotWritten)
     assert (short.status, short.bytes_total) == ("filtered", 0)
 
-    stored(alice.ingest(Upload(agent="claude-code", session_id=sid, transcript=transcript(sid))))
+    stored(alice.ingest(Upload(format="claude-code", session_id=sid, transcript=transcript(sid))))
     other = transcript(sid, topic="billing")
     with pytest.raises(SessionConflict):
-        alice.ingest(Upload(agent="claude-code", session_id=sid, transcript=other))
+        alice.ingest(Upload(format="claude-code", session_id=sid, transcript=other))
     replaced = alice.ingest(
-        Upload(agent="claude-code", session_id=sid, transcript=other, replace=True)
+        Upload(format="claude-code", session_id=sid, transcript=other, replace=True)
     )
     assert replaced.status == "stored"
 
     with pytest.raises(SessionRejected) as rejected:
         alice.ingest(
             Upload(
-                agent="claude-code",
+                format="claude-code",
                 session_id=sid,
                 transcript=transcript(sid, start=1),
                 offset=replaced.bytes_total,
@@ -221,14 +221,14 @@ def test_a_large_upload_is_sent_gzipped(live_server: LiveServer) -> None:
     log = transcript(sid, turns=6)
     assert len(log) > 8 * 1024
     with SeshiClient(live_server.url, live_server.alice, gzip_from=1024) as client:
-        answer = stored(client.ingest(Upload(agent="claude-code", session_id=sid, transcript=log)))
+        answer = stored(client.ingest(Upload(format="claude-code", session_id=sid, transcript=log)))
     assert answer.bytes_total == len(log.encode())
 
 
 def test_another_owners_sessions(live_server: LiveServer, admin: SeshiClient) -> None:
     sid = new_id()
     with SeshiClient(live_server.url, live_server.bob) as bob:
-        stored(bob.ingest(Upload(agent="claude-code", session_id=sid, transcript=transcript(sid))))
+        stored(bob.ingest(Upload(format="claude-code", session_id=sid, transcript=transcript(sid))))
         bob.set_visibility("claude-code", sid, "owner")
     meta = admin.get_session("claude-code", sid, owner="bob")
     assert meta is not None
@@ -252,7 +252,7 @@ def test_retraction_by_the_machine_that_uploaded(live_server: LiveServer) -> Non
         stored(
             frank.ingest(
                 Upload(
-                    agent="claude-code",
+                    format="claude-code",
                     session_id=sid,
                     transcript=transcript(sid),
                     retract_hash=hashlib.sha256(secret.encode()).hexdigest(),
@@ -300,7 +300,7 @@ def test_search_and_every_owners_feed(live_server: LiveServer, admin: SeshiClien
     with SeshiClient(live_server.url, live_server.alice) as alice:
         log = transcript(sid, topic=word)
         upload = Upload(
-            agent="claude-code", session_id=sid, transcript=log, repo="github.com/acme/widget"
+            format="claude-code", session_id=sid, transcript=log, repo="github.com/acme/widget"
         )
         stored(alice.ingest(upload))
 
@@ -333,9 +333,36 @@ def test_search_and_every_owners_feed(live_server: LiveServer, admin: SeshiClien
     assert all(e.key.startswith(f"owners/{e.owner}/changes/") for e in entries)
     assert {e.owner for e in entries} <= set(admin.owners(limit=1000).owners)
     assert (entries[0].owner, entries[0].entry.session_id) == ("alice", live_server.seed_session)
+    # Every entry names its session's format, the one written before 0.16 too (filled in).
+    assert all(e.entry.format == "claude-code" for e in entries)
+    assert live_server.legacy_session in {e.entry.session_id for e in entries}
     if page.truncated:
         assert page.cursor is not None
         assert admin.all_changes(after=page.cursor, limit=1).entries[0] == entries[1]
+
+
+def test_a_session_stored_before_format_was_named_reads_back(
+    alice: SeshiClient, live_server: LiveServer
+) -> None:
+    sid = live_server.legacy_session
+    metadata = alice.get_session("claude-code", sid)
+    assert metadata is not None and metadata.format == "claude-code"
+    assert "agent" not in (metadata.model_extra or {})
+    # The archive id is what it was: the same owner, format and session hash to the same id.
+    archive = hashlib.sha256(f"alice\nclaude-code\n{sid}".encode()).hexdigest()
+    assert metadata.archive_id == archive
+    trace = alice.get_trace("claude-code", sid)
+    assert isinstance(trace, Trace) and trace.format == "claude-code"
+    assert "agent" not in (trace.model_extra or {})
+    entries = [c.entry for c in alice.iter_changes() if c.entry.session_id == sid]
+    assert entries and all(e.format == "claude-code" for e in entries)
+    # By the owner and archive id an entry names, the same session.
+    assert alice.get_session_by_archive("alice", archive) == metadata
+    by_archive = alice.get_trace_by_archive("alice", archive)
+    assert isinstance(by_archive, Trace) and by_archive.content_hash == trace.content_hash
+    assert isinstance(alice.get_trace_by_archive("alice", archive, render="otlp"), OtlpTrace)
+    assert alice.reviews_by_archive("alice", archive) == []
+    assert alice.get_session_by_archive("alice", "0" * 64) is None
 
 
 def test_redaction_rules(alice: SeshiClient) -> None:
@@ -397,10 +424,10 @@ async def test_the_async_client(live_server: LiveServer) -> None:
         assert (await db.me()).owner == "alice"
         log = transcript(sid)
         answer = stored(
-            await db.ingest(Upload(agent="claude-code", session_id=sid, transcript=log))
+            await db.ingest(Upload(format="claude-code", session_id=sid, transcript=log))
         )
         with pytest.raises(OffsetMismatch) as raised:
-            await db.ingest(Upload(agent="claude-code", session_id=sid, transcript=log, offset=3))
+            await db.ingest(Upload(format="claude-code", session_id=sid, transcript=log, offset=3))
         assert raised.value.expected == answer.bytes_total
         trace = await db.get_trace("claude-code", sid)
         assert trace is not None

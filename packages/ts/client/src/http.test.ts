@@ -70,11 +70,11 @@ describe("HttpSessionDB", () => {
 
   it("gzips a body past gzipFrom", async () => {
     const { db, seen } = client(201, { status: "trivial" }, { gzipFrom: 10 });
-    await db.ingest({ agent: "claude-code", session_id: "s", transcript: "x".repeat(100) });
+    await db.ingest({ format: "claude-code", session_id: "s", transcript: "x".repeat(100) });
     const sent = seen[0] as Seen;
     expect(sent.headers["content-encoding"]).toBe("gzip");
     const body = JSON.parse(new TextDecoder().decode(gunzipSync(sent.body as Uint8Array)));
-    expect(body).toMatchObject({ agent: "claude-code", session_id: "s" });
+    expect(body).toMatchObject({ format: "claude-code", session_id: "s" });
   });
 
   it("encodes the session path and leaves out absent query values", async () => {
@@ -85,7 +85,7 @@ describe("HttpSessionDB", () => {
 
   it("sends a replace's retraction secret in X-Seshi-Retract, never the body", async () => {
     const { db, seen } = client(201, { status: "stored" });
-    const upload = { agent: "claude-code", session_id: "s1", transcript: "{}\n", replace: true };
+    const upload = { format: "claude-code", session_id: "s1", transcript: "{}\n", replace: true };
     await db.ingest(upload, { retractSecret: "s3cret" });
     expect(seen[0]?.headers["x-seshi-retract"]).toBe("s3cret");
     expect(new TextDecoder().decode(seen[0]?.body)).not.toContain("s3cret");
@@ -96,7 +96,7 @@ describe("HttpSessionDB", () => {
   it("turns the server's refusals back into the pipeline's errors", async () => {
     const mismatch = client(409, { error: { code: "offset_mismatch", expected: 12 } }).db;
     const err = await mismatch
-      .ingest({ agent: "claude-code", session_id: "s", transcript: "x\n", offset: 30 })
+      .ingest({ format: "claude-code", session_id: "s", transcript: "x\n", offset: 30 })
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(OffsetMismatch);
     expect(err).toMatchObject({ offset: 30, expected: 12 });

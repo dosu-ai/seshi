@@ -14,6 +14,11 @@
     "owner": { "type": "string", "minLength": 1 },
     "archive_id": { "$ref": "common.schema.json#/$defs/Sha256" },
     "session_id": { "type": "string" },
+    "format": {
+      "description": "The format the session is filed under (its metadata's `format`), which every session route takes. Entries written before 0.16 have none in the bucket; the change feeds fill it from the session's metadata, and leave out one whose session has no metadata.",
+      "type": "string",
+      "minLength": 1
+    },
     "content_hash": {
       "description": "The trace the entry is about; for a tombstone or a visibility change, the head at the time (null when there was none).",
       "oneOf": [{ "$ref": "common.schema.json#/$defs/Sha256" }, { "type": "null" }]
@@ -37,6 +42,16 @@
       "$ref": "common.schema.json#/$defs/Visibility"
     }
   },
-  "required": ["schema", "kind", "at", "owner", "archive_id", "session_id", "content_hash", "writer"],
+  "required": [
+    "schema",
+    "kind",
+    "at",
+    "owner",
+    "archive_id",
+    "session_id",
+    "format",
+    "content_hash",
+    "writer"
+  ],
   "additionalProperties": false
 }

@@ -245,17 +245,17 @@ export class HttpSessionDB implements SessionDB {
     return body as StoreSessionResult;
   }
 
-  private sessionPath(agent: string, sessionId: string): string {
-    return `/v1/sessions/${encodeURIComponent(agent)}/${encodeURIComponent(sessionId)}`;
+  private sessionPath(format: string, sessionId: string): string {
+    return `/v1/sessions/${encodeURIComponent(format)}/${encodeURIComponent(sessionId)}`;
   }
 
   /** The session's metadata; null for one not stored, or one the caller may not read. */
   async getSession(
-    agent: string,
+    format: string,
     sessionId: string,
     options: OwnerOption = {},
   ): Promise<SessionMetadata | null> {
-    const { status, body } = await this.request("GET", this.sessionPath(agent, sessionId), {
+    const { status, body } = await this.request("GET", this.sessionPath(format, sessionId), {
       query: { owner: options.owner },
     });
     if (status === 404) return null;
@@ -263,23 +263,64 @@ export class HttpSessionDB implements SessionDB {
     return body as SessionMetadata;
   }
 
-  /** The head trace, or `hash`, as `format`; null for a session not stored, unreadable or
-   * redacted. */
+  /** The head trace, or `hash`, rendered as `render`; null for a session not stored,
+   * unreadable or redacted. */
   async getTrace(
-    agent: string,
+    format: string,
     sessionId: string,
     hash?: string,
-    format?: RenderFormat,
+    render?: RenderFormat,
     options: OwnerOption = {},
   ): Promise<StoredTrace | null> {
     const { status, body } = await this.request(
       "GET",
-      `${this.sessionPath(agent, sessionId)}/trace`,
-      { query: { hash, format, owner: options.owner } },
+      `${this.sessionPath(format, sessionId)}/trace`,
+      { query: { hash, render, owner: options.owner } },
     );
     if (status === 404 || status === 410) return null;
     if (status !== 200) refuse(status, body);
     return body as StoredTrace;
+  }
+
+  private archivePath(owner: string, archiveId: string): string {
+    return `/v1/owners/${encodeURIComponent(owner)}/sessions/${encodeURIComponent(archiveId)}`;
+  }
+
+  /** The session's metadata by its owner and archive id, as change entries, search results and
+   * listings name it (that owner's folder exactly); null when not stored or not readable. */
+  async getSessionByArchive(owner: string, archiveId: string): Promise<SessionMetadata | null> {
+    const { status, body } = await this.request("GET", this.archivePath(owner, archiveId));
+    if (status === 404) return null;
+    if (status !== 200) refuse(status, body);
+    return body as SessionMetadata;
+  }
+
+  /** `getTrace` by owner and archive id. */
+  async getTraceByArchive(
+    owner: string,
+    archiveId: string,
+    hash?: string,
+    render?: RenderFormat,
+  ): Promise<StoredTrace | null> {
+    const { status, body } = await this.request(
+      "GET",
+      `${this.archivePath(owner, archiveId)}/trace`,
+      { query: { hash, render } },
+    );
+    if (status === 404 || status === 410) return null;
+    if (status !== 200) refuse(status, body);
+    return body as StoredTrace;
+  }
+
+  /** `reviews` by owner and archive id. */
+  async reviewsByArchive(owner: string, archiveId: string): Promise<ReviewDecision[] | null> {
+    const { status, body } = await this.request(
+      "GET",
+      `${this.archivePath(owner, archiveId)}/reviews`,
+    );
+    if (status === 404) return null;
+    if (status !== 200) refuse(status, body);
+    return (body as { reviews: ReviewDecision[] }).reviews;
   }
 
   async listSessions(options: ListSessionsOptions = {}): Promise<SessionsPage> {
@@ -309,11 +350,11 @@ export class HttpSessionDB implements SessionDB {
    * (`sessions:write`), and the tombstone says `retracted`. A refused retraction is
    * `ServerError` 403 `bad_retract_secret` or `retract_disabled`. */
   async tombstone(
-    agent: string,
+    format: string,
     sessionId: string,
     options: OwnerOption & { retractSecret?: string } = {},
   ): Promise<{ removed: number } | null> {
-    const { status, body } = await this.request("DELETE", this.sessionPath(agent, sessionId), {
+    const { status, body } = await this.request("DELETE", this.sessionPath(format, sessionId), {
       query: { owner: options.owner },
       ...(options.retractSecret !== undefined
         ? { headers: { [RETRACT_HEADER]: options.retractSecret } }
@@ -327,12 +368,12 @@ export class HttpSessionDB implements SessionDB {
   /** Change who may read a session (X5.10); the metadata as it now is, null for one not
    * stored. A redacted session is `ServerError` 410. The owner or an admin may. */
   async setVisibility(
-    agent: string,
+    format: string,
     sessionId: string,
     visibility: Visibility,
     options: OwnerOption = {},
   ): Promise<SessionMetadata | null> {
-    const { status, body } = await this.request("PATCH", this.sessionPath(agent, sessionId), {
+    const { status, body } = await this.request("PATCH", this.sessionPath(format, sessionId), {
       body: { visibility },
       query: { owner: options.owner },
     });
@@ -345,13 +386,13 @@ export class HttpSessionDB implements SessionDB {
    * `GET …/reviews`): the whole audit record for admins, only `n`, `at`, `content_hash` and
    * `decision` for anyone else who may read it. Null for a session not stored. */
   async reviews(
-    agent: string,
+    format: string,
     sessionId: string,
     options: OwnerOption = {},
   ): Promise<ReviewDecision[] | null> {
     const { status, body } = await this.request(
       "GET",
-      `${this.sessionPath(agent, sessionId)}/reviews`,
+      `${this.sessionPath(format, sessionId)}/reviews`,
       { query: { owner: options.owner } },
     );
     if (status === 404) return null;

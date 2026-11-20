@@ -38,7 +38,7 @@ beforeEach(async () => {
   });
   machine = new Machine();
   await new HttpSessionDB({ server: server.url, token: TOKEN }).ingest({
-    agent: "claude-code",
+    format: "claude-code",
     session_id: "sess1",
     transcript: CLAUDE,
     project: "github.com/acme/widget",

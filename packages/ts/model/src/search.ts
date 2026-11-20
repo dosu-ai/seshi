@@ -46,7 +46,7 @@ export interface SearchRequest {
 }
 
 /** One matching record of a session: which trace and which of its events (`GET
- * /v1/sessions/{agent}/{session_id}/trace?hash=` holds it at `events[event_index]`), and a short
+ * /v1/sessions/{format}/{session_id}/trace?hash=` holds it at `events[event_index]`), and a short
  * excerpt around what matched. */
 export interface SearchMatch {
   content_hash: string;
@@ -64,7 +64,8 @@ export interface SearchMatch {
 /** A session with records that match. */
 export interface SearchResult {
   owner: string;
-  agent: string;
+  /** The format the session is filed under. */
+  format: string;
   session_id: string;
   archive_id: string;
   origin_agent?: string;

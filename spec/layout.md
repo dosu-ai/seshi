@@ -44,9 +44,10 @@ through the API (X5.6).
   a username, an email or an IdP subject) or a service account, `svc:<source-id>` (X5.4,
   X5.8). The server derives it from the caller's identity; a value that does not fit becomes
   `h-` and 20 hex digits of its SHA-256. One owner's objects never reference another's.
-- **archive_id** = `sha256(owner + "\n" + agent + "\n" + session_id)` (hex). Deterministic, so
-  every upload of one session lands in one directory; derived, so no native id or path
-  appears in a key.
+- **archive_id** = `sha256(owner + "\n" + format + "\n" + session_id)` (hex), where `format` is
+  the format the session is filed under (`claude-code`, `codex`, `cursor-cloud-api`, …).
+  Deterministic, so every upload of one session lands in one directory; derived, so no native
+  id or path appears in a key.
 - **content_hash** = `sha256(source + "\n" + body)` where `body` joins the trace's events as
   `role + "\x1f" + text` with `"\x1e"`. Timestamps are outside the hash, so a re-export of the
   same conversation dedupes. A continuation hashes `source + "@" + from_record` in place of
@@ -118,7 +119,7 @@ Nothing else of a session's content is stored (X6.3): no raw transcript, no payl
   "schema": "seshi/trace/1",
   "content_hash": "…",
   "source": "claude-code",          // what normalized it (the meta record's source)
-  "agent": "claude-code",           // the format it was filed under; the archive id derives from it
+  "format": "claude-code",          // the format it was filed under; the archive id derives from it
   "project": "github.com/acme/widget",
   "branch": "main",
   "session_id": "…",
@@ -186,20 +187,20 @@ tombstoned it has no `head`.
 
 A session whose first envelope model review dropped (F3.4) has a **stub**: a pointer with
 `status: "stored"`, no `head`, no `traces`, and nothing of the dropped content. It holds the
-session's identity (`owner`, `session_id`, `agent`, `archive_id`), its `writer`,
+session's identity (`owner`, `session_id`, `format`, `archive_id`), its `writer`,
 `owner_basis` and `visibility`, the `retract_hash`, and where its log ends: `normalized` (the
 byte offset past the dropped envelope and the prefix hash), `dropped_prefix` (the same offset,
 record count and hash, kept once the session has a trace) and `applied` (the drop's answer).
 No change entry is written for it. The next envelope continues from there and is reviewed on
 its own; once stored, it is the session's first trace, a `continuation` from the dropped
-records whose meta record names only the format (`{ "role": "meta", "source": "<agent>" }`).
+records whose meta record names only the format (`{ "role": "meta", "source": "<format>" }`).
 Readers neither list nor serve a stub: no `head`, nothing to read.
 
 ```jsonc
 {
   "schema": "seshi/metadata/1",
   "owner": "alice", "archive_id": "…", "session_id": "…",
-  "agent": "claude-code", "source": "claude-code",
+  "format": "claude-code", "source": "claude-code",
   "project": "github.com/acme/widget", "branch": "main", "parent_session_id": "…",
   "status": "stored",                 // or "redacted"
   "head": "<content_hash>",           // absent before a trace is stored (a stub), and once redacted
@@ -282,14 +283,20 @@ cursor (the last key processed) and a lag window.
 
 ```json
 { "schema": "seshi/change/1", "kind": "tombstone", "at": "…",
-  "owner": "alice", "archive_id": "…", "session_id": "…", "content_hash": "…",
+  "owner": "alice", "archive_id": "…", "session_id": "…", "format": "claude-code",
+  "content_hash": "…",
   "writer": { "kind": "device", "principal": "alice", "source_id": "upload" },
   "owner_basis": "verified", "reason": "retracted" }
 ```
 
 `kind` is `published`, `tombstone` (with `reason`: `deleted`, `retracted` or `redacted`) or
 `visibility_changed` (with the new `visibility`). Every entry names its `writer` and the
-session's `owner_basis` (X5.5), never content.
+session's `owner_basis` (X5.5), never content, and the session's `format`, so a reader can call
+the session routes (`/v1/sessions/{format}/{session_id}`) from the entry alone. Entries written
+before seshi 0.16 have no `format`: the server's feeds (`GET /v1/changes`, `GET
+/v1/changes/all`) and `readChanges` fill it from the session's metadata. An entry whose
+session has no metadata names a write that never landed (its entry is written first), so they
+leave it out: every entry they serve has a `format`.
 
 The key is the entry's stamp (its `at`), the session's archive id, a random suffix and what
 changed: the published trace's hash, `tombstone` or `visibility`. The stamp leads, so keys sort
@@ -479,7 +486,8 @@ bytes, and the sweep checks an object's age once more just before it deletes it.
 ## Reading
 
 - One session: `metadata.json`, then `trace.<head>.json.gz`; no `head` means nothing to read
-  yet.
+  yet. Metadata and traces written before seshi 0.16 name the format `agent`, not `format`:
+  read `format ?? agent`. Writers write only `format`.
 - Everything new since a cursor: list `changes/` with `StartAfter`, and read the metadata of
   each session the entries name for what it is now. An entry whose change that metadata does
   not show yet (its writer is between the entry and the pointer, or failed there) is read again

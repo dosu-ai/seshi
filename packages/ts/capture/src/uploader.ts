@@ -832,7 +832,7 @@ export class Uploader {
       this.nextStaleCheck = now.getTime() + this.retryMaxMs;
       return;
     }
-    const listed = new Map(stale.map((s) => [`${s.agent}\n${s.session_id}`, s]));
+    const listed = new Map(stale.map((s) => [`${s.format}\n${s.session_id}`, s]));
     let marked = 0;
     await updateState(this.paths, (st) => {
       for (const session of Object.values(st.sessions)) {
@@ -1234,10 +1234,10 @@ export class Uploader {
     const keptLength = bytesOf(redacted.text) === bytesOf(piece.text);
     if (!keptLength) await this.markMisalignedBeforeSend(key, session);
     const upload: Upload = {
-      agent: agent.format,
+      format: agent.format,
       session_id: uploadId(session),
       transcript: redacted.text,
-      format: agent.encoding,
+      encoding: agent.encoding,
       offset: whole ? 0 : (session.server_offset ?? 0),
       retract_hash: retractHash(secret),
       ...(await this.details(session, agent, place)),

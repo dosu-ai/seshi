@@ -10,12 +10,12 @@ export function staleSession(
 ): StaleSession | undefined {
   if (metadata.status !== "stored" || !metadata.head) return undefined;
   const builtWith = metadata.normalizer?.format_version;
-  if (!formats.isStale(metadata.agent, builtWith)) return undefined;
+  if (!formats.isStale(metadata.format, builtWith)) return undefined;
   return {
-    agent: metadata.agent,
+    format: metadata.format,
     session_id: metadata.session_id,
     ...(builtWith !== undefined ? { built_with: builtWith } : {}),
-    current: formats.versionOf(metadata.agent) as string,
+    current: formats.versionOf(metadata.format) as string,
   };
 }
 

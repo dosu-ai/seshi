@@ -115,13 +115,13 @@ function setup(options: { lagMs?: number; pageSize?: number; budget?: number } =
 describe("the indexer (F10.2)", () => {
   it("indexes published sessions of every owner, with their fields", async () => {
     await db("alice").ingest({
-      agent: "trajectory",
+      format: "trajectory",
       session_id: "s1",
       transcript: log("fix the flaky checkout test"),
       project: "github.com/acme/widget",
     });
     await db("bob").ingest({
-      agent: "trajectory",
+      format: "trajectory",
       session_id: "s2",
       transcript: log("tune the redis cache"),
     });
@@ -138,7 +138,7 @@ describe("the indexer (F10.2)", () => {
     expect(find("done")).toEqual(["alice/s1", "bob/s2"]);
     const s1 = index.session("alice", archiveId("alice", "trajectory", "s1"));
     expect(s1).toMatchObject({
-      agent: "trajectory",
+      format: "trajectory",
       session_id: "s1",
       project: "github.com/acme/widget",
       branch: "main",
@@ -152,7 +152,7 @@ describe("the indexer (F10.2)", () => {
 
   it("indexes where a session ran and with what: its repo, harness, version and models", async () => {
     await db().ingest({
-      agent: "trajectory",
+      format: "trajectory",
       session_id: "s1",
       transcript:
         line({ role: "meta", source: "trajectory", model: "gpt-9", agent_version: "1.2.3" }) +
@@ -172,7 +172,7 @@ describe("the indexer (F10.2)", () => {
 
   it("adds a continuation's events without reading the session again", async () => {
     const first = await db().ingest({
-      agent: "trajectory",
+      format: "trajectory",
       session_id: "s1",
       transcript: log("start the migration"),
     });
@@ -180,7 +180,7 @@ describe("the indexer (F10.2)", () => {
     await indexer.run();
     const chunk = line({ role: "user", content: "now roll back the migration", timestamp: ts });
     await db().ingest({
-      agent: "trajectory",
+      format: "trajectory",
       session_id: "s1",
       transcript: chunk,
       offset: first.bytes_total,
@@ -200,7 +200,7 @@ describe("the indexer (F10.2)", () => {
 
   it("never puts back a session a slower run read before a faster run indexed it", async () => {
     const first = await db().ingest({
-      agent: "trajectory",
+      format: "trajectory",
       session_id: "s1",
       transcript: log("original"),
     });
@@ -238,7 +238,7 @@ describe("the indexer (F10.2)", () => {
     const slowRun = slow.run();
     await stalled;
     await db().ingest({
-      agent: "trajectory",
+      format: "trajectory",
       session_id: "s1",
       transcript: line({ role: "user", content: "appended later", timestamp: ts }),
       offset: first.bytes_total,
@@ -254,11 +254,11 @@ describe("the indexer (F10.2)", () => {
   });
 
   it("drops a replaced session's earlier text (X4.6)", async () => {
-    await db().ingest({ agent: "trajectory", session_id: "s1", transcript: log("old words") });
+    await db().ingest({ format: "trajectory", session_id: "s1", transcript: log("old words") });
     const { indexer, find } = setup();
     await indexer.run();
     await db().ingest({
-      agent: "trajectory",
+      format: "trajectory",
       session_id: "s1",
       transcript: log("brand new words"),
       replace: true,
@@ -274,7 +274,7 @@ describe("the indexer (F10.2)", () => {
     // A redaction backfill whose new trace keeps the old hash (only what the hash leaves out
     // changed) rewrites the object in place: the metadata's trace list is unchanged, and only
     // the replacing entry says the index's copy is stale.
-    await db().ingest({ agent: "trajectory", session_id: "s1", transcript: log("stale words") });
+    await db().ingest({ format: "trajectory", session_id: "s1", transcript: log("stale words") });
     const archive = archiveId("alice", "trajectory", "s1");
     const { index, indexer, find } = setup();
     await indexer.run();
@@ -292,6 +292,7 @@ describe("the indexer (F10.2)", () => {
       owner: "alice",
       archive_id: archive,
       session_id: "s1",
+      format: "trajectory",
       content_hash: hash,
       writer: { kind: "admin", principal: "admin", source_id: "redaction" },
       owner_basis: "verified",
@@ -305,14 +306,14 @@ describe("the indexer (F10.2)", () => {
   });
 
   it("removes a tombstoned session and follows visibility changes (F10.4)", async () => {
-    await db().ingest({ agent: "trajectory", session_id: "s1", transcript: log("alpha") });
-    await db().ingest({ agent: "trajectory", session_id: "s2", transcript: log("beta") });
+    await db().ingest({ format: "trajectory", session_id: "s1", transcript: log("alpha") });
+    await db().ingest({ format: "trajectory", session_id: "s2", transcript: log("beta") });
     const { index, indexer, find } = setup();
     await indexer.run();
     await setVisibility({
       store,
       owner: "alice",
-      agent: "trajectory",
+      format: "trajectory",
       session_id: "s2",
       visibility: "owner",
       now: () => tick(),
@@ -320,7 +321,7 @@ describe("the indexer (F10.2)", () => {
     await tombstone({
       store,
       owner: "alice",
-      agent: "trajectory",
+      format: "trajectory",
       session_id: "s1",
       now: () => tick(),
     });
@@ -333,27 +334,27 @@ describe("the indexer (F10.2)", () => {
   });
 
   it("reads each entry once, and nothing when nothing changed", async () => {
-    await db().ingest({ agent: "trajectory", session_id: "s1", transcript: log("alpha") });
+    await db().ingest({ format: "trajectory", session_id: "s1", transcript: log("alpha") });
     const { indexer } = setup();
     expect((await indexer.run()).entries).toBe(1);
     expect(await indexer.run()).toMatchObject({ entries: 0, indexed: 0, caught_up: true });
   });
 
   it("finds entries a slow clock stamped behind its cursor, within the lag window", async () => {
-    await db().ingest({ agent: "trajectory", session_id: "s1", transcript: log("first") });
+    await db().ingest({ format: "trajectory", session_id: "s1", transcript: log("first") });
     const { indexer, find } = setup({ lagMs: 5 * 60 * 1000 });
     await indexer.run();
     // A laptop whose clock runs two minutes behind writes after the cursor moved.
     const behind = new Date(clock.getTime() - 2 * 60 * 1000);
     await db("alice", () => behind).ingest({
-      agent: "trajectory",
+      format: "trajectory",
       session_id: "s2",
       transcript: log("skewed"),
     });
     // And one ten minutes behind: outside the window, found only with the next change.
     const far = new Date(clock.getTime() - 10 * 60 * 1000);
     await db("alice", () => far).ingest({
-      agent: "trajectory",
+      format: "trajectory",
       session_id: "s3",
       transcript: log("faraway"),
     });
@@ -364,14 +365,14 @@ describe("the indexer (F10.2)", () => {
 
   it("indexes a session as it is now, even when its latest entry is missing", async () => {
     const first = await db().ingest({
-      agent: "trajectory",
+      format: "trajectory",
       session_id: "s1",
       transcript: log("original"),
     });
     const { indexer, find } = setup();
     await indexer.run();
     await db().ingest({
-      agent: "trajectory",
+      format: "trajectory",
       session_id: "s1",
       transcript: line({ role: "user", content: "appended later", timestamp: ts }),
       offset: first.bytes_total,
@@ -386,7 +387,7 @@ describe("the indexer (F10.2)", () => {
     await setVisibility({
       store,
       owner: "alice",
-      agent: "trajectory",
+      format: "trajectory",
       session_id: "s1",
       visibility: "owner",
       now: () => tick(),
@@ -397,11 +398,11 @@ describe("the indexer (F10.2)", () => {
 
   it("reads an entry again until the session's pointer shows its change (decision 7 of 18)", async () => {
     const first = await db().ingest({
-      agent: "trajectory",
+      format: "trajectory",
       session_id: "s1",
       transcript: log("original"),
     });
-    await db().ingest({ agent: "trajectory", session_id: "s2", transcript: log("hidden") });
+    await db().ingest({ format: "trajectory", session_id: "s2", transcript: log("hidden") });
     const { index, indexer, find } = setup();
     await indexer.run();
     // Each write's pointer update lets the indexer run first: it reads the change entry before
@@ -420,7 +421,7 @@ describe("the indexer (F10.2)", () => {
     query = "appended";
     between.arm();
     await through().ingest({
-      agent: "trajectory",
+      format: "trajectory",
       session_id: "s1",
       transcript: line({ role: "user", content: "appended later", timestamp: ts }),
       offset: first.bytes_total,
@@ -432,7 +433,7 @@ describe("the indexer (F10.2)", () => {
 
     query = "newcomer";
     between.arm();
-    await through().ingest({ agent: "trajectory", session_id: "s3", transcript: log("newcomer") });
+    await through().ingest({ format: "trajectory", session_id: "s3", transcript: log("newcomer") });
     tick();
     await indexer.run();
     expect(seenBetween.at(-1)).toEqual([]);
@@ -443,7 +444,7 @@ describe("the indexer (F10.2)", () => {
     await tombstone({
       store: between.store,
       owner: "alice",
-      agent: "trajectory",
+      format: "trajectory",
       session_id: "s2",
       now: () => tick(),
     });
@@ -456,7 +457,7 @@ describe("the indexer (F10.2)", () => {
     await setVisibility({
       store: between.store,
       owner: "alice",
-      agent: "trajectory",
+      format: "trajectory",
       session_id: "s1",
       visibility: "owner",
       now: () => tick(),
@@ -471,7 +472,7 @@ describe("the indexer (F10.2)", () => {
 
   it("indexes correctly after a write failed between its entry and its pointer (decision 7 of 18)", async () => {
     const first = await db().ingest({
-      agent: "trajectory",
+      format: "trajectory",
       session_id: "s1",
       transcript: log("original"),
     });
@@ -487,7 +488,7 @@ describe("the indexer (F10.2)", () => {
     failing.arm();
     await expect(
       through().ingest({
-        agent: "trajectory",
+        format: "trajectory",
         session_id: "s1",
         transcript: chunk,
         offset: first.bytes_total,
@@ -508,19 +509,19 @@ describe("the indexer (F10.2)", () => {
     // A first publish that failed: an entry for a session with no metadata. Nothing is indexed.
     failing.arm();
     await expect(
-      through().ingest({ agent: "trajectory", session_id: "s2", transcript: log("ghostly") }),
+      through().ingest({ format: "trajectory", session_id: "s2", transcript: log("ghostly") }),
     ).rejects.toThrow(/injected/);
     expect((await indexer.run()).caught_up).toBe(true);
     expect(find("ghostly")).toEqual([]);
 
     // The resends land and are indexed.
     await db().ingest({
-      agent: "trajectory",
+      format: "trajectory",
       session_id: "s1",
       transcript: chunk,
       offset: first.bytes_total,
     });
-    await db().ingest({ agent: "trajectory", session_id: "s2", transcript: log("ghostly") });
+    await db().ingest({ format: "trajectory", session_id: "s2", transcript: log("ghostly") });
     await indexer.run();
     expect(find("appended")).toEqual(["alice/s1"]);
     expect(find("ghostly")).toEqual(["alice/s2"]);
@@ -529,12 +530,12 @@ describe("the indexer (F10.2)", () => {
 
   it("sees two tombstones and two visibility changes made in one millisecond (decision 8 of 18)", async () => {
     for (const id of ["s1", "s2", "s3", "s4"]) {
-      await db().ingest({ agent: "trajectory", session_id: id, transcript: log(`topic${id}`) });
+      await db().ingest({ format: "trajectory", session_id: id, transcript: log(`topic${id}`) });
     }
     const { index, indexer, find } = setup();
     await indexer.run();
     const instant = new Date(clock.getTime() + 1000);
-    const base = { store, owner: "alice", agent: "trajectory", now: () => instant };
+    const base = { store, owner: "alice", format: "trajectory", now: () => instant };
     await tombstone({ ...base, session_id: "s1" });
     await tombstone({ ...base, session_id: "s2" });
     await setVisibility({ ...base, session_id: "s3", visibility: "owner" });
@@ -552,7 +553,11 @@ describe("the indexer (F10.2)", () => {
 
   it("pages through a long feed within a budget, and is ready only once caught up", async () => {
     for (let i = 0; i < 7; i++) {
-      await db().ingest({ agent: "trajectory", session_id: `s${i}`, transcript: log(`topic${i}`) });
+      await db().ingest({
+        format: "trajectory",
+        session_id: `s${i}`,
+        transcript: log(`topic${i}`),
+      });
     }
     const { index, indexer, find } = setup({ pageSize: 2, budget: 3 });
     const first = await indexer.run();
@@ -569,7 +574,7 @@ describe("the indexer (F10.2)", () => {
     // Two API instances (or a laptop in local mode) stamp updated_at with clocks that
     // disagree: the continuation's metadata says it is older than what it extends.
     const first = await db().ingest({
-      agent: "trajectory",
+      format: "trajectory",
       session_id: "s1",
       transcript: log("start the migration"),
     });
@@ -577,7 +582,7 @@ describe("the indexer (F10.2)", () => {
     await indexer.run();
     const behind = new Date(clock.getTime() - 400);
     await db("alice", () => behind).ingest({
-      agent: "trajectory",
+      format: "trajectory",
       session_id: "s1",
       transcript: line({ role: "user", content: "skewed continuation", timestamp: ts }),
       offset: first.bytes_total,
@@ -590,9 +595,9 @@ describe("the indexer (F10.2)", () => {
   });
 
   it("skips objects it cannot decode, warns, and still catches up", async () => {
-    await db().ingest({ agent: "trajectory", session_id: "s1", transcript: log("alpha") });
-    await db().ingest({ agent: "trajectory", session_id: "s2", transcript: log("beta") });
-    await db("bob").ingest({ agent: "trajectory", session_id: "s3", transcript: log("gamma") });
+    await db().ingest({ format: "trajectory", session_id: "s1", transcript: log("alpha") });
+    await db().ingest({ format: "trajectory", session_id: "s2", transcript: log("beta") });
+    await db("bob").ingest({ format: "trajectory", session_id: "s3", transcript: log("gamma") });
     const garbage = new TextEncoder().encode("{not json");
     // s1's trace and s3's metadata are corrupt.
     const a1 = archiveId("alice", "trajectory", "s1");
@@ -610,8 +615,8 @@ describe("the indexer (F10.2)", () => {
   });
 
   it("writes nothing from a run the index was reset under, and starts over", async () => {
-    await db().ingest({ agent: "trajectory", session_id: "s1", transcript: log("alpha") });
-    await db("bob").ingest({ agent: "trajectory", session_id: "s2", transcript: log("beta") });
+    await db().ingest({ format: "trajectory", session_id: "s1", transcript: log("alpha") });
+    await db("bob").ingest({ format: "trajectory", session_id: "s2", transcript: log("beta") });
     const index = new SqliteIndex({ path: MEMORY_INDEX, deployment: "d", events: EVENTS });
     let resetDuringList = true;
     // Another process sharing the file rebuilds it while this run is reading a feed.
@@ -647,7 +652,7 @@ describe("the indexer (F10.2)", () => {
   });
 
   it("skips entries it cannot read or that name no session", async () => {
-    await db().ingest({ agent: "trajectory", session_id: "s1", transcript: log("alpha") });
+    await db().ingest({ format: "trajectory", session_id: "s1", transcript: log("alpha") });
     const unreadable = keys.change(
       "alice",
       "2026-11-14T09:01:00.000Z",
@@ -668,6 +673,7 @@ describe("the indexer (F10.2)", () => {
       owner: "alice",
       archive_id: archiveId("alice", "trajectory", "ghost"),
       session_id: "ghost",
+      format: "trajectory",
       content_hash: "f".repeat(64),
       writer: { kind: "local", principal: "alice", source_id: "upload" },
     };
@@ -680,7 +686,7 @@ describe("the indexer (F10.2)", () => {
   });
 
   it("stops at once when aborted, without marking the index ready", async () => {
-    await db().ingest({ agent: "trajectory", session_id: "s1", transcript: log("alpha") });
+    await db().ingest({ format: "trajectory", session_id: "s1", transcript: log("alpha") });
     const { index, indexer } = setup();
     const controller = new AbortController();
     controller.abort();
@@ -699,9 +705,9 @@ describe("the indexer (F10.2)", () => {
       ownerRefreshMs: 60_000,
     });
     expect((await indexer.run()).owners).toBe(0);
-    await db("alice").ingest({ agent: "trajectory", session_id: "s1", transcript: log("one") });
+    await db("alice").ingest({ format: "trajectory", session_id: "s1", transcript: log("one") });
     expect((await indexer.run()).owners).toBe(1);
-    await db("bob").ingest({ agent: "trajectory", session_id: "s2", transcript: log("two") });
+    await db("bob").ingest({ format: "trajectory", session_id: "s2", transcript: log("two") });
     expect((await indexer.run()).owners).toBe(1);
     tick(61_000);
     expect(await indexer.run()).toMatchObject({ owners: 2, indexed: 1 });
@@ -709,7 +715,7 @@ describe("the indexer (F10.2)", () => {
   });
 
   it("shares one run between callers", async () => {
-    await db().ingest({ agent: "trajectory", session_id: "s1", transcript: log("alpha") });
+    await db().ingest({ format: "trajectory", session_id: "s1", transcript: log("alpha") });
     const { indexer } = setup();
     const [a, b] = await Promise.all([indexer.run(), indexer.run()]);
     expect(a).toBe(b);

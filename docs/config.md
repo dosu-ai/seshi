@@ -190,7 +190,7 @@ milliseconds. Sizes are `<n><unit>` with `B`, `KB`, `MB`, `GB`, `KiB`, `MiB` or 
 | `deployment_id` | generated | This deployment's id, recorded in the layout marker `seshi.json` the first time a server uses the bucket. A server whose `deployment_id` differs from the marker's refuses to start (X1.4). Without it, the first server generates one and later servers accept whatever the marker says |
 | `org` | | The organization the deployment serves (X1.1). Recorded in the marker the first time a config names it; a server naming another org refuses to start (X1.4) |
 
-Traces are always stored in seshi's one canonical format (`seshi/trace/1`, X6.2) and rendered as Letta, OTLP or ATIF on read (`GET …/trace?format=`). A bucket written by sessiondb (`sessionstorage.json`) is refused: there is no migration (X1.5), so point `url` at a new prefix.
+Traces are always stored in seshi's one canonical format (`seshi/trace/1`, X6.2) and rendered as Letta, OTLP or ATIF on read (`GET …/trace?render=`). A bucket written by sessiondb (`sessionstorage.json`) is refused: there is no migration (X1.5), so point `url` at a new prefix.
 
 ### `[auth]`
 

@@ -15,8 +15,8 @@
       "type": "string",
       "minLength": 1
     },
-    "agent": {
-      "description": "The format the session was filed under (the archive id derives from it).",
+    "format": {
+      "description": "The format the session was filed under (the archive id derives from it). Traces written before 0.16 call it `agent`; readers take `format ?? agent`.",
       "type": "string",
       "minLength": 1
     },
@@ -52,7 +52,7 @@
     "schema",
     "content_hash",
     "source",
-    "agent",
+    "format",
     "session_id",
     "started_at",
     "ended_at",

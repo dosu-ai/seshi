@@ -201,7 +201,7 @@ describe("a datadog source", () => {
       expect(response.status).toBe(200);
       return (await response.json()) as {
         total: number;
-        results: { owner: string; agent: string; session_id: string; source_id?: string }[];
+        results: { owner: string; format: string; session_id: string; source_id?: string }[];
         index: { sessions: number };
       };
     };
@@ -218,7 +218,7 @@ describe("a datadog source", () => {
     expect(found.results).toEqual([
       expect.objectContaining({
         owner: OWNER,
-        agent: AGENT,
+        format: AGENT,
         session_id: SESSION,
         source_id: SOURCE,
       }),

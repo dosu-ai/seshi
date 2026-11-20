@@ -61,7 +61,7 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 async function write(owner: string, id: string, prompt: string, repo?: string) {
   await new StoreSessionDB({ store: new FsStore(bucket), owner, formats }).ingest({
-    agent: "trajectory",
+    format: "trajectory",
     session_id: id,
     transcript: log(prompt),
     ...(repo ? { repo } : {}),
@@ -278,7 +278,7 @@ describe("the command's pieces", () => {
       results: [
         {
           owner: "alice",
-          agent: "claude-code",
+          format: "claude-code",
           session_id: "a\x1b]0;pwned\x07",
           archive_id: "0".repeat(64),
           project: "p\x1b[2J",
@@ -318,7 +318,7 @@ describe("the command's pieces", () => {
       results: [
         {
           owner: "alice",
-          agent: "claude-code",
+          format: "claude-code",
           session_id: "abc",
           archive_id: "0".repeat(64),
           project: "acme/widget",

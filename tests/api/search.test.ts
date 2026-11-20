@@ -76,27 +76,27 @@ async function seed(): Promise<void> {
   const alice = client(orgKey, "alice");
   const bob = client(orgKey, "bob");
   await alice.ingest({
-    agent: "trajectory",
+    format: "trajectory",
     session_id: "pay",
     transcript: log("deploy the payments service"),
     repo: "github.com/acme/payments",
     branch: "main",
   });
   await alice.ingest({
-    agent: "trajectory",
+    format: "trajectory",
     session_id: "rot",
     transcript: log("deploy the secret rotation", "2026-10-01T10:00:00Z"),
     visibility: "owner",
   });
   await bob.ingest({
-    agent: "trajectory",
+    format: "trajectory",
     session_id: "docs",
     transcript: log("deploy the docs site"),
     repo: "github.com/acme/docs",
   });
   // Written under alice's old owner id, which [auth.owner_aliases] folds into hers (X5.8).
   await new StoreSessionDB({ store, owner: "old-alice", formats: FORMATS }).ingest({
-    agent: "trajectory",
+    format: "trajectory",
     session_id: "legacy",
     transcript: log("deploy the legacy cron"),
     visibility: "owner",
@@ -157,7 +157,7 @@ describe("GET /v1/search (F10)", () => {
   it("records and filters by where a session ran and with what (repo, harness, model)", async () => {
     const alice = client(orgKey, "alice");
     await alice.ingest({
-      agent: "trajectory",
+      format: "trajectory",
       session_id: "api",
       transcript: log("deploy the api").replace(
         '{"role":"meta","source":"trajectory"}',
@@ -170,7 +170,7 @@ describe("GET /v1/search (F10)", () => {
       client: "seshi/0.15.0 linux-x64",
     });
     await alice.ingest({
-      agent: "trajectory",
+      format: "trajectory",
       session_id: "web",
       transcript: log("deploy the web app"),
       project: "web",
@@ -206,7 +206,7 @@ describe("GET /v1/search (F10)", () => {
     });
     // A repo with credentials never reaches the store; the session does.
     await alice.ingest({
-      agent: "trajectory",
+      format: "trajectory",
       session_id: "leak",
       transcript: log("deploy the leak"),
       repo: "user:ghp_token@github.com/acme/api",
@@ -332,13 +332,13 @@ describe("the indexer job (F10.2, X7)", () => {
         throw new Error(`never found ${n} for ${q}: ${JSON.stringify((await live.status()).jobs)}`);
       };
       await alice.ingest({
-        agent: "trajectory",
+        format: "trajectory",
         session_id: "j1",
         transcript: log("zebra crossing"),
       });
       await until("zebra", 1);
       await alice.ingest({
-        agent: "trajectory",
+        format: "trajectory",
         session_id: "j2",
         transcript: log("zebra stripes"),
       });

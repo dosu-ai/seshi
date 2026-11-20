@@ -28,8 +28,8 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-const store_ = (upload: Omit<SessionUpload, "owner" | "format">) =>
-  storeSession({ owner, format: "jsonl", ...upload }, { store, formats, filter });
+const store_ = (upload: Omit<SessionUpload, "owner" | "encoding">) =>
+  storeSession({ owner, encoding: "jsonl", ...upload }, { store, formats, filter });
 
 async function headOf(agent: string, sessionId: string) {
   const session = await getSession(store, owner, agent, sessionId);
@@ -42,7 +42,7 @@ async function headOf(agent: string, sessionId: string) {
 describe("where a session ran", () => {
   it("records the commit, folder and client on the trace, and the repo on the session", async () => {
     await store_({
-      agent: "claude-code",
+      format: "claude-code",
       session_id: "s1",
       transcript: transcript("claude-basic.claude-code.jsonl"),
       project: "app",
@@ -65,7 +65,7 @@ describe("where a session ran", () => {
     const lines = log.split("\n").filter(Boolean);
     const head = `${lines.slice(0, 2).join("\n")}\n`;
     const first = await store_({
-      agent: "claude-code",
+      format: "claude-code",
       session_id: "s1",
       transcript: head,
       repo: "github.com/acme/app",
@@ -74,7 +74,7 @@ describe("where a session ran", () => {
     expect(first.status).toBe("stored");
     const tail = `${lines.slice(2).join("\n")}\n`;
     await store_({
-      agent: "claude-code",
+      format: "claude-code",
       session_id: "s1",
       transcript: tail,
       offset: Buffer.byteLength(head),
@@ -101,7 +101,7 @@ describe("where a session ran", () => {
     ];
     for (const [i, [bad, field]] of cases.entries()) {
       const result = await store_({
-        agent: "claude-code",
+        format: "claude-code",
         session_id: `s${i}`,
         transcript: log,
         ...bad,
@@ -115,7 +115,7 @@ describe("where a session ran", () => {
     }
     // A folder whose name has a colon is still a folder in the repository.
     await store_({
-      agent: "claude-code",
+      format: "claude-code",
       session_id: "colon",
       transcript: log,
       path_in_repo: "a:b/x",
@@ -127,7 +127,7 @@ describe("where a session ran", () => {
 describe("the harness's version and the models", () => {
   it("are read from a Claude Code log", async () => {
     await store_({
-      agent: "claude-code",
+      format: "claude-code",
       session_id: "s1",
       transcript: transcript("claude-basic.claude-code.jsonl"),
     });
@@ -142,11 +142,11 @@ describe("the harness's version and the models", () => {
 
   it("are the replacing trace's after a replace, none when it names no version", async () => {
     const log = transcript("claude-basic.claude-code.jsonl");
-    await store_({ agent: "claude-code", session_id: "s1", transcript: log });
+    await store_({ format: "claude-code", session_id: "s1", transcript: log });
     expect((await headOf("claude-code", "s1")).session?.agent_version).toBe("2.1.326");
     const unversioned = log.replaceAll('"version":"2.1.326",', "").replace("auth", "the auth");
     const result = await store_({
-      agent: "claude-code",
+      format: "claude-code",
       session_id: "s1",
       transcript: unversioned,
       replace: true,
@@ -160,7 +160,7 @@ describe("the harness's version and the models", () => {
 
   it("are read from a Codex log, listing every model the session used", async () => {
     await store_({
-      agent: "codex",
+      format: "codex",
       session_id: "s1",
       transcript: transcript("codex-usage.codex.jsonl"),
     });
@@ -175,7 +175,7 @@ describe("the harness's version and the models", () => {
 
   it("are the log's own, whatever the uploader's hints say", async () => {
     await store_({
-      agent: "claude-code",
+      format: "claude-code",
       session_id: "s1",
       transcript: transcript("claude-basic.claude-code.jsonl"),
       harness_version: "9.9.9",
@@ -201,7 +201,7 @@ describe("the harness's version and the models", () => {
     const log = readFileSync(join(recorded, "transcript.jsonl"), "utf8");
     expect(log).not.toContain("cursor_version");
     const result = await store_({
-      agent: "cursor",
+      format: "cursor",
       session_id: capture?.session_id as string,
       transcript: log,
       ...(capture?.harness_version ? { harness_version: capture.harness_version } : {}),

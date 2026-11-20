@@ -53,7 +53,7 @@ export function toLetta(trace: Trace): LettaTrace {
     schema: LETTA_TRACE_SCHEMA,
     content_hash: trace.content_hash,
     source: trace.source,
-    agent: trace.agent,
+    agent: trace.format,
     session_id: trace.session_id,
     started_at: trace.started_at,
     ended_at: trace.ended_at,
