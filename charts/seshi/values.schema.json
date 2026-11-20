@@ -1,0 +1,177 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "seshi chart values",
+  "type": "object",
+  "additionalProperties": false,
+  "definitions": {
+    "stringMap": { "type": "object", "additionalProperties": { "type": "string" } },
+    "list": { "type": "array" },
+    "claim": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "existingClaim": { "type": "string" },
+        "accessModes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "enum": ["ReadWriteOnce", "ReadOnlyMany", "ReadWriteMany", "ReadWriteOncePod"]
+          }
+        },
+        "storageClass": { "type": "string" },
+        "size": { "type": "string", "minLength": 1 }
+      }
+    }
+  },
+  "properties": {
+    "global": { "type": "object" },
+    "nameOverride": { "type": "string" },
+    "fullnameOverride": { "type": "string" },
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repository": { "type": "string", "minLength": 1 },
+        "tag": { "type": "string" },
+        "digest": { "type": "string", "pattern": "^(sha256:[0-9a-f]{64})?$" },
+        "pullPolicy": { "type": "string", "enum": ["Always", "IfNotPresent", "Never"] }
+      }
+    },
+    "imagePullSecrets": { "$ref": "#/definitions/list" },
+    "store": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "url": {
+          "description": "s3://bucket/prefix, r2://bucket/prefix, or file:///path (with persistence.enabled).",
+          "type": "string",
+          "pattern": "^$|^(?:file:\\/\\/\\/?.*|\\/.*|(?:s3|r2):\\/\\/[^/\\s]+(?:\\/.*)?)$"
+        },
+        "region": { "type": "string" },
+        "endpoint": { "type": "string" },
+        "accountId": { "type": "string" },
+        "deploymentId": { "type": "string" },
+        "org": { "type": "string" },
+        "credentials": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "existingSecret": { "type": "string" },
+            "keys": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "accessKeyId": { "type": "string", "minLength": 1 },
+                "secretAccessKey": { "type": "string", "minLength": 1 },
+                "sessionToken": { "type": "string" }
+              }
+            },
+            "accessKeyId": { "type": "string" },
+            "secretAccessKey": { "type": "string" }
+          }
+        }
+      }
+    },
+    "config": {
+      "description": "The rest of seshi.toml (docs/config.md); seshi config check validates it.",
+      "type": "object"
+    },
+    "dropIns": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z0-9][a-z0-9-]*$" },
+      "additionalProperties": { "type": "object" }
+    },
+    "redactionPacks": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+      "additionalProperties": { "type": "string" }
+    },
+    "persistence": { "$ref": "#/definitions/claim" },
+    "extraEnv": { "$ref": "#/definitions/list" },
+    "envFrom": { "$ref": "#/definitions/list" },
+    "extraVolumes": { "$ref": "#/definitions/list" },
+    "extraVolumeMounts": { "$ref": "#/definitions/list" },
+    "extraContainers": { "$ref": "#/definitions/list" },
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": { "type": "string", "enum": ["ClusterIP", "NodePort", "LoadBalancer"] },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "annotations": { "$ref": "#/definitions/stringMap" }
+      }
+    },
+    "ingress": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "className": { "type": "string" },
+        "annotations": { "$ref": "#/definitions/stringMap" },
+        "hosts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["paths"],
+            "properties": {
+              "host": { "type": "string" },
+              "paths": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "required": ["path"],
+                  "properties": {
+                    "path": { "type": "string" },
+                    "pathType": {
+                      "type": "string",
+                      "enum": ["Prefix", "Exact", "ImplementationSpecific"]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "tls": { "$ref": "#/definitions/list" }
+      }
+    },
+    "serviceAccount": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "create": { "type": "boolean" },
+        "name": { "type": "string" },
+        "annotations": { "$ref": "#/definitions/stringMap" }
+      }
+    },
+    "networkPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "ingressFrom": { "$ref": "#/definitions/list" }
+      }
+    },
+    "podSecurityContext": { "type": "object" },
+    "securityContext": { "type": "object" },
+    "resources": { "type": "object" },
+    "probes": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "startup": { "type": "object" },
+        "liveness": { "type": "object" },
+        "readiness": { "type": "object" }
+      }
+    },
+    "podAnnotations": { "$ref": "#/definitions/stringMap" },
+    "podLabels": { "$ref": "#/definitions/stringMap" },
+    "nodeSelector": { "$ref": "#/definitions/stringMap" },
+    "tolerations": { "$ref": "#/definitions/list" },
+    "affinity": { "type": "object" },
+    "priorityClassName": { "type": "string" }
+  }
+}

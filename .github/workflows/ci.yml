@@ -150,6 +150,38 @@ jobs:
           docker logs sessiondb
           exit 1
 
+  # The Helm chart (charts/seshi), under both Helm majors: lint, render every values file in
+  # charts/seshi/ci/, check each rendered seshi.toml with this checkout's `seshi config check`,
+  # refuse the values the chart must refuse, and validate the manifests with kubeconform.
+  chart:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        helm: [v3.22.1, v4.3.2]
+    env:
+      KUBECONFORM_VERSION: v0.8.0
+      KUBECONFORM_SHA256: 9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+      - run: bun install --frozen-lockfile
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
+        with:
+          version: ${{ matrix.helm }}
+      - name: Install kubeconform
+        run: |
+          curl -fsSLo /tmp/kubeconform.tar.gz \
+            "https://github.com/yannh/kubeconform/releases/download/$KUBECONFORM_VERSION/kubeconform-linux-amd64.tar.gz"
+          echo "$KUBECONFORM_SHA256  /tmp/kubeconform.tar.gz" | sha256sum -c -
+          sudo tar -xzf /tmp/kubeconform.tar.gz -C /usr/local/bin kubeconform
+      - run: bun run check:chart
+
   # F8.4: the binary on every platform it ships for, built natively on that platform's runner.
   # Each one is put through scripts/release/smoke.ts: serve, admin init, login with the org key
   # (Bun.secrets: the macOS Keychain, Windows Credential Manager, or the 0600 file on a Linux
@@ -289,7 +321,7 @@ jobs:
   # release bot (its credentials are the org-wide ABBS_BOT_* secrets): main only takes pull
   # requests, and that app is the ruleset's one bypass actor.
   release:
-    needs: [test, test-windows, python-client, docker, binaries, darwin-cross-check]
+    needs: [test, test-windows, python-client, docker, chart, binaries, darwin-cross-check]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:

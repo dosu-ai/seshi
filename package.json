@@ -34,6 +34,7 @@
     "check:types": "bun run scripts/model-types.ts --check",
     "check:hook": "bun run scripts/check-hook.ts",
     "check:brand": "bun run scripts/brand-tokens.ts --check",
+    "check:chart": "bun run scripts/chart-check.ts",
     "schema": "bun run scripts/config-schema.ts",
     "types": "bun run scripts/model-types.ts",
     "packs": "bun run scripts/builtin-pack.ts",

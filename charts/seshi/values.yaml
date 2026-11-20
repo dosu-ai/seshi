@@ -1,0 +1,136 @@
+# Values for the seshi chart. docs/kubernetes.md explains each part; docs/config.md has every
+# seshi setting.
+
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  repository: ghcr.io/dosu-ai/seshi
+  # Defaults to the chart's appVersion, the seshi release the chart was cut with.
+  tag: ""
+  # sha256:…; wins over the tag.
+  digest: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# Where sessions go: [store] in seshi.toml.
+store:
+  # Required. s3://bucket/prefix, r2://bucket/prefix, or file:///data/store (only with
+  # persistence.enabled: a file store on an emptyDir is lost with the pod).
+  url: ""
+  region: ""
+  # An S3-compatible endpoint (RustFS, MinIO, Backblaze, …).
+  endpoint: ""
+  # The Cloudflare account, for r2://.
+  accountId: ""
+  # This deployment's id, recorded in the bucket; seshi refuses a bucket marked for another.
+  deploymentId: ""
+  org: ""
+  # The bucket's keys, given to seshi as AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY.
+  credentials:
+    # A Secret you made. When empty and accessKeyId is set, the chart makes one.
+    existingSecret: ""
+    keys:
+      accessKeyId: access-key-id
+      secretAccessKey: secret-access-key
+      # The key holding a session token, for temporary credentials. Empty: none.
+      sessionToken: ""
+    # Inline keys, for trials. Prefer existingSecret.
+    accessKeyId: ""
+    secretAccessKey: ""
+
+# The rest of seshi.toml, as YAML: auth, default_visibility, filter, limits, records, redaction,
+# review, sources, search, worker, capture. The chart sets [store], server.listen and (unless
+# given here) search.path itself. Secrets belong in Secrets: reference them as
+# { env = "NAME" } with extraEnv, or { file = "/path" } with extraVolumes.
+config: {}
+
+# Drop-ins, rendered to seshi.d/<name>.toml beside seshi.toml. A drop-in may add sources,
+# redaction.packs, capture.exclude and capture.redact_tool_calls (docs/config.md). Names are
+# lower-case letters, digits and dashes; they load in name order.
+dropIns: {}
+
+# Redaction rule packs (docs/redaction.md): file name -> contents. Each is mounted under
+# /etc/seshi/packs/ and added to redaction.packs.
+redactionPacks: {}
+
+# /data: the search index, and a file:// store.
+persistence:
+  # false: an emptyDir. A new pod then rebuilds the search index from the bucket, and search
+  # answers 503 index_building until it has. Recommended for production.
+  enabled: false
+  existingClaim: ""
+  accessModes: [ReadWriteOnce]
+  storageClass: ""
+  size: 10Gi
+
+# More environment for the seshi container. A SESHI_* name must be a real setting: seshi
+# refuses to start on one it does not know.
+extraEnv: []
+envFrom: []
+extraVolumes: []
+extraVolumeMounts: []
+extraContainers: []
+
+service:
+  type: ClusterIP
+  port: 7200
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  # - host: seshi.example.com
+  #   paths:
+  #     - path: /
+  #       pathType: Prefix
+  hosts: []
+  tls: []
+
+serviceAccount:
+  create: true
+  # Defaults to the release's full name.
+  name: ""
+  annotations: {}
+
+networkPolicy:
+  # Admit traffic to the API port only from these peers (NetworkPolicyPeer list). Empty: from
+  # pods in the release's namespace. Egress is left alone: seshi reaches its bucket and sources.
+  enabled: false
+  ingressFrom: []
+
+podSecurityContext:
+  runAsNonRoot: true
+  # The image's seshi user and group.
+  runAsUser: 1000
+  runAsGroup: 999
+  fsGroup: 999
+  fsGroupChangePolicy: OnRootMismatch
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+# A starting point, not a measurement: peak memory follows limits.max_upload_bytes.
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+
+# Overrides for the probes' timings, merged over the chart's.
+probes:
+  startup: {}
+  liveness: {}
+  readiness: {}
+
+podAnnotations: {}
+podLabels: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+priorityClassName: ""

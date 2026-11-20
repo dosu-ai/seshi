@@ -62,6 +62,7 @@ describe("release.config.js", () => {
       "packages/ts/model/package.json",
       "integrations/cursor/extension/package.json",
       "packages/py/client/src/seshi/_version.py",
+      "charts/seshi/Chart.yaml",
       "bun.lock",
       "CHANGELOG.md",
     ]);
@@ -83,7 +84,7 @@ describe("ci.yml", () => {
     expect(CI).toContain("bun run release:build --target darwin-arm64 --target darwin-x64");
     expect(CI).toContain('codesign --verify --verbose "cross/$id/seshi"');
     expect(CI).toMatch(
-      /needs: \[test, test-windows, python-client, docker, binaries, darwin-cross-check\]/,
+      /needs: \[test, test-windows, python-client, docker, chart, binaries, darwin-cross-check\]/,
     );
   });
 

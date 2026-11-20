@@ -3,12 +3,22 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  CHART_FILE,
   PYTHON_VERSION_FILE,
   setVersion,
+  syncChartVersion,
   syncLock,
   syncPythonVersion,
   VERSIONED,
 } from "./release-version";
+
+const CHART = `apiVersion: v2
+name: seshi
+# Both versions follow the seshi release.
+version: 0.9.0
+appVersion: "0.9.0"
+kubeVersion: ">=1.25.0-0"
+`;
 
 const LOCK = `{
   "workspaces": {
@@ -48,6 +58,8 @@ describe("setVersion", () => {
     writeFileSync(join(root, "bun.lock"), LOCK);
     mkdirSync(join(root, "packages/py/client/src/seshi"), { recursive: true });
     writeFileSync(join(root, PYTHON_VERSION_FILE), '"""The release."""\n\n__version__ = "0.9.0"\n');
+    mkdirSync(join(root, "charts/seshi"), { recursive: true });
+    writeFileSync(join(root, CHART_FILE), CHART);
   });
   afterEach(() => rmSync(root, { recursive: true, force: true }));
 
@@ -63,6 +75,12 @@ describe("setVersion", () => {
     expect(readFileSync(join(root, PYTHON_VERSION_FILE), "utf8")).toBe(
       '"""The release."""\n\n__version__ = "1.0.0"\n',
     );
+    expect(readFileSync(join(root, CHART_FILE), "utf8")).toBe(
+      CHART.replace("version: 0.9.0", "version: 1.0.0").replace(
+        'appVersion: "0.9.0"',
+        'appVersion: "1.0.0"',
+      ),
+    );
   });
 
   it("refuses something that is not a version", async () => {
@@ -75,6 +93,16 @@ describe("setVersion", () => {
     const model = JSON.parse(readFileSync(join(root, "packages/ts/model/package.json"), "utf8"));
     expect(syncPythonVersion(python, model.version)).toBe(python);
     expect(() => syncPythonVersion("VERSION = 1\n", "1.0.0")).toThrow(/no __version__ line/);
+  });
+
+  it("keeps the chart's two versions on the release, and refuses a chart without them", () => {
+    const root = resolve(import.meta.dirname, "..");
+    const chart = readFileSync(join(root, CHART_FILE), "utf8");
+    const model = JSON.parse(readFileSync(join(root, "packages/ts/model/package.json"), "utf8"));
+    expect(syncChartVersion(chart, model.version)).toBe(chart);
+    expect(() => syncChartVersion("name: seshi\nappVersion: 1\n", "1.0.0")).toThrow(
+      /one version line/,
+    );
   });
 
   it("names folders that exist in this repository and hold a version", () => {

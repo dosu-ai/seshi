@@ -1,0 +1,7 @@
+# Cloudflare R2 with inline keys: the chart makes the Secret.
+store:
+  url: r2://seshi/prod
+  accountId: 0123456789abcdef0123456789abcdef
+  credentials:
+    accessKeyId: AKIAEXAMPLE
+    secretAccessKey: example-secret

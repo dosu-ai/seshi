@@ -1,0 +1,15 @@
+apiVersion: v2
+name: seshi
+description: The seshi session store server, on Kubernetes.
+type: application
+# Both versions follow the seshi release: scripts/release-version.ts writes them.
+version: 0.22.0
+appVersion: "0.22.0"
+kubeVersion: ">=1.25.0-0"
+home: https://github.com/dosu-ai/seshi
+sources:
+  - https://github.com/dosu-ai/seshi
+keywords:
+  - seshi
+  - sessions
+  - coding-agents

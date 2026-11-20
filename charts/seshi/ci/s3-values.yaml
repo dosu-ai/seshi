@@ -1,0 +1,51 @@
+# An S3-compatible bucket with keys from an existing Secret, plus most of the chart's options.
+store:
+  url: s3://seshi/sessions
+  endpoint: http://rustfs:9000
+  region: us-east-1
+  deploymentId: ci
+  credentials:
+    existingSecret: seshi-store
+config:
+  auth:
+    org_key:
+      enabled: true
+  limits:
+    max_records: 50000
+    max_upload_bytes: 64MiB
+  search:
+    enabled: true
+    events: [user, assistant, tool_call]
+  worker:
+    heartbeat_interval: 1s
+  sources:
+    - id: ingest
+      type: otlp
+      filter:
+        enabled: false
+dropIns:
+  10-capture:
+    capture:
+      exclude: [acme/secret]
+redactionPacks:
+  acme.toml: |
+    id = "acme"
+
+    [[rules]]
+    id = "acme-key"
+    pattern = 'ACME-[0-9A-F]{32}'
+    tests.match = ["key ACME-0123456789ABCDEF0123456789ABCDEF"]
+persistence:
+  enabled: true
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: seshi.example.com
+      paths:
+        - path: /
+  tls:
+    - hosts: [seshi.example.com]
+      secretName: seshi-tls
+networkPolicy:
+  enabled: true

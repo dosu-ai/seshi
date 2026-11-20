@@ -1,0 +1,18 @@
+{{- include "seshi.validate" . }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "seshi.fullname" . }}-config
+  labels:
+    {{- include "seshi.labels" . | nindent 4 }}
+data:
+  seshi.toml: |
+    {{- include "seshi.toml" . | nindent 4 }}
+  {{- range $name, $dropIn := .Values.dropIns }}
+  dropin.{{ $name }}.toml: |
+    {{- toToml $dropIn | nindent 4 }}
+  {{- end }}
+  {{- range $file, $content := .Values.redactionPacks }}
+  pack.{{ $file }}: |
+    {{- $content | nindent 4 }}
+  {{- end }}

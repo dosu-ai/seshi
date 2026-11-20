@@ -1,0 +1,22 @@
+seshi {{ .Chart.AppVersion }} is starting as {{ include "seshi.fullname" . }} in {{ .Release.Namespace }}.
+
+In the cluster it answers at http://{{ include "seshi.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.service.port }}.
+{{- if .Values.ingress.enabled }}
+{{- range .Values.ingress.hosts }}
+Outside it: http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}
+{{- end }}
+{{- else }}
+From here: kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "seshi.fullname" . }} 7200:{{ .Values.service.port }}
+{{- end }}
+
+First install? Make the first admin token and the org key once, and keep them in a Secret:
+
+  kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "seshi.fullname" . }} -- seshi admin init --json
+
+Members then run `seshi login --key <org key>` against the server. A second `admin init`
+exits 6: the bucket already has an admin (docs/kubernetes.md, "First tokens").
+{{- if not .Values.persistence.enabled }}
+
+The search index is on an emptyDir: after each restart, search answers 503 index_building
+until it is rebuilt from the bucket. persistence.enabled keeps it.
+{{- end }}

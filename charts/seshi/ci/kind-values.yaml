@@ -1,0 +1,21 @@
+# The install test on kind: a RustFS bucket in the namespace (charts/seshi/ci is not part of the
+# packaged chart). The release is named seshi on purpose: its Service then is too, which is the
+# name that would put SESHI_SERVICE_HOST in the pod if service links were on.
+store:
+  url: s3://seshi-e2e/sessions
+  endpoint: http://rustfs:9000
+  region: us-east-1
+  credentials:
+    existingSecret: seshi-store
+config:
+  worker:
+    heartbeat_interval: 1s
+  search:
+    interval: 1s
+dropIns:
+  10-capture:
+    capture:
+      exclude: [acme/secret]
+persistence:
+  enabled: true
+  size: 1Gi

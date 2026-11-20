@@ -100,7 +100,8 @@ seshi login --server https://seshi.acme.com   # the org key, or sign in through 
 seshi capture install
 ```
 
-The container image is `ghcr.io/dosu-ai/seshi` ([docs/server.md](docs/server.md#deploying)).
+The container image is `ghcr.io/dosu-ai/seshi` ([docs/server.md](docs/server.md#deploying)),
+and the Helm chart in `charts/seshi` runs it on Kubernetes ([docs/kubernetes.md](docs/kubernetes.md)).
 
 **2. Serverless.** Nothing to run: each laptop runs the pipeline and writes its own folder of a
 shared bucket with its own key. Use it when the team trusts its laptops

@@ -1,7 +1,8 @@
 /** Sets the release's version where the repository keeps it: packages/ts/model/package.json (the
  * one version; `VERSION` reads it) and that workspace's entry in bun.lock, which `bun install`
- * leaves alone on a version-only change (release.config.js), and the Python client's
- * `__version__` (packages/py/client, whose pyproject.toml reads it). Exported for its test. */
+ * leaves alone on a version-only change (release.config.js), the Python client's
+ * `__version__` (packages/py/client, whose pyproject.toml reads it), and the Helm chart's
+ * `version` and `appVersion` (charts/seshi). Exported for its test. */
 
 import { join } from "node:path";
 
@@ -15,6 +16,25 @@ const PYTHON_VERSION = /^__version__ = "[^"]*"$/m;
 export function syncPythonVersion(source: string, version: string): string {
   if (!PYTHON_VERSION.test(source)) throw new Error(`${PYTHON_VERSION_FILE}: no __version__ line`);
   return source.replace(PYTHON_VERSION, `__version__ = "${version}"`);
+}
+
+/** The Helm chart: its `version` and `appVersion` are both the release. */
+export const CHART_FILE = "charts/seshi/Chart.yaml";
+
+const CHART_VERSION = /^version: .*$/m;
+const CHART_APP_VERSION = /^appVersion: .*$/m;
+
+export function syncChartVersion(source: string, version: string): string {
+  for (const [line, name] of [
+    [CHART_VERSION, "version"],
+    [CHART_APP_VERSION, "appVersion"],
+  ] as const) {
+    const found = source.match(new RegExp(line.source, "gm")) ?? [];
+    if (found.length !== 1) throw new Error(`${CHART_FILE}: expected one ${name} line`);
+  }
+  return source
+    .replace(CHART_VERSION, `version: ${version}`)
+    .replace(CHART_APP_VERSION, `appVersion: "${version}"`);
 }
 
 const SEMVER = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
@@ -54,6 +74,11 @@ export async function setVersion(root: string, version: string): Promise<void> {
   const pythonSynced = syncPythonVersion(python, version);
   if (pythonSynced !== python) await Bun.write(pythonPath, pythonSynced);
   console.log(`${PYTHON_VERSION_FILE}: ${version}`);
+  const chartPath = join(root, CHART_FILE);
+  const chart = await Bun.file(chartPath).text();
+  const chartSynced = syncChartVersion(chart, version);
+  if (chartSynced !== chart) await Bun.write(chartPath, chartSynced);
+  console.log(`${CHART_FILE}: ${version}`);
 }
 
 if (import.meta.main) {

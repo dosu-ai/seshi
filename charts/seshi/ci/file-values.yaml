@@ -1,0 +1,9 @@
+# A file store on the chart's PVC: one machine, development.
+store:
+  url: file:///data/store
+persistence:
+  enabled: true
+config:
+  auth:
+    tokens:
+      ci: ci-token-0123456789abcdef

@@ -40,6 +40,7 @@ A Bun workspace, laid out as in the design decisions (X3,
 | `packages/py/client/` | The Python client, `seshi` on PyPI: the Python counterpart of `@seshi/client`, with its own `pyproject.toml` (uv, hatchling, ruff, mypy, pytest). Python 3.10+ |
 | `integrations/` | Everything specific to one agent or vendor (`claude-code`, `claude-platform`, `codex`, `cursor`, `datadog-trajectory`, `gemini-cli`, `opencode`, `pi`), each exporting one `Integration` from `@seshi/kit`, with its fixtures in `testdata/`. Two carry an editor add-on beside it: `claude-code/plugin` (the Claude desktop app's chip) and `cursor/extension` (Cursor's status bar; `bun run ext:build`) |
 | `spec/` | The cross-language contract: `layout.md` (the object layout), `openapi.yaml` (the HTTP API), `schemas/` (the trace, the envelope, the stored objects), the config schemas, and `testdata/` (the record sets and goldens every language must pass) |
+| `charts/seshi/` | The Helm chart for the server; `bun run check:chart` checks it ([docs/kubernetes.md](docs/kubernetes.md)) |
 | `tests/` | Tests that cross packages, and the fixture and golden tooling (`tests/tooling/`) |
 | `scripts/` | Repository scripts: the layer check, the generators below, the hook timing check, the release build, npm packages and smoke test (`scripts/release/`), the install scripts (`scripts/install/`), the brand outliner (`scripts/brand/`) |
 | `docs/` | The user docs; [`docs/README.md`](docs/README.md) is the index. `docs/seshi/` holds the design decisions and the build notes |

@@ -1,0 +1,155 @@
+{{- $secret := include "seshi.storeSecretName" . }}
+{{- $keys := .Values.store.credentials.keys }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "seshi.fullname" . }}
+  labels:
+    {{- include "seshi.labels" . | nindent 4 }}
+spec:
+  # One instance runs both roles (api and worker). Exactly one instance may run the worker, and
+  # POST /v1/admin/reload reloads only the instance that answers it, so this is not a value.
+  replicas: 1
+  # The old pod stops before the new one starts, so two workers never run at once. Uploaders
+  # retry through the gap.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "seshi.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "seshi.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      # Kubernetes would otherwise set <SERVICE>_SERVICE_HOST and friends for every Service in
+      # the namespace. A Service named seshi gives SESHI_SERVICE_HOST, and seshi refuses to
+      # start on a SESHI_* variable that is not a setting.
+      enableServiceLinks: false
+      automountServiceAccountToken: false
+      serviceAccountName: {{ include "seshi.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      # seshi stops within five seconds of SIGTERM.
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: seshi
+          image: {{ include "seshi.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["serve"]
+          ports:
+            - name: http
+              containerPort: 7200
+              protocol: TCP
+          env:
+            # Also what `kubectl exec … seshi admin init` and `seshi workers status` read.
+            - name: SESHI_CONFIG
+              value: /etc/seshi/seshi.toml
+            {{- if $secret }}
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: {{ $keys.accessKeyId }}
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: {{ $keys.secretAccessKey }}
+            {{- if $keys.sessionToken }}
+            - name: AWS_SESSION_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: {{ $keys.sessionToken }}
+            {{- end }}
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.envFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          # /healthz is the one route that needs no token.
+          startupProbe:
+            {{- toYaml (mergeOverwrite (dict "httpGet" (dict "path" "/healthz" "port" "http") "periodSeconds" 2 "failureThreshold" 60) .Values.probes.startup) | nindent 12 }}
+          livenessProbe:
+            {{- toYaml (mergeOverwrite (dict "httpGet" (dict "path" "/healthz" "port" "http") "periodSeconds" 10 "failureThreshold" 3) .Values.probes.liveness) | nindent 12 }}
+          readinessProbe:
+            {{- toYaml (mergeOverwrite (dict "httpGet" (dict "path" "/healthz" "port" "http") "periodSeconds" 5 "failureThreshold" 3) .Values.probes.readiness) | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/seshi
+              readOnly: true
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+        {{- with .Values.extraContainers }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "seshi.fullname" . }}-config
+            items:
+              - key: seshi.toml
+                path: seshi.toml
+              {{- range $name, $_ := .Values.dropIns }}
+              - key: dropin.{{ $name }}.toml
+                path: seshi.d/{{ $name }}.toml
+              {{- end }}
+              {{- range $file, $_ := .Values.redactionPacks }}
+              - key: pack.{{ $file }}
+                path: packs/{{ $file }}
+              {{- end }}
+        - name: data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "seshi.dataClaimName" . }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: tmp
+          emptyDir: {}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

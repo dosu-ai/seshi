@@ -6,8 +6,9 @@ from any other branch, and nothing is published by hand.
 
 ## What a release does
 
-1. **Gates.** The `test`, `test-windows`, `python-client`, `docker`, `binaries` and
-   `darwin-cross-check` jobs pass. `binaries` builds `seshi` natively
+1. **Gates.** The `test`, `test-windows`, `python-client`, `docker`, `chart`, `binaries` and
+   `darwin-cross-check` jobs pass. `chart` runs `bun run check:chart` under Helm 3 and Helm 4
+   ([kubernetes.md](kubernetes.md#checking-the-chart)). `binaries` builds `seshi` natively
    on a runner for each of the six targets and runs `scripts/release/smoke.ts` on it: serve on a
    folder store, `admin init`, `login --key` (which stores the org key through `Bun.secrets` in
    the macOS Keychain or Windows Credential Manager, required there; the 0600 file is accepted on
@@ -22,8 +23,9 @@ from any other branch, and nothing is published by hand.
    longer matches, so `scripts/release/build.ts` gives both darwin binaries a fresh ad-hoc
    signature (`scripts/release/macho-sign.ts`, no `codesign` needed) before archiving them.
 2. **`release`** runs semantic-release. It picks the version from the commits, writes it into
-   `packages/ts/model/package.json`, `bun.lock` and the Python client's
-   `packages/py/client/src/seshi/_version.py` (`scripts/release-version.ts`),
+   `packages/ts/model/package.json`, `bun.lock`, the Python client's
+   `packages/py/client/src/seshi/_version.py` and the Helm chart's `charts/seshi/Chart.yaml`
+   (`version` and `appVersion`; `scripts/release-version.ts`),
    cross-compiles every target with `scripts/release/build.ts` into `dist/release/`, commits the
    version, pushes the tag, and publishes the GitHub release with these assets:
 

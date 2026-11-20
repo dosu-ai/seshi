@@ -207,7 +207,8 @@ database, no volume (unless the store is `file://`), and no state outside the bu
 instances scale to many alike; the worker role wants one instance that stays up (a minimum of
 one, not scaled to zero), or run its jobs from cron with `seshi sync run <id>` for each
 polled source, `seshi sync assemble` for OTLP and Datadog sessions and `seshi sync prune` for
-retention. Keep
+retention. On Kubernetes, the Helm chart in `charts/seshi` runs it
+([kubernetes.md](kubernetes.md)). Keep
 the request timeout at 120 seconds or more; a large transcript can take that long to normalize
 and verify. Platforms that cap request bodies (Cloud Run's HTTP/1 limit is 32 MiB) are fine as
 long as clients send `Content-Encoding: gzip`, which every route accepts.

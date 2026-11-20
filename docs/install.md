@@ -10,6 +10,7 @@ the same compiled file, built once per release (F8.4):
 | npm | `npm i -g @dosu/seshi`, or `npx @dosu/seshi …` | `npm i -g @dosu/seshi@latest` |
 | GitHub release | Download the archive for your platform and `SHA256SUMS` | By hand |
 | Docker (the server) | `docker run ghcr.io/dosu-ai/seshi` ([server.md](server.md)) | New tag |
+| Helm (the server, on Kubernetes) | `helm install seshi ./charts/seshi` from a checkout ([kubernetes.md](kubernetes.md)) | `helm upgrade` |
 
 Homebrew, and signed or notarized binaries, come later.
 
