@@ -486,7 +486,8 @@ class SeshiClient(_Base):
 
     def capture_rules(self) -> m.CaptureRules:
         """`GET /v1/capture/rules`: the org's exclude list (`[capture] exclude`) and tool-call
-        redaction list (`[capture] redact_tool_calls`), which laptops apply before upload. A server older than the route raises `ServerError` 404."""
+        redaction list (`[capture] redact_tool_calls`), which laptops apply before upload. A
+        server older than the route raises `ServerError` 404."""
         return self._run(calls.capture_rules())
 
     def capture_rules_since(self, etag: str | None = None) -> m.CaptureRulesAnswer | None:
