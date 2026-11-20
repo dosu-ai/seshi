@@ -278,8 +278,10 @@ def test_tokens(live_server: LiveServer, admin: SeshiClient, alice: SeshiClient)
 
     with SeshiClient(live_server.url, created.token) as dana:
         assert dana.me().kind == "device"
+        # A device token reads its owner's own sessions (none yet), and no one else's (X5.10).
+        assert dana.list_sessions().sessions == []
         with pytest.raises(Forbidden):
-            dana.list_sessions()  # a device token writes; it reads nothing
+            dana.list_sessions(owner="alice")
     with pytest.raises(Forbidden):
         alice.create_token({"kind": "device", "owner": "alice"})
 
