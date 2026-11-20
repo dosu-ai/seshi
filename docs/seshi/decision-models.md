@@ -47,6 +47,12 @@ were public. Where the docs say nothing, this page says so and does not guess.
     85%) at about an eighth of the latency.
   - **OpenAI Decisions** flagged far too much until given `redact = 0.8`, then matched
     Haiku.
+  - **A prompt experiment** (five variants, every session judged by Opus 5.5) found that the
+    instructions carry the calibration: a one-line prompt flags nearly everything. A "flag
+    only text you can point to" sentence halves OpenAI's over-flagging, and with it OpenAI
+    tuned beat Haiku (70/80 against 64/80). Whether the policy sits in the prompt or the
+    label descriptions made no clear difference. Per-category questions ranked sessions
+    best. Neither model reliably says `drop`.
 - **Recommendation:** build the seam, then **Jev**, then **OpenAI Decisions**. Jev needs a
   40,000-character part size; OpenAI needs its threshold documented. Neither is clearly more
   accurate than today's LLM step; the gain is speed and cost.
@@ -224,7 +230,9 @@ kinds of text: the instructions, and a description of each option. They divide c
   are fine, what a confidential project looks like. It also carries the organization's edge
   cases between labels, for example "a customer's ticket text is redact, a full export of
   tickets is drop". seshi's default prompt is today's opening paragraph and the examples from
-  its bullets, rewritten as a question.
+  its bullets, rewritten as a question. It adds that most sessions are ordinary engineering
+  work, and that `redact` needs specific text the model can point to; that sentence halved
+  OpenAI's over-flagging in the experiment (section 6).
 - **Thresholds carry the risk tolerance.** "When unsure, choose redact" is no longer prose
   but two numbers that `seshi review eval --sweep` can tune.
 
@@ -479,6 +487,73 @@ not a benchmark.
   And `too_long` should split the part in two and ask again rather than fail, since
   token density varies by up to 3x between parts.
 
+### Prompt and label-description experiment
+
+The same 80 real sessions and 10 fixtures, run through five ways of asking each decision
+model. Jev used 40,000-character parts; OpenAI used 100,000.
+
+| Variant | What changes |
+|---|---|
+| `baseline` | The section 3 design: seshi's generic label descriptions, and the policy in the instructions |
+| `labels-carry-policy` | A short instruction; the policy (what to remove, what to drop, what is fine) written into each label's description |
+| `minimal` | A one-line instruction ("records from a coding agent's session that an organization is about to store") and the generic labels |
+| `precise` | `baseline`, plus: most sessions are ordinary engineering work; choose redact only for specific text you can point to, not for a sensitive-sounding topic, a possibility, placeholders, example values, or text already `[redacted:…]` |
+| `categories` | Four yes/no questions in one request: credential, personal data, customer data, and "should not be stored at all". `redact` when any is likely; `drop` from the last |
+
+The target is stricter than above. **Opus 5.5 at high effort judged all 80 sessions**, not
+only the disputed ones, so no variant is favoured by a consensus it took part in. The judge
+found 57 `allow`, 22 `redact` and 1 `drop`. Against this target, **today's Haiku step scores
+64/80, missing 7 and over-flagging 9.** For each variant the table gives:
+
+- **At 0.5:** each part is labelled with `thresholds = {drop = 0.5, redact = 0.5}`, which is
+  the same as the most probable label. The figures in brackets are sessions missed / sessions
+  over-flagged.
+- **Tuned:** the best redact threshold found on this same data, so it flatters every variant.
+- **AUROC:** how well the session's flag probability ranks the target's flagged sessions above
+  its allowed ones, whatever the threshold. 1.0 is perfect; 0.5 is chance.
+
+| Variant | Jev at 0.5 | Jev tuned | Jev AUROC | OpenAI at 0.5 | OpenAI tuned | OpenAI AUROC |
+|---|---|---|---|---|---|---|
+| `baseline` | 64 (6 / 9) | 66 at 0.55 | 0.87 | 38 (0 / 40) | 60 at 0.95 | 0.86 |
+| `labels-carry-policy` | **68** (9 / 2) | 68 at 0.50 | 0.88 | 50 (2 / 27) | 65 at 0.85 | 0.84 |
+| `minimal` | 29 (0 / 50) | 65 at 0.85 | 0.86 | 28 (0 / 51) | 57 at 0.95 | 0.83 |
+| `precise` | 66 (8 / 5) | 67 at 0.55 | 0.85 | 57 (3 / 19) | **70** at 0.90 | 0.90 |
+| `categories` | 64 (7 / 7) | 65 at 0.40 | **0.92** | **66** (6 / 7) | 69 at 0.85 | 0.90 |
+
+On the fixtures, Jev's `baseline`, `precise` and `categories` each scored 10/10, and
+`minimal` missed both drops. OpenAI's best on the fixtures was `baseline`, at 9/10.
+
+**What it shows**
+
+- **The instructions carry the calibration.** With a one-line instruction, both models
+  flagged nearly every session: 50 and 51 of the 57 the judge allowed. They still ranked
+  sessions fairly well (AUROC 0.83–0.86), but they had no anchor for what counts as
+  ordinary work. So seshi's default prompt must be substantial, and the docs should tell
+  users who write their own to keep saying what is fine to store, not only what is not.
+- **"Point to specific text" fixes most of OpenAI's over-flagging.** The `precise` paragraph
+  halved it at 0.5 (40 to 19), and gave the best result of the experiment once tuned: 70/80,
+  missing 6 and over-flagging 3. That beats today's Haiku step. For Jev it changed little.
+  **seshi's default decision-model prompt should include it.**
+- **Where the policy lives (instructions or label descriptions) makes no clear
+  difference.** Moving it into the labels made both models more conservative: fewer flags,
+  more misses (Jev 9 missed against 6). It did not rank sessions better (AUROC 0.88 against
+  0.87 for Jev; 0.84 against 0.86 for OpenAI). This is the evidence open question 2 asked
+  for. Keeping seshi's own generic label descriptions, with the user's policy in the prompt,
+  costs nothing measurable here.
+- **Per-category questions rank best.** `categories` had the highest AUROC on both models.
+  It was the best untuned OpenAI variant (66/80), and the only variant to catch the one true
+  drop. At its best Jev threshold (0.40) it missed only 2 sessions, but at the cost of 11
+  over-flags. It costs about the same, since each provider bills the shared input once per
+  request, not per question. It is the strongest candidate for phase 5.
+- **Drops cannot be calibrated from this data.** In every variant the one true drop scored
+  0.54 or less on `drop`. Thresholds high enough to stop false drops (0.7–0.8) also miss it.
+  Decision models call such sessions `redact` instead, so their text goes to the redactor
+  rather than being stored raw. Deciding how much that matters needs labelled drops, which
+  real traffic rarely has: this is what synthetic fixtures (section 5) are for.
+- **Noise.** With 23 flagged sessions, a difference of two or three sessions is within
+  noise. Treat the ordering of `baseline`, `labels-carry-policy` and `precise` on Jev as a
+  tie.
+
 ## 7. Recommendation, open questions and plan
 
 **Recommendation.** Build the `decide()` seam with thresholds and recorded scores, then
@@ -502,17 +577,20 @@ provider. Prompt injection is not treated separately from today's LLM step.
    none for Jev, `redact = 0.8` and `drop = 0.5` for OpenAI. Revisit on more data, and on
    ground truth rather than a judge.
 
-Answered by the eval: **Jev's part size** is 40,000, with `too_long` splitting the part
-(section 6).
+2. **Drops.** Decision models rarely say `drop`, even when the judge does. Is "the redactor
+   runs instead" acceptable, or should a `drop` need a second opinion: an LLM call when
+   `p.drop` is above some low bar, or the `categories` question?
+3. **Category questions (phase 5).** They ranked best in the experiment. Should they replace
+   the single choice once the seam exists? And should the categories that triggered
+   `redact` narrow what the redactor is asked to look for?
 
-To verify with the eval once phase 1 is built:
+Answered by the eval (section 6):
 
-2. **Edge cases in the prompt.** Do organization-specific edge cases between labels work as
-   well in the instructions as they would in the option descriptions? If not, add a `labels`
-   key.
-3. **Category questions (phase 5).** Do per-category yes/no questions beat one choice, and
-   should the categories that triggered `redact` narrow what the redactor is asked to look
-   for?
+- **Jev's part size** is 40,000 characters, with `too_long` splitting the part.
+- **Edge cases in the prompt or in the label descriptions:** no measurable difference, so
+  no `labels` key.
+- **seshi's default decision-model prompt** should keep the full policy and add the "point
+  to specific text" paragraph.
 
 **Plan** (S = up to a day, M = two to four days)
 
@@ -523,4 +601,4 @@ To verify with the eval once phase 1 is built:
 | 2 | `typesafe`: the `@typesafe-ai/sdk` client (section 4), a 40,000 `max_input_chars` default, `too_long` splitting the part and asking again, fake-fetch tests, `config check` output, serverless key name, [config.md](../config.md#review) and [model-review.md](../model-review.md) | S–M |
 | 3 | `openai-decisions`: the `openai` SDK client (section 4), caching off, refusal and status mapping, tests, docs with its measured starting thresholds | S |
 | 4 | Calibration data: `seshi review eval --sessions` and `--against`, shadow mode for a candidate decision step on the server, synthetic fixture generation | M |
-| 5 | Optional, on evidence: per-category questions, `seshi review fixture add`, `seshi review export` | M |
+| 5 | Per-category questions (the strongest variant in the experiment), measured against the single choice on more data; then, on evidence, `seshi review fixture add` and `seshi review export` | M |
