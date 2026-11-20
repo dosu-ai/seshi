@@ -30,6 +30,15 @@ export interface IndexedSession {
   /** The metadata's `updated_at`, shown and sorted on. It is stamped by whichever machine wrote
    * the session, so it does not order updates (see `SessionUpdate.read_at`). */
   updated_at: string;
+  /** The person's first prompt as one line, the harness's own blocks stripped
+   * (`@seshi/model/prompts`): what the session was about. */
+  title?: string;
+  /** How many events its traces hold, of every role (indexed or not). */
+  events?: number;
+  /** Tool calls by tool name. */
+  tools?: Record<string, number>;
+  /** What redaction replaced, by rule (the metadata's `redaction.counts`). */
+  redactions?: Record<string, number>;
   /** The traces indexed, in the session's order. */
   traces: string[];
 }

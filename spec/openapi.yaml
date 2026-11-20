@@ -2772,6 +2772,24 @@ components:
         started_at: { type: string, format: date-time }
         ended_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+        title:
+          type: string
+          description: |
+            The person's first prompt as one line, with the blocks their agent's harness added
+            (AGENTS.md, environment context, command wrappers) left out: what the session was
+            about. Absent when no prompt of the person's was found.
+        events:
+          type: integer
+          minimum: 0
+          description: How many events the session's traces hold, of every role.
+        tools:
+          type: object
+          description: The session's tool calls, by tool name.
+          additionalProperties: { type: integer, minimum: 1 }
+        redactions:
+          type: object
+          description: What redaction replaced in the session, by rule.
+          additionalProperties: { type: integer, minimum: 1 }
         score:
           type: number
           description: How well it matched; higher is better, comparable within one answer only (0 in a browse).

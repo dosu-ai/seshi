@@ -1,10 +1,12 @@
 import type { Identity, SessionMetadata, Trace, TraceRecord } from "@seshi/model";
 import { append, type Child, h, replace } from "../../web/dom";
 import { ApiError, call, download } from "./api";
+import { ranked } from "./charts";
 import { EMPTY } from "./filters";
 import { listHref, sessionHref } from "./list";
-import { ago, plural, shortRepo, when } from "./text";
-import { eventId, eventItem, foldedText } from "./thread";
+import { sessionStats } from "./stats";
+import { ago, duration, plural, shortRepo, when } from "./text";
+import { drawStep, eventId, foldedText, stepIndexes, stepsOf } from "./thread";
 
 const TABS = ["thread", "records", "reviews", "details"] as const;
 type Tab = (typeof TABS)[number];
@@ -175,7 +177,9 @@ function chunked<T>(
         h(
           "button",
           { type: "button", onclick: () => step(0) },
-          `Show ${Math.min(CHUNK, items.length - shown).toLocaleString()} more of ${plural(items.length - shown, "item")} left`,
+          items.length - shown <= CHUNK
+            ? `Show the last ${(items.length - shown).toLocaleString()}`
+            : `Show ${CHUNK.toLocaleString()} more (${(items.length - shown).toLocaleString()} left)`,
         ),
       );
     }
@@ -219,22 +223,111 @@ async function threadPanel(
     const list = h("ol", { class: "thread" });
     const after = h("div", { class: "more" });
     status.replaceWith(list, after);
+    const steps = stepsOf(trace.events);
     const through =
       target?.hash === ref.content_hash
-        ? trace.events.findIndex((e) => e.index === target.event)
+        ? steps.findIndex((step) => stepIndexes(step).includes(target.event))
         : -1;
-    chunked(trace.events, (e) => eventItem(ref.content_hash, e), list, after, through);
-    if (trace.events.length === 0) list.replaceWith(h("p", { class: "empty" }, "No events."));
+    chunked(steps, (step) => drawStep(ref.content_hash, step), list, after, through);
+    if (steps.length === 0) list.replaceWith(h("p", { class: "empty" }, "No events."));
   }
   if (target) {
     const el = document.getElementById(eventId(target.hash, target.event));
     if (el) {
-      el.classList.add("target");
-      el.setAttribute("tabindex", "-1");
-      el.scrollIntoView({ block: "center" });
-      el.focus({ preventScroll: true });
+      // A match inside a step's input or output: open it, and mark the step.
+      if (el instanceof HTMLDetailsElement) el.open = true;
+      const item = el.closest("li.event") ?? el;
+      if (item.classList.contains("step") && el === item) {
+        const input = item.querySelector("details.io");
+        if (input instanceof HTMLDetailsElement) input.open = true;
+      }
+      item.classList.add("target");
+      item.setAttribute("tabindex", "-1");
+      item.scrollIntoView({ block: "center" });
+      (item as HTMLElement).focus({ preventScroll: true });
     }
   }
+}
+
+function statRow(label: string, value: Child): HTMLElement {
+  return h("div", { class: "stat" }, h("dt", null, label), h("dd", null, value));
+}
+
+/** A path's last two parts, which name the file: the whole path is in the title. */
+const shortPath = (path: string) => {
+  const parts = path.split("/").filter(Boolean);
+  return parts.length > 2 ? `…/${parts.slice(-2).join("/")}` : path;
+};
+
+const tokens = (n: number) =>
+  n >= 1_000_000
+    ? `${(n / 1_000_000).toFixed(1)}M`
+    : n >= 1000
+      ? `${Math.round(n / 1000)}k`
+      : String(n);
+
+/** The session at a glance, beside its thread: how long it ran, what it did, the tools and
+ * files, the models and tokens. Drawn once every trace is read. */
+async function statsAside(
+  aside: HTMLElement,
+  m: SessionMetadata,
+  load: (hash: string) => Promise<Trace>,
+  isCurrent: () => boolean,
+): Promise<void> {
+  let traces: Trace[];
+  try {
+    traces = await Promise.all(m.traces.map((ref) => load(ref.content_hash)));
+  } catch {
+    return;
+  }
+  if (!isCurrent()) return;
+  const s = sessionStats(traces, m.models ?? []);
+  const took = duration(s.started, s.ended);
+  const total = s.tokens.input + s.tokens.output + s.tokens.cacheRead + s.tokens.cacheWrite;
+  replace(
+    aside,
+    h("h2", null, "At a glance"),
+    h(
+      "dl",
+      { class: "stats" },
+      took ? statRow("Ran for", took) : null,
+      statRow("Prompts", s.prompts.toLocaleString()),
+      statRow("Answers", s.answers.toLocaleString()),
+      statRow(
+        "Tool calls",
+        s.failedCalls > 0
+          ? `${s.toolCalls.toLocaleString()} (${s.failedCalls.toLocaleString()} failed)`
+          : s.toolCalls.toLocaleString(),
+      ),
+      statRow("Events", s.events.toLocaleString()),
+    ),
+    s.tools.length > 0 ? [h("h2", null, "Tools"), ranked(s.tools, "tools", 8)] : null,
+    s.files.length > 0
+      ? [
+          h("h2", null, `Files touched (${s.files.length.toLocaleString()})`),
+          ranked(s.files, "files", 10, undefined, shortPath),
+        ]
+      : null,
+    s.models.length > 0 || total > 0
+      ? [
+          h("h2", null, "Models"),
+          h(
+            "dl",
+            { class: "stats" },
+            s.models.length > 0
+              ? statRow(s.models.length === 1 ? "Model" : "Models", s.models.join(", "))
+              : null,
+            total > 0
+              ? statRow(
+                  "Tokens",
+                  `${tokens(s.tokens.input)} in, ${tokens(s.tokens.output)} out${s.tokens.cacheRead ? `, ${tokens(s.tokens.cacheRead)} from cache` : ""}`,
+                )
+              : null,
+            s.llmCalls > 0 ? statRow("Model calls", s.llmCalls.toLocaleString()) : null,
+          ),
+        ]
+      : null,
+  );
 }
 
 function recordItem(record: TraceRecord, index: number): HTMLElement {
@@ -470,8 +563,14 @@ export function renderSession(
         ),
       );
       if (redacted || tab === "details") detailsPanel(panel, m, owner, archive);
-      else if (tab === "thread") void threadPanel(panel, m, session.trace, target, isCurrent);
-      else if (tab === "records") void recordsPanel(panel, m, session.trace, isCurrent);
+      else if (tab === "thread") {
+        const thread = h("div", { class: "thread-col" });
+        const aside = h("aside", { class: "glance", "aria-label": "The session at a glance" });
+        panel.append(thread, aside);
+        panel.classList.add("with-aside");
+        void threadPanel(thread, m, session.trace, target, isCurrent);
+        void statsAside(aside, m, session.trace, isCurrent);
+      } else if (tab === "records") void recordsPanel(panel, m, session.trace, isCurrent);
       else void reviewsPanel(panel, owner, archive, isCurrent);
     },
     (err: unknown) => {

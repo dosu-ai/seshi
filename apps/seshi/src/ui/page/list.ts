@@ -20,7 +20,7 @@ import {
   withFilter,
   withLabel,
 } from "./filters";
-import { ago, highlightParts, plural, shortRepo, when } from "./text";
+import { ago, duration, highlightParts, plural, shortRepo, when } from "./text";
 import { ROLE } from "./thread";
 
 const PAGE = 50;
@@ -39,7 +39,35 @@ interface Row {
   labels?: Record<string, string>;
   visibility: "org" | "owner";
   updated_at: string;
+  started_at?: string;
+  ended_at?: string;
+  title?: string;
+  events?: number;
+  tools?: Record<string, number>;
+  redactions?: Record<string, number>;
   matches?: SearchMatch[];
+}
+
+const sum = (map: Record<string, number> | undefined) =>
+  Object.values(map ?? {}).reduce((a, b) => a + b, 0);
+
+/** What a row says a session did: its length, its events and tool calls, its redactions. */
+function rowStats(row: Row): HTMLElement | null {
+  const took = duration(row.started_at, row.ended_at);
+  const calls = sum(row.tools);
+  const removed = sum(row.redactions);
+  const parts = [
+    took ? `ran ${took}` : "",
+    row.events ? plural(row.events, "event") : "",
+    calls ? plural(calls, "tool call") : "",
+    removed ? `${plural(removed, "redaction")}` : "",
+  ].filter(Boolean);
+  if (parts.length === 0) return null;
+  return h(
+    "p",
+    { class: "row-stats" },
+    parts.map((p) => h("span", null, p)),
+  );
 }
 
 const FILTER_LABEL: Record<TextFilter, string> = {
@@ -262,7 +290,7 @@ function snippet(row: Row, match: SearchMatch): HTMLElement {
 }
 
 function rowItem(row: Row, state: ListState, now: Date): HTMLElement {
-  const title = row.repo ? shortRepo(row.repo) : (row.project ?? row.session_id);
+  const where = row.repo ? shortRepo(row.repo) : (row.project ?? row.session_id);
   const agent = row.origin_agent ?? row.format;
   return h(
     "li",
@@ -272,9 +300,11 @@ function rowItem(row: Row, state: ListState, now: Date): HTMLElement {
       { class: "row-head" },
       h(
         "a",
-        { class: "title", href: sessionHref(row.owner, row.archive_id) },
-        title,
-        row.branch ? h("span", { class: "branch" }, row.branch) : null,
+        {
+          class: `title${row.title ? "" : " untitled"}`,
+          href: sessionHref(row.owner, row.archive_id),
+        },
+        row.title ?? `${where}${row.branch ? ` on ${row.branch}` : ""}`,
       ),
       h(
         "time",
@@ -287,9 +317,15 @@ function rowItem(row: Row, state: ListState, now: Date): HTMLElement {
       { class: "facts" },
       chip(row.owner, "Only this owner's sessions", withFilter(state, "owner", row.owner)),
       chip(agent, "Only this agent's sessions", withFilter(state, "agent", agent)),
-      row.repo && !state.filters.repo
-        ? chip(row.repo, "Only this repository", withFilter(state, "repo", row.repo))
-        : null,
+      row.repo
+        ? chip(
+            row.branch ? `${shortRepo(row.repo)} @ ${row.branch}` : shortRepo(row.repo),
+            `Only ${row.repo}`,
+            withFilter(state, "repo", row.repo),
+          )
+        : row.branch
+          ? chip(row.branch, "Only this branch", withFilter(state, "branch", row.branch))
+          : null,
       (row.models ?? []).map((m) =>
         chip(m, "Only sessions with this model", withFilter(state, "model", m)),
       ),
@@ -304,6 +340,7 @@ function rowItem(row: Row, state: ListState, now: Date): HTMLElement {
           )
         : null,
     ),
+    rowStats(row),
     row.matches && row.matches.length > 0
       ? h(
           "ol",

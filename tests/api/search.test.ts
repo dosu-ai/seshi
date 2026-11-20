@@ -175,6 +175,42 @@ describe("GET /v1/search (F10)", () => {
     await expect(admin.search({ q: "--" })).rejects.toMatchObject({ status: 400 });
   });
 
+  it("says what each session was about: its first prompt, events and tools", async () => {
+    const alice = client(orgKey, "alice");
+    const at = "2026-11-01T10:00:00Z";
+    await alice.ingest({
+      format: "trajectory",
+      session_id: "tools",
+      transcript:
+        line({ role: "meta", source: "trajectory" }) +
+        line({
+          role: "user",
+          content: `<environment_context>\n<cwd>/work</cwd>\n</environment_context>\nFix the flaky checkout test\n${"context ".repeat(300)}`,
+          timestamp: at,
+        }) +
+        line({
+          role: "assistant",
+          content: null,
+          tool_calls: [{ id: "c1", name: "Bash", args: '{"command":"bun test"}' }],
+          timestamp: at,
+        }) +
+        line({ role: "tool", tool_call_id: "c1", content: "ok", timestamp: at }) +
+        line({
+          role: "assistant",
+          content: "Fixed: [redacted:github-token] removed",
+          timestamp: at,
+        }),
+    });
+    await instance.search?.catchUp();
+    const [result] = (await client(adminToken).search({})).results;
+    expect(result).toMatchObject({
+      session_id: "tools",
+      title: "Fix the flaky checkout test",
+      events: 4,
+      tools: { Bash: 1 },
+    });
+  });
+
   it("pages a browse by place: a session arriving between pages repeats nothing", async () => {
     await seed();
     const admin = client(adminToken);

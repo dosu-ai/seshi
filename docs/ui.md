@@ -52,7 +52,10 @@ The browser talks to the IdP directly, so the IdP must allow it:
 ## What it shows
 
 **The list** is every session you may read, the most recently active first, from the search
-index (`GET /v1/search` without words, [search.md](search.md#browsing)). Type words to search
+index (`GET /v1/search` without words, [search.md](search.md#browsing)). Each row leads with what
+the person asked (the session's first prompt, without the blocks their agent's harness added),
+then whose it is, the agent, repository and branch, and how long it ran with how many events,
+tool calls and redactions. Type words to search
 what was said and done; each result shows its best matching records, and a click on one opens
 the session at that record. Filter by owner, agent, repository, branch, model, label and how
 recently it was active; a click on a value in a row filters by it. The address keeps the words
@@ -63,10 +66,21 @@ or the credential lacks the `search` scope (a reader's service token with `sessi
 alone), the list falls back to one owner's sessions (`GET /v1/sessions`), yours unless you set
 Owner, and the other filters do not apply.
 
-**A session** opens on its thread: each event (prompt, answer, tool call, tool result) in
-order, with long text folded. **Records** shows each stored record as JSON. **Reviews** shows
+**A session** opens on its thread. Prompts and answers read as Markdown, built as text (no HTML
+from a transcript, and links stay text). What the agent's harness put before a prompt
+(AGENTS.md, environment context, command wrappers) is folded away. Each tool call and its result
+are one step: the tool and a line saying what it did, with the input and the output closed until
+opened. Beside the thread, the session at a glance: how long it ran, its prompts, answers and tool
+calls, the tools it used, the files it touched, and the models and tokens its calls record.
+**Records** shows each stored record as JSON. **Reviews** shows
 model review's decision for each write ([model-review.md](model-review.md)), with the audit
 detail for admins. **Details** shows the session's stored metadata and downloads its traces.
+
+**The overview** is the team over the last day, 7 days or 30 days: how many sessions, people,
+repositories, tool calls and redactions; sessions per day; and the people, repositories, agents,
+models and tools with the most sessions or calls, and what redaction removed by rule. A click on
+a person, repository, agent or model opens the list filtered to it. It reads the same browse as
+the list, so it counts only what you may read, up to the 2,000 most recent sessions.
 
 ## What it never shows
 

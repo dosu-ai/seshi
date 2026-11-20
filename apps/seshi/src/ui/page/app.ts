@@ -13,11 +13,13 @@ import {
 } from "./api";
 import { renderList } from "./list";
 import { finishSignIn, type PendingSignIn } from "./oidc";
+import { renderOverview } from "./overview";
 import { forgetSessions, renderSession } from "./session";
 import { renderSignIn } from "./signin";
 
 const root = document.getElementById("app") as HTMLElement;
 const who = document.getElementById("who") as HTMLElement;
+const nav = document.getElementById("nav") as HTMLElement;
 
 let generation = 0;
 let identity: Identity | undefined;
@@ -34,8 +36,16 @@ function route(): void {
   } catch {
     parts = [];
   }
+  const view = parts[0] === "overview" ? "overview" : "sessions";
+  for (const a of nav.querySelectorAll("a")) {
+    if (a.getAttribute("href") === (view === "overview" ? "#/overview" : "#/")) {
+      a.setAttribute("aria-current", "page");
+    } else a.removeAttribute("aria-current");
+  }
   if (parts[0] === "s" && parts[1] && parts[2]) {
     renderSession(root, { owner: parts[1], archive: parts[2], query, me: identity, isCurrent });
+  } else if (view === "overview") {
+    renderOverview(root, { query, me: identity, isCurrent });
   } else {
     renderList(root, { query, me: identity, isCurrent });
   }
@@ -69,6 +79,7 @@ function showWho(me: Identity, credential: Credential): void {
 function signedIn(credential: Credential, me: Identity): void {
   forgetSessions();
   saveCredential(credential);
+  nav.hidden = false;
   identity = me;
   showWho(me, credential);
   route();
@@ -79,6 +90,7 @@ function signIn(modes: AuthModes, notice?: string): void {
   generation++;
   forgetSessions();
   identity = undefined;
+  nav.hidden = true;
   document.title = "seshi";
   replace(who);
   renderSignIn(root, modes, signedIn, notice);

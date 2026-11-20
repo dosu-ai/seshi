@@ -472,7 +472,7 @@ main:focus {
 
 .snippets {
   grid-column: 2;
-  grid-row: 3;
+  grid-row: 4;
   list-style: none;
   margin: 0.6rem 0 0;
   padding: 0 0 0 0.9rem;
@@ -836,13 +836,14 @@ pre.json {
 
   .row .title,
   .facts,
+  .row-stats,
   .snippets {
     grid-column: 1;
   }
 
   .row time {
     grid-column: 1;
-    grid-row: 4;
+    grid-row: 5;
     padding-top: 0.2rem;
   }
 
@@ -853,5 +854,542 @@ pre.json {
 
   .event-head time {
     margin-left: 0;
+  }
+}
+
+/* The views in the bar. */
+
+.nav {
+  display: flex;
+  gap: 1.25rem;
+  margin-right: auto;
+  margin-left: 1.5rem;
+}
+
+.nav a {
+  color: var(--resting);
+  text-decoration: none;
+  font-size: 0.95rem;
+  padding: 0.2rem 0;
+  border-bottom: 2px solid transparent;
+}
+
+.nav a:hover {
+  color: var(--paper);
+}
+
+.nav a[aria-current="page"] {
+  color: var(--paper);
+  border-bottom-color: var(--thread-mint);
+}
+
+/* A row's title is what the person asked; the stats under it say what the session did. */
+
+.row .title.untitled {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.row-stats {
+  grid-column: 2;
+  grid-row: 3;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 0.9rem;
+  margin: 0.15rem 0 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+/* Markdown in prompts and answers. */
+
+.md {
+  max-width: 52rem;
+  font-size: 0.95rem;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.md > :first-child {
+  margin-top: 0.3rem;
+}
+
+.md > :last-child {
+  margin-bottom: 0;
+}
+
+.md p,
+.md ul,
+.md ol,
+.md blockquote {
+  margin: 0.5rem 0;
+}
+
+.md ul,
+.md ol {
+  padding-left: 1.4rem;
+}
+
+.md li + li {
+  margin-top: 0.15rem;
+}
+
+.md .md-h {
+  font-size: 1rem;
+  font-weight: 800;
+  margin: 0.9rem 0 0.3rem;
+}
+
+.md code {
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0 0.25em;
+  font-size: 0.85em;
+}
+
+.md pre.code {
+  margin: 0.5rem 0;
+  padding: 0.6rem 0.75rem;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.md pre.code code {
+  border: 0;
+  padding: 0;
+  background: none;
+}
+
+.md blockquote {
+  border-left: 3px solid var(--line);
+  padding-left: 0.75rem;
+  color: var(--muted);
+}
+
+.md hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
+.role-user .md {
+  font-weight: 500;
+}
+
+.role-reasoning .md {
+  color: var(--muted);
+  font-style: italic;
+}
+
+pre.mono-text {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  color: var(--muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0.35rem 0 0;
+}
+
+/* What a harness added, and a step's input and output: closed until opened. */
+
+details.context,
+details.io {
+  margin-top: 0.3rem;
+}
+
+details.context > summary,
+details.io > summary {
+  cursor: pointer;
+  width: max-content;
+  max-width: 100%;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+details.context > summary:hover,
+details.io > summary:hover {
+  color: var(--accent);
+}
+
+.context-only .node {
+  background: var(--bg);
+  border-style: dashed;
+  color: var(--muted);
+}
+
+.event.step .event-head {
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+.step .summary-line {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  color: var(--muted);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.step .event-head time,
+.step .event-head .ok,
+.step .event-head .failed {
+  flex: none;
+}
+
+.step {
+  padding-bottom: 0.7rem;
+}
+
+.step .event-head .tool {
+  font-weight: 700;
+  flex: none;
+}
+
+/* The thread beside the session at a glance. */
+
+.panel.with-aside {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 17rem;
+  gap: 2.5rem;
+  align-items: start;
+}
+
+.glance {
+  position: sticky;
+  top: 1rem;
+  font-size: 0.88rem;
+  border-left: 1px solid var(--line);
+  padding-left: 1.25rem;
+}
+
+.glance h2 {
+  font-size: 0.85rem;
+  font-weight: 700;
+  margin: 1.25rem 0 0.5rem;
+}
+
+.glance h2:first-child {
+  margin-top: 0;
+}
+
+dl.stats {
+  display: grid;
+  gap: 0.3rem;
+  margin: 0;
+}
+
+.stat {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.stat dt {
+  color: var(--muted);
+}
+
+.stat dd {
+  margin: 0;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+/* Ranked lists: a name, its count, and a bar for the count. */
+
+.ranked {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.45rem;
+}
+
+ol.ranked > li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 0.75rem;
+  row-gap: 0.15rem;
+  align-items: baseline;
+}
+
+.rank-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.files .rank-name,
+.tools .rank-name {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+}
+
+.rank-count {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.85rem;
+}
+
+.rank-bar {
+  grid-column: 1 / -1;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.rank-fill {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.w1 {
+  width: 5%;
+}
+.w2 {
+  width: 10%;
+}
+.w3 {
+  width: 15%;
+}
+.w4 {
+  width: 20%;
+}
+.w5 {
+  width: 25%;
+}
+.w6 {
+  width: 30%;
+}
+.w7 {
+  width: 35%;
+}
+.w8 {
+  width: 40%;
+}
+.w9 {
+  width: 45%;
+}
+.w10 {
+  width: 50%;
+}
+.w11 {
+  width: 55%;
+}
+.w12 {
+  width: 60%;
+}
+.w13 {
+  width: 65%;
+}
+.w14 {
+  width: 70%;
+}
+.w15 {
+  width: 75%;
+}
+.w16 {
+  width: 80%;
+}
+.w17 {
+  width: 85%;
+}
+.w18 {
+  width: 90%;
+}
+.w19 {
+  width: 95%;
+}
+.w20 {
+  width: 100%;
+}
+
+/* The overview. */
+
+.overview-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem 1.5rem;
+}
+
+.overview-head h1 {
+  font-size: clamp(1.5rem, 3vw, 2rem);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.spans {
+  display: flex;
+  gap: 1rem;
+  font-size: 0.9rem;
+}
+
+.spans a {
+  color: var(--muted);
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+}
+
+.spans a[aria-current="page"] {
+  color: var(--fg);
+  font-weight: 700;
+  border-bottom-color: var(--accent);
+}
+
+.figures {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 1rem 2rem;
+  margin: 1.75rem 0;
+}
+
+.figure {
+  display: flex;
+  flex-direction: column-reverse;
+}
+
+.figure dd {
+  margin: 0;
+  font-size: 2rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.figure dt {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.figure .note {
+  font-size: 0.8rem;
+}
+
+.card {
+  border-top: 1px solid var(--line);
+  padding-top: 1rem;
+  min-width: 0;
+}
+
+.card h2 {
+  font-size: 0.95rem;
+  margin: 0 0 0.75rem;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr));
+  gap: 1.75rem 2.5rem;
+  margin-top: 1.75rem;
+}
+
+.chart {
+  margin: 0;
+}
+
+svg.daily {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+svg.daily .bar {
+  fill: var(--accent);
+}
+
+svg.daily .hit {
+  fill: transparent;
+}
+
+svg.daily .day:hover .bar {
+  opacity: 0.75;
+}
+
+svg.daily .baseline {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+svg.daily .tick,
+svg.daily .peak {
+  fill: var(--muted);
+  font-size: 11px;
+  font-family: var(--sans);
+}
+
+details.as-table > summary {
+  cursor: pointer;
+  font-size: 0.82rem;
+  color: var(--muted);
+  margin-top: 0.5rem;
+  width: max-content;
+}
+
+.as-table table {
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  margin-top: 0.5rem;
+}
+
+.as-table th,
+.as-table td {
+  text-align: left;
+  padding: 0.15rem 1.5rem 0.15rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+/* Narrow screens: the glance goes above the thread, and the bar wraps. */
+@media (max-width: 56rem) {
+  .panel.with-aside {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1.5rem;
+  }
+
+  .glance {
+    position: static;
+    order: -1;
+    border-left: 0;
+    padding-left: 0;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 1rem;
+  }
+
+  .top {
+    flex-wrap: wrap;
+    row-gap: 0.5rem;
+  }
+
+  .nav {
+    margin-left: 0.5rem;
+  }
+
+  .event.step .event-head {
+    flex-wrap: wrap;
+  }
+
+  .step .summary-line {
+    flex-basis: 100%;
+    order: 5;
+  }
+
+  .md code,
+  .event-head code {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .event.step .event-head .tool {
+    flex: 0 1 auto;
+    min-width: 0;
   }
 }

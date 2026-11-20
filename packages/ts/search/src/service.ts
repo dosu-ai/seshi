@@ -225,6 +225,10 @@ function resultOf(hit: BackendHit): SearchResult {
     ...(started !== undefined ? { started_at: started } : {}),
     ...(ended !== undefined ? { ended_at: ended } : {}),
     updated_at: s.updated_at,
+    ...(s.title !== undefined ? { title: s.title } : {}),
+    ...(s.events !== undefined ? { events: s.events } : {}),
+    ...(s.tools !== undefined ? { tools: s.tools } : {}),
+    ...(s.redactions !== undefined ? { redactions: s.redactions } : {}),
     score: hit.score,
     hits: hit.hits,
     matches: hit.matches.map((m) => {

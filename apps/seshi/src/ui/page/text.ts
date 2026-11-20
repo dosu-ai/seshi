@@ -37,6 +37,18 @@ export function clock(iso: string | null | undefined): string {
     : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
+/** How long from `start` to `end`: `40 s`, `12 min`, `2 h 5 min`. */
+export function duration(start: string | null | undefined, end: string | null | undefined): string {
+  if (!start || !end) return "";
+  const ms = new Date(end).getTime() - new Date(start).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return "";
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s} s`;
+  const min = Math.round(s / 60);
+  if (min < 60) return `${min} min`;
+  return `${Math.floor(min / 60)} h ${min % 60} min`;
+}
+
 /** `github.com/acme/app` as `acme/app`: the host says little in a list. */
 export function shortRepo(repo: string): string {
   const parts = repo.split("/");

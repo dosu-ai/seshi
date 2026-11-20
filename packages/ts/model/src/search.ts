@@ -91,6 +91,16 @@ export interface SearchResult {
   started_at?: string;
   ended_at?: string;
   updated_at: string;
+  /** The person's first prompt as one line, with the blocks their agent's harness added
+   * (AGENTS.md, environment context, command wrappers) left out: what the session was about.
+   * Absent when no prompt of the person's was found. */
+  title?: string;
+  /** How many events the session's traces hold, of every role. */
+  events?: number;
+  /** The session's tool calls, by tool name. */
+  tools?: Record<string, number>;
+  /** What redaction replaced in the session, by rule. */
+  redactions?: Record<string, number>;
   /** How well the session matched: higher is better, comparable within one answer only. */
   score: number;
   /** How many of its records matched. */

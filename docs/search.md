@@ -65,7 +65,13 @@ caller's visibility allow, the most recently active first (by the last event, or
 update when the traces carry no times), with no matches. `since` and `until` then keep sessions
 whose span overlaps them, and `sort` has no effect. A browse's `cursor` marks the last
 session of the page rather than an offset, so sessions that arrive while you page neither
-repeat nor push others off a page. The [team UI](ui.md) lists sessions this
+repeat nor push others off a page.
+
+Each result also says what the session was about, in a browse and a search alike: `title`, the
+person's first prompt as one line with the blocks their agent's harness added left out
+(AGENTS.md, environment context, command wrappers, system reminders); `events`, how many events
+its traces hold; `tools`, its tool calls by tool name; and `redactions`, what redaction replaced,
+by rule. The [team UI](ui.md) lists sessions this
 way. `seshi search` still needs words.
 
 The output is plain text; `--json` prints the API's `SearchResults`. Exit 0 also when nothing

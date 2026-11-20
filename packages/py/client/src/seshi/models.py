@@ -967,6 +967,14 @@ class SearchResult(Response):
     started_at: str | None = None
     ended_at: str | None = None
     updated_at: str
+    title: str | None = None
+    """The person's first prompt as one line, the harness's own blocks left out."""
+    events: int | None = None
+    """How many events the session's traces hold, of every role."""
+    tools: dict[str, int] | None = None
+    """The session's tool calls, by tool name."""
+    redactions: dict[str, int] | None = None
+    """What redaction replaced in the session, by rule."""
     score: float
     hits: int
     matches: list[SearchMatch]

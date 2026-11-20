@@ -20,8 +20,9 @@ import { indexText, MATCH_END, MATCH_START } from "./snippet";
 /** The index's own schema: a file built under another is wiped and rebuilt from the change
  * feeds. 3: sessions' `agent` column is `format`, and the feed's copies of entries written
  * before seshi 0.16 carry the format filled in from the session. 4: sessions gained `labels`. 5:
- * sessions' `repo`, `harness`, `agent_version` and `models`. */
-export const INDEX_SCHEMA = "seshi/search-index/5";
+ * sessions' `repo`, `harness`, `agent_version` and `models`. 6: sessions' `title`, `events`,
+ * `tools` and `redactions`. */
+export const INDEX_SCHEMA = "seshi/search-index/6";
 
 const SNIPPET_TOKENS = 24;
 
@@ -62,6 +63,10 @@ CREATE TABLE IF NOT EXISTS sessions (
   ended_at INTEGER,
   updated_at TEXT NOT NULL,
   updated_ms INTEGER NOT NULL,
+  title TEXT,
+  events INTEGER,
+  tools TEXT,
+  redactions TEXT,
   traces TEXT NOT NULL,
   read_ms INTEGER NOT NULL DEFAULT 0,
   removed INTEGER NOT NULL DEFAULT 0,
@@ -115,6 +120,10 @@ interface SessionRow {
   ended_at: number | null;
   updated_at: string;
   updated_ms: number;
+  title: string | null;
+  events: number | null;
+  tools: string | null;
+  redactions: string | null;
   traces: string;
   read_ms: number;
   removed: number;
@@ -140,8 +149,19 @@ function sessionOf(row: SessionRow): IndexedSession {
     ...(row.started_at !== null ? { started_at: row.started_at } : {}),
     ...(row.ended_at !== null ? { ended_at: row.ended_at } : {}),
     updated_at: row.updated_at,
+    ...(row.title !== null ? { title: row.title } : {}),
+    ...(row.events !== null ? { events: row.events } : {}),
+    ...(row.tools !== null ? { tools: JSON.parse(row.tools) as Record<string, number> } : {}),
+    ...(row.redactions !== null
+      ? { redactions: JSON.parse(row.redactions) as Record<string, number> }
+      : {}),
     traces: JSON.parse(row.traces) as string[],
   };
+}
+
+/** A count map as a column: null when it counts nothing. */
+function counts(map: Record<string, number> | undefined): string | null {
+  return map && Object.keys(map).length > 0 ? JSON.stringify(map) : null;
 }
 
 /** Push the session filters every query shares (live sessions only, what the viewer may
@@ -347,6 +367,10 @@ export class SqliteIndex implements IndexStore {
         session.ended_at ?? null,
         session.updated_at,
         Date.parse(session.updated_at) || 0,
+        session.title ?? null,
+        session.events ?? null,
+        counts(session.tools),
+        counts(session.redactions),
         JSON.stringify(session.traces),
         readAt,
       ];
@@ -357,8 +381,9 @@ export class SqliteIndex implements IndexStore {
             `INSERT INTO sessions (owner, archive_id, format, session_id, origin_agent,
                native_session_id, project, branch, repo, harness, agent_version, models,
                labels, source_id, visibility, started_at, ended_at, updated_at, updated_ms,
-               traces, read_ms)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+               title, events, tools, redactions, traces, read_ms)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             RETURNING id`,
           )
           .get(session.owner, session.archive_id, ...values) as { id: number };
         id = row.id;
@@ -370,8 +395,8 @@ export class SqliteIndex implements IndexStore {
             `UPDATE sessions SET format = ?, session_id = ?, origin_agent = ?,
                native_session_id = ?, project = ?, branch = ?, repo = ?, harness = ?,
                agent_version = ?, models = ?, labels = ?, source_id = ?, visibility = ?,
-               started_at = ?, ended_at = ?, updated_at = ?, updated_ms = ?, traces = ?,
-               read_ms = ?, removed = 0
+               started_at = ?, ended_at = ?, updated_at = ?, updated_ms = ?, title = ?,
+               events = ?, tools = ?, redactions = ?, traces = ?, read_ms = ?, removed = 0
              WHERE id = ?`,
           )
           .run(...values, id);

@@ -5,6 +5,7 @@ import {
   type SessionMetadata,
   type Trace,
 } from "@seshi/model";
+import { promptTitle } from "@seshi/model/prompts";
 import {
   changeStamp,
   decodeJson,
@@ -578,6 +579,22 @@ export class Indexer {
     const latest = read.at(-1)?.trace;
     const agentVersion =
       metadata.agent_version ?? latest?.metadata.agent_version ?? held?.agent_version;
+    // A continuation adds to what the index holds; anything else is counted from scratch.
+    let title = held?.title;
+    let events = held?.events ?? 0;
+    const tools: Record<string, number> = { ...held?.tools };
+    for (const { trace } of read) {
+      events += trace.events.length;
+      for (const event of trace.events) {
+        if (title === undefined && event.role === "user") title = promptTitle(event.text);
+        if (event.role === "tool_call" && event.tool_name) {
+          tools[event.tool_name] = (tools[event.tool_name] ?? 0) + 1;
+        }
+      }
+    }
+    const redactions = Object.fromEntries(
+      Object.entries(metadata.redaction?.counts ?? {}).filter(([, n]) => n > 0),
+    );
     return {
       owner,
       archive_id: metadata.archive_id,
@@ -599,6 +616,10 @@ export class Indexer {
       ...(starts.length > 0 ? { started_at: Math.min(...starts) } : {}),
       ...(ends.length > 0 ? { ended_at: Math.max(...ends) } : {}),
       updated_at: metadata.updated_at,
+      ...(title !== undefined ? { title } : {}),
+      events,
+      ...(Object.keys(tools).length > 0 ? { tools } : {}),
+      ...(Object.keys(redactions).length > 0 ? { redactions } : {}),
       traces: [],
     };
   }

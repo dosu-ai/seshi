@@ -6,12 +6,15 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { Trace, TraceEvent } from "@seshi/model";
 import { beforeAll, describe, expect, it } from "vitest";
 import { type Assets, buildAssets } from "../web/assets";
 import { EMPTY, parseState, searchQuery, stateQuery, withFilter, withLabel } from "./page/filters";
 import { challengeOf, discover, finishSignIn, type PendingSignIn, startSignIn } from "./page/oidc";
 import { ROUTES, resolve } from "./page/routes";
+import { filesOf, sessionStats } from "./page/stats";
 import { fold, highlightParts, shortRepo, splitMarkers } from "./page/text";
+import { callSummary, stepIndexes, stepsOf } from "./page/thread";
 import { UI_PATH, uiCsp, uiHandler, underPrefix, withUi } from "./server";
 
 const ASSETS: Assets = {
@@ -288,5 +291,70 @@ describe("sign-in through the IdP", () => {
     await expect(finishSignIn(answer, pending, "seshi-cli", refused)).rejects.toThrow(
       /invalid_grant/,
     );
+  });
+});
+
+describe("the thread's steps and a session's stats", () => {
+  const ev = (index: number, role: TraceEvent["role"], extra: Partial<TraceEvent> = {}) =>
+    ({ index, role, text: "", timestamp: null, ...extra }) as TraceEvent;
+
+  it("pair each tool call with its result, wherever the result is", () => {
+    const events = [
+      ev(0, "user", { text: "go" }),
+      ev(1, "tool_call", { tool_name: "Bash", tool_call_id: "a", text: 'Bash {"command":"ls"}' }),
+      ev(2, "tool_call", { tool_name: "Read", tool_call_id: "b", text: 'Read {"file_path":"/x"}' }),
+      ev(3, "tool_result", { tool_call_id: "b", ok: true }),
+      ev(4, "tool_result", { tool_call_id: "a", ok: false }),
+      ev(5, "tool_result", { tool_call_id: "orphan" }),
+    ];
+    const steps = stepsOf(events);
+    expect(steps.map(stepIndexes)).toEqual([[0], [1, 4], [2, 3], [5]]);
+  });
+
+  it("say what a tool call did in one line", () => {
+    expect(callSummary('{"command":"bun test\\nmore"}')).toBe("bun test");
+    expect(callSummary('{"file_path":"/src/app.ts","content":"…"}')).toBe("/src/app.ts");
+    expect(callSummary('{"cmd":["git","status"]}')).toBe("git status");
+    expect(callSummary("not json\nsecond")).toBe("not json");
+  });
+
+  it("count prompts, tools, files, models and tokens across traces", () => {
+    const trace = {
+      started_at: "2026-11-20T10:00:00Z",
+      ended_at: "2026-11-20T10:12:00Z",
+      metadata: { model: "m1" },
+      llm_calls: [{ id: "1", model: "m2", usage: { input_tokens: 100, output_tokens: 20 } }],
+      events: [
+        ev(0, "user", { text: "<environment_context>x</environment_context>" }),
+        ev(1, "user", { text: "Fix it" }),
+        ev(2, "tool_call", { tool_name: "Edit", text: 'Edit {"file_path":"/a.ts"}' }),
+        ev(3, "tool_result", { ok: false }),
+        ev(4, "tool_call", {
+          tool_name: "apply_patch",
+          text: "apply_patch *** Begin Patch\n*** Update File: b.ts\n*** Add File: c.ts\n*** End Patch",
+        }),
+        ev(5, "assistant", { text: "done" }),
+      ],
+    } as unknown as Trace;
+    const s = sessionStats([trace], ["m0"]);
+    expect(s).toMatchObject({
+      started: "2026-11-20T10:00:00Z",
+      ended: "2026-11-20T10:12:00Z",
+      events: 6,
+      prompts: 1,
+      answers: 1,
+      toolCalls: 2,
+      failedCalls: 1,
+      tools: [
+        ["apply_patch", 1],
+        ["Edit", 1],
+      ],
+      models: ["m0", "m1", "m2"],
+      tokens: { input: 100, output: 20, cacheRead: 0, cacheWrite: 0 },
+    });
+    expect(s.files.map(([f]) => f).sort()).toEqual(["/a.ts", "b.ts", "c.ts"]);
+    expect(
+      filesOf(ev(0, "tool_call", { tool_name: "Bash", text: 'Bash {"command":"ls"}' })),
+    ).toEqual([]);
   });
 });
