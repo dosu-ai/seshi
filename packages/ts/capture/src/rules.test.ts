@@ -6,6 +6,7 @@ import {
   decide,
   type ExcludeRule,
   excludedBy,
+  excludePattern,
   folderExcluded,
   folderRule,
   normalizeRemote,
@@ -34,6 +35,7 @@ describe("remotes", () => {
     expect(normalizeRemote("https://user:pw@gitlab.example.com/a/b/")).toBe(
       "gitlab.example.com/a/b",
     );
+    expect(normalizeRemote("https://github.com/acme/App.GIT")).toBe("github.com/acme/App");
   });
 
   it("matches a pattern with wildcards, or everything under one without", () => {
@@ -42,6 +44,7 @@ describe("remotes", () => {
     expect(remoteMatches("github.com/acme-evil/app", "github.com/acme")).toBe(false);
     expect(remoteMatches("github.com/acme/team/app", "github.com/acme/*")).toBe(false);
     expect(remoteMatches("github.com/acme/team/app", "github.com/acme/**")).toBe(true);
+    expect(remoteMatches("github.com/acme/app", "github.com/**/app")).toBe(true);
     expect(remoteMatches("github.com/acme/app", "https://github.com/acme/app.git")).toBe(true);
   });
 });
@@ -230,36 +233,51 @@ describe("the decision (F9.5)", () => {
 });
 
 describe("the org's exclude list (capture.exclude)", () => {
+  const excluded = (remote: string, entry: string) => repoExcluded(remote, excludePattern(entry));
+
   it("names a repository by owner/name on any host, or host/owner/name on one, ignoring case", () => {
-    expect(repoExcluded("github.com/acme/payments", "Acme/Payments")).toBe(true);
-    expect(repoExcluded("gitlab.example.com/acme/payments", "acme/payments")).toBe(true);
-    expect(repoExcluded("github.com/Acme/Payments", "acme/payments")).toBe(true);
-    expect(repoExcluded("github.com/Acme/Payments.GIT", "acme/payments")).toBe(true);
-    expect(repoExcluded("github.com/acme/payments-ui", "acme/payments")).toBe(false);
-    expect(repoExcluded("github.com/other/acme", "acme/payments")).toBe(false);
-    expect(repoExcluded("github.com/acme/payments", "github.com/acme/payments")).toBe(true);
-    expect(repoExcluded("gitlab.com/acme/payments", "github.com/acme/payments")).toBe(false);
+    expect(excluded("github.com/acme/payments", "Acme/Payments")).toBe(true);
+    expect(excluded("gitlab.example.com/acme/payments", "acme/payments")).toBe(true);
+    expect(excluded("github.com/Acme/Payments", "acme/payments")).toBe(true);
+    expect(excluded("github.com/acme/payments-ui", "acme/payments")).toBe(false);
+    expect(excluded("github.com/other/acme", "acme/payments")).toBe(false);
+    expect(excluded("github.com/acme/payments", "github.com/acme/payments")).toBe(true);
+    expect(excluded("gitlab.com/acme/payments", "github.com/acme/payments")).toBe(false);
     // Written as a remote URL, the entry is normalized the same way.
-    expect(repoExcluded("github.com/acme/payments", "https://github.com/acme/payments.git")).toBe(
-      true,
-    );
-    expect(repoExcluded("github.com/acme/api", "git@github.com:acme/api.git")).toBe(true);
-    expect(repoExcluded("gitlab.com/acme/api", "git@github.com:acme/api.git")).toBe(false);
+    expect(excluded("github.com/acme/payments", "https://github.com/acme/payments.git")).toBe(true);
+    expect(excluded("github.com/acme/api", "git@github.com:acme/api.git")).toBe(true);
+    expect(excluded("gitlab.com/acme/api", "git@github.com:acme/api.git")).toBe(false);
   });
 
-  it("takes wildcards: * within one segment, ** across them", () => {
-    expect(repoExcluded("github.com/acme/anything", "acme/*")).toBe(true);
-    expect(repoExcluded("github.com/other/anything", "acme/*")).toBe(false);
-    expect(repoExcluded("github.com/acme/pay-api", "github.com/acme/pay-*")).toBe(true);
-    expect(repoExcluded("gitlab.com/acme/pay-api", "github.com/acme/pay-*")).toBe(false);
-    expect(repoExcluded("github.com/clients-x/api", "github.com/clients-**")).toBe(true);
-    expect(repoExcluded("gitlab.com/acme/team/api", "acme/*")).toBe(false);
-    expect(repoExcluded("gitlab.com/acme/team/api", "acme/**")).toBe(true);
+  it("reads a number after the host as a port, as a remote URL has it", () => {
+    expect(excludePattern("git.acme.com:8443/acme/app")).toBe("git.acme.com/acme/app");
+    expect(excluded("git.acme.com/acme/app", "git.acme.com:8443/acme/app")).toBe(true);
+    expect(excludePattern("git@github.com:acme/app")).toBe("github.com/acme/app");
   });
 
-  it("matches everything under an entry with no wildcard, as capture.remotes does", () => {
-    expect(repoExcluded("github.com/acme/app", "github.com/acme")).toBe(true);
-    expect(repoExcluded("github.com/acme-evil/app", "github.com/acme")).toBe(false);
+  it("takes wildcards: * within one segment, ** across any number, none included", () => {
+    expect(excluded("github.com/acme/anything", "acme/*")).toBe(true);
+    expect(excluded("github.com/other/anything", "acme/*")).toBe(false);
+    expect(excluded("github.com/acme/pay-api", "github.com/acme/pay-*")).toBe(true);
+    expect(excluded("gitlab.com/acme/pay-api", "github.com/acme/pay-*")).toBe(false);
+    expect(excluded("github.com/clients-x/api", "github.com/clients-**")).toBe(true);
+    expect(excluded("gitlab.com/acme/team/api", "acme/*")).toBe(false);
+    expect(excluded("gitlab.com/acme/team/api", "acme/**")).toBe(true);
+    expect(excluded("github.com/payments", "github.com/**/payments")).toBe(true);
+    expect(excluded("github.com/acme/x/payments", "github.com/**/payments")).toBe(true);
+    expect(excluded("github.com/acme/payments", "**/payments")).toBe(true);
+  });
+
+  it("covers everything under a whole remote with no wildcard, as capture.remotes does", () => {
+    expect(excluded("github.com/acme/app", "github.com/acme")).toBe(true);
+    expect(excluded("github.com/acme-evil/app", "github.com/acme")).toBe(false);
+  });
+
+  it("matches a bare name only as the repo's own name, never an owner or a group", () => {
+    expect(excluded("github.com/acme/payments", "payments")).toBe(true);
+    expect(excluded("github.com/payments/website", "payments")).toBe(false);
+    expect(excluded("gitlab.com/x/payments/docs", "payments")).toBe(false);
+    expect(excluded("github.com/acme/app", "acme")).toBe(false);
   });
 
   it("names a folder and everything under it, whole segments only", () => {
@@ -269,20 +287,29 @@ describe("the org's exclude list (capture.exclude)", () => {
     expect(folderExcluded("/work/a/secret/src", "/work/*/secret", "linux")).toBe(true);
     expect(folderExcluded("/work/a/b/secret", "/work/*/secret", "linux")).toBe(false);
     expect(folderExcluded("/work/a/b/secret", "/work/**/secret", "linux")).toBe(true);
+    expect(folderExcluded("/work/secret", "/work/**/secret", "linux")).toBe(true);
+    expect(folderExcluded("/home/me/clients", "/home/me/clients/**", "linux")).toBe(true);
+    expect(folderExcluded("/home/me/clients-old", "/home/me/clients/**", "linux")).toBe(false);
     expect(folderExcluded("/work/a/secretive", "/work/*/secret", "linux")).toBe(false);
     expect(folderExcluded("C:\\Work\\A\\Secret\\x", "c:/work/*/secret", "win32")).toBe(true);
+    expect(folderExcluded("\\\\fs01\\Projects\\x", "\\\\FS01\\projects", "win32")).toBe(true);
   });
 
   const folder = (path: string, real?: string): ExcludeRule => ({
     entry: path,
-    folder: path,
+    path,
     ...(real ? { real } : {}),
   });
+  const repoEntry = (entry: string): ExcludeRule => ({ entry, repo: excludePattern(entry) });
 
   it("finds the entry a place is in, by its folder, real folder or any remote", () => {
     const rules: CaptureRules = {
       ...DEFAULT_RULES,
-      exclude: [{ entry: "acme/payments" }, folder("/home/me/clients", "/data/clients")],
+      exclude: [
+        repoEntry("acme/payments"),
+        folder("/home/me/clients", "/data/clients"),
+        folder("/tmp/*/secret", "/private/tmp/*/secret"),
+      ],
     };
     const at = (place: Place) => excludedBy(rules, place, "linux")?.entry;
     expect(at({ cwd: "/work/app", repo: repo() })).toBeUndefined();
@@ -295,12 +322,14 @@ describe("the org's exclude list (capture.exclude)", () => {
     expect(at({ cwd: "/home/me/clients/x" })).toBe("/home/me/clients");
     expect(at({ cwd: "/link/x", real: "/data/clients/x" })).toBe("/home/me/clients");
     expect(at({ cwd: "/home/me/clients-old" })).toBeUndefined();
+    // A glob's real folder: a session the agent reports by its real path.
+    expect(at({ cwd: "/private/tmp/a/secret/src" })).toBe("/tmp/*/secret");
   });
 
   const exclude: CaptureRules = {
     ...DEFAULT_RULES,
     paths: [{ path: "/work", capture: true }],
-    exclude: [{ entry: "acme/payments" }, folder("/home/me/clients")],
+    exclude: [repoEntry("acme/payments"), folder("/home/me/clients")],
   };
   const payments: Place = {
     cwd: "/work/payments",

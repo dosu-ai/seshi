@@ -415,22 +415,25 @@ global level, on by default once capture is installed; `seshi capture off|on` se
 changes one); the longest matching folder decides. `capture.remotes` is the org rule, meant to
 be delivered with a managed CLI config: when it is set, only sessions in a git repo with a
 remote matching one of its patterns are captured (`github.com/acme` matches every repo under
-it; `*` stands for one path segment, `**` for any number). `capture.exclude` is the org's exclude
-list, delivered the same way: no session in a place it names is ever uploaded. Each entry is
+it; `*` stands for one path segment, `**` for any number, none included). `capture.exclude` is
+the org's exclude list, delivered the same way: no session in a place it names is ever
+uploaded. Each entry is
 
 - a repository, `owner/name` on any host or `host/owner/name` on that one (`acme/payments`,
-  `github.com/acme/*`; a remote URL works too), matched against every remote of the session's
-  repo, ignoring case, from any whole segment on: so `acme/payments` is
-  `github.com/acme/payments` and `gitlab.example.com/acme/payments`, never `acme/payments-ui`.
-  As in `capture.remotes`, one with no wildcard also covers everything under it
-  (`github.com/acme`, every acme repo there);
-- a folder, starting with `/` or `~` (or a drive, `C:\`), and everything under it: `~/clients`
-  is `~/clients/x`, not `~/clients-old`. Its symbolic links are resolved too.
+  `github.com/acme/*`; a remote URL works too, and a number after the host is read as a port),
+  matched against every remote of the session's repo, ignoring case. An entry names the
+  remote's last segments: `acme/payments` is `github.com/acme/payments` and
+  `gitlab.example.com/acme/payments`, never `acme/payments-ui`, and a bare `payments` is any repo
+  named payments, not an owner called that. A whole remote with no wildcard also covers
+  everything under it, as in `capture.remotes` (`github.com/acme`: every acme repo there);
+- a folder, starting with `/`, `~`, a drive (`C:\`) or a network share (`\\server`), and
+  everything under it: `~/clients` is `~/clients/x`, not `~/clients-old`. Its symbolic links are
+  resolved too (up to its first wildcard).
 
-In both, `*` matches within one path segment and `**` across them; blank entries and `#` comments
-are skipped. From the environment the list is comma-separated
-(`SESHI_CAPTURE__EXCLUDE=acme/payments,~/clients`). `seshi capture status` names the entry that
-turned a session off.
+In both, `*` matches within one path segment and `**` across any number of them, none included
+(`~/work/**/secrets` is `~/work/secrets` too). Blank entries and `#` comments are skipped. From
+the environment the list is comma-separated (`SESHI_CAPTURE__EXCLUDE=acme/payments,~/clients`).
+`seshi capture status` names the entry that turned a session off.
 
 Like a repo's own `capture = false`, the org rules can only turn capture off. A repo opts out
 for everyone who works in it with its own committed `.seshi/config.toml`:

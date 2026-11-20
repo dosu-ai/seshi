@@ -517,35 +517,49 @@ describe("the rules cache", () => {
   it("reads the org's exclude list from the file or SESHI_CAPTURE__EXCLUDE", async () => {
     cliConfig(`[capture]\nexclude = ["", "# the payments team", "acme/payments", "~/clients"]\n`);
     expect((await captureRules(host, paths)).rules.exclude).toEqual([
-      { entry: "acme/payments" },
-      { entry: "~/clients", folder: join(dir, "clients") },
+      { entry: "acme/payments", repo: "acme/payments" },
+      { entry: "~/clients", path: join(dir, "clients") },
     ]);
-    const env = { ...host.env, SESHI_CAPTURE__EXCLUDE: "github.com/acme/*,/srv/secret" };
+    const env = { ...host.env, SESHI_CAPTURE__EXCLUDE: "github.com/Acme/*,/srv/secret" };
     expect((await captureRules({ ...host, env }, paths)).rules.exclude).toEqual([
-      { entry: "github.com/acme/*" },
-      { entry: "/srv/secret", folder: "/srv/secret" },
+      { entry: "github.com/Acme/*", repo: "github.com/acme/*" },
+      { entry: "/srv/secret", path: "/srv/secret" },
     ]);
   });
 
-  it("reads an exclude entry as a repository, or a folder from /, ~ or a drive", () => {
-    expect(excludeRule("  acme/app ", "/h")).toEqual({ entry: "acme/app" });
-    expect(excludeRule("git@github.com:acme/app.git", "/h")).toEqual({
-      entry: "git@github.com:acme/app.git",
+  it("reads an exclude entry as a repository, or a folder from /, ~, a drive or a share", () => {
+    expect(excludeRule("  acme/app ", "/h")).toEqual({ entry: "acme/app", repo: "acme/app" });
+    expect(excludeRule("git@github.com:Acme/app.git", "/h")).toEqual({
+      entry: "git@github.com:Acme/app.git",
+      repo: "github.com/acme/app",
     });
-    expect(excludeRule("~", "/h")).toMatchObject({ entry: "~", folder: "/h" });
-    expect(excludeRule("~/x/*", "/h")).toEqual({ entry: "~/x/*", folder: join("/h", "x/*") });
-    expect(excludeRule("C:\\work", "/h")).toEqual({ entry: "C:\\work", folder: "C:\\work" });
+    expect(excludeRule("~", "/h")).toMatchObject({ entry: "~", path: "/h" });
+    expect(excludeRule("~/x/*", "/h")).toEqual({ entry: "~/x/*", path: join("/h", "x/*") });
+    expect(excludeRule("C:\\work", "/h")).toEqual({ entry: "C:\\work", path: "C:\\work" });
+    expect(excludeRule("\\\\fs01\\projects", "/h")).toEqual({
+      entry: "\\\\fs01\\projects",
+      path: "\\\\fs01\\projects",
+    });
     expect(excludeRule("", "/h")).toBeUndefined();
     expect(excludeRule("  # note", "/h")).toBeUndefined();
   });
 
-  it("resolves a folder entry's symbolic links, so a session in the real folder is excluded", () => {
+  it("keeps control characters of an entry out of the messages that name it", () => {
+    expect(excludeRule("acme/\x1b[2Japp", "/h")?.entry).toBe("acme/\uFFFD[2Japp");
+  });
+
+  it("resolves a folder entry's symbolic links up to its first wildcard", () => {
     mkdirSync(join(dir, "real"));
     symlinkSync(join(dir, "real"), join(dir, "link"));
     expect(excludeRule("~/link", dir)).toEqual({
       entry: "~/link",
-      folder: join(dir, "link"),
+      path: join(dir, "link"),
       real: join(dir, "real"),
+    });
+    expect(excludeRule("~/link/*/secret", dir)).toEqual({
+      entry: "~/link/*/secret",
+      path: join(dir, "link", "*", "secret"),
+      real: join(dir, "real", "*", "secret"),
     });
   });
 
