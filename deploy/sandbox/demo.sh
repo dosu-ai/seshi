@@ -124,7 +124,7 @@ proof() {
   heading "1. In the sandbox: the file the agent wrote"
   if [ -n "$fake" ]; then
     sbx exec "$BOX" -- sh -c "grep -rIl --exclude-dir=.claude --exclude-dir=.local '$fake' /home/agent 2>/dev/null | while read -r f; do echo \"\$f:\"; grep -h '$fake' \"\$f\"; done" |
-      tr -d '\000-\010\013-\037\177' || true
+      LC_ALL=C tr -cd '\11\12\40-\176' || true
   else
     echo "(run '$0 prompt' to plant a fake token)"
   fi
