@@ -22,7 +22,6 @@ import {
   isJsonObject,
   type RecordShape,
   redactRecords,
-  reshape,
 } from "@seshi/kit";
 
 const ENTRY_IDS = ["type", "id", "parentId", "timestamp"];
