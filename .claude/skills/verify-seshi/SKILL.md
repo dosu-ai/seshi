@@ -30,6 +30,7 @@ by side.
 bun install                       # once per checkout
 $C up                             # local mode: the CLI writes the bucket itself
 $C up --server                    # or: seshi serve on 127.0.0.1:<free port>, signed in with the org key
+$C up --idp                       # or: server mode behind a stand-in IdP, signed in through it
 export VERIFY_SESHI_RUN=<id>      # copy the export line `up` prints; every later command needs it
 ```
 
@@ -40,7 +41,9 @@ export VERIFY_SESHI_RUN=<id>      # copy the export line `up` prints; every late
   when `USER` is unset; no shared settings, so seshi's built-in defaults apply). Its output is
   in the run's `logs/init.log`. In server mode it instead runs `seshi admin init`, starts
   `seshi serve`, waits until `GET /healthz` answers `{"ok":true,...}`, then runs
-  `seshi login --key -` as the user `verifier`. Ready means `up` returned 0 and `$C doctor` says
+  `seshi login --key -` as the user `verifier`. `--idp` is server mode with `[auth.oidc]` pointed
+  at the repository's stand-in IdP, which `up` starts too, and signs in through the device flow
+  as `alice@acme.com` instead (see [features/idp-sign-in.md](features/idp-sign-in.md)). Ready means `up` returned 0 and `$C doctor` says
   `ready`. When `up` fails it stops what it started, deletes the run folder and keeps its logs
   in `.verify/seshi/<run-id>/up-logs/`.
 - seshi runs from source (`bun run apps/seshi/src/main.ts`, through a `seshi` shim on the run's
@@ -69,7 +72,8 @@ answers, and the port is held by that process. It ends with `ready` (exit 0) or 
 | Run any seshi command in the run | `$C cli --name <label> -- <seshi args…>` (example: `$C cli --name ls -- sessions ls`) |
 | Simulate an agent session turn | `$C agent claude-code <session-id> [--turns N] [--secret]` |
 | Start the explorer page | `$C explore`, which prints `http://127.0.0.1:<port>/?token=…` |
-| Stop one process | `$C stop serve` or `$C stop explore` |
+| Stop one process | `$C stop serve`, `$C stop explore` or `$C stop idp` |
+| Make the IdP refuse renewal, expire the sign-in, read its log (`--idp` runs) | `$C idp refuse`, `$C idp expire`, `$C idp calls` |
 | The run's environment, for ad-hoc commands | `eval "$($C env)"` (in a subshell; it changes HOME) |
 
 `agent` is the real capture path, the way Claude Code drives it:
@@ -128,11 +132,14 @@ It stops only the processes this run started (by pid and start time, never by na
 the run folder under `$TMPDIR/seshi-verify/`, and leaves `.verify/seshi/<run-id>/` in place. Run
 it after every run, failed ones included, so no server or port is left behind. If a run's folder
 is gone but a process survived, `$C stop` can't find it: look for
-`seshi serve --config $TMPDIR/seshi-verify/<run-id>/seshi.toml` in `ps` and kill that pid only.
+`seshi serve --config $TMPDIR/seshi-verify/<run-id>/seshi.toml` (or, for `--idp`,
+`scripts/idp.ts $TMPDIR/seshi-verify/<run-id>/…`) in `ps` and kill that pid only.
 
 ## Helpers
 
 - `scripts/control-seshi`: the harness above. `$C help` prints its usage.
+- `scripts/idp.ts`: runs the stand-in IdP (`IdpServer` from `tests/tooling/cli.ts`) as a
+  process, with its keys also served over https; `up --idp` starts it.
 - `scripts/transcript.ts`: appends synthetic Claude Code turns (`bun scripts/transcript.ts
   <path> <session-id> <cwd> [--turns N] [--secret]`); `agent` calls it.
 
