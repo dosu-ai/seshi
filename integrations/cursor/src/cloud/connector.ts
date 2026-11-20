@@ -408,6 +408,9 @@ export function cursorCloudConnector(options: CursorCloudConnectorOptions = {}):
 
       /** Reads the agent's new runs into `entry`; true when every run listed was handled. */
       async function syncAgent(agent: CursorAgent, entry: AgentEntry): Promise<boolean> {
+        // Any of the agent's repositories the org lists in [capture] redact_tool_calls: its runs
+        // are stored with their tool calls redacted (the pipeline does it, before any store).
+        const redactToolCalls = ctx.toolCallsRedactedBy?.(repoUrls(agent));
         const runs = (await api.listRuns(agent.id)).filter((run) => after(run, entry.through));
         for (const listed of runs) {
           ctx.signal.throwIfAborted();
@@ -456,7 +459,10 @@ export function cursorCloudConnector(options: CursorCloudConnectorOptions = {}):
             ...(project ? { project } : {}),
             ...(branch ? { branch } : {}),
           };
-          const outcome = await ctx.submit(envelope);
+          const outcome = await ctx.submit(
+            envelope,
+            redactToolCalls !== undefined ? { redactToolCalls } : undefined,
+          );
           if (outcome.status === "failed" && outcome.code === "offset_mismatch") {
             const expected = expectedOffset(outcome.message);
             const release = `its runs are held until seshi reprocess --source ${id} --since <time> releases them`;

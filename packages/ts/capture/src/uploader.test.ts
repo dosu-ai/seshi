@@ -31,7 +31,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type CaptureRulesAnswer, readOrgRules } from "./org-rules";
 import { type CapturePaths, capturePaths } from "./paths";
-import { DEFAULT_RULES } from "./rules";
+import { DEFAULT_RULES, decide } from "./rules";
 import { excludeRule, type RulesSnapshot, withServerExcludes } from "./rules-cache";
 import { type RetractOutcome, RetractRefused, type SessionSink, SignInNeeded } from "./sink";
 import { appendSpool } from "./spool";
@@ -1006,6 +1006,8 @@ describe("the rules apply to the uploader too (F9.3)", () => {
 class ListingServer extends FakeServer {
   /** The list it serves; `null`: a server older than the route (404). */
   list: string[] | null = [];
+  /** The tool-call redaction list it serves; undefined: a server older than that list. */
+  redact: string[] | undefined;
   /** How many fetches fail first (the server unreachable). */
   rulesFail = 0;
   readonly rulesAsked: (string | undefined)[] = [];
@@ -1017,9 +1019,15 @@ class ListingServer extends FakeServer {
       throw new ServerError(503, "unavailable", "the server is down");
     }
     if (this.list === null) return "none";
-    const current = `"${createHash("sha256").update(JSON.stringify(this.list)).digest("hex")}"`;
+    const current = `"${createHash("sha256")
+      .update(JSON.stringify([this.list, this.redact]))
+      .digest("hex")}"`;
     if (etag === current) return "unchanged";
-    return { exclude: [...this.list], etag: current };
+    return {
+      exclude: [...this.list],
+      ...(this.redact ? { redact_tool_calls: [...this.redact] } : {}),
+      etag: current,
+    };
   }
 }
 
@@ -1248,6 +1256,7 @@ describe("the server's exclude list (GET /v1/capture/rules)", () => {
         { entry: "~/clients", path: join(dir, "clients") },
         { entry: "acme/app", repo: "acme/app" },
       ],
+      redact: [],
     });
   });
 
@@ -1393,6 +1402,79 @@ describe("the server's exclude list (GET /v1/capture/rules)", () => {
     writeFileSync(join(kept, "results", "r1.json"), "{}");
     await up.pass({ sweep: true });
     expect(existsSync(kept)).toBe(false);
+  });
+
+  describe("and its tool-call redaction list", () => {
+    /** A stand-in for an agent's pass: every `text` field replaced. */
+    const pass = (text: string) => text.replace(/"text":"[^"]*"/g, '"text":"[redacted:tool-call]"');
+    const redacting: CaptureAgent = { ...agent, redactToolCalls: pass };
+    const transcriptOf = (id: string) =>
+      server.uploads
+        .filter((u) => u.session_id === id)
+        .map((u) => u.transcript)
+        .join("");
+
+    it("redacts a session in a place the server lists, joined with this machine's list", async () => {
+      listing.redact = ["~/labs"];
+      sessionIn("s1", "labs");
+      sessionIn("s2", "app");
+      const up = listed({ agents: [redacting] });
+      await up.pass();
+      expect(transcriptOf("s1")).toContain("[redacted:tool-call]");
+      expect(transcriptOf("s1")).not.toContain('"one"');
+      expect(transcriptOf("s2")).toContain('"one"');
+      expect(readOrgRules(paths)).toMatchObject({ redact_tool_calls: ["~/labs"] });
+      expect(readOrgRules(paths)?.compiled?.redact).toEqual([
+        { entry: "~/labs", path: join(dir, "labs") },
+      ]);
+    });
+
+    it("names the entry and the server it came from", async () => {
+      listing.redact = ["~/labs"];
+      sessionIn("s1", "labs");
+      await listed({ agents: [redacting] }).pass();
+      const snapshot = withServerExcludes({ rules: DEFAULT_RULES }, paths, dir);
+      const decision = decide(
+        { rules: snapshot.rules, place: { cwd: join(dir, "labs") } },
+        "linux",
+      );
+      expect(decision.redacted).toEqual({
+        entry: "~/labs",
+        from: "server",
+        server: "https://seshi.test",
+      });
+      expect(decision.redact_tool_calls).toBe(
+        "the org redacts tool calls in ~/labs (https://seshi.test's [capture] redact_tool_calls)",
+      );
+    });
+
+    it("excludes rather than redacts a place on both of the server's lists", async () => {
+      listing.list = ["~/labs"];
+      listing.redact = ["~/labs"];
+      sessionIn("s1", "labs");
+      await listed({ agents: [redacting] }).pass();
+      expect(server.uploads).toEqual([]);
+    });
+
+    it("uploads as before from a server older than the list", async () => {
+      sessionIn("s1", "labs");
+      await listed({ agents: [redacting] }).pass();
+      expect(transcriptOf("s1")).toContain('"one"');
+      expect(readOrgRules(paths)?.redact_tool_calls).toBeUndefined();
+    });
+
+    it("takes a changed list at the next fetch", async () => {
+      sessionIn("s1", "labs");
+      const up = listed({ agents: [redacting], orgRulesRefreshMs: 60_000 });
+      await up.pass();
+      expect(transcriptOf("s1")).toContain('"one"');
+      listing.redact = ["~/labs"];
+      clock = new Date(clock.getTime() + 120_000);
+      sessionIn("s2", "labs");
+      await up.pass();
+      expect(readOrgRules(paths)?.redact_tool_calls).toEqual(["~/labs"]);
+      expect(transcriptOf("s2")).not.toContain('"one"');
+    });
   });
 });
 

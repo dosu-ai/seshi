@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { loadServerConfig, type ServerConfig } from "@seshi/config";
 import { BUILTIN_FORMATS, FormatRegistry } from "@seshi/formats";
 import type { Connector } from "@seshi/kit";
+import type { Envelope } from "@seshi/model";
 import { getTrace, type Reviewer, uploadEnvelope } from "@seshi/pipeline";
 import { fakeProviderServer, KeywordModel } from "@seshi/review/testing";
 import { archiveId, listReviews, readCheckpoint, readMetadata } from "@seshi/store";
@@ -526,5 +527,84 @@ describe("the comparison", () => {
     expect(restartRequired).toEqual([]);
     expect(config.sources).toBe(b.sources);
     expect(config.store).toBe(a.store);
+  });
+});
+
+describe("reloading the org's tool-call redaction list", () => {
+  /** A datadog connector that asks the list about one repository each run. */
+  function asker(repo: string): Connector & { answers: (string | undefined)[] } {
+    const connector = {
+      kind: "datadog",
+      answers: [] as (string | undefined)[],
+      async run(ctx: Parameters<Connector["run"]>[0]) {
+        connector.answers.push(ctx.toolCallsRedactedBy?.([repo]));
+        return undefined;
+      },
+    };
+    return connector;
+  }
+
+  it("combines seshi.toml's list with a drop-in's, serves it, and applies a change at once", async () => {
+    writeConfig(`${dd("a")}\n[capture]\nredact_tool_calls = ["acme/research", "~/labs"]\n`);
+    mkdirSync(join(dir, "seshi.d"));
+    const dropIn = join(dir, "seshi.d", "adx.toml");
+    writeFileSync(dropIn, '[capture]\nredact_tool_calls = ["github.com/acme/ml-*"]\n', {
+      mode: 0o600,
+    });
+    const connector = asker("https://github.com/acme/ml-pipeline.git");
+    const instance = await start({ connectors: [connector] });
+    expect(instance.captureRedactToolCalls).toEqual([
+      "acme/research",
+      "~/labs",
+      "github.com/acme/ml-*",
+    ]);
+    await instance.jobs.runNow("source:a");
+    expect(connector.answers).toEqual(["github.com/acme/ml-*"]);
+
+    // The drop-in is rewritten and the server reloads: the next run sees the new list.
+    writeFileSync(dropIn, '[capture]\nredact_tool_calls = ["# none for now"]\n', { mode: 0o600 });
+    expect(await instance.reload("api")).toMatchObject({
+      outcome: "applied",
+      changed: ["capture"],
+    });
+    expect(instance.captureRedactToolCalls).toEqual(["acme/research", "~/labs"]);
+    await instance.jobs.runNow("source:a");
+    expect(connector.answers).toEqual(["github.com/acme/ml-*", undefined]);
+
+    // Ingest applies the list as it runs now: an upload whose repo is listed is stored with
+    // its tool calls redacted, one elsewhere as it came.
+    const withCall = (id: string, repo: string) => {
+      const base = envelope(id);
+      const call = JSON.stringify({
+        role: "assistant",
+        content: null,
+        tool_calls: [{ id: "c1", name: "Read", args: '{"path":"/repo/secret.ts"}' }],
+        timestamp: "2026-09-01T00:00:02Z",
+      });
+      const result = JSON.stringify({
+        role: "tool",
+        tool_call_id: "c1",
+        content: "export const SECRET_SOURCE = 1;",
+        timestamp: "2026-09-01T00:00:03Z",
+      });
+      const payload = base.payload as { text: string };
+      return {
+        ...base,
+        repo,
+        payload: { ...payload, text: `${payload.text}${call}\n${result}\n` },
+      };
+    };
+    const storedText = async (id: string) => {
+      const archive = archiveId("alice", "trajectory", id);
+      const meta = await readMetadata(instance.store, "alice", archive);
+      return JSON.stringify(
+        (await getTrace(instance.store, "alice", archive, meta?.head as string))?.records,
+      );
+    };
+    await instance.pipeline.submit(withCall("r1", "github.com/acme/research") as Envelope);
+    expect(await storedText("r1")).not.toContain("SECRET_SOURCE");
+    expect(await storedText("r1")).toContain("[redacted:tool-call]");
+    await instance.pipeline.submit(withCall("r2", "github.com/acme/web") as Envelope);
+    expect(await storedText("r2")).toContain("SECRET_SOURCE");
   });
 });

@@ -18,6 +18,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { HttpSessionDB } from "@seshi/client";
 import {
   addOpencodeTurn,
   type OpencodeExport,
@@ -29,6 +30,7 @@ import { VERSION } from "@seshi/model";
 import { getSession } from "@seshi/pipeline";
 import { compileRuleSet, validatePack } from "@seshi/redact";
 import { archiveId, ensureLayout, FsStore, keys, readChanges } from "@seshi/store";
+import { credentialFor } from "seshi/account";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Machine, startServer, type TestServer } from "../tooling/cli";
 import { transcript } from "../tooling/testdata";
@@ -1887,5 +1889,64 @@ describe("resending uploaded sessions (X4.9)", () => {
     expect(off.code).toBe(6);
     expect(off.out).toContain("turned off");
     expect(state().sessions[KEY].rebuild).toBeUndefined();
+  });
+});
+
+describe("the server's [capture] redact_tool_calls", () => {
+  const uploads = () =>
+    server.requests.filter((r) => r.method === "POST" && r.path === "/v1/sessions");
+
+  it("reaches a laptop with no list of its own, which redacts before upload and says whose list it is", async () => {
+    await server.stop();
+    server = await startServer({ config: `[capture]\nredact_tool_calls = ["${project}"]\n` });
+    orgKey = (await server.auth.initAdmin({ owner: "ops" })).org_key?.token as string;
+    await signIn(machine, server.url, orgKey);
+    await hook();
+    expect((await daemon()).summary).toMatchObject({ uploaded: 1 });
+    const sent = JSON.parse(uploads()[0]?.body ?? "{}").transcript as string;
+    expect(sent).not.toContain("/repo/app/auth.ts");
+    expect(sent).not.toContain("export const KEY");
+    expect(sent).toContain('"id":"toolu_01AbCdEfGhJkLmNpQr","name":"Read"');
+    expect(sent).toContain("How does auth work?");
+
+    const status = await machine.seshi(["capture", "status", "--session", SESSION, "--json"]);
+    expect(JSON.parse(status.out).session).toMatchObject({
+      capture: true,
+      redacted: { entry: project, from: "server", server: server.url },
+    });
+    const human = await machine.seshi(["capture", "status", "--session", SESSION], {
+      env: { NO_COLOR: "1" },
+    });
+    expect(human.out).toContain(`(${server.url}'s [capture] redact_tool_calls)`);
+  });
+
+  it("redacts an upload whose repo it names, from a client that did not (an older laptop)", async () => {
+    await server.stop();
+    server = await startServer({ config: `[capture]\nredact_tool_calls = ["acme/research"]\n` });
+    orgKey = (await server.auth.initAdmin({ owner: "ops" })).org_key?.token as string;
+    await signIn(machine, server.url, orgKey);
+    const credential = await credentialFor(
+      { logins: machine.logins, env: machine.env },
+      server.url,
+      "upload",
+    );
+    // The org key states its user, as the CLI signed in above.
+    const db = new HttpSessionDB({ server: server.url, token: credential.token, user: OWNER });
+    for (const [id, repo] of [
+      ["old-1", "github.com/acme/research"],
+      ["old-2", "github.com/acme/web"],
+    ] as const) {
+      await db.ingest({ format: "claude-code", session_id: id, transcript: HEAD, repo });
+    }
+    const records = async (id: string) => {
+      const out = await machine.seshi(["sessions", "export", "claude-code", id]);
+      expect(out.code, out.err).toBe(0);
+      return out.out;
+    };
+    expect(await records("old-1")).not.toContain("export const KEY");
+    expect(await records("old-1")).toContain("[redacted:tool-call]");
+    const show = await machine.seshi(["sessions", "show", "claude-code", "old-1", "--json"]);
+    expect(JSON.parse(show.out).redaction.counts["tool-call"]).toBe(2);
+    expect(await records("old-2")).toContain("export const KEY");
   });
 });

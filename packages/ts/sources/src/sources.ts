@@ -28,7 +28,10 @@ import {
 } from "@seshi/store";
 
 export interface Submitter {
-  submit(envelope: Envelope, options?: { onFailure?: "throw" | "record" }): Promise<SubmitOutcome>;
+  submit(
+    envelope: Envelope,
+    options?: { onFailure?: "throw" | "record"; redactToolCalls?: string },
+  ): Promise<SubmitOutcome>;
   readonly health?: { count(sourceId: string, outcome: "failed" | "excluded"): void };
 }
 
@@ -106,6 +109,8 @@ export interface SourcesOptions {
   now?: () => Date;
   /** The org's exclude list as it runs now (it changes on reload); none when omitted. */
   excludes?: () => RepoExcludes;
+  /** The org's tool-call redaction list as it runs now; none when omitted. */
+  toolCallRedactions?: () => RepoExcludes;
 }
 
 const quietLog: ConnectorLogger = { info() {}, warn() {}, error() {} };
@@ -124,6 +129,7 @@ export class Sources {
   private readonly log: ConnectorLogger;
   private readonly now: () => Date;
   private readonly excludes: (() => RepoExcludes) | undefined;
+  private readonly toolCallRedactions: (() => RepoExcludes) | undefined;
   private readonly running = new Set<string>();
 
   constructor(options: SourcesOptions) {
@@ -139,6 +145,7 @@ export class Sources {
     }
     this.connectors = connectors;
     this.excludes = options.excludes;
+    this.toolCallRedactions = options.toolCallRedactions;
     this.fetchImpl = options.fetch ?? fetch;
     this.log = options.log ?? quietLog;
     this.now = options.now ?? (() => new Date());
@@ -275,9 +282,13 @@ export class Sources {
 
     const prefix = `source ${id}: `;
     const excludes = this.excludes;
+    const redactions = this.toolCallRedactions;
     const context: ConnectorContext = {
       source: { id, type: config.type, config: config as unknown as Record<string, unknown> },
-      submit: async (envelope: Envelope): Promise<SubmitOutcome> => {
+      submit: async (
+        envelope: Envelope,
+        options: { redactToolCalls?: string } = {},
+      ): Promise<SubmitOutcome> => {
         if (envelope.source_id !== id) {
           throw new Error(
             `a connector for source '${id}' submitted an envelope for '${envelope.source_id}'`,
@@ -288,7 +299,12 @@ export class Sources {
         submitted++;
         let result: SubmitOutcome;
         try {
-          result = await this.pipeline.submit(envelope, { onFailure: "record" });
+          result = await this.pipeline.submit(envelope, {
+            onFailure: "record",
+            ...(options.redactToolCalls !== undefined
+              ? { redactToolCalls: options.redactToolCalls }
+              : {}),
+          });
         } catch (err) {
           checkpointBlockedBy ??= message(err);
           throw err;
@@ -364,6 +380,11 @@ export class Sources {
               outcomes.excluded = (outcomes.excluded ?? 0) + 1;
               this.pipeline.health?.count(id, "excluded");
             },
+          }
+        : {}),
+      ...(redactions
+        ? {
+            toolCallsRedactedBy: (repos: readonly string[]) => excludingEntry(redactions(), repos),
           }
         : {}),
     };

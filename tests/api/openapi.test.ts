@@ -345,6 +345,7 @@ describe("the server honours it", () => {
     expect(got.body).toEqual({
       schema: "seshi/capture-rules/1",
       exclude: ["acme/payroll", "~/clients/**"],
+      redact_tool_calls: [],
     });
     const etag = got.headers.get("etag") as string;
     expect(etag).toMatch(/^"[0-9a-f]{64}"$/);
@@ -362,7 +363,11 @@ describe("the server honours it", () => {
     expect(changed.headers.get("etag")).not.toBe(etag);
     // No list: an empty one.
     const plain = await call("GET", "/v1/capture/rules");
-    expect(plain.body).toEqual({ schema: "seshi/capture-rules/1", exclude: [] });
+    expect(plain.body).toEqual({
+      schema: "seshi/capture-rules/1",
+      exclude: [],
+      redact_tool_calls: [],
+    });
   });
 
   it("refuses an upload whose repo the org's exclude list names (403 excluded)", async () => {

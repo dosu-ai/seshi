@@ -96,9 +96,10 @@ change took effect by reading it after the reload.
 
 `*.toml` files in a `seshi.d/` folder beside the config file (`/etc/seshi/seshi.d/` for
 `/etc/seshi/seshi.toml`) are read after it, in file-name order. A drop-in may only add
-`[[sources]]`, `redaction.packs` and `capture.exclude` entries, appended after the file's; any
-other key in one is an error. This lets another program (an admin UI that connects buckets, or
-that keeps the org's exclude list, say) add a source or entries as a file of its own and reload,
+`[[sources]]`, `redaction.packs`, `capture.exclude` and `capture.redact_tool_calls` entries,
+appended after the file's; any other key in one is an error. This lets another program (an admin
+UI that connects buckets, or that keeps the org's capture lists, say) add a source or entries as
+a file of its own and reload,
 without rewriting the operator's file. Ids must still be unique
 across all of them. Files whose names start with `.` and files not ending in `.toml` are
 skipped, so write a drop-in under a temporary name and rename it into place. `seshi config
@@ -391,6 +392,7 @@ skipped. An object's `x-amz-meta-seshi-<field>` metadata (`-` for `_`) wins over
 | `worker.assembly_interval` | `"30s"` | How often the span assembler looks for sessions whose spans have gone quiet (F4.4, X7.4) |
 | `capture.allow_retract` | `true` | Let the machine that uploaded a session retract it with its per-session secret (F9.7). With `false`, a retraction is refused (`403 retract_disabled`) and only an admin or the owner's fresh sign-in can delete |
 | `capture.exclude` | `[]` | The org's exclude list: repositories and folders whose sessions are never stored, from any source ([below](#the-orgs-exclude-list-capture-exclude)) |
+| `capture.redact_tool_calls` | `[]` | The org's tool-call redaction list: repositories and folders whose sessions are stored with every tool call's input and output replaced by `[redacted:tool-call]` ([below](#the-orgs-tool-call-redaction-list-capture-redact_tool_calls)) |
 
 ### The org's exclude list (`[capture] exclude`)
 
@@ -437,6 +439,49 @@ exclude = ["acme/legal"]
   `403 excluded` ([server.md](server.md#post-v1sessions)), whoever sends it: a laptop with an
   old copy of the list or an older seshi, any source that sets `repo`. It counts as `excluded`
   in the source's health.
+
+### The org's tool-call redaction list (`[capture] redact_tool_calls`)
+
+The org's middle ground between capturing a place and excluding it: a session in a repository
+or folder it names is still stored, but with every tool call's input and output replaced by
+`[redacted:tool-call]`. What the person asked, what the agent said and thought, which tools ran,
+their ids, their order and whether each failed are kept; code, file contents and command output
+are not ([capture.md](capture.md#tool-calls-redacted)).
+
+```toml
+# /etc/seshi/seshi.toml
+[capture]
+redact_tool_calls = ["acme/research", "github.com/acme/ml-*"]
+```
+
+```toml
+# /etc/seshi/seshi.d/50-adx.toml: the same program's drop-in may hold both lists
+[capture]
+exclude = ["acme/legal"]
+redact_tool_calls = ["acme/data-science"]
+```
+
+It is held, combined, validated, reloaded and served exactly as the exclude list above is:
+the same entries, every file's entries one list (`SESHI_CAPTURE__REDACT_TOOL_CALLS` from the
+environment), applied at once on a reload, an entry that could never match refused by the
+reload and `seshi config check`. **Exclusion wins**: a place on both lists is not stored at
+all. Where it applies:
+
+- **On laptops, before upload.** `GET /v1/capture/rules` serves it with the exclude list; the
+  uploader keeps the copy and applies it with the machine's own `capture.redact_tool_calls`,
+  which can only add entries. Each agent's pass redacts the session's log before it leaves the
+  machine, and `seshi capture status` names the entry and whether it is the server's list
+  ([capture.md](capture.md#tool-calls-redacted)).
+- **On the server's own sources.** A Cursor Cloud agent with any repository listed is stored
+  with its tool calls redacted ([cursor-cloud.md](cursor-cloud.md#the-orgs-tool-call-redaction-list)).
+- **At ingest, as a backstop.** A session whose `repo` the list names has its normalized
+  records redacted before anything is stored or indexed, whoever sends it: a laptop with an old
+  copy of the list or an older seshi, any source that sets `repo`. Records a laptop already
+  redacted are left as they are. The session's `redaction.counts` counts what was replaced under
+  `tool-call`. Folder entries are laptops': the server never matches one.
+
+An entry added applies to what is stored next; it rewrites nothing already stored. An entry
+removed applies to what comes after.
 
 ## The CLI's config
 
@@ -499,8 +544,11 @@ the environment the list is comma-separated (`SESHI_CAPTURE__EXCLUDE=acme/paymen
 server's list or this config's.
 
 `capture.redact_tool_calls` is the org's middle ground between capturing a place and excluding
-it, delivered the same way and written and matched exactly as `capture.exclude` is (repositories
-and folders, wildcards, comments, comma-separated from `SESHI_CAPTURE__REDACT_TOOL_CALLS`). A
+it, written and matched exactly as `capture.exclude` is (repositories and folders, wildcards,
+comments, comma-separated from `SESHI_CAPTURE__REDACT_TOOL_CALLS`). The org's list is the
+server's (`[capture] redact_tool_calls`,
+[above](#the-orgs-tool-call-redaction-list-capture-redact_tool_calls)), which the uploader
+downloads with the exclude list; this one can only add to it. A
 session in a place it names is still uploaded, but with every string of every tool call's input
 and result replaced by `[redacted:tool-call]`: what the person asked, what the agent said and
 thought, which tools ran, their ids, their order and whether each failed are kept; code, file
@@ -508,7 +556,8 @@ contents and command output are not ([capture.md](capture.md#tool-calls-redacted
 both lists is excluded. Like the exclude list it holds for every folder a session was seen in,
 and it turns nothing on: a session it names that another rule turns off stays off. A subagent's
 session there is not uploaded at all: it is its parent's tool call.
-`seshi capture status` names the entry and says the session goes with its tool calls redacted.
+`seshi capture status` names the entry, whether it is the server's list or this config's, and
+says the session goes with its tool calls redacted.
 
 Like a repo's own `capture = false`, the org rules can only turn capture off. A repo opts out
 for everyone who works in it with its own committed `.seshi/config.toml`:

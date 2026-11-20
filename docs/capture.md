@@ -275,10 +275,13 @@ current folder in the past day; when more than one ran there it lists them and a
 ### Tool calls redacted
 
 For a repository or folder whose code should not be stored, but whose sessions still teach how
-people work there, the org lists it in `capture.redact_tool_calls`
-([config.md](config.md#the-clis-config)) instead of `capture.exclude`. Its sessions are uploaded
-with every tool call's input and output replaced by `[redacted:tool-call]`, on the laptop,
-before anything else redacts them and before a byte leaves:
+people work there, the org lists it in the server's `[capture] redact_tool_calls`
+([config.md](config.md#the-orgs-tool-call-redaction-list-capture-redact_tool_calls)) instead of
+its exclude list. The uploader downloads that list with the exclude list (`GET
+/v1/capture/rules`, kept in `capture-rules.json`, [below](#the-orgs-exclude-list-on-a-laptop))
+and applies it with this machine's own `capture.redact_tool_calls`, which can only add entries.
+A session in a listed place is uploaded with every tool call's input and output replaced by
+`[redacted:tool-call]`, on the laptop, before anything else redacts it and before a byte leaves:
 
 | Part of the session | Uploaded |
 | --- | --- |
@@ -307,9 +310,19 @@ a session that ran there before the list reached the laptop has only its later p
 
 The pass changes the length of nearly every line, so the uploader keeps its place in your file
 apart from the server's offset in redacted bytes, as for any pre-redaction; a log sent again
-whole (`seshi capture resend`, a `replace`) redacts to exactly the pieces sent before. On the
-server, the rule is not applied yet: a Cursor Cloud agent (the server polls those) or a laptop
-running an older seshi uploads such a session as it is.
+whole (`seshi capture resend`, a `replace`) redacts to exactly the pieces sent before.
+
+`seshi capture status` names the entry and where it came from (`tool calls: redacted, the org
+redacts tool calls in acme/research (https://seshi.acme.dev's [capture] redact_tool_calls)`, or
+`(capture.redact_tool_calls)` for this machine's; in `--json`, `redact_tool_calls` is that
+reason and `redacted` is `{ entry, from: "server" | "config", server? }`).
+
+The server applies the list too, to what no laptop redacted: its own sources (a Cursor Cloud
+agent, [cursor-cloud.md](cursor-cloud.md#the-orgs-tool-call-redaction-list)) and, as a backstop,
+any upload whose `repo` an entry names (a laptop running an older seshi, or one whose copy of
+the list is old). It redacts the normalized records: a tool call's arguments and its result,
+nothing else, so what only a laptop's pass catches (a command the person ran, a compaction's
+summary, a subagent's session) comes through from an older laptop as it was.
 
 ### Content an agent or a plugin adds
 
@@ -496,7 +509,9 @@ the machine, so a person's config can add to the org's list, never take from it.
 `seshi capture status` names the entry that decided and where it came from (`the org excludes
 acme/payroll (https://seshi.acme.dev's [capture] exclude)`, or `(capture.exclude)`; in `--json`,
 `excluded: { entry, from: "server" | "config", server? }`; such a session's state is `not sent`). The copy keeps the list already read
-for this machine (`~` expanded, folders' links resolved), so hooks do not read it again.
+for this machine (`~` expanded, folders' links resolved), so hooks do not read it again. The
+server's tool-call redaction list comes in the same copy and is applied the same way
+([Tool calls redacted](#tool-calls-redacted)); a server older than that list serves none.
 
 - **Before its first copy** from the server it uploads to, the uploader sends that server
   nothing: what it would send may be on the list. It asks again with backoff, the uploads wait

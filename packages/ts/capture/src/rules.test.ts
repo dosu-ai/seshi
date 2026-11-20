@@ -423,6 +423,7 @@ describe("the org's tool-call redaction list (capture.redact_tool_calls)", () =>
       level: "global",
       reason: "capture is on",
       redact_tool_calls: "the org redacts tool calls in acme/research (capture.redact_tool_calls)",
+      redacted: { entry: "acme/research", from: "config" },
     });
     // Turned on by the person, it is still redacted: the list is the org's.
     expect(judge({ rules, place: { cwd: "/home/me/labs" }, toggle: "on" })).toMatchObject({

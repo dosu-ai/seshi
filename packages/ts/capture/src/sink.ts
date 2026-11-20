@@ -139,7 +139,19 @@ export function httpSink(options: HttpSinkOptions): SessionSink {
       if (!Array.isArray(exclude) || !exclude.every((e) => typeof e === "string")) {
         throw new Error(`${options.target} answered capture rules without an exclude list`);
       }
-      return { exclude, ...(answer.etag ? { etag: answer.etag } : {}) };
+      // Absent from a server older than the list: it serves none.
+      const redact = (answer.document as { redact_tool_calls?: unknown }).redact_tool_calls;
+      if (
+        redact !== undefined &&
+        (!Array.isArray(redact) || !redact.every((e) => typeof e === "string"))
+      ) {
+        throw new Error(`${options.target} answered capture rules with a bad redact_tool_calls`);
+      }
+      return {
+        exclude,
+        ...(redact !== undefined ? { redact_tool_calls: redact as string[] } : {}),
+        ...(answer.etag ? { etag: answer.etag } : {}),
+      };
     },
     async stale() {
       const db = await client();

@@ -37,6 +37,7 @@ import {
   redactionRules,
   redactLlmCalls,
   ruleRedactor,
+  withToolCallsRedacted,
 } from "@seshi/redact";
 import {
   archiveId,
@@ -122,6 +123,10 @@ export interface PipelineOptions {
    * session's `repo`, if one does. Such a session is refused (`SessionExcluded`, 403
    * `excluded`) before anything of it is read: from a laptop, any source, any caller. */
   excludedRepo?: (repo: string) => string | undefined;
+  /** The org's tool-call redaction list (`[capture] redact_tool_calls`, as it runs now): the
+   * entry that names a session's `repo`, if one does. Such a session's records are stored with
+   * every tool call's input and result replaced (`withToolCallsRedacted`), whoever sent it. */
+  toolCallsRedactedFor?: (repo: string) => string | undefined;
   /** Where drop and failure records go (`sources/<id>/{dropped,failed}/`); `store` when
    * omitted. A serverless laptop keeps them in a folder of its own (F11.10). */
   records?: Store;
@@ -150,6 +155,10 @@ export interface SubmitOptions {
   /** The session's retraction secret (F9.7), as the caller sent it with a `replace`. An org-key
    * caller (`claimed`, X5.12) replaces a session only with it (`mayReplace`); never stored. */
   retractSecret?: string;
+  /** A source that matched the session's place itself against the org's tool-call redaction
+   * list (every repository of a Cursor Cloud agent, not only the envelope's `repo`): the entry.
+   * Server-side only; nothing a client sends sets it. */
+  redactToolCalls?: string;
 }
 
 const NOTHING: ShippedState = {
@@ -415,6 +424,7 @@ export class Pipeline {
   private readonly visibility: VisibilitySetting;
   private readonly sourceLabels: ((sourceId: string) => Labels | undefined) | undefined;
   private readonly excludedRepo: ((repo: string) => string | undefined) | undefined;
+  private readonly toolCallsRedactedFor: ((repo: string) => string | undefined) | undefined;
   private layoutChecked: Promise<unknown> | undefined;
 
   constructor(options: PipelineOptions) {
@@ -434,6 +444,15 @@ export class Pipeline {
     this.visibility = options.visibility ?? "org";
     this.sourceLabels = options.sourceLabels;
     this.excludedRepo = options.excludedRepo;
+    this.toolCallsRedactedFor = options.toolCallsRedactedFor;
+  }
+
+  /** The entry of the org's tool-call redaction list this session's write redacts for, if any:
+   * the source's own match, else its `repo`'s. */
+  private toolCallsFor(envelope: Envelope, options: SubmitOptions): string | undefined {
+    if (options.redactToolCalls !== undefined) return options.redactToolCalls;
+    const repo = envelope.repo;
+    return repo === undefined ? undefined : this.toolCallsRedactedFor?.(repo);
   }
 
   /** Refuse a session in a repository the org's exclude list names: nothing of it is stored. */
@@ -471,7 +490,12 @@ export class Pipeline {
       this.checkExcluded(envelope);
       const auth = await this.authorizer.authorize(envelope);
       if (!isLogEnvelope(envelope)) return await this.spans(envelope as SpanEnvelope, auth);
-      const { result, replay } = await this.log(envelope, auth, options.retractSecret);
+      const { result, replay } = await this.log(
+        envelope,
+        auth,
+        options.retractSecret,
+        this.toolCallsFor(envelope, options),
+      );
       this.health.count(envelope.source_id, replay ? "duplicate" : result.status);
       return result;
     } catch (err) {
@@ -496,12 +520,16 @@ export class Pipeline {
       checkEnvelope(envelope);
       this.checkExcluded(envelope);
       const auth = await this.authorizer.authorize(envelope);
-      const outcome = await this.planned(envelope, auth, (run) =>
-        this.whole(run, input.records, 0, {
-          replace: true,
-          ...(input.llm_calls ? { llm_calls: input.llm_calls } : {}),
-          ...(input.redaction ? { arrived: input.redaction } : {}),
-        }),
+      const outcome = await this.planned(
+        envelope,
+        auth,
+        (run) =>
+          this.whole(run, input.records, 0, {
+            replace: true,
+            ...(input.llm_calls ? { llm_calls: input.llm_calls } : {}),
+            ...(input.redaction ? { arrived: input.redaction } : {}),
+          }),
+        this.toolCallsFor(envelope, options),
       );
       this.health.count(envelope.source_id, outcome.replay ? "duplicate" : outcome.result.status);
       return outcome.result;
@@ -599,6 +627,7 @@ export class Pipeline {
     envelope: LogEnvelope,
     auth: Authorization,
     retractSecret?: string,
+    toolCalls?: string,
   ): Promise<Outcome> {
     const { payload } = envelope;
     if (!this.formats.has(envelope.format)) this.unsupported(envelope.format);
@@ -622,7 +651,12 @@ export class Pipeline {
       if (envelope.rebuild === true) {
         throw new SessionRejected("bad_chunk", "a rebuild sends the whole log, at offset 0");
       }
-      return this.planned(envelope, auth, (run) => this.chunk(run, payload.text, payload.offset));
+      return this.planned(
+        envelope,
+        auth,
+        (run) => this.chunk(run, payload.text, payload.offset),
+        toolCalls,
+      );
     }
     if (payload.text.trim() === "") throw new SessionRejected("empty", "transcript is empty");
     const { records, llm_calls } = this.normalize(
@@ -630,14 +664,18 @@ export class Pipeline {
       payload.text,
       envelope.session_key,
     );
-    return this.planned(envelope, auth, (run) =>
-      this.whole(run, records, utf8Length(payload.text), {
-        replace: envelope.replace === true,
-        ...(envelope.rebuild === true ? { rebuild: true } : {}),
-        ...(retractSecret !== undefined ? { retract_secret: retractSecret } : {}),
-        ...(llm_calls ? { llm_calls } : {}),
-        recordsBeforeCut: (bytes) => this.recordsBeforeCut(envelope, bytes),
-      }),
+    return this.planned(
+      envelope,
+      auth,
+      (run) =>
+        this.whole(run, records, utf8Length(payload.text), {
+          replace: envelope.replace === true,
+          ...(envelope.rebuild === true ? { rebuild: true } : {}),
+          ...(retractSecret !== undefined ? { retract_secret: retractSecret } : {}),
+          ...(llm_calls ? { llm_calls } : {}),
+          recordsBeforeCut: (bytes) => this.recordsBeforeCut(envelope, bytes),
+        }),
+      toolCalls,
     );
   }
 
@@ -663,11 +701,14 @@ export class Pipeline {
     envelope: Envelope,
     auth: Authorization,
     body: (run: Run) => Promise<StoreSessionResult>,
+    toolCalls?: string,
   ): Promise<Outcome> {
     await this.layout();
     const owner = auth.owner;
     const archive = archiveId(owner, envelope.format, envelope.session_key);
-    const { redactor, reviewer } = this;
+    const { reviewer } = this;
+    // A session in a place the org lists: its tool calls go before any rule runs.
+    const redactor = toolCalls ? withToolCallsRedacted(this.redactor) : this.redactor;
     for (let attempt = 1; ; attempt++) {
       const session = await readMetadata(this.store, owner, archive);
       if (session?.status === "redacted") {

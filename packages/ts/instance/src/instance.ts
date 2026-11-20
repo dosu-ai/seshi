@@ -214,9 +214,24 @@ export class Instance {
    * entries; a reload changes it at once), as written, blanks and comments left out: what
    * `GET /v1/capture/rules` serves laptops. */
   get captureExclude(): string[] {
-    return this.config.capture.exclude
-      .map((entry) => entry.trim())
-      .filter((entry) => entry !== "" && !entry.startsWith("#"));
+    return written(this.config.capture.exclude);
+  }
+
+  /** The org's tool-call redaction list (`[capture] redact_tool_calls`), the same way. */
+  get captureRedactToolCalls(): string[] {
+    return written(this.config.capture.redact_tool_calls);
+  }
+
+  private redactionsFor: { from: readonly string[]; redactions: RepoExcludes } | undefined;
+
+  /** The repository entries of the tool-call redaction list, read once per config: a session
+   * whose `repo` one names is stored with its tool calls redacted. */
+  get repoToolCallRedactions(): RepoExcludes {
+    const from = this.config.capture.redact_tool_calls;
+    if (this.redactionsFor?.from !== from) {
+      this.redactionsFor = { from, redactions: repoExcludes(from) };
+    }
+    return this.redactionsFor.redactions;
   }
 
   private excludesFor: { from: readonly string[]; excludes: RepoExcludes } | undefined;
@@ -297,6 +312,7 @@ export class Instance {
       authorizer: ownershipAuthorizer(),
       visibility: parts.visibility ?? ((sourceId) => visibilityFor(this.config, sourceId)),
       excludedRepo: (repo) => excludingEntry(this.repoExcludes, [repo]),
+      toolCallsRedactedFor: (repo) => excludingEntry(this.repoToolCallRedactions, [repo]),
       sourceLabels: (sourceId) => this.config.sources.find((s) => s.id === sourceId)?.labels,
       ...(parts.records ? { records: parts.records } : {}),
       ...(parts.createLayout !== undefined ? { createLayout: parts.createLayout } : {}),
@@ -317,6 +333,7 @@ export class Instance {
       log: this.log,
       now: this.now,
       excludes: () => this.repoExcludes,
+      toolCallRedactions: () => this.repoToolCallRedactions,
     });
 
     this.search =
@@ -852,4 +869,9 @@ export async function buildInstance(
     }
   }
   return instance;
+}
+
+/** A list's entries as written, blanks and `#` comments left out. */
+function written(entries: readonly string[]): string[] {
+  return entries.map((entry) => entry.trim()).filter((e) => e !== "" && !e.startsWith("#"));
 }

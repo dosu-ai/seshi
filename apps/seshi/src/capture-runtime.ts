@@ -104,7 +104,11 @@ export async function serverlessSink(ctx: CommandContext, account: Account): Pro
       }),
     // The team's exclude list is the server config's, here the bucket's shared settings and this
     // machine's serverless.config: the uploader keeps a copy for hooks as it does a server's.
-    captureRules: () => bucket.use(async (opened) => ({ exclude: opened.instance.captureExclude })),
+    captureRules: () =>
+      bucket.use(async (opened) => ({
+        exclude: opened.instance.captureExclude,
+        redact_tool_calls: opened.instance.captureRedactToolCalls,
+      })),
     stale: () =>
       bucket.use((opened) => {
         const sessions = opened.instance.localSessions(opened.owner, SERVERLESS_BASIS);

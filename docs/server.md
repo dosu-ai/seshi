@@ -350,7 +350,7 @@ allow.
 | `POST /v1/tokens/revoke` | `{owner, kind?}`: revoke every live token of an owner (`tokens:admin`, X5.11) |
 | `GET /v1/admin/jobs` | The worker, its jobs and every source, as `seshi workers status --json` prints them (`sources:admin`, X7.5) |
 | `GET /v1/redaction/rules` | The operator's rule packs and the rule-set hash, for redacting before upload (F2.4). Any signed-in caller; `ETag` is the hash, `If-None-Match` gets `304` |
-| `GET /v1/capture/rules` | The org's exclude list (`[capture] exclude`, every file's entries, as written, blanks and `#` comments left out): `{schema: "seshi/capture-rules/1", exclude: [...]}`, which laptops apply before upload ([config.md](config.md#the-orgs-exclude-list-capture-exclude), [capture.md](capture.md#the-orgs-exclude-list-on-a-laptop)). Any signed-in caller; `ETag` is a hash of the answer, `If-None-Match` gets `304`; a reload changes it at once. A server older than the route answers `404`, which a laptop reads as no list |
+| `GET /v1/capture/rules` | The org's exclude list (`[capture] exclude`, every file's entries, as written, blanks and `#` comments left out) and its tool-call redaction list (`[capture] redact_tool_calls`, the same way): `{schema: "seshi/capture-rules/1", exclude: [...], redact_tool_calls: [...]}`, which laptops apply before upload ([config.md](config.md#the-orgs-exclude-list-capture-exclude), [capture.md](capture.md#the-orgs-exclude-list-on-a-laptop)). Any signed-in caller; `ETag` is a hash of the answer, `If-None-Match` gets `304`; a reload changes it at once. A server older than the route answers `404`, which a laptop reads as no list |
 | `GET /v1/sessions/:format/:session_id/reviews?owner` | What model review decided for each stored write (`sessions:read`, F3.8): the whole audit record for admins, only `n`, `at`, `content_hash` and `decision` for anyone else who may read the session |
 | `POST /otlp/v1/traces` | OTLP/HTTP trace ingest (F4): `ExportTraceServiceRequest` as protobuf or JSON from an OTLP destination's service token. Outside `/v1`, and its errors are OTLP's (`google.rpc.Status`). See [otlp.md](otlp.md) |
 | `GET /v1/search?q&owner&agent&repo&branch&source&since&until&sort&limit&matches&cursor` | Keyword search over what the caller may read (`search`, F10; [search.md](search.md)): `{query, total, results: [{owner, format, session_id, …, score, hits, matches: [{content_hash, event_index, role, snippet, highlights}]}], cursor?, index}`. `400 bad_query`, `404 search_disabled`, `503 index_building` |
@@ -423,6 +423,10 @@ the pipeline. Nothing is written until every stage has run. Before any of them, 
 is refused with `403 excluded`, for every source and caller: nothing of it is read or stored,
 the message names no entry, and the refusal counts as `excluded` in the source's health. A
 laptop's uploader settles such a session as excluded and sends it no more.
+A session whose `repo` the org's tool-call redaction list names
+([config.md](config.md#the-orgs-tool-call-redaction-list-capture-redact_tool_calls)) is stored
+with every tool call's input and output replaced by `[redacted:tool-call]` in its records,
+before any other redaction runs.
 
 1. **Normalize** the transcript to trajectory-v1 records through the format's adapter.
 2. **Redact** the records: the operator's patterns and the built-in secret patterns on every

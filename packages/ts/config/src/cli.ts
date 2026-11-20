@@ -168,10 +168,10 @@ export const cliConfigSchema = z
             "An exclude list of this machine's, added to the server's (the org's list, [capture] exclude, which the uploader downloads): sessions in these repositories (owner/name on any host, host/owner/name on one) or folders (starting with /, ~, a drive or \\\\server, and everything under them) are never captured. * matches within a path segment, ** across any number of them; blank entries and # comments are skipped. It can only turn capture off.",
           ),
         redact_tool_calls: z
-          .array(z.string())
+          .array(excludeEntry)
           .default([])
           .describe(
-            "The org's list of places whose sessions are uploaded with every tool call's input and output replaced by [redacted:tool-call]: prompts, replies, reasoning, tool names, call ids, their order and whether each failed are kept. Entries are written and matched as in capture.exclude, which wins for a place on both lists.",
+            "A list of this machine's, added to the server's ([capture] redact_tool_calls, which the uploader downloads), of places whose sessions are uploaded with every tool call's input and output replaced by [redacted:tool-call]: prompts, replies, reasoning, tool names, call ids, their order and whether each failed are kept. Entries are written and matched as in capture.exclude, which wins for a place on both lists.",
           ),
       })
       .prefault({})
