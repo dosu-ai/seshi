@@ -47,6 +47,16 @@ pause() {
   read -r _ </dev/tty || true
 }
 fake_token() { cat "$STATE/fake-token" 2>/dev/null || true; }
+# What reaches the screen never shows the fake token: not whole, and not the 8 characters
+# deploy.sh prints. [redacted:...] markers are shown in yellow. Line by line, so a stream stays live.
+show() {
+  awk -v full="$(fake_token)" -v esc="$(printf '\033')" '{
+    if (full != "") { gsub(full, "ghp_********"); gsub(substr(full, 1, 8), "ghp_****") }
+    gsub(/\[redacted:[a-z-]+\]/, esc "[33m&" esc "[0m")
+    print
+    fflush()
+  }'
+}
 # The newest session's ID. A sandbox chose it, so anything but a plain ID is dropped.
 latest() {
   s sessions ls --owner "$OWNER" --json 2>/dev/null |
@@ -132,6 +142,25 @@ elif .type == "user" then
 elif .type == "result" and .is_error then "Claude failed: \(.result | tostring | clean)"
 else empty end'
 
+# A session as the server stores it (seshi/trace/1), as a transcript: who spoke, each tool call
+# and its result, the first lines of each. $n is a jq variable.
+# shellcheck disable=SC2016
+RENDER_SESSION='
+def lines($n): tostring | split("\n") | map(gsub("[[:cntrl:]]"; "")) | map(select(length > 0)) |
+  (.[:$n] + (if length > $n then ["…"] else [] end)) | map("    │ " + .) | .[];
+def call: if type == "string" then (try fromjson catch .) else . end |
+  if type == "object" then (.command // .file_path // .content // tojson) else . end;
+.records[] |
+if .role == "meta" then "  model \(.model // "-" | tostring | gsub("[[:cntrl:]]"; "")), working in \(.cwd // "-" | tostring | gsub("[[:cntrl:]]"; ""))\n"
+elif .role == "user" then "  you asked", (.content | lines(8)), ""
+elif .role == "assistant" then
+  (if .content then "  Claude said", (.content | lines(8)), "" else empty end),
+  (.tool_calls[]? | "  Claude ran \(.name | tostring | gsub("[[:cntrl:]]"; ""))", (.args | call | lines(10)), "")
+elif .role == "tool" then
+  "  the tool returned" + (if .withheld then " (withheld whole: \(.withheld | tostring | gsub("[[:cntrl:]]"; "")))" else "" end),
+  (.content | lines(4)), ""
+else empty end'
+
 run() {
   scene "0. Starting from scratch"
   caption "Last run's sandbox, server, sessions and token go; a fresh server and token take their place."
@@ -178,11 +207,11 @@ Then write deploy.sh that loads .env, stops if the token is empty, and prints \"
 followed by the first 8 characters of the token, and a README.md with setup steps for a new
 teammate. Run deploy.sh. Finish with a short review, about 200 words, of how safely this setup
 handles the token."
-  caption "Claude Code runs in the sandbox with this prompt and a made-up GitHub token:"
-  printf '%s\n' "$prompt" | sed 's/^/  │ /'
+  caption "Claude Code runs in the sandbox with this prompt and a GitHub token made up for this run (hidden on screen):"
+  printf '%s\n' "$prompt" | sed 's/^/  │ /' | show
   echo
   in_box claude -p "$prompt" --dangerously-skip-permissions --output-format stream-json --verbose |
-    jq --unbuffered -r "$RENDER_CLAUDE"
+    jq --unbuffered -r "$RENDER_CLAUDE" | show
   echo
   caption "The token is in a file in the sandbox and in Claude's session transcript."
   pause "look at the seshi server"
@@ -194,47 +223,47 @@ handles the token."
   wait_for "the session to reach the server" 60 latest_present ||
     fail "no session on the server: sbx exec $BOX -- seshi capture status"
   render | sed 's/^/  /'
-  pause "compare the sandbox's copy with the server's"
+  pause "open the session seshi captured"
 
   id=$(latest)
   export_text=$(s sessions export claude-code "$id" --owner "$OWNER")
-  scene "5a. The secret stayed in the sandbox"
-  caption "In the sandbox, the file Claude wrote:"
+  scene "5. The session seshi captured"
+  caption "claude-code/$id, read back from the seshi server, as the team sees it:"
+  printf '%s' "$export_text" | jq -r "$RENDER_SESSION" | show
+  caption "Every [redacted:...] was replaced inside the sandbox, before the upload."
+  pause "compare it with the sandbox"
+
+  scene "6. The secret stayed in the sandbox"
+  caption "In the sandbox, the file Claude wrote (the token is hidden on screen; the file holds all of it):"
   # shellcheck disable=SC2016 # expanded in the sandbox, not here
   in_box sh -c 'grep -rIl --exclude-dir=.claude --exclude-dir=.local "$1" /home/agent | while read -r f; do echo "$f:"; grep -h "$1" "$f"; done' sh "$fake" |
-    clean | sed 's/^/  /' || true
+    clean | sed 's/^/  /' | show || true
   echo
-  caption "On the seshi server, the same session, claude-code/$id:"
+  caption "On the seshi server, the same session:"
   found=$(printf '%s' "$export_text" | grep -o '\[redacted:[a-z-]*\]' | sort | uniq -c | sort -rn || true)
-  printf '%s\n' "${found:-(nothing redacted in this session)}" | clean | sed 's/^ */  /'
-  example=$(printf '%s' "$export_text" | grep -o 'GITHUB_TOKEN=\[redacted:[a-z-]*\]' | head -1 || true)
-  [ -z "$example" ] || echo "  for example: $example"
-  echo "  the fake token appears on the server $(printf '%s' "$export_text" | grep -c "$fake" || true) times"
+  printf '%s\n' "${found:-(nothing redacted in this session)}" | clean | sed 's/^ */  /' | show
+  echo "  the token appears on the server $(printf '%s' "$export_text" | grep -c "$fake" || true) times"
   echo
   caption "credential is the token itself. sensitive-file is each tool call that read or wrote .env, withheld whole."
   pause "show the token the sandbox holds"
 
-  scene "5b. The sandbox never sees the upload token"
+  scene "7. The sandbox never sees the upload token"
   # shellcheck disable=SC2016 # expanded in the sandbox, not here
   in_box sh -c 'echo "SESHI_TOKEN=$(printenv SESHI_TOKEN | cut -c1-20)..."' | clean | sed 's/^/  /'
   echo
   caption "A placeholder. The proxy on the host adds the real token, and only to requests to localhost:7200."
-  pause "show what the sandbox may reach"
+  pause "try to reach other hosts from the sandbox"
 
-  scene "5c. The sandbox reaches the model and seshi, nothing else"
+  scene "8. The sandbox's network is closed by default"
   for url in https://example.com http://host.docker.internal:7201 http://host.docker.internal:7200/healthz; do
     code=$(in_box curl -s -m 5 -o /dev/null -w '%{http_code}' "$url" | clean || true)
     echo "  ${code:-???}  $url"
   done
   echo
-  caption "sbx policy log, this sandbox only:"
-  sbx policy log 2>/dev/null | awk -v box="$BOX" '
-    /BLOCKED REQUESTS/ { verdict = "blocked" }
-    /ALLOWED REQUESTS/ { verdict = "allowed" }
-    $1 == box { print "  " verdict "  " $3 }' | sort -u | clean
+  caption "A site and the next port on the same host are refused. The seshi server answers because the kit's network rule names it."
   pause "remove the sandbox"
 
-  scene "6. Remove the sandbox, keep the sessions"
+  scene "9. Remove the sandbox, keep the sessions"
   caption "Removing a sandbox deletes its disk, so seshi first sends anything still queued, and fails if it can't."
   sbx exec "$BOX" -- seshi-sandbox flush 2>&1 | clean | sed 's/^/  /'
   sbx rm --force "$BOX" >/dev/null 2>&1

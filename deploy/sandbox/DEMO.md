@@ -34,12 +34,16 @@ Press Enter to move to the next scene.
 | 0. Starting from scratch | Last run cleared; a fresh server on `127.0.0.1:7200` and an upload-only token stored in `sbx` | Nothing is left over from a previous run. |
 | 1. The definition | The environment file, then `sbx env plan` | One file: an agent, the seshi kit, and the server. Docker shows what the sandbox gets before it exists, including a credential the proxy adds only for the seshi server. |
 | 2. Create the sandbox | The sandbox is created, then `seshi whoami` from inside it | Creating it hooked seshi into Claude Code. Booting it signed seshi in. |
-| 3. Claude handles a secret | The prompt with a fresh fake GitHub token, then Claude's tool calls and reply | The agent put a GitHub token in a file and in its transcript. |
+| 3. Claude handles a secret | The prompt with a fake GitHub token made for this run, then Claude's tool calls and reply | The agent put a GitHub token in a file and in its transcript. |
 | 4. The session arrives | One line per session on the server, with its redaction count | Each finished turn is captured, redacted inside the sandbox, then uploaded. |
-| 5a. The secret stayed in the sandbox | `.env` in the sandbox beside the server's redaction counts; the token found 0 times | The secret is where the agent put it. It never reached the team's store. |
-| 5b. The upload token | `SESHI_TOKEN=proxy-managed...` | The sandbox holds a placeholder. The proxy on the host adds the real token. |
-| 5c. What the sandbox may reach | `403` for example.com and port 7201, `200` for seshi, then `sbx policy log` | The model and seshi, nothing else. Even the next port on the same host is refused. |
-| 6. Remove the sandbox | The flush, the removal, and the session still listed on the server | Removing a sandbox deletes its disk, so seshi sends what is queued first. The sandbox is gone; its sessions are not. |
+| 5. The session seshi captured | The session read back from the server as a transcript, each `[redacted:...]` in yellow | This is what the team gets: the whole session, without the secret. |
+| 6. The secret stayed in the sandbox | `.env` in the sandbox beside the server's redaction counts; the token found 0 times | The secret is where the agent put it. It never reached the team's store. |
+| 7. The upload token | `SESHI_TOKEN=proxy-managed...` | The sandbox holds a placeholder. The proxy on the host adds the real token. |
+| 8. The network | `403` for example.com and port 7201, `200` for seshi | Other hosts are refused, even the next port on the same host. |
+| 9. Remove the sandbox | The flush, the removal, and the session still listed on the server | Removing a sandbox deletes its disk, so seshi sends what is queued first. The sandbox is gone; its sessions are not. |
+
+The fake token never appears on screen, whole or in part; the sandbox and the server checks use
+it, the display shows `ghp_********`.
 
 ## Again, and after
 
