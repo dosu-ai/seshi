@@ -118,6 +118,12 @@ export const cliConfigSchema = z
           .describe(
             "The org rule (F9.5): when set, only repos with a git remote matching one of these patterns are captured (github.com/acme, github.com/acme/*). It can only turn capture off.",
           ),
+        exclude: z
+          .array(z.string())
+          .default([])
+          .describe(
+            "The org's exclude list: sessions in these repositories (owner/name on any host, host/owner/name on one) or folders (starting with /, ~, a drive or \\\\server, and everything under them) are never captured. * matches within a path segment, ** across any number of them; blank entries and # comments are skipped. It can only turn capture off.",
+          ),
       })
       .prefault({})
       .describe("Personal capture rules (F9.5)."),

@@ -88,7 +88,12 @@ describe("the CLI's config", () => {
       theme: "dark",
       keychain: true,
       search: { scope: "visible" },
-      capture: { enabled: false, paths: [{ path: "~/clients/acme", capture: false }], remotes: [] },
+      capture: {
+        enabled: false,
+        paths: [{ path: "~/clients/acme", capture: false }],
+        remotes: [],
+        exclude: [],
+      },
     });
   });
 
@@ -99,7 +104,7 @@ describe("the CLI's config", () => {
       theme: "auto",
       keychain: true,
       search: { scope: "visible" },
-      capture: { enabled: true, paths: [], remotes: [] },
+      capture: { enabled: true, paths: [], remotes: [], exclude: [] },
     });
   });
 
