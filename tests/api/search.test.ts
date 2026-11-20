@@ -181,9 +181,9 @@ describe("GET /v1/search (F10)", () => {
     const direct = await raw("label=team%3Dplatform&label=dosu.project%3Dgithub.com%2Facme%2Fdocs");
     expect(ids((await direct.json()) as SearchResults)).toEqual([]);
     for (const [query, why] of [
-      ["label=team", "label must be key=value"],
+      ["label=team", "label: 'team' is not key=value"],
       ["label=Team%3Dx", "label key 'Team'"],
-      ["label=team%3Da&label=team%3Db", "label team is given twice"],
+      ["label=team%3Da&label=team%3Db", "label: team is given twice"],
     ] as const) {
       const res = await raw(query);
       expect(res.status).toBe(400);

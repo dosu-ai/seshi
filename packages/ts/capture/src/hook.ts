@@ -17,7 +17,14 @@ import { placeOf } from "./place";
 import { type Decision, decide, type Place, turnedOff } from "./rules";
 import { captureRules } from "./rules-cache";
 import { appendSpool } from "./spool";
-import { otherFolders, readState, type SessionState, sessionKey, stateFacts } from "./state";
+import {
+  labelsOpen,
+  otherFolders,
+  readState,
+  type SessionState,
+  sessionKey,
+  stateFacts,
+} from "./state";
 
 export interface HookRun {
   agent: CaptureAgent;
@@ -105,7 +112,7 @@ export async function runHook(run: HookRun): Promise<HookOutcome> {
   // Labels are resolved here, in the agent's environment (the uploader runs in its own), when
   // the session is first seen, and kept in its state: every later upload sends the same ones.
   const labelsOf = (known: SessionState | undefined, place: Place) => {
-    if (known?.labels !== undefined) return undefined;
+    if (!labelsOpen(known)) return undefined;
     const resolved = resolveLabels(labels, place, run.host.env, run.host.platform);
     if (resolved.problems.length > 0) {
       outcome.problems = [

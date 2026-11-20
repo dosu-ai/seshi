@@ -101,17 +101,39 @@ describe("resolving a session's labels", () => {
     const here = folder("w");
     const many: Record<string, string> = {};
     for (let i = 0; i < 34; i++) many[`k${String(i).padStart(2, "0")}`] = "v";
-    const r = rules({ ...many, Bad: "x", long: { env: "LONG" } });
+    const r = rules({ ...many, Bad: "x", long: { env: "LONG" }, blank: "" });
     const resolved = resolve(r, here, { LONG: "x".repeat(513) });
     expect(Object.keys(resolved.labels)).toHaveLength(32);
     expect(resolved.labels).not.toHaveProperty("Bad");
     expect(resolved.labels).not.toHaveProperty("long");
+    expect(resolved.labels).not.toHaveProperty("blank");
     expect(resolved.problems).toEqual([
-      expect.stringContaining("label key 'Bad'"),
+      "label 'blank' must not be empty",
       "label 'k32' is past the 32 allowed",
       "label 'k33' is past the 32 allowed",
+      expect.stringContaining("label key 'Bad'"),
       "label 'long' is 513 characters long; at most 512 are allowed",
     ]);
+  });
+
+  it("keeps the highest-precedence labels past the cap: a folder's over [labels]", () => {
+    const here = folder("w");
+    const many: Record<string, string> = {};
+    for (let i = 0; i < 32; i++) many[`a${String(i).padStart(2, "0")}`] = "v";
+    const r = rules(many, [{ path: here, "zz.project": "github.com/acme/app" }]);
+    const resolved = resolve(r, here);
+    expect(resolved.labels["zz.project"]).toBe("github.com/acme/app");
+    expect(resolved.labels).not.toHaveProperty("a31");
+    expect(resolved.problems).toEqual(["label 'a31' is past the 32 allowed"]);
+  });
+
+  it("leaves a fixed empty value out, saying so, and lets the next one down give the key", () => {
+    const here = folder("w");
+    const r = rules({ team: "platform" }, [{ path: here, team: "" }]);
+    expect(resolve(r, here)).toEqual({
+      labels: { team: "platform" },
+      problems: ["label 'team' must not be empty"],
+    });
   });
 });
 

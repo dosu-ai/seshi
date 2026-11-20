@@ -73,6 +73,7 @@ export {
   endPause,
   freeze,
   isPaused,
+  labelsOpen,
   MAX_PAUSES,
   newSecret,
   otherFolders,

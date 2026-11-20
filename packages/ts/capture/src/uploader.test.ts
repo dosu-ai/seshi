@@ -1388,7 +1388,51 @@ describe("labels", () => {
       folder: "yes",
     };
     expect(session("swept").labels).toEqual(expected);
+    expect(session("swept").labels_by).toBe("uploader");
     expect(server.uploads.find((u) => u.session_id === "swept")?.labels).toEqual(expected);
+  });
+
+  it("lets a hook's labels replace those the uploader resolved, until the session is sent", async () => {
+    writeFileSync(transcript(), line("one") + line("two"));
+    writeFileSync(transcript("s2"), line("one", "s2") + line("two", "s2"));
+    // The sweep got to both before their hooks' entries reached the spool; s2 went up since.
+    await updateState(paths, (st) => {
+      for (const [id, sent] of [
+        ["s1", false],
+        ["s2", true],
+      ] as const) {
+        st.sessions[`fake:${id}`] = {
+          agent: "fake",
+          session_id: id,
+          path: transcript(id),
+          cwd: dir,
+          first_seen: clock.toISOString(),
+          labels: { "dosu.project": "from-uploader" },
+          labels_by: "uploader",
+          ...(sent ? { sent: true } : {}),
+        };
+      }
+    });
+    for (const id of ["s1", "s2"]) {
+      appendSpool(paths, {
+        v: 1,
+        kind: "capture",
+        at: clock.toISOString(),
+        agent: "fake",
+        event: "Stop",
+        session_id: id,
+        transcript_path: transcript(id),
+        cwd: dir,
+        labels: { "dosu.project": "from-hook" },
+      });
+    }
+    await uploader({ rules: async () => labelSnapshot() }).pass();
+    expect(session().labels).toEqual({ "dosu.project": "from-hook" });
+    expect(session()).not.toHaveProperty("labels_by");
+    expect(server.uploads.find((u) => u.session_id === "s1")?.labels).toEqual({
+      "dosu.project": "from-hook",
+    });
+    expect(session("s2").labels).toEqual({ "dosu.project": "from-uploader" });
   });
 
   it("resolves and pins labels for a session no hook resolved them for", async () => {

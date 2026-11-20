@@ -52,6 +52,7 @@ export {
   keepableLabels,
   LABEL_KEY,
   type Labels,
+  labelPairs,
   labelProblem,
   labelsProblems,
   MAX_LABEL_VALUE_LENGTH,

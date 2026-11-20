@@ -931,7 +931,7 @@ describe("sessions", () => {
     expect((await readMetadata(store, "acme", archive))?.labels).toEqual({ team: "billing" });
   });
 
-  it("refuses labels out of the limits with 400 and why", async () => {
+  it("refuses labels out of the limits with 400 and why, and redacts what it keeps", async () => {
     const token = TOKEN;
     const refused = async (labels: unknown, why: string) => {
       const res = await call("POST", "/v1/sessions", {
@@ -952,6 +952,21 @@ describe("sessions", () => {
       "33 labels; at most 32 are allowed",
     );
     await refused(["team=x"], "labels must be an object of strings");
+    // A label value is redacted as the session's text is: an env label can carry anything.
+    const secret = "ghp_abcdefghijklmnopqrstuvwxyz012345";
+    const res = await call("POST", "/v1/sessions", {
+      token,
+      body: {
+        agent: "claude-code",
+        session_id: "l3",
+        transcript: CLAUDE,
+        labels: { oops: secret },
+      },
+    });
+    expect(res.status).toBe(201);
+    const stored = await readMetadata(store, "acme", archiveId("acme", "claude-code", "l3"));
+    expect(stored?.labels?.oops).toMatch(/\[redacted:/);
+    expect(JSON.stringify(stored)).not.toContain(secret);
     expect(await readMetadata(store, "acme", archiveId("acme", "claude-code", "l2"))).toBeNull();
   });
 

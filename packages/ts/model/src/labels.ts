@@ -1,9 +1,11 @@
 /** Labels: small key/value strings attached to a session from config (the CLI's `[labels]`, a
  * repo's `.seshi/config.toml`, a server source's `labels`), stored on its metadata and
- * searchable. seshi gives them no meaning. A leaf module with no imports, so the config loader
- * and the hook can use it without loading the rest of the model. */
+ * searchable. seshi gives them no meaning. A leaf module with no runtime imports, so the config loader
+ * and the hook can use it without loading the rest of the model (the type import is erased). */
 
-export type Labels = Record<string, string>;
+import type { Labels } from "./generated/common";
+
+export type { Labels };
 
 /** A label's key: lowercase letters, digits, `.`, `_` and `-`, starting with a letter or digit,
  * up to 64 characters (`dosu.project`, `team`). */
@@ -42,14 +44,15 @@ export function labelsProblems(labels: unknown): string[] {
 }
 
 /** The labels that can be kept, and why the others cannot: each label checked on its own, then
- * the first `MAX_LABELS` kept (by key, so the same config always keeps the same ones). */
+ * the first `MAX_LABELS` kept in the order given, so a caller that lists them highest
+ * precedence first keeps those. */
 export function keepableLabels(labels: Readonly<Record<string, unknown>>): {
   labels: Labels;
   dropped: string[];
 } {
   const kept: Labels = {};
   const dropped: string[] = [];
-  for (const key of Object.keys(labels).sort()) {
+  for (const key of Object.keys(labels)) {
     const value = labels[key];
     const problem = labelProblem(key, value);
     if (problem) {
@@ -63,6 +66,20 @@ export function keepableLabels(labels: Readonly<Record<string, unknown>>): {
     kept[key] = value as string;
   }
   return { labels: kept, dropped };
+}
+
+/** `key=value` pairs as labels (a search filter's): a pair without `=` or a key given twice is a
+ * problem. The keys and values themselves are checked as labels are, by the caller. */
+export function labelPairs(pairs: readonly string[]): { labels: Labels } | { problem: string } {
+  const labels: Labels = {};
+  for (const pair of pairs) {
+    const eq = pair.indexOf("=");
+    if (eq <= 0) return { problem: `'${printable(pair)}' is not key=value` };
+    const key = pair.slice(0, eq);
+    if (key in labels) return { problem: `${printable(key)} is given twice` };
+    labels[key] = pair.slice(eq + 1);
+  }
+  return { labels };
 }
 
 function printable(text: string): string {

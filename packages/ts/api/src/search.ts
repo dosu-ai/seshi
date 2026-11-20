@@ -1,4 +1,4 @@
-import type { SearchRequest, SearchSort } from "@seshi/model";
+import { labelPairs, type SearchRequest, type SearchSort } from "@seshi/model";
 import { SearchQueryError } from "@seshi/search";
 
 const STRINGS = ["q", "owner", "agent", "repo", "branch", "source", "since", "until", "cursor"];
@@ -34,13 +34,7 @@ export function searchRequestOf(url: URL): SearchRequest {
 /** `label=key=value`, repeatable: a session must carry every one. */
 export function labelsOf(given: readonly string[]): Record<string, string> | undefined {
   if (given.length === 0) return undefined;
-  const labels: Record<string, string> = {};
-  for (const pair of given) {
-    const eq = pair.indexOf("=");
-    if (eq <= 0) throw new SearchQueryError(`label must be key=value, not '${pair}'`);
-    const key = pair.slice(0, eq);
-    if (key in labels) throw new SearchQueryError(`label ${key} is given twice`);
-    labels[key] = pair.slice(eq + 1);
-  }
-  return labels;
+  const parsed = labelPairs(given);
+  if ("problem" in parsed) throw new SearchQueryError(`label: ${parsed.problem}`);
+  return parsed.labels;
 }

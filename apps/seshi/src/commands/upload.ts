@@ -238,16 +238,20 @@ async function upload(
     }
     keys.set(key, path);
     // A session no hook saw: its labels come from this environment and the folder its
-    // transcript names (a session already known keeps the ones it has).
-    const labels = resolveLabels(snapshot.labels, place, host.env, host.platform);
-    for (const problem of labels.problems) {
-      appendLog(paths.log, `upload: labels: left out ${problem}`);
+    // transcript names. A session already known keeps the ones it has.
+    let labels: Record<string, string> | undefined;
+    if (known?.labels === undefined) {
+      const resolved = resolveLabels(snapshot.labels, place, host.env, host.platform);
+      for (const problem of resolved.problems) {
+        appendLog(paths.log, `upload: labels: left out ${problem}`);
+      }
+      labels = resolved.labels;
     }
     additions.push({
       agent: agent.name,
       session_id: info.session_id,
       path,
-      labels: labels.labels,
+      ...(labels ? { labels } : {}),
       ...(info.cwd ? { cwd: info.cwd } : {}),
       ...(info.parent_session_id ? { parent_session_id: info.parent_session_id } : {}),
       first_seen: now.toISOString(),
@@ -265,7 +269,7 @@ async function upload(
       const key = sessionKey(addition.agent, addition.session_id);
       const session = st.sessions[key] ?? addition;
       session.path = addition.path;
-      session.labels ??= addition.labels;
+      if (session.labels === undefined && addition.labels) session.labels = addition.labels;
       if (addition.cwd) seenIn(session, addition.cwd);
       delete session.error;
       delete session.next_attempt_at;

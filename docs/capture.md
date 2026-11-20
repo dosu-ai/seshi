@@ -441,7 +441,9 @@ another folder or the environment changes.
   resolve nothing.
 - **A session only the sweep found** (no hook ran for it) is resolved by the uploader, with the
   uploader's environment and the folder the session's transcript names. So is a session first
-  seen before labels existed, at its next upload.
+  seen before labels existed, at its next upload. A hook that sees the session before it is first
+  sent replaces those labels with its own (the sweep can find a session before its hook's entry
+  reaches the spool).
 - **`seshi upload`** resolves a session it adds with the environment it runs in and the folder
   the transcript names; a session the state already holds keeps its labels.
 

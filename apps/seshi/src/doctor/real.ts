@@ -9,10 +9,10 @@ import {
   readHead,
   readSpool,
   readState,
+  resolveLabels,
   stateFacts,
   uploaderRunning,
 } from "@seshi/capture";
-import { cliLabelProblems, loadCliConfig } from "@seshi/config";
 import type { CaptureAgent, CaptureHost } from "@seshi/kit";
 import type { NormalizedRecord } from "@seshi/model";
 import { canonicalJson } from "@seshi/model";
@@ -166,23 +166,11 @@ export async function realDeps(ctx: CommandContext, options: RealDepsOptions): P
         host.platform,
       );
     },
+    // What a hook would leave out for the session, resolved as a hook does (with this
+    // environment): the CLI config's labels and the repo's, limits included.
     labelProblems: (entry) => {
-      const problems: string[] = [];
-      try {
-        const { config } = loadCliConfig({
-          env: { ...host.env },
-          home: host.home,
-          platform: host.platform,
-        });
-        problems.push(...cliLabelProblems(config.labels));
-      } catch {}
       const folder = entry?.cwd ?? (entry ? undefined : cwd);
-      problems.push(
-        ...(placeOf(folder).repo?.config.labelProblems ?? []).map(
-          (p) => `.seshi/config.toml: ${p}`,
-        ),
-      );
-      return problems;
+      return resolveLabels(snapshot.labels, placeOf(folder), host.env, host.platform).problems;
     },
     agent: (name) => agents.get(name),
     files: { stat: statFile, read: readFile },

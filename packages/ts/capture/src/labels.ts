@@ -52,8 +52,9 @@ export interface ResolvedLabels {
 /** The labels of a session in `place`, resolved now with `env` (the agent's, in a hook). Per
  * key, highest first: the `[[labels.paths]]` entries `place` is in, longest folder first; then
  * `[labels]`; then the repo's `.seshi/config.toml`. An `env` reference whose variable is unset or
- * empty counts as absent, so the next one down gives the key. Labels out of the limits are
- * dropped and said, never an error. */
+ * empty counts as absent, so the next one down gives the key. Labels out of the limits (a fixed
+ * empty value too) are dropped and said, never an error; past the cap, the lowest precedence
+ * go first. */
 export function resolveLabels(
   rules: LabelRules | undefined,
   place: Place,
@@ -74,15 +75,22 @@ export function resolveLabels(
   const repo = place.repo?.config;
   if (repo?.labels) layers.push(repo.labels);
 
+  // Highest precedence first, so the label cap keeps those (`keepableLabels`).
   const resolved: Record<string, string> = {};
+  const empty: string[] = [];
   for (const layer of layers) {
     for (const [key, source] of Object.entries(layer)) {
       if (key in resolved) continue;
+      if (source === "") {
+        // A fixed empty value is a config error (`seshi config check`): left out, said.
+        empty.push(`label '${key}' must not be empty`);
+        continue;
+      }
       const value = typeof source === "string" ? source : env[source.env];
       if (value === undefined || value === "") continue;
       resolved[key] = value;
     }
   }
   const { labels, dropped } = keepableLabels(resolved);
-  return { labels, problems: [...(repo?.labelProblems ?? []), ...dropped] };
+  return { labels, problems: [...(repo?.labelProblems ?? []), ...empty, ...dropped] };
 }

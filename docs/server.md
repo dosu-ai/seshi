@@ -513,7 +513,8 @@ retryable.
 `labels` are small key/value strings the uploader resolved from its config
 ([config.md](config.md#labels)): keys `[a-z0-9][a-z0-9._-]{0,63}`, values 1 to 512 characters,
 at most 32. An upload with labels out of those limits is refused with `400 bad_field`, saying
-which. A session's labels are set by the first write that carries any and kept on its metadata
+which. Label values are redacted with the session's rules, as its text is. A session's labels
+are set by the first write that carries any and kept on its metadata
 (`labels`); a later upload with other labels does not change them, and a `replace` (or a
 `rebuild`) may. Each trace also records the labels its write carried (`metadata.labels`). A
 source's own `labels` ([above](#sources)) win over the upload's. `GET /v1/search` filters by

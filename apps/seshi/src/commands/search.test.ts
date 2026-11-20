@@ -150,7 +150,10 @@ describe("seshi search, in-process", () => {
     expect(await ids("--label", "team=platform", "--label", "dosu.project=a")).toEqual(["s1"]);
     const bad = await seshi(["topic", "--label", "team", "--config", toml]);
     expect(bad.code).toBe(EXIT.usage);
-    expect(bad.err).toContain("--label must be key=value");
+    expect(bad.err).toContain("--label: 'team' is not key=value");
+    const twice = await seshi(["topic", "--label", "t=a", "--label", "t=b", "--config", toml]);
+    expect(twice.code).toBe(EXIT.usage);
+    expect(twice.err).toContain("--label: t is given twice");
   });
 
   it("shows and rebuilds the local index", async () => {

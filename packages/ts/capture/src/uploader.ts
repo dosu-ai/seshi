@@ -31,6 +31,7 @@ import { readSpool, removeSpool, type SpoolEntry } from "./spool";
 import {
   type CaptureState,
   freeze,
+  labelsOpen,
   newSecret,
   otherFolders,
   pauseWindows,
@@ -578,8 +579,10 @@ export class Uploader {
         // they come from this process's environment and its folder, and stay.
         const labels = this.resolveLabels(snapshot, place);
         session = (await this.save(key, (s) => {
-          s.labels ??= labels;
-        })) ?? { ...session, labels };
+          if (s.labels !== undefined) return;
+          s.labels = labels;
+          s.labels_by = "uploader";
+        })) ?? { ...session, labels, labels_by: "uploader" };
       }
       // A paused session sends no more than it had, so its upload is not composed further.
       const from = decision.capture
@@ -644,8 +647,11 @@ export class Uploader {
         if (entry.parent_session_id) session.parent_session_id = entry.parent_session_id;
         if (entry.kind === "capture" && entry.final) session.final = true;
         // The first labels a hook resolved for the session stay; later hooks' never replace them.
-        if (entry.kind === "capture" && entry.labels && session.labels === undefined) {
+        // They do replace labels this uploader resolved for it before anything was sent (a sweep
+        // that found the session before its hook's entry reached the spool).
+        if (entry.kind === "capture" && entry.labels && labelsOpen(session)) {
           session.labels = entry.labels;
+          delete session.labels_by;
         }
         if (
           entry.kind === "paused" &&
@@ -718,6 +724,7 @@ export class Uploader {
           ...(found.info.cwd ? { cwd: found.info.cwd } : {}),
           // No hook saw it: its labels come from this process's environment and its folder.
           labels: this.resolveLabels(snapshot, placeOf(found.info.cwd)),
+          labels_by: "uploader",
           ...(found.info.parent_session_id
             ? { parent_session_id: found.info.parent_session_id }
             : {}),

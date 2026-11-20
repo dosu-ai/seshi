@@ -996,7 +996,7 @@ export class Pipeline {
         agent: envelope.format,
         project: plan.project,
         branch: plan.branch,
-        ...this.labelsOf(envelope),
+        ...this.labelsOf(run),
         parent_session_id: envelope.parent_session_id,
         ...(plan.continuation ? { continuation: plan.continuation } : {}),
         normalizer: this.formats.normalizerFor(envelope.format),
@@ -1046,14 +1046,19 @@ export class Pipeline {
     return { status, ...shippedOf(normalized) };
   }
 
-  /** The session's labels: the envelope's, with its source's over them. Past the limit, the
-   * envelope's own give way. */
-  private labelsOf(envelope: Envelope): { labels?: Labels } {
+  /** The session's labels: the envelope's, with its source's over them, each value redacted as
+   * the session's text is (an `env` label can carry anything). Past the limit, the envelope's
+   * own give way. */
+  private labelsOf(run: Run): { labels?: Labels } {
+    const { envelope, redactor } = run;
     const source = this.sourceLabels?.(envelope.source_id) ?? {};
     const labels: Labels = { ...source };
     for (const [key, value] of Object.entries(envelope.labels ?? {})) {
       if (key in labels || Object.keys(labels).length >= MAX_LABELS) continue;
       labels[key] = value;
+    }
+    for (const [key, value] of Object.entries(labels)) {
+      labels[key] = redactor.redactText?.(value).text ?? value;
     }
     return Object.keys(labels).length > 0 ? { labels } : {};
   }

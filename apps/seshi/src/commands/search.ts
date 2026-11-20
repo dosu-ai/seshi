@@ -5,6 +5,7 @@ import { findServerConfig, parseDuration } from "@seshi/config";
 import type { Instance } from "@seshi/instance";
 import {
   Forbidden,
+  labelPairs,
   type SearchRequest,
   type SearchResult,
   type SearchResults,
@@ -92,13 +93,9 @@ function intArg(value: string, name: string): number {
 
 function labelArgs(given: readonly string[] | undefined): Record<string, string> | undefined {
   if (!given || given.length === 0) return undefined;
-  const labels: Record<string, string> = {};
-  for (const pair of given) {
-    const eq = pair.indexOf("=");
-    if (eq <= 0) throw new UsageProblem(`--label must be key=value, not '${pair}'`);
-    labels[pair.slice(0, eq)] = pair.slice(eq + 1);
-  }
-  return labels;
+  const parsed = labelPairs(given);
+  if ("problem" in parsed) throw new UsageProblem(`--label: ${parsed.problem}`);
+  return parsed.labels;
 }
 
 export function requestOf(query: string, values: Values, now: Date): SearchRequest {

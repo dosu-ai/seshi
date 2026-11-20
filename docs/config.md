@@ -490,8 +490,10 @@ the key. A repo's labels never read the environment: a cloned repo cannot copy y
 into a label, and a repo label that is not a string is left out (it never turns capture off).
 
 Keys are `[a-z0-9][a-z0-9._-]{0,63}`, values 1 to 512 characters, at most 32 labels a session.
-A label out of those limits is a config error that `seshi config check --cli` and `seshi
-doctor` report; a hook never fails over it, it leaves the label out and logs why. Labels are
+A label out of those limits (a fixed empty value too) is a config error that `seshi config check
+--cli` and `seshi doctor` report; a hook never fails over it, it leaves the label out and logs
+why, and the next one down gives the key. Past 32, the lowest in the order above are left out.
+The server redacts label values as it redacts a session's text. Labels are
 resolved once, when the session is first seen, and kept: see
 [capture.md](capture.md#labels). From the environment, `SESHI_LABELS__<KEY>` sets a fixed one
 (`SESHI_LABELS__TEAM=platform`; the key in lowercase, so not one with a `.`).
