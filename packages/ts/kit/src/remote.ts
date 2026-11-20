@@ -2,19 +2,24 @@
  * origin remote and a cloud agent's repository URL, and never carrying a credential. */
 
 /** `remote` (`https://github.com/acme/app.git`, `git@github.com:acme/app`, `ssh://…`, or a
- * bare `github.com/acme/app`) as `host/path`: lowercase host, no user, no port, no `.git`, no
- * trailing slash. */
+ * bare `github.com/acme/app`) as `host/path`: lowercase, no user, no port, no `.git`, no
+ * trailing slash. All of it is lowercased, not just the host: the hosts people use ignore case in
+ * owner and repository names (`github.com/Acme/App` is `github.com/acme/app`), and one
+ * repository must have one name whichever way it was cloned. */
 export function normalizeRemote(remote: string): string {
   let text = remote.trim();
   const scp = /^(?:[^@/]+@)?([^:/]+):(?!\/)(.+)$/.exec(text);
   if (scp && !/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) {
-    text = `${(scp[1] as string).toLowerCase()}/${scp[2]}`;
+    text = `${scp[1]}/${scp[2]}`;
   } else {
     const url = tryParseUrl(text);
-    if (url) text = `${url.hostname.toLowerCase()}${url.pathname}`;
+    if (url) text = `${url.hostname}${url.pathname}`;
     else text = withoutCredentials(text);
   }
-  return text.replace(/\/+$/, "").replace(/\.git$/i, "");
+  return text
+    .replace(/\/+$/, "")
+    .replace(/\.git$/i, "")
+    .toLowerCase();
 }
 
 const HOST = /^[A-Za-z0-9.-]+(?::\d*)?$/;
@@ -37,7 +42,7 @@ function withoutCredentials(text: string): string {
   const slash = hostAndPath.indexOf("/");
   const host = slash === -1 ? hostAndPath : hostAndPath.slice(0, slash);
   if (!host.includes(".") && rest === text) return text;
-  return `${host.replace(/:\d*$/, "").toLowerCase()}${slash === -1 ? "" : hostAndPath.slice(slash)}`;
+  return `${host.replace(/:\d*$/, "")}${slash === -1 ? "" : hostAndPath.slice(slash)}`;
 }
 
 function tryParseUrl(text: string): URL | undefined {

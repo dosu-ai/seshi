@@ -407,7 +407,7 @@ is left waits, with its place kept, for the next hook to start it again (or for 
   never judges, so an agent-only tail is never lost.
 
 With each upload go where the session ran, read from `.git` without running git: the repository's
-remote (`origin`, else the first, without credentials: `github.com/acme/app`), the commit `HEAD`
+remote (`origin`, else the first, lowercase and without credentials: `github.com/acme/app`), the commit `HEAD`
 named when the hook fired (read when the upload goes for a session only the sweep found), the folder relative to the repository's root (never the absolute path), the repository's
 folder name as `project`, the branch, and seshi's version and platform. Cursor's transcripts name
 neither Cursor's version nor the model, so its hooks keep what their payloads say

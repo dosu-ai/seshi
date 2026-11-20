@@ -15,7 +15,8 @@ export interface IndexedSession {
   repo?: string;
   /** What ran the session: the meta record's `source` (`claude-code`). */
   harness?: string;
-  /** The harness's version, from the latest trace. */
+  /** The session's `agent_version`: the harness's version it started on (Cursor: at its latest
+   * upload). */
   agent_version?: string;
   /** Every model the session used. */
   models?: string[];

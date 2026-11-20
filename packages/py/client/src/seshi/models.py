@@ -441,7 +441,7 @@ class SessionMetadata(Response):
     repo: str | None = None
     """The repository's normalized remote, fixed by the first write that names one."""
     agent_version: str | None = None
-    """The harness's version, from the latest trace."""
+    """The harness's version the session started on (Cursor: at its latest upload)."""
     models: list[str] | None = None
     """Every model the session used."""
     parent_session_id: str | None = None

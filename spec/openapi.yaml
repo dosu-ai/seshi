@@ -1201,7 +1201,7 @@ paths:
           schema: { type: string, maxLength: 512 }
         - name: agent_version
           in: query
-          description: Only sessions whose latest trace this version of their harness wrote.
+          description: Only sessions with this `agent_version`, the version of their harness they started on (for a hinted harness such as Cursor, the version at their latest upload).
           schema: { type: string, maxLength: 512 }
         - name: model
           in: query
@@ -1968,7 +1968,7 @@ components:
           maxLength: 1024
           description: |
             The repository's origin remote (the first remote when there is no `origin`),
-            normalized without credentials or port: `github.com/acme/widget`. The session keeps
+            normalized to lowercase without credentials or port: `github.com/acme/widget`. The session keeps
             the first one it is sent, so a later remote change does not move it. A value with
             user info (`@`) or a scheme is left out; the session is stored all the same, as for
             any of these labels that is not fit to keep.
@@ -2655,7 +2655,7 @@ components:
         branch: { type: string }
         repo: { type: string, description: "The repository's normalized remote (`github.com/acme/widget`)." }
         harness: { type: string, description: "What ran the session: its meta record's `source`." }
-        agent_version: { type: string, description: "The harness's version, from the latest trace." }
+        agent_version: { type: string, description: "The session's `agent_version`: the version of its harness it started on (for Cursor, the version at its latest upload)." }
         models:
           type: array
           items: { type: string }

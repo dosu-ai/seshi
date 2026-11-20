@@ -30,9 +30,9 @@ export interface SessionMetadata {
   /** seshi's own label for the session: the repository's folder name for a laptop upload, the repository's name for Cursor Cloud. Independent of `repo`. */
   project?: string;
   branch?: string;
-  /** The repository the session ran in, as its origin remote normalized without credentials (`github.com/acme/app`; the first remote when there is no `origin`). Fixed by the first write that names one: a later remote change does not move the session. */
+  /** The repository the session ran in, as its origin remote normalized to lowercase without credentials (`github.com/acme/app`; the first remote when there is no `origin`). Fixed by the first write that names one: a later remote change does not move the session. */
   repo?: string;
-  /** The version of the harness (`source`) that wrote the session, from the latest trace: the log's own, else the uploader's hint (`harness_version`). */
+  /** The version of the harness (`source`), as the latest trace names it: the log's own, else the uploader's hint (`harness_version`). A log that names it (Claude Code, Codex) gives the version the session started on, kept as the session grows, so a session resumed under a newer version keeps the older one; a hint (Cursor's) is the version at the latest upload. */
   agent_version?: string;
   /** Every model the session used, deduplicated in the order first seen: each LLM call's `model`, and the meta record's `model` (or the uploader's hint) when no call names one. Summed over every write; a replace starts it over. */
   models?: string[];

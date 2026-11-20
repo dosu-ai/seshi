@@ -25,7 +25,8 @@ export interface SearchRequest {
   branch?: string;
   /** Only sessions run by this harness: the meta record's `source` (`claude-code`, `cursor`). */
   harness?: string;
-  /** Only sessions whose latest trace was written by this version of their harness. */
+  /** Only sessions with this `agent_version`: the version of their harness they started on
+   * (for Cursor, whose version comes from its hooks, the version at their latest upload). */
   agent_version?: string;
   /** Only sessions that used this model, among any they used. */
   model?: string;
