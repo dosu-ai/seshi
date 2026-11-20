@@ -31,14 +31,22 @@ export function seesEverything(principal: Principal): boolean {
   return principal.role === "admin" || principal.role === "service";
 }
 
-/** Whether the principal may read the session (X5.10). Scopes are checked separately. */
+/** Whether the principal's credential reads sessions at all (`sessions:read` or `search`). */
+function readsSessions(principal: Principal): boolean {
+  return principal.scopes.has("sessions:read") || principal.scopes.has("search");
+}
+
+/** Whether the principal may find the session (X5.10). A credential that reads nothing (a
+ * device token, a writing service) finds only its own owner's sessions, so a lookup tells it
+ * nothing of anyone else's. Which routes need which scope is checked separately. */
 export function canRead(
   principal: Principal,
   session: SessionAccess,
   aliases: OwnerAliases = NO_ALIASES,
 ): boolean {
-  if (seesEverything(principal)) return true;
   if (isOwnSession(principal, session.owner, aliases)) return true;
+  if (!readsSessions(principal)) return false;
+  if (seesEverything(principal)) return true;
   return (session.visibility ?? "org") === "org";
 }
 
@@ -63,15 +71,34 @@ export function requireDelete(
   }
 }
 
+/** Throws `Forbidden` unless the principal's credential may change a session's visibility at
+ * all: a person's that writes sessions (a device token, on its owner's own sessions) or one that
+ * reads them (a sign-in, an admin). A service token that writes may not: its source's
+ * `visibility` decides its sessions'. Which sessions it may change is
+ * `requireVisibilityChange`'s. */
+export function requireVisibilityScope(principal: Principal): void {
+  if (principal.role === "service" && !principal.scopes.has("sessions:read")) {
+    throw new Forbidden(
+      "a service token cannot change a session's visibility: its source's visibility setting decides it, or an admin does",
+    );
+  }
+  if (!principal.scopes.has("sessions:write") && !principal.scopes.has("sessions:read")) {
+    throw new Forbidden(
+      "this credential cannot do that: it needs the sessions:write or sessions:read scope",
+    );
+  }
+}
+
 /** Throws `Forbidden` unless the principal may change who reads a session of `owner`, whose
- * owner was established as `basis` (X5.10). */
+ * owner was established as `basis` (X5.10). The owner may, with a credential that writes
+ * sessions or reads them; an admin may change anyone's. */
 export function requireVisibilityChange(
   principal: Principal,
   owner: string,
   aliases: OwnerAliases = NO_ALIASES,
   basis?: OwnerBasis,
 ): void {
-  requireScope(principal, "sessions:read");
+  requireVisibilityScope(principal);
   if (principal.role !== "admin" && !isOwnSession(principal, owner, aliases)) {
     throw new Forbidden("only the session's owner or an admin may change its visibility");
   }

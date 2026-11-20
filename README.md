@@ -77,7 +77,7 @@ seshi search flaky checkout test
 
 From then on each session is uploaded as it goes. Claude Code's status line says
 `Session Capture ◉` while a session is captured; `/session-capture` (`$session-capture` in Codex) turns it off or on
-for the session you are in.
+for the session you are in, and `/session-capture share` shares it with the team.
 
 ### Run it for a team
 

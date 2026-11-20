@@ -110,11 +110,39 @@ describe("deletes (X5.3)", () => {
 });
 
 describe("visibility changes and scopes", () => {
-  it("are for the owner or an admin, with a credential that reads", () => {
+  it("are for the owner or an admin, with a credential that reads or writes sessions", () => {
     expect(() => requireVisibilityChange(alice, "alice")).not.toThrow();
     expect(() => requireVisibilityChange(alice, "bob")).toThrow("owner or an admin");
     expect(() => requireVisibilityChange(admin, "bob")).not.toThrow();
-    expect(() => requireVisibilityChange(device, "alice")).toThrow("sessions:read");
+    expect(() => requireVisibilityChange(device, "alice")).not.toThrow();
+    expect(() => requireVisibilityChange(device, "bob")).toThrow("owner or an admin");
+    expect(() => requireVisibilityChange(reader, "alice")).toThrow("owner or an admin");
+    // A writing service (an OTLP source) may not, even on the sessions it wrote.
+    const writer = principal({
+      kind: "service",
+      owner: "svc:otlp",
+      role: "service",
+      credential: "service",
+      owner_basis: "service",
+      scopes: CREDENTIAL_SCOPES.service_write,
+    });
+    expect(() => requireVisibilityChange(writer, "svc:otlp")).toThrow(
+      "a service token cannot change a session's visibility",
+    );
+    const searcher = principal({ scopes: ["search"] });
+    expect(() => requireVisibilityChange(searcher, "alice")).toThrow(
+      "it needs the sessions:write or sessions:read scope",
+    );
+  });
+
+  it("let a credential that reads nothing find only its own sessions", () => {
+    const bobsShared = { owner: "bob", visibility: "org" as const };
+    expect(canRead(device, bobsShared)).toBe(false);
+    expect(canRead(device, { owner: "alice", visibility: "owner" })).toBe(true);
+    const writer = principal({ role: "service", owner: "svc:otlp", scopes: ["sessions:write"] });
+    expect(canRead(writer, bobsShared)).toBe(false);
+    expect(canRead(alice, bobsShared)).toBe(true);
+    expect(canRead(reader, bobsShared)).toBe(true);
   });
 
   it("keep the org key off a session whose owner was verified (X5.12)", () => {

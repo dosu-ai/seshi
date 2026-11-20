@@ -272,6 +272,28 @@ commands Claude Code runs. Without it, `--session` alone means the one session s
 current folder in the past day; when more than one ran there it lists them and asks for
 `--session <id>` rather than guess (a subagent never counts: its parent's toggle covers it).
 
+### Sharing a session
+
+Where the server keeps new sessions private (`default_visibility = "owner"`, or a token or repo
+that uploads with `visibility = "owner"`), you share one with the rest of the team from the
+machine that uploaded it:
+
+```sh
+seshi share                         # this session (from inside the agent: /session-capture share)
+seshi unshare                       # make it yours alone again
+seshi share --session <id> --agent codex
+seshi share claude-code <id>        # any session of yours, by its stored name
+```
+
+With no session named, `share` finds it as `capture off --session` does, and acts on it as this
+machine uploaded it (`<id>~<n>` after a `capture off` and `on`), with its subagents' sessions.
+It needs no sign-in beyond the one the uploader uses: the device token a laptop uploads with may
+share and unshare its owner's own sessions, and still reads no session or trace: a share
+answers with only that session's metadata (X5.10). A session not
+uploaded yet (before its first turn ends) or turned off has nothing on the server to share, and
+`share` says so. It is `seshi sessions visibility <format> <id> org|owner` underneath; an admin
+shares anyone's with `--owner <id>`.
+
 ### Tool calls redacted
 
 For a repository or folder whose code should not be stored, but whose sessions still teach how

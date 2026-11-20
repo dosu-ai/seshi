@@ -649,7 +649,10 @@ export function createApp(instance: Instance) {
   route("GET", "/v1/owners/:owner/sessions/:archive_id/reviews", reviewsOf);
 
   route("PATCH", "/v1/sessions/:format/:session_id", async ({ request, params, url }) => {
-    const principal = await caller(request, "sessions:read");
+    // The owner's own credential may share or unshare: a sign-in reads, a device token only
+    // writes, and either may (X5.10). One that reads nothing finds only its own sessions
+    // (canRead), and requireVisibilityChange checks the scope.
+    const principal = await authenticate(request);
     const { format, sessionId } = sessionParams(params);
     const body = await readJson(request, 64 * 1024);
     const visibility = visibilityField(body.visibility);

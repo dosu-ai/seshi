@@ -106,6 +106,11 @@ export const COMMANDS: Readonly<Record<string, CommandSpec>> = {
       "list, show, export and delete sessions, set who sees them (ls|show|export|rm|visibility)",
     load: () => import("./sessions"),
   },
+  share: {
+    summary:
+      "share a session with the org: this agent's session, or the one named (unshare takes it back)",
+    load: () => import("./share").then((m) => ({ run: (ctx) => m.run(ctx, "share") })),
+  },
   statusline: {
     summary: "one short line for an agent's status bar",
     load: () => import("./statusline"),
@@ -123,6 +128,10 @@ export const COMMANDS: Readonly<Record<string, CommandSpec>> = {
   tokens: {
     summary: "manage seshi tokens",
     load: () => import("./tokens"),
+  },
+  unshare: {
+    summary: "make a shared session its owner's alone again (the reverse of share)",
+    load: () => import("./share").then((m) => ({ run: (ctx) => m.run(ctx, "unshare") })),
   },
   upload: {
     summary: "send transcripts or folders of them by hand",

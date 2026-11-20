@@ -294,7 +294,8 @@ class SeshiClient(_Base):
         self, format: str, session_id: str, visibility: m.Visibility, *, owner: str | None = None
     ) -> m.SessionMetadata | None:
         """Change who may read a session (X5.10); the metadata as it now is, None for one not
-        stored. A redacted session is `ServerError` 410."""
+        stored. The owner may, with a token that writes sessions (a device token) or reads them;
+        an admin may change anyone's, naming `owner`. A redacted session is `ServerError` 410."""
         return self._run(calls.set_visibility(format, session_id, visibility, owner))
 
     def reviews(

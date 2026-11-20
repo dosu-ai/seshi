@@ -226,9 +226,9 @@ key with `--key`, or through the IdP ([cli.md](cli.md#signing-in-f82)).
 | Org key (no IdP) | Every member's CLI and uploader, with `X-Seshi-User: <username>` | Write as that username (lowercased; owner basis `claimed`); read and search org-wide. No deletes; never writes to, replaces or changes the visibility of a session whose owner was verified; replaces a session it wrote only with that session's retraction secret |
 | IdP ID token | The CLI, briefly | Nothing but `POST /v1/auth/exchange` |
 | Session token | The CLI, after sign-in | Read, search; delete the person's own sessions within 10 minutes of being issued. One hour; signed, not stored. An admin's (IdP group `admin_group` or an email in `admins`) can do everything |
-| Device token | The uploader on a laptop | Write the person's own sessions. 90 days; signing in again from the machine renews it |
+| Device token | The uploader on a laptop | Write the person's own sessions, and share or unshare them (`seshi share`, which answers with that session's metadata); it reads no session, trace or listing. 90 days; signing in again from the machine renews it |
 | Admin token | Admins | Everything, including deletes and token management |
-| Service token | A reader, or an OTLP destination | Read and search org-wide, or write as `svc:<source-id>` |
+| Service token | A reader, or an OTLP destination | Read and search org-wide, or write as `svc:<source-id>`; never changes a session's visibility (its source's `visibility` decides it) |
 | Static token | Config | Everything for one owner |
 
 Every seshi token is `seshi_<id>_<secret>`, stored as a hash at `tokens/<id>.json`, revocable,
@@ -241,8 +241,12 @@ rotating the org key, which every member then sets again.
 
 A session is `org` (the default) or `owner` (X5.10). Its visibility is the upload's
 `visibility`, else the token's default, else the source's, else `default_visibility`, and the
-owner or an admin can change it later (`PATCH /v1/sessions/:format/:session_id`), which writes a
-`visibility_changed` change entry. Members read their own sessions and every `org` session;
+owner or an admin can change it later (`PATCH /v1/sessions/:format/:session_id`; `seshi share`
+and `seshi unshare` from the CLI), which writes a `visibility_changed` change entry. The owner
+may with any credential of theirs that writes sessions or reads them, so the device token a
+laptop uploads with shares that person's sessions and still reads no one's (its answer is the
+session's own metadata); a service token that only writes may not change any; a credential that
+cannot read finds only its owner's sessions there (`404` for anyone else's). Members read their own sessions and every `org` session;
 admins and service readers read everything. Reads name another owner with `?owner=`; a
 session the caller may not read answers 404, as if it were not there. Another owner's change
 feed (`GET /v1/changes?owner=`) shows only the entries of sessions the caller may read. Every
@@ -337,7 +341,7 @@ allow.
 | `POST /v1/sessions` | Store a session (`sessions:write`); see below |
 | `GET /v1/sessions?owner&limit&after` | List an owner's sessions (the caller's own by default), as far as visibility allows; never a stub (F3.4) |
 | `GET /v1/sessions/:format/:session_id?owner` | The session's `metadata.json`; `404` for a stub |
-| `PATCH /v1/sessions/:format/:session_id?owner` | `{visibility}`: change who may read it. The owner or an admin |
+| `PATCH /v1/sessions/:format/:session_id?owner` | `{visibility}`: change who may read it. The owner (with `sessions:write` or `sessions:read`, so a device token too) or an admin |
 | `GET /v1/sessions/:format/:session_id/trace?hash&render` | The head trace (or another of the session's `traces`, by hash; `404` for a hash it does not name) as the stored canonical trace (`render=seshi`, the default) or rendered as `letta`, `otlp` or `atif` (until 0.17 also read as `?format=`, its name before 0.16); `400 bad_query` for another render, `404` for a session not stored (a filtered one included), `410` once redacted |
 | `GET /v1/sessions/:format/:session_id/export?hash&render` | The same trace as a download: `Content-Disposition: attachment; filename="<format>-<session>-<hash>.<render>.json"` |
 | `DELETE /v1/sessions/:format/:session_id?owner` | Tombstone: drop the trace objects, append a tombstone change. Irreversible; a later upload of the same session is refused. Needs `sessions:delete`: the owner with a fresh session token or a static token, or an admin. With `X-Seshi-Retract` it is a [retraction](#retraction-f97) by the machine that uploaded the session |

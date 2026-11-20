@@ -6,7 +6,7 @@ plugin marketplace or managed settings instead of each person running the instal
 
 - `hooks/hooks.json`: `seshi hook claude-code <event>` on SessionStart, Stop, SubagentStop,
   PreCompact and SessionEnd. `seshi` must be on the PATH Claude Code runs hooks with.
-- `skills/session-capture/SKILL.md`: `/session-capture off|on|status` for the current session.
+- `skills/session-capture/SKILL.md`: `/session-capture off|on|status|share|unshare` for the current session.
 - `hooks/register.tsx`: the Session Capture chip and `/session-capture` for the Claude desktop
   app's Code tab, which has no status line (F9.4). See below.
 - The status line is not part of a plugin; add `"statusLine": {"type": "command", "command":
