@@ -4,9 +4,9 @@ With `[auth.oidc]` set, a person signs in to a seshi server through the org's id
 (`seshi login`, by the device flow or a browser). The server checks the IdP's ID token and hands
 back a session token, good for an hour, plus a device token the uploader sends with. When the
 session token runs out, the CLI renews it with the IdP's refresh token. When the IdP no longer
-renews it (the person left, the session was revoked) or can't be reached, commands that need the
-sign-in say why and ask the person to sign in again, while uploads keep going on the device
-token.
+renews it (the person left, the session was revoked) or can't be reached, commands that read
+sessions fall back to the device token, which sees only the person's own sessions, and warn
+that signing in again shows the org's; uploads keep going on the device token throughout.
 
 ## Sub-features
 
@@ -15,17 +15,19 @@ token.
 - `idp-upload`: uploads after an IdP sign-in go out on the device token and are stored under
   that owner.
 - `idp-renew`: an expired session token is renewed through the refresh token, once, unseen.
-- `idp-refused`: when the IdP refuses renewal, commands that need the sign-in answer
-  `not_signed_in` and name `seshi login`.
-- `idp-relogin`: signing in again after a refusal brings those commands back.
-- `idp-unreachable`: when the IdP is down, they answer `idp_unreachable`.
+- `idp-refused`: when the IdP refuses renewal, reads fall back to the device token (own sessions
+  only) with a warning that names `seshi login`.
+- `idp-relogin`: signing in again after a refusal reads with the sign-in again, warning-free.
+- `idp-unreachable`: when the IdP is down, reads fall back the same way, and the warning says
+  the IdP can't be reached.
 
 ## How to get to it (user POV)
 
 - Run `seshi login --server <url>` (a browser) or `seshi login --server <url> --device` (a code
   to enter on another device), then `seshi whoami`.
 - Use seshi for an hour or more: any command that reads sessions (`sessions ls`, `search`,
-  `share`) renews the sign-in on its own, or asks to sign in again.
+  `share`) renews the sign-in on its own or, when it can't, reads with the device token and says
+  to sign in again.
 - In the agents, capture uploads with the device token whatever the sign-in's state.
 
 ## Driving it with control-seshi
@@ -54,21 +56,22 @@ Preconditions:
   `$C idp calls | grep -c 'grant=refresh_token -> 200'` is 1. `whoami` shows a new
   `expires` an hour out.
 - **Refused.** Run `$C idp refuse`, then `$C idp expire`, then
-  `$C cli --name ls-refused -- sessions ls --json`. Exit 5 with error code `not_signed_in`:
-  "the IdP no longer renews the session for <url>: run seshi login --server <url>".
-  `$C idp calls` ends with `POST /token grant=refresh_token -> 400 invalid_grant`. On a seshi
-  where device tokens read their owner's own sessions (dosu-ai/seshi#66, after 0.23), the same
-  command instead lists `idp-1` and warns on stderr that it fell back to the device token;
-  record which of the two the run showed.
+  `$C cli --name ls-refused -- sessions ls --json`. Exit 0 with `idp-1` listed, and stderr
+  warns "the sign-in for <url> has run out and could not be renewed; reading with this
+  machine's device token, which sees only your own sessions: run seshi login --server <url> to
+  see the org's". `$C idp calls` ends with
+  `POST /token grant=refresh_token -> 400 invalid_grant`.
 - **Uploads go on.** After the refusal, run `$C agent claude-code idp-2 --turns 4`. The daemon
   reports `uploaded` 1, `failed` 0: the uploader never needed the IdP.
 - **Sign in again.** Run `$C cli --name relogin -- login --server $URL --device`, then
-  `$C cli --name ls-relogin -- sessions ls --json`. Both exit 0, and `idp-1` and `idp-2` are
-  listed: a new sign-in gets new refresh tokens, which the IdP honours.
+  `$C cli --name ls-relogin -- sessions ls --json`. Both exit 0, `idp-1` and `idp-2` are
+  listed, and stderr has no warning: a new sign-in gets new refresh tokens, which the IdP
+  honours.
 - **Unreachable.** Run `$C stop idp`, then `$C idp expire` (a fresh session token needs no
-  IdP), then `$C cli --name ls-idp-down -- sessions ls --json`. Exit 7 with error code
-  `idp_unreachable`: "cannot reach the IdP at <issuer>". `$C doctor` now says
-  `idp stopped by stop idp` and, with the sign-in expired, `NOT READY`.
+  IdP), then `$C cli --name ls-idp-down -- sessions ls --json`. Exit 0 with both sessions
+  listed, and the same warning on stderr, with "(cannot reach the IdP at <issuer>: …)" after
+  "could not be renewed". `$C doctor` says `idp stopped by stop idp`, shows that warning on its
+  `whoami` line, and stays `ready`.
 - **Proof.** The `login`, `whoami`, `ls*` and `daemon-*` evidence files, plus `$C idp calls >
   .verify/seshi/$VERIFY_SESHI_RUN/idp-calls.log` saved before `down` (the run folder, and the
   IdP's log with it, goes at `down`).
@@ -96,6 +99,9 @@ Preconditions:
   later sign-in work again. It can't be undone otherwise; sign in again.
 - `doctor` fails a run whose IdP exited without `stop idp` (a crash); its log is the run's
   `logs/idp.log`.
+- Before seshi 0.24 (dosu-ai/seshi#66) there was no fallback: the refused step exited 5 with
+  `not_signed_in` and the unreachable one exited 7 with `idp_unreachable`. A run at an older
+  commit shows those instead.
 - Stopping the IdP is for good in a run: a new one would have a new issuer and keys. `down`
   and start again.
 - The org key still works on an `--idp` run (`admin.json` has it), but signing in with it
