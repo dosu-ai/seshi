@@ -433,6 +433,10 @@ exclude = ["acme/legal"]
   never read ([cursor-cloud.md](cursor-cloud.md#the-orgs-exclude-list)). An entry added stops
   what comes next; it deletes nothing already stored. An entry removed does not send what it
   kept out, on a laptop or from Cursor Cloud: it applies to what comes after.
+- **Ingest refuses what slips past**: a session whose `repo` the list names is refused with
+  `403 excluded` ([server.md](server.md#post-v1sessions)), whoever sends it: a laptop with an
+  old copy of the list or an older seshi, any source that sets `repo`. It counts as `excluded`
+  in the source's health.
 
 ## The CLI's config
 

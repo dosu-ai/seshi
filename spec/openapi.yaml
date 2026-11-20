@@ -426,6 +426,11 @@ paths:
             never writes to, or replaces, a session whose owner was verified, and replaces one
             the org key wrote only with its retraction secret (`X-Seshi-Retract`). Nothing is
             stored.
+
+            `excluded`: the org's exclude list (`[capture] exclude`, `GET /v1/capture/rules`)
+            names the session's `repo`. Nothing is stored, and the same session is refused
+            whenever it is sent; the message names no entry. A laptop's uploader settles such a
+            session as excluded and sends it no more.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }

@@ -418,7 +418,11 @@ id; turning it back on uploads it as a new session (`<id>~1`).
 ```
 
 The server builds the envelope the upload stands for (source id `upload`) and runs it through
-the pipeline. Nothing is written until every stage has run:
+the pipeline. Nothing is written until every stage has run. Before any of them, a session whose
+`repo` the org's exclude list names ([config.md](config.md#the-orgs-exclude-list-capture-exclude))
+is refused with `403 excluded`, for every source and caller: nothing of it is read or stored,
+the message names no entry, and the refusal counts as `excluded` in the source's health. A
+laptop's uploader settles such a session as excluded and sends it no more.
 
 1. **Normalize** the transcript to trajectory-v1 records through the format's adapter.
 2. **Redact** the records: the operator's patterns and the built-in secret patterns on every

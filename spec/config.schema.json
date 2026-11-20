@@ -1846,7 +1846,7 @@
         },
         "exclude": {
           "default": [],
-          "description": "The org's exclude list: sessions in these repositories (owner/name on any host, host/owner/name on one) or folders (starting with /, ~, a drive or \\\\server, and everything under them) are never stored, from any source. The server applies it to its own sources (repositories only); laptops download it (GET /v1/capture/rules) and apply it with their own capture.exclude. * matches within a path segment, ** across any number of them; blank entries and # comments are skipped. Drop-ins in seshi.d/ add to it.",
+          "description": "The org's exclude list: sessions in these repositories (owner/name on any host, host/owner/name on one) or folders (starting with /, ~, a drive or \\\\server, and everything under them) are never stored, from any source. The server applies it to its own sources and refuses an upload whose repo it names (repositories only); laptops download it (GET /v1/capture/rules) and apply it with their own capture.exclude. * matches within a path segment, ** across any number of them; blank entries and # comments are skipped. Drop-ins in seshi.d/ add to it.",
           "type": "array",
           "items": {
             "type": "string"

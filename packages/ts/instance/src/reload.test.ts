@@ -377,6 +377,15 @@ describe("reloading the org's exclude list", () => {
 
     await instance.health.flush();
     expect((await instance.sources.status("a")).health).toEqual({ excluded: 1 });
+
+    // Ingest applies the list as it runs now: hr-* is gone, payroll stays.
+    const inRepo = (repo: string, id: string) => ({ ...envelope(id), repo });
+    await expect(
+      instance.pipeline.submit(inRepo("github.com/acme/payroll", "x1")),
+    ).rejects.toMatchObject({ code: "excluded" });
+    await expect(
+      instance.pipeline.submit(inRepo("github.com/acme/hr-portal", "x2")),
+    ).resolves.toMatchObject({ status: expect.any(String) });
   });
 
   it("rejects a reload whose list has an entry that could never match, and keeps the running one", async () => {

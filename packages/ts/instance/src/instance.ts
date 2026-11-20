@@ -14,6 +14,7 @@ import type { FormatRegistry } from "@seshi/formats";
 import { type Connector, connectorsOf, type Integration } from "@seshi/kit";
 import {
   type Claims,
+  excludingEntry,
   type LayoutMarker,
   localWriter,
   type OwnerBasis,
@@ -295,6 +296,7 @@ export class Instance {
       health: this.health,
       authorizer: ownershipAuthorizer(),
       visibility: parts.visibility ?? ((sourceId) => visibilityFor(this.config, sourceId)),
+      excludedRepo: (repo) => excludingEntry(this.repoExcludes, [repo]),
       sourceLabels: (sourceId) => this.config.sources.find((s) => s.id === sourceId)?.labels,
       ...(parts.records ? { records: parts.records } : {}),
       ...(parts.createLayout !== undefined ? { createLayout: parts.createLayout } : {}),

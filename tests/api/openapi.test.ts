@@ -365,6 +365,30 @@ describe("the server honours it", () => {
     expect(plain.body).toEqual({ schema: "seshi/capture-rules/1", exclude: [] });
   });
 
+  it("refuses an upload whose repo the org's exclude list names (403 excluded)", async () => {
+    const listed = createApp({
+      store,
+      storage: { url: store.url },
+      tokens: [{ token: TOKEN, owner: "acme" }],
+      config: '[capture]\nexclude = ["acme/payroll"]\n',
+    });
+    const body = {
+      format: "claude-code",
+      session_id: "excluded-1",
+      transcript: CLAUDE,
+      repo: "github.com/acme/payroll",
+    };
+    const refused = await call("POST", "/v1/sessions", { app: listed, body });
+    expect(refused.status).toBe(403);
+    expect(refused.body).toMatchObject({ error: { code: "excluded" } });
+    expect(JSON.stringify(refused.body)).not.toContain("acme/payroll");
+    const elsewhere = await call("POST", "/v1/sessions", {
+      app: listed,
+      body: { ...body, repo: "github.com/acme/web" },
+    });
+    expect(elsewhere.status).toBe(201);
+  });
+
   it("health and identity", async () => {
     expect((await call("GET", "/healthz", { token: null })).status).toBe(200);
     expect((await call("GET", "/v1/me")).status).toBe(200);

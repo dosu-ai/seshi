@@ -12,12 +12,15 @@ import {
 import {
   EMPTY_PREFIX_SHA256,
   type Envelope,
+  excludingEntry,
   Forbidden,
   type FormatAdapter,
   isStub,
   type NormalizedRecord,
   OffsetMismatch,
+  repoExcludes,
   SessionConflict,
+  SessionExcluded,
   type SessionUpload,
   StoreError,
   type StoreSessionResult,
@@ -1268,6 +1271,50 @@ describe("a dropped first envelope leaves a stub (F3.4, revised 15 Nov 2026)", (
       expect(metadata?.traces).toHaveLength(1);
       expect(metadata?.traces[0]?.continuation).toBeUndefined();
     });
+  });
+});
+
+describe("the org's exclude list at ingest", () => {
+  const list = repoExcludes(["acme/payroll", "github.com/acme/hr-*", "~/clients/**"]);
+  const excludedRepo = (repo: string) => excludingEntry(list, [repo]);
+  const inRepo = (repo: string | undefined): Envelope => ({
+    ...upload(HEAD),
+    ...(repo !== undefined ? { repo } : {}),
+  });
+
+  it("refuses an upload whose repo is listed, before anything is stored, and counts it", async () => {
+    const health = new MemoryHealthCounters();
+    const p = pipeline({ health, excludedRepo });
+    await expect(p.submit(inRepo("github.com/acme/payroll"))).rejects.toBeInstanceOf(
+      SessionExcluded,
+    );
+    await expect(p.submit(inRepo("github.com/acme/hr-portal"))).rejects.toMatchObject({
+      code: "excluded",
+    });
+    expect(health.counts.upload).toEqual({ excluded: 2 });
+    expect(await readMetadata(store, "alice", archiveId("alice", "trajectory", "s1"))).toBeNull();
+  });
+
+  it("stores a session in a repo the list does not name, or with no repo", async () => {
+    const p = pipeline({ excludedRepo });
+    expect((await submit(p, inRepo("github.com/acme/web"))).status).toBe("stored");
+    expect(
+      (await submit(p, { ...inRepo(undefined), session_key: "s2", idempotency_key: "s2" })).status,
+    ).toBe("stored");
+  });
+
+  it("records the refusal of a source's envelope, which no caller hears", async () => {
+    const health = new MemoryHealthCounters();
+    const p = pipeline({ health, excludedRepo });
+    const envelope: Envelope = {
+      ...inRepo("github.com/acme/payroll"),
+      source: "s3",
+      source_id: "logs-bucket",
+      caller: { kind: "service", principal: "svc-logs-bucket" },
+      owner_basis: "service",
+    };
+    expect(await p.submit(envelope)).toMatchObject({ status: "failed", code: "excluded" });
+    expect(health.counts["logs-bucket"]).toEqual({ excluded: 1 });
   });
 });
 
