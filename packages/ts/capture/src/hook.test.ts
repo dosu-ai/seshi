@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { CaptureAgent, CaptureHost } from "@seshi/kit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runHook, shellWord } from "./hook";
@@ -576,6 +576,94 @@ describe("the rules cache", () => {
     expect((await captureRules({ ...host, env }, paths)).rules.exclude).toEqual([
       { entry: "github.com/Acme/*", repo: "github.com/acme/*" },
       { entry: "/srv/secret", path: "/srv/secret" },
+    ]);
+  });
+
+  it("puts the server's list (the uploader's copy) ahead of this machine's, for hooks too", async () => {
+    cliConfig(`[capture]\nexclude = ["acme/payments"]\n`);
+    mkdirSync(dirname(paths.orgRules), { recursive: true });
+    writeFileSync(
+      paths.orgRules,
+      JSON.stringify({
+        schema: "seshi/server-capture-rules/1",
+        server: "https://seshi.test",
+        etag: '"e"',
+        exclude: ["~/clients", "github.com/acme/hr-*"],
+        fetched_at: "2026-11-01T00:00:00Z",
+      }),
+    );
+    expect((await captureRules(host, paths)).rules.exclude).toEqual([
+      {
+        entry: "~/clients",
+        path: join(dir, "clients"),
+        from: "server",
+        server: "https://seshi.test",
+      },
+      {
+        entry: "github.com/acme/hr-*",
+        repo: "github.com/acme/hr-*",
+        from: "server",
+        server: "https://seshi.test",
+      },
+      { entry: "acme/payments", repo: "acme/payments" },
+    ]);
+    const outcome = await runHook({
+      agent,
+      event: "Stop",
+      payload: { id: "c1", cwd: join(dir, "clients", "x") },
+      host,
+      paths,
+    });
+    expect(outcome.spooled).toEqual([]);
+    expect(outcome.skipped[0]?.decision).toMatchObject({
+      level: "org",
+      reason: "the org excludes ~/clients (https://seshi.test's [capture] exclude)",
+      excluded: { entry: "~/clients", from: "server", server: "https://seshi.test" },
+    });
+    // The hook hands the uploader the entry, which records the session as excluded for good.
+    expect(readSpool(paths).items.map((i) => i.entry)).toContainEqual(
+      expect.objectContaining({
+        kind: "seen",
+        session_id: "c1",
+        excluded: {
+          entry: "~/clients",
+          from: "server",
+          reason: "the org excludes ~/clients (https://seshi.test's [capture] exclude)",
+        },
+      }),
+    );
+    // The rules the uploader read for this machine when it fetched the copy are used as they
+    // are; another home's are read again.
+    const copy = JSON.parse(readFileSync(paths.orgRules, "utf8"));
+    writeFileSync(
+      paths.orgRules,
+      JSON.stringify({
+        ...copy,
+        compiled: { home: dir, rules: [{ entry: "~/clients", path: "/kept/as/compiled" }] },
+      }),
+    );
+    expect((await captureRules(host, paths)).rules.exclude[0]).toMatchObject({
+      path: "/kept/as/compiled",
+    });
+    writeFileSync(
+      paths.orgRules,
+      JSON.stringify({ ...copy, compiled: { home: "/elsewhere", rules: [] } }),
+    );
+    expect((await captureRules(host, paths)).rules.exclude[0]).toMatchObject({
+      path: join(dir, "clients"),
+    });
+    // A server with no list (an older one) adds nothing.
+    writeFileSync(
+      paths.orgRules,
+      JSON.stringify({
+        schema: "seshi/server-capture-rules/1",
+        server: "https://seshi.test",
+        exclude: null,
+        fetched_at: "2026-11-01T00:00:00Z",
+      }),
+    );
+    expect((await captureRules(host, paths)).rules.exclude).toEqual([
+      { entry: "acme/payments", repo: "acme/payments" },
     ]);
   });
 

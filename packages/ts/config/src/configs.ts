@@ -19,9 +19,13 @@ export interface ServerLoadOptions extends Omit<LoadOptions, "file" | "foreign" 
   trustCwdConfig?: boolean;
 }
 
-/** What a drop-in in `seshi.d/` may add to: sources and rule packs. Everything else is the
- * main file's. */
-export const DROP_IN_LISTS: readonly (readonly string[])[] = [["sources"], ["redaction", "packs"]];
+/** What a drop-in in `seshi.d/` may add to: sources, rule packs and the org's exclude list
+ * (ADX writes its list as a drop-in). Everything else is the main file's. */
+export const DROP_IN_LISTS: readonly (readonly string[])[] = [
+  ["sources"],
+  ["redaction", "packs"],
+  ["capture", "exclude"],
+];
 
 export function loadServerConfig(options: ServerLoadOptions = {}): Loaded<ServerConfig> {
   const fs: ConfigFs = options.fs ?? nodeFs;

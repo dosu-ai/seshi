@@ -19,6 +19,7 @@ import {
   type ReceivedSpan,
   type RedactionSummary,
   SessionConflict,
+  SessionExcluded,
   type SessionMetadata,
   SessionRejected,
   type ShippedState,
@@ -117,6 +118,10 @@ export interface PipelineOptions {
   /** The labels a source puts on every session it stores, by source id (`[[sources]]`
    * `labels`): they win over the envelope's own. */
   sourceLabels?: (sourceId: string) => Labels | undefined;
+  /** The org's exclude list (`[capture] exclude`, as it runs now): the entry that names a
+   * session's `repo`, if one does. Such a session is refused (`SessionExcluded`, 403
+   * `excluded`) before anything of it is read: from a laptop, any source, any caller. */
+  excludedRepo?: (repo: string) => string | undefined;
   /** Where drop and failure records go (`sources/<id>/{dropped,failed}/`); `store` when
    * omitted. A serverless laptop keeps them in a folder of its own (F11.10). */
   records?: Store;
@@ -409,6 +414,7 @@ export class Pipeline {
   readonly health: HealthCounters;
   private readonly visibility: VisibilitySetting;
   private readonly sourceLabels: ((sourceId: string) => Labels | undefined) | undefined;
+  private readonly excludedRepo: ((repo: string) => string | undefined) | undefined;
   private layoutChecked: Promise<unknown> | undefined;
 
   constructor(options: PipelineOptions) {
@@ -427,6 +433,14 @@ export class Pipeline {
     this.health = options.health ?? noHealth();
     this.visibility = options.visibility ?? "org";
     this.sourceLabels = options.sourceLabels;
+    this.excludedRepo = options.excludedRepo;
+  }
+
+  /** Refuse a session in a repository the org's exclude list names: nothing of it is stored. */
+  private checkExcluded(envelope: Envelope): void {
+    const repo = envelope.repo;
+    if (repo === undefined || this.excludedRepo?.(repo) === undefined) return;
+    throw new SessionExcluded();
   }
 
   /** The rules new writes redact with (a config reload). A write already going finishes with
@@ -454,6 +468,7 @@ export class Pipeline {
   async submit(envelope: Envelope, options: SubmitOptions = {}): Promise<SubmitResult> {
     try {
       checkEnvelope(envelope);
+      this.checkExcluded(envelope);
       const auth = await this.authorizer.authorize(envelope);
       if (!isLogEnvelope(envelope)) return await this.spans(envelope as SpanEnvelope, auth);
       const { result, replay } = await this.log(envelope, auth, options.retractSecret);
@@ -479,6 +494,7 @@ export class Pipeline {
     };
     try {
       checkEnvelope(envelope);
+      this.checkExcluded(envelope);
       const auth = await this.authorizer.authorize(envelope);
       const outcome = await this.planned(envelope, auth, (run) =>
         this.whole(run, input.records, 0, {
@@ -501,7 +517,8 @@ export class Pipeline {
   ): Promise<FailedResult> {
     if (!isPermanent(err)) throw err;
     const respond = options.onFailure ?? (hasCaller(envelope) ? "throw" : "record");
-    if (!isProtocolAnswer(err)) {
+    if (err instanceof SessionExcluded) this.health.count(envelope.source_id, "excluded");
+    else if (!isProtocolAnswer(err)) {
       this.health.count(envelope.source_id, respond === "throw" ? "rejected" : "failed");
     }
     if (respond === "throw") throw err;

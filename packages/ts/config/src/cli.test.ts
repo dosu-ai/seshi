@@ -118,6 +118,20 @@ describe("the CLI's config", () => {
     expect(run).toThrow("colour: unknown key (in /c.toml)");
     expect(cliConfigSchema.safeParse({ capture: { paths: [{ path: "/x" }] } }).success).toBe(false);
   });
+
+  it("refuses an exclude entry that could never match, as the server does", () => {
+    const run = () =>
+      loadCliConfig({
+        file: "/c.toml",
+        fs: fs({ "/c.toml": `[capture]\nexclude = ["acme/app", "acme/my app"]\n` }),
+      });
+    expect(run).toThrow(
+      /capture\.exclude\[1\]: "acme\/my app" has a space, which no repository name has/,
+    );
+    expect(
+      cliConfigSchema.safeParse({ capture: { exclude: ["~/my clients", "# a note"] } }).success,
+    ).toBe(true);
+  });
 });
 
 describe("the CLI's labels", () => {

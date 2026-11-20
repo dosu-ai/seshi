@@ -139,6 +139,14 @@ export interface ConnectorContext<C = Readonly<Record<string, unknown>>> {
   readonly signal: AbortSignal;
   now(): Date;
   fail?(failure: ConnectorFailure): Promise<string>;
+  /** The org's exclude list (`[capture] exclude`, as the server runs it now): the entry that
+   * names any of `repos` (URLs or `host/path`, in any form), if one does. A connector asks
+   * before it fetches anything of a session: an excluded one never enters seshi. Folder entries
+   * never match here. Absent where there is no list to apply. */
+  excludedBy?(repos: readonly string[]): string | undefined;
+  /** Count a session (or the change to one) left out because the org excludes its repository,
+   * in the source's health (`excluded`, shown by `seshi sync status`). */
+  excluded?(): void;
 }
 
 export interface ConnectorFailure {

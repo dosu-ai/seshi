@@ -17,6 +17,8 @@ import {
 import { renderTrace } from "@seshi/formats";
 import type { Instance } from "@seshi/instance";
 import {
+  CAPTURE_RULES_SCHEMA,
+  type CaptureRulesDocument,
   type ChangesPage,
   Forbidden,
   type Identity,
@@ -32,6 +34,7 @@ import {
   type RenderFormat,
   SCOPE_FIELDS,
   SessionConflict,
+  SessionExcluded,
   type SessionMetadata,
   SessionRejected,
   type StorageView,
@@ -406,6 +409,7 @@ export function createApp(instance: Instance) {
         );
       }
       if (err instanceof SessionConflict) throw new HttpError(409, err.code, err.message);
+      if (err instanceof SessionExcluded) throw new HttpError(403, err.code, err.message);
       if (err instanceof SessionRejected) throw new HttpError(422, err.code, err.message);
       throw err;
     }
@@ -942,6 +946,21 @@ export function createApp(instance: Instance) {
     await authenticate(request);
     const document = rulesDocument(instance.redaction);
     const etag = `"${document.rule_set}"`;
+    const cached = request.headers.get("if-none-match");
+    if (cached?.split(",").some((t) => t.trim() === etag)) {
+      return new Response(null, { status: 304, headers: { etag } });
+    }
+    return json(document, 200, { etag, "cache-control": "private, no-cache" });
+  });
+
+  route("GET", "/v1/capture/rules", async ({ request }) => {
+    await authenticate(request);
+    const document: CaptureRulesDocument = {
+      schema: CAPTURE_RULES_SCHEMA,
+      exclude: instance.captureExclude,
+    };
+    const digest = createHash("sha256").update(JSON.stringify(document)).digest("hex");
+    const etag = `"${digest}"`;
     const cached = request.headers.get("if-none-match");
     if (cached?.split(",").some((t) => t.trim() === etag)) {
       return new Response(null, { status: 304, headers: { etag } });

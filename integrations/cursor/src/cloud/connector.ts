@@ -52,6 +52,9 @@ export const STREAM_EXPIRED = "stream_expired";
 export const SESSION_CONFLICT = "session_conflict";
 
 const DAY = 86_400_000;
+/** The run id an exclusion's cutoff names: after every real one, so `after` passes over each run
+ * created at the cutoff's instant. */
+const PASSED_OVER = "\uffff";
 /** An agent nothing was stored of, untouched this long, leaves the checkpoint. One with a stored
  * session stays: its log length is where its next run goes. */
 const PRUNE_AFTER_MS = 90 * DAY;
@@ -168,6 +171,14 @@ const after = (run: CursorRun, through: RunRef | undefined) =>
 
 const refOf = (run: CursorRun): RunRef => ({ at: run.createdAt ?? "", id: run.id });
 
+/** The repository URLs the agent works in (`repos[].url`), as Cursor names them: what the org's
+ * exclude list is matched against (normalized there as a laptop's remotes are). */
+export function repoUrls(agent: CursorAgent): string[] {
+  return (agent.repos ?? [])
+    .map((r) => r?.url)
+    .filter((url): url is string => typeof url === "string" && url.trim() !== "");
+}
+
 /** The agent's repository, `host/owner/name`: the one it was started on, else the one its run's
  * branch is in. */
 export function repoOf(agent: CursorAgent, run?: CursorRun): string | undefined {
@@ -240,6 +251,7 @@ export function rewindCursorCloud(cursor: Cursor | null): Cursor {
 
 interface Tally {
   agents: number;
+  excluded: number;
   stored: number;
   filtered: number;
   dropped: number;
@@ -273,6 +285,7 @@ export function cursorCloudConnector(options: CursorCloudConnectorOptions = {}):
       const budget = { streams: config.max_streams, more: false };
       const tally: Tally = {
         agents: 0,
+        excluded: 0,
         stored: 0,
         filtered: 0,
         dropped: 0,
@@ -487,18 +500,46 @@ export function cursorCloudConnector(options: CursorCloudConnectorOptions = {}):
         return true;
       }
 
+      /** The org excludes the agent's repository: none of its runs is listed or read. Its runs
+       * up to now are passed over for good, so one made while it was excluded is never read
+       * after the entry goes; what was stored before the entry came stays. */
+      async function exclude(agent: CursorAgent, known: AgentEntry | undefined, entry: string) {
+        tally.excluded++;
+        ctx.excluded?.();
+        ctx.log.info(`agent ${agent.id}: not read, the org excludes ${entry} ([capture] exclude)`);
+        const skipped: AgentEntry = known ? structuredClone(known) : { bytes: 0 };
+        // On Cursor's clock, in Cursor's format, as runs' `createdAt` is: every run the agent has
+        // so far is no later than its `updatedAt`. The id sorts after any run's, so a run created
+        // in that same instant is passed over too.
+        const at = agent.updatedAt ?? ctx.now().toISOString();
+        if (!skipped.through || skipped.through.at < at) {
+          skipped.through = { at, id: PASSED_OVER };
+        }
+        delete skipped.carry;
+        if (agent.updatedAt) skipped.updated = agent.updatedAt;
+        else delete skipped.updated;
+        cursor.agents[agent.id] = skipped;
+        await ctx.checkpoint.write(cursor as unknown as Cursor);
+      }
+
       const agents = await api.listAgents();
       for (const agent of agents) {
         ctx.signal.throwIfAborted();
         const known = cursor.agents[agent.id];
-        if (known?.conflict) {
-          tally.held++;
-          continue;
-        }
         if (known && known.updated !== undefined && known.updated === agent.updatedAt) continue;
         const updated = agent.updatedAt ? Date.parse(agent.updatedAt) : Number.NaN;
         // Nothing of an agent untouched since before the lookback can be had any more.
         if (!known && !Number.isNaN(updated) && updated < now - config.lookback) continue;
+        // Before anything of the agent is read: an excluded agent's runs never enter seshi.
+        const excludedBy = ctx.excludedBy?.(repoUrls(agent));
+        if (excludedBy !== undefined) {
+          await exclude(agent, known, excludedBy);
+          continue;
+        }
+        if (known?.conflict) {
+          tally.held++;
+          continue;
+        }
         if (budget.streams <= 0) {
           budget.more = true;
           break;
@@ -548,6 +589,9 @@ export function cursorCloudConnector(options: CursorCloudConnectorOptions = {}):
       }
       if (tally.refused) parts.push(`${tally.refused} refused (see sync failed)`);
       if (tally.held) parts.push(`${tally.held} agent(s) held by a session conflict`);
+      if (tally.excluded) {
+        parts.push(`${tally.excluded} agent(s) not read: the org excludes their repository`);
+      }
       if (tally.errors) parts.push(`${tally.errors} agent(s) failed, read again next poll`);
       if (budget.more) parts.push("more next poll");
       ctx.log.info(parts.join("; "));

@@ -56,8 +56,9 @@ lasts most of a day may be gone before it can be read.
 Each poll:
 
 1. lists every agent the key can see (`GET /v1/agents`);
-2. skips an agent whose `updatedAt` has not moved since it last read all its runs, and on the
-   first poll one untouched for longer than `lookback`;
+2. skips an agent whose `updatedAt` has not moved since it last read all its runs, on the
+   first poll one untouched for longer than `lookback`, and one working in a repository the
+   org's exclude list names ([below](#the-orgs-exclude-list));
 3. lists the other agents' runs (`GET /v1/agents/{id}/runs`), oldest first;
 4. replays each run that has ended and is not stored yet (`GET …/runs/{runId}/stream`), and asks
    again, up to three times, for a replay that stops before the run's `result` event;
@@ -90,6 +91,27 @@ again next poll; the other agents go on. Cursor's 429 and 5xx answers are tried 
 waiting as long as `Retry-After` asks (up to a minute). A stream that sends nothing, not even a
 heartbeat, for 60 seconds counts as stalled. A refused key (401, 403) fails the poll. A listing
 of more than 20,000 agents, or runs of one agent, fails rather than leave the rest out.
+
+## The org's exclude list
+
+The server's `[capture] exclude` ([config.md](config.md#the-orgs-exclude-list-capture-exclude))
+applies to Cursor Cloud agents before anything of them is read. Each poll matches every agent's
+repositories (`repos[].url`, normalized as a laptop normalizes its git remotes, so
+`https://github.com/Acme/App.git` and `git@github.com:acme/app` are one repository) against the
+list's repository entries:
+
+- an agent working in a listed repository is left out: none of its runs is listed or replayed,
+  so nothing of it is fetched, stored or indexed;
+- an agent with several repositories is left out when any one of them is listed;
+- an agent with no repository is never matched, and folder entries (laptops' paths) never match
+  a cloud agent.
+
+Each time an excluded agent changes it counts once as `excluded` in the source's health
+(`seshi sync status`), and the poll's log line says how many were left out. A reload applies a
+changed list from the next poll. An entry added stops an agent's new runs; what was stored
+before stays. Runs made while an agent was excluded are passed over for good: the poller notes
+the agent's `updatedAt` (Cursor's own clock) each time it leaves the agent out, and when the
+entry goes it reads only runs created after that, appended where the stored session ends.
 
 ## What a session holds
 

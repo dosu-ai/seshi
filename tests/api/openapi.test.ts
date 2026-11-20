@@ -270,6 +270,7 @@ describe("the document itself", () => {
         "GET /v1/changes/all",
         "GET /v1/admin/jobs",
         "GET /v1/redaction/rules",
+        "GET /v1/capture/rules",
         "GET /v1/sessions/{format}/{session_id}/reviews",
         "GET /v1/owners/{owner}/sessions/{archive_id}",
         "GET /v1/owners/{owner}/sessions/{archive_id}/trace",
@@ -325,6 +326,67 @@ describe("the server honours it", () => {
     // With no packs: the built-in pack's hash, and no packs to send.
     const plain = await call("GET", "/v1/redaction/rules");
     expect(plain.body).toMatchObject({ rule_set: compileRuleSet().hash, packs: [] });
+  });
+
+  it("the org's capture rules, which laptops apply before upload", async () => {
+    const withList = (toml: string) =>
+      createApp({
+        store,
+        storage: { url: store.url },
+        tokens: [{ token: TOKEN, owner: "acme" }],
+        config: toml,
+      });
+    const listed = withList(
+      '[capture]\nexclude = ["acme/payroll", "", "# reviewed", "~/clients/**"]\n',
+    );
+    expect((await call("GET", "/v1/capture/rules", { app: listed, token: null })).status).toBe(401);
+    const got = await call("GET", "/v1/capture/rules", { app: listed });
+    expect(got.status).toBe(200);
+    expect(got.body).toEqual({
+      schema: "seshi/capture-rules/1",
+      exclude: ["acme/payroll", "~/clients/**"],
+    });
+    const etag = got.headers.get("etag") as string;
+    expect(etag).toMatch(/^"[0-9a-f]{64}"$/);
+    const cached = await call("GET", "/v1/capture/rules", {
+      app: listed,
+      headers: { "if-none-match": etag },
+    });
+    expect(cached.status).toBe(304);
+    // A changed list gets a new ETag, and the list again.
+    const changed = await call("GET", "/v1/capture/rules", {
+      app: withList('[capture]\nexclude = ["acme/payroll"]\n'),
+      headers: { "if-none-match": etag },
+    });
+    expect(changed.status).toBe(200);
+    expect(changed.headers.get("etag")).not.toBe(etag);
+    // No list: an empty one.
+    const plain = await call("GET", "/v1/capture/rules");
+    expect(plain.body).toEqual({ schema: "seshi/capture-rules/1", exclude: [] });
+  });
+
+  it("refuses an upload whose repo the org's exclude list names (403 excluded)", async () => {
+    const listed = createApp({
+      store,
+      storage: { url: store.url },
+      tokens: [{ token: TOKEN, owner: "acme" }],
+      config: '[capture]\nexclude = ["acme/payroll"]\n',
+    });
+    const body = {
+      format: "claude-code",
+      session_id: "excluded-1",
+      transcript: CLAUDE,
+      repo: "github.com/acme/payroll",
+    };
+    const refused = await call("POST", "/v1/sessions", { app: listed, body });
+    expect(refused.status).toBe(403);
+    expect(refused.body).toMatchObject({ error: { code: "excluded" } });
+    expect(JSON.stringify(refused.body)).not.toContain("acme/payroll");
+    const elsewhere = await call("POST", "/v1/sessions", {
+      app: listed,
+      body: { ...body, repo: "github.com/acme/web" },
+    });
+    expect(elsewhere.status).toBe(201);
   });
 
   it("health and identity", async () => {

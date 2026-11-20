@@ -336,6 +336,70 @@ describe("reloading rule packs", () => {
   });
 });
 
+describe("reloading the org's exclude list", () => {
+  /** A datadog connector that asks the list about one repository each run, and counts a skip. */
+  function asker(repo: string): Connector & { answers: (string | undefined)[] } {
+    const connector = {
+      kind: "datadog",
+      answers: [] as (string | undefined)[],
+      async run(ctx: Parameters<Connector["run"]>[0]) {
+        const entry = ctx.excludedBy?.([repo]);
+        connector.answers.push(entry);
+        if (entry !== undefined) ctx.excluded?.();
+        return undefined;
+      },
+    };
+    return connector;
+  }
+
+  it("combines seshi.toml's list with the drop-ins', and applies a changed list at once", async () => {
+    writeConfig(`${dd("a")}\n[capture]\nexclude = ["acme/payroll", "~/clients"]\n`);
+    mkdirSync(join(dir, "seshi.d"));
+    const dropIn = join(dir, "seshi.d", "adx.toml");
+    writeFileSync(dropIn, '[capture]\nexclude = ["github.com/acme/hr-*"]\n', { mode: 0o600 });
+    const connector = asker("https://github.com/acme/hr-portal.git");
+    const instance = await start({ connectors: [connector] });
+    expect(instance.captureExclude).toEqual(["acme/payroll", "~/clients", "github.com/acme/hr-*"]);
+    expect(instance.repoExcludes.repos.map((r) => r.entry)).toEqual([
+      "acme/payroll",
+      "github.com/acme/hr-*",
+    ]);
+    await instance.jobs.runNow("source:a");
+    expect(connector.answers).toEqual(["github.com/acme/hr-*"]);
+
+    // ADX rewrites its drop-in and asks for a reload: the next run sees the new list.
+    writeFileSync(dropIn, '[capture]\nexclude = ["# none for now"]\n', { mode: 0o600 });
+    const report = await instance.reload("api");
+    expect(report).toMatchObject({ outcome: "applied", changed: ["capture"] });
+    expect(instance.captureExclude).toEqual(["acme/payroll", "~/clients"]);
+    await instance.jobs.runNow("source:a");
+    expect(connector.answers).toEqual(["github.com/acme/hr-*", undefined]);
+
+    await instance.health.flush();
+    expect((await instance.sources.status("a")).health).toEqual({ excluded: 1 });
+
+    // Ingest applies the list as it runs now: hr-* is gone, payroll stays.
+    const inRepo = (repo: string, id: string) => ({ ...envelope(id), repo });
+    await expect(
+      instance.pipeline.submit(inRepo("github.com/acme/payroll", "x1")),
+    ).rejects.toMatchObject({ code: "excluded" });
+    await expect(
+      instance.pipeline.submit(inRepo("github.com/acme/hr-portal", "x2")),
+    ).resolves.toMatchObject({ status: expect.any(String) });
+  });
+
+  it("rejects a reload whose list has an entry that could never match, and keeps the running one", async () => {
+    writeConfig('\n[capture]\nexclude = ["acme/payroll"]\n');
+    const instance = await start();
+    writeConfig('\n[capture]\nexclude = ["acme/payroll", "https://bot:tok@github.com/acme/x"]\n');
+    const report = await instance.reload("api");
+    expect(report.outcome).toBe("rejected");
+    expect(report.errors?.join("\n")).toMatch(/names a credential/);
+    expect(report.errors?.join("\n")).not.toContain("tok@");
+    expect(instance.captureExclude).toEqual(["acme/payroll"]);
+  });
+});
+
 describe("reloading review", () => {
   it("reads prompt files again: an edited prompt is a new policy, with [review] unchanged", async () => {
     const provider = fakeProviderServer({ model: new KeywordModel({}) });

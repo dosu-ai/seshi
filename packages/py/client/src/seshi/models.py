@@ -849,6 +849,20 @@ class RedactionRulesAnswer(Response):
     etag: str | None = None
 
 
+class CaptureRules(Response):
+    """`seshi/capture-rules/1`: the org's exclude list, which laptops apply before upload."""
+
+    schema_: Literal["seshi/capture-rules/1"] = Field(alias="schema")
+    exclude: list[str]
+
+
+class CaptureRulesAnswer(Response):
+    """`capture_rules_since`: the document and the ETag to send next time."""
+
+    document: CaptureRules
+    etag: str | None = None
+
+
 # --- Model review (F3.8) --------------------------------------------------------------------
 
 

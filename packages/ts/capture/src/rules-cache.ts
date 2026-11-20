@@ -1,16 +1,12 @@
 import { cliConfigPath, NOT_SETTINGS_ENV } from "@seshi/config/paths";
 import type { CaptureHost } from "@seshi/kit";
 import { expandTilde } from "@seshi/kit";
+import { readExcludeEntry } from "@seshi/model/exclude";
 import { tryReadJson, tryRealpath, tryStat, tryWritePrivateFile } from "./files";
 import { type LabelRules, labelRules } from "./labels";
+import { readOrgRules } from "./org-rules";
 import type { CapturePaths } from "./paths";
-import {
-  type CaptureRules,
-  DEFAULT_RULES,
-  type ExcludeRule,
-  excludePattern,
-  type PathRule,
-} from "./rules";
+import { type CaptureRules, DEFAULT_RULES, type ExcludeRule, type PathRule } from "./rules";
 
 // 2: rules gained `exclude`. A cache written before it would hide a new exclude list, or keep the
 // error an older seshi gave for the unknown key, until the config file changed.
@@ -68,13 +64,11 @@ function pathRule(path: string, capture: boolean, home: string): PathRule {
  * with `/`, `~`, a drive (`C:\`) or a network share (`\\server`); anything else names a
  * repository. A folder's symbolic links are resolved up to its first wildcard. */
 export function excludeRule(raw: string, home: string): ExcludeRule | undefined {
-  const written = raw.trim();
-  if (written === "" || written.startsWith("#")) return undefined;
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: matching control characters
-  const entry = written.replace(/[\x00-\x1f\x7f-\x9f]/g, "\uFFFD");
-  if (!/^(?:[/~]|[a-z]:[\\/]|\\\\)/i.test(written)) return { entry, repo: excludePattern(written) };
-  const path = expandTilde(written, home);
-  const rule: ExcludeRule = { entry, path };
+  const read = readExcludeEntry(raw);
+  if (read === undefined) return undefined;
+  if (read.repo !== undefined) return { entry: read.entry, repo: read.repo };
+  const path = expandTilde(read.folder, home);
+  const rule: ExcludeRule = { entry: read.entry, path };
   const real = realUpToWildcard(path);
   if (real !== undefined && real !== path) rule.real = real;
   return rule;
@@ -119,8 +113,13 @@ export async function loadRules(host: CaptureHost): Promise<RulesSnapshot> {
 }
 
 /** The rules, from `rules.json` when the CLI config has not changed since it was written, else
- * loaded again (and the cache rewritten). */
+ * loaded again (and the cache rewritten), with the server's exclude list (the copy the uploader
+ * fetched last) ahead of this machine's own. */
 export async function captureRules(host: CaptureHost, paths: CapturePaths): Promise<RulesSnapshot> {
+  return withServerExcludes(await localRules(host, paths), paths, host.home);
+}
+
+async function localRules(host: CaptureHost, paths: CapturePaths): Promise<RulesSnapshot> {
   const key = keyOf(host);
   const cached = tryReadJson(paths.rules) as CacheFile | null | undefined;
   if (cached?.schema === CACHE_SCHEMA && sameKey(cached.key, key)) return cached.snapshot;
@@ -128,4 +127,39 @@ export async function captureRules(host: CaptureHost, paths: CapturePaths): Prom
   const file: CacheFile = { schema: CACHE_SCHEMA, key, snapshot };
   tryWritePrivateFile(paths.rules, JSON.stringify(file));
   return snapshot;
+}
+
+/** An exclude list read for this machine (`~` expanded under `home`). */
+export function compileExcludes(
+  exclude: readonly string[],
+  home: string,
+): { home: string; rules: ExcludeRule[] } {
+  return {
+    home,
+    rules: exclude
+      .map((e) => excludeRule(e, home))
+      .filter((r): r is ExcludeRule => r !== undefined),
+  };
+}
+
+/** `snapshot` with the server's exclude list first: the org's list and this machine's are one
+ * list, and an entry from either turns capture off; the server's is named first. */
+export function withServerExcludes(
+  snapshot: RulesSnapshot,
+  paths: CapturePaths,
+  home: string,
+): RulesSnapshot {
+  const copy = readOrgRules(paths);
+  if (!copy?.exclude) return snapshot;
+  // Read for this machine when it was fetched; again only for another home.
+  const rules =
+    copy.compiled?.home === home ? copy.compiled.rules : compileExcludes(copy.exclude, home).rules;
+  // The last copy fetched, whichever server it came from: after a change of server the old list
+  // goes on applying (named for its server) until the new one's is fetched.
+  const server = rules.map((r): ExcludeRule => ({ ...r, from: "server", server: copy.server }));
+  if (server.length === 0) return snapshot;
+  return {
+    ...snapshot,
+    rules: { ...snapshot.rules, exclude: [...server, ...snapshot.rules.exclude] },
+  };
 }

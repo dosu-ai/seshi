@@ -79,6 +79,7 @@ answer back.
 | `me()` | `GET /v1/me`: who the credential is, and which bucket the server writes |
 | `owners({after, limit})` | `GET /v1/owners` |
 | `redactionRules()`, `redactionRulesSince(etag)` | `GET /v1/redaction/rules`, for redacting before upload |
+| `captureRulesSince(etag)` | `GET /v1/capture/rules`: the org's exclude list, which laptops apply before upload (404 from an older server) |
 | `createToken`, `listTokens`, `revokeToken`, `revokeOwnerTokens` | `/v1/tokens` (admins) |
 | `jobs()`, `sources({days})`, `source(id)`, `records(kind, id, …)` | `/v1/admin/jobs` and `/v1/admin/sources` (admins) |
 | `reload()`, `configStatus()` | `POST` and `GET /v1/admin/reload`: apply the config files again, and the running config's generation (admins). A rejected reload is returned with its `errors`, not thrown |
@@ -201,6 +202,7 @@ The same calls as `@dosu/seshi-client`, in snake_case:
 | `me()` | `me` | `GET /v1/me` |
 | `owners(after=, limit=)` | `owners` | `GET /v1/owners` |
 | `redaction_rules()`, `redaction_rules_since(etag)` | `redactionRules`, `redactionRulesSince` | `GET /v1/redaction/rules`, as a `RedactionRules` model |
+| `capture_rules()`, `capture_rules_since(etag)` | `captureRulesSince` | `GET /v1/capture/rules`, as a `CaptureRules` model |
 | `create_token`, `list_tokens(owner=, kind=, all=)`, `revoke_token`, `revoke_owner_tokens` | the same | `/v1/tokens` (admins) |
 | `jobs()`, `sources(days=)`, `source(id, days=)`, `records(kind, id, since=, after=, limit=)` | the same | `/v1/admin/jobs` and `/v1/admin/sources` (admins) |
 | `reload()`, `config_status()` | the same | `POST` and `GET /v1/admin/reload` (admins); a rejected reload is returned, not raised |

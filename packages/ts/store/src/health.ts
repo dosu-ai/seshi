@@ -16,7 +16,10 @@ export type HealthOutcome =
   | "filtered"
   | "dropped"
   | "failed"
-  | "rejected";
+  | "rejected"
+  /** Left out because the org's exclude list names its repository: a source's skip (a Cursor
+   * Cloud agent never fetched), or an upload refused at ingest. */
+  | "excluded";
 
 export const HEALTH_OUTCOMES: readonly HealthOutcome[] = [
   "stored",
@@ -26,6 +29,7 @@ export const HEALTH_OUTCOMES: readonly HealthOutcome[] = [
   "dropped",
   "failed",
   "rejected",
+  "excluded",
 ];
 
 export type HealthCounts = Partial<Record<HealthOutcome, number>>;

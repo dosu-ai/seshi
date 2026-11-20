@@ -10,6 +10,8 @@ export interface CapturePaths {
   uploaderLock: string;
   rules: string;
   redactionRules: string;
+  /** The server's capture rules, as the uploader last fetched them (`org-rules.ts`). */
+  orgRules: string;
   log: string;
   /** The last conversation prompted, per agent and folder (an editor's indicator reads it). */
   recent: string;
@@ -25,6 +27,7 @@ export function capturePaths(host: CaptureHost): CapturePaths {
     uploaderLock: at(dir, "uploader.json"),
     rules: at(dir, "rules.json"),
     redactionRules: at(dir, "redaction-rules.json"),
+    orgRules: at(dir, "capture-rules.json"),
     log: at(dir, "capture.log"),
     recent: at(dir, "recent"),
   };

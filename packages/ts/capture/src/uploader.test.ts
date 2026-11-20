@@ -20,6 +20,7 @@ import {
   type IngestOptions,
   OffsetMismatch,
   SessionConflict,
+  SessionExcluded,
   SessionRejected,
   type StaleSession,
   StoreError,
@@ -28,9 +29,10 @@ import {
   VERSION,
 } from "@seshi/model";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { type CaptureRulesAnswer, readOrgRules } from "./org-rules";
 import { type CapturePaths, capturePaths } from "./paths";
 import { DEFAULT_RULES } from "./rules";
-import type { RulesSnapshot } from "./rules-cache";
+import { excludeRule, type RulesSnapshot, withServerExcludes } from "./rules-cache";
 import { type RetractOutcome, RetractRefused, type SessionSink, SignInNeeded } from "./sink";
 import { appendSpool } from "./spool";
 import {
@@ -997,6 +999,400 @@ describe("the rules apply to the uploader too (F9.3)", () => {
     expect(server.uploads).toHaveLength(0);
     expect(pass.queued).toBe(0);
     expect(Object.keys(readState(paths).sessions)).not.toContain("fake:agent-b");
+  });
+});
+
+/** A server that serves the org's capture rules (`GET /v1/capture/rules`). */
+class ListingServer extends FakeServer {
+  /** The list it serves; `null`: a server older than the route (404). */
+  list: string[] | null = [];
+  /** How many fetches fail first (the server unreachable). */
+  rulesFail = 0;
+  readonly rulesAsked: (string | undefined)[] = [];
+
+  async captureRules(etag?: string): Promise<CaptureRulesAnswer> {
+    this.rulesAsked.push(etag);
+    if (this.rulesFail > 0) {
+      this.rulesFail--;
+      throw new ServerError(503, "unavailable", "the server is down");
+    }
+    if (this.list === null) return "none";
+    const current = `"${createHash("sha256").update(JSON.stringify(this.list)).digest("hex")}"`;
+    if (etag === current) return "unchanged";
+    return { exclude: [...this.list], etag: current };
+  }
+}
+
+describe("the server's exclude list (GET /v1/capture/rules)", () => {
+  let listing: ListingServer;
+  /** This machine's own capture.exclude. */
+  let local: string[];
+  beforeEach(() => {
+    listing = new ListingServer();
+    server = listing;
+    local = [];
+  });
+
+  /** An uploader whose rules are this machine's list and the server's copy, as `captureRules`
+   * gives them. */
+  const listed = (options: Partial<UploaderOptions> = {}) =>
+    uploader({
+      rules: async () =>
+        withServerExcludes(
+          {
+            rules: {
+              ...DEFAULT_RULES,
+              exclude: local.map((e) => excludeRule(e, dir)).filter((r) => r !== undefined),
+            },
+          },
+          paths,
+          dir,
+        ),
+      ...options,
+    });
+
+  /** A session `id` in folder `name` (made under the test's home), seen by a hook. */
+  function sessionIn(id: string, name: string, lines = ["one", "two"]): string {
+    const cwd = join(dir, name);
+    mkdirSync(cwd, { recursive: true });
+    writeFileSync(
+      transcript(id),
+      lines.map((text) => `${JSON.stringify({ id, cwd, text })}\n`).join(""),
+    );
+    appendSpool(paths, {
+      v: 1,
+      kind: "capture",
+      at: clock.toISOString(),
+      agent: "fake",
+      event: "Stop",
+      session_id: id,
+      transcript_path: transcript(id),
+      cwd,
+    });
+    return cwd;
+  }
+
+  const uploaded = () => [...new Set(server.uploads.map((u) => u.session_id))].sort();
+
+  it("holds uploads to a server that serves a list until this machine has a copy of it", async () => {
+    sessionIn("s1", "app");
+    listing.rulesFail = 2;
+    const up = listed();
+    const first = await up.pass();
+    expect(server.uploads).toEqual([]);
+    expect(first.retrying).toBe(1);
+    expect(readOrgRules(paths)).toBeUndefined();
+    // Said at once: nothing goes until it clears.
+    expect(readState(paths).problems?.upload?.message).toContain("wait for its capture rules");
+    // Asked again only after a backoff, not on every pass.
+    await up.pass();
+    expect(listing.rulesAsked).toHaveLength(1);
+    clock = new Date(clock.getTime() + 1500);
+    await up.pass();
+    expect(server.uploads).toEqual([]);
+    clock = new Date(clock.getTime() + 5000);
+    const sent = await up.pass();
+    expect(sent.uploaded).toBe(1);
+    expect(readState(paths).problems?.upload).toBeUndefined();
+    expect(readOrgRules(paths)).toMatchObject({ server: "https://seshi.test", exclude: [] });
+  });
+
+  it("applies the server's list with this machine's own: either one keeps a session here", async () => {
+    // The server excludes a folder and a repository (named by its remote, in another form).
+    listing.list = [join(dir, "clients"), "github.com/Acme/Payroll"];
+    local = [join(dir, "mine")];
+    sessionIn("s-client", "clients/x");
+    sessionIn("s-mine", "mine");
+    sessionIn("s-app", "app");
+    const payroll = sessionIn("s-payroll", "payroll");
+    mkdirSync(join(payroll, ".git"));
+    writeFileSync(join(payroll, ".git", "HEAD"), "ref: refs/heads/main\n");
+    writeFileSync(
+      join(payroll, ".git", "config"),
+      '[remote "origin"]\n\turl = git@github.com:acme/payroll.git\n',
+    );
+    await listed().pass();
+    expect(uploaded()).toEqual(["s-app"]);
+    const copy = readOrgRules(paths);
+    expect(copy?.exclude).toEqual([join(dir, "clients"), "github.com/Acme/Payroll"]);
+    expect(copy?.etag).toMatch(/^"/);
+  });
+
+  it("keeps using its copy when a later fetch fails", async () => {
+    listing.list = [join(dir, "clients")];
+    sessionIn("s-app", "app");
+    const up = listed({ orgRulesRefreshMs: 60_000 });
+    await up.pass();
+    expect(uploaded()).toEqual(["s-app"]);
+
+    listing.rulesFail = 5;
+    clock = new Date(clock.getTime() + 120_000);
+    sessionIn("s-client", "clients/x");
+    sessionIn("s-other", "other");
+    await up.pass();
+    expect(listing.rulesAsked.length).toBeGreaterThan(1);
+    expect(uploaded()).toEqual(["s-app", "s-other"]);
+    // A new uploader (the next run) uses the copy on disk too.
+    clock = new Date(clock.getTime() + 120_000);
+    sessionIn("s-client2", "clients/y");
+    await listed().pass();
+    expect(uploaded()).toEqual(["s-app", "s-other"]);
+  });
+
+  it("asks with its copy's ETag, and takes a changed list at once", async () => {
+    sessionIn("s1", "clients/x", ["one", "two"]);
+    const up = listed({ orgRulesRefreshMs: 60_000 });
+    await up.pass();
+    expect(uploaded()).toEqual(["s1"]);
+    const etag = readOrgRules(paths)?.etag;
+
+    // Unchanged: asked with the ETag, nothing new written.
+    clock = new Date(clock.getTime() + 120_000);
+    appendFileSync(transcript("s1"), `${JSON.stringify({ id: "s1", text: "three" })}\n`);
+    hooked("s1", transcript("s1"));
+    await up.pass();
+    expect(listing.rulesAsked.at(-1)).toBe(etag);
+    expect(server.uploads).toHaveLength(2);
+
+    // The admin adds the folder: the next pass sends nothing more of the session.
+    listing.list = [join(dir, "clients")];
+    clock = new Date(clock.getTime() + 120_000);
+    appendFileSync(transcript("s1"), `${JSON.stringify({ id: "s1", text: "four" })}\n`);
+    hooked("s1", transcript("s1"));
+    await up.pass();
+    expect(server.uploads).toHaveLength(2);
+  });
+
+  it("fetches again at once when its copy is gone, rather than wait with no reason", async () => {
+    sessionIn("s1", "app");
+    const up = listed({ orgRulesRefreshMs: 60_000 });
+    await up.pass();
+    expect(uploaded()).toEqual(["s1"]);
+    rmSync(paths.orgRules);
+    sessionIn("s2", "app2");
+    await up.pass();
+    expect(listing.rulesAsked).toHaveLength(2);
+    expect(uploaded()).toEqual(["s1", "s2"]);
+  });
+
+  it("holds uploads, saying why, while its copy cannot be written", async () => {
+    sessionIn("s1", "app");
+    // A folder where the copy goes: the write fails.
+    mkdirSync(paths.orgRules, { recursive: true });
+    const lines: string[] = [];
+    const up = listed({ log: (l) => lines.push(l) });
+    const held = await up.pass();
+    expect(server.uploads).toEqual([]);
+    expect(held.retrying).toBe(1);
+    expect(lines.join("\n")).toContain(`cannot write ${paths.orgRules}`);
+    expect(readState(paths).uploader?.failures).toBe(1);
+    // Still held on the next pass, without asking again before the backoff.
+    await up.pass();
+    expect(listing.rulesAsked).toHaveLength(1);
+    expect(server.uploads).toEqual([]);
+
+    rmSync(paths.orgRules, { recursive: true });
+    clock = new Date(clock.getTime() + 60_000);
+    expect((await up.pass()).uploaded).toBe(1);
+  });
+
+  it("holds uploads while a changed list cannot replace the copy it has", async () => {
+    sessionIn("s1", "app");
+    const up = listed({ orgRulesRefreshMs: 60_000 });
+    await up.pass();
+    expect(uploaded()).toEqual(["s1"]);
+    // The admin lists a folder; this machine cannot write its copy over.
+    listing.list = [join(dir, "clients")];
+    const copy = readFileSync(paths.orgRules, "utf8");
+    rmSync(paths.orgRules);
+    mkdirSync(paths.orgRules);
+    clock = new Date(clock.getTime() + 120_000);
+    sessionIn("s-client", "clients/x");
+    await up.pass();
+    expect(uploaded()).toEqual(["s1"]);
+    // The old copy back on disk is not the server's list: still held.
+    rmSync(paths.orgRules, { recursive: true });
+    writeFileSync(paths.orgRules, copy);
+    await up.pass();
+    expect(uploaded()).toEqual(["s1"]);
+    // Once it can write, the new list applies.
+    clock = new Date(clock.getTime() + 120_000);
+    await up.pass();
+    expect(uploaded()).toEqual(["s1"]);
+    expect(readOrgRules(paths)?.exclude).toEqual([join(dir, "clients")]);
+    sessionIn("s-app", "app3");
+    await up.pass();
+    expect(uploaded()).toEqual(["s-app", "s1"]);
+  });
+
+  it("takes a 304 to a request with no copy as no answer, never as no list", async () => {
+    listing.list = [join(dir, "clients")];
+    listing.captureRules = async (etag?: string) => {
+      listing.rulesAsked.push(etag);
+      return "unchanged";
+    };
+    sessionIn("s-client", "clients/x");
+    const held = await listed().pass();
+    expect(held.retrying).toBe(1);
+    expect(server.uploads).toEqual([]);
+    expect(readOrgRules(paths)).toBeUndefined();
+  });
+
+  it("keeps the list read for this machine with its copy", async () => {
+    listing.list = ["~/clients", "acme/app"];
+    sessionIn("s1", "app");
+    await listed().pass();
+    expect(readOrgRules(paths)?.compiled).toEqual({
+      home: dir,
+      rules: [
+        { entry: "~/clients", path: join(dir, "clients") },
+        { entry: "acme/app", repo: "acme/app" },
+      ],
+    });
+  });
+
+  it("uploads as before to an older server without the route", async () => {
+    listing.list = null;
+    sessionIn("s1", "app");
+    await listed().pass();
+    expect(uploaded()).toEqual(["s1"]);
+    expect(readOrgRules(paths)).toMatchObject({ exclude: null });
+    // It has its answer for this server: a later failure holds nothing.
+    listing.rulesFail = 5;
+    clock = new Date(clock.getTime() + 10 * 60_000);
+    sessionIn("s2", "app2");
+    await listed().pass();
+    expect(uploaded()).toEqual(["s1", "s2"]);
+  });
+
+  it("does not take another server's copy as this server's", async () => {
+    listing.list = [];
+    sessionIn("s1", "app");
+    await listed().pass();
+    expect(uploaded()).toEqual(["s1"]);
+    // The machine signs in to another server, which cannot be reached yet.
+    const other = new ListingServer();
+    Object.defineProperty(other, "target", { value: "https://other.test" });
+    other.rulesFail = 1;
+    server = other;
+    sessionIn("s2", "app2");
+    await listed().pass();
+    expect(other.uploads).toEqual([]);
+  });
+
+  it("keeps a session an entry excluded off for good, when its folder or the list changes", async () => {
+    listing.list = ["acme/payroll"];
+    const app = sessionIn("s-pay", "app");
+    mkdirSync(join(app, ".git"));
+    writeFileSync(join(app, ".git", "HEAD"), "ref: refs/heads/main\n");
+    const remote = (url: string) =>
+      writeFileSync(join(app, ".git", "config"), `[remote "origin"]\n\turl = ${url}\n`);
+    remote("git@github.com:Acme/Payroll.git");
+    const up = listed({ orgRulesRefreshMs: 60_000 });
+    await up.pass();
+    expect(server.uploads).toEqual([]);
+    expect(session("s-pay").excluded).toMatchObject({
+      entry: "acme/payroll",
+      from: "server",
+      message: expect.stringContaining("the org excludes acme/payroll"),
+    });
+    expect(sessionWord(session("s-pay"))).toBe("excluded");
+
+    // The folder now points at another repository: the session stays off, a new one goes.
+    remote("https://github.com/acme/billing.git");
+    appendFileSync(transcript("s-pay"), `${JSON.stringify({ id: "s-pay", text: "more" })}\n`);
+    hooked("s-pay", transcript("s-pay"));
+    sessionIn("s-bill", "app");
+    await up.pass();
+    expect(uploaded()).toEqual(["s-bill"]);
+
+    // The entry goes from the list: still off.
+    listing.list = [];
+    clock = new Date(clock.getTime() + 120_000);
+    await up.pass();
+    expect(uploaded()).toEqual(["s-bill"]);
+  });
+
+  it("records the entry a hook found, from its spool entry", async () => {
+    writeFileSync(transcript("s1"), line("one") + line("two"));
+    appendSpool(paths, {
+      v: 1,
+      kind: "seen",
+      at: clock.toISOString(),
+      agent: "fake",
+      session_id: "s1",
+      cwd: dir,
+      transcript_path: transcript("s1"),
+      excluded: { entry: "~/x", from: "config", reason: "the org excludes ~/x (capture.exclude)" },
+    });
+    await listed().pass();
+    expect(session("s1").excluded).toEqual({
+      at: clock.toISOString(),
+      entry: "~/x",
+      from: "config",
+      message: "the org excludes ~/x (capture.exclude)",
+    });
+    expect(server.uploads).toEqual([]);
+  });
+
+  it("records a session only the sweep found in an excluded folder, and never sends it later", async () => {
+    await updateState(paths, (st) => {
+      st.agents.fake = { installed_at: "2026-10-01T00:00:00Z" };
+    });
+    local = [join(dir, "clients")];
+    mkdirSync(join(dir, "clients"));
+    writeFileSync(
+      transcript("swept"),
+      `${JSON.stringify({ id: "swept", cwd: join(dir, "clients") })}\n${line("two", "swept")}`,
+    );
+    await listed().pass({ sweep: true });
+    expect(session("swept").excluded).toMatchObject({
+      entry: join(dir, "clients"),
+      from: "config",
+    });
+    local = [];
+    await listed().pass({ sweep: true });
+    expect(server.uploads).toEqual([]);
+  });
+
+  it("settles a session the server refuses as excluded, and sends it no more", async () => {
+    sessionIn("s1", "app");
+    listing.failNext = [new SessionExcluded()];
+    const result = await listed().pass();
+    expect(result.uploaded).toBe(0);
+    expect(session("s1")).toMatchObject({
+      excluded: { message: expect.stringContaining("exclude list") },
+    });
+    expect(session("s1").error).toBeUndefined();
+    expect(session("s1").next_attempt_at).toBeUndefined();
+    expect(sessionWord(session("s1"))).toBe("excluded by the server");
+
+    appendFileSync(transcript("s1"), `${JSON.stringify({ id: "s1", text: "three" })}\n`);
+    hooked("s1", transcript("s1"));
+    const later = await listed().pass();
+    expect(server.uploads).toHaveLength(1);
+    expect(later).toMatchObject({ queued: 0, retrying: 0 });
+  });
+
+  it("removes what the hooks kept beside a session the server excluded", async () => {
+    const kept = join(paths.dir, "kept", "fake", "s1");
+    const composing: CaptureAgent = {
+      ...agent,
+      compose: {
+        current: () => false,
+        path: () => join(kept, "transcript.jsonl"),
+        update: (_id, path) => path,
+      },
+    };
+    sessionIn("s1", "app");
+    listing.failNext = [new SessionExcluded()];
+    const up = listed({ agents: [composing] });
+    await up.pass();
+    expect(session("s1").excluded).toBeDefined();
+    mkdirSync(join(kept, "results"), { recursive: true });
+    writeFileSync(join(kept, "results", "r1.json"), "{}");
+    await up.pass({ sweep: true });
+    expect(existsSync(kept)).toBe(false);
   });
 });
 

@@ -95,6 +95,11 @@ export interface SessionState {
   uploaded_at?: string;
   /** The last answer's status (`stored`, `filtered`, `unchanged`, …). */
   last_status?: string;
+  /** The org's exclude list kept the session on this machine, for good: an entry decided it
+   * (`entry`, from the server's list or this machine's `capture.exclude`), or the server refused it
+   * (`403 excluded`, no `entry`). Nothing more of it is sent, whatever later happens to its folder
+   * or the list, until `seshi capture resend --session` asks. What was sent before stays. */
+  excluded?: { at: string; message: string; entry?: string; from?: "server" | "config" };
   /** The last refusal. A permanent one waits until the transcript changes. */
   error?: { code: string; message: string; permanent: boolean; at: string; size?: number };
   next_attempt_at?: string;
@@ -217,6 +222,17 @@ export function endPause(state: CaptureState, now: Date): void {
 /** The transcript offset the server holds from this machine: where a pause stops the session. */
 export function uploadedOffset(session: SessionState | undefined): number {
   return session?.stored ? (session.file_offset ?? 0) : 0;
+}
+
+/** Keep a session on this machine for good: an entry of the exclude list decided it (`excluded`,
+ * the decision's), and the first entry that did is the one recorded. */
+export function markExcluded(
+  session: SessionState,
+  excluded: { entry: string; from: "server" | "config" },
+  reason: string,
+  at: string,
+): void {
+  session.excluded ??= { at, message: reason, entry: excluded.entry, from: excluded.from };
 }
 
 /** Stop a session where it is (a pause, F9.5); one already stopped keeps its offset. */

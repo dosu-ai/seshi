@@ -8,6 +8,9 @@
     ".": {
       "bun": "./src/index.ts"
     },
+    "./exclude": {
+      "bun": "./src/exclude.ts"
+    },
     "./labels": {
       "bun": "./src/labels.ts"
     }

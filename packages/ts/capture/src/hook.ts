@@ -147,6 +147,15 @@ export async function runHook(run: HookRun): Promise<HookOutcome> {
             cwd: capture.cwd,
             ...(capture.transcript_path ? { transcript_path: capture.transcript_path } : {}),
             ...(capture.parent_session_id ? { parent_session_id: capture.parent_session_id } : {}),
+            ...(decision.excluded
+              ? {
+                  excluded: {
+                    entry: decision.excluded.entry,
+                    from: decision.excluded.from,
+                    reason: decision.reason,
+                  },
+                }
+              : {}),
           },
           now,
         );

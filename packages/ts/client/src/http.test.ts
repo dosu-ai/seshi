@@ -57,6 +57,19 @@ describe("HttpSessionDB", () => {
     ).rejects.toThrow(ServerError);
   });
 
+  it("fetches the org's capture rules with If-None-Match, and an older server's 404 as an error", async () => {
+    const doc = { schema: "seshi/capture-rules/1", exclude: ["acme/payroll"] };
+    const fresh = client(200, doc, { headers: { etag: '"c"' } });
+    expect(await fresh.db.captureRulesSince()).toEqual({ document: doc, etag: '"c"' });
+    expect(fresh.seen[0]?.url).toBe("https://seshi.example.com/v1/capture/rules");
+    const same = client(304, null, { headers: { etag: '"c"' } });
+    expect(await same.db.captureRulesSince('"c"')).toBeNull();
+    expect(same.seen[0]?.headers["if-none-match"]).toBe('"c"');
+    await expect(
+      client(404, { error: { code: "not_found" } }).db.captureRulesSince(),
+    ).rejects.toMatchObject({ status: 404 });
+  });
+
   it("fetches them again only when they changed (If-None-Match)", async () => {
     const doc = { schema: "seshi/redaction-rules/1", rule_set: "h", builtin: "b", packs: [] };
     const fresh = client(200, doc, { headers: { etag: '"h"' } });

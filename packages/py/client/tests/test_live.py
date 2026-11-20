@@ -376,6 +376,15 @@ def test_redaction_rules(alice: SeshiClient) -> None:
     assert alice.redaction_rules_since(first.etag) is None
 
 
+def test_capture_rules(alice: SeshiClient) -> None:
+    rules = alice.capture_rules()
+    assert rules.exclude == []
+    first = alice.capture_rules_since()
+    assert first is not None
+    assert first.etag is not None
+    assert alice.capture_rules_since(first.etag) is None
+
+
 def test_admin_status(admin: SeshiClient, alice: SeshiClient) -> None:
     jobs = admin.jobs()
     assert "api" in jobs.instance.roles

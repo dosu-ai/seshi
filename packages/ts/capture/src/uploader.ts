@@ -8,6 +8,7 @@ import {
   Forbidden,
   OffsetMismatch,
   SessionConflict,
+  SessionExcluded,
   SessionRejected,
   type StaleSession,
   type StoreSessionResult,
@@ -16,6 +17,7 @@ import {
 } from "@seshi/model";
 import { appendLog } from "./files";
 import { resolveLabels } from "./labels";
+import { OrgRulesKeeper } from "./org-rules";
 import type { CapturePaths } from "./paths";
 import { headCommitAt, placeOf } from "./place";
 import {
@@ -26,13 +28,14 @@ import {
   turnedOff,
   turnedOnSince,
 } from "./rules";
-import { captureRules, type RulesSnapshot } from "./rules-cache";
+import { captureRules, compileExcludes, type RulesSnapshot } from "./rules-cache";
 import { type HoldWord, RetractRefused, type SessionSink, SignInNeeded } from "./sink";
 import { readSpool, removeSpool, type SpoolEntry } from "./spool";
 import {
   type CaptureState,
   freeze,
   labelsOpen,
+  markExcluded,
   newSecret,
   otherFolders,
   pauseWindows,
@@ -115,8 +118,11 @@ export interface UploaderOptions {
   agents: readonly CaptureAgent[];
   /** Where sessions go; built once, on first need. */
   sink: () => Promise<SessionSink>;
-  /** The capture rules; from the CLI config (cached) by default. */
+  /** The capture rules; from the CLI config (cached) and the server's list by default. */
   rules?: () => Promise<RulesSnapshot>;
+  /** How long a copy of the server's capture rules is used before it is asked about again.
+   * Default 5 minutes. */
+  orgRulesRefreshMs?: number;
   preRedact?: PreRedactor;
   git?: GitIdentity;
   now?: () => Date;
@@ -178,6 +184,13 @@ export interface PassSummary {
 interface PassProgress {
   succeeded: boolean;
   transientFailure?: string;
+}
+
+interface UploadProgress extends PassProgress {
+  /** The rules in force at the end: the server's list may have changed during the pass. */
+  snapshot: RulesSnapshot;
+  /** Uploads waited for the server's capture rules. */
+  held?: boolean;
 }
 
 const SECOND = 1000;
@@ -367,6 +380,7 @@ export class Uploader {
   private holdWord: HoldWord = "sign in";
   private readonly rulesOf: () => Promise<RulesSnapshot>;
   private readonly preRedact: PreRedactor;
+  private readonly orgRules: OrgRulesKeeper;
   private readonly git: GitIdentity;
   private readonly now: () => Date;
   private readonly log: (line: string) => void;
@@ -409,6 +423,16 @@ export class Uploader {
     this.maxChunkBytes = options.maxChunkBytes ?? 8 * 1024 * 1024;
     this.retryBaseMs = options.retryBaseMs ?? 5 * SECOND;
     this.retryMaxMs = options.retryMaxMs ?? 5 * 60 * SECOND;
+    this.orgRules = new OrgRulesKeeper({
+      paths: options.paths,
+      now: this.now,
+      log: this.log,
+      retryBaseMs: this.retryBaseMs,
+      retryMaxMs: this.retryMaxMs,
+      rethrow: (err) => err instanceof SignInNeeded,
+      compile: (exclude) => compileExcludes(exclude, options.host.home),
+      ...(options.orgRulesRefreshMs !== undefined ? { refreshMs: options.orgRulesRefreshMs } : {}),
+    });
   }
 
   private async getSink(): Promise<SessionSink> {
@@ -491,7 +515,7 @@ export class Uploader {
     };
     summary.taken = await this.takeSpool();
     this.rebuildsLeft = this.rebuildsPerPass;
-    const snapshot = await this.rulesOf();
+    let snapshot = await this.rulesOf();
     const before = readState(this.paths);
     const sweepDue =
       options.sweep ||
@@ -509,14 +533,21 @@ export class Uploader {
       );
     const retracted = await this.retractPending(keys, state, summary);
     const uploaded = await this.uploadPending(keys, state, snapshot, summary);
+    snapshot = uploaded.snapshot;
     const succeeded = retracted.succeeded || uploaded.succeeded;
     const transientFailure = uploaded.transientFailure ?? retracted.transientFailure;
     const signedIn = await this.clearSignInWhenReady(state, summary, succeeded);
     if (!summary.signIn) await this.checkStale();
     const backlog = this.queued(snapshot);
     summary.queued = backlog.queued;
-    summary.retrying = backlog.retrying;
-    await this.finish(summary, { succeeded, signedIn, transientFailure });
+    // Held for the server's capture rules: work waiting to retry, as an upload in backoff is.
+    summary.retrying = backlog.retrying + (uploaded.held ? 1 : 0);
+    await this.finish(summary, {
+      succeeded,
+      signedIn,
+      ...(transientFailure !== undefined ? { transientFailure } : {}),
+      ...(uploaded.held ? { held: true } : {}),
+    });
     return summary;
   }
 
@@ -548,11 +579,13 @@ export class Uploader {
   private async uploadPending(
     keys: readonly string[],
     state: CaptureState,
-    snapshot: RulesSnapshot,
+    initial: RulesSnapshot,
     summary: PassSummary,
-  ): Promise<PassProgress> {
+  ): Promise<UploadProgress> {
     let transientFailure: string | undefined;
     let succeeded = false;
+    let snapshot = initial;
+    let orgChecked = false;
     for (const key of keys) {
       if (summary.signIn) break;
       let session = state.sessions[key];
@@ -570,9 +603,33 @@ export class Uploader {
         const size = this.sizeOf(composed ?? path);
         if (size === undefined || !this.pending(session, size)) continue;
       }
+      // The server's capture rules, fetched (when due) before the first upload of the pass: a
+      // server that serves a list gets nothing this machine holds no copy of it for.
+      if (!orgChecked) {
+        orgChecked = true;
+        let org: Awaited<ReturnType<OrgRulesKeeper["ready"]>>;
+        try {
+          org = await this.orgRules.ready(await this.getSink());
+        } catch (err) {
+          if (!(err instanceof SignInNeeded)) throw err;
+          summary.signIn = this.held(err);
+          break;
+        }
+        if (org.held !== undefined) {
+          return { succeeded, transientFailure: org.held, snapshot, held: true };
+        }
+        if (org.changed) snapshot = await this.rulesOf();
+      }
       session = await this.startOf(key, session, agent, path, state);
       const place = placeOf(session.cwd);
       const decision = this.decision(snapshot, session, place, state);
+      if (decision.excluded) {
+        const excluded = decision.excluded;
+        const at = this.now().toISOString();
+        await this.save(key, (s) => markExcluded(s, excluded, decision.reason, at));
+        this.log(`${key}: ${decision.reason}: nothing more of it is sent`);
+        continue;
+      }
       if (decision.frozen !== undefined && !session.frozen) {
         const offset = decision.frozen;
         const at = this.now().toISOString();
@@ -613,7 +670,7 @@ export class Uploader {
         if (outcome.transient) transientFailure = outcome.transient;
       }
     }
-    return { succeeded, ...(transientFailure !== undefined ? { transientFailure } : {}) };
+    return { succeeded, snapshot, ...(transientFailure !== undefined ? { transientFailure } : {}) };
   }
 
   private async clearSignInWhenReady(
@@ -658,6 +715,11 @@ export class Uploader {
         if (entry.cwd) seenIn(session, entry.cwd);
         if (entry.parent_session_id) session.parent_session_id = entry.parent_session_id;
         if (entry.kind === "capture" && entry.final) session.final = true;
+        // A hook found an entry of the exclude list deciding it: off for good.
+        if (entry.kind === "seen" && entry.excluded) {
+          const { reason, ...excluded } = entry.excluded;
+          markExcluded(session, excluded, reason, entry.at);
+        }
         if (entry.kind === "capture" && entry.harness_version) {
           session.harness_version = entry.harness_version;
         }
@@ -731,6 +793,23 @@ export class Uploader {
           },
           this.host.platform,
         );
+        // Kept on this machine for good: recorded so that a later change of its folder or of the
+        // list does not send it (and never written out of the agent's store).
+        if (decision.excluded) {
+          const excluded = decision.excluded;
+          const at = now.toISOString();
+          additions.push({
+            agent: agent.name,
+            session_id: found.info.session_id,
+            ...(found.keep ? {} : { path: found.path }),
+            ...(found.info.cwd ? { cwd: found.info.cwd } : {}),
+            first_seen: at,
+            last_seen: new Date(found.mtimeMs).toISOString(),
+            started_at: started,
+            excluded: { at, message: decision.reason, entry: excluded.entry, from: excluded.from },
+          });
+          continue;
+        }
         if (!decision.capture && decision.frozen === undefined) continue;
         // A session found only in the agent's store is written out for capture alone.
         if (found.keep && (!decision.capture || !this.kept(found))) continue;
@@ -772,6 +851,9 @@ export class Uploader {
             continue;
           }
         }
+        // An excluded session with no file of its own (one in an agent's database) stays recorded:
+        // forgotten, a later sweep would find it as new and judge it again.
+        if (!session.path && session.excluded?.entry !== undefined) continue;
         const gone = session.path
           ? !existsSync(session.path)
           : now.getTime() - Date.parse(session.first_seen) > 24 * 3600 * SECOND;
@@ -784,9 +866,9 @@ export class Uploader {
     return additions.length;
   }
 
-  /** Remove what agents' hooks kept beside sessions a rule has turned off since, and beside sessions
-   * the state file no longer holds (gone, or never captured from here: a Cursor subagent's tool
-   * results) a day after it last changed. */
+  /** Remove what agents' hooks kept beside sessions a rule has turned off since (or the server
+   * refused as excluded), and beside sessions the state file no longer holds (gone, or never
+   * captured from here: a Cursor subagent's tool results) a day after it last changed. */
   private pruneKept(state: CaptureState, snapshot: RulesSnapshot, now: Date): void {
     for (const agent of this.agents.values()) {
       if (!agent.compose) continue;
@@ -802,7 +884,10 @@ export class Uploader {
         const session = state.sessions[sessionKey(agent.name, id)];
         if (session) {
           const place = placeOf(session.cwd);
-          if (turnedOff(this.decision(snapshot, session, place, state))) {
+          if (
+            session.excluded !== undefined ||
+            turnedOff(this.decision(snapshot, session, place, state))
+          ) {
             rmSync(dir, { recursive: true, force: true });
           }
           continue;
@@ -905,7 +990,11 @@ export class Uploader {
   }
 
   private off(state: CaptureState, session: SessionState): boolean {
-    return session.retract === "pending" || sessionToggle(state, session.agent, session) === "off";
+    return (
+      session.retract === "pending" ||
+      session.excluded !== undefined ||
+      sessionToggle(state, session.agent, session) === "off"
+    );
   }
 
   private rebuildDue(rebuild: NonNullable<SessionState["rebuild"]>): boolean {
@@ -1377,8 +1466,29 @@ export class Uploader {
     ) {
       return onConflictReplaceOwn(retry);
     }
+    if (err instanceof SessionExcluded) return this.onExcluded(key, err);
     if (transient(err)) return this.onTransient(key, err);
     return this.onRefused(key, err, attempt.rebuild, size);
+  }
+
+  /** The server's exclude list names the session's repository: it is settled as excluded, not
+   * tried again (a list the server added since this machine's copy, or a source of `repo` this
+   * machine's rules did not see). */
+  private onExcluded(key: string, err: SessionExcluded): Handled {
+    this.log(`${key}: excluded by the server: ${err.message}`);
+    const at = this.now().toISOString();
+    return {
+      saves: [
+        (s) => {
+          s.excluded = { at, message: err.message };
+          delete s.error;
+          delete s.failures;
+          delete s.next_attempt_at;
+          delete s.rebuild;
+        },
+      ],
+      next: { stop: {} },
+    };
   }
 
   private onTransient(key: string, err: unknown): Handled {
@@ -1474,7 +1584,14 @@ export class Uploader {
 
   private async finish(
     summary: PassSummary,
-    outcome: { succeeded: boolean; signedIn: boolean; transientFailure?: string },
+    outcome: {
+      succeeded: boolean;
+      signedIn: boolean;
+      transientFailure?: string;
+      /** Every upload waits for the server's capture rules: said at once, not after three
+       * failures, since nothing goes until it clears. */
+      held?: boolean;
+    },
   ): Promise<void> {
     const now = this.now().toISOString();
     const target = this.sink?.target;
@@ -1493,7 +1610,7 @@ export class Uploader {
             ? { ...state.problems.sign_in, ...word }
             : { message: summary.signIn, at: now, ...word };
       } else if (outcome.signedIn) delete problems.sign_in;
-      if (failures >= 3 && outcome.transientFailure) {
+      if ((failures >= 3 || outcome.held) && outcome.transientFailure) {
         problems.upload = { message: outcome.transientFailure, at: now };
       } else if (failures === 0) delete problems.upload;
       const uploader = {

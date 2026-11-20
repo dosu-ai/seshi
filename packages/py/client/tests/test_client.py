@@ -533,6 +533,21 @@ class TestTokensAndAdmin:
         assert first is not None and first.etag == '"v1"'
         assert db.redaction_rules_since(first.etag) is None
 
+    def test_fetches_capture_rules_again_only_when_they_changed(self) -> None:
+        document = {"schema": "seshi/capture-rules/1", "exclude": ["acme/payroll"]}
+
+        def rules(request: httpx.Request) -> httpx.Response:
+            if request.headers.get("if-none-match") == '"c1"':
+                return httpx.Response(304)
+            return httpx.Response(200, json=document, headers={"etag": '"c1"'})
+
+        fake = Fake({"GET /v1/capture/rules": rules})
+        db = fake.client()
+        assert db.capture_rules().exclude == ["acme/payroll"]
+        first = db.capture_rules_since()
+        assert first is not None and first.etag == '"c1"'
+        assert db.capture_rules_since(first.etag) is None
+
 
 class TestPaging:
     def test_iterates_every_page_of_a_feed(self) -> None:

@@ -1,7 +1,7 @@
-import { normalizeRemote } from "@seshi/kit";
+import { cachedRegExp, globSource, remoteMatches, repoExcluded } from "@seshi/model/exclude";
 import type { Toggle } from "./state";
 
-export { normalizeRemote };
+export { excludePattern, normalizeRemote, remoteMatches, repoExcluded } from "@seshi/model/exclude";
 
 export interface PathRule {
   /** An absolute folder (`~` already expanded). */
@@ -36,6 +36,11 @@ export interface ExcludeRule {
   path?: string;
   /** That folder with symbolic links resolved (up to its first wildcard), when it differs. */
   real?: string;
+  /** Where the entry came from: the server's list (`[capture] exclude`, fetched by the
+   * uploader), or this machine's CLI config (`capture.exclude`) when unset. */
+  from?: "server";
+  /** For an entry of the server's list: the server the copy came from. */
+  server?: string;
 }
 
 export const DEFAULT_RULES: CaptureRules = {
@@ -105,6 +110,9 @@ export interface Decision {
   capture: boolean;
   level: Level;
   reason: string;
+  /** Set when an entry of the exclude list decided: the entry, and whether it is the server's
+   * list or this machine's CLI config. */
+  excluded?: { entry: string; from: "server" | "config"; server?: string };
   /** Set when a pause stops the session (`level: "pause"`): the transcript offset it stops at.
    * What lies before it may still be sent again (a whole-log resend after a 409, a moved
    * transcript, a replace); nothing past it ever is. A caller that keeps state records it as the
@@ -146,85 +154,6 @@ export interface DecideInput {
   subagent?: boolean;
 }
 
-/** A glob as a regular expression's source: `*` stands for one path segment (or part of one),
- * `**` for any number of segments, none included (`a/**` is `a` and everything under it,
- * `a/**` + `/b` is `a/b` too); everything else is literal. */
-function globSource(glob: string): string {
-  let out = "";
-  for (let i = 0; i < glob.length; ) {
-    if (glob.startsWith("**", i)) {
-      const segment = i === 0 || glob[i - 1] === "/";
-      if (segment && glob[i + 2] === "/") {
-        out += "(?:.*/)?";
-        i += 3;
-      } else if (segment && i > 0 && i + 2 === glob.length) {
-        out = `${out.slice(0, -1)}(?:/.*)?`;
-        i += 2;
-      } else {
-        out += ".*";
-        i += 2;
-      }
-    } else if (glob[i] === "*") {
-      out += "[^/]*";
-      i += 1;
-    } else {
-      out += (glob[i] as string).replace(/[.+?^${}()|[\]\\]/g, "\\$&");
-      i += 1;
-    }
-  }
-  return out;
-}
-
-/** Compiled once: hooks and the status line judge often, with the same few patterns. */
-const compiled = new Map<string, RegExp>();
-function globRegExp(source: string, flags = ""): RegExp {
-  const key = `${flags}:${source}`;
-  let re = compiled.get(key);
-  if (!re) {
-    re = new RegExp(source, flags);
-    compiled.set(key, re);
-  }
-  return re;
-}
-
-/** Whether a normalized remote matches a normalized pattern; `under` lets a pattern with no
- * wildcard match everything under it too. */
-function patternMatches(remote: string, target: string, under: boolean): boolean {
-  if (!target.includes("*")) return remote === target || (under && remote.startsWith(`${target}/`));
-  return globRegExp(`^${globSource(target)}$`).test(remote);
-}
-
-/** Whether a normalized remote matches a pattern: `*` stands for one path segment (or part of
- * one), `**` for any number; a pattern with no wildcard also matches everything under it. */
-export function remoteMatches(remote: string, pattern: string): boolean {
-  return patternMatches(remote, normalizeRemote(pattern), true);
-}
-
-/** A repository entry of `capture.exclude` as a pattern: lowercase, normalized as a remote is. A
- * number after the host is a port (`git.acme.com:8443/acme/app`), not scp's `host:path`. */
-export function excludePattern(entry: string): string {
-  return normalizeRemote(
-    entry
-      .trim()
-      .toLowerCase()
-      .replace(/^([^/@:]+):\d+\//, "$1/"),
-  );
-}
-
-/** Whether a normalized remote is in a repository entry of `capture.exclude` (`pattern`, from
- * `excludePattern`), ignoring case. The entry names the remote's last segments, so `acme/app`
- * matches it on any host and `github.com/acme/app` only on that one; or the whole remote, where
- * one with no wildcard also covers everything under it, as in `capture.remotes`
- * (`github.com/acme`: every repo of acme there). */
-export function repoExcluded(remote: string, pattern: string): boolean {
-  const target = remote.toLowerCase();
-  if (patternMatches(target, pattern, true)) return true;
-  const segments = target.split("/");
-  return segments.some(
-    (_, i) => i > 0 && patternMatches(segments.slice(i).join("/"), pattern, false),
-  );
-}
-
 /** Whether `folder` is `base` or inside it (whole path segments only). Folders are compared as
  * the platform does: case-insensitively on Windows. */
 export function within(folder: string, base: string, platform: NodeJS.Platform): boolean {
@@ -248,7 +177,7 @@ export function folderExcluded(folder: string, base: string, platform: NodeJS.Pl
     return slashed.length > 1 ? slashed.replace(/\/+$/, "") : slashed;
   };
   const flags = platform === "win32" ? "i" : "";
-  return globRegExp(`^${globSource(norm(base))}(?:/.*)?$`, flags).test(norm(folder));
+  return cachedRegExp(`^${globSource(norm(base))}(?:/.*)?$`, flags).test(norm(folder));
 }
 
 /** The longer of a rule's folders (its path, its real path) that `place`'s folder or real
@@ -333,10 +262,20 @@ function sharedExclusion(
 ): Decision | undefined {
   const excluded = excludedBy(rules, place, platform);
   if (excluded) {
+    const from = excluded.from ?? "config";
+    const where =
+      from === "config"
+        ? "capture.exclude"
+        : `${excluded.server ?? "the server"}'s [capture] exclude`;
     return {
       capture: false,
       level: "org",
-      reason: `the org excludes ${excluded.entry} (capture.exclude)`,
+      reason: `the org excludes ${excluded.entry} (${where})`,
+      excluded: {
+        entry: excluded.entry,
+        from,
+        ...(excluded.server !== undefined ? { server: excluded.server } : {}),
+      },
     };
   }
   if (rules.remotes.length > 0) {

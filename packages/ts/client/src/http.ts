@@ -14,6 +14,7 @@ import {
   type SearchResults,
   SessionConflict,
   type SessionDB,
+  SessionExcluded,
   type SessionMetadata,
   SessionRejected,
   type SessionsPage,
@@ -174,6 +175,7 @@ function refuse(status: number, body: unknown, offset = 0): never {
   }
   if (status === 409 && code === "conflict") throw new SessionConflict(message);
   if (status === 403 && code === "forbidden") throw new Forbidden(message);
+  if (status === 403 && code === "excluded") throw new SessionExcluded(message);
   if (status === 422) throw new SessionRejected(code, message);
   if (status === 502) throw new StoreError(message);
   throw new ServerError(status, code, message);
@@ -473,6 +475,20 @@ export class HttpSessionDB implements SessionDB {
     etag?: string,
   ): Promise<{ document: unknown; etag: string | undefined } | null> {
     const { status, body, headers } = await this.request("GET", "/v1/redaction/rules", {
+      ...(etag ? { headers: { "if-none-match": etag } } : {}),
+    });
+    if (status === 304 && etag) return null;
+    if (status !== 200) refuse(status, body);
+    return { document: body, etag: headers.get("etag") ?? undefined };
+  }
+
+  /** The org's capture rules (`GET /v1/capture/rules`): the server's exclude list, which a
+   * laptop applies before upload, with HTTP caching as `redactionRulesSince`. `null` means the
+   * list has not changed since `etag`; a server older than the route answers 404 (`ServerError`). */
+  async captureRulesSince(
+    etag?: string,
+  ): Promise<{ document: unknown; etag: string | undefined } | null> {
+    const { status, body, headers } = await this.request("GET", "/v1/capture/rules", {
       ...(etag ? { headers: { "if-none-match": etag } } : {}),
     });
     if (status === 304 && etag) return null;

@@ -17,6 +17,18 @@ export class SessionRejected extends Error {
   }
 }
 
+/** The org's exclude list (`[capture] exclude`) names the session's repository: nothing is
+ * stored, and the same session is refused again whenever it is sent (`403 excluded`). The
+ * message names no entry: the sender knows its repository, and the list is the org's. */
+export class SessionExcluded extends SessionRejected {
+  constructor(
+    message = "the org's exclude list names this session's repository; it is not stored",
+  ) {
+    super("excluded", message);
+    this.name = "SessionExcluded";
+  }
+}
+
 /** The store's own refusals, a subset of `SessionRejected` with a closed set of codes. */
 export class IngestRejected extends SessionRejected {
   constructor(

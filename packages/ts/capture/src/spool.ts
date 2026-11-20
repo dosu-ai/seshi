@@ -37,6 +37,9 @@ export type SpoolEntry =
       cwd: string;
       transcript_path?: string;
       parent_session_id?: string;
+      /** The exclude-list entry that kept the session off, and the hook's reason: the session is
+       * recorded as excluded for good (`SessionState.excluded`). */
+      excluded?: { entry: string; from: "server" | "config"; reason: string };
     }
   | {
       v: typeof SPOOL_VERSION;

@@ -5,7 +5,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ConnectorContext, ConnectorFailure, Cursor, SubmitOutcome } from "@seshi/kit";
-import type { Envelope } from "@seshi/model";
+import { type Envelope, excludingEntry, repoExcludes } from "@seshi/model";
 import { describe, expect, it } from "vitest";
 import {
   cursorCloudConnector,
@@ -81,11 +81,13 @@ class FakeCursor {
   queued: Response[] = [];
   keys: string[] = [];
 
-  agent(id: string, updatedAt: string, runs: FakeRun[]) {
-    this.agents = [
-      { id, updatedAt, repos: [{ url: "https://github.com/example/demo" }] },
-      ...this.agents.filter((a) => a.id !== id),
-    ];
+  agent(
+    id: string,
+    updatedAt: string,
+    runs: FakeRun[],
+    repos: { url: string }[] = [{ url: "https://github.com/example/demo" }],
+  ) {
+    this.agents = [{ id, updatedAt, repos }, ...this.agents.filter((a) => a.id !== id)];
     this.runs.set(id, runs);
   }
 
@@ -138,6 +140,10 @@ class FakeContext {
   /** A first upload shorter than this is filtered (kept nothing of), as the session filter does. */
   filterUnder = 0;
   cursor: Cursor | null = null;
+  /** The server's `[capture] exclude`. */
+  exclude: string[] = [];
+  /** Agents counted as excluded (the source's health). */
+  excludedCount = 0;
 
   constructor(
     readonly api: FakeCursor,
@@ -196,6 +202,10 @@ class FakeContext {
       fail: async (failure) => {
         this.failures.push(failure);
         return "recorded";
+      },
+      excludedBy: (repos) => excludingEntry(repoExcludes(this.exclude), repos),
+      excluded: () => {
+        this.excludedCount++;
       },
     };
   }
@@ -569,6 +579,131 @@ describe("the cursor-cloud poller", () => {
     await expect(poller.run(new FakeContext(api).context())).rejects.toThrow(
       /refused the API key \(401\)/,
     );
+  });
+});
+
+describe("the org's exclude list", () => {
+  it("leaves an excluded agent out before fetching any run, and counts it", async () => {
+    const api = new FakeCursor();
+    api.agent("bc-a", iso(NOW.getTime() - HOUR), [finished("run-1", 2)]);
+    api.agent(
+      "bc-x",
+      iso(NOW.getTime() - HOUR),
+      [finished("run-x", 2)],
+      [{ url: "https://github.com/Acme/Payroll.git" }],
+    );
+    const ctx = new FakeContext(api);
+    ctx.exclude = ["acme/payroll"];
+    await poller.run(ctx.context());
+
+    expect(ctx.submitted.map((e) => e.session_key)).toEqual(["bc-a"]);
+    expect(api.calls.filter((c) => c.includes("bc-x"))).toEqual([]);
+    expect(ctx.excludedCount).toBe(1);
+    expect(ctx.logs.at(-1)).toContain("1 agent(s) not read: the org excludes their repository");
+    expect(ctx.cursor).toMatchObject({
+      agents: {
+        "bc-x": {
+          bytes: 0,
+          updated: iso(NOW.getTime() - HOUR),
+          // Cursor's own clock: the agent's updatedAt, past any run it has so far.
+          through: { at: iso(NOW.getTime() - HOUR), id: "\uffff" },
+        },
+      },
+    });
+
+    // Not counted again until the agent changes.
+    await poller.run(ctx.context());
+    expect(ctx.excludedCount).toBe(1);
+    expect(api.calls.filter((c) => c.includes("bc-x"))).toEqual([]);
+  });
+
+  it("excludes an agent with several repositories when any is listed", async () => {
+    const api = new FakeCursor();
+    api.agent(
+      "bc-multi",
+      iso(NOW.getTime() - HOUR),
+      [finished("run-1", 2)],
+      [{ url: "https://github.com/example/demo" }, { url: "git@github.com:acme/hr-portal.git" }],
+    );
+    const ctx = new FakeContext(api);
+    ctx.exclude = ["github.com/acme/hr-*"];
+    await poller.run(ctx.context());
+    expect(ctx.submitted).toEqual([]);
+    expect(ctx.excludedCount).toBe(1);
+  });
+
+  it("never matches an agent with no repository, or by a folder entry", async () => {
+    const api = new FakeCursor();
+    api.agent("bc-none", iso(NOW.getTime() - HOUR), [finished("run-1", 2)], []);
+    api.agent("bc-a", iso(NOW.getTime() - HOUR), [finished("run-2", 2)]);
+    const ctx = new FakeContext(api);
+    ctx.exclude = ["/", "~", "~/**", "/**", "/home/*/example/demo"];
+    await poller.run(ctx.context());
+    expect(ctx.submitted.map((e) => e.session_key).sort()).toEqual(["bc-a", "bc-none"]);
+    expect(ctx.excludedCount).toBe(0);
+  });
+
+  it("stops new runs of an agent added to the list, keeps what was stored, and never reads runs made while excluded", async () => {
+    const api = new FakeCursor();
+    api.agent("bc-a", iso(NOW.getTime() - 3 * HOUR), [finished("run-1", 4)]);
+    const ctx = new FakeContext(api);
+    await poller.run(ctx.context());
+    expect(ctx.submitted.map((e) => e.idempotency_key)).toEqual(["cursor-cloud:bc-a/run-1"]);
+    const stored = ctx.stored.get("bc-a");
+
+    ctx.exclude = ["example/demo"];
+    api.agent("bc-a", iso(NOW.getTime() - 2 * HOUR), [
+      finished("run-1", 4),
+      finished("run-2", 2.5),
+    ]);
+    await poller.run(ctx.context());
+    expect(ctx.submitted).toHaveLength(1);
+    expect(ctx.excludedCount).toBe(1);
+    expect(ctx.cursor).toMatchObject({ agents: { "bc-a": { bytes: stored } } });
+
+    // The entry goes: run-2 (made while excluded) is passed over, the next run is appended
+    // where the stored session ends.
+    ctx.exclude = [];
+    api.agent("bc-a", iso(NOW.getTime() + HOUR), [
+      finished("run-1", 4),
+      finished("run-2", 2.5),
+      { ...finished("run-3", 0), createdAt: iso(NOW.getTime() + 0.5 * HOUR) },
+    ]);
+    await poller.run(ctx.context());
+    expect(ctx.submitted.map((e) => e.idempotency_key)).toEqual([
+      "cursor-cloud:bc-a/run-1",
+      "cursor-cloud:bc-a/run-3",
+    ]);
+    expect(ctx.submitted[1]?.payload).toMatchObject({ offset: stored });
+  });
+
+  it("cuts off on Cursor's clock: a run made in the instant of the cutoff stays passed over", async () => {
+    const api = new FakeCursor();
+    const at = iso(NOW.getTime() - HOUR);
+    api.agent("bc-a", at, [{ ...finished("run-1", 0), createdAt: at }]);
+    const ctx = new FakeContext(api);
+    ctx.exclude = ["example/demo"];
+    await poller.run(ctx.context());
+    ctx.exclude = [];
+    api.agent("bc-a", iso(NOW.getTime() - 0.5 * HOUR), [
+      { ...finished("run-1", 0), createdAt: at },
+      { ...finished("run-2", 0), createdAt: iso(NOW.getTime() - 0.5 * HOUR) },
+    ]);
+    await poller.run(ctx.context());
+    expect(ctx.submitted.map((e) => e.idempotency_key)).toEqual(["cursor-cloud:bc-a/run-2"]);
+  });
+
+  it("names the repository as a laptop names its remote", async () => {
+    const api = new FakeCursor();
+    api.agent(
+      "bc-a",
+      iso(NOW.getTime() - HOUR),
+      [finished("run-1", 2)],
+      [{ url: "https://x-access-token:secret@GitHub.com/acme/app.git" }],
+    );
+    const ctx = new FakeContext(api);
+    await poller.run(ctx.context());
+    expect(ctx.submitted[0]).toMatchObject({ repo: "github.com/acme/app", project: "app" });
   });
 });
 
