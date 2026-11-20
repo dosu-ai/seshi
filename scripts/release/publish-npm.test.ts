@@ -153,6 +153,31 @@ describe("publishAll", () => {
     expect(forbidden.publishes()).toBe(1);
   });
 
+  it("reports a failed optional package and goes on; a required one still fails", async () => {
+    layout("1.2.3", [
+      { name: "@dosu/seshi", dir: "seshi" },
+      { name: "seshi", dir: "launcher-seshi" },
+    ]);
+    writeFileSync(
+      join(dir, "packages.json"),
+      JSON.stringify([
+        { name: "@dosu/seshi", dir: "seshi" },
+        { name: "seshi", dir: "launcher-seshi", optional: true },
+      ]),
+    );
+    const npm = fakeNpm([], "launcher-seshi");
+    const lines: string[] = [];
+    const done = await publishAll({ dir, exec: npm.exec, log: (l) => lines.push(l) });
+    expect(done.map((d) => [d.name, d.action])).toEqual([
+      ["@dosu/seshi", "published"],
+      ["seshi", "failed"],
+    ]);
+    expect(lines.at(-1)).toMatch(/seshi@1.2.3: not published, and optional.*403/s);
+    await expect(publishAll({ dir, exec: fakeNpm([], "/seshi").exec })).rejects.toThrow(
+      /npm publish @dosu\/seshi@1.2.3/,
+    );
+  });
+
   it("refuses a private package or a folder holding another package", async () => {
     layout("1.2.3", [{ name: "seshi", dir: "seshi", private: true }]);
     await expect(publishAll({ dir, exec: fakeNpm().exec })).rejects.toThrow(/private/);

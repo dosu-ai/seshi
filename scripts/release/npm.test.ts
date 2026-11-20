@@ -16,6 +16,7 @@ import { tarGz } from "./archive";
 import { buildRelease, repositoryVersion } from "./build";
 import {
   addDeclarationExtensions,
+  BARE_LAUNCHER,
   badgeUrl,
   buildNpm,
   LAUNCHER,
@@ -157,8 +158,13 @@ describe.skipIf(!posix)("buildNpm", () => {
     rmSync(out, { recursive: true, force: true });
   });
 
-  it("builds every package in publish order, the launcher last", () => {
-    const names = [...TARGETS.map((t) => t.npm), ...LIBRARIES.map((l) => l.name), LAUNCHER];
+  it("builds every package in publish order, the launchers last", () => {
+    const names = [
+      ...TARGETS.map((t) => t.npm),
+      ...LIBRARIES.map((l) => l.name),
+      LAUNCHER,
+      BARE_LAUNCHER,
+    ];
     expect(packages.map((p) => p.name)).toEqual(names);
     const listed = JSON.parse(readFileSync(join(out, "packages.json"), "utf8"));
     expect(listed.map((p: { name: string }) => p.name)).toEqual(names);
@@ -181,7 +187,9 @@ describe.skipIf(!posix)("buildNpm", () => {
   });
 
   it("publishes under @dosu, with no import of an unpublished workspace name left", () => {
-    for (const p of packages) expect(p.name.startsWith("@dosu/seshi")).toBe(true);
+    for (const p of packages) {
+      if (p.name !== BARE_LAUNCHER) expect(p.name.startsWith("@dosu/seshi")).toBe(true);
+    }
     const client = join(out, "client");
     const manifest = JSON.parse(readFileSync(join(client, "package.json"), "utf8"));
     expect(manifest.dependencies).toMatchObject({ "@dosu/seshi-model": VERSION });
@@ -205,6 +213,19 @@ describe.skipIf(!posix)("buildNpm", () => {
     expect(readFileSync(launcher, "utf8").startsWith("#!/usr/bin/env node\n")).toBe(true);
     expect(readFileSync(launcher, "utf8")).not.toContain(process.cwd());
     expect(statSync(launcher).mode & 0o111).not.toBe(0);
+  });
+
+  it("publishes the same launcher as `seshi`, last and optional", () => {
+    const listed = JSON.parse(readFileSync(join(out, "packages.json"), "utf8"));
+    expect(listed.at(-1)).toEqual({ name: BARE_LAUNCHER, dir: "launcher-seshi", optional: true });
+    expect(listed.filter((p: { optional?: boolean }) => p.optional)).toHaveLength(1);
+    const scoped = JSON.parse(readFileSync(join(out, "seshi/package.json"), "utf8"));
+    const bare = JSON.parse(readFileSync(join(out, "launcher-seshi/package.json"), "utf8"));
+    expect(bare).toEqual({ ...scoped, name: BARE_LAUNCHER });
+    expect(readFileSync(join(out, "launcher-seshi/bin/seshi.js"))).toEqual(
+      readFileSync(join(out, "seshi/bin/seshi.js")),
+    );
+    expect(readFileSync(join(out, "launcher-seshi/README.md"), "utf8")).toContain("npm i -g seshi");
   });
 
   it("refuses archives that do not match SHA256SUMS, or a missing line", async () => {
