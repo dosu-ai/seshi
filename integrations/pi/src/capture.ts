@@ -36,6 +36,7 @@ import {
   type TranscriptInfo,
 } from "@seshi/kit";
 import { EXTENSION_MARKER, piExtension } from "./extension";
+import { redactPiToolCalls } from "./tool-calls";
 
 export const AGENT = "pi";
 
@@ -213,4 +214,5 @@ export const PI_CAPTURE: CaptureAgent = {
   identify: identifyPiSession,
   locate: locatePiSession,
   installer: piInstaller,
+  redactToolCalls: redactPiToolCalls,
 };

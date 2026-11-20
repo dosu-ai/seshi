@@ -78,6 +78,7 @@ function agentInfo(agent: CaptureAgent, host: CaptureHost): AgentInfo {
     identify: (path) => identifySafely(agent, path, readHead(path))?.session_id,
     ...(agent.locate ? { locate: (id: string) => agent.locate?.(id, host) } : {}),
     ...(agent.compose ? { uploaded: (id: string) => agent.compose?.path(id, host) } : {}),
+    ...(agent.redactToolCalls ? { redactToolCalls: agent.redactToolCalls } : {}),
   };
 }
 

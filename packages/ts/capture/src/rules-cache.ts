@@ -15,7 +15,8 @@ import {
 // 2: rules gained `exclude`. A cache written before it would hide a new exclude list, or keep the
 // error an older seshi gave for the unknown key, until the config file changed.
 // 3: the snapshot gained `labels`.
-const CACHE_SCHEMA = "seshi/capture-rules/3";
+// 4: rules gained `redactToolCalls`, for the same reason as 2.
+const CACHE_SCHEMA = "seshi/capture-rules/4";
 
 export interface RulesSnapshot {
   rules: CaptureRules;
@@ -89,6 +90,10 @@ function realUpToWildcard(path: string): string | undefined {
   return real === undefined ? undefined : `${real}${path.slice(cut)}`;
 }
 
+function placeEntries(entries: readonly string[], home: string): ExcludeRule[] {
+  return entries.map((e) => excludeRule(e, home)).filter((r): r is ExcludeRule => r !== undefined);
+}
+
 export async function loadRules(host: CaptureHost): Promise<RulesSnapshot> {
   try {
     const { loadCliConfig } = await import("@seshi/config");
@@ -102,9 +107,8 @@ export async function loadRules(host: CaptureHost): Promise<RulesSnapshot> {
         enabled: config.capture.enabled,
         paths: config.capture.paths.map((p) => pathRule(p.path, p.capture, host.home)),
         remotes: [...config.capture.remotes],
-        exclude: config.capture.exclude
-          .map((e) => excludeRule(e, host.home))
-          .filter((r): r is ExcludeRule => r !== undefined),
+        exclude: placeEntries(config.capture.exclude, host.home),
+        redactToolCalls: placeEntries(config.capture.redact_tool_calls, host.home),
       },
       theme: config.theme,
       labels: labelRules(config.labels, host.home),

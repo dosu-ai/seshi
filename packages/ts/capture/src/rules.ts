@@ -19,9 +19,14 @@ export interface CaptureRules {
   remotes: string[];
   /** The org's exclude list: sessions in these repositories or folders are never captured. */
   exclude: ExcludeRule[];
+  /** The org's list of places whose sessions are uploaded with their tool calls redacted
+   * (`capture.redact_tool_calls`); entries as in `exclude`. Absent in a rules cache written before
+   * it. */
+  redactToolCalls?: ExcludeRule[];
 }
 
-/** One entry of `capture.exclude`: a repository when `repo` is set, else a folder. */
+/** One entry of `capture.exclude` (or `capture.redact_tool_calls`, written the same way): a
+ * repository when `repo` is set, else a folder. */
 export interface ExcludeRule {
   /** As the admin wrote it (control characters replaced), for messages. */
   entry: string;
@@ -33,7 +38,13 @@ export interface ExcludeRule {
   real?: string;
 }
 
-export const DEFAULT_RULES: CaptureRules = { enabled: true, paths: [], remotes: [], exclude: [] };
+export const DEFAULT_RULES: CaptureRules = {
+  enabled: true,
+  paths: [],
+  remotes: [],
+  exclude: [],
+  redactToolCalls: [],
+};
 
 export interface RepoConfig {
   capture?: boolean;
@@ -99,6 +110,9 @@ export interface Decision {
    * transcript, a replace); nothing past it ever is. A caller that keeps state records it as the
    * session's `frozen` offset, so the session stays stopped after the pause ends. */
   frozen?: number;
+  /** Set when what is sent of the session goes with its tool calls redacted
+   * (`capture.redact_tool_calls`): why, naming the entry. */
+  redact_tool_calls?: string;
 }
 
 /** A pause, from `seshi capture pause` to its end (`until`; none while it is open-ended). */
@@ -128,6 +142,8 @@ export interface DecideInput {
   /** The other folders the session was seen in: a shared rule that turns any of them off turns
    * the session off (a session that left an excluded repo carries what it did there). */
   seen?: Place[];
+  /** The session is a subagent's (it has a parent session). */
+  subagent?: boolean;
 }
 
 /** A glob as a regular expression's source: `*` stands for one path segment (or part of one),
@@ -258,8 +274,26 @@ export function excludedBy(
   place: Place,
   platform: NodeJS.Platform,
 ): ExcludeRule | undefined {
+  return listedIn(rules.exclude, place, platform);
+}
+
+/** The entry of `capture.redact_tool_calls` that `place` is in, if any, matched as
+ * `excludedBy` matches. */
+export function toolCallsRedactedBy(
+  rules: CaptureRules,
+  place: Place,
+  platform: NodeJS.Platform,
+): ExcludeRule | undefined {
+  return listedIn(rules.redactToolCalls ?? [], place, platform);
+}
+
+function listedIn(
+  entries: readonly ExcludeRule[],
+  place: Place,
+  platform: NodeJS.Platform,
+): ExcludeRule | undefined {
   const remotes = place.repo?.remotes ?? [];
-  return rules.exclude.find((rule) => {
+  return entries.find((rule) => {
     const repo = rule.repo;
     if (repo !== undefined) return remotes.some((r) => repoExcluded(r, repo));
     return longestBase(place, rule, (f, b) => folderExcluded(f, b, platform)) !== undefined;
@@ -370,18 +404,25 @@ const unknownFolder: LevelRule = (input) =>
 const sharedRulesHere: LevelRule = (input, platform) =>
   sharedExclusion(input.rules, input.place, platform);
 
-const sharedRulesSeen: LevelRule = (input, platform) => {
+/** The first other folder the session was seen in where `check` finds something, as what it
+ * found and that folder's name (its repo's root, else the folder). */
+function firstSeenWhere<T>(
+  input: DecideInput,
+  check: (place: Place) => T | undefined,
+): { found: T; where: string } | undefined {
   for (const other of input.seen ?? []) {
     if (other.cwd === undefined || other.cwd === input.place.cwd) continue;
-    const excluded = sharedExclusion(input.rules, other, platform);
-    if (excluded) {
-      return {
-        ...excluded,
-        reason: `it also ran in ${other.repo?.root ?? other.cwd}, where ${excluded.reason}`,
-      };
-    }
+    const found = check(other);
+    if (found !== undefined) return { found, where: other.repo?.root ?? other.cwd };
   }
   return undefined;
+}
+
+const sharedRulesSeen: LevelRule = (input, platform) => {
+  const seen = firstSeenWhere(input, (other) => sharedExclusion(input.rules, other, platform));
+  return seen
+    ? { ...seen.found, reason: `it also ran in ${seen.where}, where ${seen.found.reason}` }
+    : undefined;
 };
 
 const sessionOff: LevelRule = (input) =>
@@ -468,9 +509,34 @@ const PRECEDENCE: readonly LevelRule[] = [
 ];
 
 export function decide(input: DecideInput, platform: NodeJS.Platform = process.platform): Decision {
+  let decision: Decision | undefined;
   for (const level of PRECEDENCE) {
-    const decision = level(input, platform);
-    if (decision) return decision;
+    decision = level(input, platform);
+    if (decision) break;
   }
-  return globalLevel(input.rules);
+  decision ??= globalLevel(input.rules);
+  const sends = decision.capture || decision.frozen !== undefined;
+  const redacting = sends ? toolCallsRedacted(input, platform) : undefined;
+  if (redacting && input.subagent) {
+    // A subagent's whole session is its parent's tool call: its prompt is the call's input and
+    // its last reply the call's result. The parent's log keeps the call's name, id and failure.
+    return {
+      capture: false,
+      level: "org",
+      reason: `a subagent's session is its parent's tool call, and ${redacting}`,
+    };
+  }
+  return redacting ? { ...decision, redact_tool_calls: redacting } : decision;
+}
+
+/** Why the session's tool calls are redacted, when they are: it ran in a place the org lists in
+ * `capture.redact_tool_calls`, here or in any other folder it was seen in (what it did there
+ * stays in it wherever it goes next). Exclusion is decided first, so it wins. */
+function toolCallsRedacted(input: DecideInput, platform: NodeJS.Platform): string | undefined {
+  const reason = (entry: ExcludeRule) =>
+    `the org redacts tool calls in ${entry.entry} (capture.redact_tool_calls)`;
+  const here = toolCallsRedactedBy(input.rules, input.place, platform);
+  if (here) return reason(here);
+  const seen = firstSeenWhere(input, (other) => toolCallsRedactedBy(input.rules, other, platform));
+  return seen ? `it also ran in ${seen.where}, where ${reason(seen.found)}` : undefined;
 }

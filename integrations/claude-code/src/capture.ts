@@ -41,6 +41,7 @@ import {
   type TranscriptInfo,
   writeJsonConfig,
 } from "@seshi/kit";
+import { redactClaudeToolCalls } from "./tool-calls";
 
 export const AGENT = "claude-code";
 
@@ -390,4 +391,5 @@ export const CLAUDE_CODE_CAPTURE: CaptureAgent = {
   locate: locateClaudeTranscript,
   accountIds: claudeAccountIds,
   installer: claudeCodeInstaller,
+  redactToolCalls: redactClaudeToolCalls,
 };

@@ -13,6 +13,7 @@ import {
   type Place,
   remoteMatches,
   repoExcluded,
+  toolCallsRedactedBy,
   within,
 } from "./rules";
 
@@ -375,6 +376,87 @@ describe("the org's exclude list (capture.exclude)", () => {
     const both = { ...exclude, remotes: ["github.com/acme"] };
     expect(judge({ rules: both, place: { cwd: "/home/me/clients" } }).reason).toBe(
       "the org excludes /home/me/clients (capture.exclude)",
+    );
+  });
+});
+
+describe("the org's tool-call redaction list (capture.redact_tool_calls)", () => {
+  const research: Place = {
+    cwd: "/work/research",
+    repo: repo({ root: "/work/research", remotes: ["gitlab.example.com/Acme/Research"] }),
+  };
+  const rules: CaptureRules = {
+    ...DEFAULT_RULES,
+    redactToolCalls: [
+      { entry: "acme/research", repo: excludePattern("acme/research") },
+      { entry: "/home/me/labs", path: "/home/me/labs" },
+    ],
+  };
+
+  it("names the entry a repository or a folder is in, matched as capture.exclude matches", () => {
+    expect(toolCallsRedactedBy(rules, research, "linux")?.entry).toBe("acme/research");
+    expect(toolCallsRedactedBy(rules, { cwd: "/home/me/labs/x" }, "linux")?.entry).toBe(
+      "/home/me/labs",
+    );
+    expect(toolCallsRedactedBy(rules, { cwd: "/work/app", repo: repo() }, "linux")).toBeUndefined();
+    expect(toolCallsRedactedBy(DEFAULT_RULES, research, "linux")).toBeUndefined();
+  });
+
+  it("captures the session, saying its tool calls are redacted and why", () => {
+    expect(judge({ rules, place: research })).toEqual({
+      capture: true,
+      level: "global",
+      reason: "capture is on",
+      redact_tool_calls: "the org redacts tool calls in acme/research (capture.redact_tool_calls)",
+    });
+    // Turned on by the person, it is still redacted: the list is the org's.
+    expect(judge({ rules, place: { cwd: "/home/me/labs" }, toggle: "on" })).toMatchObject({
+      capture: true,
+      level: "session",
+      redact_tool_calls: "the org redacts tool calls in /home/me/labs (capture.redact_tool_calls)",
+    });
+    expect(judge({ rules, place: { cwd: "/work/app", repo: repo() } })).not.toHaveProperty(
+      "redact_tool_calls",
+    );
+  });
+
+  it("holds for every folder the session was seen in", () => {
+    expect(
+      judge({ rules, place: { cwd: "/work/app", repo: repo() }, seen: [research] }),
+    ).toMatchObject({
+      capture: true,
+      redact_tool_calls:
+        "it also ran in /work/research, where the org redacts tool calls in acme/research (capture.redact_tool_calls)",
+    });
+  });
+
+  it("loses to exclusion: a place on both lists is not captured at all", () => {
+    const both: CaptureRules = { ...rules, exclude: [{ entry: "~/labs", path: "/home/me/labs" }] };
+    expect(judge({ rules: both, place: { cwd: "/home/me/labs" } })).toEqual({
+      capture: false,
+      level: "org",
+      reason: "the org excludes ~/labs (capture.exclude)",
+    });
+  });
+
+  it("sends nothing of a subagent there: its session is its parent's tool call", () => {
+    expect(judge({ rules, place: research, subagent: true })).toEqual({
+      capture: false,
+      level: "org",
+      reason:
+        "a subagent's session is its parent's tool call, and the org redacts tool calls in acme/research (capture.redact_tool_calls)",
+    });
+    expect(judge({ rules, place: { cwd: "/work/app", repo: repo() }, subagent: true })).toEqual(
+      judge({ rules, place: { cwd: "/work/app", repo: repo() } }),
+    );
+  });
+
+  it("applies to what a paused session still sends, and not to one turned off", () => {
+    const paused = judge({ rules, place: research, paused: true, pausedAt: "x", uploaded: 10 });
+    expect(paused).toMatchObject({ capture: false, level: "pause", frozen: 10 });
+    expect(paused.redact_tool_calls).toContain("acme/research");
+    expect(judge({ rules, place: research, toggle: "off" })).not.toHaveProperty(
+      "redact_tool_calls",
     );
   });
 });

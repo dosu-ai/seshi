@@ -304,6 +304,22 @@ describe("decision", () => {
     expect(off.summary).toContain("stopped at 10 bytes");
   });
 
+  it("says when the session's tool calls go redacted, and why", () => {
+    const check = decisionCheck(
+      evidence((ev) => {
+        ev.decision = {
+          capture: true,
+          level: "global",
+          reason: "capture is on",
+          redact_tool_calls: "the org redacts tool calls in acme/app (capture.redact_tool_calls)",
+        };
+      }),
+    );
+    expect(check.summary).toBe(
+      "capturing: capture is on (global); tool calls redacted: the org redacts tool calls in acme/app (capture.redact_tool_calls)",
+    );
+  });
+
   it("fails when the state file cannot be read", () => {
     const check = decisionCheck(
       evidence((ev) => {
@@ -706,6 +722,61 @@ describe("records and the prefix hash", () => {
       });
     });
     expectStatus(recordsCheck(stale, deps()), "warn");
+  });
+
+  describe("of a session whose tool calls the org redacts (capture.redact_tool_calls)", () => {
+    // The fake pass: the third line is a tool call's output.
+    const pass = (text: string) => text.replace("second", "[redacted:tool-call]");
+    const sent = toRecords(pass(TEXT));
+    const redacting = (listed: boolean) =>
+      evidence((ev) => {
+        ev.decision = {
+          capture: true,
+          level: "global",
+          reason: "capture is on",
+          ...(listed ? { redact_tool_calls: "the org redacts tool calls in acme/app" } : {}),
+        };
+        const bytes = Buffer.byteLength(pass(TEXT));
+        ev.local = {
+          ...(ev.local as NonNullable<SessionEvidence["local"]>),
+          server_offset: bytes,
+          aligned: false,
+        };
+        ev.server.metadata = metadata({
+          normalized: {
+            bytes,
+            records: 4,
+            prefix_sha256: prefixSha256(sent, 4),
+            hash_state: "x",
+          },
+        });
+        for (const trace of ev.server.traces) {
+          trace.records = trace.records?.map((r) =>
+            JSON.stringify(r).includes("second") ? (sent[2] as NormalizedRecord) : r,
+          );
+        }
+      });
+    const withPass = () => {
+      const base = deps();
+      return deps({
+        agent: (name) => {
+          const agent = base.agent(name);
+          return agent ? { ...agent, redactToolCalls: pass } : undefined;
+        },
+      });
+    };
+
+    it("compares what the uploader sent: the transcript through the agent's pass", () => {
+      expectStatus(recordsCheck(redacting(true), withPass()), "ok");
+      expectStatus(prefixCheck(redacting(true), withPass()), "ok");
+    });
+
+    it("skips, naming the list, once it no longer applies here", () => {
+      const check = prefixCheck(redacting(false), withPass());
+      expectStatus(check, "skip");
+      expect(check.summary).toContain("capture.redact_tool_calls");
+      expect(check.summary).not.toContain("earlier rule set");
+    });
   });
 
   it("skip the prefix under another rule set, saying why", () => {

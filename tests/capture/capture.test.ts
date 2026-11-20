@@ -1472,6 +1472,88 @@ describe("pre-redaction before upload (F2.4)", () => {
     expect(state().sessions[key].file_offset).toBe(Buffer.byteLength(head + tail));
   });
 
+  it("redacts tool calls first in a place the org lists, then the org's rules, chunk by chunk and on resend (capture.redact_tool_calls)", async () => {
+    await server.stop();
+    server = await startServer({ redaction: acme });
+    orgKey = (await server.auth.initAdmin({ owner: "ops" })).org_key?.token as string;
+    await signIn(machine, server.url, orgKey);
+    machine.cliConfig(
+      `server = "${server.url}"\nuser = "${OWNER}"\n[capture]\nredact_tool_calls = ["~/code/app"]\n`,
+    );
+    const call = line({
+      type: "assistant",
+      uuid: "a11",
+      parentUuid: "a9",
+      timestamp: "2026-09-01T00:00:08.700Z",
+      sessionId: "sess1",
+      message: {
+        role: "assistant",
+        model: "claude-x",
+        content: [
+          {
+            type: "tool_use",
+            id: "toolu_sh",
+            name: "Bash",
+            input: { command: "deploy ACME-9999" },
+          },
+        ],
+      },
+    });
+    writeFileSync(file, head + call);
+    await hook();
+    expect((await daemon()).summary).toMatchObject({ uploaded: 1 });
+
+    const first = JSON.parse(uploads()[0]?.body ?? "{}");
+    // The tools' input and output went first...
+    for (const gone of ["/repo/app/auth.ts", "export const KEY", "ACME-9999", ".env"]) {
+      expect(first.transcript).not.toContain(gone);
+    }
+    expect(first.transcript).toContain('"id":"toolu_01AbCdEfGhJkLmNpQr","name":"Read"');
+    expect(first.transcript).toContain('"id":"toolu_sh","name":"Bash"');
+    expect(first.transcript).toContain("[redacted:tool-call]");
+    // ...then the org's rules ran on what was left: the prompt keeps its words, not its key.
+    expect(first.transcript).toContain("How does auth work?");
+    expect(first.transcript).toContain("deploy with [redacted:acme-key] please");
+    const key = `claude-code:${SESSION}`;
+    expect(state().sessions[key]).toMatchObject({
+      aligned: false,
+      file_offset: Buffer.byteLength(head + call),
+    });
+
+    const status = await machine.seshi(["capture", "status", "--session", SESSION, "--json"]);
+    expect(JSON.parse(status.out).session).toMatchObject({
+      capture: true,
+      redact_tool_calls: "the org redacts tool calls in ~/code/app (capture.redact_tool_calls)",
+    });
+    const human = await machine.seshi(["capture", "status", "--session", SESSION], {
+      env: { NO_COLOR: "1" },
+    });
+    expect(human.out).toContain(
+      "tool calls: redacted, the org redacts tool calls in ~/code/app (capture.redact_tool_calls)",
+    );
+
+    // The next piece goes at the server's offset, in redacted bytes, redacted the same way.
+    appendFileSync(file, tail);
+    await hook();
+    expect((await daemon()).summary).toMatchObject({ uploaded: 1 });
+    const chunk = JSON.parse(uploads()[1]?.body ?? "{}");
+    expect(chunk.offset).toBe(Buffer.byteLength(first.transcript));
+    expect(chunk.transcript).not.toContain("hunter2");
+    expect(chunk.transcript).toContain(
+      '"tool_use_id":"toolu_env","content":"[redacted:tool-call]"',
+    );
+    expect(chunk.transcript).toContain("Rotated [redacted:acme-key] too.");
+    expect((await stored())?.traces).toHaveLength(2);
+
+    // Sent again whole, the log is byte for byte the pieces the server holds.
+    await machine.seshi(["capture", "resend", "--session", SESSION]);
+    expect((await daemon()).summary).toMatchObject({ uploaded: 1 });
+    const resent = JSON.parse(uploads()[2]?.body ?? "{}");
+    expect(resent).toMatchObject({ rebuild: true, offset: 0 });
+    expect(resent.transcript).toBe(first.transcript + chunk.transcript);
+    expect(state().sessions[key].rebuild).toBeUndefined();
+  });
+
   it("fetches a server's rules once per run, and none in local mode (the Instance redacts)", async () => {
     await hook();
     await daemon();
