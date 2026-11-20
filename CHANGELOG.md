@@ -1,3 +1,10 @@
+# [0.21.0](https://github.com/dosu-ai/seshi/compare/v0.20.0...v0.21.0) (2026-11-20)
+
+
+### Features
+
+* **npm:** publish the launcher as `seshi` too ([#55](https://github.com/dosu-ai/seshi/issues/55)) ([9ff9390](https://github.com/dosu-ai/seshi/commit/9ff93904c877f7a47b8a14cab42b5328b47896b9))
+
 # [0.20.0](https://github.com/dosu-ai/seshi/compare/v0.19.0...v0.20.0) (2026-11-20)
 
 
