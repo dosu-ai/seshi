@@ -1,3 +1,10 @@
+# [0.19.0](https://github.com/dosu-ai/seshi/compare/v0.18.0...v0.19.0) (2026-11-20)
+
+
+### Features
+
+* **capture:** upload a listed place's sessions with tool calls redacted (capture.redact_tool_calls) ([#52](https://github.com/dosu-ai/seshi/issues/52)) ([b3ff509](https://github.com/dosu-ai/seshi/commit/b3ff509ab3279d78b13ee387c2273583e78e751a))
+
 # [0.18.0](https://github.com/dosu-ai/seshi/compare/v0.17.0...v0.18.0) (2026-11-20)
 
 
