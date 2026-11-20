@@ -36,6 +36,12 @@ const DECISION: Record<Review["decision"], { icon: string; word: string }> = {
   skipped: { icon: "–", word: "Review skipped" },
 };
 
+/** Forget the session kept below: on every change of who is signed in, so nothing one
+ * credential read is ever shown to another. */
+export function forgetSessions(): void {
+  cached = undefined;
+}
+
 /** The session last opened, kept while the person moves between its tabs. */
 let cached:
   | { key: string; metadata: Promise<SessionMetadata>; traces: Map<string, Promise<Trace>> }
@@ -436,6 +442,7 @@ export function renderSession(
     hash && /^[0-9a-f]{64}$/.test(hash) && Number.isInteger(event) ? { hash, event } : undefined;
   const session = opened(owner, archive);
   const status = h("p", { class: "loading", role: "status" }, "Loading the session…");
+  document.title = "seshi";
   replace(root, h("section", { class: "session" }, status));
   if (!target) window.scrollTo(0, 0);
 

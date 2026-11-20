@@ -13,7 +13,7 @@ import {
   type SessionMetadata,
 } from "@seshi/model";
 import { accessDeniedIn, decodeMetadata, getBytes, isOwner, keys, type Store } from "@seshi/store";
-import type { BackendHit, BackendQuery, IndexStore } from "./backend";
+import type { BackendHit, BackendQuery, BrowsePosition, IndexStore } from "./backend";
 import { readFeed } from "./feed";
 import { Indexer, type IndexerLogger, type IndexerOptions, type IndexerRun } from "./indexer";
 import { defaultIndexPath } from "./paths";
@@ -132,11 +132,21 @@ export function checkRequest(request: SearchRequest, aliases = new OwnerAliases(
     throw new SearchQueryError(`sort must be one of ${SEARCH_SORTS.join(", ")}`);
   }
   let offset = 0;
+  let after: BrowsePosition | undefined;
   if (request.cursor !== undefined && request.cursor !== "") {
-    if (!/^\d{1,9}$/.test(request.cursor) || Number(request.cursor) > MAX_OFFSET) {
+    // A search's cursor is an offset; a browse's is the place of its last session.
+    const place = /^(\d{1,15})\.(\d{1,15})$/.exec(request.cursor);
+    if (match === undefined && place) {
+      after = { activity: Number(place[1]), id: Number(place[2]) };
+    } else if (
+      match === undefined ||
+      !/^\d{1,9}$/.test(request.cursor) ||
+      Number(request.cursor) > MAX_OFFSET
+    ) {
       throw new SearchQueryError("cursor is not one this server gave");
+    } else {
+      offset = Number(request.cursor);
     }
-    offset = Number(request.cursor);
   }
   const agent = text(request.agent, "agent");
   const repo = text(request.repo, "repo");
@@ -165,6 +175,7 @@ export function checkRequest(request: SearchRequest, aliases = new OwnerAliases(
       limit: count(request.limit, "limit", DEFAULT_LIMIT, 1, MAX_LIMIT),
       matches: count(request.matches, "matches", DEFAULT_MATCHES, 0, MAX_MATCHES),
       offset,
+      ...(after ? { after } : {}),
     },
   };
 }
@@ -342,12 +353,18 @@ export class SearchService {
             )
           ).filter((h): h is BackendHit => h !== null);
     const next = checked.query.offset + checked.query.limit;
+    const cursor =
+      checked.query.match === undefined
+        ? found.after && `${found.after.activity}.${found.after.id}`
+        : next < found.total && next <= MAX_OFFSET
+          ? String(next)
+          : undefined;
     const caughtUpAt = index.caughtUpAt();
     return {
       query: checked.q,
       total: found.total,
       results: verified.map(resultOf),
-      ...(next < found.total && next <= MAX_OFFSET ? { cursor: String(next) } : {}),
+      ...(cursor ? { cursor } : {}),
       index: {
         ready_at: readyAt,
         ...(caughtUpAt !== undefined ? { caught_up_at: caughtUpAt } : {}),

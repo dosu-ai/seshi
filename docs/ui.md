@@ -39,7 +39,8 @@ The credential stays in the browser tab (`sessionStorage`), is sent only in the
 The browser talks to the IdP directly, so the IdP must allow it:
 
 1. Add the page's address, `https://<your server>/ui/`, as a redirect URI of the client named
-   by `auth.oidc.client_id` (the one `seshi login` uses).
+   by `auth.oidc.client_id` (the one `seshi login` uses). The page always sends that address,
+   however it was opened.
 2. Allow the server's origin (`https://<your server>`) to call the IdP's discovery document
    and token endpoint from a browser (CORS). Okta, Auth0, Keycloak and Microsoft Entra ID do
    this for a client registered as a single-page app; with Entra, add the redirect URI under
@@ -57,8 +58,9 @@ the session at that record. Filter by owner, agent, repository, branch, model, l
 recently it was active; a click on a value in a row filters by it. The address keeps the words
 and filters, so a view can be bookmarked or shared.
 
-When search is off (`search.enabled = false`), or the index is still being built after a
-start, the list falls back to one owner's sessions (`GET /v1/sessions`), yours unless you set
+When search is off (`search.enabled = false`), the index is still being built after a start,
+or the credential lacks the `search` scope (a reader's service token with `sessions:read`
+alone), the list falls back to one owner's sessions (`GET /v1/sessions`), yours unless you set
 Owner, and the other filters do not apply.
 
 **A session** opens on its thread: each event (prompt, answer, tool call, tool result) in

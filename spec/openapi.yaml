@@ -1224,7 +1224,9 @@ paths:
         the caller's visibility allow, the most recently active first (by the last event,
         or the last update when the traces carry no times), each with `hits` 0 and no
         `matches`. `since` and `until` then keep sessions whose span (first to last event,
-        or that update) overlaps them, and `sort` has no effect.
+        or that update) overlaps them, and `sort` has no effect. A browse's `cursor` marks
+        the last session of the page, not an offset, so sessions that arrive or move while
+        a client pages neither repeat nor push others off a page.
       parameters:
         - name: q
           in: query

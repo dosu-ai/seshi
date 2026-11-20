@@ -13,7 +13,7 @@ import {
 } from "./api";
 import { renderList } from "./list";
 import { finishSignIn, type PendingSignIn } from "./oidc";
-import { renderSession } from "./session";
+import { forgetSessions, renderSession } from "./session";
 import { renderSignIn } from "./signin";
 
 const root = document.getElementById("app") as HTMLElement;
@@ -67,6 +67,7 @@ function showWho(me: Identity, credential: Credential): void {
 }
 
 function signedIn(credential: Credential, me: Identity): void {
+  forgetSessions();
   saveCredential(credential);
   identity = me;
   showWho(me, credential);
@@ -74,7 +75,11 @@ function signedIn(credential: Credential, me: Identity): void {
 }
 
 function signIn(modes: AuthModes, notice?: string): void {
+  // Whatever was loading for the last credential no longer draws, and nothing it read stays.
+  generation++;
+  forgetSessions();
   identity = undefined;
+  document.title = "seshi";
   replace(who);
   renderSignIn(root, modes, signedIn, notice);
 }

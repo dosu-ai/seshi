@@ -197,6 +197,9 @@ function filtersOf(q: BackendQuery, where: string[], params: SQLQueryBindings[])
   return true;
 }
 
+/** When a session last did something, as a browse orders it. */
+const ACTIVITY = "coalesce(s.ended_at, s.updated_ms)";
+
 function likeLiteral(value: string): string {
   return value.replace(/[\\%_]/g, (c) => `\\${c}`);
 }
@@ -493,26 +496,32 @@ export class SqliteIndex implements IndexStore {
       where.push("coalesce(s.started_at, s.updated_ms) <= ?");
       params.push(q.until);
     }
+    const total = (
+      this.db
+        .query(`SELECT count(*) AS n FROM sessions s WHERE ${where.join(" AND ")}`)
+        .get(...params) as { n: number }
+    ).n;
+    const page = [...where];
+    const pageParams = [...params];
+    if (q.after) {
+      page.push(`(${ACTIVITY} < ? OR (${ACTIVITY} = ? AND s.id < ?))`);
+      pageParams.push(q.after.activity, q.after.activity, q.after.id);
+    }
     const rows = this.db
       .query(
-        `SELECT s.*, count(*) OVER () AS total FROM sessions s
-         WHERE ${where.join(" AND ")}
-         ORDER BY coalesce(s.ended_at, s.updated_ms) DESC, s.id DESC
-         LIMIT ? OFFSET ?`,
+        `SELECT s.*, ${ACTIVITY} AS activity FROM sessions s
+         WHERE ${page.join(" AND ")}
+         ORDER BY ${ACTIVITY} DESC, s.id DESC
+         LIMIT ?`,
       )
-      .all(...params, q.limit, q.offset) as (SessionRow & { total: number })[];
-    const total =
-      rows[0]?.total ??
-      (q.offset > 0
-        ? (
-            this.db
-              .query(`SELECT count(*) AS n FROM sessions s WHERE ${where.join(" AND ")}`)
-              .get(...params) as { n: number }
-          ).n
-        : 0);
+      .all(...pageParams, q.limit + 1) as (SessionRow & { activity: number })[];
+    const more = rows.length > q.limit;
+    const shown = more ? rows.slice(0, q.limit) : rows;
+    const last = shown.at(-1);
     return {
       total,
-      hits: rows.map((row) => ({ session: sessionOf(row), score: 0, hits: 0, matches: [] })),
+      hits: shown.map((row) => ({ session: sessionOf(row), score: 0, hits: 0, matches: [] })),
+      ...(more && last ? { after: { activity: last.activity, id: last.id } } : {}),
     };
   }
 

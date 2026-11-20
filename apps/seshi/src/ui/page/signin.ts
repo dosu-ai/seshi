@@ -4,10 +4,10 @@ import { h, replace } from "../../web/dom";
 import { ApiError, type Credential, call, PENDING_KEY } from "./api";
 import { discover, SignInError, startSignIn } from "./oidc";
 
-/** The page's own address, which the IdP sends the browser back to. Registered with the IdP
- * as a redirect URI of the CLI's client (docs/ui.md). */
+/** The page's address, which the IdP sends the browser back to: always `/ui/`, however the
+ * page was opened, since that is the redirect URI registered with the IdP (docs/ui.md). */
 export function redirectUri(): string {
-  return `${location.origin}${location.pathname}`;
+  return `${location.origin}/ui/`;
 }
 
 function hostOf(url: string): string {

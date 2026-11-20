@@ -40,7 +40,9 @@ describe("the UI handler", () => {
     const file = handler(get("/ui/chunk-abc.js")) as Response;
     expect(file.status).toBe(200);
     expect(file.headers.get("content-type")).toBe("text/javascript");
-    expect((handler(get("/ui/index.html")) as Response).status).toBe(200);
+    const index = handler(get("/ui/index.html?state=s")) as Response;
+    expect(index.status).toBe(302);
+    expect(index.headers.get("location")).toBe("/ui/?state=s");
     expect((handler(get("/ui/nope.js")) as Response).status).toBe(404);
   });
 

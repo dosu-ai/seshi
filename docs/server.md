@@ -333,7 +333,7 @@ allow.
 | | |
 |---|---|
 | `GET /healthz` | `{ok, version}`, no auth |
-| `GET /ui/` | The [team UI](ui.md)'s page and its files (`server.ui`, on by default), no auth: the files hold no data. `GET /` and `GET /ui` redirect there. Not in the OpenAPI document, which covers the API |
+| `GET /ui/` | The [team UI](ui.md)'s page and its files (`server.ui`, on by default), no auth: the files hold no data. `GET /`, `GET /ui` and `GET /ui/index.html` redirect there. Not in the OpenAPI document, which covers the API |
 | `GET /v1/auth/config` | Which ways in the server takes (X5.7): `org_key`, `oidc` (`issuer`, `client_id`, `audience`, `scopes`) or null, and token lifetimes. No auth |
 | `POST /v1/auth/exchange` | `{id_token, nonce?, machine?: {id, name?}, visibility?}`: an IdP ID token for a session token, and with `machine` a device token for it (earlier device tokens for that machine are revoked). `401` for an ID token that does not check out, `404 no_idp` without an IdP. No bearer |
 | `GET /v1/me` | `{owner, storage, kind, role, scopes, owner_basis, credential_id, visibility?, expires_at?}`: who the credential is, and which bucket this server writes, so a client can point a reader at it. Never a secret |

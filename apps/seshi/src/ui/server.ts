@@ -60,10 +60,11 @@ export function uiHandler(options: UiOptions): (request: Request) => Response | 
         "content-type": "text/plain; charset=utf-8",
       });
     }
-    if (path === "/" || path === "/ui") {
+    // One address for the page, the one registered with the IdP as its redirect URI.
+    if (path === "/" || path === "/ui" || path === `${UI_PATH}index.html`) {
       return respond(null, 302, { location: `${UI_PATH}${url.search}` });
     }
-    if (path === UI_PATH || path === `${UI_PATH}index.html`) {
+    if (path === UI_PATH) {
       return respond(index, 200, { "content-type": "text/html; charset=utf-8" });
     }
     const file = files.get(path.slice(UI_PATH.length - 1));

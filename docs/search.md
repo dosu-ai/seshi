@@ -63,7 +63,9 @@ Where it searches:
 `GET /v1/search` without `q` (or with it empty) is a browse: every session the filters and the
 caller's visibility allow, the most recently active first (by the last event, or the last
 update when the traces carry no times), with no matches. `since` and `until` then keep sessions
-whose span overlaps them, and `sort` has no effect. The [team UI](ui.md) lists sessions this
+whose span overlaps them, and `sort` has no effect. A browse's `cursor` marks the last
+session of the page rather than an offset, so sessions that arrive while you page neither
+repeat nor push others off a page. The [team UI](ui.md) lists sessions this
 way. `seshi search` still needs words.
 
 The output is plain text; `--json` prints the API's `SearchResults`. Exit 0 also when nothing

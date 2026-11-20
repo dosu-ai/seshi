@@ -339,7 +339,7 @@ export function renderList(
     list.append(...rows.map((row) => rowItem(row, state, now)));
   };
 
-  const searchPage = async (cursor?: string): Promise<void> => {
+  const searchPage = async (cursor?: string, skipped = 0): Promise<void> => {
     replace(more);
     let page: SearchResults;
     try {
@@ -348,9 +348,9 @@ export function renderList(
       });
     } catch (err) {
       if (!ctx.isCurrent()) return;
-      if (err instanceof ApiError && (err.code === "search_disabled" || err.status === 503)) {
-        return ownerList(err.status === 503);
-      }
+      if (err instanceof ApiError && err.code === "search_disabled") return ownerList("off");
+      if (err instanceof ApiError && err.status === 503) return ownerList("building");
+      if (err instanceof ApiError && err.status === 403) return ownerList("scope");
       summary.textContent = `The sessions did not load: ${err instanceof Error ? err.message : String(err)}`;
       summary.classList.add("problem");
       return;
@@ -367,6 +367,11 @@ export function renderList(
             : `${plural(page.total, "session")}, most recent first`;
     }
     showRows(page.results.map(fromResult));
+    // A page can come back empty when every session on it was made private or removed since
+    // the index read it: go on to the next one rather than show a page of nothing.
+    if (page.results.length === 0 && page.cursor && skipped < 5) {
+      return searchPage(page.cursor, skipped + 1);
+    }
     if (page.cursor) {
       const next = page.cursor;
       replace(
@@ -376,9 +381,9 @@ export function renderList(
     }
   };
 
-  /** Without search (turned off, or its index still building): one owner's sessions, the
-   * newest first, with no other filter. */
-  const ownerList = async (building: boolean): Promise<void> => {
+  /** Without search (turned off, its index still building, or a credential without the
+   * `search` scope): one owner's sessions, the newest first, with no other filter. */
+  const ownerList = async (why: "off" | "building" | "scope"): Promise<void> => {
     const owner = state.filters.owner ?? ctx.me.owner;
     let page: { sessions: SessionMetadata[]; truncated: boolean };
     try {
@@ -393,10 +398,15 @@ export function renderList(
     const rows = page.sessions
       .map(fromMetadata)
       .sort((a, b) => (a.updated_at < b.updated_at ? 1 : -1));
-    summary.textContent = `${building ? "Search is still reading the sessions" : "Search is turned off on this server"}, so this lists ${owner}'s ${plural(rows.length, "session")}${page.truncated ? " (the first 1,000)" : ""}. Set Owner to see someone else's.`;
+    const reason = {
+      off: "Search is turned off on this server",
+      building: "Search is still reading the sessions",
+      scope: "This credential cannot search",
+    }[why];
+    summary.textContent = `${reason}, so this lists ${owner}'s ${plural(rows.length, "session")}${page.truncated ? " (the first 1,000)" : ""}. Set Owner to see someone else's.`;
     summary.classList.add("notice");
     showRows(rows);
-    if (building) {
+    if (why === "building") {
       replace(
         more,
         h("button", { type: "button", onclick: () => location.reload() }, "Try search again"),
@@ -404,5 +414,6 @@ export function renderList(
     }
   };
 
-  void searchPage();
+  if (ctx.me.scopes && !ctx.me.scopes.includes("search")) void ownerList("scope");
+  else void searchPage();
 }

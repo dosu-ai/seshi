@@ -85,7 +85,17 @@ export interface BackendQuery {
   sort: SearchSort;
   limit: number;
   offset: number;
+  /** A browse's place: the page starts after this session. A browse pages by position, not
+   * offset, so sessions that arrive or move while someone pages never shift the pages. */
+  after?: BrowsePosition;
   matches: number;
+}
+
+/** A session's place in a browse: its activity (the last event, or the last update when the
+ * traces carry no times; epoch ms), then its row in the index. */
+export interface BrowsePosition {
+  activity: number;
+  id: number;
 }
 
 export interface BackendMatch {
@@ -109,6 +119,8 @@ export interface BackendHit {
 export interface BackendResults {
   total: number;
   hits: BackendHit[];
+  /** A browse with more to read: where the next page starts. */
+  after?: BrowsePosition;
 }
 
 export interface SearchBackend {
