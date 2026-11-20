@@ -30,6 +30,9 @@ export interface AgentInfo {
   locate?(sessionId: string): string | undefined;
   /** The file uploaded in place of the session's transcript, when the agent composes one. */
   uploaded?(sessionId: string): string | undefined;
+  /** The agent's pass for `capture.redact_tool_calls`, which the uploader runs before
+   * pre-redaction on a session the org lists. */
+  redactToolCalls?(text: string): string;
 }
 
 export interface FileReader {

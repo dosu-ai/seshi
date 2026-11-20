@@ -76,7 +76,8 @@ export function decisionCheck(ev: SessionEvidence): CheckResult {
       `capture is paused${ev.machine.paused.until ? ` until ${ev.machine.paused.until}` : ""}`,
     );
   }
-  return result(id, title, "ok", `${word}: ${d.reason} (${d.level})`, { detail });
+  const redacted = d.redact_tool_calls ? `; tool calls redacted: ${d.redact_tool_calls}` : "";
+  return result(id, title, "ok", `${word}: ${d.reason} (${d.level})${redacted}`, { detail });
 }
 
 export function transcriptCheck(ev: SessionEvidence): CheckResult {
@@ -573,7 +574,10 @@ function localRecords(ev: SessionEvidence, deps: DoctorDeps): LocalRecords {
     return { end, skip: `the transcript is shorter than the ${bytes(end)} the server holds` };
   }
   try {
-    const text = deps.files.read(file.path ?? ev.transcript.path, end);
+    const read = deps.files.read(file.path ?? ev.transcript.path, end);
+    // What the uploader sent: the tool-call pass first, for a session the org lists.
+    const pass = ev.decision?.redact_tool_calls ? deps.agent(ev.agent)?.redactToolCalls : undefined;
+    const text = pass ? pass(read) : read;
     const sent = deps.redaction.transcript(text, ev.capture.encoding);
     return { end, records: deps.normalizer.records(ev.capture.format, sent) };
   } catch (err) {
@@ -748,6 +752,15 @@ export function prefixCheck(
       : [...markersIn(ev.server.traces.flatMap((t) => t.records ?? []))].filter(
           (marker) => !markersIn(deps.redaction.records(local.records ?? [])).has(marker),
         );
+  if (markersFromRetiredRules.includes("tool-call")) {
+    return result(
+      id,
+      title,
+      "skip",
+      "the stored records keep [redacted:tool-call]: the session was uploaded while the org redacted tool calls where it ran (capture.redact_tool_calls), which no longer applies here; the hashes cannot agree",
+      { hint: "a whole upload (seshi capture resend) stores it as the rules stand now" },
+    );
+  }
   if (markersFromRetiredRules.length > 0) {
     return result(
       id,
