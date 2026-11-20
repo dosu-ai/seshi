@@ -35,6 +35,7 @@ import {
   type CaptureState,
   freeze,
   labelsOpen,
+  markExcluded,
   newSecret,
   otherFolders,
   pauseWindows,
@@ -619,6 +620,13 @@ export class Uploader {
       session = await this.startOf(key, session, agent, path, state);
       const place = placeOf(session.cwd);
       const decision = this.decision(snapshot, session, place, state);
+      if (decision.excluded) {
+        const excluded = decision.excluded;
+        const at = this.now().toISOString();
+        await this.save(key, (s) => markExcluded(s, excluded, decision.reason, at));
+        this.log(`${key}: ${decision.reason}: nothing more of it is sent`);
+        continue;
+      }
       if (decision.frozen !== undefined && !session.frozen) {
         const offset = decision.frozen;
         const at = this.now().toISOString();
@@ -701,6 +709,11 @@ export class Uploader {
         if (entry.cwd) seenIn(session, entry.cwd);
         if (entry.parent_session_id) session.parent_session_id = entry.parent_session_id;
         if (entry.kind === "capture" && entry.final) session.final = true;
+        // A hook found an entry of the exclude list deciding it: off for good.
+        if (entry.kind === "seen" && entry.excluded) {
+          const { reason, ...excluded } = entry.excluded;
+          markExcluded(session, excluded, reason, entry.at);
+        }
         if (entry.kind === "capture" && entry.harness_version) {
           session.harness_version = entry.harness_version;
         }
@@ -774,6 +787,23 @@ export class Uploader {
           },
           this.host.platform,
         );
+        // Kept on this machine for good: recorded so that a later change of its folder or of the
+        // list does not send it (and never written out of the agent's store).
+        if (decision.excluded) {
+          const excluded = decision.excluded;
+          const at = now.toISOString();
+          additions.push({
+            agent: agent.name,
+            session_id: found.info.session_id,
+            ...(found.keep ? {} : { path: found.path }),
+            ...(found.info.cwd ? { cwd: found.info.cwd } : {}),
+            first_seen: at,
+            last_seen: new Date(found.mtimeMs).toISOString(),
+            started_at: started,
+            excluded: { at, message: decision.reason, entry: excluded.entry, from: excluded.from },
+          });
+          continue;
+        }
         if (!decision.capture && decision.frozen === undefined) continue;
         // A session found only in the agent's store is written out for capture alone.
         if (found.keep && (!decision.capture || !this.kept(found))) continue;
@@ -815,6 +845,9 @@ export class Uploader {
             continue;
           }
         }
+        // An excluded session with no file of its own (one in an agent's database) stays recorded:
+        // forgotten, a later sweep would find it as new and judge it again.
+        if (!session.path && session.excluded?.entry !== undefined) continue;
         const gone = session.path
           ? !existsSync(session.path)
           : now.getTime() - Date.parse(session.first_seen) > 24 * 3600 * SECOND;

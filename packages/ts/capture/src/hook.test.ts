@@ -619,6 +619,18 @@ describe("the rules cache", () => {
       reason: "the org excludes ~/clients (https://seshi.test's [capture] exclude)",
       excluded: { entry: "~/clients", from: "server", server: "https://seshi.test" },
     });
+    // The hook hands the uploader the entry, which records the session as excluded for good.
+    expect(readSpool(paths).items.map((i) => i.entry)).toContainEqual(
+      expect.objectContaining({
+        kind: "seen",
+        session_id: "c1",
+        excluded: {
+          entry: "~/clients",
+          from: "server",
+          reason: "the org excludes ~/clients (https://seshi.test's [capture] exclude)",
+        },
+      }),
+    );
     // The rules the uploader read for this machine when it fetched the copy are used as they
     // are; another home's are read again.
     const copy = JSON.parse(readFileSync(paths.orgRules, "utf8"));

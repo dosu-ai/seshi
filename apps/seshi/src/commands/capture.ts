@@ -406,6 +406,13 @@ function stateWord(state: SessionState, decision: { capture: boolean; frozen?: n
     : word;
 }
 
+/** What to say about a session kept off for good that no rule keeps off any more. */
+function excludedHint(state: SessionState | undefined, decision: { capture: boolean }): string {
+  return state?.excluded !== undefined && decision.capture
+    ? " (no entry names it now; seshi capture resend --session <id> sends it)"
+    : "";
+}
+
 async function status(ctx: CommandContext, json: boolean, args: Args): Promise<number> {
   const { host, paths } = pathsOf(ctx);
   const now = new Date();
@@ -513,7 +520,7 @@ async function status(ctx: CommandContext, json: boolean, args: Args): Promise<n
       `Session Capture: ${word(session ? session.decision.capture : here.capture)}`,
       ...(session
         ? [
-            `  session ${printable(session.agent)} ${printable(session.id)}: ${session.decision.reason} (${session.decision.level})${session.state ? `; ${stateWord(session.state, session.decision)}` : ""}`,
+            `  session ${printable(session.agent)} ${printable(session.id)}: ${session.decision.reason} (${session.decision.level})${session.state ? `; ${stateWord(session.state, session.decision)}${excludedHint(session.state, session.decision)}` : ""}`,
           ]
         : []),
       ...(session ? [] : [`  here (${printable(cwd)}): ${here.reason} (${here.level})`]),
@@ -872,10 +879,28 @@ async function resend(ctx: CommandContext, json: boolean, args: Args): Promise<n
     for (const key of keys) {
       const session = st.sessions[key];
       if (!session) continue;
-      // Settled as excluded by the server: sent again only when asked for by name (the org's
-      // list may have changed); the server refuses it again if not.
+      // Excluded for good: sent again only when asked for by name (the org's list may have
+      // changed since); judged again then, and kept again if an entry still names it.
       if (session.excluded !== undefined && args.all) {
-        skipped.push({ key, reason: "excluded by the server" });
+        skipped.push({
+          key,
+          reason:
+            session.excluded.entry !== undefined
+              ? `excluded (${session.excluded.entry})`
+              : "excluded by the server",
+        });
+        continue;
+      }
+      // Kept off before anything of it was sent: released by name, its first upload goes as any
+      // other's (judged again, and kept off again if an entry still names it).
+      if (session.excluded !== undefined && !session.sent) {
+        const reason = notResendable(st, { ...session, sent: true });
+        if (reason) {
+          skipped.push({ key, reason });
+          continue;
+        }
+        delete session.excluded;
+        marked.push(key);
         continue;
       }
       const reason = notResendable(st, session);

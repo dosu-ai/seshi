@@ -227,7 +227,10 @@ One decision function judges every session, the same for hooks, the sweep, the s
    more of a captured session is sent once it works in an excluded repo. A subagent is judged
    by its parent's folders too (and the parent's parent's): what the parent did in an excluded
    repo reaches the subagent through its task, so it is not uploaded, wherever it runs. What
-   it uploaded before stays (rule changes do not retract).
+   it uploaded before stays (rule changes do not retract). A session an entry of the exclude
+   list turned off stays off for good: it is recorded as `excluded` in the state file, and a
+   later change of its folder (another remote) or of the list does not send it.
+   `seshi capture resend --session <id>` sends it, judged again, if no entry names it any more.
 2. **A pause** (`seshi capture pause 2h`, or until `seshi capture resume`) stops sessions where
    they are. Every session running when it starts, or seen while it lasts, keeps what it has
    uploaded and uploads nothing more, ever: not after the pause ends either. A session started
@@ -464,7 +467,11 @@ for this machine (`~` expanded, folders' links resolved), so hooks do not read i
   `capture.exclude` applies, as before. The uploader asks again every 5 minutes, so an upgraded
   server's list is picked up.
 - **A changed list** applies from the next fetch: a session in a newly listed place sends
-  nothing more. What it uploaded before stays on the server (rule changes do not retract).
+  nothing more. What it uploaded before stays on the server (rule changes do not retract). An
+  entry taken off the list does not send what it kept off: every session an entry decided stays
+  off (`excluded` in `seshi capture status`), as a Cursor Cloud agent's runs made while it was
+  excluded are never read ([cursor-cloud.md](cursor-cloud.md#the-orgs-exclude-list)).
+  `seshi capture resend --session <id>` sends one by name; `resend --all` passes them over.
 
 In serverless mode the list is the `[capture] exclude` of the server config the laptop runs: the
 bucket's shared settings and this machine's `serverless.config`. The uploader keeps a copy of it

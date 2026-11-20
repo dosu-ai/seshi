@@ -431,7 +431,8 @@ exclude = ["acme/legal"]
   server's list ([capture.md](capture.md#the-orgs-exclude-list-on-a-laptop)).
 - **The server's own sources apply it**: a Cursor Cloud agent working in a listed repository is
   never read ([cursor-cloud.md](cursor-cloud.md#the-orgs-exclude-list)). An entry added stops
-  what comes next; it deletes nothing already stored.
+  what comes next; it deletes nothing already stored. An entry removed does not send what it
+  kept out, on a laptop or from Cursor Cloud: it applies to what comes after.
 
 ## The CLI's config
 

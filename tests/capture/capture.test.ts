@@ -1417,8 +1417,8 @@ describe("the org's exclude list in serverless mode", () => {
         capture: false,
         level: "org",
         excluded: { entry: payroll, from: "server" },
-        // Kept on this machine: not "waiting".
-        state: "not sent",
+        // Kept on this machine for good.
+        state: "excluded",
       });
     } finally {
       local.cleanup();
@@ -1741,6 +1741,30 @@ describe("resending uploaded sessions (X4.9)", () => {
     const text = await machine.seshi(["capture", "resend", "--all"]);
     expect(text.out).toContain("1 session(s)");
     expect(text.out).toContain("not resent, turned off");
+  });
+
+  it("keeps a session an entry excluded off after the entry goes, until it is asked for by name", async () => {
+    machine.cliConfig(
+      `server = "${server.url}"\nuser = "${OWNER}"\n[capture]\nexclude = ["${project}"]\n`,
+    );
+    await hook();
+    expect((await daemon()).summary).toMatchObject({ uploaded: 0 });
+    expect(state().sessions[KEY].excluded).toMatchObject({ entry: project, from: "config" });
+
+    // The entry goes: the session stays off, and resend --all passes it over.
+    machine.cliConfig(`server = "${server.url}"\nuser = "${OWNER}"\n`);
+    await hook();
+    expect((await daemon()).summary).toMatchObject({ uploaded: 0 });
+    const status = await machine.seshi(["capture", "status", "--session", SESSION]);
+    expect(status.out).toContain("excluded (no entry names it now");
+    const all = JSON.parse((await machine.seshi(["capture", "resend", "--all", "--json"])).out);
+    expect(all.skipped).toEqual([{ key: KEY, reason: `excluded (${project})` }]);
+
+    // Asked for by name: its first upload goes.
+    const one = await machine.seshi(["capture", "resend", "--session", SESSION, "--json"]);
+    expect(JSON.parse(one.out)).toEqual({ resending: [KEY], skipped: [] });
+    expect((await daemon()).summary).toMatchObject({ uploaded: 1 });
+    expect((await stored())?.status).toBe("stored");
   });
 
   it("resends a session the server excluded only when asked for by name", async () => {

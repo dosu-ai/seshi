@@ -1280,6 +1280,81 @@ describe("the server's exclude list (GET /v1/capture/rules)", () => {
     expect(other.uploads).toEqual([]);
   });
 
+  it("keeps a session an entry excluded off for good, when its folder or the list changes", async () => {
+    listing.list = ["acme/payroll"];
+    const app = sessionIn("s-pay", "app");
+    mkdirSync(join(app, ".git"));
+    writeFileSync(join(app, ".git", "HEAD"), "ref: refs/heads/main\n");
+    const remote = (url: string) =>
+      writeFileSync(join(app, ".git", "config"), `[remote "origin"]\n\turl = ${url}\n`);
+    remote("git@github.com:Acme/Payroll.git");
+    const up = listed({ orgRulesRefreshMs: 60_000 });
+    await up.pass();
+    expect(server.uploads).toEqual([]);
+    expect(session("s-pay").excluded).toMatchObject({
+      entry: "acme/payroll",
+      from: "server",
+      message: expect.stringContaining("the org excludes acme/payroll"),
+    });
+    expect(sessionWord(session("s-pay"))).toBe("excluded");
+
+    // The folder now points at another repository: the session stays off, a new one goes.
+    remote("https://github.com/acme/billing.git");
+    appendFileSync(transcript("s-pay"), `${JSON.stringify({ id: "s-pay", text: "more" })}\n`);
+    hooked("s-pay", transcript("s-pay"));
+    sessionIn("s-bill", "app");
+    await up.pass();
+    expect(uploaded()).toEqual(["s-bill"]);
+
+    // The entry goes from the list: still off.
+    listing.list = [];
+    clock = new Date(clock.getTime() + 120_000);
+    await up.pass();
+    expect(uploaded()).toEqual(["s-bill"]);
+  });
+
+  it("records the entry a hook found, from its spool entry", async () => {
+    writeFileSync(transcript("s1"), line("one") + line("two"));
+    appendSpool(paths, {
+      v: 1,
+      kind: "seen",
+      at: clock.toISOString(),
+      agent: "fake",
+      session_id: "s1",
+      cwd: dir,
+      transcript_path: transcript("s1"),
+      excluded: { entry: "~/x", from: "config", reason: "the org excludes ~/x (capture.exclude)" },
+    });
+    await listed().pass();
+    expect(session("s1").excluded).toEqual({
+      at: clock.toISOString(),
+      entry: "~/x",
+      from: "config",
+      message: "the org excludes ~/x (capture.exclude)",
+    });
+    expect(server.uploads).toEqual([]);
+  });
+
+  it("records a session only the sweep found in an excluded folder, and never sends it later", async () => {
+    await updateState(paths, (st) => {
+      st.agents.fake = { installed_at: "2026-10-01T00:00:00Z" };
+    });
+    local = [join(dir, "clients")];
+    mkdirSync(join(dir, "clients"));
+    writeFileSync(
+      transcript("swept"),
+      `${JSON.stringify({ id: "swept", cwd: join(dir, "clients") })}\n${line("two", "swept")}`,
+    );
+    await listed().pass({ sweep: true });
+    expect(session("swept").excluded).toMatchObject({
+      entry: join(dir, "clients"),
+      from: "config",
+    });
+    local = [];
+    await listed().pass({ sweep: true });
+    expect(server.uploads).toEqual([]);
+  });
+
   it("settles a session the server refuses as excluded, and sends it no more", async () => {
     sessionIn("s1", "app");
     listing.failNext = [new SessionExcluded()];
