@@ -69,6 +69,7 @@ export {
   ownedFileState,
   removeOwnedFiles,
 } from "./owned";
+export { normalizeRemote, repoLabel } from "./remote";
 export {
   captureSkill,
   installSkill,

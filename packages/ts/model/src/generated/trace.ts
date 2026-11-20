@@ -156,11 +156,19 @@ export interface TraceEvent {
   ok?: boolean;
 }
 
-/** Lineage and scope attached at ingest, plus the meta record's `cwd`, `git_branch` and `model`. */
+/** Lineage and scope attached at ingest, plus the meta record's `cwd`, `git_branch`, `model` and `agent_version` (the uploader's hints fill `model` and `agent_version` when the meta record has none). */
 export interface TraceMetadata {
   cwd?: string;
   git_branch?: string;
   model?: string;
+  /** The version of the harness that wrote the transcript. */
+  agent_version?: string;
+  /** The commit `HEAD` named when this trace was uploaded. */
+  commit?: string;
+  /** The working folder relative to the repository's root; absent at the root. */
+  path_in_repo?: string;
+  /** The program that uploaded this trace (`seshi/0.15.0 darwin-arm64`). */
+  client?: string;
   /** The session this one was spawned by (a subagent, a fork). */
   parent_session_id?: string;
   continuation?: Continuation;
@@ -335,6 +343,10 @@ export const JSON_SCHEMA = {
         cwd: { type: "string" },
         git_branch: { type: "string" },
         model: { type: "string" },
+        agent_version: { type: "string" },
+        commit: { type: "string" },
+        path_in_repo: { type: "string" },
+        client: { type: "string" },
         parent_session_id: { type: "string" },
         continuation: { $ref: "common.schema.json#/$defs/Continuation" },
         normalizer: { $ref: "common.schema.json#/$defs/Normalizer" },

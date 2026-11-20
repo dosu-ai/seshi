@@ -53,6 +53,28 @@
     },
     "project": { "type": "string" },
     "branch": { "type": "string" },
+    "repo": {
+      "description": "The repository's origin remote, normalized without credentials (`github.com/acme/app`). Kept on the session by the first write that names one.",
+      "type": "string"
+    },
+    "commit": { "description": "The commit `HEAD` named when the upload was made.", "type": "string" },
+    "path_in_repo": {
+      "description": "The working folder relative to the repository's root (`packages/api`); absent at the root. Never an absolute path.",
+      "type": "string"
+    },
+    "client": {
+      "description": "The program that sent the upload and where it ran (`seshi/0.15.0 darwin-arm64`).",
+      "type": "string"
+    },
+    "harness_version": {
+      "description": "A hint: the harness's version as the uploader knows it (from Cursor's hooks). Used only when the log names none.",
+      "type": "string"
+    },
+    "model": {
+      "description": "A hint: the session's model as the uploader knows it. Used only when the log names none.",
+      "type": "string"
+
+    },
     "labels": {
       "description": "The session's labels, as the uploader resolved them, merged under the source's own `labels`. The session keeps the first it is given; a replace may change them.",
       "$ref": "common.schema.json#/$defs/Labels"

@@ -30,6 +30,9 @@ describe("Cursor's hooks (F9.2)", () => {
           transcript_path:
             "/Users/dev/.cursor/projects/Users-dev-code-app/agent-transcripts/c0ffee00-1111-4222-8333-444455556666/c0ffee00-1111-4222-8333-444455556666.jsonl",
           cwd: "/Users/dev/code/app",
+          // The transcript names neither; every hook payload does.
+          harness_version: "2026.11.13-eacade1",
+          model: "auto-smart",
         },
       ],
     });

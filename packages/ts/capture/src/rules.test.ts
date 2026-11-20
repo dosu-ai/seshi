@@ -36,7 +36,15 @@ describe("remotes", () => {
     expect(normalizeRemote("https://user:pw@gitlab.example.com/a/b/")).toBe(
       "gitlab.example.com/a/b",
     );
-    expect(normalizeRemote("https://github.com/acme/App.GIT")).toBe("github.com/acme/App");
+    // One repository, one name, however it was cloned: owner and repo ignore case too.
+    for (const remote of [
+      "https://github.com/acme/App.GIT",
+      "https://GitHub.com/Acme/App.git",
+      "git@github.com:ACME/app.git",
+      "ssh://git@github.com:22/Acme/App",
+    ]) {
+      expect(normalizeRemote(remote), remote).toBe("github.com/acme/app");
+    }
   });
 
   it("matches a pattern with wildcards, or everything under one without", () => {

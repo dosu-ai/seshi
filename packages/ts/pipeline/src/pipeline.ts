@@ -55,11 +55,13 @@ import {
   isLogEnvelope,
   type LogEnvelope,
   type SpanEnvelope,
+  validScope,
 } from "./envelope";
 import { type FilterSetting, filterRulesFor, isFiltered } from "./filter";
 import {
   getSession,
   getTrace,
+  type IngestMetadata,
   ingest,
   recordProgress,
   type StubInput,
@@ -223,6 +225,19 @@ function recordedBranch(value: unknown): string | undefined {
 
 function metaOf(records: readonly NormalizedRecord[]): NormalizedRecord | undefined {
   return records[0]?.role === "meta" ? records[0] : undefined;
+}
+
+/** What the envelope says about where and with what the session ran, for its trace and
+ * session: the uploader's hints only fill what the log leaves out (`ingest`). */
+function scopeOf(
+  envelope: Envelope,
+): Pick<IngestMetadata, "repo" | "commit" | "path_in_repo" | "client" | "hints"> {
+  const { harness_version, model, ...scope } = validScope(envelope);
+  const hints = {
+    ...(harness_version !== undefined ? { agent_version: harness_version } : {}),
+    ...(model !== undefined ? { model } : {}),
+  };
+  return { ...scope, ...(Object.keys(hints).length > 0 ? { hints } : {}) };
 }
 
 function stubMeta(envelope: Envelope): NormalizedRecord {
@@ -996,6 +1011,7 @@ export class Pipeline {
         format: envelope.format,
         project: plan.project,
         branch: plan.branch,
+        ...scopeOf(envelope),
         ...this.labelsOf(run),
         parent_session_id: envelope.parent_session_id,
         ...(plan.continuation ? { continuation: plan.continuation } : {}),

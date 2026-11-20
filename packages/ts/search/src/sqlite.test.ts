@@ -237,7 +237,7 @@ describe("SqliteIndex: filters, sorting and pages (F10.1)", () => {
     const at = (iso: string) => Date.parse(iso);
     index.apply({
       session: session(1, {
-        project: "github.com/acme/widget",
+        repo: "github.com/acme/widget",
         branch: "main",
         source_id: "upload",
         updated_at: "2026-11-01T00:00:00.000Z",
@@ -249,7 +249,7 @@ describe("SqliteIndex: filters, sorting and pages (F10.1)", () => {
       session: session(2, {
         format: "datadog-trajectory",
         origin_agent: "codex",
-        project: "github.com/acme/gadget",
+        repo: "github.com/acme/gadget",
         branch: "fix/cache",
         source_id: "dd-prod",
         updated_at: "2026-11-10T00:00:00.000Z",
@@ -258,7 +258,7 @@ describe("SqliteIndex: filters, sorting and pages (F10.1)", () => {
       replace: true,
     });
     index.apply({
-      session: session(3, { project: "100%_widget", updated_at: "2026-11-05T00:00:00.000Z" }),
+      session: session(3, { repo: "100%_widget", updated_at: "2026-11-05T00:00:00.000Z" }),
       events: [event("cache")],
       replace: true,
     });
@@ -282,6 +282,62 @@ describe("SqliteIndex: filters, sorting and pages (F10.1)", () => {
     const nov1 = Date.parse("2026-11-01T00:00:00Z");
     expect(ids(query(index, "cache", { since: nov1 })).sort()).toEqual(["s2", "s3"]);
     expect(ids(query(index, "cache", { until: nov1 }))).toEqual(["s1"]);
+  });
+
+  it("filters by repo, harness, its version and any model the session used", () => {
+    const index = memory();
+    index.apply({
+      session: session(1, {
+        project: "widget",
+        repo: "github.com/acme/widget",
+        harness: "claude-code",
+        agent_version: "2.1.326",
+        models: ["claude-opus-9", "claude-haiku-9"],
+      }),
+      events: [event("cache")],
+      replace: true,
+    });
+    index.apply({
+      session: session(2, {
+        format: "cursor",
+        project: "widget",
+        repo: "github.com/other/widget-fork",
+        harness: "cursor",
+        agent_version: "2026.11.13-eacade1",
+        models: ["auto-smart"],
+      }),
+      events: [event("cache")],
+      replace: true,
+    });
+    // No remote: no repo, so a repo filter never finds it, whatever its project.
+    index.apply({
+      session: session(3, { project: "gadget" }),
+      events: [event("cache")],
+      replace: true,
+    });
+    const ids = (extra: Partial<BackendQuery>) =>
+      query(index, "cache", extra)
+        .hits.map((h) => h.session.session_id)
+        .sort();
+    expect(ids({ repo: "github.com/acme/widget" })).toEqual(["s1"]);
+    expect(ids({ repo: "acme/widget" })).toEqual(["s1"]);
+    // `repo` wins over a project of the same name.
+    expect(ids({ repo: "widget" })).toEqual(["s1"]);
+    expect(ids({ repo: "widget-fork" })).toEqual(["s2"]);
+    expect(ids({ repo: "gadget" })).toEqual([]);
+    expect(ids({ harness: "cursor" })).toEqual(["s2"]);
+    expect(ids({ harness: "claude-code", agent_version: "2.1.326" })).toEqual(["s1"]);
+    expect(ids({ agent_version: "1.0.0" })).toEqual([]);
+    expect(ids({ model: "claude-haiku-9" })).toEqual(["s1"]);
+    expect(ids({ model: "auto-smart" })).toEqual(["s2"]);
+    expect(ids({ model: "claude" })).toEqual([]);
+    expect(index.session("alice", H(1))).toMatchObject({
+      repo: "github.com/acme/widget",
+      harness: "claude-code",
+      agent_version: "2.1.326",
+      models: ["claude-opus-9", "claude-haiku-9"],
+    });
+    expect(index.session("alice", H(3))).not.toHaveProperty("models");
   });
 
   it("filters by labels, each key and value exactly, all of them", () => {

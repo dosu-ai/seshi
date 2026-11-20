@@ -1,4 +1,7 @@
+import { normalizeRemote } from "@seshi/kit";
 import type { Toggle } from "./state";
+
+export { normalizeRemote };
 
 export interface PathRule {
   /** An absolute folder (`~` already expanded). */
@@ -67,6 +70,12 @@ export interface Place {
     /** Its remotes, as `host/path` (`github.com/acme/app`). */
     remotes: string[];
     branch?: string;
+    /** Its `origin` remote, else its first, as `host/path`; none when that remote is a local
+     * folder. What the uploader sends as the session's `repo`. */
+    remote?: string;
+    /** The working folder relative to the root (`packages/api`, `/`-separated); none at the
+     * root. */
+    path?: string;
   };
 }
 
@@ -135,28 +144,6 @@ export interface DecideInput {
   seen?: Place[];
   /** The session is a subagent's (it has a parent session). */
   subagent?: boolean;
-}
-
-/** `remote` (`https://github.com/acme/app.git`, `git@github.com:acme/app`, `ssh://…`) as
- * `host/path`: lowercase host, no user, no port, no `.git`, no trailing slash. */
-export function normalizeRemote(remote: string): string {
-  let text = remote.trim();
-  const scp = /^(?:[^@/]+@)?([^:/]+):(?!\/)(.+)$/.exec(text);
-  if (scp && !/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) {
-    text = `${(scp[1] as string).toLowerCase()}/${scp[2]}`;
-  } else {
-    const url = tryParseUrl(text);
-    if (url) text = `${url.hostname.toLowerCase()}${url.pathname}`;
-  }
-  return text.replace(/\/+$/, "").replace(/\.git$/i, "");
-}
-
-function tryParseUrl(text: string): URL | undefined {
-  try {
-    return new URL(text);
-  } catch {
-    return undefined;
-  }
 }
 
 /** A glob as a regular expression's source: `*` stands for one path segment (or part of one),

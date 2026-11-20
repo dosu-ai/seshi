@@ -75,6 +75,18 @@ describe("seshi search with the stored credential", () => {
     expect(json.total).toBe(1);
   });
 
+  it("filters by harness, its version and model, and shows the repo", async () => {
+    const run = (...args: string[]) =>
+      machine.seshi(["search", WORD, "--server", server.url, "--token", TOKEN, ...args]);
+    const found = await run("--harness", "claude-code", "--harness-version", "2.1.326");
+    expect(found.code, found.err).toBe(0);
+    expect(found.out).toContain("claude-code/sess1");
+    expect((await run("--model", "claude-x")).out).toContain("claude-code/sess1");
+    const none = await run("--model", "gpt-9", "--json");
+    expect(JSON.parse(none.out).total).toBe(0);
+    expect(JSON.parse((await run("--harness", "codex", "--json")).out).total).toBe(0);
+  });
+
   it("takes --token over the stored credential", async () => {
     const word = WORD;
     await machine.seshi(["login", "--server", server.url, "--token", "-"], { stdin: TOKEN });

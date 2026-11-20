@@ -13,9 +13,9 @@ const isChunkable = (source: string) => FORMATS.isChunkable(source);
 const SOURCES = FORMATS.sources;
 
 /** The golden's records as trajectory-v1, which has no `llm_call` (the calls are the canonical
- * trace's). */
+ * trace's) and no `agent_version` (seshi's extension of the meta record). */
 const RECORDS = golden<Record<string, unknown>[]>("claude-basic.records.json").map(
-  ({ llm_call: _, ...record }) => record,
+  ({ llm_call: _, agent_version: _version, ...record }) => record,
 );
 const jsonl = (rows: unknown[]) => `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`;
 

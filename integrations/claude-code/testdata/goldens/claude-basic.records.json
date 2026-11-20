@@ -4,7 +4,8 @@
     "source": "claude-code",
     "cwd": "/repo/app",
     "git_branch": "main",
-    "model": "claude-x"
+    "model": "claude-x",
+    "agent_version": "2.1.326"
   },
   {
     "role": "user",
