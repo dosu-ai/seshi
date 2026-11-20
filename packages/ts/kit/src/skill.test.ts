@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -67,6 +75,24 @@ describe("the skill on disk", () => {
     installSkill(dir, ["seshi"]);
     expect(existsSync(old())).toBe(true);
   });
+
+  // root writes through a 0555 folder, so the check needs an ordinary user.
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "goes on without the skill when the skills folder cannot be written",
+    () => {
+      chmodSync(dir, 0o555);
+      try {
+        const report = installSkill(dir, ["seshi"]);
+        expect(report.changed).toEqual([]);
+        expect(report.notes).toEqual([
+          `${dir} cannot be written, so the session-capture skill was not added there; capture works without it`,
+        ]);
+        expect(existsSync(skillFile(dir))).toBe(false);
+      } finally {
+        chmodSync(dir, 0o755);
+      }
+    },
+  );
 
   it("removes its skill under both names on uninstall", () => {
     installSkill(dir, ["seshi"]);
