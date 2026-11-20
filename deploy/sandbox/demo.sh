@@ -47,7 +47,11 @@ pause() {
   read -r _ </dev/tty || true
 }
 fake_token() { cat "$STATE/fake-token" 2>/dev/null || true; }
-latest() { s sessions ls --owner "$OWNER" --json 2>/dev/null | jq -r '.sessions[0].session_id // empty'; }
+# The newest session's ID. A sandbox chose it, so anything but a plain ID is dropped.
+latest() {
+  s sessions ls --owner "$OWNER" --json 2>/dev/null |
+    jq -r '.sessions[0].session_id // empty | select(test("^[A-Za-z0-9._-]+$"))'
+}
 box_exists() { sbx ls 2>/dev/null | awk 'NR > 1 {print $1}' | grep -qx "$BOX"; }
 # Waits up to $2 seconds for the command after it to succeed, printing a dot every 2 seconds.
 wait_for() {
@@ -120,7 +124,7 @@ if .type == "assistant" then
   .message.content[]? |
   if .type == "text" then "\n" + (.text | clean)
   elif .type == "tool_use" then
-    "  > \(.name) \((.input.file_path // .input.command // "") | tostring | split("\n")[0] | clean)"
+    "  > \(.name | tostring | clean) \((.input.file_path // .input.command // "") | tostring | split("\n")[0] | clean)"
   else empty end
 elif .type == "user" then
   .message.content[]? | select(.type? == "tool_result") |
