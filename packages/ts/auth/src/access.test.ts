@@ -4,6 +4,7 @@ import {
   canRead,
   DELETE_FRESH_MS,
   requireDelete,
+  requireReadOwner,
   requireScope,
   requireVisibilityChange,
 } from "./access";
@@ -143,6 +144,47 @@ describe("visibility changes and scopes", () => {
     expect(canRead(writer, bobsShared)).toBe(false);
     expect(canRead(alice, bobsShared)).toBe(true);
     expect(canRead(reader, bobsShared)).toBe(true);
+  });
+
+  it("let the owner read its own sessions without a read scope, and no one else's", () => {
+    const bobsShared = { owner: "bob", visibility: "org" as const };
+    // A device token reads and searches its own owner's sessions, private ones too.
+    expect(canRead(device, { owner: "alice", visibility: "owner" }, undefined, "search")).toBe(
+      true,
+    );
+    expect(canRead(device, bobsShared, undefined, "search")).toBe(false);
+    // Each route checks its own scope: a credential that only searches finds no one else's
+    // session through the session routes, and one that only reads finds no one else's in search.
+    const searcher = principal({ scopes: ["search"] });
+    expect(canRead(searcher, bobsShared)).toBe(false);
+    expect(canRead(searcher, bobsShared, undefined, "search")).toBe(true);
+    const lister = principal({ scopes: ["sessions:read"] });
+    expect(canRead(lister, bobsShared, undefined, "search")).toBe(false);
+    // A writing service is a service, yet reads only the sessions it wrote.
+    const writer = principal({
+      kind: "service",
+      owner: "svc:otlp",
+      role: "service",
+      credential: "service",
+      owner_basis: "service",
+      scopes: CREDENTIAL_SCOPES.service_write,
+    });
+    expect(canRead(writer, { owner: "bob", visibility: "owner" })).toBe(false);
+    expect(canRead(writer, { owner: "svc:otlp", visibility: "owner" })).toBe(true);
+  });
+
+  it("let a credential without the read scope list and search only its own owner", () => {
+    const aliases = new OwnerAliases({ "alice-old": "alice" });
+    expect(() => requireReadOwner(device, "alice")).not.toThrow();
+    expect(() => requireReadOwner(device, "alice-old", aliases)).not.toThrow();
+    expect(() => requireReadOwner(device, "bob")).toThrow(
+      "this credential reads only its own sessions: another owner's need the sessions:read scope",
+    );
+    expect(() => requireReadOwner(device, "bob", undefined, "search")).toThrow(
+      "need the search scope",
+    );
+    expect(() => requireReadOwner(alice, "bob")).not.toThrow();
+    expect(() => requireReadOwner(reader, "bob", undefined, "search")).not.toThrow();
   });
 
   it("keep the org key off a session whose owner was verified (X5.12)", () => {

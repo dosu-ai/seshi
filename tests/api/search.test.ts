@@ -132,6 +132,37 @@ describe("GET /v1/search (F10)", () => {
     ]);
   });
 
+  it("lets a credential without the search scope search only its own sessions (X5.10)", async () => {
+    await seed();
+    const issuer = await auth.authenticate(adminToken);
+    const device = await auth.issue({ kind: "device", owner: "alice" }, issuer);
+    const alice = client(device.token);
+    // Its own, private ones and those under its old owner id too; never bob's shared one.
+    expect(ids(await alice.search({ q: "deploy" }))).toEqual([
+      "alice/pay",
+      "alice/rot",
+      "old-alice/legacy",
+    ]);
+    expect(ids(await alice.search({ q: "deploy", owner: "old-alice" }))).toEqual([
+      "alice/pay",
+      "alice/rot",
+      "old-alice/legacy",
+    ]);
+    // A malformed owner is a bad query, as for any caller, before it is anyone's.
+    await expect(alice.search({ q: "deploy", owner: "a/b" })).rejects.toThrow(
+      "owner is not an owner id",
+    );
+    await expect(alice.search({ q: "deploy", owner: "bob" })).rejects.toThrow(
+      "this credential reads only its own sessions: another owner's need the search scope",
+    );
+    // A service that only writes is a service, yet finds nothing but what it wrote.
+    const writer = await auth.issue(
+      { kind: "service", service: "otlp", scopes: ["sessions:write"] },
+      issuer,
+    );
+    expect(ids(await client(writer.token).search({ q: "deploy" }))).toEqual([]);
+  });
+
   it("filters by owner (aliases folded), repo, agent, branch, source and time", async () => {
     await seed();
     const admin = client(adminToken);

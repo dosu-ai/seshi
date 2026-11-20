@@ -664,7 +664,7 @@ pre.tree .d { color: var(--accent); font-weight: 500; }
       <div class="body">
         <h3>Four kinds of caller</h3>
         <dl>
-          <dt>Kinds</dt><dd><ul><li><b>Person</b>: signed in through the IdP (verified), or named by an org-key caller (claimed).</li><li><b>Device</b>: a person's machine holding a write-only token (IdP mode).</li><li><b>Service account</b>: a reader such as a downstream sync, or a source that writes for the org (an OTLP destination, a poller).</li><li><b>Admin</b>: a person with the admin role.</li></ul> Pollers run inside the server and need no token; each acts as its source's service account (<a href="#identity">X5.4</a>).</dd>
+          <dt>Kinds</dt><dd><ul><li><b>Person</b>: signed in through the IdP (verified), or named by an org-key caller (claimed).</li><li><b>Device</b>: a person's machine holding a token that writes, and reads only its owner's own sessions (IdP mode).</li><li><b>Service account</b>: a reader such as a downstream sync, or a source that writes for the org (an OTLP destination, a poller).</li><li><b>Admin</b>: a person with the admin role.</li></ul> Pollers run inside the server and need no token; each acts as its source's service account (<a href="#identity">X5.4</a>).</dd>
         </dl>
       </div>
     </div>
@@ -777,7 +777,8 @@ pre.tree .d { color: var(--accent); font-weight: 500; }
               <li>The server's <code>default_visibility</code>, which is <code>org</code>.</li>
             </ul></dd>
           <dt>Without an IdP</dt><dd>The org key reads org-wide, so <code>owner</code> visibility cannot keep anything from another member. Seshi accepts the field but says so in <code>seshi config check</code>.</dd>
-          <dt>Changing it</dt><dd>The owner or an admin can change a session's visibility later (<code>PATCH /v1/sessions/&lt;id&gt;</code>; <code>seshi share</code> and <code>seshi unshare</code> from the CLI). The owner may with any of their credentials that writes or reads sessions, so the device token a laptop uploads with shares and unshares that owner's sessions without being able to read anyone's (the change answers with that session's metadata only); a service token that only writes may not change visibility; a credential that cannot read finds only its owner's sessions there. The change writes a change entry so the search index updates (<a href="#f10">F10.4</a>).</dd>
+          <dt>Changing it</dt><dd>The owner or an admin can change a session's visibility later (<code>PATCH /v1/sessions/&lt;id&gt;</code>; <code>seshi share</code> and <code>seshi unshare</code> from the CLI). The owner may with any of their credentials that writes or reads sessions, so the device token a laptop uploads with shares and unshares that owner's sessions; a service token that only writes may not change visibility. The change writes a change entry so the search index updates (<a href="#f10">F10.4</a>).</dd>
+          <dt>Owning is reading</dt><dd>Being a session's owner is enough to read it: every credential reads, lists, exports and searches its own owner's sessions, private ones too. The device token keeps only <code>sessions:write</code>, yet reads its owner's sessions, so a member enrolled with nothing but a device token can look at their own work. Another owner's sessions need a scope that reads (<code>sessions:read</code>, or <code>search</code> for search): without it a credential finds none of them, <code>org</code> ones included (<code>404</code>, as if not there), and a listing, change feed or search naming another owner is refused (<code>403</code>). A service token that only writes reads only what it wrote.</dd>
         </dl>
       </div>
     </div>
@@ -1483,7 +1484,7 @@ pre.tree .d { color: var(--accent); font-weight: 500; }
       <div class="body">
         <h3>How the CLI signs in</h3>
         <dl>
-          <dt>Detail</dt><dd>With an IdP, <code>seshi login</code> runs the device flow (or browser with PKCE), keeps the IdP refresh token for interactive commands, and gets a write-only device token for unattended uploads (<a href="#identity">X5.7</a>). Without one, <code>seshi login --key</code> stores the org key and the uploader uses it with the resolved username (<a href="#identity">X5.12</a>). Credentials go in the OS keychain, falling back to a 0600 file in <code>~/.config/seshi/</code>.</dd>
+          <dt>Detail</dt><dd>With an IdP, <code>seshi login</code> runs the device flow (or browser with PKCE), keeps the IdP refresh token for interactive commands, and gets a device token for unattended uploads (it writes, and reads only its owner's sessions) (<a href="#identity">X5.7</a>). Without one, <code>seshi login --key</code> stores the org key and the uploader uses it with the resolved username (<a href="#identity">X5.12</a>). Credentials go in the OS keychain, falling back to a 0600 file in <code>~/.config/seshi/</code>.</dd>
         </dl>
       </div>
     </div>
@@ -1611,7 +1612,7 @@ pre.tree .d { color: var(--accent); font-weight: 500; }
       <div class="body">
         <h3>Turning a session off retracts what was uploaded</h3>
         <dl>
-          <dt>Problem</dt><dd>The uploader's credentials cannot delete: the device token is write-only (<a href="#identity">X5.2</a>) and the org key cannot delete at all (<a href="#identity">X5.3</a>).</dd>
+          <dt>Problem</dt><dd>The uploader's credentials cannot delete: the device token has no <code>sessions:delete</code> (<a href="#identity">X5.2</a>) and the org key cannot delete at all (<a href="#identity">X5.3</a>).</dd>
           <dt>Decision</dt><dd class="rec">A retraction secret per session. On a session's first upload the uploader generates a random secret, keeps it in the local state file next to the session's toggle, and sends only its hash, which the server stores in the session's metadata (<code>retract_hash</code>). Turning the session off makes the uploader stop and send <code>DELETE /v1/sessions/{id}</code> with its normal credential and the secret. The server checks it against the hash and runs the normal delete: a tombstone in the change feed, trace objects removed, the session dropped from search.</dd>
           <dt>Why</dt><dd>It works the same with or without an IdP and does not depend on the claimed username. Only the machine that uploaded a session can retract it; a leaked org key or device token cannot delete anyone else's sessions, because the secret never leaves that machine. Nobody has to sign in again mid-session.</dd>
           <dt>Details</dt><dd><ul>
@@ -1627,7 +1628,7 @@ pre.tree .d { color: var(--accent); font-weight: 500; }
     </div>
   </div>
   <div class="two">
-    <div class="panel"><h4>Access</h4><ul><li>With an IdP: a write-only device token; the owner is the person it was issued to (<a href="#identity">X5.7</a>).</li><li>Without one: the org key plus the resolved username, recorded as <code>owner_basis: claimed</code> (<a href="#identity">X5.12</a>).</li><li>Agent account IDs and git email are sent as claims, for spotting mismatches.</li></ul></div>
+    <div class="panel"><h4>Access</h4><ul><li>With an IdP: a device token that writes (and reads only its owner's sessions); the owner is the person it was issued to (<a href="#identity">X5.7</a>).</li><li>Without one: the org key plus the resolved username, recorded as <code>owner_basis: claimed</code> (<a href="#identity">X5.12</a>).</li><li>Agent account IDs and git email are sent as claims, for spotting mismatches.</li></ul></div>
     <div class="panel"><h4>Data and storage</h4><ul><li>Spool entries hold paths and offsets, not copies of transcripts.</li><li>Optional client-side redaction (<a href="#f2">F2.4</a>) runs in the uploader.</li><li>Capture rules, session toggles and retraction secrets stay on the machine; the server sees only what was uploaded and a hash per session.</li></ul></div>
   </div>
 </section>
@@ -1814,6 +1815,7 @@ pre.tree .d { color: var(--accent); font-weight: 500; }
 <section id="log">
   <h2>Change log</h2>
   <ul class="log">
+    <li><b>20 Nov 2026.</b> X5.10: being a session's owner is enough to read it, as to share it. A device token reads, lists, exports and searches its owner's own sessions without a read scope, and still nothing of anyone else's.</li>
     <li><b>15 Nov 2026.</b> After a security review: a repo&#39;s <code>.seshi/config.toml</code> can only narrow visibility, never widen it (X5.10, F9.5); a session&#39;s retraction hash is set only by the write that creates it (F9.7); only <code>seshi serve</code> reads <code>./seshi.toml</code> without <code>--config</code>.</li>
     <li><b>15 Nov 2026.</b> Ten questions left open by the build review decided: capture pause stops sessions where they are (F9.5); stale sessions are resent by the uploader with a <code>rebuild</code> flag (X4.9); a dropped first envelope leaves a content-free stub so the offset moves past it (F3.4 over F3.1); OTLP bodies capped at 64 MiB, 256 MiB inflated (F4.1); span history stored once (F4.4); an age-guarded sweep deletes orphaned trace objects (F2.5); change entries written before the pointer, with unique keys (X6.4); Windows CI runs the laptop packages&#39; tests (F8.4); the uploader stays up to 30 minutes while retries are pending (F9.1).</li>
     <li><b>14 Nov 2026.</b> Brand files added under <code>brand/</code> (glyphs, lockups, six poses, <code>tokens.json</code>, PDF, README). B1.7 narrowed to light variants of lilac and spark, an eye colour for dark backgrounds, and the happy pose's mouth.</li>

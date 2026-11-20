@@ -366,7 +366,11 @@ export class SqliteIndex implements IndexStore {
   query(q: BackendQuery): BackendResults {
     const where: string[] = ["events_text MATCH ?", "s.removed = 0"];
     const params: SQLQueryBindings[] = [q.match];
-    if (!q.viewer.everything) {
+    if (q.viewer.ownOnly) {
+      if (q.viewer.own.length === 0) return { total: 0, hits: [] };
+      where.push(`s.owner IN (${placeholders(q.viewer.own.length)})`);
+      params.push(...q.viewer.own);
+    } else if (!q.viewer.everything) {
       if (q.viewer.own.length > 0) {
         where.push(`(s.visibility = 'org' OR s.owner IN (${placeholders(q.viewer.own.length)}))`);
         params.push(...q.viewer.own);

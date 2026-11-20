@@ -342,7 +342,10 @@ export async function run(ctx: CommandContext): Promise<number> {
           user,
         );
       } else {
-        backend = await openBackend(ctx, account, { server });
+        backend = await openBackend(ctx, account, {
+          server,
+          purpose: values.owner ? "read_others" : "read",
+        });
       }
       return await query(ctx, json, backend, request as SearchRequest, style);
     }

@@ -254,7 +254,8 @@ class SeshiClient(_Base):
         self, *, owner: str | None = None, after: str | None = None, limit: int | None = None
     ) -> m.SessionsPage:
         """`GET /v1/sessions`: an owner's sessions (the caller's own by default), a page at a
-        time."""
+        time. Any credential lists its own owner's; another owner's need `sessions:read`
+        (`Forbidden` without it)."""
         return self._run(calls.list_sessions(owner, after, limit))
 
     def iter_sessions(

@@ -577,7 +577,9 @@ export async function run(ctx: CommandContext): Promise<number> {
     backend = await openBackend(
       ctx,
       account,
-      confirmed ? { ...server, purpose: "delete", confirmed } : { ...server, purpose: "read" },
+      confirmed
+        ? { ...server, purpose: "delete", confirmed }
+        : { ...server, purpose: values.owner ? "read_others" : "read" },
     );
     switch (sub) {
       case "ls":

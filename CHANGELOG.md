@@ -1,3 +1,10 @@
+# [0.24.0](https://github.com/dosu-ai/seshi/compare/v0.23.0...v0.24.0) (2026-11-20)
+
+
+### Features
+
+* **sessions:** owners read and search their own sessions with any credential ([#66](https://github.com/dosu-ai/seshi/issues/66)) ([bf480c8](https://github.com/dosu-ai/seshi/commit/bf480c8d90e0da8972e1716ad79cd0586ce7803c)), closes [#63](https://github.com/dosu-ai/seshi/issues/63)
+
 # [0.23.0](https://github.com/dosu-ai/seshi/compare/v0.22.0...v0.23.0) (2026-11-20)
 
 
