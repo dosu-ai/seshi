@@ -10,7 +10,7 @@ sbx run claude --kit ./deploy/sandbox/seshi-sandbox-kit
 ```
 
 `seshi-sandbox-kit/` is the kit, and `examples/` has an environment file for each agent.
-[DEMO.md](DEMO.md) is a scripted walkthrough. You need `sbx`, signed in with `sbx login`, on
+[DEMO.md](DEMO.md) is a scripted walkthrough, and `demo.sh` runs and resets it. You need `sbx`, signed in with `sbx login`, on
 macOS 14 or later on Apple silicon, Windows 11, or Ubuntu 24.04 with KVM. Docker Desktop is not
 needed. You also need a seshi server. [deploy/docker/](../docker/README.md) runs one.
 

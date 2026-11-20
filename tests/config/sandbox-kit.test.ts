@@ -30,6 +30,7 @@ const descriptorText = read(join(KIT, "seshi-sandbox-kit.yaml"));
 const descriptor = Bun.YAML.parse(descriptorText) as Descriptor;
 const dockerfile = read(join(KIT, "seshi-sandbox-kit.dockerfile"));
 const helper = read(join(KIT, "seshi-sandbox"));
+const demo = read(join(SANDBOX, "demo.sh"));
 const capability = (type: string) => {
   const found = descriptor.capabilities.filter((c) => c.type === type);
   expect(found, type).toHaveLength(1);
@@ -109,7 +110,7 @@ describe("deploy/sandbox/seshi-sandbox-kit", () => {
 
   it("names no SESHI_* variable that seshi would refuse", () => {
     const shape = shapeOf(cliConfigSchema);
-    const files = [descriptorText, dockerfile, helper, ...examples.map((e) => e.text)];
+    const files = [descriptorText, dockerfile, helper, demo, ...examples.map((e) => e.text)];
     // A build arg reaches the Dockerfile only, never seshi's environment.
     const buildArgs = new Set(Object.values(descriptor.args).map((arg) => arg.buildArg));
     const names = new Set(
@@ -132,6 +133,16 @@ describe("deploy/sandbox/seshi-sandbox-kit", () => {
       if (/^FROM scratch$/.test(from)) continue;
       expect(from).toMatch(/@sha256:[0-9a-f]{64}/);
     }
+  });
+});
+
+describe("deploy/sandbox/demo.sh", () => {
+  it("is an executable sh script that drives the example environment's sandbox", () => {
+    expect(demo.split("\n")[0]).toBe("#!/bin/sh");
+    expect(statSync(join(SANDBOX, "demo.sh")).mode & 0o111).not.toBe(0);
+    const env = Bun.YAML.parse(examples[0]?.text ?? "") as { name: string };
+    expect(demo).toContain(`BOX=${env.name}`);
+    expect(demo).toContain('ENV_FILE="$KIT_DIR/examples/claude.sbxenv.yaml"');
   });
 });
 
