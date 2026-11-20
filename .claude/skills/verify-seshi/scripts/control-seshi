@@ -6,7 +6,10 @@
 # the real home, keychain or agents, and two runs can go side by side. Evidence goes to
 # <repo>/.verify/seshi/<run-id>/ and survives `down`.
 #
-#   control-seshi up [--server] [--binary]      start a run; prints VERIFY_SESHI_RUN=<id>
+#   control-seshi up [--server|--idp] [--binary]
+#                                               start a run; prints VERIFY_SESHI_RUN=<id>.
+#                                               --idp: server mode behind a stand-in IdP,
+#                                               signed in through the device flow
 #   control-seshi doctor                        is this run worth driving? (read-only)
 #   control-seshi env                           print the run's environment as export lines
 #   control-seshi cli [--name <label>] -- <seshi args…>
@@ -15,7 +18,11 @@
 #                                               append turns to a transcript, fire the hooks,
 #                                               flush the uploader once
 #   control-seshi explore                       start `seshi explore`; prints its URL
-#   control-seshi stop <serve|explore>          stop one process this run started
+#   control-seshi idp refuse                    (--idp runs) the IdP stops renewing sign-ins
+#   control-seshi idp expire                    (--idp runs) mark the stored session token
+#                                               expired, as if its hour had passed
+#   control-seshi idp calls                     (--idp runs) the IdP's call log
+#   control-seshi stop <serve|explore|idp>      stop one process this run started
 #   control-seshi down                          stop what the run started, delete its folder
 #
 # Every command but `up` needs VERIFY_SESHI_RUN (printed by `up`) or `--run <id>` first.
@@ -61,6 +68,14 @@ EOF
 
 in_run() { ( cd "$RUN/app" && eval "$(run_env "$RUN")" && "$@" ); }
 
+json_fields() { # file, dotted path… → each field's value on its own line ("" when absent)
+  bun -e '
+    const doc = JSON.parse(await Bun.file(process.argv[1]).text());
+    for (const path of process.argv.slice(2)) {
+      console.log(path.split(".").reduce((v, k) => v?.[k], doc) ?? "");
+    }' "$@"
+}
+
 free_port() {
   bun -e 'const s = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } }); console.log(s.port); s.stop(true);'
 }
@@ -104,6 +119,7 @@ stop_bg() {
 up_failed() {
   local evidence="$REPO/.verify/seshi/$VERIFY_SESHI_RUN"
   stop_bg serve >/dev/null 2>&1 || true
+  stop_bg idp >/dev/null 2>&1 || true
   mkdir -p "$evidence" && cp -R "$RUN/logs" "$evidence/up-logs" 2>/dev/null || true
   case $RUN in "$ROOT"/*) rm -rf -- "$RUN" ;; esac
   echo "control-seshi: up failed; run folder removed, its logs kept in $evidence/up-logs" >&2
@@ -111,10 +127,11 @@ up_failed() {
 
 case $cmd in
 up)
-  mode=local binary=0
+  mode=local binary=0 idp=0
   while [[ $# -gt 0 ]]; do
     case $1 in
       --server) mode=server ;;
+      --idp) mode=server idp=1 ;;
       --binary) binary=1 ;;
       *) die "up: unknown option $1" ;;
     esac
@@ -137,6 +154,29 @@ up)
   mkdir -p "$EVIDENCE"
   port=""
   if [[ $mode == server ]]; then
+    serve_env=()
+    if [[ $idp == 1 ]]; then
+      # seshi serve takes an IdP's keys only from an https jwks_uri, so the stand-in IdP serves
+      # them again over TLS with a throwaway certificate for 127.0.0.1 that only this run's serve
+      # trusts (NODE_EXTRA_CA_CERTS). The private key is deleted once the IdP has loaded it.
+      mkdir -p "$RUN/idp"
+      openssl req -x509 -newkey rsa:2048 -nodes -days 7 -subj "/CN=127.0.0.1" \
+        -addext "subjectAltName=IP:127.0.0.1" \
+        -keyout "$RUN/idp/key.pem" -out "$RUN/idp/cert.pem" >"$RUN/logs/openssl.log" 2>&1 \
+        || { cat "$RUN/logs/openssl.log" >&2; die "openssl could not make the IdP's certificate"; }
+      start_bg idp "$RUN/logs/idp.log" bun "$SKILL_DIR/scripts/idp.ts" \
+        "$RUN/idp/cert.pem" "$RUN/idp/key.pem" "$RUN/idp/info.json"
+      for _ in $(seq 1 120); do
+        [[ -s $RUN/idp/info.json ]] && break
+        alive idp || { cat "$RUN/logs/idp.log" >&2; die "the stand-in IdP exited"; }
+        sleep 0.25
+      done
+      [[ -s $RUN/idp/info.json ]] || { cat "$RUN/logs/idp.log" >&2; die "the stand-in IdP not ready after 30 s"; }
+      rm -f "$RUN/idp/key.pem"
+      issuer=$(json_fields "$RUN/idp/info.json" issuer)
+      serve_env=(env "NODE_EXTRA_CA_CERTS=$RUN/idp/cert.pem")
+    fi
+    # The port is picked once the IdP listens, so its own ephemeral ports can't take it.
     port=$(free_port)
     cat >"$RUN/seshi.toml" <<EOF
 [server]
@@ -145,9 +185,22 @@ listen = "127.0.0.1:$port"
 [store]
 url = "file://$RUN/bucket"
 EOF
+    if [[ $idp == 1 ]]; then
+      cat >>"$RUN/seshi.toml" <<EOF
+
+[auth.oidc]
+issuer = "$issuer"
+client_id = "seshi-cli"
+owner_claim = "email"
+
+[auth.session_keys]
+k1 = "$(openssl rand -hex 24)"
+EOF
+      chmod 600 "$RUN/seshi.toml" # it now holds a literal session key, which seshi warns about
+    fi
     in_run seshi admin init --config "$RUN/seshi.toml" --json >"$RUN/admin.json"
     chmod 600 "$RUN/admin.json"
-    start_bg serve "$RUN/logs/serve.log" seshi serve --config "$RUN/seshi.toml"
+    start_bg serve "$RUN/logs/serve.log" ${serve_env[@]+"${serve_env[@]}"} seshi serve --config "$RUN/seshi.toml"
     url="http://127.0.0.1:$port"
     for _ in $(seq 1 120); do
       curl -sf "$url/healthz" >/dev/null 2>&1 && break
@@ -155,9 +208,16 @@ EOF
       sleep 0.25
     done
     curl -sf "$url/healthz" >/dev/null || { cat "$RUN/logs/serve.log" >&2; die "seshi serve not ready after 30 s"; }
-    key=$(bun -e 'console.log(JSON.parse(await Bun.file(process.argv[1]).text()).org_key.token)' "$RUN/admin.json")
-    printf '%s' "$key" | in_run seshi login --server "$url" --key - --user verifier >"$RUN/logs/login.log" 2>&1 \
-      || { cat "$RUN/logs/login.log" >&2; die "login failed"; }
+    if [[ $idp == 1 ]]; then
+      # The stand-in answers the device flow's first poll with authorization_pending, then
+      # approves it as alice@acme.com: no browser.
+      in_run seshi login --server "$url" --device </dev/null >"$RUN/logs/login.log" 2>&1 \
+        || { cat "$RUN/logs/login.log" >&2; die "IdP sign-in failed"; }
+    else
+      key=$(json_fields "$RUN/admin.json" org_key.token)
+      printf '%s' "$key" | in_run seshi login --server "$url" --key - --user verifier >"$RUN/logs/login.log" 2>&1 \
+        || { cat "$RUN/logs/login.log" >&2; die "login failed"; }
+    fi
   else
     # Local mode is serverless mode against the run's folder bucket: init writes the bucket's
     # layout marker and `[serverless]` in the run's CLI config, and no shared settings, so the
@@ -168,10 +228,12 @@ EOF
   fi
   trap - EXIT
   commit=$(git -C "$REPO" rev-parse --short HEAD)
-  printf '{"run":"%s","mode":"%s","port":"%s","repo":"%s","commit":"%s","binary":%s}\n' \
-    "$VERIFY_SESHI_RUN" "$mode" "$port" "$REPO" "$commit" "$([[ $binary == 1 ]] && echo true || echo false)" >"$RUN/run.json"
+  printf '{"run":"%s","mode":"%s","port":"%s","repo":"%s","commit":"%s","binary":%s,"issuer":"%s"}\n' \
+    "$VERIFY_SESHI_RUN" "$mode" "$port" "$REPO" "$commit" "$([[ $binary == 1 ]] && echo true || echo false)" \
+    "${issuer:-}" >"$RUN/run.json"
   cp "$RUN/run.json" "$EVIDENCE/run.json"
   echo "run $VERIFY_SESHI_RUN: $mode mode at commit $commit${port:+, server http://127.0.0.1:$port}"
+  [[ $idp == 1 ]] && echo "idp      $issuer (signed in as alice@acme.com through the device flow)"
   echo "folder   $RUN"
   echo "evidence $EVIDENCE"
   echo "export VERIFY_SESHI_RUN=$VERIFY_SESHI_RUN"
@@ -185,11 +247,10 @@ env)
 doctor)
   need_run
   ok=1
-  mode=$(bun -e 'console.log(JSON.parse(await Bun.file(process.argv[1]).text()).mode)' "$RUN/run.json")
-  port=$(bun -e 'console.log(JSON.parse(await Bun.file(process.argv[1]).text()).port)' "$RUN/run.json")
+  { read -r mode; read -r port; read -r started; read -r issuer; } < <(json_fields "$RUN/run.json" mode port commit issuer)
   echo "run      $VERIFY_SESHI_RUN ($mode mode)"
   echo "folder   $RUN"
-  echo "commit   run started at $(bun -e 'console.log(JSON.parse(await Bun.file(process.argv[1]).text()).commit)' "$RUN/run.json"), repo now at $(git -C "$REPO" rev-parse --short HEAD)"
+  echo "commit   run started at $started, repo now at $(git -C "$REPO" rev-parse --short HEAD)"
   version=$(in_run seshi --version 2>&1) || { echo "FAIL seshi --version: $version"; ok=0; }
   echo "seshi    $version"
   if [[ $mode == server ]]; then
@@ -201,6 +262,15 @@ doctor)
       echo "port     $port held by this run's serve"
     else
       echo "FAIL port $port is held by pid '${owner:-none}', not this run's serve"; ok=0
+    fi
+  fi
+  if [[ -n $issuer ]]; then
+    if alive idp; then
+      echo "idp      running at $issuer (pid $(cut -d' ' -f1 "$RUN/idp.pid"))"
+    elif [[ -f $RUN/idp.pid ]]; then
+      echo "FAIL idp at $issuer exited without stop idp (see $RUN/logs/idp.log)"; ok=0
+    else
+      echo "idp      stopped by stop idp ($issuer): sign-in and renewal through it fail"
     fi
   fi
   who=$(in_run seshi whoami 2>&1) || { echo "FAIL whoami: $who"; ok=0; }
@@ -258,9 +328,46 @@ explore)
   echo "$url"
   ;;
 
+idp)
+  need_run
+  [[ -n $(json_fields "$RUN/run.json" issuer) ]] || die "idp: this run has no IdP (start it with up --idp)"
+  case ${1:-} in
+    refuse)
+      alive idp || die "idp: the IdP is not running"
+      before=$(grep -c 'SIGUSR1:' "$RUN/logs/idp.log" || true)
+      kill -USR1 "$(cut -d' ' -f1 "$RUN/idp.pid")"
+      for _ in $(seq 1 100); do
+        [[ $(grep -c 'SIGUSR1:' "$RUN/logs/idp.log" || true) -gt $before ]] && break
+        sleep 0.1
+      done
+      [[ $(grep -c 'SIGUSR1:' "$RUN/logs/idp.log" || true) -gt $before ]] \
+        || die "idp: the IdP did not confirm the refusal within 10 s (see idp calls)"
+      grep 'SIGUSR1:' "$RUN/logs/idp.log" | tail -1
+      ;;
+    expire)
+      # Stands in for the session token's hour passing: the CLI decides from this time whether
+      # to renew, and the server would refuse the token by then anyway.
+      bun -e '
+        const path = process.argv[1];
+        const file = JSON.parse(await Bun.file(path).text());
+        const past = new Date(Date.now() - 60_000).toISOString();
+        let n = 0;
+        for (const login of Object.values(file.logins ?? {})) {
+          if (login.session) { login.session.expires_at = past; n++; }
+        }
+        if (n === 0) { console.error("control-seshi: no IdP sign-in in " + path); process.exit(1); }
+        await Bun.write(path, JSON.stringify(file, null, 2) + "\n");
+        console.log(`session token of ${n} sign-in(s) marked expired at ${past}`);
+      ' "$RUN/home/.config/seshi/logins.json"
+      ;;
+    calls) cat "$RUN/logs/idp.log" ;;
+    *) die "idp refuse|expire|calls" ;;
+  esac
+  ;;
+
 stop)
   need_run
-  [[ ${1:-} == serve || ${1:-} == explore ]] || die "stop serve|explore"
+  [[ ${1:-} == serve || ${1:-} == explore || ${1:-} == idp ]] || die "stop serve|explore|idp"
   stop_bg "$1"
   ;;
 
@@ -268,13 +375,14 @@ down)
   need_run
   stop_bg explore
   stop_bg serve
+  stop_bg idp
   case $RUN in "$ROOT"/*) ;; *) die "refusing to delete $RUN: not under $ROOT" ;; esac
   rm -rf -- "$RUN"
   echo "run $VERIFY_SESHI_RUN removed; evidence kept in $EVIDENCE"
   ;;
 
 help | -h | --help)
-  sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,/^set -euo/p' "$0" | sed -n 's/^# \{0,1\}//p'
   ;;
 
 *) die "unknown command '$cmd' (try control-seshi help)" ;;

@@ -5,8 +5,9 @@ Read this index before driving seshi, then use the matching feature file as the 
 
 ## Baseline preconditions
 
-- A run started with `C=.claude/skills/verify-seshi/scripts/control-seshi; $C up` (local mode) or
-  `$C up --server` (server mode), and `export VERIFY_SESHI_RUN=<id>` from its output.
+- A run started with `C=.claude/skills/verify-seshi/scripts/control-seshi; $C up` (local mode),
+  `$C up --server` (server mode) or `$C up --idp` (server mode behind a stand-in IdP), and
+  `export VERIFY_SESHI_RUN=<id>` from its output.
 - `$C doctor` ends with `ready`, and its commit line shows the code you mean to test.
 - A fresh run is empty: no sessions, no capture toggles, no pause. Each recipe starts from that
   unless its preconditions say otherwise.
@@ -59,6 +60,8 @@ behaviour. It then has exactly four H2 sections, in this order:
   test` shows what each rule takes out.
 - [Doctor and explore](./doctor-explore.md): `seshi doctor` checks a session end to end, and the
   `seshi explore` page shows the same evidence read-only.
+- [IdP sign-in](./idp-sign-in.md): `seshi login` through a stand-in IdP, the session token's
+  renewal, and what a person sees when the IdP refuses renewal or is down.
 
 For behaviour across capture paths (a pause meeting a rebuild, a review stub meeting a replace, a
 resend after a lost answer, faults in the server or the bucket), see the scenario runner in
@@ -67,4 +70,5 @@ with injected faults and a moved clock, which a live run here cannot reach.
 
 Not mapped yet: the Claude desktop Session Capture chip (`claude plugin test
 integrations/claude-code/plugin`, plus a look in the desktop app); OTLP intake
-(`POST /otlp/v1/traces`); the Datadog and S3 pollers; IdP sign-in.
+(`POST /otlp/v1/traces`); the Datadog and S3 pollers; IdP sign-in through a browser
+(`login --browser`).
