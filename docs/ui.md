@@ -55,11 +55,19 @@ The browser talks to the IdP directly, so the IdP must allow it:
 index (`GET /v1/search` without words, [search.md](search.md#browsing)). Each row leads with what
 the person asked (the session's first prompt, without the blocks their agent's harness added),
 then whose it is, the agent, repository and branch, and how long it ran with how many events,
-tool calls and redactions. Type words to search
-what was said and done; each result shows its best matching records, and a click on one opens
-the session at that record. Filter by owner, agent, repository, branch, model, label and how
-recently it was active; a click on a value in a row filters by it. The address keeps the words
-and filters, so a view can be bookmarked or shared.
+tool calls and redactions.
+
+Search runs as you type: the words find what was said and done (prompts, answers and tool
+inputs; tool output too when the server indexes it, below), each result shows its best matching
+records, and a click on one opens the session at that record. Filters can be typed in the same
+box, as `repo:widget`, `owner:alice`, `agent:codex`, `branch:main`, `model:…`,
+`label:team=web` or `since:7d` (quote a value with spaces: `branch:"fix x"`), or set under
+Filters; a click on a value in a row filters by it too. `/` anywhere puts the cursor in the box.
+The address keeps the words and filters, so a view can be bookmarked or shared.
+
+To search what tools returned (test failures, command output, file contents), add
+`tool_result` to `search.events` ([config.md](config.md#search-worker-capture)). The index grows, and is built
+again once.
 
 When search is off (`search.enabled = false`), the index is still being built after a start,
 or the credential lacks the `search` scope (a reader's service token with `sessions:read`
@@ -70,7 +78,10 @@ Owner, and the other filters do not apply.
 from a transcript, and links stay text). What the agent's harness put before a prompt
 (AGENTS.md, environment context, command wrappers) is folded away. Each tool call and its result
 are one step: the tool and a line saying what it did, with the input and the output closed until
-opened. Beside the thread, the session at a glance: how long it ran, its prompts, answers and tool
+opened. The find bar over the thread searches the whole session (`/` puts the cursor there):
+each match draws its step if it is past "Show more", opens its input and output, and marks the
+words; Enter and Shift+Enter move between matches, Escape clears them. Beside the thread, the
+session at a glance: how long it ran, its prompts, answers and tool
 calls, the tools it used, the files it touched, and the models and tokens its calls record.
 **Records** shows each stored record as JSON. **Reviews** shows
 model review's decision for each write ([model-review.md](model-review.md)), with the audit

@@ -3,6 +3,7 @@ import { append, type Child, h, replace } from "../../web/dom";
 import { ApiError, call, download } from "./api";
 import { ranked } from "./charts";
 import { EMPTY } from "./filters";
+import { findBar, type ThreadPart } from "./find";
 import { listHref, sessionHref } from "./list";
 import { sessionStats } from "./stats";
 import { ago, duration, plural, shortRepo, when } from "./text";
@@ -165,7 +166,7 @@ function chunked<T>(
   list: HTMLElement,
   after: HTMLElement,
   through = -1,
-): void {
+): (index: number) => void {
   let shown = 0;
   const step = (upTo: number) => {
     const end = Math.min(items.length, Math.max(upTo, shown + CHUNK));
@@ -185,6 +186,9 @@ function chunked<T>(
     }
   };
   step(through + 1);
+  return (index) => {
+    if (index >= shown) step(index + 1);
+  };
 }
 
 async function threadPanel(
@@ -193,6 +197,7 @@ async function threadPanel(
   load: (hash: string) => Promise<Trace>,
   target: { hash: string; event: number } | undefined,
   isCurrent: () => boolean,
+  parts: ThreadPart[] = [],
 ): Promise<void> {
   if (m.traces.length === 0) {
     panel.append(h("p", { class: "empty" }, "This session has no trace yet."));
@@ -228,7 +233,8 @@ async function threadPanel(
       target?.hash === ref.content_hash
         ? steps.findIndex((step) => stepIndexes(step).includes(target.event))
         : -1;
-    chunked(steps, (step) => drawStep(ref.content_hash, step), list, after, through);
+    const reveal = chunked(steps, (step) => drawStep(ref.content_hash, step), list, after, through);
+    parts.push({ hash: ref.content_hash, steps, reveal });
     if (steps.length === 0) list.replaceWith(h("p", { class: "empty" }, "No events."));
   }
   if (target) {
@@ -568,7 +574,9 @@ export function renderSession(
         const aside = h("aside", { class: "glance", "aria-label": "The session at a glance" });
         panel.append(thread, aside);
         panel.classList.add("with-aside");
-        void threadPanel(thread, m, session.trace, target, isCurrent);
+        const parts: ThreadPart[] = [];
+        if (m.traces.length > 0) thread.append(findBar(() => parts));
+        void threadPanel(thread, m, session.trace, target, isCurrent, parts);
         void statsAside(aside, m, session.trace, isCurrent);
       } else if (tab === "records") void recordsPanel(panel, m, session.trace, isCurrent);
       else void reviewsPanel(panel, owner, archive, isCurrent);

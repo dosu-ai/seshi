@@ -11,6 +11,7 @@ import {
   isFiltered,
   type ListState,
   parseState,
+  parseTyped,
   SINCE,
   type Since,
   searchQuery,
@@ -120,13 +121,21 @@ function fromResult(r: SearchResult): Row {
   return { ...r, updated_at: r.ended_at ?? r.updated_at };
 }
 
-function searchForm(state: ListState, owners: string[]): HTMLElement {
+/** How long typing pauses before the search runs. */
+const TYPING_MS = 250;
+
+function searchForm(
+  state: ListState,
+  owners: string[],
+  search: (next: ListState, push: boolean) => void,
+): HTMLElement {
   const q = h("input", {
     id: "q",
     type: "search",
     name: "q",
     value: state.q,
-    placeholder: "Search prompts, answers, commands and file paths",
+    placeholder: "Search, or filter: repo:  owner:  agent:  model:  label:k=v  since:7d",
+    "aria-describedby": "q-help",
     autocomplete: "off",
     spellcheck: "false",
   });
@@ -167,6 +176,37 @@ function searchForm(state: ListState, owners: string[]): HTMLElement {
       h("option", { value: key, selected: state.since === key }, SINCE_LABEL[key]),
     ),
   );
+  /** The search the form describes: the box's words and the filters typed in it, over the
+   * Filters fields and the labels already in force. */
+  const collect = (): ListState => {
+    const data = new FormData(form);
+    const typed = parseTyped(String(data.get("q") ?? ""));
+    const filters: ListState["filters"] = {};
+    for (const name of TEXT_FILTERS) {
+      const value = String(data.get(name) ?? "").trim();
+      if (value) filters[name] = value;
+    }
+    let next: ListState = {
+      q: typed.q,
+      filters: { ...filters, ...typed.filters },
+      labels: [...state.labels],
+    };
+    for (const label of typed.labels) next = withLabel(next, label);
+    const added = String(data.get("label") ?? "").trim();
+    if (/^[^=]+=.+$/.test(added)) next = withLabel(next, added);
+    const s = typed.since ?? String(data.get("since") ?? "");
+    return s in SINCE ? { ...next, since: s as Since } : next;
+  };
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let last = stateQuery(state).toString();
+  const live = (push: boolean) => {
+    clearTimeout(timer);
+    const next = collect();
+    const key = stateQuery(next).toString();
+    if (key === last && !push) return;
+    last = key;
+    search(next, push);
+  };
   const form = h(
     "form",
     {
@@ -174,22 +214,10 @@ function searchForm(state: ListState, owners: string[]): HTMLElement {
       role: "search",
       onsubmit: (event: Event) => {
         event.preventDefault();
-        const data = new FormData(form);
-        const next: ListState = {
-          q: String(data.get("q") ?? "").trim(),
-          filters: {},
-          labels: state.labels,
-        };
-        for (const name of TEXT_FILTERS) {
-          const value = String(data.get(name) ?? "").trim();
-          if (value) next.filters[name] = value;
-        }
-        const added = String(data.get("label") ?? "").trim();
-        const s = String(data.get("since") ?? "");
-        go({
-          ...(/^[^=]+=.+$/.test(added) ? withLabel(next, added) : next),
-          ...(s in SINCE ? { since: s as Since } : {}),
-        });
+        live(true);
+      },
+      onchange: (event: Event) => {
+        if (event.target !== q) live(false);
       },
     },
     h(
@@ -198,6 +226,11 @@ function searchForm(state: ListState, owners: string[]): HTMLElement {
       h("label", { for: "q", class: "visually-hidden" }, "Search"),
       q,
       h("button", { type: "submit", class: "primary" }, "Search"),
+    ),
+    h(
+      "p",
+      { id: "q-help", class: "hint q-help" },
+      "Results update as you type. Press / to come back here from anywhere.",
     ),
     h(
       "details",
@@ -213,6 +246,10 @@ function searchForm(state: ListState, owners: string[]): HTMLElement {
       h("datalist", { id: "owners" }, ...owners.map((o) => h("option", { value: o }))),
     ),
   );
+  q.addEventListener("input", () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => live(false), TYPING_MS);
+  });
   return form;
 }
 
@@ -355,14 +392,18 @@ export function renderList(
   root: HTMLElement,
   ctx: { query: URLSearchParams; me: Identity; isCurrent: () => boolean },
 ): void {
-  const state = parseState(ctx.query);
-  const now = new Date();
-  const summary = h("p", { class: "summary", role: "status" }, "Loading sessions…");
-  const list = h("ol", { class: "rows" });
-  const more = h("div", { class: "more" });
-  const form = searchForm(state, []);
-  replace(root, h("section", { class: "list" }, form, activeFilters(state), summary, list, more));
-  document.title = state.q ? `${state.q}: seshi` : "seshi";
+  const initial = parseState(ctx.query);
+  const results = h("div", { class: "results" });
+  let generation = 0;
+  // A search as the person types: the address follows (so it can be shared, and Back works
+  // after a submit), but the page is not drawn again, so the box keeps its focus.
+  const form = searchForm(initial, [], (next, push) => {
+    const href = `${location.pathname}${listHref(next)}`;
+    if (push) history.pushState(null, "", href);
+    else history.replaceState(null, "", href);
+    load(next);
+  });
+  replace(root, h("section", { class: "list" }, form, results));
 
   void call<{ owners: string[] }>("owners", { query: new URLSearchParams({ limit: "1000" }) })
     .then((page) => {
@@ -372,85 +413,98 @@ export function renderList(
     })
     .catch(() => {});
 
-  const showRows = (rows: Row[]) => {
-    list.append(...rows.map((row) => rowItem(row, state, now)));
-  };
+  load(initial);
 
-  const searchPage = async (cursor?: string, skipped = 0): Promise<void> => {
-    replace(more);
-    let page: SearchResults;
-    try {
-      page = await call<SearchResults>("search", {
-        query: searchQuery(state, { now, limit: PAGE, ...(cursor ? { cursor } : {}) }),
-      });
-    } catch (err) {
-      if (!ctx.isCurrent()) return;
-      if (err instanceof ApiError && err.code === "search_disabled") return ownerList("off");
-      if (err instanceof ApiError && err.status === 503) return ownerList("building");
-      if (err instanceof ApiError && err.status === 403) return ownerList("scope");
-      summary.textContent = `The sessions did not load: ${err instanceof Error ? err.message : String(err)}`;
-      summary.classList.add("problem");
-      return;
-    }
-    if (!ctx.isCurrent()) return;
-    if (!cursor) {
-      summary.textContent =
-        page.total === 0
-          ? isFiltered(state)
-            ? "No session matches. Try fewer words or filters."
-            : "No sessions yet. They appear here once someone's capture uploads one."
-          : state.q
-            ? `${plural(page.total, "session")} ${page.total === 1 ? "matches" : "match"}, best first`
-            : `${plural(page.total, "session")}, most recent first`;
-    }
-    showRows(page.results.map(fromResult));
-    // A page can come back empty when every session on it was made private or removed since
-    // the index read it: go on to the next one rather than show a page of nothing.
-    if (page.results.length === 0 && page.cursor && skipped < 5) {
-      return searchPage(page.cursor, skipped + 1);
-    }
-    if (page.cursor) {
-      const next = page.cursor;
-      replace(
-        more,
-        h("button", { type: "button", onclick: () => void searchPage(next) }, "Show more"),
-      );
-    }
-  };
+  function load(state: ListState): void {
+    const mine = ++generation;
+    const isCurrent = () => ctx.isCurrent() && mine === generation;
+    const now = new Date();
+    const summary = h("p", { class: "summary", role: "status" }, "Loading sessions…");
+    const list = h("ol", { class: "rows" });
+    const more = h("div", { class: "more" });
+    replace(results, activeFilters(state), summary, list, more);
+    document.title = state.q ? `${state.q}: seshi` : "seshi";
 
-  /** Without search (turned off, its index still building, or a credential without the
-   * `search` scope): one owner's sessions, the newest first, with no other filter. */
-  const ownerList = async (why: "off" | "building" | "scope"): Promise<void> => {
-    const owner = state.filters.owner ?? ctx.me.owner;
-    let page: { sessions: SessionMetadata[]; truncated: boolean };
-    try {
-      page = await call("sessions", { query: new URLSearchParams({ owner, limit: "1000" }) });
-    } catch (err) {
-      if (!ctx.isCurrent()) return;
-      summary.textContent = `The sessions did not load: ${err instanceof Error ? err.message : String(err)}`;
-      summary.classList.add("problem");
-      return;
-    }
-    if (!ctx.isCurrent()) return;
-    const rows = page.sessions
-      .map(fromMetadata)
-      .sort((a, b) => (a.updated_at < b.updated_at ? 1 : -1));
-    const reason = {
-      off: "Search is turned off on this server",
-      building: "Search is still reading the sessions",
-      scope: "This credential cannot search",
-    }[why];
-    summary.textContent = `${reason}, so this lists ${owner}'s ${plural(rows.length, "session")}${page.truncated ? " (the first 1,000)" : ""}. Set Owner to see someone else's.`;
-    summary.classList.add("notice");
-    showRows(rows);
-    if (why === "building") {
-      replace(
-        more,
-        h("button", { type: "button", onclick: () => location.reload() }, "Try search again"),
-      );
-    }
-  };
+    const showRows = (rows: Row[]) => {
+      list.append(...rows.map((row) => rowItem(row, state, now)));
+    };
 
-  if (ctx.me.scopes && !ctx.me.scopes.includes("search")) void ownerList("scope");
-  else void searchPage();
+    const searchPage = async (cursor?: string, skipped = 0): Promise<void> => {
+      replace(more);
+      let page: SearchResults;
+      try {
+        page = await call<SearchResults>("search", {
+          query: searchQuery(state, { now, limit: PAGE, ...(cursor ? { cursor } : {}) }),
+        });
+      } catch (err) {
+        if (!isCurrent()) return;
+        if (err instanceof ApiError && err.code === "search_disabled") return ownerList("off");
+        if (err instanceof ApiError && err.status === 503) return ownerList("building");
+        if (err instanceof ApiError && err.status === 403) return ownerList("scope");
+        summary.textContent = `The sessions did not load: ${err instanceof Error ? err.message : String(err)}`;
+        summary.classList.add("problem");
+        return;
+      }
+      if (!isCurrent()) return;
+      if (!cursor) {
+        summary.textContent =
+          page.total === 0
+            ? isFiltered(state)
+              ? "No session matches. Try fewer words or filters."
+              : "No sessions yet. They appear here once someone's capture uploads one."
+            : state.q
+              ? `${plural(page.total, "session")} ${page.total === 1 ? "matches" : "match"}, best first`
+              : `${plural(page.total, "session")}, most recent first`;
+      }
+      showRows(page.results.map(fromResult));
+      // A page can come back empty when every session on it was made private or removed since
+      // the index read it: go on to the next one rather than show a page of nothing.
+      if (page.results.length === 0 && page.cursor && skipped < 5) {
+        return searchPage(page.cursor, skipped + 1);
+      }
+      if (page.cursor) {
+        const next = page.cursor;
+        replace(
+          more,
+          h("button", { type: "button", onclick: () => void searchPage(next) }, "Show more"),
+        );
+      }
+    };
+
+    /** Without search (turned off, its index still building, or a credential without the
+     * `search` scope): one owner's sessions, the newest first, with no other filter. */
+    const ownerList = async (why: "off" | "building" | "scope"): Promise<void> => {
+      const owner = state.filters.owner ?? ctx.me.owner;
+      let page: { sessions: SessionMetadata[]; truncated: boolean };
+      try {
+        page = await call("sessions", { query: new URLSearchParams({ owner, limit: "1000" }) });
+      } catch (err) {
+        if (!isCurrent()) return;
+        summary.textContent = `The sessions did not load: ${err instanceof Error ? err.message : String(err)}`;
+        summary.classList.add("problem");
+        return;
+      }
+      if (!isCurrent()) return;
+      const rows = page.sessions
+        .map(fromMetadata)
+        .sort((a, b) => (a.updated_at < b.updated_at ? 1 : -1));
+      const reason = {
+        off: "Search is turned off on this server",
+        building: "Search is still reading the sessions",
+        scope: "This credential cannot search",
+      }[why];
+      summary.textContent = `${reason}, so this lists ${owner}'s ${plural(rows.length, "session")}${page.truncated ? " (the first 1,000)" : ""}. Set Owner to see someone else's.`;
+      summary.classList.add("notice");
+      showRows(rows);
+      if (why === "building") {
+        replace(
+          more,
+          h("button", { type: "button", onclick: () => location.reload() }, "Try search again"),
+        );
+      }
+    };
+
+    if (ctx.me.scopes && !ctx.me.scopes.includes("search")) void ownerList("scope");
+    else void searchPage();
+  }
 }

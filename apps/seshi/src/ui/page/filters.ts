@@ -86,3 +86,44 @@ export function isFiltered(state: ListState): boolean {
     state.since !== undefined
   );
 }
+
+/** The filters a person can type in the search box, as `key:value`. */
+const TYPED_KEYS: Readonly<Record<string, TextFilter | "label" | "since">> = {
+  owner: "owner",
+  user: "owner",
+  agent: "agent",
+  repo: "repo",
+  branch: "branch",
+  model: "model",
+  label: "label",
+  since: "since",
+};
+
+/** What was typed in the search box: `repo:widget owner:alice deploy failed` is the words
+ * "deploy failed" with two filters. A value may be quoted (`branch:"fix x"`). An unknown key,
+ * or a `since:` that is not `1d`, `7d` or `30d`, stays among the words. */
+export function parseTyped(text: string): Omit<ListState, "since"> & { since?: Since } {
+  const filters: ListState["filters"] = {};
+  const labels: string[] = [];
+  let since: Since | undefined;
+  const words: string[] = [];
+  const re = /(?:^|\s)([a-z]+):(?:"([^"]*)"|(\S+))|(\S+)/g;
+  for (const m of text.matchAll(re)) {
+    const key = m[1] ? TYPED_KEYS[m[1]] : undefined;
+    const value = (m[2] ?? m[3] ?? "").trim();
+    if (key && value) {
+      if (key === "label") {
+        if (/^[^=]+=.+$/.test(value) && !labels.includes(value)) labels.push(value);
+        else words.push(m[0].trim());
+      } else if (key === "since") {
+        if (value in SINCE) since = value as Since;
+        else words.push(m[0].trim());
+      } else {
+        filters[key] = value;
+      }
+    } else {
+      words.push((m[4] ?? m[0]).trim());
+    }
+  }
+  return { q: words.join(" "), filters, labels, ...(since ? { since } : {}) };
+}

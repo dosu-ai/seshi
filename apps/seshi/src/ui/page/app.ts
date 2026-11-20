@@ -135,6 +135,21 @@ async function returnFromIdp(
   }
 }
 
+/** `/` from anywhere: the find bar in a session, the search box elsewhere. */
+function slashToSearch(event: KeyboardEvent): void {
+  if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey || !identity) return;
+  const target = event.target as HTMLElement | null;
+  if (target?.closest("input, textarea, select, [contenteditable]")) return;
+  event.preventDefault();
+  const box = document.getElementById("find") ?? document.getElementById("q");
+  if (box) {
+    box.focus();
+    return;
+  }
+  location.hash = "#/";
+  setTimeout(() => document.getElementById("q")?.focus(), 50);
+}
+
 async function boot(): Promise<void> {
   let modes: AuthModes;
   try {
@@ -155,6 +170,7 @@ async function boot(): Promise<void> {
     signIn(modes, "Your sign-in has ended. Sign in again to keep reading.");
   });
   window.addEventListener("hashchange", route);
+  window.addEventListener("keydown", slashToSearch);
 
   const query = new URLSearchParams(location.search);
   if (query.has("state")) {

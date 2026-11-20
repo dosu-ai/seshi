@@ -9,7 +9,15 @@ import { fileURLToPath } from "node:url";
 import type { Trace, TraceEvent } from "@seshi/model";
 import { beforeAll, describe, expect, it } from "vitest";
 import { type Assets, buildAssets } from "../web/assets";
-import { EMPTY, parseState, searchQuery, stateQuery, withFilter, withLabel } from "./page/filters";
+import {
+  EMPTY,
+  parseState,
+  parseTyped,
+  searchQuery,
+  stateQuery,
+  withFilter,
+  withLabel,
+} from "./page/filters";
 import { challengeOf, discover, finishSignIn, type PendingSignIn, startSignIn } from "./page/oidc";
 import { ROUTES, resolve } from "./page/routes";
 import { filesOf, sessionStats } from "./page/stats";
@@ -356,5 +364,27 @@ describe("the thread's steps and a session's stats", () => {
     expect(
       filesOf(ev(0, "tool_call", { tool_name: "Bash", text: 'Bash {"command":"ls"}' })),
     ).toEqual([]);
+  });
+});
+
+describe("filters typed in the search box", () => {
+  it("take key:value pairs out of the words", () => {
+    expect(
+      parseTyped('repo:widget owner:alice deploy  failed branch:"fix x" label:team=web since:7d'),
+    ).toEqual({
+      q: "deploy failed",
+      filters: { repo: "widget", owner: "alice", branch: "fix x" },
+      labels: ["team=web"],
+      since: "7d",
+    });
+  });
+
+  it("leave unknown keys, bad labels and bad spans among the words", () => {
+    expect(parseTyped("http://x.test since:1y label:nokey error:42")).toEqual({
+      q: "http://x.test since:1y label:nokey error:42",
+      filters: {},
+      labels: [],
+    });
+    expect(parseTyped("")).toEqual({ q: "", filters: {}, labels: [] });
   });
 });

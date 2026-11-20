@@ -1348,6 +1348,54 @@ details.as-table > summary {
   border-bottom: 1px solid var(--line);
 }
 
+/* Search as you type, and find within a session. */
+
+.q-help {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.find-bar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0;
+  margin-bottom: 0.75rem;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+
+.find-bar input {
+  flex: 1 1 14rem;
+}
+
+.find-count {
+  font-size: 0.85rem;
+  color: var(--muted);
+  min-width: 6rem;
+}
+
+mark.find {
+  background: var(--spark);
+  color: var(--night-ink);
+  border-radius: 2px;
+}
+
+mark.find.current {
+  outline: 2px solid var(--thinking);
+  outline-offset: 1px;
+}
+
+.event.found > .event-head {
+  text-decoration: underline;
+  text-decoration-color: var(--thinking);
+  text-underline-offset: 0.3em;
+}
+
 /* Narrow screens: the glance goes above the thread, and the bar wraps. */
 @media (max-width: 56rem) {
   .panel.with-aside {
