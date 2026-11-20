@@ -214,6 +214,12 @@ describe("SqliteIndex: the permission filter (F10.4)", () => {
     expect(ids(member("alice"))).toEqual(["s1", "s2", "s4"]);
     expect(ids(member("bob"))).toEqual(["s1", "s3", "s4"]);
     expect(ids({ everything: false, own: [], canRead: () => false })).toEqual(["s1", "s4"]);
+    // A credential without the search scope: its own owner's sessions only, never the org's.
+    expect(ids({ everything: false, own: ["bob"], ownOnly: true, canRead: () => true })).toEqual([
+      "s3",
+      "s4",
+    ]);
+    expect(ids({ everything: true, own: [], ownOnly: true, canRead: () => true })).toEqual([]);
     expect(ids(LOCAL_VIEWER)).toEqual(["s1", "s2", "s3", "s4"]);
     // An owner filter narrows; it never widens past what the viewer may see.
     expect(

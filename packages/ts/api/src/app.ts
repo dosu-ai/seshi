@@ -847,6 +847,7 @@ export function createApp(instance: Instance) {
       const query = searchRequestOf(url);
       if (!principal.scopes.has("search")) {
         const owner = query.owner ?? principal.owner;
+        if (!isOwner(owner)) throw new SearchQueryError("owner is not an owner id");
         requireReadOwner(principal, owner, aliases, "search");
         query.owner = owner;
       }

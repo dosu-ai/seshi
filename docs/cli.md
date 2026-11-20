@@ -161,7 +161,9 @@ the rest (F11.4):
   (it writes, and reads only your own sessions). The IdP's refresh token renews the session
   token without signing in again; when the sign-in has run out and cannot be renewed,
   `sessions ls|show|export`, `search` and `explore` go on with the device token, which reads
-  and searches your own sessions (private ones too) but no one else's (X5.10); `offline_access` is asked for when the IdP lists it, which is how Okta and Entra give
+  and searches your own sessions (private ones too) but no one else's (X5.10), and say so on
+  stderr; with `--owner` they ask you to sign in again instead. A refresh token the IdP
+  refuses is forgotten, so later commands do not ask it again; `offline_access` is asked for when the IdP lists it, which is how Okta and Entra give
   one. A delete needs a session token from the last 10 minutes (X5.3), so `sessions rm` renews
   it first. `--visibility owner` makes everything the device token uploads private. The IdP's
   authorization, token and device endpoints must be `https:` (or `http:` on `localhost` or

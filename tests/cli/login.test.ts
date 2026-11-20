@@ -187,10 +187,12 @@ describe("signing in through the IdP (X5.7)", () => {
     const who = await machine.seshi(["whoami"]);
     expect(who.code, who.err).toBe(0);
     expect(who.out).toContain("credential  device (an IdP sign-in)");
-    // A delete needs the sign-in, so it asks for a new one.
+    expect(who.err).toContain("has run out and could not be renewed");
+    expect(who.err).toContain("sees only your own sessions");
+    // A delete needs the sign-in, so it asks for a new one; the refused refresh token is gone.
     const rm = await machine.seshi(["sessions", "rm", "claude-code/s1", "--yes"]);
     expect(rm.code).toBe(5);
-    expect(rm.err).toContain("the IdP no longer renews the session");
+    expect(rm.err).toContain("has expired");
     expect(rm.err).toContain(`seshi login --server ${server.url}`);
   });
 

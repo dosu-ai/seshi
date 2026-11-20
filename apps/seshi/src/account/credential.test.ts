@@ -90,8 +90,33 @@ describe("the credential for a purpose", () => {
       device: "seshi_d",
       refresh: "rt",
     });
-    const fetch = async () => Response.json({ error: "invalid_grant" }, { status: 400 });
+    let asked = 0;
+    const fetch = async () => {
+      asked++;
+      return Response.json({ error: "invalid_grant" }, { status: 400 });
+    };
+    const read = await credentialFor(options({ fetch }), SERVER, "read");
+    expect(read.token).toBe("seshi_d");
+    expect(read.fallback).toMatch(
+      /sign-in for https:\/\/seshi.acme.com has run out .* device token, which sees only your own sessions: run seshi login/,
+    );
+    // The refused refresh token is forgotten, so the next read does not ask the IdP again.
+    expect(await logins.secret(SERVER, "refresh")).toBeNull();
     expect((await credentialFor(options({ fetch }), SERVER, "read")).token).toBe("seshi_d");
+    expect(asked).toBe(1);
+    // Reading another owner's sessions never falls back: the device token finds none of theirs.
+    await expect(credentialFor(options({ fetch }), SERVER, "read_others")).rejects.toThrow(
+      /has expired/,
+    );
+    // An IdP that cannot be reached is no reason to stop reading one's own, nor to forget it.
+    await logins.update(SERVER, {}, { refresh: "rt" });
+    const down = async (): Promise<Response> => {
+      throw new TypeError("fetch failed");
+    };
+    const offline = await credentialFor(options({ fetch: down }), SERVER, "read");
+    expect(offline.token).toBe("seshi_d");
+    expect(offline.fallback).toContain("cannot reach the IdP");
+    expect(await logins.secret(SERVER, "refresh")).toBe("rt");
     // Only a device token: no sign-in at all.
     await logins.save(oidcProfile({ session: undefined }), { device: "seshi_d" });
     expect((await credentialFor(options(), SERVER, "read")).token).toBe("seshi_d");

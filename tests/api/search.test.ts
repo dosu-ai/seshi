@@ -148,6 +148,10 @@ describe("GET /v1/search (F10)", () => {
       "alice/rot",
       "old-alice/legacy",
     ]);
+    // A malformed owner is a bad query, as for any caller, before it is anyone's.
+    await expect(alice.search({ q: "deploy", owner: "a/b" })).rejects.toThrow(
+      "owner is not an owner id",
+    );
     await expect(alice.search({ q: "deploy", owner: "bob" })).rejects.toThrow(
       "this credential reads only its own sessions: another owner's need the search scope",
     );

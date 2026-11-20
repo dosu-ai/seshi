@@ -5,11 +5,13 @@ import { type ConfiguredUser, resolveUser } from "./user";
 
 type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
 
-/** What a credential is for: reading (and changing) sessions, deleting one, uploading, or
- * sharing and unsharing one's own sessions (the device token, which may, else the sign-in).
- * A read is the sign-in's, which reads the org's shared sessions too; when the sign-in has run
- * out and cannot be renewed, the device token, which reads its owner's own (X5.10). */
-export type Purpose = "read" | "delete" | "upload" | "share";
+/** What a credential is for: reading (and changing) sessions, reading another owner's by
+ * name (`--owner`), deleting one, uploading, or sharing and unsharing one's own sessions (the
+ * device token, which may, else the sign-in). A read is the sign-in's, which reads the org's
+ * shared sessions too; when the sign-in has run out and cannot be renewed, the device token,
+ * which reads its owner's own (X5.10), with `fallback` saying so. Reading another owner's
+ * never falls back: the device token would find none of theirs. */
+export type Purpose = "read" | "read_others" | "delete" | "upload" | "share";
 
 /** There is no usable credential for the server: never signed in, or it ran out. */
 export class NotSignedIn extends Error {
@@ -32,6 +34,9 @@ export interface Credential {
   /** With the org key: the username to send as `X-Seshi-User`. */
   user?: string;
   profile: LoginProfile;
+  /** Set when a read goes on with the device token because the sign-in could not be renewed:
+   * why, for the command to warn that it sees only the owner's own sessions. */
+  fallback?: string;
 }
 
 export interface CredentialOptions {
@@ -83,6 +88,8 @@ async function renewSession(
     rotated = tokens.refresh_token;
   } catch (err) {
     if (err instanceof SignInError && err.code === "refresh_refused") {
+      // Forget the dead refresh token, so later commands do not ask the IdP again.
+      await options.logins.update(server, {}, { refresh: null });
       throw new NotSignedIn(server, `the IdP no longer renews the session for ${server}`);
     }
     throw err;
@@ -148,27 +155,28 @@ export async function credentialFor(
       return { server: profile.server, token, profile };
     }
     case "oidc": {
-      const device = async (): Promise<Credential | undefined> => {
+      const device = async (): Promise<Credential | "missing" | "expired"> => {
         const token = await options.logins.secret(profile.server, "device");
-        if (!token || msUntil(profile.device?.expires_at, now) <= 0) return undefined;
+        if (!token) return "missing";
+        if (msUntil(profile.device?.expires_at, now) <= 0) return "expired";
         return { server: profile.server, token, profile };
       };
       if (purpose === "share") {
         // The device token the uploader sends with may share its owner's sessions (X5.10), so
         // sharing needs no renewal through the IdP while it lasts.
         const shared = await device();
-        if (shared) return shared;
+        if (typeof shared !== "string") return shared;
       }
       if (purpose === "upload") {
-        const device = await options.logins.secret(profile.server, "device");
-        if (!device) throw missing();
-        if (msUntil(profile.device?.expires_at, now) <= 0) {
+        const uploader = await device();
+        if (uploader === "missing") throw missing();
+        if (uploader === "expired") {
           throw new NotSignedIn(
             profile.server,
             `the device token for ${profile.server} has expired`,
           );
         }
-        return { server: profile.server, token: device, profile };
+        return uploader;
       }
       const session = await options.logins.secret(profile.server, "session");
       if (session && sessionUsable(profile, purpose, now)) {
@@ -179,11 +187,14 @@ export async function credentialFor(
         renewed = await renewSession(options, profile, now);
       } catch (err) {
         // The device token reads its owner's own sessions (X5.10): enough for a read while the
-        // sign-in cannot be renewed.
-        const fallback =
-          purpose === "read" && err instanceof NotSignedIn ? await device() : undefined;
-        if (fallback) return fallback;
-        throw err;
+        // sign-in cannot be renewed, whether the IdP refused or could not be reached.
+        const fallback = purpose === "read" ? await device() : "missing";
+        if (typeof fallback === "string") throw err;
+        const why = err instanceof NotSignedIn ? "" : ` (${(err as Error).message})`;
+        return {
+          ...fallback,
+          fallback: `the sign-in for ${profile.server} has run out and could not be renewed${why}; reading with this machine's device token, which sees only your own sessions: run seshi login --server ${profile.server} to see the org's`,
+        };
       }
       return {
         server: profile.server,
