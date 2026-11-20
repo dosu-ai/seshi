@@ -1,0 +1,375 @@
+# Decision models for model review: scope
+
+Status: scoping only, nothing built. This page covers whether and how the **decision step** of
+model review (F3, [model-review.md](../model-review.md)) can call purpose-built decision models
+instead of a general LLM. It looks at two: **Jev** from TypeSafe and OpenAI's **Decisions API**.
+The redactor is out of scope and stays an LLM.
+
+Sources were read on 2026-11-19. TypeSafe: [docs.typesafe.ai](https://docs.typesafe.ai/introduction)
+(the [`/v1/systemone` reference](https://docs.typesafe.ai/api/system-one),
+[models and pricing](https://docs.typesafe.ai/models),
+[confidence](https://docs.typesafe.ai/confidence),
+[errors](https://docs.typesafe.ai/api/errors),
+[model jaggedness](https://docs.typesafe.ai/model-jaggedness),
+[legal](https://docs.typesafe.ai/legal)). OpenAI: the
+[Decisions guide](https://developers.openai.com/api/docs/guides/decisions), the
+[create decision reference](https://developers.openai.com/api/reference/resources/decisions/methods/create),
+the [`gpt-6-luna` model page](https://developers.openai.com/api/docs/models/gpt-6-luna) and
+[data controls](https://developers.openai.com/api/docs/guides/your-data). All of these pages
+were public. Where the docs say nothing, this page says so and does not guess.
+
+## Summary
+
+- Both APIs do the same thing: you send text and a typed question, and you get back one
+  label from a fixed set plus a probability for each label. Neither writes any text, and
+  neither gives a reason. seshi's decision step already asks for one label and no
+  explanation, so it maps onto either API directly.
+- **Neither provider stores anything on its side.** There is no hosted decision, policy id or
+  per-account tuned model. The whole policy (the instructions and what each label means) is
+  sent with every request. So the policy hash can stay entirely local, and "training" a
+  provider comes down to calibrating seshi's thresholds and wording against labelled data.
+- **The smallest seam:** add a `decide()` interface used only by the decision step, wrap
+  today's LLM providers in an adapter behind it, and add two `provider` values that are
+  valid only on `decision`. The redactor and `complete()` stay as they are.
+- **New in config:** `labels` (what each label means) and `thresholds` on the label
+  probabilities, for example "drop only above 0.9, otherwise redact". The review record gains
+  each part's three probabilities. That is numbers only, never text.
+- **Recommendation:** build the seam and **OpenAI Decisions first**, then **Jev**. OpenAI's
+  retention terms are published, its context is large enough that `max_input_chars` keeps its
+  default, and many operators already have an OpenAI agreement. Jev is cheaper per token and
+  explicitly calibrated, but it publishes no retention period and its default context
+  (32k tokens per question) is below seshi's default part size. Once the seam exists, Jev is a
+  small follow-up.
+
+## 1. What these APIs are
+
+| | Jev (TypeSafe) | Decisions API (OpenAI) |
+|---|---|---|
+| Endpoint | `POST https://api.typesafe.ai/v1/systemone`, `Authorization: Bearer` | `POST https://api.openai.com/v1/decisions`, `Authorization: Bearer` |
+| Status | Generally usable; launched as "early access" ([blog](https://typesafe.ai/blog/introducing-system-one-models-and-jev)). Current model `jev-1.14.0` (2026-10-14) | Generally available (was public beta). Only model: `gpt-6-luna` |
+| Request | `model`, `state` (string, object or array: the content), `questions` (an object keyed by question name) | `model`, `input` (string, or messages with tool calls and outputs), `questions` (an array, 1–400, each with a `name`) |
+| Question types | `choice` (up to 255 options), `score` (up to 10 ordered levels), `noul` (yes/no), `box` (images) | `choice` (2–255), `score` (2–10 levels), `predicate` (yes/no) |
+| How you define the decision | `instructions` plus `criteria`: `{option: description}` for a choice, `{true, false}` for a noul | `instructions` plus `choices: [{value, description}]`, or `levels` for a score |
+| Choice answer | `choice`, `probabilities` `{option: p}`, `confidence` | `choice`, `probabilities` `[{value, probability}]`, `confidence` |
+| Yes/no answer | `noul`: P(yes) | `probability`: P(true) |
+| Reason / explanation | None | None. An answer can instead be a `refusal` |
+| Examples or training data | None. There is no fine-tuning, and every account is served the same weights ([models](https://docs.typesafe.ai/models#customizing-jev)). Examples go into the criteria text | None documented, and fine-tuning is listed as unsupported for `gpt-6-luna`. Examples go into the descriptions |
+| Response also has | `model` (the versioned id that answered, even when an alias was sent), `usage` | `model`, `usage` (with cache read and write counts) |
+| Context | 64k tokens per request and 32k per question by default. 262k with the `TypeSafe-Danger-Zone-Long-Context` header, which the docs call slower and less accurate | 1.05M-token window, 922k max input |
+| Price | $0.042 per million input tokens. Output is free | $0.10 per million input tokens. Output is not charged. Cache reads cost $0.01/M and cache writes $0.125/M |
+| Latency (published) | "Most calls complete in about 100 ms" ([how to build](https://docs.typesafe.ai/concepts/how-to-build-with-system-one)), and 70–500 ms end to end ([launch blog](https://typesafe.ai/blog/introducing-system-one-models-and-jev)) | "About 10x faster than the Responses API". No absolute figure |
+| Rate limits | Set per organization and shown in the console (behind a login, so not read) | `gpt-6-luna` tiers start at 5,000 RPM and 2M TPM. The docs don't say whether `/v1/decisions` shares those limits |
+| Training on your data | "Will not train or fine tune ... on Input" ([privacy policy](https://typesafe.ai/legal/privacy-policy)) | Not used for training ([data controls](https://developers.openai.com/api/docs/guides/your-data)) |
+| Retention | **Not published.** The [DPA](https://typesafe.ai/legal/data-processing) says data is kept "as long as necessary". Zero data retention (ZDR) is available for enterprise customers on request | Abuse-monitoring logs are kept for 30 days. No application state is kept, apart from the prompt cache. ZDR is available to eligible organizations. Regional processing in the US and EU, and Private Link |
+
+**Compared with today.** Today's decision step sends a system prompt that defines the three
+labels, plus the records as JSON. It constrains the answer with a JSON schema
+(`{"label": "allow" | "redact" | "drop"}`) and gets back one label with no probability. The
+model may think first, which is why `max_tokens` is 4096, and output and thinking tokens are
+billed. A decision model differs in four ways:
+
+- **It returns a distribution.** Code decides how much risk to take, instead of the prompt
+  ("when unsure between allow and redact, choose redact"). This is where thresholds come in.
+- **The policy is split into parts.** The instructions and the meaning of each label are
+  separate fields, not one prompt.
+- **It is cheaper and faster.** A full 100,000-character part is roughly 25–35k tokens. That
+  costs about $0.0013 on Jev and $0.003 on OpenAI, with nothing billed for output.
+- **It does no extended reasoning.** Both vendors say these models suit "gut-check"
+  judgments, and that broad judgments should be split into narrow ones.
+
+Jev's [jaggedness page](https://docs.typesafe.ai/model-jaggedness) lists failure modes that
+matter for coding-agent sessions:
+
+- It reads instructions literally.
+- Accuracy falls when the state is large and mostly irrelevant.
+- **Adversarial content in the state "can move the answer"**: a session can contain text that
+  argues for its own classification.
+- Choice option order can matter.
+
+The LLM decision step faces the same prompt-injection risk. The eval needs a fixture for it
+either way (section 5).
+
+## 2. Where they fit
+
+**Decision step only.** Neither API can return findings (record, field, exact text,
+category), because neither generates text. So the redactor stays an LLM on `complete()`.
+
+**`complete()` is the wrong interface.** `CompletionRequest` is `{system, user, schema,
+schemaName, maxTokens}`: a prompt and a schema to fill. A decision model needs instructions,
+named labels with descriptions, and the content, and it answers with probabilities. Forcing it
+through `complete()` would mean parsing seshi's schema back into questions and throwing away
+the probabilities. The smallest seam is a second interface, used only by the decision step:
+
+```ts
+// packages/ts/review/src/provider.ts
+export interface DecisionRequest {
+  instructions: string; // the policy's prompt, with seshi's data note
+  labels: Readonly<Record<Label, string>>; // what allow, redact and drop mean
+  records: Entry[]; // one part, as partsOf() makes it today
+  timeoutMs: number;
+  signal?: AbortSignal;
+}
+
+export interface DecisionAnswer {
+  probabilities?: Readonly<Record<Label, number>>; // absent for an LLM
+  label?: Label; // an LLM's own label; absent when probabilities are given
+  model?: string; // the version that answered, when the provider says
+}
+
+export interface DecisionProvider {
+  readonly kind: string;
+  readonly model: string;
+  readonly endpoint: string;
+  decide(request: DecisionRequest): Promise<DecisionAnswer>;
+}
+```
+
+- **`LlmDecision`** wraps any `ModelProvider`. It builds today's `decisionSystem(prompt)`,
+  `recordsMessage(part)` and `DECISION_SCHEMA`, and runs `checkLabel`. An LLM policy behaves
+  and hashes exactly as it does now. `labels` and `thresholds` are refused on LLM providers:
+  their prompt already defines the labels, and they return no probabilities.
+- **`OpenAiDecisions`** and **`TypeSafe`** are written on `fetch` the way `openai.ts` is. They
+  send one `choice` question named `label`, with the three labels in a fixed order (allow,
+  redact, drop).
+  - **Jev:** `state` is `{records: [...]}` as a JSON object, Jev's native form.
+  - **OpenAI:** `input` is one user message whose `input_text` is `recordsMessage(part)`. Its
+    `input_json` part caps at 256 KiB and 10,000 values, which a large part can pass.
+- **`ModelReviewer.call`** calls `decide()` for the decision step and `complete()` for the
+  redactor. Thresholds are applied in the reviewer (`labelOf(answer, thresholds)`), not in each
+  provider, so they mean the same thing for both.
+- **Unchanged:** retries, backoff and `on_failure`. Providers throw `ProviderError` with the
+  same codes as today. New mappings:
+  - A refusal (OpenAI's `refusal` answer) is `refusal`, not retried.
+  - Jev's `529` is `http_529`, retried like any status of 500 or above.
+  - Jev's `400` with `max_tokens_exceeded` becomes a new code, `too_long`, not retried.
+  - Anything other than one well-formed answer for `label` is `invalid_answer`, retried.
+
+**`max_input_chars` and splitting.** Splitting stays as it is. One `drop` drops the upload,
+and only parts labelled `redact` reach the redactor. Jev's 32k tokens per question is below
+what a 100,000-character part of JSON-escaped code can reach. Two options:
+
+- Use a provider default of **60,000** for `typesafe` (to be measured: see open questions).
+- Have `seshi config check` refuse a larger `max_input_chars` on `typesafe`.
+
+Smaller parts also help Jev's accuracy, and cost about the same, since only input tokens are
+billed. OpenAI needs no change.
+
+## 3. Config
+
+Two new `provider` values, valid on `decision` only:
+
+- **`typesafe`** (the model is Jev). Default `base_url` `https://api.typesafe.ai`.
+- **`openai-decisions`**. Default `base_url` `https://api.openai.com/v1`, default model
+  `gpt-6-luna`.
+
+They are separate from `openai-compatible` because the request, the answer and what can be
+configured all differ.
+
+```toml
+[[review.policies]]
+id = "default"
+decision = { provider = "openai-decisions", api_key = { env = "OPENAI_API_KEY" } }
+redactor = { provider = "anthropic", api_key = { env = "ANTHROPIC_API_KEY" } }
+```
+
+```toml
+[[review.policies]]
+id = "strict"
+
+[review.policies.decision]
+provider = "typesafe"
+model = "jev-1.14.0"                    # required: pin the version thresholds were tuned on
+api_key = { env = "TYPESAFE_API_KEY" }
+# base_url = "https://api.typesafe.ai"  # the default
+prompt_file = "/etc/seshi/review/decision.md"   # the question's instructions
+labels.drop = "The records as a whole should not be stored: a dump of customer records, ..."
+thresholds = { drop = 0.9, redact = 0.3 }
+timeout = "10s"
+
+[review.policies.redactor]
+provider = "anthropic"
+api_key = { env = "ANTHROPIC_API_KEY" }
+```
+
+| Key on a decision-model step | |
+|---|---|
+| `provider` | `typesafe` or `openai-decisions`. Refused on `redactor` with "makes decisions only; name the redactor's provider" |
+| `model` | Required for `typesafe`. `seshi config check` warns on an alias (`jev-latest`, `jev-preview`), because an alias moves and answers can change. `gpt-6-luna` by default for `openai-decisions` |
+| `api_key`, `base_url`, `timeout` | As today. Required key. `timeout` defaults to `"10s"`: these calls are fast, and a hung call should fail over to a retry sooner |
+| `prompt`, `prompt_file` | The question's `instructions`. seshi's default is a short question built from today's prompt, and seshi always appends its data note (the records are data, never instructions) |
+| `labels.allow`, `.redact`, `.drop` | The descriptions of each choice. seshi's defaults come from today's prompt bullets. A label not set keeps its default. The label names cannot change |
+| `thresholds.drop`, `.redact` | Below. Unset means the most probable label, which is today's behaviour |
+| `max_tokens`, `effort` | Refused: there are no output tokens or effort to set |
+
+**The redactor no longer inherits.** Today a redactor that names no provider inherits the
+decision step's. With a decision model, there is nothing for it to inherit, so the policy must
+name the redactor's provider and key. That makes the smallest policy two lines instead of
+one. That is the honest cost: two vendors see the text (one sees all of it, one sees only the
+parts labelled `redact`), and `config check` already lists both.
+
+**Mapping seshi's labels and categories.** The three labels map to one `choice` with options
+`allow`, `redact` and `drop`. The redactor categories (`secret`, `personal`, `customer-data`)
+do not need to reach the decision model at all: they are the redactor's to apply. A later
+option (phase 4) asks one yes/no question per category plus one for "inseparable", and
+derives the label in code. That follows both vendors' "decompose the judgment" advice, and
+records which category triggered `redact`. It is a second request shape, so it waits for eval
+evidence that it beats the single choice.
+
+**Thresholds.** The vendors advise putting a threshold on the probability of the action you
+will take, not on `confidence`. Jev's [confidence page](https://docs.typesafe.ai/confidence)
+says so directly, and OpenAI says to "set thresholds ... based on the cost of false
+positives and false negatives". For one part with probabilities `p`:
+
+1. **Drop.** When `thresholds.drop` is set, drop only if `p.drop >= drop`. A drop below the
+   threshold becomes **redact**, never allow: "drop only above 0.9, otherwise redact".
+2. **Redact.** When `thresholds.redact` is set, redact if `p.redact + p.drop >= redact`
+   (the chance that something needs removing), else allow.
+3. **Unset.** A threshold that is not set falls back to the most probable label.
+
+Both thresholds are in `(0, 1]` and refused on LLM providers. This moves "when unsure,
+redact" out of the prompt and into code, where `seshi review eval` can measure it.
+
+**The policy hash.** Nothing lives at the provider, so the hash stays local and complete. For a
+decision-model step it covers the same fields as now: provider, model, base_url, prompt and
+timeout. It adds the label descriptions, the thresholds, the data note's wrapper version, and
+the question shape, which is fixed for now. `labels` and `thresholds` enter the identity only
+when set, so every existing policy keeps its hash. The configured model is hashed. The
+version that actually answered (Jev returns it even for an alias) goes in the review record
+instead (below), because it is not config.
+
+**What the review record gains** at `owners/<o>/sessions/<a>/review/<n>.json`, and in the drop
+record:
+
+- `decision_model` names the version that answered when the provider reports one
+  (`typesafe/jev-1.14.0`), not the alias that was sent.
+- `scores`: each part's `{allow, redact, drop}` probabilities, in part order, up to the part
+  that decided.
+
+These are numbers, not text, so the record still holds "labels and findings, never text".
+`GET /v1/sessions/:agent/:session_id/reviews` gives admins the scores and readers only the
+label, as it does today.
+
+## 4. Guarantees seshi must keep
+
+| Guarantee ([model-review.md](../model-review.md)) | Jev | OpenAI Decisions |
+|---|---|---|
+| Only record text leaves, and only to the configured endpoint | Kept. seshi sends the same entries an LLM gets, and never sends `assets` or the `TypeSafe-Danger-Zone-*` headers, so no image placeholder is ever expanded | Kept. seshi never sends `input_image` (a URL there is fetched by OpenAI), `safety_identifier` (an id) or `prompt_cache_key` |
+| No implicit environment keys; redirects refused | Kept by not using the SDK. The SDK reads `TYPESAFE_API_KEY` from the environment, retries on its own, and takes a logger. Plain `fetch` with `redirect: "error"`, as in `openai.ts` | Kept by not using the `openai` SDK, which reads `OPENAI_API_KEY`, `OPENAI_BASE_URL` and `OPENAI_LOG`. Plain `fetch` with `redirect: "error"` |
+| Provider error text never logged | Kept, and it matters here: a `422` body echoes "a text preview of the rejected input". seshi cancels error bodies. Only a `400` body is read, to detect `max_tokens_exceeded`, and never recorded | Kept the same way. A `refusal` answer carries no text |
+| Review record stores labels and findings, never text | Kept. Probabilities are added, never text | Kept |
+
+**Prompt caching (OpenAI).** Caching is on by default: OpenAI places a cache breakpoint at
+the end of the shared `input`, which is the records, whenever they reach 1,024 tokens. That
+stores the records as cache state on OpenAI's GPUs until the cache expires: `ttl` is 30
+minutes, and data controls says it is gone within 24 hours. It also bills a cache write
+($0.125/M) above the normal input rate, for a prefix that is never reused. seshi should send
+`prompt_cache_options: {mode: "explicit"}` with no breakpoints, which turns caching off.
+
+**What retention means for users.**
+
+- **OpenAI.** The text of every reviewed upload sits in OpenAI's abuse-monitoring logs for 30
+  days and is not used for training. Organizations approved for ZDR keep nothing.
+  Organizations under data-residency rules can use OpenAI's regional processing.
+- **TypeSafe.** Input is not used for training, but no retention period is published, and ZDR
+  is for enterprise customers only. An operator choosing Jev should ask TypeSafe for those
+  terms in writing. Our docs should say plainly that we could not find them.
+
+Either way, `seshi config check` names the endpoint. The docs keep pointing people who must
+keep transcripts in-house to a local model on `openai-compatible`. Neither decision model
+can run locally.
+
+**Serverless mode.**
+
+- Laptops need the decision key too, through `seshi review key set typesafe` or
+  `seshi review key set openai-decisions`, alongside the redactor's key.
+- The shared-config rule still applies: a policy in `config/seshi.toml` that carries a key may
+  not name a `base_url` other than its provider's own.
+
+## 5. Evaluation and calibration
+
+**`seshi review eval` measures these providers as is.** It builds a reviewer from the policy
+and runs labelled fixtures through the real providers. Once the decision step goes through
+`decide()`, label accuracy, false and missed drops, redactor recall and leaks all work
+unchanged. It needs four additions:
+
+- Each fixture's probabilities in the report.
+- Latency per call (median and p95), and tokens and cost, since these providers are chosen
+  for speed and price.
+- **A threshold sweep** (`--sweep`): from the probabilities it already has, recompute the
+  labels at each pair of thresholds, with no new calls. Report the pairs with zero missed
+  drops and zero leaks, and the fewest false drops. This is how an operator sets
+  `thresholds`.
+- Fixtures that test the risks above: a record that argues for its own label (injection), and
+  each fixture with its records reordered.
+
+**The built-in fixtures are too few to calibrate.** There are ten (3 allow, 5 redact,
+2 drop), enough to catch a broken policy but not to pick a threshold. A threshold sweep needs
+an operator's own few hundred labelled fixtures (`--fixtures <dir>`). seshi can help build
+them without text leaving the server:
+
+- **`seshi review fixture add <agent> <session> --records a..b --label redact`** writes a
+  slice of a stored session as a local fixture file for the operator to label. Stored text has
+  already been redacted, so these fixtures are good for false-positive cases (allow, redact)
+  but under-represent leaks. Leak fixtures still have to be written by hand, as the built-ins
+  were.
+- **Export past decisions, without text** (`seshi review export`). This exports `policy_hash`,
+  `decision_model`, label, per-part `scores`, finding categories and counts, plus what
+  happened afterwards (retracted, deleted). It shows how labels and scores are distributed on
+  real traffic, and how many writes a threshold change would flip. It gives no ground truth,
+  because it has no text to label.
+
+**Training a provider: not possible, and not needed.** Neither provider offers per-account
+training: Jev serves every account the same weights, and `gpt-6-luna` lists fine-tuning as
+unsupported. Calibration therefore belongs to seshi: the label descriptions, the thresholds,
+and the part size. All three are local config, covered by the hash and measured by eval.
+**seshi should not build a way to send session text to a vendor for training.** If a vendor
+asks for labelled data, the operator's fixtures are files the operator owns and can share
+under their own agreement.
+
+## 6. Recommendation, open questions and plan
+
+**Recommendation.** Build the `decide()` seam with thresholds and recorded scores, then
+**OpenAI Decisions**, then **Jev**. The two APIs are nearly the same shape (one choice,
+probabilities, no text), so most of the work is the seam, not the providers. OpenAI goes
+first for four reasons:
+
+- Its retention and ZDR terms are published.
+- Its context fits seshi's default part size.
+- It is generally available.
+- Many operators can use it under an agreement they already have.
+
+Jev follows as a small change once TypeSafe answers the open questions below. It is cheaper
+per token, publishes latency figures, and documents its calibration.
+
+**Open questions**
+
+1. **TypeSafe.** Four things to ask:
+   - The retention period for `/v1/systemone` request bodies.
+   - Whether bodies are logged, and where they are processed.
+   - Whether ZDR is available below enterprise.
+   - Their guidance on prompt-injection robustness, beyond "test edge cases".
+2. **Jev's part size.** How many tokens a 100,000-character part of JSON-escaped session text
+   comes to, and so what `max_input_chars` default fits 32k per question. Measure on the
+   built-in fixtures.
+3. **Rate limits.** Whether OpenAI's `/v1/decisions` shares the `gpt-6-luna` tier limits.
+   Jev's limits are only visible in its console.
+4. **Default thresholds.** Should seshi ship with thresholds set, for example
+   `{drop = 0.9, redact = 0.3}`, or with none (the most probable label, today's behaviour)
+   until an operator runs a sweep? This page leans to none, because a number nobody measured
+   looks calibrated when it isn't.
+5. **Mixed versions.** Should the record keep a served model per part? With an alias, the
+   parts of one upload could in principle be answered by two versions. Pinning makes this
+   moot, which is why `typesafe` requires a model.
+6. **Category questions (phase 4).** Do per-category yes/no questions beat one choice on
+   operators' fixtures, and should the categories that triggered `redact` narrow what the
+   redactor is asked to look for?
+
+**Plan** (S = up to a day, M = two to four days)
+
+| Phase | Work | Size |
+|---|---|---|
+| 0 | Get keys for both. Ask TypeSafe the retention questions. No code | S |
+| 1 | The seam: `DecisionProvider`, the `LlmDecision` adapter, `labels` and `thresholds` in the schema and the hash (existing hashes unchanged), `scores` and the served model in the review and drop records, the eval's probabilities, latency, cost and `--sweep`, the new fixtures. No behaviour change for existing policies | M |
+| 2 | `openai-decisions`: the `fetch` client, caching off, refusal and status mapping, fake-fetch tests, `config check` output, serverless key name, [config.md](../config.md#review) and [model-review.md](../model-review.md) | S–M |
+| 3 | `typesafe`: the `fetch` client, `too_long`, the part-size default from open question 2, required pinned `model` and the alias warning, tests, docs | S |
+| 4 | Optional, on evidence: per-category questions, `seshi review fixture add`, `seshi review export` | M |
