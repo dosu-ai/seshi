@@ -583,6 +583,9 @@ export class Indexer {
       ...(metadata.native_session_id ? { native_session_id: metadata.native_session_id } : {}),
       ...(project ? { project } : {}),
       ...(branch ? { branch } : {}),
+      ...(metadata.labels && Object.keys(metadata.labels).length > 0
+        ? { labels: metadata.labels }
+        : {}),
       ...(source ? { source_id: source } : {}),
       visibility: metadata.visibility,
       ...(starts.length > 0 ? { started_at: Math.min(...starts) } : {}),

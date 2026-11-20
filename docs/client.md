@@ -198,7 +198,7 @@ The same calls as `@dosu/seshi-client`, in snake_case:
 | `get_session_by_archive(owner, archive_id)`, `get_trace_by_archive(owner, archive_id, hash=, render=)`, `reviews_by_archive(owner, archive_id)` | `getSessionByArchive`, `getTraceByArchive`, `sessionReviewsByArchive` | `GET /v1/owners/:owner/sessions/:archive_id` and its `/trace` and `/reviews`: the same, by the owner and archive id a change entry or search result names |
 | `changes(owner=, after=, since=, limit=)`, `iter_changes(…)` | `changes` | `GET /v1/changes`, a page or every page to the end |
 | `all_changes(after=, since=, limit=)`, `iter_all_changes(…)` | `allChanges` | `GET /v1/changes/all`, a page or every page up to `through` |
-| `search(q, owner=, agent=, repo=, branch=, source=, since=, until=, sort=, limit=, matches=, cursor=)` | `search` | `GET /v1/search` |
+| `search(q, owner=, agent=, repo=, branch=, labels=, source=, since=, until=, sort=, limit=, matches=, cursor=)` | `search` | `GET /v1/search` (`labels` a dict, each sent as `label=key=value`) |
 | `me()` | `me` | `GET /v1/me` |
 | `owners(after=, limit=)` | `owners` | `GET /v1/owners` |
 | `redaction_rules()`, `redaction_rules_since(etag)` | `redactionRules`, `redactionRulesSince` | `GET /v1/redaction/rules`, as a `RedactionRules` model |

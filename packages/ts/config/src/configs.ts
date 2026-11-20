@@ -75,7 +75,7 @@ export function loadCliConfig(options: CliLoadOptions = {}): Loaded<CliConfig> {
     file,
     ignoreEnv: [...NOT_SETTINGS_ENV],
     foreign: [shapeOf(serverConfigSchema)],
-  });
+  }) as Loaded<CliConfig>;
 }
 
 /** The sections a serverless laptop ignores (F11.3): they configure what only a server runs

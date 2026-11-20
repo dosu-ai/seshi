@@ -3,19 +3,23 @@ import type { CaptureHost } from "@seshi/kit";
 import { expandTilde } from "@seshi/kit";
 import { readExcludeEntry } from "@seshi/model/exclude";
 import { tryReadJson, tryRealpath, tryStat, tryWritePrivateFile } from "./files";
+import { type LabelRules, labelRules } from "./labels";
 import { readOrgRules } from "./org-rules";
 import type { CapturePaths } from "./paths";
 import { type CaptureRules, DEFAULT_RULES, type ExcludeRule, type PathRule } from "./rules";
 
 // 2: rules gained `exclude`. A cache written before it would hide a new exclude list, or keep the
 // error an older seshi gave for the unknown key, until the config file changed.
-const CACHE_SCHEMA = "seshi/capture-rules/2";
+// 3: the snapshot gained `labels`.
+const CACHE_SCHEMA = "seshi/capture-rules/3";
 
 export interface RulesSnapshot {
   rules: CaptureRules;
   /** The config cannot be loaded: nothing is captured until it is fixed. */
   error?: string;
   theme?: "auto" | "dark" | "light";
+  /** `[labels]`, unresolved: a hook resolves them with the agent's environment. */
+  labels?: LabelRules;
 }
 
 interface CacheKey {
@@ -97,6 +101,7 @@ export async function loadRules(host: CaptureHost): Promise<RulesSnapshot> {
           .filter((r): r is ExcludeRule => r !== undefined),
       },
       theme: config.theme,
+      labels: labelRules(config.labels, host.home),
     };
   } catch (err) {
     return { rules: DEFAULT_RULES, error: (err as Error).message };

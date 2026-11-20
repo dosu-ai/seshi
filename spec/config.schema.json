@@ -969,6 +969,19 @@
                 "additionalProperties": false,
                 "description": "This source's session filter rules; the rest come from [filter]."
               },
+              "labels": {
+                "description": "Labels put on every session the source stores (keys [a-z0-9][a-z0-9._-]{0,63}, values up to 512 characters, at most 32). They win over labels the data carries.",
+                "type": "object",
+                "propertyNames": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+                },
+                "additionalProperties": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                }
+              },
               "quiet_period": {
                 "description": "Publish a session once it has had no new spans for this long (F4.4).",
                 "default": "10m",
@@ -1038,6 +1051,19 @@
                 },
                 "additionalProperties": false,
                 "description": "This source's session filter rules; the rest come from [filter]."
+              },
+              "labels": {
+                "description": "Labels put on every session the source stores (keys [a-z0-9][a-z0-9._-]{0,63}, values up to 512 characters, at most 32). They win over labels the data carries.",
+                "type": "object",
+                "propertyNames": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+                },
+                "additionalProperties": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                }
               },
               "site": {
                 "default": "datadoghq.com",
@@ -1283,6 +1309,19 @@
                 },
                 "additionalProperties": false,
                 "description": "This source's session filter rules; the rest come from [filter]."
+              },
+              "labels": {
+                "description": "Labels put on every session the source stores (keys [a-z0-9][a-z0-9._-]{0,63}, values up to 512 characters, at most 32). They win over labels the data carries.",
+                "type": "object",
+                "propertyNames": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+                },
+                "additionalProperties": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                }
               },
               "url": {
                 "type": "string",
@@ -1578,6 +1617,19 @@
                 },
                 "additionalProperties": false,
                 "description": "This source's session filter rules; the rest come from [filter]."
+              },
+              "labels": {
+                "description": "Labels put on every session the source stores (keys [a-z0-9][a-z0-9._-]{0,63}, values up to 512 characters, at most 32). They win over labels the data carries.",
+                "type": "object",
+                "propertyNames": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+                },
+                "additionalProperties": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                }
               },
               "api_key": {
                 "x-seshi-secret": true,

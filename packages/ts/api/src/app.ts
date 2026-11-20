@@ -26,6 +26,7 @@ import {
   IngestRejected,
   isRenderFormat,
   isStub,
+  labelsProblems,
   MAX_IDEMPOTENCY_KEY_LENGTH,
   OffsetMismatch,
   type RawFormat,
@@ -452,6 +453,11 @@ export function createApp(instance: Instance) {
         `an idempotency key must be at most ${MAX_IDEMPOTENCY_KEY_LENGTH} characters`,
       );
     }
+    const labels = body.labels;
+    if (labels !== undefined && labels !== null) {
+      const problems = labelsProblems(labels);
+      if (problems.length > 0) throw new HttpError(400, "bad_field", problems.join("; "));
+    }
     const retractSecret =
       replace || rebuild ? (request.headers.get(RETRACT_HEADER) ?? undefined) : undefined;
     const upload: Upload = {
@@ -462,6 +468,9 @@ export function createApp(instance: Instance) {
       offset: offset as number,
       project: str(body, "project"),
       branch: str(body, "branch"),
+      ...(labels !== undefined && labels !== null
+        ? { labels: labels as Record<string, string> }
+        : {}),
       parent_session_id: str(body, "parent_session_id"),
       fork_of: str(body, "fork_of"),
       ...(replace ? { replace } : {}),

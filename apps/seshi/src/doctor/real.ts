@@ -9,6 +9,7 @@ import {
   readHead,
   readSpool,
   readState,
+  resolveLabels,
   stateFacts,
   uploaderRunning,
 } from "@seshi/capture";
@@ -111,6 +112,7 @@ export function ruleRedaction(rules: RuleSet, origin: string, point: RedactionPo
       point === "pre-redact" ? redactTranscript(rules, text, encoding).text : text,
     records: (records) => redactor.redact(records).records,
     residue: (records) => residueOf(rules, records),
+    text: (value) => redactor.redactText?.(value).text ?? value,
   };
 }
 
@@ -164,6 +166,12 @@ export async function realDeps(ctx: CommandContext, options: RealDepsOptions): P
         },
         host.platform,
       );
+    },
+    // What a hook would leave out for the session, resolved as a hook does (with this
+    // environment): the CLI config's labels and the repo's, limits included.
+    labelProblems: (entry) => {
+      const folder = entry?.cwd ?? (entry ? undefined : cwd);
+      return resolveLabels(snapshot.labels, placeOf(folder), host.env, host.platform).problems;
     },
     agent: (name) => agents.get(name),
     files: { stat: statFile, read: readFile },

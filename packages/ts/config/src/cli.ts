@@ -1,3 +1,4 @@
+import { labelProblem, MAX_LABELS } from "@seshi/model/labels";
 import * as z from "zod";
 import { excludeEntry } from "./server/capture";
 import { httpUrl } from "./server/common";
@@ -15,6 +16,47 @@ export const capturePath = z
     capture: z.boolean().describe("Capture sessions under it, or not."),
   })
   .describe("A personal capture rule for a folder (F9.5).");
+
+export const labelValue = z
+  .union([
+    z.string().describe("A fixed value."),
+    z
+      .strictObject({
+        env: z
+          .string()
+          .min(1)
+          .describe(
+            "An environment variable of the agent the session runs in; the label is absent when it is unset or empty.",
+          ),
+      })
+      .describe("A value read from the agent's environment when the session is first seen."),
+  ])
+  .describe('A label\'s value: a string, or { env = "NAME" }.');
+
+export const labelPath = z
+  .object({
+    path: z
+      .string()
+      .min(1)
+      .describe("A folder; ~ is the home folder. Matched as [[capture.paths]] is."),
+  })
+  .catchall(labelValue)
+  .describe(
+    "Labels for sessions in a folder: every other key is a label. The longest matching folder wins, key by key.",
+  );
+
+export const labelsSection = z
+  .object({
+    paths: z
+      .array(labelPath)
+      .default([])
+      .describe("Labels by folder; they win over the labels set here."),
+  })
+  .catchall(labelValue)
+  .prefault({})
+  .describe(
+    'Labels attached to each session when it is first seen (keys [a-z0-9][a-z0-9._-]{0,63}, values up to 512 characters, at most 32): every key but paths is a label, a string or { env = "NAME" }. Per key, a [[labels.paths]] entry wins, then these, then the repo\'s .seshi/config.toml.',
+  );
 
 export const cliConfigSchema = z
   .strictObject({
@@ -128,6 +170,7 @@ export const cliConfigSchema = z
       })
       .prefault({})
       .describe("Personal capture rules (F9.5)."),
+    labels: labelsSection,
   })
   .superRefine((config, ctx) => {
     if (config.server !== undefined && config.local !== undefined) {
@@ -162,5 +205,51 @@ export const cliConfigSchema = z
   })
   .describe("seshi CLI configuration (~/.config/seshi/config.toml).");
 
-export type CliConfig = z.output<typeof cliConfigSchema>;
+/** zod types `[labels]` with an index signature `paths` cannot satisfy: `LabelsConfig` says it. */
+export type CliConfig = Omit<z.output<typeof cliConfigSchema>, "labels"> & { labels: LabelsConfig };
 export type CapturePath = z.output<typeof capturePath>;
+export type LabelValue = z.output<typeof labelValue>;
+/** `[labels]` as loaded: `paths`, and every other key a label. */
+export interface LabelsConfig {
+  paths: ({ path: string } & Record<string, LabelValue>)[];
+  [key: string]: LabelValue | LabelsConfig["paths"];
+}
+
+/** The labels of a `[labels]` table or a `[[labels.paths]]` entry, without `paths` or `path`. */
+export function labelEntries(
+  table: Readonly<Record<string, unknown>>,
+  reserved: "paths" | "path",
+): [string, LabelValue][] {
+  return Object.entries(table).filter(([key]) => key !== reserved) as [string, LabelValue][];
+}
+
+/** What is wrong with the CLI config's labels: a key or fixed value out of the limits, an entry
+ * that would give a session more than the labels allowed. Not a load error: a hook drops such a
+ * label and logs why; `seshi config check` and `seshi doctor` report it. */
+export function cliLabelProblems(labels: LabelsConfig): string[] {
+  const problems: string[] = [];
+  const check = (entries: [string, LabelValue][], where: string) => {
+    for (const [key, value] of entries) {
+      const problem = labelProblem(key, typeof value === "string" ? value : "x");
+      if (problem) problems.push(`${where}: ${problem}`);
+    }
+  };
+  const top = labelEntries(labels, "paths");
+  check(top, "[labels]");
+  const keys = new Set(top.map(([key]) => key));
+  if (keys.size > MAX_LABELS) {
+    problems.push(`[labels]: ${keys.size} labels; at most ${MAX_LABELS} are allowed`);
+  }
+  for (const entry of labels.paths) {
+    const own = labelEntries(entry, "path");
+    const where = `[[labels.paths]] ${entry.path}`;
+    check(own, where);
+    const all = new Set([...keys, ...own.map(([key]) => key)]);
+    if (all.size > MAX_LABELS && keys.size <= MAX_LABELS) {
+      problems.push(
+        `${where}: with [labels], ${all.size} labels; at most ${MAX_LABELS} are allowed`,
+      );
+    }
+  }
+  return problems;
+}

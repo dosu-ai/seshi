@@ -59,12 +59,19 @@ beforeEach(async () => {
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-async function write(owner: string, id: string, prompt: string, project?: string) {
+async function write(
+  owner: string,
+  id: string,
+  prompt: string,
+  project?: string,
+  labels?: Record<string, string>,
+) {
   await new StoreSessionDB({ store: new FsStore(bucket), owner, formats }).ingest({
     format: "trajectory",
     session_id: id,
     transcript: log(prompt),
     ...(project ? { project } : {}),
+    ...(labels ? { labels } : {}),
   });
 }
 
@@ -125,6 +132,28 @@ describe("seshi search, in-process", () => {
     const sessions = JSON.parse(bare.out) as SearchResults;
     expect(sessions.total).toBe(2);
     expect(sessions.results.map((r) => r.matches)).toEqual([[], []]);
+  });
+
+  it("filters by --label key=value, each one a session must carry", async () => {
+    await write("alice", "s1", "label topic", undefined, { team: "platform", "dosu.project": "a" });
+    await write("alice", "s2", "label topic", undefined, { team: "platform" });
+    await write("alice", "s3", "label topic");
+    const ids = async (...args: string[]) =>
+      (
+        JSON.parse(
+          (await seshi(["topic", ...args, "--config", toml, "--json"])).out,
+        ) as SearchResults
+      ).results
+        .map((r) => r.session_id)
+        .sort();
+    expect(await ids("--label", "team=platform")).toEqual(["s1", "s2"]);
+    expect(await ids("--label", "team=platform", "--label", "dosu.project=a")).toEqual(["s1"]);
+    const bad = await seshi(["topic", "--label", "team", "--config", toml]);
+    expect(bad.code).toBe(EXIT.usage);
+    expect(bad.err).toContain("--label: 'team' is not key=value");
+    const twice = await seshi(["topic", "--label", "t=a", "--label", "t=b", "--config", toml]);
+    expect(twice.code).toBe(EXIT.usage);
+    expect(twice.err).toContain("--label: t is given twice");
   });
 
   it("shows and rebuilds the local index", async () => {

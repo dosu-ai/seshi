@@ -7,6 +7,7 @@ import {
   type ConfigEntry,
   ConfigError,
   checkServerConfig,
+  cliLabelProblems,
   configEntries,
   describeOrigin,
   displayTree,
@@ -102,6 +103,7 @@ function check(ctx: CommandContext, options: Options): number {
     if (options.cli) {
       const cli = loadCli(ctx, options, true);
       loaded = cli;
+      errors.push(...cliLabelProblems((cli.config as CliConfig).labels));
       const old = (cli.config as CliConfig).local;
       if (old) {
         report.notices.push(

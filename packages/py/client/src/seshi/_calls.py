@@ -38,7 +38,7 @@ DEFAULT_GZIP_FROM = 8 * 1024
 RETRACT_HEADER = "X-Seshi-Retract"
 """The header a retraction, or an org-key replace, carries the session's secret in (F9.7)."""
 
-QueryValue = str | int | bool | datetime | None
+QueryValue = str | int | bool | datetime | list[str] | None
 
 
 @dataclass(frozen=True)
@@ -74,7 +74,7 @@ class Settings:
     httpx client sends it."""
 
 
-def _query_value(value: QueryValue) -> str:
+def _query_value(value: str | int | bool | datetime) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, datetime):
@@ -121,7 +121,12 @@ def prepare(call: Call[Any], settings: Settings) -> httpx.Request:
         if len(content) >= settings.gzip_from:
             headers["content-encoding"] = "gzip"
             content = gzip.compress(content)
-    params = {k: _query_value(v) for k, v in call.query.items() if v is not None}
+    params: list[tuple[str, str | int | float | bool | None]] = [
+        (k, _query_value(item))
+        for k, v in call.query.items()
+        if v is not None
+        for item in (v if isinstance(v, list) else [v])
+    ]
     return httpx.Request(
         route.method,
         settings.server + path,
