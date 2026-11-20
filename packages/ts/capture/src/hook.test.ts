@@ -541,8 +541,18 @@ describe("the rules cache", () => {
       }),
     );
     expect((await captureRules(host, paths)).rules.exclude).toEqual([
-      { entry: "~/clients", path: join(dir, "clients"), from: "server" },
-      { entry: "github.com/acme/hr-*", repo: "github.com/acme/hr-*", from: "server" },
+      {
+        entry: "~/clients",
+        path: join(dir, "clients"),
+        from: "server",
+        server: "https://seshi.test",
+      },
+      {
+        entry: "github.com/acme/hr-*",
+        repo: "github.com/acme/hr-*",
+        from: "server",
+        server: "https://seshi.test",
+      },
       { entry: "acme/payments", repo: "acme/payments" },
     ]);
     const outcome = await runHook({
@@ -555,8 +565,28 @@ describe("the rules cache", () => {
     expect(outcome.spooled).toEqual([]);
     expect(outcome.skipped[0]?.decision).toMatchObject({
       level: "org",
-      reason: "the org excludes ~/clients (the server's [capture] exclude)",
-      excluded: { entry: "~/clients", from: "server" },
+      reason: "the org excludes ~/clients (https://seshi.test's [capture] exclude)",
+      excluded: { entry: "~/clients", from: "server", server: "https://seshi.test" },
+    });
+    // The rules the uploader read for this machine when it fetched the copy are used as they
+    // are; another home's are read again.
+    const copy = JSON.parse(readFileSync(paths.orgRules, "utf8"));
+    writeFileSync(
+      paths.orgRules,
+      JSON.stringify({
+        ...copy,
+        compiled: { home: dir, rules: [{ entry: "~/clients", path: "/kept/as/compiled" }] },
+      }),
+    );
+    expect((await captureRules(host, paths)).rules.exclude[0]).toMatchObject({
+      path: "/kept/as/compiled",
+    });
+    writeFileSync(
+      paths.orgRules,
+      JSON.stringify({ ...copy, compiled: { home: "/elsewhere", rules: [] } }),
+    );
+    expect((await captureRules(host, paths)).rules.exclude[0]).toMatchObject({
+      path: join(dir, "clients"),
     });
     // A server with no list (an older one) adds nothing.
     writeFileSync(

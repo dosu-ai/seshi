@@ -50,6 +50,9 @@ export const STREAM_EXPIRED = "stream_expired";
 export const SESSION_CONFLICT = "session_conflict";
 
 const DAY = 86_400_000;
+/** The run id an exclusion's cutoff names: after every real one, so `after` passes over each run
+ * created at the cutoff's instant. */
+const PASSED_OVER = "\uffff";
 /** An agent nothing was stored of, untouched this long, leaves the checkpoint. One with a stored
  * session stays: its log length is where its next run goes. */
 const PRUNE_AFTER_MS = 90 * DAY;
@@ -490,8 +493,13 @@ export function cursorCloudConnector(options: CursorCloudConnectorOptions = {}):
         ctx.excluded?.();
         ctx.log.info(`agent ${agent.id}: not read, the org excludes ${entry} ([capture] exclude)`);
         const skipped: AgentEntry = known ? structuredClone(known) : { bytes: 0 };
-        const at = ctx.now().toISOString();
-        if (!skipped.through || skipped.through.at < at) skipped.through = { at, id: "" };
+        // On Cursor's clock, in Cursor's format, as runs' `createdAt` is: every run the agent has
+        // so far is no later than its `updatedAt`. The id sorts after any run's, so a run created
+        // in that same instant is passed over too.
+        const at = agent.updatedAt ?? ctx.now().toISOString();
+        if (!skipped.through || skipped.through.at < at) {
+          skipped.through = { at, id: PASSED_OVER };
+        }
         delete skipped.carry;
         if (agent.updatedAt) skipped.updated = agent.updatedAt;
         else delete skipped.updated;

@@ -1,6 +1,14 @@
 import { excludeEntryProblem } from "@seshi/model/exclude";
 import * as z from "zod";
 
+/** One entry of an exclude list (the server's `[capture] exclude`, the CLI's
+ * `capture.exclude`): one that could never match is refused. The issue's path names the entry;
+ * its text is left out, as it may hold a credential. */
+export const excludeEntry = z.string().superRefine((entry, ctx) => {
+  const problem = excludeEntryProblem(entry);
+  if (problem !== undefined) ctx.addIssue({ code: "custom", message: `this entry ${problem}` });
+});
+
 export const captureSection = z
   .strictObject({
     allow_retract: z
@@ -10,14 +18,7 @@ export const captureSection = z
         "Let the machine that uploaded a session retract it with its per-session secret (F9.7).",
       ),
     exclude: z
-      .array(
-        z.string().superRefine((entry, ctx) => {
-          const problem = excludeEntryProblem(entry);
-          if (problem !== undefined) {
-            ctx.addIssue({ code: "custom", message: `${JSON.stringify(entry)} ${problem}` });
-          }
-        }),
-      )
+      .array(excludeEntry)
       .default([])
       .describe(
         "The org's exclude list: sessions in these repositories (owner/name on any host, host/owner/name on one) or folders (starting with /, ~, a drive or \\\\server, and everything under them) are never stored, from any source. The server applies it to its own sources (repositories only); laptops download it (GET /v1/capture/rules) and apply it with their own capture.exclude. * matches within a path segment, ** across any number of them; blank entries and # comments are skipped. Drop-ins in seshi.d/ add to it.",

@@ -420,7 +420,8 @@ exclude = ["acme/legal"]
   `watch_config`): the next poll of a source and the next fetch by a laptop see it. A list with
   an entry that could never match (a URL with a credential in it, a repository with a space, a
   control character) is refused with the rest of the config, by `seshi config check` too, and
-  the running list stays.
+  the running list stays. The refusal names the entry by its place (`capture.exclude[2]`), never
+  its text, which may hold a credential. The CLI's `capture.exclude` refuses the same entries.
 - **Laptops download it** (`GET /v1/capture/rules`, [server.md](server.md#api)) and
   apply it with their own `capture.exclude`, which can only add entries: an entry in either
   keeps a session on the machine. A laptop holds a server's uploads until it has a copy of that

@@ -10,6 +10,7 @@
 
 import { tryReadJson, tryWritePrivateFile } from "./files";
 import type { CapturePaths } from "./paths";
+import type { ExcludeRule } from "./rules";
 
 const SCHEMA = "seshi/server-capture-rules/1";
 
@@ -21,6 +22,9 @@ export interface OrgRules {
   /** The server's exclude list; null when the server serves none (older than the route). */
   exclude: string[] | null;
   fetched_at: string;
+  /** `exclude` read for this machine when it was fetched (`~` expanded under `home`, folders'
+   * symbolic links resolved), so a hook does not read it again on every call. */
+  compiled?: { home: string; rules: ExcludeRule[] };
 }
 
 /** What a sink's server answered for its capture rules. */
@@ -39,6 +43,16 @@ export function readOrgRules(paths: CapturePaths): OrgRules | undefined {
     !(read.exclude === null || (Array.isArray(read.exclude) && read.exclude.every(isString)))
   ) {
     return undefined;
+  }
+  const compiled = read.compiled;
+  if (
+    compiled !== undefined &&
+    (typeof compiled?.home !== "string" ||
+      !Array.isArray(compiled.rules) ||
+      !compiled.rules.every((r) => typeof r?.entry === "string"))
+  ) {
+    const { compiled: _dropped, ...rest } = read;
+    return rest as OrgRules;
   }
   return read as OrgRules;
 }
@@ -61,6 +75,8 @@ export interface OrgRulesOptions {
   retryMaxMs?: number;
   /** Errors that are not a failed fetch but a hold of their own (sign in), thrown on. */
   rethrow?: (err: unknown) => boolean;
+  /** Reads a fetched list for this machine, kept with the copy (`OrgRules.compiled`). */
+  compile?: (exclude: string[]) => { home: string; rules: ExcludeRule[] };
 }
 
 /** Keeps the copy of the server's capture rules fresh for one uploader. */
@@ -68,6 +84,8 @@ export class OrgRulesKeeper {
   private nextFetch = 0;
   private failures = 0;
   private waiting: string | undefined;
+  /** The copy on disk is not the list the server last served (it could not be written over). */
+  private stale = false;
   private readonly refreshMs: number;
   private readonly retryBaseMs: number;
   private readonly retryMaxMs: number;
@@ -85,20 +103,17 @@ export class OrgRulesKeeper {
     if (!sink.captureRules) return { changed: false };
     const { paths, log } = this.options;
     const cached = readOrgRules(paths);
-    const ours = cached?.server === sink.target ? cached : undefined;
+    const ours = cached?.server === sink.target && !this.stale ? cached : undefined;
     const now = this.options.now();
-    if (now.getTime() < this.nextFetch) {
-      return ours ? { changed: false } : { held: this.waiting ?? "", changed: false };
+    // Not due, with a copy in force or a reason to wait. A copy gone since (removed, unreadable)
+    // is fetched again at once rather than hold uploads with no reason given.
+    if (now.getTime() < this.nextFetch && (ours || this.waiting !== undefined)) {
+      return ours ? { changed: false } : { held: this.waiting as string, changed: false };
     }
-    let answer: CaptureRulesAnswer;
-    try {
-      answer = await sink.captureRules(ours?.etag);
-    } catch (err) {
-      if (this.options.rethrow?.(err)) throw err;
+    const failed = (why: string): { held?: string; changed: boolean } => {
       this.failures++;
       const wait = Math.min(this.retryMaxMs, this.retryBaseMs * 2 ** (this.failures - 1));
       this.nextFetch = now.getTime() + wait;
-      const why = err instanceof Error ? err.message : String(err);
       if (ours) {
         if (this.failures === 1) {
           log(`could not fetch the server's capture rules, using the copy fetched before: ${why}`);
@@ -108,27 +123,61 @@ export class OrgRulesKeeper {
       this.waiting = `uploads to ${sink.target} wait for its capture rules: ${why}`;
       if (this.failures === 1) log(this.waiting);
       return { held: this.waiting, changed: false };
+    };
+    let answer: CaptureRulesAnswer;
+    try {
+      answer = await sink.captureRules(ours?.etag);
+    } catch (err) {
+      if (this.options.rethrow?.(err)) throw err;
+      return failed(err instanceof Error ? err.message : String(err));
     }
-    this.failures = 0;
-    this.waiting = undefined;
-    this.nextFetch = now.getTime() + this.refreshMs;
-    if (answer === "unchanged" && ours) return { changed: false };
+    if (answer === "unchanged") {
+      if (ours) {
+        this.succeeded(now);
+        return { changed: false };
+      }
+      // A 304 to a request that named no copy (a cache between here and the server): nothing to
+      // go on, so it is no answer, never "no list".
+      return failed("the server answered 304 with no copy held here");
+    }
+    const exclude = answer === "none" ? null : answer.exclude;
     const next: OrgRules = {
       schema: SCHEMA,
       server: sink.target,
-      ...(typeof answer === "object" && answer.etag ? { etag: answer.etag } : {}),
-      exclude: typeof answer === "object" ? answer.exclude : null,
+      ...(answer !== "none" && answer.etag ? { etag: answer.etag } : {}),
+      exclude,
       fetched_at: now.toISOString(),
+      ...(exclude && this.options.compile ? { compiled: this.options.compile(exclude) } : {}),
     };
-    tryWritePrivateFile(paths.orgRules, JSON.stringify(next));
-    const changed = !ours || JSON.stringify(ours.exclude) !== JSON.stringify(next.exclude);
+    // Decisions read the copy on disk, so one that cannot be written is no copy: unless it already
+    // holds this list, the uploads wait (a list kept in memory alone would not reach the hooks).
+    if (!tryWritePrivateFile(paths.orgRules, JSON.stringify(next))) {
+      const why = `cannot write ${paths.orgRules}`;
+      if (ours && JSON.stringify(ours.exclude) === JSON.stringify(exclude)) return failed(why);
+      this.stale = true;
+      this.failures++;
+      const wait = Math.min(this.retryMaxMs, this.retryBaseMs * 2 ** (this.failures - 1));
+      this.nextFetch = now.getTime() + wait;
+      this.waiting = `uploads to ${sink.target} wait for its capture rules: ${why}`;
+      if (this.failures === 1) log(this.waiting);
+      return { held: this.waiting, changed: false };
+    }
+    this.stale = false;
+    this.succeeded(now);
+    const changed = !ours || JSON.stringify(ours.exclude) !== JSON.stringify(exclude);
     if (changed) {
       log(
-        next.exclude === null
+        exclude === null
           ? `${sink.target} serves no capture rules; only this machine's capture.exclude applies`
-          : `the server's exclude list has ${next.exclude.length} entr${next.exclude.length === 1 ? "y" : "ies"}`,
+          : `the server's exclude list has ${exclude.length} entr${exclude.length === 1 ? "y" : "ies"}`,
       );
     }
     return { changed };
+  }
+
+  private succeeded(now: Date): void {
+    this.failures = 0;
+    this.waiting = undefined;
+    this.nextFetch = now.getTime() + this.refreshMs;
   }
 }

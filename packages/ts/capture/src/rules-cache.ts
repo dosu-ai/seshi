@@ -120,6 +120,19 @@ async function localRules(host: CaptureHost, paths: CapturePaths): Promise<Rules
   return snapshot;
 }
 
+/** An exclude list read for this machine (`~` expanded under `home`). */
+export function compileExcludes(
+  exclude: readonly string[],
+  home: string,
+): { home: string; rules: ExcludeRule[] } {
+  return {
+    home,
+    rules: exclude
+      .map((e) => excludeRule(e, home))
+      .filter((r): r is ExcludeRule => r !== undefined),
+  };
+}
+
 /** `snapshot` with the server's exclude list first: the org's list and this machine's are one
  * list, and an entry from either turns capture off; the server's is named first. */
 export function withServerExcludes(
@@ -127,11 +140,14 @@ export function withServerExcludes(
   paths: CapturePaths,
   home: string,
 ): RulesSnapshot {
-  const exclude = readOrgRules(paths)?.exclude ?? [];
-  const server = exclude
-    .map((e) => excludeRule(e, home))
-    .filter((r): r is ExcludeRule => r !== undefined)
-    .map((r): ExcludeRule => ({ ...r, from: "server" }));
+  const copy = readOrgRules(paths);
+  if (!copy?.exclude) return snapshot;
+  // Read for this machine when it was fetched; again only for another home.
+  const rules =
+    copy.compiled?.home === home ? copy.compiled.rules : compileExcludes(copy.exclude, home).rules;
+  // The last copy fetched, whichever server it came from: after a change of server the old list
+  // goes on applying (named for its server) until the new one's is fetched.
+  const server = rules.map((r): ExcludeRule => ({ ...r, from: "server", server: copy.server }));
   if (server.length === 0) return snapshot;
   return {
     ...snapshot,

@@ -1074,6 +1074,94 @@ describe("the server's exclude list (GET /v1/capture/rules)", () => {
     expect(server.uploads).toHaveLength(2);
   });
 
+  it("fetches again at once when its copy is gone, rather than wait with no reason", async () => {
+    sessionIn("s1", "app");
+    const up = listed({ orgRulesRefreshMs: 60_000 });
+    await up.pass();
+    expect(uploaded()).toEqual(["s1"]);
+    rmSync(paths.orgRules);
+    sessionIn("s2", "app2");
+    await up.pass();
+    expect(listing.rulesAsked).toHaveLength(2);
+    expect(uploaded()).toEqual(["s1", "s2"]);
+  });
+
+  it("holds uploads, saying why, while its copy cannot be written", async () => {
+    sessionIn("s1", "app");
+    // A folder where the copy goes: the write fails.
+    mkdirSync(paths.orgRules, { recursive: true });
+    const lines: string[] = [];
+    const up = listed({ log: (l) => lines.push(l) });
+    const held = await up.pass();
+    expect(server.uploads).toEqual([]);
+    expect(held.retrying).toBe(1);
+    expect(lines.join("\n")).toContain(`cannot write ${paths.orgRules}`);
+    expect(readState(paths).uploader?.failures).toBe(1);
+    // Still held on the next pass, without asking again before the backoff.
+    await up.pass();
+    expect(listing.rulesAsked).toHaveLength(1);
+    expect(server.uploads).toEqual([]);
+
+    rmSync(paths.orgRules, { recursive: true });
+    clock = new Date(clock.getTime() + 60_000);
+    expect((await up.pass()).uploaded).toBe(1);
+  });
+
+  it("holds uploads while a changed list cannot replace the copy it has", async () => {
+    sessionIn("s1", "app");
+    const up = listed({ orgRulesRefreshMs: 60_000 });
+    await up.pass();
+    expect(uploaded()).toEqual(["s1"]);
+    // The admin lists a folder; this machine cannot write its copy over.
+    listing.list = [join(dir, "clients")];
+    const copy = readFileSync(paths.orgRules, "utf8");
+    rmSync(paths.orgRules);
+    mkdirSync(paths.orgRules);
+    clock = new Date(clock.getTime() + 120_000);
+    sessionIn("s-client", "clients/x");
+    await up.pass();
+    expect(uploaded()).toEqual(["s1"]);
+    // The old copy back on disk is not the server's list: still held.
+    rmSync(paths.orgRules, { recursive: true });
+    writeFileSync(paths.orgRules, copy);
+    await up.pass();
+    expect(uploaded()).toEqual(["s1"]);
+    // Once it can write, the new list applies.
+    clock = new Date(clock.getTime() + 120_000);
+    await up.pass();
+    expect(uploaded()).toEqual(["s1"]);
+    expect(readOrgRules(paths)?.exclude).toEqual([join(dir, "clients")]);
+    sessionIn("s-app", "app3");
+    await up.pass();
+    expect(uploaded()).toEqual(["s-app", "s1"]);
+  });
+
+  it("takes a 304 to a request with no copy as no answer, never as no list", async () => {
+    listing.list = [join(dir, "clients")];
+    listing.captureRules = async (etag?: string) => {
+      listing.rulesAsked.push(etag);
+      return "unchanged";
+    };
+    sessionIn("s-client", "clients/x");
+    const held = await listed().pass();
+    expect(held.retrying).toBe(1);
+    expect(server.uploads).toEqual([]);
+    expect(readOrgRules(paths)).toBeUndefined();
+  });
+
+  it("keeps the list read for this machine with its copy", async () => {
+    listing.list = ["~/clients", "acme/app"];
+    sessionIn("s1", "app");
+    await listed().pass();
+    expect(readOrgRules(paths)?.compiled).toEqual({
+      home: dir,
+      rules: [
+        { entry: "~/clients", path: join(dir, "clients") },
+        { entry: "acme/app", repo: "acme/app" },
+      ],
+    });
+  });
+
   it("uploads as before to an older server without the route", async () => {
     listing.list = null;
     sessionIn("s1", "app");
@@ -1120,6 +1208,27 @@ describe("the server's exclude list (GET /v1/capture/rules)", () => {
     const later = await listed().pass();
     expect(server.uploads).toHaveLength(1);
     expect(later).toMatchObject({ queued: 0, retrying: 0 });
+  });
+
+  it("removes what the hooks kept beside a session the server excluded", async () => {
+    const kept = join(paths.dir, "kept", "fake", "s1");
+    const composing: CaptureAgent = {
+      ...agent,
+      compose: {
+        current: () => false,
+        path: () => join(kept, "transcript.jsonl"),
+        update: (_id, path) => path,
+      },
+    };
+    sessionIn("s1", "app");
+    listing.failNext = [new SessionExcluded()];
+    const up = listed({ agents: [composing] });
+    await up.pass();
+    expect(session("s1").excluded).toBeDefined();
+    mkdirSync(join(kept, "results"), { recursive: true });
+    writeFileSync(join(kept, "results", "r1.json"), "{}");
+    await up.pass({ sweep: true });
+    expect(existsSync(kept)).toBe(false);
   });
 });
 

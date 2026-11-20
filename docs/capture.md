@@ -442,15 +442,17 @@ and `seshi capture status` read that copy, never the network. The list in force 
 entries followed by this machine's own `capture.exclude`: an entry in either keeps a session on
 the machine, so a person's config can add to the org's list, never take from it.
 `seshi capture status` names the entry that decided and where it came from (`the org excludes
-acme/payroll (the server's [capture] exclude)`, or `(capture.exclude)`; in `--json`, `excluded:
-{ entry, from: "server" | "config" }`).
+acme/payroll (https://seshi.acme.dev's [capture] exclude)`, or `(capture.exclude)`; in `--json`,
+`excluded: { entry, from: "server" | "config", server? }`). The copy keeps the list already read
+for this machine (`~` expanded, folders' links resolved), so hooks do not read it again.
 
 - **Before its first copy** from the server it uploads to, the uploader sends that server
   nothing: what it would send may be on the list. It asks again with backoff, the uploads wait
   with their place kept, and after a few failures the status line says `upload failing`. A copy
   of another server's list (before `seshi login` to a new one) is not this server's, so it is
   fetched first too; hooks go on applying the last copy meanwhile.
-- **When a later fetch fails**, the copy it has stays in force.
+- **When a later fetch fails**, the copy it has stays in force. A copy that cannot be written
+  (a full disk, a permission) is no copy: uploads wait, and the uploader says why.
 - **A server older than the route** answers 404: it has no list, and only this machine's
   `capture.exclude` applies, as before. The uploader asks again every 5 minutes, so an upgraded
   server's list is picked up.

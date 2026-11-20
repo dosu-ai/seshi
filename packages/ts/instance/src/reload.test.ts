@@ -386,6 +386,7 @@ describe("reloading the org's exclude list", () => {
     const report = await instance.reload("api");
     expect(report.outcome).toBe("rejected");
     expect(report.errors?.join("\n")).toMatch(/names a credential/);
+    expect(report.errors?.join("\n")).not.toContain("tok@");
     expect(instance.captureExclude).toEqual(["acme/payroll"]);
   });
 });

@@ -602,7 +602,8 @@ describe("the org's exclude list", () => {
         "bc-x": {
           bytes: 0,
           updated: iso(NOW.getTime() - HOUR),
-          through: { at: iso(NOW.getTime()) },
+          // Cursor's own clock: the agent's updatedAt, past any run it has so far.
+          through: { at: iso(NOW.getTime() - HOUR), id: "\uffff" },
         },
       },
     });
@@ -671,6 +672,22 @@ describe("the org's exclude list", () => {
       "cursor-cloud:bc-a/run-3",
     ]);
     expect(ctx.submitted[1]?.payload).toMatchObject({ offset: stored });
+  });
+
+  it("cuts off on Cursor's clock: a run made in the instant of the cutoff stays passed over", async () => {
+    const api = new FakeCursor();
+    const at = iso(NOW.getTime() - HOUR);
+    api.agent("bc-a", at, [{ ...finished("run-1", 0), createdAt: at }]);
+    const ctx = new FakeContext(api);
+    ctx.exclude = ["example/demo"];
+    await poller.run(ctx.context());
+    ctx.exclude = [];
+    api.agent("bc-a", iso(NOW.getTime() - 0.5 * HOUR), [
+      { ...finished("run-1", 0), createdAt: at },
+      { ...finished("run-2", 0), createdAt: iso(NOW.getTime() - 0.5 * HOUR) },
+    ]);
+    await poller.run(ctx.context());
+    expect(ctx.submitted.map((e) => e.idempotency_key)).toEqual(["cursor-cloud:bc-a/run-2"]);
   });
 
   it("names the project as a laptop names the repository", async () => {

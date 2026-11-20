@@ -26,7 +26,7 @@ import {
   turnedOff,
   turnedOnSince,
 } from "./rules";
-import { captureRules, type RulesSnapshot } from "./rules-cache";
+import { captureRules, compileExcludes, type RulesSnapshot } from "./rules-cache";
 import { type HoldWord, RetractRefused, type SessionSink, SignInNeeded } from "./sink";
 import { readSpool, removeSpool, type SpoolEntry } from "./spool";
 import {
@@ -418,6 +418,7 @@ export class Uploader {
       retryBaseMs: this.retryBaseMs,
       retryMaxMs: this.retryMaxMs,
       rethrow: (err) => err instanceof SignInNeeded,
+      compile: (exclude) => compileExcludes(exclude, options.host.home),
       ...(options.orgRulesRefreshMs !== undefined ? { refreshMs: options.orgRulesRefreshMs } : {}),
     });
   }
@@ -788,9 +789,9 @@ export class Uploader {
     return additions.length;
   }
 
-  /** Remove what agents' hooks kept beside sessions a rule has turned off since, and beside sessions
-   * the state file no longer holds (gone, or never captured from here: a Cursor subagent's tool
-   * results) a day after it last changed. */
+  /** Remove what agents' hooks kept beside sessions a rule has turned off since (or the server
+   * refused as excluded), and beside sessions the state file no longer holds (gone, or never
+   * captured from here: a Cursor subagent's tool results) a day after it last changed. */
   private pruneKept(state: CaptureState, snapshot: RulesSnapshot, now: Date): void {
     for (const agent of this.agents.values()) {
       if (!agent.compose) continue;
@@ -806,7 +807,10 @@ export class Uploader {
         const session = state.sessions[sessionKey(agent.name, id)];
         if (session) {
           const place = placeOf(session.cwd);
-          if (turnedOff(this.decision(snapshot, session, place, state))) {
+          if (
+            session.excluded !== undefined ||
+            turnedOff(this.decision(snapshot, session, place, state))
+          ) {
             rmSync(dir, { recursive: true, force: true });
           }
           continue;

@@ -109,9 +109,9 @@ list's repository entries:
 Each time an excluded agent changes it counts once as `excluded` in the source's health
 (`seshi sync status`), and the poll's log line says how many were left out. A reload applies a
 changed list from the next poll. An entry added stops an agent's new runs; what was stored
-before stays. Runs made while an agent was excluded are passed over for good: when its entry
-goes, the poller goes on with the agent's runs from then on, appended where its stored session
-ends.
+before stays. Runs made while an agent was excluded are passed over for good: the poller notes
+the agent's `updatedAt` (Cursor's own clock) each time it leaves the agent out, and when the
+entry goes it reads only runs created after that, appended where the stored session ends.
 
 ## What a session holds
 

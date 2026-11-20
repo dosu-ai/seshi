@@ -34,6 +34,8 @@ export interface ExcludeRule {
   /** Where the entry came from: the server's list (`[capture] exclude`, fetched by the
    * uploader), or this machine's CLI config (`capture.exclude`) when unset. */
   from?: "server";
+  /** For an entry of the server's list: the server the copy came from. */
+  server?: string;
 }
 
 export const DEFAULT_RULES: CaptureRules = { enabled: true, paths: [], remotes: [], exclude: [] };
@@ -88,7 +90,7 @@ export interface Decision {
   reason: string;
   /** Set when an entry of the exclude list decided: the entry, and whether it is the server's
    * list or this machine's CLI config. */
-  excluded?: { entry: string; from: "server" | "config" };
+  excluded?: { entry: string; from: "server" | "config"; server?: string };
   /** Set when a pause stops the session (`level: "pause"`): the transcript offset it stops at.
    * What lies before it may still be sent again (a whole-log resend after a 409, a moved
    * transcript, a replace); nothing past it ever is. A caller that keeps state records it as the
@@ -206,11 +208,19 @@ function sharedExclusion(
   const excluded = excludedBy(rules, place, platform);
   if (excluded) {
     const from = excluded.from ?? "config";
+    const where =
+      from === "config"
+        ? "capture.exclude"
+        : `${excluded.server ?? "the server"}'s [capture] exclude`;
     return {
       capture: false,
       level: "org",
-      reason: `the org excludes ${excluded.entry} (${from === "server" ? "the server's [capture] exclude" : "capture.exclude"})`,
-      excluded: { entry: excluded.entry, from },
+      reason: `the org excludes ${excluded.entry} (${where})`,
+      excluded: {
+        entry: excluded.entry,
+        from,
+        ...(excluded.server !== undefined ? { server: excluded.server } : {}),
+      },
     };
   }
   if (rules.remotes.length > 0) {

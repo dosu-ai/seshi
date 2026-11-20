@@ -122,8 +122,10 @@ describe("drop-ins in seshi.d/", () => {
         "/etc/seshi/seshi.d/adx.toml": `[capture]\nexclude = ["https://bot:tok@github.com/acme/app", "acme/my app"]\n`,
       });
     expect(run).toThrow(ConfigError);
-    expect(run).toThrow(/names a credential/);
-    expect(run).toThrow(/a repository has no spaces/);
+    expect(run).toThrow(/capture\.exclude\[0\].*names a credential/);
+    expect(run).toThrow(/capture\.exclude\[1\].*a repository has no spaces/);
+    // The refusal names where the entry is, never what it says: it may hold a token.
+    expect(run).not.toThrow(/tok/);
   });
 
   it("are checked with the rest: a drop-in source's id must be unique", () => {
