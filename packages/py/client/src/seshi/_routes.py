@@ -61,6 +61,7 @@ ROUTES: dict[str, Route] = {
         ),
     ),
     "redactionRules": Route("GET", "/v1/redaction/rules", headers=("If-None-Match",)),
+    "captureRules": Route("GET", "/v1/capture/rules", headers=("If-None-Match",)),
     "createToken": Route("POST", "/v1/tokens"),
     "listTokens": Route("GET", "/v1/tokens", query=("owner", "kind", "all")),
     "revokeOwnerTokens": Route("POST", "/v1/tokens/revoke"),

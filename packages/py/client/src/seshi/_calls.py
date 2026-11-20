@@ -387,6 +387,20 @@ def redaction_rules_since(etag: str | None) -> Call[m.RedactionRulesAnswer | Non
     return Call("redactionRules", read_answer, headers={"If-None-Match": etag} if etag else {})
 
 
+def capture_rules() -> Call[m.CaptureRules]:
+    return Call("captureRules", _model(m.CaptureRules))
+
+
+def capture_rules_since(etag: str | None) -> Call[m.CaptureRulesAnswer | None]:
+    def read_answer(answer: Answer) -> m.CaptureRulesAnswer | None:
+        if answer.status == 304 and etag:
+            return None
+        document = m.CaptureRules.model_validate(_expect(answer, 200))
+        return m.CaptureRulesAnswer(document=document, etag=answer.headers.get("etag"))
+
+    return Call("captureRules", read_answer, headers={"If-None-Match": etag} if etag else {})
+
+
 def create_token(request: m.TokenRequest | Mapping[str, Any]) -> Call[m.CreatedToken]:
     return Call("createToken", _model(m.CreatedToken, 201), body=_dump(request, m.TokenRequest))
 

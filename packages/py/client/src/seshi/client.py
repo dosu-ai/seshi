@@ -394,6 +394,19 @@ class SeshiClient(_Base):
         back with its own ETag."""
         return self._run(calls.redaction_rules_since(etag))
 
+    # --- Capture rules --------------------------------------------------------------------
+
+    def capture_rules(self) -> m.CaptureRules:
+        """`GET /v1/capture/rules`: the org's exclude list (`[capture] exclude`), which laptops
+        apply before upload. A server older than the route raises `ServerError` 404."""
+        return self._run(calls.capture_rules())
+
+    def capture_rules_since(self, etag: str | None = None) -> m.CaptureRulesAnswer | None:
+        """`capture_rules` with HTTP caching: `etag`, from an earlier answer, goes as
+        If-None-Match. None means the list has not changed since; otherwise the document comes
+        back with its own ETag."""
+        return self._run(calls.capture_rules_since(etag))
+
     # --- Tokens (admins) ------------------------------------------------------------------
 
     def create_token(self, request: m.TokenRequest | Mapping[str, Any]) -> m.CreatedToken:
@@ -730,6 +743,14 @@ class AsyncSeshiClient(_Base):
     async def redaction_rules_since(self, etag: str | None = None) -> m.RedactionRulesAnswer | None:
         """`redaction_rules` with If-None-Match; None when unchanged."""
         return await self._run(calls.redaction_rules_since(etag))
+
+    async def capture_rules(self) -> m.CaptureRules:
+        """`GET /v1/capture/rules`."""
+        return await self._run(calls.capture_rules())
+
+    async def capture_rules_since(self, etag: str | None = None) -> m.CaptureRulesAnswer | None:
+        """`capture_rules` with If-None-Match; None when unchanged."""
+        return await self._run(calls.capture_rules_since(etag))
 
     async def create_token(self, request: m.TokenRequest | Mapping[str, Any]) -> m.CreatedToken:
         """`POST /v1/tokens`."""
