@@ -430,7 +430,10 @@ export class Uploader {
       retryBaseMs: this.retryBaseMs,
       retryMaxMs: this.retryMaxMs,
       rethrow: (err) => err instanceof SignInNeeded,
-      compile: (exclude) => compileExcludes(exclude, options.host.home),
+      compile: (exclude, redact) => ({
+        ...compileExcludes(exclude, options.host.home),
+        redact: compileExcludes(redact, options.host.home).rules,
+      }),
       ...(options.orgRulesRefreshMs !== undefined ? { refreshMs: options.orgRulesRefreshMs } : {}),
     });
   }

@@ -1,7 +1,8 @@
 /** The server's capture rules on this machine: the org's exclude list (`[capture] exclude` in the
- * server's config, `GET /v1/capture/rules`), fetched by the uploader and kept in
+ * server's config, `GET /v1/capture/rules`) and its tool-call redaction list
+ * (`[capture] redact_tool_calls`), fetched by the uploader and kept in
  * `capture-rules.json` with its ETag. Hooks, the status line and `seshi capture status` read the
- * copy (`withServerExcludes`); only the uploader fetches.
+ * copy (`withServerLists`); only the uploader fetches.
  *
  * - Before this machine holds a copy from the server it uploads to, that server's uploads wait:
  *   nothing goes up that its list may exclude.
@@ -21,15 +22,25 @@ export interface OrgRules {
   etag?: string;
   /** The server's exclude list; null when the server serves none (older than the route). */
   exclude: string[] | null;
+  /** The server's tool-call redaction list; absent when it serves none (older than the list). */
+  redact_tool_calls?: string[];
   fetched_at: string;
-  /** `exclude` read for this machine when it was fetched (`~` expanded under `home`, folders'
-   * symbolic links resolved), so a hook does not read it again on every call. */
-  compiled?: { home: string; rules: ExcludeRule[] };
+  /** The lists read for this machine when they were fetched (`~` expanded under `home`,
+   * folders' symbolic links resolved), so a hook does not read them again on every call. */
+  compiled?: CompiledOrgRules;
+}
+
+export interface CompiledOrgRules {
+  home: string;
+  /** `exclude`, read. */
+  rules: ExcludeRule[];
+  /** `redact_tool_calls`, read. */
+  redact?: ExcludeRule[];
 }
 
 /** What a sink's server answered for its capture rules. */
 export type CaptureRulesAnswer =
-  | { exclude: string[]; etag?: string }
+  | { exclude: string[]; redact_tool_calls?: string[]; etag?: string }
   /** The copy whose ETag was sent is still current (304). */
   | "unchanged"
   /** The server has no such route (404): it serves no list. */
@@ -40,7 +51,11 @@ export function readOrgRules(paths: CapturePaths): OrgRules | undefined {
   if (
     read?.schema !== SCHEMA ||
     typeof read.server !== "string" ||
-    !(read.exclude === null || (Array.isArray(read.exclude) && read.exclude.every(isString)))
+    !(read.exclude === null || (Array.isArray(read.exclude) && read.exclude.every(isString))) ||
+    !(
+      read.redact_tool_calls === undefined ||
+      (Array.isArray(read.redact_tool_calls) && read.redact_tool_calls.every(isString))
+    )
   ) {
     return undefined;
   }
@@ -49,7 +64,12 @@ export function readOrgRules(paths: CapturePaths): OrgRules | undefined {
     compiled !== undefined &&
     (typeof compiled?.home !== "string" ||
       !Array.isArray(compiled.rules) ||
-      !compiled.rules.every((r) => typeof r?.entry === "string"))
+      !compiled.rules.every((r) => typeof r?.entry === "string") ||
+      !(
+        compiled.redact === undefined ||
+        (Array.isArray(compiled.redact) &&
+          compiled.redact.every((r) => typeof r?.entry === "string"))
+      ))
   ) {
     const { compiled: _dropped, ...rest } = read;
     return rest as OrgRules;
@@ -58,6 +78,14 @@ export function readOrgRules(paths: CapturePaths): OrgRules | undefined {
 }
 
 const isString = (v: unknown): v is string => typeof v === "string";
+
+/** Whether two copies hold the same lists. */
+function sameLists(a: OrgRules, b: OrgRules): boolean {
+  return (
+    JSON.stringify(a.exclude) === JSON.stringify(b.exclude) &&
+    JSON.stringify(a.redact_tool_calls ?? []) === JSON.stringify(b.redact_tool_calls ?? [])
+  );
+}
 
 export interface OrgRulesSource {
   readonly target: string;
@@ -75,8 +103,8 @@ export interface OrgRulesOptions {
   retryMaxMs?: number;
   /** Errors that are not a failed fetch but a hold of their own (sign in), thrown on. */
   rethrow?: (err: unknown) => boolean;
-  /** Reads a fetched list for this machine, kept with the copy (`OrgRules.compiled`). */
-  compile?: (exclude: string[]) => { home: string; rules: ExcludeRule[] };
+  /** Reads the fetched lists for this machine, kept with the copy (`OrgRules.compiled`). */
+  compile?: (exclude: string[], redactToolCalls: string[]) => CompiledOrgRules;
 }
 
 /** Keeps the copy of the server's capture rules fresh for one uploader. */
@@ -141,19 +169,23 @@ export class OrgRulesKeeper {
       return failed("the server answered 304 with no copy held here");
     }
     const exclude = answer === "none" ? null : answer.exclude;
+    const redact = answer === "none" ? undefined : answer.redact_tool_calls;
     const next: OrgRules = {
       schema: SCHEMA,
       server: sink.target,
       ...(answer !== "none" && answer.etag ? { etag: answer.etag } : {}),
       exclude,
+      ...(redact !== undefined ? { redact_tool_calls: redact } : {}),
       fetched_at: now.toISOString(),
-      ...(exclude && this.options.compile ? { compiled: this.options.compile(exclude) } : {}),
+      ...(exclude && this.options.compile
+        ? { compiled: this.options.compile(exclude, redact ?? []) }
+        : {}),
     };
     // Decisions read the copy on disk, so one that cannot be written is no copy: unless it already
     // holds this list, the uploads wait (a list kept in memory alone would not reach the hooks).
     if (!tryWritePrivateFile(paths.orgRules, JSON.stringify(next))) {
       const why = `cannot write ${paths.orgRules}`;
-      if (ours && JSON.stringify(ours.exclude) === JSON.stringify(exclude)) return failed(why);
+      if (ours && sameLists(ours, next)) return failed(why);
       this.stale = true;
       this.failures++;
       const wait = Math.min(this.retryMaxMs, this.retryBaseMs * 2 ** (this.failures - 1));
@@ -164,12 +196,13 @@ export class OrgRulesKeeper {
     }
     this.stale = false;
     this.succeeded(now);
-    const changed = !ours || JSON.stringify(ours.exclude) !== JSON.stringify(exclude);
+    const changed = !ours || !sameLists(ours, next);
     if (changed) {
+      const entries = (n: number) => `${n} entr${n === 1 ? "y" : "ies"}`;
       log(
         exclude === null
           ? `${sink.target} serves no capture rules; only this machine's capture.exclude applies`
-          : `the server's exclude list has ${exclude.length} entr${exclude.length === 1 ? "y" : "ies"}`,
+          : `the server's exclude list has ${entries(exclude.length)}, its tool-call redaction list ${entries(redact?.length ?? 0)}`,
       );
     }
     return { changed };

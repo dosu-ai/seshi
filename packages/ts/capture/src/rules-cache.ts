@@ -116,7 +116,7 @@ export async function loadRules(host: CaptureHost): Promise<RulesSnapshot> {
  * loaded again (and the cache rewritten), with the server's exclude list (the copy the uploader
  * fetched last) ahead of this machine's own. */
 export async function captureRules(host: CaptureHost, paths: CapturePaths): Promise<RulesSnapshot> {
-  return withServerExcludes(await localRules(host, paths), paths, host.home);
+  return withServerLists(await localRules(host, paths), paths, host.home);
 }
 
 async function localRules(host: CaptureHost, paths: CapturePaths): Promise<RulesSnapshot> {
@@ -142,9 +142,10 @@ export function compileExcludes(
   };
 }
 
-/** `snapshot` with the server's exclude list first: the org's list and this machine's are one
- * list, and an entry from either turns capture off; the server's is named first. */
-export function withServerExcludes(
+/** `snapshot` with the server's lists first: the org's exclude list and this machine's are one
+ * list, and an entry from either turns capture off; so are the two tool-call redaction lists, and
+ * an entry from either redacts. The server's entries are named first. */
+export function withServerLists(
   snapshot: RulesSnapshot,
   paths: CapturePaths,
   home: string,
@@ -152,14 +153,23 @@ export function withServerExcludes(
   const copy = readOrgRules(paths);
   if (!copy?.exclude) return snapshot;
   // Read for this machine when it was fetched; again only for another home.
-  const rules =
-    copy.compiled?.home === home ? copy.compiled.rules : compileExcludes(copy.exclude, home).rules;
+  const compiled = copy.compiled?.home === home ? copy.compiled : undefined;
+  const rules = compiled?.rules ?? compileExcludes(copy.exclude, home).rules;
+  const redact = compiled?.redact ?? compileExcludes(copy.redact_tool_calls ?? [], home).rules;
   // The last copy fetched, whichever server it came from: after a change of server the old list
   // goes on applying (named for its server) until the new one's is fetched.
-  const server = rules.map((r): ExcludeRule => ({ ...r, from: "server", server: copy.server }));
-  if (server.length === 0) return snapshot;
+  const fromServer = (r: ExcludeRule): ExcludeRule => ({
+    ...r,
+    from: "server",
+    server: copy.server,
+  });
+  if (rules.length === 0 && redact.length === 0) return snapshot;
   return {
     ...snapshot,
-    rules: { ...snapshot.rules, exclude: [...server, ...snapshot.rules.exclude] },
+    rules: {
+      ...snapshot.rules,
+      exclude: [...rules.map(fromServer), ...snapshot.rules.exclude],
+      redactToolCalls: [...redact.map(fromServer), ...(snapshot.rules.redactToolCalls ?? [])],
+    },
   };
 }

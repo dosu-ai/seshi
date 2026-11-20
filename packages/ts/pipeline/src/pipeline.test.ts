@@ -1318,6 +1318,155 @@ describe("the org's exclude list at ingest", () => {
   });
 });
 
+describe("the org's tool-call redaction list at ingest", () => {
+  const listed = repoExcludes(["acme/research", "acme/payroll"]);
+  const toolCallsRedactedFor = (repo: string) => excludingEntry(listed, [repo]);
+  const MARKER = "[redacted:tool-call]";
+  const turn = (id: string) =>
+    call(id, { file_path: `/repo/${id}.ts`, limit: 40 }) +
+    result(id, `export const KEY_${id} = 1;`) +
+    reply(`read ${id}`);
+  const inRepo = (repo: string | undefined, text = HEAD + turn("c1"), offset = 0): Envelope => ({
+    ...upload(text, offset),
+    ...(repo !== undefined ? { repo } : {}),
+  });
+  const records = async (answer: StoreSessionResult) =>
+    (await getTrace(store, "alice", ARCHIVE, (answer as { content_hash: string }).content_hash))
+      ?.records ?? [];
+
+  it("stores a listed repo's session with tool inputs and results redacted, chunk by chunk", async () => {
+    const p = pipeline({ toolCallsRedactedFor });
+    const first = HEAD + turn("c1");
+    const whole = await submit(p, inRepo("github.com/acme/research", first));
+    const stored = await records(whole);
+    expect(stored[3]).toMatchObject({
+      tool_calls: [{ id: "c1", name: "Read", args: `{"file_path":"${MARKER}","limit":40}` }],
+    });
+    expect(stored[4]).toMatchObject({ role: "tool", tool_call_id: "c1", content: MARKER });
+    // The conversation is untouched.
+    expect(stored[2]).toMatchObject({ role: "assistant", content: "done" });
+    expect(stored[5]).toMatchObject({ role: "assistant", content: "read c1" });
+    expect(JSON.stringify(stored)).not.toContain("KEY_c1");
+    const metadata = await readMetadata(store, "alice", ARCHIVE);
+    expect(metadata?.redaction?.counts["tool-call"]).toBe(2);
+    // A chunk is redacted the same way, at the raw log's offset.
+    const chunk = await submit(p, inRepo("github.com/acme/research", turn("c2"), bytes(first)));
+    expect(chunk.status).toBe("stored");
+    expect(JSON.stringify(await records(chunk))).not.toContain("KEY_c2");
+    expect((await readMetadata(store, "alice", ARCHIVE))?.normalized?.bytes).toBe(
+      bytes(first + turn("c2")),
+    );
+  });
+
+  it("redacts what a source matched itself, whatever the envelope's repo says", async () => {
+    const p = pipeline({ toolCallsRedactedFor });
+    const answer = (await p.submit(inRepo("github.com/acme/web"), {
+      redactToolCalls: "acme/research",
+    })) as StoreSessionResult;
+    expect(JSON.stringify(await records(answer))).not.toContain("KEY_c1");
+  });
+
+  it("leaves a session in another repo, or with none, as it is", async () => {
+    const p = pipeline({ toolCallsRedactedFor });
+    expect(JSON.stringify(await records(await submit(p, inRepo("github.com/acme/web"))))).toContain(
+      "KEY_c1",
+    );
+    const none = await submit(p, {
+      ...inRepo(undefined),
+      session_key: "s2",
+      idempotency_key: "s2",
+    });
+    const trace = await getTrace(
+      store,
+      "alice",
+      archiveId("alice", "trajectory", "s2"),
+      (none as { content_hash: string }).content_hash,
+    );
+    expect(JSON.stringify(trace)).toContain("KEY_c1");
+  });
+
+  it("changes nothing a laptop already redacted", async () => {
+    const p = pipeline({ toolCallsRedactedFor });
+    const sent = HEAD + call("c1", { file_path: MARKER }) + result("c1", MARKER) + reply("ok");
+    await submit(p, inRepo("github.com/acme/research", sent));
+    expect((await readMetadata(store, "alice", ARCHIVE))?.redaction?.counts["tool-call"]).toBe(
+      undefined,
+    );
+  });
+
+  it("redacts a listed session's span parts before the assembler keeps them", async () => {
+    const kept: unknown[] = [];
+    const assembler: SpanAssembler = {
+      accept: async (batch) => {
+        kept.push(...batch.parts.map((p) => p.part));
+        return { status: "accepted", archive_id: batch.archive_id, spans: batch.parts.length };
+      },
+    };
+    const attr = (key: string, value: string) => ({ key, value: { stringValue: value } });
+    const toolSpan = (repo: string): Envelope => ({
+      ...upload(HEAD),
+      repo,
+      source: "otlp",
+      source_id: "console",
+      format: "otlp-genai",
+      session_key: "sesn_1",
+      caller: { kind: "service", principal: "svc-console" },
+      owner: "svc-console",
+      owner_basis: "service",
+      payload: {
+        kind: "spans",
+        spans: [
+          {
+            traceId: "ab".repeat(16),
+            spanId: "cd".repeat(8),
+            name: "execute_tool shell",
+            startTimeUnixNano: "1790000000000000000",
+            attributes: [
+              attr("gen_ai.operation.name", "execute_tool"),
+              attr("gen_ai.tool.name", "shell"),
+              attr("gen_ai.tool.call.id", "call-1"),
+              attr("gen_ai.tool.call.arguments", '{"command":"psql -c count_customers"}'),
+              attr("gen_ai.tool.call.result", "4812 customers in sk_live_span"),
+            ],
+          },
+        ],
+      },
+      idempotency_key: "ab/cd",
+    });
+    const p = pipeline({ assembler, toolCallsRedactedFor });
+    await p.submit(toolSpan("github.com/acme/web"));
+    expect(JSON.stringify(kept)).toContain("sk_live_span");
+    kept.length = 0;
+    await p.submit(toolSpan("github.com/acme/research"));
+    expect(kept).toHaveLength(1);
+    expect(JSON.stringify(kept)).not.toContain("sk_live_span");
+    expect(JSON.stringify(kept)).not.toContain("count_customers");
+    expect(JSON.stringify(kept)).toContain("shell");
+  });
+
+  it("stores nothing a listed subagent's session said: it is all its parent's tool call", async () => {
+    const p = pipeline({ toolCallsRedactedFor });
+    await p.submit({ ...inRepo("github.com/acme/research"), parent_session_id: "parent-1" });
+    // With its text gone the session is usually below the filter: either way, none of it is kept.
+    const everything = objects()
+      .map((key) => readFileSync(join(dir, key), "utf8"))
+      .join("\n");
+    expect(everything).not.toContain("x".repeat(50));
+    expect(everything).not.toContain("read c1");
+    expect(everything).not.toContain("KEY_c1");
+  });
+
+  it("refuses a repo on both lists: exclusion wins", async () => {
+    const p = pipeline({
+      toolCallsRedactedFor,
+      excludedRepo: (repo) => excludingEntry(repoExcludes(["acme/payroll"]), [repo]),
+    });
+    await expect(p.submit(inRepo("github.com/acme/payroll"))).rejects.toBeInstanceOf(
+      SessionExcluded,
+    );
+  });
+});
+
 describe("failures (X4.8)", () => {
   const s3 = (envelope: Envelope): Envelope => ({
     ...envelope,

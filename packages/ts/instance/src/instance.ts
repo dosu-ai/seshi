@@ -214,21 +214,28 @@ export class Instance {
    * entries; a reload changes it at once), as written, blanks and comments left out: what
    * `GET /v1/capture/rules` serves laptops. */
   get captureExclude(): string[] {
-    return this.config.capture.exclude
-      .map((entry) => entry.trim())
-      .filter((entry) => entry !== "" && !entry.startsWith("#"));
+    return written(this.config.capture.exclude);
   }
 
-  private excludesFor: { from: readonly string[]; excludes: RepoExcludes } | undefined;
+  /** The org's tool-call redaction list (`[capture] redact_tool_calls`), the same way. */
+  get captureRedactToolCalls(): string[] {
+    return written(this.config.capture.redact_tool_calls);
+  }
+
+  private readonly redactions = byIdentity(repoExcludes);
+
+  /** The repository entries of the tool-call redaction list, read once per config: a session
+   * whose `repo` one names is stored with its tool calls redacted. */
+  get repoToolCallRedactions(): RepoExcludes {
+    return this.redactions(this.config.capture.redact_tool_calls);
+  }
+
+  private readonly excludes = byIdentity(repoExcludes);
 
   /** The repository entries of that list, read once per config: what the server's own sources
    * match against (folder entries are a laptop's). */
   get repoExcludes(): RepoExcludes {
-    const from = this.config.capture.exclude;
-    if (this.excludesFor?.from !== from) {
-      this.excludesFor = { from, excludes: repoExcludes(from) };
-    }
-    return this.excludesFor.excludes;
+    return this.excludes(this.config.capture.exclude);
   }
 
   constructor(parts: InstanceParts) {
@@ -297,6 +304,7 @@ export class Instance {
       authorizer: ownershipAuthorizer(),
       visibility: parts.visibility ?? ((sourceId) => visibilityFor(this.config, sourceId)),
       excludedRepo: (repo) => excludingEntry(this.repoExcludes, [repo]),
+      toolCallsRedactedFor: (repo) => excludingEntry(this.repoToolCallRedactions, [repo]),
       sourceLabels: (sourceId) => this.config.sources.find((s) => s.id === sourceId)?.labels,
       ...(parts.records ? { records: parts.records } : {}),
       ...(parts.createLayout !== undefined ? { createLayout: parts.createLayout } : {}),
@@ -317,6 +325,7 @@ export class Instance {
       log: this.log,
       now: this.now,
       excludes: () => this.repoExcludes,
+      toolCallRedactions: () => this.repoToolCallRedactions,
     });
 
     this.search =
@@ -852,4 +861,19 @@ export async function buildInstance(
     }
   }
   return instance;
+}
+
+/** A list's entries as written, blanks and `#` comments left out. */
+function written(entries: readonly string[]): string[] {
+  return entries.map((entry) => entry.trim()).filter((e) => e !== "" && !e.startsWith("#"));
+}
+
+/** `read` remembering its last answer for as long as it is asked about the same list (one config
+ * generation: a reload's list is a new array). */
+function byIdentity<T>(read: (entries: readonly string[]) => T): (entries: readonly string[]) => T {
+  let last: { from: readonly string[]; value: T } | undefined;
+  return (entries) => {
+    if (last?.from !== entries) last = { from: entries, value: read(entries) };
+    return last.value;
+  };
 }

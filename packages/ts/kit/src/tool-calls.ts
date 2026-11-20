@@ -10,27 +10,19 @@
  * a pass knows, the structure stays (keys, numbers, booleans) and only strings go
  * (`blankStrings`). */
 
-export const TOOL_CALL_MARKER = "[redacted:tool-call]";
+import { blankStrings, TOOL_CALL_MARKER } from "@seshi/model/tool-calls";
+
+export {
+  blankStrings,
+  redactCommandOutput,
+  redactTagBodies,
+  TOOL_CALL_MARKER,
+} from "@seshi/model/tool-calls";
 
 type Json = Record<string, unknown>;
 
-const NOTHING: ReadonlySet<string> = new Set();
-
 export const isJsonObject = (value: unknown): value is Json =>
   typeof value === "object" && value !== null && !Array.isArray(value);
-
-/** `value` with every non-empty string in it replaced by `TOOL_CALL_MARKER`; object keys, numbers,
- * booleans and null stay, and so does the value of any key in `keep`, at any depth. */
-export function blankStrings(value: unknown, keep: ReadonlySet<string> = NOTHING): unknown {
-  if (typeof value === "string") return value === "" ? value : TOOL_CALL_MARKER;
-  if (Array.isArray(value)) return value.map((v) => blankStrings(v, keep));
-  if (isJsonObject(value)) {
-    const next: Json = {};
-    for (const [k, v] of Object.entries(value)) next[k] = keep.has(k) ? v : blankStrings(v, keep);
-    return next;
-  }
-  return value;
-}
 
 const TYPE_ONLY: ReadonlySet<string> = new Set(["type"]);
 
@@ -96,16 +88,6 @@ export function byType(
       typeof kind === "string" && Object.hasOwn(shapes, kind) ? shapes[kind] : undefined;
     return reshape(value, shape ?? fallback);
   };
-}
-
-/** `text` with the body of each `<tag>…</tag>` named in `tags` replaced by the marker; a tag
- * left open (output cut short) loses everything after it. An empty body stays. */
-export function redactTagBodies(text: string, tags: readonly string[]): string {
-  const names = tags.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
-  const pattern = new RegExp(`<(${names})>([\\s\\S]*?)(</\\1>|$)`, "g");
-  return text.replace(pattern, (whole, tag: string, body: string, close: string) =>
-    body === "" ? whole : `<${tag}>${TOOL_CALL_MARKER}${close}`,
-  );
 }
 
 /** `text` with each record (a JSONL line, or the one JSON document) rewritten by `redact` and

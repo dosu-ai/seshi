@@ -958,6 +958,7 @@ export function createApp(instance: Instance) {
     const document: CaptureRulesDocument = {
       schema: CAPTURE_RULES_SCHEMA,
       exclude: instance.captureExclude,
+      redact_tool_calls: instance.captureRedactToolCalls,
     };
     const digest = createHash("sha256").update(JSON.stringify(document)).digest("hex");
     const etag = `"${digest}"`;

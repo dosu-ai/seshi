@@ -79,7 +79,7 @@ describe("drop-ins in seshi.d/", () => {
       });
     expect(run).toThrow(ConfigError);
     expect(run).toThrow(
-      "/etc/seshi/seshi.d/adx.toml: a drop-in may only add to sources, redaction.packs and capture.exclude; server.listen belongs in the main config file",
+      "/etc/seshi/seshi.d/adx.toml: a drop-in may only add to sources, redaction.packs, capture.exclude and capture.redact_tool_calls; server.listen belongs in the main config file",
     );
   });
 
@@ -103,7 +103,32 @@ describe("drop-ins in seshi.d/", () => {
       "/etc/seshi/seshi.toml": MAIN,
       "/etc/seshi/seshi.d/adx.toml": `[capture]\nexclude = ["acme/app"]\n`,
     });
-    expect(loaded.config.capture).toEqual({ allow_retract: true, exclude: ["acme/app"] });
+    expect(loaded.config.capture).toEqual({
+      allow_retract: true,
+      exclude: ["acme/app"],
+      redact_tool_calls: [],
+    });
+  });
+
+  it("a drop-in's tool-call redaction list, added to the main file's", () => {
+    const loaded = load({
+      "/etc/seshi/seshi.toml": `${MAIN}\n[capture]\nredact_tool_calls = ["acme/research"]\n`,
+      "/etc/seshi/seshi.d/adx.toml": `[capture]\nredact_tool_calls = ["acme/labs", "~/labs"]\n`,
+    });
+    expect(loaded.config.capture.redact_tool_calls).toEqual([
+      "acme/research",
+      "acme/labs",
+      "~/labs",
+    ]);
+  });
+
+  it("refuse a tool-call redaction entry that could never match", () => {
+    expect(() =>
+      load({
+        "/etc/seshi/seshi.toml": MAIN,
+        "/etc/seshi/seshi.d/adx.toml": `[capture]\nredact_tool_calls = ["https://bot:tok@github.com/acme/x"]\n`,
+      }),
+    ).toThrow(/names a credential/);
   });
 
   it("a drop-in may not set the capture section's other keys", () => {

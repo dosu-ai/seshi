@@ -100,3 +100,9 @@ export {
 export { redactTranscript, type TranscriptRedaction } from "./transcript";
 
 export const CUSTOM_PATTERN_KIND = "custom-pattern";
+export {
+  redactToolCallRecords,
+  TOOL_CALL_COUNT,
+  TOOL_CALL_MARKER,
+  withToolCallsRedacted,
+} from "./tool-calls";

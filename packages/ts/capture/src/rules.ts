@@ -121,6 +121,8 @@ export interface Decision {
   /** Set when what is sent of the session goes with its tool calls redacted
    * (`capture.redact_tool_calls`): why, naming the entry. */
   redact_tool_calls?: string;
+  /** With it: the entry, and whether it is the server's list or this machine's CLI config. */
+  redacted?: { entry: string; from: "server" | "config"; server?: string };
 }
 
 /** A pause, from `seshi capture pause` to its end (`until`; none while it is open-ended). */
@@ -462,20 +464,40 @@ export function decide(input: DecideInput, platform: NodeJS.Platform = process.p
     return {
       capture: false,
       level: "org",
-      reason: `a subagent's session is its parent's tool call, and ${redacting}`,
+      reason: `a subagent's session is its parent's tool call, and ${redacting.reason}`,
     };
   }
-  return redacting ? { ...decision, redact_tool_calls: redacting } : decision;
+  return redacting
+    ? { ...decision, redact_tool_calls: redacting.reason, redacted: redacting.redacted }
+    : decision;
 }
 
 /** Why the session's tool calls are redacted, when they are: it ran in a place the org lists in
  * `capture.redact_tool_calls`, here or in any other folder it was seen in (what it did there
  * stays in it wherever it goes next). Exclusion is decided first, so it wins. */
-function toolCallsRedacted(input: DecideInput, platform: NodeJS.Platform): string | undefined {
-  const reason = (entry: ExcludeRule) =>
-    `the org redacts tool calls in ${entry.entry} (capture.redact_tool_calls)`;
+function toolCallsRedacted(
+  input: DecideInput,
+  platform: NodeJS.Platform,
+): { reason: string; redacted: NonNullable<Decision["redacted"]> } | undefined {
+  const found = (entry: ExcludeRule) => {
+    const from: "server" | "config" = entry.from ?? "config";
+    const where =
+      from === "config"
+        ? "capture.redact_tool_calls"
+        : `${entry.server ?? "the server"}'s [capture] redact_tool_calls`;
+    return {
+      reason: `the org redacts tool calls in ${entry.entry} (${where})`,
+      redacted: {
+        entry: entry.entry,
+        from,
+        ...(entry.server !== undefined ? { server: entry.server } : {}),
+      },
+    };
+  };
   const here = toolCallsRedactedBy(input.rules, input.place, platform);
-  if (here) return reason(here);
+  if (here) return found(here);
   const seen = firstSeenWhere(input, (other) => toolCallsRedactedBy(input.rules, other, platform));
-  return seen ? `it also ran in ${seen.where}, where ${reason(seen.found)}` : undefined;
+  if (!seen) return undefined;
+  const there = found(seen.found);
+  return { ...there, reason: `it also ran in ${seen.where}, where ${there.reason}` };
 }

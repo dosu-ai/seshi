@@ -24,10 +24,9 @@ import {
   blankUnknown,
   isJsonObject,
   type RecordShape,
+  redactCommandOutput,
   redactRecords,
-  redactTagBodies,
   reshape,
-  TOOL_CALL_MARKER,
 } from "@seshi/kit";
 
 /** A row's identity and place: kept on every row. */
@@ -82,16 +81,10 @@ const RESULT: RecordShape = {
 
 const CALL_TYPES = new Set(["tool_use", "server_tool_use", "mcp_tool_use"]);
 
-/** What a command the person ran printed. */
-const OUTPUT_TAGS = ["bash-stdout", "bash-stderr", "local-command-stdout", "local-command-stderr"];
-const NOTIFICATION = /^\s*<task-notification/;
-
 /** Text the person (or Claude Code for them) put in the conversation, with what tools and
- * commands returned in it replaced. */
+ * commands returned in it replaced (as the server's pass does too). */
 function personText(text: unknown): unknown {
-  if (typeof text !== "string") return blankUnknown(text);
-  if (NOTIFICATION.test(text)) return `<task-notification>${TOOL_CALL_MARKER}</task-notification>`;
-  return redactTagBodies(text, OUTPUT_TAGS);
+  return typeof text === "string" ? redactCommandOutput(text) : blankUnknown(text);
 }
 
 function block(value: unknown, fromPerson: boolean): unknown {

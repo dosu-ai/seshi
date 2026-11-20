@@ -850,10 +850,12 @@ class RedactionRulesAnswer(Response):
 
 
 class CaptureRules(Response):
-    """`seshi/capture-rules/1`: the org's exclude list, which laptops apply before upload."""
+    """`seshi/capture-rules/1`: the org's exclude list and tool-call redaction list, which laptops
+    apply before upload. `redact_tool_calls` is None from a server older than that list."""
 
     schema_: Literal["seshi/capture-rules/1"] = Field(alias="schema")
     exclude: list[str]
+    redact_tool_calls: list[str] | None = None
 
 
 class CaptureRulesAnswer(Response):

@@ -94,6 +94,7 @@ export {
   byType,
   isJsonObject,
   type RecordShape,
+  redactCommandOutput,
   redactRecords,
   redactTagBodies,
   reshape,
@@ -132,7 +133,10 @@ export class CheckpointLost extends Error {
 
 export interface ConnectorContext<C = Readonly<Record<string, unknown>>> {
   readonly source: { readonly id: string; readonly type: string; readonly config: C };
-  submit(envelope: Envelope): Promise<SubmitOutcome>;
+  /** Send a session's envelope. `redactToolCalls` is the entry of the org's tool-call redaction
+   * list the connector matched for it (`toolCallsRedactedBy`): its records are stored with tool
+   * calls redacted, whatever its `repo` says. */
+  submit(envelope: Envelope, options?: { redactToolCalls?: string }): Promise<SubmitOutcome>;
   readonly checkpoint: CheckpointHandle;
   fetch(input: string | URL | Request, init?: RequestInit): Promise<Response>;
   readonly log: ConnectorLogger;
@@ -147,6 +151,10 @@ export interface ConnectorContext<C = Readonly<Record<string, unknown>>> {
   /** Count a session (or the change to one) left out because the org excludes its repository,
    * in the source's health (`excluded`, shown by `seshi sync status`). */
   excluded?(): void;
+  /** The org's tool-call redaction list (`[capture] redact_tool_calls`, as the server runs it
+   * now): the entry that names any of `repos`, if one does, matched as `excludedBy` matches. A
+   * connector passes it to `submit` for that session. Absent where there is no list. */
+  toolCallsRedactedBy?(repos: readonly string[]): string | undefined;
 }
 
 export interface ConnectorFailure {

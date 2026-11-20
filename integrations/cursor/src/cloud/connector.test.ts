@@ -144,6 +144,10 @@ class FakeContext {
   exclude: string[] = [];
   /** Agents counted as excluded (the source's health). */
   excludedCount = 0;
+  /** The server's `[capture] redact_tool_calls`. */
+  redact: string[] = [];
+  /** What each submit was asked to redact, by idempotency key. */
+  redactions = new Map<string, string | undefined>();
 
   constructor(
     readonly api: FakeCursor,
@@ -153,8 +157,9 @@ class FakeContext {
   context(): ConnectorContext {
     return {
       source: { id: "cursor-team", type: "cursor-cloud", config: this.config },
-      submit: async (envelope): Promise<SubmitOutcome> => {
+      submit: async (envelope, options): Promise<SubmitOutcome> => {
         this.submitted.push(envelope);
+        this.redactions.set(envelope.idempotency_key, options?.redactToolCalls);
         const earlier = this.answers.get(envelope.idempotency_key);
         if (earlier) return { ...earlier, status: "duplicate" } as SubmitOutcome;
         const payload = envelope.payload as { text: string; offset: number };
@@ -204,6 +209,7 @@ class FakeContext {
         return "recorded";
       },
       excludedBy: (repos) => excludingEntry(repoExcludes(this.exclude), repos),
+      toolCallsRedactedBy: (repos) => excludingEntry(repoExcludes(this.redact), repos),
       excluded: () => {
         this.excludedCount++;
       },
@@ -579,6 +585,46 @@ describe("the cursor-cloud poller", () => {
     await expect(poller.run(new FakeContext(api).context())).rejects.toThrow(
       /refused the API key \(401\)/,
     );
+  });
+});
+
+describe("the org's tool-call redaction list", () => {
+  it("submits a listed agent's runs to be stored with tool calls redacted, any repository counting", async () => {
+    const api = new FakeCursor();
+    api.agent("bc-a", iso(NOW.getTime() - HOUR), [finished("run-1", 2)]);
+    api.agent(
+      "bc-r",
+      iso(NOW.getTime() - HOUR),
+      [finished("run-r", 2)],
+      [{ url: "https://github.com/example/demo" }, { url: "git@github.com:Acme/Research.git" }],
+    );
+    const ctx = new FakeContext(api);
+    ctx.redact = ["acme/research"];
+    await poller.run(ctx.context());
+    const asked = (agent: string) =>
+      ctx.submitted
+        .filter((e) => e.session_key === agent)
+        .map((e) => ctx.redactions.get(e.idempotency_key));
+    expect(asked("bc-r")).toEqual(["acme/research"]);
+    expect(asked("bc-a")).toEqual([undefined]);
+    // Read and stored as usual: only the stored records lose the tools' detail (the pipeline).
+    expect(ctx.stored.get("bc-r")).toBeGreaterThan(0);
+  });
+
+  it("excludes rather than redacts an agent on both lists", async () => {
+    const api = new FakeCursor();
+    api.agent(
+      "bc-x",
+      iso(NOW.getTime() - HOUR),
+      [finished("run-x", 2)],
+      [{ url: "https://github.com/acme/payroll" }],
+    );
+    const ctx = new FakeContext(api);
+    ctx.exclude = ["acme/payroll"];
+    ctx.redact = ["acme/payroll"];
+    await poller.run(ctx.context());
+    expect(ctx.submitted).toEqual([]);
+    expect(ctx.excludedCount).toBe(1);
   });
 });
 

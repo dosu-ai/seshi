@@ -132,6 +132,18 @@ describe("the CLI's config", () => {
       cliConfigSchema.safeParse({ capture: { exclude: ["~/my clients", "# a note"] } }).success,
     ).toBe(true);
   });
+
+  it("still reads a redact_tool_calls entry the server would refuse, as since 0.19", () => {
+    // A laptop's own list was plain strings when it shipped: such an entry never matches, but
+    // it must not make the config unreadable (which would stop capture altogether).
+    const loaded = loadCliConfig({
+      file: "/c.toml",
+      fs: fs({
+        "/c.toml": `[capture]\nredact_tool_calls = ["https://bot:tok@github.com/acme/x", "acme/my app"]\n`,
+      }),
+    });
+    expect(loaded.config.capture.redact_tool_calls).toHaveLength(2);
+  });
 });
 
 describe("the CLI's labels", () => {

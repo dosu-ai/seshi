@@ -113,6 +113,19 @@ before stays. Runs made while an agent was excluded are passed over for good: th
 the agent's `updatedAt` (Cursor's own clock) each time it leaves the agent out, and when the
 entry goes it reads only runs created after that, appended where the stored session ends.
 
+## The org's tool-call redaction list
+
+The server's `[capture] redact_tool_calls`
+([config.md](config.md#the-orgs-tool-call-redaction-list-capture-redact_tool_calls)) is matched
+against the same repositories, in the same way, after the exclude list (which wins for an agent
+on both). An agent with any listed repository is read and stored as usual, but its runs' records
+are stored with every tool call's input and output replaced by `[redacted:tool-call]`: the
+pipeline does it before anything is stored or indexed. The prompts, the agent's words and
+thinking, each call's name and id, their order and whether each failed are kept; a call's
+arguments keep their keys and numbers (a shell call's timeout), not their strings. The session's
+`redaction.counts` counts what was replaced under `tool-call`. A reload applies a changed list
+from the next run stored; runs stored before keep what they had.
+
 ## What a session holds
 
 A session's `repo` is the agent's repository, normalized as a laptop's uploader names its remote

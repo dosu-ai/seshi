@@ -13,6 +13,9 @@
     },
     "./labels": {
       "bun": "./src/labels.ts"
+    },
+    "./tool-calls": {
+      "bun": "./src/tool-calls.ts"
     }
   },
   "dependencies": {

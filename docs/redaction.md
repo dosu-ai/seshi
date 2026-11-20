@@ -31,17 +31,23 @@ paths and results are already separate fields; the transcript itself is never st
 3. **The built-in secret patterns**: provider tokens, credential assignments, bearer headers,
    JWTs, connection URLs, private-key blocks, and the entropy pass.
 
-A session from a place the org lists in `capture.redact_tool_calls` goes through one pass more
-first, on the laptop before upload: every string of every tool call's input and result becomes
-`[redacted:tool-call]`, keeping the calls' names, ids, order and failures
-([capture.md](capture.md#tool-calls-redacted)). The passes above then run on what is left, as
+A session from a place the org lists in `[capture] redact_tool_calls` (the server's list, with
+a laptop's own `capture.redact_tool_calls`) goes through one pass more first: every string of
+every tool call's input and result becomes `[redacted:tool-call]`, keeping the calls' names,
+ids, order and failures ([capture.md](capture.md#tool-calls-redacted)). A laptop runs it on the
+raw log before upload, per agent. The server runs it on the normalized records, before the
+passes below, for its own sources' sessions (Cursor Cloud, span sets included) and any upload
+whose `repo` the list names, as a backstop for a laptop that did not: tool calls' arguments and
+results, command output and background tasks' results in what was said, and all of a subagent's
+session. Records a laptop already redacted are left as they are, and what it replaced is
+counted under `tool-call` in the session's `redaction.counts`. The passes above then run on what is left, as
 for any session: a sensitive-file or secret-command call no longer has a path or command to
 match, so its result is already `[redacted:tool-call]`, while the text rules and secret patterns
 still catch what the prompts and replies say. The markers are:
 
 | Marker | Written by |
 | --- | --- |
-| `[redacted:tool-call]` | the tool-call pass (`capture.redact_tool_calls`) |
+| `[redacted:tool-call]` | the tool-call pass (`[capture] redact_tool_calls`) |
 | `[redacted:sensitive-file]`, `[redacted:secret-output]` | pass 1 |
 | `[redacted:<rule id>]` | passes 2 and 3 (or the rule's own `replacement`) |
 

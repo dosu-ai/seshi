@@ -26,8 +26,14 @@ export const captureSection = z
       .describe(
         "The org's exclude list: sessions in these repositories (owner/name on any host, host/owner/name on one) or folders (starting with /, ~, a drive or \\\\server, and everything under them) are never stored, from any source. The server applies it to its own sources and refuses an upload whose repo it names (repositories only); laptops download it (GET /v1/capture/rules) and apply it with their own capture.exclude. * matches within a path segment, ** across any number of them; blank entries and # comments are skipped. Drop-ins in seshi.d/ add to it.",
       ),
+    redact_tool_calls: z
+      .array(excludeEntry)
+      .default([])
+      .describe(
+        "The org's list of places whose sessions are stored with every tool call's input and output replaced by [redacted:tool-call] (prompts, replies, tool names, call ids, order and failures kept). Entries are written and matched as in exclude, which wins for a place on both lists. Laptops download it (GET /v1/capture/rules) and redact before upload, with their own capture.redact_tool_calls; the server redacts the sessions of its own sources (Cursor Cloud) and any upload whose repo it names (repositories only). Drop-ins in seshi.d/ add to it.",
+      ),
   })
   .prefault({})
-  .describe("Capture integrations (F9) and the org's exclude list.");
+  .describe("Capture integrations (F9), and the org's exclude and tool-call redaction lists.");
 
 export type CaptureSection = z.output<typeof captureSection>;

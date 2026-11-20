@@ -228,4 +228,7 @@ export interface CaptureRulesDocument {
   /** The server's `[capture] exclude`, every file's entries, as written (blanks and comments
    * left out). */
   exclude: string[];
+  /** The server's `[capture] redact_tool_calls`, the same way. Absent from a server older than
+   * the list. */
+  redact_tool_calls?: string[];
 }

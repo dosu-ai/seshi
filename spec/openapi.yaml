@@ -1051,6 +1051,12 @@ paths:
         Any signed-in caller, a write-only device token included. The `ETag` is a hash of the
         document: sent back as `If-None-Match`, it gets 304 until the list changes. A server
         older than this route answers 404: a laptop then applies only its own list.
+
+        With it, the org's tool-call redaction list (`[capture] redact_tool_calls`), the same
+        way: a laptop uploads a session in a listed repository or folder with every tool call's
+        input and output replaced by `[redacted:tool-call]`, and the server redacts the records
+        of its own sources' sessions and of any upload whose `repo` an entry names. A server
+        older than that list leaves it out.
       parameters:
         - name: If-None-Match
           in: header
@@ -2528,6 +2534,12 @@ components:
             any host, `host/owner/name` on one, or a remote URL), or a folder (starting with `/`,
             `~`, a drive or `\\server`; a laptop's own paths, never matched by the server). `*`
             matches within a path segment, `**` across any number.
+          items: { type: string }
+        redact_tool_calls:
+          type: array
+          description: |
+            The org's tool-call redaction list, written and matched as `exclude` is, which wins
+            for a place on both. Absent from a server older than the list.
           items: { type: string }
 
     RedactionRules:
