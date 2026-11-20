@@ -94,7 +94,9 @@ render() {
     return
   fi
   fake=$(token)
-  echo "$list" | jq -r '.sessions[:5][] | [.session_id, (.normalized.records|tostring), ((.models // [])[0] // "-"), .active_at] | @tsv' |
+  # Fields come from what a sandbox uploaded: strip control characters before they reach the
+  # terminal, so an agent cannot plant escape sequences in the presenter's screen.
+  echo "$list" | jq -r '.sessions[:5][] | [.session_id, (.normalized.records|tostring), ((.models // [])[0] // "-"), .active_at] | map(gsub("[[:cntrl:]]"; "")) | @tsv' |
     while IFS="$(printf '\t')" read -r id records model at; do
       export_text=$(s sessions export claude-code "$id" --owner "$OWNER" 2>/dev/null || true)
       redacted=$(printf '%s' "$export_text" | grep -o '\[redacted:[a-z-]*\]' | wc -l | tr -d ' ')
@@ -121,7 +123,8 @@ proof() {
   [ -n "$id" ] || { echo "No session on the server yet: finish a turn in Claude first."; exit 1; }
   heading "1. In the sandbox: the file the agent wrote"
   if [ -n "$fake" ]; then
-    sbx exec "$BOX" -- sh -c "grep -rIl --exclude-dir=.claude --exclude-dir=.local '$fake' /home/agent 2>/dev/null | while read -r f; do echo \"\$f:\"; grep -h '$fake' \"\$f\"; done" || true
+    sbx exec "$BOX" -- sh -c "grep -rIl --exclude-dir=.claude --exclude-dir=.local '$fake' /home/agent 2>/dev/null | while read -r f; do echo \"\$f:\"; grep -h '$fake' \"\$f\"; done" |
+      tr -d '\000-\010\013-\037\177' || true
   else
     echo "(run '$0 prompt' to plant a fake token)"
   fi
