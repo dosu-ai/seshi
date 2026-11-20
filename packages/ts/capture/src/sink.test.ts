@@ -43,7 +43,7 @@ describe("httpSink", () => {
         { status: 200 },
       );
     const result = await sink("alice").ingest({
-      agent: "claude-code",
+      format: "claude-code",
       session_id: "s",
       transcript: "x\n",
     });
@@ -54,7 +54,7 @@ describe("httpSink", () => {
 
   it("turns a 401 into a sign-in", async () => {
     answer = () => error(401, "unauthorized");
-    await expect(sink().ingest({ agent: "a", session_id: "s", transcript: "" })).rejects.toThrow(
+    await expect(sink().ingest({ format: "a", session_id: "s", transcript: "" })).rejects.toThrow(
       SignInNeeded,
     );
     await expect(sink().retract("a", "s", "secret")).rejects.toThrow(SignInNeeded);

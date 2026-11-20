@@ -26,9 +26,9 @@ beforeEach(() => {
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 /** Every stored trace of a session, head first. */
-async function tracesOf(agent: string, sessionId: string) {
-  const session = await getSession(store, owner, agent, sessionId);
-  const archive = archiveId(owner, agent, sessionId);
+async function tracesOf(format: string, sessionId: string) {
+  const session = await getSession(store, owner, format, sessionId);
+  const archive = archiveId(owner, format, sessionId);
   const refs = session?.traces ?? [];
   return Promise.all(refs.map((ref) => getTrace(store, owner, archive, ref.content_hash)));
 }
@@ -53,10 +53,10 @@ describe("LLM calls from a log", () => {
     const result = await storeSession(
       {
         owner,
-        agent: "claude-code",
+        format: "claude-code",
         session_id: "usage-whole",
         transcript: transcript("claude-usage.claude-code.jsonl"),
-        format: "jsonl",
+        encoding: "jsonl",
       },
       { store, formats, filter },
     );
@@ -83,20 +83,20 @@ describe("LLM calls from a log", () => {
     const first = await storeSession(
       {
         owner,
-        agent: "claude-code",
+        format: "claude-code",
         session_id: "usage-chunks",
         transcript: head,
-        format: "jsonl",
+        encoding: "jsonl",
       },
       { store, formats, filter },
     );
     await storeSession(
       {
         owner,
-        agent: "claude-code",
+        format: "claude-code",
         session_id: "usage-chunks",
         transcript: tail,
-        format: "jsonl",
+        encoding: "jsonl",
         offset: first.bytes_total,
       },
       { store, formats, filter },
@@ -104,7 +104,7 @@ describe("LLM calls from a log", () => {
     const traces = await tracesOf("claude-code", "usage-chunks");
     expect(traces).toHaveLength(2);
     const whole = await storeSession(
-      { owner, agent: "claude-code", session_id: "usage-one", transcript: log, format: "jsonl" },
+      { owner, format: "claude-code", session_id: "usage-one", transcript: log, encoding: "jsonl" },
       { store, formats, filter },
     );
     expect(whole.status).toBe("stored");
@@ -120,10 +120,10 @@ describe("LLM calls from a log", () => {
     await storeSession(
       {
         owner,
-        agent: "codex",
+        format: "codex",
         session_id: "01a0ff74-0000-7ad0-83ee-000000000001",
         transcript: transcript("codex-usage.codex.jsonl"),
-        format: "jsonl",
+        encoding: "jsonl",
       },
       { store, formats, filter },
     );

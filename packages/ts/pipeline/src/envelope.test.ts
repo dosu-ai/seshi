@@ -10,10 +10,10 @@ function base(): Envelope {
   return uploadEnvelope(
     {
       owner: "alice",
-      agent: "claude-code",
+      format: "claude-code",
       session_id: "s1",
       transcript: "{}\n",
-      format: "jsonl",
+      encoding: "jsonl",
     },
     {
       caller: { kind: "device", principal: "alice", credential_id: "tok_1" },
@@ -33,10 +33,10 @@ describe("uploadEnvelope", () => {
     const named = uploadEnvelope(
       {
         owner: "a",
-        agent: "x",
+        format: "x",
         session_id: "s",
         transcript: "",
-        format: "json",
+        encoding: "json",
         idempotency_key: "k1",
       },
       { caller: { kind: "local", principal: "a" }, owner_basis: "verified" },

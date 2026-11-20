@@ -13,12 +13,12 @@ import type { Failure } from "./types";
 export interface ServerView {
   mode: "server" | "serverless";
   where: string;
-  getSession(agent: string, sessionId: string): Promise<SessionMetadata | null>;
-  pointer?(agent: string, sessionId: string): Promise<SessionMetadata | null>;
-  getTrace(agent: string, sessionId: string, hash: string): Promise<StoredTrace | null>;
-  reviews(agent: string, sessionId: string): Promise<ReviewDecision[] | null>;
+  getSession(format: string, sessionId: string): Promise<SessionMetadata | null>;
+  pointer?(format: string, sessionId: string): Promise<SessionMetadata | null>;
+  getTrace(format: string, sessionId: string, hash: string): Promise<StoredTrace | null>;
+  reviews(format: string, sessionId: string): Promise<ReviewDecision[] | null>;
   changes?(since: string, limit: number): Promise<{ key: string; entry: ChangeEntry }[]>;
-  search(q: string, agent: string): Promise<SearchResults>;
+  search(q: string, format: string): Promise<SearchResults>;
 }
 
 export interface AgentInfo {

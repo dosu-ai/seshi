@@ -12,7 +12,7 @@ import {
   type SearchSort,
   type SessionMetadata,
 } from "@seshi/model";
-import { accessDeniedIn, decodeJson, getBytes, isOwner, keys, type Store } from "@seshi/store";
+import { accessDeniedIn, decodeMetadata, getBytes, isOwner, keys, type Store } from "@seshi/store";
 import type { BackendHit, BackendQuery, IndexStore } from "./backend";
 import { readFeed } from "./feed";
 import { Indexer, type IndexerLogger, type IndexerOptions, type IndexerRun } from "./indexer";
@@ -177,7 +177,7 @@ async function liveMetadata(
   const bytes = await getBytes(store, keys.metadata(owner, archive));
   if (bytes === null) return null;
   try {
-    return decodeJson<SessionMetadata>(bytes);
+    return decodeMetadata(bytes);
   } catch {
     return null;
   }
@@ -189,7 +189,7 @@ function resultOf(hit: BackendHit): SearchResult {
   const ended = iso(s.ended_at);
   return {
     owner: s.owner,
-    agent: s.agent,
+    format: s.format,
     session_id: s.session_id,
     archive_id: s.archive_id,
     ...(s.origin_agent !== undefined ? { origin_agent: s.origin_agent } : {}),

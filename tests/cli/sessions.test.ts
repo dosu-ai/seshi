@@ -66,14 +66,14 @@ beforeEach(async () => {
   machine = new Machine();
   const db = new HttpSessionDB({ server: server.url, token: TOKEN });
   await db.ingest({
-    agent: "claude-code",
+    format: "claude-code",
     session_id: "sess1",
     transcript: CLAUDE,
     project: "github.com/acme/widget",
     branch: "main",
     labels: { team: "platform", "dosu.project": "github.com/acme/widget" },
   });
-  await db.ingest({ agent: "claude-code", session_id: "sess2", transcript: CLAUDE });
+  await db.ingest({ format: "claude-code", session_id: "sess2", transcript: CLAUDE });
   const login = await machine.seshi(["login", "--server", server.url, "--token", "-"], {
     stdin: TOKEN,
   });
@@ -136,7 +136,7 @@ describe("seshi sessions against a server", () => {
   it("folds subagents under their session, and lists them with --subagents", async () => {
     const db = new HttpSessionDB({ server: server.url, token: TOKEN });
     await db.ingest({
-      agent: "claude-code",
+      format: "claude-code",
       session_id: "agent-a1",
       transcript: CLAUDE.replaceAll("sess1", "agent-a1"),
       parent_session_id: "sess1",
@@ -232,7 +232,7 @@ describe("seshi sessions against a server", () => {
       },
     })}\n`;
     await db.ingest({
-      agent: "claude-code",
+      format: "claude-code",
       session_id: "evil",
       transcript: nasty,
       project: "acme\x1b[1Kwidget",
@@ -537,7 +537,7 @@ describe("serverless mode, by its old name [local] (F11.1)", () => {
         home: local.dir,
         integrations: INTEGRATIONS,
       });
-      await connection.db.ingest({ agent: "claude-code", session_id: "s1", transcript: CLAUDE });
+      await connection.db.ingest({ format: "claude-code", session_id: "s1", transcript: CLAUDE });
       await connection.close();
 
       const who = JSON.parse((await local.seshi(["whoami", "--json"])).out);

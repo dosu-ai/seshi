@@ -46,7 +46,7 @@ async function write(owner: string, sessionId: string): Promise<string> {
   const pipeline = new Pipeline({ store, formats: new FormatRegistry(BUILTIN_FORMATS) });
   const result = (await pipeline.submit(
     uploadEnvelope(
-      { owner, agent: "trajectory", session_id: sessionId, transcript, format: "jsonl" },
+      { owner, format: "trajectory", session_id: sessionId, transcript, encoding: "jsonl" },
       { caller: { kind: "static", principal: owner }, owner_basis: "verified" },
     ),
   )) as StoreSessionResult;

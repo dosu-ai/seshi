@@ -76,7 +76,7 @@ async function seed(): Promise<void> {
   const alice = client(orgKey, "alice");
   const bob = client(orgKey, "bob");
   await alice.ingest({
-    agent: "trajectory",
+    format: "trajectory",
     session_id: "pay",
     transcript: log("deploy the payments service"),
     project: "github.com/acme/payments",
@@ -84,13 +84,13 @@ async function seed(): Promise<void> {
     labels: { "dosu.project": "github.com/acme/payments", team: "platform" },
   });
   await alice.ingest({
-    agent: "trajectory",
+    format: "trajectory",
     session_id: "rot",
     transcript: log("deploy the secret rotation", "2026-10-01T10:00:00Z"),
     visibility: "owner",
   });
   await bob.ingest({
-    agent: "trajectory",
+    format: "trajectory",
     session_id: "docs",
     transcript: log("deploy the docs site"),
     project: "github.com/acme/docs",
@@ -98,7 +98,7 @@ async function seed(): Promise<void> {
   });
   // Written under alice's old owner id, which [auth.owner_aliases] folds into hers (X5.8).
   await new StoreSessionDB({ store, owner: "old-alice", formats: FORMATS }).ingest({
-    agent: "trajectory",
+    format: "trajectory",
     session_id: "legacy",
     transcript: log("deploy the legacy cron"),
     visibility: "owner",
@@ -307,13 +307,13 @@ describe("the indexer job (F10.2, X7)", () => {
         throw new Error(`never found ${n} for ${q}: ${JSON.stringify((await live.status()).jobs)}`);
       };
       await alice.ingest({
-        agent: "trajectory",
+        format: "trajectory",
         session_id: "j1",
         transcript: log("zebra crossing"),
       });
       await until("zebra", 1);
       await alice.ingest({
-        agent: "trajectory",
+        format: "trajectory",
         session_id: "j2",
         transcript: log("zebra stripes"),
       });

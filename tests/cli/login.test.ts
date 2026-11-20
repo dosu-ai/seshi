@@ -135,7 +135,7 @@ describe("signing in through the IdP (X5.7)", () => {
       "upload",
     );
     await new HttpSessionDB({ server: server.url, token: upload.token }).ingest({
-      agent: "claude-code",
+      format: "claude-code",
       session_id: "s1",
       transcript: CLAUDE,
     });

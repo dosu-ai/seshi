@@ -246,7 +246,7 @@ export async function gatherEvidence(
   }
   const format = info?.format ?? target.agent;
   const id = entry ? uploadId(entry) : target.session_id;
-  evidence.server.agent = format;
+  evidence.server.format = format;
   evidence.server.upload_id = id;
   const metadata = await attempt(() => server.getSession(format, id));
   if (metadata.error) evidence.server.metadata_error = metadata.error;
@@ -340,7 +340,7 @@ async function searchEvidence(
   const results = got.value;
   return {
     ...search,
-    found: results.results.some((r) => r.session_id === search.upload_id && r.agent === format),
+    found: results.results.some((r) => r.session_id === search.upload_id && r.format === format),
     results: results.results.length,
     ...(results.index.caught_up_at ? { index_caught_up_at: results.index.caught_up_at } : {}),
   };

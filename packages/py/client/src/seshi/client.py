@@ -182,64 +182,64 @@ class SeshiClient(_Base):
         return self._run(calls.ingest(upload, retract_secret, idempotency_key))
 
     def get_session(
-        self, agent: str, session_id: str, *, owner: str | None = None
+        self, format: str, session_id: str, *, owner: str | None = None
     ) -> m.SessionMetadata | None:
         """The session's metadata; None for one not stored, or one the caller may not read."""
-        return self._run(calls.get_session(agent, session_id, owner))
+        return self._run(calls.get_session(format, session_id, owner))
 
     @overload
     def get_trace(
         self,
-        agent: str,
+        format: str,
         session_id: str,
         *,
         hash: str | None = ...,
-        format: Literal["seshi"] | None = ...,
+        render: Literal["seshi"] | None = ...,
         owner: str | None = ...,
     ) -> m.Trace | None: ...
     @overload
     def get_trace(
         self,
-        agent: str,
+        format: str,
         session_id: str,
         *,
         hash: str | None = ...,
-        format: Literal["letta"],
+        render: Literal["letta"],
         owner: str | None = ...,
     ) -> m.LettaTrace | None: ...
     @overload
     def get_trace(
         self,
-        agent: str,
+        format: str,
         session_id: str,
         *,
         hash: str | None = ...,
-        format: Literal["otlp"],
+        render: Literal["otlp"],
         owner: str | None = ...,
     ) -> m.OtlpTrace | None: ...
     @overload
     def get_trace(
         self,
-        agent: str,
+        format: str,
         session_id: str,
         *,
         hash: str | None = ...,
-        format: Literal["atif"],
+        render: Literal["atif"],
         owner: str | None = ...,
     ) -> m.AtifDocument | None: ...
     def get_trace(
         self,
-        agent: str,
+        format: str,
         session_id: str,
         *,
         hash: str | None = None,
-        format: m.RenderFormat | None = None,
+        render: m.RenderFormat | None = None,
         owner: str | None = None,
     ) -> m.StoredTrace | None:
-        """The head trace, or the one `hash` names, as `format` renders it (`seshi`, the stored
+        """The head trace, or the one `hash` names, rendered as `render` (`seshi`, the stored
         canonical trace, by default); None for a session not stored, unreadable or redacted."""
         result: m.StoredTrace | None = self._run(
-            calls.get_trace(agent, session_id, hash, format, owner)
+            calls.get_trace(format, session_id, hash, render, owner)
         )
         return result
 
@@ -271,7 +271,7 @@ class SeshiClient(_Base):
 
     def tombstone(
         self,
-        agent: str,
+        format: str,
         session_id: str,
         *,
         owner: str | None = None,
@@ -281,21 +281,81 @@ class SeshiClient(_Base):
         stored. Needs `sessions:delete`. With `retract_secret` it is a retraction instead (F9.7),
         by the machine that uploaded the session with its upload credential; a refused one is
         `ServerError` 403 `bad_retract_secret` or `retract_disabled`."""
-        return self._run(calls.tombstone(agent, session_id, owner, retract_secret))
+        return self._run(calls.tombstone(format, session_id, owner, retract_secret))
 
     def set_visibility(
-        self, agent: str, session_id: str, visibility: m.Visibility, *, owner: str | None = None
+        self, format: str, session_id: str, visibility: m.Visibility, *, owner: str | None = None
     ) -> m.SessionMetadata | None:
         """Change who may read a session (X5.10); the metadata as it now is, None for one not
         stored. A redacted session is `ServerError` 410."""
-        return self._run(calls.set_visibility(agent, session_id, visibility, owner))
+        return self._run(calls.set_visibility(format, session_id, visibility, owner))
 
     def reviews(
-        self, agent: str, session_id: str, *, owner: str | None = None
+        self, format: str, session_id: str, *, owner: str | None = None
     ) -> list[m.ReviewDecision] | None:
         """What model review decided for each stored write of the session, oldest first (F3.8);
         None for a session not stored."""
-        return self._run(calls.reviews(agent, session_id, owner))
+        return self._run(calls.reviews(format, session_id, owner))
+
+    def get_session_by_archive(self, owner: str, archive_id: str) -> m.SessionMetadata | None:
+        """The session's metadata by its owner and archive id, as change entries, search results
+        and listings name it (that owner's folder exactly, no aliases folded in); None when not
+        stored or not readable."""
+        return self._run(calls.get_session_by_archive(owner, archive_id))
+
+    @overload
+    def get_trace_by_archive(
+        self,
+        owner: str,
+        archive_id: str,
+        *,
+        hash: str | None = ...,
+        render: Literal["seshi"] | None = ...,
+    ) -> m.Trace | None: ...
+    @overload
+    def get_trace_by_archive(
+        self,
+        owner: str,
+        archive_id: str,
+        *,
+        hash: str | None = ...,
+        render: Literal["letta"],
+    ) -> m.LettaTrace | None: ...
+    @overload
+    def get_trace_by_archive(
+        self,
+        owner: str,
+        archive_id: str,
+        *,
+        hash: str | None = ...,
+        render: Literal["otlp"],
+    ) -> m.OtlpTrace | None: ...
+    @overload
+    def get_trace_by_archive(
+        self,
+        owner: str,
+        archive_id: str,
+        *,
+        hash: str | None = ...,
+        render: Literal["atif"],
+    ) -> m.AtifDocument | None: ...
+    def get_trace_by_archive(
+        self,
+        owner: str,
+        archive_id: str,
+        *,
+        hash: str | None = None,
+        render: m.RenderFormat | None = None,
+    ) -> m.StoredTrace | None:
+        """`get_trace` by owner and archive id."""
+        result: m.StoredTrace | None = self._run(
+            calls.get_trace_by_archive(owner, archive_id, hash, render)
+        )
+        return result
+
+    def reviews_by_archive(self, owner: str, archive_id: str) -> list[m.ReviewDecision] | None:
+        """`reviews` by owner and archive id."""
+        return self._run(calls.reviews_by_archive(owner, archive_id))
 
     # --- Change feeds ---------------------------------------------------------------------
 
@@ -553,64 +613,64 @@ class AsyncSeshiClient(_Base):
         return await self._run(calls.ingest(upload, retract_secret, idempotency_key))
 
     async def get_session(
-        self, agent: str, session_id: str, *, owner: str | None = None
+        self, format: str, session_id: str, *, owner: str | None = None
     ) -> m.SessionMetadata | None:
         """The session's metadata; None for one not stored or not readable."""
-        return await self._run(calls.get_session(agent, session_id, owner))
+        return await self._run(calls.get_session(format, session_id, owner))
 
     @overload
     async def get_trace(
         self,
-        agent: str,
+        format: str,
         session_id: str,
         *,
         hash: str | None = ...,
-        format: Literal["seshi"] | None = ...,
+        render: Literal["seshi"] | None = ...,
         owner: str | None = ...,
     ) -> m.Trace | None: ...
     @overload
     async def get_trace(
         self,
-        agent: str,
+        format: str,
         session_id: str,
         *,
         hash: str | None = ...,
-        format: Literal["letta"],
+        render: Literal["letta"],
         owner: str | None = ...,
     ) -> m.LettaTrace | None: ...
     @overload
     async def get_trace(
         self,
-        agent: str,
+        format: str,
         session_id: str,
         *,
         hash: str | None = ...,
-        format: Literal["otlp"],
+        render: Literal["otlp"],
         owner: str | None = ...,
     ) -> m.OtlpTrace | None: ...
     @overload
     async def get_trace(
         self,
-        agent: str,
+        format: str,
         session_id: str,
         *,
         hash: str | None = ...,
-        format: Literal["atif"],
+        render: Literal["atif"],
         owner: str | None = ...,
     ) -> m.AtifDocument | None: ...
     async def get_trace(
         self,
-        agent: str,
+        format: str,
         session_id: str,
         *,
         hash: str | None = None,
-        format: m.RenderFormat | None = None,
+        render: m.RenderFormat | None = None,
         owner: str | None = None,
     ) -> m.StoredTrace | None:
         """The head trace, or `hash`, as `format`; None when not stored, unreadable or
         redacted."""
         result: m.StoredTrace | None = await self._run(
-            calls.get_trace(agent, session_id, hash, format, owner)
+            calls.get_trace(format, session_id, hash, render, owner)
         )
         return result
 
@@ -641,26 +701,88 @@ class AsyncSeshiClient(_Base):
 
     async def tombstone(
         self,
-        agent: str,
+        format: str,
         session_id: str,
         *,
         owner: str | None = None,
         retract_secret: str | None = None,
     ) -> m.Removed | None:
         """Delete (or, with `retract_secret`, retract) the session; None for one not stored."""
-        return await self._run(calls.tombstone(agent, session_id, owner, retract_secret))
+        return await self._run(calls.tombstone(format, session_id, owner, retract_secret))
 
     async def set_visibility(
-        self, agent: str, session_id: str, visibility: m.Visibility, *, owner: str | None = None
+        self, format: str, session_id: str, visibility: m.Visibility, *, owner: str | None = None
     ) -> m.SessionMetadata | None:
         """Change who may read a session; None for one not stored."""
-        return await self._run(calls.set_visibility(agent, session_id, visibility, owner))
+        return await self._run(calls.set_visibility(format, session_id, visibility, owner))
 
     async def reviews(
-        self, agent: str, session_id: str, *, owner: str | None = None
+        self, format: str, session_id: str, *, owner: str | None = None
     ) -> list[m.ReviewDecision] | None:
         """Model review's decisions for the session, oldest first; None for one not stored."""
-        return await self._run(calls.reviews(agent, session_id, owner))
+        return await self._run(calls.reviews(format, session_id, owner))
+
+    async def get_session_by_archive(self, owner: str, archive_id: str) -> m.SessionMetadata | None:
+        """The session's metadata by its owner and archive id, as change entries, search results
+        and listings name it (that owner's folder exactly, no aliases folded in); None when not
+        stored or not readable."""
+        return await self._run(calls.get_session_by_archive(owner, archive_id))
+
+    @overload
+    async def get_trace_by_archive(
+        self,
+        owner: str,
+        archive_id: str,
+        *,
+        hash: str | None = ...,
+        render: Literal["seshi"] | None = ...,
+    ) -> m.Trace | None: ...
+    @overload
+    async def get_trace_by_archive(
+        self,
+        owner: str,
+        archive_id: str,
+        *,
+        hash: str | None = ...,
+        render: Literal["letta"],
+    ) -> m.LettaTrace | None: ...
+    @overload
+    async def get_trace_by_archive(
+        self,
+        owner: str,
+        archive_id: str,
+        *,
+        hash: str | None = ...,
+        render: Literal["otlp"],
+    ) -> m.OtlpTrace | None: ...
+    @overload
+    async def get_trace_by_archive(
+        self,
+        owner: str,
+        archive_id: str,
+        *,
+        hash: str | None = ...,
+        render: Literal["atif"],
+    ) -> m.AtifDocument | None: ...
+    async def get_trace_by_archive(
+        self,
+        owner: str,
+        archive_id: str,
+        *,
+        hash: str | None = None,
+        render: m.RenderFormat | None = None,
+    ) -> m.StoredTrace | None:
+        """`get_trace` by owner and archive id."""
+        result: m.StoredTrace | None = await self._run(
+            calls.get_trace_by_archive(owner, archive_id, hash, render)
+        )
+        return result
+
+    async def reviews_by_archive(
+        self, owner: str, archive_id: str
+    ) -> list[m.ReviewDecision] | None:
+        """`reviews` by owner and archive id."""
+        return await self._run(calls.reviews_by_archive(owner, archive_id))
 
     async def changes(
         self,

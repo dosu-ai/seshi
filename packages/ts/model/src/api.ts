@@ -28,12 +28,13 @@ export interface StorageView {
 /** A session to store, as the pipeline takes it. */
 export interface SessionUpload {
   owner: string;
-  /** The transcript's format name (`claude-code`, `codex`, …): one the deployment's format
-   * registry knows. */
-  agent: string;
+  /** The format the session is filed under (`claude-code`, `codex`, …): one the deployment's
+   * format registry knows. */
+  format: string;
   session_id: string;
   transcript: string;
-  format: RawFormat;
+  /** How the log is encoded. */
+  encoding: RawFormat;
   /** The byte offset of `transcript` in the session's log: 0 (the default) when it is the whole
    * log, else where the last upload ended, the `bytes_total` it answered. */
   offset?: number;
@@ -69,9 +70,11 @@ export interface SessionUpload {
   retract_hash?: string;
 }
 
-/** A session to store: `SessionUpload` without the owner, which the backend knows. `format`
+/** A session to store: `SessionUpload` without the owner, which the backend knows. `encoding`
  * defaults to `jsonl`. */
-export type Upload = Omit<SessionUpload, "owner" | "format"> & { format?: SessionUpload["format"] };
+export type Upload = Omit<SessionUpload, "owner" | "encoding"> & {
+  encoding?: SessionUpload["encoding"];
+};
 
 /** How an upload is sent, beside what it stores. */
 export interface IngestOptions {
@@ -183,7 +186,7 @@ export interface SessionsPage {
  * changed since, so the session should be sent again whole with `rebuild`. */
 export interface StaleSession {
   /** The format it is filed under. */
-  agent: string;
+  format: string;
   session_id: string;
   /** The format version that built it (`normalizer.format_version`); absent when not recorded. */
   built_with?: string;
@@ -225,21 +228,21 @@ export interface SessionDB {
    * store fails. */
   ingest(upload: Upload, options?: IngestOptions): Promise<StoreSessionResult>;
   /** The session's pointer, or null for one not stored. */
-  getSession(agent: string, sessionId: string): Promise<SessionMetadata | null>;
+  getSession(format: string, sessionId: string): Promise<SessionMetadata | null>;
   /** The head trace, or the one named by `hash`, as the canonical trace (`seshi`, the default)
    * or rendered as `letta`, `otlp` or `atif`; null for a session not stored, stored raw only,
    * or redacted. */
   getTrace(
-    agent: string,
+    format: string,
     sessionId: string,
     hash?: string,
-    format?: RenderFormat,
+    render?: RenderFormat,
   ): Promise<StoredTrace | null>;
   listSessions(options?: ListSessionsOptions): Promise<SessionsPage>;
   /** The caller's own sessions an older normalizer built (X4.9), a page at a time. */
   staleSessions(options?: { after?: string; limit?: number }): Promise<StaleSessionsPage>;
   /** Drop the session's objects and append a tombstone; null for one not stored. */
-  tombstone(agent: string, sessionId: string): Promise<{ removed: number } | null>;
+  tombstone(format: string, sessionId: string): Promise<{ removed: number } | null>;
   /** The change feed after a cursor. */
   changes(options?: ReadChangesOptions): Promise<ChangesPage>;
   /** Who this client is and where its sessions go. */

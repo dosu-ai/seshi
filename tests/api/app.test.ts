@@ -159,7 +159,7 @@ describe("request bodies", () => {
 
   it("inflates a gzipped upload as it arrives: a gzip bomb stops at the cap (413)", async () => {
     // An ordinary gzipped upload, sent chunked, is stored.
-    const payload = JSON.stringify({ agent: "claude-code", session_id: "gz", transcript: CLAUDE });
+    const payload = JSON.stringify({ format: "claude-code", session_id: "gz", transcript: CLAUDE });
     const ok = await post("/v1/sessions", streamed(Bun.gzipSync(payload), 256).stream, {
       authorization: `Bearer ${TOKEN}`,
       "content-encoding": "gzip",
@@ -213,7 +213,7 @@ describe("auth", () => {
   it("serves only a trace the session names, not one left in its folder", async () => {
     const stored = await call("POST", "/v1/sessions", {
       token: TOKEN,
-      body: { agent: "claude-code", session_id: "mine", transcript: CLAUDE },
+      body: { format: "claude-code", session_id: "mine", transcript: CLAUDE },
     });
     expect(stored.status).toBe(201);
     const archive = archiveId("acme", "claude-code", "mine");
@@ -234,7 +234,7 @@ describe("auth", () => {
   it("reads its own sessions unless it names another owner", async () => {
     const stored = await call("POST", "/v1/sessions", {
       token: TOKEN,
-      body: { agent: "claude-code", session_id: "mine", transcript: CLAUDE },
+      body: { format: "claude-code", session_id: "mine", transcript: CLAUDE },
     });
     expect(stored.status).toBe(201);
     expect((await call("GET", "/v1/sessions/claude-code/mine", { token: TOKEN })).status).toBe(200);
@@ -265,7 +265,7 @@ describe("sessions", () => {
     const res = await call("POST", "/v1/sessions", {
       token,
       body: {
-        agent: "claude-code",
+        format: "claude-code",
         session_id: "sess1",
         project: "github.com/acme/widget",
         branch: "main",
@@ -286,7 +286,7 @@ describe("sessions", () => {
     expect(body.archive_id).toBe(archive);
     const metadata = await readMetadata(store, "acme", archive);
     expect(metadata).toMatchObject({
-      agent: "claude-code",
+      format: "claude-code",
       session_id: "sess1",
       project: "github.com/acme/widget",
       branch: "main",
@@ -317,7 +317,7 @@ describe("sessions", () => {
     // The same upload again is answered as the first time (X4.7), not stored twice.
     const again = await call("POST", "/v1/sessions", {
       token,
-      body: { agent: "claude-code", session_id: "sess1", transcript: CLAUDE },
+      body: { format: "claude-code", session_id: "sess1", transcript: CLAUDE },
     });
     expect(again.status).toBe(201);
     expect(await again.json()).toEqual(body);
@@ -337,7 +337,7 @@ describe("sessions", () => {
     });
     const res = await call("POST", "/v1/sessions", {
       token: TOKEN,
-      body: { agent: "claude-code", session_id: "sess-own", transcript: CLAUDE },
+      body: { format: "claude-code", session_id: "sess-own", transcript: CLAUDE },
     });
     expect(res.status).toBe(201);
     const { content_hash } = (await res.json()) as { content_hash: string };
@@ -372,7 +372,7 @@ describe("sessions", () => {
     const token = TOKEN;
     const first = await call("POST", "/v1/sessions", {
       token,
-      body: { agent: "claude-code", session_id: "sess3", transcript: CLAUDE },
+      body: { format: "claude-code", session_id: "sess3", transcript: CLAUDE },
     });
     expect(first.status).toBe(201);
     const shipped = (await first.json()) as {
@@ -404,7 +404,7 @@ describe("sessions", () => {
     // `shipped`.
     const second = await call("POST", "/v1/sessions", {
       token,
-      body: { agent: "claude-code", session_id: "sess3", transcript: resumed },
+      body: { format: "claude-code", session_id: "sess3", transcript: resumed },
     });
     expect(second.status).toBe(201);
     const tail = (await second.json()) as {
@@ -428,24 +428,24 @@ describe("sessions", () => {
     const token = TOKEN;
     const first = await call("POST", "/v1/sessions", {
       token,
-      body: { agent: "claude-code", session_id: "sess4", transcript: CLAUDE },
+      body: { format: "claude-code", session_id: "sess4", transcript: CLAUDE },
     });
     expect(first.status).toBe(201);
     const rewritten = CLAUDE.replace("The auth flow:", "A different answer:");
     const conflict = await call("POST", "/v1/sessions", {
       token,
-      body: { agent: "claude-code", session_id: "sess4", transcript: rewritten },
+      body: { format: "claude-code", session_id: "sess4", transcript: rewritten },
     });
     expect(conflict.status).toBe(409);
     expect(await conflict.json()).toMatchObject({ error: { code: "conflict" } });
     const bad = await call("POST", "/v1/sessions", {
       token,
-      body: { agent: "claude-code", session_id: "sess4", transcript: rewritten, replace: "yes" },
+      body: { format: "claude-code", session_id: "sess4", transcript: rewritten, replace: "yes" },
     });
     expect(bad.status).toBe(400);
     const replaced = await call("POST", "/v1/sessions", {
       token,
-      body: { agent: "claude-code", session_id: "sess4", transcript: rewritten, replace: true },
+      body: { format: "claude-code", session_id: "sess4", transcript: rewritten, replace: true },
     });
     expect(replaced.status).toBe(201);
     const archive = archiveId("acme", "claude-code", "sess4");
@@ -458,10 +458,10 @@ describe("sessions", () => {
     await storeSession(
       {
         owner: "acme",
-        agent: "claude-code",
+        format: "claude-code",
         session_id: "sess5",
         transcript: CLAUDE,
-        format: "jsonl",
+        encoding: "jsonl",
       },
       {
         store,
@@ -472,7 +472,7 @@ describe("sessions", () => {
     const res = await call("POST", "/v1/sessions", {
       token: TOKEN,
       body: {
-        agent: "claude-code",
+        format: "claude-code",
         session_id: "sess5",
         transcript: CLAUDE.replace("The auth flow:", "Mine now:"),
         replace: true,
@@ -488,7 +488,7 @@ describe("sessions", () => {
       call("POST", "/v1/sessions", {
         token,
         headers,
-        body: { agent: "claude-code", session_id: "sess6", transcript, ...extra },
+        body: { format: "claude-code", session_id: "sess6", transcript, ...extra },
       });
     const first = await post(CLAUDE, { "idempotency-key": "upload-1" });
     expect(first.status).toBe(201);
@@ -539,7 +539,7 @@ describe("sessions", () => {
     const post = async (body: Record<string, unknown>) => {
       const res = await call("POST", "/v1/sessions", {
         token,
-        body: { agent: "claude-code", session_id: "chunked", ...body },
+        body: { format: "claude-code", session_id: "chunked", ...body },
       });
       return [res.status, (await res.json()) as Answer] as const;
     };
@@ -752,7 +752,7 @@ describe("sessions", () => {
       [status, body] = await post({
         transcript: "{}\n",
         offset: first.bytes_total,
-        format: "json",
+        encoding: "json",
       });
       expect(status).toBe(422);
       expect(body).toMatchObject({ error: { code: "bad_chunk" } });
@@ -771,21 +771,21 @@ describe("sessions", () => {
           error: { code: string };
         }
       ).error.code;
-    expect(await code({ agent: "vim", session_id: "s", transcript: "x" })).toBe(
+    expect(await code({ format: "vim", session_id: "s", transcript: "x" })).toBe(
       "unsupported_agent",
     );
     // The source name is the only spelling: a harness alias would make a second archive.
-    expect(await code({ agent: "claude", session_id: "s", transcript: CLAUDE })).toBe(
+    expect(await code({ format: "claude", session_id: "s", transcript: CLAUDE })).toBe(
       "unsupported_agent",
     );
-    expect(await code({ agent: "claude-code", session_id: "s", transcript: "   " })).toBe("empty");
+    expect(await code({ format: "claude-code", session_id: "s", transcript: "   " })).toBe("empty");
     expect(
-      await code({ agent: "claude-code", session_id: "s", transcript: CLAUDE, format: "xml" }),
+      await code({ format: "claude-code", session_id: "s", transcript: CLAUDE, encoding: "xml" }),
     ).toBe("bad_field");
-    expect(await code({ agent: "claude-code", session_id: "s" })).toBe("missing_field");
+    expect(await code({ format: "claude-code", session_id: "s" })).toBe("missing_field");
     expect(
       await code({
-        agent: "claude-code",
+        format: "claude-code",
         session_id: "s",
         transcript: CLAUDE,
         shipped: { x: 1 },
@@ -797,7 +797,7 @@ describe("sessions", () => {
     const token = TOKEN;
     await call("POST", "/v1/sessions", {
       token,
-      body: { agent: "claude-code", session_id: "sess4", transcript: CLAUDE },
+      body: { format: "claude-code", session_id: "sess4", transcript: CLAUDE },
     });
 
     const meta = await call("GET", "/v1/sessions/claude-code/sess4", { token });
@@ -822,7 +822,7 @@ describe("sessions", () => {
     // A redacted session cannot come back.
     const retry = await call("POST", "/v1/sessions", {
       token,
-      body: { agent: "claude-code", session_id: "sess4", transcript: CLAUDE },
+      body: { format: "claude-code", session_id: "sess4", transcript: CLAUDE },
     });
     expect(retry.status).toBe(422);
     expect((await retry.json()).error.code).toBe("redacted");
@@ -840,7 +840,7 @@ describe("sessions", () => {
       new Request("http://test/v1/sessions", {
         method: "POST",
         headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
-        body: JSON.stringify({ agent: "claude-code", session_id: "tiny", transcript: SMALL }),
+        body: JSON.stringify({ format: "claude-code", session_id: "tiny", transcript: SMALL }),
       }),
     );
     expect(stored.status).toBe(201);
@@ -856,7 +856,7 @@ describe("sessions", () => {
       new Request("http://test/v1/sessions", {
         method: "POST",
         headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
-        body: JSON.stringify({ agent: "claude-code", session_id: "big", transcript: CLAUDE }),
+        body: JSON.stringify({ format: "claude-code", session_id: "big", transcript: CLAUDE }),
       }),
     );
     expect(refused.status).toBe(422);
@@ -867,7 +867,7 @@ describe("sessions", () => {
     const token = TOKEN;
     const res = await call("POST", "/v1/sessions", {
       token,
-      body: { agent: "claude-code", session_id: "tiny", transcript: SMALL },
+      body: { format: "claude-code", session_id: "tiny", transcript: SMALL },
     });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
@@ -889,7 +889,7 @@ describe("sessions", () => {
     const token = TOKEN;
     await call("POST", "/v1/sessions", {
       token,
-      body: { agent: "claude-code", session_id: "b1", transcript: CLAUDE, branch: "from-client" },
+      body: { format: "claude-code", session_id: "b1", transcript: CLAUDE, branch: "from-client" },
     });
     // The fixture's first record carries gitBranch: main.
     const metadata = await readMetadata(store, "acme", archiveId("acme", "claude-code", "b1"));
@@ -974,7 +974,7 @@ describe("sessions", () => {
     const token = TOKEN;
     const parent = await call("POST", "/v1/sessions", {
       token,
-      body: { agent: "claude-code", session_id: "parent", transcript: CLAUDE },
+      body: { format: "claude-code", session_id: "parent", transcript: CLAUDE },
     });
     expect(parent.status).toBe(201);
     const parentBody = (await parent.json()) as { records_total: number };
@@ -1000,7 +1000,7 @@ describe("sessions", () => {
     const fork = await call("POST", "/v1/sessions", {
       token,
       body: {
-        agent: "claude-code",
+        format: "claude-code",
         session_id: "fork",
         transcript: forkLog,
         parent_session_id: "parent",
@@ -1022,7 +1022,7 @@ describe("sessions", () => {
     // A fork whose parent was never stored ships in full.
     const orphan = await call("POST", "/v1/sessions", {
       token,
-      body: { agent: "claude-code", session_id: "orphan", transcript: forkLog, fork_of: "nope" },
+      body: { format: "claude-code", session_id: "orphan", transcript: forkLog, fork_of: "nope" },
     });
     expect(((await orphan.json()) as { records: number }).records).toBe(
       parentBody.records_total + 2,
@@ -1036,7 +1036,7 @@ describe("Datadog Trajectory format", () => {
   const post = (transcript: string, sessionId = STREAM_SESSION) =>
     call("POST", "/v1/sessions", {
       token: TOKEN,
-      body: { agent: "datadog-trajectory", session_id: sessionId, transcript },
+      body: { format: "datadog-trajectory", session_id: sessionId, transcript },
     });
 
   it("stores the session under datadog-trajectory", async () => {
@@ -1053,7 +1053,7 @@ describe("Datadog Trajectory format", () => {
     expect(body.archive_id).toBe(archive);
     const metadata = await readMetadata(store, "acme", archive);
     expect(metadata).toMatchObject({
-      agent: "datadog-trajectory",
+      format: "datadog-trajectory",
       source: "datadog-trajectory:claude-code",
       session_id: STREAM_SESSION,
       branch: "feature/auth",
@@ -1099,7 +1099,7 @@ describe("Datadog Trajectory format", () => {
 
 describe("ATIF documents", () => {
   // One JSON document per session, from any harness (Decant exports them). Filed under
-  // `agent: "atif"`; the trace's source is the harness the document names.
+  // `format: "atif"`; the trace's source is the harness the document names.
   const ATIF_SMALL = transcript("atif-claude-session.atif.json");
   const ATIF_SESSION = "atif-sess1";
   /** The same document with a final answer long enough to be worth storing. */
@@ -1118,7 +1118,7 @@ describe("ATIF documents", () => {
   const post = (body: Record<string, unknown>) =>
     call("POST", "/v1/sessions", {
       token: TOKEN,
-      body: { agent: "atif", session_id: ATIF_SESSION, format: "json", ...body },
+      body: { format: "atif", session_id: ATIF_SESSION, encoding: "json", ...body },
     });
 
   it("stores a whole document under atif, its source the harness it names", async () => {
@@ -1130,16 +1130,16 @@ describe("ATIF documents", () => {
     const archive = archiveId("acme", "atif", ATIF_SESSION);
     expect(body.archive_id).toBe(archive);
     expect(await readMetadata(store, "acme", archive)).toMatchObject({
-      agent: "atif",
+      format: "atif",
       source: "claude-code",
       head: body.content_hash,
     });
     const trace = (await getTrace(store, "acme", archive, body.content_hash)) as {
       source: string;
-      agent: string;
+      format: string;
       events: { role: string; tool_name?: string; ok?: boolean }[];
     };
-    expect(trace).toMatchObject({ source: "claude-code", agent: "atif" });
+    expect(trace).toMatchObject({ source: "claude-code", format: "atif" });
     expect(trace.events.filter((e) => e.role === "tool_result")).toMatchObject([
       { tool_name: "Read", ok: true },
       { tool_name: "Bash", ok: false },
@@ -1155,10 +1155,10 @@ describe("ATIF documents", () => {
     expect((await reformatted.json()).status).toBe("unchanged");
   });
 
-  it("refuses a document sent in chunks, whatever the format says", async () => {
+  it("refuses a document sent in chunks, whatever the encoding says", async () => {
     const first = (await (await post({ transcript: ATIF_DOC })).json()) as { bytes_total: number };
-    for (const format of ["json", "jsonl"]) {
-      const res = await post({ transcript: '{"steps":[]}\n', offset: first.bytes_total, format });
+    for (const encoding of ["json", "jsonl"]) {
+      const res = await post({ transcript: '{"steps":[]}\n', offset: first.bytes_total, encoding });
       expect(res.status).toBe(422);
       expect((await res.json()).error.code).toBe("bad_chunk");
     }

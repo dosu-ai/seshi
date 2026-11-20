@@ -263,10 +263,10 @@ const envelope = (sessionId: string) =>
   uploadEnvelope(
     {
       owner: "alice",
-      agent: "trajectory",
+      format: "trajectory",
       session_id: sessionId,
       transcript: text(),
-      format: "jsonl",
+      encoding: "jsonl",
     },
     { caller: { kind: "static", principal: "alice" }, owner_basis: "verified" },
   );

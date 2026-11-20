@@ -970,7 +970,7 @@ export class Pipeline {
       }
       return this.progress(run, plan.normalized, plan.withheld, "dropped", plan.guard, {
         session_id: envelope.session_key,
-        agent: envelope.format,
+        format: envelope.format,
         ...this.who(run),
         ...(envelope.retract_hash ? { retract_hash: envelope.retract_hash } : {}),
       });
@@ -993,7 +993,7 @@ export class Pipeline {
       records: write,
       metadata: {
         session_id: envelope.session_key,
-        agent: envelope.format,
+        format: envelope.format,
         project: plan.project,
         branch: plan.branch,
         ...this.labelsOf(run),

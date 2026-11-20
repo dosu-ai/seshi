@@ -71,7 +71,7 @@ describe("S3 sync (F6)", () => {
 
     const meta = await readMetadata(instance.store, OWNER, claudeArchive);
     expect(meta).toMatchObject({
-      agent: "claude-code",
+      format: "claude-code",
       session_id: "sess1",
       owner_basis: "service",
       visibility: "owner",
@@ -182,7 +182,7 @@ describe("S3 sync (F6)", () => {
     await instance.sources.run("evals");
     const archive = archiveId(OWNER, "atif", "atif-1");
     const first = await readMetadata(instance.store, OWNER, archive);
-    expect(first).toMatchObject({ agent: "atif", claims: { email: "carol@x.io" } });
+    expect(first).toMatchObject({ format: "atif", claims: { email: "carol@x.io" } });
 
     const doc = JSON.parse(ATIF) as { steps: Record<string, unknown>[] };
     const lastStep = doc.steps.at(-1) as { step_id: number };
@@ -295,13 +295,18 @@ describe("S3 sync (F6)", () => {
       const found = await search.search(LOCAL_VIEWER, { q, ...filters });
       return found.results.map((r) => ({
         owner: r.owner,
-        agent: r.agent,
+        format: r.format,
         session_id: r.session_id,
         source_id: r.source_id,
       }));
     };
     await instance.jobs.runNow("source:evals");
-    const session = { owner: OWNER, agent: "claude-code", session_id: "sess1", source_id: "evals" };
+    const session = {
+      owner: OWNER,
+      format: "claude-code",
+      session_id: "sess1",
+      source_id: "evals",
+    };
     expect(await find("auth", { source: "evals", owner: OWNER })).toEqual([session]);
     expect(await find("auth", { source: "upload" })).toEqual([]);
     // What the pipeline redacted before storing was never indexed.

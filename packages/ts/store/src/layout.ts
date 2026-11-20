@@ -63,8 +63,10 @@ function assertSpanKey(traceId: string, spanId: string): string {
   return `${traceId}-${spanId}`;
 }
 
-export function archiveId(owner: string, agent: string, sessionId: string): string {
-  return createHash("sha256").update(`${owner}\n${agent}\n${sessionId}`, "utf8").digest("hex");
+/** `sha256(owner + "\n" + format + "\n" + session_id)`, `format` being the format the session
+ * is filed under. */
+export function archiveId(owner: string, format: string, sessionId: string): string {
+  return createHash("sha256").update(`${owner}\n${format}\n${sessionId}`, "utf8").digest("hex");
 }
 
 export const LAYOUT_KEY = "seshi.json";

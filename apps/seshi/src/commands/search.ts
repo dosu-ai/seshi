@@ -149,7 +149,7 @@ export function highlighted(
 export function resultLines(result: SearchResult, style: Style = Style.plain()): string[] {
   const where = printable([result.project, result.branch].filter(Boolean).join(" @ "));
   const head = [
-    style.search(printable(`${result.agent}/${result.session_id}`)),
+    style.search(printable(`${result.format}/${result.session_id}`)),
     printable(result.owner),
     ...(where ? [style.muted(where)] : []),
     style.muted(when(result.ended_at ?? result.updated_at)),

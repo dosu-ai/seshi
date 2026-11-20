@@ -69,7 +69,7 @@ function metadata(over: Partial<SessionMetadata> = {}): SessionMetadata {
     owner: "me",
     archive_id: "c".repeat(64),
     session_id: SID,
-    agent: "claude-code",
+    format: "claude-code",
     status: "stored",
     head: T2,
     traces: [
@@ -141,7 +141,7 @@ function evidence(over: (ev: SessionEvidence) => void = () => {}): SessionEviden
       mode: "server",
       where: "https://seshi.test",
       sees_stubs: false,
-      agent: "claude-code",
+      format: "claude-code",
       upload_id: SID,
       metadata: metadata(),
       traces: [
@@ -198,8 +198,8 @@ function fakeServer(over: Partial<ServerView> = {}): ServerView {
   return {
     mode: "server",
     where: "https://seshi.test",
-    getSession: async (_agent, id) => (id === SID ? metadata() : null),
-    getTrace: async (_agent, _id, hash) =>
+    getSession: async (_format, id) => (id === SID ? metadata() : null),
+    getTrace: async (_format, _id, hash) =>
       traces[hash]
         ? ({ content_hash: hash, records: traces[hash] } as unknown as StoredTrace)
         : null,
@@ -208,7 +208,7 @@ function fakeServer(over: Partial<ServerView> = {}): ServerView {
     search: async (q) => ({
       query: q,
       total: 1,
-      results: [{ agent: "claude-code", session_id: SID } as never],
+      results: [{ format: "claude-code", session_id: SID } as never],
       index: { ready_at: NOW.toISOString(), caught_up_at: NOW.toISOString(), sessions: 1 },
     }),
     ...over,

@@ -58,6 +58,7 @@ export {
   MAX_LABEL_VALUE_LENGTH,
   MAX_LABELS,
 } from "./labels";
+export { upgradeMetadata, upgradeTrace } from "./legacy";
 export { type ParseOptions, parseTrace } from "./parse";
 export { canonicalJson, PrefixHash, prefixSha256, ResumableSha256 } from "./prefix-hash";
 export type {
