@@ -60,7 +60,8 @@ Where it searches:
 
 The output is plain text; `--json` prints the API's `SearchResults`. Exit 0 also when nothing
 matches; 2 for a query with nothing to look for; 3 when nothing is configured or search is
-turned off; 5 when not signed in or not allowed (the credential lacks the `search` scope); 7
+turned off; 5 when not signed in or not allowed (`--owner` naming someone else, with a credential that
+lacks the `search` scope); 7
 when the server or bucket cannot answer, or the server's index is still being built.
 
 ## How the index works
@@ -109,5 +110,7 @@ Who finds what follows the read rules (F10.4): a member finds their own sessions
 visible to the org; admins and services find everything. The server builds that filter from
 the credential, the index applies it, and each result is checked against the session's live
 metadata before it is returned, so a session made private or deleted after it was indexed is
-never shown. The `search` scope is needed: the org key, member session tokens, static tokens,
-admins and service readers have it; device tokens and writing services do not.
+never shown. Anyone else's sessions need the `search` scope: the org key, member session
+tokens, static tokens, admins and service readers have it. Device tokens and writing services
+do not, so they search only their own owner's sessions (X5.10): the server sets the owner
+filter to theirs, and refuses (`403`) an `owner` naming anyone else.

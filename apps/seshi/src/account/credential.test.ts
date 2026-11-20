@@ -72,7 +72,7 @@ describe("the credential for a purpose", () => {
     });
     const fetch = async () => Response.json({ error: "invalid_grant" }, { status: 400 });
     expect((await credentialFor(options({ fetch }), SERVER, "share")).token).toBe("seshi_d");
-    await expect(credentialFor(options({ fetch }), SERVER, "read")).rejects.toThrow(
+    await expect(credentialFor(options({ fetch }), SERVER, "delete")).rejects.toThrow(
       /no longer renews the session/,
     );
     // Without a usable device token it falls back to the sign-in.
@@ -81,6 +81,28 @@ describe("the credential for a purpose", () => {
       device: "seshi_d",
     });
     expect((await credentialFor(options(), SERVER, "share")).token).toBe("jwt");
+  });
+
+  it("reads with the device token when the sign-in has run out and cannot be renewed", async () => {
+    // The device token reads its owner's own sessions (X5.10).
+    await logins.save(oidcProfile({ session: { issued_at: at(-70), expires_at: at(-10) } }), {
+      session: "old",
+      device: "seshi_d",
+      refresh: "rt",
+    });
+    const fetch = async () => Response.json({ error: "invalid_grant" }, { status: 400 });
+    expect((await credentialFor(options({ fetch }), SERVER, "read")).token).toBe("seshi_d");
+    // Only a device token: no sign-in at all.
+    await logins.save(oidcProfile({ session: undefined }), { device: "seshi_d" });
+    expect((await credentialFor(options(), SERVER, "read")).token).toBe("seshi_d");
+    // A delete still needs a fresh sign-in.
+    await expect(credentialFor(options(), SERVER, "delete")).rejects.toThrow(/has expired/);
+    // An expired device token is no fallback.
+    await logins.save(
+      oidcProfile({ session: undefined, device: { id: "d1", expires_at: at(-1) } }),
+      { device: "seshi_d" },
+    );
+    await expect(credentialFor(options(), SERVER, "read")).rejects.toThrow(/has expired/);
   });
 
   it("refuses an expired device token: signing in renews it", async () => {

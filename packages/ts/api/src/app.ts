@@ -5,6 +5,7 @@ import {
   type Principal,
   pickClaims,
   requireDelete,
+  requireReadOwner,
   requireScope,
   requireVisibilityChange,
   type Scope,
@@ -506,8 +507,10 @@ export function createApp(instance: Instance) {
   });
 
   route("GET", "/v1/sessions", async ({ request, url }) => {
-    const principal = await caller(request, "sessions:read");
+    // Its own sessions any credential lists (X5.10); another owner's need sessions:read.
+    const principal = await authenticate(request);
     const owner = ownerOf(url, principal);
+    requireReadOwner(principal, owner, aliases);
     const after = url.searchParams.get("after") ?? undefined;
     const limit = intParam(url, "limit", 100, 1000);
     const folders = aliases
@@ -567,13 +570,14 @@ export function createApp(instance: Instance) {
   }
 
   /** The session the request names, by `{format}/{session_id}` (with `?owner=`) or by
-   * `{owner}/{archive_id}`. */
+   * `{owner}/{archive_id}`. Any credential reads its own sessions, being their owner (X5.10);
+   * one without `sessions:read` finds no one else's (canRead), so those are `404`. */
   async function located(
     request: Request,
     params: Record<string, string>,
     url: URL,
   ): Promise<{ principal: Principal; folder: string; metadata: SessionMetadata }> {
-    const principal = await caller(request, "sessions:read");
+    const principal = await authenticate(request);
     if (params.archive_id !== undefined) {
       return { principal, ...(await readableByArchive(principal, params)) };
     }
@@ -650,7 +654,7 @@ export function createApp(instance: Instance) {
 
   route("PATCH", "/v1/sessions/:format/:session_id", async ({ request, params, url }) => {
     // The owner's own credential may share or unshare: a sign-in reads, a device token only
-    // writes, and either may (X5.10). One that reads nothing finds only its own sessions
+    // writes, and either may (X5.10). One without sessions:read finds only its own sessions
     // (canRead), and requireVisibilityChange checks the scope.
     const principal = await authenticate(request);
     const { format, sessionId } = sessionParams(params);
@@ -757,8 +761,10 @@ export function createApp(instance: Instance) {
   });
 
   route("GET", "/v1/changes", async ({ request, url }) => {
-    const principal = await caller(request, "sessions:read");
+    // Its own feed any credential reads (X5.10); another owner's needs sessions:read.
+    const principal = await authenticate(request);
     const owner = ownerOf(url, principal);
+    requireReadOwner(principal, owner, aliases);
     // The metadata the page read (to name an old entry's format), so it is not read again here.
     const read: MetadataRead = new Map();
     const page: ChangesPage = await readChanges(
@@ -834,10 +840,18 @@ export function createApp(instance: Instance) {
   }
 
   route("GET", "/v1/search", async ({ request, url }) => {
-    const principal = await caller(request, "search");
-    return fromSearch((search) =>
-      search.search(viewerFor(principal, aliases), searchRequestOf(url)),
-    );
+    // A credential without `search` (a device token) searches its own sessions only: the
+    // owner filter is its own owner, and naming another is refused (X5.10).
+    const principal = await authenticate(request);
+    return fromSearch((search) => {
+      const query = searchRequestOf(url);
+      if (!principal.scopes.has("search")) {
+        const owner = query.owner ?? principal.owner;
+        requireReadOwner(principal, owner, aliases, "search");
+        query.owner = owner;
+      }
+      return search.search(viewerFor(principal, aliases), query);
+    });
   });
 
   function tokenKind(value: unknown): TokenKind {

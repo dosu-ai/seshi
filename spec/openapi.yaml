@@ -187,6 +187,11 @@ paths:
         there is no default. `404` for a stub (F3.4: no trace yet, its first upload dropped by
         model review), as for its trace, export and reviews, and for a session the caller may
         not read.
+
+        Any credential reads its own owner's sessions, being their owner, without
+        `sessions:read`: a device token reads the sessions it uploaded (X5.10). Another
+        owner's need `sessions:read`; a credential without it finds none of them, shared or
+        not, so they are `404` (never `403`), as for a session that is not there.
       responses:
         "200":
           description: The session's `metadata.json`.
@@ -195,7 +200,6 @@ paths:
               schema: { $ref: "#/components/schemas/SessionMetadata" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "502": { $ref: "#/components/responses/StorageError" }
 
@@ -231,7 +235,6 @@ paths:
                   - { $ref: "#/components/schemas/AtifDocument" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
         "404":
           description: |
             `not_found`: no such session (a filtered session is not stored), or no trace with
@@ -286,7 +289,6 @@ paths:
                   - { $ref: "#/components/schemas/AtifDocument" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
         "404":
           description: |
             `not_found`: no such session, or no trace with that hash. `no_trace`: the session
@@ -316,8 +318,8 @@ paths:
         was skipped. Anyone else who may read the session gets only `n`, `at`, `content_hash`
         and `decision` (`allow`, `redact` or `skipped`). Writes no policy covered have no
         entry. Envelopes review dropped left nothing in the session (a dropped first upload
-        only a stub, which is `404` here); they are drop records (`seshi sync dropped`). Needs
-        `sessions:read`.
+        only a stub, which is `404` here); they are drop records (`seshi sync dropped`). Its
+        own sessions' any credential reads; another owner's need `sessions:read` (X5.10).
       responses:
         "200":
           description: The decisions, oldest first.
@@ -326,7 +328,6 @@ paths:
               schema: { $ref: "#/components/schemas/ReviewsPage" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "502": { $ref: "#/components/responses/StorageError" }
 
@@ -467,6 +468,10 @@ paths:
         caller may read them (X5.10). A full listing; a reader that wants an index builds its
         own from the change feed. A stub (a session whose first upload model review dropped,
         with no trace yet, F3.4) is not listed.
+
+        Any credential lists its own owner's sessions, being their owner: a device token, which
+        has no `sessions:read`, lists the sessions it uploaded, private ones too. Another
+        owner's need `sessions:read`: a credential without it naming another owner is `403`.
       parameters:
         - $ref: "#/components/parameters/owner"
         - name: after
@@ -533,6 +538,11 @@ paths:
       description: |
         `404` for a stub (F3.4: no trace yet, its first upload dropped by model review), as for
         its trace, export and reviews.
+
+        Any credential reads its own owner's sessions, being their owner, without
+        `sessions:read`: a device token reads the sessions it uploaded (X5.10). Another
+        owner's need `sessions:read`; a credential without it finds none of them, shared or
+        not, so they are `404` (never `403`), as for a session that is not there.
       responses:
         "200":
           description: The session's `metadata.json`.
@@ -540,7 +550,6 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/SessionMetadata" }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "502": { $ref: "#/components/responses/StorageError" }
     patch:
@@ -670,7 +679,6 @@ paths:
                   - { $ref: "#/components/schemas/AtifDocument" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
         "404":
           description: |
             `not_found`: no such session (a filtered session is not stored), or no trace with
@@ -726,7 +734,6 @@ paths:
                   - { $ref: "#/components/schemas/AtifDocument" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
         "404":
           description: |
             `not_found`: no such session, or no trace with that hash. `no_trace`: the session
@@ -754,6 +761,9 @@ paths:
         name a change not made yet, or one that failed: read the session for what it is now.
         Another owner's feed shows the entries of sessions the caller may read now (X5.10), and
         none of a stub's (F3.4). A stub's first trace is its first `published` entry.
+
+        Any credential reads its own owner's feed; another owner's needs `sessions:read`, and a
+        credential without it naming another owner is `403` (X5.10).
       parameters:
         - $ref: "#/components/parameters/owner"
         - name: after
@@ -1098,8 +1108,8 @@ paths:
         was skipped. Anyone else who may read the session gets only `n`, `at`, `content_hash`
         and `decision` (`allow`, `redact` or `skipped`). Writes no policy covered have no
         entry. Envelopes review dropped left nothing in the session (a dropped first upload
-        only a stub, which is `404` here); they are drop records (`seshi sync dropped`). Needs
-        `sessions:read`.
+        only a stub, which is `404` here); they are drop records (`seshi sync dropped`). Its
+        own sessions' any credential reads; another owner's need `sessions:read` (X5.10).
       responses:
         "200":
           description: The decisions, oldest first.
@@ -1107,7 +1117,6 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ReviewsPage" }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "502": { $ref: "#/components/responses/StorageError" }
 
@@ -1212,10 +1221,13 @@ paths:
         event it is in (`GET …/trace?hash=` holds it at `events[event_index]`) and a short
         snippet with the matched words' offsets.
 
-        Needs the `search` scope. A member finds their own sessions and those visible to the
-        org; admins and services find everything (X5.10). The server adds that filter from
-        the credential; no parameter widens it (F10.4), and every result is checked against
-        the session's current visibility before it is returned.
+        With the `search` scope, a member finds their own sessions and those visible to the
+        org; admins and services that read find everything (X5.10). Without it (a device token,
+        a service that only writes), a credential finds only its own owner's sessions: the
+        server sets `owner` to the credential's own, and `owner` naming anyone else is `403`.
+        The server adds that filter from the credential; no parameter widens it (F10.4), and
+        every result is checked against the session's current visibility before it is
+        returned.
 
         Every instance that serves search keeps its own index, built from the change feed
         (F10.2, F10.3), so a session appears within the indexer's interval of being stored.
@@ -1232,7 +1244,9 @@ paths:
           schema: { type: string, minLength: 1, maxLength: 1000 }
         - name: owner
           in: query
-          description: Only this owner's sessions (`[auth.owner_aliases]` folded in).
+          description: |
+            Only this owner's sessions (`[auth.owner_aliases]` folded in). Without the
+            `search` scope, only the caller's own owner (the default); any other is `403`.
           schema: { $ref: "#/components/schemas/Owner" }
         - name: agent
           in: query

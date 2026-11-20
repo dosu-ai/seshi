@@ -177,16 +177,21 @@ describe("signing in through the IdP (X5.7)", () => {
     expect(idp.calls.filter((c) => c.grant === "refresh_token")).toHaveLength(2);
   });
 
-  it("asks for a new sign-in once the IdP stops renewing", async () => {
+  it("reads with the device token once the IdP stops renewing, and asks for a sign-in to delete", async () => {
     expect((await machine.seshi(["login", "--server", server.url])).code).toBe(0);
     idp.refreshTokens.clear();
     await machine.logins.update(server.url, {
       session: { issued_at: "2026-01-01T00:00:00.000Z", expires_at: "2026-01-01T01:00:00.000Z" },
     });
+    // A read goes on with the device token, which reads the person's own sessions (X5.10).
     const who = await machine.seshi(["whoami"]);
-    expect(who.code).toBe(5);
-    expect(who.err).toContain("the IdP no longer renews the session");
-    expect(who.err).toContain(`seshi login --server ${server.url}`);
+    expect(who.code, who.err).toBe(0);
+    expect(who.out).toContain("credential  device (an IdP sign-in)");
+    // A delete needs the sign-in, so it asks for a new one.
+    const rm = await machine.seshi(["sessions", "rm", "claude-code/s1", "--yes"]);
+    expect(rm.code).toBe(5);
+    expect(rm.err).toContain("the IdP no longer renews the session");
+    expect(rm.err).toContain(`seshi login --server ${server.url}`);
   });
 
   it("refuses an ID token the server does not accept", async () => {

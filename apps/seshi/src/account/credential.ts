@@ -6,7 +6,9 @@ import { type ConfiguredUser, resolveUser } from "./user";
 type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
 
 /** What a credential is for: reading (and changing) sessions, deleting one, uploading, or
- * sharing and unsharing one's own sessions (the device token, which may, else the sign-in). */
+ * sharing and unsharing one's own sessions (the device token, which may, else the sign-in).
+ * A read is the sign-in's, which reads the org's shared sessions too; when the sign-in has run
+ * out and cannot be renewed, the device token, which reads its owner's own (X5.10). */
 export type Purpose = "read" | "delete" | "upload" | "share";
 
 /** There is no usable credential for the server: never signed in, or it ran out. */
@@ -146,13 +148,16 @@ export async function credentialFor(
       return { server: profile.server, token, profile };
     }
     case "oidc": {
+      const device = async (): Promise<Credential | undefined> => {
+        const token = await options.logins.secret(profile.server, "device");
+        if (!token || msUntil(profile.device?.expires_at, now) <= 0) return undefined;
+        return { server: profile.server, token, profile };
+      };
       if (purpose === "share") {
         // The device token the uploader sends with may share its owner's sessions (X5.10), so
         // sharing needs no renewal through the IdP while it lasts.
-        const device = await options.logins.secret(profile.server, "device");
-        if (device && msUntil(profile.device?.expires_at, now) > 0) {
-          return { server: profile.server, token: device, profile };
-        }
+        const shared = await device();
+        if (shared) return shared;
       }
       if (purpose === "upload") {
         const device = await options.logins.secret(profile.server, "device");
@@ -169,7 +174,17 @@ export async function credentialFor(
       if (session && sessionUsable(profile, purpose, now)) {
         return { server: profile.server, token: session, profile };
       }
-      const renewed = await renewSession(options, profile, now);
+      let renewed: string;
+      try {
+        renewed = await renewSession(options, profile, now);
+      } catch (err) {
+        // The device token reads its owner's own sessions (X5.10): enough for a read while the
+        // sign-in cannot be renewed.
+        const fallback =
+          purpose === "read" && err instanceof NotSignedIn ? await device() : undefined;
+        if (fallback) return fallback;
+        throw err;
+      }
       return {
         server: profile.server,
         token: renewed,

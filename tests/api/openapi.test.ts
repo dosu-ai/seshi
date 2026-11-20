@@ -775,21 +775,30 @@ describe("identity and access (X5)", () => {
     expect((await call("GET", "/v1/owners", alice)).status).toBe(200);
     expect((await call("GET", "/v1/owners?after=a/b", alice)).status).toBe(400);
     expect((await call("GET", "/v1/owners", { app: x5, token: null })).status).toBe(401);
-    // A device token writes and reads nothing.
+    // A device token reads its owner's own sessions, and finds no one else's (X5.10).
+    const other = await call("POST", "/v1/tokens", {
+      ...admin,
+      body: { kind: "device", owner: "bob" },
+    });
+    const bob = { app: x5, token: (other.body as { token: string }).token };
     expect((await call("GET", "/v1/owners", device)).status).toBe(403);
-    expect((await call("GET", "/v1/sessions", device)).status).toBe(403);
-    expect((await call("GET", "/v1/sessions/claude-code/s1", device)).status).toBe(403);
-    expect((await call("GET", "/v1/sessions/claude-code/s1/trace", device)).status).toBe(403);
-    expect((await call("GET", "/v1/sessions/claude-code/s1/export", device)).status).toBe(403);
-    expect((await call("GET", "/v1/sessions/claude-code/s1/reviews", device)).status).toBe(403);
+    expect((await call("GET", "/v1/sessions", device)).status).toBe(200);
+    expect((await call("GET", "/v1/sessions?owner=alice", bob)).status).toBe(403);
+    for (const sub of ["", "/trace", "/export", "/reviews"]) {
+      const path = `/v1/sessions/claude-code/s1${sub}`;
+      expect((await call("GET", path, device)).status, sub).toBe(200);
+      expect((await call("GET", `${path}?owner=alice`, bob)).status, sub).toBe(404);
+    }
     const s1 = `/v1/owners/alice/sessions/${archiveId("alice", "claude-code", "s1")}`;
     for (const sub of ["", "/trace", "/export", "/reviews"]) {
-      expect((await call("GET", `${s1}${sub}`, device)).status, sub).toBe(403);
+      expect((await call("GET", `${s1}${sub}`, device)).status, sub).toBe(200);
+      expect((await call("GET", `${s1}${sub}`, bob)).status, sub).toBe(404);
     }
     expect((await call("GET", "/v1/admin/jobs", admin)).status).toBe(200);
     expect((await call("GET", "/v1/admin/jobs", alice)).status).toBe(403);
     expect((await call("GET", "/v1/admin/jobs", { app: x5, token: null })).status).toBe(401);
-    expect((await call("GET", "/v1/changes", device)).status).toBe(403);
+    expect((await call("GET", "/v1/changes", device)).status).toBe(200);
+    expect((await call("GET", "/v1/changes?owner=alice", bob)).status).toBe(403);
     expect((await call("DELETE", "/v1/sessions/claude-code/s1", alice)).status).toBe(403);
 
     const patch = (as: object, visibility: unknown, path = "/v1/sessions/claude-code/s1") =>
@@ -1164,9 +1173,13 @@ describe("search (F10)", () => {
       role: "member",
       scopes: ["sessions:read"],
     });
+    // Without the search scope it searches only its own owner's sessions.
     expect((await call("GET", "/v1/search?q=auth", { ...as, token: reader?.token })).status).toBe(
-      403,
+      200,
     );
+    expect(
+      (await call("GET", "/v1/search?q=auth&owner=bob", { ...as, token: reader?.token })).status,
+    ).toBe(403);
     const off = appOver(
       testInstance({
         store,

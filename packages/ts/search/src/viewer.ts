@@ -13,9 +13,9 @@ export function viewerFor(
   aliases: OwnerAliases = new OwnerAliases(),
 ): Viewer {
   return {
-    everything: seesEverything(principal),
+    everything: principal.scopes.has("search") && seesEverything(principal),
     own: aliases.storedAs(principal.owner),
-    canRead: (session) => canRead(principal, session, aliases),
+    canRead: (session) => canRead(principal, session, aliases, "search"),
   };
 }
 

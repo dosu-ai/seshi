@@ -226,9 +226,9 @@ key with `--key`, or through the IdP ([cli.md](cli.md#signing-in-f82)).
 | Org key (no IdP) | Every member's CLI and uploader, with `X-Seshi-User: <username>` | Write as that username (lowercased; owner basis `claimed`); read and search org-wide. No deletes; never writes to, replaces or changes the visibility of a session whose owner was verified; replaces a session it wrote only with that session's retraction secret |
 | IdP ID token | The CLI, briefly | Nothing but `POST /v1/auth/exchange` |
 | Session token | The CLI, after sign-in | Read, search; delete the person's own sessions within 10 minutes of being issued. One hour; signed, not stored. An admin's (IdP group `admin_group` or an email in `admins`) can do everything |
-| Device token | The uploader on a laptop | Write the person's own sessions, and share or unshare them (`seshi share`, which answers with that session's metadata); it reads no session, trace or listing. 90 days; signing in again from the machine renews it |
+| Device token | The uploader on a laptop | Write the person's own sessions; read, list, export and search them (private ones too), and share or unshare them (`seshi share`), all by being their owner: it has no `sessions:read` or `search`, so it reads no one else's session, even an `org` one. 90 days; signing in again from the machine renews it |
 | Admin token | Admins | Everything, including deletes and token management |
-| Service token | A reader, or an OTLP destination | Read and search org-wide, or write as `svc:<source-id>`; never changes a session's visibility (its source's `visibility` decides it) |
+| Service token | A reader, or an OTLP destination | Read and search org-wide, or write as `svc:<source-id>` (and read only what it wrote there); never changes a session's visibility (its source's `visibility` decides it) |
 | Static token | Config | Everything for one owner |
 
 Every seshi token is `seshi_<id>_<secret>`, stored as a hash at `tokens/<id>.json`, revocable,
@@ -244,12 +244,23 @@ A session is `org` (the default) or `owner` (X5.10). Its visibility is the uploa
 owner or an admin can change it later (`PATCH /v1/sessions/:format/:session_id`; `seshi share`
 and `seshi unshare` from the CLI), which writes a `visibility_changed` change entry. The owner
 may with any credential of theirs that writes sessions or reads them, so the device token a
-laptop uploads with shares that person's sessions and still reads no one's (its answer is the
-session's own metadata); a service token that only writes may not change any; a credential that
-cannot read finds only its owner's sessions there (`404` for anyone else's). Members read their own sessions and every `org` session;
-admins and service readers read everything. Reads name another owner with `?owner=`; a
-session the caller may not read answers 404, as if it were not there. Another owner's change
-feed (`GET /v1/changes?owner=`) shows only the entries of sessions the caller may read. Every
+laptop uploads with shares that person's sessions; a service token that only writes may not
+change any.
+
+Being the owner is enough to read a session: every credential reads, lists, exports and
+searches its own owner's sessions, private ones too, whatever its scopes. So the device token a
+laptop uploads with (which has only `sessions:write`) reads that person's sessions, and a
+service token that only writes reads what it wrote as `svc:<source-id>`. Another owner's
+sessions need a scope that reads: `sessions:read` for the session routes, listings and change
+feeds, `search` for search. Members read their own sessions and every `org` session; admins and
+service readers read everything. Reads name another owner with `?owner=`; a session the caller
+may not read answers `404`, as if it were not there, so a credential without `sessions:read`
+gets `404` for every session not its own owner's, `org` ones included. A listing, change feed
+or search that names another owner (`GET /v1/sessions?owner=`, `GET /v1/changes?owner=`,
+`GET /v1/search?owner=`) from a credential without the scope is refused with `403`: it asks
+for a whole owner, so there is nothing to hide by pretending it is empty. Search without
+`search` is limited to the credential's own owner. Another owner's change feed shows only the
+entries of sessions the caller may read. Every
 owner's feed at once (`GET /v1/changes/all`) is only for callers that read everything, service
 tokens and admins: anyone else gets `403`, never a filtered feed.
 
@@ -339,14 +350,14 @@ allow.
 | `GET /v1/me` | `{owner, storage, kind, role, scopes, owner_basis, credential_id, visibility?, expires_at?}`: who the credential is, and which bucket this server writes, so a client can point a reader at it. Never a secret |
 | `GET /v1/owners?limit&after` | The owners the bucket holds sessions for (`sessions:read`) |
 | `POST /v1/sessions` | Store a session (`sessions:write`); see below |
-| `GET /v1/sessions?owner&limit&after` | List an owner's sessions (the caller's own by default), as far as visibility allows; never a stub (F3.4) |
-| `GET /v1/sessions/:format/:session_id?owner` | The session's `metadata.json`; `404` for a stub |
+| `GET /v1/sessions?owner&limit&after` | List an owner's sessions (the caller's own by default), as far as visibility allows; never a stub (F3.4). Any credential lists its own owner's; another owner's need `sessions:read` (`403` without it) |
+| `GET /v1/sessions/:format/:session_id?owner` | The session's `metadata.json`; `404` for a stub. Any credential reads its own owner's sessions; another owner's need `sessions:read` (`404` without it). So do its trace, export and reviews |
 | `PATCH /v1/sessions/:format/:session_id?owner` | `{visibility}`: change who may read it. The owner (with `sessions:write` or `sessions:read`, so a device token too) or an admin |
 | `GET /v1/sessions/:format/:session_id/trace?hash&render` | The head trace (or another of the session's `traces`, by hash; `404` for a hash it does not name) as the stored canonical trace (`render=seshi`, the default) or rendered as `letta`, `otlp` or `atif` (until 0.17 also read as `?format=`, its name before 0.16); `400 bad_query` for another render, `404` for a session not stored (a filtered one included), `410` once redacted |
 | `GET /v1/sessions/:format/:session_id/export?hash&render` | The same trace as a download: `Content-Disposition: attachment; filename="<format>-<session>-<hash>.<render>.json"` |
 | `DELETE /v1/sessions/:format/:session_id?owner` | Tombstone: drop the trace objects, append a tombstone change. Irreversible; a later upload of the same session is refused. Needs `sessions:delete`: the owner with a fresh session token or a static token, or an admin. With `X-Seshi-Retract` it is a [retraction](#retraction-f97) by the machine that uploaded the session |
 | `GET /v1/owners/:owner/sessions/:archive_id`, `…/trace?hash&render`, `…/export?hash&render`, `…/reviews` | The same session, trace, download and reviews, by the owner and archive id a change entry, a search result or a listing names: that owner's folder exactly (no `[auth.owner_aliases]` folded in), no default owner. For readers that hold sessions the API gave them; `400 bad_query` for an owner or archive id that is not one, `404` as above |
-| `GET /v1/changes?owner&after&since&limit` | An owner's change feed; another owner's shows the entries of sessions the caller may read |
+| `GET /v1/changes?owner&after&since&limit` | An owner's change feed; another owner's shows the entries of sessions the caller may read, and needs `sessions:read` (`403` without it) |
 | `GET /v1/changes/all?after&since&limit` | Every owner's change feed as one: `{entries: [{owner, key, entry}], cursor?, truncated, through}`, by stamp, then owner, then key ([above](#every-owners-change-feed)). Service tokens and admins only, `403` for anyone else; `400 bad_query`, `404 search_disabled`, `503 index_building` |
 | `POST /v1/tokens` | `{kind: org\|admin\|device\|service, owner?, service?, scopes?, visibility?, expires_at?, label?}`: a new token, shown once (`tokens:admin`) |
 | `GET /v1/tokens?owner&kind&all` | Token records without their hashes (`tokens:admin`) |
@@ -355,9 +366,9 @@ allow.
 | `GET /v1/admin/jobs` | The worker, its jobs and every source, as `seshi workers status --json` prints them (`sources:admin`, X7.5) |
 | `GET /v1/redaction/rules` | The operator's rule packs and the rule-set hash, for redacting before upload (F2.4). Any signed-in caller; `ETag` is the hash, `If-None-Match` gets `304` |
 | `GET /v1/capture/rules` | The org's exclude list (`[capture] exclude`, every file's entries, as written, blanks and `#` comments left out) and its tool-call redaction list (`[capture] redact_tool_calls`, the same way): `{schema: "seshi/capture-rules/1", exclude: [...], redact_tool_calls: [...]}`, which laptops apply before upload ([config.md](config.md#the-orgs-exclude-list-capture-exclude), [capture.md](capture.md#the-orgs-exclude-list-on-a-laptop)). Any signed-in caller; `ETag` is a hash of the answer, `If-None-Match` gets `304`; a reload changes it at once. A server older than the route answers `404`, which a laptop reads as no list |
-| `GET /v1/sessions/:format/:session_id/reviews?owner` | What model review decided for each stored write (`sessions:read`, F3.8): the whole audit record for admins, only `n`, `at`, `content_hash` and `decision` for anyone else who may read the session |
+| `GET /v1/sessions/:format/:session_id/reviews?owner` | What model review decided for each stored write (F3.8; another owner's session needs `sessions:read`): the whole audit record for admins, only `n`, `at`, `content_hash` and `decision` for anyone else who may read the session |
 | `POST /otlp/v1/traces` | OTLP/HTTP trace ingest (F4): `ExportTraceServiceRequest` as protobuf or JSON from an OTLP destination's service token. Outside `/v1`, and its errors are OTLP's (`google.rpc.Status`). See [otlp.md](otlp.md) |
-| `GET /v1/search?q&owner&agent&repo&branch&source&since&until&sort&limit&matches&cursor` | Keyword search over what the caller may read (`search`, F10; [search.md](search.md)): `{query, total, results: [{owner, format, session_id, …, score, hits, matches: [{content_hash, event_index, role, snippet, highlights}]}], cursor?, index}`. `400 bad_query`, `404 search_disabled`, `503 index_building` |
+| `GET /v1/search?q&owner&agent&repo&branch&source&since&until&sort&limit&matches&cursor` | Keyword search over what the caller may read (F10; [search.md](search.md)); without the `search` scope, over its own owner's sessions only (`403` for `owner=` anyone else): `{query, total, results: [{owner, format, session_id, …, score, hits, matches: [{content_hash, event_index, role, snippet, highlights}]}], cursor?, index}`. `400 bad_query`, `404 search_disabled`, `503 index_building` |
 | `GET /v1/admin/sources?days` | Every configured source and `upload`: checkpoint, drop and failure counts, health over the last `days` (7) days, as `seshi sync status --json` prints them (`sources:admin`) |
 | `GET /v1/admin/sources/:id?days` | One source's status; `404 unknown_source` for an id no source has (`sources:admin`) |
 | `GET /v1/admin/sources/:id/failed`, `…/dropped` `?since&after&limit` | A source's failure or drop records, oldest first, as `seshi sync failed\|dropped --json` prints them; never content. A source no longer configured can still have its records read (`sources:admin`, X6.4) |
@@ -368,7 +379,7 @@ allow.
 
 A person can turn capture off in the middle of a session (`seshi capture off --session`, the
 `/session-capture` skill), and what was already uploaded must go too. The uploader's credentials cannot
-delete (a device token is write-only, the org key cannot delete at all), so each session carries
+delete (a device token cannot, the org key cannot delete at all), so each session carries
 a retraction secret instead. Before a session's first upload, the uploading machine makes a
 random secret and keeps it in its capture state file; every upload sends only its sha256 as
 `retract_hash`, and the server keeps the hash the session's first upload carries in its

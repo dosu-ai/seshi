@@ -158,8 +158,10 @@ the rest (F11.4):
   with a redirect to `127.0.0.1`), and is used on its own when the IdP has no device flow. The
   ID token is exchanged once (`POST /v1/auth/exchange`) for a one-hour session token, which the
   interactive commands use, and a 90-day device token for this machine, which the uploader uses
-  (it can only write). The IdP's refresh token renews the session token without signing in
-  again; `offline_access` is asked for when the IdP lists it, which is how Okta and Entra give
+  (it writes, and reads only your own sessions). The IdP's refresh token renews the session
+  token without signing in again; when the sign-in has run out and cannot be renewed,
+  `sessions ls|show|export`, `search` and `explore` go on with the device token, which reads
+  and searches your own sessions (private ones too) but no one else's (X5.10); `offline_access` is asked for when the IdP lists it, which is how Okta and Entra give
   one. A delete needs a session token from the last 10 minutes (X5.3), so `sessions rm` renews
   it first. `--visibility owner` makes everything the device token uploads private. The IdP's
   authorization, token and device endpoints must be `https:` (or `http:` on `localhost` or
@@ -170,7 +172,10 @@ the rest (F11.4):
   `seshi login` asks for it without echo). The username stated with it is resolved on every
   call: `SESHI_USER`, then `user` in the CLI config (`--user` writes it), then `git config
   user.email`, then the OS user name. It must be printable ASCII.
-- **A token** an admin issued (an admin or service token), or a static token: `--token -`.
+- **A token** an admin issued (an admin, service or device token), or a static token:
+  `--token -`. A device token (as `dosu setup` gives a member) lists, shows, exports and
+  searches its owner's own sessions; `--owner` naming anyone else is refused, and another
+  owner's session is not found (X5.10).
 
 Credentials go in the OS keychain through `Bun.secrets` (macOS Keychain, Windows Credential
 Manager, libsecret), one entry per secret under the service `seshi`. Where there is no keychain

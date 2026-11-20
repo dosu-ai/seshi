@@ -26,10 +26,13 @@ authorize stage holds every write to its caller's own sessions. The shared HS256
   - `oidc.ts` `OidcVerifier`: discovery document, then jose's remote JWKS (or a given key set).
     It checks the signature (asymmetric algorithms only), issuer, audience, expiry (60 s skew)
     and the nonce.
-  - `access.ts`: `canRead`, `requireScope`, `requireDelete` (session tokens must be under
-    10 minutes old), `requireVisibilityChange` (the owner, with `sessions:write` or
-    `sessions:read`, or an admin). `canRead` finds a credential that reads nothing (no
-    `sessions:read` or `search`) only its own owner's sessions.
+  - `access.ts`: `canRead`, `requireReadOwner`, `requireScope`, `requireDelete` (session
+    tokens must be under 10 minutes old), `requireVisibilityChange` (the owner, with
+    `sessions:write` or `sessions:read`, or an admin). Being the owner is enough to read:
+    `canRead` finds every credential its own owner's sessions, and another owner's only with
+    the route's read scope (`sessions:read`, or `search` for search), so a credential without
+    it gets `404` for them. `requireReadOwner` refuses (`403`) a listing, change feed or search
+    that names another owner without that scope.
   - `authorizer.ts` `ownershipAuthorizer()`: the pipeline's stage 1 (see below).
   - `claims.ts`: `pickClaims` (the allowlist: email, name, username, git_email, git_name,
     account_ids, all bounded) and `idTokenClaims`.
@@ -46,9 +49,9 @@ authorize stage holds every write to its caller's own sessions. The shared HS256
   | Static token | `static`, verified, member, everything for its owner |
   | Org key + `X-Seshi-User` | `person`, `claimed`, member; write, read, search |
   | Session token | `person` or `admin`, verified; member: read, search, delete; admin: all |
-  | Device token | `device`, verified, write only, 90 days |
+  | Device token | `device`, verified, `sessions:write` only, 90 days; reads, searches and shares its owner's own sessions by being their owner |
   | Admin token | `admin`, all scopes |
-  | Service token | `service`, `svc:<name>`; read and search, or write |
+  | Service token | `service`, `svc:<name>`; read and search, or write (and read what it wrote) |
 
   `credential_id` is the record id, the session token's `jti`, or `static-<owner>` (the
   config entry; never derived from the secret, since every reader of the owner's sessions sees
@@ -188,8 +191,9 @@ authorize stage holds every write to its caller's own sessions. The shared HS256
    people's sessions" (X5.12) holds for org-key sessions too (17 review fix).
 9. **Static tokens are members with every session scope, not admins.** They can't manage
    tokens; `seshi admin init` covers that.
-10. **Visibility change needs `sessions:read` plus being the owner or an admin.** Device tokens
-    can't change it. Org-key callers can change sessions whose basis is `claimed`, but not a
+10. **Visibility change needs being the owner or an admin, with a credential that writes or
+    reads sessions.** The owner's device token may (0.23); a service token that only writes may
+    not. Org-key callers can change sessions whose basis is `claimed`, but not a
     verified one: in a mixed deployment, opening a person's `owner` session to the org would
     show it to members who hold no org key.
 11. **No HS256 shared-secret tokens** (X5.2). `signed-token.ts` was removed; nothing in seshi
@@ -206,6 +210,14 @@ authorize stage holds every write to its caller's own sessions. The shared HS256
 16. **`config check` also warns in a mixed deployment.** With an IdP and the org key on,
     `owner` visibility is still not enforced against org-key holders, so the warning names
     that case too and goes away with `auth.org_key.enabled = false`.
+18. **Owning a session is enough to read it (0.24).** The device token has only
+    `sessions:write`, yet reads, lists, exports and searches its owner's own sessions; no read
+    scope was added to it, so it still reads no one else's, `org` ones included (`404`), and
+    a listing, change feed or search naming another owner is `403`. Search without `search` is
+    limited to the credential's own owner, and the search viewer sees everything only with
+    `search`, so a service that only writes (a service, so `seesEverything`) reads only its own
+    `svc:` sessions. The CLI reads with the device token when the sign-in has run out and
+    cannot be renewed; deletes still need a fresh sign-in.
 17. **`POST /v1/tokens/revoke` takes an owner id only.** The org key's owner `*` is refused
     (400): the org key is rotated (`seshi admin init --rotate-org-key` or `DELETE
     /v1/tokens/:id`), not revoked by owner.
