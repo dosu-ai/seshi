@@ -1,3 +1,10 @@
+# [0.15.0](https://github.com/dosu-ai/seshi/compare/v0.14.0...v0.15.0) (2026-11-20)
+
+
+### Features
+
+* **capture:** org exclude list (capture.exclude) ([#47](https://github.com/dosu-ai/seshi/issues/47)) ([975b91c](https://github.com/dosu-ai/seshi/commit/975b91c0e2b779d30a185d5d81d067be86532ab4))
+
 # [0.14.0](https://github.com/dosu-ai/seshi/compare/v0.13.0...v0.14.0) (2026-11-20)
 
 

@@ -804,6 +804,44 @@ describe("capture rules from the CLI (F9.5)", () => {
     expect(config()).toContain("[capture]\nenabled = true\n");
   });
 
+  it("never uploads from a place on the org's exclude list, and status names the entry", async () => {
+    machine.cliConfig(
+      `server = "${server.url}"\nuser = "${OWNER}"\n[capture]\nexclude = ["# client work", "~/code/app"]\n`,
+    );
+    await hook();
+    await machine.seshi(["capture", "on", "--session", SESSION]);
+    await hook();
+    await daemon();
+    expect(await stored()).toBeNull();
+    const status = await machine.seshi(["capture", "status", "--session", SESSION, "--json"]);
+    expect(JSON.parse(status.out).session).toMatchObject({
+      capture: false,
+      level: "org",
+      reason: "the org excludes ~/code/app (capture.exclude)",
+    });
+    const human = await machine.seshi(["capture", "status", "--session", SESSION], {
+      env: { NO_COLOR: "1" },
+    });
+    expect(human.out).toContain("the org excludes ~/code/app (capture.exclude) (org)");
+
+    // The same list from the environment, naming the repo by its remote on any host.
+    machine.cliConfig(`server = "${server.url}"\nuser = "${OWNER}"\n`);
+    mkdirSync(join(project, ".git"));
+    writeFileSync(
+      join(project, ".git", "config"),
+      `[remote "origin"]\n\turl = https://gitlab.example.com/Acme/App.git\n`,
+    );
+    const line = (env: Record<string, string> = {}) =>
+      machine
+        .seshi(["statusline", "--json"], { stdin: JSON.stringify({ cwd: project }), env })
+        .then((r) => JSON.parse(r.out));
+    expect(await line()).toMatchObject({ capturing: true });
+    expect(await line({ SESHI_CAPTURE__EXCLUDE: "acme/app" })).toMatchObject({
+      capturing: false,
+      level: "org",
+    });
+  });
+
   it("refuses bad usage", async () => {
     expect((await machine.seshi(["capture"])).code).toBe(2);
     expect((await machine.seshi(["capture", "bogus"])).code).toBe(2);

@@ -217,9 +217,10 @@ CLI or cloud session's results.
 One decision function judges every session, the same for hooks, the sweep, the status line and
 `seshi upload` (F9.3):
 
-1. **Shared rules can only turn capture off, and always win.** The org rule (`capture.remotes`
-   in a managed CLI config: only repos whose git remote matches) and a repo's own committed
-   `.seshi/config.toml` with `capture = false`. They hold for every folder a session was seen
+1. **Shared rules can only turn capture off, and always win.** The org rules in a managed CLI
+   config (`capture.remotes`: only repos whose git remote matches; `capture.exclude`: never the
+   repositories and folders it lists) and a repo's own committed `.seshi/config.toml` with
+   `capture = false`. They hold for every folder a session was seen
    in: a session that worked in an excluded repo and then moved into a captured one (a nested
    repo, `--add-dir`) carries that work in its transcript, so it is not uploaded, and nothing
    more of a captured session is sent once it works in an excluded repo. A subagent is judged

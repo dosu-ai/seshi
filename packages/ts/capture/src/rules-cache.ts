@@ -3,9 +3,17 @@ import type { CaptureHost } from "@seshi/kit";
 import { expandTilde } from "@seshi/kit";
 import { tryReadJson, tryRealpath, tryStat, tryWritePrivateFile } from "./files";
 import type { CapturePaths } from "./paths";
-import { type CaptureRules, DEFAULT_RULES, type PathRule } from "./rules";
+import {
+  type CaptureRules,
+  DEFAULT_RULES,
+  type ExcludeRule,
+  excludePattern,
+  type PathRule,
+} from "./rules";
 
-const CACHE_SCHEMA = "seshi/capture-rules/1";
+// 2: rules gained `exclude`. A cache written before it would hide a new exclude list, or keep the
+// error an older seshi gave for the unknown key, until the config file changed.
+const CACHE_SCHEMA = "seshi/capture-rules/2";
 
 export interface RulesSnapshot {
   rules: CaptureRules;
@@ -51,6 +59,32 @@ function pathRule(path: string, capture: boolean, home: string): PathRule {
   return rule;
 }
 
+/** One entry of `capture.exclude`, or undefined for a blank one or a `#` comment. A folder starts
+ * with `/`, `~`, a drive (`C:\`) or a network share (`\\server`); anything else names a
+ * repository. A folder's symbolic links are resolved up to its first wildcard. */
+export function excludeRule(raw: string, home: string): ExcludeRule | undefined {
+  const written = raw.trim();
+  if (written === "" || written.startsWith("#")) return undefined;
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: matching control characters
+  const entry = written.replace(/[\x00-\x1f\x7f-\x9f]/g, "\uFFFD");
+  if (!/^(?:[/~]|[a-z]:[\\/]|\\\\)/i.test(written)) return { entry, repo: excludePattern(written) };
+  const path = expandTilde(written, home);
+  const rule: ExcludeRule = { entry, path };
+  const real = realUpToWildcard(path);
+  if (real !== undefined && real !== path) rule.real = real;
+  return rule;
+}
+
+/** `path` with the symbolic links of its folders before the first wildcard resolved. */
+function realUpToWildcard(path: string): string | undefined {
+  const star = path.indexOf("*");
+  if (star < 0) return tryRealpath(path);
+  const cut = Math.max(path.lastIndexOf("/", star), path.lastIndexOf("\\", star));
+  if (cut <= 0) return undefined;
+  const real = tryRealpath(path.slice(0, cut));
+  return real === undefined ? undefined : `${real}${path.slice(cut)}`;
+}
+
 export async function loadRules(host: CaptureHost): Promise<RulesSnapshot> {
   try {
     const { loadCliConfig } = await import("@seshi/config");
@@ -64,6 +98,9 @@ export async function loadRules(host: CaptureHost): Promise<RulesSnapshot> {
         enabled: config.capture.enabled,
         paths: config.capture.paths.map((p) => pathRule(p.path, p.capture, host.home)),
         remotes: [...config.capture.remotes],
+        exclude: config.capture.exclude
+          .map((e) => excludeRule(e, host.home))
+          .filter((r): r is ExcludeRule => r !== undefined),
       },
       theme: config.theme,
     };

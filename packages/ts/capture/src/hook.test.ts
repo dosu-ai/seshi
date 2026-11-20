@@ -6,6 +6,7 @@ import {
   realpathSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -14,7 +15,7 @@ import type { CaptureAgent, CaptureHost } from "@seshi/kit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runHook, shellWord } from "./hook";
 import { type CapturePaths, capturePaths } from "./paths";
-import { captureRules } from "./rules-cache";
+import { captureRules, excludeRule } from "./rules-cache";
 import { readSpool, spoolCount } from "./spool";
 import { updateState } from "./state";
 import { statusLine } from "./status";
@@ -335,6 +336,59 @@ describe("runHook (F9.1)", () => {
     ]);
   });
 
+  it("skips a subagent whose parent worked in a repo the org excludes, wherever it runs", async () => {
+    cliConfig(`[capture]\nexclude = ["acme/payments"]\n`);
+    mkdirSync(join(dir, "payments", ".git"), { recursive: true });
+    writeFileSync(
+      join(dir, "payments", ".git", "config"),
+      `[remote "origin"]\n\turl = git@github.com:Acme/Payments.git\n`,
+    );
+    mkdirSync(join(dir, "b", ".git"), { recursive: true });
+    await updateState(paths, (s) => {
+      s.sessions["fake:main1"] = {
+        agent: "fake",
+        session_id: "main1",
+        first_seen: "x",
+        cwd: join(dir, "b"),
+        folders: [join(dir, "payments"), join(dir, "b")],
+      };
+    });
+    const payload = { id: "main1", cwd: join(dir, "b"), sub: "agent-abc" };
+    const outcome = await runHook({ agent, event: "SubagentStop", payload, host, paths });
+    expect(outcome.spooled).toEqual([]);
+    expect(outcome.skipped.map((s) => [s.session_id, s.decision.level])).toEqual([
+      ["main1", "org"],
+      ["agent-abc", "org"],
+    ]);
+    expect(outcome.skipped[1]?.decision.reason).toContain("acme/payments (capture.exclude)");
+  });
+
+  it("skips a folder the org excludes, and a session that moved from it, turned on or not", async () => {
+    cliConfig(`[capture]\nexclude = ["~/clients"]\n`);
+    for (const folder of ["clients", "clients-old", "app"]) mkdirSync(join(dir, folder));
+    const stop = (id: string, cwd: string) =>
+      runHook({ agent, event: "Stop", payload: { id, cwd }, host, paths });
+    expect((await stop("a", join(dir, "clients"))).skipped[0]?.decision).toMatchObject({
+      level: "org",
+      reason: "the org excludes ~/clients (capture.exclude)",
+    });
+    expect((await stop("b", join(dir, "clients-old"))).spooled).toHaveLength(1);
+    // Session a, seen in ~/clients and turned on, moves on into a captured folder: still off.
+    await updateState(paths, (s) => {
+      s.sessions["fake:a"] = {
+        agent: "fake",
+        session_id: "a",
+        first_seen: "x",
+        cwd: join(dir, "clients"),
+        folders: [join(dir, "clients")],
+        toggle: "on",
+      };
+    });
+    const moved = await stop("a", join(dir, "app"));
+    expect(moved.spooled).toEqual([]);
+    expect(moved.skipped[0]?.decision).toMatchObject({ capture: false, level: "org" });
+  });
+
   it("skips a subagent of a session turned off, unless the subagent is turned on itself", async () => {
     await updateState(paths, (s) => {
       s.sessions["fake:main1"] = {
@@ -454,8 +508,58 @@ describe("the rules cache", () => {
         enabled: true,
         paths: [{ path: join(dir, "x"), capture: true }],
         remotes: ["github.com/acme"],
+        exclude: [],
       },
       theme: "light",
+    });
+  });
+
+  it("reads the org's exclude list from the file or SESHI_CAPTURE__EXCLUDE", async () => {
+    cliConfig(`[capture]\nexclude = ["", "# the payments team", "acme/payments", "~/clients"]\n`);
+    expect((await captureRules(host, paths)).rules.exclude).toEqual([
+      { entry: "acme/payments", repo: "acme/payments" },
+      { entry: "~/clients", path: join(dir, "clients") },
+    ]);
+    const env = { ...host.env, SESHI_CAPTURE__EXCLUDE: "github.com/Acme/*,/srv/secret" };
+    expect((await captureRules({ ...host, env }, paths)).rules.exclude).toEqual([
+      { entry: "github.com/Acme/*", repo: "github.com/acme/*" },
+      { entry: "/srv/secret", path: "/srv/secret" },
+    ]);
+  });
+
+  it("reads an exclude entry as a repository, or a folder from /, ~, a drive or a share", () => {
+    expect(excludeRule("  acme/app ", "/h")).toEqual({ entry: "acme/app", repo: "acme/app" });
+    expect(excludeRule("git@github.com:Acme/app.git", "/h")).toEqual({
+      entry: "git@github.com:Acme/app.git",
+      repo: "github.com/acme/app",
+    });
+    expect(excludeRule("~", "/h")).toMatchObject({ entry: "~", path: "/h" });
+    expect(excludeRule("~/x/*", "/h")).toEqual({ entry: "~/x/*", path: join("/h", "x/*") });
+    expect(excludeRule("C:\\work", "/h")).toEqual({ entry: "C:\\work", path: "C:\\work" });
+    expect(excludeRule("\\\\fs01\\projects", "/h")).toEqual({
+      entry: "\\\\fs01\\projects",
+      path: "\\\\fs01\\projects",
+    });
+    expect(excludeRule("", "/h")).toBeUndefined();
+    expect(excludeRule("  # note", "/h")).toBeUndefined();
+  });
+
+  it("keeps control characters of an entry out of the messages that name it", () => {
+    expect(excludeRule("acme/\x1b[2Japp", "/h")?.entry).toBe("acme/\uFFFD[2Japp");
+  });
+
+  it("resolves a folder entry's symbolic links up to its first wildcard", () => {
+    mkdirSync(join(dir, "real"));
+    symlinkSync(join(dir, "real"), join(dir, "link"));
+    expect(excludeRule("~/link", dir)).toEqual({
+      entry: "~/link",
+      path: join(dir, "link"),
+      real: join(dir, "real"),
+    });
+    expect(excludeRule("~/link/*/secret", dir)).toEqual({
+      entry: "~/link/*/secret",
+      path: join(dir, "link", "*", "secret"),
+      real: join(dir, "real", "*", "secret"),
     });
   });
 
