@@ -61,7 +61,7 @@ describe("a team setup end to end", () => {
       storage: { url: booted.store.url },
     });
     const result = stored(
-      await db.ingest({ agent: "claude-code", session_id: "sess1", transcript: CLAUDE }),
+      await db.ingest({ format: "claude-code", session_id: "sess1", transcript: CLAUDE }),
     );
     expect(result.status).toBe("stored");
 
@@ -90,7 +90,7 @@ describe("a team setup end to end", () => {
   });
 
   it("keeps each owner to their own folder", async () => {
-    await client().ingest({ agent: "claude-code", session_id: "mine", transcript: CLAUDE });
+    await client().ingest({ format: "claude-code", session_id: "mine", transcript: CLAUDE });
     expect(await client(OTHER).getSession("claude-code", "mine")).toBeNull();
     expect((await client(OTHER).listSessions()).sessions).toEqual([]);
   });
@@ -148,7 +148,11 @@ describe("many instances in one process (X1.2)", () => {
               authorization: `Bearer token-${i}-0123456789abcdef`,
               "content-type": "application/json",
             },
-            body: JSON.stringify({ agent: "claude-code", session_id: `s${i}`, transcript: CLAUDE }),
+            body: JSON.stringify({
+              format: "claude-code",
+              session_id: `s${i}`,
+              transcript: CLAUDE,
+            }),
           }),
         );
         expect(res.status).toBe(201);

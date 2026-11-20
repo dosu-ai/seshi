@@ -65,7 +65,7 @@ sends to. To keep transcripts in-house, point both steps at a local model throug
 `owners/<o>/sessions/<a>/review/<n>.json` records the policy and its hash, both models
 (`anthropic/claude-haiku-5-5`), the label, the findings by record, field and category, and why
 review was skipped; never the text. The policy hash covers the prompts, models, endpoints,
-categories and scope, so a policy change shows. `GET /v1/sessions/:agent/:session_id/reviews`
+categories and scope, so a policy change shows. `GET /v1/sessions/:format/:session_id/reviews`
 gives admins the whole record and the session's readers only each write's label.
 
 **Before you change a policy**, run `seshi review eval [--policy <id>] [--fixtures <dir>]`. It

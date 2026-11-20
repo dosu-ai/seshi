@@ -100,7 +100,7 @@ describe.skipIf(!configured).each(clients)(
 
     it("ingests, dedupes, tails the change feed and tombstones", async () => {
       const s = store();
-      const meta = { session_id: "s3-sess", agent: "claude", project: "github.com/acme/widget" };
+      const meta = { session_id: "s3-sess", format: "claude", project: "github.com/acme/widget" };
       const first = await ingest({ store: s, owner: "acme", records, metadata: meta });
       expect(first.status).toBe("stored");
       const again = await ingest({ store: s, owner: "acme", records, metadata: meta });
@@ -112,7 +112,7 @@ describe.skipIf(!configured).each(clients)(
         "published",
       ]);
       expect(
-        await tombstone({ store: s, owner: "acme", agent: "claude", session_id: "s3-sess" }),
+        await tombstone({ store: s, owner: "acme", format: "claude", session_id: "s3-sess" }),
       ).toEqual({
         removed: 1,
       });

@@ -237,7 +237,7 @@ export function toOtlp(trace: Trace): OtlpTrace {
     ["service.name", "seshi"],
     ["seshi.schema", OTLP_TRACE_SCHEMA],
     ["seshi.content_hash", trace.content_hash],
-    ["seshi.agent", trace.agent],
+    ["seshi.format", trace.format],
     ["seshi.source", trace.source],
     ["seshi.session_id", trace.session_id],
     ["seshi.project", trace.project],
@@ -332,7 +332,7 @@ export function fromOtlp(otlp: OtlpTrace): Trace {
     return text === undefined ? undefined : (JSON.parse(text) as T);
   };
   const trace = parseTrace(records, {
-    agent: str("seshi.agent"),
+    format: str("seshi.format") ?? str("seshi.agent"),
     session_id: str("seshi.session_id"),
     project: str("seshi.project"),
     branch: str("seshi.branch"),

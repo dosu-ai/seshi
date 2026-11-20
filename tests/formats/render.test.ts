@@ -89,7 +89,7 @@ afterEach(() => {
 async function storedTrace(): Promise<Trace> {
   const db = new StoreSessionDB({ store, owner: "acme" });
   const result = stored(
-    await db.ingest({ agent: "claude-code", session_id: "sess1", transcript: CLAUDE }),
+    await db.ingest({ format: "claude-code", session_id: "sess1", transcript: CLAUDE }),
   );
   return (await getTrace(store, "acme", result.archive_id, result.content_hash)) as Trace;
 }
@@ -132,7 +132,7 @@ async function enrichedTrace(): Promise<Trace> {
     },
   ];
   return parseTrace(records, {
-    agent: trace.agent,
+    format: trace.format,
     session_id: trace.session_id ?? undefined,
     metadata: trace.metadata,
     llm_calls,
@@ -250,7 +250,7 @@ describe("toOtlp", () => {
       schema: "seshi/trace/1",
       content_hash: "h".repeat(64),
       source: "codex",
-      agent: "codex",
+      format: "codex",
       session_id: "s",
       started_at: "2026-09-01T00:00:00.000Z",
       ended_at: "2026-09-01T00:00:09.000Z",
@@ -326,7 +326,7 @@ describe("toAtif", () => {
       schema_version: "ATIF-v1.7",
       session_id: "sess1",
       agent: { name: "claude-code", version: "unknown" },
-      extra: { seshi: { content_hash: trace.content_hash, agent: "claude-code" } },
+      extra: { seshi: { content_hash: trace.content_hash, format: "claude-code" } },
     });
     expect(atif.steps.map((s) => s.step_id)).toEqual(atif.steps.map((_, i) => i + 1));
     expect(atif.steps.map((s) => s.source)).toEqual(["user", "agent", "agent", "user", "agent"]);

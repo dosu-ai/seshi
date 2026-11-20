@@ -22,6 +22,7 @@ const entry = (at: string, sessionId: string): Omit<ChangeEntry, "schema"> => ({
   owner: "alice",
   archive_id: archiveId("alice", "trajectory", sessionId),
   session_id: sessionId,
+  format: "trajectory",
   content_hash: null,
   writer: { kind: "local", principal: "alice", source_id: "upload" },
 });

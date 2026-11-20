@@ -216,8 +216,8 @@ def _dump(value: BaseModel | Mapping[str, Any], model: type[BaseModel]) -> dict[
     return checked.model_dump(mode="json", by_alias=True, exclude_none=True)
 
 
-def _session(agent: str, session_id: str) -> dict[str, str]:
-    return {"agent": agent, "session_id": session_id}
+def _session(format: str, session_id: str) -> dict[str, str]:
+    return {"format": format, "session_id": session_id}
 
 
 _INGEST_RESULT: TypeAdapter[m.Stored | m.NotWritten] = TypeAdapter(m.IngestResult)
@@ -272,27 +272,50 @@ def ingest(
     return Call("ingest", read_answer, body=body, headers=headers)
 
 
-def get_session(agent: str, session_id: str, owner: str | None) -> Call[m.SessionMetadata | None]:
+def get_session(format: str, session_id: str, owner: str | None) -> Call[m.SessionMetadata | None]:
     return Call(
         "getSession",
         _or_none(m.SessionMetadata, 404),
-        path_params=_session(agent, session_id),
+        path_params=_session(format, session_id),
         query={"owner": owner},
     )
 
 
 def get_trace(
-    agent: str,
+    format: str,
     session_id: str,
     hash: str | None,
-    format: m.RenderFormat | None,
+    render: m.RenderFormat | None,
     owner: str | None,
 ) -> Call[Any]:
     return Call(
         "getTrace",
-        _or_none(_TRACES[format], 404, 410),
-        path_params=_session(agent, session_id),
-        query={"owner": owner, "hash": hash, "format": format},
+        _or_none(_TRACES[render], 404, 410),
+        path_params=_session(format, session_id),
+        query={"owner": owner, "hash": hash, "render": render},
+    )
+
+
+def _archive(owner: str, archive_id: str) -> dict[str, str]:
+    return {"owner": owner, "archive_id": archive_id}
+
+
+def get_session_by_archive(owner: str, archive_id: str) -> Call[m.SessionMetadata | None]:
+    return Call(
+        "getSessionByArchive",
+        _or_none(m.SessionMetadata, 404),
+        path_params=_archive(owner, archive_id),
+    )
+
+
+def get_trace_by_archive(
+    owner: str, archive_id: str, hash: str | None, render: m.RenderFormat | None
+) -> Call[Any]:
+    return Call(
+        "getTraceByArchive",
+        _or_none(_TRACES[render], 404, 410),
+        path_params=_archive(owner, archive_id),
+        query={"hash": hash, "render": render},
     )
 
 
@@ -311,30 +334,30 @@ def stale_sessions(after: str | None, limit: int | None) -> Call[m.StaleSessions
 
 
 def tombstone(
-    agent: str, session_id: str, owner: str | None, retract_secret: str | None
+    format: str, session_id: str, owner: str | None, retract_secret: str | None
 ) -> Call[m.Removed | None]:
     return Call(
         "tombstone",
         _or_none(m.Removed, 404),
-        path_params=_session(agent, session_id),
+        path_params=_session(format, session_id),
         query={"owner": owner},
         headers={RETRACT_HEADER: retract_secret} if retract_secret is not None else {},
     )
 
 
 def set_visibility(
-    agent: str, session_id: str, visibility: m.Visibility, owner: str | None
+    format: str, session_id: str, visibility: m.Visibility, owner: str | None
 ) -> Call[m.SessionMetadata | None]:
     return Call(
         "setVisibility",
         _or_none(m.SessionMetadata, 404),
-        path_params=_session(agent, session_id),
+        path_params=_session(format, session_id),
         query={"owner": owner},
         body=_dump({"visibility": visibility}, m.VisibilityChange),
     )
 
 
-def reviews(agent: str, session_id: str, owner: str | None) -> Call[list[m.ReviewDecision] | None]:
+def reviews(format: str, session_id: str, owner: str | None) -> Call[list[m.ReviewDecision] | None]:
     def read_answer(answer: Answer) -> list[m.ReviewDecision] | None:
         if answer.status == 404:
             return None
@@ -343,9 +366,18 @@ def reviews(agent: str, session_id: str, owner: str | None) -> Call[list[m.Revie
     return Call(
         "sessionReviews",
         read_answer,
-        path_params=_session(agent, session_id),
+        path_params=_session(format, session_id),
         query={"owner": owner},
     )
+
+
+def reviews_by_archive(owner: str, archive_id: str) -> Call[list[m.ReviewDecision] | None]:
+    def read_answer(answer: Answer) -> list[m.ReviewDecision] | None:
+        if answer.status == 404:
+            return None
+        return m.ReviewsPage.model_validate(_expect(answer, 200)).reviews
+
+    return Call("sessionReviewsByArchive", read_answer, path_params=_archive(owner, archive_id))
 
 
 def changes(

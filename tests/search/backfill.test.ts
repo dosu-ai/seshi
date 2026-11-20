@@ -40,10 +40,10 @@ async function upload(sessionId: string, transcript: string, offset = 0) {
     uploadEnvelope(
       {
         owner: "alice",
-        agent: "trajectory",
+        format: "trajectory",
         session_id: sessionId,
         transcript,
-        format: "jsonl",
+        encoding: "jsonl",
         offset,
       },
       { caller: { kind: "static", principal: "alice" }, owner_basis: "verified" },

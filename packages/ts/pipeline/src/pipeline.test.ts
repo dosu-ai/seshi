@@ -90,10 +90,10 @@ function upload(
   return uploadEnvelope(
     {
       owner: "alice",
-      agent: "trajectory",
+      format: "trajectory",
       session_id: "s1",
       transcript,
-      format: "jsonl",
+      encoding: "jsonl",
       offset,
       ...extra,
     },
@@ -433,10 +433,10 @@ describe("extend or replace (X4.6)", () => {
       uploadEnvelope(
         {
           owner: "alice",
-          agent: "atif",
+          format: "atif",
           session_id: "doc",
           transcript: text,
-          format: "json",
+          encoding: "json",
           ...extra,
         },
         ALICE,
@@ -696,7 +696,7 @@ describe("a dropped first envelope leaves a stub (F3.4, revised 15 Nov 2026)", (
     expect(stub).toMatchObject({
       session_id: "s1",
       owner: "alice",
-      agent: "trajectory",
+      format: "trajectory",
       status: "stored",
       traces: [],
       normalized: { bytes: bytes(FIRST), records: 3, prefix_sha256: answer.prefix_sha256 },
@@ -856,7 +856,7 @@ describe("a dropped first envelope leaves a stub (F3.4, revised 15 Nov 2026)", (
     const changed = await setVisibility({
       store,
       owner: "alice",
-      agent: "trajectory",
+      format: "trajectory",
       session_id: "s1",
       visibility: "owner",
     });
@@ -868,7 +868,7 @@ describe("a dropped first envelope leaves a stub (F3.4, revised 15 Nov 2026)", (
     const other = archiveId("alice", "trajectory", "s2");
     await submit(p, upload(FIRST, 0, { session_id: "s2" }));
     expect(
-      await tombstone({ store, owner: "alice", agent: "trajectory", session_id: "s2" }),
+      await tombstone({ store, owner: "alice", format: "trajectory", session_id: "s2" }),
     ).toEqual({ removed: 0 });
     const gone = await readMetadata(store, "alice", other);
     expect(gone).toMatchObject({ status: "redacted", traces: [] });
@@ -889,13 +889,13 @@ describe("a dropped first envelope leaves a stub (F3.4, revised 15 Nov 2026)", (
       formats,
       pipeline: pipeline({ reviewer: r }),
     });
-    const answer = await db.ingest({ agent: "trajectory", session_id: "s1", transcript: FIRST });
+    const answer = await db.ingest({ format: "trajectory", session_id: "s1", transcript: FIRST });
     expect(answer.status).toBe("dropped");
     expect(await db.getSession("trajectory", "s1")).toBeNull();
     expect(await db.getTrace("trajectory", "s1")).toBeNull();
     expect((await db.listSessions()).sessions).toEqual([]);
     await db.ingest({
-      agent: "trajectory",
+      format: "trajectory",
       session_id: "s1",
       transcript: user("now fix the build") + reply("fixed"),
       offset: answer.bytes_total,
@@ -1251,7 +1251,7 @@ describe("a dropped first envelope leaves a stub (F3.4, revised 15 Nov 2026)", (
       expect((await submit(p, upload(other, 0, { rebuild: true }))).status).toBe("duplicate");
       expect((await session())?.dropped_prefix).toEqual(kept);
       // Nothing of the session is left once it is tombstoned.
-      await tombstone({ store, owner: "alice", agent: "trajectory", session_id: "s1" });
+      await tombstone({ store, owner: "alice", format: "trajectory", session_id: "s1" });
       expect(await session()).not.toHaveProperty("dropped_prefix");
     });
 
@@ -1632,7 +1632,7 @@ describe("stale sessions and rebuilds (X4.9)", () => {
     });
     expect((await stale(at("1"))).sessions).toEqual([]);
     expect((await stale(at("1.0.1"))).sessions).toEqual([
-      { agent: "trajectory", session_id: "s1", built_with: "1", current: "1.0.1" },
+      { format: "trajectory", session_id: "s1", built_with: "1", current: "1.0.1" },
     ]);
     // An older server is not newer: nothing to rebuild there.
     expect((await stale(at("0.9"))).sessions).toEqual([]);
@@ -1663,7 +1663,7 @@ describe("stale sessions and rebuilds (X4.9)", () => {
       new TextEncoder().encode(JSON.stringify(older)),
     );
     expect((await stale(formats)).sessions).toEqual([
-      { agent: "trajectory", session_id: "s1", current: "1" },
+      { format: "trajectory", session_id: "s1", current: "1" },
     ]);
   });
 

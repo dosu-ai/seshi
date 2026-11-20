@@ -61,7 +61,7 @@ describe("reading other owners' sessions (X5.10)", () => {
       visibility: "owner",
     });
     expect(seen.map((s) => param(s, "owner"))).toEqual(["bob", "bob", "bob", "bob"]);
-    expect(param(seen[1], "format")).toBe("atif");
+    expect(param(seen[1], "render")).toBe("atif");
     expect(seen[3]?.method).toBe("PATCH");
     expect(sent(seen[3])).toEqual({ visibility: "owner" });
     await db.getSession("claude-code", "s");

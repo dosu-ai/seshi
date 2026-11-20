@@ -20,11 +20,11 @@ export const SCHEMA_ID = "seshi/metadata/1" as const;
 export interface SessionMetadata {
   schema: "seshi/metadata/1";
   owner: string;
-  /** sha256(owner + "\n" + agent + "\n" + session_id). */
+  /** sha256(owner + "\n" + format + "\n" + session_id). */
   archive_id: Sha256;
   session_id: string;
-  /** The format the session is filed under. */
-  agent: string;
+  /** The format the session is filed under: the format adapter its envelopes named (`claude-code`, `codex`, `cursor-cloud-api`, …), which reads it. Metadata written before 0.16 calls it `agent`; readers take `format ?? agent`. */
+  format: string;
   /** What the trace's meta record says it came from; absent until a trace is stored. */
   source?: string;
   project?: string;
@@ -123,7 +123,7 @@ export const JSON_SCHEMA = {
     owner: { type: "string", minLength: 1 },
     archive_id: { $ref: "common.schema.json#/$defs/Sha256" },
     session_id: { type: "string" },
-    agent: { type: "string" },
+    format: { type: "string" },
     source: { type: "string" },
     project: { type: "string" },
     branch: { type: "string" },
@@ -157,7 +157,7 @@ export const JSON_SCHEMA = {
     "owner",
     "archive_id",
     "session_id",
-    "agent",
+    "format",
     "status",
     "traces",
     "writer",

@@ -34,7 +34,7 @@ const db = new HttpSessionDB({
 });
 
 const answer = await db.ingest({
-  agent: "claude-code",
+  format: "claude-code",
   session_id: "8f1c…",
   transcript: await Bun.file("8f1c….jsonl").text(),
   project: "github.com/acme/widget",
@@ -42,7 +42,7 @@ const answer = await db.ingest({
 // { status: "stored", content_hash: "…", records_total: 41, bytes_total: 48213, … }
 
 // As the log grows, send only what it gained, from where the last answer ended.
-await db.ingest({ agent: "claude-code", session_id: "8f1c…", transcript: tail, offset: answer.bytes_total });
+await db.ingest({ format: "claude-code", session_id: "8f1c…", transcript: tail, offset: answer.bytes_total });
 
 const session = await db.getSession("claude-code", "8f1c…");
 const trace = await db.getTrace("claude-code", "8f1c…", undefined, "otlp");
@@ -65,13 +65,14 @@ answer back.
 | Call | Route |
 |---|---|
 | `ingest(upload)` | `POST /v1/sessions` |
-| `getSession(agent, id, {owner})` | `GET /v1/sessions/:agent/:id`; null when not stored or not readable |
-| `getTrace(agent, id, hash?, format?, {owner})` | `GET …/trace`, as `seshi` (default), `letta`, `otlp` or `atif` ([formats.md](formats.md#what-seshi-writes)); null when not stored or redacted |
+| `getSession(format, id, {owner})` | `GET /v1/sessions/:format/:id`; null when not stored or not readable |
+| `getTrace(format, id, hash?, render?, {owner})` | `GET …/trace`, rendered as `seshi` (default), `letta`, `otlp` or `atif` ([formats.md](formats.md#what-seshi-writes)); null when not stored or redacted |
 | `listSessions({owner, limit, after})` | `GET /v1/sessions` |
 | `staleSessions({limit, after})` | `GET /v1/sessions/stale`: the caller's sessions an older normalizer built, to resend with `rebuild` |
-| `tombstone(agent, id, {owner, retractSecret})` | `DELETE /v1/sessions/:agent/:id`, or a retraction with the uploading machine's secret |
-| `setVisibility(agent, id, visibility, {owner})` | `PATCH /v1/sessions/:agent/:id` |
-| `reviews(agent, id, {owner})` | `GET …/reviews`: what model review decided for each write |
+| `tombstone(format, id, {owner, retractSecret})` | `DELETE /v1/sessions/:format/:id`, or a retraction with the uploading machine's secret |
+| `setVisibility(format, id, visibility, {owner})` | `PATCH /v1/sessions/:format/:id` |
+| `reviews(format, id, {owner})` | `GET …/reviews`: what model review decided for each write |
+| `getSessionByArchive(owner, archiveId)`, `getTraceByArchive(owner, archiveId, hash?, render?)`, `reviewsByArchive(owner, archiveId)` | `GET /v1/owners/:owner/sessions/:archive_id` and its `/trace` and `/reviews`: the same, by the owner and archive id a change entry or search result names |
 | `changes({after, since, limit})` | `GET /v1/changes`: the caller's change feed |
 | `allChanges({after, since, limit})` | `GET /v1/changes/all`: every owner's change feed as one, each entry with its `owner`; `after` is the last page's opaque `cursor`. For service tokens and admins (`Forbidden` for anyone else); a `ServerError` with status 503 while the server's search index is first built, 404 with search off ([server.md](server.md#every-owners-change-feed)) |
 | `search(request)` | `GET /v1/search` ([search.md](search.md)) |
@@ -140,23 +141,23 @@ with SeshiClient(
     os.environ["ACME_SESHI_TOKEN"],   # a device, service, admin or static token, or the org key
     user="alice@acme.com",            # with the org key only: the username to write as
 ) as db:
-    answer = db.ingest(Upload(agent="claude-code", session_id="8f1c…", transcript=log))
+    answer = db.ingest(Upload(format="claude-code", session_id="8f1c…", transcript=log))
     # Stored(status='stored', content_hash='…', records_total=41, bytes_total=48213, …)
 
     # As the log grows, send only what it gained, from where the last answer ended.
     try:
-        db.ingest(Upload(agent="claude-code", session_id="8f1c…", transcript=tail,
+        db.ingest(Upload(format="claude-code", session_id="8f1c…", transcript=tail,
                          offset=answer.bytes_total))
     except OffsetMismatch as err:
         ...                                # resend from err.expected
 
     session = db.get_session("claude-code", "8f1c…")
-    trace = db.get_trace("claude-code", "8f1c…", format="otlp")   # an OtlpTrace
+    trace = db.get_trace("claude-code", "8f1c…", render="otlp")   # an OtlpTrace
     page = db.list_sessions(limit=50)
     for change in db.iter_changes(after=cursor):                 # every page to the end
         cursor = change.key
     for change in db.iter_all_changes(since="2026-11-01T00:00:00.000Z"):   # a service token or an admin
-        ...
+        trace = db.get_trace_by_archive(change.owner, change.entry.archive_id)
     found = db.search("flaky checkout test", repo="widget", sort="recent")
 ```
 
@@ -174,9 +175,10 @@ are read and written under their JSON names (`model_dump(by_alias=True)`). Times
 3339 strings the server writes, so a stamp or cursor round-trips exactly; a `since` or `until`
 may also be a `datetime`. Response models keep fields they do not know (in `model_extra`), and
 an enum value they do not know as the string the server sent, so an older client reads a newer
-server; request models refuse unknown fields, but `Upload.agent` takes any format name, which
-the server decides on. A call that takes a body
-takes its model or a plain mapping (`db.ingest({"agent": "codex", …})`).
+server; request models refuse unknown fields, but `Upload.format` takes any format name, which
+the server decides on. A response model also reads a format sent as `agent`, as servers before
+0.16 sent it. A call that takes a body
+takes its model or a plain mapping (`db.ingest({"format": "codex", …})`).
 
 ### Calls
 
@@ -185,13 +187,14 @@ The same calls as `@dosu/seshi-client`, in snake_case:
 | Python | TypeScript | Route |
 |---|---|---|
 | `ingest(upload, retract_secret=, idempotency_key=)` | `ingest(upload, {retractSecret})` | `POST /v1/sessions`; `idempotency_key` is sent as `Idempotency-Key` |
-| `get_session(agent, id, owner=)` | `getSession` | `GET /v1/sessions/:agent/:id`; None when not stored or not readable |
-| `get_trace(agent, id, hash=, format=, owner=)` | `getTrace` | `GET …/trace`; the model `format` names (`Trace`, `LettaTrace`, `OtlpTrace`, `AtifDocument`), None when not stored or redacted |
+| `get_session(format, id, owner=)` | `getSession` | `GET /v1/sessions/:format/:id`; None when not stored or not readable |
+| `get_trace(format, id, hash=, render=, owner=)` | `getTrace` | `GET …/trace`; the model `render` names (`Trace`, `LettaTrace`, `OtlpTrace`, `AtifDocument`), None when not stored or redacted |
 | `list_sessions(owner=, after=, limit=)`, `iter_sessions(owner=, limit=)` | `listSessions` | `GET /v1/sessions`, a page or every page |
 | `stale_sessions(after=, limit=)` | `staleSessions` | `GET /v1/sessions/stale` |
-| `tombstone(agent, id, owner=, retract_secret=)` | `tombstone` | `DELETE /v1/sessions/:agent/:id` |
-| `set_visibility(agent, id, visibility, owner=)` | `setVisibility` | `PATCH /v1/sessions/:agent/:id` |
-| `reviews(agent, id, owner=)` | `reviews` | `GET …/reviews` |
+| `tombstone(format, id, owner=, retract_secret=)` | `tombstone` | `DELETE /v1/sessions/:format/:id` |
+| `set_visibility(format, id, visibility, owner=)` | `setVisibility` | `PATCH /v1/sessions/:format/:id` |
+| `reviews(format, id, owner=)` | `reviews` | `GET …/reviews` |
+| `get_session_by_archive(owner, archive_id)`, `get_trace_by_archive(owner, archive_id, hash=, render=)`, `reviews_by_archive(owner, archive_id)` | `getSessionByArchive`, `getTraceByArchive`, `sessionReviewsByArchive` | `GET /v1/owners/:owner/sessions/:archive_id` and its `/trace` and `/reviews`: the same, by the owner and archive id a change entry or search result names |
 | `changes(owner=, after=, since=, limit=)`, `iter_changes(…)` | `changes` | `GET /v1/changes`, a page or every page to the end |
 | `all_changes(after=, since=, limit=)`, `iter_all_changes(…)` | `allChanges` | `GET /v1/changes/all`, a page or every page up to `through` |
 | `search(q, owner=, agent=, repo=, branch=, source=, since=, until=, sort=, limit=, matches=, cursor=)` | `search` | `GET /v1/search` |

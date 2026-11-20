@@ -74,7 +74,7 @@ MODELS: dict[str, type[BaseModel]] = {
 
 NOT_MODELLED: dict[str, str] = {
     **dict.fromkeys(
-        ["Agent", "Owner", "Visibility", "Scope", "TokenKind", "Sha256", "RenderFormat", "RuleId"],
+        ["Format", "Owner", "Visibility", "Scope", "TokenKind", "Sha256", "RenderFormat", "RuleId"],
         "a string: a Literal or str in the models",
     ),
     "Error": "an error answer: raised as seshi.errors",
@@ -86,6 +86,9 @@ NOT_MODELLED: dict[str, str] = {
     "OtlpExportResponse": "otlpTraces is not a client call",
     "OtlpStatus": "otlpTraces is not a client call",
 }
+
+OPTIONAL_HERE: dict[tuple[str, str], str] = {}
+"""Properties the spec requires that a model takes as optional, and why."""
 
 # The records of a trace, in spec/schemas/trace.schema.json.
 TRACE_RECORDS: dict[str, type[BaseModel]] = {
@@ -120,6 +123,9 @@ RESPONSES: dict[str, dict[str, Reads]] = {
     "tombstone": {"200": m.Removed},
     "getTrace": {"200": (m.Trace, m.LettaTrace, m.OtlpTrace, m.AtifDocument)},
     "sessionReviews": {"200": m.ReviewsPage},
+    "getSessionByArchive": {"200": m.SessionMetadata},
+    "getTraceByArchive": {"200": (m.Trace, m.LettaTrace, m.OtlpTrace, m.AtifDocument)},
+    "sessionReviewsByArchive": {"200": m.ReviewsPage},
     "changes": {"200": m.ChangesPage},
     "allChanges": {"200": m.AllChangesPage},
     "search": {"200": m.SearchResults},
@@ -231,7 +237,7 @@ def _strip(annotation: Any) -> Any:
 
 
 def _literals(annotation: Any) -> set[Any] | None:
-    """The values a field's Literal allows (`Agent | str` allows Agent's), or None."""
+    """The values a field's Literal allows (`Format | str` allows Format's), or None."""
     annotation = _strip(annotation)
     origin = get_origin(annotation)
     if origin is Literal:
@@ -297,6 +303,8 @@ def compare(schema: Any, base: str, model: type[BaseModel], where: str) -> list[
         if info is None:
             continue
         is_required = name in required
+        if is_required and (model.__name__, name) in OPTIONAL_HERE:
+            is_required = info.is_required()
         if info.is_required() != is_required:
             problems.append(
                 f"{where}.{name}: required in the {'spec' if is_required else 'model'} only"
@@ -427,10 +435,10 @@ def test_the_drift_check_looks_into_nested_objects() -> None:
 
 def test_the_drift_check_notices_an_enum_value_or_type_the_spec_changes() -> None:
     schema = copy.deepcopy(resolve({"$ref": "#/components/schemas/Upload"}, "openapi.yaml")[0])
-    schema["properties"]["agent"] = {"enum": ["claude-code", "amp"]}
+    schema["properties"]["format"] = {"enum": ["claude-code", "amp"]}
     schema["properties"]["offset"] = {"type": "string"}
     problems = compare(schema, "openapi.yaml", m.Upload, "Upload")
-    assert any(p.startswith("Upload.agent: the spec allows") for p in problems)
+    assert any(p.startswith("Upload.format: the spec allows") for p in problems)
     assert any(p.startswith("Upload.offset: the spec says string") for p in problems)
     identity = copy.deepcopy(resolve({"$ref": "#/components/schemas/Identity"}, "openapi.yaml")[0])
     identity["properties"]["scopes"]["items"] = {"enum": ["sessions:read"]}

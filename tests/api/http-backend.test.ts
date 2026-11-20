@@ -132,7 +132,7 @@ describe("the two backends agree", () => {
     const first = stored(
       await both((db) =>
         db.ingest({
-          agent: "claude-code",
+          format: "claude-code",
           session_id: "sess1",
           transcript: CLAUDE,
           project: "github.com/acme/widget",
@@ -143,13 +143,13 @@ describe("the two backends agree", () => {
 
     // The same upload again is answered as the first time (X4.7).
     const again = await both((db) =>
-      db.ingest({ agent: "claude-code", session_id: "sess1", transcript: CLAUDE }),
+      db.ingest({ format: "claude-code", session_id: "sess1", transcript: CLAUDE }),
     );
     expect(again).toEqual(first);
 
     const chunk = await both((db) =>
       db.ingest({
-        agent: "claude-code",
+        format: "claude-code",
         session_id: "sess1",
         transcript: PROGRESS,
         offset: first.bytes_total,
@@ -187,7 +187,7 @@ describe("the two backends agree", () => {
 
   it("on a filtered session: nothing stored", async () => {
     const result = await both((db) =>
-      db.ingest({ agent: "claude-code", session_id: "tiny", transcript: SMALL }),
+      db.ingest({ format: "claude-code", session_id: "tiny", transcript: SMALL }),
     );
     expect(result.status).toBe("filtered");
     expect(await both((db) => db.getSession("claude-code", "tiny"))).toBeNull();
@@ -195,16 +195,16 @@ describe("the two backends agree", () => {
   });
 
   it("on a whole upload that does not extend the session, and its replace", async () => {
-    await both((db) => db.ingest({ agent: "claude-code", session_id: "r", transcript: CLAUDE }));
+    await both((db) => db.ingest({ format: "claude-code", session_id: "r", transcript: CLAUDE }));
     const other = CLAUDE.replace("The auth flow:", "Something else:");
     expect(other).not.toBe(CLAUDE);
     for (const db of [http, direct]) {
       await expect(
-        db.ingest({ agent: "claude-code", session_id: "r", transcript: other }),
+        db.ingest({ format: "claude-code", session_id: "r", transcript: other }),
       ).rejects.toBeInstanceOf(SessionConflict);
     }
     const replaced = await both((db) =>
-      db.ingest({ agent: "claude-code", session_id: "r", transcript: other, replace: true }),
+      db.ingest({ format: "claude-code", session_id: "r", transcript: other, replace: true }),
     );
     expect(replaced.status).toBe("stored");
   });
@@ -219,9 +219,9 @@ describe("the two backends agree", () => {
 
 describe("the HTTP backend throws what the pipeline throws", () => {
   it("OffsetMismatch, with where the log ends", async () => {
-    const first = await http.ingest({ agent: "claude-code", session_id: "s", transcript: CLAUDE });
+    const first = await http.ingest({ format: "claude-code", session_id: "s", transcript: CLAUDE });
     const wrong = http.ingest({
-      agent: "claude-code",
+      format: "claude-code",
       session_id: "s",
       transcript: PROGRESS,
       offset: first.bytes_total + 7,
@@ -235,15 +235,15 @@ describe("the HTTP backend throws what the pipeline throws", () => {
 
   it("SessionRejected with the server's code", async () => {
     await expect(
-      http.ingest({ agent: "claude-code", session_id: "blank", transcript: "  " }),
+      http.ingest({ format: "claude-code", session_id: "blank", transcript: "  " }),
     ).rejects.toMatchObject({ name: "SessionRejected", code: "empty" });
     await expect(
-      http.ingest({ agent: "nope" as never, session_id: "x", transcript: CLAUDE }),
+      http.ingest({ format: "nope" as never, session_id: "x", transcript: CLAUDE }),
     ).rejects.toMatchObject({ name: "SessionRejected", code: "unsupported_agent" });
 
-    await http.ingest({ agent: "claude-code", session_id: "gone", transcript: CLAUDE });
+    await http.ingest({ format: "claude-code", session_id: "gone", transcript: CLAUDE });
     await http.tombstone("claude-code", "gone");
-    const again = http.ingest({ agent: "claude-code", session_id: "gone", transcript: CLAUDE });
+    const again = http.ingest({ format: "claude-code", session_id: "gone", transcript: CLAUDE });
     await expect(again).rejects.toBeInstanceOf(SessionRejected);
     await expect(again).rejects.toMatchObject({ code: "redacted" });
   });
@@ -256,11 +256,15 @@ describe("the HTTP backend throws what the pipeline throws", () => {
         fetch: () => Promise.resolve(Response.json({ error: { code, message: code } }, { status })),
       });
     await expect(
-      answer(409, "conflict").ingest({ agent: "claude-code", session_id: "x", transcript: CLAUDE }),
+      answer(409, "conflict").ingest({
+        format: "claude-code",
+        session_id: "x",
+        transcript: CLAUDE,
+      }),
     ).rejects.toBeInstanceOf(SessionConflict);
     await expect(
       answer(403, "forbidden").ingest({
-        agent: "claude-code",
+        format: "claude-code",
         session_id: "x",
         transcript: CLAUDE,
       }),
@@ -366,7 +370,7 @@ describe("a 409 that is not an offset mismatch", () => {
           ),
         ),
     });
-    const refused = db.ingest({ agent: "claude-code", session_id: "x", transcript: CLAUDE });
+    const refused = db.ingest({ format: "claude-code", session_id: "x", transcript: CLAUDE });
     await expect(refused).rejects.toBeInstanceOf(ServerError);
     await expect(refused).rejects.toMatchObject({ status: 409, code: "no_storage" });
   });

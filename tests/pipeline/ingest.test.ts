@@ -49,7 +49,7 @@ let tick = 0;
 const now = () => new Date(Date.UTC(2026, 9, 21, 12, 0, tick++));
 const meta = {
   session_id: "sess1",
-  agent: "claude",
+  format: "claude",
   project: "github.com/acme/widget",
   branch: "main",
 };
@@ -101,7 +101,7 @@ describe("ingest", () => {
     expect(trace).toMatchObject({
       schema: "seshi/trace/1",
       content_hash: result.content_hash,
-      agent: "claude",
+      format: "claude",
       session_id: "sess1",
       project: "github.com/acme/widget",
     });
@@ -326,7 +326,12 @@ describe("tombstone", () => {
           const put = await target.put(key, body, options);
           if (!raced && key.includes("/trace.")) {
             raced = true;
-            await tombstone({ store: target, owner: "acme", agent: "claude", session_id: "sess1" });
+            await tombstone({
+              store: target,
+              owner: "acme",
+              format: "claude",
+              session_id: "sess1",
+            });
           }
           return put;
         };
@@ -371,7 +376,7 @@ describe("tombstone", () => {
       },
     });
     expect(
-      await tombstone({ store: lost, owner: "acme", agent: "claude", session_id: "sess1", now }),
+      await tombstone({ store: lost, owner: "acme", format: "claude", session_id: "sess1", now }),
     ).toEqual({ removed: 1 });
     expect(answered).toBe(true);
     expect(await getTrace(store, "acme", stored.archive_id, stored.content_hash)).toBeNull();
@@ -399,7 +404,7 @@ describe("tombstone", () => {
     const result = await tombstone({
       store,
       owner: "acme",
-      agent: "claude",
+      format: "claude",
       session_id: "sess1",
       now,
     });
@@ -424,7 +429,7 @@ describe("tombstone", () => {
       ingest({ store, owner: "acme", records: records("claude-basic"), metadata: meta, now }),
     ).rejects.toMatchObject({ code: "redacted" });
     expect(
-      await tombstone({ store, owner: "acme", agent: "claude", session_id: "never", now }),
+      await tombstone({ store, owner: "acme", format: "claude", session_id: "never", now }),
     ).toBeNull();
   });
 });
@@ -486,11 +491,11 @@ describe("who wrote what (X5.5)", () => {
       metadata: { ...meta, session_id: "sess2" },
       now,
     });
-    await tombstone({ store, owner: "acme", agent: "claude", session_id: "sess1", now });
+    await tombstone({ store, owner: "acme", format: "claude", session_id: "sess1", now });
     await tombstone({
       store,
       owner: "acme",
-      agent: "claude",
+      format: "claude",
       session_id: "sess2",
       now,
       reason: "retracted",

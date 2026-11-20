@@ -46,7 +46,7 @@ async function boot(policy: string) {
   cleanups.push(() => booted.cleanup());
   const db = booted.instance.localSessions("alice");
   const ingest = (transcript: string, extra: { session_id?: string } = {}) =>
-    db.ingest({ agent: "trajectory", session_id: extra.session_id ?? "s1", transcript });
+    db.ingest({ format: "trajectory", session_id: extra.session_id ?? "s1", transcript });
   return { ...booted, db, ingest };
 }
 
@@ -529,7 +529,7 @@ describe("a dropped first envelope leaves a stub (F3.4, revised 15 Nov 2026)", (
     };
     const upload = (transcript: string, offset = 0) =>
       call("POST", "/v1/sessions", {
-        body: { agent: "trajectory", session_id: "s1", transcript, offset, retract_hash },
+        body: { format: "trajectory", session_id: "s1", transcript, offset, retract_hash },
       });
     return { ...booted, db, call, upload };
   }
@@ -611,7 +611,7 @@ describe("a dropped first envelope leaves a stub (F3.4, revised 15 Nov 2026)", (
     expect(stored.body).toMatchObject({ status: "stored", records_total: 5 });
     const whole = (extra: Record<string, unknown>, transcript = DUMPED + NEXT) =>
       call("POST", "/v1/sessions", {
-        body: { agent: "trajectory", session_id: "s1", transcript, offset: 0, ...extra },
+        body: { format: "trajectory", session_id: "s1", transcript, offset: 0, ...extra },
       });
 
     // The uploader resends a stale session whole: only what follows the dropped part is
