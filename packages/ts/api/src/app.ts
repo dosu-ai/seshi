@@ -62,7 +62,6 @@ import {
   viewerFor,
 } from "@seshi/search";
 import {
-  archiveId,
   isOwner,
   keys,
   listOwners,
