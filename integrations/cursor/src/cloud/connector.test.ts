@@ -11,8 +11,10 @@ import {
   cursorCloudConnector,
   expectedOffset,
   keptEvents,
+  projectOf,
   readCursorCloudConfig,
   readCursorCloudCursor,
+  repoOf,
   SESSION_CONFLICT,
   STREAM_EXPIRED,
 } from "./connector";
@@ -227,7 +229,8 @@ describe("the cursor-cloud poller", () => {
       owner: "svc:cursor-team",
       owner_basis: "service",
       caller: { kind: "service", principal: "svc:cursor-team" },
-      project: "github.com/example/demo",
+      repo: "github.com/example/demo",
+      project: "demo",
       branch: "cursor/run-1",
       payload: { kind: "log", encoding: "jsonl", offset: 0 },
     });
@@ -566,6 +569,28 @@ describe("the cursor-cloud poller", () => {
     await expect(poller.run(new FakeContext(api).context())).rejects.toThrow(
       /refused the API key \(401\)/,
     );
+  });
+});
+
+describe("where a run ran", () => {
+  it("names the repository as a laptop names its remote, and the project after it", () => {
+    const agent = (url: string) => ({ id: "bc-a", repos: [{ url }] });
+    for (const url of [
+      "https://github.com/acme/app",
+      "https://github.com/acme/app.git",
+      "https://x-access-token:ghs_secret@github.com/acme/app.git",
+      "git@github.com:acme/app.git",
+      "ssh://git@github.com:22/acme/app.git",
+      "GitHub.com/acme/app/",
+    ]) {
+      expect(repoOf(agent(url)), url).toBe("github.com/acme/app");
+    }
+    expect(projectOf("github.com/acme/app")).toBe("app");
+    expect(projectOf(undefined)).toBeUndefined();
+    // No repository on the agent: the one its run's branch is in.
+    const run = { id: "r", git: { branches: [{ repoUrl: "https://gitlab.com/g/sub/svc" }] } };
+    expect(repoOf({ id: "bc-b" }, run)).toBe("gitlab.com/g/sub/svc");
+    expect(repoOf({ id: "bc-c" })).toBeUndefined();
   });
 });
 

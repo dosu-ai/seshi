@@ -574,6 +574,10 @@ export class Indexer {
     const project = metadata.project ?? first?.project ?? held?.project;
     const branch = metadata.branch ?? first?.branch ?? first?.metadata.git_branch ?? held?.branch;
     const source = metadata.provenance?.source_id ?? metadata.writer.source_id;
+    const harness = metadata.source ?? first?.source ?? held?.harness;
+    const latest = read.at(-1)?.trace;
+    const agentVersion =
+      metadata.agent_version ?? latest?.metadata.agent_version ?? held?.agent_version;
     return {
       owner,
       archive_id: metadata.archive_id,
@@ -583,6 +587,10 @@ export class Indexer {
       ...(metadata.native_session_id ? { native_session_id: metadata.native_session_id } : {}),
       ...(project ? { project } : {}),
       ...(branch ? { branch } : {}),
+      ...(metadata.repo ? { repo: metadata.repo } : {}),
+      ...(harness ? { harness } : {}),
+      ...(agentVersion ? { agent_version: agentVersion } : {}),
+      ...(metadata.models && metadata.models.length > 0 ? { models: metadata.models } : {}),
       ...(metadata.labels && Object.keys(metadata.labels).length > 0
         ? { labels: metadata.labels }
         : {}),

@@ -200,8 +200,23 @@ function joined(traces: readonly Trace[]): {
 }
 
 function withoutMetaRecordFields(metadata: TraceMetadata) {
-  const { cwd: _cwd, git_branch: _branch, model: _model, ...rest } = metadata;
+  const {
+    cwd: _cwd,
+    git_branch: _branch,
+    model: _model,
+    agent_version: _version,
+    ...rest
+  } = metadata;
   return rest;
+}
+
+/** What the trace had of the model and the harness's version, as hints: the rewritten meta
+ * record's own win, and a value the uploader's hint gave (Cursor's) is kept. */
+function hintsFrom(metadata: TraceMetadata): { agent_version?: string; model?: string } {
+  return {
+    ...(metadata.agent_version ? { agent_version: metadata.agent_version } : {}),
+    ...(metadata.model ? { model: metadata.model } : {}),
+  };
 }
 
 function shouldBackfillSpans(done: BackfillSession, session: SessionMetadata): boolean {
@@ -314,6 +329,7 @@ async function backfillSession(
       ...(head.project !== undefined ? { project: head.project } : {}),
       ...(head.branch !== undefined ? { branch: head.branch } : {}),
       metadata,
+      hints: hintsFrom(head.metadata as TraceMetadata),
       ...(llm_calls.length > 0 ? { llm_calls } : {}),
       ...(latest.provenance ? { provenance: latest.provenance } : {}),
     });

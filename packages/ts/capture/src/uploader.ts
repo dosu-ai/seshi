@@ -12,11 +12,12 @@ import {
   type StaleSession,
   type StoreSessionResult,
   type Upload,
+  VERSION,
 } from "@seshi/model";
 import { appendLog } from "./files";
 import { resolveLabels } from "./labels";
 import type { CapturePaths } from "./paths";
-import { placeOf } from "./place";
+import { headCommitAt, placeOf } from "./place";
 import {
   type Decision,
   decide,
@@ -72,6 +73,11 @@ export interface PreRedactor {
 export const NO_PREREDACTION: PreRedactor = {
   redact: ({ text, carried }) => ({ text, ...(carried ? { carried } : {}) }),
 };
+
+/** The uploader as an upload names it: `seshi/0.15.0 darwin-arm64`. */
+export function clientOf(host: Pick<CaptureHost, "platform">, arch: string = process.arch): string {
+  return `seshi/${VERSION} ${host.platform}-${arch}`;
+}
 
 export type GitIdentity = (cwd: string) => Promise<{ email?: string; name?: string }>;
 
@@ -646,6 +652,11 @@ export class Uploader {
         if (entry.cwd) seenIn(session, entry.cwd);
         if (entry.parent_session_id) session.parent_session_id = entry.parent_session_id;
         if (entry.kind === "capture" && entry.final) session.final = true;
+        if (entry.kind === "capture" && entry.harness_version) {
+          session.harness_version = entry.harness_version;
+        }
+        if (entry.kind === "capture" && entry.model) session.model = entry.model;
+        if (entry.kind === "capture" && entry.commit) session.commit = entry.commit;
         // The first labels a hook resolved for the session stay; later hooks' never replace them.
         // They do replace labels this uploader resolved for it before anything was sent (a sweep
         // that found the session before its hook's entry reached the spool).
@@ -1092,6 +1103,8 @@ export class Uploader {
 
   private async details(session: SessionState, agent: CaptureAgent, place: Place) {
     const repo = place.repo;
+    // What a hook recorded as the lines were written; a session only the sweep found has none.
+    const commit = repo ? (session.commit ?? headCommitAt(session.cwd)) : undefined;
     const labels = session.labels ?? {};
     const folder = repo?.root ?? session.cwd;
     const claims: Claims = {};
@@ -1118,6 +1131,12 @@ export class Uploader {
     return {
       ...(repo ? { project: repo.name } : folder ? { project: basename(folder) } : {}),
       ...(repo?.branch ? { branch: repo.branch } : {}),
+      ...(repo?.remote ? { repo: repo.remote } : {}),
+      ...(commit ? { commit } : {}),
+      ...(repo?.path ? { path_in_repo: repo.path } : {}),
+      client: clientOf(this.host),
+      ...(session.harness_version ? { harness_version: session.harness_version } : {}),
+      ...(session.model ? { model: session.model } : {}),
       ...(Object.keys(labels).length > 0 ? { labels } : {}),
       ...repoVisibilityClaim(repo?.config),
       ...(session.parent_session_id ? { parent_session_id: session.parent_session_id } : {}),

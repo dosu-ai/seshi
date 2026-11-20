@@ -485,6 +485,27 @@ stale; a release that changes no adapter makes nothing stale.
 **Which branch?** The one the transcript recorded as it began (Claude Code's `gitBranch`,
 Codex's `session_meta`), else the client's `branch`.
 
+**Where and with what it ran.** seshi's uploader also sends `repo` (the origin remote, else the
+first, normalized to lowercase without credentials or port: `github.com/acme/widget`, however it
+was cloned), `commit` (the sha
+`HEAD` named when the agent's hook last fired, so an upload that waited names the commit its
+lines were written at), `path_in_repo` (the working folder relative to the repository's root, absent at
+the root) and `client` (`seshi/0.15.0 darwin-arm64`), all read from `.git` without running git.
+The session keeps the first `repo` it is sent, so a remote renamed mid-session does not move it;
+`commit`, `path_in_repo` and `client` go on each upload's trace metadata. `project` stays the
+client's own label (the repository's folder name). These are labels, never a reason to refuse
+a session: one that is not fit to keep is left out and the session stored all the same (a `repo`
+with user info or a scheme, an absolute `path_in_repo` or one with `..`, a `commit` that is not
+a sha, anything over 1,024 characters). For a log that names no
+harness version or model (Cursor's), the uploader sends what Cursor's hooks said as
+`harness_version` and `model`: the server uses them only where the log has none. The session's
+metadata then carries `agent_version` and `models` (every model its LLM
+calls named, or its meta record's when none did); the harness is its `source`. For a log that
+names its version (Claude Code, Codex), `agent_version` is the version the session started on:
+a continuation keeps the meta record of the session's first upload, so the stored log stays a
+prefix of itself, and a session resumed under a newer version keeps the older one. A hinted
+version (Cursor's) is the one at the latest upload.
+
 `201` when a trace was written, `200` otherwise:
 
 ```json

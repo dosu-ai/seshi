@@ -10,7 +10,7 @@ import { type App, createApp } from "@seshi/api";
 import { Auth } from "@seshi/auth";
 import { HttpSessionDB, ServerError } from "@seshi/client";
 import type { Instance } from "@seshi/instance";
-import type { SearchResults } from "@seshi/model";
+import type { SearchResults, Trace } from "@seshi/model";
 import { StoreSessionDB } from "@seshi/pipeline";
 import { FsStore } from "@seshi/store";
 import { buildFormats } from "seshi/integrations";
@@ -79,7 +79,7 @@ async function seed(): Promise<void> {
     format: "trajectory",
     session_id: "pay",
     transcript: log("deploy the payments service"),
-    project: "github.com/acme/payments",
+    repo: "github.com/acme/payments",
     branch: "main",
     labels: { "dosu.project": "github.com/acme/payments", team: "platform" },
   });
@@ -93,7 +93,7 @@ async function seed(): Promise<void> {
     format: "trajectory",
     session_id: "docs",
     transcript: log("deploy the docs site"),
-    project: "github.com/acme/docs",
+    repo: "github.com/acme/docs",
     labels: { team: "platform" },
   });
   // Written under alice's old owner id, which [auth.owner_aliases] folds into hers (X5.8).
@@ -154,6 +154,68 @@ describe("GET /v1/search (F10)", () => {
     expect(page.results.every((r) => r.matches.length === 1)).toBe(true);
     const rest = await admin.search({ q: "deploy", limit: 3, cursor: page.cursor });
     expect(rest.results).toHaveLength(1);
+  });
+
+  it("records and filters by where a session ran and with what (repo, harness, model)", async () => {
+    const alice = client(orgKey, "alice");
+    await alice.ingest({
+      format: "trajectory",
+      session_id: "api",
+      transcript: log("deploy the api").replace(
+        '{"role":"meta","source":"trajectory"}',
+        '{"role":"meta","source":"trajectory","model":"gpt-9"}',
+      ),
+      project: "api",
+      repo: "github.com/acme/api",
+      commit: "a".repeat(40),
+      path_in_repo: "services/api",
+      client: "seshi/0.15.0 linux-x64",
+    });
+    await alice.ingest({
+      format: "trajectory",
+      session_id: "web",
+      transcript: log("deploy the web app"),
+      project: "web",
+      repo: "gitlab.com/acme/web",
+      model: "hinted-model",
+    });
+    await instance.search?.catchUp();
+    const admin = client(adminToken);
+    expect(ids(await admin.search({ q: "deploy", repo: "acme/api" }))).toEqual(["alice/api"]);
+    expect(ids(await admin.search({ q: "deploy", repo: "gitlab.com/acme/web" }))).toEqual([
+      "alice/web",
+    ]);
+    expect(ids(await admin.search({ q: "deploy", model: "gpt-9" }))).toEqual(["alice/api"]);
+    expect(ids(await admin.search({ q: "deploy", model: "hinted-model" }))).toEqual(["alice/web"]);
+    expect((await admin.search({ q: "deploy", harness: "trajectory" })).total).toBe(2);
+    expect((await admin.search({ q: "deploy", harness: "codex" })).total).toBe(0);
+    const [hit] = (await admin.search({ q: "deploy", repo: "api" })).results;
+    expect(hit).toMatchObject({
+      project: "api",
+      repo: "github.com/acme/api",
+      harness: "trajectory",
+      models: ["gpt-9"],
+    });
+    const session = await admin.getSession("trajectory", "api", { owner: "alice" });
+    expect(session).toMatchObject({ repo: "github.com/acme/api", models: ["gpt-9"] });
+    const trace = await admin.getTrace("trajectory", "api", undefined, undefined, {
+      owner: "alice",
+    });
+    expect((trace as Trace | null)?.metadata).toMatchObject({
+      commit: "a".repeat(40),
+      path_in_repo: "services/api",
+      client: "seshi/0.15.0 linux-x64",
+    });
+    // A repo with credentials never reaches the store; the session does.
+    await alice.ingest({
+      format: "trajectory",
+      session_id: "leak",
+      transcript: log("deploy the leak"),
+      repo: "user:ghp_token@github.com/acme/api",
+    });
+    const leak = await admin.getSession("trajectory", "leak", { owner: "alice" });
+    expect(leak?.status).toBe("stored");
+    expect(leak).not.toHaveProperty("repo");
   });
 
   it("filters by labels (label=key=value, repeatable), and returns them", async () => {

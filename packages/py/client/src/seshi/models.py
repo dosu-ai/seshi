@@ -339,6 +339,18 @@ class Upload(Request):
     offset: int | None = None
     project: str | None = None
     branch: str | None = None
+    repo: str | None = None
+    """The repository's origin remote, normalized without credentials (`github.com/acme/app`).
+    The session keeps the first one it is sent."""
+    commit: str | None = None
+    path_in_repo: str | None = None
+    """The working folder relative to the repository's root; never absolute."""
+    client: str | None = None
+    """The program that sent the upload (`seshi/0.15.0 darwin-arm64`)."""
+    harness_version: str | None = None
+    """A hint for a log that names no harness version; the log's own wins."""
+    model: str | None = None
+    """A hint for a log that names no model; the log's own wins."""
     labels: dict[str, str] | None = None
     """Keys `[a-z0-9][a-z0-9._-]{0,63}`, values up to 512 characters, at most 32. The session keeps
     the first it is sent; a `replace` may change them."""
@@ -426,8 +438,15 @@ class SessionMetadata(Response):
     format: str = Field(validation_alias=AliasChoices("format", "agent"))
     """The format the session is filed under (`agent` from a server older than 0.16)."""
     source: str | None = None
+    """The harness: the meta record's `source`."""
     project: str | None = None
     branch: str | None = None
+    repo: str | None = None
+    """The repository's normalized remote, fixed by the first write that names one."""
+    agent_version: str | None = None
+    """The harness's version the session started on (Cursor: at its latest upload)."""
+    models: list[str] | None = None
+    """Every model the session used."""
     labels: dict[str, str] | None = None
     """Set from config by the first write that carries any (the CLI's `[labels]`, a repo's
     `.seshi/config.toml`, a source's `labels`)."""
@@ -585,6 +604,10 @@ class TraceMetadata(Response):
     cwd: str | None = None
     git_branch: str | None = None
     model: str | None = None
+    agent_version: str | None = None
+    commit: str | None = None
+    path_in_repo: str | None = None
+    client: str | None = None
     parent_session_id: str | None = None
     continuation: Continuation | None = None
     normalizer: Normalizer | None = None
@@ -877,8 +900,13 @@ class SearchRequest(Request):
     owner: str | None = None
     agent: str | None = None
     repo: str | None = None
-    """The session's `project`, exactly or as its last path segments."""
+    """The session's `repo` (its normalized remote), exactly or as its last path segments."""
     branch: str | None = None
+    harness: str | None = None
+    """The meta record's `source` (`claude-code`, `codex`, `cursor`)."""
+    agent_version: str | None = None
+    model: str | None = None
+    """Any model the session used."""
     label: list[str] | None = None
     """Labels a session must carry, each `key=value` (`SeshiClient.search` takes a dict)."""
     source: str | None = None
@@ -912,6 +940,10 @@ class SearchResult(Response):
     native_session_id: str | None = None
     project: str | None = None
     branch: str | None = None
+    repo: str | None = None
+    harness: str | None = None
+    agent_version: str | None = None
+    models: list[str] | None = None
     labels: dict[str, str] | None = None
     source_id: str | None = None
     visibility: Open[Visibility]

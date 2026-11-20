@@ -22,6 +22,12 @@ export interface SessionState {
   cwd?: string;
   folders?: string[];
   parent_session_id?: string;
+  /** What the agent's hooks last said of its version and model (Cursor's), sent as hints. */
+  harness_version?: string;
+  model?: string;
+  /** The commit `HEAD` named when a hook last captured the session, sent with its uploads, so
+   * an upload that waited (offline, a retry) names the commit its lines were written at. */
+  commit?: string;
   /** The session's labels, resolved when it was first seen (in its hook, with the agent's
    * environment) and sent with every upload of it, unchanged when the folder or the environment
    * changes later. Absent until resolved; `{}` when it has none. */

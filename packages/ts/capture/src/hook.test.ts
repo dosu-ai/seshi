@@ -116,6 +116,21 @@ describe("runHook (F9.1)", () => {
     ]);
   });
 
+  it("records the commit HEAD names as the hook fires", async () => {
+    const sha = "c".repeat(40);
+    mkdirSync(join(dir, "repo", ".git"), { recursive: true });
+    writeFileSync(join(dir, "repo", ".git", "HEAD"), `${sha}\n`);
+    await runHook({
+      agent,
+      event: "Stop",
+      payload: { id: "s1", cwd: join(dir, "repo"), path: "/t/s1.jsonl" },
+      host,
+      paths,
+      now: new Date("2026-11-01T00:00:00Z"),
+    });
+    expect(readSpool(paths).items[0]?.entry).toMatchObject({ session_id: "s1", commit: sha });
+  });
+
   it("resolves labels in the agent's environment at first sight, and only then", async () => {
     cliConfig(
       `[labels]\n"dosu.project" = { env = "DOSU_PROJECT" }\nteam = "platform"\nBad = "x"\n[[labels.paths]]\npath = ${JSON.stringify(dir)}\nfolder = "here"\n`,

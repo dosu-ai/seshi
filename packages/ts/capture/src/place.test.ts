@@ -3,8 +3,19 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { GIT_CONFIG_MAX_BYTES, REPO_FILE_MAX_BYTES, readUntrustedRepoFile } from "./files";
-import { findRepo, gitRemotes, headBranch, parseRepoConfig, placeOf, repoName } from "./place";
-import { DEFAULT_RULES, decide, type RepoConfig } from "./rules";
+import {
+  findRepo,
+  gitRemotes,
+  headBranch,
+  headCommit,
+  headCommitAt,
+  parseRepoConfig,
+  pathInRepo,
+  placeOf,
+  repoName,
+  repoRemote,
+} from "./place";
+import { DEFAULT_RULES, decide, normalizeRemote, type RepoConfig } from "./rules";
 
 let dir: string;
 beforeEach(() => {
@@ -27,6 +38,107 @@ const GIT_CONFIG = `[core]
 [branch "main"]
 \tremote = origin
 `;
+
+const SHA_A = "a".repeat(40);
+const SHA_B = "b".repeat(40);
+const SHA_C = "c".repeat(40);
+
+describe("the session's repository, commit and folder", () => {
+  it("normalizes remotes without credentials or port", () => {
+    for (const remote of [
+      "https://github.com/acme/app.git",
+      "https://x-access-token:ghp_secret0123456789@github.com/acme/app.git",
+      "https://user@github.com/acme/app",
+      "http://user:pass@GitHub.com:8443/acme/app/",
+      "ssh://git@github.com/acme/app.git",
+      "ssh://git@github.com:2222/acme/app.git",
+      "git@github.com:acme/app.git",
+      "token@github.com:acme/app",
+      "git+ssh://git@github.com/acme/app.git",
+    ]) {
+      const normalized = normalizeRemote(remote);
+      expect(normalized, remote).toBe("github.com/acme/app");
+    }
+    // One no URL parser reads keeps no user info either, and an `@` in its path stays.
+    expect(normalizeRemote("https://user:pa/ss@github.com/acme/app")).toBe("github.com/acme/app");
+    expect(normalizeRemote("https://user:p/w@host.example/acme/app@v2")).toBe(
+      "host.example/acme/app@v2",
+    );
+    // A bare host/path, as Cursor names a repository; a numeric owner is not a port.
+    expect(normalizeRemote("GitHub.com/acme/app/")).toBe("github.com/acme/app");
+    expect(normalizeRemote("git@github.com:1234/app.git")).toBe("github.com/1234/app");
+  });
+
+  it("is origin's remote, else the first; none for a folder on this machine", () => {
+    const config = (...remotes: [string, string][]) =>
+      remotes.map(([name, url]) => `[remote "${name}"]\n\turl = ${url}\n`).join("");
+    expect(repoRemote(GIT_CONFIG)).toBe("github.com/acme/app");
+    expect(
+      repoRemote(
+        config(["fork", "https://github.com/me/app"], ["origin", "git@github.com:acme/app"]),
+      ),
+    ).toBe("github.com/acme/app");
+    expect(repoRemote(config(["upstream", "https://t0k3n@gitlab.com/g/app.git"]))).toBe(
+      "gitlab.com/g/app",
+    );
+    expect(repoRemote(config(["origin", "/srv/git/app.git"]))).toBeUndefined();
+    expect(repoRemote(config(["origin", "../app"]))).toBeUndefined();
+    expect(repoRemote(config(["origin", "file:///srv/git/app.git"]))).toBeUndefined();
+    expect(repoRemote("[core]\n\tbare = false\n")).toBeUndefined();
+  });
+
+  it("reads HEAD's commit from a loose ref, packed-refs, a detached HEAD and a worktree", () => {
+    const git = join(dir, "app/.git");
+    write("app/.git/HEAD", "ref: refs/heads/main\n");
+    write("app/.git/refs/heads/main", `${SHA_A}\n`);
+    expect(headCommit(git, git, "ref: refs/heads/main\n")).toBe(SHA_A);
+    write(
+      "app/.git/packed-refs",
+      `# pack-refs with: peeled fully-peeled sorted\n${SHA_B} refs/heads/packed\n^${SHA_C}\n`,
+    );
+    expect(headCommit(git, git, "ref: refs/heads/packed\n")).toBe(SHA_B);
+    expect(headCommit(git, git, `${SHA_C}\n`)).toBe(SHA_C);
+    expect(headCommit(git, git, "ref: refs/heads/missing\n")).toBeUndefined();
+    expect(headCommit(git, git, "ref: refs/heads/../../../etc/passwd\n")).toBeUndefined();
+    // A worktree: its HEAD in its own git folder, the branch's ref in the shared one.
+    write("app/.git/worktrees/wt/commondir", "../..\n");
+    write("app/.git/worktrees/wt/HEAD", "ref: refs/heads/packed\n");
+    write("wt/.git", `gitdir: ${join(git, "worktrees/wt")}\n`);
+    expect(headCommitAt(join(dir, "wt"))).toBe(SHA_B);
+    write("app/.git/worktrees/wt/HEAD", `${SHA_C}\n`);
+    expect(headCommitAt(join(dir, "wt"))).toBe(SHA_C);
+    expect(headCommitAt(join(dir, "app"))).toBe(SHA_A);
+    expect(headCommitAt(dir)).toBeUndefined();
+    // A rule decision never reads refs: placeOf names no commit.
+    expect(placeOf(join(dir, "app")).repo).not.toHaveProperty("commit");
+  });
+
+  it("follows refs that name refs, up to the last step", () => {
+    const git = join(dir, "app/.git");
+    write("app/.git/refs/heads/r1", "ref: refs/heads/r2\n");
+    write("app/.git/refs/heads/r2", "ref: refs/heads/r3\n");
+    write("app/.git/refs/heads/r3", "ref: refs/heads/r4\n");
+    write("app/.git/refs/heads/r4", `${SHA_A}\n`);
+    expect(headCommit(git, git, "ref: refs/heads/r1\n")).toBe(SHA_A);
+    // HEAD → r0 → r1 → r2 → r3 → r4: the sha is the fifth ref read, the last allowed.
+    write("app/.git/refs/heads/r0", "ref: refs/heads/r1\n");
+    expect(headCommit(git, git, "ref: refs/heads/r0\n")).toBe(SHA_A);
+    // One more hop is past the limit.
+    write("app/.git/refs/heads/rx", "ref: refs/heads/r0\n");
+    expect(headCommit(git, git, "ref: refs/heads/rx\n")).toBeUndefined();
+  });
+
+  it("is the folder relative to the repository's root: none at the root or outside it", () => {
+    write("app/.git/HEAD", "ref: refs/heads/main\n");
+    mkdirSync(join(dir, "app/packages/api"), { recursive: true });
+    mkdirSync(join(dir, "elsewhere"), { recursive: true });
+    expect(placeOf(join(dir, "app")).repo?.path).toBeUndefined();
+    expect(placeOf(join(dir, "app/packages/api")).repo?.path).toBe("packages/api");
+    expect(placeOf(join(dir, "elsewhere")).repo).toBeUndefined();
+    expect(pathInRepo(join(dir, "app"), join(dir, "elsewhere"))).toBeUndefined();
+    expect(pathInRepo(join(dir, "app"), join(dir, "app"))).toBeUndefined();
+  });
+});
 
 describe("git files", () => {
   it("reads remotes and the branch without git", () => {
@@ -54,6 +166,7 @@ describe("git files", () => {
       config: {},
       remotes: ["github.com/acme/app", "github.com/me/app"],
       branch: "wt-branch",
+      remote: "github.com/acme/app",
     });
     expect(findRepo(dir)).toBeUndefined();
   });

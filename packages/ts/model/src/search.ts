@@ -19,10 +19,18 @@ export interface SearchRequest {
   owner?: string;
   /** Only sessions filed under this format or run by this agent (`origin_agent`). */
   agent?: string;
-  /** Only sessions of this repository: the session's `project`, exactly or as its last path
-   * segments (`widget` matches `github.com/acme/widget`). */
+  /** Only sessions of this repository: the session's `repo` (its normalized remote), exactly
+   * or as its last path segments (`widget` and `acme/widget` match `github.com/acme/widget`). A
+   * session that has no `repo` (no remote) never matches. */
   repo?: string;
   branch?: string;
+  /** Only sessions run by this harness: the meta record's `source` (`claude-code`, `cursor`). */
+  harness?: string;
+  /** Only sessions with this `agent_version`: the version of their harness they started on
+   * (for Cursor, whose version comes from its hooks, the version at their latest upload). */
+  agent_version?: string;
+  /** Only sessions that used this model, among any they used. */
+  model?: string;
   /** Only sessions carrying every one of these labels (`{ "dosu.project": "github.com/acme/app" }`):
    * keys and values exactly. `GET /v1/search` takes each as `label=key=value`. */
   labels?: Labels;
@@ -69,6 +77,13 @@ export interface SearchResult {
   native_session_id?: string;
   project?: string;
   branch?: string;
+  /** The repository's normalized remote (`github.com/acme/app`). */
+  repo?: string;
+  /** What ran the session: its meta record's `source`. */
+  harness?: string;
+  agent_version?: string;
+  /** Every model the session used. */
+  models?: string[];
   labels?: Labels;
   source_id?: string;
   visibility: "org" | "owner";

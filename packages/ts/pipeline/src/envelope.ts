@@ -8,6 +8,7 @@ import {
   labelsProblems,
   MAX_IDEMPOTENCY_KEY_LENGTH,
   type OwnerBasis,
+  SCOPE_FIELDS,
   SessionRejected,
   type SessionUpload,
   type SourceKind,
@@ -122,6 +123,32 @@ export function checkEnvelope(envelope: Envelope): void {
   }
 }
 
+const MAX_SCOPE_LENGTH = 1024;
+
+/** The envelope's scope fields that are fit to keep. They are labels, never a reason to refuse
+ * a session: one that is not a short string is left out, as is a `repo` with user info or a
+ * scheme (it may carry a credential), a `commit` that is not a sha and a `path_in_repo` that is
+ * absolute or leaves the repository (a machine's path). */
+export function validScope(
+  envelope: Pick<Envelope, (typeof SCOPE_FIELDS)[number]>,
+): Partial<Record<(typeof SCOPE_FIELDS)[number], string>> {
+  const out: Partial<Record<(typeof SCOPE_FIELDS)[number], string>> = {};
+  for (const key of SCOPE_FIELDS) {
+    const value: unknown = envelope[key];
+    if (typeof value !== "string" || value === "" || value.length > MAX_SCOPE_LENGTH) continue;
+    if (key === "repo" && /[@\s\\]|:\/\//.test(value)) continue;
+    if (key === "commit" && !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(value)) continue;
+    if (
+      key === "path_in_repo" &&
+      (/^(?:[\\/]|[A-Za-z]:[\\/])/.test(value) || value.split(/[\\/]/).includes(".."))
+    ) {
+      continue;
+    }
+    out[key] = value;
+  }
+  return out;
+}
+
 export function uploadIdempotencyKey(sessionKey: string, offset: number, text: string): string {
   const digest = createHash("sha256").update(text, "utf8").digest("hex").slice(0, 32);
   return `${sessionKey}@${offset}#${digest}`;
@@ -166,6 +193,10 @@ export function uploadEnvelope(upload: SessionUpload, options: UploadEnvelopeOpt
   if (upload.shipped) envelope.shipped = upload.shipped;
   if (upload.project !== undefined) envelope.project = upload.project;
   if (upload.branch !== undefined) envelope.branch = upload.branch;
+  for (const key of SCOPE_FIELDS) {
+    const value = upload[key];
+    if (value !== undefined) envelope[key] = value;
+  }
   if (upload.labels !== undefined && Object.keys(upload.labels).length > 0) {
     envelope.labels = upload.labels;
   }

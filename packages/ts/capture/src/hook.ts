@@ -13,7 +13,7 @@ import { writeRecent } from "./current";
 import { writePrivateFile } from "./files";
 import { resolveLabels } from "./labels";
 import type { CapturePaths } from "./paths";
-import { placeOf } from "./place";
+import { headCommitAt, placeOf } from "./place";
 import { type Decision, decide, type Place, turnedOff } from "./rules";
 import { captureRules } from "./rules-cache";
 import { appendSpool } from "./spool";
@@ -157,6 +157,7 @@ export async function runHook(run: HookRun): Promise<HookOutcome> {
       capture.transcript === undefined && !capture.read
         ? capture.transcript_path
         : await keep(run, capture, outcome);
+    const commit = headCommitAt(capture.cwd ?? known?.cwd);
     const sessionLabels = labelsOf(known, place);
     appendSpool(
       run.paths,
@@ -171,6 +172,9 @@ export async function runHook(run: HookRun): Promise<HookOutcome> {
         ...(capture.cwd ? { cwd: capture.cwd } : {}),
         ...(capture.parent_session_id ? { parent_session_id: capture.parent_session_id } : {}),
         ...(capture.final ? { final: true } : {}),
+        ...(commit ? { commit } : {}),
+        ...(capture.harness_version ? { harness_version: capture.harness_version } : {}),
+        ...(capture.model ? { model: capture.model } : {}),
         ...(sessionLabels ? { labels: sessionLabels } : {}),
       },
       now,
