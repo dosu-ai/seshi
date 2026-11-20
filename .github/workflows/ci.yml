@@ -543,9 +543,25 @@ jobs:
       - name: Wait for npm to serve the release
         shell: bash
         run: bun run release:wait-npm --version "$VERSION"
+      # Even once the wait above sees every package, some of the registry's CDN nodes can
+      # still serve an older list of a platform package's versions for a few minutes; npm then
+      # skips that optional dependency and installs the launcher alone. So each install is
+      # tried again, fetching afresh, before the release counts as broken.
       - name: npm i -g @dosu/seshi
         shell: bash
         run: |
-          npm install -g "@dosu/seshi@$VERSION"
-          test "$(seshi --version)" = "seshi $VERSION"
-          test "$(npx --yes "@dosu/seshi@$VERSION" --version)" = "seshi $VERSION"
+          for try in 1 2 3 4 5 6; do
+            npm install -g --prefer-online "@dosu/seshi@$VERSION"
+            if [ "$(seshi --version)" = "seshi $VERSION" ]; then break; fi
+            if [ "$try" = 6 ]; then exit 1; fi
+            echo "npm i -g: no binary for this platform yet (try $try), retrying in 30s"
+            npm uninstall -g @dosu/seshi
+            sleep 30
+          done
+          for try in 1 2 3 4 5 6; do
+            if [ "$(npx --yes --prefer-online "@dosu/seshi@$VERSION" --version)" = "seshi $VERSION" ]; then break; fi
+            if [ "$try" = 6 ]; then exit 1; fi
+            echo "npx: no binary for this platform yet (try $try), retrying in 30s"
+            rm -rf "$(npm config get cache)/_npx"
+            sleep 30
+          done
