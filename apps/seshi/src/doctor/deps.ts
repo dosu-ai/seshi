@@ -13,12 +13,12 @@ import type { Failure } from "./types";
 export interface ServerView {
   mode: "server" | "serverless";
   where: string;
-  getSession(agent: string, sessionId: string): Promise<SessionMetadata | null>;
-  pointer?(agent: string, sessionId: string): Promise<SessionMetadata | null>;
-  getTrace(agent: string, sessionId: string, hash: string): Promise<StoredTrace | null>;
-  reviews(agent: string, sessionId: string): Promise<ReviewDecision[] | null>;
+  getSession(format: string, sessionId: string): Promise<SessionMetadata | null>;
+  pointer?(format: string, sessionId: string): Promise<SessionMetadata | null>;
+  getTrace(format: string, sessionId: string, hash: string): Promise<StoredTrace | null>;
+  reviews(format: string, sessionId: string): Promise<ReviewDecision[] | null>;
   changes?(since: string, limit: number): Promise<{ key: string; entry: ChangeEntry }[]>;
-  search(q: string, agent: string): Promise<SearchResults>;
+  search(q: string, format: string): Promise<SearchResults>;
 }
 
 export interface AgentInfo {
@@ -54,12 +54,16 @@ export interface Redaction {
   transcript(text: string, encoding: "jsonl" | "json"): string;
   records(records: readonly NormalizedRecord[]): NormalizedRecord[];
   residue(records: readonly NormalizedRecord[]): Residue[];
+  /** A short value (a label's) as these rules store it: the server redacts label values. */
+  text(value: string): string;
 }
 
 export interface DoctorDeps {
   now(): Date;
   state(): CaptureState;
   judge(state: CaptureState, agent: string, entry: SessionState | undefined): Decision;
+  /** What is wrong with the labels the CLI config and the session's repo config give. */
+  labelProblems?(entry: SessionState | undefined): string[];
   agent(name: string): AgentInfo | undefined;
   files: FileReader;
   spool(): SpoolItem[];

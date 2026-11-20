@@ -335,7 +335,7 @@ function sessionLine(s: BackfillSession, dryRun: boolean): string {
           .map(([id, n]) => `${id} ${n}`)
           .join(", ")})`
       : `${s.outcome}: ${s.message ?? ""}`;
-  return `  ${s.owner}/${s.agent}/${s.session_id}: ${what}`;
+  return `  ${s.owner}/${s.format}/${s.session_id}: ${what}`;
 }
 
 function sweepLines(

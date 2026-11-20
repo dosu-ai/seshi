@@ -5,6 +5,7 @@ import { findServerConfig, parseDuration } from "@seshi/config";
 import type { Instance } from "@seshi/instance";
 import {
   Forbidden,
+  labelPairs,
   type SearchRequest,
   type SearchResult,
   type SearchResults,
@@ -32,6 +33,7 @@ import { cwdConfigHint, openServer, serverFailure } from "./server-instance";
 
 const USAGE = [
   "usage: seshi search <words…> [--owner <id>] [--agent <a>] [--repo <r>] [--branch <b>] [--source <id>]",
+  "                    [--label key=value]…",
   "                    [--since <time|7d>] [--until <time|7d>] [--sort relevance|recent]",
   "                    [--limit <n>] [--matches <n>] [--cursor <c>]",
   "                    [--server <url>] [--token <t> [--user <name>]] [--config <file>] [--set path=value]… [--json]",
@@ -44,6 +46,7 @@ const OPTIONS = {
   agent: { type: "string" },
   repo: { type: "string" },
   branch: { type: "string" },
+  label: { type: "string", multiple: true },
   source: { type: "string" },
   since: { type: "string" },
   until: { type: "string" },
@@ -88,13 +91,22 @@ function intArg(value: string, name: string): number {
   return Number.parseInt(value, 10);
 }
 
+function labelArgs(given: readonly string[] | undefined): Record<string, string> | undefined {
+  if (!given || given.length === 0) return undefined;
+  const parsed = labelPairs(given);
+  if ("problem" in parsed) throw new UsageProblem(`--label: ${parsed.problem}`);
+  return parsed.labels;
+}
+
 export function requestOf(query: string, values: Values, now: Date): SearchRequest {
+  const labels = labelArgs(values.label);
   return {
     q: query,
     ...(values.owner !== undefined ? { owner: values.owner } : {}),
     ...(values.agent !== undefined ? { agent: values.agent } : {}),
     ...(values.repo !== undefined ? { repo: values.repo } : {}),
     ...(values.branch !== undefined ? { branch: values.branch } : {}),
+    ...(labels ? { labels } : {}),
     ...(values.source !== undefined ? { source: values.source } : {}),
     ...(values.since !== undefined ? { since: timeArg(values.since, "since", now) } : {}),
     ...(values.until !== undefined ? { until: timeArg(values.until, "until", now) } : {}),
@@ -137,7 +149,7 @@ export function highlighted(
 export function resultLines(result: SearchResult, style: Style = Style.plain()): string[] {
   const where = printable([result.project, result.branch].filter(Boolean).join(" @ "));
   const head = [
-    style.search(printable(`${result.agent}/${result.session_id}`)),
+    style.search(printable(`${result.format}/${result.session_id}`)),
     printable(result.owner),
     ...(where ? [style.muted(where)] : []),
     style.muted(when(result.ended_at ?? result.updated_at)),

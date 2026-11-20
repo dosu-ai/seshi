@@ -74,7 +74,7 @@ describe("spec/testdata/objects", () => {
   it("a trace's records reproduce its events and content hash", () => {
     const trace = read(join(dir, "trace.claude-code.json")) as Trace;
     const again = parseTrace(trace.records, {
-      agent: trace.agent,
+      format: trace.format,
       session_id: trace.session_id ?? undefined,
       project: trace.project,
       branch: trace.branch,
@@ -182,7 +182,11 @@ describe("what the pipeline writes", () => {
         content: [{ type: "text", text: "details ".repeat(400) }],
       },
     })}\n`;
-    const result = await db.ingest({ agent: "claude-code", session_id: "sess1", transcript: long });
+    const result = await db.ingest({
+      format: "claude-code",
+      session_id: "sess1",
+      transcript: long,
+    });
     if (!("content_hash" in result)) throw new Error("expected a trace");
     check(
       "layout.schema.json",

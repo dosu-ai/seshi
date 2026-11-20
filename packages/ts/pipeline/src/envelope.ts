@@ -5,6 +5,7 @@ import {
   ENVELOPE_SCHEMA,
   type Envelope,
   type LogPayload,
+  labelsProblems,
   MAX_IDEMPOTENCY_KEY_LENGTH,
   type OwnerBasis,
   SessionRejected,
@@ -101,6 +102,10 @@ export function checkEnvelope(envelope: Envelope): void {
   ) {
     refuse("retract_hash must be a sha256 in lowercase hex");
   }
+  if (envelope.labels !== undefined) {
+    const problems = labelsProblems(envelope.labels);
+    if (problems.length > 0) refuse(problems.join("; "));
+  }
   const payload = envelope.payload as LogPayload | SpanPayload | undefined;
   if (payload?.kind === "log") {
     if (typeof payload.text !== "string") refuse("payload.text must be a string");
@@ -143,9 +148,9 @@ export function uploadEnvelope(upload: SessionUpload, options: UploadEnvelopeOpt
     schema: ENVELOPE_SCHEMA,
     source: options.source ?? "upload",
     source_id: options.source_id ?? UPLOAD_SOURCE,
-    format: upload.agent,
+    format: upload.format,
     session_key: upload.session_id,
-    payload: { kind: "log", encoding: upload.format, text: upload.transcript, offset },
+    payload: { kind: "log", encoding: upload.encoding, text: upload.transcript, offset },
     caller: options.caller,
     owner: upload.owner,
     owner_basis: options.owner_basis,
@@ -161,6 +166,9 @@ export function uploadEnvelope(upload: SessionUpload, options: UploadEnvelopeOpt
   if (upload.shipped) envelope.shipped = upload.shipped;
   if (upload.project !== undefined) envelope.project = upload.project;
   if (upload.branch !== undefined) envelope.branch = upload.branch;
+  if (upload.labels !== undefined && Object.keys(upload.labels).length > 0) {
+    envelope.labels = upload.labels;
+  }
   if (upload.parent_session_id !== undefined) envelope.parent_session_id = upload.parent_session_id;
   if (upload.fork_of !== undefined) envelope.fork_of = upload.fork_of;
   if (upload.retract_hash !== undefined) envelope.retract_hash = upload.retract_hash;

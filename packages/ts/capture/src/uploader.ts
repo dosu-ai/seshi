@@ -14,6 +14,7 @@ import {
   type Upload,
 } from "@seshi/model";
 import { appendLog } from "./files";
+import { resolveLabels } from "./labels";
 import type { CapturePaths } from "./paths";
 import { placeOf } from "./place";
 import {
@@ -30,6 +31,7 @@ import { readSpool, removeSpool, type SpoolEntry } from "./spool";
 import {
   type CaptureState,
   freeze,
+  labelsOpen,
   newSecret,
   otherFolders,
   pauseWindows,
@@ -575,6 +577,16 @@ export class Uploader {
         this.log(`${key}: stopped by a pause at ${offset} bytes`);
       }
       if (!decision.capture && decision.frozen === undefined) continue;
+      if (session.labels === undefined) {
+        // No hook resolved its labels (a session from before labels, or one only seen paused):
+        // they come from this process's environment and its folder, and stay.
+        const labels = this.resolveLabels(snapshot, place);
+        session = (await this.save(key, (s) => {
+          if (s.labels !== undefined) return;
+          s.labels = labels;
+          s.labels_by = "uploader";
+        })) ?? { ...session, labels, labels_by: "uploader" };
+      }
       // A paused session sends no more than it had, so its upload is not composed further.
       const from = decision.capture
         ? this.composed(key, agent, session, path)
@@ -640,6 +652,13 @@ export class Uploader {
         if (entry.cwd) seenIn(session, entry.cwd);
         if (entry.parent_session_id) session.parent_session_id = entry.parent_session_id;
         if (entry.kind === "capture" && entry.final) session.final = true;
+        // The first labels a hook resolved for the session stay; later hooks' never replace them.
+        // They do replace labels this uploader resolved for it before anything was sent (a sweep
+        // that found the session before its hook's entry reached the spool).
+        if (entry.kind === "capture" && entry.labels && labelsOpen(session)) {
+          session.labels = entry.labels;
+          delete session.labels_by;
+        }
         if (
           entry.kind === "paused" &&
           !turnedOnSince(session.toggle, session.toggled_at, entry.at)
@@ -709,6 +728,9 @@ export class Uploader {
           session_id: found.info.session_id,
           path: found.path,
           ...(found.info.cwd ? { cwd: found.info.cwd } : {}),
+          // No hook saw it: its labels come from this process's environment and its folder.
+          labels: this.resolveLabels(snapshot, placeOf(found.info.cwd)),
+          labels_by: "uploader",
           ...(found.info.parent_session_id
             ? { parent_session_id: found.info.parent_session_id }
             : {}),
@@ -827,7 +849,7 @@ export class Uploader {
       this.nextStaleCheck = now.getTime() + this.retryMaxMs;
       return;
     }
-    const listed = new Map(stale.map((s) => [`${s.agent}\n${s.session_id}`, s]));
+    const listed = new Map(stale.map((s) => [`${s.format}\n${s.session_id}`, s]));
     let marked = 0;
     await updateState(this.paths, (st) => {
       for (const session of Object.values(st.sessions)) {
@@ -1066,8 +1088,17 @@ export class Uploader {
     return { text: bytes.subarray(0, cut + 1).toString("utf8"), end: start + cut + 1 };
   }
 
+  /** A session's labels, resolved by the uploader: with its own environment, for a session no
+   * hook resolved them for (one the sweep found). Dropped labels are logged once. */
+  private resolveLabels(snapshot: RulesSnapshot, place: Place): Record<string, string> {
+    const resolved = resolveLabels(snapshot.labels, place, this.host.env, this.host.platform);
+    for (const problem of resolved.problems) this.logOnce(`labels: left out ${problem}`);
+    return resolved.labels;
+  }
+
   private async details(session: SessionState, agent: CaptureAgent, place: Place) {
     const repo = place.repo;
+    const labels = session.labels ?? {};
     const folder = repo?.root ?? session.cwd;
     const claims: Claims = {};
     if (session.cwd) {
@@ -1093,6 +1124,7 @@ export class Uploader {
     return {
       ...(repo ? { project: repo.name } : folder ? { project: basename(folder) } : {}),
       ...(repo?.branch ? { branch: repo.branch } : {}),
+      ...(Object.keys(labels).length > 0 ? { labels } : {}),
       ...repoVisibilityClaim(repo?.config),
       ...(session.parent_session_id ? { parent_session_id: session.parent_session_id } : {}),
       ...(Object.keys(claims).length > 0 ? { claims } : {}),
@@ -1235,10 +1267,10 @@ export class Uploader {
     const keptLength = bytesOf(redacted.text) === bytesOf(piece.text);
     if (!keptLength) await this.markMisalignedBeforeSend(key, session);
     const upload: Upload = {
-      agent: agent.format,
+      format: agent.format,
       session_id: uploadId(session),
       transcript: redacted.text,
-      format: agent.encoding,
+      encoding: agent.encoding,
       offset: whole ? 0 : (session.server_offset ?? 0),
       retract_hash: retractHash(secret),
       ...(await this.details(session, agent, place)),

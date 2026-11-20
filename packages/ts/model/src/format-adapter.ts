@@ -55,7 +55,7 @@ export interface NormalizedTranscript {
  * (model, token usage, request id). Raw transcripts are not stored (X6.3), so what the adapter
  * leaves out here is gone for good (X6.2). */
 export interface FormatAdapter {
-  /** The format's name: the `agent` a client sends and what archive ids derive from. */
+  /** The format's name: the `format` a session is filed under and what archive ids derive from. */
   readonly source: string;
   /** Whether a log in this format can arrive in chunks. */
   readonly chunkable: boolean;

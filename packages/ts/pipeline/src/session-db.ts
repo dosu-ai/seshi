@@ -99,7 +99,7 @@ export class StoreSessionDB implements SessionDB {
     const envelope = uploadEnvelope(
       {
         ...upload,
-        format: upload.format ?? "jsonl",
+        encoding: upload.encoding ?? "jsonl",
         owner: this.owner,
         ...(visibility ? { visibility } : {}),
       },
@@ -123,24 +123,24 @@ export class StoreSessionDB implements SessionDB {
 
   /** A session's pointer; null for a stub (F3.4), which has no trace and is not served, as on
    * the HTTP API. */
-  async getSession(agent: string, sessionId: string): Promise<SessionMetadata | null> {
-    const metadata = await getSession(this.store, this.owner, agent, sessionId);
+  async getSession(format: string, sessionId: string): Promise<SessionMetadata | null> {
+    const metadata = await getSession(this.store, this.owner, format, sessionId);
     return metadata && isStub(metadata) ? null : metadata;
   }
 
   async getTrace(
-    agent: string,
+    format: string,
     sessionId: string,
     hash?: string,
-    format: RenderFormat = "seshi",
+    render: RenderFormat = "seshi",
   ): Promise<StoredTrace | null> {
-    const metadata = await this.getSession(agent, sessionId);
+    const metadata = await this.getSession(format, sessionId);
     if (!metadata || metadata.status === "redacted") return null;
     const wanted = hash ?? metadata.head;
     if (!wanted || !metadata.traces.some((ref) => ref.content_hash === wanted)) return null;
-    const archive = archiveId(this.owner, agent, sessionId);
+    const archive = archiveId(this.owner, format, sessionId);
     const trace = await getTrace(this.store, this.owner, archive, wanted);
-    return trace === null ? null : renderTrace(trace, format);
+    return trace === null ? null : renderTrace(trace, render);
   }
 
   /** A page of the owner's sessions, stubs (F3.4) left out, as on the HTTP API. */
@@ -157,14 +157,14 @@ export class StoreSessionDB implements SessionDB {
   }
 
   async tombstone(
-    agent: string,
+    format: string,
     sessionId: string,
     reason: TombstoneReason = "deleted",
   ): Promise<{ removed: number } | null> {
     return tombstone({
       store: this.store,
       owner: this.owner,
-      agent,
+      format,
       session_id: sessionId,
       now: this.now,
       reason,
@@ -174,14 +174,14 @@ export class StoreSessionDB implements SessionDB {
 
   /** Change who may read a session (X5.10); null for one not stored. */
   setVisibility(
-    agent: string,
+    format: string,
     sessionId: string,
     visibility: Visibility,
   ): Promise<SessionMetadata | null> {
     return setVisibility({
       store: this.store,
       owner: this.owner,
-      agent,
+      format,
       session_id: sessionId,
       visibility,
       now: this.now,

@@ -92,7 +92,14 @@ describe.each([
     const pipeline = new Pipeline({ store, formats });
     const result = (await pipeline.submit(
       uploadEnvelope(
-        { owner, agent: "trajectory", session_id: sessionId, transcript, format: "jsonl", offset },
+        {
+          owner,
+          format: "trajectory",
+          session_id: sessionId,
+          transcript,
+          encoding: "jsonl",
+          offset,
+        },
         { caller: { kind: "static", principal: owner }, owner_basis: "verified" },
       ),
     )) as StoreSessionResult;

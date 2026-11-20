@@ -26,7 +26,7 @@ function session(n: number, fields: Partial<IndexedSession> = {}): IndexedSessio
   return {
     owner: "alice",
     archive_id: H(n),
-    agent: "claude-code",
+    format: "claude-code",
     session_id: `s${n}`,
     visibility: "org",
     updated_at: "2026-11-14T09:00:00.000Z",
@@ -247,7 +247,7 @@ describe("SqliteIndex: filters, sorting and pages (F10.1)", () => {
     });
     index.apply({
       session: session(2, {
-        agent: "datadog-trajectory",
+        format: "datadog-trajectory",
         origin_agent: "codex",
         project: "github.com/acme/gadget",
         branch: "fix/cache",
@@ -266,7 +266,7 @@ describe("SqliteIndex: filters, sorting and pages (F10.1)", () => {
   }
   const ids = (r: ReturnType<typeof query>) => r.hits.map((h) => h.session.session_id);
 
-  it("filters by agent (filed or origin), repo, branch, source and time", () => {
+  it("filters by agent (filed format or origin), repo, branch, source and time", () => {
     const index = seeded();
     expect(ids(query(index, "cache", { agent: "codex" }))).toEqual(["s2"]);
     expect(ids(query(index, "cache", { agent: "datadog-trajectory" }))).toEqual(["s2"]);
@@ -282,6 +282,31 @@ describe("SqliteIndex: filters, sorting and pages (F10.1)", () => {
     const nov1 = Date.parse("2026-11-01T00:00:00Z");
     expect(ids(query(index, "cache", { since: nov1 })).sort()).toEqual(["s2", "s3"]);
     expect(ids(query(index, "cache", { until: nov1 }))).toEqual(["s1"]);
+  });
+
+  it("filters by labels, each key and value exactly, all of them", () => {
+    const index = memory();
+    const labelled = (n: number, labels?: Record<string, string>) =>
+      index.apply({
+        session: session(n, labels ? { labels } : {}),
+        events: [event("cache")],
+        replace: true,
+      });
+    labelled(1, { "dosu.project": "github.com/acme/billing", team: "platform" });
+    labelled(2, { "dosu.project": "github.com/acme/web", team: "platform" });
+    labelled(3);
+    const by = (labels: Record<string, string>) => ids(query(index, "cache", { labels })).sort();
+    expect(by({ team: "platform" })).toEqual(["s1", "s2"]);
+    expect(by({ "dosu.project": "github.com/acme/billing" })).toEqual(["s1"]);
+    expect(by({ "dosu.project": "github.com/acme/billing", team: "platform" })).toEqual(["s1"]);
+    expect(by({ "dosu.project": "github.com/acme/billing", team: "infra" })).toEqual([]);
+    expect(by({ "dosu.project": "billing" })).toEqual([]);
+    expect(by({ team: "Platform" })).toEqual([]);
+    expect(index.session("alice", H(1))?.labels).toEqual({
+      "dosu.project": "github.com/acme/billing",
+      team: "platform",
+    });
+    expect(index.session("alice", H(3))).not.toHaveProperty("labels");
   });
 
   it("sorts by relevance or by recency, and pages", () => {

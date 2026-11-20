@@ -3,6 +3,7 @@
 import type {
   Claims,
   Continuation,
+  Labels,
   Normalizer,
   OwnerBasis,
   Provenance,
@@ -20,15 +21,17 @@ export const SCHEMA_ID = "seshi/metadata/1" as const;
 export interface SessionMetadata {
   schema: "seshi/metadata/1";
   owner: string;
-  /** sha256(owner + "\n" + agent + "\n" + session_id). */
+  /** sha256(owner + "\n" + format + "\n" + session_id). */
   archive_id: Sha256;
   session_id: string;
-  /** The format the session is filed under. */
-  agent: string;
+  /** The format the session is filed under: the format adapter its envelopes named (`claude-code`, `codex`, `cursor-cloud-api`, …), which reads it. Metadata written before 0.16 calls it `agent`; readers take `format ?? agent`. */
+  format: string;
   /** What the trace's meta record says it came from; absent until a trace is stored. */
   source?: string;
   project?: string;
   branch?: string;
+  /** The session's labels: set by the first write that carries any; later writes with other labels leave them, a replace may change them. */
+  labels?: Labels;
   parent_session_id?: string;
   /** `stored`, or `redacted` once tombstoned: a redacted session is never stored again. */
   status: "stored" | "redacted";
@@ -123,10 +126,11 @@ export const JSON_SCHEMA = {
     owner: { type: "string", minLength: 1 },
     archive_id: { $ref: "common.schema.json#/$defs/Sha256" },
     session_id: { type: "string" },
-    agent: { type: "string" },
+    format: { type: "string" },
     source: { type: "string" },
     project: { type: "string" },
     branch: { type: "string" },
+    labels: { $ref: "common.schema.json#/$defs/Labels" },
     parent_session_id: { type: "string" },
     status: { enum: ["stored", "redacted"] },
     head: { $ref: "common.schema.json#/$defs/Sha256" },
@@ -157,7 +161,7 @@ export const JSON_SCHEMA = {
     "owner",
     "archive_id",
     "session_id",
-    "agent",
+    "format",
     "status",
     "traces",
     "writer",

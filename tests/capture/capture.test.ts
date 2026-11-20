@@ -1001,6 +1001,27 @@ describe("seshi upload (F8.1)", () => {
     expect((await stored())?.status).toBe("redacted");
   });
 
+  it("labels a session it adds from this environment and the transcript's folder, once", async () => {
+    // The fixture's transcript ran in /repo/app.
+    const config = join(machine.configDir, "config.toml");
+    writeFileSync(
+      config,
+      `${readFileSync(config, "utf8")}\n[labels]\n"dosu.project" = { env = "DOSU_PROJECT" }\n[[labels.paths]]\npath = "/repo/app"\nfolder = "app"\n`,
+    );
+    const first = await machine.seshi(["upload", file], {
+      env: { DOSU_PROJECT: "github.com/acme/app" },
+    });
+    expect(first.code, first.err).toBe(0);
+    const labels = { "dosu.project": "github.com/acme/app", folder: "app" };
+    expect((await stored())?.labels).toEqual(labels);
+    expect(state().sessions[`claude-code:${SESSION}`].labels).toEqual(labels);
+    // Uploaded again with another environment: the session keeps the labels it has.
+    appendFileSync(file, TAIL);
+    await machine.seshi(["upload", file], { env: { DOSU_PROJECT: "github.com/acme/other" } });
+    expect(state().sessions[`claude-code:${SESSION}`].labels).toEqual(labels);
+    expect((await stored())?.labels).toEqual(labels);
+  });
+
   it("backfills on purpose with --since, and skips what is not a transcript", async () => {
     const other = join(machine.dir, "notes.json");
     writeFileSync(other, "{}");

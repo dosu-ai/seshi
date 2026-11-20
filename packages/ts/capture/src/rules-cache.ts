@@ -2,6 +2,7 @@ import { cliConfigPath, NOT_SETTINGS_ENV } from "@seshi/config/paths";
 import type { CaptureHost } from "@seshi/kit";
 import { expandTilde } from "@seshi/kit";
 import { tryReadJson, tryRealpath, tryStat, tryWritePrivateFile } from "./files";
+import { type LabelRules, labelRules } from "./labels";
 import type { CapturePaths } from "./paths";
 import {
   type CaptureRules,
@@ -13,14 +14,17 @@ import {
 
 // 2: rules gained `exclude`. A cache written before it would hide a new exclude list, or keep the
 // error an older seshi gave for the unknown key, until the config file changed.
-// 3: rules gained `redactToolCalls`, for the same reason.
-const CACHE_SCHEMA = "seshi/capture-rules/3";
+// 3: the snapshot gained `labels`.
+// 4: rules gained `redactToolCalls`, for the same reason as 2.
+const CACHE_SCHEMA = "seshi/capture-rules/4";
 
 export interface RulesSnapshot {
   rules: CaptureRules;
   /** The config cannot be loaded: nothing is captured until it is fixed. */
   error?: string;
   theme?: "auto" | "dark" | "light";
+  /** `[labels]`, unresolved: a hook resolves them with the agent's environment. */
+  labels?: LabelRules;
 }
 
 interface CacheKey {
@@ -107,6 +111,7 @@ export async function loadRules(host: CaptureHost): Promise<RulesSnapshot> {
         redactToolCalls: placeEntries(config.capture.redact_tool_calls, host.home),
       },
       theme: config.theme,
+      labels: labelRules(config.labels, host.home),
     };
   } catch (err) {
     return { rules: DEFAULT_RULES, error: (err as Error).message };

@@ -1,15 +1,18 @@
-import type { ChangeEntry, EventRole, SearchSort, Visibility } from "@seshi/model";
+import type { ChangeEntry, EventRole, Labels, SearchSort, Visibility } from "@seshi/model";
 import type { Viewer } from "./viewer";
 
 export interface IndexedSession {
   owner: string;
   archive_id: string;
-  agent: string;
+  /** The format the session is filed under. */
+  format: string;
   session_id: string;
   origin_agent?: string;
   native_session_id?: string;
   project?: string;
   branch?: string;
+  /** The session's labels. */
+  labels?: Labels;
   source_id?: string;
   visibility: Visibility;
   /** Epoch ms of the earliest and latest event, when the traces say. */
@@ -56,9 +59,12 @@ export interface BackendQuery {
   match: string;
   viewer: Viewer;
   owners?: readonly string[];
+  /** Sessions filed under this format or run by this agent (`origin_agent`). */
   agent?: string;
   repo?: string;
   branch?: string;
+  /** Sessions carrying every one of these labels. */
+  labels?: Labels;
   source?: string;
   since?: number;
   until?: number;

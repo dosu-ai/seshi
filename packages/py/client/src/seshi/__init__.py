@@ -3,7 +3,7 @@
     from seshi import SeshiClient, Upload
 
     with SeshiClient("https://seshi.acme.internal", token) as db:
-        answer = db.ingest(Upload(agent="claude-code", session_id="8f1c…", transcript=log))
+        answer = db.ingest(Upload(format="claude-code", session_id="8f1c…", transcript=log))
 
 See docs/client.md in the seshi repository.
 """

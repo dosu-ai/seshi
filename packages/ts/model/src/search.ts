@@ -1,3 +1,4 @@
+import type { Labels } from "./labels";
 import type { EventRole } from "./schemas/trace";
 
 /** How results are ordered: best match first (bm25 over the matching records, the default),
@@ -22,6 +23,9 @@ export interface SearchRequest {
    * segments (`widget` matches `github.com/acme/widget`). */
   repo?: string;
   branch?: string;
+  /** Only sessions carrying every one of these labels (`{ "dosu.project": "github.com/acme/app" }`):
+   * keys and values exactly. `GET /v1/search` takes each as `label=key=value`. */
+  labels?: Labels;
   /** Only sessions written through this source (`upload`, or a configured source id). */
   source?: string;
   /** Only records at or after this time (RFC 3339). Records without a timestamp use their
@@ -39,7 +43,7 @@ export interface SearchRequest {
 }
 
 /** One matching record of a session: which trace and which of its events (`GET
- * /v1/sessions/{agent}/{session_id}/trace?hash=` holds it at `events[event_index]`), and a short
+ * /v1/sessions/{format}/{session_id}/trace?hash=` holds it at `events[event_index]`), and a short
  * excerpt around what matched. */
 export interface SearchMatch {
   content_hash: string;
@@ -57,13 +61,15 @@ export interface SearchMatch {
 /** A session with records that match. */
 export interface SearchResult {
   owner: string;
-  agent: string;
+  /** The format the session is filed under. */
+  format: string;
   session_id: string;
   archive_id: string;
   origin_agent?: string;
   native_session_id?: string;
   project?: string;
   branch?: string;
+  labels?: Labels;
   source_id?: string;
   visibility: "org" | "owner";
   started_at?: string;

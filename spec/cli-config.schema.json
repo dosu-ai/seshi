@@ -169,6 +169,80 @@
         }
       },
       "additionalProperties": false
+    },
+    "labels": {
+      "description": "Labels attached to each session when it is first seen (keys [a-z0-9][a-z0-9._-]{0,63}, values up to 512 characters, at most 32): every key but paths is a label, a string or { env = \"NAME\" }. Per key, a [[labels.paths]] entry wins, then these, then the repo's .seshi/config.toml.",
+      "default": {},
+      "type": "object",
+      "properties": {
+        "paths": {
+          "default": [],
+          "description": "Labels by folder; they win over the labels set here.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "description": "A folder; ~ is the home folder. Matched as [[capture.paths]] is."
+              }
+            },
+            "required": [
+              "path"
+            ],
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "description": "A fixed value."
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "env": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "An environment variable of the agent the session runs in; the label is absent when it is unset or empty."
+                    }
+                  },
+                  "required": [
+                    "env"
+                  ],
+                  "additionalProperties": false,
+                  "description": "A value read from the agent's environment when the session is first seen."
+                }
+              ],
+              "description": "A label's value: a string, or { env = \"NAME\" }."
+            },
+            "description": "Labels for sessions in a folder: every other key is a label. The longest matching folder wins, key by key."
+          }
+        }
+      },
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "string",
+            "description": "A fixed value."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "env": {
+                "type": "string",
+                "minLength": 1,
+                "description": "An environment variable of the agent the session runs in; the label is absent when it is unset or empty."
+              }
+            },
+            "required": [
+              "env"
+            ],
+            "additionalProperties": false,
+            "description": "A value read from the agent's environment when the session is first seen."
+          }
+        ],
+        "description": "A label's value: a string, or { env = \"NAME\" }."
+      }
     }
   },
   "additionalProperties": false,

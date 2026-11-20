@@ -83,7 +83,7 @@ describe("change entries before the pointer (decision 7 of 18)", () => {
     const failing = failingPointer();
     failing.arm();
     await expect(
-      db(failing.store).ingest({ agent: "trajectory", session_id: "s1", transcript: log("a") }),
+      db(failing.store).ingest({ format: "trajectory", session_id: "s1", transcript: log("a") }),
     ).rejects.toThrow(/injected/);
     expect((await feed()).map((e) => e.entry.kind)).toEqual(["published"]);
     expect(await metadata("s1")).toBeNull();
@@ -93,12 +93,12 @@ describe("change entries before the pointer (decision 7 of 18)", () => {
   });
 
   it("leaves a tombstone's entry, and the session readable, when the pointer update fails", async () => {
-    await db().ingest({ agent: "trajectory", session_id: "s1", transcript: log("a") });
+    await db().ingest({ format: "trajectory", session_id: "s1", transcript: log("a") });
     const before = await metadata("s1");
     const failing = failingPointer();
     failing.arm();
     const remove = (over: Store) =>
-      tombstone({ store: over, owner: "alice", agent: "trajectory", session_id: "s1", now: tick });
+      tombstone({ store: over, owner: "alice", format: "trajectory", session_id: "s1", now: tick });
     await expect(remove(failing.store)).rejects.toThrow(/injected/);
     expect((await feed()).map((e) => e.entry.kind)).toEqual(["published", "tombstone"]);
     expect(await metadata("s1")).toEqual(before);
@@ -118,7 +118,7 @@ describe("change entries before the pointer (decision 7 of 18)", () => {
     // Found by the scenario explorer (33): the redacted pointer landed, the caller saw an error
     // before the deletes, and its retry found the session already redacted, so the trace
     // objects of a retracted session stayed in the bucket.
-    await db().ingest({ agent: "trajectory", session_id: "s1", transcript: log("a") });
+    await db().ingest({ format: "trajectory", session_id: "s1", transcript: log("a") });
     const head = (await metadata("s1"))?.head as string;
     let armed = true;
     const lost = new Proxy(store, {
@@ -136,7 +136,7 @@ describe("change entries before the pointer (decision 7 of 18)", () => {
         return Reflect.get(target, prop, receiver);
       },
     }) as Store;
-    const input = { owner: "alice", agent: "trajectory", session_id: "s1", now: tick };
+    const input = { owner: "alice", format: "trajectory", session_id: "s1", now: tick };
     await expect(tombstone({ store: lost, ...input })).rejects.toThrow(/injected/);
     expect((await metadata("s1"))?.status).toBe("redacted");
     const trace = keys.trace("alice", archive("s1"), head);
@@ -145,7 +145,7 @@ describe("change entries before the pointer (decision 7 of 18)", () => {
     expect(await store.stat(trace)).toBe(null);
     // Nothing more to do, and nothing done to a session that is not redacted.
     expect(await finishTombstone({ store, ...input })).toBe(0);
-    await db().ingest({ agent: "trajectory", session_id: "s2", transcript: log("b") });
+    await db().ingest({ format: "trajectory", session_id: "s2", transcript: log("b") });
     expect(await finishTombstone({ store, ...input, session_id: "s2" })).toBe(0);
     expect((await metadata("s2"))?.traces).toHaveLength(1);
   });
@@ -154,7 +154,7 @@ describe("change entries before the pointer (decision 7 of 18)", () => {
     // Found by the scenario explorer (33): the compare-and-swap was tried again on the redacted
     // pointer it had written, which names no trace, so nothing was deleted, and the retraction
     // reported success.
-    await db().ingest({ agent: "trajectory", session_id: "s1", transcript: log("a") });
+    await db().ingest({ format: "trajectory", session_id: "s1", transcript: log("a") });
     const head = (await metadata("s1"))?.head as string;
     let armed = true;
     const racing = new Proxy(store, {
@@ -175,7 +175,7 @@ describe("change entries before the pointer (decision 7 of 18)", () => {
     const removed = await tombstone({
       store: racing,
       owner: "alice",
-      agent: "trajectory",
+      format: "trajectory",
       session_id: "s1",
       now: tick,
     });
@@ -185,14 +185,14 @@ describe("change entries before the pointer (decision 7 of 18)", () => {
   });
 
   it("leaves a visibility change's entry, and the visibility as it was, when the pointer update fails", async () => {
-    await db().ingest({ agent: "trajectory", session_id: "s1", transcript: log("a") });
+    await db().ingest({ format: "trajectory", session_id: "s1", transcript: log("a") });
     const failing = failingPointer();
     failing.arm();
     const hide = (over: Store) =>
       setVisibility({
         store: over,
         owner: "alice",
-        agent: "trajectory",
+        format: "trajectory",
         session_id: "s1",
         visibility: "owner",
         now: tick,
@@ -211,13 +211,13 @@ describe("change entries before the pointer (decision 7 of 18)", () => {
 describe("unique change keys (decision 8 of 18)", () => {
   it("keeps two tombstones and two visibility changes of one owner in one millisecond", async () => {
     for (const id of ["s1", "s2", "s3"]) {
-      await db().ingest({ agent: "trajectory", session_id: id, transcript: log(id) });
+      await db().ingest({ format: "trajectory", session_id: id, transcript: log(id) });
     }
     const cursor = (await readChanges(store, "alice")).cursor as string;
     // A bulk delete and a session made private and back, all stamped by one millisecond.
     const instant = new Date(clock.getTime() + 1000);
     const now = () => instant;
-    const base = { store, owner: "alice", agent: "trajectory", now };
+    const base = { store, owner: "alice", format: "trajectory", now };
     await tombstone({ ...base, session_id: "s1" });
     await tombstone({ ...base, session_id: "s2" });
     await setVisibility({ ...base, session_id: "s3", visibility: "owner" });
@@ -248,19 +248,19 @@ describe("unique change keys (decision 8 of 18)", () => {
   });
 
   it("lists every key written after a cursor, in stamp order, a page at a time", async () => {
-    await db().ingest({ agent: "trajectory", session_id: "s1", transcript: log("s1") });
+    await db().ingest({ format: "trajectory", session_id: "s1", transcript: log("s1") });
     const cursor = (await readChanges(store, "alice")).cursor as string;
     // `since` takes its millisecond in: the one after s1's entry.
     const since = new Date(clock.getTime() + 1).toISOString();
     // Two sessions published in one millisecond, then later changes.
     const instant = new Date(clock.getTime() + 1000);
     await db(store, () => instant).ingest({
-      agent: "trajectory",
+      format: "trajectory",
       session_id: "s2",
       transcript: log("s2"),
     });
     await db(store, () => instant).ingest({
-      agent: "trajectory",
+      format: "trajectory",
       session_id: "s3",
       transcript: log("s3"),
     });
@@ -268,12 +268,12 @@ describe("unique change keys (decision 8 of 18)", () => {
     await setVisibility({
       store,
       owner: "alice",
-      agent: "trajectory",
+      format: "trajectory",
       session_id: "s2",
       visibility: "owner",
       now: tick,
     });
-    await tombstone({ store, owner: "alice", agent: "trajectory", session_id: "s3", now: tick });
+    await tombstone({ store, owner: "alice", format: "trajectory", session_id: "s3", now: tick });
 
     const paged: string[] = [];
     let after = cursor;

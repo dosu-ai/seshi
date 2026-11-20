@@ -13,6 +13,14 @@ export {
   runHook,
   shellWord,
 } from "./hook";
+export {
+  type LabelRules,
+  type LabelSource,
+  labelRules,
+  NO_LABEL_RULES,
+  type ResolvedLabels,
+  resolveLabels,
+} from "./labels";
 export { type CapturePaths, captureDir, capturePaths } from "./paths";
 export {
   findRepo,
@@ -65,6 +73,7 @@ export {
   endPause,
   freeze,
   isPaused,
+  labelsOpen,
   MAX_PAUSES,
   newSecret,
   otherFolders,

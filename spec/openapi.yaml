@@ -171,6 +171,164 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "502": { $ref: "#/components/responses/StorageError" }
 
+  /v1/owners/{owner}/sessions/{archive_id}:
+    parameters:
+      - $ref: "#/components/parameters/owner_folder"
+      - $ref: "#/components/parameters/archive_id"
+    get:
+      tags: [sessions]
+      summary: The session's pointer, by owner and archive id.
+      operationId: getSessionByArchive
+      description: |
+        The session `GET /v1/sessions/{format}/{session_id}` answers, addressed as the store
+        files it: for a reader that holds the owner and archive id a change entry, a search
+        result or a listing names. The owner is that folder exactly, no aliases folded in, and
+        there is no default. `404` for a stub (F3.4: no trace yet, its first upload dropped by
+        model review), as for its trace, export and reviews, and for a session the caller may
+        not read.
+      responses:
+        "200":
+          description: The session's `metadata.json`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionMetadata" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
+  /v1/owners/{owner}/sessions/{archive_id}/trace:
+    parameters:
+      - $ref: "#/components/parameters/owner_folder"
+      - $ref: "#/components/parameters/archive_id"
+    get:
+      tags: [sessions]
+      summary: The session's trace, by owner and archive id.
+      operationId: getTraceByArchive
+      parameters:
+        - name: hash
+          in: query
+          description: One of the session's traces (a `traces[].content_hash`); the head by default. Any other hash is 404, even when an object a stopped backfill or replace left behind is under it.
+          schema: { type: string }
+        - name: render
+          in: query
+          description: |
+            How to render the stored trace; `seshi`, the stored canonical trace, by default.
+            Until seshi 0.17 the server also reads it as `format`, its name before 0.16.
+          schema: { $ref: "#/components/schemas/RenderFormat" }
+      responses:
+        "200":
+          description: The trace, as `render` renders it.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - { $ref: "#/components/schemas/Trace" }
+                  - { $ref: "#/components/schemas/LettaTrace" }
+                  - { $ref: "#/components/schemas/OtlpTrace" }
+                  - { $ref: "#/components/schemas/AtifDocument" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: |
+            `not_found`: no such session (a filtered session is not stored), or no trace with
+            that hash. `no_trace`: the session has no head.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "410":
+          description: The session was tombstoned; it has no trace and will not again.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
+  /v1/owners/{owner}/sessions/{archive_id}/export:
+    parameters:
+      - $ref: "#/components/parameters/owner_folder"
+      - $ref: "#/components/parameters/archive_id"
+    get:
+      tags: [sessions]
+      summary: The session's trace as a download, by owner and archive id.
+      operationId: exportTraceByArchive
+      description: |
+        The same trace `…/trace` answers, with `Content-Disposition: attachment` and a file
+        name naming the session's format, the session, the trace's hash and the render format
+        (`claude-code-sess1-0123456789ab.letta.json`).
+      parameters:
+        - name: hash
+          in: query
+          description: One of the session's traces (a `traces[].content_hash`); the head by default. Any other hash is 404, even when an object a stopped backfill or replace left behind is under it.
+          schema: { type: string }
+        - name: render
+          in: query
+          description: |
+            How to render the stored trace; `seshi`, the stored canonical trace, by default.
+            Until seshi 0.17 the server also reads it as `format`, its name before 0.16.
+          schema: { $ref: "#/components/schemas/RenderFormat" }
+      responses:
+        "200":
+          description: The trace, as `render` renders it.
+          headers:
+            Content-Disposition:
+              description: '`attachment; filename="<format>-<session>-<hash12>.<render>.json"`'
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - { $ref: "#/components/schemas/Trace" }
+                  - { $ref: "#/components/schemas/LettaTrace" }
+                  - { $ref: "#/components/schemas/OtlpTrace" }
+                  - { $ref: "#/components/schemas/AtifDocument" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: |
+            `not_found`: no such session, or no trace with that hash. `no_trace`: the session
+            has no head.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "410":
+          description: The session was tombstoned; it has no trace and will not again.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
+  /v1/owners/{owner}/sessions/{archive_id}/reviews:
+    parameters:
+      - $ref: "#/components/parameters/owner_folder"
+      - $ref: "#/components/parameters/archive_id"
+    get:
+      tags: [sessions]
+      summary: What model review decided for each stored write of the session (F3.8), by owner and archive id.
+      operationId: sessionReviewsByArchive
+      description: |
+        One entry per write that model review saw and that was stored, in order
+        (`review/<n>.json`). Admins get the whole audit record: the policy and its hash, both
+        models, the findings by record, field and category (never the text), and why review
+        was skipped. Anyone else who may read the session gets only `n`, `at`, `content_hash`
+        and `decision` (`allow`, `redact` or `skipped`). Writes no policy covered have no
+        entry. Envelopes review dropped left nothing in the session (a dropped first upload
+        only a stub, which is `404` here); they are drop records (`seshi sync dropped`). Needs
+        `sessions:read`.
+      responses:
+        "200":
+          description: The decisions, oldest first.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReviewsPage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
   /v1/sessions:
     post:
       tags: [sessions]
@@ -357,9 +515,9 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "502": { $ref: "#/components/responses/StorageError" }
 
-  /v1/sessions/{agent}/{session_id}:
+  /v1/sessions/{format}/{session_id}:
     parameters:
-      - $ref: "#/components/parameters/agent"
+      - $ref: "#/components/parameters/format"
       - $ref: "#/components/parameters/session_id"
       - $ref: "#/components/parameters/owner"
     get:
@@ -468,9 +626,9 @@ paths:
               schema: { $ref: "#/components/schemas/Error" }
         "502": { $ref: "#/components/responses/StorageError" }
 
-  /v1/sessions/{agent}/{session_id}/trace:
+  /v1/sessions/{format}/{session_id}/trace:
     parameters:
-      - $ref: "#/components/parameters/agent"
+      - $ref: "#/components/parameters/format"
       - $ref: "#/components/parameters/session_id"
       - $ref: "#/components/parameters/owner"
     get:
@@ -482,13 +640,15 @@ paths:
           in: query
           description: One of the session's traces (a `traces[].content_hash`); the head by default. Any other hash is 404, even when an object a stopped backfill or replace left behind is under it.
           schema: { type: string }
-        - name: format
+        - name: render
           in: query
-          description: How to render the stored trace; `seshi`, the stored canonical trace, by default.
+          description: |
+            How to render the stored trace; `seshi`, the stored canonical trace, by default.
+            Until seshi 0.17 the server also reads it as `format`, its name before 0.16.
           schema: { $ref: "#/components/schemas/RenderFormat" }
       responses:
         "200":
-          description: The trace, as `format` renders it.
+          description: The trace, as `render` renders it.
           content:
             application/json:
               schema:
@@ -514,9 +674,9 @@ paths:
               schema: { $ref: "#/components/schemas/Error" }
         "502": { $ref: "#/components/responses/StorageError" }
 
-  /v1/sessions/{agent}/{session_id}/export:
+  /v1/sessions/{format}/{session_id}/export:
     parameters:
-      - $ref: "#/components/parameters/agent"
+      - $ref: "#/components/parameters/format"
       - $ref: "#/components/parameters/session_id"
       - $ref: "#/components/parameters/owner"
     get:
@@ -525,23 +685,25 @@ paths:
       operationId: exportTrace
       description: |
         The same trace `…/trace` answers, with `Content-Disposition: attachment` and a file
-        name naming the agent, the session, the trace's hash and the format
+        name naming the session's format, the session, the trace's hash and the render format
         (`claude-code-sess1-0123456789ab.letta.json`).
       parameters:
         - name: hash
           in: query
           description: One of the session's traces (a `traces[].content_hash`); the head by default. Any other hash is 404, even when an object a stopped backfill or replace left behind is under it.
           schema: { type: string }
-        - name: format
+        - name: render
           in: query
-          description: How to render the stored trace; `seshi`, the stored canonical trace, by default.
+          description: |
+            How to render the stored trace; `seshi`, the stored canonical trace, by default.
+            Until seshi 0.17 the server also reads it as `format`, its name before 0.16.
           schema: { $ref: "#/components/schemas/RenderFormat" }
       responses:
         "200":
-          description: The trace, as `format` renders it.
+          description: The trace, as `render` renders it.
           headers:
             Content-Disposition:
-              description: '`attachment; filename="<agent>-<session>-<hash12>.<format>.json"`'
+              description: '`attachment; filename="<format>-<session>-<hash12>.<render>.json"`'
               schema: { type: string }
           content:
             application/json:
@@ -866,9 +1028,9 @@ paths:
           description: The packs are the ones the `If-None-Match` ETag names.
         "401": { $ref: "#/components/responses/Unauthorized" }
 
-  /v1/sessions/{agent}/{session_id}/reviews:
+  /v1/sessions/{format}/{session_id}/reviews:
     parameters:
-      - $ref: "#/components/parameters/agent"
+      - $ref: "#/components/parameters/format"
       - $ref: "#/components/parameters/session_id"
       - $ref: "#/components/parameters/owner"
     get:
@@ -1031,6 +1193,17 @@ paths:
         - name: branch
           in: query
           schema: { type: string, maxLength: 512 }
+        - name: label
+          in: query
+          description: |
+            Only sessions carrying this label, as `key=value` (`label=dosu.project=github.com/acme/app`):
+            the key and the value exactly. Repeat it for more; a session must carry every one.
+          style: form
+          explode: true
+          schema:
+            type: array
+            maxItems: 32
+            items: { type: string, maxLength: 1024 }
         - name: source
           in: query
           description: Only sessions written through this source (`upload`, or a configured source id).
@@ -1275,12 +1448,31 @@ components:
         caller (X5.12). There are no shared-secret tokens (X5.2).
 
   parameters:
-    agent:
-      name: agent
+    format:
+      name: format
       in: path
       required: true
-      description: The transcript format the session was posted as.
-      schema: { $ref: "#/components/schemas/Agent" }
+      description: |
+        The format the session is filed under, as its metadata's `format` and its change
+        entries name it: a format `POST /v1/sessions` takes (`claude-code`, `codex`, …) or
+        one another route files sessions under (`otlp-genai`, `cursor-cloud-api`, …).
+      schema: { type: string, minLength: 1 }
+    owner_folder:
+      name: owner
+      in: path
+      required: true
+      description: |
+        The owner whose folder holds the session, as change entries, search results and
+        session listings name it: that folder exactly, with no `[auth.owner_aliases]` folded in.
+      schema: { $ref: "#/components/schemas/Owner" }
+    archive_id:
+      name: archive_id
+      in: path
+      required: true
+      description: |
+        The session's archive id, `sha256(owner + "\n" + format + "\n" + session_id)`, as its
+        metadata, change entries and search results name it.
+      schema: { $ref: "#/components/schemas/Sha256" }
     session_id:
       name: session_id
       in: path
@@ -1352,7 +1544,7 @@ components:
           schema: { $ref: "#/components/schemas/Error" }
 
   schemas:
-    Agent:
+    Format:
       type: string
       description: |
         A transcript format, by its trajectory source name: one spelling, since the archive id
@@ -1362,6 +1554,16 @@ components:
         as `json`, and its trace's `source` is the document's `agent.name`. `trajectory` is
         JSONL of records already in Letta trajectory-v1, checked and redacted, not normalized.
       enum: [claude-code, codex, cursor, opencode, pi, gemini-cli, atif, datadog-trajectory, trajectory]
+
+    Labels:
+      type: object
+      description: |
+        Small key/value strings attached to a session from config (the CLI's `[labels]`, a
+        repo's `.seshi/config.toml`, a source's `labels`); seshi gives them no meaning. Keys
+        `[a-z0-9][a-z0-9._-]{0,63}`, values 1 to 512 characters, at most 32.
+      propertyNames: { pattern: "^[a-z0-9][a-z0-9._-]{0,63}$" }
+      maxProperties: 32
+      additionalProperties: { type: string, minLength: 1, maxLength: 512 }
 
     Owner:
       type: string
@@ -1736,16 +1938,21 @@ components:
 
     Upload:
       type: object
-      required: [agent, session_id, transcript]
+      description: |
+        Until seshi 0.16 the format was sent as `agent` and the encoding as `format`; the
+        server still takes that shape (a body with `agent`), so older uploaders keep working.
+      required: [format, session_id, transcript]
       properties:
-        agent: { $ref: "#/components/schemas/Agent" }
+        format:
+          $ref: "#/components/schemas/Format"
+          description: The format the session is filed under, as its metadata and change entries name it.
         session_id: { type: string, minLength: 1 }
         transcript:
           type: string
           description: |
             The native log, verbatim: the whole of it (`offset` 0), or the bytes from `offset`
             on, whole lines. Not blank.
-        format:
+        encoding:
           type: string
           enum: [jsonl, json]
           default: jsonl
@@ -1763,6 +1970,12 @@ components:
         branch:
           type: string
           description: The client's best guess; the branch the transcript recorded as it began wins.
+        labels:
+          $ref: "#/components/schemas/Labels"
+          description: |
+            The session's labels, from the uploader's config. The session keeps the first it is
+            sent; later uploads with other labels leave them, a `replace` may change them. A
+            source's own `labels` win over them. Out of the limits is `400 bad_field`.
         parent_session_id:
           type: string
           description: The session this one was resumed or spawned from.
@@ -1803,7 +2016,7 @@ components:
             a later upload never sets one. That machine can later retract the session with
             `DELETE` and `X-Seshi-Retract`.
       example:
-        agent: claude-code
+        format: claude-code
         session_id: 8f1c2d3e-…
         transcript: "{\"type\":\"user\",…}\n{\"type\":\"assistant\",…}\n"
         project: github.com/acme/widget
@@ -1937,10 +2150,10 @@ components:
           type: array
           items:
             type: object
-            required: [agent, session_id, current]
+            required: [format, session_id, current]
             additionalProperties: false
             properties:
-              agent: { type: string, description: The format the session is filed under. }
+              format: { type: string, description: The format the session is filed under. }
               session_id: { type: string }
               built_with:
                 type: string
@@ -2049,6 +2262,7 @@ components:
             model: { type: string }
             parent_session_id: { type: string }
             continuation: { $ref: "#/components/schemas/Continuation" }
+            labels: { $ref: "#/components/schemas/Labels" }
             normalizer:
               type: object
               required: [name, version]
@@ -2405,16 +2619,17 @@ components:
       type: object
       description: A session with records that match.
       required:
-        [owner, agent, session_id, archive_id, visibility, updated_at, score, hits, matches]
+        [owner, format, session_id, archive_id, visibility, updated_at, score, hits, matches]
       properties:
         owner: { $ref: "#/components/schemas/Owner" }
-        agent: { type: string }
+        format: { type: string, description: The format the session is filed under. }
         session_id: { type: string }
         archive_id: { type: string, pattern: "^[0-9a-f]{64}$" }
         origin_agent: { type: string }
         native_session_id: { type: string }
         project: { type: string }
         branch: { type: string }
+        labels: { $ref: "#/components/schemas/Labels" }
         source_id: { type: string }
         visibility: { type: string, enum: [org, owner] }
         started_at: { type: string, format: date-time }

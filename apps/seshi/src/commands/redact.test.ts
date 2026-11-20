@@ -276,7 +276,7 @@ async function storeSession(sessionId: string, content: string) {
   const instance = await buildInstance(config, { formats: buildFormats(), env: {} });
   try {
     await instance.localSessions("alice").ingest({
-      agent: "trajectory",
+      format: "trajectory",
       session_id: sessionId,
       transcript: jsonl(
         { role: "meta", source: "trajectory" },

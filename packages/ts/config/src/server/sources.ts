@@ -1,3 +1,4 @@
+import { LABEL_KEY, MAX_LABEL_VALUE_LENGTH, MAX_LABELS } from "@seshi/model/labels";
 import * as z from "zod";
 import { secret } from "../secret";
 import { duration } from "../units";
@@ -17,6 +18,23 @@ const base = {
     .optional()
     .describe("Visibility of the sessions it writes (X5.10); default_visibility when unset."),
   filter: filterOverride.optional(),
+  labels: z
+    .record(
+      z
+        .string()
+        .regex(
+          LABEL_KEY,
+          "lowercase letters, digits, '.', '_' or '-', starting with a letter or digit, up to 64 characters",
+        ),
+      z.string().min(1).max(MAX_LABEL_VALUE_LENGTH),
+    )
+    .refine((labels) => Object.keys(labels).length <= MAX_LABELS, {
+      message: `at most ${MAX_LABELS} labels`,
+    })
+    .optional()
+    .describe(
+      "Labels put on every session the source stores (keys [a-z0-9][a-z0-9._-]{0,63}, values up to 512 characters, at most 32). They win over labels the data carries.",
+    ),
 };
 
 export const otlpSource = z

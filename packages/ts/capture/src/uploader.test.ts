@@ -296,10 +296,10 @@ describe("the upload protocol", () => {
     const first = await uploader().pass();
     expect(first).toMatchObject({ taken: 1, uploaded: 1, queued: 0 });
     expect(server.uploads[0]).toMatchObject({
-      agent: "claude-code",
+      format: "claude-code",
       session_id: "s1",
       offset: 0,
-      format: "jsonl",
+      encoding: "jsonl",
       project: basename(dir),
       claims: { git_email: "me@acme.com", account_ids: { anthropic: "acct-1" } },
     });
@@ -1298,6 +1298,154 @@ describe("retraction (F9.7)", () => {
   });
 });
 
+describe("labels", () => {
+  /** The uploader's own environment, changed as a test goes. */
+  let env: Record<string, string>;
+  beforeEach(() => {
+    env = {};
+    host = { ...host, env };
+  });
+  const labelSnapshot = (): RulesSnapshot => ({
+    rules: DEFAULT_RULES,
+    labels: { labels: { team: "platform", "dosu.project": { env: "DOSU_PROJECT" } }, paths: [] },
+  });
+
+  it("sends the labels a hook pinned at first sight with every upload, whatever came later", async () => {
+    writeFileSync(transcript(), line("one") + line("two"));
+    let spooled = 0;
+    const spool = (labels: Record<string, string>) =>
+      appendSpool(
+        paths,
+        {
+          v: 1,
+          kind: "capture",
+          at: clock.toISOString(),
+          agent: "fake",
+          event: "Stop",
+          session_id: "s1",
+          transcript_path: transcript(),
+          cwd: dir,
+          labels,
+        },
+        new Date(clock.getTime() + ++spooled),
+      );
+    // Two hooks ran before the uploader took the spool: the first one's labels stay.
+    spool({ "dosu.project": "first" });
+    spool({ "dosu.project": "second" });
+    const run = uploader({ rules: async () => labelSnapshot() });
+    await run.pass();
+    expect(session().labels).toEqual({ "dosu.project": "first" });
+    expect(server.uploads[0]?.labels).toEqual({ "dosu.project": "first" });
+    // Later the environment and the hooks say otherwise: the session's labels do not move.
+    writeFileSync(transcript(), line("one") + line("two") + line("three"));
+    spool({ "dosu.project": "third" });
+    env.DOSU_PROJECT = "env-now";
+    await run.pass();
+    expect(server.uploads).toHaveLength(2);
+    expect(server.uploads[1]?.labels).toEqual({ "dosu.project": "first" });
+    expect(session().labels).toEqual({ "dosu.project": "first" });
+  });
+
+  it("sends none for a session pinned with none", async () => {
+    writeFileSync(transcript(), line("one") + line("two"));
+    appendSpool(paths, {
+      v: 1,
+      kind: "capture",
+      at: clock.toISOString(),
+      agent: "fake",
+      event: "Stop",
+      session_id: "s1",
+      transcript_path: transcript(),
+      cwd: dir,
+      labels: {},
+    });
+    await uploader({ rules: async () => labelSnapshot() }).pass();
+    expect(server.uploads[0]).not.toHaveProperty("labels");
+    expect(session().labels).toEqual({});
+  });
+
+  it("resolves a session the sweep found with its own environment and the session's folder", async () => {
+    await updateState(paths, (s) => {
+      s.agents.fake = { installed_at: "2026-10-15T00:00:00Z" };
+    });
+    writeFileSync(
+      transcript("swept"),
+      `${JSON.stringify({ id: "swept", cwd: dir, at: "2026-10-20T00:00:00Z" })}\n${JSON.stringify({ id: "swept" })}\n`,
+    );
+    env.DOSU_PROJECT = "github.com/acme/uploader-env";
+    await uploader({
+      rules: async () => ({
+        ...labelSnapshot(),
+        labels: {
+          labels: { team: "platform", "dosu.project": { env: "DOSU_PROJECT" } },
+          paths: [{ path: dir, labels: { folder: "yes" } }],
+        },
+      }),
+    }).pass({ sweep: true });
+    const expected = {
+      team: "platform",
+      "dosu.project": "github.com/acme/uploader-env",
+      folder: "yes",
+    };
+    expect(session("swept").labels).toEqual(expected);
+    expect(session("swept").labels_by).toBe("uploader");
+    expect(server.uploads.find((u) => u.session_id === "swept")?.labels).toEqual(expected);
+  });
+
+  it("lets a hook's labels replace those the uploader resolved, until the session is sent", async () => {
+    writeFileSync(transcript(), line("one") + line("two"));
+    writeFileSync(transcript("s2"), line("one", "s2") + line("two", "s2"));
+    // The sweep got to both before their hooks' entries reached the spool; s2 went up since.
+    await updateState(paths, (st) => {
+      for (const [id, sent] of [
+        ["s1", false],
+        ["s2", true],
+      ] as const) {
+        st.sessions[`fake:${id}`] = {
+          agent: "fake",
+          session_id: id,
+          path: transcript(id),
+          cwd: dir,
+          first_seen: clock.toISOString(),
+          labels: { "dosu.project": "from-uploader" },
+          labels_by: "uploader",
+          ...(sent ? { sent: true } : {}),
+        };
+      }
+    });
+    for (const id of ["s1", "s2"]) {
+      appendSpool(paths, {
+        v: 1,
+        kind: "capture",
+        at: clock.toISOString(),
+        agent: "fake",
+        event: "Stop",
+        session_id: id,
+        transcript_path: transcript(id),
+        cwd: dir,
+        labels: { "dosu.project": "from-hook" },
+      });
+    }
+    await uploader({ rules: async () => labelSnapshot() }).pass();
+    expect(session().labels).toEqual({ "dosu.project": "from-hook" });
+    expect(session()).not.toHaveProperty("labels_by");
+    expect(server.uploads.find((u) => u.session_id === "s1")?.labels).toEqual({
+      "dosu.project": "from-hook",
+    });
+    expect(session("s2").labels).toEqual({ "dosu.project": "from-uploader" });
+  });
+
+  it("resolves and pins labels for a session no hook resolved them for", async () => {
+    writeFileSync(transcript(), line("one") + line("two"));
+    hooked();
+    env.DOSU_PROJECT = "github.com/acme/app";
+    await uploader({ rules: async () => labelSnapshot() }).pass();
+    const expected = { team: "platform", "dosu.project": "github.com/acme/app" };
+    expect(session().labels).toEqual(expected);
+    expect(server.uploads[0]?.labels).toEqual(expected);
+  });
+});
+
 describe("the spool and the sweep", () => {
   it("takes in hooks, registering the agent as installed from then", async () => {
     writeFileSync(transcript(), line("one") + line("two"));
@@ -1559,7 +1707,7 @@ describe("resending stale sessions (X4.9)", () => {
     clock = new Date(clock.getTime() + ms);
   };
   const staleAt = (current: string) => {
-    server.staleList = [{ agent: "claude-code", session_id: "s1", built_with: "1", current }];
+    server.staleList = [{ format: "claude-code", session_id: "s1", built_with: "1", current }];
   };
   const rebuilds = () => server.uploads.filter((u) => u.rebuild);
 
@@ -1624,8 +1772,8 @@ describe("resending stale sessions (X4.9)", () => {
     hooked("s2");
     await uploader().pass();
     server.staleList = [
-      { agent: "claude-code", session_id: "s1", current: "2" },
-      { agent: "claude-code", session_id: "s2", current: "2" },
+      { format: "claude-code", session_id: "s1", current: "2" },
+      { format: "claude-code", session_id: "s2", current: "2" },
     ];
     await updateState(paths, (s) => {
       (s.sessions["fake:s1"] as SessionState).toggle = "off";

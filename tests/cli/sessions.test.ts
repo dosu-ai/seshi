@@ -66,13 +66,14 @@ beforeEach(async () => {
   machine = new Machine();
   const db = new HttpSessionDB({ server: server.url, token: TOKEN });
   await db.ingest({
-    agent: "claude-code",
+    format: "claude-code",
     session_id: "sess1",
     transcript: CLAUDE,
     project: "github.com/acme/widget",
     branch: "main",
+    labels: { team: "platform", "dosu.project": "github.com/acme/widget" },
   });
-  await db.ingest({ agent: "claude-code", session_id: "sess2", transcript: CLAUDE });
+  await db.ingest({ format: "claude-code", session_id: "sess2", transcript: CLAUDE });
   const login = await machine.seshi(["login", "--server", server.url, "--token", "-"], {
     stdin: TOKEN,
   });
@@ -135,7 +136,7 @@ describe("seshi sessions against a server", () => {
   it("folds subagents under their session, and lists them with --subagents", async () => {
     const db = new HttpSessionDB({ server: server.url, token: TOKEN });
     await db.ingest({
-      agent: "claude-code",
+      format: "claude-code",
       session_id: "agent-a1",
       transcript: CLAUDE.replaceAll("sess1", "agent-a1"),
       parent_session_id: "sess1",
@@ -182,6 +183,13 @@ describe("seshi sessions against a server", () => {
     expect(show.out).toContain("claude-code/sess1");
     expect(show.out).toContain("owner       acme (verified)");
     expect(show.out).toContain("project     github.com/acme/widget");
+    // Labels, one a line, by key.
+    expect(show.out).toContain(
+      "  labels      dosu.project=github.com/acme/widget\n              team=platform\n",
+    );
+    expect((await machine.seshi(["sessions", "show", "claude-code/sess2"])).out).not.toContain(
+      "labels",
+    );
     expect(show.out).not.toContain("review ");
     // Model review's decision for each stored write (F3.8), when a policy covered it.
     await review(server.instance.store, "acme", "sess1", 0, "allow");
@@ -224,7 +232,7 @@ describe("seshi sessions against a server", () => {
       },
     })}\n`;
     await db.ingest({
-      agent: "claude-code",
+      format: "claude-code",
       session_id: "evil",
       transcript: nasty,
       project: "acme\x1b[1Kwidget",
@@ -523,12 +531,13 @@ describe("serverless mode, by its old name [local] (F11.1)", () => {
           theme: "auto",
           keychain: true,
           capture: { enabled: true, paths: [], remotes: [], exclude: [], redact_tool_calls: [] },
+          labels: { paths: [] },
         },
         env: {},
         home: local.dir,
         integrations: INTEGRATIONS,
       });
-      await connection.db.ingest({ agent: "claude-code", session_id: "s1", transcript: CLAUDE });
+      await connection.db.ingest({ format: "claude-code", session_id: "s1", transcript: CLAUDE });
       await connection.close();
 
       const who = JSON.parse((await local.seshi(["whoami", "--json"])).out);

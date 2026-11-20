@@ -18,6 +18,7 @@ from __future__ import annotations
 from typing import Annotated, Any, Literal, TypeVar
 
 from pydantic import (
+    AliasChoices,
     BaseModel,
     ConfigDict,
     Field,
@@ -27,7 +28,7 @@ from pydantic import (
 )
 from pydantic.alias_generators import to_camel
 
-Agent = Literal[
+Format = Literal[
     "claude-code",
     "codex",
     "cursor",
@@ -38,7 +39,9 @@ Agent = Literal[
     "datadog-trajectory",
     "trajectory",
 ]
-"""A transcript format, by its trajectory source name."""
+"""A transcript format `POST /v1/sessions` takes, by its trajectory source name: the format the
+session is filed under. Sessions other routes file (`otlp-genai`, `cursor-cloud-api`, …) have
+formats outside this list."""
 
 Visibility = Literal["org", "owner"]
 """`org`: every member reads it. `owner`: only its owner (admins and services read everything)."""
@@ -326,14 +329,19 @@ class Upload(Request):
     the last answer's `bytes_total` ended. The server's rules for whole uploads, chunks,
     continuations, forks and resends are in docs/server.md."""
 
-    agent: Agent | str
-    """One of `Agent`, or a format a newer server knows: the server decides."""
+    format: Format | str
+    """The format the session is filed under: one of `Format`, or one a newer server knows (the
+    server decides)."""
     session_id: str
     transcript: str
-    format: Literal["jsonl", "json"] | None = None
+    encoding: Literal["jsonl", "json"] | None = None
+    """How the log is encoded; `jsonl` by default."""
     offset: int | None = None
     project: str | None = None
     branch: str | None = None
+    labels: dict[str, str] | None = None
+    """Keys `[a-z0-9][a-z0-9._-]{0,63}`, values up to 512 characters, at most 32. The session keeps
+    the first it is sent; a `replace` may change them."""
     parent_session_id: str | None = None
     fork_of: str | None = None
     shipped: Shipped | None = None
@@ -415,10 +423,14 @@ class SessionMetadata(Response):
     owner: str
     archive_id: str
     session_id: str
-    agent: str
+    format: str = Field(validation_alias=AliasChoices("format", "agent"))
+    """The format the session is filed under (`agent` from a server older than 0.16)."""
     source: str | None = None
     project: str | None = None
     branch: str | None = None
+    labels: dict[str, str] | None = None
+    """Set from config by the first write that carries any (the CLI's `[labels]`, a repo's
+    `.seshi/config.toml`, a source's `labels`)."""
     parent_session_id: str | None = None
     status: Open[Literal["stored", "redacted"]]
     head: str | None = None
@@ -450,7 +462,7 @@ class SessionsPage(Response):
 
 
 class StaleSession(Response):
-    agent: str
+    format: str = Field(validation_alias=AliasChoices("format", "agent"))
     session_id: str
     built_with: str | None = None
     """The format version that built it; absent when none was recorded."""
@@ -465,13 +477,13 @@ class StaleSessionsPage(Response):
 
 
 class VisibilityChange(Request):
-    """`PATCH /v1/sessions/{agent}/{session_id}`'s body."""
+    """`PATCH /v1/sessions/{format}/{session_id}`'s body."""
 
     visibility: Visibility
 
 
 class Removed(Response):
-    """`DELETE /v1/sessions/{agent}/{session_id}`: how many objects were deleted."""
+    """`DELETE /v1/sessions/{format}/{session_id}`: how many objects were deleted."""
 
     removed: int
 
@@ -576,6 +588,8 @@ class TraceMetadata(Response):
     parent_session_id: str | None = None
     continuation: Continuation | None = None
     normalizer: Normalizer | None = None
+    labels: dict[str, str] | None = None
+    """The labels the write that stored this trace carried."""
 
 
 class Trace(Response):
@@ -584,7 +598,8 @@ class Trace(Response):
     schema_: Literal["seshi/trace/1"] = Field(alias="schema")
     content_hash: str
     source: str
-    agent: str
+    format: str = Field(validation_alias=AliasChoices("format", "agent"))
+    """The format the session is filed under (`agent` from a server older than 0.16)."""
     project: str | None = None
     branch: str | None = None
     session_id: str | None
@@ -714,6 +729,8 @@ class ChangeEntry(Response):
     owner: str
     archive_id: str
     session_id: str
+    format: str
+    """The format the session is filed under, which the session routes take."""
     content_hash: str | None
     continuation: Continuation | None = None
     replace: bool | None = None
@@ -862,6 +879,8 @@ class SearchRequest(Request):
     repo: str | None = None
     """The session's `project`, exactly or as its last path segments."""
     branch: str | None = None
+    label: list[str] | None = None
+    """Labels a session must carry, each `key=value` (`SeshiClient.search` takes a dict)."""
     source: str | None = None
     since: str | None = None
     until: str | None = None
@@ -886,13 +905,14 @@ class SearchMatch(Response):
 
 class SearchResult(Response):
     owner: str
-    agent: str
+    format: str = Field(validation_alias=AliasChoices("format", "agent"))
     session_id: str
     archive_id: str
     origin_agent: str | None = None
     native_session_id: str | None = None
     project: str | None = None
     branch: str | None = None
+    labels: dict[str, str] | None = None
     source_id: str | None = None
     visibility: Open[Visibility]
     started_at: str | None = None

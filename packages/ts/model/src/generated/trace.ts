@@ -1,6 +1,6 @@
 /** Generated from spec/schemas/trace.schema.json by scripts/model-types.ts (`bun run types`). Do not edit: change the schema and regenerate. */
 
-import type { Continuation, Normalizer, Provenance, Sha256 } from "./common";
+import type { Continuation, Labels, Normalizer, Provenance, Sha256 } from "./common";
 
 /** The `schema` value of every Trace object. */
 export const SCHEMA_ID = "seshi/trace/1" as const;
@@ -12,8 +12,8 @@ export interface Trace {
   content_hash: Sha256;
   /** The meta record's `source` (`claude-code`, `codex`, an ATIF document's harness, …). */
   source: string;
-  /** The format the session was filed under (the archive id derives from it). */
-  agent: string;
+  /** The format the session was filed under (the archive id derives from it). Traces written before 0.16 call it `agent`; readers take `format ?? agent`. */
+  format: string;
   project?: string;
   branch?: string;
   session_id: string | null;
@@ -165,6 +165,8 @@ export interface TraceMetadata {
   parent_session_id?: string;
   continuation?: Continuation;
   normalizer?: Normalizer;
+  /** The labels the write that stored this trace carried. */
+  labels?: Labels;
   [key: string]: unknown;
 }
 
@@ -176,7 +178,7 @@ export const JSON_SCHEMA = {
     schema: { const: "seshi/trace/1" },
     content_hash: { $ref: "common.schema.json#/$defs/Sha256" },
     source: { type: "string", minLength: 1 },
-    agent: { type: "string", minLength: 1 },
+    format: { type: "string", minLength: 1 },
     project: { type: "string" },
     branch: { type: "string" },
     session_id: { type: ["string", "null"] },
@@ -192,7 +194,7 @@ export const JSON_SCHEMA = {
     "schema",
     "content_hash",
     "source",
-    "agent",
+    "format",
     "session_id",
     "started_at",
     "ended_at",
@@ -336,6 +338,7 @@ export const JSON_SCHEMA = {
         parent_session_id: { type: "string" },
         continuation: { $ref: "common.schema.json#/$defs/Continuation" },
         normalizer: { $ref: "common.schema.json#/$defs/Normalizer" },
+        labels: { $ref: "common.schema.json#/$defs/Labels" },
       },
       additionalProperties: true,
     },

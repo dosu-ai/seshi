@@ -8,17 +8,24 @@
     "schema": { "const": "seshi/metadata/1" },
     "owner": { "type": "string", "minLength": 1 },
     "archive_id": {
-      "description": "sha256(owner + \"\\n\" + agent + \"\\n\" + session_id).",
+      "description": "sha256(owner + \"\\n\" + format + \"\\n\" + session_id).",
       "$ref": "common.schema.json#/$defs/Sha256"
     },
     "session_id": { "type": "string" },
-    "agent": { "description": "The format the session is filed under.", "type": "string" },
+    "format": {
+      "description": "The format the session is filed under: the format adapter its envelopes named (`claude-code`, `codex`, `cursor-cloud-api`, …), which reads it. Metadata written before 0.16 calls it `agent`; readers take `format ?? agent`.",
+      "type": "string"
+    },
     "source": {
       "description": "What the trace's meta record says it came from; absent until a trace is stored.",
       "type": "string"
     },
     "project": { "type": "string" },
     "branch": { "type": "string" },
+    "labels": {
+      "description": "The session's labels: set by the first write that carries any; later writes with other labels leave them, a replace may change them.",
+      "$ref": "common.schema.json#/$defs/Labels"
+    },
     "parent_session_id": { "type": "string" },
     "status": {
       "description": "`stored`, or `redacted` once tombstoned: a redacted session is never stored again.",
@@ -84,7 +91,7 @@
     "owner",
     "archive_id",
     "session_id",
-    "agent",
+    "format",
     "status",
     "traces",
     "writer",

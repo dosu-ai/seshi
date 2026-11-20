@@ -170,6 +170,7 @@
     "packages/ts/config": {
       "name": "@seshi/config",
       "dependencies": {
+        "@seshi/model": "workspace:*",
         "zod": "^4.6.7",
       },
     },
@@ -204,7 +205,7 @@
     },
     "packages/ts/model": {
       "name": "@seshi/model",
-      "version": "0.15.0",
+      "version": "0.16.0",
       "dependencies": {
         "@letta-ai/trajectory": "^0.3.0",
       },

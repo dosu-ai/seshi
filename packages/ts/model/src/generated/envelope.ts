@@ -3,6 +3,7 @@
 import type {
   CallerKind,
   Claims,
+  Labels,
   LogEncoding,
   OwnerBasis,
   Sha256,
@@ -45,6 +46,8 @@ export interface Envelope {
   shipped?: ShippedPrefix;
   project?: string;
   branch?: string;
+  /** The session's labels, as the uploader resolved them, merged under the source's own `labels`. The session keeps the first it is given; a replace may change them. */
+  labels?: Labels;
   parent_session_id?: string;
   fork_of?: string;
   /** The hash of the uploader's retraction secret (F9.7), sent with a session's first upload. */
@@ -109,6 +112,7 @@ export const JSON_SCHEMA = {
     shipped: { $ref: "#/$defs/ShippedPrefix" },
     project: { type: "string" },
     branch: { type: "string" },
+    labels: { $ref: "common.schema.json#/$defs/Labels" },
     parent_session_id: { type: "string" },
     fork_of: { type: "string" },
     retract_hash: { $ref: "common.schema.json#/$defs/Sha256" },

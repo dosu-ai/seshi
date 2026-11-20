@@ -56,7 +56,8 @@ export interface ServerEvidence {
   where?: string;
   error?: Failure & { exit?: number };
   upload_id?: string;
-  agent?: string;
+  /** The format the server files the session under. */
+  format?: string;
   metadata?: SessionMetadata | null;
   metadata_error?: Failure;
   pointer?: SessionMetadata | null;
@@ -86,6 +87,8 @@ export interface MachineEvidence {
   paused?: CaptureState["paused"];
   problems?: CaptureState["problems"];
   uploader?: CaptureState["uploader"] & { running: boolean };
+  /** Labels the CLI config, or the session's repo config, gives that are left out, and why. */
+  label_problems?: string[];
 }
 
 export interface SessionEvidence {

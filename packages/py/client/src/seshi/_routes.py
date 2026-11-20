@@ -11,7 +11,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-SESSION = "/v1/sessions/{agent}/{session_id}"
+SESSION = "/v1/sessions/{format}/{session_id}"
+ARCHIVE = "/v1/owners/{owner}/sessions/{archive_id}"
 
 
 @dataclass(frozen=True)
@@ -38,8 +39,11 @@ ROUTES: dict[str, Route] = {
     "getSession": Route("GET", SESSION, query=("owner",)),
     "setVisibility": Route("PATCH", SESSION, query=("owner",)),
     "tombstone": Route("DELETE", SESSION, query=("owner",), headers=("X-Seshi-Retract",)),
-    "getTrace": Route("GET", f"{SESSION}/trace", query=("owner", "hash", "format")),
+    "getTrace": Route("GET", f"{SESSION}/trace", query=("owner", "hash", "render")),
     "sessionReviews": Route("GET", f"{SESSION}/reviews", query=("owner",)),
+    "getSessionByArchive": Route("GET", ARCHIVE),
+    "getTraceByArchive": Route("GET", f"{ARCHIVE}/trace", query=("hash", "render")),
+    "sessionReviewsByArchive": Route("GET", f"{ARCHIVE}/reviews"),
     "changes": Route("GET", "/v1/changes", query=("owner", "after", "since", "limit")),
     "allChanges": Route("GET", "/v1/changes/all", query=("after", "since", "limit")),
     "search": Route(
@@ -51,6 +55,7 @@ ROUTES: dict[str, Route] = {
             "agent",
             "repo",
             "branch",
+            "label",
             "source",
             "since",
             "until",
@@ -78,6 +83,9 @@ ROUTES: dict[str, Route] = {
 UNCOVERED: dict[str, str] = {
     "exportTrace": (
         "the trace getTrace returns, with Content-Disposition for a browser download; use get_trace"
+    ),
+    "exportTraceByArchive": (
+        "the trace getTraceByArchive returns, for a browser download; use get_trace_by_archive"
     ),
     "otlpTraces": "where OTLP exporters (a Claude Console destination) push spans; not a client's",
 }

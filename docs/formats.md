@@ -6,13 +6,13 @@ read.
 
 ## What seshi reads
 
-A transcript is posted with the `agent` that names its format (`POST /v1/sessions`,
+A transcript is posted with its `format` (`POST /v1/sessions`,
 [server.md](server.md#post-v1sessions)); `seshi upload` and the capture uploader detect it.
 Each is normalized to [Letta trajectory-v1](https://github.com/letta-ai/trajectory) records,
 through `@letta-ai/trajectory`'s adapters plus the fixups they need, or through seshi's own
 adapter where there is none.
 
-| `agent` | What it is | Chunks |
+| `format` | What it is | Chunks |
 |---|---|---|
 | `claude-code` | Claude Code's session log (`~/.claude/projects/…/<session>.jsonl`) | Yes |
 | `codex` | Codex's rollout log (`~/.codex/sessions/…`) | Yes |
@@ -81,10 +81,10 @@ the server applies these rules:
   `422 normalize_invalid_input`; the message names the version. The adapter reads up to v1.7;
   a v1.8 document is handed to it as v1.7, its `audio` content parts (the one v1.8 addition)
   turned into the text `[audio]`, as the adapter writes `[image]` for an image.
-- **The harness comes from `agent.name`.** The session is filed under `agent: atif`, and the
+- **The harness comes from `agent.name`.** The session is filed under `format: atif`, and the
   archive id derives from that. The trace's `source` is the document's `agent.name`
   (`claude-code`, `codex`, `copilot-cli`), or `atif` when the name is blank or holds control
-  characters. The trace's `agent` field (`atif`) records that the session came in as ATIF.
+  characters. The trace's `format` field (`atif`) records that the session came in as ATIF.
 - **Tool errors come from `extra.is_error`.** ATIF has no standard success field. A tool result
   whose `extra.is_error` is a boolean gets `ok` from it; one without gets no `ok`.
 - **Subagents are sent separately.** The adapter does not normalize embedded
@@ -108,7 +108,7 @@ says.
 ## Which agent wrote it
 
 A caller that holds logs without knowing which agent wrote them (a bucket of them, say) can ask
-seshi: `seshi normalize --json <file>` prints the `agent` it detected with the records, and
+seshi: `seshi normalize --json <file>` prints the format it detected (as `agent`) with the records, and
 fails when no format reads the file. `seshi upload` and an S3 source with `format = "auto"`
 detect the same way. Detection reads the start of the file (a last line cut short is ignored;
 an ATIF, OpenCode or Gemini CLI document is read from its opening keys) and refuses a sample
@@ -126,7 +126,7 @@ exactly `true`. seshi then replaces the content's text before anything reads it,
 reaches redaction or the store, and stores a user record in its place with empty content,
 `synthetic: true` (when the agent marked it so) and `omitted: 1`.
 
-| `agent` | Labelled `synthetic` | Where the flag goes | Ignored on |
+| `format` | Labelled `synthetic` | Where the flag goes | Ignored on |
 |---|---|---|---|
 | `opencode` | A user message's text part with `synthetic: true` (a file read for an `@` mention, a plugin's context) | The part's `metadata` | An assistant message's parts: its text, reasoning, tool calls and their results |
 | `pi` | A `custom_message` entry: what an extension added to the context (`pi.sendMessage`, a `before_agent_start` message), stored as the user message the model saw | The entry's `details` | `message` entries: the user's prompts, the assistant's messages and tool results (a tool result's own `details` included) |
@@ -152,7 +152,7 @@ Codex chunk cut between a response and its `token_count` leaves that response's 
 without a call. The layout it is stored in (immutable content-addressed traces, one pointer per
 session, an append-only change feed) is [`spec/layout.md`](../spec/layout.md).
 
-Other formats are rendered on read, by `GET /v1/sessions/:agent/:id/trace?format=` and
+Other formats are rendered on read, by `GET /v1/sessions/:format/:id/trace?render=` and
 `seshi sessions export --format`:
 
 | Format | What you get |

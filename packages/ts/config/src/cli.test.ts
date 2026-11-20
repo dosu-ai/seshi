@@ -1,9 +1,18 @@
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { cliConfigSchema } from "./cli";
+import { cliConfigSchema, cliLabelProblems } from "./cli";
 import { loadCliConfig } from "./configs";
 import { ConfigError } from "./load";
 import { cliConfigPath, findServerConfig } from "./paths";
+
+const fs = (files: Record<string, string>) => ({
+  readFile: (path: string) => {
+    const text = files[path];
+    if (text === undefined) throw new Error("ENOENT");
+    return text;
+  },
+  mode: (path: string) => (path in files ? 0o100600 : undefined),
+});
 
 describe("cliConfigPath", () => {
   it("is ~/.config/seshi/config.toml, or under XDG_CONFIG_HOME", () => {
@@ -63,15 +72,6 @@ describe("findServerConfig", () => {
 });
 
 describe("the CLI's config", () => {
-  const fs = (files: Record<string, string>) => ({
-    readFile: (path: string) => {
-      const text = files[path];
-      if (text === undefined) throw new Error("ENOENT");
-      return text;
-    },
-    mode: (path: string) => (path in files ? 0o100600 : undefined),
-  });
-
   it("reads the default location when it exists, with env over it", () => {
     const loaded = loadCliConfig({
       home: "/home/a",
@@ -95,6 +95,7 @@ describe("the CLI's config", () => {
         exclude: [],
         redact_tool_calls: [],
       },
+      labels: { paths: [] },
     });
   });
 
@@ -106,6 +107,7 @@ describe("the CLI's config", () => {
       keychain: true,
       search: { scope: "visible" },
       capture: { enabled: true, paths: [], remotes: [], exclude: [], redact_tool_calls: [] },
+      labels: { paths: [] },
     });
   });
 
@@ -115,5 +117,62 @@ describe("the CLI's config", () => {
     expect(run).toThrow(ConfigError);
     expect(run).toThrow("colour: unknown key (in /c.toml)");
     expect(cliConfigSchema.safeParse({ capture: { paths: [{ path: "/x" }] } }).success).toBe(false);
+  });
+});
+
+describe("the CLI's labels", () => {
+  const load = (toml: string, env: Record<string, string> = {}) =>
+    loadCliConfig({ file: "/c.toml", env, fs: fs({ "/c.toml": toml }) }).config;
+
+  it("takes fixed values, env references and folders, and SESHI_LABELS__<KEY>", () => {
+    const config = load(
+      [
+        "[labels]",
+        '"dosu.project" = { env = "DOSU_PROJECT" }',
+        'team = "platform"',
+        "[[labels.paths]]",
+        'path = "~/code/monorepo/packages/billing"',
+        '"dosu.project" = "github.com/acme/billing"',
+      ].join("\n"),
+      { SESHI_LABELS__OWNER: "me" },
+    );
+    expect(config.labels).toEqual({
+      "dosu.project": { env: "DOSU_PROJECT" },
+      team: "platform",
+      owner: "me",
+      paths: [
+        { path: "~/code/monorepo/packages/billing", "dosu.project": "github.com/acme/billing" },
+      ],
+    });
+    expect(cliLabelProblems(config.labels)).toEqual([]);
+  });
+
+  it("refuses any other kind of value: no files, no commands", () => {
+    expect(() => load('[labels]\nx = { file = "/etc/passwd" }\n')).toThrow(ConfigError);
+    expect(() => load('[labels]\nx = { env = "A", file = "/b" }\n')).toThrow(ConfigError);
+    expect(() => load("[labels]\nx = 3\n")).toThrow(ConfigError);
+    expect(() => load('[[labels.paths]]\nx = "no path"\n')).toThrow(ConfigError);
+  });
+
+  it("loads labels out of the limits, and says what is wrong with them", () => {
+    const many = Array.from({ length: 33 }, (_, i) => `k${i} = "v"`).join("\n");
+    const config = load(
+      [
+        "[labels]",
+        'Team = "x"',
+        `long = "${"x".repeat(513)}"`,
+        "[[labels.paths]]",
+        'path = "/w"',
+        '"-bad" = "y"',
+      ].join("\n"),
+    );
+    expect(cliLabelProblems(config.labels)).toEqual([
+      expect.stringContaining("[labels]: label key 'Team' must be lowercase"),
+      "[labels]: label 'long' is 513 characters long; at most 512 are allowed",
+      expect.stringContaining("[[labels.paths]] /w: label key '-bad'"),
+    ]);
+    expect(cliLabelProblems(load(`[labels]\n${many}\n`).labels)).toEqual([
+      "[labels]: 33 labels; at most 32 are allowed",
+    ]);
   });
 });

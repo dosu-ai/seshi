@@ -1,4 +1,10 @@
-export { type ChangesPage, type ReadChangesOptions, readChanges } from "./changes";
+export {
+  type ChangesPage,
+  entryWithFormat,
+  type MetadataRead,
+  type ReadChangesOptions,
+  readChanges,
+} from "./changes";
 export {
   type CheckCounts,
   type CheckOptions,
@@ -104,6 +110,8 @@ export { listOwners, type OwnersPage } from "./owners";
 export {
   appendChange,
   type ChangeUpdate,
+  decodeMetadata,
+  decodeTrace,
   type PointerWithChange,
   type PublishMode,
   type PublishOutcome,

@@ -33,6 +33,8 @@ const IGNORED = new Set([
   "maximum",
   "minItems",
   "maxItems",
+  "maxProperties",
+  "propertyNames",
   "examples",
   "default",
 ]);

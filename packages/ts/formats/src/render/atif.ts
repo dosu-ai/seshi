@@ -145,7 +145,7 @@ export function toAtif(trace: Trace): AtifDocument {
     extra: {
       seshi: {
         content_hash: trace.content_hash,
-        agent: trace.agent,
+        format: trace.format,
         ...(trace.project !== undefined ? { project: trace.project } : {}),
         ...(trace.branch !== undefined ? { branch: trace.branch } : {}),
       },

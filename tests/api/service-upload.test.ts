@@ -49,7 +49,7 @@ async function post(token: string, sessionId: string) {
     new Request("http://seshi.test/v1/sessions", {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ agent: "claude-code", session_id: sessionId, transcript: LONG }),
+      body: JSON.stringify({ format: "claude-code", session_id: sessionId, transcript: LONG }),
     }),
   );
 }

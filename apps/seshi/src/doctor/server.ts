@@ -8,10 +8,10 @@ export function serverView(backend: Backend): ServerView {
   const view: ServerView = {
     mode: backend.mode,
     where: backend.where,
-    getSession: (agent, id) => backend.getSession(agent, id),
-    getTrace: (agent, id, hash) => backend.getTrace(agent, id, { hash }),
-    reviews: (agent, id) => backend.reviews(agent, id),
-    search: (q, agent) => backend.search({ q, agent, limit: 50 }),
+    getSession: (format, id) => backend.getSession(format, id),
+    getTrace: (format, id, hash) => backend.getTrace(format, id, { hash }),
+    reviews: (format, id) => backend.reviews(format, id),
+    search: (q, format) => backend.search({ q, agent: format, limit: 50 }),
   };
   if (backend instanceof ServerBackend) {
     view.changes = (since, limit) =>
@@ -23,9 +23,9 @@ export function serverView(backend: Backend): ServerView {
   }
   if (backend instanceof ServerlessBackend) {
     const { instance, owner } = backend;
-    view.pointer = async (agent, id) => {
+    view.pointer = async (format, id) => {
       const { getSession } = await import("@seshi/pipeline");
-      return getSession(instance.store, owner, agent, id);
+      return getSession(instance.store, owner, format, id);
     };
     view.changes = async (since, limit) => {
       const { readChanges } = await import("@seshi/store");

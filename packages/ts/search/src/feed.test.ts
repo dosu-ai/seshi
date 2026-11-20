@@ -71,6 +71,7 @@ function change(
     owner,
     archive_id: archiveId(owner, "trajectory", session),
     session_id: session,
+    format: "trajectory",
     content_hash: kind === "published" ? "a".repeat(64) : null,
     writer: { kind: "device", principal: owner, source_id: "upload" },
     owner_basis: "verified",
