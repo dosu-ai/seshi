@@ -9,9 +9,8 @@ import {
   type SearchResults,
   type SearchSort,
   type SessionMetadata,
-  upgradeMetadata,
 } from "@seshi/model";
-import { accessDeniedIn, decodeJson, getBytes, isOwner, keys, type Store } from "@seshi/store";
+import { accessDeniedIn, decodeMetadata, getBytes, isOwner, keys, type Store } from "@seshi/store";
 import type { BackendHit, BackendQuery, IndexStore } from "./backend";
 import { readFeed } from "./feed";
 import { Indexer, type IndexerLogger, type IndexerOptions, type IndexerRun } from "./indexer";
@@ -166,7 +165,7 @@ async function liveMetadata(
   const bytes = await getBytes(store, keys.metadata(owner, archive));
   if (bytes === null) return null;
   try {
-    return upgradeMetadata(decodeJson<SessionMetadata>(bytes));
+    return decodeMetadata(bytes);
   } catch {
     return null;
   }

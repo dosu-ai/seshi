@@ -721,10 +721,8 @@ class ChangeEntry(Response):
     owner: str
     archive_id: str
     session_id: str
-    format: str | None = None
-    """The format the session is filed under, which the session routes take. Required for every
-    entry written since seshi 0.15; an older one has it only when the server could fill it in
-    from the session's metadata."""
+    format: str
+    """The format the session is filed under, which the session routes take."""
     content_hash: str | None
     continuation: Continuation | None = None
     replace: bool | None = None

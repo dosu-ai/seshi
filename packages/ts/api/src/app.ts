@@ -67,6 +67,7 @@ import {
   listOwners,
   listRecords,
   listReviews,
+  type MetadataRead,
   type ReviewRecord,
   readChanges,
   readMetadata,
@@ -728,11 +729,18 @@ export function createApp(instance: Instance) {
   route("GET", "/v1/changes", async ({ request, url }) => {
     const principal = await caller(request, "sessions:read");
     const owner = ownerOf(url, principal);
-    const page: ChangesPage = await readChanges(store, owner, {
-      after: url.searchParams.get("after") ?? undefined,
-      since: url.searchParams.get("since") ?? undefined,
-      limit: intParam(url, "limit", 100, 1000),
-    });
+    // The metadata the page read (to name an old entry's format), so it is not read again here.
+    const read: MetadataRead = new Map();
+    const page: ChangesPage = await readChanges(
+      store,
+      owner,
+      {
+        after: url.searchParams.get("after") ?? undefined,
+        since: url.searchParams.get("since") ?? undefined,
+        limit: intParam(url, "limit", 100, 1000),
+      },
+      read,
+    );
     if (canRead(principal, { owner, visibility: "owner" }, aliases)) return json(page);
     const visible = new Map<string, boolean>();
     const entries = [];
@@ -740,7 +748,9 @@ export function createApp(instance: Instance) {
       const archive = item.entry.archive_id;
       let ok = visible.get(archive);
       if (ok === undefined) {
-        const metadata = await readMetadata(store, owner, archive);
+        const metadata = read.has(archive)
+          ? (read.get(archive) ?? null)
+          : await readMetadata(store, owner, archive);
         ok = metadata !== null && !isStub(metadata) && canRead(principal, metadata, aliases);
         visible.set(archive, ok);
       }

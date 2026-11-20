@@ -21,8 +21,6 @@ import {
   type Trace,
   type TraceMetadata,
   TrajectoryError,
-  upgradeMetadata,
-  upgradeTrace,
   type Visibility,
   type Writer,
 } from "@seshi/model";
@@ -30,11 +28,11 @@ import {
   accessDeniedIn,
   archiveId,
   type ChangeUpdate,
-  decodeJson,
+  decodeMetadata,
+  decodeTrace,
   deleteSpans,
   ensureLayout,
   getBytes,
-  gunzipJson,
   gzipJsonDeterministic,
   keys,
   publishObject,
@@ -655,7 +653,7 @@ export async function getTrace(
   contentHash: string,
 ): Promise<Trace | null> {
   const bytes = await getBytes(store, keys.trace(owner, archive, contentHash));
-  return bytes === null ? null : upgradeTrace(gunzipJson<Trace>(bytes));
+  return bytes === null ? null : decodeTrace(bytes);
 }
 
 export async function getSession(
@@ -683,7 +681,7 @@ export async function listSessions(
     await Promise.all(
       metadataKeys.map(async (k) => {
         const bytes = await getBytes(store, k);
-        return bytes === null ? null : upgradeMetadata(decodeJson<SessionMetadata>(bytes));
+        return bytes === null ? null : decodeMetadata(bytes);
       }),
     )
   ).filter((m): m is SessionMetadata => m !== null);

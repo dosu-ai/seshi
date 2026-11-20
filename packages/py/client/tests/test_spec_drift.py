@@ -87,12 +87,7 @@ NOT_MODELLED: dict[str, str] = {
     "OtlpStatus": "otlpTraces is not a client call",
 }
 
-OPTIONAL_HERE: dict[tuple[str, str], str] = {
-    ("ChangeEntry", "format"): (
-        "required since seshi 0.15, but an older entry has it only when the server could fill it"
-        " in from the session's metadata"
-    ),
-}
+OPTIONAL_HERE: dict[tuple[str, str], str] = {}
 """Properties the spec requires that a model takes as optional, and why."""
 
 # The records of a trace, in spec/schemas/trace.schema.json.

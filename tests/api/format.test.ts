@@ -183,6 +183,32 @@ describe("the session's format", () => {
     expect((await get("render=nope")).status).toBe(400);
   });
 
+  it("is never missing from a feed: an old entry whose session has no metadata is left out", async () => {
+    const { instance, as } = server();
+    await as("alice").ingest({ format: "trajectory", session_id: "kept", transcript: log("ship") });
+    const kept = archiveId("alice", "trajectory", "kept");
+    await asWrittenBefore015("alice", kept);
+    // An entry for a first write whose pointer never landed: its session has no metadata.
+    const orphan = archiveId("alice", "trajectory", "never-landed");
+    const [entryKey] = await changeKeys("alice", kept);
+    const entry = await readJson(entryKey as string);
+    await store.put(
+      (entryKey as string).replace(kept, orphan),
+      encoder.encode(JSON.stringify({ ...entry, archive_id: orphan, session_id: "never-landed" })),
+    );
+    expect(await changeKeys("alice", orphan)).toHaveLength(1);
+
+    const own = await as("alice").changes();
+    expect(own.entries.map((e) => [e.entry.session_id, e.entry.format])).toEqual([
+      ["kept", "trajectory"],
+    ]);
+    await instance.search?.catchUp();
+    const all = await as().allChanges();
+    expect(all.entries.map((e) => [e.entry.session_id, e.entry.format])).toEqual([
+      ["kept", "trajectory"],
+    ]);
+  });
+
   it("derives the archive id it always did", () => {
     // spec/testdata/objects/change.published.json, written before the rename.
     expect(archiveId("alice", "claude-code", "0b1c7e9a-5f2d-4b8e-9a61-3c0f5e2d7a14")).toBe(

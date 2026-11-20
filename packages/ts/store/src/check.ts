@@ -8,10 +8,8 @@ import {
   schemaProblems,
   TRACE_SCHEMA,
   type Trace,
-  upgradeMetadata,
-  upgradeTrace,
 } from "@seshi/model";
-import { decodeJson, gunzipJson } from "./json";
+import { decodeJson } from "./json";
 import {
   archiveId,
   type ChangeKeyParts,
@@ -23,6 +21,7 @@ import {
 } from "./layout";
 import { TOKEN_SCHEMA } from "./objects";
 import { listOwners } from "./owners";
+import { decodeMetadata, decodeTrace } from "./publish";
 import { SPAN_SCHEMA, type SpanRecord, storedHashes } from "./spans";
 import type { ListedKey, Store } from "./store";
 import { namedTraces, type SessionFolder, SWEEP_MIN_AGE_MS, sessionFolders } from "./sweep";
@@ -601,12 +600,11 @@ class Check {
     this.counts.sessions++;
     let value: unknown;
     try {
-      value = decodeJson(object.body);
+      value = decodeMetadata(object.body);
     } catch {
       this.add("metadata_unreadable", "metadata.json is not JSON", where);
       return { kind: "unusable" };
     }
-    if (isObject(value)) value = upgradeMetadata(value as unknown as SessionMetadata);
     const problems = schemaProblems("metadata.schema.json", value);
     if (problems.length > 0) {
       this.add("metadata_invalid", problems.slice(0, MAX_LISTED_PER_FINDING).join("; "), where);
@@ -699,8 +697,7 @@ class Check {
     }
     let trace: Trace;
     try {
-      trace = gunzipJson<Trace>(object.body);
-      if (isObject(trace)) trace = upgradeTrace(trace);
+      trace = decodeTrace(object.body);
     } catch {
       this.add("trace_unreadable", "not gzipped JSON", where);
       return;

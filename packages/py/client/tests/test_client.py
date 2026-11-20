@@ -97,6 +97,7 @@ CHANGE = {
     "owner": "alice",
     "archive_id": SHA,
     "session_id": "s",
+    "format": "claude-code",
     "content_hash": SHA,
     "writer": WRITER,
 }

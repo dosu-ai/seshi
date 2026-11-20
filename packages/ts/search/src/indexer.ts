@@ -4,19 +4,19 @@ import {
   type EventRole,
   type SessionMetadata,
   type Trace,
-  upgradeMetadata,
 } from "@seshi/model";
 import {
   changeStamp,
   decodeJson,
+  decodeMetadata,
+  decodeTrace,
+  entryWithFormat,
   getBytes,
-  gunzipJson,
   keys,
   listOwners,
   parseChangeKey,
   type Store,
   stampTime,
-  withFormat,
 } from "@seshi/store";
 import type { IndexedEvent, IndexedSession, IndexStore, SessionUpdate } from "./backend";
 
@@ -405,11 +405,8 @@ export class Indexer {
           this.index.record(
             owner,
             fresh.flatMap((key, i) => {
-              const entry = entries[i];
-              if (!entry) return [];
-              return [
-                { name: key.slice(prefix.length), entry: this.withFormat(owner, entry, metadata) },
-              ];
+              const entry = entries[i] && this.named(owner, entries[i], metadata);
+              return entry ? [{ name: key.slice(prefix.length), entry }] : [];
             }),
           );
         }
@@ -440,18 +437,17 @@ export class Indexer {
 
   /** The entry as the cross-owner feed serves it: one written before seshi 0.15 has no
    * `format`, so it gets its session's, from the metadata just read or else from what the index
-   * holds of the session. Without either (no metadata, never indexed) it is kept without. */
-  private withFormat(
+   * holds of the session. Without either it names a write that never landed (its entry is
+   * written first), as `readChanges` has it, and is left out of the feed. */
+  private named(
     owner: string,
     entry: ChangeEntry,
     metadata: ReadonlyMap<string, SessionMetadata | null>,
-  ): ChangeEntry {
+  ): ChangeEntry | null {
     if (entry.format !== undefined) return entry;
     const format =
-      metadata.get(entry.archive_id)?.format ||
-      this.index.session(owner, entry.archive_id)?.format ||
-      undefined;
-    return format === undefined ? entry : withFormat(entry, format);
+      metadata.get(entry.archive_id)?.format || this.index.session(owner, entry.archive_id)?.format;
+    return format ? entryWithFormat(entry, format) : null;
   }
 
   private async entry(key: string): Promise<ChangeEntry | null> {
@@ -533,10 +529,10 @@ export class Indexer {
     const bytes = await getBytes(this.store, keys.metadata(owner, archive));
     if (bytes === null) return { readAt, metadata: null };
     try {
-      const decoded = decodeJson<SessionMetadata>(bytes);
-      if (typeof decoded !== "object" || decoded === null) throw new Error("not session metadata");
-      const metadata = upgradeMetadata(decoded);
+      const metadata = decodeMetadata(bytes);
       if (
+        typeof metadata !== "object" ||
+        metadata === null ||
         !Array.isArray(metadata.traces) ||
         typeof metadata.format !== "string" ||
         typeof metadata.session_id !== "string"
@@ -554,7 +550,7 @@ export class Indexer {
     const bytes = await getBytes(this.store, keys.trace(owner, archive, hash));
     if (bytes === null) return null;
     try {
-      const trace = gunzipJson<Trace>(bytes);
+      const trace = decodeTrace(bytes);
       if (!Array.isArray(trace?.events) || !Array.isArray(trace.records)) {
         throw new Error("not a trace");
       }

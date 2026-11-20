@@ -294,8 +294,9 @@ cursor (the last key processed) and a lag window.
 session's `owner_basis` (X5.5), never content, and the session's `format`, so a reader can call
 the session routes (`/v1/sessions/{format}/{session_id}`) from the entry alone. Entries written
 before seshi 0.15 have no `format`: the server's feeds (`GET /v1/changes`, `GET
-/v1/changes/all`) and `readChanges` fill it from the session's metadata, and an entry whose
-session has no metadata left to read it from is served without it.
+/v1/changes/all`) and `readChanges` fill it from the session's metadata. An entry whose
+session has no metadata names a write that never landed (its entry is written first), so they
+leave it out: every entry they serve has a `format`.
 
 The key is the entry's stamp (its `at`), the session's archive id, a random suffix and what
 changed: the published trace's hash, `tombstone` or `visibility`. The stamp leads, so keys sort

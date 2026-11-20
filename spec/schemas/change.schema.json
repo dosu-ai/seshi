@@ -15,7 +15,7 @@
     "archive_id": { "$ref": "common.schema.json#/$defs/Sha256" },
     "session_id": { "type": "string" },
     "format": {
-      "description": "The format the session is filed under (its metadata's `format`), which every session route takes. Entries written before 0.15 have none; the change feeds fill it from the session's metadata when they serve them.",
+      "description": "The format the session is filed under (its metadata's `format`), which every session route takes. Entries written before 0.15 have none in the bucket; the change feeds fill it from the session's metadata, and leave out one whose session has no metadata.",
       "type": "string",
       "minLength": 1
     },

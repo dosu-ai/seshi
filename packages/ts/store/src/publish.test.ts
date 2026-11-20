@@ -118,3 +118,16 @@ describe("updateMetadataWithChange (decision 7 of 18)", () => {
     });
   });
 });
+
+describe("reading metadata", () => {
+  it("reads one written before 0.15 with `format`, and a `null` one as no session", async () => {
+    const { format, ...old } = session;
+    const encode = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
+    await store.put(keys.metadata("alice", archive), encode({ ...old, agent: format }));
+    const read = await readMetadata(store, "alice", archive);
+    expect(read).toMatchObject({ format: "trajectory" });
+    expect(read).not.toHaveProperty("agent");
+    await store.put(keys.metadata("alice", archive), encode(null));
+    expect(await readMetadata(store, "alice", archive)).toBeNull();
+  });
+});

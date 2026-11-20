@@ -270,9 +270,9 @@ and its `key`, and the entry its session's `format`, so a reader can call
 `/v1/sessions/:format/:session_id` from the entry alone; `tombstone` and `visibility_changed`
 entries come through like `published` ones, from people, `svc:<source-id>` service accounts and
 `h-…` owners alike. Entries written before seshi 0.15 carry no `format` in the bucket: both
-feeds fill it in from the session's metadata (this one when the index reads the entry), and an
-entry whose session has no metadata to read it from (a first write that failed after its
-entry) comes without one.
+feeds fill it in from the session's metadata (this one when the index reads the entry), and
+leave out an entry whose session has no metadata to read it from (a first write that failed
+after its entry), so every entry served has one.
 
 It is served from this instance's search index, which keeps a copy of every entry it reads, so a
 poll is one SQLite range read and no bucket request, however many owners there are. Search must

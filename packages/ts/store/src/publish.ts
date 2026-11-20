@@ -3,9 +3,11 @@ import {
   CHANGE_SCHEMA,
   type ChangeEntry,
   type SessionMetadata,
+  type Trace,
   upgradeMetadata,
+  upgradeTrace,
 } from "@seshi/model";
-import { decodeJson, encodeJson, type JsonUpdate, updateJson } from "./json";
+import { decodeJson, encodeJson, gunzipJson, type JsonUpdate, updateJson } from "./json";
 import { changeSuffix, keys } from "./layout";
 import {
   getBytes,
@@ -103,13 +105,27 @@ async function matches(
   return got !== null && sha256(got) === sha256(body);
 }
 
+/** A `metadata.json` as stored, decoded; one written before seshi 0.15 has its `agent` read
+ * as `format`. Every reader of metadata decodes it with this. Throws for bytes that are not
+ * JSON; does not check the shape. */
+export function decodeMetadata(bytes: Uint8Array): SessionMetadata {
+  return upgradeMetadata(decodeJson<SessionMetadata>(bytes));
+}
+
+/** A stored trace (gzipped JSON), decoded; one written before seshi 0.15 has its `agent` read
+ * as `format`. Every reader of traces decodes them with this. Throws for bytes that are not
+ * gzipped JSON; does not check the shape. */
+export function decodeTrace(bytes: Uint8Array): Trace {
+  return upgradeTrace(gunzipJson<Trace>(bytes));
+}
+
 export async function readMetadata(
   store: Store,
   owner: string,
   archive: string,
 ): Promise<SessionMetadata | null> {
   const bytes = await getBytes(store, keys.metadata(owner, archive));
-  return bytes === null ? null : upgradeMetadata(decodeJson<SessionMetadata>(bytes));
+  return bytes === null ? null : decodeMetadata(bytes);
 }
 
 /** Update a session's pointer with If-Match and retry on 412: `step` gets the pointer as it is
