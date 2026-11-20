@@ -3,34 +3,49 @@
  * One normalizer and one matcher, so an entry matches the same repository whichever way it
  * arrived. */
 
-/** `remote` (`https://github.com/acme/app.git`, `git@github.com:acme/app`, `ssh://…`) as
- * `host/path`: lowercase host, no scheme, no user or credentials, no port, no `.git`, no trailing
- * slash. The path keeps its case; `repoKey` is the form to compare. */
+/** `remote` (`https://github.com/acme/app.git`, `git@github.com:acme/app`, `ssh://…`, or a
+ * bare `github.com/acme/app`) as `host/path`: lowercase, no scheme, no user or credentials, no
+ * port, no `.git`, no trailing slash. All of it is lowercased, not just the host: the hosts
+ * people use ignore case in owner and repository names (`github.com/Acme/App` is
+ * `github.com/acme/app`), and one repository must have one name whichever way it was cloned.
+ * (The same function as dosu-ai/seshi#49's, there in @seshi/kit.) */
 export function normalizeRemote(remote: string): string {
   let text = remote.trim();
   const scp = /^(?:[^@/]+@)?([^:/]+):(?!\/)(.+)$/.exec(text);
   if (scp && !/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) {
-    text = `${(scp[1] as string).toLowerCase()}/${scp[2]}`;
+    text = `${scp[1]}/${scp[2]}`;
   } else {
     const url = tryParseUrl(text);
-    if (url) text = `${url.hostname.toLowerCase()}${url.pathname}`;
+    if (url) text = `${url.hostname}${url.pathname}`;
     else text = withoutCredentials(text);
   }
-  return text.replace(/\/+$/, "").replace(/\.git$/i, "");
+  return text
+    .replace(/\/+$/, "")
+    .replace(/\.git$/i, "")
+    .toLowerCase();
 }
 
-/** A remote no URL parser reads (`https://user:pa/ss@host/x`), without its scheme and whatever
- * user info and port precede its host: a remote never carries a credential on. */
+const HOST = /^[A-Za-z0-9.-]+(?::\d*)?$/;
+
+/** A remote no URL parser reads (`https://user:pa/ss@host/x`), or one with no scheme
+ * (`GitHub.com/acme/app`), without its scheme and whatever user info and port precede its host:
+ * the user info ends at the first `@` followed by a host, so an `@` in the path is kept. */
 function withoutCredentials(text: string): string {
-  const scheme = /^[a-z][a-z0-9+.-]*:\/\/(.*)$/i.exec(text);
-  if (!scheme) return text;
-  const rest = scheme[1] as string;
-  // The last `@`: a password may hold a `/` (which is why no URL parser read it).
-  const at = rest.lastIndexOf("@");
-  const hostAndPath = at === -1 ? rest : rest.slice(at + 1);
+  const rest = /^[a-z][a-z0-9+.-]*:\/\/(.*)$/i.exec(text)?.[1] ?? text;
+  let from = 0;
+  for (let at = rest.indexOf("@"); at !== -1; at = rest.indexOf("@", at + 1)) {
+    const after = rest.slice(at + 1);
+    const slash = after.indexOf("/");
+    if (HOST.test(slash === -1 ? after : after.slice(0, slash))) {
+      from = at + 1;
+      break;
+    }
+  }
+  const hostAndPath = rest.slice(from);
   const slash = hostAndPath.indexOf("/");
-  const host = (slash === -1 ? hostAndPath : hostAndPath.slice(0, slash)).replace(/:\d*$/, "");
-  return `${host.toLowerCase()}${slash === -1 ? "" : hostAndPath.slice(slash)}`;
+  const host = slash === -1 ? hostAndPath : hostAndPath.slice(0, slash);
+  if (!host.includes(".") && rest === text) return text;
+  return `${host.replace(/:\d*$/, "")}${slash === -1 ? "" : hostAndPath.slice(slash)}`;
 }
 
 function tryParseUrl(text: string): URL | undefined {
@@ -41,10 +56,10 @@ function tryParseUrl(text: string): URL | undefined {
   }
 }
 
-/** A repository as compared: `normalizeRemote`, then lowercase (hosts and the forges seshi meets
- * name repositories without regard to case). */
+/** A repository as compared: `normalizeRemote` (lowercase already, so one string per
+ * repository whichever path named it). */
 export function repoKey(remote: string): string {
-  return normalizeRemote(remote).toLowerCase();
+  return normalizeRemote(remote);
 }
 
 /** A glob as a regular expression's source: `*` stands for one path segment (or part of one),

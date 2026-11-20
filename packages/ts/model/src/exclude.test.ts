@@ -32,9 +32,27 @@ describe("one repository normalizer for every path", () => {
       expect(normalizeRemote(url)).toBe("github.com/acme/app");
   });
 
-  it("compares without regard to case", () => {
-    expect(normalizeRemote("https://github.com/Acme/App")).toBe("github.com/Acme/App");
+  it("gives one repository one name, whatever the case it was cloned with", () => {
+    for (const remote of [
+      "https://github.com/acme/App.GIT",
+      "https://GitHub.com/Acme/App.git",
+      "git@github.com:ACME/app.git",
+      "ssh://git@github.com:22/Acme/App",
+    ]) {
+      expect(normalizeRemote(remote), remote).toBe("github.com/acme/app");
+    }
     expect(repoKey("https://github.com/Acme/App")).toBe(repoKey("git@github.com:acme/app.git"));
+  });
+
+  it("keeps an @ in the path, reads a bare host/path, and a numeric owner as an owner", () => {
+    expect(normalizeRemote("https://user:p/w@host.example/acme/app@v2")).toBe(
+      "host.example/acme/app@v2",
+    );
+    expect(normalizeRemote("GitHub.com/acme/app/")).toBe("github.com/acme/app");
+    expect(normalizeRemote("git@github.com:1234/app.git")).toBe("github.com/1234/app");
+    expect(normalizeRemote("http://user:pass@GitHub.com:8443/acme/app/")).toBe(
+      "github.com/acme/app",
+    );
   });
 
   it("never keeps a credential or a port", () => {
