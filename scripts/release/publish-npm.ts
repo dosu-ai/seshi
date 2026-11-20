@@ -10,6 +10,9 @@ export interface PublishOptions {
   dryRun?: boolean;
   exec?: Exec;
   log?: (line: string) => void;
+  /** Tries per package when `npm publish` fails for a reason a retry can fix (3). */
+  attempts?: number;
+  sleep?: (ms: number) => Promise<void>;
 }
 
 export interface Published {
@@ -41,9 +44,22 @@ export async function isPublished(exec: Exec, name: string, version: string): Pr
   throw new Error(`npm view ${name}@${version} failed (${code}): ${err.trim() || out.trim()}`);
 }
 
+/** Failures of the registry or of Sigstore, not of the package. `TLOG_CREATE_ENTRY_ERROR`
+ * is npm's Sigstore client timing out on its write to the transparency log, retrying it, and
+ * being told the first write had landed (409): the package was never uploaded, and a new
+ * `npm publish` signs afresh. */
+const TRANSIENT =
+  /TLOG_CREATE_ENTRY_ERROR|ETIMEDOUT|ECONNRESET|EAI_AGAIN|socket hang up|\bE?50[0234]\b/;
+
+export function isTransient(output: string): boolean {
+  return TRANSIENT.test(output);
+}
+
 export async function publishAll(options: PublishOptions): Promise<Published[]> {
   const exec = options.exec ?? spawnNpm;
   const log = options.log ?? (() => {});
+  const attempts = options.attempts ?? 3;
+  const sleep = options.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
   const order = JSON.parse(readFileSync(join(options.dir, "packages.json"), "utf8")) as {
     name: string;
     dir: string;
@@ -65,9 +81,14 @@ export async function publishAll(options: PublishOptions): Promise<Published[]> 
     const argv = ["publish", dir, "--access", "public", "--tag", distTag(version)];
     if (options.provenance) argv.push("--provenance");
     if (options.dryRun) argv.push("--dry-run");
-    const { code, out, err } = await exec(argv);
-    if (code !== 0) {
-      throw new Error(`npm publish ${entry.name}@${version} failed (${code}):\n${out}${err}`);
+    for (let attempt = 1; ; attempt++) {
+      const { code, out, err } = await exec(argv);
+      if (code === 0) break;
+      const failure = `npm publish ${entry.name}@${version} failed (${code}):\n${out}${err}`;
+      if (attempt >= attempts || !isTransient(out + err)) throw new Error(failure);
+      log(`${entry.name}@${version}: try ${attempt} of ${attempts} failed, retrying`);
+      await sleep(attempt * 10_000);
+      if (!options.dryRun && (await isPublished(exec, entry.name, version))) break;
     }
     log(`${entry.name}@${version}: ${options.dryRun ? "dry run" : "published"}`);
     results.push({ name: entry.name, version, action: "published" });
