@@ -22,8 +22,9 @@ from any other branch, and nothing is published by hand.
    longer matches, so `scripts/release/build.ts` gives both darwin binaries a fresh ad-hoc
    signature (`scripts/release/macho-sign.ts`, no `codesign` needed) before archiving them.
 2. **`release`** runs semantic-release. It picks the version from the commits, writes it into
-   `packages/ts/model/package.json`, `bun.lock` and the Python client's
-   `packages/py/client/src/seshi/_version.py` (`scripts/release-version.ts`),
+   `packages/ts/model/package.json`, `bun.lock`, the Python client's
+   `packages/py/client/src/seshi/_version.py` and the image tag the Docker kit pins in
+   `deploy/docker/compose.yaml` (`scripts/release-version.ts`),
    cross-compiles every target with `scripts/release/build.ts` into `dist/release/`, commits the
    version, pushes the tag, and publishes the GitHub release with these assets:
 
@@ -43,7 +44,9 @@ from any other branch, and nothing is published by hand.
    the job can be re-run. Prereleases go under the `next` tag.
 4. **`image`** downloads the two Linux archives, checks them, and builds
    `ghcr.io/<repo>` for linux/amd64 and linux/arm64 from those binaries
-   (`--build-arg BINARY=prebuilt`), tagged `X.Y.Z`, `X.Y` and `latest`.
+   (`--build-arg BINARY=prebuilt`), tagged `X.Y.Z`, `X.Y` and `latest`. Then **`verify-kit`**
+   checks out the tag and runs `scripts/docker-kit-smoke.sh`: it pulls that image without a
+   login, as a user would, and boots the Docker kit in each variant against it.
 5. **`pypi`** builds the Python client from the release's tag and publishes it to PyPI as
    `seshi` ([below](#pypi)).
 6. **`verify`** installs the published release on all six platforms with `install.sh` or

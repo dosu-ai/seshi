@@ -1,0 +1,40 @@
+# Caddy in front of seshi, with automatic HTTPS:
+#   docker compose -f compose.yaml -f compose.tls.yaml up -d --wait
+# Set SITE_ADDRESS in .env to the server's DNS name. Caddy gets a public certificate for it
+# (ACME), which needs ports 80 and 443 reachable from the internet. SITE_ADDRESS=localhost gets a
+# certificate from Caddy's own CA instead, for trying it out.
+#
+# Caddy's reverse proxy sets no response timeout and no body limit by default, which meets
+# docs/server.md's 120 s rule. seshi itself stays published on loopback only.
+services:
+  caddy:
+    image: caddy:2.11.9-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0
+    command:
+      - caddy
+      - reverse-proxy
+      - --from
+      - ${SITE_ADDRESS:?set SITE_ADDRESS in .env, such as seshi.example.com}
+      - --to
+      - seshi:7200
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+      - "${HTTPS_PORT:-443}:443/udp"
+    volumes:
+      # Certificates and ACME account keys; keep this volume or Caddy asks for new ones.
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      seshi:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+
+volumes:
+  caddy-data:
+  caddy-config:

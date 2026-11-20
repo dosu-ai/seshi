@@ -1,0 +1,53 @@
+# A bundled S3-compatible bucket (RustFS) for the store, in place of the /data volume:
+#   docker compose -f compose.yaml -f compose.bucket.yaml up -d --wait
+# Set BUCKET_ACCESS_KEY and BUCKET_SECRET_KEY in .env first (openssl rand -hex 16, and -hex 32).
+#
+# For trying the bucket layout, a host without a cloud bucket, and CI. Its durability is one
+# volume on one machine; for a real bucket, leave this file out and set SESHI_STORE__* in .env.
+# The store settings here are `environment`, which wins over any SESHI_STORE__* left in .env.
+# bucket-init creates the bucket on every `up` that lacks it, then exits.
+services:
+  seshi:
+    depends_on:
+      bucket-init:
+        condition: service_completed_successfully
+    environment:
+      SESHI_STORE__URL: s3://seshi/sessions
+      SESHI_STORE__ENDPOINT: http://bucket:9000
+      SESHI_STORE__REGION: us-east-1
+      SESHI_STORE__CREDENTIALS__ACCESS_KEY_ID: ${BUCKET_ACCESS_KEY:?set BUCKET_ACCESS_KEY in .env}
+      SESHI_STORE__CREDENTIALS__SECRET_ACCESS_KEY: ${BUCKET_SECRET_KEY:?set BUCKET_SECRET_KEY in .env}
+
+  bucket:
+    image: rustfs/rustfs:1.0.5@sha256:b81d16a90ee25bd9511280127ca1471788c6e874cf0f0da759645f46b2dc1d74
+    environment:
+      RUSTFS_ACCESS_KEY: ${BUCKET_ACCESS_KEY:?set BUCKET_ACCESS_KEY in .env}
+      RUSTFS_SECRET_KEY: ${BUCKET_SECRET_KEY:?set BUCKET_SECRET_KEY in .env}
+    volumes:
+      - bucket:/data
+    # For a reader of the bucket on this host:
+    # ports: ["127.0.0.1:9000:9000"]
+    restart: unless-stopped
+
+  bucket-init:
+    image: amazon/aws-cli:2.41.2@sha256:7a77ccb39e3272191adbf905c50db8c127db88fd79454911a41a6b1c0e419e9b
+    depends_on: [bucket]
+    environment:
+      AWS_ACCESS_KEY_ID: ${BUCKET_ACCESS_KEY:?set BUCKET_ACCESS_KEY in .env}
+      AWS_SECRET_ACCESS_KEY: ${BUCKET_SECRET_KEY:?set BUCKET_SECRET_KEY in .env}
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ENDPOINT_URL: http://bucket:9000
+    entrypoint: ["/bin/sh", "-c"]
+    # $$ keeps Compose from reading $i as one of its own variables.
+    command:
+      - |
+        i=0
+        until aws s3api list-buckets >/dev/null 2>&1; do
+          i=$$((i + 1)); [ "$$i" -ge 60 ] && echo "bucket did not answer in 60 s" >&2 && exit 1
+          sleep 1
+        done
+        aws s3api head-bucket --bucket seshi 2>/dev/null || aws s3 mb s3://seshi
+    restart: "no"
+
+volumes:
+  bucket:

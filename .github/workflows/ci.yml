@@ -149,6 +149,15 @@ jobs:
           done
           docker logs sessiondb
           exit 1
+      # The Docker kit (deploy/docker/) in each variant, on the image just built: the file
+      # store, the bundled bucket and Caddy in front.
+      - name: The Docker kit, every variant, with this image
+        run: |
+          docker rm -f sessiondb
+          sh scripts/docker-kit-smoke.sh
+        env:
+          IMAGE_REPOSITORY: sessiondb
+          IMAGE_TAG: latest
 
   # F8.4: the binary on every platform it ships for, built natively on that platform's runner.
   # Each one is put through scripts/release/smoke.ts: serve, admin init, login with the org key
@@ -565,3 +574,21 @@ jobs:
             rm -rf "$(npm config get cache)/_npx"
             sleep 30
           done
+
+  # The Docker kit at the release's tag, against the image the release published, pulled
+  # without a login as a user would. The release commit is [skip ci], so this is the one run of
+  # the kit with its new pin: it proves the tag exists, is public, and boots.
+  verify-kit:
+    needs: [release, image]
+    if: needs.release.outputs.released == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: v${{ needs.release.outputs.version }}
+          persist-credentials: false
+      - run: sh scripts/docker-kit-smoke.sh
+        env:
+          EXPECT_VERSION: ${{ needs.release.outputs.version }}

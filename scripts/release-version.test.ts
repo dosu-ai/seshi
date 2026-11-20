@@ -3,12 +3,17 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  KIT_COMPOSE_FILE,
   PYTHON_VERSION_FILE,
   setVersion,
+  syncKitImage,
   syncLock,
   syncPythonVersion,
   VERSIONED,
 } from "./release-version";
+
+const KIT =
+  "services:\n  seshi:\n    image: ${IMAGE_REPOSITORY:-ghcr.io/dosu-ai/seshi}:${IMAGE_TAG:-0.9.0}\n";
 
 const LOCK = `{
   "workspaces": {
@@ -48,6 +53,8 @@ describe("setVersion", () => {
     writeFileSync(join(root, "bun.lock"), LOCK);
     mkdirSync(join(root, "packages/py/client/src/seshi"), { recursive: true });
     writeFileSync(join(root, PYTHON_VERSION_FILE), '"""The release."""\n\n__version__ = "0.9.0"\n');
+    mkdirSync(join(root, "deploy/docker"), { recursive: true });
+    writeFileSync(join(root, KIT_COMPOSE_FILE), KIT);
   });
   afterEach(() => rmSync(root, { recursive: true, force: true }));
 
@@ -63,6 +70,7 @@ describe("setVersion", () => {
     expect(readFileSync(join(root, PYTHON_VERSION_FILE), "utf8")).toBe(
       '"""The release."""\n\n__version__ = "1.0.0"\n',
     );
+    expect(readFileSync(join(root, KIT_COMPOSE_FILE), "utf8")).toBe(KIT.replace("0.9.0", "1.0.0"));
   });
 
   it("refuses something that is not a version", async () => {
@@ -75,6 +83,15 @@ describe("setVersion", () => {
     const model = JSON.parse(readFileSync(join(root, "packages/ts/model/package.json"), "utf8"));
     expect(syncPythonVersion(python, model.version)).toBe(python);
     expect(() => syncPythonVersion("VERSION = 1\n", "1.0.0")).toThrow(/no __version__ line/);
+  });
+
+  it("names the Docker kit's compose file, which pins the same version", () => {
+    const root = resolve(import.meta.dirname, "..");
+    const kit = readFileSync(join(root, KIT_COMPOSE_FILE), "utf8");
+    const model = JSON.parse(readFileSync(join(root, "packages/ts/model/package.json"), "utf8"));
+    expect(syncKitImage(kit, model.version)).toBe(kit);
+    expect(() => syncKitImage("image: seshi:1.0.0\n", "1.0.0")).toThrow(/0 IMAGE_TAG pins/);
+    expect(() => syncKitImage(`${KIT}${KIT}`, "1.0.0")).toThrow(/2 IMAGE_TAG pins/);
   });
 
   it("names folders that exist in this repository and hold a version", () => {
