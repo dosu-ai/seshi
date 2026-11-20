@@ -292,7 +292,30 @@ def get_trace(
         "getTrace",
         _or_none(_TRACES[render], 404, 410),
         path_params=_session(format, session_id),
-        query={"owner": owner, "hash": hash, "format": render},
+        query={"owner": owner, "hash": hash, "render": render},
+    )
+
+
+def _archive(owner: str, archive_id: str) -> dict[str, str]:
+    return {"owner": owner, "archive_id": archive_id}
+
+
+def get_session_by_archive(owner: str, archive_id: str) -> Call[m.SessionMetadata | None]:
+    return Call(
+        "getSessionByArchive",
+        _or_none(m.SessionMetadata, 404),
+        path_params=_archive(owner, archive_id),
+    )
+
+
+def get_trace_by_archive(
+    owner: str, archive_id: str, hash: str | None, render: m.RenderFormat | None
+) -> Call[Any]:
+    return Call(
+        "getTraceByArchive",
+        _or_none(_TRACES[render], 404, 410),
+        path_params=_archive(owner, archive_id),
+        query={"hash": hash, "render": render},
     )
 
 
@@ -346,6 +369,15 @@ def reviews(format: str, session_id: str, owner: str | None) -> Call[list[m.Revi
         path_params=_session(format, session_id),
         query={"owner": owner},
     )
+
+
+def reviews_by_archive(owner: str, archive_id: str) -> Call[list[m.ReviewDecision] | None]:
+    def read_answer(answer: Answer) -> list[m.ReviewDecision] | None:
+        if answer.status == 404:
+            return None
+        return m.ReviewsPage.model_validate(_expect(answer, 200)).reviews
+
+    return Call("sessionReviewsByArchive", read_answer, path_params=_archive(owner, archive_id))
 
 
 def changes(

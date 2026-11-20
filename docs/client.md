@@ -72,6 +72,7 @@ answer back.
 | `tombstone(format, id, {owner, retractSecret})` | `DELETE /v1/sessions/:format/:id`, or a retraction with the uploading machine's secret |
 | `setVisibility(format, id, visibility, {owner})` | `PATCH /v1/sessions/:format/:id` |
 | `reviews(format, id, {owner})` | `GET …/reviews`: what model review decided for each write |
+| `getSessionByArchive(owner, archiveId)`, `getTraceByArchive(owner, archiveId, hash?, render?)`, `reviewsByArchive(owner, archiveId)` | `GET /v1/owners/:owner/sessions/:archive_id` and its `/trace` and `/reviews`: the same, by the owner and archive id a change entry or search result names |
 | `changes({after, since, limit})` | `GET /v1/changes`: the caller's change feed |
 | `allChanges({after, since, limit})` | `GET /v1/changes/all`: every owner's change feed as one, each entry with its `owner`; `after` is the last page's opaque `cursor`. For service tokens and admins (`Forbidden` for anyone else); a `ServerError` with status 503 while the server's search index is first built, 404 with search off ([server.md](server.md#every-owners-change-feed)) |
 | `search(request)` | `GET /v1/search` ([search.md](search.md)) |
@@ -156,7 +157,7 @@ with SeshiClient(
     for change in db.iter_changes(after=cursor):                 # every page to the end
         cursor = change.key
     for change in db.iter_all_changes(since="2026-11-01T00:00:00.000Z"):   # a service token or an admin
-        ...
+        trace = db.get_trace_by_archive(change.owner, change.entry.archive_id)
     found = db.search("flaky checkout test", repo="widget", sort="recent")
 ```
 
@@ -194,6 +195,7 @@ The same calls as `@dosu/seshi-client`, in snake_case:
 | `tombstone(format, id, owner=, retract_secret=)` | `tombstone` | `DELETE /v1/sessions/:format/:id` |
 | `set_visibility(format, id, visibility, owner=)` | `setVisibility` | `PATCH /v1/sessions/:format/:id` |
 | `reviews(format, id, owner=)` | `reviews` | `GET …/reviews` |
+| `get_session_by_archive(owner, archive_id)`, `get_trace_by_archive(owner, archive_id, hash=, render=)`, `reviews_by_archive(owner, archive_id)` | `getSessionByArchive`, `getTraceByArchive`, `sessionReviewsByArchive` | `GET /v1/owners/:owner/sessions/:archive_id` and its `/trace` and `/reviews`: the same, by the owner and archive id a change entry or search result names |
 | `changes(owner=, after=, since=, limit=)`, `iter_changes(…)` | `changes` | `GET /v1/changes`, a page or every page to the end |
 | `all_changes(after=, since=, limit=)`, `iter_all_changes(…)` | `allChanges` | `GET /v1/changes/all`, a page or every page up to `through` |
 | `search(q, owner=, agent=, repo=, branch=, source=, since=, until=, sort=, limit=, matches=, cursor=)` | `search` | `GET /v1/search` |

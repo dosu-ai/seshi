@@ -166,6 +166,23 @@ describe("the session's format", () => {
     });
   });
 
+  it("takes the render format as `render`, and still as `format`", async () => {
+    const { app, as } = server();
+    await as("alice").ingest({ format: "trajectory", session_id: "r", transcript: log("ship") });
+    const get = (query: string) =>
+      app.fetch(
+        new Request(`http://seshi.test/v1/sessions/trajectory/r/trace?${query}`, {
+          headers: { authorization: `Bearer ${orgKey}`, "x-seshi-user": "alice" },
+        }),
+      );
+    for (const query of ["render=otlp", "format=otlp"]) {
+      const res = await get(query);
+      expect(res.status, query).toBe(200);
+      expect(await res.json(), query).toHaveProperty("resourceSpans");
+    }
+    expect((await get("render=nope")).status).toBe(400);
+  });
+
   it("derives the archive id it always did", () => {
     // spec/testdata/objects/change.published.json, written before the rename.
     expect(archiveId("alice", "claude-code", "0b1c7e9a-5f2d-4b8e-9a61-3c0f5e2d7a14")).toBe(
@@ -197,6 +214,17 @@ describe("a session stored before 0.15", () => {
     expect(all.entries.map((e) => [e.entry.session_id, e.entry.format])).toEqual([
       ["old", "trajectory"],
     ]);
+
+    // By the owner and archive id an entry names: the same session, without its format.
+    const [entry] = all.entries;
+    const reader = as();
+    expect(await reader.getSessionByArchive(entry?.owner as string, archive)).toEqual(metadata);
+    expect(await reader.getTraceByArchive("alice", archive)).toEqual(trace);
+    expect(await reader.getTraceByArchive("alice", archive, undefined, "otlp")).toHaveProperty(
+      "resourceSpans",
+    );
+    expect(await reader.reviewsByArchive("alice", archive)).toEqual([]);
+    expect(await reader.getSessionByArchive("bob", archive)).toBeNull();
 
     // A write moves it to the new shape: the metadata names `format` only, the new entry too.
     await alice.setVisibility("trajectory", "old", "owner");

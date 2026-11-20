@@ -337,7 +337,7 @@ async function show(
   if (values.trace && metadata.status !== "redacted") {
     trace = (await backend.getTrace(ref.format, ref.sessionId, {
       ...(values.owner ? { owner: values.owner } : {}),
-      format: "seshi",
+      render: "seshi",
     })) as Trace | null;
   }
   const reviews =
@@ -387,7 +387,7 @@ async function exportTrace(
   const trace = await backend.getTrace(ref.format, ref.sessionId, {
     ...(values.owner ? { owner: values.owner } : {}),
     ...(values.hash ? { hash: values.hash } : {}),
-    format: render,
+    render,
   });
   if (!trace) {
     throw new Refused(

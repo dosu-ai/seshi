@@ -356,6 +356,13 @@ def test_a_session_stored_before_format_was_named_reads_back(
     assert "agent" not in (trace.model_extra or {})
     entries = [c.entry for c in alice.iter_changes() if c.entry.session_id == sid]
     assert entries and all(e.format == "claude-code" for e in entries)
+    # By the owner and archive id an entry names, the same session.
+    assert alice.get_session_by_archive("alice", archive) == metadata
+    by_archive = alice.get_trace_by_archive("alice", archive)
+    assert isinstance(by_archive, Trace) and by_archive.content_hash == trace.content_hash
+    assert isinstance(alice.get_trace_by_archive("alice", archive, render="otlp"), OtlpTrace)
+    assert alice.reviews_by_archive("alice", archive) == []
+    assert alice.get_session_by_archive("alice", "0" * 64) is None
 
 
 def test_redaction_rules(alice: SeshiClient) -> None:

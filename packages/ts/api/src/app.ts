@@ -519,63 +519,85 @@ export function createApp(instance: Instance) {
     );
   });
 
-  route("GET", "/v1/sessions/:format/:session_id", async ({ request, params, url }) => {
+  /** A session as the archive-id routes address it: exactly the folder `owner` (no aliases
+   * folded) and the archive id in it, as change entries, search results and listings name
+   * them. Like the format routes, `404` for one the caller may not read, and for a stub. */
+  async function readableByArchive(
+    principal: Principal,
+    params: Record<string, string>,
+  ): Promise<{ folder: string; metadata: SessionMetadata }> {
+    const owner = decodeURIComponent(params.owner as string);
+    const archive = decodeURIComponent(params.archive_id as string);
+    if (!isOwner(owner)) throw new HttpError(400, "bad_query", "owner is not an owner id");
+    if (!/^[0-9a-f]{64}$/.test(archive)) {
+      throw new HttpError(400, "bad_query", "archive_id is not a sha256 in lowercase hex");
+    }
+    const metadata = await readMetadata(store, owner, archive);
+    if (metadata === null || isStub(metadata) || !canRead(principal, metadata, aliases)) {
+      throw new HttpError(404, "not_found", "no such session");
+    }
+    return { folder: owner, metadata };
+  }
+
+  /** The session the request names, by `{format}/{session_id}` (with `?owner=`) or by
+   * `{owner}/{archive_id}`. */
+  async function located(
+    request: Request,
+    params: Record<string, string>,
+    url: URL,
+  ): Promise<{ principal: Principal; folder: string; metadata: SessionMetadata }> {
     const principal = await caller(request, "sessions:read");
+    if (params.archive_id !== undefined) {
+      return { principal, ...(await readableByArchive(principal, params)) };
+    }
     const { format, sessionId } = sessionParams(params);
-    const { metadata } = await readable(principal, ownerOf(url, principal), format, sessionId);
-    return json(metadata);
-  });
+    return {
+      principal,
+      ...(await readable(principal, ownerOf(url, principal), format, sessionId)),
+    };
+  }
+
+  async function sessionOf({ request, params, url }: Context): Promise<Response> {
+    return json((await located(request, params, url)).metadata);
+  }
 
   async function renderedTrace(request: Request, params: Record<string, string>, url: URL) {
-    const principal = await caller(request, "sessions:read");
-    const { format, sessionId } = sessionParams(params);
-    const { folder, metadata } = await readable(
-      principal,
-      ownerOf(url, principal),
-      format,
-      sessionId,
-    );
+    const { folder, metadata } = await located(request, params, url);
     if (metadata.status === "redacted") {
       throw new HttpError(410, "redacted", "session was redacted; no trace");
     }
-    const render = url.searchParams.get("format") ?? "seshi";
+    // `render`; until 0.16 also `format`, its name before the session's format took that name.
+    const render = url.searchParams.get("render") ?? url.searchParams.get("format") ?? "seshi";
     if (!isRenderFormat(render)) {
-      throw new HttpError(400, "bad_query", `format must be one of ${RENDER_FORMATS.join(", ")}`);
+      throw new HttpError(400, "bad_query", `render must be one of ${RENDER_FORMATS.join(", ")}`);
     }
     const hash = url.searchParams.get("hash") ?? metadata.head;
     if (!hash) throw new HttpError(404, "no_trace", "session has no trace");
     if (!metadata.traces.some((ref) => ref.content_hash === hash)) {
       throw new HttpError(404, "not_found", "no such trace");
     }
-    const trace = await getTrace(store, folder, archiveId(folder, format, sessionId), hash);
+    const trace = await getTrace(store, folder, metadata.archive_id, hash);
     if (!trace) throw new HttpError(404, "not_found", "no such trace");
-    return {
-      format,
-      sessionId,
-      render: render as RenderFormat,
-      hash,
-      body: renderTrace(trace, render),
-    };
+    return { metadata, render: render as RenderFormat, hash, body: renderTrace(trace, render) };
   }
 
-  route("GET", "/v1/sessions/:format/:session_id/trace", async ({ request, params, url }) => {
+  async function traceOf({ request, params, url }: Context): Promise<Response> {
     return json((await renderedTrace(request, params, url)).body);
-  });
+  }
 
-  route("GET", "/v1/sessions/:format/:session_id/export", async ({ request, params, url }) => {
-    const { format, sessionId, render, hash, body } = await renderedTrace(request, params, url);
-    const name = `${format}-${sessionId}-${hash.slice(0, 12)}.${render}.json`.replace(
-      /[^A-Za-z0-9._-]/g,
-      "_",
-    );
+  async function exportOf({ request, params, url }: Context): Promise<Response> {
+    const { metadata, render, hash, body } = await renderedTrace(request, params, url);
+    const name =
+      `${metadata.format}-${metadata.session_id}-${hash.slice(0, 12)}.${render}.json`.replace(
+        /[^A-Za-z0-9._-]/g,
+        "_",
+      );
     return json(body, 200, { "content-disposition": `attachment; filename="${name}"` });
-  });
+  }
 
-  route("GET", "/v1/sessions/:format/:session_id/reviews", async ({ request, params, url }) => {
-    const principal = await caller(request, "sessions:read");
-    const { format, sessionId } = sessionParams(params);
-    const { folder } = await readable(principal, ownerOf(url, principal), format, sessionId);
-    const records = await listReviews(store, folder, archiveId(folder, format, sessionId));
+  async function reviewsOf({ request, params, url }: Context): Promise<Response> {
+    const { principal, folder, metadata } = await located(request, params, url);
+    const records = await listReviews(store, folder, metadata.archive_id);
     const audit = principal.role === "admin";
     const view = (r: ReviewRecord) =>
       audit
@@ -588,7 +610,16 @@ export function createApp(instance: Instance) {
             decision: r.decision,
           };
     return json({ reviews: records.map(view) });
-  });
+  }
+
+  route("GET", "/v1/sessions/:format/:session_id", sessionOf);
+  route("GET", "/v1/sessions/:format/:session_id/trace", traceOf);
+  route("GET", "/v1/sessions/:format/:session_id/export", exportOf);
+  route("GET", "/v1/sessions/:format/:session_id/reviews", reviewsOf);
+  route("GET", "/v1/owners/:owner/sessions/:archive_id", sessionOf);
+  route("GET", "/v1/owners/:owner/sessions/:archive_id/trace", traceOf);
+  route("GET", "/v1/owners/:owner/sessions/:archive_id/export", exportOf);
+  route("GET", "/v1/owners/:owner/sessions/:archive_id/reviews", reviewsOf);
 
   route("PATCH", "/v1/sessions/:format/:session_id", async ({ request, params, url }) => {
     const principal = await caller(request, "sessions:read");

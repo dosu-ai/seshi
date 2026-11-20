@@ -152,7 +152,7 @@ Codex chunk cut between a response and its `token_count` leaves that response's 
 without a call. The layout it is stored in (immutable content-addressed traces, one pointer per
 session, an append-only change feed) is [`spec/layout.md`](../spec/layout.md).
 
-Other formats are rendered on read, by `GET /v1/sessions/:format/:id/trace?format=` and
+Other formats are rendered on read, by `GET /v1/sessions/:format/:id/trace?render=` and
 `seshi sessions export --format`:
 
 | Format | What you get |

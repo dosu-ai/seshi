@@ -243,6 +243,23 @@ class TestRequests:
         assert [param(r, "owner") for r in fake.seen] == ["bob"] * 5
         assert fake.seen[3].method == "PATCH" and sent(fake.seen[3]) == {"visibility": "owner"}
 
+    def test_reads_a_session_by_owner_and_archive_id(self) -> None:
+        base = f"/v1/owners/svc%3Aci/sessions/{SHA}"
+        fake = Fake(
+            {
+                f"GET {base}": (200, META),
+                f"GET {base}/trace": (200, TRACE),
+                f"GET {base}/reviews": (200, {"reviews": []}),
+            }
+        )
+        db = fake.client()
+        got = db.get_session_by_archive("svc:ci", SHA)
+        assert got is not None and got.format == "claude-code"
+        trace = db.get_trace_by_archive("svc:ci", SHA, render="seshi", hash=SHA)
+        assert isinstance(trace, Trace)
+        assert param(fake.last, "render") == "seshi" and param(fake.last, "hash") == SHA
+        assert db.reviews_by_archive("svc:ci", SHA) == []
+
     def test_asks_for_a_rendering_and_reads_it_as_that_type(self) -> None:
         # Letta's object is sessiondb's, which names the format `agent`.
         letta = {**TRACE, "schema": "sessionstorage/trace/1", "agent": TRACE["format"]}
@@ -257,7 +274,7 @@ class TestRequests:
         fake = Fake({"GET /v1/sessions/a/s/trace": answer})
         db = fake.client()
         assert isinstance(db.get_trace("a", "s", render="letta", hash=SHA), LettaTrace)
-        assert param(fake.last, "format") == "letta" and param(fake.last, "hash") == SHA
+        assert param(fake.last, "render") == "letta" and param(fake.last, "hash") == SHA
         rendered = db.get_trace("a", "s", render="otlp")
         assert isinstance(rendered, OtlpTrace)
         assert rendered.model_dump(by_alias=True, exclude_none=True) == otlp

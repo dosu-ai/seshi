@@ -275,11 +275,52 @@ export class HttpSessionDB implements SessionDB {
     const { status, body } = await this.request(
       "GET",
       `${this.sessionPath(format, sessionId)}/trace`,
-      { query: { hash, format: render, owner: options.owner } },
+      { query: { hash, render, owner: options.owner } },
     );
     if (status === 404 || status === 410) return null;
     if (status !== 200) refuse(status, body);
     return body as StoredTrace;
+  }
+
+  private archivePath(owner: string, archiveId: string): string {
+    return `/v1/owners/${encodeURIComponent(owner)}/sessions/${encodeURIComponent(archiveId)}`;
+  }
+
+  /** The session's metadata by its owner and archive id, as change entries, search results and
+   * listings name it (that owner's folder exactly); null when not stored or not readable. */
+  async getSessionByArchive(owner: string, archiveId: string): Promise<SessionMetadata | null> {
+    const { status, body } = await this.request("GET", this.archivePath(owner, archiveId));
+    if (status === 404) return null;
+    if (status !== 200) refuse(status, body);
+    return body as SessionMetadata;
+  }
+
+  /** `getTrace` by owner and archive id. */
+  async getTraceByArchive(
+    owner: string,
+    archiveId: string,
+    hash?: string,
+    render?: RenderFormat,
+  ): Promise<StoredTrace | null> {
+    const { status, body } = await this.request(
+      "GET",
+      `${this.archivePath(owner, archiveId)}/trace`,
+      { query: { hash, render } },
+    );
+    if (status === 404 || status === 410) return null;
+    if (status !== 200) refuse(status, body);
+    return body as StoredTrace;
+  }
+
+  /** `reviews` by owner and archive id. */
+  async reviewsByArchive(owner: string, archiveId: string): Promise<ReviewDecision[] | null> {
+    const { status, body } = await this.request(
+      "GET",
+      `${this.archivePath(owner, archiveId)}/reviews`,
+    );
+    if (status === 404) return null;
+    if (status !== 200) refuse(status, body);
+    return (body as { reviews: ReviewDecision[] }).reviews;
   }
 
   async listSessions(options: ListSessionsOptions = {}): Promise<SessionsPage> {

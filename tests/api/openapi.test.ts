@@ -13,7 +13,14 @@ import { Auth, CREDENTIAL_SCOPES } from "@seshi/auth";
 import { FakeIdp } from "@seshi/auth/testing";
 import { storeSession } from "@seshi/pipeline";
 import { compileRuleSet, validatePack } from "@seshi/redact";
-import { FsStore, type Store, StoreError, writeDropped, writeFailed } from "@seshi/store";
+import {
+  archiveId,
+  FsStore,
+  type Store,
+  StoreError,
+  writeDropped,
+  writeFailed,
+} from "@seshi/store";
 import { Ajv2020, type ValidateFunction } from "ajv/dist/2020";
 import addFormats from "ajv-formats";
 import { buildFormats } from "seshi/integrations";
@@ -264,6 +271,10 @@ describe("the document itself", () => {
         "GET /v1/admin/jobs",
         "GET /v1/redaction/rules",
         "GET /v1/sessions/{format}/{session_id}/reviews",
+        "GET /v1/owners/{owner}/sessions/{archive_id}",
+        "GET /v1/owners/{owner}/sessions/{archive_id}/trace",
+        "GET /v1/owners/{owner}/sessions/{archive_id}/export",
+        "GET /v1/owners/{owner}/sessions/{archive_id}/reviews",
         "POST /otlp/v1/traces",
         "GET /v1/search",
         "GET /v1/admin/sources",
@@ -427,17 +438,17 @@ describe("the server honours it", () => {
       (await call("GET", `/v1/sessions/claude-code/sess1/trace?hash=${content_hash}`)).status,
     ).toBe(200);
     const exported = await app.fetch(
-      new Request("http://sessiondb.test/v1/sessions/claude-code/sess1/export?format=letta", {
+      new Request("http://sessiondb.test/v1/sessions/claude-code/sess1/export?render=letta", {
         headers: { authorization: `Bearer ${TOKEN}` },
       }),
     );
     expect(exported.headers.get("content-disposition")).toBe(
       `attachment; filename="claude-code-sess1-${content_hash.slice(0, 12)}.letta.json"`,
     );
-    expect((await call("GET", "/v1/sessions/claude-code/sess1/export?format=atif")).status).toBe(
+    expect((await call("GET", "/v1/sessions/claude-code/sess1/export?render=atif")).status).toBe(
       200,
     );
-    expect((await call("GET", "/v1/sessions/claude-code/sess1/export?format=nope")).status).toBe(
+    expect((await call("GET", "/v1/sessions/claude-code/sess1/export?render=nope")).status).toBe(
       400,
     );
     expect(
@@ -447,6 +458,22 @@ describe("the server honours it", () => {
     expect(
       (await call("GET", "/v1/sessions/claude-code/sess1/reviews", { token: null })).status,
     ).toBe(401);
+    // The same session by its owner and archive id, as change entries and search results name it.
+    const byArchive = `/v1/owners/acme/sessions/${archiveId("acme", "claude-code", "sess1")}`;
+    const missing = `/v1/owners/acme/sessions/${"0".repeat(64)}`;
+    expect((await call("GET", byArchive)).body).toMatchObject({ format: "claude-code" });
+    expect((await call("GET", `${byArchive}/trace?render=otlp`)).status).toBe(200);
+    expect((await call("GET", `${byArchive}/trace?render=nope`)).status).toBe(400);
+    expect((await call("GET", `${byArchive}/export`)).status).toBe(200);
+    expect((await call("GET", `${byArchive}/reviews`)).status).toBe(200);
+    for (const sub of ["", "/trace", "/export", "/reviews"]) {
+      expect((await call("GET", `/v1/owners/acme/sessions/nope${sub}`)).status, sub).toBe(400);
+      expect((await call("GET", `/v1/owners/a%2Fb/sessions/${"0".repeat(64)}${sub}`)).status).toBe(
+        400,
+      );
+      expect((await call("GET", `${byArchive}${sub}`, { token: null })).status, sub).toBe(401);
+      expect((await call("GET", `${missing}${sub}`)).status, sub).toBe(404);
+    }
     expect((await call("GET", "/v1/changes")).status).toBe(200);
     expect((await call("GET", "/v1/changes?since=2020-01-01T00:00:00Z&limit=10")).status).toBe(200);
     expect((await call("GET", "/v1/changes?limit=nope")).status).toBe(400);
@@ -465,6 +492,8 @@ describe("the server honours it", () => {
     expect((await call("DELETE", "/v1/sessions/claude-code/sess1")).status).toBe(200);
     expect((await call("GET", "/v1/sessions/claude-code/sess1/trace")).status).toBe(410);
     expect((await call("GET", "/v1/sessions/claude-code/sess1/export")).status).toBe(410);
+    expect((await call("GET", `${byArchive}/trace`)).status).toBe(410);
+    expect((await call("GET", `${byArchive}/export`)).status).toBe(410);
     expect(
       (
         await call("POST", "/v1/sessions", {
@@ -519,18 +548,18 @@ describe("the server honours it", () => {
     const path = "/v1/sessions/claude-code/render/trace";
     const seshi = await call("GET", path);
     expect(seshi.body).toMatchObject({ schema: "seshi/trace/1" });
-    expect((await call("GET", `${path}?format=seshi`)).body).toEqual(seshi.body);
-    const letta = await call("GET", `${path}?format=letta`);
+    expect((await call("GET", `${path}?render=seshi`)).body).toEqual(seshi.body);
+    const letta = await call("GET", `${path}?render=letta`);
     expect(letta.body).toMatchObject({
       schema: "sessionstorage/trace/1",
       content_hash: (seshi.body as { content_hash: string }).content_hash,
     });
-    expect((await call("GET", `${path}?format=otlp`)).body).toHaveProperty("resourceSpans");
-    expect((await call("GET", `${path}?format=atif`)).body).toMatchObject({
+    expect((await call("GET", `${path}?render=otlp`)).body).toHaveProperty("resourceSpans");
+    expect((await call("GET", `${path}?render=atif`)).body).toMatchObject({
       schema_version: "ATIF-v1.7",
       agent: { name: "claude-code" },
     });
-    const bad = await call("GET", `${path}?format=xml`);
+    const bad = await call("GET", `${path}?render=xml`);
     expect(bad.status).toBe(400);
     expect(JSON.stringify(bad.body)).toContain("seshi, letta, otlp, atif");
   });
@@ -586,6 +615,10 @@ describe("the server honours it", () => {
     expect((await call("GET", "/v1/sessions", { app: down })).status).toBe(502);
     expect((await call("GET", "/v1/sessions/stale", { app: down })).status).toBe(502);
     expect((await call("GET", "/v1/sessions/claude-code/x", { app: down })).status).toBe(502);
+    for (const sub of ["", "/trace", "/export", "/reviews"]) {
+      const path = `/v1/owners/acme/sessions/${"0".repeat(64)}${sub}`;
+      expect((await call("GET", path, { app: down })).status, sub).toBe(502);
+    }
     expect((await call("GET", "/v1/sessions/claude-code/x/trace", { app: down })).status).toBe(502);
     expect((await call("GET", "/v1/sessions/claude-code/x/export", { app: down })).status).toBe(
       502,
@@ -682,6 +715,10 @@ describe("identity and access (X5)", () => {
     expect((await call("GET", "/v1/sessions/claude-code/s1/trace", device)).status).toBe(403);
     expect((await call("GET", "/v1/sessions/claude-code/s1/export", device)).status).toBe(403);
     expect((await call("GET", "/v1/sessions/claude-code/s1/reviews", device)).status).toBe(403);
+    const s1 = `/v1/owners/alice/sessions/${archiveId("alice", "claude-code", "s1")}`;
+    for (const sub of ["", "/trace", "/export", "/reviews"]) {
+      expect((await call("GET", `${s1}${sub}`, device)).status, sub).toBe(403);
+    }
     expect((await call("GET", "/v1/admin/jobs", admin)).status).toBe(200);
     expect((await call("GET", "/v1/admin/jobs", alice)).status).toBe(403);
     expect((await call("GET", "/v1/admin/jobs", { app: x5, token: null })).status).toBe(401);

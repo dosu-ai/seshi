@@ -34,7 +34,7 @@ import { USER_AGENT } from "./user-agent";
 
 export interface TraceOptions extends OwnerOption {
   hash?: string;
-  format?: RenderFormat;
+  render?: RenderFormat;
 }
 
 export interface SearchHooks {
@@ -97,7 +97,7 @@ export class ServerBackend implements Backend {
     return this.db.getSession(format, sessionId, options);
   }
   getTrace(format: string, sessionId: string, options: TraceOptions = {}) {
-    return this.db.getTrace(format, sessionId, options.hash, options.format, {
+    return this.db.getTrace(format, sessionId, options.hash, options.render, {
       ...(options.owner ? { owner: options.owner } : {}),
     });
   }
@@ -258,7 +258,7 @@ export class ServerlessBackend implements Backend {
   async getTrace(format: string, sessionId: string, options: TraceOptions = {}) {
     if (!(await this.getSession(format, sessionId, options))) return null;
     return this.refused(() =>
-      this.sessionsAs(options.owner).getTrace(format, sessionId, options.hash, options.format),
+      this.sessionsAs(options.owner).getTrace(format, sessionId, options.hash, options.render),
     );
   }
   async tombstone(format: string, sessionId: string, options: OwnerOption = {}) {
