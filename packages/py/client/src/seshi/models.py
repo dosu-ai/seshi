@@ -334,6 +334,9 @@ class Upload(Request):
     offset: int | None = None
     project: str | None = None
     branch: str | None = None
+    labels: dict[str, str] | None = None
+    """Keys `[a-z0-9][a-z0-9._-]{0,63}`, values up to 512 characters, at most 32. The session keeps
+    the first it is sent; a `replace` may change them."""
     parent_session_id: str | None = None
     fork_of: str | None = None
     shipped: Shipped | None = None
@@ -419,6 +422,9 @@ class SessionMetadata(Response):
     source: str | None = None
     project: str | None = None
     branch: str | None = None
+    labels: dict[str, str] | None = None
+    """Set from config by the first write that carries any (the CLI's `[labels]`, a repo's
+    `.seshi/config.toml`, a source's `labels`)."""
     parent_session_id: str | None = None
     status: Open[Literal["stored", "redacted"]]
     head: str | None = None
@@ -576,6 +582,8 @@ class TraceMetadata(Response):
     parent_session_id: str | None = None
     continuation: Continuation | None = None
     normalizer: Normalizer | None = None
+    labels: dict[str, str] | None = None
+    """The labels the write that stored this trace carried."""
 
 
 class Trace(Response):
@@ -862,6 +870,8 @@ class SearchRequest(Request):
     repo: str | None = None
     """The session's `project`, exactly or as its last path segments."""
     branch: str | None = None
+    label: list[str] | None = None
+    """Labels a session must carry, each `key=value` (`SeshiClient.search` takes a dict)."""
     source: str | None = None
     since: str | None = None
     until: str | None = None
@@ -893,6 +903,7 @@ class SearchResult(Response):
     native_session_id: str | None = None
     project: str | None = None
     branch: str | None = None
+    labels: dict[str, str] | None = None
     source_id: str | None = None
     visibility: Open[Visibility]
     started_at: str | None = None

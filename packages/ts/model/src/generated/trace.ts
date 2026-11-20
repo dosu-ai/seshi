@@ -1,6 +1,6 @@
 /** Generated from spec/schemas/trace.schema.json by scripts/model-types.ts (`bun run types`). Do not edit: change the schema and regenerate. */
 
-import type { Continuation, Normalizer, Provenance, Sha256 } from "./common";
+import type { Continuation, Labels, Normalizer, Provenance, Sha256 } from "./common";
 
 /** The `schema` value of every Trace object. */
 export const SCHEMA_ID = "seshi/trace/1" as const;
@@ -165,6 +165,8 @@ export interface TraceMetadata {
   parent_session_id?: string;
   continuation?: Continuation;
   normalizer?: Normalizer;
+  /** The labels the write that stored this trace carried. */
+  labels?: Labels;
   [key: string]: unknown;
 }
 
@@ -336,6 +338,7 @@ export const JSON_SCHEMA = {
         parent_session_id: { type: "string" },
         continuation: { $ref: "common.schema.json#/$defs/Continuation" },
         normalizer: { $ref: "common.schema.json#/$defs/Normalizer" },
+        labels: { $ref: "common.schema.json#/$defs/Labels" },
       },
       additionalProperties: true,
     },

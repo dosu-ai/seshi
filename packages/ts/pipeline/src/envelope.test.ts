@@ -90,6 +90,12 @@ describe("checkEnvelope", () => {
       (e: Record<string, unknown>) => {
         e.retract_hash = "not-a-sha256";
       },
+      (e: Record<string, unknown>) => {
+        e.labels = { Team: "x" };
+      },
+      (e: Record<string, unknown>) => {
+        e.labels = { team: "x".repeat(513) };
+      },
     ]) {
       expect(bad(change)).toThrow(SessionRejected);
       expect(bad(change)).toThrow(expect.objectContaining({ code: "bad_envelope" }));

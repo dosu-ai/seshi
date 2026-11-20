@@ -1298,6 +1298,110 @@ describe("retraction (F9.7)", () => {
   });
 });
 
+describe("labels", () => {
+  /** The uploader's own environment, changed as a test goes. */
+  let env: Record<string, string>;
+  beforeEach(() => {
+    env = {};
+    host = { ...host, env };
+  });
+  const labelSnapshot = (): RulesSnapshot => ({
+    rules: DEFAULT_RULES,
+    labels: { labels: { team: "platform", "dosu.project": { env: "DOSU_PROJECT" } }, paths: [] },
+  });
+
+  it("sends the labels a hook pinned at first sight with every upload, whatever came later", async () => {
+    writeFileSync(transcript(), line("one") + line("two"));
+    let spooled = 0;
+    const spool = (labels: Record<string, string>) =>
+      appendSpool(
+        paths,
+        {
+          v: 1,
+          kind: "capture",
+          at: clock.toISOString(),
+          agent: "fake",
+          event: "Stop",
+          session_id: "s1",
+          transcript_path: transcript(),
+          cwd: dir,
+          labels,
+        },
+        new Date(clock.getTime() + ++spooled),
+      );
+    // Two hooks ran before the uploader took the spool: the first one's labels stay.
+    spool({ "dosu.project": "first" });
+    spool({ "dosu.project": "second" });
+    const run = uploader({ rules: async () => labelSnapshot() });
+    await run.pass();
+    expect(session().labels).toEqual({ "dosu.project": "first" });
+    expect(server.uploads[0]?.labels).toEqual({ "dosu.project": "first" });
+    // Later the environment and the hooks say otherwise: the session's labels do not move.
+    writeFileSync(transcript(), line("one") + line("two") + line("three"));
+    spool({ "dosu.project": "third" });
+    env.DOSU_PROJECT = "env-now";
+    await run.pass();
+    expect(server.uploads).toHaveLength(2);
+    expect(server.uploads[1]?.labels).toEqual({ "dosu.project": "first" });
+    expect(session().labels).toEqual({ "dosu.project": "first" });
+  });
+
+  it("sends none for a session pinned with none", async () => {
+    writeFileSync(transcript(), line("one") + line("two"));
+    appendSpool(paths, {
+      v: 1,
+      kind: "capture",
+      at: clock.toISOString(),
+      agent: "fake",
+      event: "Stop",
+      session_id: "s1",
+      transcript_path: transcript(),
+      cwd: dir,
+      labels: {},
+    });
+    await uploader({ rules: async () => labelSnapshot() }).pass();
+    expect(server.uploads[0]).not.toHaveProperty("labels");
+    expect(session().labels).toEqual({});
+  });
+
+  it("resolves a session the sweep found with its own environment and the session's folder", async () => {
+    await updateState(paths, (s) => {
+      s.agents.fake = { installed_at: "2026-10-15T00:00:00Z" };
+    });
+    writeFileSync(
+      transcript("swept"),
+      `${JSON.stringify({ id: "swept", cwd: dir, at: "2026-10-20T00:00:00Z" })}\n${JSON.stringify({ id: "swept" })}\n`,
+    );
+    env.DOSU_PROJECT = "github.com/acme/uploader-env";
+    await uploader({
+      rules: async () => ({
+        ...labelSnapshot(),
+        labels: {
+          labels: { team: "platform", "dosu.project": { env: "DOSU_PROJECT" } },
+          paths: [{ path: dir, labels: { folder: "yes" } }],
+        },
+      }),
+    }).pass({ sweep: true });
+    const expected = {
+      team: "platform",
+      "dosu.project": "github.com/acme/uploader-env",
+      folder: "yes",
+    };
+    expect(session("swept").labels).toEqual(expected);
+    expect(server.uploads.find((u) => u.session_id === "swept")?.labels).toEqual(expected);
+  });
+
+  it("resolves and pins labels for a session no hook resolved them for", async () => {
+    writeFileSync(transcript(), line("one") + line("two"));
+    hooked();
+    env.DOSU_PROJECT = "github.com/acme/app";
+    await uploader({ rules: async () => labelSnapshot() }).pass();
+    const expected = { team: "platform", "dosu.project": "github.com/acme/app" };
+    expect(session().labels).toEqual(expected);
+    expect(server.uploads[0]?.labels).toEqual(expected);
+  });
+});
+
 describe("the spool and the sweep", () => {
   it("takes in hooks, registering the agent as installed from then", async () => {
     writeFileSync(transcript(), line("one") + line("two"));

@@ -60,6 +60,8 @@ export interface DoctorDeps {
   now(): Date;
   state(): CaptureState;
   judge(state: CaptureState, agent: string, entry: SessionState | undefined): Decision;
+  /** What is wrong with the labels the CLI config and the session's repo config give. */
+  labelProblems?(entry: SessionState | undefined): string[];
   agent(name: string): AgentInfo | undefined;
   files: FileReader;
   spool(): SpoolItem[];

@@ -342,8 +342,10 @@ A server never starts without its policies' keys, so it ignores this.
 ### `[[sources]]`
 
 What the server ingests from on its own (F4–F7). Each has an `id` (lower-case letters and
-digits, words joined by single `-`; not `upload`, which uploads use), a `type`, `enabled` (`true`), `visibility`, and `filter`
-overrides. Each writes as its service account `svc:<id>` (X5.4). The worker polls a source on
+digits, words joined by single `-`; not `upload`, which uploads use), a `type`, `enabled` (`true`), `visibility`, `filter`
+overrides, and `labels`: a table of strings put on every session the source stores
+(`labels = { "dosu.member" = "alice" }`; keys and values as [labels](#labels) are, at most 32),
+winning over labels the data itself carries. Each writes as its service account `svc:<id>` (X5.4). The worker polls a source on
 its `interval` once a connector for its type is in the binary (`seshi sync status` says which
 are polled). The binary polls `datadog` sources ([docs/datadog.md](datadog.md)) through the
 datadog-trajectory integration, `cursor-cloud` sources through the cursor integration
@@ -409,6 +411,14 @@ exclude = ["acme/payments", "~/clients"] # SESHI_CAPTURE__EXCLUDE: the org's exc
 [[capture.paths]]                        # personal rules by folder, longest match wins (F9.5)
 path = "~/clients/acme"
 capture = false
+
+[labels]                                 # put on each session when it is first seen, see below
+"dosu.project" = { env = "DOSU_PROJECT" } # from the agent's environment; absent when unset
+team = "platform"                        # SESHI_LABELS__TEAM: a fixed value
+
+[[labels.paths]]                         # per folder; the longest matching folder wins
+path = "~/code/monorepo/packages/billing"
+"dosu.project" = "github.com/acme/billing"
 ```
 
 **Capture rules** (F9.5, [capture.md](capture.md#what-is-captured)). `capture.enabled` is the
@@ -456,7 +466,41 @@ it is fixed. So does one that is not a regular file (a folder, or a link to a de
 `/dev/zero`) or is larger than 64 KiB, and the same goes for the git files capture reads to
 find the repo (a worktree's `.git` file and `commondir`, `HEAD`, git's `config`): capture reads
 each of them bounded, so a planted file never hangs a hook or the status line. Hooks read the CLI config through a cache (`rules.json` in the capture folder),
-loaded again whenever the file or a `SESHI_CAPTURE__*` variable changes.
+loaded again whenever the file or a `SESHI_*` setting changes.
+
+### Labels
+
+Labels are small key/value strings attached to each captured session, uploaded with it, kept
+on its metadata (and on each trace's) and searchable (`seshi search --label key=value`,
+[search.md](search.md)). seshi gives them no meaning: they carry what another tool needs to
+file a session, such as a project key.
+
+Every key of `[labels]` but `paths` is a label, and every key of a `[[labels.paths]]` entry but
+`path`. A value is a string, or `{ env = "NAME" }`, read from the environment of the agent the
+session runs in; nothing else (no files, no commands). Per key, highest first:
+
+1. the `[[labels.paths]]` entries the session's folder is in, the longest folder first
+   (matched as `[[capture.paths]]` is: `~` is the home folder, whole folder names only, and
+   symbolic links resolved);
+2. `[labels]`;
+3. `[labels]` in the repo's committed `.seshi/config.toml`, plain strings only.
+
+An `env` reference whose variable is unset or empty counts as absent, so the next one down gives
+the key. A repo's labels never read the environment: a cloned repo cannot copy your variables
+into a label, and a repo label that is not a string is left out (it never turns capture off).
+
+Keys are `[a-z0-9][a-z0-9._-]{0,63}`, values 1 to 512 characters, at most 32 labels a session.
+A label out of those limits is a config error that `seshi config check --cli` and `seshi
+doctor` report; a hook never fails over it, it leaves the label out and logs why. Labels are
+resolved once, when the session is first seen, and kept: see
+[capture.md](capture.md#labels). From the environment, `SESHI_LABELS__<KEY>` sets a fixed one
+(`SESHI_LABELS__TEAM=platform`; the key in lowercase, so not one with a `.`).
+
+```toml
+# .seshi/config.toml, committed: the repo's own, under anyone's
+[labels]
+"dosu.project" = "github.com/acme/monorepo"
+```
 
 `SESHI_SESSION_ID`, `SESHI_AGENT` and `SESHI_NO_UPLOADER` are capture's own variables, not
 settings; both loaders pass over them (with `SESHI_CONFIG`). Claude Code sets the first two for

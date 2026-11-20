@@ -1,7 +1,7 @@
 import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import type { ChangeEntry, EventRole, Visibility } from "@seshi/model";
+import type { ChangeEntry, EventRole, Labels, Visibility } from "@seshi/model";
 import { changeStamp } from "@seshi/store";
 import type {
   BackendHit,
@@ -17,7 +17,8 @@ import type {
 import { MEMORY_INDEX, tryRestrictToOwner } from "./paths";
 import { indexText, MATCH_END, MATCH_START } from "./snippet";
 
-export const INDEX_SCHEMA = "seshi/search-index/2";
+// 3: sessions gained `labels`.
+export const INDEX_SCHEMA = "seshi/search-index/3";
 
 const SNIPPET_TOKENS = 24;
 
@@ -47,6 +48,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   native_session_id TEXT,
   project TEXT,
   branch TEXT,
+  labels TEXT,
   source_id TEXT,
   visibility TEXT NOT NULL,
   started_at INTEGER,
@@ -94,6 +96,7 @@ interface SessionRow {
   native_session_id: string | null;
   project: string | null;
   branch: string | null;
+  labels: string | null;
   source_id: string | null;
   visibility: string;
   started_at: number | null;
@@ -115,6 +118,7 @@ function sessionOf(row: SessionRow): IndexedSession {
     ...(row.native_session_id !== null ? { native_session_id: row.native_session_id } : {}),
     ...(row.project !== null ? { project: row.project } : {}),
     ...(row.branch !== null ? { branch: row.branch } : {}),
+    ...(row.labels !== null ? { labels: JSON.parse(row.labels) as Labels } : {}),
     ...(row.source_id !== null ? { source_id: row.source_id } : {}),
     visibility: row.visibility as Visibility,
     ...(row.started_at !== null ? { started_at: row.started_at } : {}),
@@ -258,6 +262,9 @@ export class SqliteIndex implements IndexStore {
         session.native_session_id ?? null,
         session.project ?? null,
         session.branch ?? null,
+        session.labels && Object.keys(session.labels).length > 0
+          ? JSON.stringify(session.labels)
+          : null,
         session.source_id ?? null,
         session.visibility,
         session.started_at ?? null,
@@ -272,9 +279,9 @@ export class SqliteIndex implements IndexStore {
         const row = this.db
           .query(
             `INSERT INTO sessions (owner, archive_id, agent, session_id, origin_agent,
-               native_session_id, project, branch, source_id, visibility, started_at, ended_at,
-               updated_at, updated_ms, traces, read_ms)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+               native_session_id, project, branch, labels, source_id, visibility, started_at,
+               ended_at, updated_at, updated_ms, traces, read_ms)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
           )
           .get(session.owner, session.archive_id, ...values) as { id: number };
         id = row.id;
@@ -284,7 +291,8 @@ export class SqliteIndex implements IndexStore {
         this.db
           .query(
             `UPDATE sessions SET agent = ?, session_id = ?, origin_agent = ?,
-               native_session_id = ?, project = ?, branch = ?, source_id = ?, visibility = ?,
+               native_session_id = ?, project = ?, branch = ?, labels = ?, source_id = ?,
+               visibility = ?,
                started_at = ?, ended_at = ?, updated_at = ?, updated_ms = ?, traces = ?,
                read_ms = ?, removed = 0
              WHERE id = ?`,
@@ -362,6 +370,10 @@ export class SqliteIndex implements IndexStore {
     if (q.branch !== undefined) {
       where.push("s.branch = ?");
       params.push(q.branch);
+    }
+    for (const [key, value] of Object.entries(q.labels ?? {})) {
+      where.push("EXISTS (SELECT 1 FROM json_each(s.labels) AS l WHERE l.key = ? AND l.value = ?)");
+      params.push(key, value);
     }
     if (q.source !== undefined) {
       where.push("s.source_id = ?");

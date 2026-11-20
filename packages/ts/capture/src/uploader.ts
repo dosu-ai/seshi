@@ -14,6 +14,7 @@ import {
   type Upload,
 } from "@seshi/model";
 import { appendLog } from "./files";
+import { resolveLabels } from "./labels";
 import type { CapturePaths } from "./paths";
 import { placeOf } from "./place";
 import {
@@ -572,6 +573,14 @@ export class Uploader {
         this.log(`${key}: stopped by a pause at ${offset} bytes`);
       }
       if (!decision.capture && decision.frozen === undefined) continue;
+      if (session.labels === undefined) {
+        // No hook resolved its labels (a session from before labels, or one only seen paused):
+        // they come from this process's environment and its folder, and stay.
+        const labels = this.resolveLabels(snapshot, place);
+        session = (await this.save(key, (s) => {
+          s.labels ??= labels;
+        })) ?? { ...session, labels };
+      }
       // A paused session sends no more than it had, so its upload is not composed further.
       const from = decision.capture
         ? this.composed(key, agent, session, path)
@@ -634,6 +643,10 @@ export class Uploader {
         if (entry.cwd) seenIn(session, entry.cwd);
         if (entry.parent_session_id) session.parent_session_id = entry.parent_session_id;
         if (entry.kind === "capture" && entry.final) session.final = true;
+        // The first labels a hook resolved for the session stay; later hooks' never replace them.
+        if (entry.kind === "capture" && entry.labels && session.labels === undefined) {
+          session.labels = entry.labels;
+        }
         if (
           entry.kind === "paused" &&
           !turnedOnSince(session.toggle, session.toggled_at, entry.at)
@@ -703,6 +716,8 @@ export class Uploader {
           session_id: found.info.session_id,
           path: found.path,
           ...(found.info.cwd ? { cwd: found.info.cwd } : {}),
+          // No hook saw it: its labels come from this process's environment and its folder.
+          labels: this.resolveLabels(snapshot, placeOf(found.info.cwd)),
           ...(found.info.parent_session_id
             ? { parent_session_id: found.info.parent_session_id }
             : {}),
@@ -1060,8 +1075,17 @@ export class Uploader {
     return { text: bytes.subarray(0, cut + 1).toString("utf8"), end: start + cut + 1 };
   }
 
+  /** A session's labels, resolved by the uploader: with its own environment, for a session no
+   * hook resolved them for (one the sweep found). Dropped labels are logged once. */
+  private resolveLabels(snapshot: RulesSnapshot, place: Place): Record<string, string> {
+    const resolved = resolveLabels(snapshot.labels, place, this.host.env, this.host.platform);
+    for (const problem of resolved.problems) this.logOnce(`labels: left out ${problem}`);
+    return resolved.labels;
+  }
+
   private async details(session: SessionState, agent: CaptureAgent, place: Place) {
     const repo = place.repo;
+    const labels = session.labels ?? {};
     const folder = repo?.root ?? session.cwd;
     const claims: Claims = {};
     if (session.cwd) {
@@ -1087,6 +1111,7 @@ export class Uploader {
     return {
       ...(repo ? { project: repo.name } : folder ? { project: basename(folder) } : {}),
       ...(repo?.branch ? { branch: repo.branch } : {}),
+      ...(Object.keys(labels).length > 0 ? { labels } : {}),
       ...repoVisibilityClaim(repo?.config),
       ...(session.parent_session_id ? { parent_session_id: session.parent_session_id } : {}),
       ...(Object.keys(claims).length > 0 ? { claims } : {}),

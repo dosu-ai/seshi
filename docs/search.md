@@ -32,6 +32,7 @@ light background), plain with `NO_COLOR`, `--no-color` or `--json`. `seshi sessi
 | `--agent <name>` | Only sessions of this format or agent (`claude-code`, `codex`, …) |
 | `--repo <name>` | Only this repository: exactly, or its last path segments (`widget`, `acme/widget`) |
 | `--branch <name>`, `--source <id>` | Only this branch; only sessions written through this source (`upload`, `datadog-prod`) |
+| `--label <key>=<value>` | Only sessions carrying this [label](config.md#labels), key and value exactly (`--label dosu.project=github.com/acme/app`); repeat it for more, and a session must carry every one |
 | `--since`, `--until` | Only records in this time range: a date (`2026-11-01`), an RFC 3339 time, or an age (`7d`, `12h`) |
 | `--sort relevance\|recent` | Best match first (the default), or most recently active first |
 | `--limit <n>`, `--matches <n>`, `--cursor <c>` | Sessions per page (20, at most 100), records shown per session (3, at most 20), the next page |
@@ -67,7 +68,8 @@ prompts, assistant text, and tool calls (names and inputs, so file paths and com
 `tool_result` to `search.events` to search tool output too. Results are sessions, best match
 first (bm25), each with its best matching records: the trace and event each is in, and a short
 excerpt with the matched words marked by offsets. Filters: owner, agent, repository, branch,
-source and time.
+labels, source and time. `GET /v1/search` takes each label as `label=key=value`, repeated for
+more; results carry the session's `labels`.
 
 Every instance that serves the API keeps its own index, an SQLite file on local disk
 (`search.path`, by default in the user cache folder; FTS5 through Bun's built-in SQLite, so

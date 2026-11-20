@@ -20,6 +20,8 @@ export type SpoolEntry =
       cwd?: string;
       parent_session_id?: string;
       final?: boolean;
+      /** The session's labels, resolved by a hook that saw it first (the state held none). */
+      labels?: Record<string, string>;
     }
   | {
       v: typeof SPOOL_VERSION;

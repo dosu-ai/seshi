@@ -18,6 +18,7 @@ import {
   decisionCheck,
   distinctiveTerm,
   gatherEvidence,
+  labelsCheck,
   offsetsCheck,
   prefixCheck,
   presenceCheck,
@@ -284,6 +285,7 @@ describe("the checks on a captured session", () => {
       "residue",
       "staleness",
       "changes",
+      "labels",
     ]);
     expect(worst(checks.map((c) => c.status))).toBe("ok");
   });
@@ -1177,5 +1179,32 @@ describe("helpers", () => {
         { role: "assistant", content: "[redacted:github-token] done reading" } as NormalizedRecord,
       ]),
     ).toBe("reading");
+  });
+});
+
+describe("the labels check", () => {
+  it("shows the session's labels, here and on the server, and warns of labels left out", () => {
+    const none = labelsCheck(evidence());
+    expect(none).toMatchObject({ status: "ok", summary: "none" });
+    const pinned = labelsCheck(
+      evidence((ev) => {
+        if (ev.local) ev.local.labels = { team: "platform", "dosu.project": "github.com/acme/app" };
+        if (ev.server.metadata) ev.server.metadata.labels = { team: "infra" };
+      }),
+    );
+    expect(pinned.status).toBe("ok");
+    expect(pinned.summary).toBe("team=infra");
+    expect(pinned.detail).toEqual([
+      "pinned here: dosu.project=github.com/acme/app, team=platform",
+      "on the server: team=infra",
+      expect.stringContaining("the server keeps the labels of the session's first upload"),
+    ]);
+    const problems = labelsCheck(
+      evidence((ev) => {
+        ev.machine.label_problems = ["[labels]: label key 'Team' must be lowercase…"];
+      }),
+    );
+    expect(problems).toMatchObject({ status: "warn", summary: "1 label left out" });
+    expect(problems.hint).toContain("seshi config check --cli");
   });
 });

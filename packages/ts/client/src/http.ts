@@ -95,7 +95,7 @@ interface ErrorBody {
 
 interface RequestOptions {
   body?: unknown;
-  query?: Record<string, string | number | boolean | undefined>;
+  query?: Record<string, string | number | boolean | readonly string[] | undefined>;
   headers?: Record<string, string>;
   gzipFrom?: number;
 }
@@ -117,7 +117,8 @@ async function send(
   const timeoutMs = transport.timeoutMs ?? 120_000;
   const url = new URL(`${server}${path}`);
   for (const [key, value] of Object.entries(options.query ?? {})) {
-    if (value !== undefined) url.searchParams.set(key, String(value));
+    if (Array.isArray(value)) for (const item of value) url.searchParams.append(key, String(item));
+    else if (value !== undefined) url.searchParams.set(key, String(value));
   }
   const headers: Record<string, string> = {
     "user-agent": transport.userAgent ?? `@dosu/seshi-client/${VERSION}`,
@@ -392,6 +393,7 @@ export class HttpSessionDB implements SessionDB {
         agent: request.agent,
         repo: request.repo,
         branch: request.branch,
+        label: Object.entries(request.labels ?? {}).map(([key, value]) => `${key}=${value}`),
         source: request.source,
         since: request.since,
         until: request.until,

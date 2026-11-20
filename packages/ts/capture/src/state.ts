@@ -22,6 +22,10 @@ export interface SessionState {
   cwd?: string;
   folders?: string[];
   parent_session_id?: string;
+  /** The session's labels, resolved when it was first seen (in its hook, with the agent's
+   * environment) and sent with every upload of it, unchanged when the folder or the environment
+   * changes later. Absent until resolved; `{}` when it has none. */
+  labels?: Record<string, string>;
   first_seen: string;
   last_seen?: string;
   /** The agent said the session ended. */

@@ -12,6 +12,7 @@ import {
   stateFacts,
   uploaderRunning,
 } from "@seshi/capture";
+import { cliLabelProblems, loadCliConfig } from "@seshi/config";
 import type { CaptureAgent, CaptureHost } from "@seshi/kit";
 import type { NormalizedRecord } from "@seshi/model";
 import { canonicalJson } from "@seshi/model";
@@ -164,6 +165,24 @@ export async function realDeps(ctx: CommandContext, options: RealDepsOptions): P
         },
         host.platform,
       );
+    },
+    labelProblems: (entry) => {
+      const problems: string[] = [];
+      try {
+        const { config } = loadCliConfig({
+          env: { ...host.env },
+          home: host.home,
+          platform: host.platform,
+        });
+        problems.push(...cliLabelProblems(config.labels));
+      } catch {}
+      const folder = entry?.cwd ?? (entry ? undefined : cwd);
+      problems.push(
+        ...(placeOf(folder).repo?.config.labelProblems ?? []).map(
+          (p) => `.seshi/config.toml: ${p}`,
+        ),
+      );
+      return problems;
     },
     agent: (name) => agents.get(name),
     files: { stat: statFile, read: readFile },

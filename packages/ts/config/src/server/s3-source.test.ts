@@ -48,3 +48,15 @@ describe("a folder source (file://)", () => {
     expect(parse({ url: "file:///seshi/prod" }).success).toBe(true);
   });
 });
+
+describe("a source's labels", () => {
+  it("are strings under keys as labels are, at most 32", () => {
+    expect(parse({ labels: { "dosu.member": "alice", team: "evals" } }).success).toBe(true);
+    expect(issues({ labels: { Team: "x" } })[0]).toContain("sources.0.labels.Team");
+    expect(issues({ labels: { team: "" } })[0]).toContain("sources.0.labels.team");
+    expect(issues({ labels: { team: "x".repeat(513) } })[0]).toContain("sources.0.labels.team");
+    expect(issues({ labels: { team: { env: "X" } } })[0]).toContain("sources.0.labels.team");
+    const many = Object.fromEntries(Array.from({ length: 33 }, (_, i) => [`k${i}`, "v"]));
+    expect(issues({ labels: many })[0]).toContain("at most 32 labels");
+  });
+});

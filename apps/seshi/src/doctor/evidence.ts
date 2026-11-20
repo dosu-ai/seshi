@@ -178,6 +178,8 @@ export async function gatherEvidence(
         known: state.sessions[sessionKey(target.agent, entry.parent_session_id)] !== undefined,
       };
     }
+    const labelProblems = deps.labelProblems?.(entry) ?? [];
+    if (labelProblems.length > 0) evidence.machine.label_problems = labelProblems;
     try {
       evidence.decision = deps.judge(state, target.agent, entry);
     } catch (err) {

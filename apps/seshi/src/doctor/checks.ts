@@ -1037,6 +1037,40 @@ export function searchCheck(ev: SessionEvidence): CheckResult | undefined {
   return result(id, title, "ok", `deleted ${s.upload_id} is not found by ${term}`);
 }
 
+const labelText = (labels: Readonly<Record<string, string>>) =>
+  Object.entries(labels)
+    .sort(([a], [b]) => (a < b ? -1 : 1))
+    .map(([key, value]) => `${key}=${value}`)
+    .join(", ");
+
+/** The session's labels: those pinned on this machine, those the server keeps, and any the
+ * config gives that are left out. */
+export function labelsCheck(ev: SessionEvidence): CheckResult {
+  const id = "labels";
+  const title = "Labels";
+  const local = ev.local?.labels;
+  const stored = storedOf(ev)?.labels;
+  const problems = ev.machine.label_problems ?? [];
+  const detail: string[] = [];
+  if (local !== undefined) detail.push(`pinned here: ${labelText(local) || "none"}`);
+  if (stored !== undefined) detail.push(`on the server: ${labelText(stored)}`);
+  if (local && stored && labelText(local) !== labelText(stored)) {
+    detail.push(
+      "the server keeps the labels of the session's first upload that carried any; a replace may change them",
+    );
+  }
+  if (problems.length > 0) {
+    return result(id, title, "warn", `${plural(problems.length, "label")} left out`, {
+      detail: [...problems, ...detail],
+      hint: "fix [labels] in the CLI config (seshi config check --cli) or the repo's .seshi/config.toml",
+    });
+  }
+  const shown = stored ?? local;
+  return result(id, title, "ok", shown && labelText(shown) ? labelText(shown) : "none", {
+    detail,
+  });
+}
+
 export function runChecks(ev: SessionEvidence, deps: DoctorDeps): CheckResult[] {
   const local = localRecords(ev, deps);
   const results = [
@@ -1052,6 +1086,7 @@ export function runChecks(ev: SessionEvidence, deps: DoctorDeps): CheckResult[] 
     residueCheck(ev, deps),
     stalenessCheck(ev, deps),
     changesCheck(ev),
+    labelsCheck(ev),
   ];
   const search = searchCheck(ev);
   if (search) results.push(search);

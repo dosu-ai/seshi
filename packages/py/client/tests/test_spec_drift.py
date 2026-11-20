@@ -77,6 +77,7 @@ NOT_MODELLED: dict[str, str] = {
         ["Agent", "Owner", "Visibility", "Scope", "TokenKind", "Sha256", "RenderFormat", "RuleId"],
         "a string: a Literal or str in the models",
     ),
+    "Labels": "a map of strings: dict[str, str] in the models",
     "Error": "an error answer: raised as seshi.errors",
     "OffsetMismatch": "an error answer: raised as seshi.errors.OffsetMismatch",
     "Conflict": "an error answer: raised as seshi.errors.SessionConflict",

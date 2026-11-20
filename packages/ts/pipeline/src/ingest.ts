@@ -4,6 +4,7 @@ import {
   type DroppedPrefix,
   IngestRejected,
   type IngestResult,
+  type Labels,
   type LlmCall,
   localWriter,
   METADATA_SCHEMA,
@@ -131,6 +132,9 @@ export interface IngestMetadata {
   agent: string;
   project?: string;
   branch?: string;
+  /** Recorded on the trace; the session keeps the first it is given, unless this write
+   * replaces it. */
+  labels?: Labels;
   parent_session_id?: string;
   continuation?: { from_record: number; prefix_sha256: string };
   /** What normalized these records; recorded on the trace, and on the session unless
@@ -241,6 +245,9 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
   if (metadata.parent_session_id) traceMetadata.parent_session_id = metadata.parent_session_id;
   if (metadata.continuation) traceMetadata.continuation = metadata.continuation;
   if (metadata.normalizer) traceMetadata.normalizer = metadata.normalizer;
+  if (metadata.labels && Object.keys(metadata.labels).length > 0) {
+    traceMetadata.labels = metadata.labels;
+  }
 
   const writer = input.writer ?? localWriter(owner);
   const provenance: Provenance = input.provenance ?? {
@@ -319,6 +326,9 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
     );
     if (metadata.project ?? base.project) next.project = metadata.project ?? base.project;
     if (metadata.branch ?? base.branch) next.branch = metadata.branch ?? base.branch;
+    // Set by the first write that carries labels; a replace may change them.
+    const labels = traceMetadata.labels;
+    if (labels && (input.replace || base.labels === undefined)) next.labels = labels;
     const parent = metadata.parent_session_id ?? base.parent_session_id;
     if (parent) next.parent_session_id = parent;
     const active = latest(lastActivity(trace.records), input.replace ? undefined : base.active_at);

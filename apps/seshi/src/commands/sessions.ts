@@ -218,6 +218,9 @@ function showLines(
     ...row("visibility", m.visibility),
     ...row("project", m.project),
     ...row("branch", m.branch),
+    ...Object.entries(m.labels ?? {})
+      .sort(([a], [b]) => (a < b ? -1 : 1))
+      .flatMap(([key, value], i) => row(i === 0 ? "labels" : "", `${key}=${value}`)),
     ...row("subagent of", m.parent_session_id),
     ...row("active", m.active_at),
     ...row("created", m.created_at),

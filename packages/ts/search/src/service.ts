@@ -2,6 +2,8 @@ import { OwnerAliases } from "@seshi/auth";
 import {
   type AllChangesPage,
   type EventRole,
+  type Labels,
+  labelsProblems,
   type ReadChangesOptions,
   SEARCH_SORTS,
   type SearchRequest,
@@ -137,6 +139,7 @@ export function checkRequest(request: SearchRequest, aliases = new OwnerAliases(
   const agent = text(request.agent, "agent");
   const repo = text(request.repo, "repo");
   const branch = text(request.branch, "branch");
+  const labels = labelFilter(request.labels);
   const source = text(request.source, "source");
   return {
     q: request.q,
@@ -146,6 +149,7 @@ export function checkRequest(request: SearchRequest, aliases = new OwnerAliases(
       ...(agent !== undefined ? { agent } : {}),
       ...(repo !== undefined ? { repo } : {}),
       ...(branch !== undefined ? { branch } : {}),
+      ...(labels !== undefined ? { labels } : {}),
       ...(source !== undefined ? { source } : {}),
       ...(since !== undefined ? { since } : {}),
       ...(until !== undefined ? { until } : {}),
@@ -155,6 +159,14 @@ export function checkRequest(request: SearchRequest, aliases = new OwnerAliases(
       offset,
     },
   };
+}
+
+/** The label filter: each `key=value` a session must carry, keys and values as labels are. */
+function labelFilter(labels: SearchRequest["labels"]): Labels | undefined {
+  if (labels === undefined) return undefined;
+  const problems = labelsProblems(labels);
+  if (problems.length > 0) throw new SearchQueryError(`labels: ${problems.join("; ")}`);
+  return Object.keys(labels).length > 0 ? { ...labels } : undefined;
 }
 
 async function liveMetadata(
@@ -184,6 +196,7 @@ function resultOf(hit: BackendHit): SearchResult {
     ...(s.native_session_id !== undefined ? { native_session_id: s.native_session_id } : {}),
     ...(s.project !== undefined ? { project: s.project } : {}),
     ...(s.branch !== undefined ? { branch: s.branch } : {}),
+    ...(s.labels !== undefined ? { labels: s.labels } : {}),
     ...(s.source_id !== undefined ? { source_id: s.source_id } : {}),
     visibility: s.visibility,
     ...(started !== undefined ? { started_at: started } : {}),

@@ -48,6 +48,15 @@ export type {
   SpanPayload,
 } from "./generated/envelope";
 export { SCHEMA_ID as ENVELOPE_SCHEMA } from "./generated/envelope";
+export {
+  keepableLabels,
+  LABEL_KEY,
+  type Labels,
+  labelProblem,
+  labelsProblems,
+  MAX_LABEL_VALUE_LENGTH,
+  MAX_LABELS,
+} from "./labels";
 export { type ParseOptions, parseTrace } from "./parse";
 export { canonicalJson, PrefixHash, prefixSha256, ResumableSha256 } from "./prefix-hash";
 export type {

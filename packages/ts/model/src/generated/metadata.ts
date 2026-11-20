@@ -3,6 +3,7 @@
 import type {
   Claims,
   Continuation,
+  Labels,
   Normalizer,
   OwnerBasis,
   Provenance,
@@ -29,6 +30,8 @@ export interface SessionMetadata {
   source?: string;
   project?: string;
   branch?: string;
+  /** The session's labels: set by the first write that carries any; later writes with other labels leave them, a replace may change them. */
+  labels?: Labels;
   parent_session_id?: string;
   /** `stored`, or `redacted` once tombstoned: a redacted session is never stored again. */
   status: "stored" | "redacted";
@@ -127,6 +130,7 @@ export const JSON_SCHEMA = {
     source: { type: "string" },
     project: { type: "string" },
     branch: { type: "string" },
+    labels: { $ref: "common.schema.json#/$defs/Labels" },
     parent_session_id: { type: "string" },
     status: { enum: ["stored", "redacted"] },
     head: { $ref: "common.schema.json#/$defs/Sha256" },

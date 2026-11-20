@@ -90,7 +90,10 @@ export function headBranch(headText: string | undefined): string | undefined {
 }
 
 /** A repo's `.seshi/config.toml`: `capture = false` turns capture off for everyone who works in
- * the repo; `visibility = "owner"` keeps its sessions private (X5.10). A repo can only narrow:
+ * the repo; `visibility = "owner"` keeps its sessions private (X5.10); `[labels]` gives its
+ * sessions labels, plain strings only, which the CLI config's win over. A label that is not a
+ * string is left out (and said), never read from the environment: a cloned repo must not copy
+ * your variables into a label. A repo can only narrow:
  * `visibility = "org"` is accepted but never sent, so it cannot make anyone's sessions wider
  * than their token's default (the uploader's `details`). Unknown keys are left
  * for other tools; a value of the wrong type makes the file unreadable, which turns capture off
@@ -113,6 +116,21 @@ export function parseRepoConfig(text: string | undefined): RepoConfig {
       return { invalid: 'visibility must be "org" or "owner"' };
     }
     config.visibility = parsed.visibility;
+  }
+  if (parsed.labels !== undefined) {
+    const labels = parsed.labels;
+    if (typeof labels !== "object" || labels === null || Array.isArray(labels)) {
+      config.labelProblems = ["[labels] must be a table"];
+    } else {
+      const kept: Record<string, string> = {};
+      const problems: string[] = [];
+      for (const [key, value] of Object.entries(labels)) {
+        if (typeof value === "string") kept[key] = value;
+        else problems.push(`label '${key}' must be a string (a repo cannot read the environment)`);
+      }
+      if (Object.keys(kept).length > 0) config.labels = kept;
+      if (problems.length > 0) config.labelProblems = problems;
+    }
   }
   return config;
 }

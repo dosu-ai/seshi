@@ -336,6 +336,60 @@ class TestRequests:
             "until": "2026-11-14T00:00:00.000Z",
         }
 
+    def test_searches_by_labels_each_as_key_value(self) -> None:
+        results = {
+            "query": "q",
+            "total": 0,
+            "results": [],
+            "index": {"ready_at": "t", "sessions": 0},
+        }
+        fake = Fake({"GET /v1/search": (200, results)})
+        fake.client().search(
+            "flaky", labels={"dosu.project": "github.com/acme/billing", "team": "platform"}
+        )
+        assert fake.last.url.params.get_list("label") == [
+            "dosu.project=github.com/acme/billing",
+            "team=platform",
+        ]
+
+    def test_reads_labels_on_sessions_traces_and_search_results(self) -> None:
+        labels = {"dosu.project": "github.com/acme/billing"}
+        path = "/v1/sessions/claude-code/s"
+        hit = {
+            "owner": "bob",
+            "agent": "claude-code",
+            "session_id": "s",
+            "archive_id": SHA,
+            "labels": labels,
+            "visibility": "org",
+            "updated_at": "t",
+            "score": 1.0,
+            "hits": 1,
+            "matches": [],
+        }
+        results = {
+            "query": "q",
+            "total": 1,
+            "results": [hit],
+            "index": {"ready_at": "t", "sessions": 1},
+        }
+        fake = Fake(
+            {
+                f"GET {path}": (200, {**META, "labels": labels}),
+                f"GET {path}/trace": (200, {**TRACE, "metadata": {"labels": labels}}),
+                "GET /v1/search": (200, results),
+                "POST /v1/sessions": (201, STORED),
+            }
+        )
+        db = fake.client()
+        meta = db.get_session("claude-code", "s")
+        assert meta is not None and meta.labels == labels
+        trace = db.get_trace("claude-code", "s")
+        assert isinstance(trace, Trace) and trace.metadata.labels == labels
+        assert db.search("q").results[0].labels == labels
+        db.ingest(upload(labels=labels))
+        assert sent(fake.last)["labels"] == labels
+
 
 class TestRefusals:
     @pytest.mark.parametrize(

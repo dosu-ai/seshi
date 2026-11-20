@@ -86,6 +86,8 @@ export interface MachineEvidence {
   paused?: CaptureState["paused"];
   problems?: CaptureState["problems"];
   uploader?: CaptureState["uploader"] & { running: boolean };
+  /** Labels the CLI config, or the session's repo config, gives that are left out, and why. */
+  label_problems?: string[];
 }
 
 export interface SessionEvidence {

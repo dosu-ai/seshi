@@ -429,6 +429,27 @@ and your username. In serverless mode the uploader runs the pipeline itself and 
 bucket with the key `seshi init --serverless` stored; uploads can then wait for reasons of their
 own ([below](#uploads-that-wait)).
 
+### Labels
+
+A session's [labels](config.md#labels) are resolved once, when seshi first sees it, and kept in
+the capture state: every upload of it sends the same labels, even after the session moves to
+another folder or the environment changes.
+
+- **A session a hook saw** is resolved in that hook, which runs in the agent's environment, so
+  `{ env = "NAME" }` reads the agent's variables (the background uploader is a process of its
+  own and does not have them). The first hook that sees the session decides; later hooks
+  resolve nothing.
+- **A session only the sweep found** (no hook ran for it) is resolved by the uploader, with the
+  uploader's environment and the folder the session's transcript names. So is a session first
+  seen before labels existed, at its next upload.
+- **`seshi upload`** resolves a session it adds with the environment it runs in and the folder
+  the transcript names; a session the state already holds keeps its labels.
+
+The server keeps a session's labels from the first upload that carries any: a later upload with
+other labels (from another machine, say) does not change them, but a `replace` may
+([server.md](server.md#labels)). A label out of the limits is left out, never a reason to fail
+a hook; `capture.log` in the capture folder ([Files](#files)) and `seshi doctor` say why.
+
 ### Uploads that wait
 
 Some problems stop every upload until you act. The sessions stay on this machine, in the spool,
@@ -501,7 +522,8 @@ seshi upload --since 30d             # backfill the installed agents' recent ses
 retracted the same way. `--since` takes the sessions that started within that time: the installed
 agents' transcript files, and OpenCode's sessions from its own database (see
 [Installing](#installing)). If the background uploader is running it does the work, and this
-command waits for it.
+command waits for it. A session it adds gets its [labels](#labels) from the environment
+`seshi upload` runs in and the folder its transcript names.
 
 ```sh
 seshi capture resend --session 1f2e…   # one session (no id: the one this agent runs)

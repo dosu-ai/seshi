@@ -27,6 +27,7 @@ def _search_request(
     agent: str | None,
     repo: str | None,
     branch: str | None,
+    labels: Mapping[str, str] | None,
     source: str | None,
     since: str | datetime | None,
     until: str | datetime | None,
@@ -41,6 +42,7 @@ def _search_request(
         agent=agent,
         repo=repo,
         branch=branch,
+        label=[f"{key}={value}" for key, value in labels.items()] if labels else None,
         source=source,
         since=calls.rfc3339(since) if isinstance(since, datetime) else since,
         until=calls.rfc3339(until) if isinstance(until, datetime) else until,
@@ -365,6 +367,7 @@ class SeshiClient(_Base):
         agent: str | None = None,
         repo: str | None = None,
         branch: str | None = None,
+        labels: Mapping[str, str] | None = None,
         source: str | None = None,
         since: str | datetime | None = None,
         until: str | datetime | None = None,
@@ -377,7 +380,19 @@ class SeshiClient(_Base):
         query the server cannot run is `ServerError` 400 `bad_query`; 503 `index_building` while
         the index is first built; 404 `search_disabled` with search off."""
         request = _search_request(
-            q, owner, agent, repo, branch, source, since, until, sort, limit, matches, cursor
+            q,
+            owner,
+            agent,
+            repo,
+            branch,
+            labels,
+            source,
+            since,
+            until,
+            sort,
+            limit,
+            matches,
+            cursor,
         )
         return self._run(calls.search(request))
 
@@ -709,6 +724,7 @@ class AsyncSeshiClient(_Base):
         agent: str | None = None,
         repo: str | None = None,
         branch: str | None = None,
+        labels: Mapping[str, str] | None = None,
         source: str | None = None,
         since: str | datetime | None = None,
         until: str | datetime | None = None,
@@ -719,7 +735,19 @@ class AsyncSeshiClient(_Base):
     ) -> m.SearchResults:
         """`GET /v1/search` (see `SeshiClient.search`)."""
         request = _search_request(
-            q, owner, agent, repo, branch, source, since, until, sort, limit, matches, cursor
+            q,
+            owner,
+            agent,
+            repo,
+            branch,
+            labels,
+            source,
+            since,
+            until,
+            sort,
+            limit,
+            matches,
+            cursor,
         )
         return await self._run(calls.search(request))
 

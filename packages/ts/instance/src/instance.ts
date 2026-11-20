@@ -272,6 +272,7 @@ export class Instance {
       health: this.health,
       authorizer: ownershipAuthorizer(),
       visibility: parts.visibility ?? ((sourceId) => visibilityFor(this.config, sourceId)),
+      sourceLabels: (sourceId) => this.config.sources.find((s) => s.id === sourceId)?.labels,
       ...(parts.records ? { records: parts.records } : {}),
       ...(parts.createLayout !== undefined ? { createLayout: parts.createLayout } : {}),
     });
