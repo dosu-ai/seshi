@@ -16,7 +16,7 @@ import {
 } from "@seshi/model";
 import { appendLog } from "./files";
 import type { CapturePaths } from "./paths";
-import { placeOf } from "./place";
+import { headCommitAt, placeOf } from "./place";
 import {
   type Decision,
   decide,
@@ -644,6 +644,7 @@ export class Uploader {
           session.harness_version = entry.harness_version;
         }
         if (entry.kind === "capture" && entry.model) session.model = entry.model;
+        if (entry.kind === "capture" && entry.commit) session.commit = entry.commit;
         if (
           entry.kind === "paused" &&
           !turnedOnSince(session.toggle, session.toggled_at, entry.at)
@@ -1072,6 +1073,8 @@ export class Uploader {
 
   private async details(session: SessionState, agent: CaptureAgent, place: Place) {
     const repo = place.repo;
+    // What a hook recorded as the lines were written; a session only the sweep found has none.
+    const commit = repo ? (session.commit ?? headCommitAt(session.cwd)) : undefined;
     const folder = repo?.root ?? session.cwd;
     const claims: Claims = {};
     if (session.cwd) {
@@ -1098,7 +1101,7 @@ export class Uploader {
       ...(repo ? { project: repo.name } : folder ? { project: basename(folder) } : {}),
       ...(repo?.branch ? { branch: repo.branch } : {}),
       ...(repo?.remote ? { repo: repo.remote } : {}),
-      ...(repo?.commit ? { commit: repo.commit } : {}),
+      ...(commit ? { commit } : {}),
       ...(repo?.path ? { path_in_repo: repo.path } : {}),
       client: clientOf(this.host),
       ...(session.harness_version ? { harness_version: session.harness_version } : {}),

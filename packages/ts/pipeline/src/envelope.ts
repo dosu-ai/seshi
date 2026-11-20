@@ -102,7 +102,6 @@ export function checkEnvelope(envelope: Envelope): void {
   ) {
     refuse("retract_hash must be a sha256 in lowercase hex");
   }
-  checkScope(envelope);
   const payload = envelope.payload as LogPayload | SpanPayload | undefined;
   if (payload?.kind === "log") {
     if (typeof payload.text !== "string") refuse("payload.text must be a string");
@@ -121,30 +120,28 @@ export function checkEnvelope(envelope: Envelope): void {
 
 const MAX_SCOPE_LENGTH = 1024;
 
-/** The scope fields are labels, never secrets or a machine's paths: `repo` holds no user info
- * (`user:token@`), and `path_in_repo` is relative and stays inside the repository. */
-function checkScope(envelope: Envelope): void {
+/** The envelope's scope fields that are fit to keep. They are labels, never a reason to refuse
+ * a session: one that is not a short string is left out, as is a `repo` with user info or a
+ * scheme (it may carry a credential), a `commit` that is not a sha and a `path_in_repo` that is
+ * absolute or leaves the repository (a machine's path). */
+export function validScope(
+  envelope: Pick<Envelope, (typeof SCOPE_FIELDS)[number]>,
+): Partial<Record<(typeof SCOPE_FIELDS)[number], string>> {
+  const out: Partial<Record<(typeof SCOPE_FIELDS)[number], string>> = {};
   for (const key of SCOPE_FIELDS) {
-    const value = envelope[key];
-    if (value === undefined) continue;
-    if (typeof value !== "string" || value === "") refuse(`${key} must be a non-empty string`);
-    if (value.length > MAX_SCOPE_LENGTH) {
-      refuse(`${key} must be at most ${MAX_SCOPE_LENGTH} characters`);
+    const value: unknown = envelope[key];
+    if (typeof value !== "string" || value === "" || value.length > MAX_SCOPE_LENGTH) continue;
+    if (key === "repo" && /[@\s\\]|:\/\//.test(value)) continue;
+    if (key === "commit" && !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(value)) continue;
+    if (
+      key === "path_in_repo" &&
+      (/^(?:[\\/]|[A-Za-z]:[\\/])/.test(value) || value.split(/[\\/]/).includes(".."))
+    ) {
+      continue;
     }
+    out[key] = value;
   }
-  const { repo, commit, path_in_repo: path } = envelope;
-  if (repo !== undefined && (repo.includes("@") || repo.includes("://") || /\s/.test(repo))) {
-    refuse("repo must be a normalized remote (host/path), without credentials");
-  }
-  if (commit !== undefined && !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(commit)) {
-    refuse("commit must be a sha1 or sha256 in lowercase hex");
-  }
-  if (
-    path !== undefined &&
-    (/^(?:[\\/]|[A-Za-z]:)/.test(path) || path.split(/[\\/]/).some((part) => part === ".."))
-  ) {
-    refuse("path_in_repo must be relative to the repository's root");
-  }
+  return out;
 }
 
 export function uploadIdempotencyKey(sessionKey: string, offset: number, text: string): string {

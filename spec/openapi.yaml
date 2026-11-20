@@ -1027,8 +1027,8 @@ paths:
           description: |
             Only sessions of this repository: the session's `repo` (its normalized remote),
             exactly (ignoring case) or as its last path segments (`widget` and `acme/widget`
-            match `github.com/acme/widget`). A session without a `repo` is matched by its
-            `project`.
+            match `github.com/acme/widget`). A session without a `repo` (no remote) never
+            matches.
           schema: { type: string, maxLength: 512 }
         - name: branch
           in: query
@@ -1784,11 +1784,12 @@ components:
             The repository's origin remote (the first remote when there is no `origin`),
             normalized without credentials or port: `github.com/acme/widget`. The session keeps
             the first one it is sent, so a later remote change does not move it. A value with
-            user info (`@`) or a scheme is refused (`422 bad_envelope`).
+            user info (`@`) or a scheme is left out; the session is stored all the same, as for
+            any of these labels that is not fit to keep.
         commit:
           type: string
           pattern: "^([0-9a-f]{40}|[0-9a-f]{64})$"
-          description: The commit `HEAD` named when the upload was made; recorded on this upload's trace.
+          description: The commit `HEAD` named when the session's lines were written (seshi's hook records it); recorded on this upload's trace.
         path_in_repo:
           type: string
           maxLength: 1024

@@ -20,7 +20,7 @@ export interface SearchRequest {
   agent?: string;
   /** Only sessions of this repository: the session's `repo` (its normalized remote), exactly
    * or as its last path segments (`widget` and `acme/widget` match `github.com/acme/widget`). A
-   * session that has no `repo` is matched by its `project`. */
+   * session that has no `repo` (no remote) never matches. */
   repo?: string;
   branch?: string;
   /** Only sessions run by this harness: the meta record's `source` (`claude-code`, `cursor`). */

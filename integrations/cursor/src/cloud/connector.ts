@@ -23,6 +23,8 @@ import {
   type Connector,
   type ConnectorContext,
   type Cursor,
+  normalizeRemote,
+  repoLabel,
   secretValue,
   serviceEnvelopeIdentity,
 } from "@seshi/kit";
@@ -166,28 +168,13 @@ const after = (run: CursorRun, through: RunRef | undefined) =>
 
 const refOf = (run: CursorRun): RunRef => ({ at: run.createdAt ?? "", id: run.id });
 
-/** A repository URL as a session's `repo`, `host/owner/name`, as a laptop's uploader names its
- * origin remote: no scheme, user info or port, no `.git`. */
-export function normalizedRepo(url: string): string | undefined {
-  const text = url
-    .trim()
-    .replace(/^[a-z][a-z0-9+.-]*:\/\//i, "")
-    .replace(/^[^/]*@/, "")
-    .replace(/^([^/:]+):(?:\d+\/|(?!\/))/, "$1/")
-    .replace(/\/+$/, "")
-    .replace(/\.git$/i, "");
-  const slash = text.indexOf("/");
-  if (slash <= 0) return undefined;
-  return `${text.slice(0, slash).toLowerCase()}${text.slice(slash)}`;
-}
-
 /** The agent's repository, `host/owner/name`: the one it was started on, else the one its run's
  * branch is in. */
 export function repoOf(agent: CursorAgent, run?: CursorRun): string | undefined {
   const url =
     agent.repos?.find((r) => typeof r?.url === "string" && r.url !== "")?.url ??
     runBranches(run).find((b) => typeof b.repoUrl === "string" && b.repoUrl !== "")?.repoUrl;
-  return typeof url === "string" ? normalizedRepo(url) : undefined;
+  return typeof url === "string" ? repoLabel(normalizeRemote(url)) : undefined;
 }
 
 /** The session's `project`: the repository's name, as a laptop names it after its folder. */

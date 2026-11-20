@@ -8,6 +8,7 @@ import {
   gitRemotes,
   headBranch,
   headCommit,
+  headCommitAt,
   parseRepoConfig,
   pathInRepo,
   placeOf,
@@ -58,9 +59,14 @@ describe("the session's repository, commit and folder", () => {
       const normalized = normalizeRemote(remote);
       expect(normalized, remote).toBe("github.com/acme/app");
     }
-    // One no URL parser reads keeps no user info either.
-    expect(normalizeRemote("https://user:pa/ss@github.com/acme/app")).not.toContain("pa/ss");
-    expect(normalizeRemote("https://user:pa/ss@github.com/acme/app")).not.toContain("@");
+    // One no URL parser reads keeps no user info either, and an `@` in its path stays.
+    expect(normalizeRemote("https://user:pa/ss@github.com/acme/app")).toBe("github.com/acme/app");
+    expect(normalizeRemote("https://user:p/w@host.example/acme/app@v2")).toBe(
+      "host.example/acme/app@v2",
+    );
+    // A bare host/path, as Cursor names a repository; a numeric owner is not a port.
+    expect(normalizeRemote("GitHub.com/acme/app/")).toBe("github.com/acme/app");
+    expect(normalizeRemote("git@github.com:1234/app.git")).toBe("github.com/1234/app");
   });
 
   it("is origin's remote, else the first; none for a folder on this machine", () => {
@@ -98,10 +104,28 @@ describe("the session's repository, commit and folder", () => {
     write("app/.git/worktrees/wt/commondir", "../..\n");
     write("app/.git/worktrees/wt/HEAD", "ref: refs/heads/packed\n");
     write("wt/.git", `gitdir: ${join(git, "worktrees/wt")}\n`);
-    expect(placeOf(join(dir, "wt")).repo?.commit).toBe(SHA_B);
+    expect(headCommitAt(join(dir, "wt"))).toBe(SHA_B);
     write("app/.git/worktrees/wt/HEAD", `${SHA_C}\n`);
-    expect(placeOf(join(dir, "wt")).repo?.commit).toBe(SHA_C);
-    expect(placeOf(join(dir, "app")).repo?.commit).toBe(SHA_A);
+    expect(headCommitAt(join(dir, "wt"))).toBe(SHA_C);
+    expect(headCommitAt(join(dir, "app"))).toBe(SHA_A);
+    expect(headCommitAt(dir)).toBeUndefined();
+    // A rule decision never reads refs: placeOf names no commit.
+    expect(placeOf(join(dir, "app")).repo).not.toHaveProperty("commit");
+  });
+
+  it("follows refs that name refs, up to the last step", () => {
+    const git = join(dir, "app/.git");
+    write("app/.git/refs/heads/r1", "ref: refs/heads/r2\n");
+    write("app/.git/refs/heads/r2", "ref: refs/heads/r3\n");
+    write("app/.git/refs/heads/r3", "ref: refs/heads/r4\n");
+    write("app/.git/refs/heads/r4", `${SHA_A}\n`);
+    expect(headCommit(git, git, "ref: refs/heads/r1\n")).toBe(SHA_A);
+    // HEAD → r0 → r1 → r2 → r3 → r4: the sha is the fifth ref read, the last allowed.
+    write("app/.git/refs/heads/r0", "ref: refs/heads/r1\n");
+    expect(headCommit(git, git, "ref: refs/heads/r0\n")).toBe(SHA_A);
+    // One more hop is past the limit.
+    write("app/.git/refs/heads/rx", "ref: refs/heads/r0\n");
+    expect(headCommit(git, git, "ref: refs/heads/rx\n")).toBeUndefined();
   });
 
   it("is the folder relative to the repository's root: none at the root or outside it", () => {

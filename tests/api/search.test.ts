@@ -79,7 +79,7 @@ async function seed(): Promise<void> {
     agent: "trajectory",
     session_id: "pay",
     transcript: log("deploy the payments service"),
-    project: "github.com/acme/payments",
+    repo: "github.com/acme/payments",
     branch: "main",
   });
   await alice.ingest({
@@ -92,7 +92,7 @@ async function seed(): Promise<void> {
     agent: "trajectory",
     session_id: "docs",
     transcript: log("deploy the docs site"),
-    project: "github.com/acme/docs",
+    repo: "github.com/acme/docs",
   });
   // Written under alice's old owner id, which [auth.owner_aliases] folds into hers (X5.8).
   await new StoreSessionDB({ store, owner: "old-alice", formats: FORMATS }).ingest({
@@ -204,15 +204,16 @@ describe("GET /v1/search (F10)", () => {
       path_in_repo: "services/api",
       client: "seshi/0.15.0 linux-x64",
     });
-    // A repo with credentials never reaches the store.
-    await expect(
-      alice.ingest({
-        agent: "trajectory",
-        session_id: "leak",
-        transcript: log("deploy the leak"),
-        repo: "user:ghp_token@github.com/acme/api",
-      }),
-    ).rejects.toMatchObject({ code: "bad_envelope" });
+    // A repo with credentials never reaches the store; the session does.
+    await alice.ingest({
+      agent: "trajectory",
+      session_id: "leak",
+      transcript: log("deploy the leak"),
+      repo: "user:ghp_token@github.com/acme/api",
+    });
+    const leak = await admin.getSession("trajectory", "leak", { owner: "alice" });
+    expect(leak?.status).toBe("stored");
+    expect(leak).not.toHaveProperty("repo");
   });
 
   it("points each match at its trace and event, with a snippet", async () => {

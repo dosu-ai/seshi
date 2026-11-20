@@ -883,8 +883,7 @@ class SearchRequest(Request):
     owner: str | None = None
     agent: str | None = None
     repo: str | None = None
-    """The session's `repo` (its normalized remote), exactly or as its last path segments; its
-    `project` for a session without one."""
+    """The session's `repo` (its normalized remote), exactly or as its last path segments."""
     branch: str | None = None
     harness: str | None = None
     """The meta record's `source` (`claude-code`, `codex`, `cursor`)."""

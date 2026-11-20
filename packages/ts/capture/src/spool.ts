@@ -20,6 +20,9 @@ export type SpoolEntry =
       cwd?: string;
       parent_session_id?: string;
       final?: boolean;
+      /** The commit `HEAD` named when the hook fired: what the session's lines up to here were
+       * written at. */
+      commit?: string;
       harness_version?: string;
       model?: string;
     }

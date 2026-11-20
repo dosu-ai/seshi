@@ -1,5 +1,6 @@
 import { realpathSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { repoLabel } from "@seshi/kit";
 import { GIT_CONFIG_MAX_BYTES, REPO_FILE_MAX_BYTES, readUntrustedRepoFile } from "./files";
 import { normalizeRemote, type Place, type RepoConfig } from "./rules";
 
@@ -90,15 +91,11 @@ export function gitRemotes(configText: string): string[] {
   return [...new Set(namedRemotes(configText).map((r) => r.url))];
 }
 
-/** The repository's remote, as the session's `repo`: `origin`, else the first remote. None when
- * that remote is a folder on this machine (`/srv/git/app`, `../app`, `file:///…`): a label, not a
- * machine's path. */
+/** The repository's remote, as the session's `repo`: `origin`, else the first remote; none when
+ * that remote is a folder on this machine (`repoLabel`). */
 export function repoRemote(configText: string): string | undefined {
   const remotes = namedRemotes(configText);
-  const url = (remotes.find((r) => r.name === "origin") ?? remotes[0])?.url;
-  if (url === undefined || url === "" || /^[./~\\]|^[A-Za-z]:|^file:/i.test(url)) return undefined;
-  if (!url.includes("/") || url.includes("@") || url.includes("://")) return undefined;
-  return url;
+  return repoLabel((remotes.find((r) => r.name === "origin") ?? remotes[0])?.url);
 }
 
 const SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
@@ -126,7 +123,23 @@ export function headCommit(
     }
     text ??= packedRef(commonDir, ref);
   }
-  return undefined;
+  return text !== undefined && SHA.test(text) ? text : undefined;
+}
+
+/** The commit `HEAD` names in the repository `cwd` is in; none outside one, or when git's files
+ * cannot be trusted. Not part of `placeOf`, which every rule decision calls: it may read
+ * `packed-refs`, so only the hook that captures a session and the uploader read it. */
+export function headCommitAt(cwd: string | undefined): string | undefined {
+  if (cwd === undefined || cwd === "") return undefined;
+  let folder = cwd;
+  try {
+    folder = realpathSync(cwd);
+  } catch {}
+  const repo = findRepo(folder);
+  if (!repo || repo.invalid !== undefined) return undefined;
+  const head = repoFile(join(repo.gitDir, "HEAD"), "git's HEAD");
+  if (head.invalid !== undefined) return undefined;
+  return headCommit(repo.gitDir, repo.commonDir, head.text);
 }
 
 function packedRef(commonDir: string, ref: string): string | undefined {
@@ -209,8 +222,6 @@ export function placeOf(cwd: string | undefined): Place {
     const invalid = config.invalid ?? head.invalid ?? git.invalid;
     const branch = headBranch(head.text);
     const remote = repoRemote(git.text ?? "");
-    const commit =
-      head.invalid === undefined ? headCommit(repo.gitDir, repo.commonDir, head.text) : undefined;
     const path = pathInRepo(repo.root, place.real ?? cwd);
     place.repo = {
       root: repo.root,
@@ -219,7 +230,6 @@ export function placeOf(cwd: string | undefined): Place {
       remotes: gitRemotes(git.text ?? ""),
       ...(branch ? { branch } : {}),
       ...(remote ? { remote } : {}),
-      ...(commit ? { commit } : {}),
       ...(path ? { path } : {}),
     };
   }

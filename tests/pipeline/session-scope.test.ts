@@ -6,7 +6,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type CaptureAgent, hookHandler } from "@seshi/kit";
-import { SessionRejected, type SessionUpload } from "@seshi/model";
+import type { SessionUpload } from "@seshi/model";
 import { getSession, getTrace, storeSession } from "@seshi/pipeline";
 import { archiveId, FsStore } from "@seshi/store";
 import { buildFormats, INTEGRATIONS } from "seshi/integrations";
@@ -88,24 +88,39 @@ describe("where a session ran", () => {
     expect(trace?.metadata.commit).toBe("f".repeat(40));
   });
 
-  it("refuses a repo with credentials, and a folder that is not inside the repository", async () => {
-    const base = {
-      agent: "claude-code",
-      session_id: "s1",
-      transcript: transcript("claude-basic.claude-code.jsonl"),
-    };
-    for (const bad of [
-      { repo: "user:token@github.com/acme/app" },
-      { repo: "https://github.com/acme/app" },
-      { path_in_repo: "/Users/me/app" },
-      { path_in_repo: "../other" },
-      { commit: "HEAD" },
-    ]) {
-      await expect(store_({ ...base, ...bad }), JSON.stringify(bad)).rejects.toBeInstanceOf(
-        SessionRejected,
-      );
+  it("leaves out a label that is not fit to keep, and stores the session all the same", async () => {
+    const log = transcript("claude-basic.claude-code.jsonl");
+    const cases: [Partial<SessionUpload>, string][] = [
+      [{ repo: "user:token@github.com/acme/app" }, "repo"],
+      [{ repo: "https://github.com/acme/app" }, "repo"],
+      [{ path_in_repo: "/Users/me/app" }, "path_in_repo"],
+      [{ path_in_repo: "C:\\Users\\me\\app" }, "path_in_repo"],
+      [{ path_in_repo: "../other" }, "path_in_repo"],
+      [{ commit: "HEAD" }, "commit"],
+      [{ harness_version: "x".repeat(1025) }, "agent_version"],
+    ];
+    for (const [i, [bad, field]] of cases.entries()) {
+      const result = await store_({
+        agent: "claude-code",
+        session_id: `s${i}`,
+        transcript: log,
+        ...bad,
+      });
+      expect(result.status, JSON.stringify(bad)).toBe("stored");
+      const { session, trace } = await headOf("claude-code", `s${i}`);
+      expect(session).not.toHaveProperty("repo");
+      expect(JSON.stringify(session)).not.toContain("token@");
+      if (field === "agent_version") expect(trace?.metadata.agent_version).toBe("2.1.326");
+      else expect(trace?.metadata).not.toHaveProperty(field);
     }
-    expect((await headOf("claude-code", "s1")).session).toBeNull();
+    // A folder whose name has a colon is still a folder in the repository.
+    await store_({
+      agent: "claude-code",
+      session_id: "colon",
+      transcript: log,
+      path_in_repo: "a:b/x",
+    });
+    expect((await headOf("claude-code", "colon")).trace?.metadata.path_in_repo).toBe("a:b/x");
   });
 });
 
@@ -123,6 +138,24 @@ describe("the harness's version and the models", () => {
       agent_version: "2.1.326",
       models: ["claude-x"],
     });
+  });
+
+  it("are the replacing trace's after a replace, none when it names no version", async () => {
+    const log = transcript("claude-basic.claude-code.jsonl");
+    await store_({ agent: "claude-code", session_id: "s1", transcript: log });
+    expect((await headOf("claude-code", "s1")).session?.agent_version).toBe("2.1.326");
+    const unversioned = log.replaceAll('"version":"2.1.326",', "").replace("auth", "the auth");
+    const result = await store_({
+      agent: "claude-code",
+      session_id: "s1",
+      transcript: unversioned,
+      replace: true,
+    });
+    expect(result.status).toBe("stored");
+    const { session } = await headOf("claude-code", "s1");
+    expect(session?.traces).toHaveLength(1);
+    expect(session).not.toHaveProperty("agent_version");
+    expect(session?.models).toEqual(["claude-x"]);
   });
 
   it("are read from a Codex log, listing every model the session used", async () => {

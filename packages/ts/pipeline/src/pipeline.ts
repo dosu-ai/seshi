@@ -53,6 +53,7 @@ import {
   isLogEnvelope,
   type LogEnvelope,
   type SpanEnvelope,
+  validScope,
 } from "./envelope";
 import { type FilterSetting, filterRulesFor, isFiltered } from "./filter";
 import {
@@ -226,17 +227,12 @@ function metaOf(records: readonly NormalizedRecord[]): NormalizedRecord | undefi
 function scopeOf(
   envelope: Envelope,
 ): Pick<IngestMetadata, "repo" | "commit" | "path_in_repo" | "client" | "hints"> {
+  const { harness_version, model, ...scope } = validScope(envelope);
   const hints = {
-    ...(envelope.harness_version !== undefined ? { agent_version: envelope.harness_version } : {}),
-    ...(envelope.model !== undefined ? { model: envelope.model } : {}),
+    ...(harness_version !== undefined ? { agent_version: harness_version } : {}),
+    ...(model !== undefined ? { model } : {}),
   };
-  return {
-    ...(envelope.repo !== undefined ? { repo: envelope.repo } : {}),
-    ...(envelope.commit !== undefined ? { commit: envelope.commit } : {}),
-    ...(envelope.path_in_repo !== undefined ? { path_in_repo: envelope.path_in_repo } : {}),
-    ...(envelope.client !== undefined ? { client: envelope.client } : {}),
-    ...(Object.keys(hints).length > 0 ? { hints } : {}),
-  };
+  return { ...scope, ...(Object.keys(hints).length > 0 ? { hints } : {}) };
 }
 
 function stubMeta(envelope: Envelope): NormalizedRecord {

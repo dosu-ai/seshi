@@ -59,12 +59,12 @@ beforeEach(async () => {
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-async function write(owner: string, id: string, prompt: string, project?: string) {
+async function write(owner: string, id: string, prompt: string, repo?: string) {
   await new StoreSessionDB({ store: new FsStore(bucket), owner, formats }).ingest({
     agent: "trajectory",
     session_id: id,
     transcript: log(prompt),
-    ...(project ? { project } : {}),
+    ...(repo ? { repo } : {}),
   });
 }
 

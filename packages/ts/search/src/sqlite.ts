@@ -374,11 +374,7 @@ export class SqliteIndex implements IndexStore {
       params.push(q.agent, q.agent);
     }
     if (q.repo !== undefined) {
-      // A session written before `repo` was recorded is matched by its `project`, which held the
-      // repository's URL for Cursor Cloud and its name for a laptop.
-      where.push(
-        "(coalesce(s.repo, s.project) = ? COLLATE NOCASE OR coalesce(s.repo, s.project) LIKE ? ESCAPE '\\')",
-      );
+      where.push("(s.repo = ? COLLATE NOCASE OR s.repo LIKE ? ESCAPE '\\')");
       params.push(q.repo, `%/${likeLiteral(q.repo)}`);
     }
     if (q.branch !== undefined) {

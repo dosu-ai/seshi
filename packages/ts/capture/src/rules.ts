@@ -1,4 +1,7 @@
+import { normalizeRemote } from "@seshi/kit";
 import type { Toggle } from "./state";
+
+export { normalizeRemote };
 
 export interface PathRule {
   /** An absolute folder (`~` already expanded). */
@@ -54,8 +57,6 @@ export interface Place {
     /** Its `origin` remote, else its first, as `host/path`; none when that remote is a local
      * folder. What the uploader sends as the session's `repo`. */
     remote?: string;
-    /** The commit `HEAD` names. */
-    commit?: string;
     /** The working folder relative to the root (`packages/api`, `/`-separated); none at the
      * root. */
     path?: string;
@@ -122,42 +123,6 @@ export interface DecideInput {
   /** The other folders the session was seen in: a shared rule that turns any of them off turns
    * the session off (a session that left an excluded repo carries what it did there). */
   seen?: Place[];
-}
-
-/** `remote` (`https://github.com/acme/app.git`, `git@github.com:acme/app`, `ssh://…`) as
- * `host/path`: lowercase host, no user, no port, no `.git`, no trailing slash. */
-export function normalizeRemote(remote: string): string {
-  let text = remote.trim();
-  const scp = /^(?:[^@/]+@)?([^:/]+):(?!\/)(.+)$/.exec(text);
-  if (scp && !/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) {
-    text = `${(scp[1] as string).toLowerCase()}/${scp[2]}`;
-  } else {
-    const url = tryParseUrl(text);
-    if (url) text = `${url.hostname.toLowerCase()}${url.pathname}`;
-    else text = withoutCredentials(text);
-  }
-  return text.replace(/\/+$/, "").replace(/\.git$/i, "");
-}
-
-/** A remote no URL parser would read (`https://user:pa/ss@host/x`), without its scheme and
- * whatever user info and port precede its host: a remote never carries a credential on. */
-function withoutCredentials(text: string): string {
-  const scheme = /^[a-z][a-z0-9+.-]*:\/\/(.*)$/i.exec(text);
-  if (!scheme) return text;
-  const rest = scheme[1] as string;
-  const at = rest.lastIndexOf("@");
-  const hostAndPath = at === -1 ? rest : rest.slice(at + 1);
-  const slash = hostAndPath.indexOf("/");
-  const host = (slash === -1 ? hostAndPath : hostAndPath.slice(0, slash)).replace(/:\d*$/, "");
-  return `${host.toLowerCase()}${slash === -1 ? "" : hostAndPath.slice(slash)}`;
-}
-
-function tryParseUrl(text: string): URL | undefined {
-  try {
-    return new URL(text);
-  } catch {
-    return undefined;
-  }
 }
 
 /** A glob as a regular expression's source: `*` stands for one path segment (or part of one),

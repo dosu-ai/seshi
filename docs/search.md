@@ -30,7 +30,7 @@ light background), plain with `NO_COLOR`, `--no-color` or `--json`. `seshi sessi
 |---|---|
 | `--owner <id>` | Only this owner's sessions |
 | `--agent <name>` | Only sessions of this format or agent (`claude-code`, `codex`, …) |
-| `--repo <name>` | Only this repository (the session's `repo`, its normalized remote): exactly, or its last path segments (`widget`, `acme/widget`); a session without a `repo` is matched by its `project` |
+| `--repo <name>` | Only this repository (the session's `repo`, its normalized remote): exactly, or its last path segments (`widget`, `acme/widget`) |
 | `--branch <name>`, `--source <id>` | Only this branch; only sessions written through this source (`upload`, `datadog-prod`) |
 | `--harness <name>`, `--harness-version <v>` | Only sessions run by this harness (the meta record's `source`: `claude-code`, `codex`, `cursor`); only those whose latest trace this version of it wrote |
 | `--model <name>` | Only sessions that used this model, among every model they used |

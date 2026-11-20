@@ -25,6 +25,9 @@ export interface SessionState {
   /** What the agent's hooks last said of its version and model (Cursor's), sent as hints. */
   harness_version?: string;
   model?: string;
+  /** The commit `HEAD` named when a hook last captured the session, sent with its uploads, so
+   * an upload that waited (offline, a retry) names the commit its lines were written at. */
+  commit?: string;
   first_seen: string;
   last_seen?: string;
   /** The agent said the session ended. */

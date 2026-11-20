@@ -354,6 +354,28 @@ describe("the upload protocol", () => {
     expect(s3?.client).toMatch(/^seshi\//);
   });
 
+  it("names the commit the hook saw, not the one HEAD moved to before the upload", async () => {
+    const repo = join(dir, "app");
+    const later = "f".repeat(40);
+    mkdirSync(join(repo, ".git"), { recursive: true });
+    writeFileSync(join(repo, ".git", "HEAD"), `${later}\n`);
+    writeFileSync(transcript(), line("one") + line("two"));
+    appendSpool(paths, {
+      v: 1,
+      kind: "capture",
+      at: clock.toISOString(),
+      agent: "fake",
+      event: "Stop",
+      session_id: "s1",
+      transcript_path: transcript(),
+      cwd: repo,
+      commit: "a".repeat(40),
+    });
+    await uploader().pass();
+    expect(server.uploads[0]?.commit).toBe("a".repeat(40));
+    expect(session().commit).toBe("a".repeat(40));
+  });
+
   it("sends the whole log first, then only new complete lines at the server's offset", async () => {
     writeFileSync(transcript(), line("one") + line("two"));
     hooked();

@@ -465,12 +465,15 @@ Codex's `session_meta`), else the client's `branch`.
 
 **Where and with what it ran.** seshi's uploader also sends `repo` (the origin remote, else the
 first, normalized without credentials or port: `github.com/acme/widget`), `commit` (the sha
-`HEAD` names), `path_in_repo` (the working folder relative to the repository's root, absent at
+`HEAD` named when the agent's hook last fired, so an upload that waited names the commit its
+lines were written at), `path_in_repo` (the working folder relative to the repository's root, absent at
 the root) and `client` (`seshi/0.15.0 darwin-arm64`), all read from `.git` without running git.
 The session keeps the first `repo` it is sent, so a remote renamed mid-session does not move it;
 `commit`, `path_in_repo` and `client` go on each upload's trace metadata. `project` stays the
-client's own label (the repository's folder name). A `repo` with user info, an absolute
-`path_in_repo` or one with `..` is refused (`422 bad_envelope`). For a log that names no
+client's own label (the repository's folder name). These are labels, never a reason to refuse
+a session: one that is not fit to keep is left out and the session stored all the same (a `repo`
+with user info or a scheme, an absolute `path_in_repo` or one with `..`, a `commit` that is not
+a sha, anything over 1,024 characters). For a log that names no
 harness version or model (Cursor's), the uploader sends what Cursor's hooks said as
 `harness_version` and `model`: the server uses them only where the log has none. The session's
 metadata then carries `agent_version` (the latest trace's) and `models` (every model its LLM

@@ -344,7 +344,9 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
     if (metadata.branch ?? base.branch) next.branch = metadata.branch ?? base.branch;
     const repo = base.repo ?? metadata.repo;
     if (repo) next.repo = repo;
+    // The latest trace's: a replace by a trace that names none leaves none.
     if (trace.metadata.agent_version) next.agent_version = trace.metadata.agent_version;
+    else if (input.replace) delete next.agent_version;
     const models = modelsOf(input.replace ? undefined : base.models, trace);
     if (models.length > 0) next.models = models;
     else delete next.models;
