@@ -7,6 +7,9 @@
   "exports": {
     ".": {
       "bun": "./src/index.ts"
+    },
+    "./exclude": {
+      "bun": "./src/exclude.ts"
     }
   },
   "dependencies": {

@@ -1,0 +1,203 @@
+/** Repositories and the org's exclude list (`capture.exclude`), shared by every path that names a
+ * repository: a laptop's git remotes, a Cursor Cloud agent's repository URL, a session's `repo`.
+ * One normalizer and one matcher, so an entry matches the same repository whichever way it
+ * arrived. */
+
+/** `remote` (`https://github.com/acme/app.git`, `git@github.com:acme/app`, `ssh://…`) as
+ * `host/path`: lowercase host, no scheme, no user or credentials, no port, no `.git`, no trailing
+ * slash. The path keeps its case; `repoKey` is the form to compare. */
+export function normalizeRemote(remote: string): string {
+  let text = remote.trim();
+  const scp = /^(?:[^@/]+@)?([^:/]+):(?!\/)(.+)$/.exec(text);
+  if (scp && !/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) {
+    text = `${(scp[1] as string).toLowerCase()}/${scp[2]}`;
+  } else {
+    const url = tryParseUrl(text);
+    if (url) text = `${url.hostname.toLowerCase()}${url.pathname}`;
+    else text = withoutCredentials(text);
+  }
+  return text.replace(/\/+$/, "").replace(/\.git$/i, "");
+}
+
+/** A remote no URL parser reads (`https://user:pa/ss@host/x`), without its scheme and whatever
+ * user info and port precede its host: a remote never carries a credential on. */
+function withoutCredentials(text: string): string {
+  const scheme = /^[a-z][a-z0-9+.-]*:\/\/(.*)$/i.exec(text);
+  if (!scheme) return text;
+  const rest = scheme[1] as string;
+  // The last `@`: a password may hold a `/` (which is why no URL parser read it).
+  const at = rest.lastIndexOf("@");
+  const hostAndPath = at === -1 ? rest : rest.slice(at + 1);
+  const slash = hostAndPath.indexOf("/");
+  const host = (slash === -1 ? hostAndPath : hostAndPath.slice(0, slash)).replace(/:\d*$/, "");
+  return `${host.toLowerCase()}${slash === -1 ? "" : hostAndPath.slice(slash)}`;
+}
+
+function tryParseUrl(text: string): URL | undefined {
+  try {
+    return new URL(text);
+  } catch {
+    return undefined;
+  }
+}
+
+/** A repository as compared: `normalizeRemote`, then lowercase (hosts and the forges seshi meets
+ * name repositories without regard to case). */
+export function repoKey(remote: string): string {
+  return normalizeRemote(remote).toLowerCase();
+}
+
+/** A glob as a regular expression's source: `*` stands for one path segment (or part of one),
+ * `**` for any number of segments, none included (`a/**` is `a` and everything under it,
+ * `a/**` + `/b` is `a/b` too); everything else is literal. */
+export function globSource(glob: string): string {
+  let out = "";
+  for (let i = 0; i < glob.length; ) {
+    if (glob.startsWith("**", i)) {
+      const segment = i === 0 || glob[i - 1] === "/";
+      if (segment && glob[i + 2] === "/") {
+        out += "(?:.*/)?";
+        i += 3;
+      } else if (segment && i > 0 && i + 2 === glob.length) {
+        out = `${out.slice(0, -1)}(?:/.*)?`;
+        i += 2;
+      } else {
+        out += ".*";
+        i += 2;
+      }
+    } else if (glob[i] === "*") {
+      out += "[^/]*";
+      i += 1;
+    } else {
+      out += (glob[i] as string).replace(/[.+?^${}()|[\]\\]/g, "\\$&");
+      i += 1;
+    }
+  }
+  return out;
+}
+
+/** Compiled once: hooks and the status line judge often, with the same few patterns. */
+const compiled = new Map<string, RegExp>();
+export function cachedRegExp(source: string, flags = ""): RegExp {
+  const key = `${flags}:${source}`;
+  let re = compiled.get(key);
+  if (!re) {
+    re = new RegExp(source, flags);
+    compiled.set(key, re);
+  }
+  return re;
+}
+
+/** Whether a normalized remote matches a normalized pattern; `under` lets a pattern with no
+ * wildcard match everything under it too. */
+function patternMatches(remote: string, target: string, under: boolean): boolean {
+  if (!target.includes("*")) return remote === target || (under && remote.startsWith(`${target}/`));
+  return cachedRegExp(`^${globSource(target)}$`).test(remote);
+}
+
+/** Whether a normalized remote matches a pattern: `*` stands for one path segment (or part of
+ * one), `**` for any number; a pattern with no wildcard also matches everything under it. */
+export function remoteMatches(remote: string, pattern: string): boolean {
+  return patternMatches(remote, normalizeRemote(pattern), true);
+}
+
+/** A repository entry of `capture.exclude` as a pattern: lowercase, normalized as a remote is. A
+ * number after the host is a port (`git.acme.com:8443/acme/app`), not scp's `host:path`. */
+export function excludePattern(entry: string): string {
+  return normalizeRemote(
+    entry
+      .trim()
+      .toLowerCase()
+      .replace(/^([^/@:]+):\d+\//, "$1/"),
+  );
+}
+
+/** Whether a normalized remote is in a repository entry of `capture.exclude` (`pattern`, from
+ * `excludePattern`), ignoring case. The entry names the remote's last segments, so `acme/app`
+ * matches it on any host and `github.com/acme/app` only on that one; or the whole remote, where
+ * one with no wildcard also covers everything under it, as in `capture.remotes`
+ * (`github.com/acme`: every repo of acme there). */
+export function repoExcluded(remote: string, pattern: string): boolean {
+  const target = remote.toLowerCase();
+  if (patternMatches(target, pattern, true)) return true;
+  const segments = target.split("/");
+  return segments.some(
+    (_, i) => i > 0 && patternMatches(segments.slice(i).join("/"), pattern, false),
+  );
+}
+
+/** One entry of `capture.exclude` as written, read: a repository (`repo`, the pattern) or a
+ * folder (`folder`, as written: `~` is the laptop's to expand). */
+export type ExcludeEntry =
+  | { entry: string; repo: string; folder?: undefined }
+  | { entry: string; folder: string; repo?: undefined };
+
+/** An entry of `capture.exclude`, or undefined for a blank one or a `#` comment. A folder starts
+ * with `/`, `~`, a drive (`C:\`) or a network share (`\\server`); anything else names a
+ * repository. `entry` is the entry as written, control characters replaced, for messages. */
+export function readExcludeEntry(raw: string): ExcludeEntry | undefined {
+  const written = raw.trim();
+  if (written === "" || written.startsWith("#")) return undefined;
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: matching control characters
+  const entry = written.replace(/[\x00-\x1f\x7f-\x9f]/g, "\uFFFD");
+  if (isFolderEntry(written)) return { entry, folder: written };
+  return { entry, repo: excludePattern(written) };
+}
+
+export function isFolderEntry(written: string): boolean {
+  return /^(?:[/~]|[a-z]:[\\/]|\\\\)/i.test(written.trim());
+}
+
+/** What is wrong with an entry of `capture.exclude`, if anything: what an admin wrote by mistake
+ * (a URL with a credential in it, a space, a control character), which would never match. */
+export function excludeEntryProblem(raw: string): string | undefined {
+  const written = raw.trim();
+  if (written === "" || written.startsWith("#")) return undefined;
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: matching control characters
+  if (/[\x00-\x1f\x7f-\x9f]/.test(written)) return "has a control character";
+  if (isFolderEntry(written)) return undefined;
+  if (/\s/.test(written)) return "a repository has no spaces";
+  if (/^[a-z][a-z0-9+.-]*:\/\/[^/]*@/i.test(written) || /^[^/@]+:[^/@]*@/.test(written)) {
+    return "names a credential; write the repository as owner/name or host/owner/name";
+  }
+  if (excludePattern(written) === "") return "names no repository";
+  return undefined;
+}
+
+/** The repository entries of an exclude list, read once: what a server matches sessions and
+ * Cursor Cloud agents against. Folder entries are a laptop's: a server knows no folders. */
+export interface RepoExcludes {
+  repos: readonly { entry: string; pattern: string }[];
+}
+
+export function repoExcludes(entries: readonly string[]): RepoExcludes {
+  const repos: { entry: string; pattern: string }[] = [];
+  for (const raw of entries) {
+    const read = readExcludeEntry(raw);
+    if (read?.repo !== undefined) repos.push({ entry: read.entry, pattern: read.repo });
+  }
+  return { repos };
+}
+
+/** The entry that excludes a session in any of `repos` (URLs or remotes, in any form: each is
+ * normalized), if one does. */
+export function excludingEntry(
+  excludes: RepoExcludes,
+  repos: readonly string[],
+): string | undefined {
+  const keys = repos.filter((r) => r.trim() !== "").map(repoKey);
+  for (const { entry, pattern } of excludes.repos) {
+    if (keys.some((key) => repoExcluded(key, pattern))) return entry;
+  }
+  return undefined;
+}
+
+/** `GET /v1/capture/rules`: the org's capture rules, which a laptop applies before upload. */
+export const CAPTURE_RULES_SCHEMA = "seshi/capture-rules/1";
+
+export interface CaptureRulesDocument {
+  schema: typeof CAPTURE_RULES_SCHEMA;
+  /** The server's `[capture] exclude`, every file's entries, as written (blanks and comments
+   * left out). */
+  exclude: string[];
+}

@@ -17,6 +17,8 @@ import {
   type LayoutMarker,
   localWriter,
   type OwnerBasis,
+  type RepoExcludes,
+  repoExcludes,
   type StorageView,
   VERSION,
   type Visibility,
@@ -207,6 +209,27 @@ export class Instance {
     return this.rules;
   }
 
+  /** The org's exclude list as the running config has it (`[capture] exclude`, every file's
+   * entries; a reload changes it at once), as written, blanks and comments left out: what
+   * `GET /v1/capture/rules` serves laptops. */
+  get captureExclude(): string[] {
+    return this.config.capture.exclude
+      .map((entry) => entry.trim())
+      .filter((entry) => entry !== "" && !entry.startsWith("#"));
+  }
+
+  private excludesFor: { from: readonly string[]; excludes: RepoExcludes } | undefined;
+
+  /** The repository entries of that list, read once per config: what the server's own sources
+   * match against (folder entries are a laptop's). */
+  get repoExcludes(): RepoExcludes {
+    const from = this.config.capture.exclude;
+    if (this.excludesFor?.from !== from) {
+      this.excludesFor = { from, excludes: repoExcludes(from) };
+    }
+    return this.excludesFor.excludes;
+  }
+
   constructor(parts: InstanceParts) {
     const { config } = parts;
     this.running = config;
@@ -290,6 +313,7 @@ export class Instance {
       ...(parts.fetch ? { fetch: parts.fetch } : {}),
       log: this.log,
       now: this.now,
+      excludes: () => this.repoExcludes,
     });
 
     this.search =

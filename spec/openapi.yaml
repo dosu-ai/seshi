@@ -50,6 +50,7 @@ tags:
   - name: tokens
   - name: admin
   - name: redaction
+  - name: capture
   - name: otlp
   - name: search
 
@@ -864,6 +865,43 @@ paths:
               schema: { $ref: "#/components/schemas/RedactionRules" }
         "304":
           description: The packs are the ones the `If-None-Match` ETag names.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /v1/capture/rules:
+    get:
+      tags: [capture]
+      summary: The org's capture rules, which laptops apply before upload.
+      operationId: captureRules
+      description: |
+        The org's exclude list (`[capture] exclude` in the server's config, every file's
+        entries, drop-ins in `seshi.d/` included), as written, with blank entries and `#`
+        comments left out. A laptop's uploader fetches it, keeps it with its `ETag`, and applies
+        it together with its own `capture.exclude`: a session in a listed repository or folder
+        is never uploaded. Until a laptop holds a copy from this server, its uploads to this
+        server wait; a later fetch that fails keeps the copy in use. The server applies the
+        repository entries itself to its own sources (a Cursor Cloud agent in a listed
+        repository is never read). A reload (`POST /v1/admin/reload`) changes the list at once.
+        Any signed-in caller, a write-only device token included. The `ETag` is a hash of the
+        document: sent back as `If-None-Match`, it gets 304 until the list changes. A server
+        older than this route answers 404: a laptop then applies only its own list.
+      parameters:
+        - name: If-None-Match
+          in: header
+          required: false
+          description: The `ETag` of an earlier answer.
+          schema: { type: string }
+      responses:
+        "200":
+          description: The rules.
+          headers:
+            ETag:
+              description: A hash of the document, quoted.
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CaptureRules" }
+        "304":
+          description: The rules are the ones the `If-None-Match` ETag names.
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /v1/sessions/{agent}/{session_id}/reviews:
@@ -2204,6 +2242,22 @@ components:
           description: |
             Every owner's feed had been read up to this time; entries stamped later wait until
             it moves past them.
+
+    CaptureRules:
+      description: |
+        `seshi/capture-rules/1`: the org's capture rules, as `GET /v1/capture/rules` serves them.
+      type: object
+      required: [schema, exclude]
+      properties:
+        schema: { const: "seshi/capture-rules/1" }
+        exclude:
+          type: array
+          description: |
+            The org's exclude list, as `capture.exclude` reads it: a repository (`owner/name` on
+            any host, `host/owner/name` on one, or a remote URL), or a folder (starting with `/`,
+            `~`, a drive or `\\server`; a laptop's own paths, never matched by the server). `*`
+            matches within a path segment, `**` across any number.
+          items: { type: string }
 
     RedactionRules:
       description: |

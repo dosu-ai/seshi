@@ -117,7 +117,7 @@ describe("precedence (F1.1)", () => {
       events: ["user", "assistant", "tool_call"],
     });
     expect(config.worker).toEqual({ heartbeat_interval: 60_000, assembly_interval: 30_000 });
-    expect(config.capture).toEqual({ allow_retract: true });
+    expect(config.capture).toEqual({ allow_retract: true, exclude: [] });
   });
 });
 
@@ -353,7 +353,7 @@ describe("env names (F1.2)", () => {
       SESHI_SERVER: "https://seshi.example.com",
       SESHI_CAPTURE__ENABLED: "false",
     };
-    expect(server({}, { env }).config.capture).toEqual({ allow_retract: true });
+    expect(server({}, { env }).config.capture).toEqual({ allow_retract: true, exclude: [] });
     const cli = loadCliConfig({ env: { ...env, SESHI_SERVER__LISTEN: ":1" }, fs: memFs({}) });
     expect(cli.config).toMatchObject({
       user: "me",

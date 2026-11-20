@@ -1,5 +1,6 @@
 import { HttpSessionDB, ServerError } from "@seshi/client";
 import type { Fetch, IngestOptions, StaleSession, StoreSessionResult, Upload } from "@seshi/model";
+import type { CaptureRulesAnswer } from "./org-rules";
 
 /** Uploads wait until the person does something: sign in (the status line's "sign in",
  * B1.6), or, in serverless mode, set a review key, update seshi, or get a key the bucket
@@ -50,6 +51,9 @@ export interface SessionSink {
    * page of them: the uploader sends the ones it holds again whole with `rebuild`. A sink
    * without it is never asked. */
   stale?(): Promise<StaleSession[]>;
+  /** The server's capture rules (its exclude list), `etag` from the copy held. A sink without
+   * it has no server to ask (a bucket of one's own): its own config is the only list. */
+  captureRules?(etag?: string): Promise<CaptureRulesAnswer>;
   /** Whether there is a credential to send with now, without a request: throws
    * `SignInNeeded` when there is none. Lets the status line drop "sign in" once the person
    * signed in, before anything is uploaded. */
@@ -120,6 +124,22 @@ export function httpSink(options: HttpSinkOptions): SessionSink {
       } catch (err) {
         return signIn(err);
       }
+    },
+    async captureRules(etag) {
+      const db = await client();
+      let answer: Awaited<ReturnType<HttpSessionDB["captureRulesSince"]>>;
+      try {
+        answer = await db.captureRulesSince(etag);
+      } catch (err) {
+        if (err instanceof ServerError && err.status === 404) return "none";
+        return signIn(err);
+      }
+      if (answer === null) return "unchanged";
+      const exclude = (answer.document as { exclude?: unknown } | null)?.exclude;
+      if (!Array.isArray(exclude) || !exclude.every((e) => typeof e === "string")) {
+        throw new Error(`${options.target} answered capture rules without an exclude list`);
+      }
+      return { exclude, ...(answer.etag ? { etag: answer.etag } : {}) };
     },
     async stale() {
       const db = await client();

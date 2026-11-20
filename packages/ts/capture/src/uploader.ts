@@ -8,12 +8,14 @@ import {
   Forbidden,
   OffsetMismatch,
   SessionConflict,
+  SessionExcluded,
   SessionRejected,
   type StaleSession,
   type StoreSessionResult,
   type Upload,
 } from "@seshi/model";
 import { appendLog } from "./files";
+import { OrgRulesKeeper } from "./org-rules";
 import type { CapturePaths } from "./paths";
 import { placeOf } from "./place";
 import {
@@ -107,8 +109,11 @@ export interface UploaderOptions {
   agents: readonly CaptureAgent[];
   /** Where sessions go; built once, on first need. */
   sink: () => Promise<SessionSink>;
-  /** The capture rules; from the CLI config (cached) by default. */
+  /** The capture rules; from the CLI config (cached) and the server's list by default. */
   rules?: () => Promise<RulesSnapshot>;
+  /** How long a copy of the server's capture rules is used before it is asked about again.
+   * Default 5 minutes. */
+  orgRulesRefreshMs?: number;
   preRedact?: PreRedactor;
   git?: GitIdentity;
   now?: () => Date;
@@ -170,6 +175,13 @@ export interface PassSummary {
 interface PassProgress {
   succeeded: boolean;
   transientFailure?: string;
+}
+
+interface UploadProgress extends PassProgress {
+  /** The rules in force at the end: the server's list may have changed during the pass. */
+  snapshot: RulesSnapshot;
+  /** Uploads waited for the server's capture rules. */
+  held?: boolean;
 }
 
 const SECOND = 1000;
@@ -356,6 +368,7 @@ export class Uploader {
   private holdWord: HoldWord = "sign in";
   private readonly rulesOf: () => Promise<RulesSnapshot>;
   private readonly preRedact: PreRedactor;
+  private readonly orgRules: OrgRulesKeeper;
   private readonly git: GitIdentity;
   private readonly now: () => Date;
   private readonly log: (line: string) => void;
@@ -398,6 +411,15 @@ export class Uploader {
     this.maxChunkBytes = options.maxChunkBytes ?? 8 * 1024 * 1024;
     this.retryBaseMs = options.retryBaseMs ?? 5 * SECOND;
     this.retryMaxMs = options.retryMaxMs ?? 5 * 60 * SECOND;
+    this.orgRules = new OrgRulesKeeper({
+      paths: options.paths,
+      now: this.now,
+      log: this.log,
+      retryBaseMs: this.retryBaseMs,
+      retryMaxMs: this.retryMaxMs,
+      rethrow: (err) => err instanceof SignInNeeded,
+      ...(options.orgRulesRefreshMs !== undefined ? { refreshMs: options.orgRulesRefreshMs } : {}),
+    });
   }
 
   private async getSink(): Promise<SessionSink> {
@@ -480,7 +502,7 @@ export class Uploader {
     };
     summary.taken = await this.takeSpool();
     this.rebuildsLeft = this.rebuildsPerPass;
-    const snapshot = await this.rulesOf();
+    let snapshot = await this.rulesOf();
     const before = readState(this.paths);
     const sweepDue =
       options.sweep ||
@@ -498,13 +520,15 @@ export class Uploader {
       );
     const retracted = await this.retractPending(keys, state, summary);
     const uploaded = await this.uploadPending(keys, state, snapshot, summary);
+    snapshot = uploaded.snapshot;
     const succeeded = retracted.succeeded || uploaded.succeeded;
     const transientFailure = uploaded.transientFailure ?? retracted.transientFailure;
     const signedIn = await this.clearSignInWhenReady(state, summary, succeeded);
     if (!summary.signIn) await this.checkStale();
     const backlog = this.queued(snapshot);
     summary.queued = backlog.queued;
-    summary.retrying = backlog.retrying;
+    // Held for the server's capture rules: work waiting to retry, as an upload in backoff is.
+    summary.retrying = backlog.retrying + (uploaded.held ? 1 : 0);
     await this.finish(summary, { succeeded, signedIn, transientFailure });
     return summary;
   }
@@ -537,11 +561,13 @@ export class Uploader {
   private async uploadPending(
     keys: readonly string[],
     state: CaptureState,
-    snapshot: RulesSnapshot,
+    initial: RulesSnapshot,
     summary: PassSummary,
-  ): Promise<PassProgress> {
+  ): Promise<UploadProgress> {
     let transientFailure: string | undefined;
     let succeeded = false;
+    let snapshot = initial;
+    let orgChecked = false;
     for (const key of keys) {
       if (summary.signIn) break;
       let session = state.sessions[key];
@@ -558,6 +584,23 @@ export class Uploader {
       if (!agent.compose || composed) {
         const size = this.sizeOf(composed ?? path);
         if (size === undefined || !this.pending(session, size)) continue;
+      }
+      // The server's capture rules, fetched (when due) before the first upload of the pass: a
+      // server that serves a list gets nothing this machine holds no copy of it for.
+      if (!orgChecked) {
+        orgChecked = true;
+        let org: Awaited<ReturnType<OrgRulesKeeper["ready"]>>;
+        try {
+          org = await this.orgRules.ready(await this.getSink());
+        } catch (err) {
+          if (!(err instanceof SignInNeeded)) throw err;
+          summary.signIn = this.held(err);
+          break;
+        }
+        if (org.held !== undefined) {
+          return { succeeded, transientFailure: org.held, snapshot, held: true };
+        }
+        if (org.changed) snapshot = await this.rulesOf();
       }
       session = await this.startOf(key, session, agent, path, state);
       const place = placeOf(session.cwd);
@@ -589,7 +632,7 @@ export class Uploader {
         if (outcome.transient) transientFailure = outcome.transient;
       }
     }
-    return { succeeded, ...(transientFailure !== undefined ? { transientFailure } : {}) };
+    return { succeeded, snapshot, ...(transientFailure !== undefined ? { transientFailure } : {}) };
   }
 
   private async clearSignInWhenReady(
@@ -866,7 +909,11 @@ export class Uploader {
   }
 
   private off(state: CaptureState, session: SessionState): boolean {
-    return session.retract === "pending" || sessionToggle(state, session.agent, session) === "off";
+    return (
+      session.retract === "pending" ||
+      session.excluded !== undefined ||
+      sessionToggle(state, session.agent, session) === "off"
+    );
   }
 
   private rebuildDue(rebuild: NonNullable<SessionState["rebuild"]>): boolean {
@@ -1306,8 +1353,29 @@ export class Uploader {
     ) {
       return onConflictReplaceOwn(retry);
     }
+    if (err instanceof SessionExcluded) return this.onExcluded(key, err);
     if (transient(err)) return this.onTransient(key, err);
     return this.onRefused(key, err, attempt.rebuild, size);
+  }
+
+  /** The server's exclude list names the session's repository: it is settled as excluded, not
+   * tried again (a list the server added since this machine's copy, or a source of `repo` this
+   * machine's rules did not see). */
+  private onExcluded(key: string, err: SessionExcluded): Handled {
+    this.log(`${key}: excluded by the server: ${err.message}`);
+    const at = this.now().toISOString();
+    return {
+      saves: [
+        (s) => {
+          s.excluded = { at, message: err.message };
+          delete s.error;
+          delete s.failures;
+          delete s.next_attempt_at;
+          delete s.rebuild;
+        },
+      ],
+      next: { stop: {} },
+    };
   }
 
   private onTransient(key: string, err: unknown): Handled {

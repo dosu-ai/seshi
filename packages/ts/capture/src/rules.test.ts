@@ -341,6 +341,7 @@ describe("the org's exclude list (capture.exclude)", () => {
       capture: false,
       level: "org",
       reason: "the org excludes acme/payments (capture.exclude)",
+      excluded: { entry: "acme/payments", from: "config" },
     });
     expect(judge({ rules: exclude, place: { cwd: "/home/me/clients/x" } })).toMatchObject({
       capture: false,
@@ -360,6 +361,20 @@ describe("the org's exclude list (capture.exclude)", () => {
       level: "org",
       reason:
         "it also ran in /work/payments, where the org excludes acme/payments (capture.exclude)",
+      excluded: { entry: "acme/payments", from: "config" },
+    });
+  });
+
+  it("names an entry of the server's list as the server's", () => {
+    const both: CaptureRules = {
+      ...exclude,
+      exclude: [{ ...repoEntry("github.com/acme/*"), from: "server" }, ...exclude.exclude],
+    };
+    expect(judge({ rules: both, place: payments, toggle: "on" })).toEqual({
+      capture: false,
+      level: "org",
+      reason: "the org excludes github.com/acme/* (the server's [capture] exclude)",
+      excluded: { entry: "github.com/acme/*", from: "server" },
     });
   });
 

@@ -81,6 +81,10 @@ export interface SessionState {
   uploaded_at?: string;
   /** The last answer's status (`stored`, `filtered`, `unchanged`, …). */
   last_status?: string;
+  /** The server refused the session because the org's exclude list names its repository
+   * (`403 excluded`): settled, nothing of it is sent again. What the server stored before the
+   * entry was added stays there. */
+  excluded?: { at: string; message: string };
   /** The last refusal. A permanent one waits until the transcript changes. */
   error?: { code: string; message: string; permanent: boolean; at: string; size?: number };
   next_attempt_at?: string;

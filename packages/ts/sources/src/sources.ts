@@ -8,7 +8,13 @@ import {
   type Cursor,
   type SubmitOutcome,
 } from "@seshi/kit";
-import { type Envelope, type SourceKind, UPLOAD_SOURCE } from "@seshi/model";
+import {
+  type Envelope,
+  excludingEntry,
+  type RepoExcludes,
+  type SourceKind,
+  UPLOAD_SOURCE,
+} from "@seshi/model";
 import {
   countRecords,
   deleteCheckpoint,
@@ -23,7 +29,7 @@ import {
 
 export interface Submitter {
   submit(envelope: Envelope, options?: { onFailure?: "throw" | "record" }): Promise<SubmitOutcome>;
-  readonly health?: { count(sourceId: string, outcome: "failed"): void };
+  readonly health?: { count(sourceId: string, outcome: "failed" | "excluded"): void };
 }
 
 const FAILURE_MESSAGE_LENGTH = 300;
@@ -98,6 +104,8 @@ export interface SourcesOptions {
   fetch?: typeof fetch;
   log?: ConnectorLogger;
   now?: () => Date;
+  /** The org's exclude list as it runs now (it changes on reload); none when omitted. */
+  excludes?: () => RepoExcludes;
 }
 
 const quietLog: ConnectorLogger = { info() {}, warn() {}, error() {} };
@@ -115,6 +123,7 @@ export class Sources {
   private readonly fetchImpl: typeof fetch;
   private readonly log: ConnectorLogger;
   private readonly now: () => Date;
+  private readonly excludes: (() => RepoExcludes) | undefined;
   private readonly running = new Set<string>();
 
   constructor(options: SourcesOptions) {
@@ -129,6 +138,7 @@ export class Sources {
       connectors.set(connector.kind, connector);
     }
     this.connectors = connectors;
+    this.excludes = options.excludes;
     this.fetchImpl = options.fetch ?? fetch;
     this.log = options.log ?? quietLog;
     this.now = options.now ?? (() => new Date());
@@ -264,6 +274,7 @@ export class Sources {
     let etag: string | null = current?.etag ?? null;
 
     const prefix = `source ${id}: `;
+    const excludes = this.excludes;
     const context: ConnectorContext = {
       source: { id, type: config.type, config: config as unknown as Record<string, unknown> },
       submit: async (envelope: Envelope): Promise<SubmitOutcome> => {
@@ -345,6 +356,16 @@ export class Sources {
         this.pipeline.health?.count(id, "failed");
         return record;
       },
+      ...(excludes
+        ? {
+            excludedBy: (repos: readonly string[]) => excludingEntry(excludes(), repos),
+            excluded: () => {
+              assertRunOpen();
+              outcomes.excluded = (outcomes.excluded ?? 0) + 1;
+              this.pipeline.health?.count(id, "excluded");
+            },
+          }
+        : {}),
     };
 
     try {

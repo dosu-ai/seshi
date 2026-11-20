@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { SessionExcluded } from "@seshi/model";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { httpSink, RetractRefused, SignInNeeded } from "./sink";
 import { transcriptFiles } from "./sweep";
@@ -36,6 +37,34 @@ function sink(user?: string) {
 }
 
 describe("httpSink", () => {
+  it("fetches the server's capture rules with an ETag, and reads an older server's 404 as none", async () => {
+    answer = (request) =>
+      request.headers.get("if-none-match") === '"v1"'
+        ? new Response(null, { status: 304, headers: { etag: '"v1"' } })
+        : Response.json(
+            { schema: "seshi/capture-rules/1", exclude: ["acme/payroll"] },
+            { headers: { etag: '"v1"' } },
+          );
+    expect(await sink().captureRules?.()).toEqual({ exclude: ["acme/payroll"], etag: '"v1"' });
+    expect(seen[0]?.url).toBe(`${url()}/v1/capture/rules`);
+    expect(await sink().captureRules?.('"v1"')).toBe("unchanged");
+    answer = () => error(404, "not_found");
+    expect(await sink().captureRules?.()).toBe("none");
+    answer = () => error(401, "unauthorized");
+    await expect(sink().captureRules?.()).rejects.toThrow(SignInNeeded);
+    answer = () => error(503, "unavailable");
+    await expect(sink().captureRules?.()).rejects.toThrow("unavailable");
+    answer = () => Response.json({ schema: "seshi/capture-rules/1" });
+    await expect(sink().captureRules?.()).rejects.toThrow("without an exclude list");
+  });
+
+  it("reads a 403 excluded as the session excluded", async () => {
+    answer = () => error(403, "excluded");
+    await expect(
+      sink().ingest({ agent: "a", session_id: "s", transcript: "x\n" }),
+    ).rejects.toBeInstanceOf(SessionExcluded);
+  });
+
   it("uploads with the credential, and the username for the org key", async () => {
     answer = () =>
       Response.json(

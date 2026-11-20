@@ -261,7 +261,9 @@ function readDropIns(
     .filter((name) => name.endsWith(".toml") && !name.startsWith("."))
     .sort()
     .map((name) => join(dir, name));
-  const allowed = lists.map((list) => list.join(".")).join(" and ");
+  const names = lists.map((list) => list.join("."));
+  const allowed =
+    names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : (names[0] ?? "");
   for (const file of files) {
     let text: string;
     try {

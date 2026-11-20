@@ -96,9 +96,10 @@ change took effect by reading it after the reload.
 
 `*.toml` files in a `seshi.d/` folder beside the config file (`/etc/seshi/seshi.d/` for
 `/etc/seshi/seshi.toml`) are read after it, in file-name order. A drop-in may only add
-`[[sources]]` and `redaction.packs` entries, appended after the file's; any other key in one is
-an error. This lets another program (an admin UI that connects buckets, say) add a source as a
-file of its own and reload, without rewriting the operator's file. Ids must still be unique
+`[[sources]]`, `redaction.packs` and `capture.exclude` entries, appended after the file's; any
+other key in one is an error. This lets another program (an admin UI that connects buckets, or
+that keeps the org's exclude list, say) add a source or entries as a file of its own and reload,
+without rewriting the operator's file. Ids must still be unique
 across all of them. Files whose names start with `.` and files not ending in `.toml` are
 skipped, so write a drop-in under a temporary name and rename it into place. `seshi config
 show --origin` names the drop-in each value came from.
@@ -387,6 +388,46 @@ skipped. An object's `x-amz-meta-seshi-<field>` metadata (`-` for `_`) wins over
 | `worker.heartbeat_interval` | `"1m"` | How often the worker writes `worker/heartbeat.json` (X7.5); status calls a heartbeat older than three intervals stopped |
 | `worker.assembly_interval` | `"30s"` | How often the span assembler looks for sessions whose spans have gone quiet (F4.4, X7.4) |
 | `capture.allow_retract` | `true` | Let the machine that uploaded a session retract it with its per-session secret (F9.7). With `false`, a retraction is refused (`403 retract_disabled`) and only an admin or the owner's fresh sign-in can delete |
+| `capture.exclude` | `[]` | The org's exclude list: repositories and folders whose sessions are never stored, from any source ([below](#the-orgs-exclude-list-capture-exclude)) |
+
+### The org's exclude list (`[capture] exclude`)
+
+One list, held by the server, names the repositories and folders whose sessions never enter
+seshi. The server applies it to its own sources and serves it to every laptop, which applies it
+before anything is uploaded; an admin's change reaches everyone without rewriting a config file
+on any machine.
+
+```toml
+# /etc/seshi/seshi.toml
+[capture]
+exclude = ["acme/payroll", "github.com/acme/hr-*", "~/clients/**"]
+```
+
+```toml
+# /etc/seshi/seshi.d/50-adx.toml: a program that keeps the list writes a drop-in of its own
+[capture]
+exclude = ["acme/legal"]
+```
+
+- **Entries** read as the CLI's `capture.exclude` does ([below](#the-clis-config)): a
+  repository (`owner/name` on any host, `host/owner/name` on one, or a remote URL, matched
+  ignoring case), or a folder (starting with `/`, `~`, a drive or `\\server`); `*` within a
+  path segment, `**` across any number; blank entries and `#` comments skipped. Folder entries
+  are laptops' paths: laptops apply them, the server never matches one.
+- **Every file's entries are one list**: the main file's, then each drop-in's, in file-name
+  order. `SESHI_CAPTURE__EXCLUDE` (comma-separated) is the same setting.
+- **A reload applies a changed list at once** (`POST /v1/admin/reload`, `SIGHUP`, or
+  `watch_config`): the next poll of a source and the next fetch by a laptop see it. A list with
+  an entry that could never match (a URL with a credential in it, a repository with a space, a
+  control character) is refused with the rest of the config, by `seshi config check` too, and
+  the running list stays.
+- **Laptops download it** (`GET /v1/capture/rules`, [server.md](server.md#api)) and
+  apply it with their own `capture.exclude`, which can only add entries: an entry in either
+  keeps a session on the machine. A laptop holds a server's uploads until it has a copy of that
+  server's list ([capture.md](capture.md#the-orgs-exclude-list-on-a-laptop)).
+- **The server's own sources apply it**: a Cursor Cloud agent working in a listed repository is
+  never read ([cursor-cloud.md](cursor-cloud.md#the-orgs-exclude-list)). An entry added stops
+  what comes next; it deletes nothing already stored.
 
 ## The CLI's config
 
@@ -404,7 +445,7 @@ keychain = true                          # SESHI_KEYCHAIN: false keeps credentia
 [capture]
 enabled = true                           # SESHI_CAPTURE__ENABLED: the global level (F9.5)
 remotes = ["github.com/acme"]            # SESHI_CAPTURE__REMOTES: the org rule, see below
-exclude = ["acme/payments", "~/clients"] # SESHI_CAPTURE__EXCLUDE: the org's exclude list, see below
+exclude = ["acme/payments", "~/clients"] # SESHI_CAPTURE__EXCLUDE: added to the server's list, see below
 
 [[capture.paths]]                        # personal rules by folder, longest match wins (F9.5)
 path = "~/clients/acme"
@@ -418,8 +459,9 @@ changes one); the longest matching folder decides. `capture.remotes` is the org 
 be delivered with a managed CLI config: when it is set, only sessions in a git repo with a
 remote matching one of its patterns are captured (`github.com/acme` matches every repo under
 it; `*` stands for one path segment, `**` for any number, none included). `capture.exclude` is
-the org's exclude list, delivered the same way: no session in a place it names is ever
-uploaded. Each entry is
+an exclude list of this machine's: no session in a place it names is ever uploaded. The org's
+list is the server's (`[capture] exclude`, [above](#the-orgs-exclude-list-capture-exclude)),
+which the uploader downloads; this one can only add to it. Each entry is
 
 - a repository, `owner/name` on any host or `host/owner/name` on that one (`acme/payments`,
   `github.com/acme/*`; a remote URL works too, and a number after the host is read as a port),
@@ -435,7 +477,8 @@ uploaded. Each entry is
 In both, `*` matches within one path segment and `**` across any number of them, none included
 (`~/work/**/secrets` is `~/work/secrets` too). Blank entries and `#` comments are skipped. From
 the environment the list is comma-separated (`SESHI_CAPTURE__EXCLUDE=acme/payments,~/clients`).
-`seshi capture status` names the entry that turned a session off.
+`seshi capture status` names the entry that turned a session off, and whether it is the
+server's list or this config's.
 
 Like a repo's own `capture = false`, the org rules can only turn capture off. A repo opts out
 for everyone who works in it with its own committed `.seshi/config.toml`:

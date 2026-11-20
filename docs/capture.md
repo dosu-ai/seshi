@@ -217,10 +217,11 @@ CLI or cloud session's results.
 One decision function judges every session, the same for hooks, the sweep, the status line and
 `seshi upload` (F9.3):
 
-1. **Shared rules can only turn capture off, and always win.** The org rules in a managed CLI
-   config (`capture.remotes`: only repos whose git remote matches; `capture.exclude`: never the
-   repositories and folders it lists) and a repo's own committed `.seshi/config.toml` with
-   `capture = false`. They hold for every folder a session was seen
+1. **Shared rules can only turn capture off, and always win.** The org's exclude list, which
+   the server holds and the uploader downloads ([below](#the-orgs-exclude-list-on-a-laptop)),
+   together with this machine's own `capture.exclude` (never the repositories and folders
+   either lists); the org rule in a managed CLI config (`capture.remotes`: only repos whose git
+   remote matches); and a repo's own committed `.seshi/config.toml` with `capture = false`. They hold for every folder a session was seen
    in: a session that worked in an excluded repo and then moved into a captured one (a nested
    repo, `--add-dir`) carries that work in its transcript, so it is not uploaded, and nothing
    more of a captured session is sent once it works in an excluded repo. A subagent is judged
@@ -408,8 +409,10 @@ is left waits, with its place kept, for the next hook to start it again (or for 
 
 It follows the server's answers: a `409 offset_mismatch` resends from where the server says (the
 whole log when it says 0); a `409 conflict` on a session this machine wrote (the rules or the
-normalizer changed) resends it with `replace`; `403` and `422` wait until the transcript changes;
-anything else is retried with backoff. Every 15 minutes it sweeps the agents' transcript folders
+normalizer changed) resends it with `replace`; `403 excluded` (the org's exclude list names the
+session's repository) settles the session as excluded, and nothing more of it is sent
+(`seshi capture resend --session <id>` tries it again, after the list changed);
+other `403`s and `422` wait until the transcript changes; anything else is retried with backoff. Every 15 minutes it sweeps the agents' transcript folders
 for sessions the hooks missed, never reaching back past when capture was installed.
 
 The server keeps no raw transcripts, so when seshi's reading of an agent's format improves, it
@@ -428,6 +431,35 @@ Uploads use the credential `seshi login` stored: the device token (with an IdP) 
 and your username. In serverless mode the uploader runs the pipeline itself and writes the
 bucket with the key `seshi init --serverless` stored; uploads can then wait for reasons of their
 own ([below](#uploads-that-wait)).
+
+### The org's exclude list on a laptop
+
+The org's exclude list is the server's (`[capture] exclude`,
+[config.md](config.md#the-orgs-exclude-list-capture-exclude)). Before it uploads, the uploader
+fetches it (`GET /v1/capture/rules`) and keeps it in `capture-rules.json` with its ETag; while it
+runs it asks again every 5 minutes, and an unchanged list costs a `304`. Hooks, the status line
+and `seshi capture status` read that copy, never the network. The list in force is the server's
+entries followed by this machine's own `capture.exclude`: an entry in either keeps a session on
+the machine, so a person's config can add to the org's list, never take from it.
+`seshi capture status` names the entry that decided and where it came from (`the org excludes
+acme/payroll (the server's [capture] exclude)`, or `(capture.exclude)`; in `--json`, `excluded:
+{ entry, from: "server" | "config" }`).
+
+- **Before its first copy** from the server it uploads to, the uploader sends that server
+  nothing: what it would send may be on the list. It asks again with backoff, the uploads wait
+  with their place kept, and after a few failures the status line says `upload failing`. A copy
+  of another server's list (before `seshi login` to a new one) is not this server's, so it is
+  fetched first too; hooks go on applying the last copy meanwhile.
+- **When a later fetch fails**, the copy it has stays in force.
+- **A server older than the route** answers 404: it has no list, and only this machine's
+  `capture.exclude` applies, as before. The uploader asks again every 5 minutes, so an upgraded
+  server's list is picked up.
+- **A changed list** applies from the next fetch: a session in a newly listed place sends
+  nothing more. What it uploaded before stays on the server (rule changes do not retract).
+
+In serverless mode the list is the `[capture] exclude` of the server config the laptop runs: the
+bucket's shared settings and this machine's `serverless.config`. The uploader keeps a copy of it
+the same way, read when the bucket is opened.
 
 ### Uploads that wait
 
@@ -597,6 +629,7 @@ the server stored them.
 | `uploader.json` | the running uploader's process id and heartbeat; `uploader.json.takeover` exists for a moment while an uploader takes over a dead one's lock, so two never both do |
 | `rules.json` | the capture rules as last read from the CLI config |
 | `redaction-rules.json` | your server's redaction rules as last fetched, with their ETag |
+| `capture-rules.json` | your server's capture rules (the org's exclude list) as last fetched, with their ETag and the server they came from ([above](#the-orgs-exclude-list-on-a-laptop)) |
 | `capture.log` | errors from hooks and the uploader (hooks never print) |
 | `kept/cursor/<conversation>/` | a captured Cursor session's tool results as its hooks kept them (`results/`), and the file uploaded for it, its transcript with the results added (`transcript.jsonl`, `compose.json`) ([above](#tool-results-in-cursor)). Removed when the session is turned off, and a day after the session leaves the state file |
 | `transcripts/opencode/` | OpenCode sessions as seshi was handed them, or read them from OpenCode's database in a sweep, one `<id>.json` each, for captured sessions only: OpenCode keeps its own in a database. A session's copy goes when it is turned off, and the folder when OpenCode is uninstalled |

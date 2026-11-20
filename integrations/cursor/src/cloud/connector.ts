@@ -26,7 +26,7 @@ import {
   secretValue,
   serviceEnvelopeIdentity,
 } from "@seshi/kit";
-import { ENVELOPE_SCHEMA, type Envelope } from "@seshi/model";
+import { ENVELOPE_SCHEMA, type Envelope, normalizeRemote } from "@seshi/model";
 import {
   type CursorAgent,
   CursorApi,
@@ -166,15 +166,19 @@ const after = (run: CursorRun, through: RunRef | undefined) =>
 
 const refOf = (run: CursorRun): RunRef => ({ at: run.createdAt ?? "", id: run.id });
 
-/** The agent's repository as a project, `host/owner/name`. */
+/** The repository URLs the agent works in (`repos[].url`), as Cursor names them. */
+export function repoUrls(agent: CursorAgent): string[] {
+  return (agent.repos ?? [])
+    .map((r) => r?.url)
+    .filter((url): url is string => typeof url === "string" && url.trim() !== "");
+}
+
+/** The agent's repository as a project, `host/owner/name`: normalized as a laptop normalizes
+ * its git remotes (`normalizeRemote`), so the org's exclude list and searches by repository
+ * meet the same string from either. */
 export function projectOf(agent: CursorAgent): string | undefined {
-  const url = agent.repos?.find((r) => typeof r?.url === "string" && r.url !== "")?.url;
-  if (!url) return undefined;
-  return url
-    .replace(/^[a-z+]+:\/\//i, "")
-    .replace(/^[^@/]+@([^:]+):/, "$1/")
-    .replace(/\.git$/i, "")
-    .replace(/\/+$/, "");
+  const url = repoUrls(agent)[0];
+  return url === undefined ? undefined : normalizeRemote(url) || undefined;
 }
 
 /** The branch the run worked on, from its `git.branches`. */
@@ -232,6 +236,7 @@ export function rewindCursorCloud(cursor: Cursor | null): Cursor {
 
 interface Tally {
   agents: number;
+  excluded: number;
   stored: number;
   filtered: number;
   dropped: number;
@@ -265,6 +270,7 @@ export function cursorCloudConnector(options: CursorCloudConnectorOptions = {}):
       const budget = { streams: config.max_streams, more: false };
       const tally: Tally = {
         agents: 0,
+        excluded: 0,
         stored: 0,
         filtered: 0,
         dropped: 0,
@@ -476,18 +482,41 @@ export function cursorCloudConnector(options: CursorCloudConnectorOptions = {}):
         return true;
       }
 
+      /** The org excludes the agent's repository: none of its runs is listed or read. Its runs
+       * up to now are passed over for good, so one made while it was excluded is never read
+       * after the entry goes; what was stored before the entry came stays. */
+      async function exclude(agent: CursorAgent, known: AgentEntry | undefined, entry: string) {
+        tally.excluded++;
+        ctx.excluded?.();
+        ctx.log.info(`agent ${agent.id}: not read, the org excludes ${entry} ([capture] exclude)`);
+        const skipped: AgentEntry = known ? structuredClone(known) : { bytes: 0 };
+        const at = ctx.now().toISOString();
+        if (!skipped.through || skipped.through.at < at) skipped.through = { at, id: "" };
+        delete skipped.carry;
+        if (agent.updatedAt) skipped.updated = agent.updatedAt;
+        else delete skipped.updated;
+        cursor.agents[agent.id] = skipped;
+        await ctx.checkpoint.write(cursor as unknown as Cursor);
+      }
+
       const agents = await api.listAgents();
       for (const agent of agents) {
         ctx.signal.throwIfAborted();
         const known = cursor.agents[agent.id];
-        if (known?.conflict) {
-          tally.held++;
-          continue;
-        }
         if (known && known.updated !== undefined && known.updated === agent.updatedAt) continue;
         const updated = agent.updatedAt ? Date.parse(agent.updatedAt) : Number.NaN;
         // Nothing of an agent untouched since before the lookback can be had any more.
         if (!known && !Number.isNaN(updated) && updated < now - config.lookback) continue;
+        // Before anything of the agent is read: an excluded agent's runs never enter seshi.
+        const excludedBy = ctx.excludedBy?.(repoUrls(agent));
+        if (excludedBy !== undefined) {
+          await exclude(agent, known, excludedBy);
+          continue;
+        }
+        if (known?.conflict) {
+          tally.held++;
+          continue;
+        }
         if (budget.streams <= 0) {
           budget.more = true;
           break;
@@ -537,6 +566,9 @@ export function cursorCloudConnector(options: CursorCloudConnectorOptions = {}):
       }
       if (tally.refused) parts.push(`${tally.refused} refused (see sync failed)`);
       if (tally.held) parts.push(`${tally.held} agent(s) held by a session conflict`);
+      if (tally.excluded) {
+        parts.push(`${tally.excluded} agent(s) not read: the org excludes their repository`);
+      }
       if (tally.errors) parts.push(`${tally.errors} agent(s) failed, read again next poll`);
       if (budget.more) parts.push("more next poll");
       ctx.log.info(parts.join("; "));

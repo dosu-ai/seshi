@@ -79,8 +79,51 @@ describe("drop-ins in seshi.d/", () => {
       });
     expect(run).toThrow(ConfigError);
     expect(run).toThrow(
-      "/etc/seshi/seshi.d/adx.toml: a drop-in may only add to sources and redaction.packs; server.listen belongs in the main config file",
+      "/etc/seshi/seshi.d/adx.toml: a drop-in may only add to sources, redaction.packs and capture.exclude; server.listen belongs in the main config file",
     );
+  });
+
+  it("add to the org's exclude list: every file's entries, in one list", () => {
+    const loaded = load({
+      "/etc/seshi/seshi.toml": `${MAIN}\n[capture]\nexclude = ["acme/payroll"]\n`,
+      "/etc/seshi/seshi.d/50-adx.toml": `[capture]\nexclude = ["github.com/acme/hr-*", "~/clients/**"]\n`,
+      "/etc/seshi/seshi.d/60-more.toml": `[capture]\nexclude = ["# reviewed 2026-11", "acme/legal"]\n`,
+    });
+    expect(loaded.config.capture.exclude).toEqual([
+      "acme/payroll",
+      "github.com/acme/hr-*",
+      "~/clients/**",
+      "# reviewed 2026-11",
+      "acme/legal",
+    ]);
+  });
+
+  it("a drop-in's exclude list alone, with no list in the main file", () => {
+    const loaded = load({
+      "/etc/seshi/seshi.toml": MAIN,
+      "/etc/seshi/seshi.d/adx.toml": `[capture]\nexclude = ["acme/app"]\n`,
+    });
+    expect(loaded.config.capture).toEqual({ allow_retract: true, exclude: ["acme/app"] });
+  });
+
+  it("a drop-in may not set the capture section's other keys", () => {
+    expect(() =>
+      load({
+        "/etc/seshi/seshi.toml": MAIN,
+        "/etc/seshi/seshi.d/adx.toml": `[capture]\nexclude = []\nallow_retract = false\n`,
+      }),
+    ).toThrow(/capture\.allow_retract belongs in the main config file/);
+  });
+
+  it("refuse an exclude entry that could never match", () => {
+    const run = () =>
+      load({
+        "/etc/seshi/seshi.toml": MAIN,
+        "/etc/seshi/seshi.d/adx.toml": `[capture]\nexclude = ["https://bot:tok@github.com/acme/app", "acme/my app"]\n`,
+      });
+    expect(run).toThrow(ConfigError);
+    expect(run).toThrow(/names a credential/);
+    expect(run).toThrow(/a repository has no spaces/);
   });
 
   it("are checked with the rest: a drop-in source's id must be unique", () => {

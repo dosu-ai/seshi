@@ -1348,6 +1348,61 @@ describe("serverless mode, by its old name [local] (F11)", () => {
   });
 });
 
+describe("the org's exclude list in serverless mode", () => {
+  it("applies the bucket's [capture] exclude before anything is written, and names it", async () => {
+    const local = new Machine();
+    try {
+      const code = join(local.dir, "code");
+      const payroll = join(local.dir, "payroll");
+      mkdirSync(code);
+      mkdirSync(payroll);
+      const toml = join(local.dir, "seshi.toml");
+      writeFileSync(
+        toml,
+        `[store]\nurl = "file://${join(local.dir, "bucket")}"\n[capture]\nexclude = ["${payroll}"]\n`,
+        { mode: 0o600 },
+      );
+      local.cliConfig(`[local]\nconfig = "${toml}"\nowner = "me"\n`);
+      await ensureLayout(new FsStore(join(local.dir, "bucket")), {
+        createdBy: "test",
+        mode: "serverless",
+      });
+      for (const [id, cwd] of [
+        ["x1", payroll],
+        ["x2", code],
+      ] as const) {
+        const file = join(local.dir, `${id}.jsonl`);
+        writeFileSync(file, HEAD);
+        await local.seshi(["hook", "claude-code", "Stop"], {
+          stdin: JSON.stringify({ session_id: id, transcript_path: file, cwd }),
+        });
+      }
+      const { summary } = await daemon(local);
+      expect(summary).toMatchObject({ uploaded: 1 });
+      const ls = await local.seshi(["sessions", "ls"]);
+      expect(ls.out).toContain("claude-code/x2");
+      expect(ls.out).not.toContain("claude-code/x1");
+
+      const status = await local.seshi([
+        "capture",
+        "status",
+        "--session",
+        "x1",
+        "--agent",
+        "claude-code",
+        "--json",
+      ]);
+      expect(JSON.parse(status.out).session).toMatchObject({
+        capture: false,
+        level: "org",
+        excluded: { entry: payroll, from: "server" },
+      });
+    } finally {
+      local.cleanup();
+    }
+  });
+});
+
 describe("pre-redaction before upload (F2.4)", () => {
   const acme = compileRuleSet({
     packs: [
@@ -1663,6 +1718,23 @@ describe("resending uploaded sessions (X4.9)", () => {
     const text = await machine.seshi(["capture", "resend", "--all"]);
     expect(text.out).toContain("1 session(s)");
     expect(text.out).toContain("not resent, turned off");
+  });
+
+  it("resends a session the server excluded only when asked for by name", async () => {
+    await hook();
+    await daemon();
+    const st = state();
+    st.sessions[KEY].excluded = { at: "2026-11-01T00:00:00Z", message: "excluded" };
+    writeFileSync(join(stateDir(), "state.json"), JSON.stringify(st), { mode: 0o600 });
+    const all = JSON.parse((await machine.seshi(["capture", "resend", "--all", "--json"])).out);
+    expect(all).toEqual({
+      resending: [],
+      skipped: [{ key: KEY, reason: "excluded by the server" }],
+    });
+    const one = await machine.seshi(["capture", "resend", "--session", SESSION, "--json"]);
+    expect(JSON.parse(one.out)).toEqual({ resending: [KEY], skipped: [] });
+    expect(state().sessions[KEY].excluded).toBeUndefined();
+    expect((await daemon()).summary).toMatchObject({ uploaded: 1 });
   });
 
   it("refuses bad usage, a session it has not seen, and one turned off", async () => {

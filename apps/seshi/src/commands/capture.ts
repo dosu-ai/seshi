@@ -860,6 +860,12 @@ async function resend(ctx: CommandContext, json: boolean, args: Args): Promise<n
     for (const key of keys) {
       const session = st.sessions[key];
       if (!session) continue;
+      // Settled as excluded by the server: sent again only when asked for by name (the org's
+      // list may have changed); the server refuses it again if not.
+      if (session.excluded !== undefined && args.all) {
+        skipped.push({ key, reason: "excluded by the server" });
+        continue;
+      }
       const reason = notResendable(st, session);
       if (reason) {
         skipped.push({ key, reason });
@@ -867,6 +873,7 @@ async function resend(ctx: CommandContext, json: boolean, args: Args): Promise<n
       }
       session.rebuild = { at: now.toISOString(), key: rebuildKey() };
       if (session.error?.permanent) delete session.error;
+      delete session.excluded;
       marked.push(key);
     }
     return marked.length > 0;
