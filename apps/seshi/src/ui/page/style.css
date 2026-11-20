@@ -1240,6 +1240,7 @@ ol.ranked > li {
 
 .segmented {
   display: inline-flex;
+  font-weight: 400;
   border: 1px solid var(--line);
   border-radius: 6px;
   overflow: hidden;
@@ -1269,35 +1270,42 @@ ol.ranked > li {
 
 .metrics {
   display: grid;
-  grid-template-columns: repeat(8, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   margin: 0;
   border-bottom: 1px solid var(--line);
 }
 
+/* Each headline number is a link to its page. */
 .metric {
   display: grid;
   grid-template-rows: auto auto auto auto;
-  padding: 0.85rem 0.9rem 0.75rem;
+  padding: 0.9rem 1rem 0.8rem;
   border-left: 1px solid var(--line);
   min-width: 0;
+  color: var(--fg);
+  text-decoration: none;
 }
 
 .metric:first-child {
   border-left: 0;
-  padding-left: 0;
 }
 
-.metric dt {
-  font-size: 0.78rem;
+.metric:hover {
+  background: var(--raised);
+}
+
+.metric-label {
+  font-size: 0.8rem;
   color: var(--muted);
 }
 
-.metric dd {
-  margin: 0;
+.metric:hover .metric-label {
+  color: var(--accent);
+  text-decoration: underline;
 }
 
 .metric-value {
-  font-size: 1.45rem;
+  font-size: 1.6rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
@@ -1342,13 +1350,90 @@ svg.spark circle {
   min-width: 0;
 }
 
-.panel-section > h2 {
+.panel-section > h2,
+.top-list > h2 {
   font-size: 0.92rem;
   font-weight: 700;
   margin: 0 0 0.6rem;
   display: flex;
   align-items: center;
   gap: 1rem;
+}
+
+.see-all {
+  margin-left: auto;
+  font-size: 0.8rem;
+  font-weight: 400;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.see-all:hover {
+  text-decoration: underline;
+}
+
+.h2-note {
+  font-size: 0.8rem;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.tops {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0 2.5rem;
+  margin-top: 1.75rem;
+}
+
+.top-table td.name {
+  width: 55%;
+}
+
+.status-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 1.25rem;
+  margin: 1.75rem 0 0;
+  padding: 0.6rem 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  font-size: 0.84rem;
+  color: var(--muted);
+}
+
+.status-line strong {
+  color: var(--fg);
+}
+
+p.status-line > a {
+  margin-left: auto;
+  text-decoration: none;
+}
+
+p.status-line > a:hover {
+  text-decoration: underline;
+}
+
+.headline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem 1rem;
+  padding: 1rem 0 0.25rem;
+}
+
+.metric-value.big {
+  font-size: 2.25rem;
+}
+
+.crumb {
+  flex-basis: 100%;
+  font-size: 0.85rem;
+}
+
+.panel-grid.two {
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
 }
 
 .panel-section > .segmented {
@@ -1415,6 +1500,19 @@ svg.strip {
   height: 3.5rem;
 }
 
+.timeline.tall svg.strip {
+  height: 7.5rem;
+}
+
+/* One series under its own heading: no label column to repeat it. */
+.timeline.tall .strip-row {
+  grid-template-columns: minmax(0, 1fr) 3rem;
+}
+
+.timeline.tall .strip-label {
+  display: none;
+}
+
 svg.strip .bar {
   fill: var(--accent);
 }
@@ -1449,6 +1547,8 @@ svg.strip .axis {
   min-width: 0;
   white-space: nowrap;
   overflow: visible;
+  display: flex;
+  justify-content: center;
 }
 
 details.as-table > summary {
@@ -1559,6 +1659,11 @@ table.health td {
   color: var(--muted);
 }
 
+table.plain td.name.muted {
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
 table.plain td.muted,
 table.health td.muted {
   color: var(--muted);
@@ -1625,21 +1730,8 @@ mark.find.current {
   text-underline-offset: 0.3em;
 }
 
-/* Middle widths: the metrics in two rows of four, the lower panels in two columns. */
+/* Middle widths: the lower panels in two columns. */
 @media (max-width: 80rem) and (min-width: 56.01rem) {
-  .metrics {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-
-  .metric:nth-child(4n + 1) {
-    border-left: 0;
-    padding-left: 0;
-  }
-
-  .metric:nth-child(n + 5) {
-    border-top: 1px solid var(--line);
-  }
-
   .panel-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1667,8 +1759,14 @@ mark.find.current {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .panel-grid {
+  .panel-grid,
+  .panel-grid.two,
+  .tops {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .metric:nth-child(odd) {
+    border-left: 0;
   }
 
   .panel.with-aside {

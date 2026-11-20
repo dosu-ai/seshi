@@ -87,27 +87,31 @@ calls, the tools it used, the files it touched, and the models and tokens its ca
 model review's decision for each write ([model-review.md](model-review.md)), with the audit
 detail for admins. **Details** shows the session's stored metadata and downloads its traces.
 
-**The overview** is the team over the last 24 hours, 7 days or 30 days, laid out as an
-engineering panel:
+**The overview** answers "how are we doing" for the last 24 hours, 7 days or 30 days, and
+every part of it leads to more:
 
-- **Metrics**: sessions, active people, tokens, tool calls, the tool error rate, the median
-  session, events stored and the share of sessions redaction changed. Each has a sparkline over
-  the span and its change against the span before (in points for a rate).
-- **Activity**: sessions, people, tokens and tool errors per hour (24 hours) or per day, as
-  small multiples on one time axis, each labelled with its total and its tallest bar.
-- **Breakdown**: one table by agent, model, repository or person, with each one's
-  sessions, tokens, tool calls, error rate and trend (a session that used several models counts
-  toward its first). A name opens the list filtered to it.
-- **Tools**, **Redaction** (matches and sessions by rule) and **Ingest health**: the capture
-  delay from a session's last event to its stored copy (median and p95; a backfill counts from
-  its upload), the share stored within 15 minutes, and when the search index caught up. For
-  admins (`sources:admin`), ingest health adds each source's stored, filtered, failed and
-  dropped writes, the worker, and its jobs' last runs.
+- Five headline numbers: sessions, active people, tokens, the tool error rate and the capture
+  delay, each with a sparkline and its change against the span before (in points for a rate).
+  Each opens its own page.
+- Sessions per hour (24 hours) or per day, with a link to those sessions in the list.
+- The top five repositories, agents and people, each name a link to its sessions, and each
+  list a link to the full breakdown.
+- One line on ingest, linking to ingest health.
 
-Tokens are what each session's model calls record (Claude Code and Codex record them); the
-tool error rate counts failed results over results whose outcome the agent records (Codex
-records none). The overview reads the same browse as the list, so it counts only what you may
-read, up to the 4,000 most recent sessions across the span and the one before it.
+A number's page shows its series over time and a table that breaks it down by repository,
+agent, model or person, sorted by that number, with sessions and a trend per row and a row for
+sessions with none (no repository, say). Every name opens the sessions it counts. The tool
+error rate's page adds tool calls by tool. The ingest page shows the capture delay from a
+session's last event to its stored copy (median and p95; a backfill counts from its upload),
+the share stored within 15 minutes, events stored, the search index, and redaction by rule;
+for admins (`sources:admin`) it adds each source's stored, filtered, failed and dropped writes,
+the worker, and its jobs' last runs.
+
+Tokens are what each session's model calls record (Claude Code and Codex record them); a
+session that used several models counts toward its first. The tool error rate counts failed
+results over results whose outcome the agent records (Codex records none). The overview reads
+the same browse as the list, so it counts only what you may read, up to the 4,000 most recent
+sessions across the span and the one before it.
 
 ## What it never shows
 

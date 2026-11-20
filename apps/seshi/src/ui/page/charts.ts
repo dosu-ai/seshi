@@ -122,9 +122,10 @@ export interface Series {
 export function timeline(
   series: Series[],
   buckets: { label: string; tick?: string }[],
+  options: { tall?: boolean } = {},
 ): HTMLElement {
   const width = 960;
-  const rowHeight = 56;
+  const rowHeight = options.tall ? 120 : 56;
   const gap = 1;
   const slot = width / Math.max(1, buckets.length);
   const bar = Math.max(1, Math.min(28, slot - gap * 2));
@@ -219,5 +220,5 @@ export function timeline(
       ),
     ),
   );
-  return h("figure", { class: "timeline" }, ...rows, ticks, table);
+  return h("figure", { class: `timeline${options.tall ? " tall" : ""}` }, ...rows, ticks, table);
 }

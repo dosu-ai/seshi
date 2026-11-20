@@ -13,7 +13,7 @@ import {
 } from "./api";
 import { renderList } from "./list";
 import { finishSignIn, type PendingSignIn } from "./oidc";
-import { renderOverview } from "./overview";
+import { forgetOverview, renderOverview } from "./overview";
 import { forgetSessions, renderSession } from "./session";
 import { renderSignIn } from "./signin";
 
@@ -45,7 +45,7 @@ function route(): void {
   if (parts[0] === "s" && parts[1] && parts[2]) {
     renderSession(root, { owner: parts[1], archive: parts[2], query, me: identity, isCurrent });
   } else if (view === "overview") {
-    renderOverview(root, { query, me: identity, isCurrent });
+    renderOverview(root, { query, me: identity, isCurrent, view: parts[1] });
   } else {
     renderList(root, { query, me: identity, isCurrent });
   }
@@ -78,6 +78,7 @@ function showWho(me: Identity, credential: Credential): void {
 
 function signedIn(credential: Credential, me: Identity): void {
   forgetSessions();
+  forgetOverview();
   saveCredential(credential);
   nav.hidden = false;
   identity = me;
@@ -89,6 +90,7 @@ function signIn(modes: AuthModes, notice?: string): void {
   // Whatever was loading for the last credential no longer draws, and nothing it read stays.
   generation++;
   forgetSessions();
+  forgetOverview();
   identity = undefined;
   nav.hidden = true;
   document.title = "seshi";
