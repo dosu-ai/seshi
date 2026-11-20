@@ -120,7 +120,7 @@ describe("updateMetadataWithChange (decision 7 of 18)", () => {
 });
 
 describe("reading metadata", () => {
-  it("reads one written before 0.15 with `format`, and a `null` one as no session", async () => {
+  it("reads one written before 0.16 with `format`, and a `null` one as no session", async () => {
     const { format, ...old } = session;
     const encode = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
     await store.put(keys.metadata("alice", archive), encode({ ...old, agent: format }));

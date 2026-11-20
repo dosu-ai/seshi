@@ -269,7 +269,7 @@ entries by stamp, then owner, then key, with one opaque cursor. Each entry names
 and its `key`, and the entry its session's `format`, so a reader can call
 `/v1/sessions/:format/:session_id` from the entry alone; `tombstone` and `visibility_changed`
 entries come through like `published` ones, from people, `svc:<source-id>` service accounts and
-`h-…` owners alike. Entries written before seshi 0.15 carry no `format` in the bucket: both
+`h-…` owners alike. Entries written before seshi 0.16 carry no `format` in the bucket: both
 feeds fill it in from the session's metadata (this one when the index reads the entry), and
 leave out an entry whose session has no metadata to read it from (a first write that failed
 after its entry), so every entry served has one.
@@ -323,7 +323,7 @@ allow.
 | `GET /v1/sessions?owner&limit&after` | List an owner's sessions (the caller's own by default), as far as visibility allows; never a stub (F3.4) |
 | `GET /v1/sessions/:format/:session_id?owner` | The session's `metadata.json`; `404` for a stub |
 | `PATCH /v1/sessions/:format/:session_id?owner` | `{visibility}`: change who may read it. The owner or an admin |
-| `GET /v1/sessions/:format/:session_id/trace?hash&render` | The head trace (or another of the session's `traces`, by hash; `404` for a hash it does not name) as the stored canonical trace (`render=seshi`, the default) or rendered as `letta`, `otlp` or `atif` (until 0.16 also read as `?format=`, its name before 0.15); `400 bad_query` for another render, `404` for a session not stored (a filtered one included), `410` once redacted |
+| `GET /v1/sessions/:format/:session_id/trace?hash&render` | The head trace (or another of the session's `traces`, by hash; `404` for a hash it does not name) as the stored canonical trace (`render=seshi`, the default) or rendered as `letta`, `otlp` or `atif` (until 0.17 also read as `?format=`, its name before 0.16); `400 bad_query` for another render, `404` for a session not stored (a filtered one included), `410` once redacted |
 | `GET /v1/sessions/:format/:session_id/export?hash&render` | The same trace as a download: `Content-Disposition: attachment; filename="<format>-<session>-<hash>.<render>.json"` |
 | `DELETE /v1/sessions/:format/:session_id?owner` | Tombstone: drop the trace objects, append a tombstone change. Irreversible; a later upload of the same session is refused. Needs `sessions:delete`: the owner with a fresh session token or a static token, or an admin. With `X-Seshi-Retract` it is a [retraction](#retraction-f97) by the machine that uploaded the session |
 | `GET /v1/owners/:owner/sessions/:archive_id`, `…/trace?hash&render`, `…/export?hash&render`, `…/reviews` | The same session, trace, download and reviews, by the owner and archive id a change entry, a search result or a listing names: that owner's folder exactly (no `[auth.owner_aliases]` folded in), no default owner. For readers that hold sessions the API gave them; `400 bad_query` for an owner or archive id that is not one, `404` as above |
@@ -540,6 +540,6 @@ sent with `replace`, since it no longer extends what the server holds.
 
 `format` is part of the archive id (`sha256(owner, format, session_id)`), which is why only the
 trajectory source name is accepted (`claude-code`, not `claude`): one spelling, one archive.
-Before seshi 0.15 the body named the format `agent` and the encoding `format`; the server still
+Before seshi 0.16 the body named the format `agent` and the encoding `format`; the server still
 reads a body with `agent` that way, so uploaders installed before keep working.
 

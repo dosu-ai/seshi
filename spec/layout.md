@@ -293,7 +293,7 @@ cursor (the last key processed) and a lag window.
 `visibility_changed` (with the new `visibility`). Every entry names its `writer` and the
 session's `owner_basis` (X5.5), never content, and the session's `format`, so a reader can call
 the session routes (`/v1/sessions/{format}/{session_id}`) from the entry alone. Entries written
-before seshi 0.15 have no `format`: the server's feeds (`GET /v1/changes`, `GET
+before seshi 0.16 have no `format`: the server's feeds (`GET /v1/changes`, `GET
 /v1/changes/all`) and `readChanges` fill it from the session's metadata. An entry whose
 session has no metadata names a write that never landed (its entry is written first), so they
 leave it out: every entry they serve has a `format`.
@@ -486,7 +486,7 @@ bytes, and the sweep checks an object's age once more just before it deletes it.
 ## Reading
 
 - One session: `metadata.json`, then `trace.<head>.json.gz`; no `head` means nothing to read
-  yet. Metadata and traces written before seshi 0.15 name the format `agent`, not `format`:
+  yet. Metadata and traces written before seshi 0.16 name the format `agent`, not `format`:
   read `format ?? agent`. Writers write only `format`.
 - Everything new since a cursor: list `changes/` with `StartAfter`, and read the metadata of
   each session the entries name for what it is now. An entry whose change that metadata does

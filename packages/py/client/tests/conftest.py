@@ -60,7 +60,7 @@ class LiveServer:
     """A session alice stored before the server last started."""
     legacy_session: str
     """A session alice stored before the server last started, then rewritten on disk as seshi
-    wrote it before 0.15: `agent`, not `format`, in its metadata and trace, and change entries
+    wrote it before 0.16: `agent`, not `format`, in its metadata and trace, and change entries
     without `format`."""
 
 
@@ -155,7 +155,7 @@ def live_server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[LiveServer
         )
     _stop(server)
     assert isinstance(stored, Stored)
-    _as_written_before_0_15(work / "store" / "owners" / "alice", stored.archive_id)
+    _as_written_before_0_16(work / "store" / "owners" / "alice", stored.archive_id)
     server, url = _serve(command, config, env, work / "serve-2.log")
     try:
         yield LiveServer(url, admin_token, org_key, ALICE, BOB, config, pack, seed, legacy)
@@ -163,8 +163,8 @@ def live_server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[LiveServer
         _stop(server)
 
 
-def _as_written_before_0_15(owner: Path, archive: str) -> None:
-    """Rewrite a stored session as seshi wrote it before 0.15."""
+def _as_written_before_0_16(owner: Path, archive: str) -> None:
+    """Rewrite a stored session as seshi wrote it before 0.16."""
     folder = owner / "sessions" / archive
     metadata = json.loads((folder / "metadata.json").read_text())
     metadata["agent"] = metadata.pop("format")

@@ -177,7 +177,7 @@ may also be a `datetime`. Response models keep fields they do not know (in `mode
 an enum value they do not know as the string the server sent, so an older client reads a newer
 server; request models refuse unknown fields, but `Upload.format` takes any format name, which
 the server decides on. A response model also reads a format sent as `agent`, as servers before
-0.15 sent it. A call that takes a body
+0.16 sent it. A call that takes a body
 takes its model or a plain mapping (`db.ingest({"format": "codex", …})`).
 
 ### Calls

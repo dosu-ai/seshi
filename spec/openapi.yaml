@@ -215,7 +215,7 @@ paths:
           in: query
           description: |
             How to render the stored trace; `seshi`, the stored canonical trace, by default.
-            Until seshi 0.16 the server also reads it as `format`, its name before 0.15.
+            Until seshi 0.17 the server also reads it as `format`, its name before 0.16.
           schema: { $ref: "#/components/schemas/RenderFormat" }
       responses:
         "200":
@@ -266,7 +266,7 @@ paths:
           in: query
           description: |
             How to render the stored trace; `seshi`, the stored canonical trace, by default.
-            Until seshi 0.16 the server also reads it as `format`, its name before 0.15.
+            Until seshi 0.17 the server also reads it as `format`, its name before 0.16.
           schema: { $ref: "#/components/schemas/RenderFormat" }
       responses:
         "200":
@@ -644,7 +644,7 @@ paths:
           in: query
           description: |
             How to render the stored trace; `seshi`, the stored canonical trace, by default.
-            Until seshi 0.16 the server also reads it as `format`, its name before 0.15.
+            Until seshi 0.17 the server also reads it as `format`, its name before 0.16.
           schema: { $ref: "#/components/schemas/RenderFormat" }
       responses:
         "200":
@@ -696,7 +696,7 @@ paths:
           in: query
           description: |
             How to render the stored trace; `seshi`, the stored canonical trace, by default.
-            Until seshi 0.16 the server also reads it as `format`, its name before 0.15.
+            Until seshi 0.17 the server also reads it as `format`, its name before 0.16.
           schema: { $ref: "#/components/schemas/RenderFormat" }
       responses:
         "200":
@@ -1918,7 +1918,7 @@ components:
     Upload:
       type: object
       description: |
-        Until seshi 0.15 the format was sent as `agent` and the encoding as `format`; the
+        Until seshi 0.16 the format was sent as `agent` and the encoding as `format`; the
         server still takes that shape (a body with `agent`), so older uploaders keep working.
       required: [format, session_id, transcript]
       properties:

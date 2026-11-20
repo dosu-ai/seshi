@@ -501,7 +501,7 @@ class Check {
       this.add("change_unreadable", "not JSON", where);
       return;
     }
-    // An entry written before seshi 0.15 has no `format` (readers fill it from the metadata);
+    // An entry written before seshi 0.16 has no `format` (readers fill it from the metadata);
     // that alone is not a problem.
     const legacy = isObject(value) && !("format" in value);
     const problems = schemaProblems(

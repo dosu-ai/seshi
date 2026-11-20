@@ -105,14 +105,14 @@ async function matches(
   return got !== null && sha256(got) === sha256(body);
 }
 
-/** A `metadata.json` as stored, decoded; one written before seshi 0.15 has its `agent` read
+/** A `metadata.json` as stored, decoded; one written before seshi 0.16 has its `agent` read
  * as `format`. Every reader of metadata decodes it with this. Throws for bytes that are not
  * JSON; does not check the shape. */
 export function decodeMetadata(bytes: Uint8Array): SessionMetadata {
   return upgradeMetadata(decodeJson<SessionMetadata>(bytes));
 }
 
-/** A stored trace (gzipped JSON), decoded; one written before seshi 0.15 has its `agent` read
+/** A stored trace (gzipped JSON), decoded; one written before seshi 0.16 has its `agent` read
  * as `format`. Every reader of traces decodes them with this. Throws for bytes that are not
  * gzipped JSON; does not check the shape. */
 export function decodeTrace(bytes: Uint8Array): Trace {
@@ -129,7 +129,7 @@ export async function readMetadata(
 }
 
 /** Update a session's pointer with If-Match and retry on 412: `step` gets the pointer as it is
- * (null for a new session; one written before 0.15 with its `agent` read as `format`) and
+ * (null for a new session; one written before 0.16 with its `agent` read as `format`) and
  * returns the next one, or null to leave it alone. `step` may run more than once and must
  * depend only on what it is given. */
 export async function updateMetadata(

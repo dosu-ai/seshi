@@ -401,7 +401,7 @@ export function createApp(instance: Instance) {
   route("POST", "/v1/sessions", async ({ request }) => {
     const principal = await caller(request, "sessions:write");
     const body = await readJson(request, bodyLimit);
-    // Before seshi 0.15 the format was sent as `agent` and the encoding as `format`: a body
+    // Before seshi 0.16 the format was sent as `agent` and the encoding as `format`: a body
     // with `agent` is read that way, so uploaders installed before keep working.
     const legacy = body.agent !== undefined;
     const formatField = legacy ? "agent" : "format";
@@ -566,7 +566,7 @@ export function createApp(instance: Instance) {
     if (metadata.status === "redacted") {
       throw new HttpError(410, "redacted", "session was redacted; no trace");
     }
-    // `render`; until 0.16 also `format`, its name before the session's format took that name.
+    // `render`; until 0.17 also `format`, its name before the session's format took that name.
     const render = url.searchParams.get("render") ?? url.searchParams.get("format") ?? "seshi";
     if (!isRenderFormat(render)) {
       throw new HttpError(400, "bad_query", `render must be one of ${RENDER_FORMATS.join(", ")}`);

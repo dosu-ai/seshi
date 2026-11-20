@@ -13,7 +13,7 @@
     },
     "session_id": { "type": "string" },
     "format": {
-      "description": "The format the session is filed under: the format adapter its envelopes named (`claude-code`, `codex`, `cursor-cloud-api`, …), which reads it. Metadata written before 0.15 calls it `agent`; readers take `format ?? agent`.",
+      "description": "The format the session is filed under: the format adapter its envelopes named (`claude-code`, `codex`, `cursor-cloud-api`, …), which reads it. Metadata written before 0.16 calls it `agent`; readers take `format ?? agent`.",
       "type": "string"
     },
     "source": {

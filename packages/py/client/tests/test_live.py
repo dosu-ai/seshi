@@ -333,7 +333,7 @@ def test_search_and_every_owners_feed(live_server: LiveServer, admin: SeshiClien
     assert all(e.key.startswith(f"owners/{e.owner}/changes/") for e in entries)
     assert {e.owner for e in entries} <= set(admin.owners(limit=1000).owners)
     assert (entries[0].owner, entries[0].entry.session_id) == ("alice", live_server.seed_session)
-    # Every entry names its session's format, the one written before 0.15 too (filled in).
+    # Every entry names its session's format, the one written before 0.16 too (filled in).
     assert all(e.entry.format == "claude-code" for e in entries)
     assert live_server.legacy_session in {e.entry.session_id for e in entries}
     if page.truncated:

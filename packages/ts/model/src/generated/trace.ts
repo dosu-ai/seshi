@@ -12,7 +12,7 @@ export interface Trace {
   content_hash: Sha256;
   /** The meta record's `source` (`claude-code`, `codex`, an ATIF document's harness, …). */
   source: string;
-  /** The format the session was filed under (the archive id derives from it). Traces written before 0.15 call it `agent`; readers take `format ?? agent`. */
+  /** The format the session was filed under (the archive id derives from it). Traces written before 0.16 call it `agent`; readers take `format ?? agent`. */
   format: string;
   project?: string;
   branch?: string;

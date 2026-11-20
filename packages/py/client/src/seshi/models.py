@@ -421,7 +421,7 @@ class SessionMetadata(Response):
     archive_id: str
     session_id: str
     format: str = Field(validation_alias=AliasChoices("format", "agent"))
-    """The format the session is filed under (`agent` from a server older than 0.15)."""
+    """The format the session is filed under (`agent` from a server older than 0.16)."""
     source: str | None = None
     project: str | None = None
     branch: str | None = None
@@ -591,7 +591,7 @@ class Trace(Response):
     content_hash: str
     source: str
     format: str = Field(validation_alias=AliasChoices("format", "agent"))
-    """The format the session is filed under (`agent` from a server older than 0.15)."""
+    """The format the session is filed under (`agent` from a server older than 0.16)."""
     project: str | None = None
     branch: str | None = None
     session_id: str | None

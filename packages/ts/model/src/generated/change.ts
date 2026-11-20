@@ -14,7 +14,7 @@ export interface ChangeEntry {
   owner: string;
   archive_id: Sha256;
   session_id: string;
-  /** The format the session is filed under (its metadata's `format`), which every session route takes. Entries written before 0.15 have none in the bucket; the change feeds fill it from the session's metadata, and leave out one whose session has no metadata. */
+  /** The format the session is filed under (its metadata's `format`), which every session route takes. Entries written before 0.16 have none in the bucket; the change feeds fill it from the session's metadata, and leave out one whose session has no metadata. */
   format: string;
   /** The trace the entry is about; for a tombstone or a visibility change, the head at the time (null when there was none). */
   content_hash: Sha256 | null;

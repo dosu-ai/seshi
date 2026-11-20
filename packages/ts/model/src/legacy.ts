@@ -1,7 +1,7 @@
 import type { SessionMetadata } from "./generated/metadata";
 import type { Trace } from "./generated/trace";
 
-/** Metadata and traces written before seshi 0.15 name the session's format `agent`. Readers
+/** Metadata and traces written before seshi 0.16 name the session's format `agent`. Readers
  * take `format ?? agent`; writers write only `format`. These turn an object as stored into one
  * as it is written now, and leave one that already has `format`, or that is not an object at
  * all (for the caller's own shape check to refuse), as it is. */

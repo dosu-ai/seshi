@@ -16,7 +16,7 @@
       "minLength": 1
     },
     "format": {
-      "description": "The format the session was filed under (the archive id derives from it). Traces written before 0.15 call it `agent`; readers take `format ?? agent`.",
+      "description": "The format the session was filed under (the archive id derives from it). Traces written before 0.16 call it `agent`; readers take `format ?? agent`.",
       "type": "string",
       "minLength": 1
     },

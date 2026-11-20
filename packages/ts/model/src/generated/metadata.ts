@@ -23,7 +23,7 @@ export interface SessionMetadata {
   /** sha256(owner + "\n" + format + "\n" + session_id). */
   archive_id: Sha256;
   session_id: string;
-  /** The format the session is filed under: the format adapter its envelopes named (`claude-code`, `codex`, `cursor-cloud-api`, …), which reads it. Metadata written before 0.15 calls it `agent`; readers take `format ?? agent`. */
+  /** The format the session is filed under: the format adapter its envelopes named (`claude-code`, `codex`, `cursor-cloud-api`, …), which reads it. Metadata written before 0.16 calls it `agent`; readers take `format ?? agent`. */
   format: string;
   /** What the trace's meta record says it came from; absent until a trace is stored. */
   source?: string;

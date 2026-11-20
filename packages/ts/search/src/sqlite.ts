@@ -19,7 +19,7 @@ import { indexText, MATCH_END, MATCH_START } from "./snippet";
 
 /** The index's own schema: a file built under another is wiped and rebuilt from the change
  * feeds. 3: sessions' `agent` column is `format`, and the feed's copies of entries written
- * before seshi 0.15 carry the format filled in from the session. */
+ * before seshi 0.16 carry the format filled in from the session. */
 export const INDEX_SCHEMA = "seshi/search-index/3";
 
 const SNIPPET_TOKENS = 24;

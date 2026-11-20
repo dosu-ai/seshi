@@ -9,7 +9,7 @@ export type { ChangesPage, ReadChangesOptions };
 /** The owner's sessions' metadata read so far, by archive id (null: none stored). */
 export type MetadataRead = Map<string, SessionMetadata | null>;
 
-/** A page of the owner's change feed. An entry written before seshi 0.15 has no `format`; it
+/** A page of the owner's change feed. An entry written before seshi 0.16 has no `format`; it
  * gets its session's, from the session's metadata (one read per session, kept in `metadata`
  * for a caller that reads it too). One whose session has no metadata names a write that never
  * landed (its entry is written first), so there is nothing to read, and it is left out. */
@@ -48,7 +48,7 @@ export async function readChanges(
   return { entries, cursor: page.keys.at(-1), truncated: page.truncated };
 }
 
-/** An entry written without `format` (before seshi 0.15), with its session's beside the
+/** An entry written without `format` (before seshi 0.16), with its session's beside the
  * session it names, as entries are written now. */
 export function entryWithFormat(entry: ChangeEntry, format: string): ChangeEntry {
   const { schema, kind, at, owner, archive_id, session_id, format: _absent, ...rest } = entry;

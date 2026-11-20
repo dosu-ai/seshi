@@ -1,4 +1,4 @@
-/** The session's format is `format` everywhere (before 0.15 metadata, traces and the upload body
+/** The session's format is `format` everywhere (before 0.16 metadata, traces and the upload body
  * called it `agent`): a new session is stored with `format` only, a session stored before reads
  * back with it, both change feeds name it on every entry (an old entry's filled in from the
  * session), and the archive id derived from it is the one it always was. */
@@ -98,9 +98,9 @@ async function changeKeys(owner: string, archive: string): Promise<string[]> {
   return page.keys.filter((k) => k.includes(`-${archive}-`));
 }
 
-/** Rewrite a stored session as seshi wrote it before 0.15: `agent` in its metadata and traces,
+/** Rewrite a stored session as seshi wrote it before 0.16: `agent` in its metadata and traces,
  * no `format` in its change entries. */
-async function asWrittenBefore015(owner: string, archive: string): Promise<void> {
+async function asWrittenBefore016(owner: string, archive: string): Promise<void> {
   const metadataKey = keys.metadata(owner, archive);
   const { format, ...metadata } = await readJson(metadataKey);
   await store.put(metadataKey, encoder.encode(JSON.stringify({ ...metadata, agent: format })));
@@ -187,7 +187,7 @@ describe("the session's format", () => {
     const { instance, as } = server();
     await as("alice").ingest({ format: "trajectory", session_id: "kept", transcript: log("ship") });
     const kept = archiveId("alice", "trajectory", "kept");
-    await asWrittenBefore015("alice", kept);
+    await asWrittenBefore016("alice", kept);
     // An entry for a first write whose pointer never landed: its session has no metadata.
     const orphan = archiveId("alice", "trajectory", "never-landed");
     const [entryKey] = await changeKeys("alice", kept);
@@ -217,12 +217,12 @@ describe("the session's format", () => {
   });
 });
 
-describe("a session stored before 0.15", () => {
+describe("a session stored before 0.16", () => {
   it("reads back with `format`, its entries named in both feeds, and is rewritten with `format` only", async () => {
     const { instance, as } = server();
     await as("alice").ingest({ format: "trajectory", session_id: "old", transcript: log("ship") });
     const archive = archiveId("alice", "trajectory", "old");
-    await asWrittenBefore015("alice", archive);
+    await asWrittenBefore016("alice", archive);
     expect(await readJson(keys.metadata("alice", archive))).toMatchObject({ agent: "trajectory" });
 
     const alice = as("alice");

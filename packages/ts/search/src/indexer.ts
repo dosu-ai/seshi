@@ -435,7 +435,7 @@ export class Indexer {
     }
   }
 
-  /** The entry as the cross-owner feed serves it: one written before seshi 0.15 has no
+  /** The entry as the cross-owner feed serves it: one written before seshi 0.16 has no
    * `format`, so it gets its session's, from the metadata just read or else from what the index
    * holds of the session. Without either it names a write that never landed (its entry is
    * written first), as `readChanges` has it, and is left out of the feed. */
