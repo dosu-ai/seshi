@@ -1,3 +1,10 @@
+# [0.22.0](https://github.com/dosu-ai/seshi/compare/v0.21.0...v0.22.0) (2026-11-20)
+
+
+### Features
+
+* **capture:** hold the org's tool-call redaction list on the server ([capture] redact_tool_calls) ([#56](https://github.com/dosu-ai/seshi/issues/56)) ([38c4469](https://github.com/dosu-ai/seshi/commit/38c4469634e65a28cb6c9ed53ccc284e18ca48d7)), closes [#51](https://github.com/dosu-ai/seshi/issues/51)
+
 # [0.21.0](https://github.com/dosu-ai/seshi/compare/v0.20.0...v0.21.0) (2026-11-20)
 
 
