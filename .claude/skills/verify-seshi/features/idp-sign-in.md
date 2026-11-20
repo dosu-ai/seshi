@@ -67,8 +67,8 @@ Preconditions:
   listed: a new sign-in gets new refresh tokens, which the IdP honours.
 - **Unreachable.** Run `$C stop idp`, then `$C idp expire` (a fresh session token needs no
   IdP), then `$C cli --name ls-idp-down -- sessions ls --json`. Exit 7 with error code
-  `idp_unreachable`: "cannot reach the IdP at <issuer>". `$C doctor` now says `idp stopped` and,
-  with the sign-in expired, `NOT READY`.
+  `idp_unreachable`: "cannot reach the IdP at <issuer>". `$C doctor` now says
+  `idp stopped by stop idp` and, with the sign-in expired, `NOT READY`.
 - **Proof.** The `login`, `whoami`, `ls*` and `daemon-*` evidence files, plus `$C idp calls >
   .verify/seshi/$VERIFY_SESHI_RUN/idp-calls.log` saved before `down` (the run folder, and the
   IdP's log with it, goes at `down`).
@@ -94,6 +94,8 @@ Preconditions:
   valid; the CLI decides to renew from that time.
 - `idp refuse` makes the IdP forget every refresh token it has issued so far; tokens from a
   later sign-in work again. It can't be undone otherwise; sign in again.
+- `doctor` fails a run whose IdP exited without `stop idp` (a crash); its log is the run's
+  `logs/idp.log`.
 - Stopping the IdP is for good in a run: a new one would have a new issuer and keys. `down`
   and start again.
 - The org key still works on an `--idp` run (`admin.json` has it), but signing in with it

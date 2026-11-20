@@ -68,6 +68,14 @@ EOF
 
 in_run() { ( cd "$RUN/app" && eval "$(run_env "$RUN")" && "$@" ); }
 
+json_fields() { # file, dotted path… → each field's value on its own line ("" when absent)
+  bun -e '
+    const doc = JSON.parse(await Bun.file(process.argv[1]).text());
+    for (const path of process.argv.slice(2)) {
+      console.log(path.split(".").reduce((v, k) => v?.[k], doc) ?? "");
+    }' "$@"
+}
+
 free_port() {
   bun -e 'const s = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } }); console.log(s.port); s.stop(true);'
 }
@@ -146,21 +154,13 @@ up)
   mkdir -p "$EVIDENCE"
   port=""
   if [[ $mode == server ]]; then
-    port=$(free_port)
-    cat >"$RUN/seshi.toml" <<EOF
-[server]
-listen = "127.0.0.1:$port"
-
-[store]
-url = "file://$RUN/bucket"
-EOF
     serve_env=()
     if [[ $idp == 1 ]]; then
       # seshi serve takes an IdP's keys only from an https jwks_uri, so the stand-in IdP serves
       # them again over TLS with a throwaway certificate for 127.0.0.1 that only this run's serve
       # trusts (NODE_EXTRA_CA_CERTS). The private key is deleted once the IdP has loaded it.
       mkdir -p "$RUN/idp"
-      openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=127.0.0.1" \
+      openssl req -x509 -newkey rsa:2048 -nodes -days 7 -subj "/CN=127.0.0.1" \
         -addext "subjectAltName=IP:127.0.0.1" \
         -keyout "$RUN/idp/key.pem" -out "$RUN/idp/cert.pem" >"$RUN/logs/openssl.log" 2>&1 \
         || { cat "$RUN/logs/openssl.log" >&2; die "openssl could not make the IdP's certificate"; }
@@ -173,7 +173,19 @@ EOF
       done
       [[ -s $RUN/idp/info.json ]] || { cat "$RUN/logs/idp.log" >&2; die "the stand-in IdP not ready after 30 s"; }
       rm -f "$RUN/idp/key.pem"
-      issuer=$(bun -e 'console.log(JSON.parse(await Bun.file(process.argv[1]).text()).issuer)' "$RUN/idp/info.json")
+      issuer=$(json_fields "$RUN/idp/info.json" issuer)
+      serve_env=(env "NODE_EXTRA_CA_CERTS=$RUN/idp/cert.pem")
+    fi
+    # The port is picked once the IdP listens, so its own ephemeral ports can't take it.
+    port=$(free_port)
+    cat >"$RUN/seshi.toml" <<EOF
+[server]
+listen = "127.0.0.1:$port"
+
+[store]
+url = "file://$RUN/bucket"
+EOF
+    if [[ $idp == 1 ]]; then
       cat >>"$RUN/seshi.toml" <<EOF
 
 [auth.oidc]
@@ -185,7 +197,6 @@ owner_claim = "email"
 k1 = "$(openssl rand -hex 24)"
 EOF
       chmod 600 "$RUN/seshi.toml" # it now holds a literal session key, which seshi warns about
-      serve_env=(env "NODE_EXTRA_CA_CERTS=$RUN/idp/cert.pem")
     fi
     in_run seshi admin init --config "$RUN/seshi.toml" --json >"$RUN/admin.json"
     chmod 600 "$RUN/admin.json"
@@ -203,7 +214,7 @@ EOF
       in_run seshi login --server "$url" --device </dev/null >"$RUN/logs/login.log" 2>&1 \
         || { cat "$RUN/logs/login.log" >&2; die "IdP sign-in failed"; }
     else
-      key=$(bun -e 'console.log(JSON.parse(await Bun.file(process.argv[1]).text()).org_key.token)' "$RUN/admin.json")
+      key=$(json_fields "$RUN/admin.json" org_key.token)
       printf '%s' "$key" | in_run seshi login --server "$url" --key - --user verifier >"$RUN/logs/login.log" 2>&1 \
         || { cat "$RUN/logs/login.log" >&2; die "login failed"; }
     fi
@@ -217,9 +228,9 @@ EOF
   fi
   trap - EXIT
   commit=$(git -C "$REPO" rev-parse --short HEAD)
-  printf '{"run":"%s","mode":"%s","port":"%s","repo":"%s","commit":"%s","binary":%s,"idp":%s}\n' \
+  printf '{"run":"%s","mode":"%s","port":"%s","repo":"%s","commit":"%s","binary":%s,"issuer":"%s"}\n' \
     "$VERIFY_SESHI_RUN" "$mode" "$port" "$REPO" "$commit" "$([[ $binary == 1 ]] && echo true || echo false)" \
-    "$([[ $idp == 1 ]] && echo true || echo false)" >"$RUN/run.json"
+    "${issuer:-}" >"$RUN/run.json"
   cp "$RUN/run.json" "$EVIDENCE/run.json"
   echo "run $VERIFY_SESHI_RUN: $mode mode at commit $commit${port:+, server http://127.0.0.1:$port}"
   [[ $idp == 1 ]] && echo "idp      $issuer (signed in as alice@acme.com through the device flow)"
@@ -236,11 +247,10 @@ env)
 doctor)
   need_run
   ok=1
-  mode=$(bun -e 'console.log(JSON.parse(await Bun.file(process.argv[1]).text()).mode)' "$RUN/run.json")
-  port=$(bun -e 'console.log(JSON.parse(await Bun.file(process.argv[1]).text()).port)' "$RUN/run.json")
+  { read -r mode; read -r port; read -r started; read -r issuer; } < <(json_fields "$RUN/run.json" mode port commit issuer)
   echo "run      $VERIFY_SESHI_RUN ($mode mode)"
   echo "folder   $RUN"
-  echo "commit   run started at $(bun -e 'console.log(JSON.parse(await Bun.file(process.argv[1]).text()).commit)' "$RUN/run.json"), repo now at $(git -C "$REPO" rev-parse --short HEAD)"
+  echo "commit   run started at $started, repo now at $(git -C "$REPO" rev-parse --short HEAD)"
   version=$(in_run seshi --version 2>&1) || { echo "FAIL seshi --version: $version"; ok=0; }
   echo "seshi    $version"
   if [[ $mode == server ]]; then
@@ -254,12 +264,13 @@ doctor)
       echo "FAIL port $port is held by pid '${owner:-none}', not this run's serve"; ok=0
     fi
   fi
-  if [[ -f $RUN/idp/info.json ]]; then
-    issuer=$(bun -e 'console.log(JSON.parse(await Bun.file(process.argv[1]).text()).issuer)' "$RUN/idp/info.json")
+  if [[ -n $issuer ]]; then
     if alive idp; then
       echo "idp      running at $issuer (pid $(cut -d' ' -f1 "$RUN/idp.pid"))"
+    elif [[ -f $RUN/idp.pid ]]; then
+      echo "FAIL idp at $issuer exited without stop idp (see $RUN/logs/idp.log)"; ok=0
     else
-      echo "idp      stopped ($issuer): sign-in and renewal through it fail"
+      echo "idp      stopped by stop idp ($issuer): sign-in and renewal through it fail"
     fi
   fi
   who=$(in_run seshi whoami 2>&1) || { echo "FAIL whoami: $who"; ok=0; }
@@ -319,13 +330,19 @@ explore)
 
 idp)
   need_run
-  [[ -f $RUN/idp/info.json ]] || die "idp: this run has no IdP (start it with up --idp)"
+  [[ -n $(json_fields "$RUN/run.json" issuer) ]] || die "idp: this run has no IdP (start it with up --idp)"
   case ${1:-} in
     refuse)
       alive idp || die "idp: the IdP is not running"
+      before=$(grep -c 'SIGUSR1:' "$RUN/logs/idp.log" || true)
       kill -USR1 "$(cut -d' ' -f1 "$RUN/idp.pid")"
-      sleep 0.2
-      tail -1 "$RUN/logs/idp.log"
+      for _ in $(seq 1 100); do
+        [[ $(grep -c 'SIGUSR1:' "$RUN/logs/idp.log" || true) -gt $before ]] && break
+        sleep 0.1
+      done
+      [[ $(grep -c 'SIGUSR1:' "$RUN/logs/idp.log" || true) -gt $before ]] \
+        || die "idp: the IdP did not confirm the refusal within 10 s (see idp calls)"
+      grep 'SIGUSR1:' "$RUN/logs/idp.log" | tail -1
       ;;
     expire)
       # Stands in for the session token's hour passing: the CLI decides from this time whether

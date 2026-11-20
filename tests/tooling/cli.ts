@@ -197,6 +197,12 @@ export class IdpServer {
   pendingPolls = 1;
   /** Whether it offers the device flow. */
   device = true;
+  /** The `jwks_uri` discovery names; its own `/jwks` when unset. */
+  jwksUri: string | undefined;
+  /** Told of every call once it is answered. */
+  onCall:
+    | ((call: { path: string; grant?: string }, response: Response, request: Request) => unknown)
+    | undefined;
   private codes = new Map<string, { challenge: string; nonce: string; redirect: string }>();
   private counter = 0;
 
@@ -233,10 +239,17 @@ export class IdpServer {
   private async handle(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const form = new URLSearchParams(request.method === "POST" ? await request.text() : "");
-    this.calls.push({
+    const call = {
       path: url.pathname,
       ...(form.get("grant_type") ? { grant: form.get("grant_type") as string } : {}),
-    });
+    };
+    this.calls.push(call);
+    const response = await this.route(url, form);
+    await this.onCall?.(call, response, request);
+    return response;
+  }
+
+  private async route(url: URL, form: URLSearchParams): Promise<Response> {
     const error = (code: string) => Response.json({ error: code }, { status: 400 });
     switch (url.pathname) {
       case "/.well-known/openid-configuration":
@@ -245,7 +258,7 @@ export class IdpServer {
           token_endpoint: `${this.url}/token`,
           authorization_endpoint: `${this.url}/authorize`,
           ...(this.device ? { device_authorization_endpoint: `${this.url}/device` } : {}),
-          jwks_uri: `${this.url}/jwks`,
+          jwks_uri: this.jwksUri ?? `${this.url}/jwks`,
           scopes_supported: ["openid", "email", "profile", "offline_access"],
         });
       case "/jwks":

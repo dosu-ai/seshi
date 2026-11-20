@@ -13,7 +13,7 @@
  * (an IdP that stopped renewing: the person left, or the session was revoked). SIGTERM stops it.
  */
 
-import { writeFileSync } from "node:fs";
+import { renameSync, writeFileSync } from "node:fs";
 import { IdpServer } from "../../../../tests/tooling/cli";
 
 const [certPath, keyPath, infoPath] = process.argv.slice(2);
@@ -35,29 +35,16 @@ const keys = Bun.serve({
     return Response.json(idp.idp.jwks);
   },
 });
-const jwksUri = `https://127.0.0.1:${keys.port}/jwks`;
-
-// IdpServer routes every request through its `handle` method; wrap it to log each call and to
-// point discovery at the https key server.
-type Handler = (request: Request) => Promise<Response>;
-const target = idp as unknown as { handle: Handler };
-const handle = target.handle.bind(idp);
-target.handle = async (request) => {
-  const before = idp.calls.length;
-  const response = await handle(request);
-  const call = idp.calls[before];
+idp.jwksUri = `https://127.0.0.1:${keys.port}/jwks`;
+idp.onCall = async (call, response, request) => {
   let detail = "";
-  let body: Response = response;
-  if (call?.path === "/.well-known/openid-configuration" && response.ok) {
-    body = Response.json({ ...(await response.json()), jwks_uri: jwksUri });
-  } else if (!response.ok && response.headers.get("content-type")?.includes("json")) {
+  if (!response.ok && response.headers.get("content-type")?.includes("json")) {
     const { error } = (await response.clone().json()) as { error?: string };
     if (error) detail = ` ${error}`;
   }
   log(
-    `${request.method} ${call?.path ?? new URL(request.url).pathname}${call?.grant ? ` grant=${call.grant}` : ""} -> ${response.status}${detail}`,
+    `${request.method} ${call.path}${call.grant ? ` grant=${call.grant}` : ""} -> ${response.status}${detail}`,
   );
-  return body;
 };
 
 process.on("SIGUSR1", () => {
@@ -74,9 +61,11 @@ const stop = () => {
 process.on("SIGTERM", stop);
 process.on("SIGINT", stop);
 
+// Written whole and renamed into place, so a reader never sees half of it.
 writeFileSync(
-  infoPath,
-  `${JSON.stringify({ issuer: idp.url, jwks_uri: jwksUri, pid: process.pid })}\n`,
+  `${infoPath}.tmp`,
+  `${JSON.stringify({ issuer: idp.url, jwks_uri: idp.jwksUri, pid: process.pid })}\n`,
 );
+renameSync(`${infoPath}.tmp`, infoPath);
 log(`issuer ${idp.url}`);
-log(`jwks_uri ${jwksUri}`);
+log(`jwks_uri ${idp.jwksUri}`);
