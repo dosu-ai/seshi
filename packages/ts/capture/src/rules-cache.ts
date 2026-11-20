@@ -3,9 +3,11 @@ import type { CaptureHost } from "@seshi/kit";
 import { expandTilde } from "@seshi/kit";
 import { tryReadJson, tryRealpath, tryStat, tryWritePrivateFile } from "./files";
 import type { CapturePaths } from "./paths";
-import { type CaptureRules, DEFAULT_RULES, type PathRule } from "./rules";
+import { type CaptureRules, DEFAULT_RULES, type ExcludeRule, type PathRule } from "./rules";
 
-const CACHE_SCHEMA = "seshi/capture-rules/1";
+// 2: rules gained `exclude`. A cache written before it would hide a new exclude list, or keep the
+// error an older seshi gave for the unknown key, until the config file changed.
+const CACHE_SCHEMA = "seshi/capture-rules/2";
 
 export interface RulesSnapshot {
   rules: CaptureRules;
@@ -51,6 +53,19 @@ function pathRule(path: string, capture: boolean, home: string): PathRule {
   return rule;
 }
 
+/** One entry of `capture.exclude`, or undefined for a blank one or a `#` comment. A folder starts
+ * with `/`, `~` or a drive (`C:\`); anything else names a repository. */
+export function excludeRule(raw: string, home: string): ExcludeRule | undefined {
+  const entry = raw.trim();
+  if (entry === "" || entry.startsWith("#")) return undefined;
+  if (!/^(?:[/~]|[a-z]:[\\/])/i.test(entry)) return { entry };
+  const folder = expandTilde(entry, home);
+  const rule: ExcludeRule = { entry, folder };
+  const real = folder.includes("*") ? undefined : tryRealpath(folder);
+  if (real !== undefined && real !== folder) rule.real = real;
+  return rule;
+}
+
 export async function loadRules(host: CaptureHost): Promise<RulesSnapshot> {
   try {
     const { loadCliConfig } = await import("@seshi/config");
@@ -64,6 +79,9 @@ export async function loadRules(host: CaptureHost): Promise<RulesSnapshot> {
         enabled: config.capture.enabled,
         paths: config.capture.paths.map((p) => pathRule(p.path, p.capture, host.home)),
         remotes: [...config.capture.remotes],
+        exclude: config.capture.exclude
+          .map((e) => excludeRule(e, host.home))
+          .filter((r): r is ExcludeRule => r !== undefined),
       },
       theme: config.theme,
     };

@@ -14,9 +14,22 @@ export interface CaptureRules {
   /** The org rule: when not empty, only repos with a remote matching one of these patterns are
    * captured (`github.com/acme`, `github.com/acme/*`). */
   remotes: string[];
+  /** The org's exclude list: sessions in these repositories or folders are never captured. */
+  exclude: ExcludeRule[];
 }
 
-export const DEFAULT_RULES: CaptureRules = { enabled: true, paths: [], remotes: [] };
+/** One entry of `capture.exclude`: a repository (`acme/app`, `github.com/acme/*`), or a folder
+ * when `folder` is set. */
+export interface ExcludeRule {
+  /** As the admin wrote it, for `seshi capture status`. */
+  entry: string;
+  /** The folder, `~` expanded; absent for a repository entry. */
+  folder?: string;
+  /** The same folder with symbolic links resolved, when it differs. */
+  real?: string;
+}
+
+export const DEFAULT_RULES: CaptureRules = { enabled: true, paths: [], remotes: [], exclude: [] };
 
 export interface RepoConfig {
   capture?: boolean;
@@ -124,12 +137,10 @@ function tryParseUrl(text: string): URL | undefined {
   }
 }
 
-/** Whether a normalized remote matches a pattern: `*` stands for one path segment (or part of
- * one), `**` for any number; a pattern with no wildcard also matches everything under it. */
-export function remoteMatches(remote: string, pattern: string): boolean {
-  const target = normalizeRemote(pattern);
-  if (!target.includes("*")) return remote === target || remote.startsWith(`${target}/`);
-  const source = target
+/** A glob as a regular expression's source: `*` stands for one path segment (or part of one),
+ * `**` for any number; everything else is literal. */
+function globSource(glob: string): string {
+  return glob
     .split("**")
     .map((part) =>
       part
@@ -138,7 +149,24 @@ export function remoteMatches(remote: string, pattern: string): boolean {
         .join("[^/]*"),
     )
     .join(".*");
-  return new RegExp(`^${source}$`).test(remote);
+}
+
+/** Whether a normalized remote matches a pattern: `*` stands for one path segment (or part of
+ * one), `**` for any number; a pattern with no wildcard also matches everything under it. */
+export function remoteMatches(remote: string, pattern: string): boolean {
+  const target = normalizeRemote(pattern);
+  if (!target.includes("*")) return remote === target || remote.startsWith(`${target}/`);
+  return new RegExp(`^${globSource(target)}$`).test(remote);
+}
+
+/** Whether a normalized remote is in a repository entry of `capture.exclude`, ignoring case. The
+ * entry names the remote from any whole segment on: `acme/app` matches it on any host,
+ * `github.com/acme/app` only on that one. Like `capture.remotes`, an entry with no wildcard also
+ * matches everything under it (`github.com/acme`, every repo of acme there). */
+export function repoExcluded(remote: string, entry: string): boolean {
+  const pattern = entry.toLowerCase();
+  const segments = normalizeRemote(remote.toLowerCase()).split("/");
+  return segments.some((_, i) => remoteMatches(segments.slice(i).join("/"), pattern));
 }
 
 /** Whether `folder` is `base` or inside it (whole path segments only). Folders are compared as
@@ -153,6 +181,37 @@ export function within(folder: string, base: string, platform: NodeJS.Platform):
   if (f === b) return true;
   const sep = platform === "win32" ? "\\" : "/";
   return f.startsWith(b.endsWith(sep) ? b : `${b}${sep}`);
+}
+
+/** Whether `folder` is in a folder entry of `capture.exclude` (`~` already expanded): `base` and
+ * everything under it, `*` matching within one path segment and `**` across them. */
+export function folderExcluded(folder: string, base: string, platform: NodeJS.Platform): boolean {
+  if (!base.includes("*")) return within(folder, base, platform);
+  const norm = (p: string) => {
+    const slashed = platform === "win32" ? p.replace(/\\/g, "/") : p;
+    return slashed.length > 1 ? slashed.replace(/\/+$/, "") : slashed;
+  };
+  const flags = platform === "win32" ? "i" : "";
+  return new RegExp(`^${globSource(norm(base))}(?:/.*)?$`, flags).test(norm(folder));
+}
+
+/** The entry of `capture.exclude` that `place` is in, if any: its folder (or that folder with
+ * symbolic links resolved) is under a folder entry, or one of its repo's remotes matches a
+ * repository entry. */
+export function excludedBy(
+  rules: CaptureRules,
+  place: Place,
+  platform: NodeJS.Platform,
+): ExcludeRule | undefined {
+  const folders = [place.cwd, place.real].filter((p): p is string => p !== undefined);
+  const remotes = place.repo?.remotes ?? [];
+  return rules.exclude.find((rule) =>
+    rule.folder === undefined
+      ? remotes.some((r) => repoExcluded(r, rule.entry))
+      : [rule.folder, rule.real].some(
+          (base) => base !== undefined && folders.some((f) => folderExcluded(f, base, platform)),
+        ),
+  );
 }
 
 /** The folder rule for `place`: the longest one it is in. */
@@ -173,7 +232,19 @@ export function folderRule(
   return best?.rule;
 }
 
-function sharedExclusion(rules: CaptureRules, place: Place): Decision | undefined {
+function sharedExclusion(
+  rules: CaptureRules,
+  place: Place,
+  platform: NodeJS.Platform,
+): Decision | undefined {
+  const excluded = excludedBy(rules, place, platform);
+  if (excluded) {
+    return {
+      capture: false,
+      level: "org",
+      reason: `the org excludes ${excluded.entry} (capture.exclude)`,
+    };
+  }
   if (rules.remotes.length > 0) {
     const remotes = place.repo?.remotes ?? [];
     if (!remotes.some((r) => rules.remotes.some((p) => remoteMatches(r, p)))) {
@@ -236,12 +307,13 @@ const unknownFolder: LevelRule = (input) =>
         reason: "where the session ran is not known, so its repo's rules cannot be checked",
       };
 
-const sharedRulesHere: LevelRule = (input) => sharedExclusion(input.rules, input.place);
+const sharedRulesHere: LevelRule = (input, platform) =>
+  sharedExclusion(input.rules, input.place, platform);
 
-const sharedRulesSeen: LevelRule = (input) => {
+const sharedRulesSeen: LevelRule = (input, platform) => {
   for (const other of input.seen ?? []) {
     if (other.cwd === undefined || other.cwd === input.place.cwd) continue;
-    const excluded = sharedExclusion(input.rules, other);
+    const excluded = sharedExclusion(input.rules, other, platform);
     if (excluded) {
       return {
         ...excluded,

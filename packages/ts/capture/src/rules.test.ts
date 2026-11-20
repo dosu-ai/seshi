@@ -4,10 +4,14 @@ import {
   DEFAULT_RULES,
   type DecideInput,
   decide,
+  type ExcludeRule,
+  excludedBy,
+  folderExcluded,
   folderRule,
   normalizeRemote,
   type Place,
   remoteMatches,
+  repoExcluded,
   within,
 } from "./rules";
 
@@ -58,6 +62,7 @@ describe("folders", () => {
     const rules: CaptureRules = {
       enabled: true,
       remotes: [],
+      exclude: [],
       paths: [
         { path: "/work", capture: false },
         { path: "/link/app", real: "/work/app", capture: true },
@@ -181,6 +186,7 @@ describe("the decision (F9.5)", () => {
     const rules: CaptureRules = {
       enabled: false,
       remotes: [],
+      exclude: [],
       paths: [
         { path: "/work", capture: true },
         { path: "/work/app", capture: false },
@@ -220,6 +226,119 @@ describe("the decision (F9.5)", () => {
     expect(judge({ rules: paths, place: here, seen: [{ cwd: "/home/x" }] })).toMatchObject({
       capture: true,
     });
+  });
+});
+
+describe("the org's exclude list (capture.exclude)", () => {
+  it("names a repository by owner/name on any host, or host/owner/name on one, ignoring case", () => {
+    expect(repoExcluded("github.com/acme/payments", "Acme/Payments")).toBe(true);
+    expect(repoExcluded("gitlab.example.com/acme/payments", "acme/payments")).toBe(true);
+    expect(repoExcluded("github.com/Acme/Payments", "acme/payments")).toBe(true);
+    expect(repoExcluded("github.com/Acme/Payments.GIT", "acme/payments")).toBe(true);
+    expect(repoExcluded("github.com/acme/payments-ui", "acme/payments")).toBe(false);
+    expect(repoExcluded("github.com/other/acme", "acme/payments")).toBe(false);
+    expect(repoExcluded("github.com/acme/payments", "github.com/acme/payments")).toBe(true);
+    expect(repoExcluded("gitlab.com/acme/payments", "github.com/acme/payments")).toBe(false);
+    // Written as a remote URL, the entry is normalized the same way.
+    expect(repoExcluded("github.com/acme/payments", "https://github.com/acme/payments.git")).toBe(
+      true,
+    );
+    expect(repoExcluded("github.com/acme/api", "git@github.com:acme/api.git")).toBe(true);
+    expect(repoExcluded("gitlab.com/acme/api", "git@github.com:acme/api.git")).toBe(false);
+  });
+
+  it("takes wildcards: * within one segment, ** across them", () => {
+    expect(repoExcluded("github.com/acme/anything", "acme/*")).toBe(true);
+    expect(repoExcluded("github.com/other/anything", "acme/*")).toBe(false);
+    expect(repoExcluded("github.com/acme/pay-api", "github.com/acme/pay-*")).toBe(true);
+    expect(repoExcluded("gitlab.com/acme/pay-api", "github.com/acme/pay-*")).toBe(false);
+    expect(repoExcluded("github.com/clients-x/api", "github.com/clients-**")).toBe(true);
+    expect(repoExcluded("gitlab.com/acme/team/api", "acme/*")).toBe(false);
+    expect(repoExcluded("gitlab.com/acme/team/api", "acme/**")).toBe(true);
+  });
+
+  it("matches everything under an entry with no wildcard, as capture.remotes does", () => {
+    expect(repoExcluded("github.com/acme/app", "github.com/acme")).toBe(true);
+    expect(repoExcluded("github.com/acme-evil/app", "github.com/acme")).toBe(false);
+  });
+
+  it("names a folder and everything under it, whole segments only", () => {
+    expect(folderExcluded("/home/me/a", "/home/me/a", "linux")).toBe(true);
+    expect(folderExcluded("/home/me/a/x/y", "/home/me/a/", "linux")).toBe(true);
+    expect(folderExcluded("/home/me/ab", "/home/me/a", "linux")).toBe(false);
+    expect(folderExcluded("/work/a/secret/src", "/work/*/secret", "linux")).toBe(true);
+    expect(folderExcluded("/work/a/b/secret", "/work/*/secret", "linux")).toBe(false);
+    expect(folderExcluded("/work/a/b/secret", "/work/**/secret", "linux")).toBe(true);
+    expect(folderExcluded("/work/a/secretive", "/work/*/secret", "linux")).toBe(false);
+    expect(folderExcluded("C:\\Work\\A\\Secret\\x", "c:/work/*/secret", "win32")).toBe(true);
+  });
+
+  const folder = (path: string, real?: string): ExcludeRule => ({
+    entry: path,
+    folder: path,
+    ...(real ? { real } : {}),
+  });
+
+  it("finds the entry a place is in, by its folder, real folder or any remote", () => {
+    const rules: CaptureRules = {
+      ...DEFAULT_RULES,
+      exclude: [{ entry: "acme/payments" }, folder("/home/me/clients", "/data/clients")],
+    };
+    const at = (place: Place) => excludedBy(rules, place, "linux")?.entry;
+    expect(at({ cwd: "/work/app", repo: repo() })).toBeUndefined();
+    expect(
+      at({
+        cwd: "/w",
+        repo: repo({ remotes: ["github.com/me/fork", "github.com/acme/payments"] }),
+      }),
+    ).toBe("acme/payments");
+    expect(at({ cwd: "/home/me/clients/x" })).toBe("/home/me/clients");
+    expect(at({ cwd: "/link/x", real: "/data/clients/x" })).toBe("/home/me/clients");
+    expect(at({ cwd: "/home/me/clients-old" })).toBeUndefined();
+  });
+
+  const exclude: CaptureRules = {
+    ...DEFAULT_RULES,
+    paths: [{ path: "/work", capture: true }],
+    exclude: [{ entry: "acme/payments" }, folder("/home/me/clients")],
+  };
+  const payments: Place = {
+    cwd: "/work/payments",
+    repo: repo({ root: "/work/payments", remotes: ["github.com/acme/payments"] }),
+  };
+
+  it("turns capture off whatever the person says, naming the entry", () => {
+    expect(judge({ rules: exclude, place: payments, toggle: "on" })).toEqual({
+      capture: false,
+      level: "org",
+      reason: "the org excludes acme/payments (capture.exclude)",
+    });
+    expect(judge({ rules: exclude, place: { cwd: "/home/me/clients/x" } })).toMatchObject({
+      capture: false,
+      level: "org",
+      reason: "the org excludes /home/me/clients (capture.exclude)",
+    });
+    expect(judge({ rules: exclude, place: { cwd: "/work/app", repo: repo() } })).toMatchObject({
+      capture: true,
+      level: "folder",
+    });
+  });
+
+  it("holds for every folder the session was seen in", () => {
+    const here: Place = { cwd: "/work/app", repo: repo() };
+    expect(judge({ rules: exclude, place: here, seen: [payments], toggle: "on" })).toEqual({
+      capture: false,
+      level: "org",
+      reason:
+        "it also ran in /work/payments, where the org excludes acme/payments (capture.exclude)",
+    });
+  });
+
+  it("comes before the org's remotes rule, so status names the entry", () => {
+    const both = { ...exclude, remotes: ["github.com/acme"] };
+    expect(judge({ rules: both, place: { cwd: "/home/me/clients" } }).reason).toBe(
+      "the org excludes /home/me/clients (capture.exclude)",
+    );
   });
 });
 
@@ -294,6 +413,7 @@ describe("the order of the levels: each beats the one below it", () => {
     const rules: CaptureRules = {
       enabled: false,
       remotes: [],
+      exclude: [],
       paths: [{ path: "/work", capture: false }],
     };
     expect(judge({ rules, toggle: "on" })).toMatchObject({ capture: true, level: "session" });

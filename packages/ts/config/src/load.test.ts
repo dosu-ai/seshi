@@ -359,7 +359,7 @@ describe("env names (F1.2)", () => {
       user: "me",
       theme: "dark",
       server: "https://seshi.example.com",
-      capture: { enabled: false, paths: [], remotes: [] },
+      capture: { enabled: false, paths: [], remotes: [], exclude: [] },
     });
   });
 

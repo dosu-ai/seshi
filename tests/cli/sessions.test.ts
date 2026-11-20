@@ -522,7 +522,7 @@ describe("serverless mode, by its old name [local] (F11.1)", () => {
           search: { scope: "visible" },
           theme: "auto",
           keychain: true,
-          capture: { enabled: true, paths: [], remotes: [] },
+          capture: { enabled: true, paths: [], remotes: [], exclude: [] },
         },
         env: {},
         home: local.dir,
