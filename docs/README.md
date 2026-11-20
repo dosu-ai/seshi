@@ -22,6 +22,7 @@ Start with the [README](../README.md) for what it is, the
 | [server.md](server.md) | Running `seshi serve`: roles and background jobs, sources, deploying, who may call it and who sees what, the HTTP API |
 | [config.md](config.md) | Every setting, for the server (`seshi.toml`, `SESHI_*`) and for the CLI |
 | [../deploy/docker/](../deploy/docker/README.md) | The Docker kit: the server's image with Docker Compose, with a volume or a bucket, and HTTPS through Caddy |
+| [../deploy/sandbox/](../deploy/sandbox/README.md) | The Docker Sandboxes kit: captures Claude Code and Codex running in `sbx` sandboxes, with a demo |
 | [redaction.md](redaction.md) | The built-in rules, writing your own rule packs, trying them, applying them to stored sessions |
 | [model-review.md](model-review.md) | The optional model stage that drops or redacts what regular expressions miss |
 | [otlp.md](otlp.md) | OpenTelemetry traces: Claude Console destinations and other OTLP/HTTP exporters |

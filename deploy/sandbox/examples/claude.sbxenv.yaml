@@ -1,0 +1,46 @@
+# A Claude Code sandbox whose sessions go to a seshi server. With the server kit
+# (deploy/docker/) running on this machine and a device token stored with `sbx secret set
+# seshi`, this is all it takes:
+#
+#   sbx env run deploy/sandbox/examples/claude.sbxenv.yaml
+#
+# For a server elsewhere:
+#
+#   sbx env run deploy/sandbox/examples/claude.sbxenv.yaml \
+#     --env-arg server=https://seshi.example.com --env-arg host=seshi.example.com
+schemaVersion: "1"
+name: seshi-claude
+agent: claude
+
+args:
+  server:
+    default: "http://host.docker.internal:7200"
+    description: The seshi server's URL, as the sandbox reaches it
+  host:
+    default: "localhost:7200"
+    description: The seshi server as the sandbox proxy sees it
+  user:
+    default: ""
+    description: With the org key as the seshi secret, the username sessions are stored under
+
+kits:
+  - source: ../seshi-sandbox-kit
+    args:
+      server: "${{ env.args.server }}"
+      host: "${{ env.args.host }}"
+      user: "${{ env.args.user }}"
+
+# Lets the proxy put the seshi secret in requests to the server, and nowhere else.
+bindings:
+  seshi:
+    apiKey:
+      domains:
+        - "${{ env.args.host }}"
+
+lifecycle:
+  # A last try at sending what is queued. It runs after the removal is approved, and a failure
+  # only warns, so flush first: sbx exec <name> -- seshi-sandbox flush && sbx env rm <file>
+  preRemove:
+    - name: Send the sessions seshi has not uploaded yet
+      command: sbx exec "$SBX_SANDBOX_NAME" -- seshi-sandbox flush
+      timeout: 3m

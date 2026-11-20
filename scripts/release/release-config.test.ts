@@ -63,6 +63,7 @@ describe("release.config.js", () => {
       "integrations/cursor/extension/package.json",
       "packages/py/client/src/seshi/_version.py",
       "deploy/docker/compose.yaml",
+      "deploy/sandbox/seshi-sandbox-kit/seshi-sandbox-kit.yaml",
       "bun.lock",
       "CHANGELOG.md",
     ]);
@@ -135,6 +136,25 @@ describe("ci.yml", () => {
     expect(job).toContain("sh scripts/docker-kit-smoke.sh");
     // The last job in the file. It pulls as a user would: no registry login.
     expect(job).not.toContain("docker/login-action");
+  });
+
+  it("tests the Docker Sandboxes kit with this checkout's seshi, then publishes and verifies it", () => {
+    const docker = CI.slice(CI.indexOf("\n  docker:"), CI.indexOf("\n  binaries:"));
+    expect(docker).toContain("run: sh scripts/sandbox-kit-smoke.sh");
+    expect(docker).toContain("SESHI_IMAGE: sessiondb");
+    const publish = CI.slice(CI.indexOf("\n  sandbox-kit:"), CI.indexOf("\n  npm:"));
+    expect(publish).toContain("needs: release");
+    expect(publish).toContain("ref: v${{ needs.release.outputs.version }}");
+    expect(publish).toContain("file: deploy/sandbox/seshi-sandbox-kit/seshi-sandbox-kit.yaml");
+    expect(publish).toContain("platforms: linux/amd64,linux/arm64");
+    expect(publish).toContain("provenance: mode=min");
+    const verify = CI.slice(CI.indexOf("\n  verify-sandbox-kit:"), CI.indexOf("\n  verify-kit:"));
+    expect(verify).toContain("needs: [release, image, sandbox-kit]");
+    expect(verify).toContain("runner: [ubuntu-latest, ubuntu-24.04-arm]");
+    expect(verify).toContain("ref: v${{ needs.release.outputs.version }}");
+    expect(verify).toContain("sh scripts/sandbox-kit-smoke.sh");
+    expect(verify).toContain("-sandbox-kit:${{ needs.release.outputs.version }}");
+    expect(verify).not.toContain("docker/login-action");
   });
 
   it("calls only scripts that exist", () => {

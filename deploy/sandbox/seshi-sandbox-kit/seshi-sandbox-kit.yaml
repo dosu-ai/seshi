@@ -1,0 +1,101 @@
+# syntax=docker/sandbox-kit:3
+# seshi for Docker Sandboxes: a mixin for the stock claude and codex agents. It installs a
+# released seshi, hooks it into the agents when the sandbox is created, and signs in when the
+# sandbox boots, so every session the agent runs is captured, redacted in the sandbox, and
+# uploaded to a seshi server. deploy/sandbox/README.md explains each part.
+schemaVersion: "3"
+kind: mixin
+displayName: seshi session capture
+description: >-
+  Captures every Claude Code and Codex session in the sandbox, redacts it, and uploads it to
+  your seshi server.
+sourceUrl: https://github.com/dosu-ai/seshi
+licenses: [MIT]
+
+args:
+  version:
+    # The seshi release this kit installs. scripts/release-version.ts rewrites it with each
+    # release, so the kit at tag vX.Y.Z installs seshi X.Y.Z.
+    default: "0.22.0"
+    pattern: '^[0-9]+\.[0-9]+\.[0-9]+$'
+    description: seshi release to install
+    buildArg: SESHI_VERSION
+  server:
+    # Plain HTTP only to a server on this machine: the proxy puts the real token on the
+    # request, so anything that crosses a network must be HTTPS.
+    default: "http://host.docker.internal:7200"
+    pattern: '^(http://host\.docker\.internal|https://[A-Za-z0-9.-]+)(:[0-9]{1,5})?$'
+    description: The seshi server's URL, as the sandbox reaches it (https, or http://host.docker.internal for this machine)
+  host:
+    # The proxy on the host rewrites host.docker.internal to localhost, so a server on this
+    # machine is localhost:<port> here. A remote server is its DNS name.
+    default: "localhost:7200"
+    pattern: '^[A-Za-z0-9.-]+(:[0-9]{1,5})?$'
+    description: The seshi server as the sandbox proxy sees it, for the network rule and the token
+  user:
+    default: ""
+    pattern: '^[A-Za-z0-9._@+-]*$'
+    description: With the org key as the seshi secret, the username sessions are stored under; empty for a token
+
+provides: ["seshi@${{ kit.args.version }}"]
+
+# Orders this kit's hooks after the agent's own: the claude and codex workloads write
+# settings.json and config.toml in their install hooks, and seshi adds its hooks to those.
+integrates: ["claude", "codex"]
+
+capabilities:
+  # The seshi server, and nothing else. Only sandboxes created with this kit get the rule.
+  - type: com.docker.sandbox/network-policy@1
+    config:
+      runtime:
+        allow:
+          - "${{ kit.args.host }}"
+
+  # The upload credential, kept on the host: `sbx secret set seshi`. The sandbox sees a
+  # placeholder in SESHI_TOKEN, and the proxy puts the real token in the Authorization header
+  # of requests to the server. Optional: without it, the kit still captures, and a person can
+  # run `seshi login` in the sandbox.
+  - type: com.docker.sandbox/credential@1
+    optional: true
+    description: seshi upload token (a device token from `seshi tokens create device`)
+    config:
+      service: seshi
+      phase: runtime
+      apiKey:
+        name: SESHI_TOKEN
+        proxyManaged: true
+        inject:
+          - domain: "${{ kit.args.host }}"
+            header: Authorization
+            format: "Bearer %s"
+
+  - type: com.docker.sandbox/lifecycle@1
+    config:
+      install:
+        - command: [/usr/local/bin/seshi-sandbox, setup]
+          user: agent
+          env: [CODEX_HOME, CLAUDE_CONFIG_DIR, XDG_CONFIG_HOME, XDG_STATE_HOME]
+          description: Add seshi's capture hooks to Claude Code and Codex
+      startup:
+        - command:
+            - /usr/local/bin/seshi-sandbox
+            - start
+            - "--server=${{ kit.args.server }}"
+            - "--user=${{ kit.args.user }}"
+          user: agent
+          background: true
+          env:
+            - SESHI_TOKEN
+            - CODEX_HOME
+            - CLAUDE_CONFIG_DIR
+            - XDG_CONFIG_HOME
+            - XDG_STATE_HOME
+            - HTTP_PROXY
+            - HTTPS_PROXY
+            - NO_PROXY
+            - http_proxy
+            - https_proxy
+            - no_proxy
+            - NODE_EXTRA_CA_CERTS
+            - SSL_CERT_FILE
+          description: Sign in to the seshi server and send sessions an earlier run left queued

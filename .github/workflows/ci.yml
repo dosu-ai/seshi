@@ -158,6 +158,15 @@ jobs:
         env:
           IMAGE_REPOSITORY: sessiondb
           IMAGE_TAG: latest
+      # The Docker Sandboxes kit (deploy/sandbox/), built through its own frontend and laid
+      # over a stand-in agent image, against the Docker kit's server. This checkout's seshi
+      # replaces the release the kit pins, so a capture change is tested before it ships.
+      - name: The Docker Sandboxes kit, with this image's seshi
+        run: sh scripts/sandbox-kit-smoke.sh
+        env:
+          IMAGE_REPOSITORY: sessiondb
+          IMAGE_TAG: latest
+          SESHI_IMAGE: sessiondb
 
   # F8.4: the binary on every platform it ships for, built natively on that platform's runner.
   # Each one is put through scripts/release/smoke.ts: serve, admin init, login with the org key
@@ -394,6 +403,47 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  # The Docker Sandboxes kit (deploy/sandbox/seshi-sandbox-kit) as an image beside the
+  # server's, so `sbx run claude --kit ghcr.io/<repo>-sandbox-kit:X.Y.Z` needs no checkout. At
+  # the release's tag the descriptor's version default is this release, which the kit's
+  # Dockerfile downloads from the GitHub release and checks against SHA256SUMS.
+  sandbox-kit:
+    needs: release
+    if: needs.release.outputs.released == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: v${{ needs.release.outputs.version }}
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ghcr.io/${{ github.repository }}-sandbox-kit
+          tags: |
+            type=semver,pattern={{version}},value=v${{ needs.release.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=v${{ needs.release.outputs.version }}
+            type=raw,value=latest
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: deploy/sandbox/seshi-sandbox-kit
+          file: deploy/sandbox/seshi-sandbox-kit/seshi-sandbox-kit.yaml
+          platforms: linux/amd64,linux/arm64
+          # The kit frontend puts its annotations on the index only when provenance is asked for.
+          provenance: mode=min
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
   # F8.4, X3.8: the npm packages, built from the release's archives (so npm carries the very
   # binaries GitHub does) and published with provenance: @dosu/seshi-<target> for every target,
   # @dosu/seshi-model, @dosu/seshi-client, then the @dosu/seshi launcher. A package already on the registry
@@ -574,6 +624,27 @@ jobs:
             rm -rf "$(npm config get cache)/_npx"
             sleep 30
           done
+
+  # The Docker Sandboxes kit the release published, at the release's tag, against the server
+  # image the release published, both pulled without a login as a user would, on each
+  # architecture the kit ships for.
+  verify-sandbox-kit:
+    needs: [release, image, sandbox-kit]
+    if: needs.release.outputs.released == 'true'
+    strategy:
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: v${{ needs.release.outputs.version }}
+          persist-credentials: false
+      - run: sh scripts/sandbox-kit-smoke.sh
+        env:
+          KIT_IMAGE: ghcr.io/${{ github.repository }}-sandbox-kit:${{ needs.release.outputs.version }}
 
   # The Docker kit at the release's tag, against the image the release published, pulled
   # without a login as a user would. The release commit is [skip ci], so this is the one run of

@@ -23,8 +23,9 @@ from any other branch, and nothing is published by hand.
    signature (`scripts/release/macho-sign.ts`, no `codesign` needed) before archiving them.
 2. **`release`** runs semantic-release. It picks the version from the commits, writes it into
    `packages/ts/model/package.json`, `bun.lock`, the Python client's
-   `packages/py/client/src/seshi/_version.py` and the image tag the Docker kit pins in
-   `deploy/docker/compose.yaml` (`scripts/release-version.ts`),
+   `packages/py/client/src/seshi/_version.py`, the image tag the Docker kit pins in
+   `deploy/docker/compose.yaml` and the seshi release the Docker Sandboxes kit installs
+   (`deploy/sandbox/seshi-sandbox-kit/seshi-sandbox-kit.yaml`, `scripts/release-version.ts`),
    cross-compiles every target with `scripts/release/build.ts` into `dist/release/`, commits the
    version, pushes the tag, and publishes the GitHub release with these assets:
 
@@ -50,6 +51,13 @@ from any other branch, and nothing is published by hand.
    finishes, the kit at the new tag names an image that does not exist yet (the release
    commit carries the new pin). If `image` fails, re-run the workflow's failed jobs once the
    cause is fixed: `image` builds the same tag again, and `verify-kit` follows it.
+   **`sandbox-kit`** builds the Docker Sandboxes kit at the tag, which downloads this release's
+   Linux binaries and checks them against `SHA256SUMS`, and pushes it as
+   `ghcr.io/<repo>-sandbox-kit` for linux/amd64 and linux/arm64, tagged `X.Y.Z`, `X.Y` and
+   `latest`. **`verify-sandbox-kit`** then runs `scripts/sandbox-kit-smoke.sh` at the tag
+   against both published images, pulled without a login. GHCR makes a new package private: the
+   first time `sandbox-kit` publishes, make `seshi-sandbox-kit` public in the organization's
+   package settings, then re-run `verify-sandbox-kit`.
 5. **`pypi`** builds the Python client from the release's tag and publishes it to PyPI as
    `seshi` ([below](#pypi)).
 6. **`verify`** installs the published release on all six platforms with `install.sh` or
@@ -71,8 +79,8 @@ the install script's detection.
 
 ## The workflow's own security
 
-`ci.yml` gives every job a read-only `GITHUB_TOKEN`; `release`, `image` (`packages: write`)
-`npm` (`id-token: write`, for provenance) and `pypi` (`id-token: write`, for PyPI's trusted
+`ci.yml` gives every job a read-only `GITHUB_TOKEN`; `release`, `image` and `sandbox-kit`
+(`packages: write`), `npm` (`id-token: write`, for provenance) and `pypi` (`id-token: write`, for PyPI's trusted
 publishing, in the `pypi` environment) grant themselves more. No checkout keeps its
 credentials: semantic-release pushes the release commit and tag with the abbs-bot app token
 it is handed. Every action is pinned to a commit SHA with its release in a trailing comment

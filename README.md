@@ -101,7 +101,8 @@ seshi capture install
 ```
 
 The container image is `ghcr.io/dosu-ai/seshi` ([docs/server.md](docs/server.md#deploying)), and
-[deploy/docker/](deploy/docker/README.md) runs it with Docker Compose.
+[deploy/docker/](deploy/docker/README.md) runs it with Docker Compose. For agents that run in
+Docker Sandboxes, [deploy/sandbox/](deploy/sandbox/README.md) is a kit that captures them there.
 
 **2. Serverless.** Nothing to run: each laptop runs the pipeline and writes its own folder of a
 shared bucket with its own key. Use it when the team trusts its laptops

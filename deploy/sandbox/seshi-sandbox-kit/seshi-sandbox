@@ -1,0 +1,183 @@
+#!/bin/sh
+# seshi's part of a Docker sandbox's life. The seshi sandbox kit runs `setup` once, when the
+# sandbox is created, and `start` on every boot. `flush` is for you, or an environment file's
+# preRemove, before the sandbox is deleted.
+#
+#   seshi-sandbox setup                                # add capture hooks to the agents here
+#   seshi-sandbox start --server=<url> [--user=<name>] # sign in, then send what is queued
+#   seshi-sandbox flush                                # send everything; exit 1 if any is left
+#
+# setup and start always exit 0: a capture kit must never stop a sandbox from starting, so
+# they print what went wrong instead. The sandbox keeps a hook's output in its log.
+set -u
+
+SESHI=/usr/local/bin/seshi
+
+say() { printf 'seshi-sandbox: %s\n' "$*"; }
+
+# Hooks get a minimal environment. HOME is in it, but make sure it is the agent's.
+if [ -z "${HOME:-}" ] || [ "$HOME" = / ]; then
+  HOME=$(getent passwd "$(id -u)" 2>/dev/null | cut -d: -f6)
+  HOME=${HOME:-/home/agent}
+  export HOME
+fi
+
+# Credentials in credentials.json (0600) beside the CLI config, never a keychain: a sandbox has
+# no secret service, and a login would hang or fail looking for one.
+keychain_off() {
+  config="${XDG_CONFIG_HOME:-$HOME/.config}/seshi/config.toml"
+  mkdir -p "$(dirname "$config")" || return
+  if [ ! -e "$config" ]; then
+    (umask 077 && printf 'keychain = false\n' >"$config")
+  elif ! grep -q '^[[:space:]]*keychain[[:space:]]*=' "$config"; then
+    # Top-level keys go before the first [table], so prepend rather than append.
+    tmp="$config.seshi-sandbox.$$"
+    { printf 'keychain = false\n'; cat "$config"; } >"$tmp" && mv "$tmp" "$config"
+  fi
+}
+
+# The agents this sandbox has: the claude and codex workloads put their programs on PATH, or
+# in ~/.local/bin, and their config folders in HOME.
+agents() {
+  found=""
+  if command -v claude >/dev/null 2>&1 || [ -x "$HOME/.local/bin/claude" ] ||
+    [ -d "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" ]; then
+    found="claude-code"
+  fi
+  if command -v codex >/dev/null 2>&1 || [ -d "${CODEX_HOME:-$HOME/.codex}" ]; then
+    found="$found codex"
+  fi
+  printf '%s' "$found"
+}
+
+setup() {
+  keychain_off || say "could not write the seshi CLI config"
+  found=$(agents)
+  if [ -z "$found" ]; then
+    say "no Claude Code or Codex here; nothing to capture"
+    return 0
+  fi
+  # Idempotent: a second install changes nothing. Its words are split on purpose.
+  # shellcheck disable=SC2086
+  "$SESHI" capture install $found || say "capture install exited $? (see above)"
+}
+
+login() {
+  server=$1
+  user=$2
+  if [ -z "${SESHI_TOKEN:-}" ]; then
+    say "no SESHI_TOKEN: run 'sbx secret set seshi' on the host, or 'seshi login --server $server' in the sandbox"
+    return 0
+  fi
+  if [ -n "$user" ]; then
+    set -- --key - --user "$user"
+  else
+    set -- --token -
+  fi
+  # This runs in the background, so it can wait out a server that is down or still starting:
+  # sessions queue meanwhile, and the uploader sends them once it is signed in. A server that
+  # refuses the credential (exit 5) or a usage or config error (2, 3) will not change, so stop.
+  # LOGIN_TRIES and LOGIN_WAIT are for scripts/sandbox-kit-smoke.sh; the kit passes neither.
+  tries=0
+  while :; do
+    printf '%s' "$SESHI_TOKEN" | "$SESHI" login --server "$server" "$@"
+    code=$?
+    case "$code" in
+      0) return 0 ;;
+      2 | 3 | 5)
+        say "$server refused to sign in (exit $code); check the seshi secret, then run: seshi-sandbox start --server=$server"
+        return 0
+        ;;
+    esac
+    tries=$((tries + 1))
+    if [ "$tries" -ge "${LOGIN_TRIES:-60}" ]; then
+      say "could not reach $server; sessions wait in the queue. The next boot tries again, or run: seshi-sandbox start --server=$server"
+      return 0
+    fi
+    sleep "${LOGIN_WAIT:-15}"
+  done
+}
+
+start() {
+  server=""
+  user=""
+  for arg in "$@"; do
+    case "$arg" in
+      --server=*) server=${arg#--server=} ;;
+      --user=*) user=${arg#--user=} ;;
+      *) say "unknown argument $arg" ;;
+    esac
+  done
+  # Again on every boot, as a repair: the agent's own install hooks rewrite its settings when
+  # the sandbox is recreated.
+  setup
+  if [ -z "$server" ]; then
+    say "no --server given; not signing in"
+    return 0
+  fi
+  login "$server" "$user"
+  # What the uploader had not sent when the sandbox last stopped.
+  "$SESHI" daemon --once || say "the uploader exited $?; 'seshi capture status' says why"
+}
+
+# Ask the background uploader a hook started (`seshi daemon`) to stop. It finishes the pass it
+# is in, then exits. Read from /proc, so it needs no procps in the agent's image.
+stop_uploader() {
+  for dir in /proc/[0-9]*; do
+    cmd=$(tr '\0' ' ' <"$dir/cmdline" 2>/dev/null) || continue
+    case "$cmd" in
+      *--once*) ;;
+      "$SESHI daemon "*) kill -TERM "${dir#/proc/}" 2>/dev/null ;;
+    esac
+  done
+}
+
+# A number from the flat JSON summary `seshi daemon --once --json` prints; empty when absent.
+summary_number() {
+  printf '%s' "$2" | tr -d ' \n' | sed -n "s/.*\"$1\":\([0-9][0-9]*\).*/\1/p"
+}
+
+flush() {
+  # Every installed agent's sessions from the past 30 days, through the same queue as hooks, so
+  # a session a hook missed is queued too.
+  "$SESHI" upload --since 30d >/dev/null 2>&1
+  # Success is only what a pass this command ran says. A running uploader holds the lock, so
+  # ask it to stop: it finishes the pass it is in, then exits, and this command takes over.
+  tries=0
+  while :; do
+    out=$("$SESHI" daemon --once --json 2>&1)
+    code=$?
+    case "$out" in
+      *'"started":'*false*)
+        tries=$((tries + 1))
+        if [ "$tries" -ge "${FLUSH_TRIES:-90}" ]; then
+          say "the running uploader did not stop; do not remove this sandbox yet"
+          return 1
+        fi
+        stop_uploader
+        sleep 2
+        continue
+        ;;
+    esac
+    break
+  done
+  queued=$(summary_number queued "$out")
+  failed=$(summary_number failed "$out")
+  if [ "$code" -ne 0 ] || [ -z "$queued" ] || [ "$queued" -gt 0 ] || [ "${failed:-0}" -gt 0 ]; then
+    printf '%s\n' "$out"
+    "$SESHI" capture status
+    say "not everything was sent; do not remove this sandbox yet"
+    return 1
+  fi
+  say "every session is on the server; nothing is queued"
+}
+
+case "${1:-}" in
+  setup) setup; exit 0 ;;
+  start) shift; start "$@"; exit 0 ;;
+  flush) flush ;;
+  *)
+    echo "usage: seshi-sandbox setup | start --server=<url> [--user=<name>] | flush" >&2
+    exit 2
+    ;;
+esac
