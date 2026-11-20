@@ -1052,6 +1052,7 @@ export function labelsCheck(ev: SessionEvidence): CheckResult {
   const stored = storedOf(ev)?.labels;
   const problems = ev.machine.label_problems ?? [];
   const detail: string[] = [];
+  // Both as stored: the evidence redacts the pinned values with the rules the server uses.
   if (local !== undefined) detail.push(`pinned here: ${labelText(local) || "none"}`);
   if (stored !== undefined) detail.push(`on the server: ${labelText(stored)}`);
   if (local && stored && labelText(local) !== labelText(stored)) {

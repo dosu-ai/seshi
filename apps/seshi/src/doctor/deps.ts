@@ -54,6 +54,8 @@ export interface Redaction {
   transcript(text: string, encoding: "jsonl" | "json"): string;
   records(records: readonly NormalizedRecord[]): NormalizedRecord[];
   residue(records: readonly NormalizedRecord[]): Residue[];
+  /** A short value (a label's) as these rules store it: the server redacts label values. */
+  text(value: string): string;
 }
 
 export interface DoctorDeps {

@@ -112,6 +112,7 @@ export function ruleRedaction(rules: RuleSet, origin: string, point: RedactionPo
       point === "pre-redact" ? redactTranscript(rules, text, encoding).text : text,
     records: (records) => redactor.redact(records).records,
     residue: (records) => residueOf(rules, records),
+    text: (value) => redactor.redactText?.(value).text ?? value,
   };
 }
 

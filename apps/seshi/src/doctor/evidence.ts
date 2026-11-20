@@ -29,17 +29,27 @@ export interface GatherOptions {
 
 const MAX_CHANGES = 5000;
 
-export function localEntry(entry: SessionState): SecretlessStateEntry {
-  const { secret, ...rest } = entry;
+/** The session's state entry as evidence: its retraction secret as a hash, and its labels as the
+ * server stores them (`redact`): the state keeps what the hook resolved, which may hold a secret
+ * an `env` label read. */
+export function localEntry(
+  entry: SessionState,
+  redact: (value: string) => string = (value) => value,
+): SecretlessStateEntry {
+  const { secret, labels, ...rest } = entry;
+  const redacted = labels
+    ? { labels: Object.fromEntries(Object.entries(labels).map(([k, v]) => [k, redact(v)])) }
+    : {};
   return secret
     ? {
         ...rest,
+        ...redacted,
         secret: {
           present: true,
           sha256: createHash("sha256").update(secret, "utf8").digest("hex"),
         },
       }
-    : rest;
+    : { ...rest, ...redacted };
 }
 
 /** The id the session uploaded to before its last retraction. */
@@ -171,7 +181,7 @@ export async function gatherEvidence(
       evidence.machine.problems = state.problems;
     }
     evidence.machine.uploader = { ...(state.uploader ?? {}), running: deps.uploaderRunning() };
-    if (entry) evidence.local = localEntry(entry);
+    if (entry) evidence.local = localEntry(entry, deps.redaction.text);
     if (entry?.parent_session_id) {
       evidence.parent = {
         session_id: entry.parent_session_id,

@@ -247,6 +247,7 @@ function deps(over: Partial<DoctorDeps> = {}): DoctorDeps {
       rule_set: "rs1",
       origin: "the fake rules",
       transcript: (text) => text,
+      text: (value) => value.replace(/TOPSECRET\w*/g, "[redacted:fake-secret]"),
       records: (records) => [...records],
       residue: (records) =>
         records.flatMap((r, index) =>
@@ -1130,6 +1131,32 @@ describe("gatherEvidence", () => {
     expect(ev.server.changes).toHaveLength(2);
     expect(ev.server.search).toMatchObject({ expect: "found", term: "thirdly", found: true });
     expect(runChecks(ev, deps()).filter((c) => c.status !== "ok")).toEqual([]);
+  });
+
+  it("shows the pinned labels as the server stores them: redacted, and not a mismatch", async () => {
+    const labels = { team: "platform", token: "TOPSECRET123" };
+    const ev = await gatherEvidence(
+      { agent: "claude-code", session_id: SID },
+      deps({
+        state: () => state({ [KEY]: entry({ labels }) }),
+        server: fakeServer({
+          getSession: async (_agent, id) =>
+            id === SID
+              ? metadata({ labels: { team: "platform", token: "[redacted:fake-secret]" } })
+              : null,
+        }),
+      }),
+    );
+    expect(JSON.stringify(ev)).not.toContain("TOPSECRET123");
+    const check = labelsCheck(ev);
+    expect(check).toMatchObject({
+      status: "ok",
+      summary: "team=platform, token=[redacted:fake-secret]",
+    });
+    expect(check.detail).toEqual([
+      "pinned here: team=platform, token=[redacted:fake-secret]",
+      "on the server: team=platform, token=[redacted:fake-secret]",
+    ]);
   });
 
   it("records what it could not fetch instead of throwing", async () => {
