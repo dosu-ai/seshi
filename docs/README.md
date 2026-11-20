@@ -26,6 +26,7 @@ Start with the [README](../README.md) for what it is, the
 | [otlp.md](otlp.md) | OpenTelemetry traces: Claude Console destinations and other OTLP/HTTP exporters |
 | [datadog.md](datadog.md) | Polling Datadog LLM Observability for Datadog Trajectory's sessions |
 | [s3-sync.md](s3-sync.md) | Polling a bucket other systems write transcripts to |
+| [cursor-cloud.md](cursor-cloud.md) | Polling Cursor's Cloud Agents API for Cursor Cloud agents' sessions |
 | [../SECURITY.md](../SECURITY.md) | What seshi protects and what it does not, and how to report a vulnerability |
 
 ## Building on it

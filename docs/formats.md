@@ -17,6 +17,7 @@ adapter where there is none.
 | `claude-code` | Claude Code's session log (`~/.claude/projects/…/<session>.jsonl`) | Yes |
 | `codex` | Codex's rollout log (`~/.codex/sessions/…`) | Yes |
 | `cursor` | Cursor's agent transcript (IDE and CLI) | Yes |
+| `cursor-cloud-api` | A Cursor Cloud agent's runs as the Cloud Agents API streams them, one JSONL line per run; what the [Cursor Cloud poller](cursor-cloud.md) writes | Yes, at run boundaries |
 | `opencode` | An OpenCode session export, `format: "json"` | No: whole documents |
 | `pi` | pi's session log (also its forks, OMP and OpenClaw) | Yes |
 | `gemini-cli` | A Gemini CLI session document (JSON) | No: whole documents |
