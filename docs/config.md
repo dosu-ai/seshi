@@ -446,7 +446,8 @@ and result replaced by `[redacted:tool-call]`: what the person asked, what the a
 thought, which tools ran, their ids, their order and whether each failed are kept; code, file
 contents and command output are not ([capture.md](capture.md#tool-calls-redacted)). A place on
 both lists is excluded. Like the exclude list it holds for every folder a session was seen in,
-and it turns nothing on: a session it names that another rule turns off stays off.
+and it turns nothing on: a session it names that another rule turns off stays off. A subagent's
+session there is not uploaded at all: it is its parent's tool call.
 `seshi capture status` names the entry and says the session goes with its tool calls redacted.
 
 Like a repo's own `capture = false`, the org rules can only turn capture off. A repo opts out

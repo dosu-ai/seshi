@@ -57,7 +57,7 @@ const rows: Record<string, unknown>[] = [
     display: false,
     details: { note: "LEAK", session_capture: { omit: true } },
   }),
-  entry(7, { type: "compaction", summary: "KEPT summary", details: { readFiles: ["LEAK.ts"] } }),
+  entry(7, { type: "compaction", summary: "LEAK summary", details: { readFiles: ["LEAK.ts"] } }),
   entry(8, { type: "custom", customType: "ext", data: { path: "LEAK" } }),
   message(9, { role: "assistant", model: "m", content: [{ type: "text", text: "KEPT done" }] }),
 ];

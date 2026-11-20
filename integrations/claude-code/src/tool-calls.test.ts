@@ -198,6 +198,26 @@ const rows: Record<string, unknown>[] = [
     },
   },
   {
+    type: "user",
+    uuid: "c1",
+    timestamp: "2026-11-19T00:00:13.500Z",
+    ...ids,
+    isCompactSummary: true,
+    message: { role: "user", content: "Summary: read src/auth.ts: LEAK export const KEY" },
+  },
+  {
+    type: "user",
+    uuid: "u6",
+    timestamp: "2026-11-19T00:00:13.600Z",
+    ...ids,
+    message: {
+      role: "user",
+      content: "<bash-input>KEPT make</bash-input><bash-stdout>LEAK cut sh",
+    },
+  },
+  { type: "last-prompt", lastPrompt: "KEPT last<bash-stdout>LEAK</bash-stdout>", leafUuid: "a9" },
+  { type: "progress", uuid: "p2", constructor: "LEAK by an inherited key" },
+  {
     type: "attachment",
     uuid: "q3",
     timestamp: "2026-11-19T00:00:14Z",
@@ -288,6 +308,10 @@ describe("Claude Code's tool-call redaction (capture.redact_tool_calls)", () => 
     });
     expect(parsed[11].attachment.type).toBe("edited_text_file");
     expect(parsed[12]).toMatchObject({ type: "progress", toolUseID: "toolu_1" });
+    expect(parsed.find((r) => r.uuid === "u6").message.content).toBe(
+      `<bash-input>KEPT make</bash-input><bash-stdout>${TOOL_CALL_MARKER}`,
+    );
+    expect(parsed.find((r) => r.uuid === "c1").message.content).toBe(TOOL_CALL_MARKER);
     expect(parsed.at(-1).attachment.prompt).toEqual([
       { type: "text", text: "KEPT a prompt in blocks" },
     ]);

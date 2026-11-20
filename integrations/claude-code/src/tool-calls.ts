@@ -6,9 +6,11 @@
  *   `tool_use_id` and `is_error`. The row's own copies of a result (`toolUseResult`, `mcpMeta`)
  *   and of an input (`wireToolInputs`) are blanked, as is any field not listed here.
  * - A user message a tool wrote (`sourceToolUseID`: a skill's text) is blanked; so is a
- *   background task's result (`<task-notification>`), and the output of a command the person ran
- *   (`<bash-stdout>`, `<local-command-stdout>`), whose command is kept.
- * - A queued prompt (`attachment.queued_command`) is the person's, and kept the same way.
+ *   background task's result (`<task-notification>`), the output of a command the person ran
+ *   (`<bash-stdout>`, `<local-command-stdout>`, closed or cut short), whose command is kept, and
+ *   a compaction's summary (`isCompactSummary`), which quotes what tools read and printed.
+ * - A queued prompt (`attachment.queued_command`, `last-prompt`) is the person's, and kept the
+ *   same way.
  * - Rows that only name the session (`summary`, `custom-title`, …) are kept; every other row
  *   (`progress`, `system`, `file-history-snapshot`, other attachments, …) keeps only its type, ids
  *   and time.
@@ -23,6 +25,7 @@ import {
   isJsonObject,
   type RecordShape,
   redactRecords,
+  redactTagBodies,
   reshape,
   TOOL_CALL_MARKER,
 } from "@seshi/kit";
@@ -63,7 +66,7 @@ const MESSAGE_ROW_KEEP = [
 ];
 
 /** Rows that only say what the session is called or where it was left: kept whole. */
-const KEPT_ROWS = new Set(["summary", "custom-title", "agent-name", "last-prompt", "mode", "tag"]);
+const KEPT_ROWS = new Set(["summary", "custom-title", "agent-name", "mode", "tag"]);
 
 const OTHER_ROW: RecordShape = { keep: [...ROW_IDS, "subtype", "level", "isMeta", "toolUseID"] };
 
@@ -79,9 +82,8 @@ const RESULT: RecordShape = {
 
 const CALL_TYPES = new Set(["tool_use", "server_tool_use", "mcp_tool_use"]);
 
-/** What a command the person ran printed, and the result a background task reported. */
-const OUTPUT_TAGS =
-  /<(bash-stdout|bash-stderr|local-command-stdout|local-command-stderr)>([\s\S]*?)<\/\1>/g;
+/** What a command the person ran printed. */
+const OUTPUT_TAGS = ["bash-stdout", "bash-stderr", "local-command-stdout", "local-command-stderr"];
 const NOTIFICATION = /^\s*<task-notification/;
 
 /** Text the person (or Claude Code for them) put in the conversation, with what tools and
@@ -89,9 +91,7 @@ const NOTIFICATION = /^\s*<task-notification/;
 function personText(text: unknown): unknown {
   if (typeof text !== "string") return blankUnknown(text);
   if (NOTIFICATION.test(text)) return `<task-notification>${TOOL_CALL_MARKER}</task-notification>`;
-  return text.replace(OUTPUT_TAGS, (whole, tag: string, body: string) =>
-    body === "" ? whole : `<${tag}>${TOOL_CALL_MARKER}</${tag}>`,
-  );
+  return redactTagBodies(text, OUTPUT_TAGS);
 }
 
 function block(value: unknown, fromPerson: boolean): unknown {
@@ -127,7 +127,9 @@ function content(value: unknown, fromPerson: boolean, byTool: boolean): unknown 
 
 function messageRow(row: Record<string, unknown>): unknown {
   const fromPerson = row.type === "user";
-  const byTool = fromPerson && typeof row.sourceToolUseID === "string";
+  // A tool's text, or a compaction's summary of what tools read and printed.
+  const byTool =
+    fromPerson && (typeof row.sourceToolUseID === "string" || row.isCompactSummary === true);
   return reshape(row, {
     keep: MESSAGE_ROW_KEEP,
     walk: {
@@ -175,6 +177,9 @@ function row(value: unknown): unknown {
   if (value.type === "attachment") return attachmentRow(value);
   if (value.type === "queue-operation") {
     return reshape(value, { keep: [...ROW_IDS, "operation"], walk: { content: queuedPrompt } });
+  }
+  if (value.type === "last-prompt") {
+    return reshape(value, { keep: [...ROW_IDS, "leafUuid"], walk: { lastPrompt: queuedPrompt } });
   }
   if (typeof value.type === "string" && KEPT_ROWS.has(value.type)) return value;
   return reshape(value, OTHER_ROW);

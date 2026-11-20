@@ -90,9 +90,11 @@ export {
   blankResult,
   blankStrings,
   blankUnknown,
+  byType,
   isJsonObject,
   type RecordShape,
   redactRecords,
+  redactTagBodies,
   reshape,
   TOOL_CALL_MARKER,
 } from "./tool-calls";

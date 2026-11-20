@@ -76,16 +76,42 @@ export function reshape(value: unknown, shape: RecordShape): unknown {
   if (!isJsonObject(value)) return blankUnknown(value);
   const next: Json = {};
   for (const [k, v] of Object.entries(value)) {
-    const walk = shape.walk?.[k];
+    // Own keys only: a field named `constructor` is not Object's.
+    const walk = shape.walk && Object.hasOwn(shape.walk, k) ? shape.walk[k] : undefined;
     next[k] = walk ? walk(v) : shape.keep?.includes(k) ? v : blankUnknown(v);
   }
   return next;
 }
 
-/** `text` with each record (a JSONL line, or the one JSON document) rewritten by `redact`. A
- * JSONL log keeps one line out per line in (blank lines stay), so a log and its chunks redact
- * alike; a line that does not parse is replaced by the marker, as a JSON string. A record
- * `redact` leaves as it was keeps its bytes. */
+/** A pass over records told apart by a field (`type` by default): each value is reshaped by the
+ * shape its field names, or by `fallback` for a kind not listed (or not a string). */
+export function byType(
+  shapes: Readonly<Record<string, RecordShape>>,
+  fallback: RecordShape,
+  field = "type",
+): (value: unknown) => unknown {
+  return (value) => {
+    const kind = isJsonObject(value) ? value[field] : undefined;
+    const shape =
+      typeof kind === "string" && Object.hasOwn(shapes, kind) ? shapes[kind] : undefined;
+    return reshape(value, shape ?? fallback);
+  };
+}
+
+/** `text` with the body of each `<tag>…</tag>` named in `tags` replaced by the marker; a tag
+ * left open (output cut short) loses everything after it. An empty body stays. */
+export function redactTagBodies(text: string, tags: readonly string[]): string {
+  const names = tags.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+  const pattern = new RegExp(`<(${names})>([\\s\\S]*?)(</\\1>|$)`, "g");
+  return text.replace(pattern, (whole, tag: string, body: string, close: string) =>
+    body === "" ? whole : `<${tag}>${TOOL_CALL_MARKER}${close}`,
+  );
+}
+
+/** `text` with each record (a JSONL line, or the one JSON document) rewritten by `redact` and
+ * written out again. A JSONL log keeps one line out per line in (blank lines stay), so a log and
+ * its chunks redact alike; a line that does not parse is replaced by the marker, as a JSON
+ * string. */
 export function redactRecords(
   text: string,
   encoding: "jsonl" | "json",
@@ -98,9 +124,7 @@ export function redactRecords(
     } catch {
       return JSON.stringify(TOOL_CALL_MARKER);
     }
-    const before = JSON.stringify(parsed);
-    const after = JSON.stringify(redact(parsed));
-    return after === before ? line : after;
+    return JSON.stringify(redact(parsed));
   };
   if (encoding === "json") return text.trim() ? one(text) : text;
   return text

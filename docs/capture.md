@@ -283,8 +283,10 @@ before anything else redacts them and before a byte leaves:
 | Each tool call's name and id, and their order | kept |
 | Whether a call failed (`is_error`, `isError`, a status) | kept |
 | A call's input | its keys, numbers and booleans kept; every string replaced |
-| A call's result, also where the log repeats it (Claude Code's `toolUseResult`, Cursor's results from its hooks) | every string replaced |
-| The output of a command the person ran themselves (Claude Code's `!`, pi's `bashExecution`), a background task's result (`<task-notification>`), text a tool or plugin added to the conversation (a skill's body, OpenCode's synthetic parts, pi's extension messages) | replaced |
+| A call's result, also where the log repeats it (Claude Code's `toolUseResult`, Cursor's results from its hooks) | every string replaced; an output that is not the agent's own structure is replaced whole, keys and numbers included |
+| The output of a command the person ran themselves (Claude Code's `!`, Codex's `<user_shell_command>`, pi's `bashExecution`; the command is kept), a background task's result (`<task-notification>`), text a tool or plugin added to the conversation (a skill's body, OpenCode's synthetic parts, pi's extension messages) | replaced |
+| A compaction's summary of the conversation so far (Claude Code's, Codex's, pi's), which quotes what tools read and printed | replaced |
+| A subagent's session (Claude Code's, Codex's) | not uploaded: all of it is its parent's tool call, whose name, id and failure the parent's log keeps |
 | Anything else in the log the pass does not know (a new record kind, a new field) | replaced |
 
 Each agent has its own pass, which knows where its format keeps tool calls (Claude Code, Codex,

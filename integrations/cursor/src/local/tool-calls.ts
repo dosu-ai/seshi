@@ -11,6 +11,7 @@ import {
   blankResult,
   blankStrings,
   blankUnknown,
+  byType,
   isJsonObject,
   type RecordShape,
   redactRecords,
@@ -24,10 +25,7 @@ const BLOCKS: Readonly<Record<string, RecordShape>> = {
   tool_result: { keep: ["type", "tool_use_id", "is_error"], walk: { content: blankResult } },
 };
 
-function block(value: unknown): unknown {
-  const shape = isJsonObject(value) && typeof value.type === "string" && BLOCKS[value.type];
-  return reshape(value, shape || { keep: ["type"] });
-}
+const block = byType(BLOCKS, { keep: ["type"] });
 
 const LINE: RecordShape = {
   keep: ["role", "type"],

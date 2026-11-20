@@ -431,6 +431,18 @@ describe("the org's tool-call redaction list (capture.redact_tool_calls)", () =>
     });
   });
 
+  it("sends nothing of a subagent there: its session is its parent's tool call", () => {
+    expect(judge({ rules, place: research, subagent: true })).toEqual({
+      capture: false,
+      level: "org",
+      reason:
+        "a subagent's session is its parent's tool call, and the org redacts tool calls in acme/research (capture.redact_tool_calls)",
+    });
+    expect(judge({ rules, place: { cwd: "/work/app", repo: repo() }, subagent: true })).toEqual(
+      judge({ rules, place: { cwd: "/work/app", repo: repo() } }),
+    );
+  });
+
   it("applies to what a paused session still sends, and not to one turned off", () => {
     const paused = judge({ rules, place: research, paused: true, pausedAt: "x", uploaded: 10 });
     expect(paused).toMatchObject({ capture: false, level: "pause", frozen: 10 });

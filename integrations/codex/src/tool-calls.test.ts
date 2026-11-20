@@ -83,7 +83,7 @@ const rows: Record<string, unknown>[] = [
     timestamp: at(10),
     type: "compacted",
     payload: {
-      message: "KEPT summary so far",
+      message: "LEAK summary of what the tools printed",
       replacement_history: [
         {
           type: "function_call",
@@ -97,6 +97,22 @@ const rows: Record<string, unknown>[] = [
     },
   },
   { timestamp: at(11), type: "world_state", payload: { full: { files: ["LEAK.ts"] } } },
+  item(11, {
+    type: "message",
+    role: "user",
+    content: [
+      {
+        type: "input_text",
+        text: "<user_shell_command>\n<command>\nKEPT cat .env.local\n</command>\n<result>\nLEAK SECRET=1\n</result>\n</user_shell_command>",
+      },
+    ],
+  }),
+  item(11, {
+    type: "function_call_output",
+    call_id: "call_4",
+    output: JSON.stringify({ db_host: "LEAK", "LEAK@acme.com": 3, max_customers: 9917 }),
+  }),
+  item(11, { type: "function_call_output", call_id: "call_5", output: { LEAK_key: { n: 9917 } } }),
   item(12, {
     type: "message",
     role: "assistant",
@@ -155,6 +171,14 @@ describe("Codex's tool-call redaction (capture.redact_tool_calls)", () => {
       name: "shell",
       call_id: "call_0",
     });
+    // A command the person ran keeps its command, not what it printed.
+    expect(parsed[16].payload.content[0].text).toBe(
+      `<user_shell_command>\n<command>\nKEPT cat .env.local\n</command>\n<result>${TOOL_CALL_MARKER}</result>\n</user_shell_command>`,
+    );
+    // Any other output goes whole: its keys and numbers are the tool's too.
+    expect(parsed[17].payload.output).toBe(TOOL_CALL_MARKER);
+    expect(parsed[18].payload.output).toBe(TOOL_CALL_MARKER);
+    expect(out).not.toContain("9917");
   });
 
   it("keeps one line per line, so a log redacts as its chunks do", () => {

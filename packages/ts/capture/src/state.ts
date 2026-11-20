@@ -227,7 +227,15 @@ export function stateFacts(
   parentId?: string,
 ): Pick<
   DecideInput,
-  "toggle" | "toggledAt" | "paused" | "pausedAt" | "frozen" | "uploaded" | "started" | "pauses"
+  | "toggle"
+  | "toggledAt"
+  | "paused"
+  | "pausedAt"
+  | "frozen"
+  | "uploaded"
+  | "started"
+  | "pauses"
+  | "subagent"
 > {
   const holder = toggleHolder(state, agent, session, parentId);
   const paused = isPaused(state, now);
@@ -242,6 +250,7 @@ export function stateFacts(
     uploaded: uploadedOffset(session),
     ...(session?.started_at ? { started: session.started_at } : {}),
     ...(pauses.length > 0 ? { pauses } : {}),
+    ...((session?.parent_session_id ?? parentId) !== undefined ? { subagent: true } : {}),
   };
 }
 

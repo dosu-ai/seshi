@@ -15,6 +15,7 @@
 import {
   blankStrings,
   blankUnknown,
+  byType,
   isJsonObject,
   type RecordShape,
   redactRecords,
@@ -39,13 +40,13 @@ const PARTS: Readonly<Record<string, RecordShape>> = {
   compaction: { keep: [...PART_IDS, "auto"] },
 };
 
+const otherPart = byType(PARTS, { keep: PART_IDS });
+
 function part(value: unknown): unknown {
-  if (!isJsonObject(value)) return blankUnknown(value);
-  if (value.type === "text" && value.synthetic === true) {
+  if (isJsonObject(value) && value.type === "text" && value.synthetic === true) {
     return reshape(value, { keep: [...PART_IDS, "synthetic", "ignored", "metadata"] });
   }
-  const shape = typeof value.type === "string" ? PARTS[value.type] : undefined;
-  return reshape(value, shape ?? { keep: PART_IDS });
+  return otherPart(value);
 }
 
 const MESSAGE_INFO: RecordShape = {

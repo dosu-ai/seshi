@@ -128,6 +128,8 @@ export interface DecideInput {
   /** The other folders the session was seen in: a shared rule that turns any of them off turns
    * the session off (a session that left an excluded repo carries what it did there). */
   seen?: Place[];
+  /** The session is a subagent's (it has a parent session). */
+  subagent?: boolean;
 }
 
 /** `remote` (`https://github.com/acme/app.git`, `git@github.com:acme/app`, `ssh://…`) as
@@ -400,18 +402,25 @@ const unknownFolder: LevelRule = (input) =>
 const sharedRulesHere: LevelRule = (input, platform) =>
   sharedExclusion(input.rules, input.place, platform);
 
-const sharedRulesSeen: LevelRule = (input, platform) => {
+/** The first other folder the session was seen in where `check` finds something, as what it
+ * found and that folder's name (its repo's root, else the folder). */
+function firstSeenWhere<T>(
+  input: DecideInput,
+  check: (place: Place) => T | undefined,
+): { found: T; where: string } | undefined {
   for (const other of input.seen ?? []) {
     if (other.cwd === undefined || other.cwd === input.place.cwd) continue;
-    const excluded = sharedExclusion(input.rules, other, platform);
-    if (excluded) {
-      return {
-        ...excluded,
-        reason: `it also ran in ${other.repo?.root ?? other.cwd}, where ${excluded.reason}`,
-      };
-    }
+    const found = check(other);
+    if (found !== undefined) return { found, where: other.repo?.root ?? other.cwd };
   }
   return undefined;
+}
+
+const sharedRulesSeen: LevelRule = (input, platform) => {
+  const seen = firstSeenWhere(input, (other) => sharedExclusion(input.rules, other, platform));
+  return seen
+    ? { ...seen.found, reason: `it also ran in ${seen.where}, where ${seen.found.reason}` }
+    : undefined;
 };
 
 const sessionOff: LevelRule = (input) =>
@@ -506,6 +515,15 @@ export function decide(input: DecideInput, platform: NodeJS.Platform = process.p
   decision ??= globalLevel(input.rules);
   const sends = decision.capture || decision.frozen !== undefined;
   const redacting = sends ? toolCallsRedacted(input, platform) : undefined;
+  if (redacting && input.subagent) {
+    // A subagent's whole session is its parent's tool call: its prompt is the call's input and
+    // its last reply the call's result. The parent's log keeps the call's name, id and failure.
+    return {
+      capture: false,
+      level: "org",
+      reason: `a subagent's session is its parent's tool call, and ${redacting}`,
+    };
+  }
   return redacting ? { ...decision, redact_tool_calls: redacting } : decision;
 }
 
@@ -513,14 +531,10 @@ export function decide(input: DecideInput, platform: NodeJS.Platform = process.p
  * `capture.redact_tool_calls`, here or in any other folder it was seen in (what it did there
  * stays in it wherever it goes next). Exclusion is decided first, so it wins. */
 function toolCallsRedacted(input: DecideInput, platform: NodeJS.Platform): string | undefined {
+  const reason = (entry: ExcludeRule) =>
+    `the org redacts tool calls in ${entry.entry} (capture.redact_tool_calls)`;
   const here = toolCallsRedactedBy(input.rules, input.place, platform);
-  if (here) return `the org redacts tool calls in ${here.entry} (capture.redact_tool_calls)`;
-  for (const other of input.seen ?? []) {
-    if (other.cwd === undefined || other.cwd === input.place.cwd) continue;
-    const there = toolCallsRedactedBy(input.rules, other, platform);
-    if (there) {
-      return `it also ran in ${other.repo?.root ?? other.cwd}, where the org redacts tool calls in ${there.entry} (capture.redact_tool_calls)`;
-    }
-  }
-  return undefined;
+  if (here) return reason(here);
+  const seen = firstSeenWhere(input, (other) => toolCallsRedactedBy(input.rules, other, platform));
+  return seen ? `it also ran in ${seen.where}, where ${reason(seen.found)}` : undefined;
 }
