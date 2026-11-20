@@ -11,8 +11,10 @@ import {
   cursorCloudConnector,
   expectedOffset,
   keptEvents,
+  projectOf,
   readCursorCloudConfig,
   readCursorCloudCursor,
+  repoOf,
   SESSION_CONFLICT,
   STREAM_EXPIRED,
 } from "./connector";
@@ -237,7 +239,8 @@ describe("the cursor-cloud poller", () => {
       owner: "svc:cursor-team",
       owner_basis: "service",
       caller: { kind: "service", principal: "svc:cursor-team" },
-      project: "github.com/example/demo",
+      repo: "github.com/example/demo",
+      project: "demo",
       branch: "cursor/run-1",
       payload: { kind: "log", encoding: "jsonl", offset: 0 },
     });
@@ -690,7 +693,7 @@ describe("the org's exclude list", () => {
     expect(ctx.submitted.map((e) => e.idempotency_key)).toEqual(["cursor-cloud:bc-a/run-2"]);
   });
 
-  it("names the project as a laptop names the repository", async () => {
+  it("names the repository as a laptop names its remote", async () => {
     const api = new FakeCursor();
     api.agent(
       "bc-a",
@@ -700,7 +703,29 @@ describe("the org's exclude list", () => {
     );
     const ctx = new FakeContext(api);
     await poller.run(ctx.context());
-    expect(ctx.submitted[0]?.project).toBe("github.com/acme/app");
+    expect(ctx.submitted[0]).toMatchObject({ repo: "github.com/acme/app", project: "app" });
+  });
+});
+
+describe("where a run ran", () => {
+  it("names the repository as a laptop names its remote, and the project after it", () => {
+    const agent = (url: string) => ({ id: "bc-a", repos: [{ url }] });
+    for (const url of [
+      "https://github.com/acme/app",
+      "https://github.com/acme/app.git",
+      "https://x-access-token:ghs_secret@github.com/acme/app.git",
+      "git@github.com:acme/app.git",
+      "ssh://git@github.com:22/acme/app.git",
+      "GitHub.com/acme/app/",
+    ]) {
+      expect(repoOf(agent(url)), url).toBe("github.com/acme/app");
+    }
+    expect(projectOf("github.com/acme/app")).toBe("app");
+    expect(projectOf(undefined)).toBeUndefined();
+    // No repository on the agent: the one its run's branch is in.
+    const run = { id: "r", git: { branches: [{ repoUrl: "https://gitlab.com/g/sub/svc" }] } };
+    expect(repoOf({ id: "bc-b" }, run)).toBe("gitlab.com/g/sub/svc");
+    expect(repoOf({ id: "bc-c" })).toBeUndefined();
   });
 });
 

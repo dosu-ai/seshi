@@ -1,7 +1,20 @@
 import { labelPairs, type SearchRequest, type SearchSort } from "@seshi/model";
 import { SearchQueryError } from "@seshi/search";
 
-const STRINGS = ["q", "owner", "agent", "repo", "branch", "source", "since", "until", "cursor"];
+const STRINGS = [
+  "q",
+  "owner",
+  "agent",
+  "repo",
+  "branch",
+  "harness",
+  "agent_version",
+  "model",
+  "source",
+  "since",
+  "until",
+  "cursor",
+];
 const NUMBERS = ["limit", "matches"];
 const KNOWN = new Set([...STRINGS, ...NUMBERS, "sort", "label"]);
 

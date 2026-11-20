@@ -63,14 +63,14 @@ async function write(
   owner: string,
   id: string,
   prompt: string,
-  project?: string,
+  repo?: string,
   labels?: Record<string, string>,
 ) {
   await new StoreSessionDB({ store: new FsStore(bucket), owner, formats }).ingest({
     format: "trajectory",
     session_id: id,
     transcript: log(prompt),
-    ...(project ? { project } : {}),
+    ...(repo ? { repo } : {}),
     ...(labels ? { labels } : {}),
   });
 }

@@ -175,7 +175,7 @@ describe("normalizeTranscript in chunks", () => {
       }
       // Cut between a call's tool call and its count: the head cannot know the call yet.
       if (i === 6) {
-        expect(calls(whole.records).slice(2, 4)).toEqual(["call@845", "call@845"]);
+        expect(calls(whole.records).slice(2, 4)).toEqual(["call@897", "call@897"]);
         expect(calls(first.records).slice(2, 4)).toEqual([null, null]);
       }
     }

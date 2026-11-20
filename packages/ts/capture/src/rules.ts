@@ -64,6 +64,12 @@ export interface Place {
     /** Its remotes, as `host/path` (`github.com/acme/app`). */
     remotes: string[];
     branch?: string;
+    /** Its `origin` remote, else its first, as `host/path`; none when that remote is a local
+     * folder. What the uploader sends as the session's `repo`. */
+    remote?: string;
+    /** The working folder relative to the root (`packages/api`, `/`-separated); none at the
+     * root. */
+    path?: string;
   };
 }
 

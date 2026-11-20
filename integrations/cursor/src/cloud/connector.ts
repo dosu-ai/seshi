@@ -23,10 +23,12 @@ import {
   type Connector,
   type ConnectorContext,
   type Cursor,
+  normalizeRemote,
+  repoLabel,
   secretValue,
   serviceEnvelopeIdentity,
 } from "@seshi/kit";
-import { ENVELOPE_SCHEMA, type Envelope, normalizeRemote } from "@seshi/model";
+import { ENVELOPE_SCHEMA, type Envelope } from "@seshi/model";
 import {
   type CursorAgent,
   CursorApi,
@@ -169,27 +171,37 @@ const after = (run: CursorRun, through: RunRef | undefined) =>
 
 const refOf = (run: CursorRun): RunRef => ({ at: run.createdAt ?? "", id: run.id });
 
-/** The repository URLs the agent works in (`repos[].url`), as Cursor names them. */
+/** The repository URLs the agent works in (`repos[].url`), as Cursor names them: what the org's
+ * exclude list is matched against (normalized there as a laptop's remotes are). */
 export function repoUrls(agent: CursorAgent): string[] {
   return (agent.repos ?? [])
     .map((r) => r?.url)
     .filter((url): url is string => typeof url === "string" && url.trim() !== "");
 }
 
-/** The agent's repository as a project, `host/owner/name`: normalized as a laptop normalizes
- * its git remotes (`normalizeRemote`), so the org's exclude list and searches by repository
- * meet the same string from either. */
-export function projectOf(agent: CursorAgent): string | undefined {
-  const url = repoUrls(agent)[0];
-  return url === undefined ? undefined : normalizeRemote(url) || undefined;
+/** The agent's repository, `host/owner/name`: the one it was started on, else the one its run's
+ * branch is in. */
+export function repoOf(agent: CursorAgent, run?: CursorRun): string | undefined {
+  const url =
+    agent.repos?.find((r) => typeof r?.url === "string" && r.url !== "")?.url ??
+    runBranches(run).find((b) => typeof b.repoUrl === "string" && b.repoUrl !== "")?.repoUrl;
+  return typeof url === "string" ? repoLabel(normalizeRemote(url)) : undefined;
+}
+
+/** The session's `project`: the repository's name, as a laptop names it after its folder. */
+export function projectOf(repo: string | undefined): string | undefined {
+  return repo?.split("/").at(-1) || undefined;
+}
+
+function runBranches(run: CursorRun | undefined): Record<string, unknown>[] {
+  const git = isObject(run?.git) ? run.git : {};
+  return (Array.isArray(git.branches) ? git.branches : []).filter(isObject);
 }
 
 /** The branch the run worked on, from its `git.branches`. */
 export function branchOf(run: CursorRun): string | undefined {
-  const git = isObject(run.git) ? run.git : {};
-  const branches = Array.isArray(git.branches) ? git.branches : [];
-  for (const b of branches) {
-    if (isObject(b) && typeof b.branch === "string" && b.branch !== "") return b.branch;
+  for (const b of runBranches(run)) {
+    if (typeof b.branch === "string" && b.branch !== "") return b.branch;
   }
   return undefined;
 }
@@ -397,7 +409,6 @@ export function cursorCloudConnector(options: CursorCloudConnectorOptions = {}):
       /** Reads the agent's new runs into `entry`; true when every run listed was handled. */
       async function syncAgent(agent: CursorAgent, entry: AgentEntry): Promise<boolean> {
         const runs = (await api.listRuns(agent.id)).filter((run) => after(run, entry.through));
-        const project = projectOf(agent);
         for (const listed of runs) {
           ctx.signal.throwIfAborted();
           if (!TERMINAL_STATUSES.has(listed.status ?? "")) {
@@ -422,6 +433,9 @@ export function cursorCloudConnector(options: CursorCloudConnectorOptions = {}):
           const { run, text: own } = await lineOf(agent.id, listed, events);
           const where = `${agent.id}/${listed.id}`;
           const branch = branchOf(run);
+          // The Cloud Agents API names no commit for a run (Nov 2026), so none is sent.
+          const repo = repoOf(agent, run);
+          const project = projectOf(repo);
           const envelope: Envelope = {
             schema: ENVELOPE_SCHEMA,
             source: CURSOR_CLOUD_SOURCE,
@@ -438,6 +452,7 @@ export function cursorCloudConnector(options: CursorCloudConnectorOptions = {}):
             idempotency_key: `cursor-cloud:${where}`,
             provenance: { cursor: where },
             received_at: ctx.now().toISOString(),
+            ...(repo ? { repo } : {}),
             ...(project ? { project } : {}),
             ...(branch ? { branch } : {}),
           };

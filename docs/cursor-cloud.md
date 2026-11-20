@@ -115,6 +115,10 @@ entry goes it reads only runs created after that, appended where the stored sess
 
 ## What a session holds
 
+A session's `repo` is the agent's repository, normalized as a laptop's uploader names its remote
+(`github.com/acme/app`), its `project` the repository's name (`app`) and its `branch` the run's.
+Cursor's API names no commit for a run, so a Cursor Cloud trace has none.
+
 The format is `cursor-cloud-api` ([formats.md](formats.md)): one JSONL line per run, holding the
 run as Get A Run describes it, its token usage, and its stream events as Cursor sent them, minus
 heartbeats and the text, thinking and token deltas other events repeat. From it a session gets

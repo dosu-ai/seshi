@@ -1,4 +1,4 @@
-import { lettaAdapter } from "@seshi/formats";
+import { firstJsonlField, lettaAdapter } from "@seshi/formats";
 import { defineIntegration, type FormatAdapter } from "@seshi/kit";
 import type { JsonObject } from "@seshi/model";
 import { CLAUDE_CODE_CAPTURE } from "./capture";
@@ -14,6 +14,8 @@ const isObject = (value: unknown): value is JsonObject =>
 
 export const CLAUDE_CODE_FORMAT: FormatAdapter = lettaAdapter({
   source: "claude-code",
+  // 2: the meta record names Claude Code's version (`agent_version`).
+  revision: 2,
   // `{ type: "user" | "assistant", uuid, sessionId, message: { role, content } }`.
   detect: {
     record: (row) =>
@@ -24,6 +26,8 @@ export const CLAUDE_CODE_FORMAT: FormatAdapter = lettaAdapter({
   prepare: markClaudeInputs,
   finish: (records) => markedAsObservations(records),
   calls: (transcript) => claudeCodeCalls(transcript),
+  // Each line Claude Code writes carries the version that wrote it (`"version": "2.1.326"`).
+  agentVersion: (transcript) => firstJsonlField(transcript, (row) => row.version),
 });
 
 export const claudeCode = defineIntegration({

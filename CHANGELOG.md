@@ -1,3 +1,10 @@
+# [0.17.0](https://github.com/dosu-ai/seshi/compare/v0.16.0...v0.17.0) (2026-11-20)
+
+
+### Features
+
+* session labels from config, uploaded, stored and searchable ([#50](https://github.com/dosu-ai/seshi/issues/50)) ([10563ce](https://github.com/dosu-ai/seshi/commit/10563ce97eee168fa115157fcde61319e3b375b2))
+
 # [0.16.0](https://github.com/dosu-ai/seshi/compare/v0.15.0...v0.16.0) (2026-11-20)
 
 

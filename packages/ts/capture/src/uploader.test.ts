@@ -26,6 +26,7 @@ import {
   StoreError,
   type StoreSessionResult,
   type Upload,
+  VERSION,
 } from "@seshi/model";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type CaptureRulesAnswer, readOrgRules } from "./org-rules";
@@ -290,6 +291,91 @@ describe("the upload protocol", () => {
     });
     await uploader().pass();
     expect(server.uploads[0]).toMatchObject({ project: "dosu", branch: "wt" });
+  });
+
+  it("says where the session ran: its remote without credentials, commit, folder and client", async () => {
+    const repo = join(dir, "app");
+    const folder = join(repo, "packages", "api");
+    const sha = "0123456789abcdef0123456789abcdef01234567";
+    mkdirSync(join(repo, ".git", "refs", "heads"), { recursive: true });
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(repo, ".git", "HEAD"), "ref: refs/heads/main\n");
+    writeFileSync(join(repo, ".git", "refs", "heads", "main"), `${sha}\n`);
+    writeFileSync(
+      join(repo, ".git", "config"),
+      '[remote "origin"]\n\turl = https://x-access-token:ghs_secret@github.com/acme/app.git\n',
+    );
+    writeFileSync(transcript(), line("one") + line("two"));
+    appendSpool(paths, {
+      v: 1,
+      kind: "capture",
+      at: clock.toISOString(),
+      agent: "fake",
+      event: "Stop",
+      session_id: "s1",
+      transcript_path: transcript(),
+      cwd: folder,
+      harness_version: "2026.11.13-eacade1",
+      model: "auto-smart",
+    });
+    await uploader().pass();
+    expect(server.uploads[0]).toMatchObject({
+      project: "app",
+      branch: "main",
+      repo: "github.com/acme/app",
+      commit: sha,
+      path_in_repo: "packages/api",
+      client: `seshi/${VERSION} ${host.platform}-${process.arch}`,
+      harness_version: "2026.11.13-eacade1",
+      model: "auto-smart",
+    });
+    expect(JSON.stringify(server.uploads[0])).not.toContain("ghs_secret");
+    expect(JSON.stringify({ ...server.uploads[0], transcript: "" })).not.toContain(dir);
+
+    // At the repository's root: no folder. Outside any repository: no repo, commit or folder.
+    writeFileSync(transcript("s2"), line("one", "s2") + line("two", "s2"));
+    appendSpool(paths, {
+      v: 1,
+      kind: "capture",
+      at: clock.toISOString(),
+      agent: "fake",
+      event: "Stop",
+      session_id: "s2",
+      transcript_path: transcript("s2"),
+      cwd: repo,
+    });
+    writeFileSync(transcript("s3"), line("one", "s3") + line("two", "s3"));
+    hooked("s3");
+    await uploader().pass();
+    const s2 = server.uploads.find((u) => u.session_id === "s2");
+    const s3 = server.uploads.find((u) => u.session_id === "s3");
+    expect(s2).toMatchObject({ repo: "github.com/acme/app", commit: sha });
+    expect(s2).not.toHaveProperty("path_in_repo");
+    expect(s2).not.toHaveProperty("harness_version");
+    for (const key of ["repo", "commit", "path_in_repo"]) expect(s3).not.toHaveProperty(key);
+    expect(s3?.client).toMatch(/^seshi\//);
+  });
+
+  it("names the commit the hook saw, not the one HEAD moved to before the upload", async () => {
+    const repo = join(dir, "app");
+    const later = "f".repeat(40);
+    mkdirSync(join(repo, ".git"), { recursive: true });
+    writeFileSync(join(repo, ".git", "HEAD"), `${later}\n`);
+    writeFileSync(transcript(), line("one") + line("two"));
+    appendSpool(paths, {
+      v: 1,
+      kind: "capture",
+      at: clock.toISOString(),
+      agent: "fake",
+      event: "Stop",
+      session_id: "s1",
+      transcript_path: transcript(),
+      cwd: repo,
+      commit: "a".repeat(40),
+    });
+    await uploader().pass();
+    expect(server.uploads[0]?.commit).toBe("a".repeat(40));
+    expect(session().commit).toBe("a".repeat(40));
   });
 
   it("sends the whole log first, then only new complete lines at the server's offset", async () => {

@@ -300,7 +300,7 @@ def test_search_and_every_owners_feed(live_server: LiveServer, admin: SeshiClien
     with SeshiClient(live_server.url, live_server.alice) as alice:
         log = transcript(sid, topic=word)
         upload = Upload(
-            format="claude-code", session_id=sid, transcript=log, project="github.com/acme/widget"
+            format="claude-code", session_id=sid, transcript=log, repo="github.com/acme/widget"
         )
         stored(alice.ingest(upload))
 

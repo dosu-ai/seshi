@@ -30,8 +30,10 @@ light background), plain with `NO_COLOR`, `--no-color` or `--json`. `seshi sessi
 |---|---|
 | `--owner <id>` | Only this owner's sessions |
 | `--agent <name>` | Only sessions of this format or agent (`claude-code`, `codex`, …) |
-| `--repo <name>` | Only this repository: exactly, or its last path segments (`widget`, `acme/widget`) |
+| `--repo <name>` | Only this repository (the session's `repo`, its normalized remote): exactly, or its last path segments (`widget`, `acme/widget`) |
 | `--branch <name>`, `--source <id>` | Only this branch; only sessions written through this source (`upload`, `datadog-prod`) |
+| `--harness <name>`, `--harness-version <v>` | Only sessions run by this harness (the meta record's `source`: `claude-code`, `codex`, `cursor`); only those whose `agent_version` is this: the version the session started on (Cursor: at its latest upload) |
+| `--model <name>` | Only sessions that used this model, among every model they used |
 | `--label <key>=<value>` | Only sessions carrying this [label](config.md#labels), key and value exactly (`--label dosu.project=github.com/acme/app`); repeat it for more, and a session must carry every one |
 | `--since`, `--until` | Only records in this time range: a date (`2026-11-01`), an RFC 3339 time, or an age (`7d`, `12h`) |
 | `--sort relevance\|recent` | Best match first (the default), or most recently active first |

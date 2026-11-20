@@ -13,6 +13,11 @@ export interface HookCapture {
   cwd?: string;
   parent_session_id?: string;
   final?: boolean;
+  /** What the hook payload says of the harness's version and the session's model, for an agent
+   * whose transcript says neither (Cursor's): kept for the session and sent with its uploads as
+   * hints, which the server uses only when the log names none. */
+  harness_version?: string;
+  model?: string;
   /** The whole transcript, for an agent that keeps none in a file of its own (OpenCode keeps
    * its sessions in a database): seshi writes it to `<capture dir>/transcripts/<agent>/` only
    * when the session is captured, and uploads it from there. */

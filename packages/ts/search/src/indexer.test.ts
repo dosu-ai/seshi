@@ -150,6 +150,26 @@ describe("the indexer (F10.2)", () => {
     expect(index.readyAt()).toBe(clock.toISOString());
   });
 
+  it("indexes where a session ran and with what: its repo, harness, version and models", async () => {
+    await db().ingest({
+      format: "trajectory",
+      session_id: "s1",
+      transcript:
+        line({ role: "meta", source: "trajectory", model: "gpt-9", agent_version: "1.2.3" }) +
+        log("flaky test").split("\n").slice(1).join("\n"),
+      project: "widget",
+      repo: "github.com/acme/widget",
+    });
+    const { index, indexer } = setup();
+    await indexer.run();
+    expect(index.session("alice", archiveId("alice", "trajectory", "s1"))).toMatchObject({
+      project: "widget",
+      repo: "github.com/acme/widget",
+      harness: "trajectory",
+      models: ["gpt-9"],
+    });
+  });
+
   it("adds a continuation's events without reading the session again", async () => {
     const first = await db().ingest({
       format: "trajectory",

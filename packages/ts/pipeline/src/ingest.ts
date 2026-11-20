@@ -117,6 +117,16 @@ function changed(a: SessionMetadata | null, b: SessionMetadata): boolean {
   );
 }
 
+/** The models a session used, in the order first seen: `before` (the session's so far), then
+ * this trace's LLM calls, or its metadata's `model` when no call names one. */
+export function modelsOf(before: readonly string[] | undefined, trace: Trace): string[] {
+  const seen = new Set(before ?? []);
+  const called = (trace.llm_calls ?? []).map((call) => call.model).filter((m) => m !== undefined);
+  const named = trace.metadata.model;
+  for (const model of called.length > 0 ? called : named ? [named] : []) seen.add(model);
+  return [...seen];
+}
+
 function addRedaction(
   before: RedactionSummary | undefined,
   write: RedactionSummary | undefined,
@@ -133,6 +143,15 @@ export interface IngestMetadata {
   format: string;
   project?: string;
   branch?: string;
+  /** The repository's normalized remote: the session keeps the first one it is given. */
+  repo?: string;
+  /** Recorded on the trace's metadata. */
+  commit?: string;
+  path_in_repo?: string;
+  client?: string;
+  /** The uploader's hints, for a log that names neither: used only where the meta record has
+   * no `agent_version` or `model`. */
+  hints?: { agent_version?: string; model?: string };
   /** Recorded on the trace; the session keeps the first it is given, unless this write
    * replaces it. */
   labels?: Labels;
@@ -246,6 +265,9 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
   if (metadata.parent_session_id) traceMetadata.parent_session_id = metadata.parent_session_id;
   if (metadata.continuation) traceMetadata.continuation = metadata.continuation;
   if (metadata.normalizer) traceMetadata.normalizer = metadata.normalizer;
+  if (metadata.commit) traceMetadata.commit = metadata.commit;
+  if (metadata.path_in_repo) traceMetadata.path_in_repo = metadata.path_in_repo;
+  if (metadata.client) traceMetadata.client = metadata.client;
   if (metadata.labels && Object.keys(metadata.labels).length > 0) {
     traceMetadata.labels = metadata.labels;
   }
@@ -264,6 +286,7 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
       project: metadata.project,
       branch: metadata.branch,
       metadata: traceMetadata,
+      ...(metadata.hints ? { hints: metadata.hints } : {}),
       llm_calls: input.llm_calls,
       provenance,
     });
@@ -327,6 +350,16 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
     );
     if (metadata.project ?? base.project) next.project = metadata.project ?? base.project;
     if (metadata.branch ?? base.branch) next.branch = metadata.branch ?? base.branch;
+    const repo = base.repo ?? metadata.repo;
+    if (repo) next.repo = repo;
+    // The latest trace's (for a log that names it, the version the session started on: a
+    // continuation keeps the first upload's meta record). A replace by a trace that names none
+    // leaves none.
+    if (trace.metadata.agent_version) next.agent_version = trace.metadata.agent_version;
+    else if (input.replace) delete next.agent_version;
+    const models = modelsOf(input.replace ? undefined : base.models, trace);
+    if (models.length > 0) next.models = models;
+    else delete next.models;
     // Set by the first write that carries labels; a replace may change them.
     const labels = traceMetadata.labels;
     if (labels && (input.replace || base.labels === undefined)) next.labels = labels;

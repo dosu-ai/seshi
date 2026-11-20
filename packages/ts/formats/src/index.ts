@@ -19,10 +19,12 @@ export {
   SESSION_CAPTURE_KEY,
 } from "./injected";
 export {
+  firstJsonlField,
   type LettaAdapterOptions,
   type LettaSource,
   lettaAdapter,
   TRAJECTORY_VERSION,
+  withAgentVersion,
 } from "./letta";
 export {
   compareNormalizerVersions,
