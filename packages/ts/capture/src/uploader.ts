@@ -532,7 +532,12 @@ export class Uploader {
     summary.queued = backlog.queued;
     // Held for the server's capture rules: work waiting to retry, as an upload in backoff is.
     summary.retrying = backlog.retrying + (uploaded.held ? 1 : 0);
-    await this.finish(summary, { succeeded, signedIn, transientFailure });
+    await this.finish(summary, {
+      succeeded,
+      signedIn,
+      ...(transientFailure !== undefined ? { transientFailure } : {}),
+      ...(uploaded.held ? { held: true } : {}),
+    });
     return summary;
   }
 
@@ -1507,7 +1512,14 @@ export class Uploader {
 
   private async finish(
     summary: PassSummary,
-    outcome: { succeeded: boolean; signedIn: boolean; transientFailure?: string },
+    outcome: {
+      succeeded: boolean;
+      signedIn: boolean;
+      transientFailure?: string;
+      /** Every upload waits for the server's capture rules: said at once, not after three
+       * failures, since nothing goes until it clears. */
+      held?: boolean;
+    },
   ): Promise<void> {
     const now = this.now().toISOString();
     const target = this.sink?.target;
@@ -1526,7 +1538,7 @@ export class Uploader {
             ? { ...state.problems.sign_in, ...word }
             : { message: summary.signIn, at: now, ...word };
       } else if (outcome.signedIn) delete problems.sign_in;
-      if (failures >= 3 && outcome.transientFailure) {
+      if ((failures >= 3 || outcome.held) && outcome.transientFailure) {
         problems.upload = { message: outcome.transientFailure, at: now };
       } else if (failures === 0) delete problems.upload;
       const uploader = {

@@ -1417,6 +1417,8 @@ describe("the org's exclude list in serverless mode", () => {
         capture: false,
         level: "org",
         excluded: { entry: payroll, from: "server" },
+        // Kept on this machine: not "waiting".
+        state: "not sent",
       });
     } finally {
       local.cleanup();

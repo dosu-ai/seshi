@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   excludeEntryProblem,
   excludingEntry,
+  maskedEntry,
   normalizeRemote,
   readExcludeEntry,
   repoExcludes,
@@ -104,9 +105,18 @@ describe("the server's exclude list", () => {
     expect(excludeEntryProblem("~/my clients")).toBeUndefined();
     expect(excludeEntryProblem("https://github.com/acme/app.git")).toBeUndefined();
     expect(excludeEntryProblem("git@github.com:acme/app.git")).toBeUndefined();
-    expect(excludeEntryProblem("acme/my app")).toBe("a repository has no spaces");
+    expect(excludeEntryProblem("acme/my app")).toBe("has a space, which no repository name has");
     expect(excludeEntryProblem("https://bot:tok@github.com/acme/app")).toMatch(/credential/);
     expect(excludeEntryProblem("bot:tok@github.com/acme/app")).toMatch(/credential/);
     expect(excludeEntryProblem("acme/\u0007app")).toBe("has a control character");
+  });
+
+  it("shows an entry in a message with its credential masked", () => {
+    expect(maskedEntry("https://bot:ghp_x@github.com/acme/app")).toBe(
+      "https://***@github.com/acme/app",
+    );
+    expect(maskedEntry("bot:tok@github.com/acme/app")).toBe("***@github.com/acme/app");
+    expect(maskedEntry(" acme/my app ")).toBe("acme/my app");
+    expect(maskedEntry("git@github.com:acme/app.git")).toBe("git@github.com:acme/app.git");
   });
 });

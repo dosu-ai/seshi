@@ -397,6 +397,15 @@ async function uninstall(ctx: CommandContext, json: boolean, args: Args): Promis
   return failed.length > 0 ? EXIT.failure : EXIT.ok;
 }
 
+/** A session's upload state, as `sessionWord` says it, except that one the rules keep on this
+ * machine (not a pause, which keeps what was sent) is never "waiting": nothing of it goes. */
+function stateWord(state: SessionState, decision: { capture: boolean; frozen?: number }): string {
+  const word = sessionWord(state);
+  return word === "waiting" && !decision.capture && decision.frozen === undefined
+    ? "not sent"
+    : word;
+}
+
 async function status(ctx: CommandContext, json: boolean, args: Args): Promise<number> {
   const { host, paths } = pathsOf(ctx);
   const now = new Date();
@@ -480,7 +489,10 @@ async function status(ctx: CommandContext, json: boolean, args: Args): Promise<n
               session_id: session.id,
               ...session.decision,
               ...(session.state
-                ? { state: sessionWord(session.state), upload_id: uploadId(session.state) }
+                ? {
+                    state: stateWord(session.state, session.decision),
+                    upload_id: uploadId(session.state),
+                  }
                 : {}),
             },
           }
@@ -501,7 +513,7 @@ async function status(ctx: CommandContext, json: boolean, args: Args): Promise<n
       `Session Capture: ${word(session ? session.decision.capture : here.capture)}`,
       ...(session
         ? [
-            `  session ${printable(session.agent)} ${printable(session.id)}: ${session.decision.reason} (${session.decision.level})${session.state ? `; ${sessionWord(session.state)}` : ""}`,
+            `  session ${printable(session.agent)} ${printable(session.id)}: ${session.decision.reason} (${session.decision.level})${session.state ? `; ${stateWord(session.state, session.decision)}` : ""}`,
           ]
         : []),
       ...(session ? [] : [`  here (${printable(cwd)}): ${here.reason} (${here.level})`]),

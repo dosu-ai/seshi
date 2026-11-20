@@ -1,12 +1,15 @@
-import { excludeEntryProblem } from "@seshi/model/exclude";
+import { excludeEntryProblem, maskedEntry } from "@seshi/model/exclude";
 import * as z from "zod";
 
 /** One entry of an exclude list (the server's `[capture] exclude`, the CLI's
- * `capture.exclude`): one that could never match is refused. The issue's path names the entry;
- * its text is left out, as it may hold a credential. */
+ * `capture.exclude`): one that could never match is refused. The message shows the entry with
+ * any credential in it masked, so it can be found in its file (the path's index counts every
+ * file's entries). */
 export const excludeEntry = z.string().superRefine((entry, ctx) => {
   const problem = excludeEntryProblem(entry);
-  if (problem !== undefined) ctx.addIssue({ code: "custom", message: `this entry ${problem}` });
+  if (problem !== undefined) {
+    ctx.addIssue({ code: "custom", message: `${JSON.stringify(maskedEntry(entry))} ${problem}` });
+  }
 });
 
 export const captureSection = z

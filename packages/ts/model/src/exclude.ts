@@ -171,12 +171,25 @@ export function excludeEntryProblem(raw: string): string | undefined {
   // biome-ignore lint/suspicious/noControlCharactersInRegex: matching control characters
   if (/[\x00-\x1f\x7f-\x9f]/.test(written)) return "has a control character";
   if (isFolderEntry(written)) return undefined;
-  if (/\s/.test(written)) return "a repository has no spaces";
+  if (/\s/.test(written)) return "has a space, which no repository name has";
   if (/^[a-z][a-z0-9+.-]*:\/\/[^/]*@/i.test(written) || /^[^/@]+:[^/@]*@/.test(written)) {
     return "names a credential; write the repository as owner/name or host/owner/name";
   }
   if (excludePattern(written) === "") return "names no repository";
   return undefined;
+}
+
+/** An entry as a message may show it: user info (a token, a password) masked as `***`, and
+ * control characters replaced. */
+export function maskedEntry(raw: string): string {
+  return (
+    raw
+      .trim()
+      .replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/]*@/i, "$1***@")
+      .replace(/^[^/@:]+:[^/@]*@/, "***@")
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: matching control characters
+      .replace(/[\x00-\x1f\x7f-\x9f]/g, "\uFFFD")
+  );
 }
 
 /** The repository entries of an exclude list, read once: what a server matches sessions and

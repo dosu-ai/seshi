@@ -124,7 +124,9 @@ describe("the CLI's config", () => {
         file: "/c.toml",
         fs: fs({ "/c.toml": `[capture]\nexclude = ["acme/app", "acme/my app"]\n` }),
       });
-    expect(run).toThrow(/capture\.exclude\[1\].*a repository has no spaces/);
+    expect(run).toThrow(
+      /capture\.exclude\[1\]: "acme\/my app" has a space, which no repository name has/,
+    );
     expect(
       cliConfigSchema.safeParse({ capture: { exclude: ["~/my clients", "# a note"] } }).success,
     ).toBe(true);

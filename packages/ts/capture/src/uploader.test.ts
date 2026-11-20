@@ -996,6 +996,8 @@ describe("the server's exclude list (GET /v1/capture/rules)", () => {
     expect(server.uploads).toEqual([]);
     expect(first.retrying).toBe(1);
     expect(readOrgRules(paths)).toBeUndefined();
+    // Said at once: nothing goes until it clears.
+    expect(readState(paths).problems?.upload?.message).toContain("wait for its capture rules");
     // Asked again only after a backoff, not on every pass.
     await up.pass();
     expect(listing.rulesAsked).toHaveLength(1);
@@ -1005,6 +1007,7 @@ describe("the server's exclude list (GET /v1/capture/rules)", () => {
     clock = new Date(clock.getTime() + 5000);
     const sent = await up.pass();
     expect(sent.uploaded).toBe(1);
+    expect(readState(paths).problems?.upload).toBeUndefined();
     expect(readOrgRules(paths)).toMatchObject({ server: "https://seshi.test", exclude: [] });
   });
 
