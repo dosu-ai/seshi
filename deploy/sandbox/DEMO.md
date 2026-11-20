@@ -13,9 +13,6 @@ Before you start, have these on the presenting machine:
 - A checkout of the release tag, open at its root.
 - Two terminals: the host, and one for the sandbox.
 
-To make the network step clearer, choose the Locked Down network preset when `sbx` first asks.
-It allows only what a kit or a rule names.
-
 ## 1. Start the server
 
 ```sh
@@ -58,6 +55,9 @@ cat deploy/sandbox/examples/claude.sbxenv.yaml
 sbx env run deploy/sandbox/examples/claude.sbxenv.yaml
 ```
 
+`sbx` shows the plan and asks you to approve it, including the `seshi` credential for
+`localhost:7200`. Approve it.
+
 In Claude Code, give it a task that touches a secret, for example:
 
 ```text
@@ -75,9 +75,9 @@ deploy.sh that reads it, and show me both files.
 On the host:
 
 ```sh
-seshi sessions ls
-seshi sessions export claude-code <id> | grep -o 'redacted:[a-z-]*' | sort -u
-seshi sessions export claude-code <id> | grep -c 'ghp_'     # 0
+seshi sessions ls --owner demo@example.com
+seshi sessions export claude-code <id> --owner demo@example.com | grep -o 'redacted:[a-z-]*' | sort -u
+seshi sessions export claude-code <id> --owner demo@example.com | grep -c 'ghp_'     # 0
 ```
 
 > Here it is, a few seconds after the turn ended. The token the agent wrote is stored as
@@ -90,7 +90,7 @@ seshi sessions export claude-code <id> | grep -c 'ghp_'     # 0
 sbx env run deploy/sandbox/examples/codex.sbxenv.yaml
 ```
 
-Give it a small task, then run `seshi sessions ls` on the host again.
+Give it a small task, then run `seshi sessions ls --owner demo@example.com` on the host again.
 
 > Same kit, different agent. Codex's session shows up under `codex/` beside Claude's. Docker
 > runs Codex without its own inner sandbox, since the microVM is the boundary, and seshi rides
@@ -99,24 +99,29 @@ Give it a small task, then run `seshi sessions ls` on the host again.
 ## 7. Show what the sandbox could reach
 
 ```sh
+sbx exec seshi-claude -- curl -sS -m 5 -o /dev/null -w '%{http_code}\n' https://example.com
+sbx exec seshi-claude -- curl -sS -m 5 -o /dev/null -w '%{http_code}\n' http://host.docker.internal:7201
 sbx policy log
-sbx exec seshi-claude -- curl -sS -m 5 https://example.com
 ```
 
-> The log shows the model's API and `localhost:7200`, which is the seshi server. The curl is
-> refused. The kit opened exactly one address, for sandboxes that carry the kit, and nothing
-> else.
+Both curls print `403`. The log has them under BLOCKED REQUESTS ("No matching allow rule"), and
+`localhost:7200` under ALLOWED REQUESTS beside the model's API and the package mirror the Claude
+kit's startup uses.
+
+> Everything is closed unless a rule opens it. The kit opened exactly one address, the seshi
+> server, and only for sandboxes that carry the kit: even the next port on the same host is
+> refused.
 
 ## 8. Remove it without losing anything
 
 ```sh
-sbx env rm deploy/sandbox/examples/claude.sbxenv.yaml
-sbx env rm deploy/sandbox/examples/codex.sbxenv.yaml
+sbx exec seshi-claude -- seshi-sandbox flush && sbx env rm deploy/sandbox/examples/claude.sbxenv.yaml
+sbx exec seshi-codex -- seshi-sandbox flush && sbx env rm deploy/sandbox/examples/codex.sbxenv.yaml
 ```
 
-> Removing a sandbox deletes its disk. The environment file runs `seshi-sandbox flush` first,
-> which sends whatever is still queued and says so if anything is left. The sessions are on the
-> server, and the sandboxes are gone.
+> Removing a sandbox deletes its disk, so we flush first. `seshi-sandbox flush` runs an upload
+> pass of its own and only succeeds when nothing is left queued, and the `&&` means a failed
+> flush keeps the sandbox. The sessions are on the server, and the sandboxes are gone.
 
 ## Cleaning up
 

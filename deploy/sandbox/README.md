@@ -38,7 +38,22 @@ sbx run claude --kit ./deploy/sandbox/seshi-sandbox-kit
 sbx run codex --kit ./deploy/sandbox/seshi-sandbox-kit
 ```
 
-Or use an environment file, which also flushes uploads before the sandbox is removed:
+The first time, `sbx` asks you to approve the `seshi` credential for `localhost:7200`. Without
+that approval it starts the sandbox with the credential withheld, and sign-in fails with "does
+not accept that credential". To approve it ahead of time, for a script or CI, add the binding to
+`~/.config/sbx/credentials.yaml` before creating the sandbox:
+
+```yaml
+bindings:
+  seshi:
+    apiKey:
+      domains: [localhost:7200]
+```
+
+The example environment files declare the same binding. A binding added after the sandbox was
+created does not apply to it: create the sandbox again.
+
+Or use an environment file, which also tries a last flush when the sandbox is removed:
 
 ```sh
 sbx env run deploy/sandbox/examples/claude.sbxenv.yaml
@@ -61,9 +76,12 @@ built), and `seshi-sandbox`, a small script that runs at three points:
 - **Every time the sandbox boots**, `seshi-sandbox start` repeats the install (the agent's own
   setup rewrites its settings when the sandbox is recreated), signs in to the server with
   `SESHI_TOKEN`, and sends what an earlier run left queued. It runs in the background, so an
-  unreachable server never holds up the agent. Until sign-in works, sessions wait in the queue.
+  unreachable server never holds up the agent: it keeps trying for 15 minutes, and sessions
+  wait in the queue meanwhile. If the server refuses the credential, it stops and says so.
+  `sbx exec <name> -- seshi-sandbox start --server=<url>` tries again by hand.
 - **Before the sandbox is removed**, `seshi-sandbox flush` sends every session of the past
-  30 days and exits 1 if anything is still queued. See [Removing a sandbox](#removing-a-sandbox).
+  30 days and exits 1 unless a full upload pass it ran itself left nothing queued or failed.
+  See [Removing a sandbox](#removing-a-sandbox).
 
 `setup` and `start` always exit 0: they print what went wrong, and the sandbox starts anyway.
 
@@ -71,7 +89,7 @@ built), and `seshi-sandbox`, a small script that runs at three points:
 
 | Argument | Default | What it is |
 | --- | --- | --- |
-| `server` | `http://host.docker.internal:7200` | The server's URL, as the sandbox reaches it |
+| `server` | `http://host.docker.internal:7200` | The server's URL, as the sandbox reaches it. `https://` for any server not on this machine |
 | `host` | `localhost:7200` | The server as the sandbox's proxy sees it: the network rule and where the token goes |
 | `user` | empty | With the org key as the secret, the username sessions are stored under |
 | `version` | this release | The seshi release to install. It is a build argument, fixed when the kit is built |
@@ -95,7 +113,9 @@ seshi server and a sandbox without it cannot.
   127.0.0.1) works as it is, because the proxy connects from the host. For another port, set
   both `server` and `host`.
 - **A server elsewhere.** Set `server=https://seshi.example.com` and `host=seshi.example.com`.
-  [deploy/docker/](../docker/README.md#https) puts Caddy in front of the server for HTTPS.
+  The kit refuses plain `http://` for anything but `host.docker.internal`, because the proxy
+  puts the real token on each request. [deploy/docker/](../docker/README.md#https) puts Caddy in
+  front of the server for HTTPS.
 
 Write rules for `localhost:<port>`, never `host.docker.internal`: the proxy matches the address
 after it rewrites it, so a rule on `host.docker.internal` is listed but not applied
@@ -123,17 +143,22 @@ sandbox, so prefer a device token for that too.
 ## Removing a sandbox
 
 The sandbox's disk survives `sbx stop` and a restart, and the startup hook sends what was
-queued. `sbx rm` deletes it, with any session the uploader has not sent yet. Before removing a
-sandbox, flush it:
+queued. `sbx rm` deletes it, with any session the uploader has not sent yet. Each finished turn
+is uploaded within seconds, so what is at risk is the last turn, or everything while the server
+is unreachable. Flush first, and remove the sandbox only if the flush succeeds:
 
 ```sh
 sbx exec <name> -- seshi-sandbox flush && sbx rm <name>
 ```
 
-The example environment files run the flush as a `preRemove` step, so `sbx env rm` sends first.
-If that step fails, `sbx` warns and removes the sandbox anyway, so read its output before you
-confirm. `sbx run --rm` removes the sandbox when the agent exits, with no step in between: the
-last turn's upload may still be running then, so don't use `--rm` for sessions you want kept.
+`sbx exec` starts a sandbox that has stopped. The flush exits 1, and the `&&` keeps the
+sandbox, when anything is still queued or the server cannot be reached.
+
+The example environment files also run the flush as a `preRemove` step. That is a last try,
+not a guard: `sbx env rm` runs it after you approve the removal, and if it fails, `sbx` warns
+and removes the sandbox anyway. Flush with `sbx exec` before `sbx env rm` too. `sbx run --rm`
+removes the sandbox when the agent exits, with no step in between, so don't use `--rm` for
+sessions you want kept.
 
 ## Codex
 
@@ -170,11 +195,12 @@ The build runs the kit's own frontend (`docker/sandbox-kit:3`), which checks the
 The smoke test needs no `sbx`. It lays the kit over a stand-in agent image with the settings
 Docker's agent kits write and the shared skills folders mounted read-only. Then it runs both
 hooks against the server kit, plants a fake GitHub token in a Claude Code session, and checks
-that the session arrives with the token redacted and that `flush` leaves nothing queued. CI runs
-it on every change, with that change's seshi in place of the release.
+that the session arrives with the token already redacted in the sandbox. It also checks that
+`flush` fails while the server is stopped and succeeds once it is back. CI runs it on every
+change, with that change's seshi in place of the release.
 
 Only a real sandbox can check the network rule, the credential proxy and the hooks' trimmed
-environment. Check those by hand when the kit changes:
+environment. Check those by hand when the kit changes (with `sbx` 0.54 they all hold):
 
 1. `sbx run claude --kit ./deploy/sandbox/seshi-sandbox-kit`, finish a turn, and see the
    session in `seshi sessions ls` on the host.

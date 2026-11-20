@@ -38,8 +38,8 @@ bindings:
         - "${{ env.args.host }}"
 
 lifecycle:
-  # Removing the sandbox deletes whatever its uploader has not sent yet. A failure here only
-  # warns, so read the output before you confirm.
+  # A last try at sending what is queued. It runs after the removal is approved, and a failure
+  # only warns, so flush first: sbx exec <name> -- seshi-sandbox flush && sbx env rm <file>
   preRemove:
     - name: Send the sessions seshi has not uploaded yet
       command: sbx exec "$SBX_SANDBOX_NAME" -- seshi-sandbox flush

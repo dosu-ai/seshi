@@ -6,9 +6,11 @@
 # - the install hook adds seshi's hooks beside the ones the stock claude and codex kits write,
 #   twice without duplicates, with the shared skills folders mounted read-only;
 # - the startup hook signs in with a device token, and with the org key and a username;
-# - a Claude Code session with a planted secret reaches the server, redacted;
-# - `seshi-sandbox flush` leaves nothing queued;
-# - neither hook fails when the server cannot be reached.
+# - a Claude Code session with a planted secret reaches the server already redacted, so the
+#   server finds nothing left to redact;
+# - `seshi-sandbox flush` leaves nothing queued, and fails while the server is down;
+# - neither hook fails when the server cannot be reached;
+# - a published kit (KIT_IMAGE) carries its descriptor in each platform's manifest.
 #
 # It needs no `sbx`, so it cannot check what only a sandbox does: the network rule, the
 # credential proxy, or the hooks' environment. deploy/sandbox/README.md lists those checks.
@@ -80,6 +82,17 @@ if [ -z "$KIT" ]; then
   docker buildx build --load --progress quiet -t "$KIT" \
     -f "$ROOT/deploy/sandbox/seshi-sandbox-kit/seshi-sandbox-kit.yaml" \
     "$ROOT/deploy/sandbox/seshi-sandbox-kit" >/dev/null
+fi
+if [ -n "${KIT_IMAGE:-}" ]; then
+  # sbx reads a published kit's descriptor from its manifest annotations, per platform.
+  INDEX=$(docker buildx imagetools inspect --raw "$KIT")
+  for digest in $(echo "$INDEX" | jq -r '.manifests[] | select(.platform.os == "linux") | .digest'); do
+    docker buildx imagetools inspect --raw "${KIT%%:*}@$digest" |
+      jq -er '.annotations["vnd.docker.sandbox.kit.descriptor"] | fromjson | .schemaVersion == "3"' \
+        >/dev/null || fail "$KIT@$digest has no kit descriptor annotation"
+  done
+  [ "$(echo "$INDEX" | jq '[.manifests[] | select(.platform.os == "linux")] | length')" -ge 2 ] ||
+    fail "$KIT is not published for both amd64 and arm64"
 fi
 docker image inspect "$KIT" >/dev/null 2>&1 || docker pull -q "$KIT" >/dev/null
 docker create --name "$BOX-kit" "$KIT" true >/dev/null
@@ -196,7 +209,33 @@ done
 echo "$EXPORT" | grep -q 'Deploying now' || fail "the export is not the session: $EXPORT"
 echo "$EXPORT" | grep -q "$SECRET" && fail "the planted secret reached the server"
 echo "$EXPORT" | grep -q '\[redacted:' || fail "nothing in the stored session is redacted"
+# The server counts what it replaced itself. Zero means the token arrived already redacted: the
+# sandbox's seshi redacted it before upload.
+SERVER_COUNT=$(admin sessions show claude-code "$SESSION" --owner "$OWNER" --json |
+  jq '.redaction.counts["github-token"] // 0')
+[ "$SERVER_COUNT" = 0 ] || fail "the token reached the server unredacted ($SERVER_COUNT found there)"
 echo "stored with $(echo "$EXPORT" | grep -o 'redacted:[a-z-]*' | sort -u | tr '\n' ' ')"
+
+echo "== flush with the server down"
+SESSION2=5e551e00-0000-4000-8000-$(openssl rand -hex 6)
+TRANSCRIPT2="/home/agent/.claude/projects/-home-agent-work/$SESSION2.jsonl"
+sed "s/$SESSION/$SESSION2/g" transcript.jsonl | as_agent sh -c "cat >'$TRANSCRIPT2'"
+compose stop seshi >/dev/null
+jq -nc --arg s "$SESSION2" --arg t "$TRANSCRIPT2" \
+  '{session_id: $s, transcript_path: $t, cwd: "/home/agent/work", hook_event_name: "Stop"}' |
+  as_agent sh -c "cd /home/agent/work && $STOP"
+if as_agent FLUSH_TRIES=15 seshi-sandbox flush >flush.out 2>&1; then
+  cat flush.out
+  fail "flush reported success while the server was down"
+fi
+compose up -d --wait --wait-timeout 180
+as_agent seshi-sandbox flush || fail "flush did not send the queued session once the server was back"
+i=0
+until admin sessions show claude-code "$SESSION2" --owner "$OWNER" >/dev/null 2>&1; do
+  i=$((i + 1))
+  [ "$i" -ge 30 ] && fail "the session queued while the server was down never arrived"
+  sleep 1
+done
 
 echo "== startup hook, org key and username"
 as_agent HOME=/tmp/orgkey SESHI_TOKEN="$ORG_KEY" seshi-sandbox start --server="$SERVER" \

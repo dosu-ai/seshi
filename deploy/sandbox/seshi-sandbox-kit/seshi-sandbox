@@ -74,16 +74,27 @@ login() {
   else
     set -- --token -
   fi
-  # The server may still be starting, or the network rule not yet in place: try for a minute.
+  # This runs in the background, so it can wait out a server that is down or still starting:
+  # sessions queue meanwhile, and the uploader sends them once it is signed in. A server that
+  # refuses the credential (exit 5) or a usage or config error (2, 3) will not change, so stop.
   # LOGIN_TRIES and LOGIN_WAIT are for scripts/sandbox-kit-smoke.sh; the kit passes neither.
   tries=0
-  until printf '%s' "$SESHI_TOKEN" | "$SESHI" login --server "$server" "$@"; do
+  while :; do
+    printf '%s' "$SESHI_TOKEN" | "$SESHI" login --server "$server" "$@"
+    code=$?
+    case "$code" in
+      0) return 0 ;;
+      2 | 3 | 5)
+        say "$server refused to sign in (exit $code); check the seshi secret, then run: seshi-sandbox start --server=$server"
+        return 0
+        ;;
+    esac
     tries=$((tries + 1))
-    if [ "$tries" -ge "${LOGIN_TRIES:-6}" ]; then
-      say "could not sign in to $server; sessions wait in the queue until 'seshi login' works"
+    if [ "$tries" -ge "${LOGIN_TRIES:-60}" ]; then
+      say "could not reach $server; sessions wait in the queue. The next boot tries again, or run: seshi-sandbox start --server=$server"
       return 0
     fi
-    sleep "${LOGIN_WAIT:-10}"
+    sleep "${LOGIN_WAIT:-15}"
   done
 }
 
@@ -109,23 +120,56 @@ start() {
   "$SESHI" daemon --once || say "the uploader exited $?; 'seshi capture status' says why"
 }
 
+# Ask the background uploader a hook started (`seshi daemon`) to stop. It finishes the pass it
+# is in, then exits. Read from /proc, so it needs no procps in the agent's image.
+stop_uploader() {
+  for dir in /proc/[0-9]*; do
+    cmd=$(tr '\0' ' ' <"$dir/cmdline" 2>/dev/null) || continue
+    case "$cmd" in
+      *--once*) ;;
+      "$SESHI daemon "*) kill -TERM "${dir#/proc/}" 2>/dev/null ;;
+    esac
+  done
+}
+
+# A number from the flat JSON summary `seshi daemon --once --json` prints; empty when absent.
+summary_number() {
+  printf '%s' "$2" | tr -d ' \n' | sed -n "s/.*\"$1\":\([0-9][0-9]*\).*/\1/p"
+}
+
 flush() {
-  # Every installed agent's sessions from the past 30 days, through the same queue as hooks. If
-  # an uploader is running, this waits for it.
-  "$SESHI" upload --since 30d
-  sent=$?
-  "$SESHI" capture status
-  if [ "$sent" -ne 0 ]; then
-    say "some sessions were not sent (seshi upload exited $sent); do not remove this sandbox yet"
+  # Every installed agent's sessions from the past 30 days, through the same queue as hooks, so
+  # a session a hook missed is queued too.
+  "$SESHI" upload --since 30d >/dev/null 2>&1
+  # Success is only what a pass this command ran says. A running uploader holds the lock, so
+  # ask it to stop: it finishes the pass it is in, then exits, and this command takes over.
+  tries=0
+  while :; do
+    out=$("$SESHI" daemon --once --json 2>&1)
+    code=$?
+    case "$out" in
+      *'"started":'*false*)
+        tries=$((tries + 1))
+        if [ "$tries" -ge "${FLUSH_TRIES:-90}" ]; then
+          say "the running uploader did not stop; do not remove this sandbox yet"
+          return 1
+        fi
+        stop_uploader
+        sleep 2
+        continue
+        ;;
+    esac
+    break
+  done
+  queued=$(summary_number queued "$out")
+  failed=$(summary_number failed "$out")
+  if [ "$code" -ne 0 ] || [ -z "$queued" ] || [ "$queued" -gt 0 ] || [ "${failed:-0}" -gt 0 ]; then
+    printf '%s\n' "$out"
+    "$SESHI" capture status
+    say "not everything was sent; do not remove this sandbox yet"
     return 1
   fi
-  queued=$("$SESHI" capture status --json 2>/dev/null | tr -d ' \n' |
-    sed -n 's/.*"uploader":{"running":[a-z]*,"queued":\([0-9][0-9]*\).*/\1/p')
-  if [ -n "$queued" ] && [ "$queued" -gt 0 ]; then
-    say "$queued uploads still queued; do not remove this sandbox yet"
-    return 1
-  fi
-  say "nothing left to send"
+  say "every session is on the server; nothing is queued"
 }
 
 case "${1:-}" in

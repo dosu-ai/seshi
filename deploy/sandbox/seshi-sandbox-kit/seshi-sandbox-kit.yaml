@@ -21,9 +21,11 @@ args:
     description: seshi release to install
     buildArg: SESHI_VERSION
   server:
+    # Plain HTTP only to a server on this machine: the proxy puts the real token on the
+    # request, so anything that crosses a network must be HTTPS.
     default: "http://host.docker.internal:7200"
-    pattern: '^https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?$'
-    description: The seshi server's URL, as the sandbox reaches it
+    pattern: '^(http://host\.docker\.internal|https://[A-Za-z0-9.-]+)(:[0-9]{1,5})?$'
+    description: The seshi server's URL, as the sandbox reaches it (https, or http://host.docker.internal for this machine)
   host:
     # The proxy on the host rewrites host.docker.internal to localhost, so a server on this
     # machine is localhost:<port> here. A remote server is its DNS name.

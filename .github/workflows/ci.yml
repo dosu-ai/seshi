@@ -438,6 +438,8 @@ jobs:
           context: deploy/sandbox/seshi-sandbox-kit
           file: deploy/sandbox/seshi-sandbox-kit/seshi-sandbox-kit.yaml
           platforms: linux/amd64,linux/arm64
+          # The kit frontend puts its annotations on the index only when provenance is asked for.
+          provenance: mode=min
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -624,11 +626,15 @@ jobs:
           done
 
   # The Docker Sandboxes kit the release published, at the release's tag, against the server
-  # image the release published, both pulled without a login as a user would.
+  # image the release published, both pulled without a login as a user would, on each
+  # architecture the kit ships for.
   verify-sandbox-kit:
     needs: [release, image, sandbox-kit]
     if: needs.release.outputs.released == 'true'
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
     steps:

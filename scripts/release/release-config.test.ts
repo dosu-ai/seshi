@@ -147,8 +147,10 @@ describe("ci.yml", () => {
     expect(publish).toContain("ref: v${{ needs.release.outputs.version }}");
     expect(publish).toContain("file: deploy/sandbox/seshi-sandbox-kit/seshi-sandbox-kit.yaml");
     expect(publish).toContain("platforms: linux/amd64,linux/arm64");
+    expect(publish).toContain("provenance: mode=min");
     const verify = CI.slice(CI.indexOf("\n  verify-sandbox-kit:"), CI.indexOf("\n  verify-kit:"));
     expect(verify).toContain("needs: [release, image, sandbox-kit]");
+    expect(verify).toContain("runner: [ubuntu-latest, ubuntu-24.04-arm]");
     expect(verify).toContain("ref: v${{ needs.release.outputs.version }}");
     expect(verify).toContain("sh scripts/sandbox-kit-smoke.sh");
     expect(verify).toContain("-sandbox-kit:${{ needs.release.outputs.version }}");
