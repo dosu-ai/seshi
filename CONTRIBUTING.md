@@ -43,6 +43,7 @@ A Bun workspace, laid out as in the design decisions (X3,
 | `tests/` | Tests that cross packages, and the fixture and golden tooling (`tests/tooling/`) |
 | `scripts/` | Repository scripts: the layer check, the generators below, the hook timing check, the release build, npm packages and smoke test (`scripts/release/`), the install scripts (`scripts/install/`), the brand outliner (`scripts/brand/`) |
 | `deploy/docker/` | The Docker kit: Compose files that run the published image, with its `.env.example` and README. `scripts/docker-kit-smoke.sh` boots it |
+| `deploy/sandbox/` | The Docker Sandboxes kit: a mixin that installs seshi beside the `claude` and `codex` agents in `sbx`, with example environment files and a demo. `scripts/sandbox-kit-smoke.sh` runs it against the Docker kit |
 | `docs/` | The user docs; [`docs/README.md`](docs/README.md) is the index. `docs/seshi/` holds the design decisions and the build notes |
 | `brand/` | The brand files and colour tokens ([`brand/README.md`](brand/README.md)) |
 

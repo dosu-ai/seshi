@@ -4,7 +4,9 @@
  *
  * 1. prepare: scripts/release-version.ts writes it into packages/ts/model/package.json (the
  *    repository's one version: what traces record as their normalizer, what /healthz and
- *    `seshi --version` report), bun.lock, the Python client's `__version__` and the image tag deploy/docker/compose.yaml pins; scripts/release/build.ts cross-compiles `seshi`
+ *    `seshi --version` report), bun.lock, the Python client's `__version__`, the image tag
+ *    deploy/docker/compose.yaml pins and the seshi release the Docker Sandboxes kit
+ *    (deploy/sandbox/) installs; scripts/release/build.ts cross-compiles `seshi`
  *    for every target (scripts/release/targets.ts) into dist/release/: one archive per target,
  *    install.sh, install.ps1, the Cursor extension's .vsix and SHA256SUMS. @semantic-release/git commits the version files.
  * 2. The tag `vX.Y.Z` is pushed, and the GitHub release is published with those assets. The
@@ -13,7 +15,9 @@
  * 3. ci.yml's later jobs take it from there, from the release's own assets: `npm` publishes
  *    the platform packages, @dosu/seshi-model, @dosu/seshi-client and the @dosu/seshi launcher; `image`
  *    builds ghcr.io/<repo> from the two Linux binaries, and `verify-kit` boots the Docker kit at the
- *    tag against it; `pypi` publishes the Python client;
+ *    tag against it; `sandbox-kit` publishes the Docker Sandboxes kit as
+ *    ghcr.io/<repo>-sandbox-kit, and `verify-sandbox-kit` runs its smoke at the tag against both
+ *    images; `pypi` publishes the Python client;
  *    `openvsx` publishes the Cursor extension; `verify` installs the release on every platform
  *    through each channel.
  *
@@ -54,6 +58,7 @@ export default {
           "integrations/cursor/extension/package.json",
           "packages/py/client/src/seshi/_version.py",
           "deploy/docker/compose.yaml",
+          "deploy/sandbox/seshi-sandbox-kit/seshi-sandbox-kit.yaml",
           "bun.lock",
           "CHANGELOG.md",
         ],

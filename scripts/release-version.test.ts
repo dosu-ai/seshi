@@ -5,15 +5,27 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   KIT_COMPOSE_FILE,
   PYTHON_VERSION_FILE,
+  SANDBOX_KIT_FILE,
   setVersion,
   syncKitImage,
   syncLock,
   syncPythonVersion,
+  syncSandboxKitVersion,
   VERSIONED,
 } from "./release-version";
 
 const KIT =
   "services:\n  seshi:\n    image: ${IMAGE_REPOSITORY:-ghcr.io/dosu-ai/seshi}:${IMAGE_TAG:-0.9.0}\n";
+
+const SANDBOX_KIT = `args:
+  version:
+    default: "0.9.0"
+    buildArg: SESHI_VERSION
+  server:
+    default: "http://host.docker.internal:7200"
+  user:
+    default: ""
+`;
 
 const LOCK = `{
   "workspaces": {
@@ -55,6 +67,8 @@ describe("setVersion", () => {
     writeFileSync(join(root, PYTHON_VERSION_FILE), '"""The release."""\n\n__version__ = "0.9.0"\n');
     mkdirSync(join(root, "deploy/docker"), { recursive: true });
     writeFileSync(join(root, KIT_COMPOSE_FILE), KIT);
+    mkdirSync(join(root, "deploy/sandbox/seshi-sandbox-kit"), { recursive: true });
+    writeFileSync(join(root, SANDBOX_KIT_FILE), SANDBOX_KIT);
   });
   afterEach(() => rmSync(root, { recursive: true, force: true }));
 
@@ -71,6 +85,9 @@ describe("setVersion", () => {
       '"""The release."""\n\n__version__ = "1.0.0"\n',
     );
     expect(readFileSync(join(root, KIT_COMPOSE_FILE), "utf8")).toBe(KIT.replace("0.9.0", "1.0.0"));
+    expect(readFileSync(join(root, SANDBOX_KIT_FILE), "utf8")).toBe(
+      SANDBOX_KIT.replace("0.9.0", "1.0.0"),
+    );
   });
 
   it("refuses something that is not a version", async () => {
@@ -92,6 +109,17 @@ describe("setVersion", () => {
     expect(syncKitImage(kit, model.version)).toBe(kit);
     expect(() => syncKitImage("image: seshi:1.0.0\n", "1.0.0")).toThrow(/0 IMAGE_TAG pins/);
     expect(() => syncKitImage(`${KIT}${KIT}`, "1.0.0")).toThrow(/2 IMAGE_TAG pins/);
+  });
+
+  it("names the Docker Sandboxes kit's descriptor, which installs the same version", () => {
+    const root = resolve(import.meta.dirname, "..");
+    const kit = readFileSync(join(root, SANDBOX_KIT_FILE), "utf8");
+    const model = JSON.parse(readFileSync(join(root, "packages/ts/model/package.json"), "utf8"));
+    expect(syncSandboxKitVersion(kit, model.version)).toBe(kit);
+    expect(() => syncSandboxKitVersion("args: {}\n", "1.0.0")).toThrow(/0 version defaults/);
+    expect(() => syncSandboxKitVersion(`${SANDBOX_KIT}${SANDBOX_KIT}`, "1.0.0")).toThrow(
+      /2 version defaults/,
+    );
   });
 
   it("names folders that exist in this repository and hold a version", () => {

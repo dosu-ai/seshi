@@ -10,6 +10,7 @@ the same compiled file, built once per release (F8.4):
 | npm | `npm i -g @dosu/seshi`, or `npx @dosu/seshi …` | `npm i -g @dosu/seshi@latest` |
 | GitHub release | Download the archive for your platform and `SHA256SUMS` | By hand |
 | Docker (the server) | `docker run ghcr.io/dosu-ai/seshi`, or the Compose kit in [`deploy/docker/`](../deploy/docker/README.md) ([server.md](server.md)) | New tag |
+| Docker Sandboxes (agents in `sbx`) | `sbx run claude --kit ghcr.io/dosu-ai/seshi-sandbox-kit:X.Y.Z`, or the kit in [`deploy/sandbox/`](../deploy/sandbox/README.md) | New tag |
 
 Homebrew, and signed or notarized binaries, come later.
 

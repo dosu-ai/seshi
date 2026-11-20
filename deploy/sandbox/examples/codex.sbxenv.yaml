@@ -1,0 +1,37 @@
+# A Codex sandbox whose sessions go to a seshi server. The same kit as claude.sbxenv.yaml,
+# with a different agent:
+#
+#   sbx env run deploy/sandbox/examples/codex.sbxenv.yaml
+schemaVersion: "1"
+name: seshi-codex
+agent: codex
+
+args:
+  server:
+    default: "http://host.docker.internal:7200"
+    description: The seshi server's URL, as the sandbox reaches it
+  host:
+    default: "localhost:7200"
+    description: The seshi server as the sandbox proxy sees it
+  user:
+    default: ""
+    description: With the org key as the seshi secret, the username sessions are stored under
+
+kits:
+  - source: ../seshi-sandbox-kit
+    args:
+      server: "${{ env.args.server }}"
+      host: "${{ env.args.host }}"
+      user: "${{ env.args.user }}"
+
+bindings:
+  seshi:
+    apiKey:
+      domains:
+        - "${{ env.args.host }}"
+
+lifecycle:
+  preRemove:
+    - name: Send the sessions seshi has not uploaded yet
+      command: sbx exec "$SBX_SANDBOX_NAME" -- seshi-sandbox flush
+      timeout: 3m

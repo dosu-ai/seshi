@@ -1,8 +1,9 @@
 /** Sets the release's version where the repository keeps it: packages/ts/model/package.json (the
  * one version; `VERSION` reads it) and that workspace's entry in bun.lock, which `bun install`
  * leaves alone on a version-only change (release.config.js), the Python client's `__version__`
- * (packages/py/client, whose pyproject.toml reads it), and the image tag the Docker kit pins
- * (deploy/docker/compose.yaml), so a checkout of the release's tag runs that release's image.
+ * (packages/py/client, whose pyproject.toml reads it), the image tag the Docker kit pins
+ * (deploy/docker/compose.yaml), so a checkout of the release's tag runs that release's image,
+ * and the seshi release the Docker Sandboxes kit installs (its `version` arg's default).
  * Exported for its test. */
 
 import { join } from "node:path";
@@ -30,6 +31,20 @@ export function syncKitImage(source: string, version: string): string {
     throw new Error(`${KIT_COMPOSE_FILE}: ${pins.length} IMAGE_TAG pins, expected exactly one`);
   }
   return source.replace(KIT_IMAGE_TAG, `$1${version}$2`);
+}
+
+/** The Docker Sandboxes kit's descriptor: its one version-shaped arg default, the seshi
+ * release the kit installs. */
+export const SANDBOX_KIT_FILE = "deploy/sandbox/seshi-sandbox-kit/seshi-sandbox-kit.yaml";
+
+const SANDBOX_KIT_VERSION = /^(\s+default: ")\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(")$/gm;
+
+export function syncSandboxKitVersion(source: string, version: string): string {
+  const pins = source.match(SANDBOX_KIT_VERSION) ?? [];
+  if (pins.length !== 1) {
+    throw new Error(`${SANDBOX_KIT_FILE}: ${pins.length} version defaults, expected exactly one`);
+  }
+  return source.replace(SANDBOX_KIT_VERSION, `$1${version}$2`);
 }
 
 const SEMVER = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
@@ -74,6 +89,11 @@ export async function setVersion(root: string, version: string): Promise<void> {
   const kitSynced = syncKitImage(kit, version);
   if (kitSynced !== kit) await Bun.write(kitPath, kitSynced);
   console.log(`${KIT_COMPOSE_FILE}: ${version}`);
+  const sandboxPath = join(root, SANDBOX_KIT_FILE);
+  const sandbox = await Bun.file(sandboxPath).text();
+  const sandboxSynced = syncSandboxKitVersion(sandbox, version);
+  if (sandboxSynced !== sandbox) await Bun.write(sandboxPath, sandboxSynced);
+  console.log(`${SANDBOX_KIT_FILE}: ${version}`);
 }
 
 if (import.meta.main) {
