@@ -194,7 +194,7 @@ describe("GET /v1/search (F10)", () => {
           tool_calls: [{ id: "c1", name: "Bash", args: '{"command":"bun test"}' }],
           timestamp: at,
         }) +
-        line({ role: "tool", tool_call_id: "c1", content: "ok", timestamp: at }) +
+        line({ role: "tool", tool_call_id: "c1", content: "ok", ok: false, timestamp: at }) +
         line({
           role: "assistant",
           content: "Fixed: [redacted:github-token] removed",
@@ -208,6 +208,7 @@ describe("GET /v1/search (F10)", () => {
       title: "Fix the flaky checkout test",
       events: 4,
       tools: { Bash: 1 },
+      tool_outcomes: { ok: 0, failed: 1 },
     });
   });
 

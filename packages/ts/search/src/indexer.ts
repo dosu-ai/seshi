@@ -583,6 +583,13 @@ export class Indexer {
     let title = held?.title;
     let events = held?.events ?? 0;
     const tools: Record<string, number> = { ...held?.tools };
+    const outcomes = { ok: held?.tool_outcomes?.ok ?? 0, failed: held?.tool_outcomes?.failed ?? 0 };
+    const tokens = {
+      input: held?.tokens?.input ?? 0,
+      output: held?.tokens?.output ?? 0,
+      cache_read: held?.tokens?.cache_read ?? 0,
+      cache_write: held?.tokens?.cache_write ?? 0,
+    };
     for (const { trace } of read) {
       events += trace.events.length;
       for (const event of trace.events) {
@@ -590,8 +597,19 @@ export class Indexer {
         if (event.role === "tool_call" && event.tool_name) {
           tools[event.tool_name] = (tools[event.tool_name] ?? 0) + 1;
         }
+        if (event.role === "tool_result" && event.ok !== undefined) {
+          if (event.ok) outcomes.ok++;
+          else outcomes.failed++;
+        }
+      }
+      for (const call of trace.llm_calls ?? []) {
+        tokens.input += call.usage?.input_tokens ?? 0;
+        tokens.output += call.usage?.output_tokens ?? 0;
+        tokens.cache_read += call.usage?.cache_read_input_tokens ?? 0;
+        tokens.cache_write += call.usage?.cache_creation_input_tokens ?? 0;
       }
     }
+    const anyTokens = tokens.input + tokens.output + tokens.cache_read + tokens.cache_write > 0;
     const redactions = Object.fromEntries(
       Object.entries(metadata.redaction?.counts ?? {}).filter(([, n]) => n > 0),
     );
@@ -620,6 +638,8 @@ export class Indexer {
       events,
       ...(Object.keys(tools).length > 0 ? { tools } : {}),
       ...(Object.keys(redactions).length > 0 ? { redactions } : {}),
+      ...(outcomes.ok + outcomes.failed > 0 ? { tool_outcomes: outcomes } : {}),
+      ...(anyTokens ? { tokens } : {}),
       traces: [],
     };
   }

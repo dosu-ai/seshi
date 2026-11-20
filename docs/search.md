@@ -70,8 +70,9 @@ repeat nor push others off a page.
 Each result also says what the session was about, in a browse and a search alike: `title`, the
 person's first prompt as one line with the blocks their agent's harness added left out
 (AGENTS.md, environment context, command wrappers, system reminders); `events`, how many events
-its traces hold; `tools`, its tool calls by tool name; and `redactions`, what redaction replaced,
-by rule. The [team UI](ui.md) lists sessions this
+its traces hold; `tools`, its tool calls by tool name; `redactions`, what redaction replaced,
+by rule; `tool_outcomes`, its tool results whose outcome the trace records (`ok`, `failed`); and
+`tokens`, what its model calls record (`input`, `output`, `cache_read`, `cache_write`). The [team UI](ui.md) lists sessions this
 way. `seshi search` still needs words.
 
 The output is plain text; `--json` prints the API's `SearchResults`. Exit 0 also when nothing

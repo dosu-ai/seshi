@@ -1,6 +1,13 @@
 import type { ChangeEntry, EventRole, Labels, SearchSort, Visibility } from "@seshi/model";
 import type { Viewer } from "./viewer";
 
+export interface SessionTokens {
+  input: number;
+  output: number;
+  cache_read: number;
+  cache_write: number;
+}
+
 export interface IndexedSession {
   owner: string;
   archive_id: string;
@@ -39,6 +46,10 @@ export interface IndexedSession {
   tools?: Record<string, number>;
   /** What redaction replaced, by rule (the metadata's `redaction.counts`). */
   redactions?: Record<string, number>;
+  /** Tool results whose outcome the trace records, by outcome. */
+  tool_outcomes?: { ok: number; failed: number };
+  /** Tokens the session's model calls record (`llm_calls[].usage`), summed. */
+  tokens?: SessionTokens;
   /** The traces indexed, in the session's order. */
   traces: string[];
 }

@@ -975,6 +975,10 @@ class SearchResult(Response):
     """The session's tool calls, by tool name."""
     redactions: dict[str, int] | None = None
     """What redaction replaced in the session, by rule."""
+    tool_outcomes: dict[str, int] | None = None
+    """Tool results whose outcome the trace records: `ok` and `failed`."""
+    tokens: dict[str, int] | None = None
+    """Tokens the session's model calls record: `input`, `output`, `cache_read`, `cache_write`."""
     score: float
     hits: int
     matches: list[SearchMatch]

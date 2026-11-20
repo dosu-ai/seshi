@@ -1254,7 +1254,7 @@ ol.ranked > li {
 
 .figure {
   display: flex;
-  flex-direction: column-reverse;
+  flex-direction: column;
 }
 
 .figure dd {
@@ -1271,7 +1271,9 @@ ol.ranked > li {
 }
 
 .figure .note {
-  font-size: 0.8rem;
+  display: block;
+  font-size: 0.78rem;
+  margin-top: 0.1rem;
 }
 
 .card {
@@ -1280,9 +1282,61 @@ ol.ranked > li {
   min-width: 0;
 }
 
-.card h2 {
+.card h3 {
   font-size: 0.95rem;
   margin: 0 0 0.75rem;
+}
+
+.card-note {
+  margin: -0.5rem 0 0.75rem;
+  font-size: 0.8rem;
+}
+
+.overview-part {
+  margin-top: 2.5rem;
+}
+
+.overview-part > h2 {
+  font-size: 1.25rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.overview-part > .hint {
+  margin: 0.25rem 0 0;
+}
+
+.overview-part > .figures {
+  margin: 1.25rem 0 0;
+}
+
+.cards.cards-2 {
+  grid-template-columns: repeat(auto-fit, minmax(min(26rem, 100%), 1fr));
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+table.plain {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+table.plain th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--muted);
+  padding: 0 0.75rem 0.4rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+table.plain td {
+  padding: 0.35rem 0.75rem 0.35rem 0;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
 }
 
 .cards {
@@ -1341,8 +1395,8 @@ details.as-table > summary {
   margin-top: 0.5rem;
 }
 
-.as-table th,
-.as-table td {
+details.as-table th,
+details.as-table td {
   text-align: left;
   padding: 0.15rem 1.5rem 0.15rem 0;
   border-bottom: 1px solid var(--line);
@@ -1398,6 +1452,10 @@ mark.find.current {
 
 /* Narrow screens: the glance goes above the thread, and the bar wraps. */
 @media (max-width: 56rem) {
+  .cards.cards-2 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .panel.with-aside {
     grid-template-columns: minmax(0, 1fr);
     gap: 1.5rem;

@@ -87,11 +87,25 @@ calls, the tools it used, the files it touched, and the models and tokens its ca
 model review's decision for each write ([model-review.md](model-review.md)), with the audit
 detail for admins. **Details** shows the session's stored metadata and downloads its traces.
 
-**The overview** is the team over the last day, 7 days or 30 days: how many sessions, people,
-repositories, tool calls and redactions; sessions per day; and the people, repositories, agents,
-models and tools with the most sessions or calls, and what redaction removed by rule. A click on
-a person, repository, agent or model opens the list filtered to it. It reads the same browse as
-the list, so it counts only what you may read, up to the 2,000 most recent sessions.
+**The overview** is the team over the last day, 7 days or 30 days, in three parts:
+
+- **Usage**: sessions, people (and how many were active a day), tokens, tool calls, the tool
+  error rate (failed results over results whose outcome the agent records; Codex records none)
+  and the median session length; sessions and tokens per day; and the people, repositories,
+  agents, models and tools with the most sessions, tokens or calls, with tool errors by agent.
+  Tokens are what each session's model calls record (Claude Code and Codex record them), and a
+  session's tokens count toward its main model.
+- **Ingest**: events stored, the capture delay from a session's last event to its stored copy
+  (median and p95; a backfill counts from when it was sent), the share stored within 15
+  minutes, the share of sessions redaction changed with what it removed by rule, when the search
+  index last caught up, and events stored per day.
+- **Pipeline**, for admins (`sources:admin`): each source's stored, filtered, failed and dropped
+  writes, and the worker's state and its jobs' last runs (`GET /v1/admin/sources` and
+  `GET /v1/admin/jobs`).
+
+A click on a person, repository, agent or model opens the list filtered to it. Usage and ingest
+read the same browse as the list, so they count only what you may read, up to the 2,000 most
+recent sessions.
 
 ## What it never shows
 

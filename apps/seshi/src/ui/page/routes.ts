@@ -11,6 +11,8 @@ export const ROUTES = {
   trace: "GET /v1/owners/{owner}/sessions/{archive_id}/trace",
   export: "GET /v1/owners/{owner}/sessions/{archive_id}/export",
   reviews: "GET /v1/owners/{owner}/sessions/{archive_id}/reviews",
+  adminSources: "GET /v1/admin/sources",
+  adminJobs: "GET /v1/admin/jobs",
 } as const;
 
 export type RouteName = keyof typeof ROUTES;

@@ -229,6 +229,8 @@ function resultOf(hit: BackendHit): SearchResult {
     ...(s.events !== undefined ? { events: s.events } : {}),
     ...(s.tools !== undefined ? { tools: s.tools } : {}),
     ...(s.redactions !== undefined ? { redactions: s.redactions } : {}),
+    ...(s.tool_outcomes !== undefined ? { tool_outcomes: s.tool_outcomes } : {}),
+    ...(s.tokens !== undefined ? { tokens: s.tokens } : {}),
     score: hit.score,
     hits: hit.hits,
     matches: hit.matches.map((m) => {

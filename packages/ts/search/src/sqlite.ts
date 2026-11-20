@@ -21,8 +21,8 @@ import { indexText, MATCH_END, MATCH_START } from "./snippet";
  * feeds. 3: sessions' `agent` column is `format`, and the feed's copies of entries written
  * before seshi 0.16 carry the format filled in from the session. 4: sessions gained `labels`. 5:
  * sessions' `repo`, `harness`, `agent_version` and `models`. 6: sessions' `title`, `events`,
- * `tools` and `redactions`. */
-export const INDEX_SCHEMA = "seshi/search-index/6";
+ * `tools` and `redactions`. 7: sessions' `tool_outcomes` and `tokens`. */
+export const INDEX_SCHEMA = "seshi/search-index/7";
 
 const SNIPPET_TOKENS = 24;
 
@@ -67,6 +67,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   events INTEGER,
   tools TEXT,
   redactions TEXT,
+  tool_outcomes TEXT,
+  tokens TEXT,
   traces TEXT NOT NULL,
   read_ms INTEGER NOT NULL DEFAULT 0,
   removed INTEGER NOT NULL DEFAULT 0,
@@ -124,6 +126,8 @@ interface SessionRow {
   events: number | null;
   tools: string | null;
   redactions: string | null;
+  tool_outcomes: string | null;
+  tokens: string | null;
   traces: string;
   read_ms: number;
   removed: number;
@@ -155,6 +159,10 @@ function sessionOf(row: SessionRow): IndexedSession {
     ...(row.redactions !== null
       ? { redactions: JSON.parse(row.redactions) as Record<string, number> }
       : {}),
+    ...(row.tool_outcomes !== null
+      ? { tool_outcomes: JSON.parse(row.tool_outcomes) as IndexedSession["tool_outcomes"] }
+      : {}),
+    ...(row.tokens !== null ? { tokens: JSON.parse(row.tokens) as IndexedSession["tokens"] } : {}),
     traces: JSON.parse(row.traces) as string[],
   };
 }
@@ -371,6 +379,8 @@ export class SqliteIndex implements IndexStore {
         session.events ?? null,
         counts(session.tools),
         counts(session.redactions),
+        session.tool_outcomes ? JSON.stringify(session.tool_outcomes) : null,
+        session.tokens ? JSON.stringify(session.tokens) : null,
         JSON.stringify(session.traces),
         readAt,
       ];
@@ -381,8 +391,8 @@ export class SqliteIndex implements IndexStore {
             `INSERT INTO sessions (owner, archive_id, format, session_id, origin_agent,
                native_session_id, project, branch, repo, harness, agent_version, models,
                labels, source_id, visibility, started_at, ended_at, updated_at, updated_ms,
-               title, events, tools, redactions, traces, read_ms)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               title, events, tools, redactions, tool_outcomes, tokens, traces, read_ms)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              RETURNING id`,
           )
           .get(session.owner, session.archive_id, ...values) as { id: number };
@@ -396,7 +406,8 @@ export class SqliteIndex implements IndexStore {
                native_session_id = ?, project = ?, branch = ?, repo = ?, harness = ?,
                agent_version = ?, models = ?, labels = ?, source_id = ?, visibility = ?,
                started_at = ?, ended_at = ?, updated_at = ?, updated_ms = ?, title = ?,
-               events = ?, tools = ?, redactions = ?, traces = ?, read_ms = ?, removed = 0
+               events = ?, tools = ?, redactions = ?, tool_outcomes = ?, tokens = ?, traces = ?,
+               read_ms = ?, removed = 0
              WHERE id = ?`,
           )
           .run(...values, id);

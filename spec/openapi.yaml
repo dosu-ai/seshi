@@ -2790,6 +2790,22 @@ components:
           type: object
           description: What redaction replaced in the session, by rule.
           additionalProperties: { type: integer, minimum: 1 }
+        tool_outcomes:
+          type: object
+          description: The session's tool results whose outcome its trace records, by outcome. Absent for agents that report no outcomes (Codex).
+          required: [ok, failed]
+          properties:
+            ok: { type: integer, minimum: 0 }
+            failed: { type: integer, minimum: 0 }
+        tokens:
+          type: object
+          description: Tokens the session's model calls record (`llm_calls[].usage`), summed. Absent when its agent reports none.
+          required: [input, output, cache_read, cache_write]
+          properties:
+            input: { type: integer, minimum: 0 }
+            output: { type: integer, minimum: 0 }
+            cache_read: { type: integer, minimum: 0 }
+            cache_write: { type: integer, minimum: 0 }
         score:
           type: number
           description: How well it matched; higher is better, comparable within one answer only (0 in a browse).

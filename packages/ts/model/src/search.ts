@@ -101,6 +101,11 @@ export interface SearchResult {
   tools?: Record<string, number>;
   /** What redaction replaced in the session, by rule. */
   redactions?: Record<string, number>;
+  /** The session's tool results whose outcome its trace records, by outcome (agents that do
+   * not report outcomes, such as Codex, have none). */
+  tool_outcomes?: { ok: number; failed: number };
+  /** Tokens the session's model calls record, summed (absent when its agent reports none). */
+  tokens?: { input: number; output: number; cache_read: number; cache_write: number };
   /** How well the session matched: higher is better, comparable within one answer only. */
   score: number;
   /** How many of its records matched. */
