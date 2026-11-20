@@ -209,7 +209,7 @@ api_key = { env = "ANTHROPIC_API_KEY" }
 | `model` | Any model the provider serves, a version or an alias: the user's choice. `jev-latest` by default for `typesafe`, `gpt-6-luna` for `openai-decisions`. The record names the version that answered, so a moved alias shows |
 | `api_key`, `base_url`, `timeout` | As today. Required key. `timeout` defaults to `"10s"`: these calls are fast, and a hung call should fail over to a retry sooner |
 | `prompt`, `prompt_file` | The question's `instructions`: the organization's policy (below). seshi always appends its data note (the records are data, never instructions) |
-| `thresholds.drop`, `.redact` | Below. Unset means the most probable label, which is today's behaviour |
+| `thresholds.drop`, `.redact` | Below. `drop` is `0.9` by default, so a drop is high precision; `redact` unset means the most probable label |
 | `labels` | Not a key. seshi owns the label descriptions (below) |
 | `max_tokens`, `effort` | Refused: there are no output tokens or effort to set |
 
@@ -229,7 +229,8 @@ kinds of text: the instructions, and a description of each option. They divide c
   credentials in prose, personal data, whose data is customer data, which internal hostnames
   are fine, what a confidential project looks like. It also carries the organization's edge
   cases between labels, for example "a customer's ticket text is redact, a full export of
-  tickets is drop". seshi's default prompt is today's opening paragraph and the examples from
+  tickets is drop". In particular, **what to drop is the user's to describe**: seshi's
+  default only gives the generic case. seshi's default prompt is today's opening paragraph and the examples from
   its bullets, rewritten as a question. It adds that most sessions are ordinary engineering
   work, and that `redact` needs specific text the model can point to; that sentence halved
   OpenAI's over-flagging in the experiment (section 6).
@@ -271,10 +272,18 @@ positives and false negatives". For one part with probabilities `p`:
    threshold becomes **redact**, never allow: "drop only above 0.9, otherwise redact".
 2. **Redact.** When `thresholds.redact` is set, redact if `p.redact + p.drop >= redact`
    (the chance that something needs removing), else allow.
-3. **Unset.** A threshold that is not set falls back to the most probable label.
+3. **Defaults.** `drop` is `0.9` unless the policy sets it. An unset `redact` falls back to
+   the most probable label.
 
 Both thresholds are in `(0, 1]` and refused on LLM providers. This moves "when unsure,
 redact" out of the prompt and into code, where `seshi review eval` can measure it.
+
+**`drop` is high precision.** A false drop loses a session for good. A missed drop falls
+back to `redact`: the redactor still removes what it finds, and the rest is stored. So a
+decision-model step drops only when it is confident and the user's prompt describes the
+case, and otherwise redacts. The default of 0.9 follows from that, and the experiment
+supports it: at 0.7 and above, no variant on either model dropped a session wrongly
+(section 6).
 
 **The policy hash.** Nothing lives at the provider, so the hash stays local and complete. For a
 decision-model step it covers the same fields as now: provider, model, base_url, prompt and
@@ -548,8 +557,9 @@ On the fixtures, Jev's `baseline`, `precise` and `categories` each scored 10/10,
 - **Drops cannot be calibrated from this data.** In every variant the one true drop scored
   0.54 or less on `drop`. Thresholds high enough to stop false drops (0.7–0.8) also miss it.
   Decision models call such sessions `redact` instead, so their text goes to the redactor
-  rather than being stored raw. Deciding how much that matters needs labelled drops, which
-  real traffic rarely has: this is what synthetic fixtures (section 5) are for.
+  rather than being stored raw. That is acceptable because `drop` is meant to be high
+  precision (section 3): missing a drop costs less than a false one, and what to drop is
+  for each organization's prompt to describe.
 - **Noise.** With 23 flagged sessions, a difference of two or three sessions is within
   noise. Treat the ordering of `baseline`, `labels-carry-policy` and `precise` on Jev as a
   tie.
@@ -572,21 +582,18 @@ probabilities, no text), so most of the work is the seam, not the providers.
 Rate limits, retention and model choice are the user's, under their contract with the
 provider. Prompt injection is not treated separately from today's LLM step.
 
-1. **Default thresholds.** The eval answers part of this: one default cannot serve both
-   providers. Ship none, and document per-provider starting points measured by the sweep:
-   none for Jev, `redact = 0.8` and `drop = 0.5` for OpenAI. Revisit on more data, and on
-   ground truth rather than a judge.
-
-2. **Drops.** Decision models rarely say `drop`, even when the judge does. Is "the redactor
-   runs instead" acceptable, or should a `drop` need a second opinion: an LLM call when
-   `p.drop` is above some low bar, or the `categories` question?
-3. **Category questions (phase 5).** They ranked best in the experiment. Should they replace
+1. **The `redact` threshold.** One default cannot serve both providers. Ship none, and
+   document per-provider starting points measured by the sweep: none for Jev, and 0.8–0.9
+   for OpenAI. Revisit on more data, and on ground truth rather than a judge.
+2. **Category questions (phase 5).** They ranked best in the experiment. Should they replace
    the single choice once the seam exists? And should the categories that triggered
    `redact` narrow what the redactor is asked to look for?
 
 Answered by the eval (section 6):
 
 - **Jev's part size** is 40,000 characters, with `too_long` splitting the part.
+- **Drops** are high precision: `drop = 0.9` by default, and below it the part is redacted.
+  What to drop is for the user's prompt to describe.
 - **Edge cases in the prompt or in the label descriptions:** no measurable difference, so
   no `labels` key.
 - **seshi's default decision-model prompt** should keep the full policy and add the "point
