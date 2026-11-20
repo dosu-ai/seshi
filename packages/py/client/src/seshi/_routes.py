@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-SESSION = "/v1/sessions/{agent}/{session_id}"
+SESSION = "/v1/sessions/{format}/{session_id}"
 
 
 @dataclass(frozen=True)

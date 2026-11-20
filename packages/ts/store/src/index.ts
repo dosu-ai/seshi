@@ -1,4 +1,4 @@
-export { type ChangesPage, type ReadChangesOptions, readChanges } from "./changes";
+export { type ChangesPage, type ReadChangesOptions, readChanges, withFormat } from "./changes";
 export {
   type CheckCounts,
   type CheckOptions,

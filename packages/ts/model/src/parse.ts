@@ -29,8 +29,8 @@ function epochOf(value: string): number | null {
 }
 
 export interface ParseOptions {
-  /** The harness name; defaults to the meta record's `source`. */
-  agent?: string;
+  /** The format the session is filed under; defaults to the meta record's `source`. */
+  format?: string;
   session_id?: string;
   /** Merged over the meta record's `cwd` / `git_branch` / `model`. */
   metadata?: TraceMetadata;
@@ -229,7 +229,7 @@ export function parseTrace(input: unknown, options: ParseOptions = {}): Trace {
     schema: TRACE_SCHEMA,
     content_hash: contentHash(meta.source, events, continuation),
     source: meta.source,
-    agent: options.agent ?? meta.source,
+    format: options.format ?? meta.source,
     session_id: options.session_id ?? null,
     started_at: started?.timestamp ?? null,
     ended_at: ended?.timestamp ?? null,

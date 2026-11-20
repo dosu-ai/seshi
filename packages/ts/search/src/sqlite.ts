@@ -17,7 +17,10 @@ import type {
 import { MEMORY_INDEX, tryRestrictToOwner } from "./paths";
 import { indexText, MATCH_END, MATCH_START } from "./snippet";
 
-export const INDEX_SCHEMA = "seshi/search-index/2";
+/** The index's own schema: a file built under another is wiped and rebuilt from the change
+ * feeds. 3: sessions' `agent` column is `format`, and the feed's copies of entries written
+ * before seshi 0.15 carry the format filled in from the session. */
+export const INDEX_SCHEMA = "seshi/search-index/3";
 
 const SNIPPET_TOKENS = 24;
 
@@ -41,7 +44,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   id INTEGER PRIMARY KEY,
   owner TEXT NOT NULL,
   archive_id TEXT NOT NULL,
-  agent TEXT NOT NULL,
+  format TEXT NOT NULL,
   session_id TEXT NOT NULL,
   origin_agent TEXT,
   native_session_id TEXT,
@@ -88,7 +91,7 @@ interface SessionRow {
   id: number;
   owner: string;
   archive_id: string;
-  agent: string;
+  format: string;
   session_id: string;
   origin_agent: string | null;
   native_session_id: string | null;
@@ -109,7 +112,7 @@ function sessionOf(row: SessionRow): IndexedSession {
   return {
     owner: row.owner,
     archive_id: row.archive_id,
-    agent: row.agent,
+    format: row.format,
     session_id: row.session_id,
     ...(row.origin_agent !== null ? { origin_agent: row.origin_agent } : {}),
     ...(row.native_session_id !== null ? { native_session_id: row.native_session_id } : {}),
@@ -252,7 +255,7 @@ export class SqliteIndex implements IndexStore {
         if (holds !== JSON.stringify(update.base ?? [])) return false;
       }
       const values = [
-        session.agent,
+        session.format,
         session.session_id,
         session.origin_agent ?? null,
         session.native_session_id ?? null,
@@ -271,7 +274,7 @@ export class SqliteIndex implements IndexStore {
       if (existing === null) {
         const row = this.db
           .query(
-            `INSERT INTO sessions (owner, archive_id, agent, session_id, origin_agent,
+            `INSERT INTO sessions (owner, archive_id, format, session_id, origin_agent,
                native_session_id, project, branch, source_id, visibility, started_at, ended_at,
                updated_at, updated_ms, traces, read_ms)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
@@ -283,7 +286,7 @@ export class SqliteIndex implements IndexStore {
         if (update.replace || existing.removed === 1) this.dropEvents(id);
         this.db
           .query(
-            `UPDATE sessions SET agent = ?, session_id = ?, origin_agent = ?,
+            `UPDATE sessions SET format = ?, session_id = ?, origin_agent = ?,
                native_session_id = ?, project = ?, branch = ?, source_id = ?, visibility = ?,
                started_at = ?, ended_at = ?, updated_at = ?, updated_ms = ?, traces = ?,
                read_ms = ?, removed = 0
@@ -320,7 +323,7 @@ export class SqliteIndex implements IndexStore {
       if (existing === null) {
         this.db
           .query(
-            `INSERT INTO sessions (owner, archive_id, agent, session_id, visibility, updated_at,
+            `INSERT INTO sessions (owner, archive_id, format, session_id, visibility, updated_at,
                updated_ms, traces, read_ms, removed)
              VALUES (?, ?, '', '', 'owner', '', 0, '[]', ?, 1)`,
           )
@@ -352,7 +355,7 @@ export class SqliteIndex implements IndexStore {
       params.push(...q.owners);
     }
     if (q.agent !== undefined) {
-      where.push("(s.agent = ? OR s.origin_agent = ?)");
+      where.push("(s.format = ? OR s.origin_agent = ?)");
       params.push(q.agent, q.agent);
     }
     if (q.repo !== undefined) {

@@ -48,6 +48,7 @@ export type {
   SpanPayload,
 } from "./generated/envelope";
 export { SCHEMA_ID as ENVELOPE_SCHEMA } from "./generated/envelope";
+export { upgradeMetadata, upgradeTrace } from "./legacy";
 export { type ParseOptions, parseTrace } from "./parse";
 export { canonicalJson, PrefixHash, prefixSha256, ResumableSha256 } from "./prefix-hash";
 export type {

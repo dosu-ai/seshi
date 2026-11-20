@@ -357,9 +357,9 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "502": { $ref: "#/components/responses/StorageError" }
 
-  /v1/sessions/{agent}/{session_id}:
+  /v1/sessions/{format}/{session_id}:
     parameters:
-      - $ref: "#/components/parameters/agent"
+      - $ref: "#/components/parameters/format"
       - $ref: "#/components/parameters/session_id"
       - $ref: "#/components/parameters/owner"
     get:
@@ -468,9 +468,9 @@ paths:
               schema: { $ref: "#/components/schemas/Error" }
         "502": { $ref: "#/components/responses/StorageError" }
 
-  /v1/sessions/{agent}/{session_id}/trace:
+  /v1/sessions/{format}/{session_id}/trace:
     parameters:
-      - $ref: "#/components/parameters/agent"
+      - $ref: "#/components/parameters/format"
       - $ref: "#/components/parameters/session_id"
       - $ref: "#/components/parameters/owner"
     get:
@@ -514,9 +514,9 @@ paths:
               schema: { $ref: "#/components/schemas/Error" }
         "502": { $ref: "#/components/responses/StorageError" }
 
-  /v1/sessions/{agent}/{session_id}/export:
+  /v1/sessions/{format}/{session_id}/export:
     parameters:
-      - $ref: "#/components/parameters/agent"
+      - $ref: "#/components/parameters/format"
       - $ref: "#/components/parameters/session_id"
       - $ref: "#/components/parameters/owner"
     get:
@@ -525,7 +525,7 @@ paths:
       operationId: exportTrace
       description: |
         The same trace `…/trace` answers, with `Content-Disposition: attachment` and a file
-        name naming the agent, the session, the trace's hash and the format
+        name naming the session's format, the session, the trace's hash and the render format
         (`claude-code-sess1-0123456789ab.letta.json`).
       parameters:
         - name: hash
@@ -541,7 +541,7 @@ paths:
           description: The trace, as `format` renders it.
           headers:
             Content-Disposition:
-              description: '`attachment; filename="<agent>-<session>-<hash12>.<format>.json"`'
+              description: '`attachment; filename="<format>-<session>-<hash12>.<render>.json"`'
               schema: { type: string }
           content:
             application/json:
@@ -866,9 +866,9 @@ paths:
           description: The packs are the ones the `If-None-Match` ETag names.
         "401": { $ref: "#/components/responses/Unauthorized" }
 
-  /v1/sessions/{agent}/{session_id}/reviews:
+  /v1/sessions/{format}/{session_id}/reviews:
     parameters:
-      - $ref: "#/components/parameters/agent"
+      - $ref: "#/components/parameters/format"
       - $ref: "#/components/parameters/session_id"
       - $ref: "#/components/parameters/owner"
     get:
@@ -1275,12 +1275,15 @@ components:
         caller (X5.12). There are no shared-secret tokens (X5.2).
 
   parameters:
-    agent:
-      name: agent
+    format:
+      name: format
       in: path
       required: true
-      description: The transcript format the session was posted as.
-      schema: { $ref: "#/components/schemas/Agent" }
+      description: |
+        The format the session is filed under, as its metadata's `format` and its change
+        entries name it: a format `POST /v1/sessions` takes (`claude-code`, `codex`, …) or
+        one another route files sessions under (`otlp-genai`, `cursor-cloud-api`, …).
+      schema: { type: string, minLength: 1 }
     session_id:
       name: session_id
       in: path
@@ -1352,7 +1355,7 @@ components:
           schema: { $ref: "#/components/schemas/Error" }
 
   schemas:
-    Agent:
+    Format:
       type: string
       description: |
         A transcript format, by its trajectory source name: one spelling, since the archive id
@@ -1736,16 +1739,21 @@ components:
 
     Upload:
       type: object
-      required: [agent, session_id, transcript]
+      description: |
+        Until seshi 0.15 the format was sent as `agent` and the encoding as `format`; the
+        server still takes that shape (a body with `agent`), so older uploaders keep working.
+      required: [format, session_id, transcript]
       properties:
-        agent: { $ref: "#/components/schemas/Agent" }
+        format:
+          $ref: "#/components/schemas/Format"
+          description: The format the session is filed under, as its metadata and change entries name it.
         session_id: { type: string, minLength: 1 }
         transcript:
           type: string
           description: |
             The native log, verbatim: the whole of it (`offset` 0), or the bytes from `offset`
             on, whole lines. Not blank.
-        format:
+        encoding:
           type: string
           enum: [jsonl, json]
           default: jsonl
@@ -1803,7 +1811,7 @@ components:
             a later upload never sets one. That machine can later retract the session with
             `DELETE` and `X-Seshi-Retract`.
       example:
-        agent: claude-code
+        format: claude-code
         session_id: 8f1c2d3e-…
         transcript: "{\"type\":\"user\",…}\n{\"type\":\"assistant\",…}\n"
         project: github.com/acme/widget
@@ -1937,10 +1945,10 @@ components:
           type: array
           items:
             type: object
-            required: [agent, session_id, current]
+            required: [format, session_id, current]
             additionalProperties: false
             properties:
-              agent: { type: string, description: The format the session is filed under. }
+              format: { type: string, description: The format the session is filed under. }
               session_id: { type: string }
               built_with:
                 type: string
@@ -2405,10 +2413,10 @@ components:
       type: object
       description: A session with records that match.
       required:
-        [owner, agent, session_id, archive_id, visibility, updated_at, score, hits, matches]
+        [owner, format, session_id, archive_id, visibility, updated_at, score, hits, matches]
       properties:
         owner: { $ref: "#/components/schemas/Owner" }
-        agent: { type: string }
+        format: { type: string, description: The format the session is filed under. }
         session_id: { type: string }
         archive_id: { type: string, pattern: "^[0-9a-f]{64}$" }
         origin_agent: { type: string }

@@ -39,7 +39,7 @@ function service(options: { path?: string; aliases?: OwnerAliases; verify?: bool
 
 async function write(owner: string, id: string, prompt: string, visibility?: "org" | "owner") {
   await new StoreSessionDB({ store, owner, formats }).ingest({
-    agent: "trajectory",
+    format: "trajectory",
     session_id: id,
     transcript: log(prompt),
     ...(visibility ? { visibility } : {}),
@@ -70,7 +70,7 @@ describe("SearchService", () => {
     const [result] = found.results;
     expect(result).toMatchObject({
       owner: "alice",
-      agent: "trajectory",
+      format: "trajectory",
       session_id: "s1",
       visibility: "org",
       source_id: "upload",
@@ -106,11 +106,11 @@ describe("SearchService", () => {
     await setVisibility({
       store,
       owner: "bob",
-      agent: "trajectory",
+      format: "trajectory",
       session_id: "bob1",
       visibility: "owner",
     });
-    await tombstone({ store, owner: "alice", agent: "trajectory", session_id: "pub" });
+    await tombstone({ store, owner: "alice", format: "trajectory", session_id: "pub" });
     const stale = await search.search(member("alice"), { q: "roadmap" });
     expect(ids(stale)).toEqual(["alice/priv"]);
     expect(stale.total).toBe(3);

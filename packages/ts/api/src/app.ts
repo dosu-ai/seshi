@@ -194,15 +194,15 @@ function str(body: Record<string, unknown>, key: string, required = false): stri
   return value;
 }
 
-function assertKnownSource(formats: Instance["formats"], agent: string): string {
-  if (!formats.has(agent)) {
+function assertKnownSource(formats: Instance["formats"], format: string): string {
+  if (!formats.has(format)) {
     throw new HttpError(
       422,
       "unsupported_agent",
-      `no normalizer for '${agent}' (one of ${formats.sources.join(", ")})`,
+      `no normalizer for '${format}' (one of ${formats.sources.join(", ")})`,
     );
   }
-  return agent;
+  return format;
 }
 
 function intParam(url: URL, name: string, fallback: number, max: number): number {
@@ -302,12 +302,12 @@ export function createApp(instance: Instance) {
   async function readable(
     principal: Principal,
     owner: string,
-    agent: string,
+    format: string,
     sessionId: string,
     options: { stubs?: boolean } = {},
   ): Promise<{ folder: string; metadata: SessionMetadata }> {
     for (const folder of aliases.storedAs(owner)) {
-      const metadata = await getSession(store, folder, agent, sessionId);
+      const metadata = await getSession(store, folder, format, sessionId);
       if (metadata === null) continue;
       if (isStub(metadata)) {
         if (!options.stubs || !canManageStub(principal, metadata)) break;
@@ -317,9 +317,9 @@ export function createApp(instance: Instance) {
     throw new HttpError(404, "not_found", "no such session");
   }
 
-  function sessionParams(params: Record<string, string>): { agent: string; sessionId: string } {
+  function sessionParams(params: Record<string, string>): { format: string; sessionId: string } {
     return {
-      agent: decodeURIComponent(params.agent as string),
+      format: decodeURIComponent(params.format as string),
       sessionId: decodeURIComponent(params.session_id as string),
     };
   }
@@ -401,10 +401,15 @@ export function createApp(instance: Instance) {
   route("POST", "/v1/sessions", async ({ request }) => {
     const principal = await caller(request, "sessions:write");
     const body = await readJson(request, bodyLimit);
-    const agent = assertKnownSource(formats, str(body, "agent", true) as string);
-    const format = (str(body, "format") ?? "jsonl") as RawFormat;
-    if (format !== "jsonl" && format !== "json") {
-      throw new HttpError(400, "bad_field", "format must be jsonl or json");
+    // Before seshi 0.15 the format was sent as `agent` and the encoding as `format`: a body
+    // with `agent` is read that way, so uploaders installed before keep working.
+    const legacy = body.agent !== undefined;
+    const formatField = legacy ? "agent" : "format";
+    const encodingField = legacy ? "format" : "encoding";
+    const format = assertKnownSource(formats, str(body, formatField, true) as string);
+    const encoding = (str(body, encodingField) ?? "jsonl") as RawFormat;
+    if (encoding !== "jsonl" && encoding !== "json") {
+      throw new HttpError(400, "bad_field", `${encodingField} must be jsonl or json`);
     }
     const offset = body.offset ?? 0;
     if (!Number.isInteger(offset) || (offset as number) < 0) {
@@ -446,10 +451,10 @@ export function createApp(instance: Instance) {
     const retractSecret =
       replace || rebuild ? (request.headers.get(RETRACT_HEADER) ?? undefined) : undefined;
     const upload: Upload = {
-      agent,
+      format,
       session_id: str(body, "session_id", true) as string,
       transcript: str(body, "transcript", true) as string,
-      format,
+      encoding,
       offset: offset as number,
       project: str(body, "project"),
       branch: str(body, "branch"),
@@ -514,27 +519,27 @@ export function createApp(instance: Instance) {
     );
   });
 
-  route("GET", "/v1/sessions/:agent/:session_id", async ({ request, params, url }) => {
+  route("GET", "/v1/sessions/:format/:session_id", async ({ request, params, url }) => {
     const principal = await caller(request, "sessions:read");
-    const { agent, sessionId } = sessionParams(params);
-    const { metadata } = await readable(principal, ownerOf(url, principal), agent, sessionId);
+    const { format, sessionId } = sessionParams(params);
+    const { metadata } = await readable(principal, ownerOf(url, principal), format, sessionId);
     return json(metadata);
   });
 
   async function renderedTrace(request: Request, params: Record<string, string>, url: URL) {
     const principal = await caller(request, "sessions:read");
-    const { agent, sessionId } = sessionParams(params);
+    const { format, sessionId } = sessionParams(params);
     const { folder, metadata } = await readable(
       principal,
       ownerOf(url, principal),
-      agent,
+      format,
       sessionId,
     );
     if (metadata.status === "redacted") {
       throw new HttpError(410, "redacted", "session was redacted; no trace");
     }
-    const format = url.searchParams.get("format") ?? "seshi";
-    if (!isRenderFormat(format)) {
+    const render = url.searchParams.get("format") ?? "seshi";
+    if (!isRenderFormat(render)) {
       throw new HttpError(400, "bad_query", `format must be one of ${RENDER_FORMATS.join(", ")}`);
     }
     const hash = url.searchParams.get("hash") ?? metadata.head;
@@ -542,35 +547,35 @@ export function createApp(instance: Instance) {
     if (!metadata.traces.some((ref) => ref.content_hash === hash)) {
       throw new HttpError(404, "not_found", "no such trace");
     }
-    const trace = await getTrace(store, folder, archiveId(folder, agent, sessionId), hash);
+    const trace = await getTrace(store, folder, archiveId(folder, format, sessionId), hash);
     if (!trace) throw new HttpError(404, "not_found", "no such trace");
     return {
-      agent,
+      format,
       sessionId,
-      format: format as RenderFormat,
+      render: render as RenderFormat,
       hash,
-      body: renderTrace(trace, format),
+      body: renderTrace(trace, render),
     };
   }
 
-  route("GET", "/v1/sessions/:agent/:session_id/trace", async ({ request, params, url }) => {
+  route("GET", "/v1/sessions/:format/:session_id/trace", async ({ request, params, url }) => {
     return json((await renderedTrace(request, params, url)).body);
   });
 
-  route("GET", "/v1/sessions/:agent/:session_id/export", async ({ request, params, url }) => {
-    const { agent, sessionId, format, hash, body } = await renderedTrace(request, params, url);
-    const name = `${agent}-${sessionId}-${hash.slice(0, 12)}.${format}.json`.replace(
+  route("GET", "/v1/sessions/:format/:session_id/export", async ({ request, params, url }) => {
+    const { format, sessionId, render, hash, body } = await renderedTrace(request, params, url);
+    const name = `${format}-${sessionId}-${hash.slice(0, 12)}.${render}.json`.replace(
       /[^A-Za-z0-9._-]/g,
       "_",
     );
     return json(body, 200, { "content-disposition": `attachment; filename="${name}"` });
   });
 
-  route("GET", "/v1/sessions/:agent/:session_id/reviews", async ({ request, params, url }) => {
+  route("GET", "/v1/sessions/:format/:session_id/reviews", async ({ request, params, url }) => {
     const principal = await caller(request, "sessions:read");
-    const { agent, sessionId } = sessionParams(params);
-    const { folder } = await readable(principal, ownerOf(url, principal), agent, sessionId);
-    const records = await listReviews(store, folder, archiveId(folder, agent, sessionId));
+    const { format, sessionId } = sessionParams(params);
+    const { folder } = await readable(principal, ownerOf(url, principal), format, sessionId);
+    const records = await listReviews(store, folder, archiveId(folder, format, sessionId));
     const audit = principal.role === "admin";
     const view = (r: ReviewRecord) =>
       audit
@@ -585,9 +590,9 @@ export function createApp(instance: Instance) {
     return json({ reviews: records.map(view) });
   });
 
-  route("PATCH", "/v1/sessions/:agent/:session_id", async ({ request, params, url }) => {
+  route("PATCH", "/v1/sessions/:format/:session_id", async ({ request, params, url }) => {
     const principal = await caller(request, "sessions:read");
-    const { agent, sessionId } = sessionParams(params);
+    const { format, sessionId } = sessionParams(params);
     const body = await readJson(request, 64 * 1024);
     const visibility = visibilityField(body.visibility);
     if (visibility === undefined) {
@@ -596,7 +601,7 @@ export function createApp(instance: Instance) {
     const { folder, metadata: current } = await readable(
       principal,
       ownerOf(url, principal),
-      agent,
+      format,
       sessionId,
       { stubs: true },
     );
@@ -606,7 +611,7 @@ export function createApp(instance: Instance) {
       metadata = await setVisibility({
         store,
         owner: folder,
-        agent,
+        format,
         session_id: sessionId,
         visibility,
         now,
@@ -624,7 +629,7 @@ export function createApp(instance: Instance) {
 
   async function retracted(request: Request, params: Record<string, string>, secret: string) {
     const principal = await caller(request, "sessions:write");
-    const { agent, sessionId } = sessionParams(params);
+    const { format, sessionId } = sessionParams(params);
     if (!instance.config.capture.allow_retract) {
       throw new HttpError(
         403,
@@ -635,7 +640,7 @@ export function createApp(instance: Instance) {
     let folder: string | undefined;
     let metadata: SessionMetadata | null = null;
     for (const candidate of aliases.storedAs(principal.owner)) {
-      metadata = await getSession(store, candidate, agent, sessionId);
+      metadata = await getSession(store, candidate, format, sessionId);
       if (metadata !== null) {
         folder = candidate;
         break;
@@ -645,7 +650,7 @@ export function createApp(instance: Instance) {
       throw new HttpError(404, "not_found", "no such session");
     }
     if (metadata.status === "redacted") {
-      await finishTombstone({ store, owner: folder, agent, session_id: sessionId });
+      await finishTombstone({ store, owner: folder, format, session_id: sessionId });
       throw new HttpError(410, "redacted", "session was already removed");
     }
     if (!metadata.retract_hash || !sameHash(retractHashOf(secret), metadata.retract_hash)) {
@@ -658,7 +663,7 @@ export function createApp(instance: Instance) {
     const result = await tombstone({
       store,
       owner: folder,
-      agent,
+      format,
       session_id: sessionId,
       now,
       reason: "retracted",
@@ -668,19 +673,19 @@ export function createApp(instance: Instance) {
     return json(result);
   }
 
-  route("DELETE", "/v1/sessions/:agent/:session_id", async ({ request, params, url }) => {
+  route("DELETE", "/v1/sessions/:format/:session_id", async ({ request, params, url }) => {
     const secret = request.headers.get(RETRACT_HEADER);
     if (secret !== null) return retracted(request, params, secret);
     const principal = await caller(request, "sessions:delete");
-    const { agent, sessionId } = sessionParams(params);
-    const { folder } = await readable(principal, ownerOf(url, principal), agent, sessionId, {
+    const { format, sessionId } = sessionParams(params);
+    const { folder } = await readable(principal, ownerOf(url, principal), format, sessionId, {
       stubs: true,
     });
     requireDelete(principal, folder, now(), aliases);
     const result = await tombstone({
       store,
       owner: folder,
-      agent,
+      format,
       session_id: sessionId,
       now,
       reason: "deleted",

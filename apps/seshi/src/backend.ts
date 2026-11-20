@@ -47,24 +47,24 @@ export interface Backend {
   me(): Promise<Identity>;
   listSessions(options: { owner?: string; after?: string; limit?: number }): Promise<SessionsPage>;
   getSession(
-    agent: string,
+    format: string,
     sessionId: string,
     options?: OwnerOption,
   ): Promise<SessionMetadata | null>;
-  getTrace(agent: string, sessionId: string, options?: TraceOptions): Promise<StoredTrace | null>;
+  getTrace(format: string, sessionId: string, options?: TraceOptions): Promise<StoredTrace | null>;
   tombstone(
-    agent: string,
+    format: string,
     sessionId: string,
     options?: OwnerOption,
   ): Promise<{ removed: number } | null>;
   setVisibility(
-    agent: string,
+    format: string,
     sessionId: string,
     visibility: Visibility,
     options?: OwnerOption,
   ): Promise<SessionMetadata | null>;
   reviews(
-    agent: string,
+    format: string,
     sessionId: string,
     options?: OwnerOption,
   ): Promise<ReviewDecision[] | null>;
@@ -93,27 +93,27 @@ export class ServerBackend implements Backend {
   listSessions(options: { owner?: string; after?: string; limit?: number }) {
     return this.db.listSessions(options);
   }
-  getSession(agent: string, sessionId: string, options: OwnerOption = {}) {
-    return this.db.getSession(agent, sessionId, options);
+  getSession(format: string, sessionId: string, options: OwnerOption = {}) {
+    return this.db.getSession(format, sessionId, options);
   }
-  getTrace(agent: string, sessionId: string, options: TraceOptions = {}) {
-    return this.db.getTrace(agent, sessionId, options.hash, options.format, {
+  getTrace(format: string, sessionId: string, options: TraceOptions = {}) {
+    return this.db.getTrace(format, sessionId, options.hash, options.format, {
       ...(options.owner ? { owner: options.owner } : {}),
     });
   }
-  tombstone(agent: string, sessionId: string, options: OwnerOption = {}) {
-    return this.db.tombstone(agent, sessionId, options);
+  tombstone(format: string, sessionId: string, options: OwnerOption = {}) {
+    return this.db.tombstone(format, sessionId, options);
   }
   setVisibility(
-    agent: string,
+    format: string,
     sessionId: string,
     visibility: Visibility,
     options: OwnerOption = {},
   ) {
-    return this.db.setVisibility(agent, sessionId, visibility, options);
+    return this.db.setVisibility(format, sessionId, visibility, options);
   }
-  reviews(agent: string, sessionId: string, options: OwnerOption = {}) {
-    return this.db.reviews(agent, sessionId, options);
+  reviews(format: string, sessionId: string, options: OwnerOption = {}) {
+    return this.db.reviews(format, sessionId, options);
   }
   search(request: SearchRequest): Promise<SearchResults> {
     return this.db.search(request);
@@ -250,38 +250,38 @@ export class ServerlessBackend implements Backend {
       }
     });
   }
-  getSession(agent: string, sessionId: string, options: OwnerOption = {}) {
+  getSession(format: string, sessionId: string, options: OwnerOption = {}) {
     return this.refused(async () =>
-      this.readable(await this.sessionsAs(options.owner).getSession(agent, sessionId)),
+      this.readable(await this.sessionsAs(options.owner).getSession(format, sessionId)),
     );
   }
-  async getTrace(agent: string, sessionId: string, options: TraceOptions = {}) {
-    if (!(await this.getSession(agent, sessionId, options))) return null;
+  async getTrace(format: string, sessionId: string, options: TraceOptions = {}) {
+    if (!(await this.getSession(format, sessionId, options))) return null;
     return this.refused(() =>
-      this.sessionsAs(options.owner).getTrace(agent, sessionId, options.hash, options.format),
+      this.sessionsAs(options.owner).getTrace(format, sessionId, options.hash, options.format),
     );
   }
-  async tombstone(agent: string, sessionId: string, options: OwnerOption = {}) {
+  async tombstone(format: string, sessionId: string, options: OwnerOption = {}) {
     this.writable();
-    return this.refused(() => this.sessionsAs(options.owner).tombstone(agent, sessionId));
+    return this.refused(() => this.sessionsAs(options.owner).tombstone(format, sessionId));
   }
   async setVisibility(
-    agent: string,
+    format: string,
     sessionId: string,
     visibility: Visibility,
     options: OwnerOption = {},
   ) {
     this.writable();
     return this.refused(() =>
-      this.sessionsAs(options.owner).setVisibility(agent, sessionId, visibility),
+      this.sessionsAs(options.owner).setVisibility(format, sessionId, visibility),
     );
   }
-  async reviews(agent: string, sessionId: string, options: OwnerOption = {}) {
-    if (!(await this.getSession(agent, sessionId, options))) return null;
+  async reviews(format: string, sessionId: string, options: OwnerOption = {}) {
+    if (!(await this.getSession(format, sessionId, options))) return null;
     const { archiveId, listReviews } = await import("@seshi/store");
     const owner = options.owner ?? this.owner;
     const records = await this.refused(() =>
-      listReviews(this.instance.store, owner, archiveId(owner, agent, sessionId)),
+      listReviews(this.instance.store, owner, archiveId(owner, format, sessionId)),
     );
     return records as ReviewDecision[];
   }

@@ -26,7 +26,7 @@ function session(n: number, fields: Partial<IndexedSession> = {}): IndexedSessio
   return {
     owner: "alice",
     archive_id: H(n),
-    agent: "claude-code",
+    format: "claude-code",
     session_id: `s${n}`,
     visibility: "org",
     updated_at: "2026-11-14T09:00:00.000Z",
@@ -247,7 +247,7 @@ describe("SqliteIndex: filters, sorting and pages (F10.1)", () => {
     });
     index.apply({
       session: session(2, {
-        agent: "datadog-trajectory",
+        format: "datadog-trajectory",
         origin_agent: "codex",
         project: "github.com/acme/gadget",
         branch: "fix/cache",
@@ -266,7 +266,7 @@ describe("SqliteIndex: filters, sorting and pages (F10.1)", () => {
   }
   const ids = (r: ReturnType<typeof query>) => r.hits.map((h) => h.session.session_id);
 
-  it("filters by agent (filed or origin), repo, branch, source and time", () => {
+  it("filters by agent (filed format or origin), repo, branch, source and time", () => {
     const index = seeded();
     expect(ids(query(index, "cache", { agent: "codex" }))).toEqual(["s2"]);
     expect(ids(query(index, "cache", { agent: "datadog-trajectory" }))).toEqual(["s2"]);

@@ -1,5 +1,10 @@
 import { createHash } from "node:crypto";
-import { CHANGE_SCHEMA, type ChangeEntry, type SessionMetadata } from "@seshi/model";
+import {
+  CHANGE_SCHEMA,
+  type ChangeEntry,
+  type SessionMetadata,
+  upgradeMetadata,
+} from "@seshi/model";
 import { decodeJson, encodeJson, type JsonUpdate, updateJson } from "./json";
 import { changeSuffix, keys } from "./layout";
 import {
@@ -104,20 +109,27 @@ export async function readMetadata(
   archive: string,
 ): Promise<SessionMetadata | null> {
   const bytes = await getBytes(store, keys.metadata(owner, archive));
-  return bytes === null ? null : decodeJson<SessionMetadata>(bytes);
+  return bytes === null ? null : upgradeMetadata(decodeJson<SessionMetadata>(bytes));
 }
 
 /** Update a session's pointer with If-Match and retry on 412: `step` gets the pointer as it is
- * (null for a new session) and returns the next one, or null to leave it alone. `step` may run
- * more than once and must depend only on what it is given. */
-export function updateMetadata(
+ * (null for a new session; one written before 0.15 with its `agent` read as `format`) and
+ * returns the next one, or null to leave it alone. `step` may run more than once and must
+ * depend only on what it is given. */
+export async function updateMetadata(
   store: Store,
   owner: string,
   archive: string,
   step: (current: SessionMetadata | null) => SessionMetadata | null,
   options?: Omit<UpdateOptions, "contentType">,
 ): Promise<JsonUpdate<SessionMetadata>> {
-  return updateJson(store, keys.metadata(owner, archive), step, options);
+  const result = await updateJson<SessionMetadata>(
+    store,
+    keys.metadata(owner, archive),
+    (current) => step(current === null ? null : upgradeMetadata(current)),
+    options,
+  );
+  return { ...result, value: result.value === null ? null : upgradeMetadata(result.value) };
 }
 
 /** Append one entry to the owner's change feed. The key is the entry's stamp, its session's

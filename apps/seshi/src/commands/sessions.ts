@@ -19,10 +19,10 @@ import { printable, type Style, styleFor } from "../cli/style";
 import type { CommandContext } from "./index";
 
 const USAGE = `usage: seshi sessions ls [--owner <id>] [--limit N] [--after <cursor>] [--all] [--subagents]
-       seshi sessions show <agent> <session-id> [--owner <id>] [--trace]
-       seshi sessions export <agent> <session-id> [--format seshi|letta|otlp|atif] [--hash <h>] [-o <file>] [--owner <id>]
-       seshi sessions rm <agent> <session-id> [--owner <id>] [--yes]
-       seshi sessions visibility <agent> <session-id> org|owner [--owner <id>]
+       seshi sessions show <format> <session-id> [--owner <id>] [--trace]
+       seshi sessions export <format> <session-id> [--format seshi|letta|otlp|atif] [--hash <h>] [-o <file>] [--owner <id>]
+       seshi sessions rm <format> <session-id> [--owner <id>] [--yes]
+       seshi sessions visibility <format> <session-id> org|owner [--owner <id>]
        (each also takes --server <url> and --json; in serverless mode, ls, show and export
         take --include-private to read others' owner-only sessions too)`;
 
@@ -61,22 +61,22 @@ const SUBCOMMANDS = ["ls", "list", "show", "export", "rm", "visibility"] as cons
 class UsageError extends Error {}
 
 export function sessionRef(args: readonly string[]): {
-  agent: string;
+  format: string;
   sessionId: string;
   rest: string[];
 } {
   const [first, second, ...more] = args;
-  if (first === undefined) throw new UsageError("name a session: <agent> <session-id>");
+  if (first === undefined) throw new UsageError("name a session: <format> <session-id>");
   const slash = first.indexOf("/");
   if (slash > 0 && slash < first.length - 1) {
     return {
-      agent: first.slice(0, slash),
+      format: first.slice(0, slash),
       sessionId: first.slice(slash + 1),
       rest: second === undefined ? more : [second, ...more],
     };
   }
-  if (second === undefined) throw new UsageError("name a session: <agent> <session-id>");
-  return { agent: first, sessionId: second, rest: more };
+  if (second === undefined) throw new UsageError("name a session: <format> <session-id>");
+  return { format: first, sessionId: second, rest: more };
 }
 
 function positiveInt(value: string | undefined, name: string, fallback: number): number {
@@ -103,7 +103,7 @@ function when(iso: string): string {
 }
 
 const activeAt = (m: SessionMetadata) => m.active_at ?? m.updated_at;
-const refOf = (agent: string, id: string) => `${agent}/${id}`;
+const refOf = (format: string, id: string) => `${format}/${id}`;
 
 function listLines(
   page: SessionsPage,
@@ -113,9 +113,9 @@ function listLines(
 ): string[] {
   if (page.sessions.length === 0) return [`No sessions for ${printable(owner)}.`];
   const sorted = [...page.sessions].sort((a, b) => (activeAt(a) < activeAt(b) ? 1 : -1));
-  const listed = new Set(sorted.map((m) => refOf(m.agent, m.session_id)));
+  const listed = new Set(sorted.map((m) => refOf(m.format, m.session_id)));
   const parentOf = (m: SessionMetadata) =>
-    m.parent_session_id ? refOf(m.agent, m.parent_session_id) : undefined;
+    m.parent_session_id ? refOf(m.format, m.parent_session_id) : undefined;
   const children = new Map<string, SessionMetadata[]>();
   for (const m of sorted) {
     const parent = parentOf(m);
@@ -131,12 +131,12 @@ function listLines(
     }
     rows.push({ m, child: false });
     if (withSubagents) {
-      for (const c of children.get(refOf(m.agent, m.session_id)) ?? [])
+      for (const c of children.get(refOf(m.format, m.session_id)) ?? [])
         rows.push({ m: c, child: true });
     }
   }
   const refs = rows.map(
-    ({ m, child }) => `${child ? "  └ " : ""}${printable(refOf(m.agent, m.session_id))}`,
+    ({ m, child }) => `${child ? "  └ " : ""}${printable(refOf(m.format, m.session_id))}`,
   );
   const width = Math.min(60, Math.max(...refs.map((r) => r.length)));
   const sessions = rows.filter((r) => !r.m.parent_session_id).length;
@@ -160,7 +160,7 @@ function listLines(
         ? style.status("deleted".padEnd(11), "warn")
         : `${records ?? "?"} records`.padEnd(11);
     const kids =
-      child || withSubagents ? 0 : (children.get(refOf(m.agent, m.session_id)) ?? []).length;
+      child || withSubagents ? 0 : (children.get(refOf(m.format, m.session_id)) ?? []).length;
     const where = printable(
       [
         m.project,
@@ -212,7 +212,7 @@ function showLines(
     .map(([k, v]) => `${k} ${v}`)
     .join(", ");
   return [
-    style.bold(printable(`${m.agent}/${m.session_id}`)),
+    style.bold(printable(`${m.format}/${m.session_id}`)),
     ...row("owner", `${m.owner} (${m.owner_basis})`),
     ...line("status", status),
     ...row("visibility", m.visibility),
@@ -309,16 +309,16 @@ async function ls(
 
 async function found(
   backend: Backend,
-  agent: string,
+  format: string,
   sessionId: string,
   owner: string | undefined,
 ): Promise<SessionMetadata> {
-  const metadata = await backend.getSession(agent, sessionId, owner ? { owner } : {});
+  const metadata = await backend.getSession(format, sessionId, owner ? { owner } : {});
   if (!metadata) {
     throw new Refused(
       EXIT.notFound,
       "not_found",
-      `no session ${agent}/${sessionId}${owner ? ` for ${owner}` : ""}`,
+      `no session ${format}/${sessionId}${owner ? ` for ${owner}` : ""}`,
     );
   }
   return metadata;
@@ -328,14 +328,14 @@ async function show(
   ctx: CommandContext,
   json: boolean,
   backend: Backend,
-  ref: { agent: string; sessionId: string },
+  ref: { format: string; sessionId: string },
   values: Values,
   style: Style,
 ) {
-  const metadata = await found(backend, ref.agent, ref.sessionId, values.owner);
+  const metadata = await found(backend, ref.format, ref.sessionId, values.owner);
   let trace: Trace | null = null;
   if (values.trace && metadata.status !== "redacted") {
-    trace = (await backend.getTrace(ref.agent, ref.sessionId, {
+    trace = (await backend.getTrace(ref.format, ref.sessionId, {
       ...(values.owner ? { owner: values.owner } : {}),
       format: "seshi",
     })) as Trace | null;
@@ -344,7 +344,7 @@ async function show(
     json || metadata.status === "redacted"
       ? null
       : await backend.reviews(
-          ref.agent,
+          ref.format,
           ref.sessionId,
           values.owner ? { owner: values.owner } : {},
         );
@@ -365,35 +365,35 @@ async function exportTrace(
   ctx: CommandContext,
   json: boolean,
   backend: Backend,
-  ref: { agent: string; sessionId: string },
+  ref: { format: string; sessionId: string },
   values: Values,
 ) {
-  const format = (values.format ?? "seshi") as RenderFormat;
-  if (!isRenderFormat(format)) {
+  const render = (values.format ?? "seshi") as RenderFormat;
+  if (!isRenderFormat(render)) {
     throw new UsageError(`--format must be one of ${RENDER_FORMATS.join(", ")}`);
   }
   if (values.hash !== undefined && !/^[0-9a-f]{64}$/.test(values.hash)) {
     throw new UsageError("--hash must be a trace's 64-character content hash");
   }
-  const metadata = await found(backend, ref.agent, ref.sessionId, values.owner);
+  const metadata = await found(backend, ref.format, ref.sessionId, values.owner);
   if (metadata.status === "redacted") {
     throw new Refused(
       EXIT.notFound,
       "redacted",
-      `${ref.agent}/${ref.sessionId} was deleted; it has no trace`,
+      `${ref.format}/${ref.sessionId} was deleted; it has no trace`,
     );
   }
   const hash = values.hash ?? metadata.head;
-  const trace = await backend.getTrace(ref.agent, ref.sessionId, {
+  const trace = await backend.getTrace(ref.format, ref.sessionId, {
     ...(values.owner ? { owner: values.owner } : {}),
     ...(values.hash ? { hash: values.hash } : {}),
-    format,
+    format: render,
   });
   if (!trace) {
     throw new Refused(
       EXIT.notFound,
       "not_found",
-      `no trace ${hash ? hash.slice(0, 12) : ""} for ${ref.agent}/${ref.sessionId}`,
+      `no trace ${hash ? hash.slice(0, 12) : ""} for ${ref.format}/${ref.sessionId}`,
     );
   }
   const text = `${JSON.stringify(trace, null, 2)}\n`;
@@ -405,7 +405,7 @@ async function exportTrace(
   const isDir = path.endsWith("/") || tryIsDirectory(path);
   if (isDir) {
     const name =
-      `${ref.agent}-${ref.sessionId}-${(hash ?? "").slice(0, 12)}.${format}.json`.replace(
+      `${ref.format}-${ref.sessionId}-${(hash ?? "").slice(0, 12)}.${render}.json`.replace(
         /[^A-Za-z0-9._-]/g,
         "_",
       );
@@ -413,8 +413,8 @@ async function exportTrace(
   }
   writeFileSync(path, text);
   const bytes = Buffer.byteLength(text);
-  emit(ctx, json, { path, format, hash, bytes }, () => [
-    `Wrote ${path} (${format}, ${bytes} bytes).`,
+  emit(ctx, json, { path, format: render, hash, bytes }, () => [
+    `Wrote ${path} (${render}, ${bytes} bytes).`,
   ]);
   return EXIT.ok;
 }
@@ -433,13 +433,13 @@ async function confirm(ctx: CommandContext, question: string): Promise<boolean> 
   return /^y(es)?$/i.test(answer.trim());
 }
 
-function deleteName(ref: { agent: string; sessionId: string }, values: Values): string {
-  return printable(`${ref.agent}/${ref.sessionId}${values.owner ? ` of ${values.owner}` : ""}`);
+function deleteName(ref: { format: string; sessionId: string }, values: Values): string {
+  return printable(`${ref.format}/${ref.sessionId}${values.owner ? ` of ${values.owner}` : ""}`);
 }
 
 async function confirmDelete(
   ctx: CommandContext,
-  ref: { agent: string; sessionId: string },
+  ref: { format: string; sessionId: string },
   values: Values,
 ): Promise<DeleteConfirmation | null> {
   const confirmation = {} as DeleteConfirmation;
@@ -456,18 +456,18 @@ async function rm(
   ctx: CommandContext,
   json: boolean,
   backend: Backend,
-  ref: { agent: string; sessionId: string },
+  ref: { format: string; sessionId: string },
   values: Values,
   style: Style,
 ) {
   const name = deleteName(ref, values);
   const result = await backend.tombstone(
-    ref.agent,
+    ref.format,
     ref.sessionId,
     values.owner ? { owner: values.owner } : {},
   );
   if (!result) throw new Refused(EXIT.notFound, "not_found", `no session ${name}`);
-  emit(ctx, json, { agent: ref.agent, session_id: ref.sessionId, ...result }, () => [
+  emit(ctx, json, { format: ref.format, session_id: ref.sessionId, ...result }, () => [
     `${style.status("Deleted", "success")} ${name} (${result.removed} object(s) removed).`,
   ]);
   return EXIT.ok;
@@ -477,20 +477,20 @@ async function visibility(
   ctx: CommandContext,
   json: boolean,
   backend: Backend,
-  ref: { agent: string; sessionId: string },
+  ref: { format: string; sessionId: string },
   value: string | undefined,
   values: Values,
   style: Style,
 ) {
   if (value !== "org" && value !== "owner") throw new UsageError("visibility is org or owner");
   const metadata = await backend.setVisibility(
-    ref.agent,
+    ref.format,
     ref.sessionId,
     value,
     values.owner ? { owner: values.owner } : {},
   );
   if (!metadata) {
-    throw new Refused(EXIT.notFound, "not_found", `no session ${ref.agent}/${ref.sessionId}`);
+    throw new Refused(EXIT.notFound, "not_found", `no session ${ref.format}/${ref.sessionId}`);
   }
   const who =
     value === "org"
@@ -499,7 +499,7 @@ async function visibility(
         ? "seshi shows it only to its owner, but any key that can read the bucket can read it"
         : "only its owner (and admins) may read it";
   emit(ctx, json, metadata, () => [
-    `${style.status("Visibility", "success")} of ${ref.agent}/${ref.sessionId} is ${value}: ${who}.`,
+    `${style.status("Visibility", "success")} of ${ref.format}/${ref.sessionId} is ${value}: ${who}.`,
   ]);
   return EXIT.ok;
 }
@@ -530,7 +530,7 @@ export async function run(ctx: CommandContext): Promise<number> {
   let account: Account | undefined;
   let backend: Backend | undefined;
   try {
-    let ref: { agent: string; sessionId: string; rest: string[] } | undefined;
+    let ref: { format: string; sessionId: string; rest: string[] } | undefined;
     if (sub === "ls" || sub === "list") {
       if (positionals.length > 0) throw new UsageError("sessions ls takes no arguments");
     } else {
@@ -539,7 +539,7 @@ export async function run(ctx: CommandContext): Promise<number> {
       if (ref.rest.length !== extra) {
         throw new UsageError(
           sub === "visibility"
-            ? "sessions visibility <agent> <session-id> org|owner"
+            ? "sessions visibility <format> <session-id> org|owner"
             : `sessions ${sub} takes one session`,
         );
       }

@@ -14,6 +14,8 @@ export interface ChangeEntry {
   owner: string;
   archive_id: Sha256;
   session_id: string;
+  /** The format the session is filed under (its metadata's `format`), which every session route takes. Entries written before 0.15 have none; the change feeds fill it from the session's metadata when they serve them. */
+  format: string;
   /** The trace the entry is about; for a tombstone or a visibility change, the head at the time (null when there was none). */
   content_hash: Sha256 | null;
   continuation?: Continuation;
@@ -39,6 +41,7 @@ export const JSON_SCHEMA = {
     owner: { type: "string", minLength: 1 },
     archive_id: { $ref: "common.schema.json#/$defs/Sha256" },
     session_id: { type: "string" },
+    format: { type: "string", minLength: 1 },
     content_hash: { oneOf: [{ $ref: "common.schema.json#/$defs/Sha256" }, { type: "null" }] },
     continuation: { $ref: "common.schema.json#/$defs/Continuation" },
     replace: { const: true },
@@ -47,6 +50,16 @@ export const JSON_SCHEMA = {
     reason: { enum: ["deleted", "retracted", "redacted"] },
     visibility: { $ref: "common.schema.json#/$defs/Visibility" },
   },
-  required: ["schema", "kind", "at", "owner", "archive_id", "session_id", "content_hash", "writer"],
+  required: [
+    "schema",
+    "kind",
+    "at",
+    "owner",
+    "archive_id",
+    "session_id",
+    "format",
+    "content_hash",
+    "writer",
+  ],
   additionalProperties: false,
 };

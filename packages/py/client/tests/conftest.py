@@ -8,6 +8,8 @@ fail instead.
 
 from __future__ import annotations
 
+import gzip
+import json
 import os
 import re
 import shutil
@@ -22,7 +24,7 @@ from subprocess import Popen
 import httpx
 import pytest
 
-from seshi import SeshiClient, Upload
+from seshi import SeshiClient, Stored, Upload
 
 from .transcripts import transcript
 
@@ -56,6 +58,10 @@ class LiveServer:
     pack: Path
     seed_session: str
     """A session alice stored before the server last started."""
+    legacy_session: str
+    """A session alice stored before the server last started, then rewritten on disk as seshi
+    wrote it before 0.15: `agent`, not `format`, in its metadata and trace, and change entries
+    without `format`."""
 
 
 def _command() -> list[str] | None:
@@ -141,14 +147,36 @@ def live_server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[LiveServer
     # owners, which it does when it starts and then once a minute. A session stored before a
     # restart is there at once; one stored after waits up to that minute.
     seed = "seed-" + uuid.uuid4().hex
+    legacy = "legacy-" + uuid.uuid4().hex
     with SeshiClient(url, ALICE) as alice:
-        alice.ingest(Upload(agent="claude-code", session_id=seed, transcript=transcript(seed)))
+        alice.ingest(Upload(format="claude-code", session_id=seed, transcript=transcript(seed)))
+        stored = alice.ingest(
+            Upload(format="claude-code", session_id=legacy, transcript=transcript(legacy))
+        )
     _stop(server)
+    assert isinstance(stored, Stored)
+    _as_written_before_0_15(work / "store" / "owners" / "alice", stored.archive_id)
     server, url = _serve(command, config, env, work / "serve-2.log")
     try:
-        yield LiveServer(url, admin_token, org_key, ALICE, BOB, config, pack, seed)
+        yield LiveServer(url, admin_token, org_key, ALICE, BOB, config, pack, seed, legacy)
     finally:
         _stop(server)
+
+
+def _as_written_before_0_15(owner: Path, archive: str) -> None:
+    """Rewrite a stored session as seshi wrote it before 0.15."""
+    folder = owner / "sessions" / archive
+    metadata = json.loads((folder / "metadata.json").read_text())
+    metadata["agent"] = metadata.pop("format")
+    (folder / "metadata.json").write_text(json.dumps(metadata))
+    for path in folder.glob("trace.*.json.gz"):
+        trace = json.loads(gzip.decompress(path.read_bytes()))
+        trace["agent"] = trace.pop("format")
+        path.write_bytes(gzip.compress(json.dumps(trace).encode()))
+    for path in (owner / "changes").glob(f"*-{archive}-*.json"):
+        entry = json.loads(path.read_text())
+        del entry["format"]
+        path.write_text(json.dumps(entry))
 
 
 LISTENING = re.compile(r"listening on (http://127\.0\.0\.1:\d+)")

@@ -20,11 +20,11 @@ starting with it; `a OR b` matches either; `-word` (or `NOT word`) leaves out re
 -staging`, since a leading `-` reads as an option). Case and accents are ignored, and
 punctuation separates words, so `src/app.ts` finds those words in that order.
 
-Each result is a session (agent and session id, owner, repository and branch, when it was last
+Each result is a session (format and session id, owner, repository and branch, when it was last
 active, how many records matched) followed by its best matching records with a short excerpt.
 On a terminal the session and the matched words are in the search colour (lilac; magenta on a
 light background), plain with `NO_COLOR`, `--no-color` or `--json`. `seshi sessions show
-<agent>/<session-id> --owner <owner>` opens one.
+<format>/<session-id> --owner <owner>` opens one.
 
 | Flag | |
 |---|---|

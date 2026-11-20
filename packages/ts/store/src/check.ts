@@ -8,6 +8,8 @@ import {
   schemaProblems,
   TRACE_SCHEMA,
   type Trace,
+  upgradeMetadata,
+  upgradeTrace,
 } from "@seshi/model";
 import { decodeJson, gunzipJson } from "./json";
 import {
@@ -26,6 +28,10 @@ import type { ListedKey, Store } from "./store";
 import { namedTraces, type SessionFolder, SWEEP_MIN_AGE_MS, sessionFolders } from "./sweep";
 
 export type Severity = "error" | "warn";
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 export const FINDINGS = {
   read_failed: { severity: "error", what: "the store failed a read, so part was not checked" },
@@ -496,7 +502,13 @@ class Check {
       this.add("change_unreadable", "not JSON", where);
       return;
     }
-    const problems = schemaProblems("change.schema.json", value);
+    // An entry written before seshi 0.15 has no `format` (readers fill it from the metadata);
+    // that alone is not a problem.
+    const legacy = isObject(value) && !("format" in value);
+    const problems = schemaProblems(
+      "change.schema.json",
+      legacy ? { ...(value as object), format: "-" } : value,
+    );
     if (problems.length > 0) {
       this.add("change_unreadable", problems.slice(0, MAX_LISTED_PER_FINDING).join("; "), where);
       return;
@@ -594,6 +606,7 @@ class Check {
       this.add("metadata_unreadable", "metadata.json is not JSON", where);
       return { kind: "unusable" };
     }
+    if (isObject(value)) value = upgradeMetadata(value as unknown as SessionMetadata);
     const problems = schemaProblems("metadata.schema.json", value);
     if (problems.length > 0) {
       this.add("metadata_invalid", problems.slice(0, MAX_LISTED_PER_FINDING).join("; "), where);
@@ -603,8 +616,8 @@ class Check {
     const wrong: string[] = [];
     if (metadata.owner !== owner) wrong.push(`owner ${JSON.stringify(metadata.owner)}`);
     if (metadata.archive_id !== archive) wrong.push(`archive_id ${short(metadata.archive_id)}`);
-    else if (archiveId(metadata.owner, metadata.agent, metadata.session_id) !== archive) {
-      wrong.push("an archive_id that is not sha256(owner, agent, session_id)");
+    else if (archiveId(metadata.owner, metadata.format, metadata.session_id) !== archive) {
+      wrong.push("an archive_id that is not sha256(owner, format, session_id)");
     }
     if (wrong.length > 0) {
       this.add("metadata_identity", `it names ${wrong.join(", ")}, unlike its key`, where);
@@ -687,6 +700,7 @@ class Check {
     let trace: Trace;
     try {
       trace = gunzipJson<Trace>(object.body);
+      if (isObject(trace)) trace = upgradeTrace(trace);
     } catch {
       this.add("trace_unreadable", "not gzipped JSON", where);
       return;

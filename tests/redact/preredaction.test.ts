@@ -58,7 +58,7 @@ describe("client pre-redaction (F2.4)", () => {
     const clean = redactTranscript(local, transcript, "jsonl");
     expect(clean.summary.counts).toEqual({ "acme-key": 1, "github-token": 1 });
     const stored = await client.ingest({
-      agent: "trajectory",
+      format: "trajectory",
       session_id: "s1",
       transcript: clean.text,
     });

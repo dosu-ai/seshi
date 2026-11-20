@@ -53,7 +53,7 @@ META = {
     "owner": "bob",
     "archive_id": SHA,
     "session_id": "s",
-    "agent": "claude-code",
+    "format": "claude-code",
     "status": "stored",
     "head": SHA,
     "traces": [{"content_hash": SHA, "created_at": "2026-11-14T09:00:00.000Z", "records": 3}],
@@ -67,7 +67,7 @@ TRACE = {
     "schema": "seshi/trace/1",
     "content_hash": SHA,
     "source": "claude-code",
-    "agent": "claude-code",
+    "format": "claude-code",
     "session_id": "s",
     "started_at": None,
     "ended_at": None,
@@ -180,7 +180,7 @@ def param(request: httpx.Request, name: str) -> str | None:
 
 def upload(**fields: Any) -> Upload:
     return Upload.model_validate(
-        {"agent": "claude-code", "session_id": "s", "transcript": "{}\n", **fields}
+        {"format": "claude-code", "session_id": "s", "transcript": "{}\n", **fields}
     )
 
 
@@ -244,7 +244,9 @@ class TestRequests:
         assert fake.seen[3].method == "PATCH" and sent(fake.seen[3]) == {"visibility": "owner"}
 
     def test_asks_for_a_rendering_and_reads_it_as_that_type(self) -> None:
-        letta = {**TRACE, "schema": "sessionstorage/trace/1"}
+        # Letta's object is sessiondb's, which names the format `agent`.
+        letta = {**TRACE, "schema": "sessionstorage/trace/1", "agent": TRACE["format"]}
+        del letta["format"]
         otlp = {"resourceSpans": [{"resource": {"attributes": []}, "scopeSpans": []}]}
         replies = iter([(200, letta), (200, otlp)])
 
@@ -254,9 +256,9 @@ class TestRequests:
 
         fake = Fake({"GET /v1/sessions/a/s/trace": answer})
         db = fake.client()
-        assert isinstance(db.get_trace("a", "s", format="letta", hash=SHA), LettaTrace)
+        assert isinstance(db.get_trace("a", "s", render="letta", hash=SHA), LettaTrace)
         assert param(fake.last, "format") == "letta" and param(fake.last, "hash") == SHA
-        rendered = db.get_trace("a", "s", format="otlp")
+        rendered = db.get_trace("a", "s", render="otlp")
         assert isinstance(rendered, OtlpTrace)
         assert rendered.model_dump(by_alias=True, exclude_none=True) == otlp
 
@@ -280,7 +282,7 @@ class TestRequests:
         assert fake.last.headers["x-seshi-retract"] == "s3cret"
         assert fake.last.headers["idempotency-key"] == "k1"
         assert sent(fake.last) == {
-            "agent": "claude-code",
+            "format": "claude-code",
             "session_id": "s",
             "transcript": "{}\n",
             "replace": True,
@@ -291,12 +293,12 @@ class TestRequests:
     def test_takes_an_upload_as_a_mapping_and_refuses_a_field_it_does_not_know(self) -> None:
         fake = Fake({"POST /v1/sessions": (200, {"status": "unchanged", **WHOLE})})
         db = fake.client()
-        answer = db.ingest({"agent": "codex", "session_id": "s", "transcript": "x", "offset": 4})
+        answer = db.ingest({"format": "codex", "session_id": "s", "transcript": "x", "offset": 4})
         assert isinstance(answer, NotWritten) and answer.bytes_total == 120
         with pytest.raises(ValueError, match="extra"):
-            db.ingest({"agent": "codex", "session_id": "s", "transcript": "x", "ofset": 4})
-        with pytest.raises(ValueError, match="agent"):
-            db.ingest({"agent": 7, "session_id": "s", "transcript": "x"})
+            db.ingest({"format": "codex", "session_id": "s", "transcript": "x", "ofset": 4})
+        with pytest.raises(ValueError, match="format"):
+            db.ingest({"format": 7, "session_id": "s", "transcript": "x"})
 
     def test_reads_a_stored_answer(self) -> None:
         fake = Fake({"POST /v1/sessions": (201, STORED)})
@@ -587,8 +589,8 @@ class TestReviewFixes:
 
     def test_sends_an_agent_a_newer_server_knows(self) -> None:
         fake = Fake({"POST /v1/sessions": (201, STORED)})
-        fake.client().ingest({"agent": "amp", "session_id": "s", "transcript": "x"})
-        assert sent(fake.last)["agent"] == "amp"
+        fake.client().ingest({"format": "amp", "session_id": "s", "transcript": "x"})
+        assert sent(fake.last)["format"] == "amp"
 
     def test_checks_another_model_given_as_a_body(self) -> None:
         fake = Fake({"POST /v1/tokens": (201, {"token": "x", "record": TOKEN})})

@@ -50,7 +50,7 @@ const CLAUDE = `${SMALL.trim()}\n${JSON.stringify({
 })}\n`;
 
 const upload = (session: string): Upload => ({
-  agent: "claude-code",
+  format: "claude-code",
   session_id: session,
   transcript: CLAUDE,
 });

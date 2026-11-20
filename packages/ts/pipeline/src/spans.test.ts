@@ -267,7 +267,7 @@ describe("span batches through the pipeline", () => {
     await pipeline.submit(envelope([chat("first question", "first answer")]));
     later(QUIET);
     await assemble();
-    await tombstone({ store, owner: OWNER, agent: "otlp-genai", session_id: SESSION, now });
+    await tombstone({ store, owner: OWNER, format: "otlp-genai", session_id: SESSION, now });
     expect(await listSpans(store, OWNER, ARCHIVE)).toEqual([]);
     expect(await store.get(keys.pending(ARCHIVE))).toBeNull();
     await expect(
@@ -290,7 +290,7 @@ describe("span batches through the pipeline", () => {
     await tombstone({
       store,
       owner: OWNER,
-      agent: "otlp-genai",
+      format: "otlp-genai",
       session_id: SESSION,
       now,
       reason: "retracted",
@@ -308,7 +308,7 @@ describe("span batches through the pipeline", () => {
       await tombstone({
         store,
         owner: OWNER,
-        agent: "otlp-genai",
+        format: "otlp-genai",
         session_id: "sesn_pending",
         now,
       }),
@@ -328,7 +328,7 @@ describe("span batches through the pipeline", () => {
     const removed = await tombstone({
       store,
       owner: OWNER,
-      agent: "otlp-genai",
+      format: "otlp-genai",
       session_id: SESSION,
       now,
     });
@@ -337,7 +337,7 @@ describe("span batches through the pipeline", () => {
     expect(await store.get(keys.pending(ARCHIVE))).toBeNull();
     // Nothing left: a second delete finds no session.
     expect(
-      await tombstone({ store, owner: OWNER, agent: "otlp-genai", session_id: SESSION, now }),
+      await tombstone({ store, owner: OWNER, format: "otlp-genai", session_id: SESSION, now }),
     ).toBeNull();
   });
 });
@@ -447,7 +447,7 @@ describe("assemblePending", () => {
     later(QUIET);
     await assemble();
     const kept = await listSpans(store, OWNER, ARCHIVE);
-    await tombstone({ store, owner: OWNER, agent: "otlp-genai", session_id: SESSION, now });
+    await tombstone({ store, owner: OWNER, format: "otlp-genai", session_id: SESSION, now });
     for (const record of kept) await putSpan(store, OWNER, ARCHIVE, record);
     const { payload: _payload, ...about } = envelope([]);
     await touchPending(store, OWNER, ARCHIVE, now, { envelope: about, source_id: "console" });

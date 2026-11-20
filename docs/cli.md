@@ -81,10 +81,10 @@ repository's code.
 | `logout [--server <url>] [--all]` | Forget the stored credentials |
 | `whoami [--server <url>]` | Who the CLI is signed in as, and whether the credential still works. In serverless mode: the owner (claimed) and the bucket |
 | `sessions ls [--owner] [--limit N] [--after] [--all] [--subagents] [--include-private]` | An owner's sessions, most recently active first, dated by their last record in local time. Subagents are counted on their session's row (`+2 subagents`); `--subagents` lists them under it. `--json` gives every session of the page. `--include-private`: serverless mode, [below](#talking-to-a-server-or-to-a-bucket-f83-f11) |
-| `sessions show <agent> <id> [--owner] [--trace] [--include-private]` | A session's metadata and, with model review on, each stored write's decision (`allow`, `redact`, `skipped`; F3.8); `--trace` adds its head trace, a line per record |
-| `sessions export <agent> <id> [--format seshi\|letta\|otlp\|atif] [--hash] [-o <file\|dir>] [--include-private]` | The trace itself, on stdout or into a file |
-| `sessions rm <agent> <id> [--owner] [--yes]` | Delete a session (a tombstone; it cannot be undone). Asks on a terminal, needs `--yes` elsewhere |
-| `sessions visibility <agent> <id> org\|owner [--owner]` | Change who may read a session (X5.10) |
+| `sessions show <format> <id> [--owner] [--trace] [--include-private]` | A session's metadata and, with model review on, each stored write's decision (`allow`, `redact`, `skipped`; F3.8); `--trace` adds its head trace, a line per record |
+| `sessions export <format> <id> [--format seshi\|letta\|otlp\|atif] [--hash] [-o <file\|dir>] [--include-private]` | The trace itself, on stdout or into a file |
+| `sessions rm <format> <id> [--owner] [--yes]` | Delete a session (a tombstone; it cannot be undone). Asks on a terminal, needs `--yes` elsewhere |
+| `sessions visibility <format> <id> org\|owner [--owner]` | Change who may read a session (X5.10) |
 | `tokens ls [--owner] [--kind] [--all]`, `tokens create <kind> [--owner] [--service] [--scope]… [--visibility] [--expires 30d\|date] [--label]`, `tokens revoke <id>\|--owner <id> [--kind]` | Manage tokens (X5.9, X5.11; admins). A new token is printed once. Tokens need a server: in serverless mode they exit 3 |
 | `capture install [<agent>…] [--service] [--command <program>]` | Wire seshi into Claude Code, Codex, Cursor, pi and OpenCode on this machine (F9.6): agents `claude-code`, `codex`, `cursor`, `pi`, `opencode`; with no agent, every one found. Merges into each agent's own config and keeps every hook there; for pi and OpenCode it writes an extension or plugin of its own ([capture.md](capture.md#installing)) |
 | `capture uninstall [<agent>…] [--service] [--command <program>]` | Take out only seshi's entries (`--command`: the program an install was given, when it is not named `seshi`) |

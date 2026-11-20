@@ -20,16 +20,16 @@ with SeshiClient(
     os.environ["ACME_SESHI_TOKEN"],  # a device, service, admin or static token, or the org key
     user="alice@acme.com",  # with the org key only: the username to write as
 ) as db:
-    answer = db.ingest(Upload(agent="claude-code", session_id="8f1c…", transcript=log))
+    answer = db.ingest(Upload(format="claude-code", session_id="8f1c…", transcript=log))
     # Stored(status='stored', content_hash='…', records_total=41, bytes_total=48213, …)
 
     # As the log grows, send only what it gained, from where the last answer ended.
     db.ingest(
-        Upload(agent="claude-code", session_id="8f1c…", transcript=tail, offset=answer.bytes_total)
+        Upload(format="claude-code", session_id="8f1c…", transcript=tail, offset=answer.bytes_total)
     )
 
     session = db.get_session("claude-code", "8f1c…")
-    trace = db.get_trace("claude-code", "8f1c…", format="otlp")
+    trace = db.get_trace("claude-code", "8f1c…", render="otlp")
     for entry in db.iter_changes(after=cursor):
         ...
     found = db.search("flaky checkout test", repo="widget", sort="recent")

@@ -105,7 +105,7 @@ describe("storeSession redaction", () => {
     // The call and its result in one whole upload first, so the session has a trace…
     const first = prompt + readEnv;
     const one = await storeSession(
-      { owner, agent: "claude-code", session_id: sid, transcript: first, format: "jsonl" },
+      { owner, format: "claude-code", session_id: sid, transcript: first, encoding: "jsonl" },
       { store, formats },
     );
     expect((await getSession(store, owner, "claude-code", sid))?.withheld_calls).toEqual({
@@ -115,10 +115,10 @@ describe("storeSession redaction", () => {
     await storeSession(
       {
         owner,
-        agent: "claude-code",
+        format: "claude-code",
         session_id: sid,
         transcript: envResult + answer,
-        format: "jsonl",
+        encoding: "jsonl",
         offset: one.bytes_total,
       },
       { store, formats },
@@ -139,10 +139,10 @@ describe("storeSession redaction", () => {
     const result = await storeSession(
       {
         owner,
-        agent: "claude-code",
+        format: "claude-code",
         session_id: sid,
         transcript: prompt + readEnv + envResult + answer,
-        format: "jsonl",
+        encoding: "jsonl",
       },
       { store, formats, redaction },
     );
@@ -168,10 +168,10 @@ describe("storeSession redaction", () => {
     await storeSession(
       {
         owner,
-        agent: "claude-code",
+        format: "claude-code",
         session_id: sid,
         transcript: prompt + readEnv,
-        format: "jsonl",
+        encoding: "jsonl",
       },
       { store, formats },
     );
@@ -182,10 +182,10 @@ describe("storeSession redaction", () => {
     const result = await storeSession(
       {
         owner,
-        agent: "claude-code",
+        format: "claude-code",
         session_id: sid,
         transcript: prompt + readEnv + envResult + answer + keyLine,
-        format: "jsonl",
+        encoding: "jsonl",
       },
       { store, formats },
     );
@@ -207,10 +207,10 @@ describe("storeSession redaction", () => {
     await storeSession(
       {
         owner,
-        agent: "claude-code",
+        format: "claude-code",
         session_id: sid,
         transcript: prompt + answer,
-        format: "jsonl",
+        encoding: "jsonl",
       },
       { store, formats },
     );
@@ -225,10 +225,10 @@ describe("storeSession redaction", () => {
     const result = await storeSession(
       {
         owner,
-        agent: "claude-code",
+        format: "claude-code",
         session_id: sid,
         transcript: rewritten + readEnv + envResult + answer + keyLine,
-        format: "jsonl",
+        encoding: "jsonl",
         replace: true,
       },
       { store, formats },
@@ -251,10 +251,10 @@ describe("storeSession redaction", () => {
     await storeSession(
       {
         owner,
-        agent: "claude-code",
+        format: "claude-code",
         session_id: sid,
         transcript: prompt + answer,
-        format: "jsonl",
+        encoding: "jsonl",
       },
       { store, formats },
     );

@@ -12,8 +12,8 @@ export interface Trace {
   content_hash: Sha256;
   /** The meta record's `source` (`claude-code`, `codex`, an ATIF document's harness, …). */
   source: string;
-  /** The format the session was filed under (the archive id derives from it). */
-  agent: string;
+  /** The format the session was filed under (the archive id derives from it). Traces written before 0.15 call it `agent`; readers take `format ?? agent`. */
+  format: string;
   project?: string;
   branch?: string;
   session_id: string | null;
@@ -176,7 +176,7 @@ export const JSON_SCHEMA = {
     schema: { const: "seshi/trace/1" },
     content_hash: { $ref: "common.schema.json#/$defs/Sha256" },
     source: { type: "string", minLength: 1 },
-    agent: { type: "string", minLength: 1 },
+    format: { type: "string", minLength: 1 },
     project: { type: "string" },
     branch: { type: "string" },
     session_id: { type: ["string", "null"] },
@@ -192,7 +192,7 @@ export const JSON_SCHEMA = {
     "schema",
     "content_hash",
     "source",
-    "agent",
+    "format",
     "session_id",
     "started_at",
     "ended_at",

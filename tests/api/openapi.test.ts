@@ -247,7 +247,7 @@ describe("the document itself", () => {
         "POST /v1/auth/exchange",
         "GET /v1/me",
         "GET /v1/owners",
-        "PATCH /v1/sessions/{agent}/{session_id}",
+        "PATCH /v1/sessions/{format}/{session_id}",
         "POST /v1/tokens",
         "GET /v1/tokens",
         "POST /v1/tokens/revoke",
@@ -255,15 +255,15 @@ describe("the document itself", () => {
         "POST /v1/sessions",
         "GET /v1/sessions",
         "GET /v1/sessions/stale",
-        "GET /v1/sessions/{agent}/{session_id}",
-        "DELETE /v1/sessions/{agent}/{session_id}",
-        "GET /v1/sessions/{agent}/{session_id}/trace",
-        "GET /v1/sessions/{agent}/{session_id}/export",
+        "GET /v1/sessions/{format}/{session_id}",
+        "DELETE /v1/sessions/{format}/{session_id}",
+        "GET /v1/sessions/{format}/{session_id}/trace",
+        "GET /v1/sessions/{format}/{session_id}/export",
         "GET /v1/changes",
         "GET /v1/changes/all",
         "GET /v1/admin/jobs",
         "GET /v1/redaction/rules",
-        "GET /v1/sessions/{agent}/{session_id}/reviews",
+        "GET /v1/sessions/{format}/{session_id}/reviews",
         "POST /otlp/v1/traces",
         "GET /v1/search",
         "GET /v1/admin/sources",
@@ -325,7 +325,7 @@ describe("the server honours it", () => {
   it("a session's life", async () => {
     const stored = await call("POST", "/v1/sessions", {
       body: {
-        agent: "claude-code",
+        format: "claude-code",
         session_id: "sess1",
         transcript: CLAUDE,
         project: "github.com/acme/widget",
@@ -343,12 +343,12 @@ describe("the server honours it", () => {
     // A resend; the log again with nothing new in it; a chunk with nothing in it; a wrong
     // offset.
     const again = await call("POST", "/v1/sessions", {
-      body: { agent: "claude-code", session_id: "sess1", transcript: CLAUDE },
+      body: { format: "claude-code", session_id: "sess1", transcript: CLAUDE },
     });
     expect(again).toEqual(stored);
     const unchanged = await call("POST", "/v1/sessions", {
       body: {
-        agent: "claude-code",
+        format: "claude-code",
         session_id: "sess1",
         transcript: CLAUDE,
         shipped: { records: records_total, prefix_sha256 },
@@ -359,7 +359,7 @@ describe("the server honours it", () => {
     expect(unchanged.body).toMatchObject({ status: "unchanged" });
     const chunk = await call("POST", "/v1/sessions", {
       body: {
-        agent: "claude-code",
+        format: "claude-code",
         session_id: "sess1",
         transcript: PROGRESS,
         offset: bytes_total,
@@ -367,7 +367,7 @@ describe("the server honours it", () => {
     });
     expect(chunk.body).toMatchObject({ status: "unchanged" });
     const wrong = await call("POST", "/v1/sessions", {
-      body: { agent: "claude-code", session_id: "sess1", transcript: PROGRESS, offset: 5 },
+      body: { format: "claude-code", session_id: "sess1", transcript: PROGRESS, offset: 5 },
     });
     expect(wrong.status).toBe(409);
     expect(wrong.body).toMatchObject({ error: { expected: bytes_total + PROGRESS.length } });
@@ -375,17 +375,17 @@ describe("the server honours it", () => {
     // A whole upload that does not extend the session; its replace, by its writer only.
     const rewritten = CLAUDE.replace("The auth flow:", "Another answer:");
     const conflict = await call("POST", "/v1/sessions", {
-      body: { agent: "claude-code", session_id: "sess1", transcript: rewritten },
+      body: { format: "claude-code", session_id: "sess1", transcript: rewritten },
     });
     expect(conflict.status).toBe(409);
     expect(conflict.body).toMatchObject({ error: { code: "conflict" } });
     await storeSession(
       {
         owner: "acme",
-        agent: "claude-code",
+        format: "claude-code",
         session_id: "theirs",
         transcript: CLAUDE,
-        format: "jsonl",
+        encoding: "jsonl",
       },
       {
         store,
@@ -394,17 +394,17 @@ describe("the server honours it", () => {
       },
     );
     const forbidden = await call("POST", "/v1/sessions", {
-      body: { agent: "claude-code", session_id: "theirs", transcript: rewritten, replace: true },
+      body: { format: "claude-code", session_id: "theirs", transcript: rewritten, replace: true },
     });
     expect(forbidden.status).toBe(403);
     // A rebuild is a replace (X4.9): the same writer only, and never a chunk.
     const rebuildOthers = await call("POST", "/v1/sessions", {
-      body: { agent: "claude-code", session_id: "theirs", transcript: CLAUDE, rebuild: true },
+      body: { format: "claude-code", session_id: "theirs", transcript: CLAUDE, rebuild: true },
     });
     expect(rebuildOthers.status).toBe(403);
     const rebuildChunk = await call("POST", "/v1/sessions", {
       body: {
-        agent: "claude-code",
+        format: "claude-code",
         session_id: "sess1",
         transcript: PROGRESS,
         offset: bytes_total,
@@ -458,7 +458,7 @@ describe("the server honours it", () => {
     expect((await call("GET", "/v1/sessions/claude-code/nope/reviews")).status).toBe(404);
     expect((await call("DELETE", "/v1/sessions/claude-code/nope")).status).toBe(404);
     const tiny = await call("POST", "/v1/sessions", {
-      body: { agent: "claude-code", session_id: "tiny", transcript: SMALL },
+      body: { format: "claude-code", session_id: "tiny", transcript: SMALL },
     });
     expect(tiny.body).toMatchObject({ status: "filtered" });
     expect((await call("GET", "/v1/sessions/claude-code/tiny/trace")).status).toBe(404);
@@ -468,7 +468,7 @@ describe("the server honours it", () => {
     expect(
       (
         await call("POST", "/v1/sessions", {
-          body: { agent: "claude-code", session_id: "sess1", transcript: CLAUDE },
+          body: { format: "claude-code", session_id: "sess1", transcript: CLAUDE },
         })
       ).status,
     ).toBe(422);
@@ -479,7 +479,7 @@ describe("the server honours it", () => {
       (
         await call("POST", "/v1/sessions", {
           token: null,
-          body: { agent: "codex", session_id: "x", transcript: "x" },
+          body: { format: "codex", session_id: "x", transcript: "x" },
         })
       ).status,
     ).toBe(401);
@@ -498,7 +498,7 @@ describe("the server honours it", () => {
     expect(
       (
         await call("POST", "/v1/sessions", {
-          body: { agent: "claude-code", session_id: "blank", transcript: "  " },
+          body: { format: "claude-code", session_id: "blank", transcript: "  " },
         })
       ).status,
     ).toBe(422);
@@ -514,7 +514,7 @@ describe("the server honours it", () => {
   });
 
   it("every render format", async () => {
-    const body = { agent: "claude-code", session_id: "render", transcript: CLAUDE };
+    const body = { format: "claude-code", session_id: "render", transcript: CLAUDE };
     expect((await call("POST", "/v1/sessions", { body })).status).toBe(201);
     const path = "/v1/sessions/claude-code/render/trace";
     const seshi = await call("GET", path);
@@ -579,7 +579,7 @@ describe("the server honours it", () => {
       (await call("POST", "/v1/tokens/revoke", { ...admin, body: { owner: "x" } })).status,
     ).toBe(502);
     expect((await call("DELETE", `/v1/tokens/${"0".repeat(20)}`, admin)).status).toBe(502);
-    const body = { agent: "claude-code", session_id: "x", transcript: CLAUDE };
+    const body = { format: "claude-code", session_id: "x", transcript: CLAUDE };
     // Who the token is needs no bucket.
     expect((await call("GET", "/v1/me", { app: down })).status).toBe(200);
     expect((await call("POST", "/v1/sessions", { body, app: down })).status).toBe(502);
@@ -669,7 +669,7 @@ describe("identity and access (X5)", () => {
     });
     expect(created.status).toBe(201);
     const device = { app: x5, token: (created.body as { token: string }).token };
-    const body = { agent: "claude-code", session_id: "s1", transcript: CLAUDE };
+    const body = { format: "claude-code", session_id: "s1", transcript: CLAUDE };
     expect((await call("POST", "/v1/sessions", { ...device, body })).status).toBe(201);
 
     expect((await call("GET", "/v1/owners", alice)).status).toBe(200);
@@ -728,7 +728,7 @@ describe("identity and access (X5)", () => {
     const alice = { app: x5, token: org_key?.token, user: "alice" };
     const secret = "s".repeat(43);
     const retract_hash = createHash("sha256").update(secret).digest("hex");
-    const body = { agent: "claude-code", session_id: "r1", transcript: CLAUDE, retract_hash };
+    const body = { format: "claude-code", session_id: "r1", transcript: CLAUDE, retract_hash };
     expect((await call("POST", "/v1/sessions", { ...alice, body })).status).toBe(201);
     const retract = (as: object, value: string, path = "/v1/sessions/claude-code/r1") =>
       call("DELETE", path, { ...as, headers: { "x-seshi-retract": value } });
@@ -1040,7 +1040,7 @@ describe("search (F10)", () => {
 
     // Until the index has caught up once, it says so (F10.3).
     expect((await call("GET", "/v1/search?q=auth", as)).status).toBe(503);
-    const body = { agent: "claude-code", session_id: "sess1", transcript: CLAUDE };
+    const body = { format: "claude-code", session_id: "sess1", transcript: CLAUDE };
     expect((await call("POST", "/v1/sessions", { ...as, body })).status).toBe(201);
     await instance.search?.catchUp();
 
@@ -1094,7 +1094,7 @@ describe("every owner's change feed", () => {
     const as = { app: appOver(instance), token: admin?.token };
 
     expect((await call("GET", "/v1/changes/all", as)).status).toBe(503);
-    const body = { agent: "claude-code", session_id: "feed1", transcript: CLAUDE };
+    const body = { format: "claude-code", session_id: "feed1", transcript: CLAUDE };
     expect((await call("POST", "/v1/sessions", { ...as, token: TOKEN, body })).status).toBe(201);
     await instance.search?.catchUp();
     const first = await call("GET", "/v1/changes/all?limit=1", as);
