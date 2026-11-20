@@ -62,6 +62,7 @@ describe("release.config.js", () => {
       "packages/ts/model/package.json",
       "integrations/cursor/extension/package.json",
       "packages/py/client/src/seshi/_version.py",
+      "deploy/docker/compose.yaml",
       "bun.lock",
       "CHANGELOG.md",
     ]);
@@ -121,6 +122,19 @@ describe("ci.yml", () => {
     expect(job).toContain("runs-on: windows-latest");
     expect(job).toContain("bun install --frozen-lockfile");
     expect(job).toContain("bun run test:laptop");
+  });
+
+  it("boots the Docker kit with the image it built, and with the image a release published", () => {
+    const docker = CI.slice(CI.indexOf("\n  docker:"), CI.indexOf("\n  binaries:"));
+    expect(docker).toContain("sh scripts/docker-kit-smoke.sh");
+    const job = CI.slice(CI.indexOf("\n  verify-kit:"));
+    expect(job).toContain("needs: [release, image]");
+    expect(job).toContain("if: needs.release.outputs.released == 'true'");
+    expect(job).toContain("ref: v${{ needs.release.outputs.version }}");
+    expect(job).toContain("EXPECT_VERSION: ${{ needs.release.outputs.version }}");
+    expect(job).toContain("sh scripts/docker-kit-smoke.sh");
+    // The last job in the file. It pulls as a user would: no registry login.
+    expect(job).not.toContain("docker/login-action");
   });
 
   it("calls only scripts that exist", () => {

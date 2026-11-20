@@ -13,6 +13,8 @@ brand
 !brand/glyph/seshi-glyph-badge.svg
 *.md
 .env
+# The Docker kit, and a .env a user keeps beside it.
+deploy
 dist
 # The release binaries the image job unpacks for `--build-arg BINARY=prebuilt`.
 !dist/docker

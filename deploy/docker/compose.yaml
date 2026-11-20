@@ -1,0 +1,54 @@
+# The seshi server from its published image, ghcr.io/dosu-ai/seshi. The repository root's
+# compose.yaml builds the image from a checkout instead; this kit runs a release.
+#
+#   cp .env.example .env && chmod 600 .env
+#   docker compose up -d --wait
+#   docker compose exec seshi seshi admin init     # the first admin token and the org key
+#
+# Add-ons, each one more -f (or COMPOSE_FILE in .env, so it sticks):
+#   compose.bucket.yaml  a bundled S3-compatible bucket (RustFS) instead of the /data volume
+#   compose.tls.yaml     Caddy in front, with automatic HTTPS for SITE_ADDRESS
+#
+# .env is read twice: by Compose for the ${…} names in these files, and by the container for its
+# SESHI_* settings (docs/config.md). The server refuses a SESHI_* name that is not a setting, so
+# the kit's own names (IMAGE_TAG, HOST_PORT, …) never start with SESHI_. Leave
+# SESHI_SERVER__LISTEN unset: the container listens on 7200, and HOST_PORT moves the host side.
+#
+# The release rewrites the IMAGE_TAG default below to its own version (scripts/release-version.ts),
+# so a checkout of tag vX.Y.Z runs image X.Y.Z. README.md has the rest.
+name: seshi
+
+services:
+  seshi:
+    image: ${IMAGE_REPOSITORY:-ghcr.io/dosu-ai/seshi}:${IMAGE_TAG:-0.22.0}
+    env_file: .env
+    ports:
+      # Loopback unless BIND_ADDRESS says otherwise: transcripts arrive here, and a published
+      # port bypasses host firewalls such as ufw. Put TLS in front before opening it up.
+      - "${BIND_ADDRESS:-127.0.0.1}:${HOST_PORT:-7200}:7200"
+    volumes:
+      # A file:///data store, and the search index (/data/.cache) for every store.
+      - data:/data
+      # A config directory (seshi.toml, seshi.d/); env settings still win over it:
+      # - ./config:/etc/seshi:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    # The image checks every 30 s; 10 s makes `up --wait` return sooner.
+    healthcheck:
+      test: ["CMD", "seshi", "healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+    # No default limits: one upload may be 256 MiB and the pipeline holds it in memory, so a
+    # guessed limit kills the server mid-upload. Size from what you see, then:
+    # deploy:
+    #   resources:
+    #     limits: { cpus: "2", memory: 4G }
+
+volumes:
+  data:

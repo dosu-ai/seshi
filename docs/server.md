@@ -57,7 +57,8 @@ The config is `./seshi.toml` (read unasked by `seshi serve` only: every other co
 commented example and [config.md](config.md) lists every setting. The compiled binary reads
 nothing else: no `.env`, no `bunfig.toml`. From a checkout, `bun start` runs the server from
 source and Bun reads `.env` (copy [`.env.example`](../.env.example)); `docker compose up -d`
-hands the container the same `.env`.
+from the root builds the image from the checkout and hands the container the same `.env`. To
+run a released image, use the Docker kit ([below](#deploying)).
 
 At boot the server writes the layout marker and a probe object, so a wrong bucket or key fails
 there and not on the first session. On a bucket whose marker says it is used in serverless mode
@@ -211,6 +212,12 @@ retention. Keep
 the request timeout at 120 seconds or more; a large transcript can take that long to normalize
 and verify. Platforms that cap request bodies (Cloud Run's HTTP/1 limit is 32 MiB) are fine as
 long as clients send `Content-Encoding: gzip`, which every route accepts.
+
+To run the image on one host, use the Docker kit in
+[`deploy/docker/`](../deploy/docker/README.md): a Compose file that runs the image a release
+pins, with a file store on a volume, an add-on for a bundled S3-compatible bucket (RustFS), and
+an add-on that puts Caddy in front with automatic HTTPS. The image runs there as uid 1000 with a
+read-only root filesystem: `/data` and `/tmp` are the only paths it writes.
 
 ## Setting up who may call it
 

@@ -1,4 +1,5 @@
-# seshi in a container. Fill in `.env` (copy `.env.example`: the tokens, the bucket URL and its
+# seshi in a container, built from this checkout (for working on seshi). To run a released
+# image instead, use the Docker kit in deploy/docker/ (its README.md). Fill in `.env` (copy `.env.example`: the tokens, the bucket URL and its
 # keys, as SESHI_* settings), then `docker compose up -d`. A seshi.toml can be mounted at
 # /etc/seshi/seshi.toml instead (docs/config.md). The /data volume only matters for a file://
 # store, which must then be SESHI_STORE__URL=file:///data (as in `.env.example`): anything else

@@ -42,6 +42,7 @@ A Bun workspace, laid out as in the design decisions (X3,
 | `spec/` | The cross-language contract: `layout.md` (the object layout), `openapi.yaml` (the HTTP API), `schemas/` (the trace, the envelope, the stored objects), the config schemas, and `testdata/` (the record sets and goldens every language must pass) |
 | `tests/` | Tests that cross packages, and the fixture and golden tooling (`tests/tooling/`) |
 | `scripts/` | Repository scripts: the layer check, the generators below, the hook timing check, the release build, npm packages and smoke test (`scripts/release/`), the install scripts (`scripts/install/`), the brand outliner (`scripts/brand/`) |
+| `deploy/docker/` | The Docker kit: Compose files that run the published image, with its `.env.example` and README. `scripts/docker-kit-smoke.sh` boots it |
 | `docs/` | The user docs; [`docs/README.md`](docs/README.md) is the index. `docs/seshi/` holds the design decisions and the build notes |
 | `brand/` | The brand files and colour tokens ([`brand/README.md`](brand/README.md)) |
 
@@ -164,7 +165,7 @@ so the subject line follows [Conventional Commits](https://www.conventionalcommi
 `fix(redact): …` releases a patch, `feat(capture): …` a minor, a `BREAKING CHANGE:` footer a
 major. A commit with another shape is not seen by the release pipeline at all; it ships with the
 next one that is. Each release writes the version into `packages/ts/model/package.json`, the
-Python client's `src/seshi/_version.py` and `CHANGELOG.md`, tags `vX.Y.Z`, attaches the
+Python client's `src/seshi/_version.py`, the Docker kit's image tag and `CHANGELOG.md`, tags `vX.Y.Z`, attaches the
 binaries, install scripts and `SHA256SUMS` to the GitHub release, publishes the npm packages,
 and pushes `ghcr.io/dosu-ai/seshi`. Nobody edits
 a version field by hand.

@@ -1,5 +1,7 @@
-# The workflows pin every action to a commit SHA (the release in a trailing comment).
-# Dependabot keeps those pins current: one grouped pull request a week.
+# The workflows pin every action to a commit SHA (the release in a trailing comment), and the
+# Docker kit pins its third-party images (RustFS, aws-cli, Caddy) by tag and digest. Dependabot
+# keeps those pins current: one grouped pull request a week for each. The kit's own seshi image
+# is not its business: the release rewrites that tag (scripts/release-version.ts).
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -11,3 +13,14 @@ updates:
         patterns: ["*"]
     commit-message:
       prefix: ci
+  - package-ecosystem: docker-compose
+    directory: /deploy/docker
+    schedule:
+      interval: weekly
+    groups:
+      docker-kit:
+        patterns: ["*"]
+    ignore:
+      - dependency-name: ghcr.io/dosu-ai/seshi
+    commit-message:
+      prefix: build

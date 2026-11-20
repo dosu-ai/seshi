@@ -9,7 +9,7 @@ the same compiled file, built once per release (F8.4):
 | Install script (Windows) | `irm https://github.com/dosu-ai/seshi/releases/latest/download/install.ps1 \| iex` | Run it again |
 | npm | `npm i -g @dosu/seshi`, or `npx @dosu/seshi …` | `npm i -g @dosu/seshi@latest` |
 | GitHub release | Download the archive for your platform and `SHA256SUMS` | By hand |
-| Docker (the server) | `docker run ghcr.io/dosu-ai/seshi` ([server.md](server.md)) | New tag |
+| Docker (the server) | `docker run ghcr.io/dosu-ai/seshi`, or the Compose kit in [`deploy/docker/`](../deploy/docker/README.md) ([server.md](server.md)) | New tag |
 
 Homebrew, and signed or notarized binaries, come later.
 
