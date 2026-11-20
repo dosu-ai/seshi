@@ -591,6 +591,9 @@ export class Indexer {
       ...(harness ? { harness } : {}),
       ...(agentVersion ? { agent_version: agentVersion } : {}),
       ...(metadata.models && metadata.models.length > 0 ? { models: metadata.models } : {}),
+      ...(metadata.labels && Object.keys(metadata.labels).length > 0
+        ? { labels: metadata.labels }
+        : {}),
       ...(source ? { source_id: source } : {}),
       visibility: metadata.visibility,
       ...(starts.length > 0 ? { started_at: Math.min(...starts) } : {}),

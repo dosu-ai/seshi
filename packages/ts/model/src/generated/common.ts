@@ -34,6 +34,11 @@ export type LogEncoding = "jsonl" | "json";
 /** Who may read a session (X5.10): `org`, every member; `owner`, only its owner. Admins and services see everything. */
 export type Visibility = "org" | "owner";
 
+/** Small key/value strings attached to a session from config: the CLI's `[labels]`, a repo's `.seshi/config.toml`, a server source's `labels`. seshi gives them no meaning. Keys `[a-z0-9][a-z0-9._-]{0,63}`, values 1 to 512 characters, at most 32. */
+export type Labels = {
+  [key: string]: string;
+};
+
 /** Identity the data asserts, copied from a fixed allowlist (X5.5). Never decides ownership (X5.4); with no raw stored, this is the only place it survives. */
 export interface Claims {
   /** An email the data names (`trajectory.user_email`). */
@@ -126,6 +131,12 @@ export const JSON_SCHEMA = {
     OwnerBasis: { type: "string", enum: ["verified", "claimed", "service"] },
     LogEncoding: { enum: ["jsonl", "json"] },
     Visibility: { type: "string", enum: ["org", "owner"] },
+    Labels: {
+      type: "object",
+      propertyNames: { pattern: "^[a-z0-9][a-z0-9._-]{0,63}$" },
+      maxProperties: 32,
+      additionalProperties: { type: "string", minLength: 1, maxLength: 512 },
+    },
     Claims: {
       type: "object",
       properties: {

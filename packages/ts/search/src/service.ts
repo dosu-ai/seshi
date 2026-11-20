@@ -2,6 +2,8 @@ import { OwnerAliases } from "@seshi/auth";
 import {
   type AllChangesPage,
   type EventRole,
+  type Labels,
+  labelsProblems,
   type ReadChangesOptions,
   SEARCH_SORTS,
   type SearchRequest,
@@ -140,6 +142,7 @@ export function checkRequest(request: SearchRequest, aliases = new OwnerAliases(
   const harness = text(request.harness, "harness");
   const agentVersion = text(request.agent_version, "agent_version");
   const model = text(request.model, "model");
+  const labels = labelFilter(request.labels);
   const source = text(request.source, "source");
   return {
     q: request.q,
@@ -152,6 +155,7 @@ export function checkRequest(request: SearchRequest, aliases = new OwnerAliases(
       ...(harness !== undefined ? { harness } : {}),
       ...(agentVersion !== undefined ? { agent_version: agentVersion } : {}),
       ...(model !== undefined ? { model } : {}),
+      ...(labels !== undefined ? { labels } : {}),
       ...(source !== undefined ? { source } : {}),
       ...(since !== undefined ? { since } : {}),
       ...(until !== undefined ? { until } : {}),
@@ -161,6 +165,14 @@ export function checkRequest(request: SearchRequest, aliases = new OwnerAliases(
       offset,
     },
   };
+}
+
+/** The label filter: each `key=value` a session must carry, keys and values as labels are. */
+function labelFilter(labels: SearchRequest["labels"]): Labels | undefined {
+  if (labels === undefined) return undefined;
+  const problems = labelsProblems(labels);
+  if (problems.length > 0) throw new SearchQueryError(`labels: ${problems.join("; ")}`);
+  return Object.keys(labels).length > 0 ? { ...labels } : undefined;
 }
 
 async function liveMetadata(
@@ -194,6 +206,7 @@ function resultOf(hit: BackendHit): SearchResult {
     ...(s.harness !== undefined ? { harness: s.harness } : {}),
     ...(s.agent_version !== undefined ? { agent_version: s.agent_version } : {}),
     ...(s.models !== undefined ? { models: s.models } : {}),
+    ...(s.labels !== undefined ? { labels: s.labels } : {}),
     ...(s.source_id !== undefined ? { source_id: s.source_id } : {}),
     visibility: s.visibility,
     ...(started !== undefined ? { started_at: started } : {}),

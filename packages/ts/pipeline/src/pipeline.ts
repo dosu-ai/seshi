@@ -7,7 +7,9 @@ import {
   Forbidden,
   IngestRejected,
   isStub,
+  type Labels,
   type LlmCall,
+  MAX_LABELS,
   type NormalizedRecord,
   type NormalizedState,
   type Normalizer,
@@ -112,6 +114,9 @@ export interface PipelineOptions {
    * then the server's `default_visibility` (`(id) => visibilityFor(config, id)`); `org` when
    * omitted. The request and the token's default are the envelope's `visibility`. */
   visibility?: VisibilitySetting;
+  /** The labels a source puts on every session it stores, by source id (`[[sources]]`
+   * `labels`): they win over the envelope's own. */
+  sourceLabels?: (sourceId: string) => Labels | undefined;
   /** Where drop and failure records go (`sources/<id>/{dropped,failed}/`); `store` when
    * omitted. A serverless laptop keeps them in a folder of its own (F11.10). */
   records?: Store;
@@ -403,6 +408,7 @@ export class Pipeline {
   private readonly assembler: SpanAssembler | undefined;
   readonly health: HealthCounters;
   private readonly visibility: VisibilitySetting;
+  private readonly sourceLabels: ((sourceId: string) => Labels | undefined) | undefined;
   private layoutChecked: Promise<unknown> | undefined;
 
   constructor(options: PipelineOptions) {
@@ -420,6 +426,7 @@ export class Pipeline {
     this.assembler = options.assembler;
     this.health = options.health ?? noHealth();
     this.visibility = options.visibility ?? "org";
+    this.sourceLabels = options.sourceLabels;
   }
 
   /** The rules new writes redact with (a config reload). A write already going finishes with
@@ -1005,6 +1012,7 @@ export class Pipeline {
         project: plan.project,
         branch: plan.branch,
         ...scopeOf(envelope),
+        ...this.labelsOf(run),
         parent_session_id: envelope.parent_session_id,
         ...(plan.continuation ? { continuation: plan.continuation } : {}),
         normalizer: this.formats.normalizerFor(envelope.format),
@@ -1052,6 +1060,23 @@ export class Pipeline {
       ...(createStubIfMissing ? { createStubIfMissing } : {}),
     });
     return { status, ...shippedOf(normalized) };
+  }
+
+  /** The session's labels: the envelope's, with its source's over them, each value redacted as
+   * the session's text is (an `env` label can carry anything). Past the limit, the envelope's
+   * own give way. */
+  private labelsOf(run: Run): { labels?: Labels } {
+    const { envelope, redactor } = run;
+    const source = this.sourceLabels?.(envelope.source_id) ?? {};
+    const labels: Labels = { ...source };
+    for (const [key, value] of Object.entries(envelope.labels ?? {})) {
+      if (key in labels || Object.keys(labels).length >= MAX_LABELS) continue;
+      labels[key] = value;
+    }
+    for (const [key, value] of Object.entries(labels)) {
+      labels[key] = redactor.redactText?.(value).text ?? value;
+    }
+    return Object.keys(labels).length > 0 ? { labels } : {};
   }
 
   private who(run: Run): Pick<WriteContext, "writer" | "owner_basis" | "visibility"> {

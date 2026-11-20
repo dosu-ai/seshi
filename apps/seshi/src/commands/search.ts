@@ -5,6 +5,7 @@ import { findServerConfig, parseDuration } from "@seshi/config";
 import type { Instance } from "@seshi/instance";
 import {
   Forbidden,
+  labelPairs,
   type SearchRequest,
   type SearchResult,
   type SearchResults,
@@ -33,6 +34,7 @@ import { cwdConfigHint, openServer, serverFailure } from "./server-instance";
 const USAGE = [
   "usage: seshi search <words…> [--owner <id>] [--agent <a>] [--repo <r>] [--branch <b>] [--source <id>]",
   "                    [--harness <h>] [--harness-version <v>] [--model <m>]",
+  "                    [--label key=value]…",
   "                    [--since <time|7d>] [--until <time|7d>] [--sort relevance|recent]",
   "                    [--limit <n>] [--matches <n>] [--cursor <c>]",
   "                    [--server <url>] [--token <t> [--user <name>]] [--config <file>] [--set path=value]… [--json]",
@@ -48,6 +50,7 @@ const OPTIONS = {
   harness: { type: "string" },
   "harness-version": { type: "string" },
   model: { type: "string" },
+  label: { type: "string", multiple: true },
   source: { type: "string" },
   since: { type: "string" },
   until: { type: "string" },
@@ -92,7 +95,15 @@ function intArg(value: string, name: string): number {
   return Number.parseInt(value, 10);
 }
 
+function labelArgs(given: readonly string[] | undefined): Record<string, string> | undefined {
+  if (!given || given.length === 0) return undefined;
+  const parsed = labelPairs(given);
+  if ("problem" in parsed) throw new UsageProblem(`--label: ${parsed.problem}`);
+  return parsed.labels;
+}
+
 export function requestOf(query: string, values: Values, now: Date): SearchRequest {
+  const labels = labelArgs(values.label);
   return {
     q: query,
     ...(values.owner !== undefined ? { owner: values.owner } : {}),
@@ -104,6 +115,7 @@ export function requestOf(query: string, values: Values, now: Date): SearchReque
       ? { agent_version: values["harness-version"] }
       : {}),
     ...(values.model !== undefined ? { model: values.model } : {}),
+    ...(labels ? { labels } : {}),
     ...(values.source !== undefined ? { source: values.source } : {}),
     ...(values.since !== undefined ? { since: timeArg(values.since, "since", now) } : {}),
     ...(values.until !== undefined ? { until: timeArg(values.until, "until", now) } : {}),

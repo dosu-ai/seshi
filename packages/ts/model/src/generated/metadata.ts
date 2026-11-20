@@ -3,6 +3,7 @@
 import type {
   Claims,
   Continuation,
+  Labels,
   Normalizer,
   OwnerBasis,
   Provenance,
@@ -36,6 +37,8 @@ export interface SessionMetadata {
   agent_version?: string;
   /** Every model the session used, deduplicated in the order first seen: each LLM call's `model`, and the meta record's `model` (or the uploader's hint) when no call names one. Summed over every write; a replace starts it over. */
   models?: string[];
+  /** The session's labels: set by the first write that carries any; later writes with other labels leave them, a replace may change them. */
+  labels?: Labels;
   parent_session_id?: string;
   /** `stored`, or `redacted` once tombstoned: a redacted session is never stored again. */
   status: "stored" | "redacted";
@@ -137,6 +140,7 @@ export const JSON_SCHEMA = {
     repo: { type: "string" },
     agent_version: { type: "string" },
     models: { type: "array", items: { type: "string" } },
+    labels: { $ref: "common.schema.json#/$defs/Labels" },
     parent_session_id: { type: "string" },
     status: { enum: ["stored", "redacted"] },
     head: { $ref: "common.schema.json#/$defs/Sha256" },

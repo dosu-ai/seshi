@@ -58,6 +58,7 @@ ROUTES: dict[str, Route] = {
             "harness",
             "agent_version",
             "model",
+            "label",
             "source",
             "since",
             "until",

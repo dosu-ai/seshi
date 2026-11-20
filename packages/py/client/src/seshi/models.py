@@ -351,6 +351,9 @@ class Upload(Request):
     """A hint for a log that names no harness version; the log's own wins."""
     model: str | None = None
     """A hint for a log that names no model; the log's own wins."""
+    labels: dict[str, str] | None = None
+    """Keys `[a-z0-9][a-z0-9._-]{0,63}`, values up to 512 characters, at most 32. The session keeps
+    the first it is sent; a `replace` may change them."""
     parent_session_id: str | None = None
     fork_of: str | None = None
     shipped: Shipped | None = None
@@ -444,6 +447,9 @@ class SessionMetadata(Response):
     """The harness's version the session started on (Cursor: at its latest upload)."""
     models: list[str] | None = None
     """Every model the session used."""
+    labels: dict[str, str] | None = None
+    """Set from config by the first write that carries any (the CLI's `[labels]`, a repo's
+    `.seshi/config.toml`, a source's `labels`)."""
     parent_session_id: str | None = None
     status: Open[Literal["stored", "redacted"]]
     head: str | None = None
@@ -605,6 +611,8 @@ class TraceMetadata(Response):
     parent_session_id: str | None = None
     continuation: Continuation | None = None
     normalizer: Normalizer | None = None
+    labels: dict[str, str] | None = None
+    """The labels the write that stored this trace carried."""
 
 
 class Trace(Response):
@@ -899,6 +907,8 @@ class SearchRequest(Request):
     agent_version: str | None = None
     model: str | None = None
     """Any model the session used."""
+    label: list[str] | None = None
+    """Labels a session must carry, each `key=value` (`SeshiClient.search` takes a dict)."""
     source: str | None = None
     since: str | None = None
     until: str | None = None
@@ -934,6 +944,7 @@ class SearchResult(Response):
     harness: str | None = None
     agent_version: str | None = None
     models: list[str] | None = None
+    labels: dict[str, str] | None = None
     source_id: str | None = None
     visibility: Open[Visibility]
     started_at: str | None = None

@@ -5,6 +5,7 @@ import {
   ENVELOPE_SCHEMA,
   type Envelope,
   type LogPayload,
+  labelsProblems,
   MAX_IDEMPOTENCY_KEY_LENGTH,
   type OwnerBasis,
   SCOPE_FIELDS,
@@ -102,6 +103,10 @@ export function checkEnvelope(envelope: Envelope): void {
   ) {
     refuse("retract_hash must be a sha256 in lowercase hex");
   }
+  if (envelope.labels !== undefined) {
+    const problems = labelsProblems(envelope.labels);
+    if (problems.length > 0) refuse(problems.join("; "));
+  }
   const payload = envelope.payload as LogPayload | SpanPayload | undefined;
   if (payload?.kind === "log") {
     if (typeof payload.text !== "string") refuse("payload.text must be a string");
@@ -191,6 +196,9 @@ export function uploadEnvelope(upload: SessionUpload, options: UploadEnvelopeOpt
   for (const key of SCOPE_FIELDS) {
     const value = upload[key];
     if (value !== undefined) envelope[key] = value;
+  }
+  if (upload.labels !== undefined && Object.keys(upload.labels).length > 0) {
+    envelope.labels = upload.labels;
   }
   if (upload.parent_session_id !== undefined) envelope.parent_session_id = upload.parent_session_id;
   if (upload.fork_of !== undefined) envelope.fork_of = upload.fork_of;

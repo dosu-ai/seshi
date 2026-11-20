@@ -31,6 +31,7 @@ def _search_request(
     harness: str | None,
     agent_version: str | None,
     model: str | None,
+    labels: Mapping[str, str] | None,
     source: str | None,
     since: str | datetime | None,
     until: str | datetime | None,
@@ -48,6 +49,7 @@ def _search_request(
         harness=harness,
         agent_version=agent_version,
         model=model,
+        label=[f"{key}={value}" for key, value in labels.items()] if labels else None,
         source=source,
         since=calls.rfc3339(since) if isinstance(since, datetime) else since,
         until=calls.rfc3339(until) if isinstance(until, datetime) else until,
@@ -435,6 +437,7 @@ class SeshiClient(_Base):
         harness: str | None = None,
         agent_version: str | None = None,
         model: str | None = None,
+        labels: Mapping[str, str] | None = None,
         source: str | None = None,
         since: str | datetime | None = None,
         until: str | datetime | None = None,
@@ -461,6 +464,7 @@ class SeshiClient(_Base):
             sort=sort,
             limit=limit,
             matches=matches,
+            labels=labels,
             cursor=cursor,
         )
         return self._run(calls.search(request))
@@ -858,6 +862,7 @@ class AsyncSeshiClient(_Base):
         harness: str | None = None,
         agent_version: str | None = None,
         model: str | None = None,
+        labels: Mapping[str, str] | None = None,
         source: str | None = None,
         since: str | datetime | None = None,
         until: str | datetime | None = None,
@@ -882,6 +887,7 @@ class AsyncSeshiClient(_Base):
             sort=sort,
             limit=limit,
             matches=matches,
+            labels=labels,
             cursor=cursor,
         )
         return await self._run(calls.search(request))

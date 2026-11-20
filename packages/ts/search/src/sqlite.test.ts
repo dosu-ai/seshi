@@ -340,6 +340,31 @@ describe("SqliteIndex: filters, sorting and pages (F10.1)", () => {
     expect(index.session("alice", H(3))).not.toHaveProperty("models");
   });
 
+  it("filters by labels, each key and value exactly, all of them", () => {
+    const index = memory();
+    const labelled = (n: number, labels?: Record<string, string>) =>
+      index.apply({
+        session: session(n, labels ? { labels } : {}),
+        events: [event("cache")],
+        replace: true,
+      });
+    labelled(1, { "dosu.project": "github.com/acme/billing", team: "platform" });
+    labelled(2, { "dosu.project": "github.com/acme/web", team: "platform" });
+    labelled(3);
+    const by = (labels: Record<string, string>) => ids(query(index, "cache", { labels })).sort();
+    expect(by({ team: "platform" })).toEqual(["s1", "s2"]);
+    expect(by({ "dosu.project": "github.com/acme/billing" })).toEqual(["s1"]);
+    expect(by({ "dosu.project": "github.com/acme/billing", team: "platform" })).toEqual(["s1"]);
+    expect(by({ "dosu.project": "github.com/acme/billing", team: "infra" })).toEqual([]);
+    expect(by({ "dosu.project": "billing" })).toEqual([]);
+    expect(by({ team: "Platform" })).toEqual([]);
+    expect(index.session("alice", H(1))?.labels).toEqual({
+      "dosu.project": "github.com/acme/billing",
+      team: "platform",
+    });
+    expect(index.session("alice", H(3))).not.toHaveProperty("labels");
+  });
+
   it("sorts by relevance or by recency, and pages", () => {
     const index = seeded();
     expect(ids(query(index, "cache bug"))).toEqual(["s2", "s1"]);

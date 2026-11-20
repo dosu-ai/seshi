@@ -1207,6 +1207,17 @@ paths:
           in: query
           description: Only sessions that used this model, among every model they used.
           schema: { type: string, maxLength: 512 }
+        - name: label
+          in: query
+          description: |
+            Only sessions carrying this label, as `key=value` (`label=dosu.project=github.com/acme/app`):
+            the key and the value exactly. Repeat it for more; a session must carry every one.
+          style: form
+          explode: true
+          schema:
+            type: array
+            maxItems: 32
+            items: { type: string, maxLength: 1024 }
         - name: source
           in: query
           description: Only sessions written through this source (`upload`, or a configured source id).
@@ -1557,6 +1568,16 @@ components:
         as `json`, and its trace's `source` is the document's `agent.name`. `trajectory` is
         JSONL of records already in Letta trajectory-v1, checked and redacted, not normalized.
       enum: [claude-code, codex, cursor, opencode, pi, gemini-cli, atif, datadog-trajectory, trajectory]
+
+    Labels:
+      type: object
+      description: |
+        Small key/value strings attached to a session from config (the CLI's `[labels]`, a
+        repo's `.seshi/config.toml`, a source's `labels`); seshi gives them no meaning. Keys
+        `[a-z0-9][a-z0-9._-]{0,63}`, values 1 to 512 characters, at most 32.
+      propertyNames: { pattern: "^[a-z0-9][a-z0-9._-]{0,63}$" }
+      maxProperties: 32
+      additionalProperties: { type: string, minLength: 1, maxLength: 512 }
 
     Owner:
       type: string
@@ -1992,6 +2013,12 @@ components:
           type: string
           maxLength: 1024
           description: "A hint, for a log that names none (Cursor's): the session's model as the client knows it. The log's own `model` wins."
+        labels:
+          $ref: "#/components/schemas/Labels"
+          description: |
+            The session's labels, from the uploader's config. The session keeps the first it is
+            sent; later uploads with other labels leave them, a `replace` may change them. A
+            source's own `labels` win over them. Out of the limits is `400 bad_field`.
         parent_session_id:
           type: string
           description: The session this one was resumed or spawned from.
@@ -2287,6 +2314,7 @@ components:
             client: { type: string }
             parent_session_id: { type: string }
             continuation: { $ref: "#/components/schemas/Continuation" }
+            labels: { $ref: "#/components/schemas/Labels" }
             normalizer:
               type: object
               required: [name, version]
@@ -2660,6 +2688,7 @@ components:
           type: array
           items: { type: string }
           description: Every model the session used.
+        labels: { $ref: "#/components/schemas/Labels" }
         source_id: { type: string }
         visibility: { type: string, enum: [org, owner] }
         started_at: { type: string, format: date-time }

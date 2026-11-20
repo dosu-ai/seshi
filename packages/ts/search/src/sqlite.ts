@@ -1,7 +1,7 @@
 import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import type { ChangeEntry, EventRole, Visibility } from "@seshi/model";
+import type { ChangeEntry, EventRole, Labels, Visibility } from "@seshi/model";
 import { changeStamp } from "@seshi/store";
 import type {
   BackendHit,
@@ -19,9 +19,9 @@ import { indexText, MATCH_END, MATCH_START } from "./snippet";
 
 /** The index's own schema: a file built under another is wiped and rebuilt from the change
  * feeds. 3: sessions' `agent` column is `format`, and the feed's copies of entries written
- * before seshi 0.16 carry the format filled in from the session. 4: sessions' `repo`, `harness`,
- * `agent_version` and `models`. */
-export const INDEX_SCHEMA = "seshi/search-index/4";
+ * before seshi 0.16 carry the format filled in from the session. 4: sessions gained `labels`. 5:
+ * sessions' `repo`, `harness`, `agent_version` and `models`. */
+export const INDEX_SCHEMA = "seshi/search-index/5";
 
 const SNIPPET_TOKENS = 24;
 
@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   harness TEXT,
   agent_version TEXT,
   models TEXT,
+  labels TEXT,
   source_id TEXT,
   visibility TEXT NOT NULL,
   started_at INTEGER,
@@ -106,6 +107,7 @@ interface SessionRow {
   harness: string | null;
   agent_version: string | null;
   models: string | null;
+  labels: string | null;
   source_id: string | null;
   visibility: string;
   started_at: number | null;
@@ -131,6 +133,7 @@ function sessionOf(row: SessionRow): IndexedSession {
     ...(row.harness !== null ? { harness: row.harness } : {}),
     ...(row.agent_version !== null ? { agent_version: row.agent_version } : {}),
     ...(row.models !== null ? { models: JSON.parse(row.models) as string[] } : {}),
+    ...(row.labels !== null ? { labels: JSON.parse(row.labels) as Labels } : {}),
     ...(row.source_id !== null ? { source_id: row.source_id } : {}),
     visibility: row.visibility as Visibility,
     ...(row.started_at !== null ? { started_at: row.started_at } : {}),
@@ -278,6 +281,9 @@ export class SqliteIndex implements IndexStore {
         session.harness ?? null,
         session.agent_version ?? null,
         session.models && session.models.length > 0 ? JSON.stringify(session.models) : null,
+        session.labels && Object.keys(session.labels).length > 0
+          ? JSON.stringify(session.labels)
+          : null,
         session.source_id ?? null,
         session.visibility,
         session.started_at ?? null,
@@ -293,9 +299,9 @@ export class SqliteIndex implements IndexStore {
           .query(
             `INSERT INTO sessions (owner, archive_id, format, session_id, origin_agent,
                native_session_id, project, branch, repo, harness, agent_version, models,
-               source_id, visibility, started_at, ended_at, updated_at, updated_ms, traces,
-               read_ms)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+               labels, source_id, visibility, started_at, ended_at, updated_at, updated_ms,
+               traces, read_ms)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
           )
           .get(session.owner, session.archive_id, ...values) as { id: number };
         id = row.id;
@@ -306,7 +312,7 @@ export class SqliteIndex implements IndexStore {
           .query(
             `UPDATE sessions SET format = ?, session_id = ?, origin_agent = ?,
                native_session_id = ?, project = ?, branch = ?, repo = ?, harness = ?,
-               agent_version = ?, models = ?, source_id = ?, visibility = ?,
+               agent_version = ?, models = ?, labels = ?, source_id = ?, visibility = ?,
                started_at = ?, ended_at = ?, updated_at = ?, updated_ms = ?, traces = ?,
                read_ms = ?, removed = 0
              WHERE id = ?`,
@@ -396,6 +402,10 @@ export class SqliteIndex implements IndexStore {
     if (q.model !== undefined) {
       where.push("EXISTS (SELECT 1 FROM json_each(s.models) WHERE json_each.value = ?)");
       params.push(q.model);
+    }
+    for (const [key, value] of Object.entries(q.labels ?? {})) {
+      where.push("EXISTS (SELECT 1 FROM json_each(s.labels) AS l WHERE l.key = ? AND l.value = ?)");
+      params.push(key, value);
     }
     if (q.source !== undefined) {
       where.push("s.source_id = ?");

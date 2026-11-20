@@ -11,12 +11,20 @@ import {
 } from "@seshi/kit";
 import { writeRecent } from "./current";
 import { writePrivateFile } from "./files";
+import { resolveLabels } from "./labels";
 import type { CapturePaths } from "./paths";
 import { headCommitAt, placeOf } from "./place";
-import { type Decision, decide, turnedOff } from "./rules";
+import { type Decision, decide, type Place, turnedOff } from "./rules";
 import { captureRules } from "./rules-cache";
 import { appendSpool } from "./spool";
-import { otherFolders, readState, type SessionState, sessionKey, stateFacts } from "./state";
+import {
+  labelsOpen,
+  otherFolders,
+  readState,
+  type SessionState,
+  sessionKey,
+  stateFacts,
+} from "./state";
 
 export interface HookRun {
   agent: CaptureAgent;
@@ -79,15 +87,19 @@ export async function runHook(run: HookRun): Promise<HookOutcome> {
   if (result.captures.length === 0 && !result.announce && !result.toolResult) return outcome;
 
   const now = run.now ?? new Date();
-  const [{ rules, error }, state] = [await captureRules(run.host, run.paths), readState(run.paths)];
+  const [{ rules, error, labels }, state] = [
+    await captureRules(run.host, run.paths),
+    readState(run.paths),
+  ];
   const judge = (capture: HookCapture) => {
     const known = state.sessions[sessionKey(run.agent.name, capture.session_id)];
     const cwd = capture.cwd ?? known?.cwd;
+    const place = placeOf(cwd);
     const decision = decide(
       {
         rules,
         ...(error !== undefined ? { rulesError: error } : {}),
-        place: placeOf(cwd),
+        place,
         ...stateFacts(state, run.agent.name, known, now, capture.parent_session_id),
         seen: otherFolders(state, run.agent.name, known, cwd, capture.parent_session_id).map(
           placeOf,
@@ -95,7 +107,20 @@ export async function runHook(run: HookRun): Promise<HookOutcome> {
       },
       run.host.platform,
     );
-    return { known, decision };
+    return { known, decision, place };
+  };
+  // Labels are resolved here, in the agent's environment (the uploader runs in its own), when
+  // the session is first seen, and kept in its state: every later upload sends the same ones.
+  const labelsOf = (known: SessionState | undefined, place: Place) => {
+    if (!labelsOpen(known)) return undefined;
+    const resolved = resolveLabels(labels, place, run.host.env, run.host.platform);
+    if (resolved.problems.length > 0) {
+      outcome.problems = [
+        ...(outcome.problems ?? []),
+        ...resolved.problems.map((p) => `labels: left out ${p}`),
+      ];
+    }
+    return resolved.labels;
   };
   if (result.announce) {
     outcome.announced = {
@@ -104,7 +129,7 @@ export async function runHook(run: HookRun): Promise<HookOutcome> {
     };
   }
   for (const capture of result.captures) {
-    const { known, decision } = judge(capture);
+    const { known, decision, place } = judge(capture);
     if (!decision.capture) {
       if (capture.transcript !== undefined || capture.read)
         forgetHandedTranscript(run.host, run.agent, capture.session_id);
@@ -133,6 +158,7 @@ export async function runHook(run: HookRun): Promise<HookOutcome> {
         ? capture.transcript_path
         : await keep(run, capture, outcome);
     const commit = headCommitAt(capture.cwd ?? known?.cwd);
+    const sessionLabels = labelsOf(known, place);
     appendSpool(
       run.paths,
       {
@@ -149,6 +175,7 @@ export async function runHook(run: HookRun): Promise<HookOutcome> {
         ...(commit ? { commit } : {}),
         ...(capture.harness_version ? { harness_version: capture.harness_version } : {}),
         ...(capture.model ? { model: capture.model } : {}),
+        ...(sessionLabels ? { labels: sessionLabels } : {}),
       },
       now,
     );

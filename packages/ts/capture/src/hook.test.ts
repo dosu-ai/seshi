@@ -110,6 +110,8 @@ describe("runHook (F9.1)", () => {
         session_id: "s1",
         transcript_path: "/t/s1.jsonl",
         cwd: dir,
+        // Resolved at first sight: none configured, so none, pinned.
+        labels: {},
       },
     ]);
   });
@@ -127,6 +129,39 @@ describe("runHook (F9.1)", () => {
       now: new Date("2026-11-01T00:00:00Z"),
     });
     expect(readSpool(paths).items[0]?.entry).toMatchObject({ session_id: "s1", commit: sha });
+  });
+
+  it("resolves labels in the agent's environment at first sight, and only then", async () => {
+    cliConfig(
+      `[labels]\n"dosu.project" = { env = "DOSU_PROJECT" }\nteam = "platform"\nBad = "x"\n[[labels.paths]]\npath = ${JSON.stringify(dir)}\nfolder = "here"\n`,
+    );
+    const stop = (env: Record<string, string>) =>
+      runHook({
+        agent,
+        event: "Stop",
+        payload: { id: "s1", cwd: dir, path: "/t/s1.jsonl" },
+        host: { ...host, env: { ...host.env, ...env } },
+        paths,
+      });
+    const first = await stop({ DOSU_PROJECT: "github.com/acme/app" });
+    expect(readSpool(paths).items[0]?.entry).toMatchObject({
+      labels: { "dosu.project": "github.com/acme/app", team: "platform", folder: "here" },
+    });
+    // A label out of the limits is left out and said, never a failure.
+    expect(first.problems).toEqual([expect.stringContaining("labels: left out label key 'Bad'")]);
+    // Once the session's labels are in its state, a later hook resolves none.
+    await updateState(paths, (st) => {
+      st.sessions["fake:s1"] = {
+        agent: "fake",
+        session_id: "s1",
+        cwd: dir,
+        first_seen: "2026-11-01T00:00:00Z",
+        labels: { "dosu.project": "github.com/acme/app" },
+      };
+    });
+    const later = await stop({ DOSU_PROJECT: "github.com/acme/other" });
+    expect(readSpool(paths).items[1]?.entry).not.toHaveProperty("labels");
+    expect(later.problems).toBeUndefined();
   });
 
   it("writes a transcript the hook was handed whole, for a captured session only", async () => {
@@ -526,6 +561,7 @@ describe("the rules cache", () => {
         exclude: [],
       },
       theme: "light",
+      labels: { labels: {}, paths: [] },
     });
   });
 

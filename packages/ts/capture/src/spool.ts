@@ -25,6 +25,8 @@ export type SpoolEntry =
       commit?: string;
       harness_version?: string;
       model?: string;
+      /** The session's labels, resolved by a hook that saw it first (the state held none). */
+      labels?: Record<string, string>;
     }
   | {
       v: typeof SPOOL_VERSION;

@@ -73,6 +73,11 @@
     "model": {
       "description": "A hint: the session's model as the uploader knows it. Used only when the log names none.",
       "type": "string"
+
+    },
+    "labels": {
+      "description": "The session's labels, as the uploader resolved them, merged under the source's own `labels`. The session keeps the first it is given; a replace may change them.",
+      "$ref": "common.schema.json#/$defs/Labels"
     },
     "parent_session_id": { "type": "string" },
     "fork_of": { "type": "string" },

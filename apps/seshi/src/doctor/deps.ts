@@ -54,12 +54,16 @@ export interface Redaction {
   transcript(text: string, encoding: "jsonl" | "json"): string;
   records(records: readonly NormalizedRecord[]): NormalizedRecord[];
   residue(records: readonly NormalizedRecord[]): Residue[];
+  /** A short value (a label's) as these rules store it: the server redacts label values. */
+  text(value: string): string;
 }
 
 export interface DoctorDeps {
   now(): Date;
   state(): CaptureState;
   judge(state: CaptureState, agent: string, entry: SessionState | undefined): Decision;
+  /** What is wrong with the labels the CLI config and the session's repo config give. */
+  labelProblems?(entry: SessionState | undefined): string[];
   agent(name: string): AgentInfo | undefined;
   files: FileReader;
   spool(): SpoolItem[];

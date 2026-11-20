@@ -178,6 +178,7 @@ function deps(f: Fake, over: Partial<DoctorDeps> = {}): DoctorDeps {
       origin: "the fake rules",
       // As the uploader pre-redacts before sending.
       transcript: (text) => redactText(text),
+      text: (value) => value,
       records: (records) => redactRecords(records),
       residue: () => [],
     },

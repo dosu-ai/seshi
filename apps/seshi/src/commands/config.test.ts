@@ -2,6 +2,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { EXIT } from "../cli/exit";
 import { main } from "../main";
 
 let dir: string;
@@ -264,5 +265,21 @@ describe("seshi config", () => {
     expect((await seshi(["config", "check", "--origin"])).err).toContain(
       "--origin is for config show",
     );
+  });
+});
+
+describe("seshi config check --cli", () => {
+  it("reports labels out of the limits as errors, the config still loading", async () => {
+    const path = file(
+      "config.toml",
+      `[labels]\nTeam = "x"\nok = "fine"\n[[labels.paths]]\npath = "/w"\nlong = "${"x".repeat(513)}"\n`,
+    );
+    const { code, err, out } = await seshi(["config", "check", "--cli", "--config", path]);
+    expect(code).toBe(EXIT.config);
+    expect(err).toContain("error: [labels]: label key 'Team' must be lowercase");
+    expect(err).toContain("error: [[labels.paths]] /w: label 'long' is 513 characters long");
+    expect(out).toBe("");
+    const fine = file("fine.toml", '[labels]\nteam = "platform"\n');
+    expect((await seshi(["config", "check", "--cli", "--config", fine])).code).toBe(0);
   });
 });

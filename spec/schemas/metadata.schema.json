@@ -37,6 +37,11 @@
       "description": "Every model the session used, deduplicated in the order first seen: each LLM call's `model`, and the meta record's `model` (or the uploader's hint) when no call names one. Summed over every write; a replace starts it over.",
       "type": "array",
       "items": { "type": "string" }
+
+    },
+    "labels": {
+      "description": "The session's labels: set by the first write that carries any; later writes with other labels leave them, a replace may change them.",
+      "$ref": "common.schema.json#/$defs/Labels"
     },
     "parent_session_id": { "type": "string" },
     "status": {

@@ -15,6 +15,7 @@ import {
   VERSION,
 } from "@seshi/model";
 import { appendLog } from "./files";
+import { resolveLabels } from "./labels";
 import type { CapturePaths } from "./paths";
 import { headCommitAt, placeOf } from "./place";
 import {
@@ -31,6 +32,7 @@ import { readSpool, removeSpool, type SpoolEntry } from "./spool";
 import {
   type CaptureState,
   freeze,
+  labelsOpen,
   newSecret,
   otherFolders,
   pauseWindows,
@@ -578,6 +580,16 @@ export class Uploader {
         this.log(`${key}: stopped by a pause at ${offset} bytes`);
       }
       if (!decision.capture && decision.frozen === undefined) continue;
+      if (session.labels === undefined) {
+        // No hook resolved its labels (a session from before labels, or one only seen paused):
+        // they come from this process's environment and its folder, and stay.
+        const labels = this.resolveLabels(snapshot, place);
+        session = (await this.save(key, (s) => {
+          if (s.labels !== undefined) return;
+          s.labels = labels;
+          s.labels_by = "uploader";
+        })) ?? { ...session, labels, labels_by: "uploader" };
+      }
       // A paused session sends no more than it had, so its upload is not composed further.
       const from = decision.capture
         ? this.composed(key, agent, session, path)
@@ -645,6 +657,13 @@ export class Uploader {
         }
         if (entry.kind === "capture" && entry.model) session.model = entry.model;
         if (entry.kind === "capture" && entry.commit) session.commit = entry.commit;
+        // The first labels a hook resolved for the session stay; later hooks' never replace them.
+        // They do replace labels this uploader resolved for it before anything was sent (a sweep
+        // that found the session before its hook's entry reached the spool).
+        if (entry.kind === "capture" && entry.labels && labelsOpen(session)) {
+          session.labels = entry.labels;
+          delete session.labels_by;
+        }
         if (
           entry.kind === "paused" &&
           !turnedOnSince(session.toggle, session.toggled_at, entry.at)
@@ -714,6 +733,9 @@ export class Uploader {
           session_id: found.info.session_id,
           path: found.path,
           ...(found.info.cwd ? { cwd: found.info.cwd } : {}),
+          // No hook saw it: its labels come from this process's environment and its folder.
+          labels: this.resolveLabels(snapshot, placeOf(found.info.cwd)),
+          labels_by: "uploader",
           ...(found.info.parent_session_id
             ? { parent_session_id: found.info.parent_session_id }
             : {}),
@@ -1071,10 +1093,19 @@ export class Uploader {
     return { text: bytes.subarray(0, cut + 1).toString("utf8"), end: start + cut + 1 };
   }
 
+  /** A session's labels, resolved by the uploader: with its own environment, for a session no
+   * hook resolved them for (one the sweep found). Dropped labels are logged once. */
+  private resolveLabels(snapshot: RulesSnapshot, place: Place): Record<string, string> {
+    const resolved = resolveLabels(snapshot.labels, place, this.host.env, this.host.platform);
+    for (const problem of resolved.problems) this.logOnce(`labels: left out ${problem}`);
+    return resolved.labels;
+  }
+
   private async details(session: SessionState, agent: CaptureAgent, place: Place) {
     const repo = place.repo;
     // What a hook recorded as the lines were written; a session only the sweep found has none.
     const commit = repo ? (session.commit ?? headCommitAt(session.cwd)) : undefined;
+    const labels = session.labels ?? {};
     const folder = repo?.root ?? session.cwd;
     const claims: Claims = {};
     if (session.cwd) {
@@ -1106,6 +1137,7 @@ export class Uploader {
       client: clientOf(this.host),
       ...(session.harness_version ? { harness_version: session.harness_version } : {}),
       ...(session.model ? { model: session.model } : {}),
+      ...(Object.keys(labels).length > 0 ? { labels } : {}),
       ...repoVisibilityClaim(repo?.config),
       ...(session.parent_session_id ? { parent_session_id: session.parent_session_id } : {}),
       ...(Object.keys(claims).length > 0 ? { claims } : {}),

@@ -2,6 +2,7 @@ export {
   chainCheck,
   changesCheck,
   decisionCheck,
+  labelsCheck,
   offsetsCheck,
   PENDING_STUCK_MS,
   prefixCheck,

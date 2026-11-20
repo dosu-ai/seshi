@@ -1,3 +1,4 @@
+import type { Labels } from "./labels";
 import type { EventRole } from "./schemas/trace";
 
 /** How results are ordered: best match first (bm25 over the matching records, the default),
@@ -30,6 +31,9 @@ export interface SearchRequest {
   agent_version?: string;
   /** Only sessions that used this model, among any they used. */
   model?: string;
+  /** Only sessions carrying every one of these labels (`{ "dosu.project": "github.com/acme/app" }`):
+   * keys and values exactly. `GET /v1/search` takes each as `label=key=value`. */
+  labels?: Labels;
   /** Only sessions written through this source (`upload`, or a configured source id). */
   source?: string;
   /** Only records at or after this time (RFC 3339). Records without a timestamp use their
@@ -80,6 +84,7 @@ export interface SearchResult {
   agent_version?: string;
   /** Every model the session used. */
   models?: string[];
+  labels?: Labels;
   source_id?: string;
   visibility: "org" | "owner";
   started_at?: string;

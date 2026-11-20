@@ -81,6 +81,7 @@ async function seed(): Promise<void> {
     transcript: log("deploy the payments service"),
     repo: "github.com/acme/payments",
     branch: "main",
+    labels: { "dosu.project": "github.com/acme/payments", team: "platform" },
   });
   await alice.ingest({
     format: "trajectory",
@@ -93,6 +94,7 @@ async function seed(): Promise<void> {
     session_id: "docs",
     transcript: log("deploy the docs site"),
     repo: "github.com/acme/docs",
+    labels: { team: "platform" },
   });
   // Written under alice's old owner id, which [auth.owner_aliases] folds into hers (X5.8).
   await new StoreSessionDB({ store, owner: "old-alice", formats: FORMATS }).ingest({
@@ -214,6 +216,41 @@ describe("GET /v1/search (F10)", () => {
     const leak = await admin.getSession("trajectory", "leak", { owner: "alice" });
     expect(leak?.status).toBe("stored");
     expect(leak).not.toHaveProperty("repo");
+  });
+
+  it("filters by labels (label=key=value, repeatable), and returns them", async () => {
+    await seed();
+    const admin = client(adminToken);
+    expect(ids(await admin.search({ q: "deploy", labels: { team: "platform" } }))).toEqual([
+      "alice/pay",
+      "bob/docs",
+    ]);
+    const both = await admin.search({
+      q: "deploy",
+      labels: { team: "platform", "dosu.project": "github.com/acme/payments" },
+    });
+    expect(ids(both)).toEqual(["alice/pay"]);
+    expect(both.results[0]?.labels).toEqual({
+      "dosu.project": "github.com/acme/payments",
+      team: "platform",
+    });
+    const raw = async (query: string) =>
+      app.fetch(
+        new Request(`http://seshi.test/v1/search?q=deploy&${query}`, {
+          headers: { authorization: `Bearer ${adminToken}` },
+        }),
+      );
+    const direct = await raw("label=team%3Dplatform&label=dosu.project%3Dgithub.com%2Facme%2Fdocs");
+    expect(ids((await direct.json()) as SearchResults)).toEqual([]);
+    for (const [query, why] of [
+      ["label=team", "label: 'team' is not key=value"],
+      ["label=Team%3Dx", "label key 'Team'"],
+      ["label=team%3Da&label=team%3Db", "label: team is given twice"],
+    ] as const) {
+      const res = await raw(query);
+      expect(res.status).toBe(400);
+      expect(JSON.stringify(await res.json())).toContain(why);
+    }
   });
 
   it("points each match at its trace and event, with a snippet", async () => {

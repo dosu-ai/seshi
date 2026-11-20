@@ -28,6 +28,14 @@ export interface SessionState {
   /** The commit `HEAD` named when a hook last captured the session, sent with its uploads, so
    * an upload that waited (offline, a retry) names the commit its lines were written at. */
   commit?: string;
+  /** The session's labels, resolved when it was first seen (in its hook, with the agent's
+   * environment) and sent with every upload of it, unchanged when the folder or the environment
+   * changes later. Absent until resolved; `{}` when it has none. */
+  labels?: Record<string, string>;
+  /** `uploader`: the uploader resolved `labels` in its own environment (the sweep found the
+   * session, or no hook resolved them). A hook's labels replace those until the session is first
+   * sent; absent, a hook resolved them, or `seshi upload` did. */
+  labels_by?: "uploader";
   first_seen: string;
   last_seen?: string;
   /** The agent said the session ended. */
@@ -366,4 +374,12 @@ export function subsessionKeys(state: CaptureState, agent: string, id: string): 
     }
   }
   return keys;
+}
+
+/** Whether a hook should resolve the session's labels: none are pinned yet, or only the
+ * uploader's, and nothing has been sent with them. */
+export function labelsOpen(session: SessionState | undefined): boolean {
+  return (
+    session?.labels === undefined || (session.labels_by === "uploader" && session.sent !== true)
+  );
 }
