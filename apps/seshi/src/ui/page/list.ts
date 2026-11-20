@@ -144,15 +144,18 @@ function searchForm(
       "div",
       { class: "field" },
       h("label", { for: `f-${name}` }, FILTER_LABEL[name]),
-      h("input", {
-        id: `f-${name}`,
-        name,
-        type: "text",
-        value: state.filters[name] ?? "",
-        autocomplete: "off",
-        spellcheck: "false",
-        ...(name === "owner" ? { list: "owners" } : {}),
-      }),
+      pickable(
+        name === "owner",
+        h("input", {
+          id: `f-${name}`,
+          name,
+          type: "text",
+          value: state.filters[name] ?? "",
+          autocomplete: "off",
+          spellcheck: "false",
+          ...(name === "owner" ? { list: "owners" } : {}),
+        }),
+      ),
     ),
   );
   const label = h(
@@ -241,7 +244,12 @@ function searchForm(
         { class: "fields" },
         fields,
         label,
-        h("div", { class: "field" }, h("label", { for: "f-since" }, "Active"), since),
+        h(
+          "div",
+          { class: "field" },
+          h("label", { for: "f-since" }, "Active"),
+          pickable(true, since),
+        ),
       ),
       h("datalist", { id: "owners" }, ...owners.map((o) => h("option", { value: o }))),
     ),
@@ -251,6 +259,12 @@ function searchForm(
     timer = setTimeout(() => live(false), TYPING_MS);
   });
   return form;
+}
+
+/** A field that offers a list (a select, or a text box with suggestions) wears the page's one
+ * chevron, drawn by `.pick` in the stylesheet, in place of the browser's own arrow. */
+function pickable(offers: boolean, field: HTMLElement): HTMLElement {
+  return offers ? h("span", { class: "pick" }, field) : field;
 }
 
 /** The filters in force, each with a button that drops it. */

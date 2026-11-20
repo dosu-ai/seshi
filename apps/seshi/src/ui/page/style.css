@@ -139,12 +139,80 @@ select {
   border: 1px solid var(--line);
   border-radius: 6px;
   padding: 0.45rem 0.6rem;
+  line-height: 1.4;
   min-width: 0;
 }
 
 input:focus-visible,
 select:focus-visible {
   border-color: var(--focus);
+}
+
+/* One chevron for everything that opens, in place of the three arrows browsers draw (a select's,
+ * a suggestion list's, a disclosure's). It is a line icon like dosu-adx's: a 1.5px stroke with
+ * nothing filled. It points down on a field that opens a list, right on a closed disclosure and
+ * down on an open one. */
+.pick {
+  position: relative;
+  display: grid;
+}
+
+.pick::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 0.85rem;
+  width: 0.4rem;
+  height: 0.4rem;
+  border-right: 1.5px solid var(--muted);
+  border-bottom: 1.5px solid var(--muted);
+  transform: translateY(-70%) rotate(45deg);
+  pointer-events: none;
+}
+
+.pick select,
+.pick input {
+  appearance: none;
+  line-height: 1.4;
+  padding-right: 2.2rem;
+}
+
+/* The suggestion list's own button stays where the chevron is, unseen, so a click there still
+ * opens the list. */
+.pick input::-webkit-calendar-picker-indicator {
+  opacity: 0;
+}
+
+summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+summary::-webkit-details-marker {
+  display: none;
+}
+
+summary::before {
+  content: "";
+  flex: none;
+  width: 0.36rem;
+  height: 0.36rem;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 0.12s;
+}
+
+details[open] > summary::before {
+  transform: translateY(-0.12rem) rotate(45deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  summary::before {
+    transition: none;
+  }
 }
 
 /* The bar. */
