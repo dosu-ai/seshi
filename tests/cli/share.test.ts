@@ -55,7 +55,14 @@ const stored = async (id: string, owner = ALICE) =>
 /** This machine's capture state, as its hooks and uploader leave it for an uploaded session. */
 async function captured(
   m: Machine,
-  sessions: { id: string; parent?: string; generation?: number; toggle?: "off"; cwd?: string }[],
+  sessions: {
+    id: string;
+    parent?: string;
+    generation?: number;
+    toggle?: "off" | "on";
+    cwd?: string;
+    sent?: boolean;
+  }[],
 ) {
   const paths = capturePaths({ env: m.env, home: m.dir, platform: process.platform });
   await updateState(paths, (state) => {
@@ -66,7 +73,7 @@ async function captured(
         cwd: s.cwd ?? m.dir,
         first_seen: new Date().toISOString(),
         last_seen: new Date().toISOString(),
-        sent: true,
+        sent: s.sent ?? true,
         ...(s.parent ? { parent_session_id: s.parent } : {}),
         ...(s.generation ? { generation: s.generation } : {}),
         ...(s.toggle ? { toggle: s.toggle } : {}),
@@ -132,6 +139,25 @@ describe("seshi share and unshare", () => {
     ]);
   });
 
+  it("share a subagent turned on by itself, and report one the server refuses", async () => {
+    await captured(machine, [{ id: "s1" }, { id: "agent-a1", parent: "s1", toggle: "on" }]);
+    const env = { SESHI_SESSION_ID: "s1" };
+    expect((await machine.seshi(["share"], { env })).code).toBe(0);
+    expect(await stored("agent-a1")).toBe("org");
+
+    // Deleted on the server: the session itself still changes, and the subagent is reported.
+    const deleted = await fetch(`${server.url}/v1/sessions/claude-code/agent-a1?owner=${ALICE}`, {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${admin}` },
+    });
+    expect(deleted.status).toBe(200);
+    const partly = await machine.seshi(["unshare"], { env });
+    expect(partly.code).toBe(8);
+    expect(partly.out).toContain("Unshared claude-code/s1: visibility is owner");
+    expect(partly.out).toMatch(/not changed: subagent claude-code\/agent-a1: /);
+    expect(await stored("s1")).toBe("owner");
+  });
+
   it("find the one session seen in this folder without the agent's variables, as uploaded", async () => {
     // Turned off and on once, it is stored as s2~1.
     await captured(machine, [{ id: "s2", generation: 1, cwd: process.cwd() }]);
@@ -177,7 +203,11 @@ describe("seshi share and unshare", () => {
   });
 
   it("say why there is nothing to share, and refuse what makes no sense", async () => {
-    await captured(machine, [{ id: "s1", toggle: "off" }, { id: "fresh" }]);
+    await captured(machine, [
+      { id: "s1", toggle: "off" },
+      { id: "fresh", sent: false },
+      { id: "elsewhere" },
+    ]);
     const off = await machine.seshi(["share"], { env: { SESHI_SESSION_ID: "s1" } });
     expect(off.code).toBe(1);
     expect(off.err).toContain("Session Capture is off for claude-code s1");
@@ -186,6 +216,10 @@ describe("seshi share and unshare", () => {
     const fresh = await machine.seshi(["share"], { env: { SESHI_SESSION_ID: "fresh" } });
     expect(fresh.code).toBe(4);
     expect(fresh.err).toContain("claude-code/fresh is not in the session store yet");
+    // Uploaded from here, yet not where this CLI looks: another owner or server.
+    const elsewhere = await machine.seshi(["share"], { env: { SESHI_SESSION_ID: "elsewhere" } });
+    expect(elsewhere.code).toBe(4);
+    expect(elsewhere.err).toContain("though this machine uploaded it");
 
     expect((await machine.seshi(["share", "claude-code"])).code).toBe(2);
     expect((await machine.seshi(["share", "claude-code", "s1", "extra"])).code).toBe(2);

@@ -31,14 +31,22 @@ export function seesEverything(principal: Principal): boolean {
   return principal.role === "admin" || principal.role === "service";
 }
 
-/** Whether the principal may read the session (X5.10). Scopes are checked separately. */
+/** Whether the principal's credential reads sessions at all (`sessions:read` or `search`). */
+function readsSessions(principal: Principal): boolean {
+  return principal.scopes.has("sessions:read") || principal.scopes.has("search");
+}
+
+/** Whether the principal may find the session (X5.10). A credential that reads nothing (a
+ * device token, a writing service) finds only its own owner's sessions, so a lookup tells it
+ * nothing of anyone else's. Which routes need which scope is checked separately. */
 export function canRead(
   principal: Principal,
   session: SessionAccess,
   aliases: OwnerAliases = NO_ALIASES,
 ): boolean {
-  if (seesEverything(principal)) return true;
   if (isOwnSession(principal, session.owner, aliases)) return true;
+  if (!readsSessions(principal)) return false;
+  if (seesEverything(principal)) return true;
   return (session.visibility ?? "org") === "org";
 }
 
@@ -72,13 +80,6 @@ export function requireVisibilityScope(principal: Principal): void {
       "this credential cannot do that: it needs the sessions:write or sessions:read scope",
     );
   }
-}
-
-/** Whether the principal finds only its own sessions when changing visibility: a credential that
- * writes but cannot read, so a session it does not own is not there for it (404), as for a read.
- * It learns nothing of anyone else's sessions. */
-export function changesOnlyOwn(principal: Principal): boolean {
-  return principal.role !== "admin" && !principal.scopes.has("sessions:read");
 }
 
 /** Throws `Forbidden` unless the principal may change who reads a session of `owner`, whose

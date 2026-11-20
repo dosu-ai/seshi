@@ -2,14 +2,11 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import {
   AuthRequestError,
   canRead,
-  changesOnlyOwn,
-  isOwnSession,
   type Principal,
   pickClaims,
   requireDelete,
   requireScope,
   requireVisibilityChange,
-  requireVisibilityScope,
   type Scope,
   seesEverything,
   serviceSourceId,
@@ -324,10 +321,9 @@ export function createApp(instance: Instance) {
     owner: string,
     format: string,
     sessionId: string,
-    options: { stubs?: boolean; onlyOwn?: boolean } = {},
+    options: { stubs?: boolean } = {},
   ): Promise<{ folder: string; metadata: SessionMetadata }> {
     for (const folder of aliases.storedAs(owner)) {
-      if (options.onlyOwn && !isOwnSession(principal, folder, aliases)) break;
       const metadata = await getSession(store, folder, format, sessionId);
       if (metadata === null) continue;
       if (isStub(metadata)) {
@@ -654,9 +650,9 @@ export function createApp(instance: Instance) {
 
   route("PATCH", "/v1/sessions/:format/:session_id", async ({ request, params, url }) => {
     // The owner's own credential may share or unshare: a sign-in reads, a device token only
-    // writes, and either may (X5.10). One that cannot read finds only its own sessions.
+    // writes, and either may (X5.10). One that reads nothing finds only its own sessions
+    // (canRead), and requireVisibilityChange checks the scope.
     const principal = await authenticate(request);
-    requireVisibilityScope(principal);
     const { format, sessionId } = sessionParams(params);
     const body = await readJson(request, 64 * 1024);
     const visibility = visibilityField(body.visibility);
@@ -668,7 +664,7 @@ export function createApp(instance: Instance) {
       ownerOf(url, principal),
       format,
       sessionId,
-      { stubs: true, onlyOwn: changesOnlyOwn(principal) },
+      { stubs: true },
     );
     requireVisibilityChange(principal, folder, aliases, current.owner_basis);
     let metadata: SessionMetadata | null;

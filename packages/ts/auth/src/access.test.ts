@@ -2,7 +2,6 @@ import { Forbidden } from "@seshi/model";
 import { describe, expect, it } from "vitest";
 import {
   canRead,
-  changesOnlyOwn,
   DELETE_FRESH_MS,
   requireDelete,
   requireScope,
@@ -124,11 +123,14 @@ describe("visibility changes and scopes", () => {
     );
   });
 
-  it("let a credential that cannot read find only its own sessions", () => {
-    expect(changesOnlyOwn(device)).toBe(true);
-    expect(changesOnlyOwn(alice)).toBe(false);
-    expect(changesOnlyOwn(admin)).toBe(false);
-    expect(changesOnlyOwn(reader)).toBe(false);
+  it("let a credential that reads nothing find only its own sessions", () => {
+    const bobsShared = { owner: "bob", visibility: "org" as const };
+    expect(canRead(device, bobsShared)).toBe(false);
+    expect(canRead(device, { owner: "alice", visibility: "owner" })).toBe(true);
+    const writer = principal({ role: "service", owner: "svc:otlp", scopes: ["sessions:write"] });
+    expect(canRead(writer, bobsShared)).toBe(false);
+    expect(canRead(alice, bobsShared)).toBe(true);
+    expect(canRead(reader, bobsShared)).toBe(true);
   });
 
   it("keep the org key off a session whose owner was verified (X5.12)", () => {

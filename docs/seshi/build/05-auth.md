@@ -28,8 +28,8 @@ authorize stage holds every write to its caller's own sessions. The shared HS256
     and the nonce.
   - `access.ts`: `canRead`, `requireScope`, `requireDelete` (session tokens must be under
     10 minutes old), `requireVisibilityChange` (the owner, with `sessions:write` or
-    `sessions:read`, or an admin; `changesOnlyOwn` keeps a credential that cannot read to its
-    own owner's sessions).
+    `sessions:read`, or an admin). `canRead` finds a credential that reads nothing (no
+    `sessions:read` or `search`) only its own owner's sessions.
   - `authorizer.ts` `ownershipAuthorizer()`: the pipeline's stage 1 (see below).
   - `claims.ts`: `pickClaims` (the allowlist: email, name, username, git_email, git_name,
     account_ids, all bounded) and `idTokenClaims`.
