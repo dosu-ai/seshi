@@ -1,4 +1,4 @@
-import type { ChangeEntry, EventRole, SearchSort, Visibility } from "@seshi/model";
+import type { ChangeEntry, EventRole, Labels, SearchSort, Visibility } from "@seshi/model";
 import type { Viewer } from "./viewer";
 
 export interface IndexedSession {
@@ -11,6 +11,8 @@ export interface IndexedSession {
   native_session_id?: string;
   project?: string;
   branch?: string;
+  /** The session's labels. */
+  labels?: Labels;
   source_id?: string;
   visibility: Visibility;
   /** Epoch ms of the earliest and latest event, when the traces say. */
@@ -61,6 +63,8 @@ export interface BackendQuery {
   agent?: string;
   repo?: string;
   branch?: string;
+  /** Sessions carrying every one of these labels. */
+  labels?: Labels;
   source?: string;
   since?: number;
   until?: number;

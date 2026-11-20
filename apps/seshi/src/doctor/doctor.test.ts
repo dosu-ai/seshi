@@ -18,6 +18,7 @@ import {
   decisionCheck,
   distinctiveTerm,
   gatherEvidence,
+  labelsCheck,
   offsetsCheck,
   prefixCheck,
   presenceCheck,
@@ -246,6 +247,7 @@ function deps(over: Partial<DoctorDeps> = {}): DoctorDeps {
       rule_set: "rs1",
       origin: "the fake rules",
       transcript: (text) => text,
+      text: (value) => value.replace(/TOPSECRET\w*/g, "[redacted:fake-secret]"),
       records: (records) => [...records],
       residue: (records) =>
         records.flatMap((r, index) =>
@@ -284,6 +286,7 @@ describe("the checks on a captured session", () => {
       "residue",
       "staleness",
       "changes",
+      "labels",
     ]);
     expect(worst(checks.map((c) => c.status))).toBe("ok");
   });
@@ -1130,6 +1133,32 @@ describe("gatherEvidence", () => {
     expect(runChecks(ev, deps()).filter((c) => c.status !== "ok")).toEqual([]);
   });
 
+  it("shows the pinned labels as the server stores them: redacted, and not a mismatch", async () => {
+    const labels = { team: "platform", token: "TOPSECRET123" };
+    const ev = await gatherEvidence(
+      { agent: "claude-code", session_id: SID },
+      deps({
+        state: () => state({ [KEY]: entry({ labels }) }),
+        server: fakeServer({
+          getSession: async (_agent, id) =>
+            id === SID
+              ? metadata({ labels: { team: "platform", token: "[redacted:fake-secret]" } })
+              : null,
+        }),
+      }),
+    );
+    expect(JSON.stringify(ev)).not.toContain("TOPSECRET123");
+    const check = labelsCheck(ev);
+    expect(check).toMatchObject({
+      status: "ok",
+      summary: "team=platform, token=[redacted:fake-secret]",
+    });
+    expect(check.detail).toEqual([
+      "pinned here: team=platform, token=[redacted:fake-secret]",
+      "on the server: team=platform, token=[redacted:fake-secret]",
+    ]);
+  });
+
   it("records what it could not fetch instead of throwing", async () => {
     const ev = await gatherEvidence(
       { agent: "claude-code", session_id: SID },
@@ -1177,5 +1206,32 @@ describe("helpers", () => {
         { role: "assistant", content: "[redacted:github-token] done reading" } as NormalizedRecord,
       ]),
     ).toBe("reading");
+  });
+});
+
+describe("the labels check", () => {
+  it("shows the session's labels, here and on the server, and warns of labels left out", () => {
+    const none = labelsCheck(evidence());
+    expect(none).toMatchObject({ status: "ok", summary: "none" });
+    const pinned = labelsCheck(
+      evidence((ev) => {
+        if (ev.local) ev.local.labels = { team: "platform", "dosu.project": "github.com/acme/app" };
+        if (ev.server.metadata) ev.server.metadata.labels = { team: "infra" };
+      }),
+    );
+    expect(pinned.status).toBe("ok");
+    expect(pinned.summary).toBe("team=infra");
+    expect(pinned.detail).toEqual([
+      "pinned here: dosu.project=github.com/acme/app, team=platform",
+      "on the server: team=infra",
+      expect.stringContaining("the server keeps the labels of the session's first upload"),
+    ]);
+    const problems = labelsCheck(
+      evidence((ev) => {
+        ev.machine.label_problems = ["[labels]: label key 'Team' must be lowercase…"];
+      }),
+    );
+    expect(problems).toMatchObject({ status: "warn", summary: "1 label left out" });
+    expect(problems.hint).toContain("seshi config check --cli");
   });
 });

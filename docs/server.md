@@ -177,6 +177,21 @@ Sources are added, changed and removed without a restart: edit the file (or a dr
 `seshi.d/`) and reload with `SIGHUP` or `POST /v1/admin/reload`
 ([config.md](config.md#reloading)). Unchanged sources keep running, and checkpoints are kept.
 
+A source's `labels` table is put on every session it stores, whatever its type: say, which
+member's key a Cursor Cloud source polls with.
+
+```toml
+[[sources]]
+id = "cursor-alice"
+type = "cursor-cloud"
+api_key = { env = "CURSOR_API_KEY_ALICE" }
+labels = { "dosu.member" = "alice" }
+```
+
+They win over labels the data carries, and follow the rules every session's labels do
+([below](#labels)). A source's labels reach sessions it stores after they are set; a session
+keeps the labels it was first stored with.
+
 ## Deploying
 
 Every release is published as a container image, `ghcr.io/dosu-ai/seshi:<version>`, built
@@ -387,6 +402,7 @@ id; turning it back on uploads it as a new session (`<id>~1`).
   "encoding": "jsonl",             // or "json" (OpenCode exports, ATIF): how the log is encoded
   "project": "github.com/acme/widget",
   "branch": "main",                // the client's best guess; the transcript's own record wins
+  "labels": { "team": "platform" }, // the session's labels, see "Labels" below
   "parent_session_id": "…",        // the session this one was resumed or forked from
   "fork_of": "…",                  // a fork: the parent whose history this log begins with
   "offset": 0,                     // where `transcript` starts in the log: 0 for the whole log
@@ -497,6 +513,18 @@ session that has only started) is `filtered`, not an error. `413 too_large` is a
 body that, decoded (gunzipped), is larger than any upload can need: twice
 `limits.max_upload_bytes` plus 1 MiB. `502 storage_error` is the bucket failing and is
 retryable.
+
+#### Labels
+
+`labels` are small key/value strings the uploader resolved from its config
+([config.md](config.md#labels)): keys `[a-z0-9][a-z0-9._-]{0,63}`, values 1 to 512 characters,
+at most 32. An upload with labels out of those limits is refused with `400 bad_field`, saying
+which. Label values are redacted with the session's rules, as its text is. A session's labels
+are set by the first write that carries any and kept on its metadata
+(`labels`); a later upload with other labels does not change them, and a `replace` (or a
+`rebuild`) may. Each trace also records the labels its write carried (`metadata.labels`). A
+source's own `labels` ([above](#sources)) win over the upload's. `GET /v1/search` filters by
+them ([search.md](search.md)).
 
 #### In chunks
 

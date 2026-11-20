@@ -22,6 +22,10 @@
     },
     "project": { "type": "string" },
     "branch": { "type": "string" },
+    "labels": {
+      "description": "The session's labels: set by the first write that carries any; later writes with other labels leave them, a replace may change them.",
+      "$ref": "common.schema.json#/$defs/Labels"
+    },
     "parent_session_id": { "type": "string" },
     "status": {
       "description": "`stored`, or `redacted` once tombstoned: a redacted session is never stored again.",

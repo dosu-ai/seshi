@@ -896,6 +896,80 @@ describe("sessions", () => {
     expect(metadata?.branch).toBe("main");
   });
 
+  it("keeps a session's labels from its first upload; a replace may change them", async () => {
+    const token = TOKEN;
+    const archive = archiveId("acme", "claude-code", "l1");
+    const upload = (transcript: string, labels: unknown, extra: Record<string, unknown> = {}) =>
+      call("POST", "/v1/sessions", {
+        token,
+        body: { agent: "claude-code", session_id: "l1", transcript, labels, ...extra },
+      });
+    const first = { "dosu.project": "github.com/acme/billing", team: "platform" };
+    expect((await upload(CLAUDE, first)).status).toBe(201);
+    const stored = await readMetadata(store, "acme", archive);
+    expect(stored?.labels).toEqual(first);
+    const trace = await call("GET", "/v1/sessions/claude-code/l1/trace", { token });
+    expect((await trace.json()).metadata.labels).toEqual(first);
+
+    // A later upload that extends the session, with other labels: the session keeps its own.
+    const more = `${CLAUDE}${JSON.stringify({
+      type: "user",
+      uuid: "u9",
+      timestamp: "2026-09-01T00:00:09.000Z",
+      sessionId: "sess1",
+      message: { role: "user", content: "and the tests?" },
+    })}\n`;
+    expect((await upload(more, { "dosu.project": "github.com/acme/other" })).status).toBe(201);
+    const extended = await readMetadata(store, "acme", archive);
+    expect(extended?.traces).toHaveLength(2);
+    expect(extended?.labels).toEqual(first);
+
+    // A replace may.
+    const rewritten = CLAUDE.replace("The auth flow:", "A different answer:");
+    const replaced = await upload(rewritten, { team: "billing" }, { replace: true });
+    expect(replaced.status).toBe(201);
+    expect((await readMetadata(store, "acme", archive))?.labels).toEqual({ team: "billing" });
+  });
+
+  it("refuses labels out of the limits with 400 and why, and redacts what it keeps", async () => {
+    const token = TOKEN;
+    const refused = async (labels: unknown, why: string) => {
+      const res = await call("POST", "/v1/sessions", {
+        token,
+        body: { agent: "claude-code", session_id: "l2", transcript: CLAUDE, labels },
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: { code: string; message: string } };
+      expect(body.error.code).toBe("bad_field");
+      expect(body.error.message).toContain(why);
+    };
+    await refused({ Team: "x" }, "label key 'Team' must be lowercase");
+    await refused({ team: "x".repeat(513) }, "at most 512 are allowed");
+    await refused({ team: "" }, "label 'team' must not be empty");
+    await refused({ team: 3 }, "label 'team' must be a string");
+    await refused(
+      Object.fromEntries(Array.from({ length: 33 }, (_, i) => [`k${i}`, "v"])),
+      "33 labels; at most 32 are allowed",
+    );
+    await refused(["team=x"], "labels must be an object of strings");
+    // A label value is redacted as the session's text is: an env label can carry anything.
+    const secret = "ghp_abcdefghijklmnopqrstuvwxyz012345";
+    const res = await call("POST", "/v1/sessions", {
+      token,
+      body: {
+        agent: "claude-code",
+        session_id: "l3",
+        transcript: CLAUDE,
+        labels: { oops: secret },
+      },
+    });
+    expect(res.status).toBe(201);
+    const stored = await readMetadata(store, "acme", archiveId("acme", "claude-code", "l3"));
+    expect(stored?.labels?.oops).toMatch(/\[redacted:/);
+    expect(JSON.stringify(stored)).not.toContain(secret);
+    expect(await readMetadata(store, "acme", archiveId("acme", "claude-code", "l2"))).toBeNull();
+  });
+
   it("writes only what a fork added past the history it copied from its parent", async () => {
     const token = TOKEN;
     const parent = await call("POST", "/v1/sessions", {

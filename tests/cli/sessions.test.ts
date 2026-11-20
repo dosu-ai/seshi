@@ -71,6 +71,7 @@ beforeEach(async () => {
     transcript: CLAUDE,
     project: "github.com/acme/widget",
     branch: "main",
+    labels: { team: "platform", "dosu.project": "github.com/acme/widget" },
   });
   await db.ingest({ format: "claude-code", session_id: "sess2", transcript: CLAUDE });
   const login = await machine.seshi(["login", "--server", server.url, "--token", "-"], {
@@ -182,6 +183,13 @@ describe("seshi sessions against a server", () => {
     expect(show.out).toContain("claude-code/sess1");
     expect(show.out).toContain("owner       acme (verified)");
     expect(show.out).toContain("project     github.com/acme/widget");
+    // Labels, one a line, by key.
+    expect(show.out).toContain(
+      "  labels      dosu.project=github.com/acme/widget\n              team=platform\n",
+    );
+    expect((await machine.seshi(["sessions", "show", "claude-code/sess2"])).out).not.toContain(
+      "labels",
+    );
     expect(show.out).not.toContain("review ");
     // Model review's decision for each stored write (F3.8), when a policy covered it.
     await review(server.instance.store, "acme", "sess1", 0, "allow");
@@ -523,6 +531,7 @@ describe("serverless mode, by its old name [local] (F11.1)", () => {
           theme: "auto",
           keychain: true,
           capture: { enabled: true, paths: [], remotes: [], exclude: [] },
+          labels: { paths: [] },
         },
         env: {},
         home: local.dir,

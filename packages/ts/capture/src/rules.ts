@@ -35,6 +35,11 @@ export const DEFAULT_RULES: CaptureRules = { enabled: true, paths: [], remotes: 
 export interface RepoConfig {
   capture?: boolean;
   visibility?: "org" | "owner";
+  /** `[labels]`: plain strings only, the fallback under the CLI config's (`resolveLabels`). */
+  labels?: Record<string, string>;
+  /** Why labels of the file were left out (an `env` reference, not a string): they never turn
+   * capture off. */
+  labelProblems?: string[];
   /** The file could not be read: capture is off there until it is fixed (fail closed). */
   invalid?: string;
 }
@@ -272,6 +277,16 @@ export function excludedBy(
     if (repo !== undefined) return remotes.some((r) => repoExcluded(r, repo));
     return longestBase(place, rule, (f, b) => folderExcluded(f, b, platform)) !== undefined;
   });
+}
+
+/** How long the folder of `rule` (its path, or its real path) that `place` is in is, as
+ * `[[capture.paths]]` matches; undefined when `place` is in neither. */
+export function folderMatch(
+  place: Place,
+  rule: { path: string; real?: string },
+  platform: NodeJS.Platform,
+): number | undefined {
+  return longestBase(place, rule, (f, b) => within(f, b, platform))?.length;
 }
 
 /** The folder rule for `place`: the longest one it is in. */

@@ -69,7 +69,12 @@ export function isLeaf(node: JsonSchema | undefined): boolean {
 }
 
 export function childOf(node: JsonSchema, key: string, value?: unknown): JsonSchema | undefined {
-  if (isTable(node)) return node.properties?.[key];
+  if (isTable(node)) {
+    // A table whose other keys are its own (`[labels]`: `paths`, and any label).
+    const extra =
+      typeof node.additionalProperties === "object" ? node.additionalProperties : undefined;
+    return node.properties?.[key] ?? extra;
+  }
   if (isMap(node)) return node.additionalProperties as JsonSchema;
   const options = branches(node).filter(isTable);
   if (options.length === 0) return undefined;

@@ -13,6 +13,7 @@ import {
   placeOf,
   readHead,
   readState,
+  resolveLabels,
   type SessionState,
   StateUnreadable,
   seenIn,
@@ -197,11 +198,12 @@ async function upload(
     if (keys.has(key)) continue;
     const known = state.sessions[key];
     const cwd = info.cwd ?? known?.cwd;
+    const place = placeOf(cwd);
     const decision = decide(
       {
         rules: snapshot.rules,
         ...(snapshot.error ? { rulesError: snapshot.error } : {}),
-        place: placeOf(cwd),
+        place,
         ...stateFacts(state, agent.name, known, now, info.parent_session_id),
         ...(info.started_at ? { started: info.started_at } : {}),
         seen: otherFolders(state, agent.name, known, cwd, info.parent_session_id).map(placeOf),
@@ -235,10 +237,21 @@ async function upload(
       }
     }
     keys.set(key, path);
+    // A session no hook saw: its labels come from this environment and the folder its
+    // transcript names. A session already known keeps the ones it has.
+    let labels: Record<string, string> | undefined;
+    if (known?.labels === undefined) {
+      const resolved = resolveLabels(snapshot.labels, place, host.env, host.platform);
+      for (const problem of resolved.problems) {
+        appendLog(paths.log, `upload: labels: left out ${problem}`);
+      }
+      labels = resolved.labels;
+    }
     additions.push({
       agent: agent.name,
       session_id: info.session_id,
       path,
+      ...(labels ? { labels } : {}),
       ...(info.cwd ? { cwd: info.cwd } : {}),
       ...(info.parent_session_id ? { parent_session_id: info.parent_session_id } : {}),
       first_seen: now.toISOString(),
@@ -256,6 +269,7 @@ async function upload(
       const key = sessionKey(addition.agent, addition.session_id);
       const session = st.sessions[key] ?? addition;
       session.path = addition.path;
+      if (session.labels === undefined && addition.labels) session.labels = addition.labels;
       if (addition.cwd) seenIn(session, addition.cwd);
       delete session.error;
       delete session.next_attempt_at;

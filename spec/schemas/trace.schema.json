@@ -236,7 +236,11 @@
           "type": "string"
         },
         "continuation": { "$ref": "common.schema.json#/$defs/Continuation" },
-        "normalizer": { "$ref": "common.schema.json#/$defs/Normalizer" }
+        "normalizer": { "$ref": "common.schema.json#/$defs/Normalizer" },
+        "labels": {
+          "description": "The labels the write that stored this trace carried.",
+          "$ref": "common.schema.json#/$defs/Labels"
+        }
       },
       "additionalProperties": true
     }

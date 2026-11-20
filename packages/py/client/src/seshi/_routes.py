@@ -55,6 +55,7 @@ ROUTES: dict[str, Route] = {
             "agent",
             "repo",
             "branch",
+            "label",
             "source",
             "since",
             "until",

@@ -1,4 +1,5 @@
 import type { ShippedPrefix } from "./generated/envelope";
+import type { Labels } from "./labels";
 import type { RenderedTrace, RenderFormat } from "./schemas/renders";
 import type {
   CallerKind,
@@ -39,6 +40,9 @@ export interface SessionUpload {
   offset?: number;
   project?: string;
   branch?: string;
+  /** The session's labels (`labelsProblems` gives the limits). The session keeps the first it is
+   * sent; later uploads with other labels leave them, a `replace` may change them. */
+  labels?: Labels;
   parent_session_id?: string;
   fork_of?: string;
   /** What the client stored from the last answer for this session, if it was stored before.
