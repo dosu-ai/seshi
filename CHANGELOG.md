@@ -1,3 +1,11 @@
+# [0.23.0](https://github.com/dosu-ai/seshi/compare/v0.22.0...v0.23.0) (2026-11-20)
+
+
+### Features
+
+* **capture:** /session-capture share and unshare in pi, OpenCode, Codex and Cursor ([#64](https://github.com/dosu-ai/seshi/issues/64)) ([555486e](https://github.com/dosu-ai/seshi/commit/555486e45e87b84cee5f4a03f5b25b62fffd38e4))
+* **sessions:** owners share and unshare their own sessions (seshi share) ([#63](https://github.com/dosu-ai/seshi/issues/63)) ([c0bbfce](https://github.com/dosu-ai/seshi/commit/c0bbfce9a4dfb8e62a80bb5628a25030b359d77c))
+
 # [0.22.0](https://github.com/dosu-ai/seshi/compare/v0.21.0...v0.22.0) (2026-11-20)
 
 
