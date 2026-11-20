@@ -83,8 +83,10 @@ anything over a network.
 docker compose -f compose.yaml -f compose.tls.yaml up -d --wait
 ```
 
-With this add-on seshi publishes no port on the host at all, whatever `BIND_ADDRESS` says, so
-nothing reaches it except through Caddy. Caddy gets a certificate for the name from a public CA (Let's Encrypt, or ZeroSSL as a
+With this add-on Caddy is the only service that publishes ports on the host: seshi publishes
+none, whatever `BIND_ADDRESS` says. Containers on the same Docker network, and on Linux the
+host itself, can still reach seshi on its container address, so keep untrusted containers off
+this project's network. Caddy gets a certificate for the name from a public CA (Let's Encrypt, or ZeroSSL as a
 fallback) and renews it. Keep the
 `seshi_caddy-data` volume, which holds the certificates. `SITE_ADDRESS=localhost` uses Caddy's
 own CA instead, which is enough to try it. Caddy sets no response timeout and no body limit by

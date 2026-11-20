@@ -29,16 +29,16 @@ cp .env.example .env
   echo "SESHI_AUTH__TOKENS__CI=$TOKEN"
   echo "SESHI_WORKER__HEARTBEAT_INTERVAL=1s"
   echo "SESHI_SEARCH__INTERVAL=1s"
-  # 0: Docker picks a free port, read back with `docker compose port` after each up.
-  echo "HOST_PORT=0"
-  echo "HTTP_PORT=0"
-  echo "HTTPS_PORT=0"
-  echo "SITE_ADDRESS=localhost"
-  echo "BUCKET_ACCESS_KEY=$(openssl rand -hex 16)"
-  echo "BUCKET_SECRET_KEY=$(openssl rand -hex 32)"
-  if [ -n "${IMAGE_REPOSITORY:-}" ]; then echo "IMAGE_REPOSITORY=$IMAGE_REPOSITORY"; fi
-  if [ -n "${IMAGE_TAG:-}" ]; then echo "IMAGE_TAG=$IMAGE_TAG"; fi
 } >>.env
+
+# The kit's own variables are exported rather than written to .env: Compose takes the shell's
+# value over .env's, so a HOST_PORT or BIND_ADDRESS the caller happens to have set must not leak
+# in. Port 0 lets Docker pick a free port, read back with `docker compose port` after each up.
+# IMAGE_REPOSITORY and IMAGE_TAG are the script's inputs and pass through as given.
+export HOST_PORT=0 HTTP_PORT=0 HTTPS_PORT=0 SITE_ADDRESS=localhost
+BUCKET_ACCESS_KEY=$(openssl rand -hex 16)
+BUCKET_SECRET_KEY=$(openssl rand -hex 32)
+export BUCKET_ACCESS_KEY BUCKET_SECRET_KEY
 
 # A Claude Code transcript with more assistant text than the session filter's 2000-character
 # floor (docs/config.md, [filter]), so the server stores it.
@@ -81,11 +81,18 @@ up() {
   published=$(compose port seshi 7200 2>/dev/null || true)
   if [ -n "$published" ] && [ "${published##*:}" != 0 ]; then
     BASE="http://127.0.0.1:${published##*:}"
+    # Without the TLS add-on, seshi is published on loopback only.
+    if [ "$BIND_ADDRESS" = 127.0.0.1 ] && [ "${published%:*}" != 127.0.0.1 ]; then
+      fail "seshi is published on ${published%:*}, not loopback"
+    fi
   fi
 }
 
+# check_health <base URL> [curl options]
 check_health() {
-  health=$(curl -fsS "$BASE/healthz") || fail "/healthz did not answer"
+  url=$1
+  shift
+  health=$(curl -fsS "$@" "$url/healthz") || fail "$url/healthz did not answer"
   [ "$(echo "$health" | jq -r .ok)" = true ] || fail "/healthz: $health"
   if [ -n "${EXPECT_VERSION:-}" ]; then
     [ "$(echo "$health" | jq -r .version)" = "$EXPECT_VERSION" ] ||
@@ -126,6 +133,11 @@ check_hardening() {
     fail "the root filesystem is writable"
   [ "$(docker inspect -f '{{json .HostConfig.CapDrop}}' "$container")" = '["ALL"]' ] ||
     fail "capabilities are not all dropped"
+  # A cap_add entry is granted even beside CapDrop ALL.
+  case "$(docker inspect -f '{{json .HostConfig.CapAdd}}' "$container")" in
+    null | "[]") ;;
+    *) fail "capabilities are added back" ;;
+  esac
 }
 
 check_recreate() {
@@ -136,21 +148,22 @@ check_recreate() {
 
 for variant in $VARIANTS; do
   PROJECT="seshi-kit-smoke-$RUN-$variant"
+  BIND_ADDRESS=127.0.0.1
   case "$variant" in
     file) COMPOSE_FILE=compose.yaml ;;
     bucket) COMPOSE_FILE=compose.yaml:compose.bucket.yaml ;;
     # With seshi on every interface, as a deployment that adds Caddy later may have it: the
     # overlay must still publish nothing for seshi.
-    tls) COMPOSE_FILE=compose.yaml:compose.tls.yaml BIND_ADDRESS=0.0.0.0 && export BIND_ADDRESS ;;
+    tls) COMPOSE_FILE=compose.yaml:compose.tls.yaml BIND_ADDRESS=0.0.0.0 ;;
     *) fail "unknown variant $variant" ;;
   esac
-  export COMPOSE_FILE
+  export COMPOSE_FILE BIND_ADDRESS
   echo "== $variant ($COMPOSE_FILE)"
   compose config -q
   up
   case "$variant" in
     file)
-      check_health
+      check_health "$BASE"
       check_upload
       check_read
       check_search
@@ -159,7 +172,7 @@ for variant in $VARIANTS; do
       check_recreate
       ;;
     bucket)
-      check_health
+      check_health "$BASE"
       check_upload
       check_read
       compose logs --no-color seshi | grep -q 'storing sessions in s3://seshi/sessions' ||
@@ -174,9 +187,9 @@ for variant in $VARIANTS; do
       [ -z "$BASE" ] || fail "seshi publishes $BASE beside Caddy"
       [ "$(compose config --format json | jq '.services.seshi.ports // [] | length')" = 0 ] ||
         fail "the merged config publishes a seshi port"
+      # Through Caddy, with the same checks (ok, and the version); -k for Caddy's local CA.
       https=$(compose port caddy 443)
-      curl -kfsS "https://localhost:${https##*:}/healthz" >/dev/null ||
-        fail "Caddy does not serve /healthz over HTTPS"
+      check_health "https://localhost:${https##*:}" -k
       ;;
   esac
   compose down -v --remove-orphans >/dev/null
