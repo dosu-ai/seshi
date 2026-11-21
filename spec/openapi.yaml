@@ -1630,9 +1630,9 @@ paths:
       summary: Write a file under config/ (a rule pack, a review prompt).
       operationId: putAdminConfigFile
       description: |
-        The body is the file. When `config/seshi.toml` names it, the result is checked as a
-        reload would check it (a pack compiled and its test strings run) before it is
-        written; then applied here at once. Needs `sources:admin`.
+        The body is the file. A pack under `packs/` is compiled and its test strings run;
+        when `config/seshi.toml` names the file, the result is also checked as a reload would
+        check it. Both before it is written; then applied here at once. Needs `sources:admin`.
       parameters:
         - $ref: "#/components/parameters/if_match"
         - $ref: "#/components/parameters/if_none_match"
@@ -2257,7 +2257,10 @@ components:
         set: { type: boolean, const: true }
         fingerprint:
           type: string
-          description: An HMAC of the value under the sealing key, 12 hex digits.
+          description: |
+            An HMAC of the value under the sealing key it was set with, 12 hex digits; a
+            reseal keeps it, so it changes only with the value. Sent back in a PUT, this view
+            keeps the sealed value.
         key_id: { type: string }
         updated_at: { type: string, format: date-time }
     StoredSourceWrite:

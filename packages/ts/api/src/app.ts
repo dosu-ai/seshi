@@ -1044,7 +1044,9 @@ export function createApp(instance: Instance) {
             type: String(stored.source.type ?? ""),
             enabled: stored.source.enabled !== false,
             polled: false,
-            note: "stored in the bucket; not running on this instance",
+            note: instance.runtime?.leftOut(id)
+              ? `left out here: ${instance.runtime.leftOut(id)}`
+              : "stored in the bucket; not applied on this instance yet",
             checkpoint: null,
             dropped: 0,
             failed: 0,
@@ -1135,13 +1137,19 @@ export function createApp(instance: Instance) {
     in_use: 409,
   };
 
+  /** `text` with the server's local copies of `config/` named as the bucket's `config/`. */
+  function tidy(text: string): string {
+    return instance.runtime?.tidy(text) ?? text;
+  }
+
   async function change<T>(write: () => Promise<T>): Promise<T> {
     let result: T;
     try {
       result = await write();
     } catch (err) {
       if (err instanceof RuntimeChangeError) {
-        throw new HttpError(CHANGE_STATUS[err.code], err.code, err.message, err.problems);
+        const problems = err.problems.map(tidy);
+        throw new HttpError(CHANGE_STATUS[err.code], err.code, problems.join("; "), problems);
       }
       if (isPreconditionFailed(err)) {
         throw new HttpError(
@@ -1150,13 +1158,14 @@ export function createApp(instance: Instance) {
           "it changed since it was read (or already exists): read it again and redo the change",
         );
       }
-      if (err instanceof SealingError) throw new HttpError(422, "sealing", err.message);
+      if (err instanceof SealingError) throw new HttpError(422, "sealing", tidy(err.message));
       if (err instanceof ConfigError) {
+        const issues = err.issues.map(tidy);
         throw new HttpError(
           422,
           "invalid",
-          `the config does not load as it stands: ${err.issues.join("; ")}`,
-          err.issues,
+          `the config does not load as it stands: ${issues.join("; ")}`,
+          issues,
         );
       }
       throw err;
@@ -1180,7 +1189,7 @@ export function createApp(instance: Instance) {
   function runtimeSettings(): Record<string, unknown> {
     const config = instance.config as unknown as Record<string, unknown>;
     return JSON.parse(
-      JSON.stringify(Object.fromEntries(RUNTIME_SECTIONS.map((key) => [key, config[key]]))),
+      tidy(JSON.stringify(Object.fromEntries(RUNTIME_SECTIONS.map((key) => [key, config[key]])))),
     ) as Record<string, unknown>;
   }
 
@@ -1212,7 +1221,7 @@ export function createApp(instance: Instance) {
       {
         runtime_config: "store",
         version: runtime.version,
-        here: instance.configStatus().runtime,
+        here: JSON.parse(tidy(JSON.stringify(instance.configStatus().runtime ?? null))),
         converged: instances.every((i) => i.current),
         instances,
         doc,

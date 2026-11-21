@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { type ConfigFs, Keyring, loadServerConfig, type RuntimeLayer } from "@seshi/config";
 import { openStore } from "@seshi/store";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { readRedactionPacks } from "./instance";
 import { RuntimeChangeError, RuntimeConfig } from "./runtime";
 
 const K1 = "k1-0123456789abcdef0123456789abcdef";
@@ -52,11 +53,69 @@ describe("RuntimeConfig", () => {
     expect(stored).toContain('"v1.k2.');
     expect(stored).not.toContain("secret-a");
 
+    // The value did not change, so its fingerprint did not either.
+    const before = one.storedSource("cursor-a")?.source.api_key as { fingerprint: string };
+    await both.sync();
+    const after = both.storedSource("cursor-a")?.source.api_key as {
+      fingerprint: string;
+      key_id: string;
+    };
+    expect(after).toMatchObject({ key_id: "k2", fingerprint: before.fingerprint });
+
     const old = runtime(new Keyring({ k1: K1 }));
     await old.sync();
     const loaded = old.compose();
     expect(loaded.config.sources).toEqual([]);
     expect(loaded.warnings.join("\n")).toMatch(/cursor-a.json: left out: .*key 'k2'/);
+    expect(old.leftOut("cursor-a")).toMatch(/key 'k2'/);
+    // A reseal that cannot unseal one names it.
+    await expect(
+      runtime(new Keyring({ k1: K1, k3: K2.replace("k2", "k3") }, "k3")).reseal(),
+    ).rejects.toThrow(/source 'cursor-a': .*key 'k2'/);
+  });
+
+  it("keeps a secret sent back as the view a read gave, and checks every pack", async () => {
+    const rt = runtime(new Keyring({ k1: K1 }));
+    await rt.putSource("cursor-a", { type: "cursor-cloud", api_key: "secret-a" }, {}, ok);
+    await rt.sync();
+    const view = rt.storedSource("cursor-a")?.source.api_key;
+    expect(view).toMatchObject({ set: true });
+    await rt.putSource("cursor-a", { type: "cursor-cloud", enabled: false, api_key: view }, {}, ok);
+    await rt.sync();
+    expect(rt.compose().config.sources[0]).toMatchObject({ enabled: false });
+    expect(rt.storedSource("cursor-a")?.source.api_key).toEqual(view);
+    await expect(
+      rt.putSource("cursor-b", { type: "cursor-cloud", api_key: view }, {}, ok),
+    ).rejects.toMatchObject({ problems: ["api_key: no secret stored to keep; send its value"] });
+
+    const bad = new TextEncoder().encode('{"patterns":["(unclosed"],"sensitive_files":[]}');
+    await expect(rt.putFile("packs/bad.json", bad, {}, ok)).rejects.toMatchObject({
+      code: "invalid",
+    });
+    await expect(rt.putFile("packs/bad.json", bad, {}, ok)).rejects.toThrow(/not a usable RE2/);
+    const good = new TextEncoder().encode('{"patterns":["ZEBRA-[0-9]{6}"],"sensitive_files":[]}');
+    await rt.putFile("packs/good.json", good, {}, ok);
+  });
+
+  it("names the bucket's config/ in messages, not its local copies", async () => {
+    const rt = runtime(new Keyring({ k1: K1 }));
+    const pack = new TextEncoder().encode('{"patterns":["X"],"sensitive_files":[]}');
+    await rt.putFile("packs/org.json", pack, {}, ok);
+    await rt.patchDoc({ set: { "redaction.packs": ["packs/org.json"] } }, {}, ok);
+    // The check a server runs: the packs the config names are read.
+    const packs = async (config: { redaction: { packs: string[] } }) =>
+      readRedactionPacks(config.redaction.packs).then(
+        () => [],
+        (err: Error) => [err.message],
+      );
+    const refused = await rt.deleteFile("packs/org.json", {}, packs).catch((err) => err);
+    expect(refused).toMatchObject({
+      code: "in_use",
+      problems: ["config/seshi.toml needs config/packs/org.json; take it out there first"],
+    });
+    await rt.sync();
+    const [path] = rt.compose().config.redaction.packs;
+    expect(rt.tidy(`cannot read ${path}`)).toBe("cannot read config/packs/org.json");
   });
 
   it("refuses a file's source, a file secret, and a deletion a review policy needs", async () => {

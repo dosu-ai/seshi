@@ -138,7 +138,8 @@ on a server, with a warning. `seshi config show --origin` names the layer each v
 
 **Every change is checked before it is written**, as a reload would check it: the candidate is
 merged under the files, and the schema, the cross-section rules, the rule packs (their test
-strings run) and the review policies must all pass (`422` with each problem in
+strings run; a pack under `config/packs/` is compiled when written, named yet or not) and the
+review policies must all pass (`422` with each problem in
 `error.problems`). Then it is written with the caller's condition: `If-Match` the `ETag` it read
 (`412` when it changed since), `If-None-Match: *` to create only. So a version seshi would
 refuse never lands in the bucket.
@@ -157,14 +158,15 @@ laptops fetch the rules on their own schedule, so no barrier could close that ga
 **Secrets are sealed.** A source's secrets (`api_key`, `credentials.*`) sent as values are
 sealed with AES-256-GCM under a key from [`[secrets]`](#secrets), bound to the source and field
 they belong to, and are never returned: a read shows `{ set, fingerprint, key_id, updated_at }`
-in their place. A `PUT` that leaves a secret out keeps the sealed one when the source keeps its
-type. Only values are taken: `{ env = "NAME" }` and `{ file = … }` are refused (and a stored
+in their place (the fingerprint is taken when the value is set and kept by a reseal, so it
+changes only with the value). A `PUT` that leaves a secret out, or sends back the view it read,
+keeps the sealed one when the source keeps its type. Only values are taken: `{ env = "NAME" }` and `{ file = … }` are refused (and a stored
 source holding one is left out), since they would let an admin token make the server send its
 own environment or files, the sealing keys among them, to an endpoint the caller picks. A
 source that needs one belongs in `seshi.toml`. To rotate: add a key to `secrets.keys`, point
 `secrets.key_id` at it, deploy, `POST /v1/admin/secrets/reseal`, then remove the old key. A
-stored source whose key is gone is left out (with a warning), so one lost key stops one
-source, not the server.
+stored source whose key is gone is left out, so one lost key stops one source, not the server
+and not writes to the other sources; `GET /v1/admin/sources/{id}` says why in its `note`.
 
 The server does not start when it cannot read the bucket's runtime config: the files alone
 may be missing the org's rules.

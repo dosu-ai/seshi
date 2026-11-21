@@ -16,6 +16,7 @@ import {
   RUNTIME_SECTIONS,
   RUNTIME_SOURCES_PREFIX,
   type RuntimeLayer,
+  SealingError,
   type SecretView,
   type ServerConfig,
   SHARED_CONFIG,
@@ -29,6 +30,7 @@ import {
 import { VERSION } from "@seshi/model";
 import { isPreconditionFailed, listNamed, type Store } from "@seshi/store";
 import { Coalesced } from "./coalesced";
+import { readRedactionPacks } from "./instance";
 import type { Logger } from "./log";
 
 /** How a source the admin API wrote is kept: `runtime/sources/<id>.json`. Its secrets are
@@ -99,6 +101,10 @@ interface Snapshot {
 }
 
 const EMPTY_VERSION = "none";
+/** How often a change sent without a condition is redone when another write won the race. */
+const PATCH_RETRIES = 10;
+/** Files under `config/` that are redaction rule packs. */
+const PACKS_PREFIX = "packs/";
 
 export interface RuntimeConfigOptions {
   store: Store;
@@ -138,6 +144,8 @@ export class RuntimeConfig {
     at: new Date(0),
   };
   private warnings: string[] = [];
+  /** Why each stored source the bucket holds is not in the running config, by id. */
+  private leftOutReasons = new Map<string, string>();
 
   constructor(options: RuntimeConfigOptions) {
     this.store = options.store;
@@ -249,6 +257,7 @@ export class RuntimeConfig {
    * that cannot be unsealed is left out with a warning, so one bad key stops one source. */
   layer(snapshot: Snapshot = this.snapshot, unseal = true): RuntimeLayer {
     const warnings: string[] = [];
+    const reasons = new Map<string, string>();
     const sources: RuntimeLayer["sources"][number][] = [];
     for (const [id, { stored }] of [...snapshot.sources].sort(([a], [b]) => a.localeCompare(b))) {
       try {
@@ -257,10 +266,12 @@ export class RuntimeConfig {
           source: unseal ? this.unseal(id, stored) : masked(id, stored),
         });
       } catch (err) {
+        reasons.set(id, message(err));
         warnings.push(`${this.sourceOrigin(id)}: left out: ${message(err)}`);
       }
     }
     this.warnings = warnings;
+    if (snapshot === this.snapshot) this.leftOutReasons = reasons;
     if (snapshot.docProblems) throw new ConfigError(snapshot.docProblems);
     return { ...(snapshot.doc ? { doc: snapshot.doc } : {}), sources };
   }
@@ -282,6 +293,19 @@ export class RuntimeConfig {
     this.applied = problem
       ? { ...this.applied, problem }
       : { version: this.snapshot.version, at: this.now() };
+  }
+
+  /** Why stored source `id` is left out of the config (a key it was sealed with is gone, say),
+   * or undefined when it is not. */
+  leftOut(id: string): string | undefined {
+    return this.leftOutReasons.get(id);
+  }
+
+  /** `text` with this process's local copies of `config/` named as the bucket's `config/`, so
+   * no message shows a temporary folder. */
+  tidy(text: string): string {
+    const root = this.cacheDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return text.replace(new RegExp(`${root}/(?:config|candidate)-\\d+/`, "g"), SHARED_PREFIX);
   }
 
   private sourceOrigin(id: string): string {
@@ -469,7 +493,9 @@ export class RuntimeConfig {
       try {
         return await this.patchOnce(change, own, check);
       } catch (err) {
-        if (given || !isPreconditionFailed(err) || attempt >= 4) throw err;
+        if (given || !isPreconditionFailed(err) || attempt >= PATCH_RETRIES) throw err;
+        // Writers racing on one doc each wait a little, at random, before they read again.
+        await Bun.sleep(10 + Math.random() * 40 * (attempt + 1));
       }
     }
   }
@@ -528,7 +554,15 @@ export class RuntimeConfig {
       ]);
     }
     await this.sync();
-    await this.withCandidateFiles({ put: { name, body } }, check, "invalid");
+    await this.withCandidateFiles({ put: { name, body } }, check, "invalid", async (dir) => {
+      // A pack is checked when it is written, named by the doc or not yet.
+      if (!name.startsWith(PACKS_PREFIX)) return;
+      try {
+        await readRedactionPacks([join(dir, name)]);
+      } catch (err) {
+        throw new RuntimeChangeError("invalid", [message(err)]);
+      }
+    });
     const put = await this.store.put(`${SHARED_PREFIX}${name}`, body, condition);
     return { etag: put.etag ?? "" };
   }
@@ -559,6 +593,7 @@ export class RuntimeConfig {
     change: { put?: { name: string; body: Uint8Array }; remove?: string },
     check: (config: ServerConfig) => Promise<string[]>,
     code: "invalid" | "in_use",
+    alsoCheck?: (dir: string) => Promise<void>,
   ): Promise<void> {
     const dir = join(this.cacheDir, `candidate-${++this.candidates}`);
     try {
@@ -581,13 +616,14 @@ export class RuntimeConfig {
       const doc = this.snapshot.docTree
         ? baseLayerOf(dir, origin, structuredClone(this.snapshot.docTree))
         : undefined;
+      await alsoCheck?.(dir);
       try {
         await this.checkCandidate({ ...this.snapshot, dir, doc }, check);
       } catch (err) {
         if (err instanceof RuntimeChangeError && code === "in_use") {
+          // Why the config would not load without it (it cannot read the file) says no more.
           throw new RuntimeChangeError("in_use", [
             `config/${SHARED_CONFIG} needs config/${change.remove}; take it out there first`,
-            ...err.problems,
           ]);
         }
         throw err;
@@ -611,7 +647,12 @@ export class RuntimeConfig {
         current.push(id);
         continue;
       }
-      const plain = this.unseal(id, stored);
+      let plain: Record<string, unknown>;
+      try {
+        plain = this.unseal(id, stored);
+      } catch (err) {
+        throw new SealingError(`source '${id}': ${message(err)}`);
+      }
       const next = this.seal(id, plain, undefined, stored.updated_by, stored);
       try {
         await this.store.put(
@@ -629,7 +670,7 @@ export class RuntimeConfig {
   }
 
   /** The "left out" warnings `snapshot`'s sources give, or none when its doc does not load. */
-  private leftOut(snapshot: Snapshot): string[] {
+  private leftOutWarnings(snapshot: Snapshot): string[] {
     try {
       this.layer(snapshot);
     } catch {
@@ -655,7 +696,7 @@ export class RuntimeConfig {
     let loaded: Loaded<ServerConfig>;
     let left: string[];
     try {
-      const before = new Set(this.leftOut(this.snapshot));
+      const before = new Set(this.leftOutWarnings(this.snapshot));
       try {
         loaded = this.compose(candidate);
       } catch (err) {
@@ -691,6 +732,15 @@ export class RuntimeConfig {
     const problems: string[] = [];
     for (const field of secretFields(source)) {
       const value = getField(source, field);
+      if (isSecretView(value)) {
+        // The view a read gives, sent back as it was read: keep the sealed value.
+        if (previous && previous.source.type === source.type && previous.secrets[field]) {
+          unsetField(source, field);
+        } else {
+          problems.push(`${field}: no secret stored to keep; send its value`);
+        }
+        continue;
+      }
       if (typeof value === "string") {
         if (value === "") {
           problems.push(`${field}: empty`);
@@ -701,7 +751,9 @@ export class RuntimeConfig {
         setField(source, field, sealed);
         secrets[field] = {
           key_id: kid,
-          fingerprint: this.keyring.fingerprint(value, kid),
+          // A reseal keeps the value, so it keeps its fingerprint too.
+          fingerprint:
+            keepTimesFrom?.secrets[field]?.fingerprint ?? this.keyring.fingerprint(value, kid),
           updated_at: keepTimesFrom?.secrets[field]?.updated_at ?? now,
         };
       } else if (isSealed(value)) {
@@ -846,6 +898,16 @@ function viewOf(stored: StoredSource): Record<string, unknown> {
 
 /** A stored source with each sealed secret as a placeholder: for showing the config where
  * the sealing keys are not at hand (`seshi config show`). */
+/** The `{ set, fingerprint, key_id, updated_at }` a read shows in a secret's place. */
+function isSecretView(value: unknown): boolean {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    (value as Record<string, unknown>).set === true
+  );
+}
+
 /** Why a stored source's secret must be a value: `{ env }` and `{ file }` would read the
  * server's own environment and files, which an admin token must not reach. */
 const NOT_A_VALUE =
