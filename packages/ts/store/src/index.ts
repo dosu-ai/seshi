@@ -247,6 +247,7 @@ export {
   type Store,
   type StoredObject,
   StoreError,
+  storeFailure,
   type UpdateOptions,
   type UpdateResult,
   type UpdateStep,

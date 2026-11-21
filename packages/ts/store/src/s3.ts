@@ -13,6 +13,7 @@ import {
   type Store,
   type StoredObject,
   StoreError,
+  storeFailure,
 } from "./store";
 
 export interface S3Credentials {
@@ -139,7 +140,7 @@ export class S3Store implements Store {
         if (await this.missing(key)) return null;
         throw new AccessDenied("read", key, err);
       }
-      throw new StoreError(`read ${key}`, err);
+      throw storeFailure(`read ${key}`, err);
     }
   }
 
@@ -164,7 +165,7 @@ export class S3Store implements Store {
         throw new PreconditionFailed(key, "no object to replace");
       }
       if (denied(err)) throw new AccessDenied("write", key, err);
-      throw new StoreError(`write ${key}`, err);
+      throw storeFailure(`write ${key}`, err);
     }
   }
 
@@ -176,7 +177,7 @@ export class S3Store implements Store {
         if (await this.missing(key)) return null;
         throw new AccessDenied("stat", key, err);
       }
-      throw new StoreError(`stat ${key}`, err);
+      throw storeFailure(`stat ${key}`, err);
     }
   }
 
@@ -188,7 +189,7 @@ export class S3Store implements Store {
         throw new PreconditionFailed(key, "the object changed since it was read");
       }
       if (denied(err)) throw new AccessDenied("delete", key, err);
-      throw new StoreError(`delete ${key}`, err);
+      throw storeFailure(`delete ${key}`, err);
     }
   }
 
@@ -204,7 +205,7 @@ export class S3Store implements Store {
       return { keys: response.keys.map((k) => k.slice(strip)), truncated: response.truncated };
     } catch (err) {
       if (denied(err)) throw new AccessDenied("list", prefix, err);
-      throw new StoreError(`list ${prefix}`, err);
+      throw storeFailure(`list ${prefix}`, err);
     }
   }
 
@@ -228,7 +229,7 @@ export class S3Store implements Store {
       return { keys: objects.map((o) => o.key), truncated: response.truncated, objects };
     } catch (err) {
       if (denied(err)) throw new AccessDenied("list", prefix, err);
-      throw new StoreError(`list ${prefix}`, err);
+      throw storeFailure(`list ${prefix}`, err);
     }
   }
 }

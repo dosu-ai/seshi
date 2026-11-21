@@ -1,4 +1,5 @@
 import { StoreError } from "@seshi/model";
+import { BucketHttpError } from "./http-error";
 
 export interface ObjectStat {
   size: number;
@@ -104,9 +105,20 @@ export class AccessDenied extends StoreError {
     readonly key: string,
     cause?: unknown,
   ) {
-    super(`${operation} ${key || "/"}: access denied`, cause);
+    // The service's reason, when it gave one: a key that is wrong (Azure's AuthenticationFailed,
+    // S3's SignatureDoesNotMatch) reads differently from one that may not do this.
+    const code = cause instanceof BucketHttpError ? cause.code : undefined;
+    super(`${operation} ${key || "/"}: access denied${code ? ` (${code})` : ""}`, cause);
     this.name = "AccessDenied";
   }
+}
+
+/** A store operation that failed for a reason other than a refusal, saying what failed and why
+ * (`read seshi.json: GET c/seshi.json: 404 ContainerNotFound: …`, `list owners/: Unable to
+ * connect`): callers print the message, not the cause. */
+export function storeFailure(what: string, cause: unknown): StoreError {
+  const why = cause instanceof Error ? cause.message : cause === undefined ? "" : String(cause);
+  return new StoreError(why ? `${what}: ${why}` : what, cause);
 }
 
 /** The `AccessDenied` behind `err`, following `cause`s; undefined when there is none. */

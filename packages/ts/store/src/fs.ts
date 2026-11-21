@@ -25,6 +25,7 @@ import {
   type Store,
   type StoredObject,
   StoreError,
+  storeFailure,
 } from "./store";
 
 const TMP_SUFFIX = ".tmp";
@@ -84,7 +85,7 @@ export class FsStore implements Store {
       const body = await this.read(path);
       return body === null ? null : { body, etag: md5(body) };
     } catch (err) {
-      throw new StoreError(`read ${key}`, err);
+      throw storeFailure(`read ${key}`, err);
     }
   }
 
@@ -180,7 +181,7 @@ export class FsStore implements Store {
       });
     } catch (err) {
       if (err instanceof StoreError) throw err;
-      throw new StoreError(`write ${key}`, err);
+      throw storeFailure(`write ${key}`, err);
     }
   }
 
@@ -194,7 +195,7 @@ export class FsStore implements Store {
       return { size: body.length, etag: md5(body), modified: info.mtime.toISOString() };
     } catch (err) {
       if (isCode(err, "ENOENT")) return null;
-      throw new StoreError(`stat ${key}`, err);
+      throw storeFailure(`stat ${key}`, err);
     }
   }
 
@@ -215,7 +216,7 @@ export class FsStore implements Store {
       });
     } catch (err) {
       if (err instanceof StoreError) throw err;
-      throw new StoreError(`delete ${key}`, err);
+      throw storeFailure(`delete ${key}`, err);
     }
   }
 
@@ -234,7 +235,7 @@ export class FsStore implements Store {
         .sort();
     } catch (err) {
       if (isCode(err, "ENOENT")) return { keys: [], truncated: false };
-      throw new StoreError(`list ${prefix}`, err);
+      throw storeFailure(`list ${prefix}`, err);
     }
     if (options.startAfter !== undefined) {
       const after = options.startAfter;
