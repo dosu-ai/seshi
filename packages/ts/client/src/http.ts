@@ -712,7 +712,7 @@ export class HttpSeshi implements Seshi {
       `/v1/admin/config/files/${encodeURIComponent(name)}`,
       { headers: conditionHeaders(condition) },
     );
-    if (status === 404) return null;
+    if (status === 404 && errorCode(body) === "no_such_file") return null;
     if (status !== 200) refuseChange(status, body);
     return body as { name: string; deleted: boolean; version: string };
   }
@@ -743,7 +743,7 @@ export class HttpSeshi implements Seshi {
       `/v1/admin/sources/${encodeURIComponent(id)}`,
       { headers: conditionHeaders(condition) },
     );
-    if (status === 404) return null;
+    if (status === 404 && errorCode(body) === "unknown_source") return null;
     if (status !== 200) refuseChange(status, body);
     return body as { id: string; deleted: boolean; version: string };
   }

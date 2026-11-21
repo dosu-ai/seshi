@@ -602,7 +602,7 @@ def put_config_file(
 
 def delete_config_file(name: str, if_match: str | None) -> Call[m.RuntimeFileWrite | None]:
     def read_answer(answer: Answer) -> m.RuntimeFileWrite | None:
-        if answer.status == 404:
+        if answer.status == 404 and error_code(answer.body) == "no_such_file":
             return None
         return _runtime_write(m.RuntimeFileWrite)(answer)
 
@@ -628,7 +628,7 @@ def put_source(
 
 def delete_source(id: str, if_match: str | None) -> Call[m.SourceDeleted | None]:
     def read_answer(answer: Answer) -> m.SourceDeleted | None:
-        if answer.status == 404:
+        if answer.status == 404 and error_code(answer.body) == "unknown_source":
             return None
         return _runtime_write(m.SourceDeleted)(answer)
 

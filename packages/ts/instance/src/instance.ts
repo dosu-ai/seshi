@@ -211,6 +211,7 @@ export class Instance {
   /** The bucket's runtime config, when this server keeps one there. */
   readonly runtime: RuntimeConfig | undefined;
   private readonly refreshing = new Coalesced<void>();
+  private lastFreshen = 0;
 
   /** The running config: the start-up one, or the last reload's (its restart-only sections are
    * always the start-up ones). */
@@ -443,8 +444,13 @@ export class Instance {
   async freshen(waitMs = 2_000): Promise<void> {
     const runtime = this.runtime;
     if (!runtime) return;
+    const now = this.now().getTime();
     const last = runtime.lastSync?.getTime() ?? 0;
-    if (this.now().getTime() - last <= 2 * runtime.pollMs) return;
+    if (now - last <= 2 * runtime.pollMs) return;
+    // A bucket that is failing or hanging is not waited on by every request: one wait per
+    // poll interval, and the rest go on with the config running.
+    if (now - this.lastFreshen < runtime.pollMs) return;
+    this.lastFreshen = now;
     let timer: ReturnType<typeof setTimeout> | undefined;
     await Promise.race([
       this.refreshConfig().catch((err) =>

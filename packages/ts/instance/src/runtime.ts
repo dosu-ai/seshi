@@ -63,7 +63,13 @@ export interface RuntimeInstanceRecord {
 /** A change refused before anything was written: what is wrong with it, one problem a line. */
 export class RuntimeChangeError extends Error {
   constructor(
-    readonly code: "invalid" | "locked" | "file_owned" | "not_found" | "in_use",
+    readonly code:
+      | "invalid"
+      | "locked"
+      | "file_owned"
+      | "unknown_source"
+      | "no_such_file"
+      | "in_use",
     readonly problems: string[],
   ) {
     super(problems.join("; "));
@@ -119,6 +125,10 @@ export class RuntimeConfig {
   private readonly log: Logger | undefined;
   private snapshot: Snapshot = emptySnapshot();
   private copies = 0;
+  private candidates = 0;
+  /** The local copies of `config/` still kept: the current one and the one before it (a
+   * write in flight may still read its packs). */
+  private dirs: string[] = [];
   private readonly syncing = new Coalesced<boolean>();
   /** When the bucket was last read without an error. */
   lastSync: Date | undefined;
@@ -200,9 +210,9 @@ export class RuntimeConfig {
         docTree = undefined;
         docProblems = err instanceof ConfigError ? err.issues : [message(err)];
       }
-      if (before.dir !== undefined && before.dir !== dir) {
-        // A write in flight may still read the old copy's packs; the one before it is spent.
-        rmSync(join(this.cacheDir, `config-${this.copies - 2}`), { recursive: true, force: true });
+      this.dirs.push(dir);
+      while (this.dirs.length > 2) {
+        rmSync(this.dirs.shift() as string, { recursive: true, force: true });
       }
     }
 
@@ -339,7 +349,12 @@ export class RuntimeConfig {
         continue;
       }
       const dotted = path.filter((p): p is string => typeof p === "string").join(".");
-      if ([...lists].some((l) => dotted === l || dotted.startsWith(`${l}.`))) continue;
+      const list = [...lists].find((l) => dotted === l || dotted.startsWith(`${l}.`));
+      if (list !== undefined) {
+        // A list from a file adds to the bucket's; one from env or flags replaces it whole.
+        if (origin.source === "env" || origin.source === "flag") out.add(list);
+        continue;
+      }
       if (typeof path[1] === "number" || path.length > 3) {
         // A list of tables (review.policies) is locked as a whole.
         out.add(path.slice(0, 2).join("."));
@@ -398,7 +413,7 @@ export class RuntimeConfig {
     }
     await this.sync();
     if (!this.snapshot.sources.has(id)) {
-      throw new RuntimeChangeError("not_found", [`no stored source '${id}'`]);
+      throw new RuntimeChangeError("unknown_source", [`no stored source '${id}'`]);
     }
     const policies = this.compose().config.review.policies.filter((p) => p.sources.includes(id));
     if (policies.length > 0) {
@@ -440,7 +455,31 @@ export class RuntimeConfig {
         held.map((p) => `${p}: set in this server's config files, which win; change it there`),
       );
     }
-    await this.sync();
+    const docKey = `${SHARED_PREFIX}${SHARED_CONFIG}`;
+    const given = condition.ifMatch !== undefined || condition.ifNoneMatch !== undefined;
+    for (let attempt = 0; ; attempt++) {
+      await this.sync();
+      // Written against the doc read, so a change made meanwhile is never overwritten: with
+      // the caller's condition, a 412 is theirs; without one, read again and redo it.
+      const read = this.snapshot.etags[docKey];
+      const own: WriteCondition = given
+        ? condition
+        : read !== undefined
+          ? { ifMatch: read }
+          : { ifNoneMatch: "*" };
+      try {
+        return await this.patchOnce(change, own, check);
+      } catch (err) {
+        if (given || !isPreconditionFailed(err) || attempt >= 4) throw err;
+      }
+    }
+  }
+
+  private async patchOnce(
+    change: { set?: Record<string, unknown>; unset?: string[] },
+    condition: WriteCondition,
+    check: (config: ServerConfig) => Promise<string[]>,
+  ): Promise<{ etag: string }> {
     const tree = structuredClone(this.snapshot.docTree ?? {});
     for (const [path, value] of Object.entries(change.set ?? {})) setField(tree, path, value);
     for (const path of change.unset ?? []) unsetField(tree, path);
@@ -490,49 +529,73 @@ export class RuntimeConfig {
       ]);
     }
     await this.sync();
-    const dir = join(this.cacheDir, `candidate-${++this.copies}`);
+    await this.withCandidateFiles({ put: { name, body } }, check, "invalid");
+    const put = await this.store.put(`${SHARED_PREFIX}${name}`, body, condition);
+    return { etag: put.etag ?? "" };
+  }
+
+  /** Remove a file under `config/`; refused while the doc needs it (checked as a reload would
+   * check the config without it). */
+  async deleteFile(
+    name: string,
+    condition: WriteCondition,
+    check: (config: ServerConfig) => Promise<string[]>,
+  ): Promise<void> {
+    if (!safeSharedName(name) || name === SHARED_CONFIG) {
+      throw new RuntimeChangeError("invalid", [`${name}: not a file the API removes`]);
+    }
+    await this.sync();
+    if (this.snapshot.etags[`${SHARED_PREFIX}${name}`] === undefined) {
+      throw new RuntimeChangeError("no_such_file", [`no file config/${name}`]);
+    }
+    await this.withCandidateFiles({ remove: name }, check, "in_use");
+    await this.store.delete(`${SHARED_PREFIX}${name}`, {
+      ...(condition.ifMatch ? { ifMatch: condition.ifMatch } : {}),
+    });
+  }
+
+  /** Check the config as it would be with a file under `config/` written or removed: a copy of
+   * the current folder with the change, the doc's paths pointing into it. Refused with `code`. */
+  private async withCandidateFiles(
+    change: { put?: { name: string; body: Uint8Array }; remove?: string },
+    check: (config: ServerConfig) => Promise<string[]>,
+    code: "invalid" | "in_use",
+  ): Promise<void> {
+    const dir = join(this.cacheDir, `candidate-${++this.candidates}`);
     try {
       mkdirSync(dir, { recursive: true, mode: 0o700 });
       for (const [key] of Object.entries(this.snapshot.etags)) {
         if (!key.startsWith(SHARED_PREFIX) || this.snapshot.dir === undefined) continue;
         const rel = key.slice(SHARED_PREFIX.length);
+        if (rel === change.remove) continue;
         const from = Bun.file(join(this.snapshot.dir, rel));
         if (await from.exists()) {
           mkdirSync(dirname(join(dir, rel)), { recursive: true, mode: 0o700 });
           writeFileSync(join(dir, rel), new Uint8Array(await from.arrayBuffer()), { mode: 0o600 });
         }
       }
-      mkdirSync(dirname(join(dir, name)), { recursive: true, mode: 0o700 });
-      writeFileSync(join(dir, name), body, { mode: 0o600 });
+      if (change.put) {
+        mkdirSync(dirname(join(dir, change.put.name)), { recursive: true, mode: 0o700 });
+        writeFileSync(join(dir, change.put.name), change.put.body, { mode: 0o600 });
+      }
       const origin = `${this.store.url}/${SHARED_PREFIX}${SHARED_CONFIG}`;
       const doc = this.snapshot.docTree
         ? baseLayerOf(dir, origin, structuredClone(this.snapshot.docTree))
         : undefined;
-      await this.checkCandidate({ ...this.snapshot, dir, doc }, check);
-      const put = await this.store.put(`${SHARED_PREFIX}${name}`, body, condition);
-      return { etag: put.etag ?? "" };
+      try {
+        await this.checkCandidate({ ...this.snapshot, dir, doc }, check);
+      } catch (err) {
+        if (err instanceof RuntimeChangeError && code === "in_use") {
+          throw new RuntimeChangeError("in_use", [
+            `config/${SHARED_CONFIG} needs config/${change.remove}; take it out there first`,
+            ...err.problems,
+          ]);
+        }
+        throw err;
+      }
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-  }
-
-  /** Remove a file under `config/`; refused while the doc names it. */
-  async deleteFile(name: string, condition: WriteCondition): Promise<void> {
-    if (!safeSharedName(name) || name === SHARED_CONFIG) {
-      throw new RuntimeChangeError("invalid", [`${name}: not a file the API removes`]);
-    }
-    await this.sync();
-    if (this.snapshot.etags[`${SHARED_PREFIX}${name}`] === undefined) {
-      throw new RuntimeChangeError("not_found", [`no file config/${name}`]);
-    }
-    if (JSON.stringify(this.snapshot.docTree ?? {}).includes(JSON.stringify(name))) {
-      throw new RuntimeChangeError("in_use", [
-        `config/${SHARED_CONFIG} names ${name}; take it out there first`,
-      ]);
-    }
-    await this.store.delete(`${SHARED_PREFIX}${name}`, {
-      ...(condition.ifMatch ? { ifMatch: condition.ifMatch } : {}),
-    });
   }
 
   /** Seal every stored source's secrets again with the current key. Returns the ids

@@ -15,7 +15,13 @@ import {
   tokenInfo,
   USER_HEADER,
 } from "@seshi/auth";
-import { parseDuration, RUNTIME_SECTIONS, SealingError, sourceId } from "@seshi/config";
+import {
+  ConfigError,
+  parseDuration,
+  RUNTIME_SECTIONS,
+  SealingError,
+  sourceId,
+} from "@seshi/config";
 import { renderTrace } from "@seshi/formats";
 import { type Instance, RuntimeChangeError, type WriteCondition } from "@seshi/instance";
 import {
@@ -1029,7 +1035,22 @@ export function createApp(instance: Instance) {
     const id = decodeURIComponent(params.id as string);
     const stored = instance.runtime?.storedSource(id);
     if (!stored && !(await knownSource(id, false))) throw unknownSource(id);
-    const status = await instance.sources.status(id, { days: daysParam(url) });
+    // A stored source this instance does not run (left out, or not applied yet) has no
+    // status here beyond what the bucket says.
+    const status =
+      stored && instance.source(id) === undefined
+        ? {
+            id,
+            type: String(stored.source.type ?? ""),
+            enabled: stored.source.enabled !== false,
+            polled: false,
+            note: "stored in the bucket; not running on this instance",
+            checkpoint: null,
+            dropped: 0,
+            failed: 0,
+            health: {},
+          }
+        : await instance.sources.status(id, { days: daysParam(url) });
     if (!stored) {
       return json({ ...status, managed: id === UPLOAD_SOURCE ? "builtin" : "file" });
     }
@@ -1109,7 +1130,8 @@ export function createApp(instance: Instance) {
     invalid: 422,
     locked: 409,
     file_owned: 409,
-    not_found: 404,
+    unknown_source: 404,
+    no_such_file: 404,
     in_use: 409,
   };
 
@@ -1129,9 +1151,23 @@ export function createApp(instance: Instance) {
         );
       }
       if (err instanceof SealingError) throw new HttpError(422, "sealing", err.message);
+      if (err instanceof ConfigError) {
+        throw new HttpError(
+          422,
+          "invalid",
+          `the config does not load as it stands: ${err.issues.join("; ")}`,
+          err.issues,
+        );
+      }
       throw err;
     }
-    await instance.refreshConfig();
+    // Written: applied here now if the bucket answers, else by the next poll. A failure to
+    // read it back does not make the write a failure.
+    await instance.refreshConfig().catch((err) => {
+      instance.log.warn(
+        `runtime config: written, but not read back yet: ${err instanceof Error ? err.message : err}`,
+      );
+    });
     return result;
   }
 
@@ -1232,7 +1268,7 @@ export function createApp(instance: Instance) {
     const runtime = runtimeOf();
     const name = decodeURIComponent(params.name as string);
     const condition = conditionOf(request);
-    await change(() => runtime.deleteFile(name, condition));
+    await change(() => runtime.deleteFile(name, condition, check));
     return json({ name, deleted: true, version: runtime.version });
   });
 
@@ -1283,7 +1319,8 @@ export function createApp(instance: Instance) {
 
   const handle = dispatch(routes);
   async function fetch(request: Request): Promise<Response> {
-    await instance.freshen();
+    // Health answers at once, whatever the bucket is doing.
+    if (new URL(request.url).pathname !== "/healthz") await instance.freshen();
     return handle(request);
   }
 

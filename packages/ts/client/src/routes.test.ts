@@ -249,7 +249,7 @@ describe("the runtime config calls", () => {
         422,
         { error: { code: "invalid", message: "bad", problems: ["a", "b"] } },
       ],
-      "DELETE /v1/admin/sources/gone": [404, { error: { code: "not_found", message: "no" } }],
+      "DELETE /v1/admin/sources/gone": [404, { error: { code: "unknown_source", message: "no" } }],
     });
     await db.putSource("cursor-a", { type: "otlp" }, { create: true });
     expect(seen[0]?.headers["if-none-match"]).toBe("*");
@@ -265,5 +265,7 @@ describe("the runtime config calls", () => {
     });
     expect(seen[2]?.headers["content-type"]).toBe("application/octet-stream");
     expect(await db.deleteSource("gone")).toBeNull();
+    // A server without the route is not "already gone".
+    await expect(db.deleteConfigFile("packs/x.json")).rejects.toMatchObject({ status: 404 });
   });
 });

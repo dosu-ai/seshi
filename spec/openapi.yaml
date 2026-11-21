@@ -1481,7 +1481,7 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404":
-          description: "`not_found`: no stored source has this id."
+          description: "`unknown_source`: no stored source has this id."
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -1659,7 +1659,9 @@ paths:
       tags: [admin]
       summary: Remove a file under config/.
       operationId: deleteAdminConfigFile
-      description: Refused (409 `in_use`) while `config/seshi.toml` names it. Needs `sources:admin`.
+      description: |
+        Refused (409 `in_use`, with `error.problems`) while the config needs it: the config
+        without it is checked as a reload would check it. Needs `sources:admin`.
       parameters:
         - $ref: "#/components/parameters/if_match"
       responses:
@@ -1671,7 +1673,7 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404":
-          description: "`not_found`: no such file."
+          description: "`no_such_file`: no such file under `config/`."
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }

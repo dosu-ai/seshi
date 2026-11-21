@@ -15,7 +15,7 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-function runtime(keyring: Keyring, main = "") {
+function runtime(keyring: Keyring, main = "", env: Record<string, string> = {}) {
   const file = join(dir, "seshi.toml");
   const fs: ConfigFs = {
     readFile: (path) => {
@@ -30,7 +30,7 @@ function runtime(keyring: Keyring, main = "") {
     store,
     keyring,
     load: (layer: RuntimeLayer | undefined) =>
-      loadServerConfig({ configFlag: file, fs, ...(layer ? { runtime: layer } : {}) }),
+      loadServerConfig({ configFlag: file, fs, env, ...(layer ? { runtime: layer } : {}) }),
     cacheDir: join(dir, "cache"),
     pollMs: 1_000,
   });
@@ -88,5 +88,34 @@ describe("RuntimeConfig", () => {
       ok,
     );
     await expect(rt.deleteSource("dd", {})).rejects.toMatchObject({ code: "in_use" });
+  });
+
+  it("refuses to delete a file the doc needs, however it spells it", async () => {
+    const rt = runtime(new Keyring({ k1: K1 }));
+    await rt.putFile(
+      "packs/org.json",
+      new TextEncoder().encode('{"patterns": ["X-[0-9]{3}"]}'),
+      {},
+      ok,
+    );
+    await rt.patchDoc({ set: { "redaction.packs": ["./packs/org.json"] } }, {}, ok);
+    const check = async (config: { redaction: { packs: readonly string[] } }) => {
+      for (const pack of config.redaction.packs) {
+        if (!(await Bun.file(pack).exists())) return [`cannot read redaction pack ${pack}`];
+      }
+      return [];
+    };
+    await expect(rt.deleteFile("packs/org.json", {}, check)).rejects.toMatchObject({
+      code: "in_use",
+    });
+    await expect(rt.deleteFile("packs/none.json", {}, check)).rejects.toMatchObject({
+      code: "no_such_file",
+    });
+  });
+
+  it("locks a list the server's env sets whole", () => {
+    const rt = runtime(new Keyring({ k1: K1 }), "", { SESHI_CAPTURE__EXCLUDE: '["acme/payroll"]' });
+    expect(rt.locked()).toContain("capture.exclude");
+    expect(runtime(new Keyring({ k1: K1 }), '[capture]\nexclude = ["a/b"]\n').locked()).toEqual([]);
   });
 });
