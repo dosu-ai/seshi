@@ -1,3 +1,10 @@
+# [0.26.0](https://github.com/dosu-ai/seshi/compare/v0.25.0...v0.26.0) (2026-11-21)
+
+
+### Features
+
+* drop the remaining sessiondb names ([#71](https://github.com/dosu-ai/seshi/issues/71)) ([ba3645c](https://github.com/dosu-ai/seshi/commit/ba3645ceec923a9a112e26b21e8ee93026deec23))
+
 # [0.25.0](https://github.com/dosu-ai/seshi/compare/v0.24.0...v0.25.0) (2026-11-21)
 
 
