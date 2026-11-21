@@ -762,8 +762,8 @@ async function buildReviewer(
 }
 
 /** Build an Instance from a loaded config: open the bucket, read the redaction packs, check
- * the layout marker (X1.4: the bucket must be this deployment's and org's), and probe the static tokens' owners. Every failure is an `InstanceError` saying
- * what to fix. */
+ * the layout marker (X1.4: the bucket must be this deployment's and org's), and probe the
+ * static tokens' owners. Every failure is an `InstanceError` saying what to fix. */
 export async function buildInstance(
   config: ServerConfig,
   options: BuildOptions,
