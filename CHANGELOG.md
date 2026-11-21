@@ -1,3 +1,11 @@
+# [0.25.0](https://github.com/dosu-ai/seshi/compare/v0.24.0...v0.25.0) (2026-11-21)
+
+
+### Features
+
+* **store:** Azure Blob Storage as a store and source bucket (az://) ([#68](https://github.com/dosu-ai/seshi/issues/68)) ([da8cf3a](https://github.com/dosu-ai/seshi/commit/da8cf3abc8f0bdb2af70abf924cadfc0bf00f2d9))
+* **store:** Google Cloud Storage as a store and source bucket (gs://) ([#69](https://github.com/dosu-ai/seshi/issues/69)) ([6d28cae](https://github.com/dosu-ai/seshi/commit/6d28caeb2d524460f9792317aa13cfd0c7e8994a)), closes [#68](https://github.com/dosu-ai/seshi/issues/68)
+
 # [0.24.0](https://github.com/dosu-ai/seshi/compare/v0.23.0...v0.24.0) (2026-11-20)
 
 
