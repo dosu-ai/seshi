@@ -2190,8 +2190,16 @@ components:
       required: [schema, instance, process, seshi, version, applied_at, at, current]
       properties:
         schema: { type: string, const: seshi/runtime-instance/1 }
-        instance: { type: string }
-        process: { type: string }
+        instance:
+          type: string
+          description: |
+            `server.instance_id`, else the host name: stable across restarts, and shared by
+            processes on one host.
+        process:
+          type: string
+          description: |
+            This run of the server (`instance` and a random suffix), one record each; count
+            these for "applied on N of M".
         seshi: { type: string }
         version: { type: string }
         applied_at: { type: string, format: date-time }
