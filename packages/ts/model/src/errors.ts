@@ -87,6 +87,20 @@ export class Unauthorized extends Error {
   }
 }
 
+/** `err`'s message, then each of its causes' (the `cause` chain), each once:
+ * `write k: GET bucket/k: 404: Not Found`. A wrapping error's message says what was being
+ * done; the cause says why it failed. */
+export function errorMessage(err: unknown): string {
+  const parts: string[] = [];
+  let at: unknown = err;
+  for (let depth = 0; at !== undefined && at !== null && depth < 5; depth++) {
+    const text = at instanceof Error ? at.message : String(at);
+    if (text && !parts.some((part) => part.includes(text))) parts.push(text);
+    at = at instanceof Error ? (at as { cause?: unknown }).cause : undefined;
+  }
+  return parts.join(": ");
+}
+
 /** The store, or the server in front of it, failed or could not be reached: a fault to retry,
  * not a refusal. Raised by every store driver and by the HTTP client. */
 export class StoreError extends Error {

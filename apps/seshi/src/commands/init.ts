@@ -62,6 +62,17 @@ interface Values {
 
 const encoder = new TextEncoder();
 
+/** Where a bucket's store finds credentials when no key is stored for it. */
+function keyFallback(url: string): string {
+  if (url.startsWith("az://")) {
+    return "the AZURE_STORAGE_* variables in the environment are used, else workload identity";
+  }
+  if (url.startsWith("gs://")) {
+    return "Application Default Credentials are used (GOOGLE_APPLICATION_CREDENTIALS, gcloud's application-default login, else the metadata server), or none with STORAGE_EMULATOR_HOST";
+  }
+  return "the AWS_* / S3_* / R2_* variables in the environment are used";
+}
+
 async function askKey(ctx: CommandContext, url: string): Promise<BucketKey | undefined> {
   if (url.startsWith("file://")) return undefined;
   if (!ctx.terminal || !ctx.tty?.stdin) return undefined;
@@ -253,9 +264,7 @@ export async function run(ctx: CommandContext): Promise<number> {
       );
     }
     if (!key && !url.startsWith("file://")) {
-      warnings.push(
-        "no bucket key stored: the AWS_* / S3_* / R2_* variables in the environment are used",
-      );
+      warnings.push(`no bucket key stored: ${keyFallback(url)}`);
     }
     const document = {
       url,

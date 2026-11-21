@@ -11,6 +11,22 @@ import { EXIT } from "./exit";
 import { classify, failWith, Refused } from "./failures";
 import { Cancelled } from "./terminal";
 
+describe("a store error's message", () => {
+  it("says why, from its causes, each once", () => {
+    const http = Object.assign(new Error("GET b/k: 404: Not Found"), { status: 404 });
+    const err = new StoreError("write k", new StoreError("GET b/k: 404: Not Found", http));
+    expect(classify(err)?.message).toBe("write k: GET b/k: 404: Not Found");
+    const timeout = new StoreError(
+      "write k",
+      new StoreError("no Google credentials", new Error("The operation timed out.")),
+    );
+    expect(classify(timeout)?.message).toBe(
+      "write k: no Google credentials: The operation timed out.",
+    );
+    expect(classify(new StoreError("cannot reach"))?.message).toBe("cannot reach");
+  });
+});
+
 describe("what each failure exits with (F8.1)", () => {
   it("maps the client commands' errors to the stable codes", () => {
     const exit = (err: unknown) => classify(err)?.exit;
