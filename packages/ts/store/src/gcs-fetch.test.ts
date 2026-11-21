@@ -146,6 +146,16 @@ describe("FetchGcsClient requests", () => {
     expect(seen[1]?.url.searchParams.get("fields")).toBe("name");
   });
 
+  it("reads an unclear download 404 as missing when the object was written since", async () => {
+    const { c } = client((r) =>
+      r.url.searchParams.get("alt") === "media"
+        ? new Response("Not Found", { status: 404 })
+        : json({ name: "k" }),
+    );
+    expect(await c.get("k")).toBeNull();
+    expect(await c.getObject("k")).toBeNull();
+  });
+
   it("refuses generation 0 as an ETag: ifGenerationMatch=0 means no object", async () => {
     const { c, seen } = client(() => json({ generation: "1" }));
     await expect(c.put("k", new Uint8Array(), "x", { ifMatch: "0" })).rejects.toMatchObject({

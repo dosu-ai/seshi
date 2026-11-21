@@ -150,9 +150,12 @@ export class FetchGcsClient {
       .catch(() => "");
     const missing = notFound(text);
     if (missing !== "unknown" || !media) return missing === "object";
+    // The metadata answering at all shows the path is the API's, so the download's 404 was
+    // the object's: it may exist by now (another writer), but it did not when read, as a
+    // conditional write after this read will find.
     const check = await this.send("GET", this.url(this.objectPath(key), { fields: "name" }));
     const checkText = await check.text().catch(() => "");
-    return check.status === 404 && notFound(checkText) === "object";
+    return check.ok || (check.status === 404 && notFound(checkText) === "object");
   }
 
   /** Create the bucket; one that already exists is not an error. For tests against an
