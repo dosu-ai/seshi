@@ -60,7 +60,7 @@ export interface FormatAdapter {
   /** Whether a log in this format can arrive in chunks. */
   readonly chunkable: boolean;
   /** The adapter's normalizer version: what the records a transcript normalizes to depend on,
-   * as dotted numbers compared one by one (`1+trajectory.0.3.0` is 1, 0, 3, 0). Raise it with
+   * as dotted numbers compared one by one (`1+trajectory.0.4.4` is 1, 0, 3, 0). Raise it with
    * any change that alters the records of a transcript already stored: sessions built by an
    * older one are `stale`, and the uploader sends them again to be rebuilt (X4.9). `1` when
    * omitted. */
