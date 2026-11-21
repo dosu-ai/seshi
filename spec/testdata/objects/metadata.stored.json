@@ -38,7 +38,7 @@
   "project": "github.com/acme/widget",
   "branch": "main",
   "normalizer": {
-    "name": "@dosu/sessiondb",
+    "name": "@dosu/seshi",
     "version": "0.9.0+trajectory.0.3.0",
     "format_version": "1+trajectory.0.3.0"
   },

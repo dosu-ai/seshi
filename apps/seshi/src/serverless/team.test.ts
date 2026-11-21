@@ -103,7 +103,7 @@ class LimitedStore implements Store {
 const member = (owner: string): KeyPolicy => ({ read: [""], write: [`owners/${owner}/`] });
 /** A key that reads and writes only its own folder (and the marker and shared settings). */
 const ownOnly = (owner: string): KeyPolicy => ({
-  read: [`owners/${owner}/`, "seshi.json", "config/", "sessionstorage.json"],
+  read: [`owners/${owner}/`, "seshi.json", "config/"],
   write: [`owners/${owner}/`],
 });
 

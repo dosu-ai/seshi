@@ -10,7 +10,7 @@ import {
   type OwnerBasis,
   type ReadChangesOptions,
   type RenderFormat,
-  type SessionDB,
+  type Seshi,
   type SessionMetadata,
   type SessionsPage,
   type StaleSessionsPage,
@@ -58,7 +58,7 @@ export interface StoreClientOptions {
   pipeline?: Pipeline;
 }
 
-export class StoreSessionDB implements SessionDB {
+export class StoreSeshi implements Seshi {
   readonly owner: string;
   readonly store: Store;
   private readonly storage: StorageView;

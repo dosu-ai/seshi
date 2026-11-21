@@ -129,8 +129,8 @@ describe("FormatRegistry", () => {
 });
 
 describe("NORMALIZER", () => {
-  it("keeps the name traces have always recorded", () => {
-    expect(NORMALIZER.name).toBe("@dosu/sessiondb");
+  it("names seshi and its trajectory version", () => {
+    expect(NORMALIZER.name).toBe("@dosu/seshi");
     expect(NORMALIZER.version).toMatch(/^\d+\.\d+\.\d+.*\+trajectory\./);
   });
 });

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FsStore } from "./fs";
 import { decodeJson, encodeJson } from "./json";
-import { LAYOUT_KEY, LEGACY_LAYOUT_KEY } from "./layout";
+import { LAYOUT_KEY } from "./layout";
 import {
   ensureLayout,
   LayoutError,
@@ -87,23 +87,6 @@ describe("ensureLayout", () => {
     const ids = new Set(markers.map((m) => m.deployment_id));
     expect(ids.size).toBe(1);
     expect((await readLayout(store))?.deployment_id).toBe([...ids][0]);
-  });
-
-  it("refuses a sessiondb prefix, which holds sessionstorage/layout/1", async () => {
-    await store.put(
-      LEGACY_LAYOUT_KEY,
-      encodeJson({
-        schema: "sessionstorage/layout/1",
-        created_at: "x",
-        created_by: "y",
-        format: "letta",
-      }),
-    );
-    await expect(ensureLayout(store, { createdBy: "t" })).rejects.toThrow(
-      /holds a sessiondb store \(sessionstorage.json, sessionstorage\/layout\/1\).*no migration \(X1.5\)/,
-    );
-    await expect(readLayout(store)).rejects.toBeInstanceOf(LayoutError);
-    expect(await getBytes(store, LAYOUT_KEY)).toBeNull();
   });
 
   it("refuses a marker this version cannot read", async () => {

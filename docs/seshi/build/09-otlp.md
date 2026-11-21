@@ -126,7 +126,7 @@ service account. User docs: [docs/otlp.md](../../otlp.md).
     `OtlpStatus` schemas.
 - **05's gap**: a service token's `POST /v1/sessions` is filed under its own source.
   `writerFor` gives a service principal `source_id = <id>` (`serviceSourceId` in
-  `@seshi/auth`), `uploadEnvelope` takes `source_id`, and `StoreSessionDB` passes its writer's
+  `@seshi/auth`), `uploadEnvelope` takes `source_id`, and `StoreSeshi` passes its writer's
   source. The source's visibility, filter and health now apply.
 - **Docs**: new docs/otlp.md. Updated: docs/server.md (assembler job, route, service tokens),
   docs/config.md (`assembly_interval`, `quiet_period`), spec/layout.md (span records, marker

@@ -32,8 +32,8 @@ schemas.
   `staleSessions(store, owner, formats, { after, limit })`, paged by key like `listSessions`.
   `GET /v1/sessions/stale` (operation `staleSessions`, schema `StaleSessionsPage`): the
   caller's own stale sessions as `{ agent, session_id, built_with?, current }`, with
-  `sessions:write`. `SessionDB.staleSessions` on both backends (`HttpSessionDB`,
-  `StoreSessionDB`); `@seshi/model` `StaleSession`, `StaleSessionsPage`.
+  `sessions:write`. `Seshi.staleSessions` on both backends (`HttpSeshi`,
+  `StoreSeshi`); `@seshi/model` `StaleSession`, `StaleSessionsPage`.
 - **`rebuild` on the envelope** (`envelope.schema.json`), `SessionUpload.rebuild`, and the
   upload route's body field. In `Pipeline.whole` a rebuild skips the "does it extend" check and
   takes the replace path, with `mayReplace` and the retraction secret (`X-Seshi-Retract` is now

@@ -47,9 +47,3 @@ Start with the [README](../README.md) for what it is, the
 | [seshi/design-decisions.html](seshi/design-decisions.html) | Every agreed decision; the IDs in these pages (X4.3, F9.7, B1.5) point into it |
 | [seshi/build/](seshi/build/README.md) | How the decisions were built, branch by branch |
 | [../brand/](../brand/README.md) | The Threadling brand: glyph, lockups, poses, colour tokens |
-
-## History
-
-[understanding/session-store-field-guide.html](understanding/session-store-field-guide.html) is
-an onboarding guide to sessiondb v0.9.0, the code seshi was rebuilt from. It describes the old
-SDK, server and layout, and is kept as a record, not as documentation of seshi.

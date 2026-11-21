@@ -1,9 +1,9 @@
 /** Runs only against a Google Cloud Storage endpoint, given by environment. Either an emulator:
  *
- *   SESSIONDB_TEST_GCS_EMULATOR=http://127.0.0.1:4443   (fake-gcs-server; no credentials)
- *   SESSIONDB_TEST_GCS_BUCKET=sessiondb-test           (created when missing)
+ *   SESHI_TEST_GCS_EMULATOR=http://127.0.0.1:4443   (fake-gcs-server; no credentials)
+ *   SESHI_TEST_GCS_BUCKET=seshi-test           (created when missing)
  *
- * or a real bucket, with SESSIONDB_TEST_GCS_BUCKET alone and Application Default Credentials
+ * or a real bucket, with SESHI_TEST_GCS_BUCKET alone and Application Default Credentials
  * in the environment (GOOGLE_APPLICATION_CREDENTIALS, gcloud's application-default login, or the
  * metadata server). The same cases as azure-live.test.ts: the store, the pipeline, the source
  * bucket the poller reads, and seshi init --serverless.
@@ -33,8 +33,8 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { Machine } from "../tooling/cli";
 import { golden, transcript } from "../tooling/testdata";
 
-const emulator = process.env.SESSIONDB_TEST_GCS_EMULATOR;
-const bucket = process.env.SESSIONDB_TEST_GCS_BUCKET ?? (emulator ? "sessiondb-test" : undefined);
+const emulator = process.env.SESHI_TEST_GCS_EMULATOR;
+const bucket = process.env.SESHI_TEST_GCS_BUCKET ?? (emulator ? "seshi-test" : undefined);
 const configured = Boolean(bucket);
 /** What the store reads its endpoint and credentials from: the emulator's host, else this
  * process's Application Default Credentials. */

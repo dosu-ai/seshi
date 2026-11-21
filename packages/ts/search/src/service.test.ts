@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { OwnerAliases } from "@seshi/auth";
 import { BUILTIN_FORMATS, FormatRegistry } from "@seshi/formats";
-import { StoreSessionDB, setVisibility, tombstone } from "@seshi/pipeline";
+import { StoreSeshi, setVisibility, tombstone } from "@seshi/pipeline";
 import { FsStore, type Store } from "@seshi/store";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { MEMORY_INDEX } from "./paths";
@@ -38,7 +38,7 @@ function service(options: { path?: string; aliases?: OwnerAliases; verify?: bool
 }
 
 async function write(owner: string, id: string, prompt: string, visibility?: "org" | "owner") {
-  await new StoreSessionDB({ store, owner, formats }).ingest({
+  await new StoreSeshi({ store, owner, formats }).ingest({
     format: "trajectory",
     session_id: id,
     transcript: log(prompt),

@@ -1,8 +1,8 @@
 /** Runs only against a real S3-compatible endpoint, given by environment:
  *
- *   SESSIONDB_TEST_S3_ENDPOINT=http://127.0.0.1:9000
- *   SESSIONDB_TEST_S3_BUCKET=sessionstorage-test
- *   SESSIONDB_TEST_S3_ACCESS_KEY / SESSIONDB_TEST_S3_SECRET_KEY
+ *   SESHI_TEST_S3_ENDPOINT=http://127.0.0.1:9000
+ *   SESHI_TEST_S3_BUCKET=seshi-test
+ *   SESHI_TEST_S3_ACCESS_KEY / SESHI_TEST_S3_SECRET_KEY
  *
  * The bucket must exist. MinIO, RustFS, Garage, R2 and AWS all qualify. It crosses packages (the
  * store and the pipeline over it), so it lives in tests/ (X3.6). */
@@ -20,10 +20,10 @@ import {
 import { describe, expect, it } from "vitest";
 import { golden } from "../tooling/testdata";
 
-const endpoint = process.env.SESSIONDB_TEST_S3_ENDPOINT;
-const bucket = process.env.SESSIONDB_TEST_S3_BUCKET;
-const accessKeyId = process.env.SESSIONDB_TEST_S3_ACCESS_KEY;
-const secretAccessKey = process.env.SESSIONDB_TEST_S3_SECRET_KEY;
+const endpoint = process.env.SESHI_TEST_S3_ENDPOINT;
+const bucket = process.env.SESHI_TEST_S3_BUCKET;
+const accessKeyId = process.env.SESHI_TEST_S3_ACCESS_KEY;
+const secretAccessKey = process.env.SESHI_TEST_S3_SECRET_KEY;
 const configured = Boolean(endpoint && bucket && accessKeyId && secretAccessKey);
 // `S3Store` signs its own requests over `fetch` on every runtime (Bun.S3Client cannot send
 // If-Match / If-None-Match); the global fetch and an explicit one should agree.

@@ -3,7 +3,7 @@
  * with, and takes it back. */
 
 import { capturePaths, sessionKey, updateState } from "@seshi/capture";
-import { HttpSessionDB } from "@seshi/client";
+import { HttpSeshi } from "@seshi/client";
 import { archiveId, readChanges, readMetadata } from "@seshi/store";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Machine, startServer, type TestServer } from "../tooling/cli";
@@ -88,7 +88,7 @@ beforeEach(async () => {
   server = await startServer();
   admin = (await server.auth.initAdmin({ owner: "ops" })).admin?.token as string;
   const token = await mint(ALICE);
-  const db = new HttpSessionDB({ server: server.url, token });
+  const db = new HttpSeshi({ server: server.url, token });
   for (const [id, parent] of [["s1"], ["agent-a1", "s1"], ["s2~1"], ["other"]] as const) {
     await db.ingest({
       format: "claude-code",
@@ -258,7 +258,7 @@ describe("/session-capture share and unshare, carried out by the hook", () => {
   };
 
   it("share and unshare a pi session from /session-capture, saying what seshi share said", async () => {
-    const db = new HttpSessionDB({ server: server.url, token: await mint(ALICE) });
+    const db = new HttpSeshi({ server: server.url, token: await mint(ALICE) });
     await db.ingest({ format: "pi", session_id: PI_ID, transcript: PI, visibility: "owner" });
     await captured(machine, [{ id: PI_ID, agent: "pi" }]);
     const pi = (prompt: string) =>

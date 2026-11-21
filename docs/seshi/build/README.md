@@ -61,7 +61,7 @@ are used on the search empty state and `seshi upload`'s lines (17); the rest of 
 commands' lines, poses in the docs) is not applied.
 
 Status: every branch is built and pushed. All 38 are combined, history kept, as `seshi-mvp`,
-open for review as [dosu-ai/sessiondb#20](https://github.com/dosu-ai/sessiondb/pull/20); that PR is
+open for review as [dosu-ai/seshi#20](https://github.com/dosu-ai/seshi/pull/20); that PR is
 the first CI run on any of them. What follows describes the check made at 17. Its final check (see
 [17](17-review.md#final-check)) passed `check`, `typecheck`, `test`, the generators, the
 compiled binary's smoke test, `check:hook` and the Docker build there, and `check` and

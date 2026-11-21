@@ -70,7 +70,6 @@ export function archiveId(owner: string, format: string, sessionId: string): str
 }
 
 export const LAYOUT_KEY = "seshi.json";
-export const LEGACY_LAYOUT_KEY = "sessionstorage.json";
 
 export const PAST_FOLDER = "\u{10FFFF}";
 

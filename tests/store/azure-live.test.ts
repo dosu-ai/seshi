@@ -1,9 +1,9 @@
 /** Runs only against a real Azure Blob Storage endpoint, given by environment:
  *
- *   SESSIONDB_TEST_AZURE_ENDPOINT=http://127.0.0.1:10000/devstoreaccount1   (Azurite)
- *   SESSIONDB_TEST_AZURE_ACCOUNT=devstoreaccount1
- *   SESSIONDB_TEST_AZURE_KEY=<the account key; Azurite's is its documented well-known key>
- *   SESSIONDB_TEST_AZURE_CONTAINER=sessiondb-test   (created when missing)
+ *   SESHI_TEST_AZURE_ENDPOINT=http://127.0.0.1:10000/devstoreaccount1   (Azurite)
+ *   SESHI_TEST_AZURE_ACCOUNT=devstoreaccount1
+ *   SESHI_TEST_AZURE_KEY=<the account key; Azurite's is its documented well-known key>
+ *   SESHI_TEST_AZURE_CONTAINER=seshi-test   (created when missing)
  *
  * Azurite (Azure's emulator) and a real storage account both qualify. The same cases as
  * s3-live.test.ts, over a Shared Key and over a SAS token made from it, plus the source bucket
@@ -33,10 +33,10 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { Machine } from "../tooling/cli";
 import { golden, transcript } from "../tooling/testdata";
 
-const endpoint = process.env.SESSIONDB_TEST_AZURE_ENDPOINT;
-const account = process.env.SESSIONDB_TEST_AZURE_ACCOUNT;
-const accountKey = process.env.SESSIONDB_TEST_AZURE_KEY;
-const container = process.env.SESSIONDB_TEST_AZURE_CONTAINER ?? "sessiondb-test";
+const endpoint = process.env.SESHI_TEST_AZURE_ENDPOINT;
+const account = process.env.SESHI_TEST_AZURE_ACCOUNT;
+const accountKey = process.env.SESHI_TEST_AZURE_KEY;
+const container = process.env.SESHI_TEST_AZURE_CONTAINER ?? "seshi-test";
 const configured = Boolean(endpoint && account && accountKey);
 
 /** An account SAS (version 2020-12-06 and later) for the blob service, signed with the

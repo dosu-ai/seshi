@@ -3,7 +3,7 @@
  * pipeline to the bucket and back. */
 
 import { createApp } from "@seshi/api";
-import { HttpSessionDB } from "@seshi/client";
+import { HttpSeshi } from "@seshi/client";
 import type { Instance } from "@seshi/instance";
 import { type StoreSessionResult, type Trace, VERSION } from "@seshi/model";
 import { readMetadata } from "@seshi/store";
@@ -50,7 +50,7 @@ afterEach(async () => {
   await booted.cleanup();
 });
 
-const client = (token = TOKEN) => new HttpSessionDB({ server: base, token });
+const client = (token = TOKEN) => new HttpSeshi({ server: base, token });
 
 describe("a team setup end to end", () => {
   it("stores, reads, lists, renders, feeds changes and deletes through the client", async () => {

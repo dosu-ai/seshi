@@ -68,20 +68,20 @@ jobs:
         run: |
           pip install --quiet awscli==1.46.3
           AWS_ACCESS_KEY_ID=rustfsadmin AWS_SECRET_ACCESS_KEY=rustfsadmin AWS_DEFAULT_REGION=us-east-1 \
-            aws --endpoint-url http://127.0.0.1:9000 s3 mb s3://sessiondb-test
+            aws --endpoint-url http://127.0.0.1:9000 s3 mb s3://seshi-test
       - name: S3 store test against a live endpoint
         env:
-          SESSIONDB_TEST_S3_ENDPOINT: http://127.0.0.1:9000
-          SESSIONDB_TEST_S3_BUCKET: sessiondb-test
-          SESSIONDB_TEST_S3_ACCESS_KEY: rustfsadmin
-          SESSIONDB_TEST_S3_SECRET_KEY: rustfsadmin
+          SESHI_TEST_S3_ENDPOINT: http://127.0.0.1:9000
+          SESHI_TEST_S3_BUCKET: seshi-test
+          SESHI_TEST_S3_ACCESS_KEY: rustfsadmin
+          SESHI_TEST_S3_SECRET_KEY: rustfsadmin
         run: bun --bun vitest run tests/store/s3-live.test.ts
       - name: Azure Blob store test against Azurite
         env:
-          SESSIONDB_TEST_AZURE_ENDPOINT: http://127.0.0.1:10000/devstoreaccount1
-          SESSIONDB_TEST_AZURE_ACCOUNT: devstoreaccount1
+          SESHI_TEST_AZURE_ENDPOINT: http://127.0.0.1:10000/devstoreaccount1
+          SESHI_TEST_AZURE_ACCOUNT: devstoreaccount1
           # Azurite's well-known development account key, published by Microsoft: not a secret.
-          SESSIONDB_TEST_AZURE_KEY: Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==
+          SESHI_TEST_AZURE_KEY: Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==
         run: bun --bun vitest run tests/store/azure-live.test.ts
       # fake-gcs-server, for the gs:// store test. A step, not a service: it needs arguments
       # (plain HTTP), which a service container cannot be given.
@@ -94,8 +94,8 @@ jobs:
           docker logs fake-gcs; exit 1
       - name: Google Cloud Storage store test against fake-gcs-server
         env:
-          SESSIONDB_TEST_GCS_EMULATOR: http://127.0.0.1:4443
-          SESSIONDB_TEST_GCS_BUCKET: sessiondb-test
+          SESHI_TEST_GCS_EMULATOR: http://127.0.0.1:4443
+          SESHI_TEST_GCS_BUCKET: seshi-test
         run: bun --bun vitest run tests/store/gcs-live.test.ts
 
   # The Python client (packages/py/client) on its oldest and newest Python: ruff, mypy, and its
@@ -155,24 +155,24 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - run: docker build -f apps/seshi/Dockerfile -t sessiondb .
+      - run: docker build -f apps/seshi/Dockerfile -t seshi-smoke .
       - name: Boot against a file store and hit /healthz
         run: |
-          docker run --rm sessiondb --version
-          docker run -d --name sessiondb -p 7200:7200 \
+          docker run --rm seshi-smoke --version
+          docker run -d --name seshi-smoke -p 7200:7200 \
             -e SESHI_AUTH__TOKENS__CI=ci-token-0123456789abcdef -e SESHI_STORE__URL=file:///data \
-            -e SESHI_WORKER__HEARTBEAT_INTERVAL=1s sessiondb
+            -e SESHI_WORKER__HEARTBEAT_INTERVAL=1s seshi-smoke
           for i in $(seq 1 20); do
             if curl -fsS http://127.0.0.1:7200/healthz; then
               # The image's own health check, and the worker role's heartbeat (X7.5).
-              docker exec sessiondb seshi healthcheck
+              docker exec seshi-smoke seshi healthcheck
               sleep 2
-              docker exec sessiondb seshi workers status --json | grep -q '"state": "running"'
+              docker exec seshi-smoke seshi workers status --json | grep -q '"state": "running"'
               exit 0
             fi
             sleep 1
           done
-          docker logs sessiondb
+          docker logs seshi-smoke
           exit 1
 
   # F8.4: the binary on every platform it ships for, built natively on that platform's runner.

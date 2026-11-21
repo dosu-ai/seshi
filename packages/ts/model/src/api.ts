@@ -249,7 +249,7 @@ export interface Identity {
   expires_at?: string;
 }
 
-export interface SessionDB {
+export interface Seshi {
   /** Store a session, whole or as a chunk from `offset`. Throws `SessionRejected` for a
    * transcript that cannot be stored, `OffsetMismatch` for a chunk that does not start where
    * the log ends, `Forbidden` for a `replace` the caller may not make, `StoreError` when the

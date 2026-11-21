@@ -13,7 +13,7 @@ const formats = buildFormats();
 let dir: string;
 let store: FsStore;
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), "sessiondb-redaction-"));
+  dir = mkdtempSync(join(tmpdir(), "seshi-redaction-"));
   store = new FsStore(dir);
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));

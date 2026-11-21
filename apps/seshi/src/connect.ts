@@ -1,8 +1,8 @@
-import { HttpSessionDB } from "@seshi/client";
+import { HttpSeshi } from "@seshi/client";
 import type { CliConfig } from "@seshi/config";
 import type { Instance } from "@seshi/instance";
 import type { Integration } from "@seshi/kit";
-import type { SessionDB } from "@seshi/model";
+import type { Seshi } from "@seshi/model";
 import type { SecretBackend } from "./account/secrets";
 import { openServerless, SERVERLESS_BASIS, type ServerlessBucket } from "./serverless/open";
 import { isServerless, serverlessOwner } from "./serverless/settings";
@@ -17,7 +17,7 @@ export class NotConnected extends Error {
 }
 
 export interface Connection {
-  db: SessionDB;
+  db: Seshi;
   mode: "server" | "serverless";
   /** Serverless mode's instance, for commands that need more than the session API. */
   instance?: Instance;
@@ -78,7 +78,7 @@ export async function connect(options: ConnectOptions): Promise<Connection> {
       throw new NotConnected(`not signed in to ${cli.server}: run seshi login`);
     }
     return {
-      db: new HttpSessionDB({
+      db: new HttpSeshi({
         server: cli.server,
         token: options.token,
         userAgent: USER_AGENT,

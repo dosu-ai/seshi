@@ -2,7 +2,7 @@
  * builds the same rule set as the server, redacts a transcript before it leaves, and uploads
  * it; the server redacts again and records its own rule set. */
 
-import { HttpSessionDB } from "@seshi/client";
+import { HttpSeshi } from "@seshi/client";
 import { compileRuleSet, redactTranscript, ruleSetFromDocument, validatePack } from "@seshi/redact";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { tempStore, testApp } from "../tooling/instance";
@@ -40,7 +40,7 @@ describe("client pre-redaction (F2.4)", () => {
       redaction: rules,
     });
     const sent: string[] = [];
-    const client = new HttpSessionDB({
+    const client = new HttpSeshi({
       server: "http://seshi.test",
       token: TOKEN,
       gzipFrom: Number.POSITIVE_INFINITY,

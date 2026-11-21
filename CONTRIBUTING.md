@@ -71,7 +71,7 @@ fails when one is stale, so run the generator in the same change as its source:
 Tests sit beside the code (`*.test.ts`). They never call external services: use recorded
 fixtures or local fakes. The S3 store test is the exception CI runs against a live
 S3-compatible endpoint ([RustFS](https://github.com/rustfs/rustfs)); to run it locally, point
-`SESSIONDB_TEST_S3_ENDPOINT`, `_BUCKET`, `_ACCESS_KEY` and `_SECRET_KEY` at any S3-compatible
+`SESHI_TEST_S3_ENDPOINT`, `_BUCKET`, `_ACCESS_KEY` and `_SECRET_KEY` at any S3-compatible
 service. Without them it skips.
 
 ## Scenarios

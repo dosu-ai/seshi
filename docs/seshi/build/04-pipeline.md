@@ -97,11 +97,11 @@ trace objects and its change entries.
 - **HTTP and client.** `createApp` builds one `Pipeline`. Its new options are `reviewer`,
   `health`, and `filter` as a `FilterSetting`. `POST /v1/sessions` takes `replace`,
   `visibility`, `idempotency_key` and the `Idempotency-Key` header, and answers 409 `conflict`
-  and 403 `forbidden`. `HttpSessionDB` maps them back to `SessionConflict` and `Forbidden`.
+  and 403 `forbidden`. `HttpSeshi` maps them back to `SessionConflict` and `Forbidden`.
   The request body is capped at `maxBodyBytes(max_upload_bytes)` (twice the transcript cap
   plus 1 MiB), on the wire (serve's `maxRequestBodySize`) and once gunzipped; past it, 413
   `too_large`.
-  `StoreSessionDB` submits envelopes to a pipeline it is given or builds. `storeSession` is a
+  `StoreSeshi` submits envelopes to a pipeline it is given or builds. `storeSession` is a
   thin wrapper.
 - **Contract and docs.**
   - Updated: `metadata`, `change`, `envelope` and `common` schemas; regenerated types; the
@@ -116,7 +116,7 @@ trace objects and its change entries.
     idempotency key from X4.7. Permanent failures are recorded for them automatically.
   - The S3 poller (F6.3) sends a rewritten object with `replace: true`; its service account is
     the session's original writer.
-  - The HTTP route goes through `StoreSessionDB.ingest`, which calls `uploadEnvelope`.
+  - The HTTP route goes through `StoreSeshi.ingest`, which calls `uploadEnvelope`.
 - **05 (auth):**
   - Implement `Authorizer` (stages.ts). It resolves the owner, `owner_basis` and `writer` from
     the verified caller, sets `admin` from roles, and throws `Forbidden`.

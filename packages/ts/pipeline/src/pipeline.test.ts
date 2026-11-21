@@ -42,7 +42,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type UploadEnvelopeOptions, uploadEnvelope } from "./envelope";
 import { getTrace, setVisibility, tombstone } from "./ingest";
 import { Pipeline, type PipelineOptions } from "./pipeline";
-import { StoreSessionDB } from "./session-db";
 import {
   MemoryHealthCounters,
   type ReviewDecision,
@@ -52,6 +51,7 @@ import {
   StoreHealthCounters,
 } from "./stages";
 import { staleSessions } from "./stale";
+import { StoreSeshi } from "./store-seshi";
 
 let dir: string;
 let store: FsStore;
@@ -886,7 +886,7 @@ describe("a dropped first envelope leaves a stub (F3.4, revised 15 Nov 2026)", (
 
   it("is neither listed nor served by the session API until it has a trace", async () => {
     const r = judge();
-    const db = new StoreSessionDB({
+    const db = new StoreSeshi({
       store,
       owner: "alice",
       formats,
@@ -1823,7 +1823,7 @@ describe("stale sessions and rebuilds (X4.9)", () => {
   it("records the format version that built a session, and lists it stale once the adapter is newer", async () => {
     await submit(pipeline({ formats: at("1") }), upload(HEAD));
     expect((await session())?.normalizer).toMatchObject({
-      name: "@dosu/sessiondb",
+      name: "@dosu/seshi",
       format_version: "1",
     });
     expect((await stale(at("1"))).sessions).toEqual([]);

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig, type ServerConfig, serverConfigSchema } from "@seshi/config";
@@ -113,7 +113,7 @@ describe("buildInstance", () => {
     await instance.close();
   });
 
-  it("refuses another deployment's or org's bucket, and a sessiondb prefix (X1.4, X1.5)", async () => {
+  it("refuses another deployment's or org's bucket (X1.4)", async () => {
     await (
       await buildInstance(config('deployment_id = "prod"\norg = "acme"\n'), { formats, env: {} })
     ).close();
@@ -123,19 +123,6 @@ describe("buildInstance", () => {
     await expect(buildInstance(config('org = "globex"\n'), { formats, env: {} })).rejects.toThrow(
       /belongs to org/,
     );
-    mkdirSync(join(dir, "old"), { recursive: true });
-    writeFileSync(
-      join(dir, "old", "sessionstorage.json"),
-      JSON.stringify({ schema: "sessionstorage/layout/1", created_at: "x", created_by: "y" }),
-    );
-    await expect(
-      buildInstance(
-        loadConfig(serverConfigSchema, {
-          env: { SESHI_STORE__URL: `file://${join(dir, "old")}` },
-        }).config,
-        { formats, env: {} },
-      ),
-    ).rejects.toBeInstanceOf(InstanceError);
   });
 
   it("refuses a store URL it cannot open and a redaction pack it cannot use", async () => {

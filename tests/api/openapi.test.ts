@@ -145,7 +145,7 @@ let store: FsStore;
 let app: App;
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), "sessiondb-openapi-"));
+  dir = mkdtempSync(join(tmpdir(), "seshi-openapi-"));
   store = new FsStore(join(dir, "bucket"));
   app = createApp({
     store,
@@ -173,7 +173,7 @@ async function call(
     headers?: Record<string, string>;
   } = {},
 ): Promise<{ status: number; body: unknown; headers: Headers }> {
-  const url = new URL(`http://sessiondb.test${path}`);
+  const url = new URL(`http://seshi.test${path}`);
   const op = operationFor(method, url.pathname);
   const headers: Record<string, string> = { ...options.headers };
   if (options.encoding) headers["content-encoding"] = options.encoding;
@@ -505,7 +505,7 @@ describe("the server honours it", () => {
       (await call("GET", `/v1/sessions/claude-code/sess1/trace?hash=${content_hash}`)).status,
     ).toBe(200);
     const exported = await app.fetch(
-      new Request("http://sessiondb.test/v1/sessions/claude-code/sess1/export?render=letta", {
+      new Request("http://seshi.test/v1/sessions/claude-code/sess1/export?render=letta", {
         headers: { authorization: `Bearer ${TOKEN}` },
       }),
     );

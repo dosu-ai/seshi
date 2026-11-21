@@ -10,7 +10,7 @@ import { loadConfig, serverConfigSchema } from "@seshi/config";
 import { BUILTIN_FORMATS, FormatRegistry } from "@seshi/formats";
 import { Instance } from "@seshi/instance";
 import type { SearchResults } from "@seshi/model";
-import { StoreSessionDB } from "@seshi/pipeline";
+import { StoreSeshi } from "@seshi/pipeline";
 import { ensureLayout, FsStore } from "@seshi/store";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { EXIT } from "../cli/exit";
@@ -66,7 +66,7 @@ async function write(
   repo?: string,
   labels?: Record<string, string>,
 ) {
-  await new StoreSessionDB({ store: new FsStore(bucket), owner, formats }).ingest({
+  await new StoreSeshi({ store: new FsStore(bucket), owner, formats }).ingest({
     format: "trajectory",
     session_id: id,
     transcript: log(prompt),

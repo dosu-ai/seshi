@@ -3,7 +3,7 @@
 
 import { Forbidden } from "@seshi/model";
 import { describe, expect, it } from "vitest";
-import { authConfig, exchangeIdToken, HttpSessionDB } from "./http";
+import { authConfig, exchangeIdToken, HttpSeshi } from "./http";
 
 interface Seen {
   url: string;
@@ -28,7 +28,7 @@ function routed(routes: Record<string, [number, unknown]>, options: { user?: str
     const [status, body] = routes[`${method} ${path}`] ?? [404, { error: { code: "not_found" } }];
     return new Response(JSON.stringify(body), { status });
   };
-  const db = new HttpSessionDB({
+  const db = new HttpSeshi({
     server: "https://seshi.example.com",
     token: "tok",
     fetch,

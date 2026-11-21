@@ -137,7 +137,6 @@ override everything it wrote.
 - `[[sources]]` are defined in the file only, each with an `id`; env can override a field of
   one by its id (upper case, `-` as `_`).
 - A secret can be given as a reference from env too: `SESHI_AUTH__SESSION_KEYS__K1__FILE=/run/secrets/session-key`.
-- Only `SESHI_*` names are read. Today's `SESSIONDB_*` names are not.
 - A `SESHI_*` name that is not a setting stops the server, except the ones below and a
   variable a secret reads (`{ env = "SESHI_DD_KEY" }`, or the value of a `…__ENV` variable),
   which holds a value, not a setting.
@@ -257,7 +256,7 @@ url = "gs://acme-seshi/prod"
 seshi gives an object's generation as its ETag. A generation is not an MD5 of the body, so, as
 on Azure, seshi checks each trace it writes by reading it back.
 
-Traces are always stored in seshi's one canonical format (`seshi/trace/1`, X6.2) and rendered as Letta, OTLP or ATIF on read (`GET …/trace?render=`). A bucket written by sessiondb (`sessionstorage.json`) is refused: there is no migration (X1.5), so point `url` at a new prefix.
+Traces are always stored in seshi's one canonical format (`seshi/trace/1`, X6.2) and rendered as Letta, OTLP or ATIF on read (`GET …/trace?render=`).
 
 ### `[auth]`
 
@@ -332,7 +331,7 @@ are kept (X6.4). `health_retention`, `"90d"`: how many days of source health cou
 
 `packs`, default `[]`: rule pack files, in order, on top of the built-in pack, which always
 runs (F2.1). A `.toml` file is a rule pack (`id`, `rules`, `sensitive_files`,
-`secret_commands`, `disable`); a `.json` file is the rule file sessiondb took (`patterns`,
+`secret_commands`, `disable`); a `.json` file is a plain rule file (`patterns`,
 `sensitive_files`, `secret_commands`), and every JSON file loads together as the pack `legacy`.
 See [redaction.md](redaction.md). Your patterns run under RE2 (F2.2). The server
 refuses to start on a pack it cannot use, a pattern RE2 cannot run, a rule id used twice, a

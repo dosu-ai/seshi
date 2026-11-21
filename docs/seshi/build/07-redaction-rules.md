@@ -120,7 +120,7 @@ Reference for operators: [docs/redaction.md](../../redaction.md).
   `seshi/redaction-rules/1` document `{rule_set, builtin, packs}`. It goes to any signed-in
   caller, a write-only device token included. The packs are not public (F2.4 Access).
   - `ETag` is the rule-set hash; `If-None-Match` gets 304.
-  - `HttpSessionDB.redactionRules()` fetches it. `ruleSetFromDocument(doc)` validates the
+  - `HttpSeshi.redactionRules()` fetches it. `ruleSetFromDocument(doc)` validates the
     packs again with the one validator and compiles them on the client's own built-in pack.
     It returns `{rules, same}`, where `same` says whether the client's hash equals the
     server's.
@@ -201,7 +201,7 @@ Reference for operators: [docs/redaction.md](../../redaction.md).
     hook path: it costs about 11 ms to import (re2js included), measured against the 250 ms
     hook budget.
   - Cache the rules document. The client sends no `If-None-Match` yet; the route supports it,
-    so add the header to `HttpSessionDB` if polling matters.
+    so add the header to `HttpSeshi` if polling matters.
   - Use `redactTranscript`, not `redactRaw`: `redactRaw` (kept for compatibility) still
     redacts ids, which can break the server's call/result linkage.
   - **Offsets.** The server counts the bytes it receives (`normalized.bytes` is offset plus the
@@ -223,7 +223,7 @@ Reference for operators: [docs/redaction.md](../../redaction.md).
   them and must use the entry's `content_hash`.
 - **08 (review):** nothing to wire. Review sees regex-redacted records as before, and backfill
   re-redacts the stored, reviewed trace, so review redactions stay.
-- **13 (CLI):** `HttpSessionDB.redactionRules()` was added to `packages/ts/client/src/http.ts`;
+- **13 (CLI):** `HttpSeshi.redactionRules()` was added to `packages/ts/client/src/http.ts`;
   keep it when merging 13's client changes. `seshi redact` runs where the server config is;
   13 may add a remote `redact test` that fetches the rules through the client.
 - **Shared files touched**, all additive:

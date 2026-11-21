@@ -78,7 +78,7 @@ User docs: [docs/capture.md](../../capture.md) (new), docs/cli.md (rows), docs/c
     a dead pid or a beat older than 2 minutes is taken over, and the old holder stops at its
     next beat.
   - `sink.ts`: `SessionSink { target, ingest, retract, ready }`, `httpSink` over
-    `HttpSessionDB` (401 → `SignInNeeded`; 403 `bad_retract_secret`/`retract_disabled` →
+    `HttpSeshi` (401 → `SignInNeeded`; 403 `bad_retract_secret`/`retract_disabled` →
     `RetractRefused`; 404 on retract → `absent`, 410 → `gone`).
   - `uploader.ts` `Uploader`: `pass()` takes in the spool (registering an agent as installed on
     its first hook), sweeps when due (15 min), retracts sessions turned off, uploads every due
@@ -111,7 +111,7 @@ User docs: [docs/capture.md](../../capture.md) (new), docs/cli.md (rows), docs/c
   `sessions:write`, acts on the caller's own folder, checks `capture.allow_retract` (403
   `retract_disabled`), the hash in constant time (403 `bad_retract_secret`), 404 / 410
   `redacted`, then `tombstone(reason: "retracted", writer: caller)`.
-  `HttpSessionDB.tombstone(…, { retractSecret })`, `RETRACT_HEADER`. openapi.yaml documents the
+  `HttpSeshi.tombstone(…, { retractSecret })`, `RETRACT_HEADER`. openapi.yaml documents the
   header, the field, 403 codes and 410; the openapi test exercises them.
 - **Config**: CLI `capture.remotes` (the org rule); `@seshi/config/paths` export (no zod);
   `NOT_SETTINGS_ENV` (`SESHI_CONFIG`, `SESHI_SESSION_ID`, `SESHI_AGENT`, `SESHI_NO_UPLOADER`)
@@ -283,7 +283,7 @@ A review of this branch against F9/B1.6 fixed, each with a test:
 
 - **07 (redaction rules), done after the rebase**: `preRedactor(account)` in
   `apps/seshi/src/capture-runtime.ts` fetches the rules once per uploader run, on the first
-  piece, with the upload credential (`HttpSessionDB.redactionRulesSince(etag)`, new: it sends
+  piece, with the upload credential (`HttpSeshi.redactionRulesSince(etag)`, new: it sends
   If-None-Match and answers `null` on 304), builds them with `ruleSetFromDocument`, and calls
   `redactTranscript(rules, text, encoding, carried)` per piece, returning `{text, carried:
   withheld}` (no `carried` when nothing is withheld). The document and its ETag are kept in

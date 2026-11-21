@@ -4,12 +4,12 @@
 # failure:
 #   unexpected exception: Error: ENOENT: no such file or directory, open '<world>/bucket/sources/upload/health/2026-09-01/test.json.51b9e66f9725.tmp'
 #       at readFileSync (native)
-#       at /Users/devstein/code/sessiondb/.claude/worktrees/heuristic-maxwell-b8618f/tests/tooling/scenario/runner.ts:180:31
+#       at <repo>/tests/tooling/scenario/runner.ts:180:31
 #       at map (native)
-#       at invariants (/Users/devstein/code/sessiondb/.claude/worktrees/heuristic-maxwell-b8618f/tests/tooling/scenario/runner.ts:509:41)
-#       at all (/Users/devstein/code/sessiondb/.claude/worktrees/heuristic-maxwell-b8618f/tests/tooling/scenario/runner.ts:835:51)
-#       at runScenario (/Users/devstein/code/sessiondb/.claude/worktrees/heuristic-maxwell-b8618f/tests/tooling/scenario/runner.ts:874:27)
-#       at attempt (/Users/devstein/code/sessiondb/.claude/worktrees/heuristic-maxwell-b8618f/tests/tooling/scenario/explore.ts:69:26)
+#       at invariants (<repo>/tests/tooling/scenario/runner.ts:509:41)
+#       at all (<repo>/tests/tooling/scenario/runner.ts:835:51)
+#       at runScenario (<repo>/tests/tooling/scenario/runner.ts:874:27)
+#       at attempt (<repo>/tests/tooling/scenario/explore.ts:69:26)
 name: found by seed 33018
 description: "A generated scenario (seed 33018) shrunk from 15 to 15 steps; the header says how it failed."
 setup: { repos: { code/private: { config: "capture = false\n" } }, seed: 6 }

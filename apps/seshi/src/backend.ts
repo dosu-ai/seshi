@@ -1,6 +1,6 @@
 import type { Principal } from "@seshi/auth";
 import {
-  HttpSessionDB,
+  HttpSeshi,
   type OwnerOption,
   type ReviewDecision,
   type TokenInfo,
@@ -20,7 +20,7 @@ import {
   VERSION,
   type Visibility,
 } from "@seshi/model";
-import type { StoreSessionDB } from "@seshi/pipeline";
+import type { StoreSeshi } from "@seshi/pipeline";
 import { LOCAL_VIEWER, type Viewer, viewerFor } from "@seshi/search";
 import { type Account, accountCredential, serverOf } from "./account/account";
 import type { Purpose } from "./account/credential";
@@ -80,7 +80,7 @@ export class ServerBackend implements Backend {
   readonly mode = "server";
 
   constructor(
-    readonly db: HttpSessionDB,
+    readonly db: HttpSeshi,
     readonly user?: string,
   ) {}
 
@@ -158,7 +158,7 @@ export class ServerlessBackend implements Backend {
     return this.instance.storage.url;
   }
 
-  private sessionsAs(owner?: string): StoreSessionDB {
+  private sessionsAs(owner?: string): StoreSeshi {
     if (owner === undefined || owner === this.owner) {
       return this.instance.localSessions(this.owner, SERVERLESS_BASIS);
     }
@@ -364,7 +364,7 @@ export async function openBackend(
   const credential = await accountCredential(account, server, options.purpose ?? "read");
   if (credential.fallback) ctx.stderr(`seshi: warning: ${credential.fallback}`);
   return new ServerBackend(
-    new HttpSessionDB({
+    new HttpSeshi({
       server,
       token: credential.token,
       userAgent: USER_AGENT,

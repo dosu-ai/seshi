@@ -158,7 +158,7 @@ Other formats are rendered on read, by `GET /v1/sessions/:format/:id/trace?rende
 | Format | What you get |
 |---|---|
 | `seshi` (default) | The stored canonical trace |
-| `letta` | `sessionstorage/trace/1`: plain trajectory-v1 records, events and hash, as sessiondb stored them |
+| `letta` | Letta trajectory-v1 (`sessionstorage/trace/1`): plain trajectory-v1 records with the canonical trace's events and hash, without `llm_calls` or `provenance` |
 | `otlp` | An OTLP/HTTP JSON `ExportTraceServiceRequest`: OpenTelemetry GenAI spans (`invoke_agent`, a `chat` span per model turn with its `gen_ai.usage.*`, an `execute_tool` span per tool call), ready to post to a collector. Lossless: the canonical trace can be read back from it |
 | `atif` | An ATIF-v1.7 document, with token usage as step metrics |
 

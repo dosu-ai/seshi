@@ -2,7 +2,7 @@
  * with the credential `seshi login` stored (`--token` overriding it), the hits styled in the
  * search colour on a terminal and plain otherwise. */
 
-import { HttpSessionDB } from "@seshi/client";
+import { HttpSeshi } from "@seshi/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Machine, startServer, type TestServer } from "../tooling/cli";
 import { transcript } from "../tooling/testdata";
@@ -37,7 +37,7 @@ beforeEach(async () => {
     },
   });
   machine = new Machine();
-  await new HttpSessionDB({ server: server.url, token: TOKEN }).ingest({
+  await new HttpSeshi({ server: server.url, token: TOKEN }).ingest({
     format: "claude-code",
     session_id: "sess1",
     transcript: CLAUDE,

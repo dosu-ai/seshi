@@ -18,7 +18,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { HttpSessionDB } from "@seshi/client";
+import { HttpSeshi } from "@seshi/client";
 import {
   addOpencodeTurn,
   type OpencodeExport,
@@ -1931,7 +1931,7 @@ describe("the server's [capture] redact_tool_calls", () => {
       "upload",
     );
     // The org key states its user, as the CLI signed in above.
-    const db = new HttpSessionDB({ server: server.url, token: credential.token, user: OWNER });
+    const db = new HttpSeshi({ server: server.url, token: credential.token, user: OWNER });
     for (const [id, repo] of [
       ["old-1", "github.com/acme/research"],
       ["old-2", "github.com/acme/web"],

@@ -24,7 +24,7 @@ info:
     sessions; a session the caller may not read answers `404`. Request bodies may be sent
     `Content-Encoding: gzip`.
 
-    The TypeScript SDK's `HttpSessionDB` maps the error responses back to the errors its store
+    The TypeScript SDK's `HttpSeshi` maps the error responses back to the errors its store
     backend throws: `409 offset_mismatch` to `OffsetMismatch`, `409 conflict` to
     `SessionConflict`, `403 forbidden` to `Forbidden`, `422` to `SessionRejected`, `502` to
     `StoreError`; everything else is a `ServerError`. A server implementing this
@@ -2213,7 +2213,7 @@ components:
       enum: [seshi, letta, otlp, atif]
       description: |
         How a trace is returned: `seshi` (`Trace`, the stored canonical trace), `letta`
-        (`LettaTrace`, trajectory-v1 records as sessiondb stored them), `otlp` (`OtlpTrace`,
+        (`LettaTrace`, plain Letta trajectory-v1 records), `otlp` (`OtlpTrace`,
         OTLP/HTTP JSON GenAI spans) or `atif` (`AtifDocument`, an ATIF-v1.7 document).
 
     StorageView:
@@ -2355,7 +2355,7 @@ components:
 
     LettaTrace:
       type: object
-      description: "A trace rendered as Letta trajectory-v1 (`?format=letta`): the `sessionstorage/trace/1` object sessiondb stored, with the same events and hash as the canonical trace."
+      description: "A trace rendered as Letta trajectory-v1 (`?format=letta`): plain trajectory-v1 records without `llm_calls` or `provenance`, with the same events and hash as the canonical trace."
       required: [schema, content_hash, source, agent, session_id, started_at, ended_at, records, events, metadata]
       properties:
         schema: { const: sessionstorage/trace/1 }

@@ -4,10 +4,8 @@ import { asTranscript } from "./calls";
 import { detectFormat } from "./detect";
 import { TRAJECTORY_VERSION } from "./letta";
 
-const LEGACY_NORMALIZER_NAME = "@dosu/sessiondb";
-
 export const NORMALIZER = {
-  name: LEGACY_NORMALIZER_NAME,
+  name: "@dosu/seshi",
   version: `${VERSION}+trajectory.${TRAJECTORY_VERSION}`,
 } as const;
 

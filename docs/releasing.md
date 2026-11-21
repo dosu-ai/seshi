@@ -140,16 +140,10 @@ Publishing page) to match, or the upload is refused.
   `publish-npm` logs why and the release goes on. For it to publish, the token must be allowed
   to publish new packages outside `@dosu` as well. Until `seshi` is out, the docs name
   `@dosu/seshi` only.
-- **Repository name.** The repository was `dosu-ai/sessiondb` and is now `dosu-ai/seshi`.
-  `REPOSITORY` in `scripts/release/targets.ts` and the two install scripts name it (a test
-  keeps them equal); GitHub redirects the old URLs, including sessiondb's release downloads.
-  The release job's app token is scoped to the repository by name, which `ci.yml` reads from
-  the event, so a rename needs no change there. The image moves with it to
-  `ghcr.io/dosu-ai/seshi`; the old `ghcr.io/dosu-ai/sessiondb` keeps sessiondb's tags.
-- **The old package.** Give `@dosu/sessiondb` its last release pointing to seshi (X3.8): publish
-  one more patch whose README says it moved to `@dosu/seshi` and `@dosu/seshi-client`, then
-  `npm deprecate @dosu/sessiondb "moved to seshi: npm i -g @dosu/seshi; the client is @dosu/seshi-client"`.
-  This is a one-off, done by hand from the last sessiondb tag.
+- **Repository name.** `REPOSITORY` in `scripts/release/targets.ts` and the two install
+  scripts name the repository, `dosu-ai/seshi` (a test keeps them equal). The release job's app
+  token is scoped to the repository by name, which `ci.yml` reads from the event, so renaming
+  the repository needs no change there; the image is `ghcr.io/dosu-ai/<repository>`.
 - **Open VSX** (the Cursor extension). Create an Eclipse account, sign the Open VSX publisher
   agreement, create the `dosu` namespace (`bunx ovsx@1.3.0 create-namespace dosu -p <token>`)
   and claim it, and give CI an `OVSX_PAT` secret. Without it the `openvsx` job publishes

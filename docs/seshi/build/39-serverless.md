@@ -1,6 +1,6 @@
 # 39 · Serverless mode (F11)
 
-Branch `seshi-39-serverless`, merged into `seshi-mvp` (dosu-ai/sessiondb#21). The spec is [`../serverless.md`](../serverless.md);
+Branch `seshi-39-serverless`, merged into `seshi-mvp` (dosu-ai/seshi#21). The spec is [`../serverless.md`](../serverless.md);
 this note says what was built, where the build differs from the spec, what was checked and what
 is still open. The spec's eight build steps landed as commits on this one branch, not as eight
 branches.

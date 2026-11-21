@@ -131,7 +131,7 @@ pre.tree .d { color: var(--accent); font-weight: 500; }
 <div class="wrap">
 <nav class="rail" aria-label="Contents">
   <div class="brand">seshi</div>
-  <div class="sub">Design decisions for the sessiondb redesign</div>
+  <div class="sub">Design decisions for seshi</div>
   <h4>Start here</h4>
   <a href="#overview"><span class="k">—</span>Overview</a>
   <a href="#first"><span class="k">—</span>Decide these first</a>
@@ -162,9 +162,9 @@ pre.tree .d { color: var(--accent); font-weight: 500; }
 
 <main>
 <section class="first" id="overview">
-  <div class="meta">Working document · started 14 Nov 2026 · base: sessiondb v0.9.0</div>
+  <div class="meta">Working document · started 14 Nov 2026 · base: the pre-seshi session store, v0.9.0</div>
   <h1>Seshi design decisions</h1>
-  <p class="lede">Seshi turns sessiondb from an upload-only session store into a toolkit for the whole session lifecycle: capture, ingest from other systems, redact, store, and search. This page records each decision we need to make, the options, a recommendation, and what is still open.</p>
+  <p class="lede">Seshi turns an upload-only session store into a toolkit for the whole session lifecycle: capture, ingest from other systems, redact, store, and search. This page records each decision we need to make, the options, a recommendation, and what is still open.</p>
   <p>Every decision has an ID (<code>X5.2</code>, <code>F4.3</code>) so we can refer to it in discussion. Recommendations are proposals until we agree on them.</p>
   <div class="legend">
     <span><span class="chip proposed">Proposed</span> recommendation, not yet agreed</span>
@@ -271,7 +271,7 @@ pre.tree .d { color: var(--accent); font-weight: 500; }
       <div class="body">
         <h3>No migration of shared deployments</h3>
         <dl>
-          <dt>Decision</dt><dd class="rec">Assume no hosted multi-org sessiondb deployments exist today. Seshi ships no tool to split a shared bucket by org.</dd>
+          <dt>Decision</dt><dd class="rec">Assume no hosted multi-org deployments of the pre-seshi store exist today. Seshi ships no tool to split a shared bucket by org.</dd>
           <dt>Note</dt><dd>The <code>o-&lt;org&gt;.u-&lt;user&gt;</code> owner naming seen earlier is treated as not in use. If a shared deployment does turn up, its owner names start with the org, so splitting it by prefix stays possible.</dd>
         </dl>
       </div>
@@ -309,7 +309,7 @@ pre.tree .d { color: var(--accent); font-weight: 500; }
 
 <section id="repo">
   <h2><span class="k">X3</span>Repository structure</h2>
-  <p class="intro">Today: <code>sdks/typescript</code> holds normalize, redact, store, trace and ingest in one published package (<code>@dosu/sessiondb</code>); <code>server/</code> is one HTTP file, an entry point and token code; <code>spec/</code> holds the layout, OpenAPI and test data.</p>
+  <p class="intro">Today: <code>sdks/typescript</code> holds normalize, redact, store, trace and ingest in one published package; <code>server/</code> is one HTTP file, an entry point and token code; <code>spec/</code> holds the layout, OpenAPI and test data.</p>
   <p>Because <a href="#runtime">X2.2</a> puts the CLI, hooks and server in one binary, package boundaries no longer decide what ships: everything is in the binary. They now do two jobs: keep layers apart so each can be tested alone (<a href="#tenancy">X1.2</a>), and let each command load only the code it needs, so hooks start quickly (<a href="#repo">X3.3</a>). Packages are grouped in a folder per language (<a href="#repo">X3.9</a>), and everything specific to one vendor or agent lives in <code>integrations/</code> (<a href="#repo">X3.11</a>).</p>
 <pre class="tree"><span class="d">seshi/</span>
 ├─ <span class="d">apps/</span>
@@ -429,8 +429,8 @@ pre.tree .d { color: var(--accent); font-weight: 500; }
       <div class="body">
         <h3>Names and what gets published</h3>
         <dl>
-          <dt>Decision</dt><dd class="rec">Publish <code>@seshi/client</code> and <code>@seshi/model</code> to npm, and the binary as <code>seshi</code> through npm, Homebrew and GitHub releases. Give <code>@dosu/sessiondb</code> a last release that points to seshi. The <code>seshi</code> npm name is believed to be available.</dd>
-          <dt>Still to do</dt><dd>Register the name and the <code>@seshi</code> scope before announcing; decide whether the repository is renamed from <code>dosu-ai/sessiondb</code>.</dd>
+          <dt>Decision</dt><dd class="rec">Publish <code>@seshi/client</code> and <code>@seshi/model</code> to npm, and the binary as <code>seshi</code> through npm, Homebrew and GitHub releases. Give the pre-seshi package a last release that points to seshi. The <code>seshi</code> npm name is believed to be available.</dd>
+          <dt>Still to do</dt><dd>Register the name and the <code>@seshi</code> scope before announcing; decide whether the repository is renamed (it is now <code>dosu-ai/seshi</code>).</dd>
         </dl>
       </div>
     </div>
@@ -802,7 +802,7 @@ pre.tree .d { color: var(--accent); font-weight: 500; }
         <h3>Without an IdP, trust members with an org key</h3>
         <dl>
           <dt>Options</dt><dd><ul>
-            <li><b>Static tokens</b> from config, like today's <code>SESSIONDB_TOKENS</code>: one token per named owner, edited by hand.</li>
+            <li><b>Static tokens</b> from config, like today's token list: one token per named owner, edited by hand.</li>
             <li><b>Managed people</b>: an admin adds each person and sends a single-use invite; seshi issues and revokes their tokens. Verified, but a second people-admin system next to the IdP.</li>
             <li><b>Trusted org key</b>: members share an org key and state their username, like Datadog Trajectory's <code>trajectory.user</code>.</li>
           </ul></dd>
@@ -1007,7 +1007,7 @@ pre.tree .d { color: var(--accent); font-weight: 500; }
       <div class="body">
         <h3>Env names map to TOML paths</h3>
         <dl>
-          <dt>Decision</dt><dd><code>SESHI_</code> plus the TOML path in upper case, with <code>__</code> between levels: <code>[store] url</code> is <code>SESHI_STORE__URL</code>; <code>[auth.oidc] issuer</code> is <code>SESHI_AUTH__OIDC__ISSUER</code>. Only <code>SESHI_*</code> names are read; there is no compatibility with today's <code>SESSIONDB_*</code> names for now.</dd>
+          <dt>Decision</dt><dd><code>SESHI_</code> plus the TOML path in upper case, with <code>__</code> between levels: <code>[store] url</code> is <code>SESHI_STORE__URL</code>; <code>[auth.oidc] issuer</code> is <code>SESHI_AUTH__OIDC__ISSUER</code>. Only <code>SESHI_*</code> names are read; there is no compatibility with today's env names for now.</dd>
           <dt>Sources</dt><dd>Lists of sources (<code>[[sources]]</code>) do not map well to env. Sources are defined in TOML only, with an <code>id</code> each; env can override a field of a named source (<code>SESHI_SOURCES__DATADOG_PROD__API_KEY</code>).</dd>
         </dl>
       </div>
@@ -1838,8 +1838,8 @@ pre.tree .d { color: var(--accent); font-weight: 500; }
     <li><b>14 Nov 2026.</b> F4.5 agreed: metadata-only batches are rejected through <code>partial_success</code>. F4.1 explains why the path is <code>/otlp/v1/traces</code>; overview row corrected to match.</li>
     <li><b>14 Nov 2026.</b> F3 agreed and reworked into two steps: a decision model labels each envelope allow, redact or drop with no free text, and only redact goes to a small configurable LLM that returns findings for code to apply. Default models and prompts, all replaceable; chunks reviewed alone for now; each envelope reviewed once and no daily budget.</li>
     <li><b>14 Nov 2026.</b> F2 agreed: TOML rule packs, RE2 for operator patterns, counts not matches recorded, server always redacts with optional client pre-redaction, backfill over stored traces.</li>
-    <li><b>14 Nov 2026.</b> F1.2 changed: no <code>SESSIONDB_*</code> aliases; only <code>SESHI_*</code> names are read for now.</li>
-    <li><b>14 Nov 2026.</b> F1 agreed: flags over env over TOML; <code>SESHI_</code> env names with <code>__</code> nesting and <code>SESSIONDB_*</code> aliases; sources in TOML only; secrets as references; one strict schema; restart to apply changes.</li>
+    <li><b>14 Nov 2026.</b> F1.2 changed: no aliases for today's env names; only <code>SESHI_*</code> names are read for now.</li>
+    <li><b>14 Nov 2026.</b> F1 agreed: flags over env over TOML; <code>SESHI_</code> env names with <code>__</code> nesting and aliases for today's env names; sources in TOML only; secrets as references; one strict schema; restart to apply changes.</li>
     <li><b>14 Nov 2026.</b> X7.3 to X7.5 agreed. All cross-cutting decisions (X1 to X7) are settled.</li>
     <li><b>14 Nov 2026.</b> X7 changed: one worker instance in the first version (X7.2, agreed), leases deferred to multi-server support (X7.6, agreed). Lease mechanics removed; X7.3 to X7.5 cover safety with a second worker, how jobs find work, and job status.</li>
     <li><b>14 Nov 2026.</b> X7 expanded: lease mechanics (X7.2), correctness without relying on leases (X7.3), how jobs find work (X7.4), assembler sharding later (X7.5), job status (X7.6).</li>

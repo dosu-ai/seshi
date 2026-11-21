@@ -19,7 +19,7 @@ import {
 } from "@seshi/store";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { finishTombstone, setVisibility, tombstone } from "./ingest";
-import { StoreSessionDB } from "./session-db";
+import { StoreSeshi } from "./store-seshi";
 
 const formats = new FormatRegistry(BUILTIN_FORMATS);
 const line = (record: Record<string, unknown>) => `${JSON.stringify(record)}\n`;
@@ -71,7 +71,7 @@ function failingPointer(): { store: Store; arm: () => void } {
 }
 
 const db = (over: Store = store, now: () => Date = tick) =>
-  new StoreSessionDB({ store: over, owner: "alice", formats, now });
+  new StoreSeshi({ store: over, owner: "alice", formats, now });
 
 const archive = (sessionId: string) => archiveId("alice", "trajectory", sessionId);
 const metadata = (sessionId: string) => readMetadata(store, "alice", archive(sessionId));

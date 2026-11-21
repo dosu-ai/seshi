@@ -74,7 +74,6 @@ export {
   type StoreSessionResult,
   storeSession,
 } from "./session";
-export { type StoreClientOptions, StoreSessionDB } from "./session-db";
 export {
   ASSEMBLE_BATCH,
   type AssembleOptions,
@@ -106,3 +105,4 @@ export {
   StoreHealthCounters,
 } from "./stages";
 export { staleSession, staleSessions } from "./stale";
+export { type StoreClientOptions, StoreSeshi } from "./store-seshi";

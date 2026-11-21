@@ -20,7 +20,7 @@ import { type BackfillOptions, backfillRedaction } from "./backfill";
 import { uploadEnvelope } from "./envelope";
 import { getTrace, ingest, tombstone } from "./ingest";
 import { Pipeline } from "./pipeline";
-import { StoreSessionDB } from "./session-db";
+import { StoreSeshi } from "./store-seshi";
 
 let dir: string;
 let store: FsStore;
@@ -406,7 +406,7 @@ describe("backfillRedaction (F2.5)", () => {
     expect((await metadata("s1"))?.head).not.toBe(old);
     // The object is left behind with what the new rules take out, but no reader is given it.
     expect(JSON.stringify(await getTrace(store, "alice", archive, old))).toContain("ACME-1234");
-    const db = new StoreSessionDB({ store, owner: "alice", formats });
+    const db = new StoreSeshi({ store, owner: "alice", formats });
     expect(await db.getTrace("trajectory", "s1", old)).toBeNull();
     expect(JSON.stringify(await db.getTrace("trajectory", "s1"))).not.toContain("ACME-1234");
   });

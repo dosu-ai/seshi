@@ -12,7 +12,7 @@ and `@seshi/client` libraries), and install scripts for macOS/Linux (`install.sh
 - **Targets** (`scripts/release/targets.ts`): darwin-arm64, darwin-x64, linux-x64, linux-arm64
   (glibc), windows-x64, windows-arm64. Each has its Bun target (x64 uses `-baseline`), its
   archive name (`seshi-<id>.tar.gz`, `.zip` on Windows), its npm package (`@seshi/cli-<id>`) and
-  Node's platform name. `REPOSITORY` (`dosu-ai/sessiondb`), `CHECKSUMS` (`SHA256SUMS`) and
+  Node's platform name. `REPOSITORY` (the repository's name, now `dosu-ai/seshi`), `CHECKSUMS` (`SHA256SUMS`) and
   `INSTALL_SCRIPTS` live here too.
 - **Archives** (`archive.ts`): a ustar `.tar.gz` writer and a deflate `.zip` writer, plus readers
   for both, with no dependency on the build machine's `tar` or `zip`. Output is deterministic for
@@ -181,9 +181,8 @@ and `@seshi/client` libraries), and install scripts for macOS/Linux (`install.sh
     XDG-style config and state folders F9.1 uses, and often already on `PATH`.
     `%LOCALAPPDATA%\Programs\seshi` on Windows, the per-user programs folder, kept apart from
     the capture state in `%LOCALAPPDATA%\seshi`.
-13. **`@dosu/sessiondb`'s last release is a documented manual step** (docs/releasing.md), not
-    automation. It is a one-off from the last sessiondb tag, and that package's sources are
-    gone from `main`.
+13. **The pre-seshi npm package's last release is a manual step**, not automation. It is a
+    one-off from that package's last tag, and its sources are gone from `main`.
 14. **"Windows in the CI test matrix" means Windows binaries, smoke tested, and both
     PowerShells running install.ps1.** The full `bun run test` on Windows is not added: the
     suite has never run there (shell-script fixtures, POSIX paths, file modes), and a red job no

@@ -15,7 +15,7 @@ body:
         triggers it, and run it through a local server with a file store:
 
         ```sh
-        SESSIONDB_TOKEN=repro-token-0123456789 SESSIONDB_STORE_URL=file:///tmp/sessiondb-repro bun start
+        SESHI_AUTH__TOKENS__REPRO=repro-token-0123456789 SESHI_STORE__URL=file:///tmp/seshi-repro bun start
         curl -s localhost:7200/v1/sessions -H 'authorization: Bearer repro-token-0123456789' \
           -H 'content-type: application/json' -d @repro.json
         ```
@@ -63,8 +63,8 @@ body:
     id: version
     attributes:
       label: Version
-      description: The `version` field from `GET /healthz`, or the `@dosu/sessiondb` version from your lockfile.
-      placeholder: "0.9.0"
+      description: The `version` field from `GET /healthz`, `seshi --version`, or the `@dosu/seshi` or `@dosu/seshi-client` version from your lockfile.
+      placeholder: "0.25.0"
     validations:
       required: true
 
@@ -75,7 +75,8 @@ body:
       multiple: true
       options:
         - Server (HTTP API or Docker image)
-        - SDK (@dosu/sessiondb)
+        - CLI or capture (@dosu/seshi)
+        - Client (@dosu/seshi-client or the seshi Python package)
         - Redaction
         - Normalizing a transcript
         - Bucket layout or change feed

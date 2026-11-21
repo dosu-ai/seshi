@@ -41,7 +41,7 @@ seshi answers: in seshi's own state, through the CLI.
   reads (`capturing`, `reason`, `problems`; `retracting`, `fresh`, `unfrozen`), so a change to
   the CLI's JSON breaks a test here, not the chip.
 - **`.claude-plugin/marketplace.json`** at the repository root, listing the plugin, so it
-  installs with `/plugin install seshi --marketplace dosu-ai/sessiondb`. The plugin's README
+  installs with `/plugin install seshi --marketplace dosu-ai/seshi`. The plugin's README
   has the install lines and a section on the chip.
 
 ## Deviations from the prototype

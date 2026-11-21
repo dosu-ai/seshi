@@ -17,13 +17,10 @@ import {
 } from "@seshi/pipeline";
 import {
   archiveId,
-  encodeJson,
   FsStore,
   getBytes,
   keys,
   LAYOUT_KEY,
-  LayoutError,
-  LEGACY_LAYOUT_KEY,
   PreconditionFailed,
   readChanges,
 } from "@seshi/store";
@@ -55,7 +52,7 @@ const meta = {
 };
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), "sessionstorage-ingest-"));
+  dir = mkdtempSync(join(tmpdir(), "seshi-ingest-"));
   store = new FsStore(dir);
   tick = 0;
 });
@@ -683,13 +680,5 @@ describe("conditional pointer writes (X6.5)", () => {
       new Set(results.map((r) => r.content_hash)),
     );
     expect((await readChanges(store, "acme")).entries).toHaveLength(5);
-  });
-
-  it("refuses a prefix that holds a sessiondb store, before writing anything", async () => {
-    await store.put(LEGACY_LAYOUT_KEY, encodeJson({ schema: "sessionstorage/layout/1" }));
-    await expect(
-      ingest({ store, owner: "acme", records: records("claude-basic"), metadata: meta, now }),
-    ).rejects.toBeInstanceOf(LayoutError);
-    expect((await store.list("owners/")).keys).toEqual([]);
   });
 });

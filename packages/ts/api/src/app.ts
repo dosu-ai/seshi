@@ -54,7 +54,7 @@ import {
   getSession,
   getTrace,
   listSessions,
-  type StoreSessionDB,
+  type StoreSeshi,
   setVisibility,
   staleSessions,
   tombstone,
@@ -297,7 +297,7 @@ export function createApp(instance: Instance) {
     return principal;
   }
 
-  function writerClient(principal: Principal): StoreSessionDB {
+  function writerClient(principal: Principal): StoreSeshi {
     return instance.sessions({
       owner: principal.owner,
       writer: writerFor(principal),
@@ -395,7 +395,7 @@ export function createApp(instance: Instance) {
   });
 
   async function stored(
-    db: StoreSessionDB,
+    db: StoreSeshi,
     upload: Upload,
     options: IngestOptions = {},
   ): Promise<Response> {

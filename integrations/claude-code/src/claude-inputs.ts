@@ -26,7 +26,7 @@ const NOTIFICATION_PREFIX = "<task-notification";
 
 const QUEUED_COMMAND = "queued_command";
 
-const MARK = "\uE000sessiondb-observation\uE000";
+const MARK = "\uE000seshi-observation\uE000";
 
 function startsNotification(text: unknown): boolean {
   return typeof text === "string" && text.trimStart().startsWith(NOTIFICATION_PREFIX);
