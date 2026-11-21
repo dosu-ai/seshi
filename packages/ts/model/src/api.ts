@@ -22,6 +22,8 @@ export interface StorageView {
   url: string;
   region?: string;
   account_id?: string;
+  /** The Azure storage account, for `az://`. */
+  account_name?: string;
   endpoint?: string;
 }
 

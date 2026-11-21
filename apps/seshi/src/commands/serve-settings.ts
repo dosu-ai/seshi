@@ -1,5 +1,11 @@
 import { type AuthSettings, AuthSettingsError, authSettings } from "@seshi/auth";
-import { type FlagValue, parseListen, type ServerConfig } from "@seshi/config";
+import {
+  type FlagValue,
+  parseListen,
+  type RevealedBucketCredentials,
+  revealBucketCredentials,
+  type ServerConfig,
+} from "@seshi/config";
 import { ServeConfigError } from "../cli/failures";
 
 function fail(message: string): never {
@@ -14,7 +20,8 @@ export interface ServeSettings {
     region?: string;
     endpoint?: string;
     accountId?: string;
-    credentials?: { accessKeyId: string; secretAccessKey: string; sessionToken?: string };
+    accountName?: string;
+    credentials?: RevealedBucketCredentials;
   };
   deploymentId: string | undefined;
   org: string | undefined;
@@ -39,15 +46,7 @@ export function serveSettings(config: ServerConfig): ServeSettings {
   if (!listen) fail(`server.listen '${config.server.listen}' is not host:port, :port or port`);
 
   const { store } = config;
-  const credentials = store.credentials
-    ? {
-        accessKeyId: store.credentials.access_key_id.reveal(),
-        secretAccessKey: store.credentials.secret_access_key.reveal(),
-        ...(store.credentials.session_token
-          ? { sessionToken: store.credentials.session_token.reveal() }
-          : {}),
-      }
-    : undefined;
+  const credentials = store.credentials ? revealBucketCredentials(store.credentials) : undefined;
 
   return {
     auth,
@@ -57,6 +56,7 @@ export function serveSettings(config: ServerConfig): ServeSettings {
       ...(store.region ? { region: store.region } : {}),
       ...(store.endpoint ? { endpoint: store.endpoint } : {}),
       ...(store.account_id ? { accountId: store.account_id } : {}),
+      ...(store.account_name ? { accountName: store.account_name } : {}),
       ...(credentials ? { credentials } : {}),
     },
     deploymentId: store.deployment_id,

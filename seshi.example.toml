@@ -19,6 +19,11 @@ region = "us-east-1"
 access_key_id = { env = "AWS_ACCESS_KEY_ID" }
 secret_access_key = { file = "/run/secrets/bucket-secret-key" }
 
+# On Azure, a container instead (no credentials: AKS workload identity, or AZURE_STORAGE_KEY):
+# [store]
+# url = "az://sessions/prod"
+# account_name = "acmeseshi"
+
 # Who may call the server (X5). For a team, run `seshi admin init` once: it prints the first
 # admin token and the org key. With an IdP, people sign in instead; uncomment [auth.oidc] and
 # give session tokens a key to be signed with.

@@ -20,7 +20,7 @@ capture uploader, seshi upload, any client ──POST /v1/sessions──▶ sesh
 OTLP exporters ──POST /otlp/v1/traces──▶       normalize · redact · filter · review · write
 worker: Datadog, S3 sources ──poll──▶                              │
                                                                    ▼
-                                                  the bucket (s3:// r2:// file://)
+                                                  the bucket (s3:// r2:// az:// file://)
                                                                    ▲
                                       readers: the API with a service token, or changes/
 ```
@@ -73,8 +73,8 @@ The settings most servers need ([config.md](config.md) has all of them):
 | `auth.tokens.<name>` | `SESHI_AUTH__TOKENS__<NAME>` | Static tokens, for one person and development: each is everything for its owner (`SESHI_AUTH__TOKENS__ALICE=…`, 16+ characters, `openssl rand -hex 24`). For a team, use `seshi admin init` and the org key or an IdP instead |
 | `auth.oidc.*`, `auth.session_keys.*` | `SESHI_AUTH__OIDC__ISSUER`, `…__CLIENT_ID`, `SESHI_AUTH__SESSION_KEYS__K1` | Sign-in through your IdP (X5.2) and the key session tokens are signed with (32+ characters) |
 | `auth.org_key.enabled` | `SESHI_AUTH__ORG_KEY__ENABLED` | Default `true`: members holding the org key write as the username they state (X5.12) |
-| `store.url` | `SESHI_STORE__URL` | Required: `r2://bucket/prefix`, `s3://bucket/prefix`, or `file:///path` |
-| `store.credentials.*`, `store.region`, `store.endpoint`, `store.account_id` | `SESHI_STORE__CREDENTIALS__ACCESS_KEY_ID`, … | The bucket's keys and where it is. Unset, the standard `AWS_*` / `S3_*` (and `R2_*` for `r2://`) variables apply |
+| `store.url` | `SESHI_STORE__URL` | Required: `r2://bucket/prefix`, `s3://bucket/prefix`, `az://container/prefix` (Azure Blob Storage), or `file:///path` |
+| `store.credentials.*`, `store.region`, `store.endpoint`, `store.account_id`, `store.account_name` | `SESHI_STORE__CREDENTIALS__ACCESS_KEY_ID`, `SESHI_STORE__ACCOUNT_NAME`, … | The bucket's keys and where it is. Unset, the standard `AWS_*` / `S3_*` (and `R2_*` for `r2://`) variables apply; for `az://`, `AZURE_STORAGE_*`, then workload identity ([config.md](config.md#azure-blob-storage-az)) |
 | `redaction.packs` | `SESHI_REDACTION__PACKS` | Your own redaction rule packs (TOML, or today's JSON rule files), on top of the built-in pack ([redaction.md](redaction.md)). The server refuses to start on a pack it cannot use or a rule that fails its own test strings |
 | `store.deployment_id`, `store.org` | `SESHI_STORE__DEPLOYMENT_ID`, `SESHI_STORE__ORG` | Recorded in the bucket's layout marker (`seshi.json`); the server refuses to start against a bucket marked for another deployment or org (X1.4). See [the layout](../spec/layout.md) |
 | `server.listen` | `SESHI_SERVER__LISTEN` | Default `:7200`; flag `--listen` |
@@ -211,6 +211,21 @@ retention. Keep
 the request timeout at 120 seconds or more; a large transcript can take that long to normalize
 and verify. Platforms that cap request bodies (Cloud Run's HTTP/1 limit is 32 MiB) are fine as
 long as clients send `Content-Encoding: gzip`, which every route accepts.
+
+Each cloud's own object storage holds the bucket:
+
+| Cloud | `store.url` | Keys |
+|---|---|---|
+| AWS | `s3://bucket/prefix` with `store.region` | An IAM role for the pod or instance through the `AWS_*` variables, or `store.credentials` |
+| Google Cloud | `s3://bucket/prefix` with `store.endpoint = "https://storage.googleapis.com"` | HMAC keys in `store.credentials` |
+| Azure | `az://container/prefix` with `store.account_name` | Workload identity on AKS (`AZURE_FEDERATED_TOKEN_FILE`, `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, set by AKS for a service account that names a managed identity with **Storage Blob Data Contributor** on the container), or `store.credentials.account_key` / `sas_token` |
+
+On Azure no S3 gateway is needed: seshi speaks the Blob service's own API
+([config.md](config.md#azure-blob-storage-az)). To try it locally, run Azurite
+(`docker run -p 10000:10000 mcr.microsoft.com/azure-storage/azurite azurite-blob --blobHost 0.0.0.0`),
+create a container, and set `store.endpoint = "http://127.0.0.1:10000/devstoreaccount1"`,
+`store.account_name = "devstoreaccount1"` and Azurite's documented account key as
+`AZURE_STORAGE_KEY`.
 
 ## Setting up who may call it
 

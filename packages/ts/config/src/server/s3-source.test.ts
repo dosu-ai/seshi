@@ -60,3 +60,27 @@ describe("a source's labels", () => {
     expect(issues({ labels: many })[0]).toContain("at most 32 labels");
   });
 });
+
+describe("an Azure source (az://)", () => {
+  it("takes an account name and key, and never reads seshi's own container", () => {
+    expect(
+      parse({ url: "az://evals/runs", account_name: "acct", credentials: { sas_token: "sig=x" } })
+        .success,
+    ).toBe(true);
+    expect(issues({ url: "az://seshi/prod/inbox" }, "az://seshi/prod")[0]).toContain(
+      "reads seshi's own bucket",
+    );
+    expect(parse({ url: "az://seshi/staging" }, "az://seshi/prod").success).toBe(true);
+    // An S3 bucket and an Azure container of the same name are different buckets.
+    expect(parse({ url: "az://seshi/prod" }, "s3://seshi/prod").success).toBe(true);
+  });
+
+  it("refuses a role, which is AWS STS, and S3 keys", () => {
+    expect(issues({ url: "az://evals", role: { arn: "arn:aws:iam::1:role/r" } })).toEqual([
+      "sources.0.role: role applies to s3:// sources (AWS STS); an az:// source takes keys or workload identity",
+    ]);
+    expect(
+      issues({ url: "az://evals", credentials: { access_key_id: "a", secret_access_key: "s" } })[0],
+    ).toContain("an az:// bucket takes account_key or sas_token");
+  });
+});

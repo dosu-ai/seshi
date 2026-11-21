@@ -22,8 +22,9 @@ import { SHARED_CONFIG, SHARED_PREFIX } from "../serverless/shared";
 import type { CommandContext } from "./index";
 
 const USAGE = [
-  "usage: seshi init --serverless --url <s3://|r2://|file://…> [--owner <id>] [--key-from-env] [--admin]",
-  "                  [--region <r>] [--endpoint <url>] [--account-id <id>] [--json]",
+  "usage: seshi init --serverless --url <s3://|r2://|az://|file://…> [--owner <id>] [--key-from-env]",
+  "                  [--admin] [--region <r>] [--endpoint <url>] [--account-id <id>]",
+  "                  [--account-name <name>] [--json]",
   "",
   "Set this machine up to write a shared bucket directly, with no server (F11). To use a seshi",
   "server instead: seshi login --server <url>.",
@@ -54,6 +55,7 @@ interface Values {
   region?: string;
   endpoint?: string;
   "account-id"?: string;
+  "account-name"?: string;
 }
 
 const encoder = new TextEncoder();
@@ -62,6 +64,16 @@ async function askKey(ctx: CommandContext, url: string): Promise<BucketKey | und
   if (url.startsWith("file://")) return undefined;
   if (!ctx.terminal || !ctx.tty?.stdin) return undefined;
   const terminal = await ctx.terminal();
+  if (url.startsWith("az://")) {
+    const given = (
+      await terminal.ask("Storage account key or SAS token (empty: use the environment): ", {
+        hidden: true,
+      })
+    ).trim();
+    if (!given) return undefined;
+    // A SAS token is a query string with a signature; an account key is base64.
+    return /(^|[?&])sig=/.test(given) ? { sas_token: given } : { account_key: given };
+  }
   const id = (await terminal.ask("Bucket access key id (empty: use the environment): ")).trim();
   if (!id) return undefined;
   const secret = (await terminal.ask("Secret access key: ", { hidden: true })).trim();
@@ -99,6 +111,7 @@ export async function run(ctx: CommandContext): Promise<number> {
         region: { type: "string" },
         endpoint: { type: "string" },
         "account-id": { type: "string" },
+        "account-name": { type: "string" },
       },
       strict: true,
       allowPositionals: false,
@@ -116,8 +129,8 @@ export async function run(ctx: CommandContext): Promise<number> {
   }
   if (values.url === undefined) return helpOrUsageError(ctx, json, "--url is required", USAGE);
   const url = values.url.replace(/\/+$/, "");
-  if (!/^(s3|r2|file):\/\//.test(url)) {
-    return helpOrUsageError(ctx, json, "--url is s3://, r2:// or file://", USAGE);
+  if (!/^(s3|r2|az|file):\/\//.test(url)) {
+    return helpOrUsageError(ctx, json, "--url is s3://, r2://, az:// or file://", USAGE);
   }
   try {
     const account = openAccount(ctx);
@@ -132,6 +145,7 @@ export async function run(ctx: CommandContext): Promise<number> {
       ...(values.region ? { region: values.region } : {}),
       ...(values.endpoint ? { endpoint: values.endpoint } : {}),
       ...(values["account-id"] ? { account_id: values["account-id"] } : {}),
+      ...(values["account-name"] ? { account_name: values["account-name"] } : {}),
     };
     const cli = cliConfigSchema.parse({ serverless });
 
@@ -140,7 +154,9 @@ export async function run(ctx: CommandContext): Promise<number> {
       return helpOrUsageError(
         ctx,
         json,
-        "--key-from-env: no AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (or S3_*, R2_*) in the environment",
+        url.startsWith("az://")
+          ? "--key-from-env: no AZURE_STORAGE_KEY or AZURE_STORAGE_SAS_TOKEN in the environment"
+          : "--key-from-env: no AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (or S3_*, R2_*) in the environment",
         USAGE,
       );
     }

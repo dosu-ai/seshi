@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { gunzipSync } from "node:zlib";
 import { pickClaims, serviceIdentity } from "@seshi/auth";
-import type { SourceConfig } from "@seshi/config";
+import { revealBucketCredentials, type SourceConfig } from "@seshi/config";
 import type { FormatRegistry } from "@seshi/formats";
 import type {
   Connector,
@@ -12,8 +12,9 @@ import type {
   SubmitOutcome,
 } from "@seshi/kit";
 import { ENVELOPE_SCHEMA, type Envelope, type SourceLocation } from "@seshi/model";
-import { type AssumedCredentials, parseS3Url } from "@seshi/store";
+import { type AssumedCredentials, parseAzureUrl, parseS3Url } from "@seshi/store";
 import {
+  AzureSourceBucket,
   FolderSourceBucket,
   ObjectChanged,
   ObjectDenied,
@@ -87,7 +88,11 @@ export function completeLines(text: string): string {
 }
 
 export function sourcePrefix(config: Pick<S3SourceConfig, "url" | "prefix">): string {
-  const fromUrl = /^(?:s3|r2):\/\//.test(config.url) ? parseS3Url(config.url).prefix : "";
+  const fromUrl = /^(?:s3|r2):\/\//.test(config.url)
+    ? parseS3Url(config.url).prefix
+    : config.url.startsWith("az://")
+      ? parseAzureUrl(config.url).prefix
+      : "";
   return [fromUrl, config.prefix ?? ""]
     .map((p) => p.replace(/^\/+|\/+$/g, ""))
     .filter((p) => p !== "")
@@ -124,22 +129,28 @@ export class S3Connector implements Connector<S3SourceConfig> {
   private openBucket(ctx: ConnectorContext<S3SourceConfig>): SourceBucket {
     const config = ctx.source.config;
     if (this.options.openBucket) return this.options.openBucket(config, ctx);
-    if (!/^(?:s3|r2):\/\//.test(config.url)) return new FolderSourceBucket(config.url);
     const credentials = config.credentials
-      ? {
-          accessKeyId: config.credentials.access_key_id.reveal(),
-          secretAccessKey: config.credentials.secret_access_key.reveal(),
-          ...(config.credentials.session_token
-            ? { sessionToken: config.credentials.session_token.reveal() }
-            : {}),
-        }
+      ? revealBucketCredentials(config.credentials)
       : undefined;
+    const fetch = (input: string, init?: RequestInit) => ctx.fetch(input, init);
+    const env = this.options.env ?? process.env;
+    if (config.url.startsWith("az://")) {
+      return new AzureSourceBucket({
+        url: config.url,
+        ...(config.account_name ? { account: config.account_name } : {}),
+        ...(config.endpoint ? { endpoint: config.endpoint } : {}),
+        ...(credentials && !("accessKeyId" in credentials) ? { credentials } : {}),
+        fetch,
+        env,
+      });
+    }
+    if (!/^(?:s3|r2):\/\//.test(config.url)) return new FolderSourceBucket(config.url);
     return new S3SourceBucket({
       url: config.url,
       ...(config.region ? { region: config.region } : {}),
       ...(config.endpoint ? { endpoint: config.endpoint } : {}),
       ...(config.account_id ? { accountId: config.account_id } : {}),
-      ...(credentials ? { credentials } : {}),
+      ...(credentials && "accessKeyId" in credentials ? { credentials } : {}),
       ...(config.role
         ? {
             role: {
@@ -150,8 +161,8 @@ export class S3Connector implements Connector<S3SourceConfig> {
           }
         : {}),
       roleCache: this.roleCache,
-      fetch: (input, init) => ctx.fetch(input, init),
-      env: this.options.env ?? process.env,
+      fetch,
+      env,
       now: () => ctx.now(),
       ...(this.options.stsEndpoint ? { stsEndpoint: this.options.stsEndpoint } : {}),
     });

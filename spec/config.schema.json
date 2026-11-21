@@ -52,15 +52,15 @@
       "properties": {
         "url": {
           "type": "string",
-          "pattern": "^(?:file:\\/\\/\\/?.*|\\/.*|(?:s3|r2):\\/\\/[^/\\s]+(?:\\/.*)?)$",
-          "description": "Where sessions go: s3://bucket/prefix, r2://bucket/prefix, or file:///path for one machine."
+          "pattern": "^(?:file:\\/\\/\\/?.*|\\/.*|(?:s3|r2|az):\\/\\/[^/\\s]+(?:\\/.*)?)$",
+          "description": "Where sessions go: s3://bucket/prefix, r2://bucket/prefix, az://container/prefix, or file:///path for one machine."
         },
         "credentials": {
           "type": "object",
           "properties": {
             "access_key_id": {
+              "description": "The access key id (s3://, r2://).",
               "x-seshi-secret": true,
-              "description": "The access key id.",
               "anyOf": [
                 {
                   "type": "string",
@@ -97,8 +97,8 @@
               ]
             },
             "secret_access_key": {
+              "description": "The secret access key (s3://, r2://).",
               "x-seshi-secret": true,
-              "description": "The secret access key.",
               "anyOf": [
                 {
                   "type": "string",
@@ -135,7 +135,83 @@
               ]
             },
             "session_token": {
-              "description": "A session token, for temporary credentials.",
+              "description": "A session token, for temporary credentials (s3://, r2://).",
+              "x-seshi-secret": true,
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "env": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "the environment variable to read"
+                    }
+                  },
+                  "required": [
+                    "env"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "file": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "the file to read"
+                    }
+                  },
+                  "required": [
+                    "file"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "account_key": {
+              "description": "The storage account's shared key (az://).",
+              "x-seshi-secret": true,
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "env": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "the environment variable to read"
+                    }
+                  },
+                  "required": [
+                    "env"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "file": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "the file to read"
+                    }
+                  },
+                  "required": [
+                    "file"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "sas_token": {
+              "description": "A shared access signature for the container (az://), with or without its ?.",
               "x-seshi-secret": true,
               "anyOf": [
                 {
@@ -173,12 +249,8 @@
               ]
             }
           },
-          "required": [
-            "access_key_id",
-            "secret_access_key"
-          ],
           "additionalProperties": false,
-          "description": "Static bucket keys."
+          "description": "Static bucket keys: access_key_id and secret_access_key for s3:// and r2://, account_key or sas_token for az://."
         },
         "region": {
           "description": "The bucket's region (s3://).",
@@ -186,12 +258,17 @@
           "minLength": 1
         },
         "endpoint": {
-          "description": "An S3-compatible endpoint (MinIO, Backblaze, Wasabi…); overrides the region.",
+          "description": "An S3-compatible endpoint (MinIO, Backblaze, Wasabi…), which overrides the region; for az://, the blob endpoint, when not https://<account>.blob.core.windows.net (Azurite: http://127.0.0.1:10000/devstoreaccount1).",
           "type": "string",
           "minLength": 1
         },
         "account_id": {
           "description": "The Cloudflare account id (r2://).",
+          "type": "string",
+          "minLength": 1
+        },
+        "account_name": {
+          "description": "The Azure storage account (az://). Falls back to AZURE_STORAGE_ACCOUNT.",
           "type": "string",
           "minLength": 1
         },
@@ -1325,8 +1402,8 @@
               },
               "url": {
                 "type": "string",
-                "pattern": "^(?:file:\\/\\/\\/?.*|\\/.*|(?:s3|r2):\\/\\/[^/\\s]+(?:\\/.*)?)$",
-                "description": "The bucket to read: s3://bucket/prefix or r2://bucket/prefix."
+                "pattern": "^(?:file:\\/\\/\\/?.*|\\/.*|(?:s3|r2|az):\\/\\/[^/\\s]+(?:\\/.*)?)$",
+                "description": "The bucket to read: s3://bucket/prefix, r2://bucket/prefix or az://container/prefix."
               },
               "prefix": {
                 "description": "A key prefix under the URL's own.",
@@ -1337,8 +1414,8 @@
                 "type": "object",
                 "properties": {
                   "access_key_id": {
+                    "description": "The access key id (s3://, r2://).",
                     "x-seshi-secret": true,
-                    "description": "The access key id.",
                     "anyOf": [
                       {
                         "type": "string",
@@ -1375,8 +1452,8 @@
                     ]
                   },
                   "secret_access_key": {
+                    "description": "The secret access key (s3://, r2://).",
                     "x-seshi-secret": true,
-                    "description": "The secret access key.",
                     "anyOf": [
                       {
                         "type": "string",
@@ -1413,7 +1490,83 @@
                     ]
                   },
                   "session_token": {
-                    "description": "A session token, for temporary credentials.",
+                    "description": "A session token, for temporary credentials (s3://, r2://).",
+                    "x-seshi-secret": true,
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "env": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "the environment variable to read"
+                          }
+                        },
+                        "required": [
+                          "env"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "file": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "the file to read"
+                          }
+                        },
+                        "required": [
+                          "file"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "account_key": {
+                    "description": "The storage account's shared key (az://).",
+                    "x-seshi-secret": true,
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "env": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "the environment variable to read"
+                          }
+                        },
+                        "required": [
+                          "env"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "file": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "the file to read"
+                          }
+                        },
+                        "required": [
+                          "file"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "sas_token": {
+                    "description": "A shared access signature for the container (az://), with or without its ?.",
                     "x-seshi-secret": true,
                     "anyOf": [
                       {
@@ -1451,14 +1604,10 @@
                     ]
                   }
                 },
-                "required": [
-                  "access_key_id",
-                  "secret_access_key"
-                ],
                 "additionalProperties": false
               },
               "role": {
-                "description": "A role to assume instead of static keys.",
+                "description": "A role to assume instead of static keys (s3:// only).",
                 "type": "object",
                 "properties": {
                   "arn": {
@@ -1522,6 +1671,11 @@
                 "type": "string",
                 "minLength": 1
               },
+              "account_name": {
+                "description": "The Azure storage account (az://). Falls back to AZURE_STORAGE_ACCOUNT.",
+                "type": "string",
+                "minLength": 1
+              },
               "include": {
                 "default": [],
                 "description": "Globs of keys to read; every key when empty.",
@@ -1570,7 +1724,7 @@
               "url"
             ],
             "additionalProperties": false,
-            "description": "An S3-compatible bucket other systems write sessions to (F6), polled."
+            "description": "A bucket other systems write sessions to (F6), polled: S3 or S3-compatible (s3://, r2://) or Azure Blob Storage (az://)."
           },
           {
             "type": "object",

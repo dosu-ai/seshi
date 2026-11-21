@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
+import { BucketHttpError } from "./http-error";
 import { keys } from "./layout";
-import { S3HttpError } from "./s3-fetch";
 import { accessDeniedIn, isPreconditionFailed, type Store, StoreError } from "./store";
 
 /** One step of the storage test and what the store did. */
@@ -32,7 +32,7 @@ const encoder = new TextEncoder();
  * store does not do conditional deletes. */
 function notConditional(err: unknown): string {
   if (accessDeniedIn(err)) throw err;
-  const answered = err instanceof StoreError && err.cause instanceof S3HttpError;
+  const answered = err instanceof StoreError && err.cause instanceof BucketHttpError;
   if (!answered) throw err;
   return `answered a delete with If-Match with an error (${err.message}): this store does not do conditional deletes`;
 }
