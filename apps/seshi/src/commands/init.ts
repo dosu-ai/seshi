@@ -164,7 +164,9 @@ export async function run(ctx: CommandContext): Promise<number> {
 
     let key: BucketKey | undefined;
     try {
-      key = values["key-from-env"] ? bucketKeyFromEnv(ctx.env, url) : await askKey(ctx, url);
+      key = values["key-from-env"]
+        ? bucketKeyFromEnv(ctx.env, url, values["account-name"])
+        : await askKey(ctx, url);
     } catch (err) {
       if (err instanceof Refused) throw err;
       return helpOrUsageError(
@@ -179,7 +181,7 @@ export async function run(ctx: CommandContext): Promise<number> {
         ctx,
         json,
         url.startsWith("az://")
-          ? "--key-from-env: no AZURE_STORAGE_KEY or AZURE_STORAGE_SAS_TOKEN in the environment"
+          ? "--key-from-env: no AZURE_STORAGE_KEY, AZURE_STORAGE_SAS_TOKEN or AZURE_STORAGE_CONNECTION_STRING key in the environment"
           : url.startsWith("gs://")
             ? "--key-from-env: no GOOGLE_APPLICATION_CREDENTIALS in the environment (without a key, gs:// uses Application Default Credentials: leave out --key-from-env)"
             : "--key-from-env: no AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (or S3_*, R2_*) in the environment",

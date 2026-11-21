@@ -24,6 +24,9 @@ describe("a bucket key", () => {
       sas_token: "sig=x",
     });
     expect(bucketKeyFromEnv(env, "az://c")).toBeUndefined();
+    const conn = { AZURE_STORAGE_CONNECTION_STRING: "AccountName=acct;AccountKey=a2V5" };
+    expect(bucketKeyFromEnv(conn, "az://c", "acct")).toEqual({ account_key: "a2V5" });
+    expect(bucketKeyFromEnv(conn, "az://c", "other")).toBeUndefined();
     expect(bucketKeyFromEnv({ ...env, AZURE_STORAGE_KEY: "k" }, "s3://b")).toEqual({
       access_key_id: "AKID",
       secret_access_key: "s",
@@ -33,9 +36,9 @@ describe("a bucket key", () => {
   it("is the key file GOOGLE_APPLICATION_CREDENTIALS names, for gs://", () => {
     const read = (path: string) => `{"path":"${path}"}`;
     expect(
-      bucketKeyFromEnv({ GOOGLE_APPLICATION_CREDENTIALS: "/k.json" }, "gs://b/p", read),
+      bucketKeyFromEnv({ GOOGLE_APPLICATION_CREDENTIALS: "/k.json" }, "gs://b/p", undefined, read),
     ).toEqual({ service_account_key: '{"path":"/k.json"}' });
-    expect(bucketKeyFromEnv({ AWS_ACCESS_KEY_ID: "a" }, "gs://b", read)).toBeUndefined();
+    expect(bucketKeyFromEnv({ AWS_ACCESS_KEY_ID: "a" }, "gs://b", undefined, read)).toBeUndefined();
   });
 
   it("is kept and read back in each of its kinds, as the store takes it", async () => {

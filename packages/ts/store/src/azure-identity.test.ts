@@ -1,9 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { AzureHttpError } from "./azure-fetch";
-import { workloadIdentity, workloadIdentityFromEnv } from "./azure-identity";
+import {
+  AzureIdentityError,
+  type IdentitySlot,
+  workloadIdentity,
+  workloadIdentityFromEnv,
+} from "./azure-identity";
 
 describe("workload identity", () => {
-  function identity(answers: Response[], start = new Date("2026-11-20T09:00:00Z")) {
+  function identity(
+    answers: Response[],
+    start = new Date("2026-11-20T09:00:00Z"),
+    cache = new Map<string, IdentitySlot>(),
+  ) {
     let now = start.getTime();
     const sent: { url: string; form: URLSearchParams }[] = [];
     let reads = 0;
@@ -12,6 +20,7 @@ describe("workload identity", () => {
       clientId: "client-1",
       tenantId: "tenant-1",
       authorityHost: "https://login.test",
+      cache,
       read: async () => `federated-${++reads}\n`,
       now: () => new Date(now),
       fetch: async (input: string, init?: RequestInit) => {
@@ -50,9 +59,18 @@ describe("workload identity", () => {
       issued("ok"),
     ]);
     const err = await token().catch((e) => e);
-    expect(err).toBeInstanceOf(AzureHttpError);
+    expect(err).toBeInstanceOf(AzureIdentityError);
     expect(err).toMatchObject({ status: 401, code: "invalid_client" });
     expect(await token()).toBe("ok");
+  });
+
+  it("shares one token among the functions made for the same identity", async () => {
+    const cache = new Map<string, IdentitySlot>();
+    const first = identity([issued("shared")], undefined, cache);
+    const second = identity([issued("unused")], undefined, cache);
+    expect(await first.token()).toBe("shared");
+    expect(await second.token()).toBe("shared");
+    expect(second.sent).toHaveLength(0);
   });
 
   it("is set up from the variables AKS injects, and only when all are there", () => {

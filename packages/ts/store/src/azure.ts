@@ -48,14 +48,49 @@ export function parseAzureUrl(url: string): { container: string; prefix: string 
   return { container: container as string, prefix };
 }
 
-/** The parts of an Azure Storage connection string (`AccountName=…;AccountKey=…;…`). */
+/** Azurite's account, its well-known key (published by Microsoft, in every Azure SDK) and its
+ * default blob endpoint: what `UseDevelopmentStorage=true` stands for. */
+const DEVELOPMENT_STORAGE = {
+  AccountName: "devstoreaccount1",
+  AccountKey:
+    "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==",
+  BlobEndpoint: "http://127.0.0.1:10000/devstoreaccount1",
+};
+
+/** The parts of an Azure Storage connection string (`AccountName=…;AccountKey=…;…`), with
+ * `UseDevelopmentStorage=true` spelled out. */
 function connectionString(value: string | undefined): Record<string, string> {
   const parts: Record<string, string> = {};
   for (const part of (value ?? "").split(";")) {
     const at = part.indexOf("=");
     if (at > 0) parts[part.slice(0, at).trim()] = part.slice(at + 1).trim();
   }
-  return parts;
+  return parts.UseDevelopmentStorage?.toLowerCase() === "true"
+    ? { ...DEVELOPMENT_STORAGE, ...parts }
+    : parts;
+}
+
+/** `AZURE_STORAGE_CONNECTION_STRING`'s parts when it is for `account` (or `account` is not
+ * known yet); nothing when it names another account, whose key and endpoint are not this one's. */
+function connectionFor(
+  env: Readonly<Record<string, string | undefined>>,
+  account: string | undefined,
+): Record<string, string> {
+  const conn = connectionString(env.AZURE_STORAGE_CONNECTION_STRING);
+  return account && conn.AccountName && conn.AccountName !== account ? {} : conn;
+}
+
+/** The account key or SAS token in the environment: `AZURE_STORAGE_KEY`, then
+ * `AZURE_STORAGE_SAS_TOKEN`, then the connection string's (when it is for `account`). */
+export function azureKeyFromEnv(
+  env: Readonly<Record<string, string | undefined>>,
+  account?: string,
+): AzureKey | undefined {
+  const conn = connectionFor(env, account);
+  const accountKey = env.AZURE_STORAGE_KEY ?? conn.AccountKey;
+  if (accountKey) return { accountKey };
+  const sasToken = env.AZURE_STORAGE_SAS_TOKEN ?? conn.SharedAccessSignature;
+  return sasToken ? { sasToken } : undefined;
 }
 
 /** Which account, endpoint and credentials an `az://` URL is reached with: what config gives,
@@ -63,13 +98,16 @@ function connectionString(value: string | undefined): Record<string, string> {
  * bucket in errors. */
 export function resolveAzureAccess(label: string, options: AzureAccessOptions = {}): AzureAccess {
   const env = options.env ?? process.env;
-  const conn = connectionString(env.AZURE_STORAGE_CONNECTION_STRING);
-  const account = options.account ?? env.AZURE_STORAGE_ACCOUNT ?? conn.AccountName;
+  const account =
+    options.account ??
+    env.AZURE_STORAGE_ACCOUNT ??
+    connectionString(env.AZURE_STORAGE_CONNECTION_STRING).AccountName;
   if (!account) {
     throw new StoreError(
       `${label} needs a storage account name ([store] account_name, or AZURE_STORAGE_ACCOUNT in the environment)`,
     );
   }
+  const conn = connectionFor(env, account);
   const suffix = conn.EndpointSuffix;
   const endpoint =
     options.endpoint ??
@@ -77,12 +115,13 @@ export function resolveAzureAccess(label: string, options: AzureAccessOptions = 
     (suffix
       ? `${conn.DefaultEndpointsProtocol ?? "https"}://${account}.blob.${suffix}`
       : undefined);
-  const accountKey = env.AZURE_STORAGE_KEY ?? conn.AccountKey;
-  const sasToken = env.AZURE_STORAGE_SAS_TOKEN ?? conn.SharedAccessSignature;
-  const token = workloadIdentityFromEnv(env, options.fetch ? { fetch: options.fetch } : {});
   const credentials: AzureCredentials | undefined =
     options.credentials ??
-    (accountKey ? { accountKey } : sasToken ? { sasToken } : token ? { token } : undefined);
+    azureKeyFromEnv(env, account) ??
+    (() => {
+      const token = workloadIdentityFromEnv(env, options.fetch ? { fetch: options.fetch } : {});
+      return token ? { token } : undefined;
+    })();
   if (!credentials) {
     throw new StoreError(
       `${label} needs credentials: an account key or SAS token (credentials, or AZURE_STORAGE_KEY / AZURE_STORAGE_SAS_TOKEN / AZURE_STORAGE_CONNECTION_STRING in the environment), or workload identity (AZURE_FEDERATED_TOKEN_FILE, AZURE_CLIENT_ID, AZURE_TENANT_ID)`,

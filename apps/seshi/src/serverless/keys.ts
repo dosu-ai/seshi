@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { azureKeyFromEnv, type StoreCredentials } from "@seshi/store";
 import type { SecretBackend } from "../account/secrets";
 
 /** A bucket key as `seshi init --serverless` stores it (credential purpose `bucket`): an S3
@@ -11,13 +12,7 @@ export type BucketKey =
   | { service_account_key: string };
 
 /** The key as the store takes it. */
-export function bucketKeyCredentials(
-  key: BucketKey,
-):
-  | { accessKeyId: string; secretAccessKey: string; sessionToken?: string }
-  | { accountKey: string }
-  | { sasToken: string }
-  | { serviceAccountKey: string } {
+export function bucketKeyCredentials(key: BucketKey): StoreCredentials {
   if ("service_account_key" in key) return { serviceAccountKey: key.service_account_key };
   if ("account_key" in key) return { accountKey: key.account_key };
   if ("sas_token" in key) return { sasToken: key.sas_token };
@@ -71,12 +66,14 @@ export function deleteBucketKey(secrets: SecretBackend, url: string): Promise<bo
 }
 
 /** The bucket key in the environment, as the store would find it (`AWS_*`, `S3_*`, `R2_*`;
- * `AZURE_STORAGE_KEY` or `AZURE_STORAGE_SAS_TOKEN` for `az://`; the service account key file
- * `GOOGLE_APPLICATION_CREDENTIALS` names for `gs://`): what
- * `seshi init --serverless --key-from-env` stores. */
+ * for `az://`, `AZURE_STORAGE_KEY`, `AZURE_STORAGE_SAS_TOKEN` or the connection string's, when
+ * it is for `account`; for `gs://`, the service account key file
+ * `GOOGLE_APPLICATION_CREDENTIALS` names): what `seshi init --serverless --key-from-env`
+ * stores. */
 export function bucketKeyFromEnv(
   env: Record<string, string | undefined>,
   url: string,
+  account?: string,
   read: (path: string) => string = (path) => readFileSync(path, "utf8"),
 ): BucketKey | undefined {
   if (url.startsWith("gs://")) {
@@ -84,9 +81,9 @@ export function bucketKeyFromEnv(
     return path ? { service_account_key: read(path) } : undefined;
   }
   if (url.startsWith("az://")) {
-    if (env.AZURE_STORAGE_KEY) return { account_key: env.AZURE_STORAGE_KEY };
-    if (env.AZURE_STORAGE_SAS_TOKEN) return { sas_token: env.AZURE_STORAGE_SAS_TOKEN };
-    return undefined;
+    const key = azureKeyFromEnv(env, account);
+    if (!key) return undefined;
+    return "accountKey" in key ? { account_key: key.accountKey } : { sas_token: key.sasToken };
   }
   const r2 = url.startsWith("r2://");
   const id =

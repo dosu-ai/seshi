@@ -216,7 +216,7 @@ describe("FetchAzureBlobClient", () => {
 
   it("percent-encodes a space in the query, never as +", async () => {
     const { c, seen } = client(() => listing([]));
-    await c.list({ prefix: "a b/", maxKeys: 1 });
+    await c.listObjects({ prefix: "a b/", maxKeys: 1 });
     expect(seen[0]?.url.search).toContain("prefix=a%20b%2F");
     expect(seen[0]?.url.search).not.toContain("+");
   });
@@ -225,10 +225,9 @@ describe("FetchAzureBlobClient", () => {
     const { c } = client(() =>
       listing([blob("a", "0x1", 1), blob("b", "0x2", 1), blob("c", "0x3", 1)]),
     );
-    expect(await c.list({ prefix: "", maxKeys: 5, startAfter: "a" })).toEqual({
-      keys: ["b", "c"],
-      truncated: false,
-    });
+    const page = await c.listObjects({ prefix: "", maxKeys: 5, startAfter: "a" });
+    expect(page.objects.map((o) => o.key)).toEqual(["b", "c"]);
+    expect(page.truncated).toBe(false);
   });
 
   it("stops at maxKeys, saying the listing is truncated", async () => {
@@ -265,6 +264,21 @@ describe("FetchAzureBlobClient", () => {
       content_encoding: "gzip",
     });
     expect(seen[0]?.headers).toMatchObject({ "x-ms-range": "bytes=2-", "if-match": '"0x5"' });
+  });
+
+  it("keeps a SAS signature out of a network error", async () => {
+    const c = new FetchAzureBlobClient({
+      account: "acct",
+      container: "sessions",
+      credentials: { sasToken: "sv=1&sig=SECRETSIG" },
+      fetch: async (input: string) => {
+        throw new Error(`Unable to connect: ${input}`);
+      },
+    });
+    const err = await c.get("k").catch((e) => e);
+    expect(err.message).toContain("GET https://acct.blob.core.windows.net/sessions/k");
+    expect(err.message).not.toContain("SECRETSIG");
+    expect(err.cause).toBeUndefined();
   });
 
   it("throws Azure's status and error code", async () => {

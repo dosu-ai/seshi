@@ -28,11 +28,13 @@ export interface StorageTestResult {
 const encoder = new TextEncoder();
 
 /** A delete with If-Match the store answered with an error other than a failed condition:
- * a refusal of the key is thrown on (it says nothing about the store); anything else means the
- * store does not do conditional deletes. */
+ * a refusal of the key or of its credentials (403, 401) is thrown on, as is anything the store
+ * did not answer (the network, a sign-in that failed): they say nothing about the store.
+ * Anything else means the store does not do conditional deletes. */
 function notConditional(err: unknown): string {
   if (accessDeniedIn(err)) throw err;
-  const answered = err instanceof StoreError && err.cause instanceof BucketHttpError;
+  const answered =
+    err instanceof StoreError && err.cause instanceof BucketHttpError && err.cause.status !== 401;
   if (!answered) throw err;
   return `answered a delete with If-Match with an error (${err.message}): this store does not do conditional deletes`;
 }
