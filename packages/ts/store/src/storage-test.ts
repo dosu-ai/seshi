@@ -36,7 +36,9 @@ function notConditional(err: unknown): string {
   if (!answered) throw err;
   return `answered a delete with If-Match with an error (${err.message}): this store does not do conditional deletes`;
 }
-const MADE_UP_ETAG = "0123456789abcdef0123456789abcdef";
+/** All digits, so a GCS store asks the bucket with it as a generation (an ETag that is no
+ * generation it refuses without asking); any string serves as an S3 or Azure ETag. */
+const MADE_UP_ETAG = "1234567890123456789";
 
 /** The key the test writes: beside the start-up probe, in the owner's own folder, so it needs
  * no permission outside it (F11.11). */

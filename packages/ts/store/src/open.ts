@@ -1,6 +1,7 @@
 import type { Fetch, StorageView } from "@seshi/model";
 import { type AzureKey, AzureStore } from "./azure";
 import { FsStore } from "./fs";
+import { type GcsKey, GcsStore } from "./gcs";
 import type { S3Credentials } from "./s3";
 import { S3Store } from "./s3";
 import { type Store, StoreError } from "./store";
@@ -8,11 +9,11 @@ import { type Store, StoreError } from "./store";
 export type { StorageView };
 
 /** The URL schemes a store may have, as said in messages. */
-export const STORE_SCHEMES = "s3://, r2://, az:// or file://";
+export const STORE_SCHEMES = "s3://, r2://, az://, gs:// or file://";
 
 /** Keys given in config: an S3 access key for `s3://` and `r2://`, an account key or SAS token
- * for `az://`. */
-export type StoreCredentials = S3Credentials | AzureKey;
+ * for `az://`, a service account key for `gs://`. */
+export type StoreCredentials = S3Credentials | AzureKey | GcsKey;
 
 export interface OpenStoreOptions {
   region?: string;
@@ -27,11 +28,15 @@ export interface OpenStoreOptions {
 }
 
 export function isStoreUrl(url: string): boolean {
-  return url.startsWith("file://") || url.startsWith("/") || /^(s3|r2|az):\/\//.test(url);
+  return url.startsWith("file://") || url.startsWith("/") || /^(s3|r2|az|gs):\/\//.test(url);
 }
 
 function isS3Credentials(credentials: StoreCredentials): credentials is S3Credentials {
   return "accessKeyId" in credentials;
+}
+
+function isGcsKey(credentials: StoreCredentials): credentials is GcsKey {
+  return "serviceAccountKey" in credentials;
 }
 
 export function openStore(
@@ -43,11 +48,21 @@ export function openStore(
     return { store, storage: { url: store.url } };
   }
   const { credentials } = options;
+  if (url.startsWith("gs://")) {
+    if (credentials && !isGcsKey(credentials)) {
+      throw new StoreError(`${url}: a gs:// store takes a service account key`);
+    }
+    const store = GcsStore.fromUrl(url, {
+      ...(options.endpoint ? { endpoint: options.endpoint } : {}),
+      ...(credentials ? { credentials } : {}),
+      ...(options.fetch ? { fetch: options.fetch } : {}),
+      ...(options.env ? { env: options.env } : {}),
+    });
+    return { store, storage: { url, ...(store.endpoint ? { endpoint: store.endpoint } : {}) } };
+  }
   if (url.startsWith("az://")) {
-    if (credentials && isS3Credentials(credentials)) {
-      throw new StoreError(
-        `${url}: an az:// store takes an account key or SAS token, not an access key id`,
-      );
+    if (credentials && (isS3Credentials(credentials) || isGcsKey(credentials))) {
+      throw new StoreError(`${url}: an az:// store takes an account key or SAS token`);
     }
     const store = AzureStore.fromUrl(url, {
       ...(options.accountName ? { account: options.accountName } : {}),
@@ -67,7 +82,7 @@ export function openStore(
   }
   if (/^(s3|r2):\/\//.test(url)) {
     if (credentials && !isS3Credentials(credentials)) {
-      throw new StoreError(`${url}: takes an access key id and secret, not an Azure key`);
+      throw new StoreError(`${url}: takes an access key id and secret access key`);
     }
     const env = options.env ?? process.env;
     const region = options.region ?? env.AWS_REGION ?? env.S3_REGION;

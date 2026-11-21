@@ -49,11 +49,19 @@ describe("parseListen", () => {
 });
 
 describe("store", () => {
-  it("takes s3, r2, az and file URLs", () => {
-    for (const url of ["s3://b", "s3://b/p/q", "r2://b/p", "az://c/p", "file:///data", "/data"]) {
+  it("takes s3, r2, az, gs and file URLs", () => {
+    for (const url of [
+      "s3://b",
+      "s3://b/p/q",
+      "r2://b/p",
+      "az://c/p",
+      "gs://b/p",
+      "file:///data",
+      "/data",
+    ]) {
       expect(serverConfigSchema.safeParse({ store: { url } }).success).toBe(true);
     }
-    for (const url of ["http://b", "s3://", "gs://b", "data"]) {
+    for (const url of ["http://b", "s3://", "gs://", "ftp://b", "data"]) {
       expect(serverConfigSchema.safeParse({ store: { url } }).success).toBe(false);
     }
   });
@@ -87,11 +95,35 @@ describe("store", () => {
     expect(ok({ store: { url: "az://c" } }).store.credentials).toBeUndefined();
   });
 
+  it("takes a service account key for gs://, or none for Application Default Credentials", () => {
+    const keyed = ok({
+      store: {
+        url: "gs://sessions/prod",
+        credentials: { service_account_key: { file: "/k.json" } },
+      },
+    });
+    expect(keyed.store.credentials?.service_account_key).toBeInstanceOf(Secret);
+    expect(ok({ store: { url: "gs://b" } }).store.credentials).toBeUndefined();
+    expect(messages({ store: { url: "gs://b", credentials: { account_key: "k" } } })).toEqual([
+      "store.credentials: a gs:// bucket takes service_account_key, not account_key or sas_token",
+    ]);
+    expect(
+      messages({ store: { url: "s3://b", credentials: { service_account_key: "{}" } } }),
+    ).toEqual([
+      "store.credentials: an s3:// or r2:// bucket takes access_key_id and secret_access_key, not service_account_key",
+    ]);
+    expect(
+      messages({
+        store: { url: "gs://b", credentials: { service_account_key: "{}", access_key_id: "a" } },
+      })[0],
+    ).toContain("give one kind of key");
+  });
+
   it("refuses mixed keys, half an S3 key, and keys for the other kind of bucket", () => {
     expect(
       messages({ store: { url: "az://c", credentials: { account_key: "k", sas_token: "s" } } }),
     ).toEqual([
-      "store.credentials: give one kind of key: access_key_id and secret_access_key (s3://, r2://), account_key or sas_token (az://)",
+      "store.credentials: give one kind of key: access_key_id and secret_access_key (s3://, r2://), account_key or sas_token (az://), service_account_key (gs://)",
     ]);
     expect(messages({ store: { url: "s3://b", credentials: { access_key_id: "a" } } })).toEqual([
       "store.credentials: access_key_id and secret_access_key go together",

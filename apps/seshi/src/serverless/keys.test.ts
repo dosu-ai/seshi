@@ -30,18 +30,30 @@ describe("a bucket key", () => {
     });
   });
 
+  it("is the key file GOOGLE_APPLICATION_CREDENTIALS names, for gs://", () => {
+    const read = (path: string) => `{"path":"${path}"}`;
+    expect(
+      bucketKeyFromEnv({ GOOGLE_APPLICATION_CREDENTIALS: "/k.json" }, "gs://b/p", read),
+    ).toEqual({ service_account_key: '{"path":"/k.json"}' });
+    expect(bucketKeyFromEnv({ AWS_ACCESS_KEY_ID: "a" }, "gs://b", read)).toBeUndefined();
+  });
+
   it("is kept and read back in each of its kinds, as the store takes it", async () => {
     const secrets = memory();
     for (const key of [
       { access_key_id: "AKID", secret_access_key: "s", session_token: "t" },
       { account_key: "k" },
       { sas_token: "sig=x" },
+      { service_account_key: '{"type":"service_account"}' },
     ]) {
       await saveBucketKey(secrets, "az://c", key);
       expect(await readBucketKey(secrets, "az://c")).toEqual(key);
     }
     expect(bucketKeyCredentials({ account_key: "k" })).toEqual({ accountKey: "k" });
     expect(bucketKeyCredentials({ sas_token: "sig=x" })).toEqual({ sasToken: "sig=x" });
+    expect(bucketKeyCredentials({ service_account_key: "{}" })).toEqual({
+      serviceAccountKey: "{}",
+    });
     expect(bucketKeyCredentials({ access_key_id: "a", secret_access_key: "s" })).toEqual({
       accessKeyId: "a",
       secretAccessKey: "s",

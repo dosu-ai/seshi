@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { usernameOwner } from "@seshi/auth";
 import { cliConfigSchema } from "@seshi/config";
@@ -18,13 +19,14 @@ import { failWith, Refused } from "../cli/failures";
 import { emit, helpOrUsageError, takeJson } from "../cli/output";
 import { type BucketKey, bucketKeyFromEnv, saveBucketKey } from "../serverless/keys";
 import { openServerlessStore, refusalOf, runStorageTest, storageRefusal } from "../serverless/open";
+import { expandHome, homeFor } from "../serverless/settings";
 import { SHARED_CONFIG, SHARED_PREFIX } from "../serverless/shared";
 import type { CommandContext } from "./index";
 
 const USAGE = [
-  "usage: seshi init --serverless --url <s3://|r2://|az://|file://…> [--owner <id>] [--key-from-env]",
-  "                  [--admin] [--region <r>] [--endpoint <url>] [--account-id <id>]",
-  "                  [--account-name <name>] [--json]",
+  "usage: seshi init --serverless --url <s3://|r2://|az://|gs://|file://…> [--owner <id>]",
+  "                  [--key-from-env] [--admin] [--region <r>] [--endpoint <url>]",
+  "                  [--account-id <id>] [--account-name <name>] [--json]",
   "",
   "Set this machine up to write a shared bucket directly, with no server (F11). To use a seshi",
   "server instead: seshi login --server <url>.",
@@ -64,6 +66,17 @@ async function askKey(ctx: CommandContext, url: string): Promise<BucketKey | und
   if (url.startsWith("file://")) return undefined;
   if (!ctx.terminal || !ctx.tty?.stdin) return undefined;
   const terminal = await ctx.terminal();
+  if (url.startsWith("gs://")) {
+    const path = (
+      await terminal.ask("Service account key file (empty: use Application Default Credentials): ")
+    ).trim();
+    if (!path) return undefined;
+    try {
+      return { service_account_key: readFileSync(expandHome(path, homeFor(ctx.env)), "utf8") };
+    } catch {
+      throw new Refused(EXIT.usage, "usage", `cannot read the service account key file ${path}`);
+    }
+  }
   if (url.startsWith("az://")) {
     const given = (
       await terminal.ask("Storage account key or SAS token (empty: use the environment): ", {
@@ -129,8 +142,8 @@ export async function run(ctx: CommandContext): Promise<number> {
   }
   if (values.url === undefined) return helpOrUsageError(ctx, json, "--url is required", USAGE);
   const url = values.url.replace(/\/+$/, "");
-  if (!/^(s3|r2|az|file):\/\//.test(url)) {
-    return helpOrUsageError(ctx, json, "--url is s3://, r2://, az:// or file://", USAGE);
+  if (!/^(s3|r2|az|gs|file):\/\//.test(url)) {
+    return helpOrUsageError(ctx, json, "--url is s3://, r2://, az://, gs:// or file://", USAGE);
   }
   try {
     const account = openAccount(ctx);
@@ -149,14 +162,27 @@ export async function run(ctx: CommandContext): Promise<number> {
     };
     const cli = cliConfigSchema.parse({ serverless });
 
-    const key = values["key-from-env"] ? bucketKeyFromEnv(ctx.env, url) : await askKey(ctx, url);
+    let key: BucketKey | undefined;
+    try {
+      key = values["key-from-env"] ? bucketKeyFromEnv(ctx.env, url) : await askKey(ctx, url);
+    } catch (err) {
+      if (err instanceof Refused) throw err;
+      return helpOrUsageError(
+        ctx,
+        json,
+        `--key-from-env: cannot read the key file GOOGLE_APPLICATION_CREDENTIALS names (${ctx.env.GOOGLE_APPLICATION_CREDENTIALS})`,
+        USAGE,
+      );
+    }
     if (values["key-from-env"] && !key) {
       return helpOrUsageError(
         ctx,
         json,
         url.startsWith("az://")
           ? "--key-from-env: no AZURE_STORAGE_KEY or AZURE_STORAGE_SAS_TOKEN in the environment"
-          : "--key-from-env: no AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (or S3_*, R2_*) in the environment",
+          : url.startsWith("gs://")
+            ? "--key-from-env: no GOOGLE_APPLICATION_CREDENTIALS in the environment (without a key, gs:// uses Application Default Credentials: leave out --key-from-env)"
+            : "--key-from-env: no AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (or S3_*, R2_*) in the environment",
         USAGE,
       );
     }

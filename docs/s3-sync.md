@@ -8,7 +8,7 @@ polls it as soon as it is configured:
 [[sources]]
 id = "evals"
 type = "s3"
-url = "s3://eval-runs/harness"            # or r2://bucket/prefix, az://container/prefix, or file:///path on one machine
+url = "s3://eval-runs/harness"            # or r2://, az://container/prefix, gs://bucket/prefix, or file:///path on one machine
 credentials = { access_key_id = { env = "EVALS_KEY_ID" }, secret_access_key = { env = "EVALS_SECRET" } }
 # role = { arn = "arn:aws:iam::123456789012:role/seshi-read", external_id = { env = "EVALS_EXTERNAL_ID" } }
 include = ["**/*.jsonl", "**/*.json"]
@@ -72,7 +72,10 @@ source's checkpoint, so an unchanged object is never read again (F6.2).
   like the bucket client. An `az://` source takes `account_name`, `endpoint` and
   `credentials.account_key` or `sas_token` (read and list are enough), else the
   `AZURE_STORAGE_*` variables or workload identity, as [`[store]`](config.md#azure-blob-storage-az)
-  does. A source may not point at seshi's own bucket and prefix, or its own
+  does. A `gs://` source takes `credentials.service_account_key`, else Application Default
+  Credentials (`GOOGLE_APPLICATION_CREDENTIALS`, gcloud's login, GKE Workload Identity), as
+  [`[store]`](config.md#google-cloud-storage-gs) does; **Storage Object Viewer** is enough. A
+  source may not point at seshi's own bucket and prefix, or its own
   folder.
 - **Reprocessing.** `seshi reprocess --source evals --since 2026-11-01 --run` forgets the
   objects changed since then, so the next run reads them whole and normalizes them again: one

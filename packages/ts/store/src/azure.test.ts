@@ -162,11 +162,11 @@ describe("openStore with az://", () => {
       }),
     ).toThrow(/account key or SAS token/);
     expect(() => openStore("s3://b", { credentials: { accountKey: KEY }, env: {} })).toThrow(
-      /not an Azure key/,
+      /access key id and secret access key/,
     );
   });
 
   it("lists every scheme when the URL has none of them", () => {
-    expect(() => openStore("gs://b")).toThrow("s3://, r2://, az:// or file://");
+    expect(() => openStore("ftp://b")).toThrow("s3://, r2://, az://, gs:// or file://");
   });
 });

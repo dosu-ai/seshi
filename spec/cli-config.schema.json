@@ -33,9 +33,9 @@
       "type": "object",
       "properties": {
         "url": {
-          "description": "The bucket and prefix sessions are written to: s3://bucket/prefix, r2://bucket/prefix, az://container/prefix or file:///path. Required unless config names a server config with a [store].",
+          "description": "The bucket and prefix sessions are written to: s3://bucket/prefix, r2://bucket/prefix, az://container/prefix, gs://bucket/prefix or file:///path. Required unless config names a server config with a [store].",
           "type": "string",
-          "pattern": "^(s3|r2|az|file):\\/\\/"
+          "pattern": "^(s3|r2|az|gs|file):\\/\\/"
         },
         "region": {
           "description": "The bucket's region, as [store] region.",
@@ -43,7 +43,7 @@
           "minLength": 1
         },
         "endpoint": {
-          "description": "An S3-compatible endpoint, or the Azure blob endpoint, as [store] endpoint.",
+          "description": "An S3-compatible endpoint, the Azure blob endpoint, or the GCS JSON API root, as [store] endpoint.",
           "type": "string",
           "format": "uri"
         },

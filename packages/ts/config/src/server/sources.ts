@@ -130,7 +130,7 @@ export const s3Source = z
     type: z.literal("s3"),
     ...base,
     url: storeUrl.describe(
-      "The bucket to read: s3://bucket/prefix, r2://bucket/prefix or az://container/prefix.",
+      "The bucket to read: s3://bucket/prefix, r2://bucket/prefix, az://container/prefix or gs://bucket/prefix.",
     ),
     prefix: z.string().optional().describe("A key prefix under the URL's own."),
     credentials: bucketCredentials.optional().describe("Read-only keys for the source bucket."),
@@ -180,9 +180,17 @@ export const s3Source = z
           "role applies to s3:// sources (AWS STS); an az:// source takes keys or workload identity",
       });
     }
+    if (source.role !== undefined && source.url.startsWith("gs://")) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["role"],
+        message:
+          "role applies to s3:// sources (AWS STS); a gs:// source takes a service account key or Application Default Credentials",
+      });
+    }
   })
   .describe(
-    "A bucket other systems write sessions to (F6), polled: S3 or S3-compatible (s3://, r2://) or Azure Blob Storage (az://).",
+    "A bucket other systems write sessions to (F6), polled: S3 or S3-compatible (s3://, r2://), Azure Blob Storage (az://) or Google Cloud Storage (gs://).",
   );
 
 export const cursorCloudSource = z

@@ -56,7 +56,7 @@ A new `[serverless]` table replaces `[local]`. `server` and `serverless` are exc
 ```toml
 # ~/.config/seshi/config.toml
 [serverless]
-url = "s3://acme-seshi/seshi"        # SESHI_SERVERLESS__URL. s3://, r2://, az:// or file://
+url = "s3://acme-seshi/seshi"        # SESHI_SERVERLESS__URL. s3://, r2://, az://, gs:// or file://
 region = "us-east-1"                 # as [store]: region, endpoint, account_id
 owner = "alice"                      # SESHI_SERVERLESS__OWNER; else user, else the OS user
 config = "~/.config/seshi/seshi.toml"  # optional: a local server config layered on top

@@ -13,15 +13,25 @@ export const bucketCredentials = z
     sas_token: secret()
       .optional()
       .describe("A shared access signature for the container (az://), with or without its ?."),
+    service_account_key: secret()
+      .optional()
+      .describe(
+        'A Google service account key (gs://): the JSON key file\'s contents, usually { file = "/path/key.json" }.',
+      ),
   })
   .superRefine((keys, ctx) => {
     const s3 = keys.access_key_id !== undefined || keys.secret_access_key !== undefined;
-    const kinds = [s3, keys.account_key !== undefined, keys.sas_token !== undefined];
+    const kinds = [
+      s3,
+      keys.account_key !== undefined,
+      keys.sas_token !== undefined,
+      keys.service_account_key !== undefined,
+    ];
     if (kinds.filter(Boolean).length !== 1) {
       ctx.addIssue({
         code: "custom",
         message:
-          "give one kind of key: access_key_id and secret_access_key (s3://, r2://), account_key or sas_token (az://)",
+          "give one kind of key: access_key_id and secret_access_key (s3://, r2://), account_key or sas_token (az://), service_account_key (gs://)",
       });
     } else if (s3 && (keys.access_key_id === undefined || keys.secret_access_key === undefined)) {
       ctx.addIssue({ code: "custom", message: "access_key_id and secret_access_key go together" });
@@ -30,7 +40,7 @@ export const bucketCredentials = z
     }
   })
   .describe(
-    "Static bucket keys: access_key_id and secret_access_key for s3:// and r2://, account_key or sas_token for az://.",
+    "Static bucket keys: access_key_id and secret_access_key for s3:// and r2://, account_key or sas_token for az://, service_account_key for gs://.",
   );
 
 export type BucketCredentials = z.output<typeof bucketCredentials>;
@@ -39,9 +49,13 @@ export type BucketCredentials = z.output<typeof bucketCredentials>;
 export type RevealedBucketCredentials =
   | { accessKeyId: string; secretAccessKey: string; sessionToken?: string }
   | { accountKey: string }
-  | { sasToken: string };
+  | { sasToken: string }
+  | { serviceAccountKey: string };
 
 export function revealBucketCredentials(keys: BucketCredentials): RevealedBucketCredentials {
+  if (keys.service_account_key) {
+    return { serviceAccountKey: keys.service_account_key.reveal() };
+  }
   if (keys.account_key) return { accountKey: keys.account_key.reveal() };
   if (keys.sas_token) return { sasToken: keys.sas_token.reveal() };
   if (!keys.access_key_id || !keys.secret_access_key) {
@@ -54,26 +68,33 @@ export function revealBucketCredentials(keys: BucketCredentials): RevealedBucket
   };
 }
 
-/** A problem with keys given for a bucket of another kind: Azure keys for an S3 URL, or S3
- * keys for an `az://` one. */
+/** A problem with keys given for a bucket of another kind: Azure or Google keys for an S3 URL,
+ * S3 keys for an `az://` one, and so on. */
 export function credentialsMismatch(
   url: string,
   keys: BucketCredentials | undefined,
 ): string | undefined {
   if (keys === undefined) return undefined;
-  const azure = keys.account_key !== undefined || keys.sas_token !== undefined;
-  if (url.startsWith("az://") && !azure) {
-    return "an az:// bucket takes account_key or sas_token, not access_key_id";
-  }
-  if (/^(s3|r2):\/\//.test(url) && azure) {
-    return "an s3:// or r2:// bucket takes access_key_id and secret_access_key, not account_key or sas_token";
-  }
-  return undefined;
+  const given =
+    keys.service_account_key !== undefined
+      ? "service_account_key"
+      : keys.account_key !== undefined || keys.sas_token !== undefined
+        ? "account_key or sas_token"
+        : "access_key_id";
+  const wanted = url.startsWith("az://")
+    ? { bucket: "an az:// bucket", takes: "account_key or sas_token" }
+    : url.startsWith("gs://")
+      ? { bucket: "a gs:// bucket", takes: "service_account_key" }
+      : /^(s3|r2):\/\//.test(url)
+        ? { bucket: "an s3:// or r2:// bucket", takes: "access_key_id and secret_access_key" }
+        : undefined;
+  if (wanted === undefined || wanted.takes.startsWith(given)) return undefined;
+  return `${wanted.bucket} takes ${wanted.takes}, not ${given}`;
 }
 
 const store = z.strictObject({
   url: storeUrl.describe(
-    "Where sessions go: s3://bucket/prefix, r2://bucket/prefix, az://container/prefix, or file:///path for one machine.",
+    "Where sessions go: s3://bucket/prefix, r2://bucket/prefix, az://container/prefix, gs://bucket/prefix, or file:///path for one machine.",
   ),
   credentials: bucketCredentials.optional(),
   region: z.string().min(1).optional().describe("The bucket's region (s3://)."),
@@ -82,7 +103,7 @@ const store = z.strictObject({
     .min(1)
     .optional()
     .describe(
-      "An S3-compatible endpoint (MinIO, Backblaze, Wasabi…), which overrides the region; for az://, the blob endpoint, when not https://<account>.blob.core.windows.net (Azurite: http://127.0.0.1:10000/devstoreaccount1).",
+      "An S3-compatible endpoint (MinIO, Backblaze, Wasabi…), which overrides the region; for az://, the blob endpoint, when not https://<account>.blob.core.windows.net (Azurite: http://127.0.0.1:10000/devstoreaccount1); for gs://, the JSON API root, when not https://storage.googleapis.com.",
     ),
   account_id: z.string().min(1).optional().describe("The Cloudflare account id (r2://)."),
   account_name: z
