@@ -17,6 +17,7 @@ const isObject = (value: unknown): value is JsonObject =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 const MODEL_ITEMS = new Set([
+  "reasoning",
   "function_call",
   "custom_tool_call",
   "web_search_call",
@@ -41,8 +42,9 @@ function usageOf(value: unknown): TokenUsage | undefined {
   return Object.keys(usage).length > 0 ? usage : undefined;
 }
 
+/** A line the model wrote. Reasoning is read from the `response_item` reasoning item, the line its
+ * records come from (`withoutReasoningEvents` drops the `agent_reasoning` events). */
 function isModelLine(type: unknown, payload: JsonObject): boolean {
-  if (type === "event_msg") return payload.type === "agent_reasoning";
   if (type !== "response_item") return false;
   if (payload.type === "message") return payload.role === "assistant";
   return MODEL_ITEMS.has(payload.type as string);

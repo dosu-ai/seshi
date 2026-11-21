@@ -139,8 +139,8 @@ Nothing else of a session's content is stored (X6.3): no raw transcript, no payl
     "cwd": "/repo/app", "git_branch": "main", "model": "…",
     "parent_session_id": "…",
     "continuation": { "from_record": 6, "prefix_sha256": "…" },
-    "normalizer": { "name": "@dosu/seshi", "version": "0.9.0+trajectory.0.3.0",
-                    "format_version": "1+trajectory.0.3.0" }
+    "normalizer": { "name": "@dosu/seshi", "version": "0.9.0+trajectory.0.4.4",
+                    "format_version": "1+trajectory.0.4.4" }
   },
   "llm_calls": [
     { "id": "call_1", "model": "claude-sonnet-4-5", "provider": "anthropic",

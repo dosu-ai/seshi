@@ -518,7 +518,7 @@ credential) lists the caller's own stale sessions, paged by key like `GET /v1/se
 
 ```jsonc
 { "sessions": [ { "format": "claude-code", "session_id": "…",
-                  "built_with": "1+trajectory.0.3.0", "current": "2+trajectory.0.3.0" } ],
+                  "built_with": "1+trajectory.0.4.4", "current": "2+trajectory.0.4.4" } ],
   "cursor": "…", "truncated": false }
 ```
 

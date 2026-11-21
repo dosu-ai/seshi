@@ -26,6 +26,29 @@ export function subagentReportsAsObservations(records: NormalizedRecord[]): Norm
   );
 }
 
+/** A rollout with its `agent_reasoning` events blanked out, each line kept as spaces of the same
+ * byte length so every other line keeps its byte offset (and so its record id).
+ *
+ * Codex writers that emit `agent_reasoning` events also store the same text as the `response_item`
+ * reasoning item's `summary`; newer writers store only the summary. The library reads both and
+ * drops a summary only when a matching event is in the same text, which a chunk cut between the
+ * two defeats: the reasoning would be stored twice. Reading the summaries alone gives the same
+ * records whether the log arrives whole or in chunks. */
+export function withoutReasoningEvents(transcript: string): string {
+  if (!transcript.includes("agent_reasoning")) return transcript;
+  return transcript
+    .split("\n")
+    .map((line) => (isReasoningEvent(line) ? " ".repeat(Buffer.byteLength(line, "utf8")) : line))
+    .join("\n");
+}
+
+function isReasoningEvent(line: string): boolean {
+  if (!line.includes("agent_reasoning")) return false;
+  const record = parsed(line);
+  const payload = record?.payload as Record<string, unknown> | undefined;
+  return record?.type === "event_msg" && payload?.type === "agent_reasoning";
+}
+
 /** A forked subagent's rollout without the parent history copied into it: its own
  * `session_meta`, then the records from `subagent_history_start_ordinal` on. Any other rollout,
  * or one this cannot read, comes back as it was. */
