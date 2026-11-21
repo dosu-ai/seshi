@@ -17,7 +17,6 @@ import {
   type SessionMetadata,
   type SessionsPage,
   type StoredTrace,
-  VERSION,
   type Visibility,
 } from "@seshi/model";
 import type { StoreSeshi } from "@seshi/pipeline";

@@ -7,7 +7,6 @@ import {
   captureRules,
   decide,
   endPause,
-  findRepo,
   forgetHandedTranscript,
   freeze,
   isPaused,
@@ -33,7 +32,6 @@ import {
 import { parseDuration } from "@seshi/config";
 import type { CaptureAgent, InstallStatus } from "@seshi/kit";
 import { expandTilde, handedTranscriptDir } from "@seshi/kit";
-import { VERSION } from "@seshi/model";
 import { type Account, openAccount } from "../account/account";
 import { allCaptureAgents, CAPTURE_AGENTS, captureAgent } from "../capture-agents";
 import {
@@ -50,7 +48,7 @@ import {
   uninstallService,
 } from "../capture-service";
 import { EXIT, type ExitCode } from "../cli/exit";
-import { failWith, Refused } from "../cli/failures";
+import { failWith } from "../cli/failures";
 import { emit, fail, helpOrUsageError, takeJson } from "../cli/output";
 import { hookCommand, inNpxCache, isCompiled } from "../cli/spawn";
 import { printable, type Style, styleFor } from "../cli/style";
