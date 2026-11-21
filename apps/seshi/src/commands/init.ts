@@ -163,18 +163,20 @@ export async function run(ctx: CommandContext): Promise<number> {
     const cli = cliConfigSchema.parse({ serverless });
 
     let key: BucketKey | undefined;
-    try {
-      key = values["key-from-env"]
-        ? bucketKeyFromEnv(ctx.env, url, values["account-name"])
-        : await askKey(ctx, url);
-    } catch (err) {
-      if (err instanceof Refused) throw err;
-      return helpOrUsageError(
-        ctx,
-        json,
-        `--key-from-env: cannot read the key file GOOGLE_APPLICATION_CREDENTIALS names (${ctx.env.GOOGLE_APPLICATION_CREDENTIALS})`,
-        USAGE,
-      );
+    if (values["key-from-env"]) {
+      try {
+        key = bucketKeyFromEnv(ctx.env, url, values["account-name"]);
+      } catch {
+        // Only reading the gs:// key file GOOGLE_APPLICATION_CREDENTIALS names can fail here.
+        return helpOrUsageError(
+          ctx,
+          json,
+          `--key-from-env: cannot read the key file GOOGLE_APPLICATION_CREDENTIALS names (${ctx.env.GOOGLE_APPLICATION_CREDENTIALS})`,
+          USAGE,
+        );
+      }
+    } else {
+      key = await askKey(ctx, url);
     }
     if (values["key-from-env"] && !key) {
       return helpOrUsageError(

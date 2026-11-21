@@ -33,9 +33,29 @@ function conditionNotMet(what: string): GcsHttpError {
 }
 
 /** A GCS generation, which is what this client reports as an object's ETag: a positive decimal
- * int64. */
+ * int64. Not 0: `ifGenerationMatch=0` means "only while there is no object", the opposite of an
+ * `If-Match`. */
 function isGeneration(etag: string): boolean {
-  return /^\d{1,19}$/.test(etag);
+  return /^[1-9]\d{0,18}$/.test(etag);
+}
+
+/** GCS orders object names, and applies `startOffset`, by their UTF-8 bytes, which is not
+ * JavaScript's UTF-16 order for names with characters beyond U+FFFF. */
+function compareNames(a: string, b: string): number {
+  return Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"));
+}
+
+/** What a 404 says is missing. GCS's own answers name the object ("No such object: b/k", or a
+ * JSON error with reason `notFound`) or the bucket ("The specified bucket does not exist.");
+ * anything else came from no Cloud Storage API (a wrong endpoint path answers "Not Found"). */
+function notFound(text: string): "object" | "other" | "unknown" {
+  if (/bucket does not exist/i.test(text)) return "other";
+  if (/no such object/i.test(text)) return "object";
+  try {
+    const body = JSON.parse(text) as { error?: { errors?: { reason?: string }[] } };
+    if (body.error?.errors?.[0]?.reason === "notFound") return "object";
+  } catch {}
+  return "unknown";
 }
 
 interface ObjectResource {
@@ -118,15 +138,21 @@ export class FetchGcsClient {
     );
   }
 
-  /** A 404 for the object, as opposed to the bucket: a missing bucket is an error, not an empty
-   * store. GCS says "The specified bucket does not exist." for the latter. */
-  private static async objectMissing(response: Response): Promise<boolean> {
+  /** A 404 for the object, as opposed to the bucket or a wrong endpoint: those are errors, not
+   * an empty store. A media download's 404 is plain text, which an emulator (fake-gcs-server
+   * says "Not Found") and a path no API serves can share, so an unclear one asks for the
+   * object's metadata, whose 404 is JSON from the API alone. */
+  private async objectMissing(response: Response, key: string, media = false): Promise<boolean> {
     if (response.status !== 404) return false;
     const text = await response
       .clone()
       .text()
       .catch(() => "");
-    return !/bucket does not exist/i.test(text);
+    const missing = notFound(text);
+    if (missing !== "unknown" || !media) return missing === "object";
+    const check = await this.send("GET", this.url(this.objectPath(key), { fields: "name" }));
+    const checkText = await check.text().catch(() => "");
+    return check.status === 404 && notFound(checkText) === "object";
   }
 
   /** Create the bucket; one that already exists is not an error. For tests against an
@@ -144,7 +170,7 @@ export class FetchGcsClient {
 
   async get(key: string): Promise<{ body: Uint8Array; etag: string } | null> {
     const response = await this.send("GET", this.url(this.objectPath(key), { alt: "media" }));
-    if (await FetchGcsClient.objectMissing(response)) {
+    if (await this.objectMissing(response, key, true)) {
       await response.body?.cancel();
       return null;
     }
@@ -184,7 +210,7 @@ export class FetchGcsClient {
       "GET",
       this.url(this.objectPath(key), { fields: "size,generation,updated" }),
     );
-    if (await FetchGcsClient.objectMissing(response)) {
+    if (await this.objectMissing(response, key)) {
       await response.body?.cancel();
       return null;
     }
@@ -208,7 +234,7 @@ export class FetchGcsClient {
       "DELETE",
       this.url(this.objectPath(key), { ifGenerationMatch: condition.ifMatch }),
     );
-    if (!response.ok && !(await FetchGcsClient.objectMissing(response))) {
+    if (!response.ok && !(await this.objectMissing(response, key))) {
       return this.fail("DELETE", key, response);
     }
     await response.body?.cancel();
@@ -249,7 +275,8 @@ export class FetchGcsClient {
       const page = (await response.json()) as { items?: ObjectResource[]; nextPageToken?: string };
       for (const item of page.items ?? []) {
         const key = item.name;
-        if (key === undefined || (startAfter !== undefined && key <= startAfter)) continue;
+        if (key === undefined) continue;
+        if (startAfter !== undefined && compareNames(key, startAfter) <= 0) continue;
         const size = Number(item.size ?? 0);
         const at = Date.parse(item.updated ?? "");
         objects.push({
@@ -294,7 +321,7 @@ export class FetchGcsClient {
       headers,
       { decompress: false },
     );
-    if (await FetchGcsClient.objectMissing(response)) {
+    if (await this.objectMissing(response, key, true)) {
       await response.body?.cancel();
       return null;
     }

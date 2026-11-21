@@ -10,8 +10,11 @@ import { StoreError } from "./store";
 export const GCS_SCOPE = "https://www.googleapis.com/auth/devstorage.read_write";
 
 const DEFAULT_TOKEN_URI = "https://oauth2.googleapis.com/token";
-/** Renew this long before the access token expires. */
+/** Renew this long before the access token expires, or halfway through a shorter life. */
 const RENEW_BEFORE_MS = 5 * 60 * 1000;
+/** How long the metadata server has to answer: off Google Cloud its name may resolve to a host
+ * that never does, and every request would wait for the connection to time out. */
+const METADATA_TIMEOUT_MS = 10_000;
 
 /** How the GCS client gets the bearer token it sends: asked before each request, so it can be
  * renewed. `undefined` sends none (an emulator). */
@@ -95,7 +98,8 @@ export function serviceAccountAssertion(
 
 interface Token {
   token: string;
-  expires: number;
+  /** When to ask for a new one (ms since the epoch). */
+  renewAt: number;
 }
 
 /** A token source that calls `exchange` when it has no token or the one it has is about to
@@ -104,7 +108,7 @@ function cached(exchange: () => Promise<Token>, now: () => Date): () => Promise<
   let current: Token | undefined;
   let pending: Promise<string> | undefined;
   return () => {
-    if (current && current.expires - RENEW_BEFORE_MS > now().getTime()) {
+    if (current && current.renewAt > now().getTime()) {
       return Promise.resolve(current.token);
     }
     pending ??= exchange()
@@ -132,17 +136,25 @@ async function tokenFrom(response: Response, what: string, now: () => Date): Pro
       `${what}: ${response.status}${detail ? ` ${detail}` : ""}`,
     );
   }
-  const body = JSON.parse(text) as { access_token?: unknown; expires_in?: unknown };
+  let body: { access_token?: unknown; expires_in?: unknown } = {};
+  try {
+    body = JSON.parse(text) as typeof body;
+  } catch {}
   if (typeof body.access_token !== "string") {
     throw new GcsAuthError(response.status, `${what}: no access_token in the answer`);
   }
-  const seconds = typeof body.expires_in === "number" ? body.expires_in : 3600;
-  return { token: body.access_token, expires: now().getTime() + seconds * 1000 };
+  const lifetime = (typeof body.expires_in === "number" ? body.expires_in : 3600) * 1000;
+  // The metadata server hands out its cached token until about five minutes are left, so a
+  // token can come with less than RENEW_BEFORE_MS to live: it is kept for half its life.
+  const renewAt = now().getTime() + lifetime - Math.min(RENEW_BEFORE_MS, lifetime / 2);
+  return { token: body.access_token, renewAt };
 }
 
 export interface TokenOptions {
   fetch?: Fetch;
   now?: () => Date;
+  /** How long the metadata server has to answer; 10 s by default. */
+  metadataTimeoutMs?: number;
 }
 
 /** Access tokens from a credentials file: a service account key signs a JWT for one; user
@@ -205,14 +217,18 @@ export function metadataServerToken(
   const fetchImpl = options.fetch ?? ((input, init) => fetch(input, init));
   const now = options.now ?? (() => new Date());
   const host = env.GCE_METADATA_HOST ?? env.GCE_METADATA_IP ?? "metadata.google.internal";
+  const timeout = options.metadataTimeoutMs ?? METADATA_TIMEOUT_MS;
   const url = `http://${host}/computeMetadata/v1/instance/service-accounts/default/token?scopes=${encodeURIComponent(GCS_SCOPE)}`;
   return cached(async () => {
     let response: Response;
     try {
-      response = await fetchImpl(url, { headers: { "metadata-flavor": "Google" } });
+      response = await fetchImpl(url, {
+        headers: { "metadata-flavor": "Google" },
+        signal: AbortSignal.timeout(timeout),
+      });
     } catch (err) {
       throw new StoreError(
-        `no Google credentials: the metadata server (${host}) did not answer. Give a service account key ([store] credentials.service_account_key or GOOGLE_APPLICATION_CREDENTIALS), run gcloud auth application-default login, or run on GKE with Workload Identity`,
+        `no Google credentials: the metadata server (${host}) did not answer within ${timeout / 1000} s. Give a service account key ([store] credentials.service_account_key or GOOGLE_APPLICATION_CREDENTIALS), run gcloud auth application-default login, or run on GKE with Workload Identity`,
         err,
       );
     }

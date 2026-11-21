@@ -127,6 +127,35 @@ describe("FetchGcsClient requests", () => {
     expect(await present.head("k")).toBeNull();
   });
 
+  it("fails on a 404 that no Cloud Storage API sent (a wrong endpoint path)", async () => {
+    const { c } = client(() => new Response("Not Found", { status: 404 }));
+    await expect(c.get("k")).rejects.toMatchObject({ status: 404 });
+    await expect(c.getObject("k")).rejects.toMatchObject({ status: 404 });
+    await expect(c.head("k")).rejects.toMatchObject({ status: 404 });
+    await expect(c.delete("k")).rejects.toMatchObject({ status: 404 });
+  });
+
+  it("asks the metadata when a download's 404 is unclear, as fake-gcs-server's is", async () => {
+    const { c, seen } = client((r) =>
+      r.url.searchParams.get("alt") === "media"
+        ? new Response("Not Found", { status: 404 })
+        : gcsError(404, "notFound", "Not Found"),
+    );
+    expect(await c.get("k")).toBeNull();
+    expect(await c.getObject("k")).toBeNull();
+    expect(seen[1]?.url.searchParams.get("fields")).toBe("name");
+  });
+
+  it("refuses generation 0 as an ETag: ifGenerationMatch=0 means no object", async () => {
+    const { c, seen } = client(() => json({ generation: "1" }));
+    await expect(c.put("k", new Uint8Array(), "x", { ifMatch: "0" })).rejects.toMatchObject({
+      status: 412,
+    });
+    await expect(c.delete("k", { ifMatch: "0" })).rejects.toMatchObject({ status: 412 });
+    await expect(c.getObject("k", { ifMatch: "0" })).rejects.toMatchObject({ status: 412 });
+    expect(seen).toEqual([]);
+  });
+
   it("stats from the object resource: size, generation, updated", async () => {
     const { c, seen } = client(() =>
       json({ size: "5", generation: "77", updated: "2026-11-20T09:00:00.123Z" }),
@@ -160,6 +189,13 @@ describe("FetchGcsClient listing", () => {
     });
     const query = Object.fromEntries(seen[0]?.url.searchParams ?? []);
     expect(query).toMatchObject({ prefix: "a/", maxResults: "3", startOffset: "a/1" });
+  });
+
+  it("drops keys up to startAfter in GCS's UTF-8 byte order, not UTF-16's", async () => {
+    // U+FF01 is EF BC 81 in UTF-8, before an emoji's F0 …; in UTF-16 it is after D83D.
+    const { c } = client(() => json({ items: [item("a/\uFF01"), item("a/\u{1F600}")] }));
+    const page = await c.listObjects({ prefix: "a/", maxKeys: 5, startAfter: "a/\uFF01" });
+    expect(page.objects.map((o) => o.key)).toEqual(["a/\u{1F600}"]);
   });
 
   it("follows page tokens until enough keys are found, and says when more remain", async () => {

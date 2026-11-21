@@ -84,6 +84,22 @@ describe("a service account key", () => {
     expect(form.get("assertion")?.split(".")).toHaveLength(3);
   });
 
+  it("keeps a token that comes with under five minutes to live for half its life", async () => {
+    let now = NOW;
+    let n = 0;
+    const { seen, fetch } = recorder(() => tokenAnswer(`t${++n}`, 290));
+    const token = credentialsFileToken(
+      parseCredentialsFile(JSON.stringify(serviceAccount), "key"),
+      { fetch, now: () => now },
+    );
+    expect(await token()).toBe("t1");
+    now = new Date(NOW.getTime() + 140 * 1000);
+    expect(await token()).toBe("t1");
+    now = new Date(NOW.getTime() + 146 * 1000);
+    expect(await token()).toBe("t2");
+    expect(seen).toHaveLength(2);
+  });
+
   it("says why an exchange was refused", async () => {
     const { fetch } = recorder(
       () =>
@@ -147,6 +163,20 @@ describe("the metadata server", () => {
       `http://10.0.0.9:8080/computeMetadata/v1/instance/service-accounts/default/token?scopes=${encodeURIComponent(GCS_SCOPE)}`,
     );
     expect(seen[0]?.init?.headers).toEqual({ "metadata-flavor": "Google" });
+  });
+
+  it("gives up on a metadata server that never answers", async () => {
+    const token = metadataServerToken(
+      {},
+      {
+        metadataTimeoutMs: 20,
+        fetch: (_url, init) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+          }),
+      },
+    );
+    await expect(token()).rejects.toThrow(/did not answer within 0.02 s/);
   });
 
   it("says where credentials can come from when it does not answer", async () => {
