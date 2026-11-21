@@ -4,6 +4,7 @@ export {
   type AzureKey,
   AzureStore,
   type AzureStoreOptions,
+  azureKeyFromEnv,
   parseAzureUrl,
   resolveAzureAccess,
 } from "./azure";
@@ -16,6 +17,8 @@ export {
   sharedKeyAuthorization,
 } from "./azure-fetch";
 export {
+  AzureIdentityError,
+  type IdentitySlot,
   type WorkloadIdentityOptions,
   workloadIdentity,
   workloadIdentityFromEnv,

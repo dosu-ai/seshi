@@ -168,13 +168,24 @@ export class FetchAzureBlobClient {
         accountKey: credentials.accountKey,
       });
     }
-    return this.fetchImpl(url.toString(), {
-      method,
-      headers,
-      ...(body ? { body: body as BodyInit } : {}),
-      // Bun's fetch option: hand over a `Content-Encoding` body as stored, not decoded.
-      ...extra,
-    } as RequestInit);
+    try {
+      return await this.fetchImpl(url.toString(), {
+        method,
+        headers,
+        ...(body ? { body: body as BodyInit } : {}),
+        // Bun's fetch option: hand over a `Content-Encoding` body as stored, not decoded.
+        ...extra,
+      } as RequestInit);
+    } catch (err) {
+      if (!("sasToken" in credentials)) throw err;
+      // A network error may carry the URL, and with it the SAS signature: say what failed
+      // without the query string, and leave the original (and its URL) behind.
+      const message = (err instanceof Error ? err.message : String(err)).replace(
+        /([?&]sig=)[^&\s"']*/gi,
+        "$1[redacted]",
+      );
+      throw new Error(`${method} ${url.origin}${url.pathname}: ${message}`);
+    }
   }
 
   private async fail(method: string, key: string, response: Response): Promise<never> {
@@ -260,15 +271,6 @@ export class FetchAzureBlobClient {
       return this.fail("DELETE", key, response);
     }
     await response.body?.cancel();
-  }
-
-  async list(options: {
-    prefix: string;
-    maxKeys: number;
-    startAfter?: string;
-  }): Promise<{ keys: string[]; truncated: boolean }> {
-    const listing = await this.listObjects(options);
-    return { keys: listing.objects.map((o) => o.key), truncated: listing.truncated };
   }
 
   /** Blobs under `prefix`, after `startAfter` (exclusive, as S3's `start-after`), at most

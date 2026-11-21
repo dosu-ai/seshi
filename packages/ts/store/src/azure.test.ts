@@ -60,6 +60,27 @@ describe("resolveAzureAccess", () => {
     });
   });
 
+  it("reads UseDevelopmentStorage=true as Azurite", () => {
+    const access = resolve({ AZURE_STORAGE_CONNECTION_STRING: "UseDevelopmentStorage=true" });
+    expect(access.account).toBe("devstoreaccount1");
+    expect(access.endpoint).toBe("http://127.0.0.1:10000/devstoreaccount1");
+    expect("accountKey" in access.credentials).toBe(true);
+  });
+
+  it("ignores a connection string for another account", () => {
+    const env = {
+      AZURE_STORAGE_CONNECTION_STRING:
+        "AccountName=logs;AccountKey=bG9ncw==;BlobEndpoint=https://logs.example",
+      AZURE_FEDERATED_TOKEN_FILE: "/t",
+      AZURE_CLIENT_ID: "c",
+      AZURE_TENANT_ID: "t",
+    };
+    const access = resolve(env, { account: "sessions" });
+    expect(access.account).toBe("sessions");
+    expect(access.endpoint).toBeUndefined();
+    expect("token" in access.credentials).toBe(true);
+  });
+
   it("uses workload identity when no key is given", () => {
     const access = resolve({
       AZURE_STORAGE_ACCOUNT: "a",

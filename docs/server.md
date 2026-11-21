@@ -217,7 +217,7 @@ Each cloud's own object storage holds the bucket:
 | Cloud | `store.url` | Keys |
 |---|---|---|
 | AWS | `s3://bucket/prefix` with `store.region` | An IAM role for the pod or instance through the `AWS_*` variables, or `store.credentials` |
-| Google Cloud | `s3://bucket/prefix` with `store.endpoint = "https://storage.googleapis.com"` | HMAC keys in `store.credentials` |
+| Google Cloud | Not yet: Cloud Storage's S3-compatible API has no conditional writes, so seshi's storage test refuses it ([serverless.md](serverless.md#credentials)) | |
 | Azure | `az://container/prefix` with `store.account_name` | Workload identity on AKS (`AZURE_FEDERATED_TOKEN_FILE`, `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, set by AKS for a service account that names a managed identity with **Storage Blob Data Contributor** on the container), or `store.credentials.account_key` / `sas_token` |
 
 On Azure no S3 gateway is needed: seshi speaks the Blob service's own API

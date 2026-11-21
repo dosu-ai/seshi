@@ -204,7 +204,8 @@ wins:
 2. `AZURE_STORAGE_KEY`, then `AZURE_STORAGE_SAS_TOKEN`.
 3. `AZURE_STORAGE_CONNECTION_STRING`: its `AccountKey` or `SharedAccessSignature`, and its
    `AccountName` and `BlobEndpoint` (or `EndpointSuffix`) when `account_name` and `endpoint`
-   are not set.
+   are not set. A connection string for another account than `account_name` is ignored;
+   `UseDevelopmentStorage=true` is Azurite on its default port.
 4. Workload identity: `AZURE_FEDERATED_TOKEN_FILE`, `AZURE_CLIENT_ID` and `AZURE_TENANT_ID`, as
    AKS sets them on a pod whose service account names a managed identity
    (`AZURE_AUTHORITY_HOST` for a sovereign cloud). seshi exchanges the token file for a Storage
