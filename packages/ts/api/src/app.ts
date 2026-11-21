@@ -14,6 +14,7 @@ import {
   type TokenRequest,
   tokenInfo,
   USER_HEADER,
+  UsernameMissing,
 } from "@seshi/auth";
 import {
   ConfigError,
@@ -302,7 +303,17 @@ export function createApp(instance: Instance) {
   }
 
   async function caller(request: Request, scope: Scope): Promise<Principal> {
-    const principal = await authenticate(request);
+    let principal: Principal;
+    try {
+      principal = await authenticate(request);
+    } catch (err) {
+      // The org key without a username, on a route no username would open: refused for what
+      // it is (403), not sent off to add a header that would not help.
+      if (err instanceof UsernameMissing && !err.scopes.has(scope)) {
+        throw new Forbidden(`this credential cannot do that: it needs the ${scope} scope`);
+      }
+      throw err;
+    }
     requireScope(principal, scope);
     return principal;
   }

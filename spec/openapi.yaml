@@ -1885,7 +1885,8 @@ components:
     Unauthorized:
       description: |
         No credential, or not one the server accepts: unknown, expired or revoked, or the
-        org key without `X-Seshi-User`. `code` is `unauthorized`.
+        org key without `X-Seshi-User` on a route the org key may use (elsewhere it is 403).
+        `code` is `unauthorized`.
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }

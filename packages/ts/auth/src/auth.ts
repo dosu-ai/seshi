@@ -12,6 +12,14 @@ import type { AuthSettings } from "./settings";
 import { type IssueOptions, TokenService } from "./tokens";
 
 export const DEVICE_TOKEN_DAYS = 90;
+/** The org key without the username it needs (X5.12). It carries the key's scopes, so a route
+ * no username would open answers 403, not "add the username". */
+export class UsernameMissing extends Unauthorized {
+  constructor(readonly scopes: ReadonlySet<Scope>) {
+    super("the org key needs the username in the X-Seshi-User header");
+  }
+}
+
 export const USER_HEADER = "x-seshi-user";
 export const OIDC_SCOPES = ["openid", "email", "profile"] as const;
 export type OrgKeyOwner = "*";
@@ -219,7 +227,7 @@ export class Auth {
         if (!this.settings.orgKey) throw new Unauthorized("the org key is turned off");
         const owner = user === undefined ? undefined : usernameOwner(user);
         if (owner === undefined) {
-          throw new Unauthorized("the org key needs the username in the X-Seshi-User header");
+          throw new UsernameMissing(common.scopes);
         }
         return {
           ...common,
