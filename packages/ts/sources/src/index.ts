@@ -4,6 +4,8 @@ export {
   AzureSourceBucket,
   type AzureSourceOptions,
   FolderSourceBucket,
+  GcsSourceBucket,
+  type GcsSourceOptions,
   ObjectChanged,
   ObjectDenied,
   S3SourceBucket,

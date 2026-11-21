@@ -84,3 +84,25 @@ describe("an Azure source (az://)", () => {
     ).toContain("an az:// bucket takes account_key or sas_token");
   });
 });
+
+describe("a Google Cloud Storage source (gs://)", () => {
+  it("takes a service account key or none, and never reads seshi's own bucket", () => {
+    expect(
+      parse({ url: "gs://evals/runs", credentials: { service_account_key: "{}" } }).success,
+    ).toBe(true);
+    expect(parse({ url: "gs://evals/runs" }).success).toBe(true);
+    expect(issues({ url: "gs://seshi/prod/inbox" }, "gs://seshi/prod")[0]).toContain(
+      "reads seshi's own bucket",
+    );
+    expect(parse({ url: "gs://seshi/prod" }, "s3://seshi/prod").success).toBe(true);
+  });
+
+  it("refuses a role and keys for other buckets", () => {
+    expect(issues({ url: "gs://evals", role: { arn: "arn:aws:iam::1:role/r" } })).toEqual([
+      "sources.0.role: role applies to s3:// sources (AWS STS); a gs:// source takes a service account key or Application Default Credentials",
+    ]);
+    expect(issues({ url: "gs://evals", credentials: { sas_token: "sig=x" } })[0]).toContain(
+      "a gs:// bucket takes service_account_key",
+    );
+  });
+});

@@ -42,6 +42,26 @@ export {
 } from "./check";
 export { FsStore, STALE_LOCK_MS } from "./fs";
 export {
+  type GcsAccess,
+  type GcsAccessOptions,
+  type GcsKey,
+  GcsStore,
+  type GcsStoreOptions,
+  parseGcsUrl,
+  resolveGcsAccess,
+} from "./gcs";
+export {
+  applicationDefaultToken,
+  credentialsFileToken,
+  GCS_SCOPE,
+  GcsAuthError,
+  type GcsTokenSource,
+  metadataServerToken,
+  parseCredentialsFile,
+  serviceAccountAssertion,
+} from "./gcs-auth";
+export { FetchGcsClient, type FetchGcsOptions, GCS_ENDPOINT, GcsHttpError } from "./gcs-fetch";
+export {
   addHealth,
   HEALTH_OUTCOMES,
   HEALTH_SCHEMA,

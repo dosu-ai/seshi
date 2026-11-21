@@ -83,6 +83,20 @@ jobs:
           # Azurite's well-known development account key, published by Microsoft: not a secret.
           SESSIONDB_TEST_AZURE_KEY: Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==
         run: bun --bun vitest run tests/store/azure-live.test.ts
+      # fake-gcs-server, for the gs:// store test. A step, not a service: it needs arguments
+      # (plain HTTP), which a service container cannot be given.
+      - name: Start fake-gcs-server
+        run: |
+          docker run -d --name fake-gcs -p 4443:4443 \
+            fsouza/fake-gcs-server:1.56.1@sha256:797ce226d62f947c009dc40246b30cfb456b8473d8241407f9d6f2c04e4d69ef \
+            -scheme http -port 4443 -public-host 127.0.0.1:4443
+          for _ in $(seq 30); do curl -sf http://127.0.0.1:4443/storage/v1/b >/dev/null && exit 0; sleep 1; done
+          docker logs fake-gcs; exit 1
+      - name: Google Cloud Storage store test against fake-gcs-server
+        env:
+          SESSIONDB_TEST_GCS_EMULATOR: http://127.0.0.1:4443
+          SESSIONDB_TEST_GCS_BUCKET: sessiondb-test
+        run: bun --bun vitest run tests/store/gcs-live.test.ts
 
   # The Python client (packages/py/client) on its oldest and newest Python: ruff, mypy, and its
   # tests, which hold it to spec/openapi.yaml and run it against a seshi server started from

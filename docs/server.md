@@ -20,7 +20,7 @@ capture uploader, seshi upload, any client ──POST /v1/sessions──▶ sesh
 OTLP exporters ──POST /otlp/v1/traces──▶       normalize · redact · filter · review · write
 worker: Datadog, S3 sources ──poll──▶                              │
                                                                    ▼
-                                                  the bucket (s3:// r2:// az:// file://)
+                                                  the bucket (s3:// r2:// az:// gs:// file://)
                                                                    ▲
                                       readers: the API with a service token, or changes/
 ```
@@ -73,8 +73,8 @@ The settings most servers need ([config.md](config.md) has all of them):
 | `auth.tokens.<name>` | `SESHI_AUTH__TOKENS__<NAME>` | Static tokens, for one person and development: each is everything for its owner (`SESHI_AUTH__TOKENS__ALICE=…`, 16+ characters, `openssl rand -hex 24`). For a team, use `seshi admin init` and the org key or an IdP instead |
 | `auth.oidc.*`, `auth.session_keys.*` | `SESHI_AUTH__OIDC__ISSUER`, `…__CLIENT_ID`, `SESHI_AUTH__SESSION_KEYS__K1` | Sign-in through your IdP (X5.2) and the key session tokens are signed with (32+ characters) |
 | `auth.org_key.enabled` | `SESHI_AUTH__ORG_KEY__ENABLED` | Default `true`: members holding the org key write as the username they state (X5.12) |
-| `store.url` | `SESHI_STORE__URL` | Required: `r2://bucket/prefix`, `s3://bucket/prefix`, `az://container/prefix` (Azure Blob Storage), or `file:///path` |
-| `store.credentials.*`, `store.region`, `store.endpoint`, `store.account_id`, `store.account_name` | `SESHI_STORE__CREDENTIALS__ACCESS_KEY_ID`, `SESHI_STORE__ACCOUNT_NAME`, … | The bucket's keys and where it is. Unset, the standard `AWS_*` / `S3_*` (and `R2_*` for `r2://`) variables apply; for `az://`, `AZURE_STORAGE_*`, then workload identity ([config.md](config.md#azure-blob-storage-az)) |
+| `store.url` | `SESHI_STORE__URL` | Required: `r2://bucket/prefix`, `s3://bucket/prefix`, `az://container/prefix` (Azure Blob Storage), `gs://bucket/prefix` (Google Cloud Storage), or `file:///path` |
+| `store.credentials.*`, `store.region`, `store.endpoint`, `store.account_id`, `store.account_name` | `SESHI_STORE__CREDENTIALS__ACCESS_KEY_ID`, `SESHI_STORE__ACCOUNT_NAME`, … | The bucket's keys and where it is. Unset, the standard `AWS_*` / `S3_*` (and `R2_*` for `r2://`) variables apply; for `az://`, `AZURE_STORAGE_*`, then workload identity ([config.md](config.md#azure-blob-storage-az)); for `gs://`, Application Default Credentials ([config.md](config.md#google-cloud-storage-gs)) |
 | `redaction.packs` | `SESHI_REDACTION__PACKS` | Your own redaction rule packs (TOML, or today's JSON rule files), on top of the built-in pack ([redaction.md](redaction.md)). The server refuses to start on a pack it cannot use or a rule that fails its own test strings |
 | `store.deployment_id`, `store.org` | `SESHI_STORE__DEPLOYMENT_ID`, `SESHI_STORE__ORG` | Recorded in the bucket's layout marker (`seshi.json`); the server refuses to start against a bucket marked for another deployment or org (X1.4). See [the layout](../spec/layout.md) |
 | `server.listen` | `SESHI_SERVER__LISTEN` | Default `:7200`; flag `--listen` |
@@ -217,15 +217,20 @@ Each cloud's own object storage holds the bucket:
 | Cloud | `store.url` | Keys |
 |---|---|---|
 | AWS | `s3://bucket/prefix` with `store.region` | An IAM role for the pod or instance through the `AWS_*` variables, or `store.credentials` |
-| Google Cloud | Not yet: Cloud Storage's S3-compatible API has no conditional writes, so seshi's storage test refuses it ([serverless.md](serverless.md#credentials)) | |
+| Google Cloud | `gs://bucket/prefix` | GKE Workload Identity: the pod's Kubernetes service account bound to a Google service account with **Storage Object User** on the bucket (seshi asks the metadata server for its token), or `store.credentials.service_account_key`, or `GOOGLE_APPLICATION_CREDENTIALS` |
 | Azure | `az://container/prefix` with `store.account_name` | Workload identity on AKS (`AZURE_FEDERATED_TOKEN_FILE`, `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, set by AKS for a service account that names a managed identity with **Storage Blob Data Contributor** on the container), or `store.credentials.account_key` / `sas_token` |
 
-On Azure no S3 gateway is needed: seshi speaks the Blob service's own API
-([config.md](config.md#azure-blob-storage-az)). To try it locally, run Azurite
+On Azure and Google Cloud no S3 gateway is needed: seshi speaks the Blob service's and Cloud
+Storage's own APIs ([config.md](config.md#azure-blob-storage-az),
+[config.md](config.md#google-cloud-storage-gs)). Not GCS's S3-compatible XML API: it takes
+`If-Match` and `If-None-Match` only on reads, so it cannot hold a seshi bucket. To try it locally, run Azurite
 (`docker run -p 10000:10000 mcr.microsoft.com/azure-storage/azurite azurite-blob --blobHost 0.0.0.0`),
 create a container, and set `store.endpoint = "http://127.0.0.1:10000/devstoreaccount1"`,
 `store.account_name = "devstoreaccount1"` and Azurite's documented account key as
-`AZURE_STORAGE_KEY`.
+`AZURE_STORAGE_KEY`. For Google Cloud, run fake-gcs-server
+(`docker run -p 4443:4443 fsouza/fake-gcs-server -scheme http -port 4443`), create a bucket,
+and set `STORAGE_EMULATOR_HOST=http://127.0.0.1:4443`; it ignores generation preconditions on
+deletes, so the storage test reports conditional deletes as not supported there.
 
 ## Setting up who may call it
 
