@@ -11,6 +11,7 @@ export interface ServerlessSettings {
   region?: string;
   endpoint?: string;
   account_id?: string;
+  account_name?: string;
   owner?: string;
   /** A local server config layered over the shared one; `~` not yet expanded. */
   config?: string;

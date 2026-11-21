@@ -70,6 +70,8 @@ describe("seshi init --serverless", () => {
   it("asks for --serverless, --url, and an owner when it cannot name one", async () => {
     expect((await machine.seshi(["init"])).code).toBe(2);
     expect((await machine.seshi(["init", "--serverless"])).err).toContain("--url is required");
+    const gcs = await machine.seshi(["init", "--serverless", "--url", "gs://b/p"]);
+    expect(gcs.err).toContain("--url is s3://, r2://, az:// or file://");
     const unnamed = await machine.seshi(["init", "--serverless", "--url", url]);
     expect(unnamed.err).toContain("name the owner: --owner <id>");
   });

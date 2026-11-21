@@ -85,18 +85,25 @@ export const cliConfigSchema = z
       .strictObject({
         url: z
           .string()
-          .regex(/^(s3|r2|file):\/\//, "s3://, r2:// or file://")
+          .regex(/^(s3|r2|az|file):\/\//, "s3://, r2://, az:// or file://")
           .optional()
           .describe(
-            "The bucket and prefix sessions are written to: s3://bucket/prefix, r2://bucket/prefix or file:///path. Required unless config names a server config with a [store].",
+            "The bucket and prefix sessions are written to: s3://bucket/prefix, r2://bucket/prefix, az://container/prefix or file:///path. Required unless config names a server config with a [store].",
           ),
         region: z.string().min(1).optional().describe("The bucket's region, as [store] region."),
-        endpoint: httpUrl.optional().describe("An S3-compatible endpoint, as [store] endpoint."),
+        endpoint: httpUrl
+          .optional()
+          .describe("An S3-compatible endpoint, or the Azure blob endpoint, as [store] endpoint."),
         account_id: z
           .string()
           .min(1)
           .optional()
           .describe("Cloudflare account id for r2://, as [store] account_id."),
+        account_name: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("Azure storage account for az://, as [store] account_name."),
         owner: z
           .string()
           .min(1)

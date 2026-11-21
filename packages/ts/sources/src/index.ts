@@ -1,6 +1,8 @@
 import { S3Connector, type S3ConnectorOptions } from "./s3/connector";
 
 export {
+  AzureSourceBucket,
+  type AzureSourceOptions,
   FolderSourceBucket,
   ObjectChanged,
   ObjectDenied,

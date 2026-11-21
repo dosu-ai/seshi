@@ -85,7 +85,7 @@
   <!-- Bucket -->
   <rect class="zone" x="750" y="30" width="230" height="390" rx="10"/>
   <text class="tz" x="766" y="56">BUCKET</text>
-  <text class="ts" x="766" y="74">s3:// · r2:// · file://</text>
+  <text class="ts" x="766" y="74">s3:// · r2:// · az:// · file://</text>
   <rect class="box" x="766" y="90" width="198" height="312" rx="6"/>
   <text class="tm" x="778" y="116">owners/&lt;owner&gt;/</text>
   <text class="tm" x="778" y="138" xml:space="preserve">  sessions/&lt;id&gt;/</text>

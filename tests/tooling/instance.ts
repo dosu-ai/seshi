@@ -32,7 +32,7 @@ export function serverConfig(
 
 /** A store URL the config schema accepts for `store`: its own when it is one. */
 function urlOf(store: Store): string {
-  return /^(file|s3|r2):\/\//.test(store.url) ? store.url : "file:///unused-test-store";
+  return /^(file|s3|r2|az):\/\//.test(store.url) ? store.url : "file:///unused-test-store";
 }
 
 /** What the old `createApp(options)` took, which most API suites still describe their server

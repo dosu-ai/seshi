@@ -1,10 +1,22 @@
+import { azureKeyFromEnv, type StoreCredentials } from "@seshi/store";
 import type { SecretBackend } from "../account/secrets";
 
-/** A bucket key as `seshi init --serverless` stores it (credential purpose `bucket`). */
-export interface BucketKey {
-  access_key_id: string;
-  secret_access_key: string;
-  session_token?: string;
+/** A bucket key as `seshi init --serverless` stores it (credential purpose `bucket`): an S3
+ * access key for `s3://` and `r2://`, an account key or SAS token for `az://`. */
+export type BucketKey =
+  | { access_key_id: string; secret_access_key: string; session_token?: string }
+  | { account_key: string }
+  | { sas_token: string };
+
+/** The key as the store takes it. */
+export function bucketKeyCredentials(key: BucketKey): StoreCredentials {
+  if ("account_key" in key) return { accountKey: key.account_key };
+  if ("sas_token" in key) return { sasToken: key.sas_token };
+  return {
+    accessKeyId: key.access_key_id,
+    secretAccessKey: key.secret_access_key,
+    ...(key.session_token ? { sessionToken: key.session_token } : {}),
+  };
 }
 
 function bucketName(url: string): string {
@@ -22,7 +34,7 @@ export async function readBucketKey(
   const text = await secrets.get(bucketName(url));
   if (text === null) return undefined;
   try {
-    const parsed = JSON.parse(text) as Partial<BucketKey>;
+    const parsed = JSON.parse(text) as Record<string, unknown>;
     if (typeof parsed.access_key_id === "string" && typeof parsed.secret_access_key === "string") {
       return {
         access_key_id: parsed.access_key_id,
@@ -32,6 +44,8 @@ export async function readBucketKey(
           : {}),
       };
     }
+    if (typeof parsed.account_key === "string") return { account_key: parsed.account_key };
+    if (typeof parsed.sas_token === "string") return { sas_token: parsed.sas_token };
   } catch {}
   return undefined;
 }
@@ -44,12 +58,19 @@ export function deleteBucketKey(secrets: SecretBackend, url: string): Promise<bo
   return secrets.delete(bucketName(url));
 }
 
-/** The bucket key in the environment, as the store would find it (`AWS_*`, `S3_*`, `R2_*`):
- * what `seshi init --serverless --key-from-env` stores. */
+/** The bucket key in the environment, as the store would find it (`AWS_*`, `S3_*`, `R2_*`;
+ * for `az://`, `AZURE_STORAGE_KEY`, `AZURE_STORAGE_SAS_TOKEN` or the connection string's, when
+ * it is for `account`): what `seshi init --serverless --key-from-env` stores. */
 export function bucketKeyFromEnv(
   env: Record<string, string | undefined>,
   url: string,
+  account?: string,
 ): BucketKey | undefined {
+  if (url.startsWith("az://")) {
+    const key = azureKeyFromEnv(env, account);
+    if (!key) return undefined;
+    return "accountKey" in key ? { account_key: key.accountKey } : { sas_token: key.sasToken };
+  }
   const r2 = url.startsWith("r2://");
   const id =
     (r2 ? env.R2_ACCESS_KEY_ID : undefined) ?? env.S3_ACCESS_KEY_ID ?? env.AWS_ACCESS_KEY_ID;

@@ -36,7 +36,7 @@ function bucketOf(url: string, extra = ""): { at: string; prefix: string } | und
   const folder = /^(?:file:\/\/)?(\/.*)$/.exec(url);
   const match = folder
     ? ["", "file", "", posix.normalize(folder[1] as string)]
-    : /^(s3|r2):\/\/([^/]+)\/?(.*)$/.exec(url);
+    : /^(s3|r2|az):\/\/([^/]+)\/?(.*)$/.exec(url);
   if (!match) return undefined;
   const prefix = [match[3], extra]
     .map((p) => (p ?? "").replace(/^\/+|\/+$/g, ""))
@@ -178,5 +178,13 @@ export {
   sourcesSection,
   UPLOAD_SOURCE_ID,
 } from "./sources";
-export { type StoreSection, storeSection } from "./store";
+export {
+  type BucketCredentials,
+  bucketCredentials,
+  credentialsMismatch,
+  type RevealedBucketCredentials,
+  revealBucketCredentials,
+  type StoreSection,
+  storeSection,
+} from "./store";
 export { type WorkerSection, workerSection } from "./worker";

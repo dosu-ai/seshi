@@ -1,4 +1,29 @@
 export {
+  type AzureAccess,
+  type AzureAccessOptions,
+  type AzureKey,
+  AzureStore,
+  type AzureStoreOptions,
+  azureKeyFromEnv,
+  parseAzureUrl,
+  resolveAzureAccess,
+} from "./azure";
+export {
+  AZURE_API_VERSION,
+  type AzureCredentials,
+  AzureHttpError,
+  FetchAzureBlobClient,
+  type FetchAzureBlobOptions,
+  sharedKeyAuthorization,
+} from "./azure-fetch";
+export {
+  AzureIdentityError,
+  type IdentitySlot,
+  type WorkloadIdentityOptions,
+  workloadIdentity,
+  workloadIdentityFromEnv,
+} from "./azure-identity";
+export {
   type ChangesPage,
   entryWithFormat,
   type MetadataRead,
@@ -28,6 +53,7 @@ export {
   readHealth,
   sourcesWithHealth,
 } from "./health";
+export { BucketHttpError } from "./http-error";
 export {
   createJson,
   decodeJson,
@@ -105,7 +131,14 @@ export {
   writeHeartbeat,
   writeReview,
 } from "./objects";
-export { isStoreUrl, type OpenStoreOptions, openStore, type StorageView } from "./open";
+export {
+  isStoreUrl,
+  type OpenStoreOptions,
+  openStore,
+  STORE_SCHEMES,
+  type StorageView,
+  type StoreCredentials,
+} from "./open";
 export { listOwners, type OwnersPage } from "./owners";
 export {
   appendChange,
@@ -194,6 +227,7 @@ export {
   type Store,
   type StoredObject,
   StoreError,
+  storeFailure,
   type UpdateOptions,
   type UpdateResult,
   type UpdateStep,

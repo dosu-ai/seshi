@@ -184,13 +184,44 @@ milliseconds. Sizes are `<n><unit>` with `B`, `KB`, `MB`, `GB`, `KiB`, `MiB` or 
 
 | Key | Default | |
 |---|---|---|
-| `url` | required | `s3://bucket/prefix`, `r2://bucket/prefix`, or `file:///path` for one machine |
-| `credentials` | | `access_key_id`, `secret_access_key`, `session_token` (secrets). Without them the bucket client falls back to the standard `AWS_*` / `S3_*` variables (`R2_*` for `r2://`), like any S3 tool |
+| `url` | required | `s3://bucket/prefix`, `r2://bucket/prefix`, `az://container/prefix` (Azure Blob Storage), or `file:///path` for one machine |
+| `credentials` | | Secrets. For `s3://` and `r2://`: `access_key_id`, `secret_access_key`, `session_token`; without them the bucket client falls back to the standard `AWS_*` / `S3_*` variables (`R2_*` for `r2://`), like any S3 tool. For `az://`: `account_key` (the storage account's shared key) or `sas_token` (a shared access signature); without them, the standard Azure variables, then workload identity ([Azure Blob Storage](#azure-blob-storage-az)). Keys for the other kind of bucket are refused |
 | `region` | | `s3://`. Falls back to `AWS_REGION` |
-| `endpoint` | | S3-compatible services (MinIO, Backblaze, Wasabi). Falls back to `S3_ENDPOINT` |
+| `endpoint` | | S3-compatible services (MinIO, Backblaze, Wasabi). Falls back to `S3_ENDPOINT`. For `az://`, the blob endpoint when it is not `https://<account>.blob.core.windows.net`: a sovereign cloud, a private endpoint, or Azurite (`http://127.0.0.1:10000/devstoreaccount1`) |
 | `account_id` | | Cloudflare account for `r2://`. Falls back to `R2_ACCOUNT_ID` |
+| `account_name` | | Azure storage account for `az://`. Falls back to `AZURE_STORAGE_ACCOUNT`, then `AZURE_STORAGE_CONNECTION_STRING`'s `AccountName` |
 | `deployment_id` | generated | This deployment's id, recorded in the layout marker `seshi.json` the first time a server uses the bucket. A server whose `deployment_id` differs from the marker's refuses to start (X1.4). Without it, the first server generates one and later servers accept whatever the marker says |
 | `org` | | The organization the deployment serves (X1.1). Recorded in the marker the first time a config names it; a server naming another org refuses to start (X1.4) |
+
+#### Azure Blob Storage (`az://`)
+
+`az://<container>/<prefix>` stores sessions in a container of an Azure storage account, with
+the same operations and conditional writes as S3 (seshi talks to the Blob service's REST API
+itself, version 2023-11-03). The container must exist. seshi finds its way in, first match
+wins:
+
+1. `credentials.account_key` or `credentials.sas_token` in this table.
+2. `AZURE_STORAGE_KEY`, then `AZURE_STORAGE_SAS_TOKEN`.
+3. `AZURE_STORAGE_CONNECTION_STRING`: its `AccountKey` or `SharedAccessSignature`, and its
+   `AccountName` and `BlobEndpoint` (or `EndpointSuffix`) when `account_name` and `endpoint`
+   are not set. A connection string for another account than `account_name` is ignored;
+   `UseDevelopmentStorage=true` is Azurite on its default port.
+4. Workload identity: `AZURE_FEDERATED_TOKEN_FILE`, `AZURE_CLIENT_ID` and `AZURE_TENANT_ID`, as
+   AKS sets them on a pod whose service account names a managed identity
+   (`AZURE_AUTHORITY_HOST` for a sovereign cloud). seshi exchanges the token file for a Storage
+   token and renews it before it expires. Give the identity the **Storage Blob Data
+   Contributor** role on the container.
+
+```toml
+[store]
+url = "az://sessions/seshi"
+account_name = "acmeseshi"
+credentials = { sas_token = { env = "SESHI_SAS" } }   # or account_key; or neither, for workload identity
+```
+
+A SAS token needs read, add, create, write, delete and list on the container (`sp=racwdl`), and
+must outlive the server's run: seshi does not renew it. Azure's ETags are not an MD5 of the
+body, so seshi checks each trace it writes by reading it back, which S3 spares it.
 
 Traces are always stored in seshi's one canonical format (`seshi/trace/1`, X6.2) and rendered as Letta, OTLP or ATIF on read (`GET …/trace?render=`). A bucket written by sessiondb (`sessionstorage.json`) is refused: there is no migration (X1.5), so point `url` at a new prefix.
 
@@ -362,14 +393,17 @@ a Datadog span it cannot parse, a Cursor run whose events expired) is recorded u
 | `otlp` | `quiet_period` (`"10m"`): a session is published once its spans have been quiet this long (F4.4). The destination posts to `POST /otlp/v1/traces` with a service token for this source ([docs/otlp.md](otlp.md)) |
 | `datadog` | `site` (`"datadoghq.com"`), `api_url` (instead of `https://api.<site>`: a proxy; `https`, or `http` to localhost only), `api_key`, `app_key` (secrets), `ml_app`, `tags` (each `key:value`; a span must carry all), `interval` (`"5m"`), `overlap` (`"10m"`), `lag` (`"2m"`), `backfill` (`"7d"`), `page_size` (`500`, at most 5000), `quiet_period` (`"10m"`): polls Datadog LLM Observability ([docs/datadog.md](datadog.md)) |
 | `cursor-cloud` | `api_key` (secret), `api_url` (instead of `https://api.cursor.com`: a test server; `https`, or `http` to localhost only), `interval` (`"5m"`), `lookback` (`"25h"`, how far back Cursor still has a run's events), `max_streams` (`25`, at most 60), `usage` (`true`): polls Cursor's Cloud Agents API ([docs/cursor-cloud.md](cursor-cloud.md)) |
-| `s3` | `url`, `prefix`, `credentials` or `role` (`arn`, `external_id`), `region`, `endpoint`, `account_id`, `include` globs, `format` (`"auto"`), `ordered_keys` (`false`), `interval` (`"5m"`), `path` |
+| `s3` | `url`, `prefix`, `credentials` or `role` (`arn`, `external_id`), `region`, `endpoint`, `account_id`, `account_name`, `include` globs, `format` (`"auto"`), `ordered_keys` (`false`), `interval` (`"5m"`), `path` |
 
 Ids are unique, and an `s3` source may not read seshi's own bucket and prefix, or its own
 folder (F6.4). Sources can also come from drop-ins in `seshi.d/`, and are added, changed and
 removed by a [reload](#reloading) without a restart; a reload never resets a checkpoint.
 
 An `s3` source is polled by the built-in S3 poller ([s3-sync.md](s3-sync.md)).
-Its `url` is `s3://`, `r2://` or a folder (`file:///path`, for one machine). `include` globs
+Its `url` is `s3://`, `r2://`, `az://` (an Azure Blob Storage container, reached as `[store]`
+reaches one: `account_name`, `endpoint`, `credentials.account_key` or `sas_token`, else the
+Azure variables or workload identity; `role` is for `s3://` only) or a folder
+(`file:///path`, for one machine). `include` globs
 (Bun's glob syntax) and `path` match the key under the URL's prefix plus `prefix` (both
 name folders: `prefix = "runs"` lists `runs/`, and a partial name such as `"runs/2026-"` is
 not a key prefix; use `include` for that). `path` is a
@@ -652,16 +686,17 @@ scope = "visible"
 
 | Key | Default | |
 |---|---|---|
-| `url` | | The bucket and prefix: `s3://bucket/prefix`, `r2://bucket/prefix` or `file:///path`. Required unless `config` names a server config with a `[store]`; with both, `url` wins |
+| `url` | | The bucket and prefix: `s3://bucket/prefix`, `r2://bucket/prefix`, `az://container/prefix` or `file:///path`. Required unless `config` names a server config with a `[store]`; with both, `url` wins |
 | `region` | | As `[store] region`, for `s3://`. Falls back to `AWS_REGION` |
 | `endpoint` | | As `[store] endpoint`, for other S3-compatible stores. Falls back to `S3_ENDPOINT` |
 | `account_id` | | As `[store] account_id`, the Cloudflare account for `r2://`. Falls back to `R2_ACCOUNT_ID` |
+| `account_name` | | As `[store] account_name`, the Azure storage account for `az://`. Falls back to `AZURE_STORAGE_ACCOUNT` |
 | `owner` | `user`, else the OS user | The owner sessions are written under, `owners/<owner>/`. Lowercased; a name that can't be a folder becomes a hashed `h-…` id. `seshi whoami` prints it |
 | `config` | | A server config (`seshi.toml`; `~` is the home folder) layered over the bucket's shared `config/seshi.toml`, for this machine's own settings. Its `[store].credentials`, when set, are the bucket key |
 
 The bucket key is not in this file: `seshi init --serverless` keeps it in the keychain, or in
 `credentials.json` with `keychain = false`; without one, the `AWS_*`, `S3_*` and `R2_*` variables
-apply ([serverless.md](serverless.md#credentials)). The server config this machine uses is,
+(the `AZURE_STORAGE_*` ones for `az://`) apply ([serverless.md](serverless.md#credentials)). The server config this machine uses is,
 lowest first: built-in defaults, the bucket's `config/seshi.toml`, the file `config` names,
 `SESHI_*` env, `--set`; `[[sources]]` (OTLP intake included), `[auth]`, `[server]` and `[worker]` are ignored
 in any of them.

@@ -33,9 +33,9 @@
       "type": "object",
       "properties": {
         "url": {
-          "description": "The bucket and prefix sessions are written to: s3://bucket/prefix, r2://bucket/prefix or file:///path. Required unless config names a server config with a [store].",
+          "description": "The bucket and prefix sessions are written to: s3://bucket/prefix, r2://bucket/prefix, az://container/prefix or file:///path. Required unless config names a server config with a [store].",
           "type": "string",
-          "pattern": "^(s3|r2|file):\\/\\/"
+          "pattern": "^(s3|r2|az|file):\\/\\/"
         },
         "region": {
           "description": "The bucket's region, as [store] region.",
@@ -43,12 +43,17 @@
           "minLength": 1
         },
         "endpoint": {
-          "description": "An S3-compatible endpoint, as [store] endpoint.",
+          "description": "An S3-compatible endpoint, or the Azure blob endpoint, as [store] endpoint.",
           "type": "string",
           "format": "uri"
         },
         "account_id": {
           "description": "Cloudflare account id for r2://, as [store] account_id.",
+          "type": "string",
+          "minLength": 1
+        },
+        "account_name": {
+          "description": "Azure storage account for az://, as [store] account_name.",
           "type": "string",
           "minLength": 1
         },

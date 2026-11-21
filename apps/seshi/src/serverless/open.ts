@@ -1,14 +1,15 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import type { CliConfig } from "@seshi/config";
 import {
   type BaseLayer,
+  type CliConfig,
   ConfigError,
   DEFAULT_BASE_URLS,
   type FlagValue,
   formatPath,
   loadServerlessConfig,
   resolveSteps,
+  revealBucketCredentials,
   type ServerConfig,
   secretsIn,
 } from "@seshi/config";
@@ -33,7 +34,7 @@ import { writePrivateFile } from "../account/secrets";
 import { EXIT } from "../cli/exit";
 import { Refused } from "../cli/failures";
 import { buildFormats } from "../integrations";
-import { readBucketKey, readReviewKey } from "./keys";
+import { bucketKeyCredentials, readBucketKey, readReviewKey } from "./keys";
 import { refusalOf } from "./refusal";
 import {
   expandHome,
@@ -128,6 +129,7 @@ function storeFlags(settings: ServerlessSettings): FlagValue[] {
   add("serverless.region", "store.region", settings.region);
   add("serverless.endpoint", "store.endpoint", settings.endpoint);
   add("serverless.account_id", "store.account_id", settings.account_id);
+  add("serverless.account_name", "store.account_name", settings.account_name);
   return flags;
 }
 
@@ -335,23 +337,16 @@ export async function openBucketStore(
   const key = secrets ? await readBucketKey(secrets, url) : undefined;
   const fromConfig = config.store.credentials;
   const credentials = fromConfig
-    ? {
-        accessKeyId: fromConfig.access_key_id.reveal(),
-        secretAccessKey: fromConfig.secret_access_key.reveal(),
-        ...(fromConfig.session_token ? { sessionToken: fromConfig.session_token.reveal() } : {}),
-      }
+    ? revealBucketCredentials(fromConfig)
     : key
-      ? {
-          accessKeyId: key.access_key_id,
-          secretAccessKey: key.secret_access_key,
-          ...(key.session_token ? { sessionToken: key.session_token } : {}),
-        }
+      ? bucketKeyCredentials(key)
       : undefined;
   try {
     return openStore(url, {
       ...(config.store.region ? { region: config.store.region } : {}),
       ...(config.store.endpoint ? { endpoint: config.store.endpoint } : {}),
       ...(config.store.account_id ? { accountId: config.store.account_id } : {}),
+      ...(config.store.account_name ? { accountName: config.store.account_name } : {}),
       ...(credentials ? { credentials } : {}),
       env,
     });

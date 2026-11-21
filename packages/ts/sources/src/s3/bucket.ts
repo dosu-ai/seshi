@@ -4,12 +4,16 @@ import { fileURLToPath } from "node:url";
 import type { Fetch } from "@seshi/model";
 import {
   type AssumedCredentials,
+  type AzureKey,
   assumeRole,
+  BucketHttpError,
+  FetchAzureBlobClient,
   type FetchedObject,
   FetchS3Client,
   type ListedObject,
+  parseAzureUrl,
   parseS3Url,
-  S3HttpError,
+  resolveAzureAccess,
 } from "@seshi/store";
 
 export type SourceObject = ListedObject;
@@ -48,7 +52,8 @@ export class ObjectChanged extends Error {
 
 export interface SourceBucket {
   readonly url: string;
-  /** Where `key` sits, for provenance: `s3://bucket/key`, `r2://bucket/key`, `file:///path`. */
+  /** Where `key` sits, for provenance: `s3://bucket/key`, `r2://bucket/key`,
+   * `az://container/key`, `file:///path`. */
   locate(key: string): string;
   list(prefix: string, options: { startAfter?: string; limit: number }): Promise<SourceListing>;
   /** The object at `key` from byte `start` (0 by default), only while its ETag is `etag`:
@@ -187,23 +192,97 @@ export class S3SourceBucket implements SourceBucket {
   }
 
   async read(key: string, options: { etag: string; start?: number }): Promise<SourceRead | null> {
-    const client = await this.connect();
-    try {
-      return await client.getObject(key, {
-        ifMatch: options.etag,
-        ...(options.start ? { start: options.start } : {}),
-      });
-    } catch (err) {
-      // 412: no longer the version listed. 416: it shrank below `start` since.
-      if (err instanceof S3HttpError && (err.status === 412 || err.status === 416)) {
-        throw new ObjectChanged(key);
-      }
-      if (err instanceof S3HttpError && err.status === 403) throw new ObjectDenied(key);
-      if (err instanceof S3HttpError && isFinalRefusal(err.status)) {
-        throw new ObjectDenied(key, err.status, err.code);
-      }
-      throw err;
+    return readOrRefuse(await this.connect(), key, options);
+  }
+}
+
+/** A conditional, ranged read through either bucket client, its refusals as the poller wants
+ * them: 412 (no longer the version listed) and 416 (it shrank below `start` since) are
+ * `ObjectChanged`; 403 and other final 4xx answers for this object are `ObjectDenied`. */
+async function readOrRefuse(
+  client: Pick<FetchS3Client, "getObject">,
+  key: string,
+  options: { etag: string; start?: number },
+): Promise<SourceRead | null> {
+  try {
+    return await client.getObject(key, {
+      ifMatch: options.etag,
+      ...(options.start ? { start: options.start } : {}),
+    });
+  } catch (err) {
+    if (err instanceof BucketHttpError && (err.status === 412 || err.status === 416)) {
+      throw new ObjectChanged(key);
     }
+    if (err instanceof BucketHttpError && err.status === 403) throw new ObjectDenied(key);
+    if (err instanceof BucketHttpError && isFinalRefusal(err.status)) {
+      throw new ObjectDenied(key, err.status, err.code);
+    }
+    throw err;
+  }
+}
+
+export interface AzureSourceOptions {
+  url: string;
+  account?: string;
+  endpoint?: string;
+  /** An account key or SAS token; else the standard `AZURE_STORAGE_*` variables in `env`, then
+   * workload identity. */
+  credentials?: AzureKey;
+  fetch: Fetch;
+  env: Readonly<Record<string, string | undefined>>;
+}
+
+/** A source bucket in Azure Blob Storage (`az://container/prefix`). */
+export class AzureSourceBucket implements SourceBucket {
+  readonly url: string;
+  private readonly container: string;
+  private client: FetchAzureBlobClient | undefined;
+
+  constructor(private readonly options: AzureSourceOptions) {
+    this.url = options.url;
+    this.container = parseAzureUrl(options.url).container;
+  }
+
+  locate(key: string): string {
+    return `az://${this.container}/${key}`;
+  }
+
+  /** Resolved on first use, so a source missing its account or keys fails its run, not the
+   * server's start. */
+  private connect(): FetchAzureBlobClient {
+    if (this.client) return this.client;
+    const { options } = this;
+    const access = resolveAzureAccess(this.url, {
+      ...(options.account ? { account: options.account } : {}),
+      ...(options.endpoint ? { endpoint: options.endpoint } : {}),
+      ...(options.credentials ? { credentials: options.credentials } : {}),
+      fetch: options.fetch,
+      env: options.env,
+    });
+    this.client = new FetchAzureBlobClient({
+      account: access.account,
+      container: this.container,
+      ...(access.endpoint ? { endpoint: access.endpoint } : {}),
+      credentials: access.credentials,
+      fetch: options.fetch,
+    });
+    return this.client;
+  }
+
+  async list(
+    prefix: string,
+    options: { startAfter?: string; limit: number },
+  ): Promise<SourceListing> {
+    const page = await this.connect().listObjects({
+      prefix,
+      maxKeys: options.limit,
+      ...(options.startAfter !== undefined ? { startAfter: options.startAfter } : {}),
+    });
+    return { objects: page.objects, truncated: page.truncated };
+  }
+
+  async read(key: string, options: { etag: string; start?: number }): Promise<SourceRead | null> {
+    return readOrRefuse(this.connect(), key, options);
   }
 }
 
