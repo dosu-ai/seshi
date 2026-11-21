@@ -1,3 +1,10 @@
+# [0.27.0](https://github.com/dosu-ai/seshi/compare/v0.26.1...v0.27.0) (2026-11-21)
+
+
+### Features
+
+* runtime config in the bucket for servers on several hosts ([#73](https://github.com/dosu-ai/seshi/issues/73)) ([caef9c8](https://github.com/dosu-ai/seshi/commit/caef9c893b8b8480517e98f30b09fe5f0f866c5d))
+
 ## [0.26.1](https://github.com/dosu-ai/seshi/compare/v0.26.0...v0.26.1) (2026-11-21)
 
 
