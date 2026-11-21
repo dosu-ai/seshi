@@ -85,15 +85,17 @@ export const cliConfigSchema = z
       .strictObject({
         url: z
           .string()
-          .regex(/^(s3|r2|az|file):\/\//, "s3://, r2://, az:// or file://")
+          .regex(/^(s3|r2|az|gs|file):\/\//, "s3://, r2://, az://, gs:// or file://")
           .optional()
           .describe(
-            "The bucket and prefix sessions are written to: s3://bucket/prefix, r2://bucket/prefix, az://container/prefix or file:///path. Required unless config names a server config with a [store].",
+            "The bucket and prefix sessions are written to: s3://bucket/prefix, r2://bucket/prefix, az://container/prefix, gs://bucket/prefix or file:///path. Required unless config names a server config with a [store].",
           ),
         region: z.string().min(1).optional().describe("The bucket's region, as [store] region."),
         endpoint: httpUrl
           .optional()
-          .describe("An S3-compatible endpoint, or the Azure blob endpoint, as [store] endpoint."),
+          .describe(
+            "An S3-compatible endpoint, the Azure blob endpoint, or the GCS JSON API root, as [store] endpoint.",
+          ),
         account_id: z
           .string()
           .min(1)

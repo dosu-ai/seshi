@@ -24,6 +24,11 @@ secret_access_key = { file = "/run/secrets/bucket-secret-key" }
 # url = "az://sessions/prod"
 # account_name = "acmeseshi"
 
+# On Google Cloud, a bucket (no credentials: GKE Workload Identity, or
+# GOOGLE_APPLICATION_CREDENTIALS; or credentials.service_account_key = { file = "…" }):
+# [store]
+# url = "gs://acme-seshi/prod"
+
 # Who may call the server (X5). For a team, run `seshi admin init` once: it prints the first
 # admin token and the org key. With an IdP, people sign in instead; uncomment [auth.oidc] and
 # give session tokens a key to be signed with.

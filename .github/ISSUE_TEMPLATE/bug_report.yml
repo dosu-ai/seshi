@@ -111,4 +111,5 @@ body:
         - s3:// (another S3-compatible service)
         - r2://
         - az:// (Azure Blob Storage)
+        - gs:// (Google Cloud Storage)
         - Not applicable

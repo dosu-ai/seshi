@@ -1,15 +1,19 @@
+import { readFileSync } from "node:fs";
 import { azureKeyFromEnv, type StoreCredentials } from "@seshi/store";
 import type { SecretBackend } from "../account/secrets";
 
 /** A bucket key as `seshi init --serverless` stores it (credential purpose `bucket`): an S3
- * access key for `s3://` and `r2://`, an account key or SAS token for `az://`. */
+ * access key for `s3://` and `r2://`, an account key or SAS token for `az://`, a service
+ * account key (the JSON key file's contents) for `gs://`. */
 export type BucketKey =
   | { access_key_id: string; secret_access_key: string; session_token?: string }
   | { account_key: string }
-  | { sas_token: string };
+  | { sas_token: string }
+  | { service_account_key: string };
 
 /** The key as the store takes it. */
 export function bucketKeyCredentials(key: BucketKey): StoreCredentials {
+  if ("service_account_key" in key) return { serviceAccountKey: key.service_account_key };
   if ("account_key" in key) return { accountKey: key.account_key };
   if ("sas_token" in key) return { sasToken: key.sas_token };
   return {
@@ -46,6 +50,9 @@ export async function readBucketKey(
     }
     if (typeof parsed.account_key === "string") return { account_key: parsed.account_key };
     if (typeof parsed.sas_token === "string") return { sas_token: parsed.sas_token };
+    if (typeof parsed.service_account_key === "string") {
+      return { service_account_key: parsed.service_account_key };
+    }
   } catch {}
   return undefined;
 }
@@ -60,12 +67,19 @@ export function deleteBucketKey(secrets: SecretBackend, url: string): Promise<bo
 
 /** The bucket key in the environment, as the store would find it (`AWS_*`, `S3_*`, `R2_*`;
  * for `az://`, `AZURE_STORAGE_KEY`, `AZURE_STORAGE_SAS_TOKEN` or the connection string's, when
- * it is for `account`): what `seshi init --serverless --key-from-env` stores. */
+ * it is for `account`; for `gs://`, the service account key file
+ * `GOOGLE_APPLICATION_CREDENTIALS` names): what `seshi init --serverless --key-from-env`
+ * stores. */
 export function bucketKeyFromEnv(
   env: Record<string, string | undefined>,
   url: string,
   account?: string,
+  read: (path: string) => string = (path) => readFileSync(path, "utf8"),
 ): BucketKey | undefined {
+  if (url.startsWith("gs://")) {
+    const path = env.GOOGLE_APPLICATION_CREDENTIALS;
+    return path ? { service_account_key: read(path) } : undefined;
+  }
   if (url.startsWith("az://")) {
     const key = azureKeyFromEnv(env, account);
     if (!key) return undefined;

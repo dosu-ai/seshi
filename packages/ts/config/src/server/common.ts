@@ -4,13 +4,13 @@ export const VISIBILITIES = ["org", "owner"] as const;
 export const visibility = z.enum(VISIBILITIES);
 export type Visibility = z.output<typeof visibility>;
 
-export const STORE_URL = /^(?:file:\/\/\/?.*|\/.*|(?:s3|r2|az):\/\/[^/\s]+(?:\/.*)?)$/;
+export const STORE_URL = /^(?:file:\/\/\/?.*|\/.*|(?:s3|r2|az|gs):\/\/[^/\s]+(?:\/.*)?)$/;
 
 export const storeUrl = z
   .string()
   .regex(
     STORE_URL,
-    "a store URL: s3://bucket/prefix, r2://bucket/prefix, az://container/prefix or file:///path",
+    "a store URL: s3://bucket/prefix, r2://bucket/prefix, az://container/prefix, gs://bucket/prefix or file:///path",
   );
 
 export const httpUrl = z.url({ protocol: /^https?$/, error: "an http:// or https:// URL" });

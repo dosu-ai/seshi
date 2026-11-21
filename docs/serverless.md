@@ -13,7 +13,7 @@ that case, is now serverless mode; a CLI config with `[local]` keeps working
 laptop: hook ─▶ spool ─▶ seshi daemon ─▶ normalize · redact · filter · review ─▶ owners/alice/…
 laptop: hook ─▶ spool ─▶ seshi daemon ─▶ normalize · redact · filter · review ─▶ owners/bob/…
                                                                                       │
-               the bucket (s3:// r2:// az:// file://): seshi.json, config/, owners/ ◀─┘
+               the bucket (s3:// r2:// az:// gs:// …): seshi.json, config/, owners/ ◀─┘
 ```
 
 ## When to use it
@@ -56,7 +56,7 @@ A bucket can move between the two modes ([below](#switching-modes)).
 ### Just you
 
 ```sh
-seshi init --serverless --url file:///Users/alice/seshi    # or s3://bucket/prefix, r2://bucket/prefix, az://container/prefix
+seshi init --serverless --url file:///Users/alice/seshi    # or s3://bucket/prefix, r2://, az://container/prefix, gs://bucket/prefix
 seshi capture install
 seshi upload --since 30d
 seshi search flaky checkout test
@@ -64,9 +64,11 @@ seshi search flaky checkout test
 
 For `s3://`, add `--region`; for `r2://`, `--account-id`; for `az://`, `--account-name` (the
 Azure storage account); for another S3-compatible store, `--endpoint`. On a terminal, `init`
-asks for the bucket's access key (for `az://`, the account key or a SAS token; leave it empty to
-use the `AWS_*` or `AZURE_STORAGE_*` variables instead); `--key-from-env` stores the one in the
-environment without asking.
+asks for the bucket's access key (for `az://`, the account key or a SAS token; for `gs://`, the
+path of a service account's JSON key file; leave it empty to use the `AWS_*` or
+`AZURE_STORAGE_*` variables, or for `gs://` Application Default Credentials, instead);
+`--key-from-env` stores the one in the environment without asking (for `gs://`, the key file
+`GOOGLE_APPLICATION_CREDENTIALS` names).
 
 ### A team
 
@@ -145,7 +147,9 @@ Each laptop holds a bucket key. The CLI uses, in order:
 3. the environment: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and `AWS_SESSION_TOKEN`, or the
    `S3_*` names, and `R2_*` for `r2://`, as for a server. For `az://`: `AZURE_STORAGE_KEY`,
    `AZURE_STORAGE_SAS_TOKEN`, `AZURE_STORAGE_CONNECTION_STRING`, then workload identity
-   ([config.md](config.md#azure-blob-storage-az)).
+   ([config.md](config.md#azure-blob-storage-az)). For `gs://`: Application Default
+   Credentials, so `gcloud auth application-default login` is enough
+   ([config.md](config.md#google-cloud-storage-gs)).
 
 `init` stores a session token when the environment has one, but temporary credentials expire;
 for those, store nothing and keep them in the environment.
@@ -157,8 +161,9 @@ What a key can be limited to depends on the store:
 | AWS S3 (`s3://`) | Yes | IAM policies can limit a key to `owners/<owner>/`. See the examples below |
 | Cloudflare R2 (`r2://`) | No | R2 API tokens are scoped to buckets, not folders. Only temporary credentials can be limited to a folder, and those need something trusted to mint them. Use one shared read and write key for the team (owners are then claimed and not enforced), or a bucket per person (each laptop then reads only its own bucket). Whether R2 honours `If-Match` on delete is untested; the storage test decides per bucket |
 | Azure Blob Storage (`az://`) | Untested | A SAS is scoped to a container at most, not a folder. Azure role assignment conditions on the blob path might limit a person to `owners/<owner>/`, but seshi has not been tried that way. Use one account key or container SAS for the team (owners are then claimed and not enforced), or a container per person. Conditional writes and deletes pass the storage test |
+| Google Cloud Storage (`gs://`) | Untested | IAM Conditions on `resource.name` starting with `projects/_/buckets/<bucket>/objects/<prefix>/owners/<owner>/` might limit a person's service account to their folder, but seshi has not been tried that way, and listing is granted per bucket. Use one service account for the team (owners are then claimed and not enforced), or a bucket per person. Conditional writes and deletes are generation preconditions, which Google documents for both; fake-gcs-server honours them only on uploads |
 | MinIO, RustFS and other S3-compatible stores (`s3://` with `--endpoint`) | Depends on the store | They must pass the storage test |
-| Backblaze B2, DigitalOcean Spaces, Google Cloud Storage's S3 API | | No conditional writes, so they can't hold a seshi bucket. The storage test says so and `init` refuses them |
+| Backblaze B2, DigitalOcean Spaces, Google Cloud Storage's S3 API (`s3://` with `--endpoint https://storage.googleapis.com`) | | No conditional writes, so they can't hold a seshi bucket. The storage test says so and `init` refuses them. GCS's XML API takes `If-Match` and `If-None-Match` only on reads; use `gs://` for Cloud Storage |
 | A folder (`file://`) | | For one machine. No key |
 
 ## Example AWS IAM policies

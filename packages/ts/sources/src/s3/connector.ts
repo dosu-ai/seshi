@@ -12,10 +12,11 @@ import type {
   SubmitOutcome,
 } from "@seshi/kit";
 import { ENVELOPE_SCHEMA, type Envelope, type SourceLocation } from "@seshi/model";
-import { type AssumedCredentials, parseAzureUrl, parseS3Url } from "@seshi/store";
+import { type AssumedCredentials, parseAzureUrl, parseGcsUrl, parseS3Url } from "@seshi/store";
 import {
   AzureSourceBucket,
   FolderSourceBucket,
+  GcsSourceBucket,
   ObjectChanged,
   ObjectDenied,
   S3SourceBucket,
@@ -92,7 +93,9 @@ export function sourcePrefix(config: Pick<S3SourceConfig, "url" | "prefix">): st
     ? parseS3Url(config.url).prefix
     : config.url.startsWith("az://")
       ? parseAzureUrl(config.url).prefix
-      : "";
+      : config.url.startsWith("gs://")
+        ? parseGcsUrl(config.url).prefix
+        : "";
   return [fromUrl, config.prefix ?? ""]
     .map((p) => p.replace(/^\/+|\/+$/g, ""))
     .filter((p) => p !== "")
@@ -134,12 +137,23 @@ export class S3Connector implements Connector<S3SourceConfig> {
       : undefined;
     const fetch = (input: string, init?: RequestInit) => ctx.fetch(input, init);
     const env = this.options.env ?? process.env;
+    if (config.url.startsWith("gs://")) {
+      return new GcsSourceBucket({
+        url: config.url,
+        ...(config.endpoint ? { endpoint: config.endpoint } : {}),
+        ...(credentials && "serviceAccountKey" in credentials ? { credentials } : {}),
+        fetch,
+        env,
+      });
+    }
     if (config.url.startsWith("az://")) {
       return new AzureSourceBucket({
         url: config.url,
         ...(config.account_name ? { account: config.account_name } : {}),
         ...(config.endpoint ? { endpoint: config.endpoint } : {}),
-        ...(credentials && !("accessKeyId" in credentials) ? { credentials } : {}),
+        ...(credentials && ("accountKey" in credentials || "sasToken" in credentials)
+          ? { credentials }
+          : {}),
         fetch,
         env,
       });

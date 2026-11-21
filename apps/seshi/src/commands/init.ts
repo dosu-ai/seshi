@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { usernameOwner } from "@seshi/auth";
 import { cliConfigSchema } from "@seshi/config";
@@ -18,13 +19,14 @@ import { failWith, Refused } from "../cli/failures";
 import { emit, helpOrUsageError, takeJson } from "../cli/output";
 import { type BucketKey, bucketKeyFromEnv, saveBucketKey } from "../serverless/keys";
 import { openServerlessStore, refusalOf, runStorageTest, storageRefusal } from "../serverless/open";
+import { expandHome, homeFor } from "../serverless/settings";
 import { SHARED_CONFIG, SHARED_PREFIX } from "../serverless/shared";
 import type { CommandContext } from "./index";
 
 const USAGE = [
-  "usage: seshi init --serverless --url <s3://|r2://|az://|file://…> [--owner <id>] [--key-from-env]",
-  "                  [--admin] [--region <r>] [--endpoint <url>] [--account-id <id>]",
-  "                  [--account-name <name>] [--json]",
+  "usage: seshi init --serverless --url <s3://|r2://|az://|gs://|file://…> [--owner <id>]",
+  "                  [--key-from-env] [--admin] [--region <r>] [--endpoint <url>]",
+  "                  [--account-id <id>] [--account-name <name>] [--json]",
   "",
   "Set this machine up to write a shared bucket directly, with no server (F11). To use a seshi",
   "server instead: seshi login --server <url>.",
@@ -60,10 +62,32 @@ interface Values {
 
 const encoder = new TextEncoder();
 
+/** Where a bucket's store finds credentials when no key is stored for it. */
+function keyFallback(url: string): string {
+  if (url.startsWith("az://")) {
+    return "the AZURE_STORAGE_* variables in the environment are used, else workload identity";
+  }
+  if (url.startsWith("gs://")) {
+    return "Application Default Credentials are used (GOOGLE_APPLICATION_CREDENTIALS, gcloud's application-default login, else the metadata server), or none with STORAGE_EMULATOR_HOST";
+  }
+  return "the AWS_* / S3_* / R2_* variables in the environment are used";
+}
+
 async function askKey(ctx: CommandContext, url: string): Promise<BucketKey | undefined> {
   if (url.startsWith("file://")) return undefined;
   if (!ctx.terminal || !ctx.tty?.stdin) return undefined;
   const terminal = await ctx.terminal();
+  if (url.startsWith("gs://")) {
+    const path = (
+      await terminal.ask("Service account key file (empty: use Application Default Credentials): ")
+    ).trim();
+    if (!path) return undefined;
+    try {
+      return { service_account_key: readFileSync(expandHome(path, homeFor(ctx.env)), "utf8") };
+    } catch {
+      throw new Refused(EXIT.usage, "usage", `cannot read the service account key file ${path}`);
+    }
+  }
   if (url.startsWith("az://")) {
     const given = (
       await terminal.ask("Storage account key or SAS token (empty: use the environment): ", {
@@ -129,8 +153,8 @@ export async function run(ctx: CommandContext): Promise<number> {
   }
   if (values.url === undefined) return helpOrUsageError(ctx, json, "--url is required", USAGE);
   const url = values.url.replace(/\/+$/, "");
-  if (!/^(s3|r2|az|file):\/\//.test(url)) {
-    return helpOrUsageError(ctx, json, "--url is s3://, r2://, az:// or file://", USAGE);
+  if (!/^(s3|r2|az|gs|file):\/\//.test(url)) {
+    return helpOrUsageError(ctx, json, "--url is s3://, r2://, az://, gs:// or file://", USAGE);
   }
   try {
     const account = openAccount(ctx);
@@ -149,16 +173,31 @@ export async function run(ctx: CommandContext): Promise<number> {
     };
     const cli = cliConfigSchema.parse({ serverless });
 
-    const key = values["key-from-env"]
-      ? bucketKeyFromEnv(ctx.env, url, values["account-name"])
-      : await askKey(ctx, url);
+    let key: BucketKey | undefined;
+    if (values["key-from-env"]) {
+      try {
+        key = bucketKeyFromEnv(ctx.env, url, values["account-name"]);
+      } catch {
+        // Only reading the gs:// key file GOOGLE_APPLICATION_CREDENTIALS names can fail here.
+        return helpOrUsageError(
+          ctx,
+          json,
+          `--key-from-env: cannot read the key file GOOGLE_APPLICATION_CREDENTIALS names (${ctx.env.GOOGLE_APPLICATION_CREDENTIALS})`,
+          USAGE,
+        );
+      }
+    } else {
+      key = await askKey(ctx, url);
+    }
     if (values["key-from-env"] && !key) {
       return helpOrUsageError(
         ctx,
         json,
         url.startsWith("az://")
           ? "--key-from-env: no AZURE_STORAGE_KEY, AZURE_STORAGE_SAS_TOKEN or AZURE_STORAGE_CONNECTION_STRING key in the environment"
-          : "--key-from-env: no AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (or S3_*, R2_*) in the environment",
+          : url.startsWith("gs://")
+            ? "--key-from-env: no GOOGLE_APPLICATION_CREDENTIALS in the environment (without a key, gs:// uses Application Default Credentials: leave out --key-from-env)"
+            : "--key-from-env: no AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (or S3_*, R2_*) in the environment",
         USAGE,
       );
     }
@@ -225,9 +264,7 @@ export async function run(ctx: CommandContext): Promise<number> {
       );
     }
     if (!key && !url.startsWith("file://")) {
-      warnings.push(
-        "no bucket key stored: the AWS_* / S3_* / R2_* variables in the environment are used",
-      );
+      warnings.push(`no bucket key stored: ${keyFallback(url)}`);
     }
     const document = {
       url,

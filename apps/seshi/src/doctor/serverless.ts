@@ -97,7 +97,7 @@ async function storageCheck(bucket: ServerlessBucket): Promise<CheckResult> {
       status: "fail",
       summary: `${result.missing}; seshi can't use this store`,
       detail,
-      hint: "use a store with conditional writes: AWS S3, Cloudflare R2, Azure Blob Storage, MinIO, RustFS",
+      hint: "use a store with conditional writes: AWS S3, Cloudflare R2, Azure Blob Storage, Google Cloud Storage (gs://), MinIO, RustFS",
     };
   }
   if (!result.conditionalDelete) {

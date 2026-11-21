@@ -52,8 +52,8 @@
       "properties": {
         "url": {
           "type": "string",
-          "pattern": "^(?:file:\\/\\/\\/?.*|\\/.*|(?:s3|r2|az):\\/\\/[^/\\s]+(?:\\/.*)?)$",
-          "description": "Where sessions go: s3://bucket/prefix, r2://bucket/prefix, az://container/prefix, or file:///path for one machine."
+          "pattern": "^(?:file:\\/\\/\\/?.*|\\/.*|(?:s3|r2|az|gs):\\/\\/[^/\\s]+(?:\\/.*)?)$",
+          "description": "Where sessions go: s3://bucket/prefix, r2://bucket/prefix, az://container/prefix, gs://bucket/prefix, or file:///path for one machine."
         },
         "credentials": {
           "type": "object",
@@ -247,10 +247,48 @@
                   "additionalProperties": false
                 }
               ]
+            },
+            "service_account_key": {
+              "description": "A Google service account key (gs://): the JSON key file's contents, usually { file = \"/path/key.json\" }.",
+              "x-seshi-secret": true,
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "env": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "the environment variable to read"
+                    }
+                  },
+                  "required": [
+                    "env"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "file": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "the file to read"
+                    }
+                  },
+                  "required": [
+                    "file"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
             }
           },
           "additionalProperties": false,
-          "description": "Static bucket keys: access_key_id and secret_access_key for s3:// and r2://, account_key or sas_token for az://."
+          "description": "Static bucket keys: access_key_id and secret_access_key for s3:// and r2://, account_key or sas_token for az://, service_account_key for gs://."
         },
         "region": {
           "description": "The bucket's region (s3://).",
@@ -258,7 +296,7 @@
           "minLength": 1
         },
         "endpoint": {
-          "description": "An S3-compatible endpoint (MinIO, Backblaze, Wasabi…), which overrides the region; for az://, the blob endpoint, when not https://<account>.blob.core.windows.net (Azurite: http://127.0.0.1:10000/devstoreaccount1).",
+          "description": "An S3-compatible endpoint (MinIO, Backblaze, Wasabi…), which overrides the region; for az://, the blob endpoint, when not https://<account>.blob.core.windows.net (Azurite: http://127.0.0.1:10000/devstoreaccount1); for gs://, the JSON API root, when not https://storage.googleapis.com.",
           "type": "string",
           "minLength": 1
         },
@@ -1402,8 +1440,8 @@
               },
               "url": {
                 "type": "string",
-                "pattern": "^(?:file:\\/\\/\\/?.*|\\/.*|(?:s3|r2|az):\\/\\/[^/\\s]+(?:\\/.*)?)$",
-                "description": "The bucket to read: s3://bucket/prefix, r2://bucket/prefix or az://container/prefix."
+                "pattern": "^(?:file:\\/\\/\\/?.*|\\/.*|(?:s3|r2|az|gs):\\/\\/[^/\\s]+(?:\\/.*)?)$",
+                "description": "The bucket to read: s3://bucket/prefix, r2://bucket/prefix, az://container/prefix or gs://bucket/prefix."
               },
               "prefix": {
                 "description": "A key prefix under the URL's own.",
@@ -1602,6 +1640,44 @@
                         "additionalProperties": false
                       }
                     ]
+                  },
+                  "service_account_key": {
+                    "description": "A Google service account key (gs://): the JSON key file's contents, usually { file = \"/path/key.json\" }.",
+                    "x-seshi-secret": true,
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "env": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "the environment variable to read"
+                          }
+                        },
+                        "required": [
+                          "env"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "file": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "the file to read"
+                          }
+                        },
+                        "required": [
+                          "file"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
                   }
                 },
                 "additionalProperties": false
@@ -1724,7 +1800,7 @@
               "url"
             ],
             "additionalProperties": false,
-            "description": "A bucket other systems write sessions to (F6), polled: S3 or S3-compatible (s3://, r2://) or Azure Blob Storage (az://)."
+            "description": "A bucket other systems write sessions to (F6), polled: S3 or S3-compatible (s3://, r2://), Azure Blob Storage (az://) or Google Cloud Storage (gs://)."
           },
           {
             "type": "object",

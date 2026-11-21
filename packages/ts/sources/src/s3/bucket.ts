@@ -9,11 +9,15 @@ import {
   BucketHttpError,
   FetchAzureBlobClient,
   type FetchedObject,
+  FetchGcsClient,
   FetchS3Client,
+  type GcsKey,
   type ListedObject,
   parseAzureUrl,
+  parseGcsUrl,
   parseS3Url,
   resolveAzureAccess,
+  resolveGcsAccess,
 } from "@seshi/store";
 
 export type SourceObject = ListedObject;
@@ -53,7 +57,7 @@ export class ObjectChanged extends Error {
 export interface SourceBucket {
   readonly url: string;
   /** Where `key` sits, for provenance: `s3://bucket/key`, `r2://bucket/key`,
-   * `az://container/key`, `file:///path`. */
+   * `az://container/key`, `gs://bucket/key`, `file:///path`. */
   locate(key: string): string;
   list(prefix: string, options: { startAfter?: string; limit: number }): Promise<SourceListing>;
   /** The object at `key` from byte `start` (0 by default), only while its ETag is `etag`:
@@ -373,5 +377,66 @@ export class FolderSourceBucket implements SourceBucket {
     } finally {
       await handle.close();
     }
+  }
+}
+
+export interface GcsSourceOptions {
+  url: string;
+  endpoint?: string;
+  /** A service account key; else Application Default Credentials from `env`. */
+  credentials?: GcsKey;
+  fetch: Fetch;
+  env: Readonly<Record<string, string | undefined>>;
+}
+
+/** A source bucket in Google Cloud Storage (`gs://bucket/prefix`). Its ETags are generations,
+ * so a conditional read is on the generation listed. */
+export class GcsSourceBucket implements SourceBucket {
+  readonly url: string;
+  private readonly bucket: string;
+  private client: FetchGcsClient | undefined;
+
+  constructor(private readonly options: GcsSourceOptions) {
+    this.url = options.url;
+    this.bucket = parseGcsUrl(options.url).bucket;
+  }
+
+  locate(key: string): string {
+    return `gs://${this.bucket}/${key}`;
+  }
+
+  /** Resolved on first use, so a source with a bad key fails its run, not the server's start. */
+  private connect(): FetchGcsClient {
+    if (this.client) return this.client;
+    const { options } = this;
+    const access = resolveGcsAccess(this.url, {
+      ...(options.endpoint ? { endpoint: options.endpoint } : {}),
+      ...(options.credentials ? { credentials: options.credentials } : {}),
+      fetch: options.fetch,
+      env: options.env,
+    });
+    this.client = new FetchGcsClient({
+      bucket: this.bucket,
+      ...(access.endpoint ? { endpoint: access.endpoint } : {}),
+      token: access.token,
+      fetch: options.fetch,
+    });
+    return this.client;
+  }
+
+  async list(
+    prefix: string,
+    options: { startAfter?: string; limit: number },
+  ): Promise<SourceListing> {
+    const page = await this.connect().listObjects({
+      prefix,
+      maxKeys: options.limit,
+      ...(options.startAfter !== undefined ? { startAfter: options.startAfter } : {}),
+    });
+    return { objects: page.objects, truncated: page.truncated };
+  }
+
+  async read(key: string, options: { etag: string; start?: number }): Promise<SourceRead | null> {
+    return readOrRefuse(this.connect(), key, options);
   }
 }

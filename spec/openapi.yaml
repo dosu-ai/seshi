@@ -2223,7 +2223,7 @@ components:
       properties:
         url:
           type: string
-          description: "`s3://bucket/prefix`, `r2://bucket/prefix`, `az://container/prefix` or `file:///path`."
+          description: "`s3://bucket/prefix`, `r2://bucket/prefix`, `az://container/prefix`, `gs://bucket/prefix` or `file:///path`."
         region: { type: string }
         account_id: { type: string, description: Cloudflare account, for `r2://`. }
         account_name: { type: string, description: Azure storage account, for `az://`. }

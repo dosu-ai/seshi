@@ -184,10 +184,10 @@ milliseconds. Sizes are `<n><unit>` with `B`, `KB`, `MB`, `GB`, `KiB`, `MiB` or 
 
 | Key | Default | |
 |---|---|---|
-| `url` | required | `s3://bucket/prefix`, `r2://bucket/prefix`, `az://container/prefix` (Azure Blob Storage), or `file:///path` for one machine |
-| `credentials` | | Secrets. For `s3://` and `r2://`: `access_key_id`, `secret_access_key`, `session_token`; without them the bucket client falls back to the standard `AWS_*` / `S3_*` variables (`R2_*` for `r2://`), like any S3 tool. For `az://`: `account_key` (the storage account's shared key) or `sas_token` (a shared access signature); without them, the standard Azure variables, then workload identity ([Azure Blob Storage](#azure-blob-storage-az)). Keys for the other kind of bucket are refused |
+| `url` | required | `s3://bucket/prefix`, `r2://bucket/prefix`, `az://container/prefix` (Azure Blob Storage), `gs://bucket/prefix` (Google Cloud Storage), or `file:///path` for one machine |
+| `credentials` | | Secrets. For `s3://` and `r2://`: `access_key_id`, `secret_access_key`, `session_token`; without them the bucket client falls back to the standard `AWS_*` / `S3_*` variables (`R2_*` for `r2://`), like any S3 tool. For `az://`: `account_key` (the storage account's shared key) or `sas_token` (a shared access signature); without them, the standard Azure variables, then workload identity ([Azure Blob Storage](#azure-blob-storage-az)). For `gs://`: `service_account_key` (a service account's JSON key); without it, Application Default Credentials ([Google Cloud Storage](#google-cloud-storage-gs)). Keys for another kind of bucket are refused |
 | `region` | | `s3://`. Falls back to `AWS_REGION` |
-| `endpoint` | | S3-compatible services (MinIO, Backblaze, Wasabi). Falls back to `S3_ENDPOINT`. For `az://`, the blob endpoint when it is not `https://<account>.blob.core.windows.net`: a sovereign cloud, a private endpoint, or Azurite (`http://127.0.0.1:10000/devstoreaccount1`) |
+| `endpoint` | | S3-compatible services (MinIO, Backblaze, Wasabi). Falls back to `S3_ENDPOINT`. For `az://`, the blob endpoint when it is not `https://<account>.blob.core.windows.net`: a sovereign cloud, a private endpoint, or Azurite (`http://127.0.0.1:10000/devstoreaccount1`). For `gs://`, the JSON API root when it is not `https://storage.googleapis.com` (a private endpoint); falls back to `STORAGE_EMULATOR_HOST` |
 | `account_id` | | Cloudflare account for `r2://`. Falls back to `R2_ACCOUNT_ID` |
 | `account_name` | | Azure storage account for `az://`. Falls back to `AZURE_STORAGE_ACCOUNT`, then `AZURE_STORAGE_CONNECTION_STRING`'s `AccountName` |
 | `deployment_id` | generated | This deployment's id, recorded in the layout marker `seshi.json` the first time a server uses the bucket. A server whose `deployment_id` differs from the marker's refuses to start (X1.4). Without it, the first server generates one and later servers accept whatever the marker says |
@@ -222,6 +222,40 @@ credentials = { sas_token = { env = "SESHI_SAS" } }   # or account_key; or neith
 A SAS token needs read, add, create, write, delete and list on the container (`sp=racwdl`), and
 must outlive the server's run: seshi does not renew it. Azure's ETags are not an MD5 of the
 body, so seshi checks each trace it writes by reading it back, which S3 spares it.
+
+#### Google Cloud Storage (`gs://`)
+
+`gs://<bucket>/<prefix>` stores sessions in a Cloud Storage bucket, with the same operations
+and conditional writes as S3. seshi talks to the JSON API itself, and its conditions are
+generation preconditions (`ifGenerationMatch`): GCS's S3-compatible XML API takes `If-Match`
+and `If-None-Match` only on reads, so an `s3://` URL with `endpoint =
+"https://storage.googleapis.com"` cannot hold a seshi bucket. The bucket must exist. seshi
+finds its way in, first match wins:
+
+1. `credentials.service_account_key` in this table: the contents of a service account's JSON
+   key file, usually `{ file = "/var/run/secrets/gcp/key.json" }`.
+2. `STORAGE_EMULATOR_HOST` (an emulator such as fake-gcs-server): requests go there with no
+   credentials.
+3. Application Default Credentials, as Google's client libraries find them: the file
+   `GOOGLE_APPLICATION_CREDENTIALS` names (a service account key, or gcloud's user
+   credentials), then gcloud's `application_default_credentials.json` (from `gcloud auth
+   application-default login`), then the metadata server. On GKE with Workload Identity, the
+   metadata server answers for the Google service account the pod's Kubernetes service account
+   is bound to; on Compute Engine and Cloud Run, for the instance's (`GCE_METADATA_HOST`
+   overrides its host). seshi renews the token before it expires.
+
+Give the service account **Storage Object User** (`roles/storage.objectUser`) on the bucket;
+seshi never reads the bucket's own metadata. Workload Identity Federation (`external_account`
+credentials) and service account impersonation are not supported yet.
+
+```toml
+[store]
+url = "gs://acme-seshi/prod"
+# credentials = { service_account_key = { file = "/run/secrets/seshi-gcs.json" } }   # or none: ADC
+```
+
+seshi gives an object's generation as its ETag. A generation is not an MD5 of the body, so, as
+on Azure, seshi checks each trace it writes by reading it back.
 
 Traces are always stored in seshi's one canonical format (`seshi/trace/1`, X6.2) and rendered as Letta, OTLP or ATIF on read (`GET …/trace?render=`). A bucket written by sessiondb (`sessionstorage.json`) is refused: there is no migration (X1.5), so point `url` at a new prefix.
 
@@ -402,7 +436,9 @@ removed by a [reload](#reloading) without a restart; a reload never resets a che
 An `s3` source is polled by the built-in S3 poller ([s3-sync.md](s3-sync.md)).
 Its `url` is `s3://`, `r2://`, `az://` (an Azure Blob Storage container, reached as `[store]`
 reaches one: `account_name`, `endpoint`, `credentials.account_key` or `sas_token`, else the
-Azure variables or workload identity; `role` is for `s3://` only) or a folder
+Azure variables or workload identity), `gs://` (a Cloud Storage bucket, reached as `[store]`
+reaches one: `endpoint`, `credentials.service_account_key`, else Application Default
+Credentials; `role` is for `s3://` only) or a folder
 (`file:///path`, for one machine). `include` globs
 (Bun's glob syntax) and `path` match the key under the URL's prefix plus `prefix` (both
 name folders: `prefix = "runs"` lists `runs/`, and a partial name such as `"runs/2026-"` is
@@ -686,7 +722,7 @@ scope = "visible"
 
 | Key | Default | |
 |---|---|---|
-| `url` | | The bucket and prefix: `s3://bucket/prefix`, `r2://bucket/prefix`, `az://container/prefix` or `file:///path`. Required unless `config` names a server config with a `[store]`; with both, `url` wins |
+| `url` | | The bucket and prefix: `s3://bucket/prefix`, `r2://bucket/prefix`, `az://container/prefix`, `gs://bucket/prefix` or `file:///path`. Required unless `config` names a server config with a `[store]`; with both, `url` wins |
 | `region` | | As `[store] region`, for `s3://`. Falls back to `AWS_REGION` |
 | `endpoint` | | As `[store] endpoint`, for other S3-compatible stores. Falls back to `S3_ENDPOINT` |
 | `account_id` | | As `[store] account_id`, the Cloudflare account for `r2://`. Falls back to `R2_ACCOUNT_ID` |
@@ -696,7 +732,7 @@ scope = "visible"
 
 The bucket key is not in this file: `seshi init --serverless` keeps it in the keychain, or in
 `credentials.json` with `keychain = false`; without one, the `AWS_*`, `S3_*` and `R2_*` variables
-(the `AZURE_STORAGE_*` ones for `az://`) apply ([serverless.md](serverless.md#credentials)). The server config this machine uses is,
+(the `AZURE_STORAGE_*` ones for `az://`, Application Default Credentials for `gs://`) apply ([serverless.md](serverless.md#credentials)). The server config this machine uses is,
 lowest first: built-in defaults, the bucket's `config/seshi.toml`, the file `config` names,
 `SESHI_*` env, `--set`; `[[sources]]` (OTLP intake included), `[auth]`, `[server]` and `[worker]` are ignored
 in any of them.
