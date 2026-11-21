@@ -1,3 +1,10 @@
+## [0.26.1](https://github.com/dosu-ai/seshi/compare/v0.26.0...v0.26.1) (2026-11-21)
+
+
+### Bug Fixes
+
+* **formats:** upgrade @letta-ai/trajectory to 0.4.4 ([#72](https://github.com/dosu-ai/seshi/issues/72)) ([4e4ec5f](https://github.com/dosu-ai/seshi/commit/4e4ec5ff8404591ec3aabd60170f564d5d093c85))
+
 # [0.26.0](https://github.com/dosu-ai/seshi/compare/v0.25.0...v0.26.0) (2026-11-21)
 
 
