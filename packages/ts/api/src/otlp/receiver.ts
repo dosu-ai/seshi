@@ -118,7 +118,12 @@ export function otlpTraces(instance: Instance, deps: ReceiverDeps) {
       throw err;
     }
     const sourceId = principal.kind === "service" ? serviceSourceId(principal.owner) : undefined;
-    const source = sourceId ? instance.source(sourceId) : undefined;
+    let source = sourceId ? instance.source(sourceId) : undefined;
+    if (sourceId && !source && instance.runtime) {
+      // A source the admin API just stored may not have reached this instance yet.
+      await instance.refreshConfig().catch(() => undefined);
+      source = instance.source(sourceId);
+    }
     if (!sourceId || !source || source.type !== "otlp") {
       return failure(
         encoding,
