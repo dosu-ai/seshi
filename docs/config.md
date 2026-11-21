@@ -158,8 +158,10 @@ laptops fetch the rules on their own schedule, so no barrier could close that ga
 sealed with AES-256-GCM under a key from [`[secrets]`](#secrets), bound to the source and field
 they belong to, and are never returned: a read shows `{ set, fingerprint, key_id, updated_at }`
 in their place. A `PUT` that leaves a secret out keeps the sealed one when the source keeps its
-type. `{ env = "NAME" }` stays a reference to the server's environment; `{ file = … }` is
-refused, since it names a path on one machine. To rotate: add a key to `secrets.keys`, point
+type. Only values are taken: `{ env = "NAME" }` and `{ file = … }` are refused (and a stored
+source holding one is left out), since they would let an admin token make the server send its
+own environment or files, the sealing keys among them, to an endpoint the caller picks. A
+source that needs one belongs in `seshi.toml`. To rotate: add a key to `secrets.keys`, point
 `secrets.key_id` at it, deploy, `POST /v1/admin/secrets/reseal`, then remove the old key. A
 stored source whose key is gone is left out (with a warning), so one lost key stops one
 source, not the server.

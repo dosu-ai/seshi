@@ -292,17 +292,16 @@ export class RuntimeConfig {
     const source = structuredClone(stored.source);
     for (const field of secretFields(source)) {
       const value = getField(source, field);
-      if (isSealed(value)) {
-        setField(source, field, this.keyring.unseal(value, sealContext(id, field)));
-      }
+      if (!isSealed(value)) throw new Error(`${field}: not sealed; ${NOT_A_VALUE}`);
+      setField(source, field, this.keyring.unseal(value, sealContext(id, field)));
     }
     return { ...source, id };
   }
 
   // Reading ---------------------------------------------------------------------------------
 
-  /** A stored source as the API shows it: its settings with each secret as a `SecretView` (or
-   * its env reference), and its ETag. Undefined when the bucket holds none by that id. */
+  /** A stored source as the API shows it: its settings with each secret as a `SecretView`, and
+   * its ETag. Undefined when the bucket holds none by that id. */
   storedSource(
     id: string,
   ): { etag: string; source: Record<string, unknown>; updated_at: string } | undefined {
@@ -629,34 +628,55 @@ export class RuntimeConfig {
     return { resealed, changed, current };
   }
 
+  /** The "left out" warnings `snapshot`'s sources give, or none when its doc does not load. */
+  private leftOut(snapshot: Snapshot): string[] {
+    try {
+      this.layer(snapshot);
+    } catch {
+      return [];
+    }
+    return this.warnings.filter((w) => w.includes("left out"));
+  }
+
   private withSource(id: string, entry: { etag: string; stored: StoredSource }): Snapshot {
     const sources = new Map(this.snapshot.sources);
     sources.set(id, entry);
     return { ...this.snapshot, sources };
   }
 
+  /** Refuses `candidate` when it does not load, when it leaves out a source the bucket runs
+   * now (a source already left out, say one sealed with a key since removed, blocks no other
+   * write), or when `check` finds problems in it. */
   private async checkCandidate(
     candidate: Snapshot,
     check: (config: ServerConfig) => Promise<string[]>,
   ): Promise<void> {
+    const kept = this.warnings;
     let loaded: Loaded<ServerConfig>;
+    let left: string[];
     try {
-      loaded = this.compose(candidate);
-    } catch (err) {
-      throw new RuntimeChangeError(
-        "invalid",
-        err instanceof ConfigError ? err.issues : [message(err)],
-      );
+      const before = new Set(this.leftOut(this.snapshot));
+      try {
+        loaded = this.compose(candidate);
+      } catch (err) {
+        throw new RuntimeChangeError(
+          "invalid",
+          err instanceof ConfigError ? err.issues : [message(err)],
+        );
+      }
+      left = this.warnings.filter((w) => w.includes("left out") && !before.has(w));
+    } finally {
+      this.warnings = kept;
     }
-    const left = this.warnings.filter((w) => w.includes("left out"));
     if (left.length > 0) throw new RuntimeChangeError("invalid", left);
     const problems = await check(loaded.config);
     if (problems.length > 0) throw new RuntimeChangeError("invalid", problems);
   }
 
-  /** `input`'s secrets sealed for source `id`: a plain value is sealed with the current key,
-   * an env reference kept, a file reference refused (it names a path on one machine), and a
-   * secret left out keeps `previous`'s sealed value when the type is the same. */
+  /** `input`'s secrets sealed for source `id`: a plain value is sealed with the current key, and
+   * a secret left out keeps `previous`'s sealed value when the type is the same. `{ env }` and
+   * `{ file }` are refused: they would let an admin token make the server send its own
+   * environment or files (the sealing keys among them) to an endpoint the caller picks. */
   private seal(
     id: string,
     input: Record<string, unknown>,
@@ -684,12 +704,10 @@ export class RuntimeConfig {
           fingerprint: this.keyring.fingerprint(value, kid),
           updated_at: keepTimesFrom?.secrets[field]?.updated_at ?? now,
         };
-      } else if (value !== null && typeof value === "object" && "file" in value) {
-        problems.push(
-          `${field}: { file = … } names a path on one machine; send the value (it is sealed) or { env = "NAME" }`,
-        );
       } else if (isSealed(value)) {
         problems.push(`${field}: send the secret's value; a sealed value is seshi's own`);
+      } else if (value !== undefined) {
+        problems.push(`${field}: ${NOT_A_VALUE}`);
       }
     }
     if (previous && previous.source.type === source.type) {
@@ -828,6 +846,11 @@ function viewOf(stored: StoredSource): Record<string, unknown> {
 
 /** A stored source with each sealed secret as a placeholder: for showing the config where
  * the sealing keys are not at hand (`seshi config show`). */
+/** Why a stored source's secret must be a value: `{ env }` and `{ file }` would read the
+ * server's own environment and files, which an admin token must not reach. */
+const NOT_A_VALUE =
+  "a source stored in the bucket takes each secret as its value (seshi seals it); { env } and { file } name the server's own environment and files, so they belong in seshi.toml";
+
 function masked(id: string, stored: StoredSource): Record<string, unknown> {
   const source = structuredClone(stored.source);
   for (const field of secretFields(source)) {

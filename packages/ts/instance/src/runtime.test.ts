@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type ConfigFs, Keyring, loadServerConfig, type RuntimeLayer } from "@seshi/config";
@@ -88,6 +88,41 @@ describe("RuntimeConfig", () => {
       ok,
     );
     await expect(rt.deleteSource("dd", {})).rejects.toMatchObject({ code: "in_use" });
+  });
+
+  it("takes a stored source's secrets only as values, never the server's env", async () => {
+    const rt = runtime(new Keyring({ k1: K1 }));
+    // An admin token must not get the server to send its own env (the sealing keys among it)
+    // to an endpoint the caller picks.
+    const leak = {
+      type: "datadog",
+      api_url: "http://127.0.0.1:9",
+      api_key: { env: "SEAL_K1" },
+      app_key: "b",
+    };
+    await expect(rt.putSource("dd", leak, {}, ok)).rejects.toMatchObject({
+      code: "invalid",
+      problems: [expect.stringMatching(/^api_key: .*\{ env \}/)],
+    });
+    // One written to the bucket some other way is left out, not run.
+    mkdirSync(join(dir, "bucket", "runtime", "sources"), { recursive: true });
+    writeFileSync(
+      join(dir, "bucket", "runtime", "sources", "dd.json"),
+      JSON.stringify({
+        schema: "seshi/runtime-source/1",
+        source: leak,
+        secrets: {},
+        updated_at: new Date(0).toISOString(),
+      }),
+    );
+    await rt.sync();
+    const loaded = rt.compose();
+    expect(loaded.config.sources).toEqual([]);
+    expect(loaded.warnings.join("\n")).toMatch(/dd.json: left out: api_key: not sealed/);
+    // That one left out blocks no other write, and it can still be deleted.
+    await rt.putSource("cursor-b", { type: "cursor-cloud", api_key: "secret-b" }, {}, ok);
+    await rt.deleteSource("dd", {});
+    expect(rt.compose().config.sources.map((s) => s.id)).toEqual(["cursor-b"]);
   });
 
   it("refuses to delete a file the doc needs, however it spells it", async () => {

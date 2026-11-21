@@ -1416,8 +1416,8 @@ paths:
       description: |
         The body is the source's settings as in `[[sources]]` (`id` may be left out). Secrets
         sent as values are sealed under `secrets.key_id` and never returned; one left out
-        keeps its sealed value when the type stays the same; `{ env = "NAME" }` names the
-        server's environment; `{ file = … }` is refused. The source is merged under the files
+        keeps its sealed value when the type stays the same; `{ env = … }` and `{ file = … }`
+        are refused, since they would read the server's own environment and files. The source is merged under the files
         and checked as a reload would check it before it is written (422 with
         `error.problems`), then applied here at once and on the other instances within
         `server.config_poll`. A source in the server's files cannot be written here (409
