@@ -57,7 +57,7 @@ dropped text is never stored or sent to review again. This closes 04's deviation
     (`readable(…, { stubs: true })`, checked as an owner-only session), so anyone else gets the
     same `404` as for a session that does not exist. The retraction route (`X-Seshi-Retract`)
     already read the pointer directly and works on a stub.
-  - `StoreSessionDB` (local mode, the CLI): `getSession` answers null for a stub (so
+  - `StoreSeshi` (local mode, the CLI): `getSession` answers null for a stub (so
     `getTrace` and `reviews` do too), `listSessions` leaves stubs out. `tombstone` and
     `setVisibility` work on one.
   - Search already removed or skipped a session without a `head` (`Indexer.plan`, the live

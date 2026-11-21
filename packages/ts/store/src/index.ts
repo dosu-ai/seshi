@@ -101,7 +101,6 @@ export {
   isOwner,
   keys,
   LAYOUT_KEY,
-  LEGACY_LAYOUT_KEY,
   parseChangeKey,
   type RecordKind,
   recordKeyHash,

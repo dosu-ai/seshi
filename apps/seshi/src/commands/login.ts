@@ -4,7 +4,7 @@ import {
   type AuthConfig,
   authConfig,
   exchangeIdToken,
-  HttpSessionDB,
+  HttpSeshi,
   ServerError,
 } from "@seshi/client";
 import type { Identity } from "@seshi/model";
@@ -62,7 +62,7 @@ async function secretArg(ctx: CommandContext, value: string, what: string): Prom
 
 async function identify(server: string, token: string, user?: string): Promise<Identity> {
   try {
-    return await new HttpSessionDB({
+    return await new HttpSeshi({
       server,
       token,
       userAgent: USER_AGENT,

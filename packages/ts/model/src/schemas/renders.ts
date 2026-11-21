@@ -2,9 +2,9 @@ import type { OtlpTrace } from "./otlp";
 import type { Continuation, Trace, TraceEvent } from "./trace";
 import type { NormalizedRecord } from "./trajectory";
 
-/** `seshi` (the stored canonical trace, the default), `letta` (Letta trajectory-v1, the
- * `sessionstorage/trace/1` object sessiondb stored), `otlp` (OTLP/HTTP JSON GenAI spans) or
- * `atif` (an ATIF-v1.7 document). */
+/** `seshi` (the stored canonical trace, the default), `letta` (Letta trajectory-v1, schema
+ * `sessionstorage/trace/1`), `otlp` (OTLP/HTTP JSON GenAI spans) or `atif` (an ATIF-v1.7
+ * document). */
 export type RenderFormat = "seshi" | "letta" | "otlp" | "atif";
 
 export const RENDER_FORMATS: readonly RenderFormat[] = ["seshi", "letta", "otlp", "atif"];
@@ -13,8 +13,7 @@ export function isRenderFormat(value: unknown): value is RenderFormat {
   return typeof value === "string" && (RENDER_FORMATS as readonly string[]).includes(value);
 }
 
-/** The schema id of the Letta rendering: what sessiondb stored before seshi, so a reader of
- * those objects reads this one unchanged. */
+/** The schema id of the Letta rendering. */
 export const LETTA_TRACE_SCHEMA = "sessionstorage/trace/1" as const;
 
 /** A trace rendered as Letta trajectory-v1: the canonical trace with plain trajectory-v1

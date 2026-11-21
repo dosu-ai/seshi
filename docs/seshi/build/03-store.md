@@ -65,7 +65,7 @@ generated from them. The per-bucket `letta`/`otlp` choice (`store.format`) is go
   unique call ids and `llm_call` refs; events and `content_hash` derive from role/text/tool fields
   only, so every golden hash is unchanged (`bun run goldens` leaves the tree clean).
 - **Renderers** (`packages/ts/formats/src/render/`): `toLetta` (the `sessionstorage/trace/1`
-  object, plain records, same keys and order sessiondb wrote), `toOtlp` (now over the canonical
+  object, plain records, same keys and order as before seshi), `toOtlp` (now over the canonical
   trace: LLM call model/provider/response id/`gen_ai.usage.*` on the call's first chat span,
   call times when known, error status; attributes and resource now `seshi.*`, schema
   `seshi/trace-otlp/1`, lossless incl. `llm_calls` and `provenance`; `fromOtlp` returns the
@@ -89,7 +89,7 @@ generated from them. The per-bucket `letta`/`otlp` choice (`store.format`) is go
   canonical trace. Defaults: writer `localWriter(owner)` (`local`, source `upload`),
   `verified`, `org`.
 - **API/client**: `GET …/trace?format=seshi|letta|otlp|atif` (default `seshi`, 400 otherwise);
-  `SessionDB.getTrace(agent, id, hash?, format?)` on both backends; `/v1/me` drops `format` and
+  `Seshi.getTrace(agent, id, hash?, format?)` on both backends; `/v1/me` drops `format` and
   no longer touches the store. The server records writers as `static` (config tokens) or
   `legacy` (HS256 tokens). Marker client is `seshi/<version>`.
 - **Contract (X3.10)**: `spec/schemas/{common,trace,metadata,change,envelope,layout}.schema.json`
@@ -151,9 +151,9 @@ generated from them. The per-bucket `letta`/`otlp` choice (`store.format`) is go
   when the config names none. Kept small, as X1.4 asks.
 - **`GET …/trace` defaults to `seshi`**, the stored format, not `letta`. A reader that expects
   `sessionstorage/trace/1` must pass `?format=letta`.
-- **OTLP rendering attributes renamed** `sessiondb.*` → `seshi.*`, `service.name`/scope
+- **OTLP rendering attributes renamed** to `seshi.*`, `service.name`/scope
   `seshi`, schema `seshi/trace-otlp/1`, since it is now an on-read export of a different
-  object (records carry seshi fields). The normalizer name stays `@dosu/sessiondb`.
+  object (records carry seshi fields). The normalizer name stays the pre-seshi package's (it became `@dosu/seshi` later).
 - **Review files are zero-padded** (`review/00000003.json`) so listings are in order.
 - **Drop/failure record keys** are `<stamp>-<sha256(idempotency_key)[:24]>.json`: time order
   for listing and retention, no raw keys or ids in object names. The same envelope recorded at

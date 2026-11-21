@@ -6,7 +6,7 @@ import { IngestRejected } from "@seshi/model";
 import { archiveId, FsStore, readChanges, readMetadata } from "@seshi/store";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { setVisibility, tombstone } from "./ingest";
-import { StoreSessionDB } from "./session-db";
+import { StoreSeshi } from "./store-seshi";
 
 let dir: string;
 let store: FsStore;
@@ -31,8 +31,8 @@ const writer = {
   source_id: "upload",
 };
 
-function db(options: Partial<ConstructorParameters<typeof StoreSessionDB>[0]> = {}) {
-  return new StoreSessionDB({ store, owner: "alice", formats, now, ...options });
+function db(options: Partial<ConstructorParameters<typeof StoreSeshi>[0]> = {}) {
+  return new StoreSeshi({ store, owner: "alice", formats, now, ...options });
 }
 
 describe("setVisibility (X5.10)", () => {
@@ -103,7 +103,7 @@ describe("setVisibility (X5.10)", () => {
   });
 });
 
-describe("StoreSessionDB as a credential's client (X5.5, X5.10)", () => {
+describe("StoreSeshi as a credential's client (X5.5, X5.10)", () => {
   it("writes the credential's claims over the upload's, and its default visibility", async () => {
     const client = db({
       writer: { kind: "person", principal: "alice", credential_id: "org", source_id: "upload" },

@@ -121,7 +121,7 @@ the index builds.
    built with, all of which live in the app; a package would have needed them passed in from
    above anyway, and `seshi explore` will be a command of the same app. No layer changes.
 2. **`Backend` is unchanged.** `serverView` reaches past it where a `Backend` hides what the
-   doctor needs: the change feed (`HttpSessionDB.changes`, `readChanges` on the bucket) and,
+   doctor needs: the change feed (`HttpSeshi.changes`, `readChanges` on the bucket) and,
    in local mode, the raw pointer.
 3. **A stub cannot be seen through a server.** `GET /v1/sessions/:agent/:id` answers 404 for a
    stub (20), and the only routes that find one change something. Against a server, presence

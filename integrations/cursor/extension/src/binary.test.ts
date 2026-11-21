@@ -43,6 +43,7 @@ describe("the seshi program", () => {
     // The hook an earlier seshi committed to a repository for Cursor Cloud is a shell line, not a
     // program: never taken, even in a home folder that is also a repository.
     const committed =
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: a shell parameter expansion, meant literally
       '[ -e "${XDG_STATE_HOME:-$HOME/.local/state}/seshi/cursor-cloud" ] || exit 0; s=$(command -v seshi || echo "$HOME/.local/bin/seshi"); [ -x "$s" ] || exit 0; exec "$s" hook cursor stop --cloud';
     expect(programFromHooks(hooks(committed))).toBeUndefined();
     expect(

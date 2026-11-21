@@ -565,11 +565,10 @@ describe.each([
     );
   });
 
-  it("names a missing, unreadable, foreign or legacy layout marker", async () => {
+  it("names a missing, unreadable or foreign layout marker", async () => {
     await expectFindings(() => store.delete(LAYOUT_KEY), ["marker_missing"]);
     await store.put(LAYOUT_KEY, encoder.encode(JSON.stringify({ schema: "seshi/layout/2" })));
-    await store.put("sessionstorage.json", encoder.encode("{}"));
-    expect(codes(await checkStore(store))).toEqual(["marker_legacy", "marker_version"]);
+    expect(codes(await checkStore(store))).toEqual(["marker_version"]);
     await store.put(LAYOUT_KEY, encoder.encode("nope"));
     expect(codes(await checkStore(store))).toContain("marker_invalid");
   });

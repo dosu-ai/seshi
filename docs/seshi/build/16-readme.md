@@ -50,7 +50,7 @@ brought up to date with what branches 01–15 built.
   development. The lockup is shown at 272×80 px, the glyph about 64 px tall, with no eyes. No
   status is shown by colour: the status line is quoted with its ◉ and ⏸ symbols.
 - **docs/** made one set, with an index (`docs/README.md`):
-  - `docs/sdk.md` (the pre-seshi `@dosu/sessiondb` SDK, flagged in 01) is replaced by
+  - `docs/sdk.md` (the pre-seshi SDK, flagged in 01) is replaced by
     `docs/client.md`: `@seshi/client` and `@seshi/model` as 15 publishes them, every client call
     and the route it uses, options, errors, and the contract for other languages. It says
     plainly that no library writes a bucket (X3.5).
@@ -69,8 +69,8 @@ brought up to date with what branches 01–15 built.
   - A search example from 12 did not run: `seshi search deploy -staging …` fails, because
     the argument parser reads `-staging` as options. The example now uses `NOT staging`, and
     the syntax paragraph says to write `NOT word` or put `-word` after `--`.
-  - The field guide (`docs/understanding/`) stays, labelled as history of sessiondb v0.9.0 in a
-    banner and its title.
+  - The field guide to the pre-seshi code (`docs/understanding/`) stays, labelled as history
+    in a banner and its title (it was removed later).
   - Links into the moved sections were updated everywhere: the docs, the build notes (07, 08,
     11), `seshi.example.toml` and `.env.example`.
 - **CONTRIBUTING.md**: the layout with every package and its layer, every integration, a table
@@ -144,14 +144,14 @@ lockups and the badge. It changed:
 - **npm's rendering**: the badge URL resolves only once a release tag holds the file, so the
   first release after this branch merges is the first time an npm page shows it.
 - **Found while checking the docs, left for 17-review** (code, not docs):
-  - `@seshi/client`'s default `User-Agent` is still `@dosu/sessiondb/<version>`
-    (`packages/ts/client/src/http.ts`), and the normalizer name every trace records is
-    `@dosu/sessiondb` (`packages/ts/formats/src/registry.ts`). The second is pinned in
+  - `@seshi/client`'s default `User-Agent` is still the pre-seshi package's
+    (`packages/ts/client/src/http.ts`), and so is the normalizer name every trace records
+    (`packages/ts/formats/src/registry.ts`). The second is pinned in
     goldens and fixtures, so changing it is a decision, not a cleanup. *Resolved in 17 for the
     user agent*: the default is `@seshi/client/<version>` and the CLI and uploader send
-    `seshi/<version>`; the normalizer name is unchanged.
+    `seshi/<version>`; the normalizer name is unchanged (it became `@dosu/seshi` later).
   - `seshi --help` lists `sessions (ls|show|export|rm)` without `visibility`, which the
     command has. *Resolved in 17*: the summary names `visibility`.
-  - The Docker Compose service and volume are still named `sessiondb` (kept on purpose, so an
-    existing volume survives), and the image is `ghcr.io/dosu-ai/sessiondb` until the
-    repository is renamed (X3.8).
+  - The Docker Compose service and volume keep their pre-seshi names (on purpose, so an
+    existing volume survives; renamed to `seshi` later), and the image keeps the repository's
+    old name until the repository is renamed (X3.8).

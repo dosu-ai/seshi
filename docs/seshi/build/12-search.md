@@ -81,7 +81,7 @@ an indexer per instance tails every owner's change feed into a local SQLite FTS5
   `Retry-After: 5`. `spec/openapi.yaml`: the path, a `search` tag, `SearchResults`,
   `SearchResult`, `SearchMatch` (appended). Types in `@seshi/model` (`search.ts`:
   `SearchRequest`, `SearchResults`, …).
-- **Client**: `HttpSessionDB.search(request)`; non-2xx as `ServerError` (`Forbidden` for 403).
+- **Client**: `HttpSeshi.search(request)`; non-2xx as `ServerError` (`Forbidden` for 403).
 - **`seshi search`** (replaces the stub): words plus `--owner --agent --repo --branch --source
   --since --until` (dates, RFC 3339 or ages like `7d`) `--sort --limit --matches --cursor
   --json`; `--status` and `--rebuild` for the local index. Picks, in order: `--config`/`--set`

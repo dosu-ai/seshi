@@ -12,7 +12,7 @@ command. The Docker image is built from the compiled binary.
   - `buildInstance(config, options)` does the I/O, in this order: open the bucket
     (`storeOptions(config)`, or `options.store`); read `redaction.packs`
     (`readRedactionPacks`); check the layout marker with `ensureLayout` (X1.4: deployment, org,
-    no sessiondb prefix); assemble the Instance; probe the static tokens' owners. Every failure
+    no pre-seshi prefix); assemble the Instance; probe the static tokens' owners. Every failure
     is an `InstanceError` with an operator message.
   - `new Instance(parts)` assembles the rest with no I/O, so tests build Instances
     synchronously and in parallel (X1.2). Each Instance has its own:
@@ -26,7 +26,7 @@ command. The Docker image is built from the compiled binary.
       names the health shard, so a restart keeps it. This answers 04's open item.
     - `process` is `<id>-<8 hex>`, unique per run. The heartbeat uses it to tell two workers on
       one host apart.
-  - `instance.sessions(identity)` is a `StoreSessionDB` over the shared pipeline; the routes
+  - `instance.sessions(identity)` is a `StoreSeshi` over the shared pipeline; the routes
     build one per principal. `instance.localSessions(owner)` is local mode's: writer `local`,
     owner basis `verified`.
   - `close()` stops the jobs, then flushes source health. Each step is bounded.
@@ -101,7 +101,7 @@ command. The Docker image is built from the compiled binary.
     `admin` tag. The openapi test sees every new status.
 - **Local mode (X3.5).** `connect()` and `ConnectOptions` are removed from `@seshi/pipeline`,
   and pipeline no longer depends on `@seshi/client`. `local.ts` became `session-db.ts`
-  (`StoreSessionDB`, without `check()`).
+  (`StoreSeshi`, without `check()`).
   - `apps/seshi/src/connect.ts` (`seshi/connect`): `connect({cli, env, token, user,
     integrations})` returns a `Connection` with `db`, `mode`, `instance` and `close`. It talks
     HTTP when the CLI config sets `server`. With `[local] config = "<server toml>"` it builds an
@@ -206,7 +206,7 @@ command. The Docker image is built from the compiled binary.
     Never invent a new number; add a code at the end if one is truly needed.
   - A command that runs where the server config is uses `openServer(ctx, values, { roles: [],
     probe: [] })` and `serverFailure`.
-  - 13: the session commands get a `SessionDB` from `connect()` in `apps/seshi/src/connect.ts`,
+  - 13: the session commands get a `Seshi` from `connect()` in `apps/seshi/src/connect.ts`,
     passing the token `seshi login` stored.
 - **`hook` and `statusline` (14):** may import only what capture needs: model, kit, formats,
   redact, config, client and capture. `bun run check:hook` fails on anything in `FORBIDDEN`
@@ -288,6 +288,6 @@ its graceful stop; `admin init` closing its instance.
 - `bun build --compile` cross-compilation downloads the target's Bun runtime at build time, so
   the image build needs network access. It always did, for `bun install`.
 - Open items carried over:
-  - Dosu's deploy (`deploy/sessiondb.go`) must move to `SESHI_*` names and the new image
+  - Dosu's deploy (in dosu-ai/dosu) must move to `SESHI_*` names and the new image
     entry point (`seshi serve` is the default command).
   - The live S3 test still has never run.

@@ -79,7 +79,7 @@ The settings most servers need ([config.md](config.md) has all of them):
 | `store.deployment_id`, `store.org` | `SESHI_STORE__DEPLOYMENT_ID`, `SESHI_STORE__ORG` | Recorded in the bucket's layout marker (`seshi.json`); the server refuses to start against a bucket marked for another deployment or org (X1.4). See [the layout](../spec/layout.md) |
 | `server.listen` | `SESHI_SERVER__LISTEN` | Default `:7200`; flag `--listen` |
 
-sessiondb's `SESSIONDB_*` names and `PORT` are not read.
+`PORT` is not read.
 
 ## Roles and background work
 

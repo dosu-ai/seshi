@@ -270,7 +270,7 @@ export function preRedactor(account: Account, options: PreRedactorOptions = {}):
     const { redactionRules, redactTranscript, RulePackError, ruleSetFromDocument } = await import(
       "@seshi/redact"
     );
-    const { HttpSessionDB, ServerError } = await import("@seshi/client");
+    const { HttpSeshi, ServerError } = await import("@seshi/client");
     const builtin = () => ({ rules: redactionRules(), redact: redactTranscript });
     const server = serverOf(account);
     if (server === undefined)
@@ -282,7 +282,7 @@ export function preRedactor(account: Account, options: PreRedactorOptions = {}):
       if (err instanceof NotSignedIn) throw new SignInNeeded(err.message);
       throw err;
     }
-    const db = new HttpSessionDB({
+    const db = new HttpSeshi({
       server: credential.server,
       token: credential.token,
       userAgent: USER_AGENT,

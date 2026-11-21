@@ -5,12 +5,11 @@ import {
   LAYOUT_SCHEMA_V1,
   LAYOUT_SCHEMAS,
   type LayoutMarker,
-  LEGACY_LAYOUT_SCHEMA,
   TRACE_SCHEMA,
 } from "@seshi/model";
-import { createJson, readJson, tryDecodeJson, updateJson } from "./json";
-import { LAYOUT_KEY, LEGACY_LAYOUT_KEY } from "./layout";
-import { getBytes, isPreconditionFailed, type Store, StoreError } from "./store";
+import { createJson, readJson, updateJson } from "./json";
+import { LAYOUT_KEY } from "./layout";
+import { isPreconditionFailed, type Store, StoreError } from "./store";
 
 export class LayoutError extends StoreError {
   constructor(message: string) {
@@ -61,26 +60,15 @@ function check(marker: LayoutMarker): LayoutMarker {
   return marker;
 }
 
-async function refuseLegacy(store: Store): Promise<void> {
-  const legacy = await getBytes(store, LEGACY_LAYOUT_KEY);
-  if (legacy === null) return;
-  const schema = tryDecodeJson<{ schema?: string }>(legacy)?.schema ?? LEGACY_LAYOUT_SCHEMA;
-  throw new LayoutError(
-    `${store.url} holds a sessiondb store (${LEGACY_LAYOUT_KEY}, ${schema}): its traces are letta or otlp objects beside raw transcripts, which seshi does not read, and there is no migration (X1.5). Point store.url at a new prefix.`,
-  );
-}
-
-/** The prefix's marker, checked; null when it has none. Refuses a sessiondb prefix. */
+/** The prefix's marker, checked; null when it has none. */
 export async function readLayout(store: Store): Promise<LayoutMarker | null> {
   const found = await readJson<LayoutMarker>(store, LAYOUT_KEY);
-  if (found) return check(found.value);
-  await refuseLegacy(store);
-  return null;
+  return found ? check(found.value) : null;
 }
 
 /** The prefix's marker, written if there is none, checked against the deployment and org the
- * config names. Throws `LayoutError` when the prefix is another deployment's or org's, holds
- * sessiondb's layout, or holds a marker this version cannot read. */
+ * config names. Throws `LayoutError` when the prefix is another deployment's or org's, or holds
+ * a marker this version cannot read. */
 export async function ensureLayout(store: Store, options: LayoutOptions): Promise<LayoutMarker> {
   const now = options.now ?? (() => new Date());
   for (let attempt = 0; ; attempt++) {

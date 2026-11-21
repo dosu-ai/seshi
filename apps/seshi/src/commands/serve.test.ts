@@ -1,7 +1,6 @@
 import {
   chmodSync,
   existsSync,
-  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -250,18 +249,6 @@ describe("seshi serve", () => {
     expect(globex.out).toContain('belongs to org "acme", not "globex"');
   });
 
-  it("refuses a bucket a sessiondb server wrote", async () => {
-    mkdirSync(join(dir, "bucket"), { recursive: true });
-    writeFileSync(
-      join(dir, "bucket", "sessionstorage.json"),
-      JSON.stringify({ schema: "sessionstorage/layout/1", created_at: "x", created_by: "y" }),
-    );
-    const { code, out } = await boot({});
-    expect(code).toBe(3);
-    expect(out).toContain("seshi: cannot use file://");
-    expect(out).toContain("holds a sessiondb store");
-  });
-
   it("exits 3 (config) with a message when its address is taken", async () => {
     const taken = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response() });
     try {
@@ -282,11 +269,8 @@ describe("seshi serve", () => {
     expect(out).toContain("seshi: Unknown option '--port'");
   });
 
-  it("does not read the old SESSIONDB_* names, and says when no token can call it", async () => {
-    const { out } = await boot({
-      SESHI_AUTH__TOKENS__DEFAULT: "",
-      SESSIONDB_TOKEN: "sdb_test-token-0123456789abcdef",
-    });
+  it("says when no token can call it", async () => {
+    const { out } = await boot({ SESHI_AUTH__TOKENS__DEFAULT: "" });
     expect(out).toContain("no token can call this server yet: run `seshi admin init`");
     expect(out).not.toContain("static tokens for");
   });

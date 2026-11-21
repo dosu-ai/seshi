@@ -8,10 +8,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type App, createApp } from "@seshi/api";
 import { Auth } from "@seshi/auth";
-import { HttpSessionDB, ServerError } from "@seshi/client";
+import { HttpSeshi, ServerError } from "@seshi/client";
 import type { Instance } from "@seshi/instance";
 import type { SearchResults, Trace } from "@seshi/model";
-import { StoreSessionDB } from "@seshi/pipeline";
+import { StoreSeshi } from "@seshi/pipeline";
 import { FsStore } from "@seshi/store";
 import { buildFormats } from "seshi/integrations";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -61,8 +61,8 @@ afterEach(async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-function client(token: string, user?: string): HttpSessionDB {
-  return new HttpSessionDB({
+function client(token: string, user?: string): HttpSeshi {
+  return new HttpSeshi({
     server: "http://seshi.test",
     token,
     ...(user ? { user } : {}),
@@ -97,7 +97,7 @@ async function seed(): Promise<void> {
     labels: { team: "platform" },
   });
   // Written under alice's old owner id, which [auth.owner_aliases] folds into hers (X5.8).
-  await new StoreSessionDB({ store, owner: "old-alice", formats: FORMATS }).ingest({
+  await new StoreSeshi({ store, owner: "old-alice", formats: FORMATS }).ingest({
     format: "trajectory",
     session_id: "legacy",
     transcript: log("deploy the legacy cron"),
@@ -380,7 +380,7 @@ describe("the indexer job (F10.2, X7)", () => {
       roles: ["api"],
     });
     const liveApp = createApp(live);
-    const alice = new HttpSessionDB({
+    const alice = new HttpSeshi({
       server: "http://seshi.test",
       token: orgKey,
       user: "alice",

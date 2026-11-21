@@ -92,7 +92,9 @@ describe("ci.yml", () => {
     expect(job).toContain("needs: release");
     expect(job).toContain("environment: pypi");
     expect(job).toContain("id-token: write");
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: a GitHub Actions expression, meant literally
     expect(job).toContain("VERSION: ${{ needs.release.outputs.version || inputs.pypi_version }}");
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: a GitHub Actions expression, meant literally
     expect(job).toContain("ref: v${{ env.VERSION }}");
     // By hand, only for a release already cut: the tag it names, never a branch.
     expect(job).toContain("github.event_name == 'workflow_dispatch' && inputs.pypi_version != ''");

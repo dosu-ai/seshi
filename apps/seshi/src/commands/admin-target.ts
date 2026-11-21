@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { HttpSessionDB } from "@seshi/client";
+import { HttpSeshi } from "@seshi/client";
 import { findServerConfig } from "@seshi/config";
 import { accountCredential, openAccount, serverOf } from "../account/account";
 import { isServerless } from "../serverless/settings";
@@ -9,7 +9,7 @@ import { SKIPPED_CONFIG_HINT } from "./server-instance";
 
 export type AdminTarget =
   | { kind: "local"; config?: string }
-  | { kind: "remote"; server: string; db: HttpSessionDB }
+  | { kind: "remote"; server: string; db: HttpSeshi }
   /** The CLI config names a serverless bucket (F11): there is no server or worker to ask. */
   | { kind: "serverless" };
 
@@ -26,7 +26,7 @@ async function remote(ctx: CommandContext, server: string | undefined): Promise<
   return {
     kind: "remote",
     server: url,
-    db: new HttpSessionDB({
+    db: new HttpSeshi({
       server: url,
       token: credential.token,
       userAgent: USER_AGENT,

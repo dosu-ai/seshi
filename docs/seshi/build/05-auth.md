@@ -80,7 +80,7 @@ authorize stage holds every write to its caller's own sessions. The shared HS256
   - `PipelineOptions.visibility` (`VisibilitySetting`) is the source and server fallback.
   - Change entries carry `owner_basis`.
   - `setVisibility()` writes a `visibility_changed` entry and refuses a redacted session.
-  - `StoreSessionDB` takes `claims` and `visibility`. Credential claims win over upload claims.
+  - `StoreSeshi` takes `claims` and `visibility`. Credential claims win over upload claims.
 - **HTTP** (`@seshi/api`). `createApp({ auth })`; without `auth`, an `Auth` with `tokens` as
   static tokens.
   - Scopes are checked per route. 401 means `Unauthorized`; 403 means `Forbidden`.
@@ -197,9 +197,9 @@ authorize stage holds every write to its caller's own sessions. The shared HS256
     verified one: in a mixed deployment, opening a person's `owner` session to the org would
     show it to members who hold no org key.
 11. **No HS256 shared-secret tokens** (X5.2). `signed-token.ts` was removed; nothing in seshi
-    needed it. Dosu's hosted setup mints such tokens (`SESSIONDB_TOKEN_SECRET`) and must move
+    needed it. Dosu's hosted setup mints such tokens (with the pre-seshi token secret) and must move
     to the token API or service tokens before it runs a seshi image (open item).
-12. **`HttpSessionDB` still throws `ServerError` for 401**, as before. `Unauthorized` is new in
+12. **`HttpSeshi` still throws `ServerError` for 401**, as before. `Unauthorized` is new in
     model but the client doesn't use it, to keep existing callers' `status` checks working.
 13. **`GET /v1/changes` reads one owner folder.** Aliases fold folders into session reads and
     listings only. Feed consumers key on stored owners.

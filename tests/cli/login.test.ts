@@ -4,7 +4,7 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { HttpSessionDB } from "@seshi/client";
+import { HttpSeshi } from "@seshi/client";
 import { credentialFor } from "seshi/account";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { fakeTerminal, IdpServer, Machine, startServer, type TestServer } from "../tooling/cli";
@@ -134,7 +134,7 @@ describe("signing in through the IdP (X5.7)", () => {
       server.url,
       "upload",
     );
-    await new HttpSessionDB({ server: server.url, token: upload.token }).ingest({
+    await new HttpSeshi({ server: server.url, token: upload.token }).ingest({
       format: "claude-code",
       session_id: "s1",
       transcript: CLAUDE,

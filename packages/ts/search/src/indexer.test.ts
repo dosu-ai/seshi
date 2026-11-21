@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BUILTIN_FORMATS, FormatRegistry } from "@seshi/formats";
 import type { ChangeEntry, Trace } from "@seshi/model";
-import { StoreSessionDB, setVisibility, tombstone } from "@seshi/pipeline";
+import { StoreSeshi, setVisibility, tombstone } from "@seshi/pipeline";
 import {
   appendChange,
   archiveId,
@@ -61,7 +61,7 @@ function tick(ms = 1000): Date {
 }
 
 function db(owner = "alice", now = () => tick()) {
-  return new StoreSessionDB({ store, owner, formats, now });
+  return new StoreSeshi({ store, owner, formats, now });
 }
 
 /** `store`, running `hook` before the next write of a session pointer once `arm` is called:
@@ -415,7 +415,7 @@ describe("the indexer (F10.2)", () => {
       seenBetween.push(find(query));
     });
     const through = (now = () => tick()) =>
-      new StoreSessionDB({ store: between.store, owner: "alice", formats, now });
+      new StoreSeshi({ store: between.store, owner: "alice", formats, now });
     const archive = (id: string) => archiveId("alice", "trajectory", id);
 
     query = "appended";
@@ -482,7 +482,7 @@ describe("the indexer (F10.2)", () => {
       throw new StoreError("injected: the pointer update failed");
     });
     const through = () =>
-      new StoreSessionDB({ store: failing.store, owner: "alice", formats, now: () => tick() });
+      new StoreSeshi({ store: failing.store, owner: "alice", formats, now: () => tick() });
     const chunk = line({ role: "user", content: "appended later", timestamp: ts });
 
     failing.arm();

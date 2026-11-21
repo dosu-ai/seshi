@@ -12,8 +12,8 @@ import {
   type RenderFormat,
   type SearchRequest,
   type SearchResults,
+  type Seshi,
   SessionConflict,
-  type SessionDB,
   SessionExcluded,
   type SessionMetadata,
   SessionRejected,
@@ -203,7 +203,7 @@ export async function exchangeIdToken(
 
 /** The server's API over `fetch`. Every refusal the server maps to a status comes back as the
  * error the pipeline would have thrown. */
-export class HttpSessionDB implements SessionDB {
+export class HttpSeshi implements Seshi {
   readonly server: string;
   private readonly token: string;
   private readonly user: string | undefined;

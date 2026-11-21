@@ -69,7 +69,7 @@ rule, and the checker under Reading).
 | `marker_missing` | error | The bucket holds `owners/` but no `seshi.json` (an empty bucket is fine) |
 | `marker_invalid` | error | `seshi.json` is not JSON or does not match `layout.schema.json` |
 | `marker_version` | error | `seshi.json` names a layout or trace format this seshi does not read |
-| `marker_legacy` | error | `sessionstorage.json` is there: a sessiondb prefix (X1.5) |
+| `marker_legacy` | error | The pre-seshi marker is there (X1.5; removed later) |
 | `token_unreadable` | error | A `tokens/<id>.json` does not parse as `seshi/token/1` (only its key is reported) |
 | `metadata_unreadable` | error | A `metadata.json` is not JSON |
 | `metadata_invalid` | error | A `metadata.json` does not match `metadata.schema.json` |
@@ -150,7 +150,7 @@ store and on an `S3Store` over the writable `FakeS3`.
    each trace object's content hash recomputed with `parseTrace` (and its count and
    continuation), change entries against their keys, the inverse of entry-before-pointer
    (`publish_no_entry`, `tombstone_no_entry`), a stub's content and log state, a tombstoned
-   session's span objects, span records that do not parse, the sessiondb marker. The age guard
+   session's span objects, span records that do not parse, the pre-seshi marker. The age guard
    also applies to unnamed span messages (written before the record that names them) and to a
    tombstoned session's span objects.
 9. **`format_version_missing` is a warning; it found a real gap, fixed here.** A stub continued

@@ -85,7 +85,7 @@ what changed.
   `claimed` session only with that secret: `POST /v1/sessions` reads `X-Seshi-Retract` with
   `replace` (never stored), `IngestOptions.retractSecret` carries it to the pipeline, and
   `mayReplace` takes `retractProven` (checked against `metadata.retract_hash` in constant
-  time). `HttpSessionDB.ingest` sends it as the header, and the uploader sends it with every
+  time). `HttpSeshi.ingest` sends it as the header, and the uploader sends it with every
   replace. Admins and verified writers are unchanged; extending a claimed session still works
   as before. openapi.yaml, server.md, 05 and 14 say so. Tests: API (a second org-key caller
   stating `alice` gets 403 with no, a wrong or the hashed secret, the head stays; the
@@ -124,7 +124,7 @@ what changed.
   objects, holding what the new rules take out, and no later run deletes them (the session is
   `current`). The ordering is the recorded trade-off, but the comment's "harmless, the pointer
   no longer names them" was false: `GET …/trace?hash=`, `…/export?hash=` and
-  `SessionDB.getTrace` served any object in the session's folder, and old hashes were handed out
+  `Seshi.getTrace` served any object in the session's folder, and old hashes were handed out
   in earlier `published` entries. They now serve only a hash the session's `traces` name (404,
   or null, otherwise), which also covers objects a stopped replace leaves. openapi.yaml,
   server.md and 07 say so. Tests: a backfill whose delete fails, then `getTrace` of the old hash
@@ -318,12 +318,12 @@ what changed.
   `coding-agents`.
 - **docs, low**: docs/config.md said `config check` exits 1 on an unusable config; it exits 3
   (`config`), as docs/cli.md's table says. The text says 3.
-- **docs, low**: the CLI and the capture uploader sent `User-Agent: @dosu/sessiondb/<version>`
+- **docs, low**: the CLI and the capture uploader sent the pre-seshi SDK's `User-Agent`
   (no call site set `userAgent`), so seshi traffic looked like the old SDK. They now send
   `seshi/<version>` (`apps/seshi/src/user-agent.ts`), and `@seshi/client`'s default is
   `@seshi/client/<version>` (docs/client.md). Tests: `seshi login` and `sessions ls` requests,
   and the uploader's upload and rules fetch, carry `seshi/<version>`. The normalizer name
-  `@dosu/sessiondb` is unchanged (16's note: pinned in goldens, a decision).
+  is unchanged (16's note: pinned in goldens, a decision).
 - **docs, low**: spec/openapi.yaml's Agent enum said `atif` takes ATIF-v1.0 to v1.7; the server
   reads v1.8 (renders stay v1.7). It says v1.8.
 - **docs, low**: spec/openapi.yaml's 413 for `POST /otlp/v1/traces` named
@@ -338,7 +338,7 @@ what changed.
   it as live; generated types regenerated.
 - **docs, low**: SECURITY.md said only admin and fresh session tokens can delete; a static
   token from config deletes its own owner's sessions with no freshness rule. It says so.
-- **docs, low**: spec/openapi.yaml was titled `sessiondb` and described "a sessiondb server".
+- **docs, low**: spec/openapi.yaml still had the pre-seshi title and server name.
   It names seshi; the legacy Letta render's `sessionstorage/trace/1` mentions stay.
 - **cli, low** (found in the final check): `seshi <command> --help` answered
   `Unknown option '--help'` with exit 2 for every command but `config`, and `seshi --help`
@@ -371,7 +371,7 @@ Run at `seshi-17-review` after the fixes above:
 
 - **ingest, low** (split vote, reported medium): reading or exporting a chunked session returns
   only its head trace. That is the documented contract (`GET …/trace` "the head by default",
-  `sessions show --trace` "adds its head trace"), inherited from sessiondb main; the trace
+  `sessions show --trace` "adds its head trace"), inherited from the pre-seshi code; the trace
   carries `continuation`. A joined export is a feature, not a defect against any decision.
 
 - **background, low** (split vote, judged a documented deviation): an S3 chunk at a stale

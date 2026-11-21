@@ -36,7 +36,7 @@ import {
   type SpanAssembler,
   SpanStore,
   StoreHealthCounters,
-  StoreSessionDB,
+  StoreSeshi,
   type VisibilitySetting,
 } from "@seshi/pipeline";
 import {
@@ -570,8 +570,8 @@ export class Instance {
     return instanceStatus(this);
   }
 
-  sessions(identity: SessionIdentity): StoreSessionDB {
-    return new StoreSessionDB({
+  sessions(identity: SessionIdentity): StoreSeshi {
+    return new StoreSeshi({
       store: this.store,
       storage: this.storage,
       owner: identity.owner,
@@ -589,7 +589,7 @@ export class Instance {
   /** The session API as `owner` itself, through the upload route. `basis` is how the owner
    * was established: `claimed` in serverless mode, where nothing seshi controls checked the
    * name (F11.4). */
-  localSessions(owner: string, basis: OwnerBasis = "verified"): StoreSessionDB {
+  localSessions(owner: string, basis: OwnerBasis = "verified"): StoreSeshi {
     assertOwner(owner);
     return this.sessions({ owner, writer: localWriter(owner), owner_basis: basis });
   }
@@ -762,9 +762,8 @@ async function buildReviewer(
 }
 
 /** Build an Instance from a loaded config: open the bucket, read the redaction packs, check
- * the layout marker (X1.4: the bucket must be this deployment's and org's, and not a sessiondb
- * prefix), and probe the static tokens' owners. Every failure is an `InstanceError` saying
- * what to fix. */
+ * the layout marker (X1.4: the bucket must be this deployment's and org's), and probe the
+ * static tokens' owners. Every failure is an `InstanceError` saying what to fix. */
 export async function buildInstance(
   config: ServerConfig,
   options: BuildOptions,

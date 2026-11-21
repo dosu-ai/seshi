@@ -1,7 +1,7 @@
 # Serverless mode (F11): spec
 
-Status: built on `seshi-39-serverless` and merged into `seshi-mvp` (dosu-ai/sessiondb#21, on
-dosu-ai/sessiondb#20); the build note is
+Status: built on `seshi-39-serverless` and merged into `seshi-mvp` (dosu-ai/seshi#21, on
+dosu-ai/seshi#20); the build note is
 [`build/39-serverless.md`](build/39-serverless.md), which lists where the build differs from this
 page and what is still open. The design sketch it came from is the "Serverless mode" artifact.
 

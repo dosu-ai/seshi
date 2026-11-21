@@ -1,5 +1,5 @@
 import { parseArgs } from "node:util";
-import type { HttpSessionDB, RecordsPage } from "@seshi/client";
+import type { HttpSeshi, RecordsPage } from "@seshi/client";
 import type { AssembleRun, Instance, PruneRun } from "@seshi/instance";
 import { UPLOAD_SOURCE } from "@seshi/model";
 import { type RunReport, SourceError, type SourceStatus } from "@seshi/sources";
@@ -237,7 +237,7 @@ async function serverlessSync(
 async function remoteSync(
   ctx: CommandContext,
   json: boolean,
-  db: HttpSessionDB,
+  db: HttpSeshi,
   sub: "status" | "failed" | "dropped",
   id: string | undefined,
   values: Values,

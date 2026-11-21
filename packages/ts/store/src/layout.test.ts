@@ -6,7 +6,6 @@ import {
   changeSuffix,
   keys,
   LAYOUT_KEY,
-  LEGACY_LAYOUT_KEY,
   parseChangeKey,
   recordKeyHash,
   stampTime,
@@ -52,7 +51,6 @@ describe("layout", () => {
   it("names the deployment-wide objects", () => {
     expect(keys.marker()).toBe(LAYOUT_KEY);
     expect(LAYOUT_KEY).toBe("seshi.json");
-    expect(LEGACY_LAYOUT_KEY).toBe("sessionstorage.json");
     expect(keys.token("tok_0123456789")).toBe("tokens/tok_0123456789.json");
     expect(() => keys.token("short")).toThrow(/invalid token id/);
     expect(() => keys.token("../../../etc")).toThrow(StoreError);

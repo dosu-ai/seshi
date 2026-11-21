@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { parseArgs } from "node:util";
-import { HttpSessionDB, ServerError } from "@seshi/client";
+import { HttpSeshi, ServerError } from "@seshi/client";
 import { findServerConfig, parseDuration } from "@seshi/config";
 import type { Instance } from "@seshi/instance";
 import {
@@ -333,7 +333,7 @@ export async function run(ctx: CommandContext): Promise<number> {
       if (values.token !== undefined) {
         const user = values.user ?? cli.user;
         backend = new ServerBackend(
-          new HttpSessionDB({
+          new HttpSeshi({
             server: normalizeServer(server),
             token: values.token,
             userAgent: USER_AGENT,

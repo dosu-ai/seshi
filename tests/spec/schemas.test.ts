@@ -18,7 +18,7 @@ import {
   TRACE_SCHEMA,
   type Trace,
 } from "@seshi/model";
-import { StoreSessionDB } from "@seshi/pipeline";
+import { StoreSeshi } from "@seshi/pipeline";
 import { FsStore, getBytes, gunzipJson, LAYOUT_KEY } from "@seshi/store";
 import { Ajv2020 } from "ajv/dist/2020";
 import addFormats from "ajv-formats";
@@ -169,7 +169,7 @@ describe("what the pipeline writes", () => {
 
   it("is the contract: marker, metadata, trace and change entries", async () => {
     const store = new FsStore(root);
-    const db = new StoreSessionDB({ store, owner: "acme", formats: buildFormats() });
+    const db = new StoreSeshi({ store, owner: "acme", formats: buildFormats() });
     const claude = transcript("claude-basic.claude-code.jsonl");
     const long = `${claude.trim()}\n${JSON.stringify({
       type: "assistant",

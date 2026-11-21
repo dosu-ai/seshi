@@ -47,10 +47,6 @@ export const LAYOUT_SCHEMAS: readonly string[] = [LAYOUT_SCHEMA_V1, LAYOUT_SCHEM
 /** Which mode a bucket is used in (F11.8). */
 export type BucketMode = "server" | "serverless";
 
-/** The marker a sessiondb (pre-seshi) prefix holds, `sessionstorage.json`. Seshi does not read
- * such a prefix: no migration is planned (X1.5). */
-export const LEGACY_LAYOUT_SCHEMA = "sessionstorage/layout/1" as const;
-
 export type SessionStatus = "stored" | "redacted";
 
 export type ChangeKind = "published" | "tombstone" | "visibility_changed";

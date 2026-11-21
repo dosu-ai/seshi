@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type App, createApp } from "@seshi/api";
 import { Auth } from "@seshi/auth";
-import { HttpSessionDB } from "@seshi/client";
+import { HttpSeshi } from "@seshi/client";
 import type { Instance } from "@seshi/instance";
 import { SearchService } from "@seshi/search";
 import {
@@ -65,7 +65,7 @@ afterEach(async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-function server(): { instance: Instance; app: App; as: (user?: string) => HttpSessionDB } {
+function server(): { instance: Instance; app: App; as: (user?: string) => HttpSeshi } {
   const instance = testInstance({
     store,
     storage: { url: store.url },
@@ -80,7 +80,7 @@ function server(): { instance: Instance; app: App; as: (user?: string) => HttpSe
   instances.push(instance);
   const app = createApp(instance);
   const as = (user?: string) =>
-    new HttpSessionDB({
+    new HttpSeshi({
       server: "http://seshi.test",
       token: user ? orgKey : adminToken,
       ...(user ? { user } : {}),

@@ -119,7 +119,7 @@ async function storageCheck(bucket: ServerlessBucket): Promise<CheckResult> {
 }
 
 /** Whether the key can read other owners' folders: read-all or read-own (F11.5). */
-async function readCheck(bucket: ServerlessBucket, scope: string): Promise<CheckResult> {
+async function readCheck(bucket: ServerlessBucket): Promise<CheckResult> {
   const store = bucket.instance.store;
   try {
     const page = await listOwners(store, { limit: 50 });
@@ -271,7 +271,7 @@ export async function serverlessChecks(
   const checks: CheckResult[] = [markerCheck(bucket)];
   checks.push(await ownerCheck(bucket));
   checks.push(await storageCheck(bucket));
-  checks.push(await readCheck(bucket, scope));
+  checks.push(await readCheck(bucket));
   checks.push(sharedCheck(bucket, now));
   checks.push(reviewCheck(bucket));
   checks.push(searchCheck(bucket, scope, now));

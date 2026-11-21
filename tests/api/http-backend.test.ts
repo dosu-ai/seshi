@@ -1,24 +1,24 @@
-/** The SDK's HTTP backend against this server: the same calls, over `HttpSessionDB` through
- * `createApp` and over `StoreSessionDB` on a store, give the same results and throw the same
+/** The SDK's HTTP backend against this server: the same calls, over `HttpSeshi` through
+ * `createApp` and over `StoreSeshi` on a store, give the same results and throw the same
  * errors. This is the contract between the two halves of the client: a route or a mapping
  * that drifts fails here. */
 
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { HttpSessionDB, ServerError } from "@seshi/client";
+import { HttpSeshi, ServerError } from "@seshi/client";
 import {
   type ChangesPage,
   Forbidden,
   OffsetMismatch,
+  type Seshi,
   SessionConflict,
-  type SessionDB,
   SessionRejected,
   StoreError,
   type StoreSessionResult,
   type Trace,
 } from "@seshi/model";
-import { StoreSessionDB } from "@seshi/pipeline";
+import { StoreSeshi } from "@seshi/pipeline";
 import { FsStore } from "@seshi/store";
 import { buildFormats } from "seshi/integrations";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -52,15 +52,15 @@ function stored(result: StoreSessionResult): Extract<StoreSessionResult, { conte
 }
 
 let dir: string;
-let direct: SessionDB;
-let http: SessionDB;
+let direct: Seshi;
+let http: Seshi;
 let store: FsStore;
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), "sessiondb-http-"));
+  dir = mkdtempSync(join(tmpdir(), "seshi-http-"));
   // The same clock on both sides, so the two stores come out identical.
   const now = () => new Date("2026-10-30T17:00:00.000Z");
-  direct = new StoreSessionDB({
+  direct = new StoreSeshi({
     store: new FsStore(join(dir, "direct")),
     owner: "acme",
     formats: FORMATS,
@@ -81,8 +81,8 @@ beforeEach(() => {
     tokens: [{ token: TOKEN, owner: "acme" }],
     now,
   });
-  http = new HttpSessionDB({
-    server: "http://sessiondb.test",
+  http = new HttpSeshi({
+    server: "http://seshi.test",
     token: TOKEN,
     fetch: (input, init) => app.fetch(new Request(input, init)),
     // Small enough that the transcript goes gzipped, exercising that path too.
@@ -95,7 +95,7 @@ afterEach(() => {
 });
 
 /** The same calls through both backends must agree. */
-async function both<T>(call: (db: SessionDB) => Promise<T>): Promise<T> {
+async function both<T>(call: (db: Seshi) => Promise<T>): Promise<T> {
   const [a, b] = await Promise.all([call(direct), call(http)]);
   expect(b).toEqual(a);
   return a;
@@ -110,7 +110,7 @@ const masked = (page: ChangesPage): unknown =>
 
 /** The same feed call through both backends; `side` says whose store, for its own cursor. */
 async function bothFeeds(
-  call: (db: SessionDB, side: 0 | 1) => Promise<ChangesPage>,
+  call: (db: Seshi, side: 0 | 1) => Promise<ChangesPage>,
 ): Promise<[ChangesPage, ChangesPage]> {
   const [a, b] = await Promise.all([call(direct, 0), call(http, 1)]);
   expect(masked(b)).toEqual(masked(a));
@@ -250,7 +250,7 @@ describe("the HTTP backend throws what the pipeline throws", () => {
 
   it("SessionConflict and Forbidden from their statuses", async () => {
     const answer = (status: number, code: string) =>
-      new HttpSessionDB({
+      new HttpSeshi({
         server: "http://s.test",
         token: TOKEN,
         fetch: () => Promise.resolve(Response.json({ error: { code, message: code } }, { status })),
@@ -272,8 +272,8 @@ describe("the HTTP backend throws what the pipeline throws", () => {
   });
 
   it("ServerError for the rest", async () => {
-    const wrong = new HttpSessionDB({
-      server: "http://sessiondb.test/",
+    const wrong = new HttpSeshi({
+      server: "http://seshi.test/",
       token: "sdb_wrong-0123456789abcdef",
       fetch: (input, init) =>
         createApp({
@@ -295,8 +295,8 @@ describe("the request itself", () => {
       seen.push({ input, agent: new Headers(init?.headers).get("user-agent") });
       return Promise.resolve(Response.json({ owner: "acme", storage: { url: store.url } }));
     };
-    await new HttpSessionDB({ server: "http://s.test", token: TOKEN, fetch: capture }).me();
-    await new HttpSessionDB({
+    await new HttpSeshi({ server: "http://s.test", token: TOKEN, fetch: capture }).me();
+    await new HttpSeshi({
       server: "http://s.test",
       token: TOKEN,
       fetch: capture,
@@ -308,7 +308,7 @@ describe("the request itself", () => {
   });
 
   it("gives up after timeoutMs as a StoreError", async () => {
-    const slow = new HttpSessionDB({
+    const slow = new HttpSeshi({
       server: "http://s.test",
       token: TOKEN,
       timeoutMs: 20,
@@ -328,14 +328,14 @@ describe("responses that are not the server's", () => {
     Promise.resolve(new Response(text, { status }));
 
   it("a proxy's 502 page is a StoreError by status, its 504 a ServerError", async () => {
-    const down = new HttpSessionDB({
+    const down = new HttpSeshi({
       server: "http://s.test",
       token: TOKEN,
       fetch: respond(502, "<html>bad gateway</html>"),
     });
     await expect(down.me()).rejects.toBeInstanceOf(StoreError);
     await expect(down.me()).rejects.toThrow("HTTP 502");
-    const slow = new HttpSessionDB({
+    const slow = new HttpSeshi({
       server: "http://s.test",
       token: TOKEN,
       fetch: respond(504, "timeout"),
@@ -348,7 +348,7 @@ describe("responses that are not the server's", () => {
   });
 
   it("a 200 that is not JSON is bad_response", async () => {
-    const odd = new HttpSessionDB({
+    const odd = new HttpSeshi({
       server: "http://s.test",
       token: TOKEN,
       fetch: respond(200, "<html>login</html>"),
@@ -359,7 +359,7 @@ describe("responses that are not the server's", () => {
 
 describe("a 409 that is not an offset mismatch", () => {
   it("is a ServerError with the server's code", async () => {
-    const db = new HttpSessionDB({
+    const db = new HttpSeshi({
       server: "http://s.test",
       token: TOKEN,
       fetch: () =>

@@ -310,9 +310,9 @@ describe.skipIf(!posix)("buildNpm", () => {
       writeFileSync(
         script,
         [
-          'import { HttpSessionDB, SessionRejected, authConfig } from "@dosu/seshi-client";',
+          'import { HttpSeshi, SessionRejected, authConfig } from "@dosu/seshi-client";',
           'import { VERSION, canonicalText, parseTrace } from "@dosu/seshi-model";',
-          "const db = new HttpSessionDB({ server: 'http://127.0.0.1:1', token: 't' });",
+          "const db = new HttpSeshi({ server: 'http://127.0.0.1:1', token: 't' });",
           "console.log(JSON.stringify({ VERSION, db: typeof db.getSession, fns: [typeof authConfig, typeof canonicalText, typeof parseTrace], err: new SessionRejected('x', 'y') instanceof Error }));",
         ].join("\n"),
       );
@@ -331,9 +331,9 @@ describe.skipIf(!posix)("buildNpm", () => {
       writeFileSync(
         file,
         [
-          'import { HttpSessionDB, type StoredTrace } from "@dosu/seshi-client";',
+          'import { HttpSeshi, type StoredTrace } from "@dosu/seshi-client";',
           'import type { Visibility } from "@dosu/seshi-model";',
-          "const db: HttpSessionDB = new HttpSessionDB({ server: 'http://x', token: 't' });",
+          "const db: HttpSeshi = new HttpSeshi({ server: 'http://x', token: 't' });",
           "const v: Visibility = 'org';",
           // Proves the types are real: an unresolved declaration import makes them `any`, and
           // then this line is no error and the directive itself fails.

@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type App, createApp } from "@seshi/api";
 import { Auth } from "@seshi/auth";
-import { Forbidden, HttpSessionDB, ServerError } from "@seshi/client";
+import { Forbidden, HttpSeshi, ServerError } from "@seshi/client";
 import type { Instance } from "@seshi/instance";
 import { SearchService } from "@seshi/search";
 import { FsStore } from "@seshi/store";
@@ -58,7 +58,7 @@ afterEach(async () => {
 function server(indexPath?: string): {
   instance: Instance;
   app: App;
-  as: (token: string, user?: string) => HttpSessionDB;
+  as: (token: string, user?: string) => HttpSeshi;
 } {
   const instance = testInstance({
     store,
@@ -78,7 +78,7 @@ function server(indexPath?: string): {
   instances.push(instance);
   const app = createApp(instance);
   const as = (token: string, user?: string) =>
-    new HttpSessionDB({
+    new HttpSeshi({
       server: "http://seshi.test",
       token,
       ...(user ? { user } : {}),
@@ -184,7 +184,7 @@ describe("GET /v1/changes/all", () => {
     });
     instances.push(off);
     const offApp = createApp(off);
-    const offClient = new HttpSessionDB({
+    const offClient = new HttpSeshi({
       server: "http://seshi.test",
       token: adminToken,
       fetch: (url, init) => offApp.fetch(new Request(url, init)),

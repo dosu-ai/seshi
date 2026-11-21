@@ -3,7 +3,7 @@
 Branch `seshi-02-config`, on `seshi-01-restructure`. `@seshi/config` loads the server's
 `seshi.toml` and the CLI's own `config.toml` from flags, `SESHI_*` env, TOML and defaults
 against one strict zod schema each, with provenance for every value and secret references.
-`seshi serve` is configured by it (the `SESSIONDB_*` env is gone), and `seshi config
+`seshi serve` is configured by it (the pre-seshi env names are gone), and `seshi config
 check|show` validate and print it. Reference: [docs/config.md](../../config.md).
 
 ## What was built
@@ -65,7 +65,7 @@ check|show` validate and print it. Reference: [docs/config.md](../../config.md).
   defaults, named as in the config: `DEFAULT_LIMITS` / `Limits` (`max_records`,
   `max_records_bytes`, `max_upload_bytes`; replaces `LIMITS`) and `DEFAULT_FILTER` /
   `FilterRules` (`enabled`, `min_chars`, `require_user`, `require_reply`), taken by `ingest`,
-  `putRaw`, `storeSession` (`SessionOptions.filter`/`limits`), `StoreSessionDB` and
+  `putRaw`, `storeSession` (`SessionOptions.filter`/`limits`), `StoreSeshi` and
   `createApp`. The filter judges a session's first trace only: chunks that continue a head,
   and (since review) a whole upload's tail past `shipped` when the session has a head, are
   never filtered; `shipped` is ignored until the session has a head, so a session that was
@@ -121,12 +121,12 @@ check|show` validate and print it. Reference: [docs/config.md](../../config.md).
 - **The bucket client still falls back to the standard `AWS_*` / `S3_*` / `R2_*` variables**
   (and `AWS_REGION`, `S3_ENDPOINT`, `R2_ACCOUNT_ID`) when `[store]` does not set them. These
   are the S3 tooling's ambient credentials, not seshi settings; F1.2's "only `SESHI_*`" is read
-  as "no `SESSIONDB_*` aliases". `[store]` values win.
+  as "no aliases for the pre-seshi env names". `[store]` values win.
 - **`PORT` is not read.** Platforms that inject `PORT` (Cloud Run) need
   `SESHI_SERVER__LISTEN=:$PORT` or a container port of 7200.
 - **`auth.legacy_token_secret`** keeps today's HS256 signed tokens working until 05 decides
   (X5.2 drops them). Static tokens moved from `name:token` pairs to a map,
-  `[auth.tokens] owner = token` (`SESHI_AUTH__TOKENS__<OWNER>`); `SESSIONDB_TOKEN` (owner
+  `[auth.tokens] owner = token` (`SESHI_AUTH__TOKENS__<OWNER>`); the old single token (owner
   `default`) is `SESHI_AUTH__TOKENS__DEFAULT`.
 - **`store.format`** (letta|otlp) is kept, transitional, because the server still writes one of
   the two; 03 replaces it with the canonical format.
@@ -142,12 +142,12 @@ check|show` validate and print it. Reference: [docs/config.md](../../config.md).
 - **The CLI config honours `XDG_CONFIG_HOME`** when set, beyond the decision's
   `~/.config/seshi/config.toml`.
 - **Messages and banner say `seshi`** (`seshi: …`, `seshi <v> listening on …`); the layout
-  marker's client stays `sessiondb-server/<v>` until 03 changes the layout.
+  marker's client keeps its pre-seshi name until 03 changes the layout.
 
 ## Still to check
 
-- Dosu's deployment (`deploy/sessiondb.go` in dosu-ai/dosu) sets `SESSIONDB_TOKENS`,
-  `SESSIONDB_TOKEN_SECRET` and the R2 variables; it must move to `SESHI_AUTH__TOKENS__*`,
+- Dosu's deployment (in dosu-ai/dosu) sets the pre-seshi token, token-secret and R2
+  variables; it must move to `SESHI_AUTH__TOKENS__*`,
   `SESHI_AUTH__LEGACY_TOKEN_SECRET`, `SESHI_STORE__URL` and a listen address before it runs a
   seshi image.
 - Poller timing defaults (`interval`, `overlap`, `lag`, `backfill`, `quiet_period`) and the

@@ -83,7 +83,7 @@
     "git_branch": "main",
     "model": "claude-x",
     "normalizer": {
-      "name": "@dosu/sessiondb",
+      "name": "@dosu/seshi",
       "version": "0.9.0+trajectory.0.3.0"
     }
   },

@@ -1,4 +1,4 @@
-import { HttpSessionDB, ServerError } from "@seshi/client";
+import { HttpSeshi, ServerError } from "@seshi/client";
 import type { Fetch, IngestOptions, StaleSession, StoreSessionResult, Upload } from "@seshi/model";
 import type { CaptureRulesAnswer } from "./org-rules";
 
@@ -39,7 +39,7 @@ export type RetractOutcome = "retracted" | "gone" | "absent";
 export interface SessionSink {
   /** Where uploads go, for status: the server's URL, or `local: <bucket>`. */
   readonly target: string;
-  /** Store a session or a chunk of one. Throws what `SessionDB.ingest` throws, `SignInNeeded`
+  /** Store a session or a chunk of one. Throws what `Seshi.ingest` throws, `SignInNeeded`
    * for a missing or refused credential, and `StoreError` or `ServerError` otherwise. A
    * `replace` carries the session's retraction secret (`options`), which the org key needs. */
   ingest(upload: Upload, options?: IngestOptions): Promise<StoreSessionResult>;
@@ -98,7 +98,7 @@ export async function allStale(
 export function httpSink(options: HttpSinkOptions): SessionSink {
   const client = async () => {
     const credential = await options.credential();
-    return new HttpSessionDB({
+    return new HttpSeshi({
       server: credential.server,
       token: credential.token,
       ...(credential.user ? { user: credential.user } : {}),
@@ -127,7 +127,7 @@ export function httpSink(options: HttpSinkOptions): SessionSink {
     },
     async captureRules(etag) {
       const db = await client();
-      let answer: Awaited<ReturnType<HttpSessionDB["captureRulesSince"]>>;
+      let answer: Awaited<ReturnType<HttpSeshi["captureRulesSince"]>>;
       try {
         answer = await db.captureRulesSince(etag);
       } catch (err) {

@@ -37,7 +37,7 @@ User docs: [docs/cli.md](../../cli.md) (conventions, commands, signing in), docs
   `background` (OSC 11, BEL or ST, 1–4 hex digits per channel, relative luminance), `openUrl`
   (`open`, `xdg-open`, `rundll32 url.dll,FileProtocolHandler`: never a shell; `http:` and
   `https:` URLs only, so a `file:`, `smb:` or custom scheme is never handed to the opener).
-- **`@seshi/client`** (05's and 06's gaps). The request code is one `send()`; `HttpSessionDB`
+- **`@seshi/client`** (05's and 06's gaps). The request code is one `send()`; `HttpSeshi`
   gains `getSession/getTrace/tombstone(..., { owner })`, `setVisibility`, `owners`,
   `createToken`, `listTokens`, `revokeToken`, `revokeOwnerTokens`, `jobs`, `sources`, `source`,
   `records`; `authConfig(transport)` and `exchangeIdToken(transport, request)` need no token.
@@ -113,7 +113,7 @@ User docs: [docs/cli.md](../../cli.md) (conventions, commands, signing in), docs
   hits and snippets especially). JSON output needs nothing.
 - **The uploader (14)**: `credentialFor({ logins, env, configuredUser }, server, "upload")`
   from `seshi/account` gives the device token, or the org key and the username to send; pass
-  them to `HttpSessionDB` (or `connect({ token, user })`). `NotSignedIn` means "sign in" for the
+  them to `HttpSeshi` (or `connect({ token, user })`). `NotSignedIn` means "sign in" for the
   status line; a device token past `profile.device.expires_at` is refused before any request.
   `seshi/account` is in `apps/seshi` (layer 6): code in `ts/capture` (layer 5, X3.2) must not
   import it. `apps/seshi` calls `credentialFor` and hands the uploader the result, or a
@@ -155,7 +155,7 @@ User docs: [docs/cli.md](../../cli.md) (conventions, commands, signing in), docs
     person who owns the bucket (X3.5).
 11. **The device flow prints the URL and code and does not open a browser**, so it works over
     SSH; `--browser` opens one.
-12. **`HttpSessionDB.source()` and `records()` are null only for 404 `unknown_source`**, so a
+12. **`HttpSeshi.source()` and `records()` are null only for 404 `unknown_source`**, so a
     server without the routes is an error, not "unknown source".
 13. **A declined `rm` confirmation exits 1**; a server's 400 exits 2 (the command line asked for
     something the server reads as malformed).
@@ -205,12 +205,12 @@ Rebased onto `seshi-12-search` (07, 08, 09, 10, 11 and 12 below it). Shared list
 as unions: the stub list in `commands.test.ts` (login, logout, whoami, sessions, tokens, search,
 redact all gone), the openapi test's route list, `spec/openapi.yaml` (12's `/v1/search` and
 07's, 08's and 09's paths, then this branch's `/v1/admin/sources…`; schemas appended),
-`docs/server.md`'s route table and the root `check` line. `HttpSessionDB.redactionRules()` (07)
+`docs/server.md`'s route table and the root `check` line. `HttpSeshi.redactionRules()` (07)
 and `.search()` (12) are kept beside this branch's client calls, now using the module's
 `refuse()`.
 
 - **12 → 13, search through the account.** `Backend` gains `search(request, hooks)`:
-  `ServerBackend` calls `HttpSessionDB.search` (`GET /v1/search`), `LocalBackend` catches the
+  `ServerBackend` calls `HttpSeshi.search` (`GET /v1/search`), `LocalBackend` catches the
   Instance's index up with the change feed and searches it as `LOCAL_VIEWER` (a turned-off
   index is `Refused` exit 3, `search_disabled`). `seshi search` now opens the account
   (`openAccount`), takes the server from `--server` or the CLI config and the credential
@@ -230,7 +230,7 @@ and `.search()` (12) are kept beside this branch's client calls, now using the m
   `style.status(…, "success")`, the passed/failed test counts in success/error, and failing
   rules with a `FAIL` word. It uses `styleFor(ctx, {json})`, so `--json`, `NO_COLOR` and
   `--no-color` stay plain; with `--print` the report goes to stderr and is plain.
-- **08 → 13.** `HttpSessionDB.reviews(agent, id, {owner})` reads `GET …/reviews` (null for a
+- **08 → 13.** `HttpSeshi.reviews(agent, id, {owner})` reads `GET …/reviews` (null for a
   session not stored; `ReviewDecision` in `@seshi/client`), and `Backend.reviews` reads it on a
   server or with `listReviews` in local mode. `sessions show` adds a `review` row with each
   stored write's decision (`#0 allow, #1 redact`, counts past eight writes) in success/warn
@@ -250,7 +250,7 @@ a terminal and none with `NO_COLOR` or `--json`), local-mode search and review r
   X3.2);
   the status line maps `NotSignedIn` to "sign in" (B1.6) and builds its colour with
   `colourLevel`/`new Style(level, theme)` (its stdout is not a terminal, so `styleFor` would
-  turn colour off). F9.7's retraction needs `HttpSessionDB.tombstone` to send the retraction
+  turn colour off). F9.7's retraction needs `HttpSeshi.tombstone` to send the retraction
   secret: extend the options object added here. 14 may add `CommandContext` fields next to
   `tty`, `noColor`, `terminal`, `secrets`.
 - **15 (distribution)**: check `Bun.secrets` in the compiled binaries on macOS, Linux and
@@ -260,6 +260,6 @@ a terminal and none with `NO_COLOR` or `--json`), local-mode search and review r
   `docs/cli.md` rows for login/sessions/tokens/workers/sync (other branches edit their own
   rows); `docs/server.md` route table (appended rows).
 - **Optional, not done**: a remote `redact test` that checks a file against the server's packs
-  through `HttpSessionDB.redactionRules()` (07); `sync status` showing an S3 source's manifest
+  through `HttpSeshi.redactionRules()` (07); `sync status` showing an S3 source's manifest
   object count and `listed_at` (11). `sync failed` already prints 11's new failure codes
   (`unsupported_encoding`, `unreadable`) as they come.

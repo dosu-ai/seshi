@@ -52,7 +52,7 @@ through the API (X5.6).
   `role + "\x1f" + text` with `"\x1e"`. Timestamps are outside the hash, so a re-export of the
   same conversation dedupes. A continuation hashes `source + "@" + from_record` in place of
   `source`. Events are derived from each record's role, text and tool fields only, never from
-  the fields `seshi/trace/1` added to trajectory-v1, so hashes are what sessiondb computed.
+  the fields `seshi/trace/1` added to trajectory-v1, so the Letta rendering has the same hash.
   The derivation is in [`packages/ts/model/src/parse.ts`](../packages/ts/model/src/parse.ts),
   pinned by the goldens in [`testdata/goldens/`](testdata/goldens/).
 - **stamp** in a change or record key is RFC 3339 UTC to the millisecond with `-` and `:`
@@ -102,10 +102,6 @@ config's `store.deployment_id`, or one the first writer generated; `org` is reco
 time a config names one. A server whose config names another deployment or org refuses to
 start (X1.4), as does one that finds a marker schema or trace format it cannot read.
 
-A prefix that holds sessiondb's marker, `sessionstorage.json` (`sessionstorage/layout/1`),
-is refused: its traces are `letta` or `otlp` objects beside raw transcripts, and there is no
-migration (X1.5). Point seshi at a new prefix.
-
 ### `trace.<content_hash>.json.gz` — `seshi/trace/1` ([schema](schemas/trace.schema.json))
 
 The one canonical stored trace (X6.2). Immutable and content-addressed: if the key exists, a
@@ -143,7 +139,7 @@ Nothing else of a session's content is stored (X6.3): no raw transcript, no payl
     "cwd": "/repo/app", "git_branch": "main", "model": "…",
     "parent_session_id": "…",
     "continuation": { "from_record": 6, "prefix_sha256": "…" },
-    "normalizer": { "name": "@dosu/sessiondb", "version": "0.9.0+trajectory.0.3.0",
+    "normalizer": { "name": "@dosu/seshi", "version": "0.9.0+trajectory.0.3.0",
                     "format_version": "1+trajectory.0.3.0" }
   },
   "llm_calls": [
@@ -169,7 +165,7 @@ index range.
 
 Other formats are rendered from it on read, never stored (`GET …/trace?format=`):
 
-- `letta`: the `sessionstorage/trace/1` object sessiondb stored: plain trajectory-v1 records,
+- `letta`: Letta trajectory-v1, schema `sessionstorage/trace/1`: plain trajectory-v1 records,
   no `llm_calls` or `provenance`, the same events and `content_hash`.
 - `otlp`: one OTLP/HTTP JSON `ExportTraceServiceRequest` (schema attribute
   `seshi/trace-otlp/1`) with GenAI spans: an `invoke_agent` root, a `chat` span per assistant

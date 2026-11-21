@@ -1,7 +1,7 @@
 import { gunzipSync } from "node:zlib";
 import { OffsetMismatch, SessionRejected, StoreError, VERSION } from "@seshi/model";
 import { describe, expect, it } from "vitest";
-import { HttpSessionDB, ServerError } from "./http";
+import { HttpSeshi, ServerError } from "./http";
 
 interface Seen {
   url: string;
@@ -17,7 +17,7 @@ function client(
   options: { gzipFrom?: number; headers?: Record<string, string> } = {},
 ) {
   const seen: Seen[] = [];
-  const db = new HttpSessionDB({
+  const db = new HttpSeshi({
     server: "https://seshi.example.com/",
     token: "tok",
     gzipFrom: options.gzipFrom,
@@ -38,7 +38,7 @@ function client(
   return { db, seen };
 }
 
-describe("HttpSessionDB", () => {
+describe("HttpSeshi", () => {
   it("sends the token and its user agent, and reads the answer", async () => {
     const { db, seen } = client(200, { owner: "acme", storage: { url: "s3://b" } });
     expect(await db.me()).toEqual({ owner: "acme", storage: { url: "s3://b" } });
@@ -134,7 +134,7 @@ describe("HttpSessionDB", () => {
 
   it("refuses a 2xx that is not JSON, and reports an unreachable server as StoreError", async () => {
     await expect(client(200, "not json").db.me()).rejects.toMatchObject({ code: "bad_response" });
-    const down = new HttpSessionDB({
+    const down = new HttpSeshi({
       server: "https://seshi.example.com",
       token: "tok",
       fetch: async () => {

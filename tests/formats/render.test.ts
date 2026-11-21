@@ -26,7 +26,7 @@ import {
   type Trace,
   type TraceRecord,
 } from "@seshi/model";
-import { StoreSessionDB as Db, getTrace, type StoreClientOptions } from "@seshi/pipeline";
+import { StoreSeshi as Db, getTrace, type StoreClientOptions } from "@seshi/pipeline";
 import { FsStore } from "@seshi/store";
 import { buildFormats } from "seshi/integrations";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -34,7 +34,7 @@ import { transcript } from "../tooling/testdata";
 
 const formats = buildFormats();
 /** The pipeline over a store with this binary's formats. */
-class StoreSessionDB extends Db {
+class StoreSeshi extends Db {
   constructor(options: Omit<StoreClientOptions, "formats">) {
     super({ formats, ...options });
   }
@@ -87,7 +87,7 @@ afterEach(() => {
 });
 
 async function storedTrace(): Promise<Trace> {
-  const db = new StoreSessionDB({ store, owner: "acme" });
+  const db = new StoreSeshi({ store, owner: "acme" });
   const result = stored(
     await db.ingest({ format: "claude-code", session_id: "sess1", transcript: CLAUDE }),
   );
@@ -287,7 +287,7 @@ describe("toOtlp", () => {
 });
 
 describe("toLetta", () => {
-  it("is the sessiondb trace object: plain trajectory-v1 records, same events and hash", async () => {
+  it("is plain Letta trajectory-v1: no seshi fields, same events and hash", async () => {
     const trace = await enrichedTrace();
     const letta = toLetta(trace);
     expect(letta.schema).toBe("sessionstorage/trace/1");

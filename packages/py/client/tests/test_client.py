@@ -262,7 +262,7 @@ class TestRequests:
         assert db.reviews_by_archive("svc:ci", SHA) == []
 
     def test_asks_for_a_rendering_and_reads_it_as_that_type(self) -> None:
-        # Letta's object is sessiondb's, which names the format `agent`.
+        # The Letta rendering names the format `agent`.
         letta = {**TRACE, "schema": "sessionstorage/trace/1", "agent": TRACE["format"]}
         del letta["format"]
         otlp = {"resourceSpans": [{"resource": {"attributes": []}, "scopeSpans": []}]}

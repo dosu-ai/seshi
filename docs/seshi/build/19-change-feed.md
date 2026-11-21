@@ -42,7 +42,7 @@ its entry before the session pointer moves, and change keys are unique.
   window behind the cursor) reads it again; once its stamp is `lagMs` behind the indexer's
   clock it is marked seen whatever the metadata says. `Plan` now carries the metadata it was
   made from.
-- **Other feed readers.** `readChanges`, `GET /v1/changes` and `HttpSessionDB.changes` pass keys
+- **Other feed readers.** `readChanges`, `GET /v1/changes` and `HttpSeshi.changes` pass keys
   through and never parse them; the route's visibility filter reads metadata and drops entries
   of sessions with none. Search's live re-check reads metadata too. Nothing else lists
   `changes/`.

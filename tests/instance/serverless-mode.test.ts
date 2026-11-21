@@ -4,17 +4,17 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { HttpSessionDB } from "@seshi/client";
+import { HttpSeshi } from "@seshi/client";
 import { cliConfigSchema } from "@seshi/config";
 import { InstanceError } from "@seshi/instance";
 import {
   IngestRejected,
-  type SessionDB,
+  type Seshi,
   SessionRejected,
   type StoreSessionResult,
   type Trace,
 } from "@seshi/model";
-import { StoreSessionDB } from "@seshi/pipeline";
+import { StoreSeshi } from "@seshi/pipeline";
 import { ensureLayout, FsStore, getBytes, LAYOUT_KEY } from "@seshi/store";
 import { type Connection, connect, expandHome, localOwner, NotConnected } from "seshi/connect";
 import { INTEGRATIONS } from "seshi/integrations";
@@ -43,7 +43,7 @@ function stored(result: StoreSessionResult): Extract<StoreSessionResult, { conte
 
 let dir: string;
 let connection: Connection;
-let db: SessionDB;
+let db: Seshi;
 
 /** The CLI config, as the loader parses it. */
 const cli = (tree: unknown) => cliConfigSchema.parse(tree);
@@ -75,7 +75,7 @@ afterEach(async () => {
 describe("connect", () => {
   it("builds an instance from the local config, scoped to the owner", async () => {
     expect(connection.mode).toBe("serverless");
-    expect(db).toBeInstanceOf(StoreSessionDB);
+    expect(db).toBeInstanceOf(StoreSeshi);
     expect(connection.instance?.roles).toEqual([]);
     const me = await db.me();
     expect(me.owner).toBe("acme");
@@ -144,7 +144,7 @@ describe("connect", () => {
       integrations: INTEGRATIONS,
     });
     expect(remote.mode).toBe("server");
-    expect(remote.db).toBeInstanceOf(HttpSessionDB);
+    expect(remote.db).toBeInstanceOf(HttpSeshi);
     await expect(
       connect({ cli: cli({ server: "https://seshi.example" }), env: {}, integrations: [] }),
     ).rejects.toThrow(/run seshi login/);
@@ -183,7 +183,7 @@ describe("over a store", () => {
 
     const trace = (await db.getTrace("claude-code", "sess1")) as Trace | null;
     expect(trace?.content_hash).toBe(result.content_hash);
-    expect(trace?.metadata.normalizer?.name).toBe("@dosu/sessiondb");
+    expect(trace?.metadata.normalizer?.name).toBe("@dosu/seshi");
     expect(await db.getTrace("claude-code", "sess1", result.content_hash)).toEqual(trace);
 
     const page = await db.listSessions();

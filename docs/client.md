@@ -25,9 +25,9 @@ npm i @dosu/seshi-client      # or bun add @dosu/seshi-client
 ```
 
 ```ts
-import { HttpSessionDB, OffsetMismatch } from "@dosu/seshi-client";
+import { HttpSeshi, OffsetMismatch } from "@dosu/seshi-client";
 
-const db = new HttpSessionDB({
+const db = new HttpSeshi({
   server: "https://seshi.acme.internal",
   token: process.env.ACME_SESHI_TOKEN!,   // a device, service, admin or static token, or the org key
   user: "alice@acme.com",            // with the org key only: the username to write as
@@ -90,7 +90,7 @@ there is a token: which ways in the server takes, and an IdP ID token for a sesh
 
 ### Options
 
-`HttpSessionDB` takes `server`, `token`, and:
+`HttpSeshi` takes `server`, `token`, and:
 
 | Option | |
 |---|---|

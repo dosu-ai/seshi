@@ -2,7 +2,7 @@
  * enrolls one: `seshi sessions ls|show|export` and `seshi search` read the member's own
  * sessions, private ones too, and find no one else's. */
 
-import { HttpSessionDB } from "@seshi/client";
+import { HttpSeshi } from "@seshi/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Machine, startServer, type TestServer } from "../tooling/cli";
 import { transcript } from "../tooling/testdata";
@@ -41,13 +41,13 @@ beforeEach(async () => {
   server = await startServer();
   const admin = (await server.auth.initAdmin({ owner: "ops" })).admin?.token as string;
   const alice = await mint(admin, ALICE);
-  await new HttpSessionDB({ server: server.url, token: alice }).ingest({
+  await new HttpSeshi({ server: server.url, token: alice }).ingest({
     format: "claude-code",
     session_id: "mine",
     transcript: CLAUDE("mine", "The rotation plan"),
     visibility: "owner",
   });
-  await new HttpSessionDB({ server: server.url, token: await mint(admin, BOB) }).ingest({
+  await new HttpSeshi({ server: server.url, token: await mint(admin, BOB) }).ingest({
     format: "claude-code",
     session_id: "theirs",
     transcript: CLAUDE("theirs", "The rotation rollout"),

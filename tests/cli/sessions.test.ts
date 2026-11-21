@@ -4,7 +4,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { HttpSessionDB } from "@seshi/client";
+import { HttpSeshi } from "@seshi/client";
 import { VERSION } from "@seshi/model";
 import {
   archiveId,
@@ -64,7 +64,7 @@ beforeEach(async () => {
   server = await startServer({ settings: { staticTokens: [{ token: TOKEN, owner: "acme" }] } });
   admin = (await server.auth.initAdmin({ owner: "ops" })).admin?.token as string;
   machine = new Machine();
-  const db = new HttpSessionDB({ server: server.url, token: TOKEN });
+  const db = new HttpSeshi({ server: server.url, token: TOKEN });
   await db.ingest({
     format: "claude-code",
     session_id: "sess1",
@@ -134,7 +134,7 @@ describe("seshi sessions against a server", () => {
   });
 
   it("folds subagents under their session, and lists them with --subagents", async () => {
-    const db = new HttpSessionDB({ server: server.url, token: TOKEN });
+    const db = new HttpSeshi({ server: server.url, token: TOKEN });
     await db.ingest({
       format: "claude-code",
       session_id: "agent-a1",
@@ -213,7 +213,7 @@ describe("seshi sessions against a server", () => {
   it("never prints a session's control characters to the terminal", async () => {
     // A member's transcript and project carrying escape sequences: a title change, an OSC 52
     // clipboard write, a cursor move that would hide a line.
-    const db = new HttpSessionDB({ server: server.url, token: TOKEN });
+    const db = new HttpSeshi({ server: server.url, token: TOKEN });
     const nasty = `${JSON.stringify({
       type: "user",
       uuid: "u1",

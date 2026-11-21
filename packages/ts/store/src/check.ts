@@ -16,7 +16,6 @@ import {
   isOwner,
   keys,
   LAYOUT_KEY,
-  LEGACY_LAYOUT_KEY,
   parseChangeKey,
 } from "./layout";
 import { TOKEN_SCHEMA } from "./objects";
@@ -40,7 +39,6 @@ export const FINDINGS = {
     severity: "error",
     what: "seshi.json names a layout or trace format this seshi does not read",
   },
-  marker_legacy: { severity: "error", what: "the prefix holds sessiondb's sessionstorage.json" },
   token_unreadable: { severity: "error", what: "a token record does not parse" },
   metadata_unreadable: { severity: "error", what: "a metadata.json is not JSON" },
   metadata_invalid: { severity: "error", what: "a metadata.json does not match its schema" },
@@ -335,13 +333,6 @@ class Check {
   }
 
   private async marker(): Promise<void> {
-    if ((await this.store.get(LEGACY_LAYOUT_KEY)) !== null) {
-      this.add(
-        "marker_legacy",
-        `${LEGACY_LAYOUT_KEY} is here: a sessiondb store, which seshi does not read (X1.5)`,
-        { key: LEGACY_LAYOUT_KEY },
-      );
-    }
     const object = await this.store.get(LAYOUT_KEY);
     if (object === null) {
       const used = await this.store.list(keys.owners(), { limit: 1 });

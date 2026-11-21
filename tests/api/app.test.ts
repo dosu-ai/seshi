@@ -59,7 +59,7 @@ let store: FsStore;
 let app: App;
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), "sessiondb-server-"));
+  dir = mkdtempSync(join(tmpdir(), "seshi-server-"));
   store = new FsStore(`file://${join(dir, "bucket")}`);
   app = createApp({
     store,
@@ -69,7 +69,7 @@ beforeEach(() => {
       { token: TOKEN, owner: "acme" },
       { token: OTHER, owner: "globex" },
     ],
-    client: "sessiondb-server/test",
+    client: "seshi-server/test",
   });
 });
 
@@ -93,7 +93,7 @@ function call(
       headers["content-type"] = "application/json";
     }
   }
-  return app.fetch(new Request(`http://sessiondb.test${path}`, { method, headers, body }));
+  return app.fetch(new Request(`http://seshi.test${path}`, { method, headers, body }));
 }
 
 describe("health and routing", () => {
@@ -128,7 +128,7 @@ function streamed(bytes: Uint8Array, size = 1024) {
 
 function post(path: string, body: ReadableStream<Uint8Array>, headers: Record<string, string>) {
   return app.fetch(
-    new Request(`http://sessiondb.test${path}`, {
+    new Request(`http://seshi.test${path}`, {
       method: "POST",
       headers: { "content-type": "application/json", ...headers },
       body,
@@ -305,7 +305,7 @@ describe("sessions", () => {
     );
     // The trace says what normalized it, so a later pass can pick out what to redo.
     expect(trace.metadata.normalizer).toEqual({
-      name: "@dosu/sessiondb",
+      name: "@dosu/seshi",
       version: expect.stringMatching(/^\d+\.\d+\.\d+\+trajectory\.\d+\.\d+\.\d+$/),
       // The format's own version, which says when the session is stale (X4.9).
       format_version: expect.stringMatching(/^\d+\+trajectory\.\d+\.\d+\.\d+$/),
