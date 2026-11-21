@@ -177,7 +177,7 @@
     "packages/ts/formats": {
       "name": "@seshi/formats",
       "dependencies": {
-        "@letta-ai/trajectory": "^0.3.0",
+        "@letta-ai/trajectory": "^0.4.4",
         "@seshi/model": "workspace:*",
       },
     },
@@ -207,7 +207,7 @@
       "name": "@seshi/model",
       "version": "0.25.0",
       "dependencies": {
-        "@letta-ai/trajectory": "^0.3.0",
+        "@letta-ai/trajectory": "^0.4.4",
       },
     },
     "packages/ts/pipeline": {
@@ -309,7 +309,7 @@
 
     "@jridgewell/sourcemap-codec": ["@jridgewell/sourcemap-codec@1.6.0", "", {}, "sha512-T7jf+5zgsZHwNJ4lvQ7/aezbyk0nNX+zJVWpmHA7VYsEx7a7qr5Rg5IbtJFqkgze5Y2sruq1RUY8Q837Od7iFw=="],
 
-    "@letta-ai/trajectory": ["@letta-ai/trajectory@0.3.0", "", {}, "sha512-7omHLu28WcbQWcfz+KF92OuomPM59jv5ATAEqpvYWXjAqJwkcHUxWQSHXXImz90bGBfmc3FeUtmTKjb/DwSSgQ=="],
+    "@letta-ai/trajectory": ["@letta-ai/trajectory@0.4.4", "", {}, "sha512-vdz4VpbO/wJSl87xazAZRZfR2FvbHOUW+LVN7IWv2W/hyrXS/tw3SwdEc33P7+AqAURF/EVQwpBvk9tNUNneaA=="],
 
     "@octokit/auth-token": ["@octokit/auth-token@6.0.0", "", {}, "sha512-P4YJBPdPSpWTQ1NU4XYdvHvXJJDxM6YwpS0FZHRgP7YFkdVxsWcpWGy/NVqlAA7PcPCnMacXlRm1y2PFZRWL/w=="],
 

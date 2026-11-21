@@ -12,7 +12,7 @@
     }
   },
   "dependencies": {
-    "@letta-ai/trajectory": "^0.3.0",
+    "@letta-ai/trajectory": "^0.4.4",
     "@seshi/model": "workspace:*"
   }
 }
