@@ -23,7 +23,6 @@ export { EMPTY_PREFIX_SHA256, isStub, MAX_IDEMPOTENCY_KEY_LENGTH, SCOPE_FIELDS }
 export type { Authorization, Authorizer } from "./authz";
 export { canonicalText, stripNul } from "./canonical";
 export {
-  errorMessage,
   Forbidden,
   IngestRejected,
   OffsetMismatch,

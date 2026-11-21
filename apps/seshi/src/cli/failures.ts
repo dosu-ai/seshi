@@ -1,6 +1,6 @@
 import { ServerError } from "@seshi/client";
 import { ConfigError } from "@seshi/config";
-import { errorMessage, Forbidden, SessionRejected, StoreError, Unauthorized } from "@seshi/model";
+import { Forbidden, SessionRejected, StoreError, Unauthorized } from "@seshi/model";
 import { accessDeniedIn } from "@seshi/store";
 import { NotSignedIn } from "../account/credential";
 import { BadServerUrl } from "../account/logins";
@@ -86,8 +86,7 @@ export function classify(
     return { exit: EXIT.failure, code: err.code, message: err.message };
   }
   if (err instanceof StoreError) {
-    // "write k" says what failed; its causes say why (a 404, a refused token, no answer).
-    return { exit: EXIT.unavailable, code: "unavailable", message: errorMessage(err) };
+    return { exit: EXIT.unavailable, code: "unavailable", message: err.message };
   }
   if (err instanceof SessionRejected) {
     return { exit: EXIT.failure, code: err.code, message: err.message };

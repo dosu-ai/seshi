@@ -156,6 +156,44 @@ describe("GcsStore", () => {
   });
 });
 
+describe("GcsStore messages", () => {
+  const open = (fetch: (input: string, init?: RequestInit) => Promise<Response>) =>
+    GcsStore.fromUrl("gs://b/seshi", {
+      endpoint: "http://gcs",
+      fetch,
+      env: { STORAGE_EMULATOR_HOST: "x" },
+    });
+  const answer = (status: number, reason: string, message: string) => async () =>
+    new Response(JSON.stringify({ error: { code: status, message, errors: [{ reason }] } }), {
+      status,
+    });
+
+  it("say why: the service's reason, a missing bucket, the network", async () => {
+    await expect(open(answer(403, "forbidden", "no")).get("seshi.json")).rejects.toThrow(
+      "read seshi.json: access denied (forbidden)",
+    );
+    await expect(
+      open(answer(404, "notFound", "The specified bucket does not exist.")).get("seshi.json"),
+    ).rejects.toThrow("read seshi.json: GET b/seshi/seshi.json: 404 notFound");
+    const unreachable = open(async () => {
+      throw new Error("Unable to connect. Is the computer able to access the url?");
+    });
+    await expect(unreachable.list("owners/")).rejects.toThrow("list owners/: Unable to connect");
+  });
+
+  it("say why a token could not be had", async () => {
+    const s = GcsStore.fromUrl("gs://b", {
+      env: { HOME: "/nonexistent", GCE_METADATA_HOST: "10.0.0.1" },
+      fetch: async () => {
+        throw new TypeError("fetch failed");
+      },
+    });
+    await expect(s.put("k", new Uint8Array())).rejects.toThrow(
+      "write k: no Google credentials: the metadata server (10.0.0.1) did not answer",
+    );
+  });
+});
+
 describe("openStore with gs://", () => {
   it("opens a GCS store and says where it is, never with the key", () => {
     const { store, storage } = openStore("gs://sessions/prod", {
