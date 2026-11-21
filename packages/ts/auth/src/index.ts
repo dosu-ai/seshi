@@ -24,6 +24,7 @@ export {
   type OrgKeyOwner,
   type TokenRequest,
   USER_HEADER,
+  UsernameMissing,
 } from "./auth";
 export { ownershipAuthorizer } from "./authorizer";
 export { idTokenClaims, pickClaims } from "./claims";

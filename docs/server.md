@@ -360,7 +360,8 @@ Request bodies may be `Content-Encoding: gzip` (any other encoding is a `415`). 
 `/v1/auth/config` and `/v1/auth/exchange` wants `Authorization: Bearer <token>` (and
 `X-Seshi-User` with the org key): `401 unauthorized` without a credential the server accepts,
 `403 forbidden` for a call the credential's scopes or the session's owner and visibility do not
-allow.
+allow. The org key without `X-Seshi-User` gets `403` on a route it cannot use with any username
+(the admin routes), since adding the header would not help.
 
 | | |
 |---|---|

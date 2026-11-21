@@ -175,6 +175,10 @@ describe("the org key (X5.12)", () => {
   it("needs the username, and stops working when turned off or rotated", async () => {
     const { alice } = await setUp();
     expect((await call("GET", "/v1/me", { token: alice.token })).status).toBe(401);
+    // On a route no username would open, it is refused for what it is.
+    const admin = await call("GET", "/v1/admin/sources", { token: alice.token });
+    expect(admin.status).toBe(403);
+    expect((await call("GET", "/v1/admin/sources", alice)).status).toBe(403);
     const rotated = await auth.initAdmin({ owner: "ops", rotateOrgKey: true });
     expect((await call("GET", "/v1/me", alice)).status).toBe(401);
     expect((await call("GET", "/v1/me", { token: rotated.org_key?.token, user: "a" })).status).toBe(
