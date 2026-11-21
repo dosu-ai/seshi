@@ -161,6 +161,26 @@ describe("AzureStore", () => {
     expect(err).toBeInstanceOf(StoreError);
     expect(err).not.toBeInstanceOf(AccessDenied);
   });
+
+  it("says why in the message: the service's error code, a missing container", async () => {
+    const wrongKey = store(() => error(403, "AuthenticationFailed")).s;
+    await expect(wrongKey.get("seshi.json")).rejects.toThrow(
+      "read seshi.json: access denied (AuthenticationFailed)",
+    );
+    const noContainer = store(() => error(404, "ContainerNotFound")).s;
+    await expect(noContainer.get("seshi.json")).rejects.toThrow(
+      "read seshi.json: GET sessions/seshi/seshi.json: 404 ContainerNotFound",
+    );
+    const unreachable = AzureStore.fromUrl("az://sessions", {
+      account: "acct",
+      credentials: { accountKey: KEY },
+      env: {},
+      fetch: async () => {
+        throw new Error("Unable to connect. Is the computer able to access the url?");
+      },
+    });
+    await expect(unreachable.list("owners/")).rejects.toThrow("list owners/: Unable to connect");
+  });
 });
 
 describe("openStore with az://", () => {

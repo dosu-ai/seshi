@@ -14,6 +14,7 @@ import {
   type Store,
   type StoredObject,
   StoreError,
+  storeFailure,
 } from "./store";
 
 /** A storage account key or SAS token given in config; anything else comes from `env`. */
@@ -190,7 +191,7 @@ export class AzureStore implements Store {
       return await this.client.get(this.keyOf(key));
     } catch (err) {
       if (denied(err)) throw new AccessDenied("read", key, err);
-      throw new StoreError(`read ${key}`, err);
+      throw storeFailure(`read ${key}`, err);
     }
   }
 
@@ -213,7 +214,7 @@ export class AzureStore implements Store {
         throw new PreconditionFailed(key, "no object to replace");
       }
       if (denied(err)) throw new AccessDenied("write", key, err);
-      throw new StoreError(`write ${key}`, err);
+      throw storeFailure(`write ${key}`, err);
     }
   }
 
@@ -222,7 +223,7 @@ export class AzureStore implements Store {
       return await this.client.head(this.keyOf(key));
     } catch (err) {
       if (denied(err)) throw new AccessDenied("stat", key, err);
-      throw new StoreError(`stat ${key}`, err);
+      throw storeFailure(`stat ${key}`, err);
     }
   }
 
@@ -234,7 +235,7 @@ export class AzureStore implements Store {
         throw new PreconditionFailed(key, "the object changed since it was read");
       }
       if (denied(err)) throw new AccessDenied("delete", key, err);
-      throw new StoreError(`delete ${key}`, err);
+      throw storeFailure(`delete ${key}`, err);
     }
   }
 
@@ -260,7 +261,7 @@ export class AzureStore implements Store {
         : { keys, truncated: response.truncated };
     } catch (err) {
       if (denied(err)) throw new AccessDenied("list", prefix, err);
-      throw new StoreError(`list ${prefix}`, err);
+      throw storeFailure(`list ${prefix}`, err);
     }
   }
 }
