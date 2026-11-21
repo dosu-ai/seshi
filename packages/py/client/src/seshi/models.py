@@ -289,6 +289,7 @@ class StorageView(Response):
     url: str
     region: str | None = None
     account_id: str | None = None
+    account_name: str | None = None
     endpoint: str | None = None
 
 

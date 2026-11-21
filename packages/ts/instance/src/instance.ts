@@ -4,7 +4,9 @@ import { Auth, AuthSettingsError, authSettings, ownershipAuthorizer } from "@ses
 import {
   ConfigError,
   filterFor,
+  type RevealedBucketCredentials,
   type ROLES,
+  revealBucketCredentials,
   type ServerConfig,
   type SourceConfig,
   serverConfigProblems,
@@ -700,24 +702,16 @@ export function storeOptions(config: ServerConfig): {
   region?: string;
   endpoint?: string;
   accountId?: string;
-  credentials?: { accessKeyId: string; secretAccessKey: string; sessionToken?: string };
+  accountName?: string;
+  credentials?: RevealedBucketCredentials;
 } {
   const { store } = config;
   return {
     ...(store.region ? { region: store.region } : {}),
     ...(store.endpoint ? { endpoint: store.endpoint } : {}),
     ...(store.account_id ? { accountId: store.account_id } : {}),
-    ...(store.credentials
-      ? {
-          credentials: {
-            accessKeyId: store.credentials.access_key_id.reveal(),
-            secretAccessKey: store.credentials.secret_access_key.reveal(),
-            ...(store.credentials.session_token
-              ? { sessionToken: store.credentials.session_token.reveal() }
-              : {}),
-          },
-        }
-      : {}),
+    ...(store.account_name ? { accountName: store.account_name } : {}),
+    ...(store.credentials ? { credentials: revealBucketCredentials(store.credentials) } : {}),
   };
 }
 

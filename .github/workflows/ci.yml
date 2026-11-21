@@ -38,6 +38,10 @@ jobs:
         env:
           RUSTFS_ACCESS_KEY: rustfsadmin
           RUSTFS_SECRET_KEY: rustfsadmin
+      # Azure's Blob Storage emulator, for the az:// store test below.
+      azurite:
+        image: mcr.microsoft.com/azure-storage/azurite:3.38.0@sha256:c26024d62bf4a5b88a40968afd217234c00e1fc9a4790dc6105d1ca7979f6eec
+        ports: ["10000:10000"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -72,6 +76,13 @@ jobs:
           SESSIONDB_TEST_S3_ACCESS_KEY: rustfsadmin
           SESSIONDB_TEST_S3_SECRET_KEY: rustfsadmin
         run: bun --bun vitest run tests/store/s3-live.test.ts
+      - name: Azure Blob store test against Azurite
+        env:
+          SESSIONDB_TEST_AZURE_ENDPOINT: http://127.0.0.1:10000/devstoreaccount1
+          SESSIONDB_TEST_AZURE_ACCOUNT: devstoreaccount1
+          # Azurite's well-known development account key, published by Microsoft: not a secret.
+          SESSIONDB_TEST_AZURE_KEY: Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==
+        run: bun --bun vitest run tests/store/azure-live.test.ts
 
   # The Python client (packages/py/client) on its oldest and newest Python: ruff, mypy, and its
   # tests, which hold it to spec/openapi.yaml and run it against a seshi server started from

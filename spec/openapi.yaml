@@ -2223,10 +2223,13 @@ components:
       properties:
         url:
           type: string
-          description: "`s3://bucket/prefix`, `r2://bucket/prefix` or `file:///path`."
+          description: "`s3://bucket/prefix`, `r2://bucket/prefix`, `az://container/prefix` or `file:///path`."
         region: { type: string }
         account_id: { type: string, description: Cloudflare account, for `r2://`. }
-        endpoint: { type: string, description: An S3-compatible endpoint, when not AWS. }
+        account_name: { type: string, description: Azure storage account, for `az://`. }
+        endpoint:
+          type: string
+          description: An S3-compatible endpoint when not AWS, or the Azure blob endpoint when not Azure's own.
 
     Continuation:
       type: object

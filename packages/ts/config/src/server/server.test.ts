@@ -49,8 +49,8 @@ describe("parseListen", () => {
 });
 
 describe("store", () => {
-  it("takes s3, r2 and file URLs", () => {
-    for (const url of ["s3://b", "s3://b/p/q", "r2://b/p", "file:///data", "/data"]) {
+  it("takes s3, r2, az and file URLs", () => {
+    for (const url of ["s3://b", "s3://b/p/q", "r2://b/p", "az://c/p", "file:///data", "/data"]) {
       expect(serverConfigSchema.safeParse({ store: { url } }).success).toBe(true);
     }
     for (const url of ["http://b", "s3://", "gs://b", "data"]) {
@@ -67,10 +67,45 @@ describe("store", () => {
       },
     });
     expect(config.store.credentials?.access_key_id).toBeInstanceOf(Secret);
-    expect(config.store.credentials?.secret_access_key.ref).toEqual({
+    expect(config.store.credentials?.secret_access_key?.ref).toEqual({
       kind: "file",
       path: "/run/k",
     });
+  });
+
+  it("takes an Azure account key or SAS token for az://, with the account name", () => {
+    const keyed = ok({
+      store: {
+        url: "az://sessions/prod",
+        account_name: "acct",
+        credentials: { account_key: { env: "AZURE_KEY" } },
+      },
+    });
+    expect(keyed.store.account_name).toBe("acct");
+    expect(keyed.store.credentials?.account_key).toBeInstanceOf(Secret);
+    expect(ok({ store: { url: "az://c", credentials: { sas_token: "sv=1&sig=x" } } })).toBeTruthy();
+    expect(ok({ store: { url: "az://c" } }).store.credentials).toBeUndefined();
+  });
+
+  it("refuses mixed keys, half an S3 key, and keys for the other kind of bucket", () => {
+    expect(
+      messages({ store: { url: "az://c", credentials: { account_key: "k", sas_token: "s" } } }),
+    ).toEqual([
+      "store.credentials: give one kind of key: access_key_id and secret_access_key (s3://, r2://), account_key or sas_token (az://)",
+    ]);
+    expect(messages({ store: { url: "s3://b", credentials: { access_key_id: "a" } } })).toEqual([
+      "store.credentials: access_key_id and secret_access_key go together",
+    ]);
+    expect(
+      messages({
+        store: { url: "az://c", credentials: { access_key_id: "a", secret_access_key: "s" } },
+      }),
+    ).toEqual([
+      "store.credentials: an az:// bucket takes account_key or sas_token, not access_key_id",
+    ]);
+    expect(messages({ store: { url: "r2://b", credentials: { sas_token: "s" } } })[0]).toContain(
+      "an s3:// or r2:// bucket takes access_key_id",
+    );
   });
 });
 

@@ -8,7 +8,7 @@ polls it as soon as it is configured:
 [[sources]]
 id = "evals"
 type = "s3"
-url = "s3://eval-runs/harness"            # or r2://bucket/prefix, or file:///path on one machine
+url = "s3://eval-runs/harness"            # or r2://bucket/prefix, az://container/prefix, or file:///path on one machine
 credentials = { access_key_id = { env = "EVALS_KEY_ID" }, secret_access_key = { env = "EVALS_SECRET" } }
 # role = { arn = "arn:aws:iam::123456789012:role/seshi-read", external_id = { env = "EVALS_EXTERNAL_ID" } }
 include = ["**/*.jsonl", "**/*.json"]
@@ -69,7 +69,10 @@ source's checkpoint, so an unchanged object is never read again (F6.2).
   else; with `role` the given keys (or the `AWS_*` environment) need `sts:AssumeRole` on that
   role, and the role's keys are renewed before they expire. `role` applies to `s3://`. Without
   `credentials` the poller reads the standard `AWS_*` / `S3_*` (`R2_*` for `r2://`) variables,
-  like the bucket client. A source may not point at seshi's own bucket and prefix, or its own
+  like the bucket client. An `az://` source takes `account_name`, `endpoint` and
+  `credentials.account_key` or `sas_token` (read and list are enough), else the
+  `AZURE_STORAGE_*` variables or workload identity, as [`[store]`](config.md#azure-blob-storage-az)
+  does. A source may not point at seshi's own bucket and prefix, or its own
   folder.
 - **Reprocessing.** `seshi reprocess --source evals --since 2026-11-01 --run` forgets the
   objects changed since then, so the next run reads them whole and normalizes them again: one

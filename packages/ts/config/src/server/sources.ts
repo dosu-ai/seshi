@@ -4,7 +4,7 @@ import { secret } from "../secret";
 import { duration } from "../units";
 import { httpUrl, sourceId, storeUrl, visibility } from "./common";
 import { filterOverride } from "./filter";
-import { bucketCredentials } from "./store";
+import { bucketCredentials, credentialsMismatch } from "./store";
 
 export const UPLOAD_SOURCE_ID = "upload";
 
@@ -129,7 +129,9 @@ export const s3Source = z
   .strictObject({
     type: z.literal("s3"),
     ...base,
-    url: storeUrl.describe("The bucket to read: s3://bucket/prefix or r2://bucket/prefix."),
+    url: storeUrl.describe(
+      "The bucket to read: s3://bucket/prefix, r2://bucket/prefix or az://container/prefix.",
+    ),
     prefix: z.string().optional().describe("A key prefix under the URL's own."),
     credentials: bucketCredentials.optional().describe("Read-only keys for the source bucket."),
     role: z
@@ -138,10 +140,15 @@ export const s3Source = z
         external_id: secret().optional().describe("The external id the role requires."),
       })
       .optional()
-      .describe("A role to assume instead of static keys."),
+      .describe("A role to assume instead of static keys (s3:// only)."),
     region: z.string().min(1).optional(),
     endpoint: z.string().min(1).optional(),
     account_id: z.string().min(1).optional(),
+    account_name: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("The Azure storage account (az://). Falls back to AZURE_STORAGE_ACCOUNT."),
     include: z
       .array(z.string().min(1))
       .default([])
@@ -162,7 +169,21 @@ export const s3Source = z
         "A template for keys under the prefix, such as {username}/{session}.jsonl: {session} names the session, {format} its format, {project} and {branch} the work, {email}, {name}, {username}, {git_email} and {git_name} identity claims (never the owner, X5.4); * and ** match the rest. Keys that do not match are skipped. Without it the session is the key under the prefix.",
       ),
   })
-  .describe("An S3-compatible bucket other systems write sessions to (F6), polled.");
+  .superRefine((source, ctx) => {
+    const mismatch = credentialsMismatch(source.url, source.credentials);
+    if (mismatch) ctx.addIssue({ code: "custom", path: ["credentials"], message: mismatch });
+    if (source.role !== undefined && source.url.startsWith("az://")) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["role"],
+        message:
+          "role applies to s3:// sources (AWS STS); an az:// source takes keys or workload identity",
+      });
+    }
+  })
+  .describe(
+    "A bucket other systems write sessions to (F6), polled: S3 or S3-compatible (s3://, r2://) or Azure Blob Storage (az://).",
+  );
 
 export const cursorCloudSource = z
   .strictObject({

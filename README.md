@@ -68,7 +68,7 @@ On Windows: `irm https://github.com/dosu-ai/seshi/releases/latest/download/insta
 With no server, the CLI writes your own bucket directly:
 
 ```sh
-seshi init --serverless --url file:///Users/alice/seshi   # or s3://bucket/prefix (with --region), r2://bucket/prefix (with --account-id)
+seshi init --serverless --url file:///Users/alice/seshi   # or s3://bucket/prefix (with --region), r2://bucket/prefix (with --account-id), az://container/prefix (with --account-name)
 seshi capture install              # hooks into every agent found on this machine
 seshi upload --since 30d           # the last 30 days of those agents' sessions
 seshi sessions ls
