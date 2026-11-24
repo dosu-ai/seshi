@@ -42,6 +42,13 @@ ClickHouse's full-text `text` index (an inverted index) is generally available f
 The rough size is three to five weeks for one person: a spike, the seam refactor, the backend,
 then deployment. The details are in the [plan](#phased-plan).
 
+**There is an alternative: [LanceDB](#an-alternative-lancedb).** It is an embedded library, like
+SQLite, with BM25 built in, and it keeps its index on S3. One writer and many readers can share an
+index in the bucket without a new service. A probe ran it under Bun against S3, and every query
+feature but prefix search worked. It suits search better than ClickHouse. ClickHouse suits
+analytics better. The seam and the reader/writer interface below serve either, so the spike
+should try both before the backend is picked.
+
 ## Decisions proposed
 
 | | Proposal |
@@ -627,6 +634,96 @@ version. Do fix two things now so it slots in later:
 Whether aggregates may include owner-only sessions, and for whom, is a policy question (F10.4
 covers search, not totals) and is listed below.
 
+## An alternative: LanceDB
+
+[LanceDB](https://docs.lancedb.com) (Apache 2.0) is an embedded library over the Lance columnar
+format. Tables and their indexes are files on local disk or object storage, written with
+conditional commits. Its full-text index is its own inverted index with BM25 ranking. It also has
+vector indexes and hybrid search, which F10.5 (semantic search) would want later. Multi-node
+serving and SQL are in the paid Enterprise edition; the open-source library is what this section
+means.
+
+### What a probe showed
+
+A script ran `@lancedb/lancedb` 0.41.0 under Bun 1.4.2 (macOS arm64) on 23 November 2026, first
+on a local folder and then on S3. The S3 was rustfs, the same pinned image CI uses. It did not
+need a Node runtime.
+
+| Check | Result |
+|---|---|
+| Runs under Bun | Yes. The native add-on loads, and every call worked, on a folder and on S3. |
+| Words ANDed in one record | `BooleanQuery` with `Must` clauses. Records are ranked by BM25 `_score`. |
+| `"a phrase"`, including `src/app.ts` | `PhraseQuery`. Punctuation splits words, as in FTS5. The index must be built with `withPosition: true`: 0.41.0 defaults to false despite its own type docs, and a phrase query then fails. |
+| `OR`, `NOT` | `Should` and `MustNot` clauses |
+| Case and accents | `lowercase` and `asciiFolding` (both on by default): `cafe ferme` finds `café … fermé`. |
+| `word*` | No prefix query. Options: a second index with the `ngram` tokenizer and `prefixOnly`, or giving up prefixes. |
+| Filters and visibility | `where("visibility = 'org' OR owner IN (…)")` is applied before the search, together with BM25. |
+| Records added since the index was built | Found by a normal search, which scans the unindexed rows; `fastSearch()` skips them. `optimize()` indexes them. |
+| Retract or replace a session | `delete(predicate)` and `mergeInsert(id)` take effect for the next query. |
+| Is deleted text gone from the bucket? | **Not after one `optimize()`.** The data file still held the deleted and replaced rows, hidden by a deletion file. A second `optimize({ cleanupOlderThan: now, deleteUnverified: true })` rewrote the file and pruned the old versions, after which the text was gone. |
+| A second connection (another instance) | Reads the writer's table from the same prefix. |
+| 100k records of 40 words, on local S3 | Write 0.4 s; index build 0.5 s. From a new connection, the first query took 6–39 ms and later ones 1–25 ms (rare word, two common words ANDed, phrase, a filter). Local S3 has no network latency, so real S3 will be slower on cold reads. |
+| Install size | The macOS arm64 native binary is 250 MB. Optional dependencies for embeddings (`onnxruntime-node` and others) add 180 MB and can be left out. |
+
+### ClickHouse and LanceDB compared
+
+| | ClickHouse | LanceDB |
+|---|---|---|
+| What runs | A service, on ClickHouse Cloud or self-hosted, with its own credentials, upgrades and monitoring | A library inside `seshi serve`. No new service: the index is files. |
+| Where the index lives | In ClickHouse | In object storage: a prefix in the seshi bucket, or a separate bucket. Writing it into the seshi bucket is a layout change, because spec/layout.md says nothing derived is written there. |
+| A shared index | One writer, readers query the service | One writer (the worker) commits. API instances read the same prefix and pick up new versions on a read-consistency interval. |
+| BM25 | None built in: a formula written in SQL, or a term table of your own | Built in, scored over the whole index |
+| Phrases, OR, NOT, case and accents | Yes (phrases as a hint, then each row checked) | Yes (positions required for phrases) |
+| Prefix search | `LIKE` hint plus regex | A second `ngram` index, or none |
+| Grouping by session, `total`, paging | SQL: `GROUP BY`, `count() OVER ()`, `LIMIT … BY` | No `GROUP BY` in the open-source library. Group the top few thousand records in TypeScript. An exact `total` for a broad query needs a second pass over matching ids, or the API reports it as "at least". |
+| Session fields (repo, visibility) | Separate `sessions` table joined at query time | No joins: the fields are copied onto every record, and a visibility change rewrites a session's records. |
+| Excerpts and highlights | In TypeScript | In TypeScript |
+| Deleting retracted text | Hidden at once; gone after a merge or `APPLY DELETED MASK` | Hidden at once; gone after compaction and version pruning (above) |
+| Rebuild without downtime | New tables, then switch | New table, then switch (Lance also has branches) |
+| Transactions | None: order and idempotency | One commit per table; still nothing across tables |
+| Analytics (tokens, spend) | Its strength | Not an analytics engine: no `GROUP BY` in the open-source library |
+| Semantic search later | Vector indexes exist; hybrid ranking is up to us | Vector indexes and hybrid (RRF) search built in |
+| Serverless mode | No: laptops would need ClickHouse credentials | Possible later: laptops could read an index the server writes to the bucket. That index could only hold sessions every reader may see. |
+| Cost to the deployment | A ClickHouse service | About 250 MB more in the server image, plus S3 requests per query |
+| Maturity for this job | Text index GA since 26.2 (March 2026) | Lance-native FTS is new; the older Tantivy-based option is gone. Pre-1.0. |
+
+### What changes in this design if LanceDB is picked
+
+- The [proposed interface](#proposed-interface) is unchanged. `commit(page)` becomes a
+  `mergeInsert` of the page's records, one `delete` for removed and replaced sessions, and
+  appends to the feed-state tables, with the cursor last.
+- The feed-state tables (cursors, seen keys, the feed copy) become small Lance tables, or stay in
+  a local SQLite file on the worker. In the second case, `GET /v1/changes/all` stays on the
+  worker.
+- The [schema sketch](#schema-sketch) loses the `sessions` join and the epochs. The `norm` column
+  is not needed, because Lance's tokenizer lowercases and folds accents. It folds to ASCII rather
+  than following FTS5 exactly, so the conformance suite decides whether that is close enough.
+- The worker runs `optimize()` on a schedule: often enough to keep few rows unindexed, and with
+  version pruning to bound how long deleted text stays.
+- Both `@lancedb/lancedb` and `apache-arrow` become server-only dependencies, loaded lazily, so
+  the hook's import check (X3.3) keeps them off the capture path.
+
+### Recommendation
+
+For search alone, LanceDB fits seshi better than ClickHouse:
+
+- BM25 is built in.
+- There is no service to run.
+- The index sits in object storage, in the spirit of X6.1.
+- It covers semantic search later.
+
+ClickHouse is the better choice only if token and spend analytics become a goal. That would be a
+separate decision and could use a separate store.
+
+Both depend on the reader/writer seam, which is the first step either way. The spike (phase 0)
+should run the same queries against both, on real S3 with about 1M real-shaped records, and
+measure:
+
+- latency on cold and warm reads;
+- the cost of grouping in TypeScript;
+- how often `optimize()` has to run;
+- how long deleted text survives.
+
 ## Risks
 
 - **Relevance quality.** Hand-written BM25 over the matching rows is an approximation with a cap
@@ -667,12 +764,16 @@ covers search, not totals) and is listed below.
    owner's own totals?
 7. **Does `GET /v1/changes/all` move to ClickHouse with search?** The proposal says yes, since it
    is `FeedState`. A deployment with search off would then have no cross-owner feed, as today.
+8. **ClickHouse or LanceDB for the shared index?** The spike decides; the leaning is LanceDB for
+   search, with ClickHouse kept for analytics if they become a goal.
+9. **With LanceDB, where does the index live?** Options are a derived prefix in the seshi bucket
+   (a spec/layout.md change), or a separate bucket or folder named in `[search]`.
 
 ## Phased plan
 
 | Phase | What | Size |
 |---|---|---|
-| 0. Spike | One script against `clickhouse-server:26.3`. Load about 1M real-shaped events. Check `hasAllTokens`, `hasPhrase` (hint mode), the prefix pattern and the BM25 SQL. Measure p50 and p95 for 10 representative queries, and check lightweight delete with the text index. Decide on the client library and between a stored `norm` column and a preprocessor. | 2–3 days |
+| 0. Spike | One script against `clickhouse-server:26.3`. Load about 1M real-shaped events. Check `hasAllTokens`, `hasPhrase` (hint mode), the prefix pattern and the BM25 SQL. Measure p50 and p95 for 10 representative queries, and check lightweight delete with the text index. Decide on the client library and between a stored `norm` column and a preprocessor. Run the same queries against LanceDB on real S3: cold and warm latency, grouping in TypeScript, the `optimize()` cadence and how long deleted text survives. Pick the backend. | 3–4 days |
 | 1. Seam | Replace `SearchBackend` and `FeedState` with `IndexReader` and `IndexWriter`, and move `drain()` onto `commit()`. Add `MatchTree`, `state()`, `IndexUnavailable`, the `OpenIndex` factory, `SearchStatus.location`, and `excerpt()` in `snippet.ts`. SQLite only, with no change in behaviour; the existing tests keep their assertions, with calls ported to the new interface. | 4–6 days |
 | 2. Backend | `ClickHouseIndex`: DDL and meta checks, the unit-of-work flush, sessions, events and epochs, batched deletes, the `FeedState` tables, the query compiler, grouping and BM25. The conformance suite, the CI service and crash tests. | 1.5–2 weeks |
 | 3. Deploy | The config schema, a `worker` placement for this backend, blue-green rebuild, `--status`, `--rebuild` and `--wait`, `doctor` checks, the delete-mask job, and docs (`docs/search.md` operator section, `docs/config.md`, F10 in `design-decisions.html`). | 1 week |
