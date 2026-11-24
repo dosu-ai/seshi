@@ -780,6 +780,57 @@ and measure:
 - how often `optimize()` has to run;
 - how long deleted text survives.
 
+### Also considered: DuckLake with Moraine
+
+This was read from the projects' READMEs and docs in November 2026, not run.
+
+- **[DuckLake](https://github.com/duckdb/ducklake)** is DuckDB's table format. Data is Parquet
+  files on object storage, and a catalog sits in a SQL database (DuckDB, SQLite, Postgres or
+  MySQL). It has ACID commits and time travel. Deletes are written to separate delete files and
+  applied when reading.
+- **[Moraine](https://github.com/morainedb/moraine)** (MIT or Apache 2.0) moves that catalog into
+  SlateDB, a key-value store kept in the same bucket, so DuckLake needs only the bucket. It is a
+  DuckDB extension plus a Rust crate.
+  - It allows one writing process; others attach `READ_ONLY`. That is the shape this design
+    already has: one worker writing, API instances reading.
+  - A commit takes about 30 ms on S3 Standard.
+  - `CREATE INDEX` adds ordered indexes for lookups by key.
+
+It is an analytics store, not a search engine. It would compete with ClickHouse for token and
+spend reports, not with LanceDB for search:
+
+- **No text index and no BM25.** Moraine's indexes are ordered key indexes. DuckDB's `fts`
+  extension cannot build an index on a DuckLake table: it fails with "DuckLake does not support
+  functions" (duckdb/ducklake#537). That index would also need a full rebuild on every change.
+  Search would be `ILIKE` or regex scans over Parquet (60–100 ms for 1M records in the probe,
+  with no ranking), or a term table of our own with BM25 written in SQL, as for ClickHouse.
+- **Removing deleted text** takes three steps: `ducklake_expire_snapshots`,
+  `ducklake_rewrite_data_files` and then `ducklake_cleanup_old_files`. The rewrite only touches
+  files whose rows are mostly deleted; the threshold defaults to 95%. A partly deleted file keeps
+  its deleted text unless the threshold is lowered.
+- **Small, frequent writes**, such as one commit per feed page, make many small Parquet files.
+  They need inlining or `ducklake_merge_adjacent_files` on a schedule, the counterpart of
+  LanceDB's `optimize()`.
+- **Maturity.** DuckLake is DuckDB's own. Moraine started in July 2026 and has one named
+  production user. Its listing in DuckDB's community extensions is in progress; until then,
+  builds come from its own repository. DuckDB's Node bindings run under Bun (see the probe), but
+  loading Moraine was not tried.
+
+| | DuckLake + Moraine | LanceDB (+ DuckDB) | ClickHouse |
+|---|---|---|---|
+| What runs | A DuckDB extension; no service | A library; no service | A server |
+| Storage | Parquet and a SlateDB catalog in the bucket | Lance files in the bucket | Inside ClickHouse |
+| BM25 and full-text search | None | Built in | A formula in SQL |
+| SQL aggregation | Yes: its purpose | Through DuckDB's `lance` extension | Yes, fastest in the probe |
+| Writers | One process; readers attach read-only | One writer in practice | One indexer |
+| Removing deleted text | Expire, rewrite (95% threshold by default), clean up | Two `optimize()` runs, with `deleteUnverified` | A merge, or `APPLY DELETED MASK` |
+
+**Where it would fit:** an open, bucket-only usage table of tokens, spend, model and day, which
+any DuckDB can query. It would only pay off if analytics becomes a goal and other tools need to
+read that table. LanceDB with DuckDB already gives SQL over the same files as the search index.
+DuckLake would add a second copy of the data, in a second format, with its own maintenance. It
+is not part of the plan; it is worth watching as Moraine matures.
+
 ## Risks
 
 - **Relevance quality.** Hand-written BM25 over the matching rows is an approximation with a cap
