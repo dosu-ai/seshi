@@ -48,6 +48,7 @@ The storage options the LanceDB scripts take as their second argument:
 | `count.ts` | 100k records in `./count-data`: `countRows(filter)`, and counting search matches and sessions in TypeScript |
 | `gen.ts <uri> [options]` | 1M records with owner, model and token columns, an FTS index, then `optimize()` |
 | `duck.ts <path to .lance> [setup SQL]` | DuckDB with the `lance` extension against `gen.ts`'s table: aggregations, `lance_fts` with grouping, a copy into memory. For S3, set `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_ENDPOINT`, `AWS_ALLOW_HTTP=true` and `AWS_REGION`: the extension did not take DuckDB's S3 secret for a custom endpoint. |
+| `replace.ts [uri]` | One `mergeInsert` with `whenNotMatchedBySourceDelete`: replace one session, remove another, continue a third, in one commit |
 | `export.ts` | `./big/events.lance` to `./chfiles/events.parquet`, for ClickHouse |
 | `clickhouse.sh` | Loads that Parquet file into ClickHouse 26.3 with a `text` index and runs the same queries as `duck.ts` |
 
@@ -95,6 +96,23 @@ and the replaced one (`a2`).
 optimize 1: {"compaction":{"fragmentsRemoved":2,"fragmentsAdded":1,"filesRemoved":2,"filesAdded":1},"prune":{"bytesRemoved":21985,"oldVersionsRemoved":3}}
 optimize 2: {"compaction":{"fragmentsRemoved":0,"fragmentsAdded":0,"filesRemoved":0,"filesAdded":0},"prune":{"bytesRemoved":13708,"oldVersionsRemoved":1}}
 stats: {"totalBytes":11048,"numRows":5,"numIndices":1,"fragmentStats":{"numFragments":1,"numSmallFragments":1,"lengths":{"min":5,"max":5,"mean":5,"p25":5,"p50":5,"p75":5,"p99":5}},"numDeletedRows":0}
+```
+
+### A page as one commit (`replace.ts`), on a local folder
+
+Run on 24 November 2026. Session `a` had records 0–2 and was replaced by 0–1; `c` was removed
+with no new rows; `d` was continued with a new record 1; `b` was not in the page.
+
+```text
+merge result: {"version":3,"numInsertedRows":1,"numUpdatedRows":2,"numDeletedRows":2,"numAttempts":1,"numRows":3}
+versions: 2 -> 3 (one commit expected)
+rows: [ "a:0=new alpha zero", "a:1=new alpha one", "b:0=bravo kept", "d:0=delta continued",
+  "d:1=delta appended"
+]
+search old: []
+search new: [ "a:0", "a:1" ]
+search charlie: []
+search delta: [ "d:0", "d:1" ]
 ```
 
 ### 100k records (`scale.ts`), on S3

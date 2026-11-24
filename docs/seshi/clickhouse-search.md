@@ -736,19 +736,119 @@ Two gaps found:
 
 ### What changes in this design if LanceDB is picked
 
-- The [proposed interface](#proposed-interface) is unchanged. `commit(page)` becomes a
-  `mergeInsert` of the page's records, one `delete` for removed and replaced sessions, and
-  appends to the feed-state tables, with the cursor last.
+- The [proposed interface](#proposed-interface) is unchanged. `commit(page)` becomes one
+  `mergeInsert` per table (see [the schema](#schema-with-lancedb)), then the feed-state tables,
+  with the cursor last.
 - The feed-state tables (cursors, seen keys, the feed copy) become small Lance tables, or stay in
   a local SQLite file on the worker. In the second case, `GET /v1/changes/all` stays on the
   worker.
-- The [schema sketch](#schema-sketch) loses the `sessions` join and the epochs. The `norm` column
-  is not needed, because Lance's tokenizer lowercases and folds accents. It folds to ASCII rather
-  than following FTS5 exactly, so the conformance suite decides whether that is close enough.
+- The [ClickHouse schema sketch](#schema-sketch) is replaced by the one below. It drops the
+  epochs and the `norm` column. Lance's tokenizer lowercases and folds accents itself; it folds
+  to ASCII rather than following FTS5 exactly, so the conformance suite decides whether that is
+  close enough.
 - The worker runs `optimize()` on a schedule: often enough to keep few rows unindexed, and with
   version pruning to bound how long deleted text stays.
 - Both `@lancedb/lancedb` and `apache-arrow` become server-only dependencies, loaded lazily, so
   the hook's import check (X3.3) keeps them off the capture path.
+
+### Schema with LanceDB
+
+Each generation's tables live under their own prefix, such as `<index prefix>/<gen>/events.lance`.
+A `meta` table outside the generations names the live one.
+
+**`events`**: one row per searchable record. It is the search table.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | string | `owner/archive_id/content_hash/event_index`; the `mergeInsert` key |
+| `owner`, `archive_id`, `session_id` | string | |
+| `agent`, `origin_agent` | string | |
+| `project`, `branch`, `source_id` | string, nullable | |
+| `visibility` | string | `org` or `owner` |
+| `content_hash` | string | The trace the record is in |
+| `event_index` | int32 | |
+| `role` | string | `user`, `assistant`, `tool_call`, … |
+| `tool_name` | string, nullable | |
+| `ok` | bool, nullable | From the trace event (`TraceEvent.ok`) |
+| `ts` | timestamp(ms), nullable | The event's own time |
+| `session_updated` | timestamp(ms) | For `since` and `until` when the event has no time |
+| `text` | string | Redacted; at most 32 KiB (`MAX_INDEXED_CHARS`) |
+
+Its indexes:
+
+- full text on `text`, with `withPosition: true`, `stem: false` and `removeStopWords: false`,
+  and lowercasing and accent folding left on;
+- bitmap on `visibility`, `role` and `agent`;
+- btree on `owner`, `archive_id` and `ts`.
+
+Session fields are copied onto every row, because Lance has no joins. A visibility change or a
+renamed branch therefore rewrites that session's rows: rare, and done in one `mergeInsert`.
+
+**`sessions`**: one row per session. It is small. `IndexWriter.sessions()` reads it, and it
+answers totals and listings without touching `events`.
+
+| Column | Type | Notes |
+|---|---|---|
+| `owner`, `archive_id` | string | The key |
+| `agent`, `session_id`, `origin_agent`, `native_session_id` | string | |
+| `project`, `branch`, `source_id`, `visibility` | string | |
+| `started_at`, `ended_at` | timestamp(ms), nullable | |
+| `updated_at` | string | As the metadata says |
+| `traces` | list\<string\> | The traces held, checked when a session is continued |
+| `read_at` | int64 | When the indexer read the metadata; an older read is refused |
+| `removed` | bool | A tombstone, so a late update read earlier is refused |
+
+**`llm_calls`**: one row per LLM call, for analytics. It is filled by the same pass over the
+feed, and it can come later.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | string | `owner/archive_id/content_hash/call_id` |
+| `owner`, `archive_id`, `agent`, `project`, `branch`, `source_id`, `visibility` | string | Copied from the session, as in `events` |
+| `model`, `provider` | string | |
+| `started_at`, `ended_at` | timestamp(ms) | |
+| `duration_ms` | float64 | |
+| `stop_reason` | string | |
+| `failed` | bool | Whether the call ended with an error |
+| `input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens`, `reasoning_tokens`, `total_tokens` | int64, nullable | From the trace's `TokenUsage` |
+
+Traces record tokens, not prices. Spend is computed at query time against a `prices` table
+(`model`, `valid_from`, a price per token type), so a price change applies without rewriting
+history. A `usage_daily` rollup (day, owner, project, model, sums) can be added when reports want
+it; see [scale](#what-larger-scale-means).
+
+**Feed state.** Small tables:
+
+- `cursors (owner, cursor)`;
+- `seen (owner, key, at)`;
+- `changes (stamp, owner, name, entry)`: the copy behind `GET /v1/changes/all`;
+- `meta (key, value)`: the live and building generations, `ready_at`, `caught_up_at`,
+  `feed_through`, and the counts that `state()` reports.
+
+**One commit per table per page, with no epochs.** The ClickHouse design needs per-session
+epochs, because a replace there is an insert followed by a separate delete. Lance can do both in
+one commit:
+
+```ts
+await events
+  .mergeInsert("id")
+  .whenMatchedUpdateAll()
+  .whenNotMatchedInsertAll()
+  // Rows of replaced or removed sessions that the page no longer holds.
+  .whenNotMatchedBySourceDelete({ where: `archive_id IN (${replacedOrRemoved})` })
+  .execute(pageRecords);
+```
+
+The probe ([`search-probe/replace.ts`](search-probe/replace.ts)) checked this on 0.41.0. One commit
+did three things to three sessions:
+
+- replaced one session's three records with two, deleting the third;
+- removed a second session that had no new rows;
+- appended a record to a third session while keeping its older one.
+
+The untouched session stayed as it was, and searches saw only the new state. `sessions` and
+`llm_calls` are written the same way. The commits across tables are still separate, so the
+order and idempotency rules from [ingest](#ingest) apply: content tables first, the cursor last.
 
 ### Recommendation
 
@@ -768,8 +868,8 @@ Under those, LanceDB fits seshi better than ClickHouse:
 - DuckDB's `lance` extension adds SQL aggregation in-process when it is needed: totals for
   search, and token and spend reports.
 
-ClickHouse stays the better choice for heavy analytics at a scale where tens of milliseconds
-per query is not enough, and for teams that already run it.
+ClickHouse stays the better choice for analytics at the scale described below, and for teams
+that already run it.
 
 Both depend on the reader/writer seam, which is the first step either way. The spike (phase 0)
 should run the same queries against both on real S3 and on Linux, the server image's platform,
@@ -779,6 +879,37 @@ and measure:
 - whether grouping goes in TypeScript or through DuckDB;
 - how often `optimize()` has to run;
 - how long deleted text survives.
+
+### What "larger scale" means
+
+These are estimates. They extrapolate from the 1M-record probe, where DuckDB over Lance took
+5–50 ms per aggregation, assuming time grows roughly with row count. That would put a 100M-row
+table at about 0.5–5 s warm, and more from a cold bucket. The spike should measure it.
+
+How big seshi gets depends on numbers we have not measured. Assume about 150 searchable records
+and 50–100 LLM calls per session, and 8 sessions per developer per working day:
+
+| Team | Searchable records per year | LLM calls per year |
+|---|---|---|
+| 50 developers | ~20M | ~10M |
+| 500 developers | ~200M | ~100M |
+| 5,000 developers | ~2B | ~1B |
+
+ClickHouse becomes the better choice when one of these holds:
+
+- **Over about a billion raw rows**, with answers expected in under a second on queries across
+  all of them.
+- **Many people using dashboards at once.** DuckDB runs inside each API instance and competes
+  with search for CPU and memory. ClickHouse is built for many concurrent queries.
+- **Group-bys over very many distinct keys**, such as per session across a year, that do not fit
+  in the API process's memory.
+- **Rollups that keep themselves up to date.** ClickHouse's materialized views do this as rows
+  arrive; with DuckDB, the indexer maintains them.
+
+A rollup moves the line a long way. If the indexer keeps `usage_daily` (day × owner × project ×
+model), most reports read thousands of rows rather than millions. With it, DuckDB covers every
+team size above except the largest. ClickHouse then pays off only for frequent ad hoc queries over
+billions of raw rows.
 
 ### Also considered: DuckLake with Moraine
 
@@ -873,7 +1004,9 @@ is not part of the plan; it is worth watching as Moraine matures.
    is `FeedState`. A deployment with search off would then have no cross-owner feed, as today.
 8. **ClickHouse or LanceDB for the shared index?** The spike decides. The leaning is LanceDB, with
    DuckDB's `lance` extension for aggregations. ClickHouse is kept in reserve for analytics at a
-   scale DuckDB cannot serve.
+   scale DuckDB cannot serve ([what that means](#what-larger-scale-means)).
+10. **How many records and LLM calls does a real session have?** The scale estimates assume about
+    150 and 50–100. A count over an existing bucket would replace the guess.
 9. **With LanceDB, where does the index live?** Options are a derived prefix in the seshi bucket
    (a spec/layout.md change), or a separate bucket or folder named in `[search]`.
 
