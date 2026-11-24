@@ -648,7 +648,8 @@ means.
 
 A script ran `@lancedb/lancedb` 0.41.0 under Bun 1.4.2 (macOS arm64) on 23 November 2026, first
 on a local folder and then on S3. The S3 was rustfs, the same pinned image CI uses. It did not
-need a Node runtime.
+need a Node runtime. The scripts, how to run them, and their raw output are in
+[`search-probe/`](search-probe/README.md).
 
 | Check | Result |
 |---|---|

@@ -1,0 +1,11 @@
+{
+  "name": "seshi-search-probe",
+  "private": true,
+  "type": "module",
+  "description": "Throwaway probes behind docs/seshi/clickhouse-search.md: LanceDB, DuckDB's lance extension and ClickHouse under Bun. Not part of the workspace.",
+  "dependencies": {
+    "@duckdb/node-api": "2.0.1-r.1",
+    "@lancedb/lancedb": "0.41.0",
+    "apache-arrow": "21.2.0"
+  }
+}
