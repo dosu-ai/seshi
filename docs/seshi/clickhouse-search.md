@@ -45,8 +45,9 @@ then deployment. The details are in the [plan](#phased-plan).
 **There is an alternative: [LanceDB](#an-alternative-lancedb).** It is an embedded library, like
 SQLite, with BM25 built in, and it keeps its index on S3. One writer and many readers can share an
 index in the bucket without a new service. A probe ran it under Bun against S3, and every query
-feature but prefix search worked. It suits search better than ClickHouse. ClickHouse suits
-analytics better. The seam and the reader/writer interface below serve either, so the spike
+feature but prefix search worked. It suits search better than ClickHouse. With DuckDB's
+`lance` extension, it also answers aggregations in-process, in tens of milliseconds at 1M
+records. ClickHouse was faster at plain scans, but not by enough to matter at seshi's scale. The seam and the reader/writer interface below serve either, so the spike
 should try both before the backend is picked.
 
 ## Decisions proposed
@@ -663,7 +664,52 @@ need a Node runtime.
 | Is deleted text gone from the bucket? | **Not after one `optimize()`.** The data file still held the deleted and replaced rows, hidden by a deletion file. A second `optimize({ cleanupOlderThan: now, deleteUnverified: true })` rewrote the file and pruned the old versions, after which the text was gone. |
 | A second connection (another instance) | Reads the writer's table from the same prefix. |
 | 100k records of 40 words, on local S3 | Write 0.4 s; index build 0.5 s. From a new connection, the first query took 6–39 ms and later ones 1–25 ms (rare word, two common words ANDed, phrase, a filter). Local S3 has no network latency, so real S3 will be slower on cold reads. |
+| Counting | `countRows(filter)` counts with a SQL filter: 85,714 of 100k in 3 ms. A search has no `count()`. Instead, select only `archive_id` with a high `limit()` and count in TypeScript: 1,645 records in 1,220 sessions took 13 ms, and 13,161 records in 5,414 sessions took 15 ms. **A search returns only 10 rows unless `limit()` is set**, so a count without it silently comes out low. |
 | Install size | The macOS arm64 native binary is 250 MB. Optional dependencies for embeddings (`onnxruntime-node` and others) add 180 MB and can be left out. |
+
+### SQL over the index: DuckDB's `lance` extension
+
+The open-source library has no `GROUP BY`. DuckDB's core `lance` extension adds it. It reads
+`.lance` tables in place, on disk or S3, and `lance_fts(path, column, query, k = …)` runs the
+BM25 search as a table function, which can then be grouped, counted and joined in normal SQL.
+DuckDB runs in-process (`@duckdb/node-api`; the macOS arm64 binary is 63 MB) with an in-memory
+catalog. The `.lance` files stay where they are, or a `CREATE TABLE … AS SELECT` copies columns
+into memory.
+
+The probe ran DuckDB 2.0.1 under Bun 1.4.2 against 1M records: 40 words each, 62,500 sessions,
+plus owner, model and token columns. The same rows were loaded into ClickHouse 26.3 in Docker,
+with a `text` index, for comparison. Each query ran three times. The table gives the second and
+third runs; a cold first run was up to twice as slow. Everything ran on one laptop and the S3
+was local, so read these as orders of magnitude, not a benchmark.
+
+| Query | DuckDB + lance, folder | DuckDB + lance, local S3 | ClickHouse 26.3 |
+|---|---|---|---|
+| `count(*)` | 0–1 ms | 1–2 ms | 1 ms |
+| Count by visibility | 5 ms | 7 ms | 6 ms |
+| Tokens by model | 7 ms | 18 ms | 6–8 ms |
+| Tokens by owner and day, top 3 | 31 ms | 43–46 ms | 14–17 ms |
+| Distinct sessions | 5 ms | 7 ms | 12 ms |
+| Substring scan (`ILIKE`, no index) | 60–64 ms | 85–102 ms | 25–31 ms |
+| Search `error`: count records (110,069) and sessions (52,205) | 89–92 ms, with BM25 | 138–332 ms, with BM25 | 9 ms, no score |
+| Search `w300`: top sessions by BM25, with a visibility filter | 64–73 ms | 113–118 ms | 71–72 ms (BM25 written in SQL) |
+| Copy 1M rows without text into memory, then group | 132 ms, then 5–6 ms | 146 ms, then 5 ms | Not applicable |
+
+What the numbers say:
+
+- Both are fast enough for seshi at this size. Aggregations are tens of milliseconds at most.
+- ClickHouse is faster at plain filtering and scanning. Counting matches is about ten times
+  faster, because its index answers without reading text.
+- With ranking, the two are level. DuckDB gets BM25 from Lance's index. ClickHouse's BM25 is the
+  formula from the [query section](#query-semantics), which scores every matching record.
+- ClickHouse is a server. DuckDB and Lance run inside `seshi serve`, and their data stays files
+  in object storage.
+
+Two gaps found:
+
+- The lance extension did not use DuckDB's S3 secret for a custom endpoint. It needed the
+  standard `AWS_*` variables (`AWS_ENDPOINT`, `AWS_ALLOW_HTTP`) in the environment.
+- `lance_fts(…)` filtered with an outer `WHERE` applies the filter after the top `k` results.
+  For visibility, the search needs a `k` large enough, or the extension's `prefilter` option.
 
 ### ClickHouse and LanceDB compared
 
@@ -675,16 +721,16 @@ need a Node runtime.
 | BM25 | None built in: a formula written in SQL, or a term table of your own | Built in, scored over the whole index |
 | Phrases, OR, NOT, case and accents | Yes (phrases as a hint, then each row checked) | Yes (positions required for phrases) |
 | Prefix search | `LIKE` hint plus regex | A second `ngram` index, or none |
-| Grouping by session, `total`, paging | SQL: `GROUP BY`, `count() OVER ()`, `LIMIT … BY` | No `GROUP BY` in the open-source library. Group the top few thousand records in TypeScript. An exact `total` for a broad query needs a second pass over matching ids, or the API reports it as "at least". |
+| Grouping by session, `total`, paging | SQL: `GROUP BY`, `count() OVER ()`, `LIMIT … BY` | No `GROUP BY` in the library itself. Either group in TypeScript (an exact `total` is a second pass over matching ids, 13–15 ms at 100k records), or query through DuckDB's `lance` extension in SQL. |
 | Session fields (repo, visibility) | Separate `sessions` table joined at query time | No joins: the fields are copied onto every record, and a visibility change rewrites a session's records. |
 | Excerpts and highlights | In TypeScript | In TypeScript |
 | Deleting retracted text | Hidden at once; gone after a merge or `APPLY DELETED MASK` | Hidden at once; gone after compaction and version pruning (above) |
 | Rebuild without downtime | New tables, then switch | New table, then switch (Lance also has branches) |
 | Transactions | None: order and idempotency | One commit per table; still nothing across tables |
-| Analytics (tokens, spend) | Its strength | Not an analytics engine: no `GROUP BY` in the open-source library |
+| Analytics (tokens, spend) | Its strength; the fastest in the probe | Through DuckDB's `lance` extension: the same queries in tens of milliseconds at 1M records, in-process |
 | Semantic search later | Vector indexes exist; hybrid ranking is up to us | Vector indexes and hybrid (RRF) search built in |
 | Serverless mode | No: laptops would need ClickHouse credentials | Possible later: laptops could read an index the server writes to the bucket. That index could only hold sessions every reader may see. |
-| Cost to the deployment | A ClickHouse service | About 250 MB more in the server image, plus S3 requests per query |
+| Cost to the deployment | A ClickHouse service | About 250 MB more in the server image (plus 63 MB with DuckDB), and S3 requests per query |
 | Maturity for this job | Text index GA since 26.2 (March 2026) | Lance-native FTS is new; the older Tantivy-based option is gone. Pre-1.0. |
 
 ### What changes in this design if LanceDB is picked
@@ -705,22 +751,31 @@ need a Node runtime.
 
 ### Recommendation
 
-For search alone, LanceDB fits seshi better than ClickHouse:
+Two expectations shape the choice:
+
+- **Deletes are rare next to inserts and updates.** Deleted text lingering until compaction
+  matters less, and an occasional `optimize()` with version pruning is enough.
+- **Speed only has to be reasonable.** Grouping in TypeScript, and cold reads from object
+  storage, are acceptable.
+
+Under those, LanceDB fits seshi better than ClickHouse:
 
 - BM25 is built in.
 - There is no service to run.
 - The index sits in object storage, in the spirit of X6.1.
 - It covers semantic search later.
+- DuckDB's `lance` extension adds SQL aggregation in-process when it is needed: totals for
+  search, and token and spend reports.
 
-ClickHouse is the better choice only if token and spend analytics become a goal. That would be a
-separate decision and could use a separate store.
+ClickHouse stays the better choice for heavy analytics at a scale where tens of milliseconds
+per query is not enough, and for teams that already run it.
 
 Both depend on the reader/writer seam, which is the first step either way. The spike (phase 0)
-should run the same queries against both, on real S3 with about 1M real-shaped records, and
-measure:
+should run the same queries against both on real S3 and on Linux, the server image's platform,
+and measure:
 
-- latency on cold and warm reads;
-- the cost of grouping in TypeScript;
+- latency on cold reads from a real bucket;
+- whether grouping goes in TypeScript or through DuckDB;
 - how often `optimize()` has to run;
 - how long deleted text survives.
 
@@ -764,8 +819,9 @@ measure:
    owner's own totals?
 7. **Does `GET /v1/changes/all` move to ClickHouse with search?** The proposal says yes, since it
    is `FeedState`. A deployment with search off would then have no cross-owner feed, as today.
-8. **ClickHouse or LanceDB for the shared index?** The spike decides; the leaning is LanceDB for
-   search, with ClickHouse kept for analytics if they become a goal.
+8. **ClickHouse or LanceDB for the shared index?** The spike decides. The leaning is LanceDB, with
+   DuckDB's `lance` extension for aggregations. ClickHouse is kept in reserve for analytics at a
+   scale DuckDB cannot serve.
 9. **With LanceDB, where does the index live?** Options are a derived prefix in the seshi bucket
    (a spec/layout.md change), or a separate bucket or folder named in `[search]`.
 
