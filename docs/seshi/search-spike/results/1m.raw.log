@@ -1,0 +1,213 @@
+Copying gs://seshi-search-spike-a8d43c/harness/run.sh to file:///spike/run.sh
+  
+
++ command -v /usr/bin/time
++ apt-get install -y time
++ cd /spike
++ rm -rf h
++ mkdir h
++ gcloud storage cp -r 'gs://seshi-search-spike-a8d43c/harness/*' h/
+Copying gs://seshi-search-spike-a8d43c/harness/bench.ts to file://h/bench.ts
+Copying gs://seshi-search-spike-a8d43c/harness/commit.ts to file://h/commit.ts
+  
+Copying gs://seshi-search-spike-a8d43c/harness/common.ts to file://h/common.ts
+Copying gs://seshi-search-spike-a8d43c/harness/duck.ts to file://h/duck.ts
+Copying gs://seshi-search-spike-a8d43c/harness/gen.ts to file://h/gen.ts
+Copying gs://seshi-search-spike-a8d43c/harness/package.json to file://h/package.json
+Copying gs://seshi-search-spike-a8d43c/harness/run.sh to file://h/run.sh
+.
+
+Average throughput: 619.2kiB/s
++ cd h
++ bun install
++ tail -3
+100 packages installed [86.00ms]
+
+Blocked 2 postinstalls. Run `bun pm untrusted` for details.
++ uname -a
+Linux seshi-search-spike 6.1.0-56-cloud-amd64 #1 SMP PREEMPT_DYNAMIC Debian 6.1.192-2 (2026-11-16) x86_64 GNU/Linux
++ nproc
+8
++ free -g
++ head -2
+               total        used        free      shared  buff/cache   available
+Mem:              31           0          29           0           1          30
++ du -sh node_modules/@lancedb/lancedb node_modules/@lancedb/lancedb-linux-x64-gnu node_modules/@lancedb/lancedb-linux-x64-musl node_modules/@duckdb/node-api node_modules/@duckdb/node-bindings node_modules/@duckdb/node-bindings-linux-x64 node_modules/@duckdb/node-bindings-linux-x64-musl node_modules/apache-arrow
+1.7M	node_modules/@lancedb/lancedb
+205M	node_modules/@lancedb/lancedb-linux-x64-gnu
+171M	node_modules/@lancedb/lancedb-linux-x64-musl
+1.8M	node_modules/@duckdb/node-api
+112K	node_modules/@duckdb/node-bindings
+93M	node_modules/@duckdb/node-bindings-linux-x64
+89M	node_modules/@duckdb/node-bindings-linux-x64-musl
+8.5M	node_modules/apache-arrow
++ U=gs://seshi-search-spike-a8d43c/1m
++ /usr/bin/time -v bun gen.ts gs://seshi-search-spike-a8d43c/1m 1000000
++ grep -vE '^\s+(Average|Exit|Socket|Signals|Swaps|Page size|File system|Voluntary|Involuntary|Minor|Major|Percent|System time|User time)'
+[2026-11-25T05:04:40Z WARN  lance::dataset::write::insert] No existing dataset at gs://seshi-search-spike-a8d43c/1m/events.lance, it will be created
+[2026-11-25T05:04:40Z WARN  lance::dataset::write::insert] No existing dataset at gs://seshi-search-spike-a8d43c/1m/sessions.lance, it will be created
+  1000018 records, 11927 sessions, 71132ms
+write: 1000018 records in 11927 sessions, 889 chars/record, 71132ms
+index fts text: 30142ms
+index fts text_prefix (ngram 2-12, prefixOnly): 10612ms
+index labelList models, labels: 1203ms
+index bitmap visibility, role, format: 1514ms
+index btree owner, archive_id, session_updated: 1992ms
+sessions btree id: 498ms
+optimize: 65034ms
+events stats: {"bytes":1035926222,"rows":1000018,"fragments":1,"indices":10}
+  index archive_id_idx: BTree, {"numIndexedRows":1000018,"numUnindexedRows":0,"indexType":"BTREE","numIndices":1}
+  index format_idx: Bitmap, {"numIndexedRows":1000018,"numUnindexedRows":0,"indexType":"BITMAP","numIndices":1}
+  index labels_idx: LabelList, {"numIndexedRows":1000018,"numUnindexedRows":0,"indexType":"LABEL_LIST","numIndices":1}
+  index models_idx: LabelList, {"numIndexedRows":1000018,"numUnindexedRows":0,"indexType":"LABEL_LIST","numIndices":1}
+  index owner_idx: BTree, {"numIndexedRows":1000018,"numUnindexedRows":0,"indexType":"BTREE","numIndices":1}
+  index role_idx: Bitmap, {"numIndexedRows":1000018,"numUnindexedRows":0,"indexType":"BITMAP","numIndices":1}
+  index session_updated_idx: BTree, {"numIndexedRows":1000018,"numUnindexedRows":0,"indexType":"BTREE","numIndices":1}
+  index text_idx: FTS, {"numIndexedRows":1000018,"numUnindexedRows":0,"indexType":"FTS","numIndices":1}
+  index text_prefix_idx: FTS, {"numIndexedRows":1000018,"numUnindexedRows":0,"indexType":"FTS","numIndices":1}
+  index visibility_idx: Bitmap, {"numIndexedRows":1000018,"numUnindexedRows":0,"indexType":"BITMAP","numIndices":1}
+	Command being timed: "bun gen.ts gs://seshi-search-spike-a8d43c/1m 1000000"
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 3:03.01
+	Maximum resident set size (kbytes): 3646352
++ gcloud storage du -s gs://seshi-search-spike-a8d43c/1m/events.lance gs://seshi-search-spike-a8d43c/1m/sessions.lance
+2070951859   gs://seshi-search-spike-a8d43c/1m/events.lance
+1002345      gs://seshi-search-spike-a8d43c/1m/sessions.lance
++ for i in 1 2
++ bun bench.ts gs://seshi-search-spike-a8d43c/1m 10
+relevance | admin, no filter       | rare word (zeppelinx)              | cold  1640ms | p50   258ms | p95   299ms | search 55ms group 0ms fetch 243ms | rows 5 | sessions 5
+relevance | admin, no filter       | one common word (error)            | cold  1956ms | p50   846ms | p95   910ms | search 500ms group 142ms fetch 204ms | rows 100000 (capped) | sessions 10302
+relevance | admin, no filter       | two common words AND (error test)  | cold  4338ms | p50  1107ms | p95  1318ms | search 783ms group 159ms fetch 233ms | rows 100000 (capped) | sessions 10323
+relevance | admin, no filter       | phrase (flaky checkout test)       | cold  1796ms | p50   316ms | p95   347ms | search 92ms group 7ms fetch 204ms | rows 5014 | sessions 3007
+relevance | admin, no filter       | NOT (deploy -staging)              | cold  1974ms | p50   786ms | p95   817ms | search 443ms group 153ms fetch 222ms | rows 100000 (capped) | sessions 10331
+relevance | admin, no filter       | OR (rollback OR deployer)          | cold  1577ms | p50   426ms | p95   476ms | search 170ms group 53ms fetch 199ms | rows 36345 | sessions 8101
+relevance | admin, no filter       | very common word (the)             | cold  1670ms | p50   855ms | p95   908ms | search 476ms group 136ms fetch 200ms | rows 100000 (capped) | sessions 10337
+relevance | admin, no filter       | prefix (deplo*)                    | cold  1829ms | p50   841ms | p95   962ms | search 438ms group 80ms fetch 231ms | rows 35528 checked 35528 kept 18023 | sessions 6202
+relevance | member u1 (org or own) | rare word (zeppelinx)              | cold  1101ms | p50   244ms | p95   269ms | search 61ms group 0ms fetch 207ms | rows 4 | sessions 4
+relevance | member u1 (org or own) | one common word (error)            | cold  1543ms | p50   803ms | p95   836ms | search 465ms group 130ms fetch 209ms | rows 100000 (capped) | sessions 9018
+relevance | member u1 (org or own) | two common words AND (error test)  | cold  2051ms | p50  1043ms | p95  1189ms | search 691ms group 133ms fetch 205ms | rows 100000 (capped) | sessions 9008
+relevance | member u1 (org or own) | phrase (flaky checkout test)       | cold  1420ms | p50   327ms | p95   383ms | search 96ms group 6ms fetch 199ms | rows 4279 | sessions 2572
+relevance | member u1 (org or own) | NOT (deploy -staging)              | cold  1784ms | p50   751ms | p95   823ms | search 374ms group 132ms fetch 198ms | rows 100000 (capped) | sessions 9019
+relevance | member u1 (org or own) | OR (rollback OR deployer)          | cold  1404ms | p50   398ms | p95   447ms | search 142ms group 40ms fetch 257ms | rows 31034 | sessions 6896
+relevance | member u1 (org or own) | very common word (the)             | cold  1700ms | p50   886ms | p95   947ms | search 514ms group 141ms fetch 231ms | rows 100000 (capped) | sessions 9054
+relevance | member u1 (org or own) | prefix (deplo*)                    | cold  1942ms | p50   816ms | p95   889ms | search 501ms group 87ms fetch 227ms | rows 30422 checked 30422 kept 15421 | sessions 5277
+relevance | member + label + model | rare word (zeppelinx)              | cold   565ms | p50    12ms | p95    13ms | search 12ms group 0ms fetch 0ms | rows 0 | sessions 0
+relevance | member + label + model | one common word (error)            | cold  1279ms | p50   437ms | p95   585ms | search 157ms group 47ms fetch 194ms | rows 58347 | sessions 895
+relevance | member + label + model | two common words AND (error test)  | cold  1437ms | p50   479ms | p95   603ms | search 219ms group 40ms fetch 209ms | rows 37864 | sessions 889
+relevance | member + label + model | phrase (flaky checkout test)       | cold  1338ms | p50   301ms | p95   320ms | search 82ms group 1ms fetch 200ms | rows 386 | sessions 214
+relevance | member + label + model | NOT (deploy -staging)              | cold  1256ms | p50   389ms | p95   507ms | search 145ms group 14ms fetch 215ms | rows 18017 | sessions 863
+relevance | member + label + model | OR (rollback OR deployer)          | cold  1129ms | p50   299ms | p95   363ms | search 92ms group 3ms fetch 219ms | rows 2915 | sessions 594
+relevance | member + label + model | very common word (the)             | cold  1308ms | p50   474ms | p95   540ms | search 187ms group 55ms fetch 297ms | rows 75208 | sessions 896
+relevance | member + label + model | prefix (deplo*)                    | cold  1331ms | p50   625ms | p95   659ms | search 381ms group 6ms fetch 244ms | rows 2806 checked 2806 kept 1386 | sessions 440
+recent    | admin, no filter       | rare word (zeppelinx)              | cold  1459ms | p50   373ms | p95   395ms | search 169ms group 0ms fetch 190ms | rows 5 | sessions 5
+recent    | admin, no filter       | one common word (error)            | cold  1207ms | p50   307ms | p95   422ms | search 89ms group 4ms fetch 213ms | rows 6714 | sessions 107
+recent    | admin, no filter       | two common words AND (error test)  | cold  1406ms | p50   357ms | p95   427ms | search 153ms group 3ms fetch 188ms | rows 4315 | sessions 107
+recent    | admin, no filter       | phrase (flaky checkout test)       | cold  1133ms | p50   258ms | p95   289ms | search 75ms group 0ms fetch 183ms | rows 47 | sessions 31
+recent    | admin, no filter       | NOT (deploy -staging)              | cold  1214ms | p50   375ms | p95   441ms | search 122ms group 2ms fetch 218ms | rows 2135 | sessions 103
+recent    | admin, no filter       | OR (rollback OR deployer)          | cold  1153ms | p50   288ms | p95   310ms | search 74ms group 0ms fetch 207ms | rows 324 | sessions 72
+recent    | admin, no filter       | very common word (the)             | cold  1132ms | p50   308ms | p95   328ms | search 80ms group 6ms fetch 223ms | rows 8719 | sessions 107
+recent    | admin, no filter       | prefix (deplo*)                    | cold  1079ms | p50   335ms | p95   372ms | search 132ms group 1ms fetch 181ms | rows 330 checked 330 kept 174 | sessions 65
+recent    | member u1 (org or own) | rare word (zeppelinx)              | cold  1382ms | p50   384ms | p95   417ms | search 221ms group 0ms fetch 196ms | rows 4 | sessions 4
+recent    | member u1 (org or own) | one common word (error)            | cold  1176ms | p50   280ms | p95   325ms | search 82ms group 4ms fetch 238ms | rows 6061 | sessions 87
+recent    | member u1 (org or own) | two common words AND (error test)  | cold  1578ms | p50   360ms | p95   520ms | search 158ms group 3ms fetch 186ms | rows 3891 | sessions 87
+recent    | member u1 (org or own) | phrase (flaky checkout test)       | cold  1158ms | p50   276ms | p95   345ms | search 61ms group 0ms fetch 198ms | rows 42 | sessions 27
+recent    | member u1 (org or own) | NOT (deploy -staging)              | cold  1279ms | p50   352ms | p95   381ms | search 129ms group 1ms fetch 222ms | rows 1912 | sessions 84
+recent    | member u1 (org or own) | OR (rollback OR deployer)          | cold  1111ms | p50   275ms | p95   309ms | search 68ms group 0ms fetch 193ms | rows 282 | sessions 57
+recent    | member u1 (org or own) | very common word (the)             | cold  1114ms | p50   279ms | p95   302ms | search 76ms group 5ms fetch 187ms | rows 7857 | sessions 87
+recent    | member u1 (org or own) | prefix (deplo*)                    | cold  1084ms | p50   301ms | p95   320ms | search 108ms group 1ms fetch 178ms | rows 295 checked 295 kept 156 | sessions 54
+recent    | member + label + model | rare word (zeppelinx)              | cold   637ms | p50    38ms | p95    39ms | search 36ms group 0ms fetch 0ms | rows 0 | sessions 0
+recent    | member + label + model | one common word (error)            | cold  1259ms | p50   349ms | p95   380ms | search 132ms group 2ms fetch 184ms | rows 2292 | sessions 55
+recent    | member + label + model | two common words AND (error test)  | cold  1420ms | p50   510ms | p95   546ms | search 288ms group 1ms fetch 190ms | rows 1482 | sessions 54
+recent    | member + label + model | phrase (flaky checkout test)       | cold  1383ms | p50   347ms | p95   535ms | search 145ms group 0ms fetch 198ms | rows 80 | sessions 43
+recent    | member + label + model | NOT (deploy -staging)              | cold  1278ms | p50   431ms | p95   542ms | search 214ms group 1ms fetch 217ms | rows 659 | sessions 52
+recent    | member + label + model | OR (rollback OR deployer)          | cold  1216ms | p50   336ms | p95   365ms | search 127ms group 0ms fetch 238ms | rows 121 | sessions 35
+recent    | member + label + model | very common word (the)             | cold  1149ms | p50   340ms | p95   399ms | search 203ms group 2ms fetch 194ms | rows 2940 | sessions 55
+recent    | member + label + model | prefix (deplo*)                    | cold  1107ms | p50   375ms | p95   390ms | search 162ms group 1ms fetch 212ms | rows 108 checked 123 kept 48 | sessions 25
+runtime: bun 1.4.2, linux-x64
++ for i in 1 2
++ bun bench.ts gs://seshi-search-spike-a8d43c/1m 10
+relevance | admin, no filter       | rare word (zeppelinx)              | cold   978ms | p50   248ms | p95   269ms | search 68ms group 0ms fetch 189ms | rows 5 | sessions 5
+relevance | admin, no filter       | one common word (error)            | cold  1613ms | p50   816ms | p95   891ms | search 478ms group 155ms fetch 215ms | rows 100000 (capped) | sessions 10302
+relevance | admin, no filter       | two common words AND (error test)  | cold  4234ms | p50  1097ms | p95  1148ms | search 703ms group 141ms fetch 218ms | rows 100000 (capped) | sessions 10323
+relevance | admin, no filter       | phrase (flaky checkout test)       | cold  1165ms | p50   319ms | p95   382ms | search 90ms group 8ms fetch 196ms | rows 5014 | sessions 3007
+relevance | admin, no filter       | NOT (deploy -staging)              | cold  1730ms | p50   779ms | p95   846ms | search 445ms group 152ms fetch 205ms | rows 100000 (capped) | sessions 10331
+relevance | admin, no filter       | OR (rollback OR deployer)          | cold  1257ms | p50   421ms | p95   477ms | search 148ms group 50ms fetch 228ms | rows 36345 | sessions 8101
+relevance | admin, no filter       | very common word (the)             | cold  1627ms | p50   849ms | p95   891ms | search 501ms group 144ms fetch 199ms | rows 100000 (capped) | sessions 10337
+relevance | admin, no filter       | prefix (deplo*)                    | cold  1517ms | p50   823ms | p95   866ms | search 427ms group 80ms fetch 206ms | rows 35528 checked 35528 kept 18023 | sessions 6202
+relevance | member u1 (org or own) | rare word (zeppelinx)              | cold  1075ms | p50   256ms | p95   456ms | search 114ms group 0ms fetch 342ms | rows 4 | sessions 4
+relevance | member u1 (org or own) | one common word (error)            | cold  1603ms | p50   814ms | p95   911ms | search 449ms group 131ms fetch 234ms | rows 100000 (capped) | sessions 9018
+relevance | member u1 (org or own) | two common words AND (error test)  | cold  2033ms | p50  1039ms | p95  1225ms | search 712ms group 147ms fetch 210ms | rows 100000 (capped) | sessions 9008
+relevance | member u1 (org or own) | phrase (flaky checkout test)       | cold  1184ms | p50   310ms | p95   332ms | search 123ms group 6ms fetch 174ms | rows 4279 | sessions 2572
+relevance | member u1 (org or own) | NOT (deploy -staging)              | cold  1542ms | p50   728ms | p95   759ms | search 393ms group 129ms fetch 196ms | rows 100000 (capped) | sessions 9019
+relevance | member u1 (org or own) | OR (rollback OR deployer)          | cold  1279ms | p50   395ms | p95   466ms | search 138ms group 45ms fetch 202ms | rows 31034 | sessions 6896
+relevance | member u1 (org or own) | very common word (the)             | cold  1578ms | p50   836ms | p95   891ms | search 507ms group 137ms fetch 217ms | rows 100000 (capped) | sessions 9054
+relevance | member u1 (org or own) | prefix (deplo*)                    | cold  1514ms | p50   751ms | p95   775ms | search 472ms group 63ms fetch 199ms | rows 30422 checked 30422 kept 15421 | sessions 5277
+relevance | member + label + model | rare word (zeppelinx)              | cold   515ms | p50    12ms | p95    13ms | search 11ms group 0ms fetch 0ms | rows 0 | sessions 0
+relevance | member + label + model | one common word (error)            | cold  1233ms | p50   422ms | p95   463ms | search 160ms group 44ms fetch 208ms | rows 58347 | sessions 895
+relevance | member + label + model | two common words AND (error test)  | cold  1367ms | p50   455ms | p95   487ms | search 216ms group 31ms fetch 197ms | rows 37864 | sessions 889
+relevance | member + label + model | phrase (flaky checkout test)       | cold  1119ms | p50   294ms | p95   421ms | search 93ms group 1ms fetch 194ms | rows 386 | sessions 214
+relevance | member + label + model | NOT (deploy -staging)              | cold  1253ms | p50   382ms | p95   520ms | search 148ms group 14ms fetch 220ms | rows 18017 | sessions 863
+relevance | member + label + model | OR (rollback OR deployer)          | cold  1206ms | p50   292ms | p95   306ms | search 83ms group 3ms fetch 207ms | rows 2915 | sessions 594
+relevance | member + label + model | very common word (the)             | cold  1321ms | p50   447ms | p95   470ms | search 170ms group 55ms fetch 199ms | rows 75208 | sessions 896
+relevance | member + label + model | prefix (deplo*)                    | cold  1282ms | p50   594ms | p95   857ms | search 365ms group 10ms fetch 217ms | rows 2806 checked 2806 kept 1386 | sessions 440
+recent    | admin, no filter       | rare word (zeppelinx)              | cold  1344ms | p50   379ms | p95   462ms | search 196ms group 0ms fetch 183ms | rows 5 | sessions 5
+recent    | admin, no filter       | one common word (error)            | cold  1095ms | p50   309ms | p95   456ms | search 83ms group 5ms fetch 368ms | rows 6714 | sessions 107
+recent    | admin, no filter       | two common words AND (error test)  | cold  1399ms | p50   366ms | p95   438ms | search 229ms group 3ms fetch 190ms | rows 4315 | sessions 107
+recent    | admin, no filter       | phrase (flaky checkout test)       | cold  1063ms | p50   251ms | p95   285ms | search 58ms group 0ms fetch 178ms | rows 47 | sessions 31
+recent    | admin, no filter       | NOT (deploy -staging)              | cold  1341ms | p50   341ms | p95   371ms | search 120ms group 2ms fetch 199ms | rows 2135 | sessions 103
+recent    | admin, no filter       | OR (rollback OR deployer)          | cold  1133ms | p50   272ms | p95   300ms | search 70ms group 1ms fetch 191ms | rows 324 | sessions 72
+recent    | admin, no filter       | very common word (the)             | cold  1091ms | p50   307ms | p95   324ms | search 78ms group 6ms fetch 194ms | rows 8719 | sessions 107
+recent    | admin, no filter       | prefix (deplo*)                    | cold  1006ms | p50   323ms | p95   349ms | search 128ms group 1ms fetch 180ms | rows 330 checked 330 kept 174 | sessions 65
+recent    | member u1 (org or own) | rare word (zeppelinx)              | cold  1282ms | p50   364ms | p95   385ms | search 206ms group 0ms fetch 179ms | rows 4 | sessions 4
+recent    | member u1 (org or own) | one common word (error)            | cold  1132ms | p50   290ms | p95   348ms | search 71ms group 5ms fetch 171ms | rows 6061 | sessions 87
+recent    | member u1 (org or own) | two common words AND (error test)  | cold  1265ms | p50   357ms | p95   515ms | search 155ms group 3ms fetch 194ms | rows 3891 | sessions 87
+recent    | member u1 (org or own) | phrase (flaky checkout test)       | cold  1149ms | p50   294ms | p95   456ms | search 66ms group 0ms fetch 227ms | rows 42 | sessions 27
+recent    | member u1 (org or own) | NOT (deploy -staging)              | cold  1159ms | p50   330ms | p95   356ms | search 134ms group 2ms fetch 195ms | rows 1912 | sessions 84
+recent    | member u1 (org or own) | OR (rollback OR deployer)          | cold  1148ms | p50   274ms | p95   312ms | search 95ms group 0ms fetch 214ms | rows 282 | sessions 57
+recent    | member u1 (org or own) | very common word (the)             | cold  1058ms | p50   276ms | p95   297ms | search 71ms group 5ms fetch 180ms | rows 7857 | sessions 87
+recent    | member u1 (org or own) | prefix (deplo*)                    | cold  1035ms | p50   309ms | p95   355ms | search 132ms group 1ms fetch 223ms | rows 295 checked 295 kept 156 | sessions 54
+recent    | member + label + model | rare word (zeppelinx)              | cold   676ms | p50    37ms | p95    38ms | search 37ms group 0ms fetch 0ms | rows 0 | sessions 0
+recent    | member + label + model | one common word (error)            | cold  1212ms | p50   357ms | p95   498ms | search 128ms group 2ms fetch 214ms | rows 2292 | sessions 55
+recent    | member + label + model | two common words AND (error test)  | cold  1488ms | p50   537ms | p95   546ms | search 281ms group 2ms fetch 255ms | rows 1482 | sessions 54
+recent    | member + label + model | phrase (flaky checkout test)       | cold  1306ms | p50   352ms | p95   405ms | search 147ms group 0ms fetch 258ms | rows 80 | sessions 43
+recent    | member + label + model | NOT (deploy -staging)              | cold  1309ms | p50   434ms | p95   559ms | search 220ms group 1ms fetch 232ms | rows 659 | sessions 52
+recent    | member + label + model | OR (rollback OR deployer)          | cold  1189ms | p50   336ms | p95   351ms | search 120ms group 0ms fetch 182ms | rows 121 | sessions 35
+recent    | member + label + model | very common word (the)             | cold  1255ms | p50   343ms | p95   372ms | search 140ms group 3ms fetch 200ms | rows 2940 | sessions 55
+recent    | member + label + model | prefix (deplo*)                    | cold  1172ms | p50   384ms | p95   440ms | search 181ms group 0ms fetch 192ms | rows 108 checked 123 kept 48 | sessions 25
+runtime: bun 1.4.2, linux-x64
++ bun duck.ts gs://seshi-search-spike-a8d43c/1m/events.lance 10
+load lance: 413ms
+shape "error": 729624 records
+shape "error test": 858473 records
+shape "error AND test": 858473 records
+shape "+error +test": 858473 records
+shape "\"flaky checkout test\"": 608391 records
+shape "deploy -staging": 407938 records
+duck | admin, no filter       | zeppelinx          | first   182ms | p50   108ms | p95   122ms | sessions 5
+duck | admin, no filter       | error              | first  1409ms | p50  1495ms | p95  1578ms | sessions 10302
+duck | admin, no filter       | rollback deployer  | first   891ms | p50   839ms | p95   892ms | sessions 8101
+duck | admin, no filter       | the                | first  1638ms | p50  1535ms | p95  1620ms | sessions 10337
+duck | member u1 (org or own) | zeppelinx          | first   190ms | p50   156ms | p95   179ms | sessions 4
+duck | member u1 (org or own) | error              | first  1455ms | p50  1408ms | p95  1645ms | sessions 8794
+duck | member u1 (org or own) | rollback deployer  | first   965ms | p50   974ms | p95  1013ms | sessions 6896
+duck | member u1 (org or own) | the                | first  1496ms | p50  1501ms | p95  1600ms | sessions 8850
+runtime: bun 1.4.2, linux-x64
++ /usr/bin/time -v bun commit.ts gs://seshi-search-spike-a8d43c/1m 5 --scrub
++ grep -vE '^\s+(Average|Exit|Socket|Signals|Swaps|Page size|File system|Voluntary|Involuntary|Minor|Major|Percent|System time|User time)'
+page 0: 1962 records, events mergeInsert 1639ms (inserted 1962, updated 0, deleted 196), sessions 446ms
+page 1: 1786 records, events mergeInsert 1349ms (inserted 1786, updated 0, deleted 189), sessions 269ms
+page 2: 1836 records, events mergeInsert 1337ms (inserted 1836, updated 0, deleted 413), sessions 279ms
+page 3: 1261 records, events mergeInsert 1253ms (inserted 1261, updated 0, deleted 200), sessions 260ms
+page 4: 1658 records, events mergeInsert 1298ms (inserted 1658, updated 0, deleted 295), sessions 271ms
+events commit p50 1337ms max 1639ms; sessions p50 271ms
+optimize: 58311ms {"fragmentsRemoved":5,"fragmentsAdded":1,"filesRemoved":5,"filesAdded":1}
+deleted rows still in fragments: before optimize 1293, after 1293 (deleted this run: 1293)
+[2026-11-25T05:20:31Z WARN  lance::dataset::write::insert] No existing dataset at gs://seshi-search-spike-a8d43c/1m/events_scrub.lance, it will be created
+scrub copy: 1007228 rows in 18937ms
+scrub fts text: 37940ms
+scrub fts text_prefix: 11200ms
+scrub scalar indexes: 4485ms
+scrub total: 72563ms; deleted rows in the copy: 0
+	Command being timed: "bun commit.ts gs://seshi-search-spike-a8d43c/1m 5 --scrub"
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 2:20.81
+	Maximum resident set size (kbytes): 5677700
+exit 0
