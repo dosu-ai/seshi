@@ -35,8 +35,8 @@ import {
   sqliteIndex,
   type Viewer,
 } from "@seshi/search";
-import { FsStore, type Store } from "@seshi/store";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { FetchAzureBlobClient, FsStore, type Store } from "@seshi/store";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { lanceIndex } from "./index";
 
 const H = (n: number) => n.toString(16).padStart(64, "0");
@@ -59,6 +59,30 @@ function s3StorageOptions(): Record<string, string> {
     allow_http: "true",
   };
 }
+
+// Azure Blob Storage: Azurite in CI, as tests/store/azure-live.test.ts.
+const azure = {
+  endpoint: process.env.SESHI_TEST_AZURE_ENDPOINT,
+  account: process.env.SESHI_TEST_AZURE_ACCOUNT,
+  key: process.env.SESHI_TEST_AZURE_KEY,
+  container: process.env.SESHI_TEST_AZURE_CONTAINER ?? "seshi-test",
+};
+const azureConfigured = Boolean(azure.endpoint && azure.account && azure.key);
+
+function azureStorageOptions(): Record<string, string> {
+  return {
+    azure_storage_account_name: azure.account as string,
+    azure_storage_account_key: azure.key as string,
+    azure_storage_endpoint: azure.endpoint as string,
+    ...(azure.endpoint?.startsWith("http://") ? { allow_http: "true" } : {}),
+  };
+}
+
+// Google Cloud Storage: a real bucket only, with Application Default Credentials. LanceDB's
+// client cannot write to fake-gcs-server, so CI's emulator does not count.
+const gcsBucket = process.env.SESHI_TEST_GCS_EMULATOR
+  ? undefined
+  : process.env.SESHI_TEST_GCS_BUCKET;
 
 interface Backend {
   name: string;
@@ -88,7 +112,29 @@ const BACKENDS: Backend[] = [
     location: () => `s3://${s3.bucket}/conformance-${Date.now().toString(36)}-${run++}`,
     open: (uri) => lanceIndex({ uri, readConsistency: 0, storageOptions: s3StorageOptions() }),
   },
+  {
+    name: "LanceDB on Azure Blob Storage",
+    skip: !azureConfigured,
+    location: () => `az://${azure.container}/conformance-${Date.now().toString(36)}-${run++}`,
+    open: (uri) => lanceIndex({ uri, readConsistency: 0, storageOptions: azureStorageOptions() }),
+  },
+  {
+    name: "LanceDB on Google Cloud Storage",
+    skip: gcsBucket === undefined,
+    location: () => `gs://${gcsBucket}/conformance-${Date.now().toString(36)}-${run++}`,
+    open: (uri) => lanceIndex({ uri, readConsistency: 0 }),
+  },
 ];
+
+beforeAll(async () => {
+  if (!azureConfigured) return;
+  await new FetchAzureBlobClient({
+    account: azure.account as string,
+    container: azure.container,
+    endpoint: azure.endpoint as string,
+    credentials: { accountKey: azure.key as string },
+  }).createContainer();
+});
 
 const formats = new FormatRegistry(BUILTIN_FORMATS);
 

@@ -15,6 +15,7 @@ import { buildInstance, type Instance, SEARCH_JOB } from "@seshi/instance";
 import { lanceIndex } from "@seshi/lance";
 import type { SearchResults } from "@seshi/model";
 import { provideLance } from "@seshi/search";
+import { FetchAzureBlobClient } from "@seshi/store";
 import { buildFormats } from "seshi/integrations";
 import { main } from "seshi/main";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -28,6 +29,22 @@ const s3 = {
   secret: process.env.SESHI_TEST_S3_SECRET_KEY,
 };
 const s3Configured = Boolean(s3.endpoint && s3.bucket && s3.key && s3.secret);
+
+const azure = {
+  endpoint: process.env.SESHI_TEST_AZURE_ENDPOINT,
+  account: process.env.SESHI_TEST_AZURE_ACCOUNT,
+  key: process.env.SESHI_TEST_AZURE_KEY,
+  container: process.env.SESHI_TEST_AZURE_CONTAINER ?? "seshi-test",
+};
+const azureConfigured = Boolean(azure.endpoint && azure.account && azure.key);
+
+// A real bucket with Application Default Credentials: LanceDB cannot write to fake-gcs-server.
+const gcsBucket = process.env.SESHI_TEST_GCS_EMULATOR
+  ? undefined
+  : process.env.SESHI_TEST_GCS_BUCKET;
+
+const unique = () =>
+  `lance-deploy-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
 interface Variant {
   name: string;
@@ -48,12 +65,30 @@ const VARIANTS: Variant[] = [
     store: () =>
       [
         "[store]",
-        `url = "s3://${s3.bucket}/lance-deploy-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}"`,
+        `url = "s3://${s3.bucket}/${unique()}"`,
         `endpoint = "${s3.endpoint}"`,
         'region = "us-east-1"',
         `credentials = { access_key_id = "${s3.key}", secret_access_key = "${s3.secret}" }`,
         "",
       ].join("\n"),
+  },
+  {
+    name: "Azure Blob Storage",
+    skip: !azureConfigured,
+    store: () =>
+      [
+        "[store]",
+        `url = "az://${azure.container}/${unique()}"`,
+        `account_name = "${azure.account}"`,
+        `endpoint = "${azure.endpoint}"`,
+        `credentials = { account_key = "${azure.key}" }`,
+        "",
+      ].join("\n"),
+  },
+  {
+    name: "Google Cloud Storage",
+    skip: gcsBucket === undefined,
+    store: () => `[store]\nurl = "gs://${gcsBucket}/${unique()}"\n`,
   },
 ];
 
@@ -135,7 +170,22 @@ describe.each(VARIANTS)("LanceDB search served from $name", (variant) => {
       ].join("\n"),
       { mode: 0o600 },
     );
-    env = { HOME: dir, PATH: process.env.PATH ?? "" };
+    env = {
+      HOME: dir,
+      PATH: process.env.PATH ?? "",
+      // Application Default Credentials, for a real GCS bucket.
+      ...(process.env.GOOGLE_APPLICATION_CREDENTIALS
+        ? { GOOGLE_APPLICATION_CREDENTIALS: process.env.GOOGLE_APPLICATION_CREDENTIALS }
+        : {}),
+    };
+    if (variant.name === "Azure Blob Storage") {
+      await new FetchAzureBlobClient({
+        account: azure.account as string,
+        container: azure.container,
+        endpoint: azure.endpoint as string,
+        credentials: { accountKey: azure.key as string },
+      }).createContainer();
+    }
     const config = loadServerConfig({ configFlag: configPath, env }).config;
 
     // The API instance: it writes the bucket (uploads) but only reads the index.

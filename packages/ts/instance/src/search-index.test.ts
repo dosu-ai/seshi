@@ -96,6 +96,50 @@ describe("lanceLocation (F10.9)", () => {
     });
   });
 
+  it("finds Azure's account, endpoint and key as the store does, workload identity included", () => {
+    const az = config(`[store]\nurl = "az://sessions/p"\n${LANCE}`);
+    expect(
+      lanceLocation(az, "d", {
+        AZURE_STORAGE_CONNECTION_STRING:
+          "DefaultEndpointsProtocol=http;AccountName=acct;AccountKey=k3y;BlobEndpoint=http://127.0.0.1:10000/acct",
+      }).storageOptions,
+    ).toEqual({
+      azure_storage_account_name: "acct",
+      azure_storage_account_key: "k3y",
+      azure_storage_endpoint: "http://127.0.0.1:10000/acct",
+      allow_http: "true",
+    });
+    expect(
+      lanceLocation(az, "d", {
+        AZURE_STORAGE_ACCOUNT: "acct",
+        AZURE_FEDERATED_TOKEN_FILE: "/var/run/token",
+        AZURE_CLIENT_ID: "client",
+        AZURE_TENANT_ID: "tenant",
+      }).storageOptions,
+    ).toEqual({
+      azure_storage_account_name: "acct",
+      azure_federated_token_file: "/var/run/token",
+      azure_client_id: "client",
+      azure_tenant_id: "tenant",
+    });
+    expect(() => lanceLocation(az, "d", {})).toThrow(/storage account name/);
+  });
+
+  it("refuses a gs:// index behind an emulator or another endpoint, which LanceDB cannot reach", () => {
+    const gs = config(`[store]\nurl = "gs://b/p"\n${LANCE}`);
+    expect(lanceLocation(gs, "d", {})).toEqual({ uri: "gs://b/p/search/d", storageOptions: {} });
+    expect(() => lanceLocation(gs, "d", { STORAGE_EMULATOR_HOST: "127.0.0.1:4443" })).toThrow(
+      /LanceDB talks to Google Cloud Storage only/,
+    );
+    const other = config(`[store]\nurl = "gs://b/p"\nendpoint = "http://gcs.internal"\n${LANCE}`);
+    expect(() => lanceLocation(other, "d", {})).toThrow(/search.lance.uri to a folder/);
+    // Google's own endpoint, named, is fine.
+    const google = config(
+      `[store]\nurl = "gs://b/p"\nendpoint = "https://storage.googleapis.com"\n${LANCE}`,
+    );
+    expect(lanceLocation(google, "d", {}).uri).toBe("gs://b/p/search/d");
+  });
+
   it("takes search.lance.uri with its own keys, or [store]'s for another prefix of the same bucket", () => {
     const store = `[store]\nurl = "s3://acme/seshi"\ncredentials = { access_key_id = "STORE", secret_access_key = "S" }\n`;
     const same = config(`${store}${LANCE}[search.lance]\nuri = "s3://acme/index"\n`);

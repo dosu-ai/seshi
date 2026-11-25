@@ -145,7 +145,10 @@ scrub = "24h"
   ([spec/layout.md](../spec/layout.md)). `search.lance.uri` puts it in another bucket (with
   keys of its own in `[search.lance]`) or a folder on a single host. It is derived data: it can
   be deleted at any time and is rebuilt from the change feeds. It holds session text, so the
-  same people may read it as may read traces.
+  same people may read it as may read traces. On `gs://` it must be Google's own Cloud
+  Storage: LanceDB cannot reach a GCS emulator or another endpoint, so a `gs://` store with
+  one (or `STORAGE_EMULATOR_HOST`) needs `search.lance.uri` set to a folder or another
+  bucket.
 - **Which binary.** LanceDB's native library is about 200 MB (430 MB on Linux arm64), so it is
   only in the **server build**: the container image (`ghcr.io/dosu-ai/seshi`) and the
   `seshi-server-linux-x64` and `-arm64` release archives. The binaries laptops install (the

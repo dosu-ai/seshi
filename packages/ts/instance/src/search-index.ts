@@ -6,6 +6,7 @@ import {
   type ServerConfig,
 } from "@seshi/config";
 import { lanceBackend, type OpenIndex } from "@seshi/search";
+import { resolveAzureAccess } from "@seshi/store";
 
 /** Where the LanceDB index is and how it is reached: a URI LanceDB takes, with no credentials
  * in it, and its `storageOptions` (F10.9). */
@@ -135,21 +136,44 @@ export function lanceUri(url: string, access: Access, env: Env): LanceLocation {
     return { uri: `s3://${url.slice(url.indexOf("://") + 3)}`, storageOptions: options };
   }
   if (scheme === "az") {
-    set("azure_storage_account_name", access.account_name ?? env.AZURE_STORAGE_ACCOUNT);
-    if (keys && "accountKey" in keys) set("azure_storage_account_key", keys.accountKey);
-    else if (keys && "sasToken" in keys) {
-      set("azure_storage_sas_token", keys.sasToken.replace(/^\?/, ""));
+    // The account, endpoint and key exactly as the store finds them: config, then
+    // AZURE_STORAGE_ACCOUNT, AZURE_STORAGE_KEY, AZURE_STORAGE_SAS_TOKEN and the connection
+    // string, then workload identity.
+    const azure = resolveAzureAccess(url, {
+      ...(access.account_name ? { account: access.account_name } : {}),
+      ...(access.endpoint ? { endpoint: access.endpoint } : {}),
+      ...(keys && ("accountKey" in keys || "sasToken" in keys) ? { credentials: keys } : {}),
+      env: { ...env },
+    });
+    set("azure_storage_account_name", azure.account);
+    const credentials = azure.credentials;
+    if ("accountKey" in credentials) set("azure_storage_account_key", credentials.accountKey);
+    else if ("sasToken" in credentials) {
+      set("azure_storage_sas_token", credentials.sasToken.replace(/^\?/, ""));
     } else {
-      set("azure_storage_account_key", env.AZURE_STORAGE_KEY);
-      set("azure_storage_sas_token", env.AZURE_STORAGE_SAS_TOKEN?.replace(/^\?/, ""));
+      // Workload identity: LanceDB's client exchanges the same federated token itself.
+      set("azure_federated_token_file", env.AZURE_FEDERATED_TOKEN_FILE);
+      set("azure_client_id", env.AZURE_CLIENT_ID);
+      set("azure_tenant_id", env.AZURE_TENANT_ID);
     }
-    if (access.endpoint) {
-      set("azure_storage_endpoint", access.endpoint);
-      if (access.endpoint.startsWith("http://")) set("allow_http", "true");
+    if (azure.endpoint) {
+      set("azure_storage_endpoint", azure.endpoint);
+      if (azure.endpoint.startsWith("http://")) set("allow_http", "true");
     }
     return { uri: url, storageOptions: options };
   }
   if (scheme === "gs") {
+    // LanceDB's GCS client takes no endpoint option, and cannot write to fake-gcs-server
+    // (checked on 25 November 2026, 1.49 to 1.56): an index beside an emulated or other GCS
+    // endpoint would go to Google's instead. Refuse rather than write somewhere else.
+    const endpoint = access.endpoint ?? env.STORAGE_EMULATOR_HOST;
+    if (endpoint !== undefined && endpoint !== "" && !/storage\.googleapis\.com/.test(endpoint)) {
+      throw new Error(
+        `search.backend = "lance" cannot reach ${url} through ${endpoint}: LanceDB talks to Google Cloud Storage only, not an emulator or another endpoint; set search.lance.uri to a folder or another bucket`,
+      );
+    }
+    // Without a key, LanceDB's client finds Application Default Credentials itself
+    // (GOOGLE_APPLICATION_CREDENTIALS, or the metadata server), as the store does.
     if (keys && "serviceAccountKey" in keys) {
       set("google_service_account_key", keys.serviceAccountKey);
     }

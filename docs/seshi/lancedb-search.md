@@ -650,9 +650,22 @@ max_recent_rows = 100000        # sort = recent
   dependencies too. No release channel installs the workspace, so users never fetched them;
   this is for contributors, CI and the image build.
 - **Platforms.** The spike ran on linux-x64 under Bun 1.4.2, against GCS with the VM's metadata
-  credentials. Phase 2's conformance suite runs on a local folder in every CI run (linux-x64)
-  and on macOS arm64, and against S3 on rustfs 1.0.5 (CI's service, and locally); linux-arm64,
-  GCS from the suite, and Azure are not checked yet.
+  credentials. The conformance suite and the deploy test run on a local folder in every CI run
+  (linux-x64) and on macOS arm64, against S3 on rustfs 1.0.5 and against Azure on Azurite 3.38
+  (CI's services, and locally). The images and the Linux server binaries are checked on
+  linux-arm64 too.
+- **GCS.** LanceDB's GCS client has no endpoint option, and cannot write to fake-gcs-server
+  (1.49 to 1.56 all answer its uploads `400 invalid uploadType`; checked on 25 November 2026),
+  so the GCS variants of both suites run only against a real bucket (`SESHI_TEST_GCS_BUCKET`
+  with Application Default Credentials, no emulator), not in CI. A `gs://` index beside a
+  `[store] endpoint` that is not Google's, or `STORAGE_EMULATOR_HOST`, is refused, since the
+  index would otherwise go to Google while the store goes elsewhere. Without a key LanceDB
+  finds Application Default Credentials itself, as the store does; with
+  `service_account_key` it is passed on as `google_service_account_key`.
+- **Azure** reuses the store's own resolution (`resolveAzureAccess`): config, then
+  `AZURE_STORAGE_ACCOUNT`, `AZURE_STORAGE_KEY`, `AZURE_STORAGE_SAS_TOKEN` and the connection
+  string, then workload identity, whose variables are passed on for LanceDB's client to
+  exchange the federated token itself.
 - **`seshi doctor --config <seshi.toml>`** (a new mode: `doctor` was a laptop's check until
   phase 3) checks that the index can be read (a `meta` naming another deployment fails here,
   with LanceDB's error), that the worker's keys can write the location (a probe object written
