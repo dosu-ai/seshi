@@ -1,8 +1,9 @@
-# Spike: locking down DuckDB for `sql`
+# Spike: locking down DuckDB and SQLite for `sql`
 
 For [session-tools.md](../session-tools.md), open question 5: do DuckDB's settings that turn off
 external access hold for its `lance` and `sqlite` extensions, which read storage through their
-own code? It also checks the parts of the third check the plan relies on: the parser output,
+own code? A second part, after `sql` on SQLite moved to SQLite itself, checks what a read-only
+`bun:sqlite` connection allows. It also checks the parts of the third check the plan relies on: the parser output,
 one statement per call, interrupting, the memory limit, reading a SQLite index while it is
 written, and whether an error can quote a row the caller may not see.
 
@@ -21,6 +22,8 @@ Nothing here is product code.
 | `probe.ts <ext dir> <root>` | Sets up a database as the endpoint would (extensions loaded, views with a member's scope), turns off external access, locks the configuration, then runs 32 statements an agent might send. Runs twice: `allowed_directories` naming the index's folder, then an unrelated folder. |
 | `limits.ts <ext dir> <root>` | `json_serialize_sql` on statements of each kind, `prepare` of two statements, interrupting at 500 ms, a 256 MB memory limit, and 50 reads of the SQLite index while another connection writes it. |
 | `leak.ts <ext dir> <root>` | Predicates that fail only on a row outside the caller's scope, to see whether DuckDB runs them before the view's filter. |
+| `native.ts <root>` | The same questions for native SQLite: a read-only `bun:sqlite` connection with `TEMP` views and `query_only`, `ATTACH`, two statements in one `prepare`, `hard_heap_limit`, and a Worker running a runaway query stopped with `terminate()` (`native-worker.ts`). |
+| `explain.ts <root>` | What SQLite's `EXPLAIN` shows of a statement: the tables it opens and the functions it calls. |
 
 ```bash
 bun install
@@ -30,6 +33,8 @@ bun -e 'const {DuckDBInstance}=await import("@duckdb/node-api");const c=await(aw
 bun probe.ts ext data
 bun limits.ts ext data
 bun leak.ts ext data
+bun native.ts data
+bun explain.ts data
 ```
 
 `results/` holds the output of the last run, with local paths replaced by `<root>`, `<ext>`
@@ -129,6 +134,34 @@ signed; stripping one would break its signature, so it was not tried.
 - SQLite's FTS5 text, read through the content table `events_text_content.c0`, arrives as
   `BLOB` and needs a cast to `VARCHAR`. The FTS5 table itself (`idx.events_text`) also reads.
 
+### Native SQLite (`bun:sqlite`)
+
+From [results/native-darwin.md](results/native-darwin.md) and
+[results/explain-darwin.md](results/explain-darwin.md). On macOS `bun:sqlite` uses the system
+SQLite (3.51.0, built with `OMIT_LOAD_EXTENSION`, `MAX_ATTACHED=10`, `TEMP_STORE=1`); on
+Linux Bun embeds its own, which was not run here. `bun:sqlite` exposes `readonly`, `iterate()`
+and `fileControl`, but no authorizer, progress handler, interrupt or `sqlite3_limit`.
+
+| Probe | Result |
+|---|---|
+| `TEMP VIEW events` over `main.events` with alice's scope, queried as `events` | The view: 68,000 rows of 80,000. Unqualified names find `temp` first |
+| `main.events`, `main.sessions`, bypassing the views | **Read**: 80,000 rows, 400 owner-only sessions |
+| `ATTACH` a SQLite file outside, on a read-only connection | **Attached and read** |
+| `ATTACH` after `PRAGMA query_only = 1` | **Attached** |
+| `PRAGMA query_only = 0` sent as the caller's statement | **Ran**: the caller can turn it off |
+| `CREATE TEMP TABLE`, `CREATE TEMP VIEW`, `DROP VIEW events` after `query_only` | Refused: "attempt to write a readonly database" |
+| `load_extension()`, `readfile()` | Do not exist |
+| `prepare("SELECT 1 AS a; DROP VIEW events")` | **Prepared and ran the first statement, silently dropping the rest** |
+| `json_each(…)`, `pragma_database_list` | Both answer a `SELECT` (table-valued functions) |
+| `PRAGMA hard_heap_limit = 64 MB` | **Ignored**: it reads back 0, and a 5M-row sort of 200-character strings finished |
+| A Worker running a 10¹²-row cross join, `terminate()` at 500 ms | **Not closed 10 s later**; the main thread stayed responsive (206 ticks of 50 ms) |
+
+`EXPLAIN` lists `OpenRead` with the database number (an attached file is database 2) and root
+page, and `Function` and `AggStep` with the function's name. A table-valued function shows as
+`VOpen` with a pointer, not a name. A read of the scoped view and a direct read of
+`main.events` both open the index's `events` table, so `EXPLAIN` cannot see the scope. Of
+`SELECT 1; DROP VIEW events` it shows only the first statement.
+
 ## Findings
 
 1. **The third check does not cover `lance`.** Turning off external access binds DuckDB's own
@@ -155,3 +188,11 @@ signed; stripping one would break its signature, so it was not tried.
 6. **The SQLite index reads while the indexer writes**, read-only and attached before the lock.
 7. **`lance` is the cost of shipping DuckDB:** 317 MB on linux-x64, more than LanceDB's own
    native library after stripping (179 MB).
+8. **Native SQLite has no wall below the parser.** A read-only connection with `query_only`
+   still runs `ATTACH` and reads the file, the caller can switch `query_only` off, `main.*`
+   bypasses `TEMP` views, and `prepare` silently ignores a second statement. With no authorizer
+   or attach limit in `bun:sqlite`, a JS parser has to refuse all of these, and `EXPLAIN` can
+   back it up for attached files and functions, not for scope.
+9. **A runaway native query can only be stopped by killing its process.** No interrupt, and
+   a Worker does not stop. Memory has to be bounded the same way where `hard_heap_limit` is
+   ignored, as on macOS.
