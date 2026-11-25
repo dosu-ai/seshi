@@ -149,11 +149,14 @@ scrub = "24h"
   Storage: LanceDB cannot reach a GCS emulator or another endpoint, so a `gs://` store with
   one (or `STORAGE_EMULATOR_HOST`) needs `search.lance.uri` set to a folder or another
   bucket.
-- **Which binary.** LanceDB's native library is about 200 MB (430 MB on Linux arm64), so it is
+- **Which binary.** LanceDB's native library is about 180 MB (280 MB on Linux arm64), so it is
   only in the **server build**: the container image (`ghcr.io/dosu-ai/seshi`) and the
   `seshi-server-linux-x64` and `-arm64` release archives. The binaries laptops install (the
   install scripts, npm) do not carry it, and a server started from one with `backend = "lance"`
-  refuses to start, saying so.
+  refuses to start, saying so. The server build strips LanceDB's symbol table to save that
+  much, so a crash or panic inside LanceDB shows its frames without function names; the
+  unstripped library on npm, at the pinned version, names them
+  ([how](seshi/lancedb-search.md#the-binary-the-server-build)).
 - **Who writes.** Only an instance with the worker role indexes; give exactly one instance that
   role (X7.2). API-only instances open the index read-only and never write it, not even its
   bookkeeping. A deployment without a worker runs `seshi sync search` from cron instead, which

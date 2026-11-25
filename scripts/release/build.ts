@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { buildCommand, checkLanceNative } from "../build-binary";
+import { buildCommand, checkLanceNative, stripLanceNative } from "../build-binary";
 import { checksumFile, readArchive, sha256, tarGz, zip } from "./archive";
 import { adhocSign } from "./macho-sign";
 import {
@@ -69,7 +69,10 @@ export async function compileTarget(
   root = ROOT,
   server = false,
 ): Promise<void> {
-  if (server) checkLanceNative(root, target.bun);
+  if (server) {
+    checkLanceNative(root, target.bun);
+    stripLanceNative(root, target.bun);
+  }
   const { argv } = buildCommand({ root, target: target.bun, outfile, server });
   mkdirSync(dirname(outfile), { recursive: true });
   const proc = Bun.spawn(argv, { cwd: root, stdout: "pipe", stderr: "pipe" });
