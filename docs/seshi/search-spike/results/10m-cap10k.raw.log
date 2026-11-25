@@ -1,0 +1,60 @@
+Copying gs://seshi-search-spike-a8d43c/harness/addidx.ts to file://./addidx.ts
+Copying gs://seshi-search-spike-a8d43c/harness/bench.ts to file://./bench.ts
+  
+Copying gs://seshi-search-spike-a8d43c/harness/commit.ts to file://./commit.ts
+Copying gs://seshi-search-spike-a8d43c/harness/common.ts to file://./common.ts
+Copying gs://seshi-search-spike-a8d43c/harness/duck.ts to file://./duck.ts
+Copying gs://seshi-search-spike-a8d43c/harness/gen.ts to file://./gen.ts
+
+
+Average throughput: 875.6kiB/s
+relevance | admin, no filter       | rare word (zeppelinx)              | cold  2007ms | p50   409ms | p95   434ms | search 305ms group 1ms fetch 104ms | rows 103 | sessions 103
+relevance | admin, no filter       | one common word (error)            | cold  2693ms | p50   975ms | p95  1186ms | search 1024ms group 17ms fetch 144ms | rows 10000 (capped) | sessions 8519
+relevance | admin, no filter       | two common words AND (error test)  | cold 14344ms | p50 12509ms | p95 12889ms | search 12349ms group 19ms fetch 142ms | rows 10000 (capped) | sessions 8550
+relevance | admin, no filter       | phrase (flaky checkout test)       | cold  3083ms | p50   991ms | p95  1037ms | search 825ms group 17ms fetch 152ms | rows 10000 (capped) | sessions 8472
+relevance | admin, no filter       | NOT (deploy -staging)              | cold  6167ms | p50  4833ms | p95  4930ms | search 4688ms group 19ms fetch 122ms | rows 10000 (capped) | sessions 8540
+relevance | admin, no filter       | OR (rollback OR deployer)          | cold  2072ms | p50   704ms | p95   754ms | search 558ms group 16ms fetch 93ms | rows 10000 (capped) | sessions 8492
+relevance | admin, no filter       | very common word (the)             | cold  2262ms | p50   970ms | p95  1030ms | search 853ms group 19ms fetch 93ms | rows 10000 (capped) | sessions 8491
+relevance | admin, no filter       | prefix (deplo*)                    | cold  7485ms | p50  4891ms | p95  5003ms | search 4719ms group 44ms fetch 61ms | rows 10000 (capped) checked 10000 kept 10000 | sessions 7683
+relevance | member u1 (org or own) | rare word (zeppelinx)              | cold  1644ms | p50   414ms | p95   456ms | search 301ms group 0ms fetch 97ms | rows 87 | sessions 87
+relevance | member u1 (org or own) | one common word (error)            | cold  2153ms | p50  1054ms | p95  1270ms | search 935ms group 17ms fetch 91ms | rows 10000 (capped) | sessions 8339
+relevance | member u1 (org or own) | two common words AND (error test)  | cold 12361ms | p50 11080ms | p95 11279ms | search 11119ms group 17ms fetch 143ms | rows 10000 (capped) | sessions 8352
+relevance | member u1 (org or own) | phrase (flaky checkout test)       | cold  2662ms | p50   971ms | p95  1098ms | search 838ms group 19ms fetch 114ms | rows 10000 (capped) | sessions 8263
+relevance | member u1 (org or own) | NOT (deploy -staging)              | cold  5494ms | p50  4447ms | p95  4610ms | search 4268ms group 18ms fetch 169ms | rows 10000 (capped) | sessions 8297
+relevance | member u1 (org or own) | OR (rollback OR deployer)          | cold  1668ms | p50   685ms | p95   911ms | search 530ms group 21ms fetch 96ms | rows 10000 (capped) | sessions 8365
+relevance | member u1 (org or own) | very common word (the)             | cold  2414ms | p50  1147ms | p95  1282ms | search 1134ms group 20ms fetch 128ms | rows 10000 (capped) | sessions 8298
+relevance | member u1 (org or own) | prefix (deplo*)                    | cold  7564ms | p50  4944ms | p95  5119ms | search 4819ms group 38ms fetch 72ms | rows 10000 (capped) checked 10000 kept 10000 | sessions 7710
+relevance | member + label + model | rare word (zeppelinx)              | cold  1269ms | p50   166ms | p95   205ms | search 147ms group 0ms fetch 59ms | rows 2 | sessions 2
+relevance | member + label + model | one common word (error)            | cold  2476ms | p50  1350ms | p95  1638ms | search 1191ms group 17ms fetch 103ms | rows 10000 (capped) | sessions 4023
+relevance | member + label + model | two common words AND (error test)  | cold  2584ms | p50  1488ms | p95  1561ms | search 1345ms group 14ms fetch 119ms | rows 10000 (capped) | sessions 3997
+relevance | member + label + model | phrase (flaky checkout test)       | cold  2139ms | p50   648ms | p95   748ms | search 554ms group 5ms fetch 89ms | rows 3743 | sessions 2223
+relevance | member + label + model | NOT (deploy -staging)              | cold  2936ms | p50   894ms | p95   934ms | search 759ms group 15ms fetch 133ms | rows 10000 (capped) | sessions 4041
+relevance | member + label + model | OR (rollback OR deployer)          | cold  1767ms | p50   569ms | p95   853ms | search 711ms group 16ms fetch 126ms | rows 10000 (capped) | sessions 4012
+relevance | member + label + model | very common word (the)             | cold  2506ms | p50  1372ms | p95  1420ms | search 1248ms group 16ms fetch 100ms | rows 10000 (capped) | sessions 3983
+relevance | member + label + model | prefix (deplo*)                    | cold  4561ms | p50  2558ms | p95  2702ms | search 2537ms group 33ms fetch 132ms | rows 10000 (capped) checked 10000 kept 5537 | sessions 2266
+recent    | admin, no filter       | rare word (zeppelinx)              | cold  2688ms | p50   831ms | p95   860ms | search 743ms group 0ms fetch 88ms | rows 27 | sessions 27
+recent    | admin, no filter       | one common word (error)            | cold  6522ms | p50  4310ms | p95  4585ms | search 4370ms group 63ms fetch 59ms | rows 10000 (capped) | sessions 8520
+recent    | admin, no filter       | two common words AND (error test)  | cold 19929ms | p50 18178ms | p95 18558ms | search 17698ms group 69ms fetch 88ms | rows 10000 (capped) | sessions 8550
+recent    | admin, no filter       | phrase (flaky checkout test)       | cold  1729ms | p50   445ms | p95   550ms | search 370ms group 1ms fetch 74ms | rows 536 | sessions 352
+recent    | admin, no filter       | NOT (deploy -staging)              | cold  9362ms | p50  7883ms | p95  8247ms | search 7746ms group 63ms fetch 74ms | rows 10000 (capped) | sessions 8540
+recent    | admin, no filter       | OR (rollback OR deployer)          | cold  1733ms | p50   638ms | p95   689ms | search 557ms group 5ms fetch 66ms | rows 3673 | sessions 1022
+recent    | admin, no filter       | very common word (the)             | cold  5972ms | p50  4402ms | p95  4874ms | search 4729ms group 61ms fetch 84ms | rows 10000 (capped) | sessions 8491
+recent    | admin, no filter       | prefix (deplo*)                    | cold  2396ms | p50   910ms | p95  1093ms | search 848ms group 8ms fetch 54ms | rows 3745 checked 3745 kept 1909 | sessions 743
+recent    | member u1 (org or own) | rare word (zeppelinx)              | cold  2408ms | p50   851ms | p95   908ms | search 714ms group 0ms fetch 102ms | rows 24 | sessions 24
+recent    | member u1 (org or own) | one common word (error)            | cold  5871ms | p50  4265ms | p95  4325ms | search 4107ms group 71ms fetch 100ms | rows 10000 (capped) | sessions 8338
+recent    | member u1 (org or own) | two common words AND (error test)  | cold 17759ms | p50 15886ms | p95 16847ms | search 15629ms group 64ms fetch 81ms | rows 10000 (capped) | sessions 8352
+recent    | member u1 (org or own) | phrase (flaky checkout test)       | cold  1703ms | p50   443ms | p95   505ms | search 374ms group 1ms fetch 62ms | rows 467 | sessions 302
+recent    | member u1 (org or own) | NOT (deploy -staging)              | cold  8481ms | p50  6980ms | p95  7117ms | search 6955ms group 63ms fetch 100ms | rows 10000 (capped) | sessions 8297
+recent    | member u1 (org or own) | OR (rollback OR deployer)          | cold  1633ms | p50   604ms | p95   630ms | search 535ms group 4ms fetch 62ms | rows 3246 | sessions 873
+recent    | member u1 (org or own) | very common word (the)             | cold  6136ms | p50  4513ms | p95  4913ms | search 4531ms group 80ms fetch 66ms | rows 10000 (capped) | sessions 8300
+recent    | member u1 (org or own) | prefix (deplo*)                    | cold  2484ms | p50   841ms | p95   990ms | search 766ms group 7ms fetch 56ms | rows 3290 checked 3290 kept 1689 | sessions 643
+recent    | member + label + model | rare word (zeppelinx)              | cold  2044ms | p50   402ms | p95   451ms | search 331ms group 0ms fetch 45ms | rows 2 | sessions 2
+recent    | member + label + model | one common word (error)            | cold  1446ms | p50   239ms | p95   327ms | search 225ms group 4ms fetch 69ms | rows 5083 | sessions 141
+recent    | member + label + model | two common words AND (error test)  | cold  1672ms | p50   273ms | p95   437ms | search 269ms group 3ms fetch 63ms | rows 3298 | sessions 140
+recent    | member + label + model | phrase (flaky checkout test)       | cold  1644ms | p50   202ms | p95   327ms | search 113ms group 0ms fetch 70ms | rows 30 | sessions 27
+recent    | member + label + model | NOT (deploy -staging)              | cold  1782ms | p50   254ms | p95   371ms | search 273ms group 2ms fetch 65ms | rows 1562 | sessions 136
+recent    | member + label + model | OR (rollback OR deployer)          | cold  1348ms | p50   226ms | p95   428ms | search 174ms group 1ms fetch 254ms | rows 258 | sessions 88
+recent    | member + label + model | very common word (the)             | cold  1541ms | p50   234ms | p95   245ms | search 163ms group 5ms fetch 67ms | rows 6514 | sessions 141
+recent    | member + label + model | prefix (deplo*)                    | cold  1599ms | p50   333ms | p95   399ms | search 268ms group 1ms fetch 60ms | rows 224 checked 224 kept 109 | sessions 50
+runtime: bun 1.4.2, linux-x64
+exit 0

@@ -5,7 +5,9 @@ Status: proposed design. Nothing here is built. It follows the scoping work in
 and DuckLake with Moraine, and ran the probes this design relies on
 ([`search-probe/`](https://github.com/dosu-ai/seshi/blob/8b7d3f9/docs/seshi/search-probe/README.md)).
 It is written against `main` at seshi 0.27.0, with `@lancedb/lancedb` 0.41.0 and Bun 1.4.2. The
-checks added for this document ran on 24 November 2026, on macOS arm64.
+checks added for this document ran on 24 November 2026, on macOS arm64. The spike (phase 0) ran
+on 24 and 25 November on a GCE VM and a GCS bucket, at 1M and 10M records; its scripts and
+numbers are in [`search-spike/`](search-spike/README.md), and this document reflects them.
 
 ## Summary
 
@@ -25,11 +27,16 @@ instance.** SQLite stays the default and the only backend in serverless mode.
   the indexer writes one feed page per `commit()`, and queries carry a parsed tree instead of an
   FTS5 string. SQLite moves onto the new seam first, with no change in behaviour.
 
+The spike ([results](search-spike/README.md)) found it works at 10M records on GCS, which is
+about four months of a 50-person team: most searches answer in 0.2 to 1 s, prefixes in 2 to
+5 s. Its limit is maintenance, which rewrites the whole index and takes 8 to 9 minutes at that
+size, so it fits a team up to roughly 10 to 30M records (see [risks](#risks)).
+
 What this does not include: analytics (tokens and spend), semantic search, and ClickHouse. The
 first two can build on this index later; see [later](#later-analytics-and-semantic-search).
 
-The size is about four weeks for one person: a short spike, the seam, the backend, then
-deployment. See the [plan](#plan).
+The size is about three and a half weeks for one person after the spike: the seam, the backend,
+then deployment. See the [plan](#plan).
 
 ## Decisions
 
@@ -39,7 +46,7 @@ deployment. See the [plan](#plan).
 | F10.7 | `IndexStore` splits into an async `IndexReader` (queries, state, the cross-owner feed) and `IndexWriter` (the indexer). The indexer writes one feed page per `commit()`, every writer call names its generation, and queries take a parsed `MatchTree`. SQLite's behaviour does not change. |
 | F10.8 | With LanceDB, the worker writes the index and every API instance reads it. The search job's placement is `worker` for this backend, `every` for SQLite. |
 | F10.9 | The index lives under `search/` in the store's bucket by default, or at `search.lance.uri`. It is derived (X6.1), holds session text, and is written only by the indexer. spec/layout.md lists it. |
-| F10.10 | A feed page is one `mergeInsert` per table, content tables first and the cursor last. Writes are idempotent, so a crash part-way is repaired by reading the page again. |
+| F10.10 | A feed page is written content tables first and the cursor last: for `events`, an indexed `mergeInsert` and then a `delete` of the old rows of replaced and removed sessions; for the others, one `mergeInsert` each. Writes are idempotent, so a crash part-way is repaired by reading the page again. |
 | F10.11 | A rebuild writes a new generation beside the live one and switches when it has caught up. Search keeps answering from the old one. Only the first build answers 503. |
 | F10.12 | Retracted and redacted text is hidden at the next commit, and leaves the bucket within `search.lance.scrub` (a day by default), when the worker rewrites tables that hold deleted rows. |
 
@@ -64,7 +71,9 @@ deployment. See the [plan](#plan).
   (`optimize()`, and the scrub when due).
 - **API instances** open the tables read-only with `readConsistencyInterval` set (5 seconds by
   default), so they see new versions within that time. LanceDB's default is to never check,
-  which would freeze a reader on the version it opened.
+  which would freeze a reader on the version it opened. They open the tables at start-up and
+  keep them: in the spike the first query on a new connection took 1 to 3 s at 10M records,
+  reading index metadata from the bucket.
 - `GET /v1/changes/all` is served from the index's copy of the feed, as today. Every instance
   can serve it, because the copy is in the shared index.
 - A deployment without a worker (cron-only, X7.1) runs the job from cron. Progress is in the
@@ -298,7 +307,7 @@ Indexes on `events`:
 - full text on `text_prefix`: `baseTokenizer: "ngram"`, `prefixOnly: true`, lengths 2 to 12
   (see [prefixes](#query-semantics));
 - `labelList` on `models` and `labels`; `bitmap` on `visibility`, `role` and `format`; `btree`
-  on `owner`, `archive_id` and `session_updated`.
+  on `id`, `owner`, `archive_id` and `session_updated`.
 
 A session's visibility change, a new branch name or new labels rewrite that session's `events`
 rows in the next page's `mergeInsert`. That is rare, and costs one commit like any other page.
@@ -332,12 +341,18 @@ event counts, and `scrub_due`.
 
 | Feature | SQLite (FTS5) | LanceDB |
 |---|---|---|
-| Words in one record | `"a" AND "b"` | `BooleanQuery` of `Must` `MatchQuery` clauses on `text` |
+| Words in one record | `"a" AND "b"` | One `MatchQuery("a b")` with `Operator.And` on `text` |
 | `"a phrase"`, `src/app.ts` | phrase | `PhraseQuery` on `text` |
 | `a OR b` | `OR` | A `Must` clause holding a `BooleanQuery` of `Should` clauses |
 | `-word`, `NOT word` | `NOT` | `MustNot` clause |
+| A mix of the above | | A `BooleanQuery`: the plain words as one `Must` clause of the `Operator.And` kind, then the rest |
 | Case and accents | `unicode61 remove_diacritics 2` | `lowercase` and `asciiFolding` |
 | `word*` | prefix | A candidate clause on `text_prefix`, then a check in TypeScript (below) |
+
+A `BooleanQuery` of one `Must` clause per word gives the same matches but, at 10M records, took
+4.7 s for two common words where one `MatchQuery` with `Operator.And` took 0.5 s
+([spike](search-spike/README.md#after-commits-before-optimize-and-the-cap)). So the compiler
+uses `BooleanQuery` only when the tree has more than plain words.
 
 **Tokenizing.** LanceDB tokenizes the query with the index's tokenizer, so documents and
 queries agree. Its `simple` tokenizer splits on anything that is not a letter or digit, as
@@ -351,7 +366,10 @@ with either operator. So the prefix clause only narrows the candidates. Each can
 then read and checked in TypeScript against the word prefix, after the same folding. Prefixes
 must be at least 2 characters, and a prefix longer than 12 is checked in full in TypeScript.
 `"a phrase"*` uses the phrase of the complete words plus the prefix clause, and the same check.
-Prefix queries cost more than others, because they read text; the spike measures how much.
+Prefix queries cost the most. The ngram index matches every ngram of the prefix, so about
+half the candidates fail the check (57% kept for `deplo`), and at 10M records a prefix page
+took 4.6 s with the cap at 10,000, or 2 s with a label filter. That is slow but usable for an
+occasional query; see [risks](#risks).
 
 **Filters** are one SQL `where` string on `events`, applied before the search:
 
@@ -373,12 +391,14 @@ conformance suite searches with quotes, backslashes and `%` in every filter.
 `SearchService` still checks each result against the session's live metadata before it returns
 it (F10.4), so the filter only needs to be fast, not authoritative.
 
-**Grouping and paging** happen in TypeScript by default. The spike compares DuckDB for the
-same steps ([below](#duckdb-compared-in-the-spike)).
+**Grouping and paging** happen in TypeScript, over the Arrow result. The spike compared
+DuckDB for the same steps and kept TypeScript ([below](#duckdb-compared-in-the-spike)).
 
 1. One search selects `owner`, `archive_id`, `id`, `session_updated` and `_score` for every
-   matching record, up to `search.lance.max_scored_rows` (100,000 by default). LanceDB returns
-   10 rows unless a limit is set, so the limit is always set.
+   matching record, up to `search.lance.max_scored_rows` (10,000 by default) for relevance and
+   `max_recent_rows` (100,000) for recent. LanceDB returns 10 rows unless a limit is set, so
+   the limit is always set. At 10M records the smaller cap brought broad queries from 1.3 s
+   to 0.5 s; the recent page needs the larger one because its windows (step 3) fill from it.
 2. Records are grouped by session: `best` is the top `_score`, `hits` the number of records.
    `total` is the number of sessions. When the cap was reached, `total` is a lower bound and the
    response says so ("at least N"). Counts are not what search is mainly for, so this is
@@ -389,36 +409,32 @@ same steps ([below](#duckdb-compared-in-the-spike)).
    the cap, it runs again with a window on `session_updated` going back from now (a day, a
    week, a month, then everything), and stops at the first window that fills the page without
    reaching the cap.
-4. One read of `sessions` for the page, and one read of `events` by `id` for the best
+4. One read of `sessions` for the page, and one read of `events` by `id` (which has a btree
+   index; without it this read took 200 ms) for the best
    `matches` records of each session, with their text, role, tool name and time. `excerpt()`
    marks them.
 
 ### DuckDB, compared in the spike
 
 DuckDB's `lance` extension can do steps 1 to 3 in SQL: `lance_fts(path, 'text', query, k = …)`
-grouped by session, with `max(_score)`, `count(*)`, `ORDER BY` and `LIMIT … OFFSET`. The probes
-do not settle which is faster. TypeScript grouped 13,161 matches at 100k records in 15 ms;
-DuckDB grouped 110,069 matches at 1M records in about 90 ms from a folder and 138 to 332 ms from
-local S3. Those are different sizes, so the spike runs both on the same data.
+grouped by session. The spike ran both on the same GCS tables
+([results](search-spike/README.md#duckdb)), and TypeScript groups searches:
 
-It measures, on Linux, against a real S3 bucket, at 1M and 10M records (10M is about four
-months of a 50-person team; see [sizes](#sizes)):
+- **Slower.** At 1M, DuckDB took 2 to 4 times as long as TypeScript's search and grouping
+  (`error`: 1.5 s against 0.66 s). At 10M it took 15 to 17 s for any broad query, against about
+  1 s.
+- **Words only.** `lance_fts` reads its query as words joined by OR: `error test`,
+  `error AND test` and `+error +test` all matched the same 858,473 records at 1M, and
+  `"flaky checkout test"` matched 608,391 where the phrase matches 5,050. It has no AND, phrase
+  or NOT, so it could group only single-word queries.
+- **Filters after the top `k`.** Its `filter` argument works only on namespace-backed tables.
+  An outer `WHERE` applies after the top `k`, so visibility drops matches (at 10M, 38,642
+  sessions against 42,205 for `error`).
+- **Memory.** Asking for every match at 10M overflowed Arrow's 2 GB string offsets, then ran
+  out of 32 GB.
 
-- p50 and p95 for a relevance page and a recent page, for a rare word, two common words, a
-  phrase, a prefix and a `NOT`, each with and without visibility and label filters;
-- TypeScript reading the matches as Arrow (`toArrow()`, so no JavaScript object per row)
-  against DuckDB's `lance_fts` with the grouping in SQL;
-- whether `lance_fts` takes every query shape the `MatchTree` produces (phrases, `OR`, `NOT`).
-  If it takes only plain words, DuckDB can group only those queries;
-- whether the filter applies before the top `k` (`prefilter`), which visibility needs;
-- credentials: in the probe the extension read S3 credentials only from `AWS_*` variables,
-  which are the whole process's. The spike checks GCS and Azure, and an index whose
-  credentials differ from the store's;
-- memory per query, and DuckDB's size in the image (63 MB on macOS arm64).
-
-DuckDB groups searches if it is clearly faster, say twice as fast at p95, and handles every
-query shape and store. Otherwise TypeScript does, and DuckDB arrives later with analytics. The
-choice sits inside `LanceIndex.query()`, so the seam does not change either way.
+DuckDB still has a place in analytics ([later](#later-analytics-and-semantic-search)), over
+plain columns with no full-text search.
 
 Searches include rows not yet in the index (LanceDB scans them), so a record is searchable as
 soon as its page is committed. `fastSearch()` is not used.
@@ -440,14 +456,21 @@ later commit; the job reports a failure and the next pass reads the page again.
 
 1. Check, with no write: each continuation's `base` against what `sessions()` read. Refused
    ones are left out of the page and returned.
-2. `events`: one `mergeInsert("id")` with the page's records, `whenMatchedUpdateAll`,
-   `whenNotMatchedInsertAll`, and `whenNotMatchedBySourceDelete` limited to the sessions the
-   page replaces or removes. One commit inserts, updates and deletes. The scoping probe checked
-   this on 0.41.0: a replaced session lost its extra record, a removed one lost all of them, a
-   continued one kept its old records, and an untouched one did not change.
-3. `sessions`: one `mergeInsert` of the page's sessions, including tombstones.
-4. `changes`: the page's feed entries, by `mergeInsert` on `(stamp, owner, name)`.
-5. `seen`, then `cursors`.
+2. `events`: one `mergeInsert("id")` with the page's records, `whenMatchedUpdateAll` and
+   `whenNotMatchedInsertAll`. It finds matches through the btree index on `id`.
+3. `events` again: one `delete()` of the rows of sessions the page replaces or removes that the
+   page did not write: `archive_id IN (…) AND content_hash NOT IN (…)`, through the btree on
+   `archive_id`. Inserting first means a replaced session never disappears from search; for
+   the few seconds between the two commits it can count its old and new records together.
+4. `sessions`: one `mergeInsert` of the page's sessions, including tombstones.
+5. `changes`: the page's feed entries, by `mergeInsert` on `(stamp, owner, name)`.
+6. `seen`, then `cursors`.
+
+The scoping probe wrote `events` in one commit instead, with `whenNotMatchedBySourceDelete`
+limited to the replaced and removed sessions. That is correct, but LanceDB scans the whole
+table to find the rows a page does not hold, even with the limit. In the spike a page took
+1.3 s at 1M records and 8.6 s at 10M. Split, it took 0.8 s at 10M
+([commits](search-spike/README.md#commits)).
 
 A crash anywhere leaves the cursor behind the content. The next run reads the same entries and
 indexes each session from its metadata as it is now, which is idempotent (spec/layout.md,
@@ -455,19 +478,32 @@ indexes each session from its metadata as it is now, which is idempotent (spec/l
 are missing. The feed copy is safe for the same reason as today: `feed_through` moves only after
 the rows up to it are written.
 
-Each commit makes a table version, so a page costs five or six commits. At the default
-`search.interval` that is fine. A first build of a large bucket writes many pages in a row; the
-worker runs `optimize()` every 50 pages during a build, not only at the end of a pass.
+Each commit makes a table version, so a page costs six or seven commits. At the default
+`search.interval` that is fine: a 50-person team adds about one record a second, and a split
+page commits about 2,500. A first build is different: a year of that team is about 32M
+records, which is three to four hours one page per commit. So during a build the indexer
+gathers pages until it holds 50,000 records and commits them together, the same steps over the
+union; plain `add()` of 100,000-row batches wrote 14,000 records a second in the spike. The
+cursor still moves only after the content. A new generation's tables get their indexes once,
+when the build has caught up, instead of after every batch: at 10M records the spike wrote the
+tables in 12 minutes and built every index in 5.
 
 ## Maintenance
 
 `maintain()` runs after each pass, on the worker:
 
 - **`optimize()`** compacts small fragments, adds new rows to the indexes and prunes old
-  versions. It runs when more than 10,000 rows are unindexed or every `search.lance.optimize`
-  (10 minutes). `cleanupOlderThan` is now minus 15 minutes, so a reader on an older version
-  finishes its query. `deleteUnverified` stays off, as LanceDB advises while other processes may
-  read.
+  versions. In the spike it cost about as much as building the indexes again, however little
+  had changed: 58 s at 1M records and 8 to 9 minutes at 10M, after ten small pages.
+  0.41.0's TypeScript API has no option to only append to the indexes. Skipping it costs too:
+  at 10M, with 18,000 rows from ten pages unindexed in ten small fragments, broad searches
+  took two to three times as long (`error` 2.9 s instead of 1.3 s), and a rare word 400 ms
+  instead of 240 ms ([maintenance](search-spike/README.md#maintenance)). So it runs every
+  `search.lance.optimize` (an hour), only when something was committed, which at 10M records
+  is about 15% of the worker's time. That cost grows with the table; past about 10M records it
+  is the limit on this design (see [risks](#risks)). `cleanupOlderThan` is now minus 15
+  minutes, so a reader on an older version finishes its query. `deleteUnverified` stays off,
+  as LanceDB advises while other processes may read.
 - **The scrub** is how deleted text leaves the bucket. A check on 24 November deleted one
   session (10 rows) from a 20,000-row table and ran `optimize()` twice: the deleted rows were
   still in the data file, hidden by a deletion file. LanceDB compacts a fragment only when
@@ -476,8 +512,10 @@ worker runs `optimize()` every 50 pages during a build, not only at the end of a
   Once a day (`search.lance.scrub`), if a scrub is due, it rewrites each table that holds
   deleted rows: it copies the live rows into a new table in the same generation, builds its
   indexes, switches `meta` to it, and deletes the old table after the 15-minute grace. Indexing
-  pauses during the scrub. At 1M records, writing took about 6 s and the index build 3 s in the
-  probe.
+  pauses during the scrub. On GCS the spike confirmed the problem (1,293 deleted rows before
+  and after `optimize()`) and timed the scrub: 73 s at 1M records and 8 minutes at 10M, most
+  of it the full-text indexes. The copy is fully indexed and compact, so a scrub also does what
+  `optimize()` would, and the worker skips `optimize()` on a pass that scrubs.
 
 The bound for deleted text is therefore `search.lance.scrub` plus the grace: a day and a quarter
 of an hour by default. That is weaker than SQLite, where the delete is in the transaction, and
@@ -523,9 +561,10 @@ events = ["user", "assistant", "tool_call"]
 [search.lance]                  # all optional
 # uri = "s3://other-bucket/seshi-search"   # default: search/<deployment>/ in the store's bucket
 read_consistency = "5s"         # how soon API instances see a commit
-optimize = "10m"
+optimize = "1h"                # only after a commit
 scrub = "24h"
-max_scored_rows = 100000
+max_scored_rows = 10000         # relevance
+max_recent_rows = 100000        # sort = recent
 # Credentials only when uri is set and differs from [store]: the same fields as [store],
 # secrets as { env } or { file }.
 ```
@@ -538,13 +577,16 @@ max_scored_rows = 100000
   scope (F11.9), and laptops must not write a shared index.
 - **Dependencies.** `@lancedb/lancedb` and `apache-arrow`, pinned exactly, as server-only
   dependencies of `@seshi/search`, imported lazily by `lanceIndex()`. The hook's import check
-  (X3.3) keeps them off the capture path. The native binary is about 250 MB on macOS arm64;
-  LanceDB's optional embedding dependencies (`onnxruntime-node`, 180 MB) are left out.
-  `@duckdb/node-api` joins them, the same way, only if the spike picks DuckDB for grouping.
-- **Platforms.** The probes ran on macOS arm64. The server image is Linux; the spike checks
-  linux-x64 and linux-arm64 under Bun, and the image size.
+  (X3.3) keeps them off the capture path. The native binary is 205 MB on linux-x64 with glibc
+  and 171 MB with musl (about 250 MB on macOS arm64); the image installs only its own one.
+  LanceDB's optional embedding dependencies (`onnxruntime-node`, 180 MB) are left out. DuckDB
+  is not a dependency of this design.
+- **Platforms.** The spike ran on linux-x64 under Bun 1.4.2, against GCS with the VM's metadata
+  credentials. S3 is covered by the conformance suite against rustfs; linux-arm64 and Azure are
+  not checked yet.
 - **`seshi doctor`** with a server config checks that the location is reachable and writable by
-  the worker, that `meta` names this deployment and schema, and how old `caught_up_at` is.
+  the worker, that `meta` names this deployment and schema, and how old `caught_up_at` is. It
+  warns when `events` holds more than 20M records ([risks](#risks)).
 
 **Tests.**
 
@@ -627,30 +669,43 @@ guess in the scoping PR.
 - **Deleted text stays up to a day.** Stated above, bounded by the scrub, and on demand with
   `--scrub`. If LanceDB's TypeScript API gains a way to force deletion materialization, the
   scrub becomes an `optimize()` option.
-- **The scrub's cost grows with the table.** It rewrites whole tables. From the 1M-record probe
-  (about 9 s to write and index), a year of a 50-person team ([sizes](#sizes)) would take about
-  5 minutes, and of a 500-person team close to an hour, with indexing paused. The spike measures
-  it. If it is too slow, the scrub writes a new generation in the background, as a rebuild
-  does, and switches when it is done.
-- **Prefix queries read text** to check candidates. If the spike finds them too slow, raise the
-  minimum length to 3 or cap the candidates checked.
-- **Cold reads from object storage.** The probes used a local S3. Real S3 adds latency to each
-  read an API instance makes after a new version, and costs a request per read. The spike
-  measures p50 and p95 on a real bucket.
-- **Image size.** About 250 MB more in the server image.
+- **Maintenance grows with the table, and sets the size limit.** `optimize()` and the scrub
+  each rewrite the indexes of the whole table: about 1 minute at 1M records and 8 to 9 minutes
+  at 10M on an `e2-standard-8`, with indexing paused, and 14 GB of memory for the scrub. By
+  that line, a year of a 50-person team ([sizes](#sizes), about 32M records) costs about half
+  an hour per run, so an hourly `optimize()` would take half the worker's time; a 500-person
+  team's year is out of reach. So this design fits an `events` table up to roughly 10 to 30M
+  records, and `seshi doctor` warns above 20M. Past that, `events` splits into one table per
+  month, so only the current month takes writes and `optimize()`, and older months change
+  only when a scrub is due; see [open questions](#open-questions). LanceDB adding incremental
+  index updates to its TypeScript API would also lift the limit.
+- **Prefix queries are slow** at 10M records: 2 to 5 s ([query semantics](#query-semantics)).
+  If that is too slow, raise the minimum length to 3, or limit prefixes to `sort = recent`,
+  whose windows keep the candidates few (under 1 s in the spike).
+- **Cold reads from object storage.** On GCS the first query on a new connection took 1 to
+  3 s, so instances keep their tables open. Each search reads from the bucket (100 to 250 ms
+  for a rare word), and each read is a billed request.
+- **Image size.** About 205 MB more in the server image (linux-x64, glibc).
 - **SQL text in filters.** No bound parameters, so escaping is the only defence. One function
   does it, and the suite tests it with hostile values.
 
 ## Open questions
 
-1. **TypeScript or DuckDB for grouping searches?** The spike decides, by the measures and rule
-   in [DuckDB, compared in the spike](#duckdb-compared-in-the-spike).
+1. **Split `events` by month in the first version, or only when a team nears the limit?**
+   Monthly tables keep `optimize()` and the scrub bounded by a month's records, but a search
+   then runs once per month and merges the results, and BM25 scores from different tables are
+   not quite comparable (each table has its own word statistics). The proposal is to ship one
+   table, warn in `seshi doctor` above 20M records, and design the split when a deployment
+   needs it.
+
+TypeScript or DuckDB for grouping searches, the question this section held before the spike, is
+settled: [TypeScript](#duckdb-compared-in-the-spike).
 
 ## Plan
 
 | Phase | What | Size |
 |---|---|---|
-| 0. Spike | On Linux and a real S3 bucket, with about 1M real-shaped records: cold and warm latency for 10 representative queries, grouping in TypeScript against DuckDB's `lance` extension ([what it measures](#duckdb-compared-in-the-spike)), prefix checks, a page commit's time, `optimize()` and scrub times, and the image size. | 3–4 days |
+| 0. Spike | Done, 24–25 November ([results](search-spike/README.md)): latency at 1M and 10M records on GCS, TypeScript against DuckDB for grouping, prefix checks, commit, `optimize()` and scrub times, and the image size. | Done |
 | 1. Seam | `IndexReader` and `IndexWriter`, `drain()` onto `commit()`, `MatchTree`, `state()`, `IndexUnavailable`, the `OpenIndex` factory, `SearchStatus.location`, `excerpt()`. SQLite only, with no change in behaviour; existing tests keep their assertions. | 4–6 days |
 | 2. Backend | `LanceIndex`: tables and `meta`, `commit()`, the query compiler, filters and escaping, grouping, prefixes, `maintain()` with the scrub, generations. The conformance suite on folder and S3, and the crash tests. | 1.5 weeks |
 | 3. Deploy | The config schema, `worker` placement for this backend, `--status`, `--rebuild`, `--wait` and `--scrub`, `doctor` checks, spec/layout.md's `search/` entry, and docs (`docs/search.md`, `docs/config.md`, F10.6–F10.12 in `design-decisions.html`). | 1 week |

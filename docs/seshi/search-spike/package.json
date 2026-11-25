@@ -1,0 +1,11 @@
+{
+  "name": "seshi-search-spike",
+  "private": true,
+  "type": "module",
+  "description": "Phase 0 of docs/seshi/lancedb-search.md: LanceDB and DuckDB on GCS, from Linux. Throwaway scripts, outside the workspace.",
+  "dependencies": {
+    "@duckdb/node-api": "2.0.1-r.1",
+    "@lancedb/lancedb": "0.41.0",
+    "apache-arrow": "21.2.0"
+  }
+}
