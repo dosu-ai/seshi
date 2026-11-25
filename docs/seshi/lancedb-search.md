@@ -538,6 +538,9 @@ Neither is in the first version. Two choices now keep them open:
   second indexer. It uses the same keys, generations and scrub, so a retracted session leaves
   spend reports too. Prices are a separate table applied at query time, because traces record
   tokens, not money.
+- Totals include owner-only sessions (decided 24 November 2026). F10.4 governs which sessions
+  a search shows, not what they add up to; a report never lists an owner-only session to
+  someone who could not open it.
 - Aggregation goes through DuckDB's `lance` extension, in-process. In the probe it answered
   counts and group-bys over 1M rows in 5 to 50 ms. A `usage_daily` rollup kept by the indexer
   would keep reports small at any team size seshi expects.
@@ -583,12 +586,10 @@ arrive. The scoping PR has the comparison and the thresholds.
 
 ## Open questions
 
-1. **May analytics totals include owner-only sessions,** and for whom? F10.4 covers search
-   results, not totals. Not needed until analytics.
-2. **How many records and LLM calls does a real session have?** The scale estimates assume about
+1. **How many records and LLM calls does a real session have?** The scale estimates assume about
    150 records and 50 to 100 calls. A count over an existing bucket would replace the guess and
    size the scrub.
-3. **Is a lower bound on `total` acceptable** when `max_scored_rows` is reached, or should a
+2. **Is a lower bound on `total` acceptable** when `max_scored_rows` is reached, or should a
    relevance sort fall back to recent order above it?
 
 ## Plan
