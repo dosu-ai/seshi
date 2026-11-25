@@ -181,14 +181,16 @@ scrub = "24h"
   asks the worker to scrub on its next pass.
 - **Upkeep.** After a pass that committed something, at most every `search.lance.optimize` (an
   hour), the worker compacts the tables and adds new rows to their indexes. That rewrites the
-  indexes, so it takes longer as the index grows: about 1 minute at 1M records and 8 to 9 at
-  10M. The design fits up to roughly 10 to 30M records (about a year of a 50-person team);
-  `seshi doctor --config` warns past 20M
+  indexes, so it takes longer as the index grows: about 2 minutes at 1M records and 17 at 10M.
+  The design fits up to about 10M records (about four months of a 50-person team);
+  `seshi doctor --config` warns past 10M. At 10M the scrub (above) does not finish yet
   ([design](seshi/lancedb-search.md#risks)).
 - **Counts.** A relevance search scores at most `search.lance.max_scored_rows` records (10,000);
   past it the total is a lower bound (`capped`, "at least N"). Results are the best-scored ones
   either way.
-- **Prefixes** (`word*`) need at least 2 letters with LanceDB; SQLite takes one.
+- **Prefixes** (`word*`) need at least 2 letters with LanceDB; SQLite takes one. They are slow
+  on a large index: about 1 s at 1M records and 6 s at 10M, longer beside other words or
+  sorted by recent.
 
 `seshi search --status --config <seshi.toml>` shows the backend, the location (never its
 keys), the live generation, when it was ready and last caught up, and a rebuild in progress;
