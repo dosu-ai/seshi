@@ -161,8 +161,10 @@ export interface IndexWriter {
   /** The generation writes go to: the live one, or the one being built. Changes on every
    * `reset`. */
   generation(): Promise<string>;
-  /** Every owner's cursor (the last change key read), read once a pass. */
-  cursors(generation: string): Promise<Map<string, string>>;
+  /** The cursors (the last change key read) of `owners`, or of every owner. The indexer reads
+   * each owner's as it reaches that owner, so it starts from where another process sharing the
+   * index may have moved it since the pass began. */
+  cursors(generation: string, owners?: readonly string[]): Promise<Map<string, string>>;
   /** Which of `keys` were already processed (within the lag window). */
   seen(generation: string, owner: string, keys: readonly string[]): Promise<Set<string>>;
   /** What the index holds of these sessions; missing and removed ones are absent. */

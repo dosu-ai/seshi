@@ -652,6 +652,38 @@ describe("the indexer (F10.2)", () => {
     expect(second).toMatchObject({ caught_up: true, indexed: 2 });
   });
 
+  it("starts each owner from its cursor as it reaches it, which another process may have moved", async () => {
+    // Bob's two sessions are further apart than the lag window: once his cursor is past the
+    // second, the first's key is no longer remembered as seen.
+    await db("bob").ingest({ format: "trajectory", session_id: "b1", transcript: log("first") });
+    tick(10 * 60_000);
+    await db("bob").ingest({ format: "trajectory", session_id: "b2", transcript: log("second") });
+    await db("alice").ingest({ format: "trajectory", session_id: "a1", transcript: log("third") });
+    const index = new SqliteIndex({ path: MEMORY_INDEX, deployment: "d", events: EVENTS });
+    const options = { index, events: EVENTS, now: () => clock, ownerRefreshMs: 0 };
+    // Another process sharing the file runs a whole pass while this one reads alice's feed.
+    const other = new Indexer({ store, ...options });
+    let raced = false;
+    const racing: Store = {
+      ...store,
+      url: store.url,
+      get: (key) => store.get(key),
+      put: (key, body, putOptions) => store.put(key, body, putOptions),
+      stat: (key) => store.stat(key),
+      delete: (key, deleteOptions) => store.delete(key, deleteOptions),
+      list: async (prefix, listOptions) => {
+        if (!raced && prefix === keys.changes("alice")) {
+          raced = true;
+          expect((await other.run()).indexed).toBe(3);
+        }
+        return store.list(prefix, listOptions);
+      },
+    };
+    const run = await new Indexer({ store: racing, ...options }).run();
+    // Nothing is read again: bob's feed starts after the cursor the other process moved.
+    expect(run).toMatchObject({ caught_up: true, entries: 0, indexed: 0 });
+  });
+
   it("skips entries it cannot read or that name no session", async () => {
     await db().ingest({ format: "trajectory", session_id: "s1", transcript: log("alpha") });
     const unreadable = keys.change(

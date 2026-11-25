@@ -168,6 +168,47 @@ describe("SearchService: opening the index", () => {
     await search.close();
   });
 
+  it("closes the index only once the reads in flight have finished", async () => {
+    await write("alice", "s1", "inflight words");
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let held = false;
+    const search = new SearchService({
+      store,
+      deployment: "d",
+      settings: { events: ["user"] },
+      open: async (options) => {
+        const index = await sqliteIndex({ path: MEMORY_INDEX })(options);
+        const state = index.state.bind(index);
+        // Once armed, a read waits at the gate before it reads the index.
+        index.state = async () => {
+          if (held) await gate;
+          return state();
+        };
+        return index;
+      },
+    });
+    await search.catchUp();
+    held = true;
+    const answered = search.search(LOCAL_VIEWER, { q: "inflight" });
+    const status = search.status();
+    await Promise.resolve();
+    let closed = false;
+    const closing = search.close().then(() => {
+      closed = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(closed).toBe(false);
+    await expect(search.ready()).rejects.toThrow(SearchUnavailable);
+    release();
+    expect((await answered).total).toBe(1);
+    expect(await status).toMatchObject({ ready: true, sessions: 1 });
+    await closing;
+    expect(closed).toBe(true);
+  });
+
   it("passes on an index it cannot reach, and tries to open it again", async () => {
     let attempts = 0;
     const search = new SearchService({

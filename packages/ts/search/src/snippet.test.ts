@@ -78,6 +78,14 @@ describe("excerpt", () => {
     expect(two.endsWith("[redis] [cache]")).toBe(true);
   });
 
+  it("shows a phrase that crosses the window's edge whole", () => {
+    const filler = Array.from({ length: 22 }, (_, i) => `w${i}`).join(" ");
+    const tail = Array.from({ length: 30 }, (_, i) => `v${i}`).join(" ");
+    const text = marked(`needle ${filler} auth flow ${tail}`, 'needle OR "auth flow"');
+    expect(text.startsWith("[needle] w0 ")).toBe(true);
+    expect(text.endsWith(" w21 [auth flow]…")).toBe(true);
+  });
+
   it("starts the text when nothing is found, and reads as highlights() expects", () => {
     expect(marked("nothing to see", "zzz")).toBe("nothing to see");
     expect(excerpt(`a${MATCH_START}b`, parseQuery("b").match)).toBe(`a ${m("b")}`);

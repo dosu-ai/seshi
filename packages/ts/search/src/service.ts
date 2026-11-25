@@ -242,6 +242,8 @@ export class SearchService {
   private readonly aliases: OwnerAliases;
   private opened: Promise<Opened> | undefined;
   private closed = false;
+  /** Reads in flight, which `close()` lets finish before it closes the index. */
+  private readonly reads = new Set<Promise<unknown>>();
 
   constructor(options: SearchServiceOptions) {
     this.options = options;
@@ -286,6 +288,20 @@ export class SearchService {
     return { index, indexer };
   }
 
+  /** Run `read` against the open index. One that starts after `close()` is refused, and
+   * `close()` waits for those already running, so none meets a closed index. */
+  private async reading<T>(read: (index: IndexStore) => Promise<T>): Promise<T> {
+    const { index } = await this.open();
+    if (this.closed) throw new SearchUnavailable("search is shut down");
+    const running = read(index);
+    this.reads.add(running);
+    try {
+      return await running;
+    } finally {
+      this.reads.delete(running);
+    }
+  }
+
   async run(signal?: AbortSignal): Promise<IndexerRun> {
     return (await this.open()).indexer.run(signal);
   }
@@ -303,29 +319,36 @@ export class SearchService {
     return indexer.catchUp(signal);
   }
 
-  async status(): Promise<SearchStatus> {
-    const { index } = await this.open();
-    const state = await index.state();
-    return {
-      location: index.location(),
-      ready: state.ready_at !== undefined,
-      ...(state.ready_at !== undefined ? { ready_at: state.ready_at } : {}),
-      ...(state.caught_up_at !== undefined ? { caught_up_at: state.caught_up_at } : {}),
-      sessions: state.sessions,
-      events: state.events,
-    };
+  status(): Promise<SearchStatus> {
+    return this.reading(async (index) => {
+      const state = await index.state();
+      return {
+        location: index.location(),
+        ready: state.ready_at !== undefined,
+        ...(state.ready_at !== undefined ? { ready_at: state.ready_at } : {}),
+        ...(state.caught_up_at !== undefined ? { caught_up_at: state.caught_up_at } : {}),
+        sessions: state.sessions,
+        events: state.events,
+      };
+    });
   }
 
-  async ready(): Promise<boolean> {
-    const { index } = await this.open();
-    return (await index.state()).ready_at !== undefined;
+  ready(): Promise<boolean> {
+    return this.reading(async (index) => (await index.state()).ready_at !== undefined);
   }
 
   /** Answer `request` as `viewer` may see it. Throws `SearchQueryError` for a request that
    * cannot be run and `SearchUnavailable` while the index is being built. */
   async search(viewer: Viewer, request: SearchRequest): Promise<SearchResults> {
     const checked = checkRequest(request, this.aliases);
-    const { index } = await this.open();
+    return this.reading((index) => this.answer(index, viewer, checked));
+  }
+
+  private async answer(
+    index: IndexStore,
+    viewer: Viewer,
+    checked: Checked,
+  ): Promise<SearchResults> {
     const state = await index.state();
     const readyAt = state.ready_at;
     if (readyAt === undefined) {
@@ -389,7 +412,7 @@ export class SearchService {
     ) {
       throw new Error("this index keeps no copy of every owner's feed");
     }
-    const page = await readFeed((await this.open()).index, options);
+    const page = await this.reading((index) => readFeed(index, options));
     if (page === null) {
       throw new SearchUnavailable(
         "the search index is reading every owner's change feed for the first time; try again shortly",
@@ -398,12 +421,14 @@ export class SearchService {
     return page;
   }
 
-  /** Close the index. The service is not used after this. */
+  /** Close the index, once the reads in flight have finished. The service is not used after
+   * this. */
   async close(): Promise<void> {
     this.closed = true;
     const opened = this.opened;
     this.opened = undefined;
     if (opened === undefined) return;
+    await Promise.allSettled([...this.reads]);
     let index: IndexStore;
     try {
       ({ index } = await opened);

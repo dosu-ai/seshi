@@ -591,18 +591,25 @@ export class SqliteIndex implements IndexStore {
     return this.currentGeneration();
   }
 
-  async cursors(generation: string): Promise<Map<string, string>> {
-    const rows = this.db
-      .transaction(() =>
-        this.currentGeneration() === generation
-          ? (this.db.query("SELECT owner, cursor FROM feeds WHERE cursor IS NOT NULL").all() as {
-              owner: string;
-              cursor: string;
-            }[])
-          : [],
-      )
+  async cursors(generation: string, owners?: readonly string[]): Promise<Map<string, string>> {
+    return this.db
+      .transaction(() => {
+        const found = new Map<string, string>();
+        if (this.currentGeneration() !== generation) return found;
+        if (owners !== undefined) {
+          for (const owner of owners) {
+            const cursor = this.cursor(owner);
+            if (cursor !== undefined) found.set(owner, cursor);
+          }
+          return found;
+        }
+        const rows = this.db
+          .query("SELECT owner, cursor FROM feeds WHERE cursor IS NOT NULL")
+          .all() as { owner: string; cursor: string }[];
+        for (const row of rows) found.set(row.owner, row.cursor);
+        return found;
+      })
       .deferred();
-    return new Map(rows.map((r) => [r.owner, r.cursor]));
   }
 
   private cursor(owner: string): string | undefined {

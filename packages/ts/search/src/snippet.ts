@@ -52,7 +52,8 @@ function folded(word: string): string {
 }
 
 /** An excerpt of `text` around what `tree` matches, marked as `snippet()` marks it: the window of
- * about `EXCERPT_WORDS` words holding the most matched words, each match (a phrase as one)
+ * about `EXCERPT_WORDS` words (more when a phrase crosses its edge) holding the most matched
+ * words, each match (a phrase as one)
  * between `MATCH_START` and `MATCH_END`, with `…` where the text goes on. For a backend that
  * returns a matched record's text instead of a snippet; `highlights()` reads its output. */
 export function excerpt(text: string, tree: MatchTree): string {
@@ -97,15 +98,18 @@ export function excerpt(text: string, tree: MatchTree): string {
       start = at;
     }
   }
-  const end = Math.min(words.length, start + EXCERPT_WORDS);
+  let end = Math.min(words.length, start + EXCERPT_WORDS);
+  // A match that crosses an edge of the window is shown whole: the window grows to hold it.
+  for (const [from, to] of runs) {
+    if (from < start && to > start) start = from;
+    if (from < end && to > end) end = to;
+  }
   let out = start > 0 ? "…" : "";
   let at = start > 0 ? (words[start] as (typeof words)[number]).start : 0;
   for (const [from, to] of runs) {
-    const first = Math.max(from, start);
-    const last = Math.min(to, end);
-    if (first >= last) continue;
-    const open = (words[first] as (typeof words)[number]).start;
-    const close = (words[last - 1] as (typeof words)[number]).end;
+    if (from < start || to > end) continue;
+    const open = (words[from] as (typeof words)[number]).start;
+    const close = (words[to - 1] as (typeof words)[number]).end;
     out += `${clean.slice(at, open)}${MATCH_START}${clean.slice(open, close)}${MATCH_END}`;
     at = close;
   }

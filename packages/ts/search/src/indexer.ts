@@ -281,7 +281,6 @@ export class Indexer {
       removed: 0,
     };
     const generation = await this.index.generation();
-    const cursors = await this.index.cursors(generation);
     const { list, at: listedAt } = await this.ownerList();
     run.owners = list.length;
     if (this.readTo?.generation !== generation) {
@@ -293,7 +292,7 @@ export class Indexer {
     try {
       for (const owner of [...list.slice(start), ...list.slice(0, start)]) {
         if (signal.aborted) return run;
-        const more = await this.drain(owner, run, signal, generation, cursors.get(owner), readTo);
+        const more = await this.drain(owner, run, signal, generation, readTo);
         if (more) {
           this.resumeAfter = owner;
           run.more = true;
@@ -336,14 +335,13 @@ export class Indexer {
     return `${prefix}${changeStamp(new Date(Math.max(0, at - this.lagMs)).toISOString())}`;
   }
 
-  /** Reads `owner`'s feed from `cursor` (its cursor when the pass started), one page per
-   * commit. True when the pass should stop here: the budget is spent, or the index was reset. */
+  /** Reads `owner`'s feed from its cursor, one page per commit. True when the pass should stop
+   * here: the budget is spent, or the index was reset. */
   private async drain(
     owner: string,
     run: IndexerRun,
     signal: AbortSignal,
     generation: string,
-    cursor: string | undefined,
     readTo: Map<string, number>,
   ): Promise<boolean> {
     const prefix = keys.changes(owner);
@@ -351,7 +349,7 @@ export class Indexer {
       if (at === null || at === undefined) return;
       readTo.set(owner, Math.max(readTo.get(owner) ?? at, at));
     };
-    let held = cursor;
+    let held = (await this.index.cursors(generation, [owner])).get(owner);
     let startAfter = held === undefined ? undefined : this.windowStart(prefix, held);
     for (;;) {
       if (signal.aborted) return false;
@@ -464,7 +462,12 @@ export class Indexer {
   ): ChangeEntry | null {
     if (entry.format !== undefined) return entry;
     const read = metadata.get(entry.archive_id);
-    // A session with no metadata is removed by this page: the index no longer holds it.
+    // A session with no metadata is removed by this page, so the index's copy of it is not
+    // used. The removal can be refused (another process sharing the index read the session
+    // later), and then the index still holds it, but this page cannot know that: the feed copy
+    // is written in the same commit as the removal and the cursor. So such an entry, written
+    // before 0.16 and naming a session whose metadata is gone, is left out, as `readChanges`
+    // leaves it out of the owner's own feed.
     const format = read === null ? undefined : read?.format || holds.get(entry.archive_id)?.format;
     return format ? entryWithFormat(entry, format) : null;
   }
