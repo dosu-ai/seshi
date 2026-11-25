@@ -82,6 +82,9 @@ export interface LanceIndexOptions extends LanceSettings {
   /** While a generation is being built, `optimize()` its tables after this many rows are
    * committed (100,000), so their scalar indexes keep up. */
   buildOptimizeRows?: number;
+  /** While a generation is being built, the indexer gathers one owner's feed pages into
+   * commits of about this many records (50,000), instead of one commit per page. */
+  buildBatchRecords?: number;
   now?: () => number;
   /** Tests only: called before each step of `commit()`; a throw is a crash there. */
   beforeStep?: (step: CommitStep) => void | Promise<void>;
@@ -1300,6 +1303,15 @@ export class LanceIndex implements IndexStore {
       }
     }
     return { stale: false, refused, removed };
+  }
+
+  /** A first build or a rebuild commits gathered pages: each commit is a table version (six or
+   * seven a page), so at one page per commit a year of a team's sessions takes hours. Once the
+   * generation has caught up, each page is committed on its own, so it is searchable at once. */
+  async batchRecords(gen: string): Promise<number> {
+    const meta = await this.meta();
+    if (this.writing(meta) !== gen || meta.get(gk(gen, "indexed")) !== undefined) return 0;
+    return this.options.buildBatchRecords ?? 50_000;
   }
 
   async readThrough(gen: string, through: string): Promise<void> {
