@@ -1,6 +1,12 @@
 import { ServerError } from "@seshi/client";
 import { ConfigError } from "@seshi/config";
 import { Forbidden, SessionRejected, StoreError, Unauthorized } from "@seshi/model";
+import {
+  IndexUnavailable,
+  SearchQueryError,
+  SearchUnavailable,
+  SessionReadError,
+} from "@seshi/search";
 import { accessDeniedIn } from "@seshi/store";
 import { NotSignedIn } from "../account/credential";
 import { BadServerUrl } from "../account/logins";
@@ -76,6 +82,7 @@ export function classify(
       return { exit: EXIT.notFound, code: err.code, message: err.message };
     }
     if (err.status === 400) return { exit: EXIT.usage, code: err.code, message: err.message };
+    if (err.status === 409) return { exit: EXIT.conflict, code: err.code, message: err.message };
     if (err.status >= 500) {
       return {
         exit: EXIT.unavailable,
@@ -84,6 +91,17 @@ export function classify(
       };
     }
     return { exit: EXIT.failure, code: err.code, message: err.message };
+  }
+  if (err instanceof SessionReadError) {
+    const exit =
+      err.status === 400 ? EXIT.usage : err.status === 409 ? EXIT.conflict : EXIT.notFound;
+    return { exit, code: err.code, message: err.message };
+  }
+  if (err instanceof SearchQueryError) {
+    return { exit: EXIT.usage, code: err.code, message: err.message };
+  }
+  if (err instanceof SearchUnavailable || err instanceof IndexUnavailable) {
+    return { exit: EXIT.unavailable, code: err.code, message: err.message };
   }
   if (err instanceof StoreError) {
     return { exit: EXIT.unavailable, code: "unavailable", message: err.message };

@@ -14,7 +14,11 @@ import {
   type SearchResults,
   type Seshi,
   SessionConflict,
+  type SessionEvents,
+  type SessionEventsRequest,
   SessionExcluded,
+  type SessionList,
+  type SessionListRequest,
   type SessionMetadata,
   SessionRejected,
   type SessionsPage,
@@ -504,6 +508,78 @@ export class HttpSeshi implements Seshi {
     });
     if (status !== 200) refuse(status, body);
     return body as SearchResults;
+  }
+
+  /** Sessions by who, where and when, with no search words (`GET /v1/search/sessions`): those
+   * this credential may read that overlap the window (the last 7 days by default), newest
+   * first. Refused as `search` is: 400 `bad_query`, 503 while the index is first built, 404
+   * `search_disabled`. */
+  async searchSessions(request: SessionListRequest = {}): Promise<SessionList> {
+    const { status, body } = await this.request("GET", "/v1/search/sessions", {
+      query: {
+        owner: request.owner,
+        agent: request.agent,
+        repo: request.repo,
+        branch: request.branch,
+        harness: request.harness,
+        agent_version: request.agent_version,
+        model: request.model,
+        label: Object.entries(request.labels ?? {}).map(([key, value]) => `${key}=${value}`),
+        source: request.source,
+        since: request.since,
+        until: request.until,
+        limit: request.limit,
+        after: request.after,
+      },
+    });
+    if (status !== 200) refuse(status, body);
+    return body as SessionList;
+  }
+
+  /** Part of a session's events, numbered by `seq` across its current traces (`GET
+   * …/events`). Every refusal is a `ServerError`: 404 for a session not stored or not readable,
+   * 410 `redacted`, 409 `head_changed` (with `head`), 400 `bad_query`. */
+  async sessionEvents(
+    format: string,
+    sessionId: string,
+    request: SessionEventsRequest = {},
+    options: OwnerOption = {},
+  ): Promise<SessionEvents> {
+    return this.events(`${this.sessionPath(format, sessionId)}/events`, request, options.owner);
+  }
+
+  /** `sessionEvents` by owner and archive id, as search results and listings name a session. */
+  async sessionEventsByArchive(
+    owner: string,
+    archiveId: string,
+    request: SessionEventsRequest = {},
+  ): Promise<SessionEvents> {
+    return this.events(`${this.archivePath(owner, archiveId)}/events`, request);
+  }
+
+  private async events(
+    path: string,
+    request: SessionEventsRequest,
+    owner?: string,
+  ): Promise<SessionEvents> {
+    const { status, body } = await this.request("GET", path, {
+      query: {
+        owner,
+        from: request.from,
+        to: request.to,
+        around: request.around,
+        context: request.context,
+        mode: request.mode,
+        roles: request.roles?.join(","),
+        max_chars: request.max_chars,
+        event: request.event,
+        offset: request.offset,
+        head: request.head,
+        trace: request.trace,
+      },
+    });
+    if (status !== 200) refuse(status, body);
+    return body as SessionEvents;
   }
 
   async me(): Promise<Identity> {

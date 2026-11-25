@@ -17,6 +17,9 @@ export {
   type OpenIndex,
   type PageCommit,
   type Removal,
+  type SessionListPage,
+  type SessionListQuery,
+  type SessionPosition,
   type SessionUpdate,
 } from "./backend";
 export {
@@ -25,6 +28,14 @@ export {
   lanceBackend,
   provideLance,
 } from "./backends";
+export {
+  checkEventsRequest,
+  type ReadSessionOptions,
+  type ReadTrace,
+  readSessionEvents,
+  SessionReadError,
+  TraceCache,
+} from "./events";
 export {
   decodeFeedCursor,
   encodeFeedCursor,
@@ -58,9 +69,13 @@ export {
   WORD,
 } from "./query";
 export {
+  checkListRequest,
   checkRequest,
   DEFAULT_LIMIT,
+  DEFAULT_LIST_DAYS,
   DEFAULT_MATCHES,
+  decodeSessionCursor,
+  encodeSessionCursor,
   MAX_LIMIT,
   MAX_MATCHES,
   MAX_OFFSET,

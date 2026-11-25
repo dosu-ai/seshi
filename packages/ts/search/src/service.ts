@@ -10,10 +10,21 @@ import {
   type SearchResult,
   type SearchResults,
   type SearchSort,
+  type SessionList,
+  type SessionListRequest,
   type SessionMetadata,
+  type SessionSummary,
 } from "@seshi/model";
 import { accessDeniedIn, decodeMetadata, getBytes, isOwner, keys, type Store } from "@seshi/store";
-import type { BackendHit, BackendQuery, IndexStore, OpenIndex } from "./backend";
+import type {
+  BackendHit,
+  BackendQuery,
+  IndexedSession,
+  IndexStore,
+  OpenIndex,
+  SessionListQuery,
+  SessionPosition,
+} from "./backend";
 import { readFeed } from "./feed";
 import { Indexer, type IndexerLogger, type IndexerOptions, type IndexerRun } from "./indexer";
 import { defaultIndexPath } from "./paths";
@@ -195,6 +206,78 @@ export function checkRequest(request: SearchRequest, aliases = new OwnerAliases(
   };
 }
 
+/** The days `list_sessions` looks back when `since` is not given. */
+export const DEFAULT_LIST_DAYS = 7;
+
+/** A listing's place as its cursor: the last session's `updated_ms` and key. */
+export function encodeSessionCursor(
+  s: Pick<IndexedSession, "owner" | "archive_id" | "updated_at">,
+): string {
+  const position: SessionPosition = {
+    updated: Date.parse(s.updated_at) || 0,
+    key: `${s.owner}/${s.archive_id}`,
+  };
+  return Buffer.from(JSON.stringify([position.updated, position.key])).toString("base64url");
+}
+
+export function decodeSessionCursor(cursor: string): SessionPosition {
+  const refused = new SearchQueryError("after is not a cursor this server gave");
+  if (cursor.length > 1024 || !/^[A-Za-z0-9_-]+$/.test(cursor)) throw refused;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
+  } catch {
+    throw refused;
+  }
+  if (
+    !Array.isArray(parsed) ||
+    parsed.length !== 2 ||
+    !Number.isSafeInteger(parsed[0]) ||
+    typeof parsed[1] !== "string"
+  ) {
+    throw refused;
+  }
+  return { updated: parsed[0] as number, key: parsed[1] as string };
+}
+
+export function checkListRequest(
+  request: SessionListRequest,
+  now: number,
+  aliases = new OwnerAliases(),
+): Omit<SessionListQuery, "viewer"> & { since: number } {
+  const owner = text(request.owner, "owner");
+  if (owner !== undefined && !isOwner(owner)) {
+    throw new SearchQueryError("owner is not an owner id");
+  }
+  const since = time(request.since, "since") ?? now - DEFAULT_LIST_DAYS * 24 * 60 * 60 * 1000;
+  const until = time(request.until, "until");
+  if (until !== undefined && since > until) throw new SearchQueryError("since is after until");
+  const agent = text(request.agent, "agent");
+  const repo = text(request.repo, "repo");
+  const branch = text(request.branch, "branch");
+  const harness = text(request.harness, "harness");
+  const agentVersion = text(request.agent_version, "agent_version");
+  const model = text(request.model, "model");
+  const labels = labelFilter(request.labels);
+  const source = text(request.source, "source");
+  const after = text(request.after, "after");
+  return {
+    ...(owner !== undefined ? { owners: aliases.storedAs(owner) } : {}),
+    ...(agent !== undefined ? { agent } : {}),
+    ...(repo !== undefined ? { repo } : {}),
+    ...(branch !== undefined ? { branch } : {}),
+    ...(harness !== undefined ? { harness } : {}),
+    ...(agentVersion !== undefined ? { agent_version: agentVersion } : {}),
+    ...(model !== undefined ? { model } : {}),
+    ...(labels !== undefined ? { labels } : {}),
+    ...(source !== undefined ? { source } : {}),
+    since,
+    ...(until !== undefined ? { until } : {}),
+    limit: count(request.limit, "limit", DEFAULT_LIMIT, 1, MAX_LIMIT),
+    ...(after !== undefined ? { after: decodeSessionCursor(after) } : {}),
+  };
+}
+
 /** The label filter: each `key=value` a session must carry, keys and values as labels are. */
 function labelFilter(labels: SearchRequest["labels"]): Labels | undefined {
   if (labels === undefined) return undefined;
@@ -217,8 +300,7 @@ async function liveMetadata(
   }
 }
 
-function resultOf(hit: BackendHit): SearchResult {
-  const s = hit.session;
+function summaryOf(s: IndexedSession): SessionSummary {
   const started = iso(s.started_at);
   const ended = iso(s.ended_at);
   return {
@@ -240,6 +322,12 @@ function resultOf(hit: BackendHit): SearchResult {
     ...(started !== undefined ? { started_at: started } : {}),
     ...(ended !== undefined ? { ended_at: ended } : {}),
     updated_at: s.updated_at,
+  };
+}
+
+function resultOf(hit: BackendHit): SearchResult {
+  return {
+    ...summaryOf(hit.session),
     score: hit.score,
     hits: hit.hits,
     matches: hit.matches.map((m) => {
@@ -426,34 +514,14 @@ export class SearchService {
       );
     }
     const found = await index.query({ ...checked.query, viewer });
-    const verified =
-      this.options.verify === false
-        ? found.hits
-        : (
-            await Promise.all(
-              found.hits.map(async (hit) => {
-                let live: Awaited<ReturnType<typeof liveMetadata>>;
-                try {
-                  live = await liveMetadata(
-                    this.options.store,
-                    hit.session.owner,
-                    hit.session.archive_id,
-                  );
-                } catch (err) {
-                  // The key in use may not read this owner's folder (F11.5): not a result.
-                  if (accessDeniedIn(err)) return null;
-                  throw err;
-                }
-                if (live === null || live.status === "redacted" || live.head === undefined) {
-                  return null;
-                }
-                if (!viewer.canRead({ owner: live.owner, visibility: live.visibility })) {
-                  return null;
-                }
-                return { ...hit, session: { ...hit.session, visibility: live.visibility } };
-              }),
-            )
-          ).filter((h): h is BackendHit => h !== null);
+    const verified = (
+      await Promise.all(
+        found.hits.map(async (hit) => {
+          const session = await this.recheck(viewer, hit.session);
+          return session === null ? null : { ...hit, session };
+        }),
+      )
+    ).filter((h): h is BackendHit => h !== null);
     const next = checked.query.offset + checked.query.limit;
     const caughtUpAt = state.caught_up_at;
     return {
@@ -468,6 +536,58 @@ export class SearchService {
         sessions: state.sessions,
       },
     };
+  }
+
+  /** A session the index gave, checked against its live metadata: null when it is gone,
+   * redacted, a stub, or one `viewer` may no longer read; else with its live visibility. */
+  private async recheck(viewer: Viewer, session: IndexedSession): Promise<IndexedSession | null> {
+    if (this.options.verify === false) return session;
+    let live: SessionMetadata | null;
+    try {
+      live = await liveMetadata(this.options.store, session.owner, session.archive_id);
+    } catch (err) {
+      // The key in use may not read this owner's folder (F11.5): not a result.
+      if (accessDeniedIn(err)) return null;
+      throw err;
+    }
+    if (live === null || live.status === "redacted" || live.head === undefined) return null;
+    if (!viewer.canRead({ owner: live.owner, visibility: live.visibility })) return null;
+    return { ...session, visibility: live.visibility };
+  }
+
+  /** The sessions `viewer` may read that match `request`'s filters and overlap its window (the
+   * last 7 days by default), newest first (`GET /v1/search/sessions`, `list_sessions`). Each is
+   * checked against its live metadata, as search results are. Throws `SearchQueryError` for a
+   * request that cannot be run and `SearchUnavailable` while the index is being built. */
+  async listSessions(viewer: Viewer, request: SessionListRequest): Promise<SessionList> {
+    const now = (this.options.now ?? (() => new Date()))().getTime();
+    const checked = checkListRequest(request, now, this.aliases);
+    return this.reading(async (index) => {
+      const state = await index.state();
+      const readyAt = state.ready_at;
+      if (readyAt === undefined) {
+        throw new SearchUnavailable(
+          "the search index is being built from the change feed; try again shortly",
+        );
+      }
+      const page = await index.listSessions({ ...checked, viewer });
+      const live = await Promise.all(page.sessions.map((s) => this.recheck(viewer, s)));
+      const last = page.sessions.at(-1);
+      const caughtUpAt = state.caught_up_at;
+      return {
+        sessions: live.filter((s): s is IndexedSession => s !== null).map(summaryOf),
+        window: {
+          since: new Date(checked.since).toISOString(),
+          ...(checked.until !== undefined ? { until: new Date(checked.until).toISOString() } : {}),
+        },
+        ...(page.more && last !== undefined ? { cursor: encodeSessionCursor(last) } : {}),
+        index: {
+          ready_at: readyAt,
+          ...(caughtUpAt !== undefined ? { caught_up_at: caughtUpAt } : {}),
+          sessions: state.sessions,
+        },
+      };
+    });
   }
 
   /** Every owner's change feed as one, read from this index's copy of it (`GET
