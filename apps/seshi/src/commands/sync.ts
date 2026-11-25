@@ -135,6 +135,18 @@ async function searchPass(ctx: CommandContext, json: boolean, instance: Instance
       'sync search is for search.backend = "lance": with SQLite each API instance keeps its own index',
     );
   }
+  // LanceIndex has one writer (F10.8): a second indexer beside a running worker would race its
+  // commits and its bookkeeping. This is for deployments with no worker.
+  const { workerRunning } = await import("@seshi/instance");
+  if (await workerRunning(instance)) {
+    return fail(
+      ctx,
+      json,
+      EXIT.config,
+      "worker_running",
+      "a worker is running and keeps the shared search index: sync search is for deployments without one (seshi workers status)",
+    );
+  }
   const run = await search.run();
   emit(ctx, json, run, () => [
     `search: ${run.entries} change entries read from ${run.owners} owners, ${run.indexed} sessions indexed, ${run.removed} removed${run.more ? "; more to read: run it again" : ""}`,

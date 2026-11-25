@@ -94,12 +94,15 @@ export interface SearchStatus {
   building?: { generation: string; read_through?: string };
   /** The live generation was written under another layout: it is not served until rebuilt. */
   stale_schema?: string;
+  /** Requests waiting for the worker's next pass, with when each was made. */
+  requested?: { rebuild?: string; scrub?: string };
 }
 
-/** A rebuild of a shared index, started: the worker builds `generation`, and it goes live
- * when it has caught up (F10.11). */
-export interface RebuildStarted {
-  generation: string;
+/** A rebuild of a shared index, asked for: the worker starts it on its next pass, builds the
+ * new generation beside the live one, and switches when it has caught up (F10.11). */
+export interface RebuildRequested {
+  /** The generation live when it was asked for: the rebuild is done when another is live. */
+  from: string;
 }
 
 interface Checked {
@@ -356,19 +359,24 @@ export class SearchService {
     return indexer.catchUp(signal);
   }
 
-  /** Start a rebuild of a shared index and return at once: the worker builds the new
-   * generation beside the live one, which keeps answering until it goes live (F10.11). */
-  async startRebuild(): Promise<RebuildStarted> {
-    this.writable();
+  /** Ask the worker to rebuild a shared index, and return at once: it starts the rebuild on
+   * its next pass and builds the new generation beside the live one, which keeps answering
+   * until it goes live (F10.11). Only the request is written, so a read-only service may ask:
+   * the worker stays the one writer (F10.8). */
+  async requestRebuild(): Promise<RebuildRequested> {
     if (!this.shared) throw new Error("this index is rebuilt in process: rebuild()");
-    const { index } = await this.open();
-    return { generation: await index.reset() };
+    return this.reading(async (index) => {
+      if (index.requestRebuild === undefined) throw new Error("this index rebuilds in process");
+      const from = (await index.state()).generation;
+      await index.requestRebuild();
+      return { from };
+    });
   }
 
   /** Ask the worker to scrub on its next pass (F10.12, `seshi search --scrub`). False for a
-   * backend with nothing to scrub, which deletes text when it commits (SQLite). */
+   * backend with nothing to scrub, which deletes text when it commits (SQLite). Like
+   * `requestRebuild`, it writes only the request. */
   async requestScrub(): Promise<boolean> {
-    this.writable();
     const { index } = await this.open();
     if (index.requestScrub === undefined) return false;
     await index.requestScrub();
@@ -389,6 +397,7 @@ export class SearchService {
         ...(this.shared && state.generation !== "" ? { generation: state.generation } : {}),
         ...(state.building ? { building: state.building } : {}),
         ...(state.stale_schema ? { stale_schema: state.stale_schema } : {}),
+        ...(state.requested ? { requested: state.requested } : {}),
       };
     });
   }

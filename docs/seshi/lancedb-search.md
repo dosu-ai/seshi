@@ -84,7 +84,9 @@ then deployment. See the [plan](#plan).
 - `GET /v1/changes/all` is served from the index's copy of the feed, as today. Every instance
   can serve it, because the copy is in the shared index.
 - A deployment without a worker (cron-only, X7.1) runs the job from cron: `seshi sync search`,
-  one budgeted pass. Progress is in the index's cursors, so a long first build spans several
+  one budgeted pass. It refuses while a worker's heartbeat is fresh, since `LanceIndex`
+  assumes one writer (concurrent commits conflict, and `meta.trash`'s read-modify-write would
+  lose entries). Progress is in the index's cursors, so a long first build spans several
   runs.
 
 ## The seam
@@ -600,14 +602,22 @@ and how far it has read. The job's `backlog()` reports the same, so `seshi worke
 `GET /v1/admin/jobs` show it.
 
 **`seshi search --rebuild`**, with a server config: with SQLite it rebuilds this instance's
-file, as today. With LanceDB it writes `building_gen` and returns; the worker does the build,
-so there is never a second writer and the build survives the CLI exiting. `--wait` follows
-`--status` until the switch. **`seshi search --scrub`** calls `requestScrub()`: the worker
-scrubs on its next pass. Both open the index as a writer from the CLI, with the CLI's config, so
-`open()`'s reconciliation runs there too: a CLI whose `search.events` differs from the
-worker's would start the rebuild (or narrowing) that config calls for. They read the same
-config as the worker, so in practice it agrees; it is noted here because it is the one write
-that is not the worker's.
+file, as today. With LanceDB it writes one key, `rebuild_requested`, to `meta` and returns:
+the CLI opens the index read-only, and only the worker ever calls `reset()`, in `maintain()`
+after its next pass, so there is never a second writer and the build survives the CLI
+exiting. **`seshi search --scrub`** writes `scrub_requested` the same way. A worker clears a
+request only while it still holds the value it acted on, so one made while it works stays for
+the next pass. `--status` lists requests waiting. `--wait` follows the request, the build and
+the switch; when nothing has moved for 15 minutes (or 20 indexer intervals) and no worker's
+heartbeat is fresh, it gives up and points to `seshi workers status` and `seshi sync search`.
+
+A first draft of phase 3 had the CLI open a full writer and call `reset()` itself. Review
+found that this could delete the live index: `reset()` put the generation being built in the
+trash while the worker's `passDone()` was still building its text indexes (minutes, at scale),
+which then made that generation live, and the grace dropped it. Besides the request, two
+guards stay: `passDone()` reads `meta` again before it switches and never makes live a
+generation in the trash, and `emptyTrash()` never drops the live generation or a table `meta`
+names.
 
 ## Config and deployment
 
@@ -657,9 +667,22 @@ max_recent_rows = 100000        # sort = recent
   dependencies too. No release channel installs the workspace, so users never fetched them;
   this is for contributors, CI and the image build.
 - **Platforms.** The spike ran on linux-x64 under Bun 1.4.2, against GCS with the VM's metadata
-  credentials. Phase 2's conformance suite runs on a local folder in every CI run (linux-x64)
-  and on macOS arm64, and against S3 on rustfs 1.0.5 (CI's service, and locally); linux-arm64,
-  GCS from the suite, and Azure are not checked yet.
+  credentials. The conformance suite and the deploy test run on a local folder in every CI run
+  (linux-x64) and on macOS arm64, against S3 on rustfs 1.0.5 and against Azure on Azurite 3.38
+  (CI's services, and locally). The images and the Linux server binaries are checked on
+  linux-arm64 too.
+- **GCS.** LanceDB's GCS client has no endpoint option, and cannot write to fake-gcs-server
+  (1.49 to 1.56 all answer its uploads `400 invalid uploadType`; checked on 25 November 2026),
+  so the GCS variants of both suites run only against a real bucket (`SESHI_TEST_GCS_BUCKET`
+  with Application Default Credentials, no emulator), not in CI. A `gs://` index beside a
+  `[store] endpoint` that is not Google's, or `STORAGE_EMULATOR_HOST`, is refused, since the
+  index would otherwise go to Google while the store goes elsewhere. Without a key LanceDB
+  finds Application Default Credentials itself, as the store does; with
+  `service_account_key` it is passed on as `google_service_account_key`.
+- **Azure** reuses the store's own resolution (`resolveAzureAccess`): config, then
+  `AZURE_STORAGE_ACCOUNT`, `AZURE_STORAGE_KEY`, `AZURE_STORAGE_SAS_TOKEN` and the connection
+  string, then workload identity, whose variables are passed on for LanceDB's client to
+  exchange the federated token itself.
 - **`seshi doctor --config <seshi.toml>`** (a new mode: `doctor` was a laptop's check until
   phase 3) checks that the index can be read (a `meta` naming another deployment fails here,
   with LanceDB's error), that the worker's keys can write the location (a probe object written
@@ -723,7 +746,9 @@ amd64 under emulation.
   `doctor` only checked a laptop's sessions. Phase 3 added `seshi doctor --config`.
 - **`seshi sync search`** is new: the design said a cron-only deployment "runs the job from
   cron" but named no command.
-- **`--rebuild` and `--scrub` open a writer from the CLI** (see [rebuild](#rebuild)).
+- **`--rebuild` and `--scrub` are requests the worker carries out** (`rebuild_requested`,
+  `scrub_requested` in `meta`), not writes from the CLI; see [rebuild](#rebuild) for the race
+  that a writer in the CLI caused.
 - **LanceDB is its own package**, `@seshi/lance` at `packages/ts/search/lance`, so
   `@seshi/search` no longer depends on LanceDB or Arrow, and LanceDB's embedding packages are
   overridden away (see Installs above).

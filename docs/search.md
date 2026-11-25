@@ -145,7 +145,10 @@ scrub = "24h"
   ([spec/layout.md](../spec/layout.md)). `search.lance.uri` puts it in another bucket (with
   keys of its own in `[search.lance]`) or a folder on a single host. It is derived data: it can
   be deleted at any time and is rebuilt from the change feeds. It holds session text, so the
-  same people may read it as may read traces.
+  same people may read it as may read traces. On `gs://` it must be Google's own Cloud
+  Storage: LanceDB cannot reach a GCS emulator or another endpoint, so a `gs://` store with
+  one (or `STORAGE_EMULATOR_HOST`) needs `search.lance.uri` set to a folder or another
+  bucket.
 - **Which binary.** LanceDB's native library is about 200 MB (430 MB on Linux arm64), so it is
   only in the **server build**: the container image (`ghcr.io/dosu-ai/seshi`) and the
   `seshi-server-linux-x64` and `-arm64` release archives. The binaries laptops install (the
@@ -153,15 +156,18 @@ scrub = "24h"
   refuses to start, saying so.
 - **Who writes.** Only an instance with the worker role indexes; give exactly one instance that
   role (X7.2). API-only instances open the index read-only and never write it, not even its
-  bookkeeping. A deployment without a worker has no index. A second worker by mistake is
+  bookkeeping. A deployment without a worker runs `seshi sync search` from cron instead, which
+  refuses while a worker is running. A second worker by mistake is
   harmless (writes are idempotent), only wasteful.
 - **Serverless laptops** ignore `search.backend` and `[search.lance]` in the shared config:
   each keeps its own SQLite index, limited to its scope (F11.9).
 - **The first build** answers `503 index_building` until the worker has read every feed once,
   as with SQLite. Later rebuilds do not: `seshi search --rebuild` (with the server's config)
   asks the worker to build a new generation **beside** the live one, which keeps answering
-  until the new one has caught up and takes its place (F10.11). It returns at once;
-  `--wait` follows the build until the switch. Changing `search.events` to index more roles,
+  until the new one has caught up and takes its place (F10.11). It only records the request,
+  and returns at once: the worker starts the rebuild after its next pass, so it stays the one
+  writer. `--wait` follows the request and the build until the switch, and gives up, pointing
+  to `seshi workers status`, when nothing has moved for 15 minutes and no worker is running. Changing `search.events` to index more roles,
   or a seshi upgrade that changes the index's layout, rebuilds the same way; indexing fewer
   roles stops the old generation answering at once, since it holds records the new config
   leaves out.

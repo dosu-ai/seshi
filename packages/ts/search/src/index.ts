@@ -64,7 +64,7 @@ export {
   MAX_LIMIT,
   MAX_MATCHES,
   MAX_OFFSET,
-  type RebuildStarted,
+  type RebuildRequested,
   SearchService,
   type SearchServiceOptions,
   type SearchSettings,
