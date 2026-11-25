@@ -17,8 +17,27 @@ interface Item {
   negated: boolean;
 }
 
+/** A word or phrase to look for. */
+export interface MatchItem {
+  /** As typed (a phrase without its quotes): for a backend that tokenizes queries itself, as
+   * FTS5 does, so they are tokenized as the indexed text was. */
+  text: string;
+  /** `text`'s words, lower-cased; more than one is a phrase (`src/app.ts` → src, app, ts). */
+  tokens: string[];
+  /** `word*` or `"a phrase"*`: the last word is a prefix. */
+  prefix: boolean;
+}
+
+/** A parsed query, which each backend compiles into its own. */
+export interface MatchTree {
+  /** Every group must match one record; within a group, any item will do. */
+  all: MatchItem[][];
+  /** A record holding any of these does not match. */
+  none: MatchItem[];
+}
+
 export interface ParsedQuery {
-  match: string;
+  match: MatchTree;
   /** The words and phrases to find, as typed (negated ones left out). */
   terms: string[];
 }
@@ -27,9 +46,17 @@ export interface ParsedQuery {
  * keeps. Anything else (`--`, `/`, `"`) would be an empty phrase. */
 const TOKEN_CHAR = /[\p{L}\p{N}]/u;
 
-function quoted(item: Item): string {
-  const body = `"${item.text.replaceAll('"', '""')}"`;
-  return item.prefix ? `${body} *` : body;
+/** A word, as a backend's tokenizer splits text: on anything that is not a letter or digit (or
+ * a mark on one). */
+export const WORD = /[\p{L}\p{N}\p{M}]+/gu;
+
+/** The words of `text`, lower-cased. */
+export function tokensOf(text: string): string[] {
+  return (text.match(WORD) ?? []).map((t) => t.toLowerCase());
+}
+
+function matchItem(item: Item): MatchItem {
+  return { text: item.text, tokens: tokensOf(item.text), prefix: item.prefix };
 }
 
 function startsNegation(text: string, at: number): boolean {
@@ -79,7 +106,7 @@ function lex(text: string): (Item | "OR" | "NOT")[] {
   return out;
 }
 
-/** The FTS5 expression for `text`; `SearchQueryError` when it holds nothing to look for. */
+/** The match tree for `text`; `SearchQueryError` when it holds nothing to look for. */
 export function parseQuery(text: string): ParsedQuery {
   if (text.length > MAX_QUERY_LENGTH) {
     throw new SearchQueryError(`the query is longer than ${MAX_QUERY_LENGTH} characters`);
@@ -124,13 +151,8 @@ export function parseQuery(text: string): ParsedQuery {
   if (groups.length === 0) {
     throw new SearchQueryError("the query needs at least one word to look for");
   }
-  const positive = groups
-    .map((g) => (g.length === 1 ? quoted(g[0] as Item) : `(${g.map(quoted).join(" OR ")})`))
-    .join(" AND ");
-  const match =
-    negated.length === 0 ? positive : `(${positive}) NOT (${negated.map(quoted).join(" OR ")})`;
   return {
-    match,
+    match: { all: groups.map((g) => g.map(matchItem)), none: negated.map(matchItem) },
     terms: groups.flat().map((t) => (t.phrase ? `"${t.text}"` : t.text)),
   };
 }

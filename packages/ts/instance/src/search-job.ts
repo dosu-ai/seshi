@@ -25,7 +25,7 @@ export function searchIndexJobs(host: JobHost): Job[] {
         };
       },
       async backlog() {
-        const status = search.status();
+        const status = await search.status();
         const caughtUp = status.caught_up_at ? Date.parse(status.caught_up_at) : Number.NaN;
         return {
           ready: status.ready ? 1 : 0,

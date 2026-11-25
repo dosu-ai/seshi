@@ -1,16 +1,23 @@
-export type {
-  BackendHit,
-  BackendMatch,
-  BackendQuery,
-  BackendResults,
-  FeedPosition,
-  FeedRow,
-  FeedState,
-  IndexedEvent,
-  IndexedSession,
-  IndexStore,
-  SearchBackend,
-  SessionUpdate,
+export {
+  type BackendHit,
+  type BackendMatch,
+  type BackendQuery,
+  type BackendResults,
+  type CommitResult,
+  type FeedPosition,
+  type FeedRow,
+  type IndexedEvent,
+  type IndexedSession,
+  type IndexOptions,
+  type IndexReader,
+  type IndexState,
+  type IndexStore,
+  IndexUnavailable,
+  type IndexWriter,
+  type OpenIndex,
+  type PageCommit,
+  type Removal,
+  type SessionUpdate,
 } from "./backend";
 export {
   decodeFeedCursor,
@@ -36,9 +43,12 @@ export { defaultIndexPath, type IndexPathOptions, MEMORY_INDEX } from "./paths";
 export {
   MAX_QUERY_LENGTH,
   MAX_QUERY_TERMS,
+  type MatchItem,
+  type MatchTree,
   type ParsedQuery,
   parseQuery,
   SearchQueryError,
+  tokensOf,
 } from "./query";
 export {
   checkRequest,
@@ -53,6 +63,20 @@ export {
   type SearchStatus,
   SearchUnavailable,
 } from "./service";
-export { highlights, indexText, MATCH_END, MATCH_START, MAX_INDEXED_CHARS } from "./snippet";
-export { INDEX_SCHEMA, SqliteIndex, type SqliteIndexOptions } from "./sqlite";
+export {
+  EXCERPT_WORDS,
+  excerpt,
+  highlights,
+  indexText,
+  MATCH_END,
+  MATCH_START,
+  MAX_INDEXED_CHARS,
+} from "./snippet";
+export {
+  fts5Match,
+  INDEX_SCHEMA,
+  SqliteIndex,
+  type SqliteIndexOptions,
+  sqliteIndex,
+} from "./sqlite";
 export { LOCAL_VIEWER, type Viewer, viewerFor } from "./viewer";

@@ -1,6 +1,6 @@
 import type { AllChangesPage, ReadChangesOptions } from "@seshi/model";
 import { changeStamp, isOwner, keys, parseChangeKey } from "@seshi/store";
-import type { FeedPosition, IndexStore } from "./backend";
+import type { FeedPosition, IndexReader } from "./backend";
 import { SearchQueryError } from "./query";
 
 export const FEED_DEFAULT_LIMIT = 100;
@@ -44,13 +44,13 @@ function sincePosition(since: string): FeedPosition {
   return { stamp: changeStamp(since), owner: "", name: "" };
 }
 
-/** A page of every owner's change feed, read from the index's copy (`FeedState.feed`); null
+/** A page of every owner's change feed, read from the index's copy (`IndexReader.feed`); null
  * until every owner's feed has been read once. `limit` is the caller's to check (the route's
  * `intParam`); it is only capped here. */
-export function readFeed(
-  index: IndexStore,
+export async function readFeed(
+  index: IndexReader,
   options: ReadChangesOptions = {},
-): AllChangesPage | null {
+): Promise<AllChangesPage | null> {
   const limit = Math.min(options.limit ?? FEED_DEFAULT_LIMIT, FEED_MAX_LIMIT);
   const after =
     options.after !== undefined
@@ -58,7 +58,7 @@ export function readFeed(
       : options.since !== undefined
         ? sincePosition(options.since)
         : undefined;
-  const page = index.feed(after, limit);
+  const page = await index.feed(after, limit);
   if (page === null) return null;
   const last = page.entries.at(-1);
   return {

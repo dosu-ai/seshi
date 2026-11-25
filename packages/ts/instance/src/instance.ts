@@ -675,7 +675,7 @@ export class Instance {
       await this.runtime.forget(this.process);
       this.runtime.close();
     }
-    this.search?.close();
+    await this.search?.close();
     let timer: ReturnType<typeof setTimeout> | undefined;
     await Promise.race([
       this.health.flush(),

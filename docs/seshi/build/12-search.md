@@ -113,10 +113,12 @@ an indexer per instance tails every owner's change feed into a local SQLite FTS5
 
 ## Extension points
 
-- **Another backend (ClickHouse, later):** implement `SearchBackend` (+ `FeedState`, or keep
-  cursors elsewhere) and choose it in `SearchService.open()` from `search.backend`; the indexer
-  and the API do not change. The indexer only calls `session`, `apply`, `remove`, the feed
-  state and `transaction`.
+- **Another backend:** since 0.28 the seam is `IndexReader` (what the API reads: `state`,
+  `query` with a parsed `MatchTree`, the cross-owner `feed`) and `IndexWriter` (what the
+  indexer writes: one `commit()` per feed page, every call naming its generation), which
+  replaced `SearchBackend`, `FeedState` and `transaction`. Implement both and pass an
+  `OpenIndex` to `SearchService` (`open`); the indexer and the API do not change. A backend
+  that returns a record's text rather than a snippet marks it with `excerpt()`.
 - **Semantic search (later):** add documents per turn from `searchableEvents`' output; the
   `SearchRequest`/`SearchResults` shapes are additive-friendly (`score` is per answer).
 - **Styled CLI output (13):** `searchLines` / `resultLines` in `commands/search.ts` produce the
@@ -125,7 +127,7 @@ an indexer per instance tails every owner's change feed into a local SQLite FTS5
 - **CLI credentials (13):** `overHttp` takes `--token`/`--user`; once `seshi login` stores a
   credential, read it there (or in `connect()`) and keep `--token` as an override.
 - **An MCP tool (later, F10.5):** call `SearchService.search(viewerFor(principal, aliases), …)`.
-- **Other processes that need an index of the feed:** `Indexer` takes any `IndexStore`.
+- **Other processes that need an index of the feed:** `Indexer` takes any `IndexWriter`.
 
 ## Deviations and why
 

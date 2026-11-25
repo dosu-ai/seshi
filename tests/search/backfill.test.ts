@@ -56,16 +56,15 @@ function searchable() {
   const indexer = new Indexer({ store, index, events: EVENTS, ownerRefreshMs: 0 });
   const find = async (q: string) => {
     await indexer.catchUp();
-    return index
-      .query({
-        match: parseQuery(q).match,
-        viewer: LOCAL_VIEWER,
-        sort: "relevance",
-        limit: 50,
-        offset: 0,
-        matches: 5,
-      })
-      .hits.map((h) => `${h.session.owner}/${h.session.session_id}`);
+    const found = await index.query({
+      match: parseQuery(q).match,
+      viewer: LOCAL_VIEWER,
+      sort: "relevance",
+      limit: 50,
+      offset: 0,
+      matches: 5,
+    });
+    return found.hits.map((h) => `${h.session.owner}/${h.session.session_id}`);
   };
   return { index, find };
 }

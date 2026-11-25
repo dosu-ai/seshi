@@ -6,9 +6,11 @@ import { BUILTIN_FORMATS, FormatRegistry } from "@seshi/formats";
 import { StoreSeshi, setVisibility, tombstone } from "@seshi/pipeline";
 import { FsStore, type Store } from "@seshi/store";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { type IndexOptions, type IndexStore, IndexUnavailable, type OpenIndex } from "./backend";
 import { MEMORY_INDEX } from "./paths";
 import { SearchQueryError } from "./query";
 import { checkRequest, MAX_LIMIT, SearchService, SearchUnavailable } from "./service";
+import { fts5Match, sqliteIndex } from "./sqlite";
 import { LOCAL_VIEWER, type Viewer } from "./viewer";
 
 const formats = new FormatRegistry(BUILTIN_FORMATS);
@@ -61,9 +63,9 @@ describe("SearchService", () => {
     await expect(search.search(LOCAL_VIEWER, { q: "kubernetes" })).rejects.toBeInstanceOf(
       SearchUnavailable,
     );
-    expect(search.ready()).toBe(false);
+    expect(await search.ready()).toBe(false);
     await search.catchUp();
-    expect(search.ready()).toBe(true);
+    expect(await search.ready()).toBe(true);
     const found = await search.search(LOCAL_VIEWER, { q: "kubernetes" });
     expect(found).toMatchObject({ query: "kubernetes", total: 1 });
     expect(found.index.sessions).toBe(1);
@@ -84,7 +86,7 @@ describe("SearchService", () => {
       timestamp: ts.replace("Z", ".000Z"),
     });
     expect(match?.snippet.slice(...(match.highlights[0] as [number, number]))).toBe("kubernetes");
-    search.close();
+    await search.close();
   });
 
   it("shows each viewer only what it may read, checked again against live metadata", async () => {
@@ -130,8 +132,8 @@ describe("SearchService", () => {
     const path = join(dir, "index", "d.sqlite");
     const first = service({ path });
     await first.catchUp();
-    expect(first.status()).toMatchObject({ path, ready: true, sessions: 1 });
-    first.close();
+    expect(await first.status()).toMatchObject({ location: path, ready: true, sessions: 1 });
+    await first.close();
     await expect(first.search(LOCAL_VIEWER, { q: "persistent" })).rejects.toThrow(/shut down/);
     const second = service({ path });
     // Ready at once: the file holds the index and its cursors.
@@ -140,14 +142,110 @@ describe("SearchService", () => {
     const rebuilt = await second.rebuild();
     expect(rebuilt).toMatchObject({ caught_up: true, entries: 1, indexed: 1 });
     expect((await second.search(LOCAL_VIEWER, { q: "persistent" })).total).toBe(1);
-    second.close();
+    await second.close();
+  });
+});
+
+describe("SearchService: opening the index", () => {
+  it("opens the index it is given, and reports where it is", async () => {
+    await write("alice", "s1", "opened words");
+    const opened: IndexOptions[] = [];
+    const open: OpenIndex = async (options) => {
+      opened.push(options);
+      return sqliteIndex({ path: MEMORY_INDEX })(options);
+    };
+    const search = new SearchService({
+      store,
+      deployment: "d",
+      scope: "mine:alice",
+      settings: { events: ["user"] },
+      open,
+    });
+    await search.catchUp();
+    expect(await search.status()).toMatchObject({ location: MEMORY_INDEX, ready: true });
+    expect((await search.search(LOCAL_VIEWER, { q: "opened" })).total).toBe(1);
+    expect(opened).toEqual([{ deployment: "d", events: ["user"], scope: "mine:alice" }]);
+    await search.close();
+  });
+
+  it("closes the index only once the reads in flight have finished", async () => {
+    await write("alice", "s1", "inflight words");
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let held = false;
+    const search = new SearchService({
+      store,
+      deployment: "d",
+      settings: { events: ["user"] },
+      open: async (options) => {
+        const index = await sqliteIndex({ path: MEMORY_INDEX })(options);
+        const state = index.state.bind(index);
+        // Once armed, a read waits at the gate before it reads the index.
+        index.state = async () => {
+          if (held) await gate;
+          return state();
+        };
+        return index;
+      },
+    });
+    await search.catchUp();
+    held = true;
+    const answered = search.search(LOCAL_VIEWER, { q: "inflight" });
+    const status = search.status();
+    await Promise.resolve();
+    let closed = false;
+    const closing = search.close().then(() => {
+      closed = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(closed).toBe(false);
+    await expect(search.ready()).rejects.toThrow(SearchUnavailable);
+    release();
+    expect((await answered).total).toBe(1);
+    expect(await status).toMatchObject({ ready: true, sessions: 1 });
+    await closing;
+    expect(closed).toBe(true);
+  });
+
+  it("passes on an index it cannot reach, and tries to open it again", async () => {
+    let attempts = 0;
+    const search = new SearchService({
+      store,
+      deployment: "d",
+      settings: { events: ["user"] },
+      open: async (options) => {
+        attempts++;
+        if (attempts === 1) throw new IndexUnavailable("the bucket did not answer");
+        const index = await sqliteIndex({ path: MEMORY_INDEX })(options);
+        return {
+          ...index,
+          location: () => index.location(),
+          state: () => Promise.reject(new IndexUnavailable("timed out")),
+          close: () => index.close(),
+        } as IndexStore;
+      },
+    });
+    await expect(search.status()).rejects.toThrow(IndexUnavailable);
+    const failed = search.search(LOCAL_VIEWER, { q: "x" });
+    await expect(failed).rejects.toBeInstanceOf(IndexUnavailable);
+    await expect(failed).rejects.toMatchObject({ code: "index_unavailable" });
+    expect(attempts).toBe(2);
+    await search.close();
   });
 });
 
 describe("checkRequest", () => {
   it("resolves defaults and filters", () => {
     const { query } = checkRequest({ q: "x" });
-    expect(query).toEqual({ match: '"x"', sort: "relevance", limit: 20, matches: 3, offset: 0 });
+    expect({ ...query, match: fts5Match(query.match) }).toEqual({
+      match: '"x"',
+      sort: "relevance",
+      limit: 20,
+      matches: 3,
+      offset: 0,
+    });
     const full = checkRequest({
       q: "x",
       owner: "alice",
