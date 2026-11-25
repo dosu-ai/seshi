@@ -45,6 +45,8 @@ export interface ReadTrace {
   models: string[];
   calls: number;
   tokens: SessionTokens;
+  /** Characters of event text: what the cache counts it as. */
+  chars: number;
 }
 
 const NO_TOKENS: SessionTokens = {
@@ -71,11 +73,17 @@ function tokensOf(calls: readonly LlmCall[]): SessionTokens {
 /** Decoded traces, kept a while: traces are immutable under their hash, so a long session read
  * a range at a time costs one read per trace it crosses. A redaction backfill may rewrite a
  * trace in place under the same hash, so the key also names the rule set the trace was last
- * redacted under. */
+ * redacted under. Bounded by count and by the characters of event text held: the least
+ * recently used go first, and a trace larger than the whole budget is not kept. */
 export class TraceCache {
-  private readonly held = new Map<string, Promise<ReadTrace | null>>();
+  private readonly held = new Map<string, { trace: Promise<ReadTrace | null>; chars: number }>();
+  private total = 0;
 
-  constructor(private readonly max = 32) {}
+  constructor(
+    private readonly max = 32,
+    /** 32M characters: about 64 MB of strings. */
+    private readonly maxChars = 32 * 1024 * 1024,
+  ) {}
 
   get(key: string, load: () => Promise<ReadTrace | null>): Promise<ReadTrace | null> {
     const held = this.held.get(key);
@@ -83,26 +91,51 @@ export class TraceCache {
       // Most recently used last.
       this.held.delete(key);
       this.held.set(key, held);
-      return held;
+      return held.trace;
     }
     const loading = load();
-    this.held.set(key, loading);
-    // A failed or missing read is not kept.
+    const entry = { trace: loading, chars: 0 };
+    this.held.set(key, entry);
     loading.then(
       (trace) => {
-        if (trace === null) this.held.delete(key);
+        if (this.held.get(key) !== entry) return;
+        // A missing read is not kept.
+        if (trace === null) {
+          this.drop(key);
+          return;
+        }
+        entry.chars = trace.chars;
+        this.total += trace.chars;
+        this.evict();
       },
-      () => this.held.delete(key),
+      () => {
+        if (this.held.get(key) === entry) this.drop(key);
+      },
     );
-    while (this.held.size > this.max) {
-      const oldest = this.held.keys().next().value as string;
-      this.held.delete(oldest);
-    }
+    this.evict();
     return loading;
+  }
+
+  private drop(key: string): void {
+    const entry = this.held.get(key);
+    if (entry === undefined) return;
+    this.total -= entry.chars;
+    this.held.delete(key);
+  }
+
+  private evict(): void {
+    while (this.held.size > this.max || (this.total > this.maxChars && this.held.size > 0)) {
+      this.drop(this.held.keys().next().value as string);
+    }
   }
 
   get size(): number {
     return this.held.size;
+  }
+
+  /** Characters of event text held. */
+  get chars(): number {
+    return this.total;
   }
 }
 
@@ -118,6 +151,7 @@ async function loadTrace(
   const calls = trace.llm_calls ?? [];
   return {
     events: trace.events,
+    chars: trace.events.reduce((n, e) => n + e.text.length, 0),
     started_at: trace.started_at,
     ended_at: trace.ended_at,
     models: calls.map((c) => c.model).filter((m): m is string => typeof m === "string"),
@@ -169,9 +203,6 @@ export function checkEventsRequest(request: SessionEventsRequest): Checked {
   }
   if (offset !== undefined && event === undefined) {
     throw new SessionReadError(400, "bad_query", "offset goes with event");
-  }
-  if (context !== undefined && around === undefined) {
-    throw new SessionReadError(400, "bad_query", "context goes with around");
   }
   if (from !== undefined && to !== undefined && to < from) {
     throw new SessionReadError(400, "bad_query", "to is before from");

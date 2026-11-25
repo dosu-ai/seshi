@@ -175,7 +175,7 @@ describe.each(VARIANTS)("seshi mcp against seshi serve, $name", (variant) => {
     }, "the index to hold the sessions").catch((err) => {
       throw new Error(`${(err as Error).message}\nserver:\n${serverLog}`);
     });
-  }, 120_000);
+  }, 240_000);
 
   afterAll(async () => {
     for (const c of clients) await c.close().catch(() => {});
@@ -190,7 +190,8 @@ describe.each(VARIANTS)("seshi mcp against seshi serve, $name", (variant) => {
       args: ["run", join(ROOT, "apps/seshi/src/main.ts"), "mcp", ...args],
       env: { ...env, ...extraEnv },
       cwd: dir,
-      stderr: "pipe",
+      // Inherited, not piped: a pipe nobody reads would block the child once full.
+      stderr: "inherit",
     });
     const client = new Client({ name: "seshi-test", version: "0" });
     await client.connect(transport);

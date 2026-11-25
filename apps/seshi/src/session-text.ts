@@ -181,11 +181,15 @@ export function searchLines(results: SearchResults): string[] {
   return lines;
 }
 
+/** A time as a date or an RFC 3339 time: four-digit year first, so a bare number (`7`) is not
+ * read as a year. */
+const ISO_TIME = /^\d{4}-\d{2}-\d{2}/;
+
 /** A time a person or an agent gave (RFC 3339, a date) or an age back from `now` (`7d`, `24h`),
  * as RFC 3339; undefined for neither. */
 export function timeOrAge(value: string, now: Date): string | undefined {
   const ago = parseDuration(value);
   if (ago !== undefined) return new Date(now.getTime() - ago).toISOString();
-  const ms = Date.parse(value);
+  const ms = ISO_TIME.test(value) ? Date.parse(value) : Number.NaN;
   return Number.isFinite(ms) ? new Date(ms).toISOString() : undefined;
 }

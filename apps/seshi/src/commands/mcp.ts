@@ -9,7 +9,7 @@ import { normalizeServer } from "../account/logins";
 import { type Backend, openBackend, ServerBackend } from "../backend";
 import { EXIT } from "../cli/exit";
 import { helpOrUsageError } from "../cli/output";
-import { TOOL_NAMES, type ToolName, Tools } from "../mcp/tools";
+import { type HostBackend, TOOL_NAMES, type ToolName, Tools } from "../mcp/tools";
 import { isServerless } from "../serverless/settings";
 import { USER_AGENT } from "../user-agent";
 import type { CommandContext } from "./index";
@@ -36,7 +36,7 @@ const INSTRUCTIONS = [
 /** Where the tools' backend comes from: made once, or (with the login) afresh for each call, so
  * a session token that ran out is renewed as the CLI renews it. A failure is the call's answer,
  * not the command's: the server starts whatever the backend's state. */
-export function backendSource(ctx: CommandContext, values: Values): () => Promise<Backend> {
+export function backendSource(ctx: CommandContext, values: Values): () => Promise<HostBackend> {
   const token = values.token ?? ctx.env.SESHI_TOKEN;
   let account: Account | undefined;
   const opened = () => {
@@ -46,7 +46,7 @@ export function backendSource(ctx: CommandContext, values: Values): () => Promis
   if (token !== undefined && token !== "") {
     let backend: Backend | undefined;
     return async () => {
-      if (backend) return backend;
+      if (backend) return { backend };
       const server = values.server ?? opened().cli.server;
       if (server === undefined) {
         throw new Error("--token needs a server: pass --server <url>, or run seshi login first");
@@ -61,7 +61,7 @@ export function backendSource(ctx: CommandContext, values: Values): () => Promis
         }),
         user,
       );
-      return backend;
+      return { backend };
     };
   }
   let serverless: Promise<Backend> | undefined;
@@ -78,12 +78,23 @@ export function backendSource(ctx: CommandContext, values: Values): () => Promis
         });
         serverless = opening;
       }
-      return serverless;
+      return { backend: await serverless };
     }
-    return openBackend(ctx, account, {
-      ...(values.server !== undefined ? { server: values.server } : {}),
-      purpose: "mcp",
-    });
+    // The warning a fallback credential comes with goes into this call's answer too: the agent
+    // never sees stderr.
+    let notice: string | undefined;
+    const backend = await openBackend(
+      {
+        ...ctx,
+        stderr: (line) => {
+          if (line.startsWith("seshi: warning: ")) notice = line.slice("seshi: warning: ".length);
+          ctx.stderr(line);
+        },
+      },
+      account,
+      { ...(values.server !== undefined ? { server: values.server } : {}), purpose: "mcp" },
+    );
+    return notice === undefined ? { backend } : { backend, notice };
   };
 }
 

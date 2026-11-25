@@ -155,9 +155,12 @@ function fake(overrides: Partial<Backend> = {}): { backend: Backend; calls: Call
   return { backend, calls };
 }
 
-function tools(backend: Backend | (() => Promise<Backend>)) {
+function tools(backend: Backend | (() => Promise<Backend>), notice?: string) {
   return new Tools({
-    backend: typeof backend === "function" ? backend : async () => backend,
+    backend: async () => ({
+      backend: typeof backend === "function" ? await backend() : backend,
+      ...(notice !== undefined ? { notice } : {}),
+    }),
     now: () => NOW,
   });
 }
@@ -167,7 +170,9 @@ const textOf = (r: { content: { text: string }[] }) => r.content.map((c) => c.te
 describe("seshi mcp's tools", () => {
   it("lists three read-only tools with the design's schemas", () => {
     expect(
-      new Tools({ backend: async () => fake().backend, now: () => NOW }).list().map((t) => t.name),
+      new Tools({ backend: async () => ({ backend: fake().backend }), now: () => NOW })
+        .list()
+        .map((t) => t.name),
     ).toEqual(["list_sessions", "read_session", "search"]);
     for (const t of TOOLS) {
       expect(t.annotations).toMatchObject({ readOnlyHint: true, openWorldHint: false });
@@ -190,7 +195,9 @@ describe("seshi mcp's tools", () => {
       ]),
     );
     expect(
-      new Tools({ backend: async () => fake().backend, now: () => NOW }, ["search"]).list(),
+      new Tools({ backend: async () => ({ backend: fake().backend }), now: () => NOW }, [
+        "search",
+      ]).list(),
     ).toHaveLength(1);
   });
 
@@ -209,7 +216,6 @@ describe("seshi mcp's tools", () => {
     expect(calls.list[0]).toEqual({
       repo: "app",
       labels: { team: "core" },
-      since: "2026-11-18T12:00:00.000Z",
     });
     await tools(backend).call("list_sessions", {
       since: "24h",
@@ -223,6 +229,11 @@ describe("seshi mcp's tools", () => {
       limit: 5,
       after: "x",
     });
+    // An until alone leaves the window to the server: the 7 days before it.
+    await tools(backend).call("list_sessions", { until: "2026-10-31" });
+    expect(calls.list[2]).toEqual({ until: "2026-10-31T00:00:00.000Z" });
+    const bare = await tools(backend).call("list_sessions", { since: "7" });
+    expect(bare.isError).toBe(true);
   });
 
   it("read_session: the session's header, lines of events, then next", async () => {
@@ -319,6 +330,22 @@ describe("seshi mcp's tools", () => {
     );
     expect(await as({ owner: "bob", role: "member", scopes: ["sessions:write"] })).toContain(
       "as bob (member: own sessions only)",
+    );
+    // Each backend is asked who it reads as, and a fallback credential's warning is in the header.
+    let me = { owner: "alice", role: "member", scopes: ["search"] };
+    const host = new Tools({
+      backend: async () => ({
+        backend: fake({ me: async () => me as never }).backend,
+        ...(me.scopes.includes("search")
+          ? {}
+          : { notice: "reading with this machine's device token" }),
+      }),
+      now: () => NOW,
+    });
+    expect(textOf(await host.call("list_sessions", {}))).toContain("as alice (member: own + org)");
+    me = { owner: "alice", role: "member", scopes: ["sessions:write"] };
+    expect(textOf(await host.call("list_sessions", {})).split("\n")[0]).toContain(
+      "as alice (member: own sessions only) · warning: reading with this machine's device token",
     );
     expect(await as({ owner: "carol" }, "serverless")).toContain(
       "as carol (this machine's bucket key: own + org)",

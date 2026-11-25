@@ -107,11 +107,15 @@ export function sessionListRequestOf(url: URL, now: Date): SessionListRequest {
   return request as SessionListRequest;
 }
 
+/** A time as a date or an RFC 3339 time: four-digit year first, so a bare number (`7`) is not
+ * read as a year. */
+const ISO_TIME = /^\d{4}-\d{2}-\d{2}/;
+
 /** A time (RFC 3339, or a date) or an age back from `now` (`7d`, `24h`), as RFC 3339. */
 export function timeOrAge(value: string, name: string, now: Date): string {
   const ago = parseDuration(value);
   if (ago !== undefined) return new Date(now.getTime() - ago).toISOString();
-  const ms = Date.parse(value);
+  const ms = ISO_TIME.test(value) ? Date.parse(value) : Number.NaN;
   if (!Number.isFinite(ms)) {
     throw new SearchQueryError(`${name} must be a time (RFC 3339) or an age (7d, 24h)`);
   }

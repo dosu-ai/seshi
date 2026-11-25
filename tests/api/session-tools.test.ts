@@ -161,7 +161,12 @@ describe("GET /v1/search/sessions", () => {
     const second = await alice.searchSessions({ limit: 2, after: first.cursor as string });
     expect(ids(second)).toEqual(["alice/pay"]);
     expect(second.cursor).toBeUndefined();
-    for (const bad of [{ after: "nope!" }, { since: "soon" }, { owner: "../x" }]) {
+    // An until alone: the 7 days before it, not before now.
+    expect(ids(await alice.searchSessions({ until: "2026-01-06T00:00:00Z" }))).toEqual([
+      "alice/old",
+    ]);
+    expect(ids(await alice.searchSessions({ until: "2026-01-20T00:00:00Z" }))).toEqual([]);
+    for (const bad of [{ after: "nope!" }, { since: "soon" }, { since: "7" }, { owner: "../x" }]) {
       expect(await refused(alice.searchSessions(bad))).toMatchObject({ status: 400 });
     }
   });
@@ -177,6 +182,30 @@ describe("GET /v1/search/sessions", () => {
       visibility: "owner",
     });
     expect(ids(await client(orgKey, "bob").searchSessions())).toEqual(["bob/docs"]);
+    // A page the live check empties reads on instead of answering nothing with a cursor.
+    await setVisibility({
+      store,
+      owner: "alice",
+      format: "trajectory",
+      session_id: "pay",
+      visibility: "org",
+    });
+    await setVisibility({
+      store,
+      owner: "alice",
+      format: "trajectory",
+      session_id: "old",
+      visibility: "owner",
+    });
+    const bob = client(orgKey, "bob");
+    const first = await bob.searchSessions({ since: "2026-01-01T00:00:00Z", limit: 1 });
+    expect(ids(first)).toEqual(["bob/docs"]);
+    const second = await bob.searchSessions({
+      since: "2026-01-01T00:00:00Z",
+      limit: 1,
+      after: first.cursor as string,
+    });
+    expect(ids(second)).toEqual(["alice/pay"]);
     const device = await auth.issue(
       { kind: "device", owner: "bob" },
       await auth.authenticate(adminToken),

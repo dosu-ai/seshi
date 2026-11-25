@@ -202,6 +202,8 @@ describe("read_session's events", () => {
     expect(around.events.map((e) => e.seq)).toEqual([3, 4, 5]);
     const edge = await read({ around: 0, context: 5 });
     expect(edge).toMatchObject({ from: 0, to: 6 });
+    // A client that fills in the schema's defaults sends context with a range: it is ignored.
+    expect((await read({ from: 3, to: 5, context: 5 })).events.map((e) => e.seq)).toEqual([3, 4]);
     const users = await read({ roles: ["user"] });
     expect(users.events.map((e) => e.seq)).toEqual([0, 4]);
     expect((await read({ from: 9 })).events).toEqual([]);
@@ -256,7 +258,6 @@ describe("read_session's events", () => {
       { from: 1, around: 2 },
       { event: 1, from: 0 },
       { offset: 3 },
-      { context: 2 },
       { around: 7 },
       { event: 7 },
       { max_chars: 999 },
@@ -306,5 +307,19 @@ describe("read_session's events", () => {
     await readSessionEvents({ store, folder: "alice", metadata: redacted, request: {}, cache });
     expect(store.reads).toHaveLength(4);
     expect(cache.size).toBe(4);
+  });
+
+  it("keeps no more characters of event text than its budget, least recently used going first", async () => {
+    const { store, meta } = session();
+    // The two traces hold 5,041 and 19 characters of event text.
+    const cache = new TraceCache(32, 6_000);
+    await readSessionEvents({ store, folder: "alice", metadata: meta, request: {}, cache });
+    expect(cache.size).toBe(2);
+    expect(cache.chars).toBe(5_060);
+    const small = new TraceCache(32, 100);
+    await readSessionEvents({ store, folder: "alice", metadata: meta, request: {}, cache: small });
+    // The large trace alone is over the budget: only the small one is kept.
+    expect(small.size).toBe(1);
+    expect(small.chars).toBe(19);
   });
 });

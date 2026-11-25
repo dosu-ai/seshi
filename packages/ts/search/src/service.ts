@@ -206,17 +206,24 @@ export function checkRequest(request: SearchRequest, aliases = new OwnerAliases(
   };
 }
 
+/** Index pages one listing reads at most to fill a page the live check left short. */
+const LIST_PAGES = 5;
+
 /** The days `list_sessions` looks back when `since` is not given. */
 export const DEFAULT_LIST_DAYS = 7;
+
+/** Where a listing is after `s`: its `updated_ms` and key, as the index orders them. */
+function positionOf(
+  s: Pick<IndexedSession, "owner" | "archive_id" | "updated_at">,
+): SessionPosition {
+  return { updated: Date.parse(s.updated_at) || 0, key: `${s.owner}/${s.archive_id}` };
+}
 
 /** A listing's place as its cursor: the last session's `updated_ms` and key. */
 export function encodeSessionCursor(
   s: Pick<IndexedSession, "owner" | "archive_id" | "updated_at">,
 ): string {
-  const position: SessionPosition = {
-    updated: Date.parse(s.updated_at) || 0,
-    key: `${s.owner}/${s.archive_id}`,
-  };
+  const position = positionOf(s);
   return Buffer.from(JSON.stringify([position.updated, position.key])).toString("base64url");
 }
 
@@ -249,8 +256,10 @@ export function checkListRequest(
   if (owner !== undefined && !isOwner(owner)) {
     throw new SearchQueryError("owner is not an owner id");
   }
-  const since = time(request.since, "since") ?? now - DEFAULT_LIST_DAYS * 24 * 60 * 60 * 1000;
   const until = time(request.until, "until");
+  // The default window is the 7 days before `until`, or before now.
+  const since =
+    time(request.since, "since") ?? (until ?? now) - DEFAULT_LIST_DAYS * 24 * 60 * 60 * 1000;
   if (until !== undefined && since > until) throw new SearchQueryError("since is after until");
   const agent = text(request.agent, "agent");
   const repo = text(request.repo, "repo");
@@ -570,17 +579,35 @@ export class SearchService {
           "the search index is being built from the change feed; try again shortly",
         );
       }
-      const page = await index.listSessions({ ...checked, viewer });
-      const live = await Promise.all(page.sessions.map((s) => this.recheck(viewer, s)));
-      const last = page.sessions.at(-1);
+      // Sessions the live check drops (made owner-only, deleted, since the index read them) leave
+      // a page short: read on, a few pages at most, so an answer is never empty while more
+      // follow.
+      const kept: IndexedSession[] = [];
+      let after = checked.after;
+      let more = false;
+      let last: IndexedSession | undefined;
+      for (let pages = 0; pages < LIST_PAGES && kept.length < checked.limit; pages++) {
+        const page = await index.listSessions({
+          ...checked,
+          ...(after !== undefined ? { after } : {}),
+          limit: checked.limit - kept.length,
+          viewer,
+        });
+        const live = await Promise.all(page.sessions.map((s) => this.recheck(viewer, s)));
+        kept.push(...live.filter((s): s is IndexedSession => s !== null));
+        last = page.sessions.at(-1) ?? last;
+        more = page.more;
+        if (!more || last === undefined) break;
+        after = positionOf(last);
+      }
       const caughtUpAt = state.caught_up_at;
       return {
-        sessions: live.filter((s): s is IndexedSession => s !== null).map(summaryOf),
+        sessions: kept.map(summaryOf),
         window: {
           since: new Date(checked.since).toISOString(),
           ...(checked.until !== undefined ? { until: new Date(checked.until).toISOString() } : {}),
         },
-        ...(page.more && last !== undefined ? { cursor: encodeSessionCursor(last) } : {}),
+        ...(more && last !== undefined ? { cursor: encodeSessionCursor(last) } : {}),
         index: {
           ready_at: readyAt,
           ...(caughtUpAt !== undefined ? { caught_up_at: caughtUpAt } : {}),

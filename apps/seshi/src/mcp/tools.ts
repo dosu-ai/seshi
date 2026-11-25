@@ -83,7 +83,9 @@ export const TOOLS: readonly ToolDefinition[] = [
     "List the coding-agent sessions you may read, newest first, by who ran them, where (repo, branch) and when; no search words needed. Each line is one session: owner/archive_id (what read_session takes), format/session_id, repo@branch, start → end (UTC), models, labels. Page with `after`.",
     {
       ...filters,
-      since: { type: "string", default: "7d", description: "ISO date or duration (7d, 24h)" },
+      since: str(
+        "ISO date or duration (7d, 24h); by default the 7 days before until, or before now",
+      ),
       until: str("ISO date or duration (7d, 24h)"),
       limit: { type: "integer", minimum: 1, maximum: 100, default: 20 },
       after: str("the cursor from the last page"),
@@ -148,11 +150,18 @@ export const TOOLS: readonly ToolDefinition[] = [
   ),
 ];
 
+/** A backend for one call, and anything the caller must know about how it reads (the login
+ * could not be renewed, so it reads with the device token, which sees only its own sessions). */
+export interface HostBackend {
+  backend: Backend;
+  notice?: string;
+}
+
 /** What the tools run against. */
 export interface ToolHost {
   /** The backend to call; it may throw (not signed in, the server down), and every tool then
    * answers that error. */
-  backend(): Promise<Backend>;
+  backend(): Promise<HostBackend>;
   now(): Date;
 }
 
@@ -308,7 +317,9 @@ export function errorResult(err: unknown, header: string): ToolResult {
 }
 
 export class Tools {
-  private me: Identity | undefined;
+  /** Who each backend reads as: a backend made afresh for a call (a renewed login, or the
+   * device token after a failed renewal) is asked again. */
+  private readonly identities = new WeakMap<Backend, Identity>();
 
   constructor(
     private readonly host: ToolHost,
@@ -319,9 +330,14 @@ export class Tools {
     return TOOLS.filter((t) => this.enabled.includes(t.name));
   }
 
-  private async scope(backend: Backend): Promise<string> {
-    this.me ??= await backend.me();
-    return scopeOf(this.me, backend.mode);
+  private async scope({ backend, notice }: HostBackend): Promise<string> {
+    let me = this.identities.get(backend);
+    if (me === undefined) {
+      me = await backend.me();
+      this.identities.set(backend, me);
+    }
+    const scope = scopeOf(me, backend.mode);
+    return notice === undefined ? scope : `${scope} · warning: ${notice}`;
   }
 
   async call(name: string, args: Args = {}): Promise<ToolResult> {
@@ -331,8 +347,9 @@ export class Tools {
       const definition = this.list().find((t) => t.name === name);
       if (definition === undefined) throw new BadArguments(`no tool ${name}`);
       check(definition, args);
-      const backend = await this.host.backend();
-      const scope = await this.scope(backend);
+      const opened = await this.host.backend();
+      const { backend } = opened;
+      const scope = await this.scope(opened);
       header = headerLine(now, scope);
       switch (definition.name) {
         case "list_sessions":
@@ -348,7 +365,8 @@ export class Tools {
   }
 
   private async listSessions(backend: Backend, args: Args, now: Date, scope: string) {
-    const since = when(args.since ?? "7d", "since", now);
+    // Without since, the server's window is the 7 days before until (or now).
+    const since = when(args.since, "since", now);
     const until = when(args.until, "until", now);
     const request: SessionListRequest = {
       ...pick<SessionListRequest>(args, [

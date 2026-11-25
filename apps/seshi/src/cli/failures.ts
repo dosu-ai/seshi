@@ -82,7 +82,9 @@ export function classify(
       return { exit: EXIT.notFound, code: err.code, message: err.message };
     }
     if (err.status === 400) return { exit: EXIT.usage, code: err.code, message: err.message };
-    if (err.status === 409) return { exit: EXIT.conflict, code: err.code, message: err.message };
+    if (err.status === 409 && err.code === "head_changed") {
+      return { exit: EXIT.conflict, code: err.code, message: err.message };
+    }
     if (err.status >= 500) {
       return {
         exit: EXIT.unavailable,
