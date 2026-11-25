@@ -370,7 +370,7 @@ pre.tree .d { color: var(--accent); font-weight: 500; }
             <li><b>1</b> <code>ts/kit</code>, <code>ts/formats</code>, <code>ts/redact</code>, <code>ts/config</code>, <code>ts/store</code></li>
             <li><b>2</b> <code>ts/pipeline</code>, <code>ts/auth</code>, <code>integrations/*</code> (which may use only <code>ts/model</code>, <code>ts/kit</code> and <code>ts/formats</code>)</li>
             <li><b>3</b> <code>ts/sources</code>, <code>ts/search</code></li>
-            <li><b>4</b> <code>ts/instance</code></li>
+            <li><b>4</b> <code>ts/instance</code>; <code>ts/search/lance</code> (<code>@seshi/lance</code>, the LanceDB index, <a href="#f10">F10.6</a>), which only <code>apps/seshi</code>'s server entry imports</li>
             <li><b>5</b> <code>ts/api</code>; <code>ts/capture</code> (uses <code>ts/client</code>, <code>ts/config</code>, <code>ts/redact</code>, <code>ts/kit</code>, never <code>ts/instance</code>)</li>
             <li><b>6</b> <code>apps/seshi</code></li>
           </ul><code>ts/client</code> depends only on <code>ts/model</code>. A package may import from lower layers only.</dd>
@@ -1691,7 +1691,7 @@ pre.tree .d { color: var(--accent); font-weight: 500; }
         <dl>
           <dt>Decision</dt><dd class="rec"><code>[search] backend = "lance"</code> keeps one index for every instance, in object storage, with LanceDB. SQLite (F10.3) stays the default. It is a server option: serverless laptops ignore the shared config's <code>search.backend</code> and keep their own SQLite index, limited to their scope (F11.9, <code>docs/serverless.md</code>), and never write a shared one.</dd>
           <dt>Why</dt><dd>Every API instance reading every feed into its own copy does not scale with instances. LanceDB is embedded like SQLite, with BM25 full-text search, and stores its tables on a folder, S3, R2, GCS or Azure, so no service is added. The spike found most searches answer in 0.2 to 1 s at 10M records on GCS. Design: <a href="lancedb-search.md">lancedb-search.md</a>.</dd>
-          <dt>The binary</dt><dd>LanceDB's native library is about 200 MB (430 MB on Linux arm64), so only the <b>server build</b> carries it: <code>apps/seshi/src/main-server.ts</code>, which registers <code>@seshi/search/lance</code> and runs the same seshi. It ships as the container image and the <code>seshi-server-linux-x64</code> and <code>-arm64</code> release archives; the binaries laptops install are unchanged (<a href="#runtime">X2.2</a> still holds: one program, and the image ships the release's own server archive). A binary without it refuses <code>backend = "lance"</code> at start-up, naming the build that has it.</dd>
+          <dt>The binary</dt><dd>LanceDB's native library is about 200 MB (430 MB on Linux arm64), so only the <b>server build</b> carries it: <code>apps/seshi/src/main-server.ts</code>, which registers <code>@seshi/lance</code> (<code>packages/ts/search/lance</code>, the only package that depends on LanceDB) and runs the same seshi. It ships as the container image and the <code>seshi-server-linux-x64</code> and <code>-arm64</code> release archives; the binaries laptops install are unchanged (<a href="#runtime">X2.2</a> still holds: one program, and the image ships the release's own server archive). A binary without it refuses <code>backend = "lance"</code> at start-up, naming the build that has it.</dd>
         </dl>
       </div>
     </div>

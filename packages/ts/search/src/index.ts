@@ -19,7 +19,12 @@ export {
   type Removal,
   type SessionUpdate,
 } from "./backend";
-export { type LanceOpener, lanceBackend, provideLance } from "./backends";
+export {
+  type LanceOpener,
+  type LanceSettings,
+  lanceBackend,
+  provideLance,
+} from "./backends";
 export {
   decodeFeedCursor,
   encodeFeedCursor,
@@ -50,6 +55,7 @@ export {
   parseQuery,
   SearchQueryError,
   tokensOf,
+  WORD,
 } from "./query";
 export {
   checkRequest,

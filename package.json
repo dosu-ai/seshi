@@ -8,6 +8,7 @@
   "workspaces": [
     "apps/*",
     "packages/ts/*",
+    "packages/ts/search/lance",
     "integrations/*"
   ],
   "scripts": {
@@ -59,6 +60,7 @@
     "@seshi/instance": "workspace:*",
     "@seshi/integration-opencode": "workspace:*",
     "@seshi/kit": "workspace:*",
+    "@seshi/lance": "workspace:*",
     "@seshi/model": "workspace:*",
     "@seshi/pipeline": "workspace:*",
     "@seshi/redact": "workspace:*",
@@ -80,5 +82,9 @@
   },
   "engines": {
     "bun": ">=1.3"
+  },
+  "overrides": {
+    "@huggingface/transformers": "file:./packages/ts/search/lance/no-embeddings",
+    "openai": "file:./packages/ts/search/lance/no-embeddings"
   }
 }

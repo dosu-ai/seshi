@@ -10,6 +10,18 @@ import { BUILTIN_FORMATS, FormatRegistry } from "@seshi/formats";
 import type { EventRole, Trace } from "@seshi/model";
 import { StoreSeshi, tombstone } from "@seshi/pipeline";
 import {
+  type BackendQuery,
+  type IndexedSession,
+  type IndexOptions,
+  type IndexStore,
+  IndexUnavailable,
+  LOCAL_VIEWER,
+  parseQuery,
+  SearchQueryError,
+  SearchService,
+  type SessionUpdate,
+} from "@seshi/search";
+import {
   appendChange,
   archiveId,
   FsStore,
@@ -22,16 +34,8 @@ import {
 } from "@seshi/store";
 import { Field, Schema, Utf8 } from "apache-arrow";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-  type BackendQuery,
-  type IndexedSession,
-  type IndexOptions,
-  type IndexStore,
-  IndexUnavailable,
-  type SessionUpdate,
-} from "./backend";
+import { lanceIndex } from "./index";
 import { COMMIT_STEPS, type CommitStep, type LanceIndexOptions, openLanceIndex } from "./lance";
-import { lanceIndex } from "./lance-open";
 import {
   compileMatch,
   filterSql,
@@ -41,10 +45,7 @@ import {
   PREFIX_MAX,
   prefixesOf,
   sqlString,
-} from "./lance-query";
-import { parseQuery, SearchQueryError } from "./query";
-import { SearchService } from "./service";
-import { LOCAL_VIEWER } from "./viewer";
+} from "./query";
 
 const H = (n: number) => n.toString(16).padStart(64, "0");
 const EVENTS: readonly EventRole[] = ["user", "assistant", "tool_call"];

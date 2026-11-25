@@ -1,6 +1,6 @@
 /** The search index on LanceDB (F10.6 to F10.12): one index for every API instance, in a folder
  * or a bucket, written by one indexer. docs/seshi/lancedb-search.md is the design. Imported only
- * through `lanceIndex()` (lance-open.ts), so LanceDB stays off every other path. */
+ * through `lanceIndex()` (index.ts), so LanceDB stays off every other path. */
 import {
   BooleanQuery,
   type Connection,
@@ -15,6 +15,26 @@ import {
   type Table,
 } from "@lancedb/lancedb";
 import type { ChangeEntry, EventRole, Labels, Visibility } from "@seshi/model";
+import {
+  type BackendHit,
+  type BackendMatch,
+  type BackendQuery,
+  type BackendResults,
+  type CommitResult,
+  excerpt,
+  type FeedPosition,
+  type FeedRow,
+  type IndexedSession,
+  type IndexOptions,
+  type IndexState,
+  type IndexStore,
+  IndexUnavailable,
+  indexText,
+  type LanceSettings,
+  type PageCommit,
+  SearchQueryError,
+  type SessionUpdate,
+} from "@seshi/search";
 import { changeStamp } from "@seshi/store";
 import {
   Table as ArrowTable,
@@ -29,22 +49,6 @@ import {
   Utf8,
 } from "apache-arrow";
 import {
-  type BackendHit,
-  type BackendMatch,
-  type BackendQuery,
-  type BackendResults,
-  type CommitResult,
-  type FeedPosition,
-  type FeedRow,
-  type IndexedSession,
-  type IndexOptions,
-  type IndexState,
-  type IndexStore,
-  IndexUnavailable,
-  type PageCommit,
-  type SessionUpdate,
-} from "./backend";
-import {
   compileMatch,
   type FtsQuery,
   filterSql,
@@ -54,9 +58,7 @@ import {
   sqlList,
   sqlString,
   sqlTime,
-} from "./lance-query";
-import { SearchQueryError } from "./query";
-import { excerpt, indexText } from "./snippet";
+} from "./query";
 
 /** The layout of the tables and `meta`: an index written under another is rebuilt beside it. */
 export const LANCE_SCHEMA = "seshi/search-lance/1";
@@ -73,17 +75,7 @@ export const COMMIT_STEPS = [
 ] as const;
 export type CommitStep = (typeof COMMIT_STEPS)[number];
 
-export interface LanceIndexOptions {
-  /** A folder, or a bucket URI LanceDB takes (`s3://`, `gs://`, `az://`). Never credentials:
-   * those go in `storageOptions`. */
-  uri: string;
-  storageOptions?: Record<string, string>;
-  /** How soon, in seconds, a reader sees another process's commit (5). 0 checks on every read. */
-  readConsistency?: number;
-  /** `optimize()` at most this often, in ms, and only after a commit (an hour). */
-  optimizeEvery?: number;
-  /** A due scrub at most this often, in ms (a day). */
-  scrubEvery?: number;
+export interface LanceIndexOptions extends LanceSettings {
   /** How long a replaced table or generation is kept for readers still on it, in ms (15
    * minutes). Also `optimize()`'s `cleanupOlderThan`. */
   grace?: number;
@@ -93,12 +85,6 @@ export interface LanceIndexOptions {
   /** While a generation is being built, the indexer gathers one owner's feed pages into
    * commits of about this many records (50,000), instead of one commit per page. */
   buildBatchRecords?: number;
-  /** Rows a relevance search scores at most (10,000). */
-  maxScoredRows?: number;
-  /** Rows a recent search reads at most (100,000). */
-  maxRecentRows?: number;
-  /** An API instance: it reads and never writes, not even `meta`. */
-  readOnly?: boolean;
   now?: () => number;
   /** Tests only: called before each step of `commit()`; a throw is a crash there. */
   beforeStep?: (step: CommitStep) => void | Promise<void>;

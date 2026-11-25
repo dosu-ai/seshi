@@ -2,8 +2,8 @@
  * full-text query as a plain tree (turned into LanceDB's classes by `lance.ts`), and the check
  * prefix queries need. Kept apart so the escaping can be tested on its own, with hostile
  * values. */
-import type { BackendQuery } from "./backend";
-import { type MatchItem, type MatchTree, SearchQueryError, WORD } from "./query";
+import type { BackendQuery } from "@seshi/search";
+import { type MatchItem, type MatchTree, SearchQueryError, WORD } from "@seshi/search";
 
 /** A prefix must have at least this many letters (`de*`, not `d*`). */
 export const PREFIX_MIN = 2;

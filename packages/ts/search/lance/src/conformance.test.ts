@@ -16,8 +16,6 @@ import { join } from "node:path";
 import { BUILTIN_FORMATS, FormatRegistry } from "@seshi/formats";
 import type { ChangeEntry, EventRole } from "@seshi/model";
 import { StoreSeshi, setVisibility, tombstone } from "@seshi/pipeline";
-import { FsStore, type Store } from "@seshi/store";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type {
   BackendQuery,
   IndexedEvent,
@@ -27,13 +25,19 @@ import type {
   OpenIndex,
   Removal,
   SessionUpdate,
-} from "./backend";
-import { lanceIndex } from "./lance-open";
-import { parseQuery } from "./query";
-import { SearchService } from "./service";
-import { MATCH_END, MATCH_START } from "./snippet";
-import { sqliteIndex } from "./sqlite";
-import { LOCAL_VIEWER, type Viewer } from "./viewer";
+} from "@seshi/search";
+import {
+  LOCAL_VIEWER,
+  MATCH_END,
+  MATCH_START,
+  parseQuery,
+  SearchService,
+  sqliteIndex,
+  type Viewer,
+} from "@seshi/search";
+import { FsStore, type Store } from "@seshi/store";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { lanceIndex } from "./index";
 
 const H = (n: number) => n.toString(16).padStart(64, "0");
 const EVENTS: readonly EventRole[] = ["user", "assistant", "tool_call"];

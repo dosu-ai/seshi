@@ -1,0 +1,22 @@
+{
+  "name": "@seshi/lance",
+  "private": true,
+  "description": "Layer 4: the LanceDB search index (F10.6): one index in object storage, written by the worker and read by every API instance. Only the server build imports it.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "bun": "./src/index.ts"
+    }
+  },
+  "dependencies": {
+    "@lancedb/lancedb": "0.41.0",
+    "@seshi/model": "workspace:*",
+    "@seshi/search": "workspace:*",
+    "@seshi/store": "workspace:*",
+    "apache-arrow": "21.2.0"
+  },
+  "devDependencies": {
+    "@seshi/formats": "workspace:*",
+    "@seshi/pipeline": "workspace:*"
+  }
+}
