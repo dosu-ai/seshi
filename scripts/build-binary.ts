@@ -66,7 +66,7 @@ export function checkLanceNative(root: string, target: string | undefined): void
   let lancedb: string;
   try {
     lancedb = dirname(
-      Bun.resolveSync("@lancedb/lancedb/package.json", join(root, "packages/ts/search")),
+      Bun.resolveSync("@lancedb/lancedb/package.json", join(root, "packages/ts/search/lance")),
     );
     Bun.resolveSync(`${name}/package.json`, lancedb);
   } catch {

@@ -75,7 +75,7 @@ jobs:
           SESHI_TEST_S3_BUCKET: seshi-test
           SESHI_TEST_S3_ACCESS_KEY: rustfsadmin
           SESHI_TEST_S3_SECRET_KEY: rustfsadmin
-        run: bun --bun vitest run tests/store/s3-live.test.ts packages/ts/search/src/conformance.test.ts tests/search/lance-deploy.test.ts
+        run: bun --bun vitest run tests/store/s3-live.test.ts packages/ts/search/lance/src/conformance.test.ts tests/search/lance-deploy.test.ts
       - name: Azure Blob store test against Azurite
         env:
           SESHI_TEST_AZURE_ENDPOINT: http://127.0.0.1:10000/devstoreaccount1

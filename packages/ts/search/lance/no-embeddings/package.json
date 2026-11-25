@@ -1,0 +1,6 @@
+{
+  "name": "seshi-no-embeddings",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Stands in for LanceDB's optional embedding packages (@huggingface/transformers, openai), which seshi never imports: the root package.json's overrides point them here, so installs skip about 420 MB."
+}

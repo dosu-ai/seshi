@@ -47,6 +47,7 @@
     "@seshi/integration-opencode": "workspace:*",
     "@seshi/integration-pi": "workspace:*",
     "@seshi/kit": "workspace:*",
+    "@seshi/lance": "workspace:*",
     "@seshi/model": "workspace:*",
     "@seshi/pipeline": "workspace:*",
     "@seshi/redact": "workspace:*",
