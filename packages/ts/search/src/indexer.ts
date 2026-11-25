@@ -18,7 +18,7 @@ import {
   type Store,
   stampTime,
 } from "@seshi/store";
-import type { IndexedEvent, IndexedSession, IndexStore, SessionUpdate } from "./backend";
+import type { IndexedEvent, IndexedSession, IndexWriter, Removal, SessionUpdate } from "./backend";
 
 export const FEED_LAG_MS = 5 * 60 * 1000;
 export const FEED_PAGE = 500;
@@ -34,7 +34,7 @@ export interface IndexerLogger {
 
 export interface IndexerOptions {
   store: Store;
-  index: IndexStore;
+  index: IndexWriter;
   events: readonly EventRole[];
   now?: () => Date;
   log?: IndexerLogger;
@@ -49,7 +49,7 @@ export interface IndexerOptions {
    * `visible`: others' owner-only sessions are left out). */
   admit?: (session: { owner: string; visibility?: SessionMetadata["visibility"] }) => boolean;
   /** Keep a copy of every change entry read, and how far every feed has been read, for the
-   * cross-owner feed (`FeedState.record`, `readThrough`). Only an index of every owner's
+   * cross-owner feed (`PageCommit.feed`, `IndexWriter.readThrough`). Only an index of every owner's
    * whole feed can serve it. */
   feed?: boolean;
 }
@@ -172,18 +172,12 @@ interface Replaced {
 }
 
 type Plan =
-  | {
-      kind: "remove";
-      owner: string;
-      archive: string;
-      read_at: number;
-      metadata: SessionMetadata | null;
-    }
+  | { kind: "remove"; removal: Removal; metadata: SessionMetadata | null }
   | { kind: "apply"; update: SessionUpdate; metadata: SessionMetadata };
 
 export class Indexer {
   private readonly store: Store;
-  private readonly index: IndexStore;
+  private readonly index: IndexWriter;
   private readonly roles: ReadonlySet<EventRole>;
   private readonly now: () => Date;
   private readonly log: IndexerLogger | undefined;
@@ -286,7 +280,8 @@ export class Indexer {
       indexed: 0,
       removed: 0,
     };
-    const generation = this.index.generation();
+    const generation = await this.index.generation();
+    const cursors = await this.index.cursors(generation);
     const { list, at: listedAt } = await this.ownerList();
     run.owners = list.length;
     if (this.readTo?.generation !== generation) {
@@ -298,7 +293,7 @@ export class Indexer {
     try {
       for (const owner of [...list.slice(start), ...list.slice(0, start)]) {
         if (signal.aborted) return run;
-        const more = await this.drain(owner, run, signal, generation, readTo);
+        const more = await this.drain(owner, run, signal, generation, cursors.get(owner), readTo);
         if (more) {
           this.resumeAfter = owner;
           run.more = true;
@@ -306,28 +301,25 @@ export class Indexer {
         }
       }
     } finally {
-      this.feedRead(list, listedAt, readTo, generation);
+      await this.feedRead(list, listedAt, readTo, generation);
     }
     if (signal.aborted) return run;
-    const caughtUp = this.index.transaction(() => {
-      if (this.index.generation() !== generation) return false;
-      this.index.caughtUp(this.now().toISOString());
-      return true;
-    });
+    const caughtUp = await this.index.passDone(generation, this.now().toISOString());
     run.more = !caughtUp;
     run.caught_up = caughtUp;
+    await this.index.maintain(signal);
     return run;
   }
 
   /** Move the cross-owner feed's bound to the least any listed owner's feed has been read to,
    * and no later than when the list was taken (an owner not on it had written nothing then).
    * One owner with more than a pass can read holds it back without stopping it. */
-  private feedRead(
+  private async feedRead(
     list: readonly string[],
     listedAt: number,
     readTo: ReadonlyMap<string, number>,
     generation: string,
-  ): void {
+  ): Promise<void> {
     if (!this.keepFeed) return;
     let through = listedAt;
     for (const owner of list) {
@@ -335,10 +327,7 @@ export class Indexer {
       if (at === undefined) return;
       through = Math.min(through, at);
     }
-    this.index.transaction(() => {
-      if (this.index.generation() !== generation) return;
-      this.index.readThrough(new Date(through).toISOString());
-    });
+    await this.index.readThrough(generation, new Date(through).toISOString());
   }
 
   private windowStart(prefix: string, cursor: string): string {
@@ -347,11 +336,14 @@ export class Indexer {
     return `${prefix}${changeStamp(new Date(Math.max(0, at - this.lagMs)).toISOString())}`;
   }
 
+  /** Reads `owner`'s feed from `cursor` (its cursor when the pass started), one page per
+   * commit. True when the pass should stop here: the budget is spent, or the index was reset. */
   private async drain(
     owner: string,
     run: IndexerRun,
     signal: AbortSignal,
     generation: string,
+    cursor: string | undefined,
     readTo: Map<string, number>,
   ): Promise<boolean> {
     const prefix = keys.changes(owner);
@@ -359,14 +351,14 @@ export class Indexer {
       if (at === null || at === undefined) return;
       readTo.set(owner, Math.max(readTo.get(owner) ?? at, at));
     };
-    const cursor = this.index.cursor(owner);
-    let startAfter = cursor === undefined ? undefined : this.windowStart(prefix, cursor);
+    let held = cursor;
+    let startAfter = held === undefined ? undefined : this.windowStart(prefix, held);
     for (;;) {
       if (signal.aborted) return false;
       const listedAt = this.now().getTime();
       const page = await this.store.list(prefix, { startAfter, limit: this.pageSize });
       const listed = page.keys.filter((k) => parseChangeKey(k.slice(prefix.length)) !== null);
-      const seen = this.index.seen(owner, listed);
+      const seen = await this.index.seen(generation, owner, listed);
       const fresh = listed.filter((k) => !seen.has(k));
       const entries = await mapLimit(fresh, CONCURRENCY, (key) => this.entry(key));
       const named = entries.filter((e): e is ChangeEntry => e !== null && HEX64.test(e.archive_id));
@@ -377,11 +369,11 @@ export class Indexer {
           replaced.set(e.archive_id, { content_hash: e.content_hash });
         }
       }
+      const holds = await this.index.sessions(generation, owner, archives);
       const plans = await mapLimit(archives, CONCURRENCY, (a) =>
-        this.plan(owner, a, replaced.get(a)),
+        this.plan(owner, a, holds.get(a) ?? null, replaced.get(a)),
       );
       const last = page.keys.at(-1);
-      const held = this.index.cursor(owner);
       const next = held === undefined || (last !== undefined && last > held) ? last : held;
       const nextAt = next === undefined ? undefined : stampTime(next.slice(prefix.length));
       const metadata = new Map(archives.map((a, i) => [a, plans[i]?.metadata ?? null]));
@@ -393,34 +385,40 @@ export class Indexer {
         if (nowMs - at >= this.lagMs) return true;
         return shows(metadata.get(entry.archive_id) ?? null, entry);
       });
-      const refused: string[] = [];
-      const reset = this.index.transaction(() => {
-        if (this.index.generation() !== generation) return true;
-        for (const plan of plans) {
-          if (!this.applyPlan(plan, run) && plan.kind === "apply") {
-            refused.push(plan.update.session.archive_id);
-          }
-        }
-        if (this.keepFeed) {
-          this.index.record(
-            owner,
-            fresh.flatMap((key, i) => {
-              const entry = entries[i] && this.named(owner, entries[i], metadata);
+      const committed = await this.index.commit({
+        generation,
+        owner,
+        ...this.planned(plans),
+        feed: this.keepFeed
+          ? fresh.flatMap((key, i) => {
+              const entry = entries[i] && this.named(entries[i], metadata, holds);
               return entry ? [{ name: key.slice(prefix.length), entry }] : [];
-            }),
-          );
-        }
-        this.index.advance(
-          owner,
-          next,
-          done.map((key) => ({ key, at: stampTime(key.slice(prefix.length)) ?? 0 })),
-          nextAt === null || nextAt === undefined ? 0 : nextAt - this.lagMs,
-        );
-        return false;
+            })
+          : [],
+        seen: done.map((key) => ({ key, at: stampTime(key.slice(prefix.length)) ?? 0 })),
+        cursor: next,
+        forgetBefore: nextAt === null || nextAt === undefined ? 0 : nextAt - this.lagMs,
       });
-      if (reset) return true;
-      for (const archive of refused) {
-        this.applyPlan(await this.plan(owner, archive, replaced.get(archive)), run);
+      if (committed.stale) return true;
+      this.counted(run, plans, committed.refused, committed.removed);
+      held = next;
+      if (committed.refused.length > 0) {
+        // Another process got to these sessions first: plan them again from what it wrote.
+        const again = await this.index.sessions(generation, owner, committed.refused);
+        const retries = await mapLimit(committed.refused, CONCURRENCY, (a) =>
+          this.plan(owner, a, again.get(a) ?? null, replaced.get(a)),
+        );
+        const retried = await this.index.commit({
+          generation,
+          owner,
+          ...this.planned(retries),
+          feed: [],
+          seen: [],
+          cursor: undefined,
+          forgetBefore: 0,
+        });
+        if (retried.stale) return true;
+        this.counted(run, retries, retried.refused, retried.removed);
       }
       run.entries += fresh.length;
       if (!page.truncated || last === undefined) {
@@ -435,18 +433,39 @@ export class Indexer {
     }
   }
 
+  private planned(plans: readonly Plan[]): { updates: SessionUpdate[]; removals: Removal[] } {
+    const updates: SessionUpdate[] = [];
+    const removals: Removal[] = [];
+    for (const plan of plans) {
+      if (plan.kind === "apply") updates.push(plan.update);
+      else removals.push(plan.removal);
+    }
+    return { updates, removals };
+  }
+
+  private counted(
+    run: IndexerRun,
+    plans: readonly Plan[],
+    refused: readonly string[],
+    removed: number,
+  ): void {
+    run.indexed += plans.filter((p) => p.kind === "apply").length - refused.length;
+    run.removed += removed;
+  }
+
   /** The entry as the cross-owner feed serves it: one written before seshi 0.16 has no
    * `format`, so it gets its session's, from the metadata just read or else from what the index
    * holds of the session. Without either it names a write that never landed (its entry is
    * written first), as `readChanges` has it, and is left out of the feed. */
   private named(
-    owner: string,
     entry: ChangeEntry,
     metadata: ReadonlyMap<string, SessionMetadata | null>,
+    holds: ReadonlyMap<string, IndexedSession>,
   ): ChangeEntry | null {
     if (entry.format !== undefined) return entry;
-    const format =
-      metadata.get(entry.archive_id)?.format || this.index.session(owner, entry.archive_id)?.format;
+    const read = metadata.get(entry.archive_id);
+    // A session with no metadata is removed by this page: the index no longer holds it.
+    const format = read === null ? undefined : read?.format || holds.get(entry.archive_id)?.format;
     return format ? entryWithFormat(entry, format) : null;
   }
 
@@ -461,39 +480,28 @@ export class Indexer {
     }
   }
 
-  private applyPlan(plan: Plan, run: IndexerRun): boolean {
-    if (plan.kind === "remove") {
-      const held = this.index.session(plan.owner, plan.archive) !== null;
-      if (this.index.remove(plan.owner, plan.archive, plan.read_at) && held) run.removed++;
-      return true;
-    }
-    const applied = this.index.apply(plan.update);
-    if (applied) run.indexed++;
-    return applied;
-  }
-
+  /** What to do with a session, from its metadata now and what the index holds of it. */
   private async plan(
     owner: string,
     archive: string,
+    held: IndexedSession | null,
     replaced?: Replaced,
     attempt = 0,
   ): Promise<Plan> {
     const { readAt, metadata } = await this.stampedMetadata(owner, archive);
+    const gone = metadata === null || metadata.status === "redacted" || metadata.head === undefined;
     if (
-      metadata === null ||
-      metadata.status === "redacted" ||
-      metadata.head === undefined ||
+      gone ||
       (this.admit !== undefined && !this.admit({ owner, visibility: metadata.visibility }))
     ) {
-      return { kind: "remove", owner, archive, read_at: readAt, metadata };
+      return { kind: "remove", removal: { archive, read_at: readAt, scrub: gone }, metadata };
     }
-    const held = this.index.session(owner, archive);
     const wanted = replaced ? tracesFrom(metadata, replaced.content_hash) : currentTraces(metadata);
     const extends_ = !replaced && held !== null && startsWith(wanted, held.traces);
     const toRead = extends_ ? wanted.slice((held as IndexedSession).traces.length) : wanted;
     const traces = await mapLimit(toRead, 4, (hash) => this.traceOf(owner, archive, hash));
     if (traces.some((t) => t === null) && attempt === 0) {
-      return this.plan(owner, archive, replaced, 1);
+      return this.plan(owner, archive, held, replaced, 1);
     }
     const read = toRead
       .map((hash, i) => ({ hash, read: traces[i] ?? null }))

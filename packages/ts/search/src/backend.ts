@@ -1,4 +1,5 @@
 import type { ChangeEntry, EventRole, Labels, SearchSort, Visibility } from "@seshi/model";
+import type { MatchTree } from "./query";
 import type { Viewer } from "./viewer";
 
 export interface IndexedSession {
@@ -62,10 +63,10 @@ export interface SessionUpdate {
   read_at?: number;
 }
 
-/** A query as the backend runs it: the match expression already parsed, filters already
- * resolved (owner aliases folded, times in epoch ms). */
+/** A query as the backend runs it: the match already parsed (each backend compiles the tree),
+ * filters already resolved (owner aliases folded, times in epoch ms). */
 export interface BackendQuery {
-  match: string;
+  match: MatchTree;
   viewer: Viewer;
   owners?: readonly string[];
   /** Sessions filed under this format or run by this agent (`origin_agent`). */
@@ -109,63 +110,6 @@ export interface BackendResults {
   hits: BackendHit[];
 }
 
-export interface SearchBackend {
-  /** What the index holds of a session, or null. */
-  session(owner: string, archive: string): IndexedSession | null;
-  /** Index a session's new head (F10.2). Returns false, changing nothing, when the index
-   * holds the session as read later (by `read_at`), or a continuation's `base` is not what it
-   * holds. */
-  apply(update: SessionUpdate): boolean;
-  /** Drop a session (a tombstone, F10.2). The index remembers the removal with its read stamp
-   * (`SessionUpdate.read_at`), even for a session it never held, so an update read earlier
-   * that arrives late is refused. Returns false, changing nothing, when the index holds the
-   * session as read later. */
-  remove(owner: string, archive: string, readAt?: number): boolean;
-  query(query: BackendQuery): BackendResults;
-  counts(): { sessions: number; events: number };
-  close(): void;
-}
-
-export interface FeedState {
-  cursor(owner: string): string | undefined;
-  /** Which of `keys` were already processed (within the lag window). */
-  seen(owner: string, keys: readonly string[]): Set<string>;
-  /** Record `processed` keys (with their stamps, epoch ms), move the cursor to `cursor`, and
-   * forget processed keys stamped before `forgetBefore`. */
-  advance(
-    owner: string,
-    cursor: string | undefined,
-    processed: readonly { key: string; at: number }[],
-    forgetBefore: number,
-  ): void;
-  /** Keep change entries as listed from `owner`'s feed (`name` is the key under `changes/`),
-   * for the cross-owner feed. One already kept is left as it is. */
-  record(owner: string, entries: readonly { name: string; entry: ChangeEntry }[]): void;
-  /** The kept entries after `after` (in stamp, owner, name order), stamped no later than
-   * `through`: at most `limit`, whether more follow, and the `through` used. `through` is the
-   * time every owner's feed has been read up to (`readThrough`); null before there is one. */
-  feed(
-    after: FeedPosition | undefined,
-    limit: number,
-  ): { entries: FeedRow[]; more: boolean; through: string } | null;
-  /** Every owner's feed has been read after `through`, and an owner not listed then had
-   * written nothing: the cross-owner feed may serve entries up to it. Never moves back. */
-  readThrough(through: string): void;
-  /** When the index first caught up with the whole feed; undefined while it is building. */
-  readyAt(): string | undefined;
-  caughtUpAt(): string | undefined;
-  /** A full pass over every owner finished at `at`; the first one makes the index ready. */
-  caughtUp(at: string): void;
-  /** Changes on every `reset`. A run that started before a reset (in this process or another
-   * sharing the file) writes nothing once it sees it change, so a page it read earlier never
-   * moves the rebuilt index's cursors past entries the rebuild has not read. */
-  generation(): string;
-  /** Run `fn` as one transaction: it all applies, or none of it. */
-  transaction<T>(fn: () => T): T;
-  /** Forget everything: sessions, events, cursors and readiness (a rebuild). */
-  reset(): void;
-}
-
 /** A place in the cross-owner feed: entries sort by stamp, then owner, then name (the key
  * under `changes/`, which starts with the stamp). */
 export interface FeedPosition {
@@ -178,4 +122,137 @@ export interface FeedRow extends FeedPosition {
   entry: ChangeEntry;
 }
 
-export type IndexStore = SearchBackend & FeedState;
+/** What a search reports about the index, read in one go. */
+export interface IndexState {
+  /** When the live generation first caught up with every feed; undefined before it has. */
+  ready_at?: string;
+  caught_up_at?: string;
+  sessions: number;
+  events: number;
+  generation: string;
+  /** A rebuild in progress beside the live generation: the one being built, and how far it has
+   * read. Never for an index that empties itself to rebuild (SQLite). */
+  building?: { generation: string; read_through?: string };
+}
+
+/** The API's side: what `SearchService.search`, `status` and `changes` call. It reads the live
+ * generation. */
+export interface IndexReader {
+  /** Where the index is: a file path, or a bucket URI. Never credentials. */
+  location(): string;
+  /** One read; the backend may cache it for a few seconds. */
+  state(): Promise<IndexState>;
+  query(query: BackendQuery): Promise<BackendResults>;
+  /** The kept change entries after `after` (in stamp, owner, name order), stamped no later than
+   * `through`: at most `limit`, whether more follow, and the `through` used. `through` is the
+   * time every owner's feed has been read up to (`IndexWriter.readThrough`); null before there
+   * is one (`GET /v1/changes/all`). */
+  feed(
+    after: FeedPosition | undefined,
+    limit: number,
+  ): Promise<{ entries: FeedRow[]; more: boolean; through: string } | null>;
+  close(): Promise<void>;
+}
+
+/** The indexer's side. Every call names the generation it reads or writes, so a run that
+ * started before a reset (in this process or another sharing the index) never writes into the
+ * rebuilt one. */
+export interface IndexWriter {
+  /** The generation writes go to: the live one, or the one being built. Changes on every
+   * `reset`. */
+  generation(): Promise<string>;
+  /** Every owner's cursor (the last change key read), read once a pass. */
+  cursors(generation: string): Promise<Map<string, string>>;
+  /** Which of `keys` were already processed (within the lag window). */
+  seen(generation: string, owner: string, keys: readonly string[]): Promise<Set<string>>;
+  /** What the index holds of these sessions; missing and removed ones are absent. */
+  sessions(
+    generation: string,
+    owner: string,
+    archives: readonly string[],
+  ): Promise<Map<string, IndexedSession>>;
+  /** One feed page, written as a whole. Writing a page twice changes nothing. */
+  commit(page: PageCommit): Promise<CommitResult>;
+  /** Every owner's feed has been read after `through`, and an owner not listed then had
+   * written nothing: the cross-owner feed may serve entries up to it. Never moves back. */
+  readThrough(generation: string, through: string): Promise<void>;
+  /** A full pass over every owner ended at `at`; the first one makes the generation ready (and
+   * live, for one being built). False, changing nothing, when `generation` is no longer the one
+   * writes go to. */
+  passDone(generation: string, at: string): Promise<boolean>;
+  /** Start a new generation and return it. SQLite forgets everything it held: sessions,
+   * events, cursors and readiness, so searches are refused until it catches up again. */
+  reset(): Promise<string>;
+  /** Housekeeping after a pass; nothing for SQLite. */
+  maintain(signal: AbortSignal): Promise<void>;
+}
+
+/** A removal: a tombstone, or a session no longer admitted. */
+export interface Removal {
+  archive: string;
+  /** The read stamp, as `SessionUpdate.read_at`: the index remembers the removal with it, even
+   * for a session it never held, so an update read earlier that arrives late is refused. */
+  read_at: number;
+  /** The session was deleted, retracted or redacted, so its text must leave the index's
+   * storage, not only its results. */
+  scrub: boolean;
+}
+
+/** One page of one owner's change feed, as the indexer planned it. */
+export interface PageCommit {
+  generation: string;
+  owner: string;
+  /** Sessions to index (F10.2): a replace, or a continuation checked against its `base`. */
+  updates: SessionUpdate[];
+  removals: Removal[];
+  /** Change entries as listed (`name` is the key under `changes/`), for the cross-owner feed.
+   * One already kept is left as it is. */
+  feed: { name: string; entry: ChangeEntry }[];
+  /** Keys processed (with their stamps, epoch ms). */
+  seen: { key: string; at: number }[];
+  /** Where the owner's cursor moves (never back); none for a page that only retries refused
+   * updates. */
+  cursor: string | undefined;
+  /** Forget processed keys stamped before this (epoch ms). */
+  forgetBefore: number;
+}
+
+export interface CommitResult {
+  /** `generation` is no longer the one writes go to: nothing was written. */
+  stale: boolean;
+  /** Updates the index refused, changing nothing (it holds the session as read later, or a
+   * continuation's `base` is not what it holds): plan these again. */
+  refused: string[];
+  /** Sessions the index held that the page removed. */
+  removed: number;
+}
+
+export type IndexStore = IndexReader & IndexWriter;
+
+/** What a backend is opened with, whichever it is. */
+export interface IndexOptions {
+  /** The deployment the index belongs to: one built for another is wiped. */
+  deployment: string;
+  /** Which event roles are indexed: an index built with others is wiped (it would miss some,
+   * or hold some it should not). */
+  events: readonly EventRole[];
+  /** What the indexer admits, named (F11.9: a serverless laptop's search scope and owner): an
+   * index built under another scope is wiped, so it holds nothing this one would leave out. */
+  scope?: string;
+  /** Keep a copy of every change entry read, for the cross-owner feed. An index built without
+   * it is wiped when it is turned on, so the copy starts from every feed's start. */
+  feed?: boolean;
+}
+
+/** Opens a backend's index: what `SearchService` calls instead of constructing one. */
+export type OpenIndex = (options: IndexOptions) => Promise<IndexStore>;
+
+/** The index cannot be reached, or did not answer in time: the API answers 503, the CLI exits
+ * 7. Not an index that is still being built (`SearchUnavailable`). */
+export class IndexUnavailable extends Error {
+  readonly code = "index_unavailable";
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "IndexUnavailable";
+  }
+}

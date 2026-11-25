@@ -9,7 +9,7 @@ import { type App, createApp } from "@seshi/api";
 import { Auth } from "@seshi/auth";
 import { Forbidden, HttpSeshi, ServerError } from "@seshi/client";
 import type { Instance } from "@seshi/instance";
-import { SearchService } from "@seshi/search";
+import { IndexUnavailable, SearchService } from "@seshi/search";
 import { FsStore } from "@seshi/store";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { testInstance } from "../tooling/instance";
@@ -167,6 +167,32 @@ describe("GET /v1/changes/all", () => {
     );
     const bobSees = (await response.json()) as { entries: { entry: { session_id: string } }[] };
     expect(bobSees.entries.map((e) => e.entry.session_id)).toEqual(["open"]);
+  });
+
+  it("answers 503 with Retry-After when the index cannot be reached", async () => {
+    const instance = testInstance({
+      store,
+      storage: { url: store.url },
+      auth,
+      search: new SearchService({
+        store,
+        deployment: "test",
+        feed: true,
+        settings: { events: ["user"] },
+        open: () => Promise.reject(new IndexUnavailable("the index did not answer")),
+      }),
+    });
+    instances.push(instance);
+    const app = createApp(instance);
+    const token = await serviceToken();
+    for (const path of ["/v1/changes/all", "/v1/search?q=x"]) {
+      const response = await app.fetch(
+        new Request(`http://seshi.test${path}`, { headers: { authorization: `Bearer ${token}` } }),
+      );
+      expect(response.status, path).toBe(503);
+      expect(response.headers.get("retry-after"), path).toBe("5");
+      expect(await response.json(), path).toMatchObject({ error: { code: "index_unavailable" } });
+    }
   });
 
   it("says why it cannot answer: 400, 503 while building, 404 without search", async () => {

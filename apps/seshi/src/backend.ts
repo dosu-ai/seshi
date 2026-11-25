@@ -293,8 +293,9 @@ export class ServerlessBackend implements Backend {
         "search is off on this machine: set [search] enabled = true in the CLI config",
       );
     }
-    if (!search.ready()) hooks.building?.();
-    const caughtUp = search.status().caught_up_at;
+    const status = await search.status();
+    if (!status.ready) hooks.building?.();
+    const caughtUp = status.caught_up_at;
     const fresh =
       caughtUp !== undefined &&
       Date.now() - Date.parse(caughtUp) < 2 * this.instance.config.search.interval;

@@ -97,9 +97,9 @@ function setup(options: { lagMs?: number; pageSize?: number; budget?: number } =
     log: { warn: (l) => warnings.push(l) },
     ...options,
   });
-  const find = (q: string) =>
-    index
-      .query({
+  const find = async (q: string) =>
+    (
+      await index.query({
         match: parseQuery(q).match,
         viewer: LOCAL_VIEWER,
         sort: "relevance",
@@ -107,7 +107,8 @@ function setup(options: { lagMs?: number; pageSize?: number; budget?: number } =
         offset: 0,
         matches: 5,
       })
-      .hits.map((h) => `${h.session.owner}/${h.session.session_id}`)
+    ).hits
+      .map((h) => `${h.session.owner}/${h.session.session_id}`)
       .sort();
   return { index, indexer, find, warnings };
 }
@@ -128,14 +129,14 @@ describe("the indexer (F10.2)", () => {
     const { index, indexer, find } = setup();
     const run = await indexer.run();
     expect(run).toMatchObject({ caught_up: true, more: false, owners: 2, entries: 2, indexed: 2 });
-    expect(find("flaky")).toEqual(["alice/s1"]);
-    expect(find("redis")).toEqual(["bob/s2"]);
+    expect(await find("flaky")).toEqual(["alice/s1"]);
+    expect(await find("redis")).toEqual(["bob/s2"]);
     // Tool calls are indexed with their names and inputs; tool output is not by default.
-    expect(find("git push --force")).toEqual(["alice/s1", "bob/s2"]);
-    expect(find("Bash")).toEqual(["alice/s1", "bob/s2"]);
-    expect(find("TOOLOUTPUT")).toEqual([]);
+    expect(await find("git push --force")).toEqual(["alice/s1", "bob/s2"]);
+    expect(await find("Bash")).toEqual(["alice/s1", "bob/s2"]);
+    expect(await find("TOOLOUTPUT")).toEqual([]);
     // What the assistant said alongside its tool calls is assistant text too.
-    expect(find("done")).toEqual(["alice/s1", "bob/s2"]);
+    expect(await find("done")).toEqual(["alice/s1", "bob/s2"]);
     const s1 = index.session("alice", archiveId("alice", "trajectory", "s1"));
     expect(s1).toMatchObject({
       format: "trajectory",
@@ -147,7 +148,7 @@ describe("the indexer (F10.2)", () => {
       started_at: Date.parse(ts),
       ended_at: Date.parse("2026-11-01T10:00:05Z"),
     });
-    expect(index.readyAt()).toBe(clock.toISOString());
+    expect((await index.state()).ready_at).toBe(clock.toISOString());
   });
 
   it("indexes where a session ran and with what: its repo, harness, version and models", async () => {
@@ -192,10 +193,10 @@ describe("the indexer (F10.2)", () => {
     await store.delete(keys.trace("alice", archive, metadata?.traces[0]?.content_hash as string));
     const run = await indexer.run();
     expect(run.indexed).toBe(1);
-    expect(find("roll back")).toEqual(["alice/s1"]);
-    expect(find("start")).toEqual(["alice/s1"]);
+    expect(await find("roll back")).toEqual(["alice/s1"]);
+    expect(await find("start")).toEqual(["alice/s1"]);
     expect(index.session("alice", archive)?.traces).toEqual(currentTraces(metadata as never));
-    expect(index.counts().events).toBe(4);
+    expect((await index.state()).events).toBe(4);
   });
 
   it("never puts back a session a slower run read before a faster run indexed it", async () => {
@@ -245,12 +246,12 @@ describe("the indexer (F10.2)", () => {
     });
     tick();
     await fast.run();
-    expect(find("appended")).toEqual(["alice/s1"]);
+    expect(await find("appended")).toEqual(["alice/s1"]);
     tick();
     release();
     await slowRun;
-    expect(find("appended")).toEqual(["alice/s1"]);
-    expect(find("original")).toEqual(["alice/s1"]);
+    expect(await find("appended")).toEqual(["alice/s1"]);
+    expect(await find("original")).toEqual(["alice/s1"]);
   });
 
   it("drops a replaced session's earlier text (X4.6)", async () => {
@@ -266,8 +267,8 @@ describe("the indexer (F10.2)", () => {
     const entries = (await readChanges(store, "alice")).entries;
     expect(entries.at(-1)?.entry).toMatchObject({ kind: "published", replace: true });
     await indexer.run();
-    expect(find("old")).toEqual([]);
-    expect(find("brand")).toEqual(["alice/s1"]);
+    expect(await find("old")).toEqual([]);
+    expect(await find("brand")).toEqual(["alice/s1"]);
   });
 
   it("reads a session again from a replacing entry's trace, even when its trace list looks the same (07)", async () => {
@@ -278,7 +279,7 @@ describe("the indexer (F10.2)", () => {
     const archive = archiveId("alice", "trajectory", "s1");
     const { index, indexer, find } = setup();
     await indexer.run();
-    expect(find("stale")).toEqual(["alice/s1"]);
+    expect(await find("stale")).toEqual(["alice/s1"]);
     const metadata = await readMetadata(store, "alice", archive);
     const hash = metadata?.head as string;
     const key = keys.trace("alice", archive, hash);
@@ -300,8 +301,8 @@ describe("the indexer (F10.2)", () => {
       reason: "redacted",
     });
     expect(await indexer.run()).toMatchObject({ entries: 1, indexed: 1 });
-    expect(find("stale")).toEqual([]);
-    expect(find("fresh")).toEqual(["alice/s1"]);
+    expect(await find("stale")).toEqual([]);
+    expect(await find("fresh")).toEqual(["alice/s1"]);
     expect(index.session("alice", archive)?.traces).toEqual([hash]);
   });
 
@@ -327,7 +328,7 @@ describe("the indexer (F10.2)", () => {
     });
     const run = await indexer.run();
     expect(run).toMatchObject({ removed: 1, indexed: 1 });
-    expect(find("alpha")).toEqual([]);
+    expect(await find("alpha")).toEqual([]);
     expect(index.session("alice", archiveId("alice", "trajectory", "s2"))?.visibility).toBe(
       "owner",
     );
@@ -359,8 +360,8 @@ describe("the indexer (F10.2)", () => {
       transcript: log("faraway"),
     });
     await indexer.run();
-    expect(find("skewed")).toEqual(["alice/s2"]);
-    expect(find("faraway")).toEqual([]);
+    expect(await find("skewed")).toEqual(["alice/s2"]);
+    expect(await find("faraway")).toEqual([]);
   });
 
   it("indexes a session as it is now, even when its latest entry is missing", async () => {
@@ -382,7 +383,7 @@ describe("the indexer (F10.2)", () => {
     const listed = await store.list(keys.changes("alice"));
     await store.delete(listed.keys.at(-1) as string);
     await indexer.run();
-    expect(find("appended")).toEqual([]);
+    expect(await find("appended")).toEqual([]);
     // The session's next change (any kind) brings the index up to date.
     await setVisibility({
       store,
@@ -393,7 +394,7 @@ describe("the indexer (F10.2)", () => {
       now: () => tick(),
     });
     await indexer.run();
-    expect(find("appended")).toEqual(["alice/s1"]);
+    expect(await find("appended")).toEqual(["alice/s1"]);
   });
 
   it("reads an entry again until the session's pointer shows its change (decision 7 of 18)", async () => {
@@ -412,7 +413,7 @@ describe("the indexer (F10.2)", () => {
     const between = beforePointer(async () => {
       tick();
       await indexer.run();
-      seenBetween.push(find(query));
+      seenBetween.push(await find(query));
     });
     const through = (now = () => tick()) =>
       new StoreSeshi({ store: between.store, owner: "alice", formats, now });
@@ -429,7 +430,7 @@ describe("the indexer (F10.2)", () => {
     tick();
     await indexer.run();
     expect(seenBetween.at(-1)).toEqual([]);
-    expect(find("appended")).toEqual(["alice/s1"]);
+    expect(await find("appended")).toEqual(["alice/s1"]);
 
     query = "newcomer";
     between.arm();
@@ -437,7 +438,7 @@ describe("the indexer (F10.2)", () => {
     tick();
     await indexer.run();
     expect(seenBetween.at(-1)).toEqual([]);
-    expect(find("newcomer")).toEqual(["alice/s3"]);
+    expect(await find("newcomer")).toEqual(["alice/s3"]);
 
     query = "hidden";
     between.arm();
@@ -451,7 +452,7 @@ describe("the indexer (F10.2)", () => {
     tick();
     await indexer.run();
     expect(seenBetween.at(-1)).toEqual(["alice/s2"]);
-    expect(find("hidden")).toEqual([]);
+    expect(await find("hidden")).toEqual([]);
 
     between.arm();
     await setVisibility({
@@ -496,15 +497,15 @@ describe("the indexer (F10.2)", () => {
     ).rejects.toThrow(/injected/);
     // The entry names a trace the session does not list: the session is indexed as it is.
     expect(await indexer.run()).toMatchObject({ entries: 1, caught_up: true });
-    expect(find("appended")).toEqual([]);
-    expect(find("original")).toEqual(["alice/s1"]);
+    expect(await find("appended")).toEqual([]);
+    expect(await find("original")).toEqual(["alice/s1"]);
     // While the entry is young it is read again (its pointer may still move); once it is the
     // lag window behind the clock it is read a last time and settled.
     expect((await indexer.run()).entries).toBe(1);
     tick(61_000);
     expect((await indexer.run()).entries).toBe(1);
     expect((await indexer.run()).entries).toBe(0);
-    expect(find("original")).toEqual(["alice/s1"]);
+    expect(await find("original")).toEqual(["alice/s1"]);
 
     // A first publish that failed: an entry for a session with no metadata. Nothing is indexed.
     failing.arm();
@@ -512,7 +513,7 @@ describe("the indexer (F10.2)", () => {
       through().ingest({ format: "trajectory", session_id: "s2", transcript: log("ghostly") }),
     ).rejects.toThrow(/injected/);
     expect((await indexer.run()).caught_up).toBe(true);
-    expect(find("ghostly")).toEqual([]);
+    expect(await find("ghostly")).toEqual([]);
 
     // The resends land and are indexed.
     await db().ingest({
@@ -523,8 +524,8 @@ describe("the indexer (F10.2)", () => {
     });
     await db().ingest({ format: "trajectory", session_id: "s2", transcript: log("ghostly") });
     await indexer.run();
-    expect(find("appended")).toEqual(["alice/s1"]);
-    expect(find("ghostly")).toEqual(["alice/s2"]);
+    expect(await find("appended")).toEqual(["alice/s1"]);
+    expect(await find("ghostly")).toEqual(["alice/s2"]);
     expect(warnings).toEqual([]);
   });
 
@@ -542,7 +543,7 @@ describe("the indexer (F10.2)", () => {
     await setVisibility({ ...base, session_id: "s4", visibility: "owner" });
     tick(2000);
     expect(await indexer.run()).toMatchObject({ entries: 4, removed: 2, indexed: 2 });
-    expect(find("topics1 OR topics2")).toEqual([]);
+    expect(await find("topics1 OR topics2")).toEqual([]);
     for (const id of ["s3", "s4"]) {
       expect(index.session("alice", archiveId("alice", "trajectory", id))?.visibility).toBe(
         "owner",
@@ -562,12 +563,12 @@ describe("the indexer (F10.2)", () => {
     const { index, indexer, find } = setup({ pageSize: 2, budget: 3 });
     const first = await indexer.run();
     expect(first).toMatchObject({ more: true, caught_up: false });
-    expect(index.readyAt()).toBeUndefined();
+    expect((await index.state()).ready_at).toBeUndefined();
     const all = await indexer.catchUp();
     expect(all.caught_up).toBe(true);
-    expect(index.readyAt()).toBeDefined();
-    expect(find("topic6")).toEqual(["alice/s6"]);
-    expect(index.counts().sessions).toBe(7);
+    expect((await index.state()).ready_at).toBeDefined();
+    expect(await find("topic6")).toEqual(["alice/s6"]);
+    expect((await index.state()).sessions).toBe(7);
   });
 
   it("adds a continuation written by a clock behind the one that wrote the session", async () => {
@@ -591,7 +592,7 @@ describe("the indexer (F10.2)", () => {
     const metadata = await readMetadata(store, "alice", archive);
     expect(metadata?.traces).toHaveLength(2);
     expect(await indexer.run()).toMatchObject({ indexed: 1 });
-    expect(find("skewed")).toEqual(["alice/s1"]);
+    expect(await find("skewed")).toEqual(["alice/s1"]);
   });
 
   it("skips objects it cannot decode, warns, and still catches up", async () => {
@@ -607,9 +608,9 @@ describe("the indexer (F10.2)", () => {
     const { index, indexer, find, warnings } = setup();
     const run = await indexer.run();
     expect(run.caught_up).toBe(true);
-    expect(index.readyAt()).toBeDefined();
-    expect(find("beta")).toEqual(["alice/s2"]);
-    expect(find("alpha OR gamma")).toEqual([]);
+    expect((await index.state()).ready_at).toBeDefined();
+    expect(await find("beta")).toEqual(["alice/s2"]);
+    expect(await find("alpha OR gamma")).toEqual([]);
     expect(warnings.some((w) => w.includes("could not be read"))).toBe(true);
     expect(warnings.some((w) => w.includes("metadata cannot be read"))).toBe(true);
   });
@@ -645,8 +646,8 @@ describe("the indexer (F10.2)", () => {
     });
     const first = await indexer.run();
     expect(first).toMatchObject({ more: true, caught_up: false, indexed: 0 });
-    expect(index.cursor("alice")).toBeUndefined();
-    expect(index.readyAt()).toBeUndefined();
+    expect((await index.cursors(await index.generation())).get("alice")).toBeUndefined();
+    expect((await index.state()).ready_at).toBeUndefined();
     const second = await indexer.run();
     expect(second).toMatchObject({ caught_up: true, indexed: 2 });
   });
@@ -681,7 +682,7 @@ describe("the indexer (F10.2)", () => {
     const { indexer, find, warnings } = setup();
     const run = await indexer.run();
     expect(run.caught_up).toBe(true);
-    expect(find("alpha")).toEqual(["alice/s1"]);
+    expect(await find("alpha")).toEqual(["alice/s1"]);
     expect(warnings.some((w) => w.includes("unreadable change entry"))).toBe(true);
   });
 
@@ -692,7 +693,7 @@ describe("the indexer (F10.2)", () => {
     controller.abort();
     const run = await indexer.run(controller.signal);
     expect(run.caught_up).toBe(false);
-    expect(index.readyAt()).toBeUndefined();
+    expect((await index.state()).ready_at).toBeUndefined();
   });
 
   it("reads the owners again after a while, and at once while there are none", async () => {

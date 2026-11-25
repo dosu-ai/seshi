@@ -8,13 +8,19 @@ import type {
   BackendMatch,
   BackendQuery,
   BackendResults,
+  CommitResult,
   FeedPosition,
   FeedRow,
   IndexedSession,
+  IndexOptions,
+  IndexState,
   IndexStore,
+  OpenIndex,
+  PageCommit,
   SessionUpdate,
 } from "./backend";
 import { MEMORY_INDEX, tryRestrictToOwner } from "./paths";
+import type { MatchItem, MatchTree } from "./query";
 import { indexText, MATCH_END, MATCH_START } from "./snippet";
 
 /** The index's own schema: a file built under another is wiped and rebuilt from the change
@@ -151,6 +157,22 @@ function placeholders(n: number): string {
   return Array.from({ length: n }, () => "?").join(", ");
 }
 
+function quoted(item: MatchItem): string {
+  const body = `"${item.text.replaceAll('"', '""')}"`;
+  return item.prefix ? `${body} *` : body;
+}
+
+/** The FTS5 expression for a match tree. Each item is quoted as typed, so FTS5 tokenizes it as
+ * it tokenized the indexed text. */
+export function fts5Match(tree: MatchTree): string {
+  const positive = tree.all
+    .map((g) => (g.length === 1 ? quoted(g[0] as MatchItem) : `(${g.map(quoted).join(" OR ")})`))
+    .join(" AND ");
+  return tree.none.length === 0
+    ? positive
+    : `(${positive}) NOT (${tree.none.map(quoted).join(" OR ")})`;
+}
+
 /** The snippets of `n` picked events: binds the two markers, the match, then the event ids.
  * `rowid+0`, not `rowid`: SQLite pushes `rowid IN (…)` into FTS5, which then evaluates the
  * match again for every id, so one search with many matches stalls the server. As an
@@ -162,22 +184,18 @@ export function snippetsSql(n: number): string {
     WHERE events_text MATCH ? AND events_text.rowid+0 IN (${placeholders(n)})`;
 }
 
-export interface SqliteIndexOptions {
+export interface SqliteIndexOptions extends IndexOptions {
   /** The file, or `:memory:`. Its folder is created (owner-only) when missing. */
   path: string;
-  /** The deployment the index belongs to: a file built for another is wiped. */
-  deployment: string;
-  /** Which event roles are indexed: a file built with others is wiped (it would miss some,
-   * or hold some it should not). */
-  events: readonly EventRole[];
-  /** What the indexer admits, named (F11.9: a serverless laptop's search scope and owner): a
-   * file built under another scope is wiped, so it holds nothing this one would leave out. */
-  scope?: string;
-  /** The file keeps a copy of every change entry read, for the cross-owner feed. A file built
-   * without it is wiped when it is turned on, so the copy starts from every feed's start. */
-  feed?: boolean;
 }
 
+/** Opens the SQLite index at `path` (`:memory:` for none). */
+export function sqliteIndex(options: { path: string }): OpenIndex {
+  return async (index) => new SqliteIndex({ ...index, path: options.path });
+}
+
+/** The index in one SQLite file, on this host (F10.3). Several processes on one host may share
+ * the file: each write is one transaction. */
 export class SqliteIndex implements IndexStore {
   readonly path: string;
   private readonly db: Database;
@@ -238,8 +256,12 @@ export class SqliteIndex implements IndexStore {
       .run(key, value);
   }
 
-  transaction<T>(fn: () => T): T {
+  private transaction<T>(fn: () => T): T {
     return this.db.transaction(fn).immediate();
+  }
+
+  location(): string {
+    return this.path;
   }
 
   private row(owner: string, archive: string): SessionRow | null {
@@ -248,6 +270,7 @@ export class SqliteIndex implements IndexStore {
       .get(owner, archive) as SessionRow | null;
   }
 
+  /** What the index holds of a session, or null. */
   session(owner: string, archive: string): IndexedSession | null {
     const row = this.row(owner, archive);
     return row === null || row.removed === 1 ? null : sessionOf(row);
@@ -260,6 +283,9 @@ export class SqliteIndex implements IndexStore {
     this.db.query("DELETE FROM events WHERE session = ?").run(sessionId);
   }
 
+  /** Index a session's new head (F10.2), as one transaction. Returns false, changing nothing,
+   * when the index holds the session as read later (by `read_at`), or a continuation's `base`
+   * is not what it holds. */
   apply(update: SessionUpdate): boolean {
     const { session, events } = update;
     return this.transaction(() => {
@@ -341,6 +367,10 @@ export class SqliteIndex implements IndexStore {
     });
   }
 
+  /** Drop a session (a tombstone, F10.2), as one transaction. The index remembers the removal
+   * with its read stamp, even for a session it never held, so an update read earlier that
+   * arrives late is refused. Returns false, changing nothing, when the index holds the session
+   * as read later. */
   remove(owner: string, archive: string, readAt = 0): boolean {
     return this.transaction(() => {
       const existing = this.row(owner, archive);
@@ -363,9 +393,10 @@ export class SqliteIndex implements IndexStore {
     });
   }
 
-  query(q: BackendQuery): BackendResults {
+  async query(q: BackendQuery): Promise<BackendResults> {
+    const match = fts5Match(q.match);
     const where: string[] = ["events_text MATCH ?", "s.removed = 0"];
-    const params: SQLQueryBindings[] = [q.match];
+    const params: SQLQueryBindings[] = [match];
     if (q.viewer.ownOnly) {
       if (q.viewer.own.length === 0) return { total: 0, hits: [] };
       where.push(`s.owner IN (${placeholders(q.viewer.own.length)})`);
@@ -460,7 +491,7 @@ export class SqliteIndex implements IndexStore {
       params,
       rows.map((r) => r.id),
       q.matches,
-      q.match,
+      match,
     );
     const hits: BackendHit[] = rows.map((row) => ({
       session: sessionOf(row),
@@ -522,7 +553,23 @@ export class SqliteIndex implements IndexStore {
     return out;
   }
 
-  counts(): { sessions: number; events: number } {
+  async state(): Promise<IndexState> {
+    // One read snapshot: readiness and counts as of one moment.
+    return this.db
+      .transaction((): IndexState => {
+        const readyAt = this.meta("ready_at");
+        const caughtUpAt = this.meta("caught_up_at");
+        return {
+          ...(readyAt !== undefined ? { ready_at: readyAt } : {}),
+          ...(caughtUpAt !== undefined ? { caught_up_at: caughtUpAt } : {}),
+          ...this.counts(),
+          generation: this.currentGeneration(),
+        };
+      })
+      .deferred();
+  }
+
+  private counts(): { sessions: number; events: number } {
     const sessions = this.db
       .query("SELECT count(*) AS n FROM sessions WHERE removed = 0")
       .get() as {
@@ -532,62 +579,126 @@ export class SqliteIndex implements IndexStore {
     return { sessions: sessions.n, events: events.n };
   }
 
-  close(): void {
+  async close(): Promise<void> {
     this.db.close();
   }
 
-  cursor(owner: string): string | undefined {
+  private currentGeneration(): string {
+    return this.meta("generation") ?? "0";
+  }
+
+  async generation(): Promise<string> {
+    return this.currentGeneration();
+  }
+
+  async cursors(generation: string): Promise<Map<string, string>> {
+    const rows = this.db
+      .transaction(() =>
+        this.currentGeneration() === generation
+          ? (this.db.query("SELECT owner, cursor FROM feeds WHERE cursor IS NOT NULL").all() as {
+              owner: string;
+              cursor: string;
+            }[])
+          : [],
+      )
+      .deferred();
+    return new Map(rows.map((r) => [r.owner, r.cursor]));
+  }
+
+  private cursor(owner: string): string | undefined {
     const row = this.db.query("SELECT cursor FROM feeds WHERE owner = ?").get(owner) as {
       cursor: string | null;
     } | null;
     return row?.cursor ?? undefined;
   }
 
-  seen(owner: string, keys: readonly string[]): Set<string> {
-    const found = new Set<string>();
-    const lookup = this.db.query("SELECT 1 AS hit FROM seen WHERE owner = ? AND key = ?");
-    for (const key of keys) if (lookup.get(owner, key) !== null) found.add(key);
-    return found;
+  async seen(generation: string, owner: string, keys: readonly string[]): Promise<Set<string>> {
+    return this.db
+      .transaction(() => {
+        const found = new Set<string>();
+        if (this.currentGeneration() !== generation) return found;
+        const lookup = this.db.query("SELECT 1 AS hit FROM seen WHERE owner = ? AND key = ?");
+        for (const key of keys) if (lookup.get(owner, key) !== null) found.add(key);
+        return found;
+      })
+      .deferred();
   }
 
-  advance(
+  async sessions(
+    generation: string,
+    owner: string,
+    archives: readonly string[],
+  ): Promise<Map<string, IndexedSession>> {
+    return this.db
+      .transaction(() => {
+        const held = new Map<string, IndexedSession>();
+        if (this.currentGeneration() !== generation) return held;
+        for (const archive of archives) {
+          const session = this.session(owner, archive);
+          if (session !== null) held.set(archive, session);
+        }
+        return held;
+      })
+      .deferred();
+  }
+
+  /** The page as one transaction: its sessions, its removals, the feed's copy, the keys seen
+   * and the cursor, or (for a stale generation) nothing. */
+  async commit(page: PageCommit): Promise<CommitResult> {
+    return this.transaction((): CommitResult => {
+      if (this.currentGeneration() !== page.generation) {
+        return { stale: true, refused: [], removed: 0 };
+      }
+      const refused: string[] = [];
+      for (const update of page.updates) {
+        if (!this.apply(update)) refused.push(update.session.archive_id);
+      }
+      let removed = 0;
+      for (const { archive, read_at } of page.removals) {
+        const held = this.session(page.owner, archive) !== null;
+        if (this.remove(page.owner, archive, read_at) && held) removed++;
+      }
+      this.record(page.owner, page.feed);
+      if (page.cursor !== undefined || page.seen.length > 0) {
+        this.advance(page.owner, page.cursor, page.seen, page.forgetBefore);
+      }
+      return { stale: false, refused, removed };
+    });
+  }
+
+  private advance(
     owner: string,
     cursor: string | undefined,
     processed: readonly { key: string; at: number }[],
     forgetBefore: number,
   ): void {
-    this.transaction(() => {
-      const insert = this.db.query(
-        "INSERT INTO seen (owner, key, at) VALUES (?, ?, ?) ON CONFLICT DO NOTHING",
-      );
-      for (const { key, at } of processed) insert.run(owner, key, at);
-      const held = this.cursor(owner);
-      const next = held === undefined || (cursor !== undefined && cursor > held) ? cursor : held;
-      this.db
-        .query(
-          "INSERT INTO feeds (owner, cursor) VALUES (?, ?) ON CONFLICT (owner) DO UPDATE SET cursor = excluded.cursor",
-        )
-        .run(owner, next ?? null);
-      this.db.query("DELETE FROM seen WHERE owner = ? AND at < ?").run(owner, forgetBefore);
-    });
+    const insert = this.db.query(
+      "INSERT INTO seen (owner, key, at) VALUES (?, ?, ?) ON CONFLICT DO NOTHING",
+    );
+    for (const { key, at } of processed) insert.run(owner, key, at);
+    const held = this.cursor(owner);
+    const next = held === undefined || (cursor !== undefined && cursor > held) ? cursor : held;
+    this.db
+      .query(
+        "INSERT INTO feeds (owner, cursor) VALUES (?, ?) ON CONFLICT (owner) DO UPDATE SET cursor = excluded.cursor",
+      )
+      .run(owner, next ?? null);
+    this.db.query("DELETE FROM seen WHERE owner = ? AND at < ?").run(owner, forgetBefore);
   }
 
-  record(owner: string, entries: readonly { name: string; entry: ChangeEntry }[]): void {
-    if (entries.length === 0) return;
-    this.transaction(() => {
-      const insert = this.db.query(
-        "INSERT INTO changes (stamp, owner, name, entry) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING",
-      );
-      for (const { name, entry } of entries) {
-        insert.run(name.slice(0, name.indexOf("-")), owner, name, JSON.stringify(entry));
-      }
-    });
+  private record(owner: string, entries: readonly { name: string; entry: ChangeEntry }[]): void {
+    const insert = this.db.query(
+      "INSERT INTO changes (stamp, owner, name, entry) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING",
+    );
+    for (const { name, entry } of entries) {
+      insert.run(name.slice(0, name.indexOf("-")), owner, name, JSON.stringify(entry));
+    }
   }
 
-  feed(
+  async feed(
     after: FeedPosition | undefined,
     limit: number,
-  ): { entries: FeedRow[]; more: boolean; through: string } | null {
+  ): Promise<{ entries: FeedRow[]; more: boolean; through: string } | null> {
     // One read snapshot: the bound reported is the one the rows were read under.
     return this.db.transaction(() => this.feedPage(after, limit)).deferred();
   }
@@ -624,8 +735,9 @@ export class SqliteIndex implements IndexStore {
     };
   }
 
-  readThrough(through: string): void {
+  async readThrough(generation: string, through: string): Promise<void> {
     this.transaction(() => {
+      if (this.currentGeneration() !== generation) return;
       const held = this.meta("feed_through");
       if (held === undefined || Date.parse(through) > Date.parse(held)) {
         this.setMeta("feed_through", through);
@@ -633,28 +745,20 @@ export class SqliteIndex implements IndexStore {
     });
   }
 
-  readyAt(): string | undefined {
-    return this.meta("ready_at");
-  }
-
-  caughtUpAt(): string | undefined {
-    return this.meta("caught_up_at");
-  }
-
-  caughtUp(at: string): void {
-    this.transaction(() => {
+  async passDone(generation: string, at: string): Promise<boolean> {
+    return this.transaction(() => {
+      if (this.currentGeneration() !== generation) return false;
       if (this.meta("ready_at") === undefined) this.setMeta("ready_at", at);
       this.setMeta("caught_up_at", at);
+      return true;
     });
   }
 
-  generation(): string {
-    return this.meta("generation") ?? "0";
-  }
-
-  reset(): void {
-    this.transaction(() => {
-      this.setMeta("generation", crypto.randomUUID());
+  /** Empties the file under a new generation: searches are refused until it catches up. */
+  async reset(): Promise<string> {
+    return this.transaction(() => {
+      const generation = crypto.randomUUID();
+      this.setMeta("generation", generation);
       this.db.run("DELETE FROM events_text");
       this.db.run("DELETE FROM events");
       this.db.run("DELETE FROM sessions");
@@ -662,6 +766,9 @@ export class SqliteIndex implements IndexStore {
       this.db.run("DELETE FROM feeds");
       this.db.run("DELETE FROM changes");
       this.db.run("DELETE FROM meta WHERE key IN ('ready_at', 'caught_up_at', 'feed_through')");
+      return generation;
     });
   }
+
+  async maintain(_signal: AbortSignal): Promise<void> {}
 }

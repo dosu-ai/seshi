@@ -1,44 +1,66 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, it } from "vitest";
-import { MAX_QUERY_LENGTH, MAX_QUERY_TERMS, parseQuery, SearchQueryError } from "./query";
+import { MAX_QUERY_LENGTH, MAX_QUERY_TERMS, parseQuery, SearchQueryError, tokensOf } from "./query";
+import { fts5Match } from "./sqlite";
 
 describe("parseQuery", () => {
   it("quotes every word, so all must appear in any order", () => {
-    expect(parseQuery("flaky test").match).toBe('"flaky" AND "test"');
+    expect(fts5Match(parseQuery("flaky test").match)).toBe('"flaky" AND "test"');
     expect(parseQuery("  flaky\t test \n").terms).toEqual(["flaky", "test"]);
   });
 
   it("keeps phrases, prefixes, OR groups and exclusions", () => {
-    expect(parseQuery('"auth flow"').match).toBe('"auth flow"');
-    expect(parseQuery("deploy*").match).toBe('"deploy" *');
-    expect(parseQuery("redis OR memcached cache").match).toBe(
+    expect(fts5Match(parseQuery('"auth flow"').match)).toBe('"auth flow"');
+    expect(fts5Match(parseQuery("deploy*").match)).toBe('"deploy" *');
+    expect(fts5Match(parseQuery("redis OR memcached cache").match)).toBe(
       '("redis" OR "memcached") AND "cache"',
     );
-    expect(parseQuery("a OR b OR c").match).toBe('("a" OR "b" OR "c")');
-    expect(parseQuery("deploy -staging").match).toBe('("deploy") NOT ("staging")');
-    expect(parseQuery('deploy -"dry run" NOT canary').match).toBe(
+    expect(fts5Match(parseQuery("a OR b OR c").match)).toBe('("a" OR "b" OR "c")');
+    expect(fts5Match(parseQuery("deploy -staging").match)).toBe('("deploy") NOT ("staging")');
+    expect(fts5Match(parseQuery('deploy -"dry run" NOT canary').match)).toBe(
       '("deploy") NOT ("dry run" OR "canary")',
     );
-    expect(parseQuery('"half open phrase').match).toBe('"half open phrase"');
+    expect(fts5Match(parseQuery('"half open phrase').match)).toBe('"half open phrase"');
   });
 
   it("treats paths, flags and FTS5 operators people type as plain words", () => {
-    expect(parseQuery("src/app.ts").match).toBe('"src/app.ts"');
-    expect(parseQuery("git push --force").match).toBe('"git" AND "push" AND "--force"');
-    expect(parseQuery('say "it""s" NEAR(a b) col:x').match).toBe(
+    expect(fts5Match(parseQuery("src/app.ts").match)).toBe('"src/app.ts"');
+    expect(fts5Match(parseQuery("git push --force").match)).toBe('"git" AND "push" AND "--force"');
+    expect(fts5Match(parseQuery('say "it""s" NEAR(a b) col:x').match)).toBe(
       '"say" AND "it" AND "s" AND "NEAR(a" AND "b)" AND "col:x"',
     );
-    expect(parseQuery("and or not AND").match).toBe('"and" AND "or" AND "not"');
+    expect(fts5Match(parseQuery("and or not AND").match)).toBe('"and" AND "or" AND "not"');
     // A dangling OR, a leading OR and a lone dash are not operators.
-    expect(parseQuery("OR deploy OR").match).toBe('"deploy"');
-    expect(parseQuery("- deploy").match).toBe('"deploy"');
+    expect(fts5Match(parseQuery("OR deploy OR").match)).toBe('"deploy"');
+    expect(fts5Match(parseQuery("- deploy").match)).toBe('"deploy"');
   });
 
   it("drops what has nothing to find, and refuses a query left with nothing", () => {
-    expect(parseQuery("deploy -- / *").match).toBe('"deploy"');
+    expect(fts5Match(parseQuery("deploy -- / *").match)).toBe('"deploy"');
     expect(() => parseQuery("")).toThrow(SearchQueryError);
     expect(() => parseQuery('-- / ** ""')).toThrow(/at least one word/);
     expect(() => parseQuery("-staging")).toThrow(/at least one word/);
+  });
+
+  it("gives a tree of groups and exclusions, each item as typed and as words", () => {
+    expect(parseQuery('Redis OR memcached "src/App.ts"* -staging').match).toEqual({
+      all: [
+        [
+          { text: "Redis", tokens: ["redis"], prefix: false },
+          { text: "memcached", tokens: ["memcached"], prefix: false },
+        ],
+        [{ text: "src/App.ts", tokens: ["src", "app", "ts"], prefix: true }],
+      ],
+      none: [{ text: "staging", tokens: ["staging"], prefix: false }],
+    });
+    expect(tokensOf("git push --force; déjà-vu 2x")).toEqual([
+      "git",
+      "push",
+      "force",
+      "déjà",
+      "vu",
+      "2x",
+    ]);
   });
 
   it("bounds the query", () => {
@@ -67,12 +89,15 @@ describe("parseQuery", () => {
       "AND OR word NOT other",
     ];
     for (const q of queries) {
-      const { match } = parseQuery(q);
+      const match = fts5Match(parseQuery(q).match);
       expect(() => db.query("SELECT rowid FROM t WHERE t MATCH ?").all(match), q).not.toThrow();
     }
     const found = (q: string) =>
-      (db.query("SELECT rowid FROM t WHERE t MATCH ?").all(parseQuery(q).match) as unknown[])
-        .length;
+      (
+        db
+          .query("SELECT rowid FROM t WHERE t MATCH ?")
+          .all(fts5Match(parseQuery(q).match)) as unknown[]
+      ).length;
     expect(found("src/app.ts")).toBe(1);
     expect(found("app.ts")).toBe(1);
     expect(found("fla*")).toBe(1);

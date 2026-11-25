@@ -233,12 +233,16 @@ function reviewCheck(bucket: ServerlessBucket): CheckResult {
       };
 }
 
-function searchCheck(bucket: ServerlessBucket, scope: string, now: Date): CheckResult {
+async function searchCheck(
+  bucket: ServerlessBucket,
+  scope: string,
+  now: Date,
+): Promise<CheckResult> {
   const search = bucket.instance.search;
   if (!search) {
     return { id: "search", title: "Search", status: "ok", summary: "off on this machine" };
   }
-  const status = search.status();
+  const status = await search.status();
   return {
     id: "search",
     title: "Search",
@@ -246,7 +250,7 @@ function searchCheck(bucket: ServerlessBucket, scope: string, now: Date): CheckR
     summary: status.ready
       ? `scope ${scope}; ${status.sessions} sessions indexed, caught up ${ago(status.caught_up_at, now)}`
       : `scope ${scope}; not built yet (the next search or the daemon builds it)`,
-    detail: [`index ${status.path}`],
+    detail: [`index ${status.location}`],
   };
 }
 
@@ -274,7 +278,7 @@ export async function serverlessChecks(
   checks.push(await readCheck(bucket));
   checks.push(sharedCheck(bucket, now));
   checks.push(reviewCheck(bucket));
-  checks.push(searchCheck(bucket, scope, now));
+  checks.push(await searchCheck(bucket, scope, now));
   const serverOnly = serverOnlyCheck(bucket);
   if (serverOnly) checks.push(serverOnly);
   for (const warning of bucket.warnings.filter((w) => w.startsWith("[local]"))) {

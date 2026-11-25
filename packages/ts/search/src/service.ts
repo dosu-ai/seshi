@@ -13,13 +13,13 @@ import {
   type SessionMetadata,
 } from "@seshi/model";
 import { accessDeniedIn, decodeMetadata, getBytes, isOwner, keys, type Store } from "@seshi/store";
-import type { BackendHit, BackendQuery, IndexStore } from "./backend";
+import type { BackendHit, BackendQuery, IndexStore, OpenIndex } from "./backend";
 import { readFeed } from "./feed";
 import { Indexer, type IndexerLogger, type IndexerOptions, type IndexerRun } from "./indexer";
 import { defaultIndexPath } from "./paths";
 import { parseQuery, SearchQueryError } from "./query";
 import { highlights } from "./snippet";
-import { SqliteIndex } from "./sqlite";
+import { sqliteIndex } from "./sqlite";
 import type { Viewer } from "./viewer";
 
 export class SearchUnavailable extends Error {
@@ -38,7 +38,8 @@ export const MAX_OFFSET = 10_000;
 const MAX_FILTER_LENGTH = 512;
 
 export interface SearchSettings {
-  /** The index file; `defaultIndexPath(deployment)` when omitted. `:memory:` for none. */
+  /** The SQLite index file; `defaultIndexPath(deployment)` when omitted. `:memory:` for none.
+   * Not read when `SearchServiceOptions.open` is given. */
   path?: string;
   events: readonly EventRole[];
 }
@@ -47,6 +48,8 @@ export interface SearchServiceOptions {
   store: Store;
   deployment: string;
   settings: SearchSettings;
+  /** Opens the index; SQLite at `settings.path` when omitted. */
+  open?: OpenIndex;
   aliases?: OwnerAliases;
   now?: () => Date;
   log?: IndexerLogger;
@@ -69,7 +72,8 @@ export interface SearchServiceOptions {
 }
 
 export interface SearchStatus {
-  path: string;
+  /** Where the index is: a file path, or a bucket URI. */
+  location: string;
   ready: boolean;
   ready_at?: string;
   caught_up_at?: string;
@@ -228,89 +232,108 @@ function resultOf(hit: BackendHit): SearchResult {
   };
 }
 
+interface Opened {
+  index: IndexStore;
+  indexer: Indexer;
+}
+
 export class SearchService {
-  readonly path: string;
   private readonly options: SearchServiceOptions;
   private readonly aliases: OwnerAliases;
-  private opened: { index: IndexStore; indexer: Indexer } | undefined;
+  private opened: Promise<Opened> | undefined;
   private closed = false;
 
   constructor(options: SearchServiceOptions) {
     this.options = options;
     this.aliases = options.aliases ?? new OwnerAliases();
-    this.path = options.settings.path ?? defaultIndexPath({ deployment: options.deployment });
   }
 
-  private open(): { index: IndexStore; indexer: Indexer } {
-    if (this.closed) throw new SearchUnavailable("search is shut down");
+  private open(): Promise<Opened> {
+    if (this.closed) return Promise.reject(new SearchUnavailable("search is shut down"));
     if (!this.opened) {
-      const index = new SqliteIndex({
-        path: this.path,
-        deployment: this.options.deployment,
-        events: this.options.settings.events,
-        ...(this.options.scope !== undefined ? { scope: this.options.scope } : {}),
-        ...(this.options.feed ? { feed: true } : {}),
+      const opening = this.openIndex();
+      // A failed open is tried again on the next call.
+      opening.catch(() => {
+        if (this.opened === opening) this.opened = undefined;
       });
-      const indexer = new Indexer({
-        store: this.options.store,
-        index,
-        events: this.options.settings.events,
-        ...(this.options.now ? { now: this.options.now } : {}),
-        ...(this.options.log ? { log: this.options.log } : {}),
-        ...this.options.indexer,
-        ...(this.options.feed ? { feed: true } : {}),
-      });
-      this.opened = { index, indexer };
+      this.opened = opening;
     }
     return this.opened;
   }
 
-  run(signal?: AbortSignal): Promise<IndexerRun> {
-    return this.open().indexer.run(signal);
+  private async openIndex(): Promise<Opened> {
+    const open =
+      this.options.open ??
+      sqliteIndex({
+        path:
+          this.options.settings.path ?? defaultIndexPath({ deployment: this.options.deployment }),
+      });
+    const index = await open({
+      deployment: this.options.deployment,
+      events: this.options.settings.events,
+      ...(this.options.scope !== undefined ? { scope: this.options.scope } : {}),
+      ...(this.options.feed ? { feed: true } : {}),
+    });
+    const indexer = new Indexer({
+      store: this.options.store,
+      index,
+      events: this.options.settings.events,
+      ...(this.options.now ? { now: this.options.now } : {}),
+      ...(this.options.log ? { log: this.options.log } : {}),
+      ...this.options.indexer,
+      ...(this.options.feed ? { feed: true } : {}),
+    });
+    return { index, indexer };
   }
 
-  catchUp(signal?: AbortSignal): Promise<IndexerRun> {
-    return this.open().indexer.catchUp(signal);
+  async run(signal?: AbortSignal): Promise<IndexerRun> {
+    return (await this.open()).indexer.run(signal);
+  }
+
+  async catchUp(signal?: AbortSignal): Promise<IndexerRun> {
+    return (await this.open()).indexer.catchUp(signal);
   }
 
   /** Drop everything the index holds and build it again from the change feed (F10.2). Until
    * it has caught up, queries here and in any process sharing the file are refused. */
   async rebuild(signal?: AbortSignal): Promise<IndexerRun> {
-    const { index, indexer } = this.open();
-    index.reset();
+    const { index, indexer } = await this.open();
+    await index.reset();
     indexer.forgetOwners();
     return indexer.catchUp(signal);
   }
 
-  status(): SearchStatus {
-    const { index } = this.open();
-    const readyAt = index.readyAt();
-    const caughtUpAt = index.caughtUpAt();
+  async status(): Promise<SearchStatus> {
+    const { index } = await this.open();
+    const state = await index.state();
     return {
-      path: this.path,
-      ready: readyAt !== undefined,
-      ...(readyAt !== undefined ? { ready_at: readyAt } : {}),
-      ...(caughtUpAt !== undefined ? { caught_up_at: caughtUpAt } : {}),
-      ...index.counts(),
+      location: index.location(),
+      ready: state.ready_at !== undefined,
+      ...(state.ready_at !== undefined ? { ready_at: state.ready_at } : {}),
+      ...(state.caught_up_at !== undefined ? { caught_up_at: state.caught_up_at } : {}),
+      sessions: state.sessions,
+      events: state.events,
     };
   }
 
-  ready(): boolean {
-    return this.open().index.readyAt() !== undefined;
+  async ready(): Promise<boolean> {
+    const { index } = await this.open();
+    return (await index.state()).ready_at !== undefined;
   }
 
   /** Answer `request` as `viewer` may see it. Throws `SearchQueryError` for a request that
    * cannot be run and `SearchUnavailable` while the index is being built. */
   async search(viewer: Viewer, request: SearchRequest): Promise<SearchResults> {
     const checked = checkRequest(request, this.aliases);
-    const { index } = this.open();
-    const readyAt = index.readyAt();
+    const { index } = await this.open();
+    const state = await index.state();
+    const readyAt = state.ready_at;
     if (readyAt === undefined) {
       throw new SearchUnavailable(
         "the search index is being built from the change feed; try again shortly",
       );
     }
-    const found = index.query({ ...checked.query, viewer });
+    const found = await index.query({ ...checked.query, viewer });
     const verified =
       this.options.verify === false
         ? found.hits
@@ -340,7 +363,7 @@ export class SearchService {
             )
           ).filter((h): h is BackendHit => h !== null);
     const next = checked.query.offset + checked.query.limit;
-    const caughtUpAt = index.caughtUpAt();
+    const caughtUpAt = state.caught_up_at;
     return {
       query: checked.q,
       total: found.total,
@@ -349,7 +372,7 @@ export class SearchService {
       index: {
         ready_at: readyAt,
         ...(caughtUpAt !== undefined ? { caught_up_at: caughtUpAt } : {}),
-        sessions: index.counts().sessions,
+        sessions: state.sessions,
       },
     };
   }
@@ -358,7 +381,7 @@ export class SearchService {
    * /v1/changes/all`). Throws `SearchQueryError` for a cursor it did not give and
    * `SearchUnavailable` until the index has read every feed once. Only a service built with
    * `feed` has one; an index limited to some owners or sessions (F11.9) never does. */
-  changes(options: ReadChangesOptions = {}): AllChangesPage {
+  async changes(options: ReadChangesOptions = {}): Promise<AllChangesPage> {
     if (
       !this.options.feed ||
       this.options.indexer?.owners !== undefined ||
@@ -366,7 +389,7 @@ export class SearchService {
     ) {
       throw new Error("this index keeps no copy of every owner's feed");
     }
-    const page = readFeed(this.open().index, options);
+    const page = await readFeed((await this.open()).index, options);
     if (page === null) {
       throw new SearchUnavailable(
         "the search index is reading every owner's change feed for the first time; try again shortly",
@@ -375,10 +398,18 @@ export class SearchService {
     return page;
   }
 
-  /** Close the index file. The service is not used after this. */
-  close(): void {
+  /** Close the index. The service is not used after this. */
+  async close(): Promise<void> {
     this.closed = true;
-    this.opened?.index.close();
+    const opened = this.opened;
     this.opened = undefined;
+    if (opened === undefined) return;
+    let index: IndexStore;
+    try {
+      ({ index } = await opened);
+    } catch {
+      return;
+    }
+    await index.close();
   }
 }

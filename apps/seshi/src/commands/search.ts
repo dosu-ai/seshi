@@ -13,6 +13,7 @@ import {
   StoreError,
 } from "@seshi/model";
 import {
+  IndexUnavailable,
   LOCAL_VIEWER,
   SearchQueryError,
   type SearchStatus,
@@ -204,7 +205,7 @@ export function searchLines(results: SearchResults, style: Style = Style.plain()
 
 function statusLines(status: SearchStatus): string[] {
   return [
-    `index ${status.path}`,
+    `index ${status.location}`,
     status.ready
       ? `ready since ${when(status.ready_at)}; last caught up ${when(status.caught_up_at)}`
       : "not built yet: the next search builds it from the change feed",
@@ -239,7 +240,7 @@ async function inProcess(
     );
   }
   if (mode === "query") {
-    if (!search.ready() && !json) {
+    if (!json && !(await search.ready())) {
       ctx.stderr("seshi: building the search index from the change feed (first use)…");
     }
     await search.catchUp();
@@ -248,16 +249,16 @@ async function inProcess(
     return EXIT.ok;
   }
   if (mode === "status") {
-    const status = search.status();
+    const status = await search.status();
     emit(ctx, json, status, () => statusLines(status));
     return EXIT.ok;
   }
   if (mode === "rebuild") {
     const run = await search.rebuild();
-    const status = search.status();
+    const status = await search.status();
     emit(ctx, json, { ...status, rebuilt: run }, () => [
       `Rebuilt the search index from ${run.entries} change entries: ${status.sessions} sessions.`,
-      `index ${status.path}`,
+      `index ${status.location}`,
     ]);
     return EXIT.ok;
   }
@@ -410,7 +411,7 @@ function failure(ctx: CommandContext, json: boolean, err: unknown): number {
   if (err instanceof NotConnected)
     return fail(ctx, json, EXIT.config, "not_configured", err.message);
   if (err instanceof SearchQueryError) return helpOrUsageError(ctx, json, err.message, USAGE);
-  if (err instanceof SearchUnavailable) {
+  if (err instanceof SearchUnavailable || err instanceof IndexUnavailable) {
     return fail(ctx, json, EXIT.unavailable, err.code, err.message);
   }
   if (err instanceof Forbidden) return fail(ctx, json, EXIT.auth, "forbidden", err.message);

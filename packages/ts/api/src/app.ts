@@ -71,6 +71,7 @@ import { rulesDocument } from "@seshi/redact";
 import {
   FEED_DEFAULT_LIMIT,
   FEED_MAX_LIMIT,
+  IndexUnavailable,
   SearchQueryError,
   SearchUnavailable,
   viewerFor,
@@ -851,7 +852,7 @@ export function createApp(instance: Instance) {
       return json(await fn(instance.search));
     } catch (err) {
       if (err instanceof SearchQueryError) throw new HttpError(400, err.code, err.message);
-      if (err instanceof SearchUnavailable) {
+      if (err instanceof SearchUnavailable || err instanceof IndexUnavailable) {
         return json({ error: { code: err.code, message: err.message } }, 503, {
           "retry-after": String(SEARCH_RETRY_AFTER_S),
         });
