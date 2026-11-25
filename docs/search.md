@@ -96,7 +96,7 @@ error), for questions across sessions.
 
 8 KiB is measured: on Dosu's own sessions (5,036 of them, aggregates only), an index of every
 role at these caps is about 2.4 times one of prompts, answers and tool calls alone, the earlier
-default, against 2.0 times at 4 KiB and 1.8 times at 2 KiB. A quarter of tool results run past
+default, against 2.1 times at 4 KiB and 1.8 times at 2 KiB. A quarter of tool results run past
 2,500 characters; 8 KiB keeps about three quarters of their text.
 
 Every instance that serves the API keeps its own index, an SQLite file on local disk
