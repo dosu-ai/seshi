@@ -1,3 +1,10 @@
+# [0.28.0](https://github.com/dosu-ai/seshi/compare/v0.27.0...v0.28.0) (2026-11-25)
+
+
+### Features
+
+* **search:** put the search index behind IndexReader and IndexWriter ([#75](https://github.com/dosu-ai/seshi/issues/75)) ([7337188](https://github.com/dosu-ai/seshi/commit/7337188fc6f92971a953b2587ba8fece97528a11))
+
 # [0.27.0](https://github.com/dosu-ai/seshi/compare/v0.26.1...v0.27.0) (2026-11-21)
 
 
