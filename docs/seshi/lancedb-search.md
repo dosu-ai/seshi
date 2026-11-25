@@ -1,6 +1,9 @@
 # A shared search index on LanceDB: design
 
-Status: proposed design. Nothing here is built. It follows the scoping work in
+Status: phases 1 and 2 are built (the seam, and `LanceIndex` behind it, not yet wired into
+config or the CLI); phase 3 is not. Where the build found this design wrong, the text says so
+and what was done instead ([prefixes](#query-semantics), [the binary](#config-and-deployment)).
+It follows the scoping work in
 [dosu-ai/seshi#43](https://github.com/dosu-ai/seshi/pull/43), which compared ClickHouse, LanceDB
 and DuckLake with Moraine, and ran the probes this design relies on
 ([`search-probe/`](https://github.com/dosu-ai/seshi/blob/8b7d3f9/docs/seshi/search-probe/README.md)).
@@ -28,8 +31,9 @@ instance.** SQLite stays the default and the only backend in serverless mode.
   FTS5 string. SQLite moves onto the new seam first, with no change in behaviour.
 
 The spike ([results](search-spike/README.md)) found it works at 10M records on GCS, which is
-about four months of a 50-person team: most searches answer in 0.2 to 1 s, prefixes in 2 to
-5 s. Its limit is maintenance, which rewrites the whole index and takes 8 to 9 minutes at that
+about four months of a 50-person team: most searches answer in 0.2 to 1 s. (Its prefix
+timings, 2 to 5 s, were taken on an index that missed most matches, and are unmeasured for the
+one phase 2 built; see [prefixes](#query-semantics).) Its limit is maintenance, which rewrites the whole index and takes 8 to 9 minutes at that
 size, so it fits a team up to roughly 10 to 30M records (see [risks](#risks)). The first
 version ships one table and revisits that when a team nears it ([past the limit](#past-the-limit)).
 
@@ -292,7 +296,7 @@ every row, because LanceDB has no joins.
 | `tool_name` | string, nullable | |
 | `ts` | timestamp(ms), nullable | The event's own time |
 | `text` | string | Redacted, as stored; at most `MAX_INDEXED_CHARS` (32 KiB) |
-| `text_prefix` | string | The same text, for the prefix index |
+| `text_prefix` | string | Each distinct word's first 2 to 8 letters, folded, space-separated (see [prefixes](#query-semantics)) |
 | `format`, `origin_agent` | string | Copied from the session, for `agent` |
 | `repo`, `branch`, `harness`, `agent_version`, `source_id` | string, nullable | Copied from the session |
 | `models` | list\<string\> | Copied from the session |
@@ -305,8 +309,8 @@ Indexes on `events`:
 - full text on `text`: the default `simple` tokenizer, `lowercase` and `asciiFolding` on,
   `stem: false`, `removeStopWords: false`, and **`withPosition: true`**, which phrases need and
   which 0.41.0 does not default to;
-- full text on `text_prefix`: `baseTokenizer: "ngram"`, `prefixOnly: true`, lengths 2 to 12
-  (see [prefixes](#query-semantics));
+- full text on `text_prefix`: the same `simple` tokenizer, without positions (see
+  [prefixes](#query-semantics));
 - `labelList` on `models` and `labels`; `bitmap` on `visibility`, `role` and `format`; `btree`
   on `id`, `owner`, `archive_id` and `session_updated`.
 
@@ -348,7 +352,7 @@ event counts, and `scrub_due`.
 | `-word`, `NOT word` | `NOT` | `MustNot` clause |
 | A mix of the above | | A `BooleanQuery`: the plain words as one `Must` clause of the `Operator.And` kind, then the rest |
 | Case and accents | `unicode61 remove_diacritics 2` | `lowercase` and `asciiFolding` |
-| `word*` | prefix | A candidate clause on `text_prefix`, then a check in TypeScript (below) |
+| `word*` | prefix | A clause on `text_prefix`, then a check in TypeScript (below) |
 
 A `BooleanQuery` of one `Must` clause per word gives the same matches but, at 10M records, took
 4.7 s for two common words where one `MatchQuery` with `Operator.And` took 0.5 s
@@ -361,16 +365,27 @@ queries agree. Its `simple` tokenizer splits on anything that is not a letter or
 characters (`ß`, `æ`) compare differently. The conformance suite lists them; it is not worth a
 normalizer of our own.
 
-**Prefixes.** LanceDB has no prefix query. The `text_prefix` index holds each word's first 2 to
-12 characters. A check on 24 November found it over-matches: `dep` also found `delta pepper`,
-with either operator. So the prefix clause only narrows the candidates. Each candidate's text is
-then read and checked in TypeScript against the word prefix, after the same folding. Prefixes
-must be at least 2 characters, and a prefix longer than 12 is checked in full in TypeScript.
-`"a phrase"*` uses the phrase of the complete words plus the prefix clause, and the same check.
-Prefix queries cost the most. The ngram index matches every ngram of the prefix, so about
-half the candidates fail the check (57% kept for `deplo`), and at 10M records a prefix page
-took 4.6 s with the cap at 10,000, or 2 s with a label filter. That is slow but usable for an
-occasional query; see [risks](#risks).
+**Prefixes.** LanceDB has no prefix query. This design first put the text in `text_prefix`
+under an ngram index (`prefixOnly`, lengths 2 to 12). Building phase 2 found that wrong on
+0.41.0: the ngram tokenizer takes prefixes of the whole value, not of each word, so it holds only
+the record's first word (`hello deploy` is found by `hel*` and not by `dep*`), and it does not
+honour `Operator.And` (any of the query's ngrams will do). That is why `dep` "found" `delta
+pepper` in the check on 24 November. The spike's prefix timings were taken on that index, so
+they measured a candidate set that missed most matches.
+
+Instead, the writer puts each distinct word's first 2 to 8 letters, folded (lower-cased, accents
+removed), in `text_prefix` as space-separated tokens, indexed with the plain `simple` tokenizer.
+`deplo*` is then one `MatchQuery("deplo")` on `text_prefix`, whose candidates are exactly the
+records with a word starting `deplo`. A prefix longer than 8 letters looks up its first 8. When
+the query holds a prefix, each candidate's text is read and the whole query checked in
+TypeScript, word by word after the same folding (`matchesTree`), which handles a longer prefix,
+`"a phrase"*` (the phrase of the complete words, plus the prefix clause), a prefix in an OR, and
+`-dep*`, which is never a `MustNot` clause because a shared prefix token is not a match.
+Prefixes must be at least 2 letters: `d*` is a 400 on LanceDB, where SQLite accepts it. A test
+(`lance.test.ts`) fails if a LanceDB upgrade starts indexing every word's ngram prefixes, so
+the column could go back to the ngram index. The column is larger than the text it stands for
+(about four tokens per distinct word), and prefix latency at 10M records is unmeasured; the
+spike's prefix numbers above do not apply.
 
 **Filters** are one SQL `where` string on `events`, applied before the search:
 
@@ -385,8 +400,9 @@ occasional query; see [risks](#risks).
 - since and until: `coalesce(ts, session_updated)` in the range, as today.
 
 LanceDB takes the filter as SQL text, with no bound parameters. Every value goes through one
-`sqlString()` that doubles quotes and refuses control characters, and `LIKE` values also escape
-`%` and `_`. Request values are checked before they get there (`checkRequest`), and the
+`sqlString()` (`lance-query.ts`) that doubles quotes and refuses control characters, and `LIKE`
+values also escape `\`, `%` and `_` (with `ESCAPE '\'`). Backslashes are literal in LanceDB's
+SQL strings. Request values are checked before they get there (`checkRequest`), and the
 conformance suite searches with quotes, backslashes and `%` in every filter.
 
 `SearchService` still checks each result against the session's live metadata before it returns
@@ -401,8 +417,8 @@ DuckDB for the same steps and kept TypeScript ([below](#duckdb-compared-in-the-s
    the limit is always set. At 10M records the smaller cap brought broad queries from 1.3 s
    to 0.5 s; the recent page needs the larger one because its windows (step 3) fill from it.
 2. Records are grouped by session: `best` is the top `_score`, `hits` the number of records.
-   `total` is the number of sessions. When the cap was reached, `total` is a lower bound and the
-   response says so ("at least N"). Counts are not what search is mainly for, so this is
+   `total` is the number of sessions. When the cap was reached, `total` is a lower bound:
+   `BackendResults.capped` says so, and phase 3 shows it in the response ("at least N"). Counts are not what search is mainly for, so this is
    accepted.
 3. Sessions are sorted by `best` or by `session_updated`, and `offset` and `limit` applied.
    Cursors stay offsets capped at `MAX_OFFSET`. The capped records are the best-scored ones,
@@ -576,15 +592,26 @@ max_recent_rows = 100000        # sort = recent
 - **Server-only.** In serverless mode, laptops ignore `search.backend` and `[search.lance]` in
   the shared config, as they ignore `search.path`. Each laptop's index is limited to its own
   scope (F11.9), and laptops must not write a shared index.
-- **Dependencies.** `@lancedb/lancedb` and `apache-arrow`, pinned exactly, as server-only
+- **Dependencies.** `@lancedb/lancedb` 0.41.0 and `apache-arrow` 21.2.0, pinned exactly, as
   dependencies of `@seshi/search`, imported lazily by `lanceIndex()`. The hook's import check
-  (X3.3) keeps them off the capture path. The native binary is 205 MB on linux-x64 with glibc
-  and 171 MB with musl (about 250 MB on macOS arm64); the image installs only its own one.
-  LanceDB's optional embedding dependencies (`onnxruntime-node`, 180 MB) are left out. DuckDB
-  is not a dependency of this design.
+  (X3.3) keeps them off the capture path. The native library is 205 MB on linux-x64 with glibc
+  and 171 MB with musl (250 MB on macOS arm64). DuckDB is not a dependency of this design.
+- **The binary.** The server image is the compiled `seshi` binary with no `node_modules`, and
+  `bun build --compile` bundles every module a dynamic import names, the native library
+  included: with `lanceIndex()` reachable from `main.ts`, the macOS arm64 binary went from 72
+  MB to 336 MB. Every release binary would carry it, laptops included. So phase 2 exports
+  `lanceIndex()` as `@seshi/search/lance`, which nothing in the app imports yet. Phase 3 must
+  choose: a server build that imports it (a second release binary, or only the image), or
+  loading LanceDB at run time from beside the binary, with the image installing its own
+  platform's package. Either way the image grows by about 205 MB.
+- **Installs.** `bun install` also installs LanceDB's optional embedding dependencies
+  (`@huggingface/transformers`, `onnxruntime-node`, `sharp`: about 330 MB on macOS arm64) in
+  the workspace. They are never imported, so no binary carries them; a server image that
+  installs LanceDB should leave them out (`--omit optional`, then add the platform package).
 - **Platforms.** The spike ran on linux-x64 under Bun 1.4.2, against GCS with the VM's metadata
-  credentials. S3 is covered by the conformance suite against rustfs; linux-arm64 and Azure are
-  not checked yet.
+  credentials. Phase 2's conformance suite runs on a local folder in every CI run (linux-x64)
+  and on macOS arm64, and against S3 on rustfs 1.0.5 (CI's service, and locally); linux-arm64,
+  GCS from the suite, and Azure are not checked yet.
 - **`seshi doctor`** with a server config checks that the location is reachable and writable by
   the worker, that `meta` names this deployment and schema, and how old `caught_up_at` is. It
   warns when `events` holds more than 20M records ([risks](#risks)).
@@ -678,13 +705,17 @@ guess in the scoping PR.
   team's year is out of reach. So this design fits an `events` table up to roughly 10 to 30M
   records, and `seshi doctor` warns above 20M. The first version ships one `events` table, and
   the limit is revisited when a deployment nears it; see [past the limit](#past-the-limit).
-- **Prefix queries are slow** at 10M records: 2 to 5 s ([query semantics](#query-semantics)).
-  If that is too slow, raise the minimum length to 3, or limit prefixes to `sort = recent`,
-  whose windows keep the candidates few (under 1 s in the spike).
+- **Prefix queries may be slow** at 10M records: the spike's 2 to 5 s was measured on the
+  ngram index phase 2 replaced, and the word-prefix column is unmeasured at that size ([query
+  semantics](#query-semantics)). Its candidates are exact, so it should do no worse; if it is
+  too slow, raise the minimum length to 3, or limit prefixes to `sort = recent`, whose windows
+  keep the candidates few. The column also makes `events` larger than the design assumed.
 - **Cold reads from object storage.** On GCS the first query on a new connection took 1 to
   3 s, so instances keep their tables open. Each search reads from the bucket (100 to 250 ms
   for a rare word), and each read is a billed request.
-- **Image size.** About 205 MB more in the server image (linux-x64, glibc).
+- **Image size.** About 205 MB more in the server image (linux-x64, glibc), and far more for
+  every release binary if phase 3 imports LanceDB from the shared build ([the
+  binary](#config-and-deployment)).
 - **SQL text in filters.** No bound parameters, so escaping is the only defence. One function
   does it, and the suite tests it with hostile values.
 
@@ -723,8 +754,8 @@ grouping searches is settled: [TypeScript](#duckdb-compared-in-the-spike).
 |---|---|---|
 | 0. Spike | Done, 24–25 November ([results](search-spike/README.md)): latency at 1M and 10M records on GCS, TypeScript against DuckDB for grouping, prefix checks, commit, `optimize()` and scrub times, and the image size. | Done |
 | 1. Seam | `IndexReader` and `IndexWriter`, `drain()` onto `commit()`, `MatchTree`, `state()`, `IndexUnavailable`, the `OpenIndex` factory, `SearchStatus.location`, `excerpt()`. SQLite only, with no change in behaviour; existing tests keep their assertions. | 4–6 days |
-| 2. Backend | `LanceIndex`: tables and `meta`, `commit()`, the query compiler, filters and escaping, grouping, prefixes, `maintain()` with the scrub, generations. The conformance suite on folder and S3, and the crash tests. | 1.5 weeks |
-| 3. Deploy | The config schema, `worker` placement for this backend, `--status`, `--rebuild`, `--wait` and `--scrub`, `doctor` checks, spec/layout.md's `search/` entry, and docs (`docs/search.md`, `docs/config.md`, F10.6–F10.12 in `design-decisions.html`). | 1 week |
+| 2. Backend | Done: `LanceIndex` (`lance.ts`, `lance-query.ts`, `lanceIndex()` as `@seshi/search/lance`): tables and `meta`, `commit()`, the query compiler, filters and escaping, grouping, prefixes, `maintain()` with the scrub, generations. The conformance suite on SQLite, a folder and S3, and the crash tests. Not done: gathering a first build's pages into 50,000-record commits (an `Indexer` change; see [ingest](#ingest)). | 1.5 weeks |
+| 3. Deploy | The config schema (with `storageOptions` from `[store]`), `worker` placement for this backend and `readOnly` for API instances, how the binary carries LanceDB ([the binary](#config-and-deployment)), "at least N" from `capped`, `--status`, `--rebuild`, `--wait` and `--scrub` (`requestScrub()`), `doctor` checks, spec/layout.md's `search/` entry, and docs (`docs/search.md`, `docs/config.md`, F10.6–F10.12 in `design-decisions.html`). | 1 week |
 | Later | `llm_calls` and DuckDB analytics; semantic search. | Separate decisions |
 
 Phase 1 is worth doing on its own: it makes the indexer's writes explicit and removes the

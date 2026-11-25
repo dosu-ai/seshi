@@ -108,6 +108,8 @@ export interface BackendHit {
 export interface BackendResults {
   total: number;
   hits: BackendHit[];
+  /** The backend stopped at its cap of scored records, so `total` is a lower bound (LanceDB). */
+  capped?: boolean;
 }
 
 /** A place in the cross-owner feed: entries sort by stamp, then owner, then name (the key
