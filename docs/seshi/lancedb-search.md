@@ -564,6 +564,31 @@ arrive. The scoping PR has the comparison and the thresholds.
 - **Keeping per-instance SQLite.** It stays the default. Its cost is that every instance reads
   every feed and holds a full copy, which a shared index removes.
 
+## Sizes
+
+Sampled on 24 November 2026 from Dosu's own captured sessions: 5,014 sessions from 14 people
+over six weeks, mostly Claude Code (72%) and Codex (17%). Only aggregate counts were read. A
+session counts its largest trace, since later uploads repeat earlier records.
+
+| Per session | Median | p90 | p99 | Mean |
+|---|---|---|---|---|
+| Searchable records (user, assistant, tool call) | 37 | 194 | 1,242 | 107 |
+| All events, with tool results | | | | 190 |
+| LLM calls (2,071 sessions that report usage) | 25 | 138 | 729 | 71 |
+
+A searchable record averages about 900 characters. A person made a median of 7 sessions on a
+day they worked, and a mean of 24: agents that start many short sessions pull the mean up. With
+the mean, a person adds about 2,500 searchable records and 1,700 LLM calls per working day:
+
+| Team | Searchable records per year | LLM calls per year |
+|---|---|---|
+| 50 people | ~32M | ~21M |
+| 500 people | ~320M | ~210M |
+| 5,000 people | ~3.2B | ~2.1B |
+
+These are heavy, early users, so treat the table as an upper estimate. It is about twice the
+guess in the scoping PR.
+
 ## Risks
 
 - **Pre-1.0 library.** LanceDB's full-text index is its own and recent, and 0.41.0 differs from
@@ -572,9 +597,11 @@ arrive. The scoping PR has the comparison and the thresholds.
 - **Deleted text stays up to a day.** Stated above, bounded by the scrub, and on demand with
   `--scrub`. If LanceDB's TypeScript API gains a way to force deletion materialization, the
   scrub becomes an `optimize()` option.
-- **The scrub's cost grows with the table.** It rewrites whole tables. At 200M records that may
-  take tens of minutes with indexing paused. The spike estimates it; if it is too slow, the
-  scrub rewrites by generation in the background, as a rebuild does.
+- **The scrub's cost grows with the table.** It rewrites whole tables. From the 1M-record probe
+  (about 9 s to write and index), a year of a 50-person team ([sizes](#sizes)) would take about
+  5 minutes, and of a 500-person team close to an hour, with indexing paused. The spike measures
+  it. If it is too slow, the scrub writes a new generation in the background, as a rebuild
+  does, and switches when it is done.
 - **Prefix queries read text** to check candidates. If the spike finds them too slow, raise the
   minimum length to 3 or cap the candidates checked.
 - **Cold reads from object storage.** The probes used a local S3. Real S3 adds latency to each
@@ -586,10 +613,7 @@ arrive. The scoping PR has the comparison and the thresholds.
 
 ## Open questions
 
-1. **How many records and LLM calls does a real session have?** The scale estimates assume about
-   150 records and 50 to 100 calls. A count over an existing bucket would replace the guess and
-   size the scrub.
-2. **Is a lower bound on `total` acceptable** when `max_scored_rows` is reached, or should a
+1. **Is a lower bound on `total` acceptable** when `max_scored_rows` is reached, or should a
    relevance sort fall back to recent order above it?
 
 ## Plan
