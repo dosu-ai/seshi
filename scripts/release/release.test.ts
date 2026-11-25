@@ -27,7 +27,7 @@ import {
   smokeTranscript,
   startsWithProgram,
 } from "./smoke";
-import { extensionAsset, hostTarget, TARGETS } from "./targets";
+import { extensionAsset, hostTarget, serverAsset, TARGETS } from "./targets";
 import { exec, installPackages } from "./testing";
 
 const VERSION = repositoryVersion();
@@ -165,9 +165,11 @@ describe.skipIf(!supported || process.platform === "win32")("the host's release"
   }, 180_000);
   afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
-  it("is one archive, the install scripts, the Cursor extension and SHA256SUMS", () => {
+  it("is one archive (and on Linux the server build's), the install scripts, the Cursor extension and SHA256SUMS", () => {
+    const server = serverAsset(hostTarget());
     expect(assets.map((a) => a.name)).toEqual([
       hostTarget().asset,
+      ...(server ? [server] : []),
       "install.sh",
       "install.ps1",
       extensionAsset(repositoryVersion()),
@@ -199,6 +201,12 @@ describe.skipIf(!supported || process.platform === "win32")("the host's release"
       expect(ran.out).toContain(`Installed seshi ${VERSION} to ${bin}/seshi`);
       const version = await exec([join(bin, "seshi"), "--version"]);
       expect(version.out.trim()).toBe(`seshi ${VERSION}`);
+      // install.sh fetches the plain archive, never the server build (F10.6).
+      const installed = await Bun.file(join(bin, "seshi")).arrayBuffer();
+      const plain = await Bun.file(
+        join(release, "bin", hostTarget().id, hostTarget().binary),
+      ).arrayBuffer();
+      expect(installed.byteLength).toBe(plain.byteLength);
     } finally {
       server.stop(true);
     }
