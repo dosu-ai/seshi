@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 
@@ -62,24 +62,40 @@ export function lanceNativePackage(
  * one for another platform is not there unless the install asked for it, and the binary would
  * fail at its first search. Refuse to build instead. */
 export function checkLanceNative(root: string, target: string | undefined): void {
+  const file = lanceNativeLibrary(root, target);
+  if (!existsSync(file)) {
+    throw new Error(`${lanceNativePackage(target)} names ${file} as its library, which is missing`);
+  }
+}
+
+/** The `.node` file of the target's LanceDB native package in node_modules. A package that
+ * cannot be found is reported as not installed, with the install that brings it; anything
+ * else (a package.json that does not parse, or names no library) is reported as it is. */
+export function lanceNativeLibrary(root: string, target: string | undefined): string {
   const name = lanceNativePackage(target);
+  let pkg: string;
   try {
-    lanceNativeLibrary(root, target);
-  } catch {
+    const lancedb = dirname(
+      Bun.resolveSync("@lancedb/lancedb/package.json", join(root, "packages/ts/search/lance")),
+    );
+    pkg = dirname(Bun.resolveSync(`${name}/package.json`, lancedb));
+  } catch (error) {
+    if ((error as { code?: unknown }).code !== "ERR_MODULE_NOT_FOUND") throw error;
     const [, os, cpu] = name.match(/lancedb-(linux|darwin)-(x64|arm64)/) ?? [];
     throw new Error(
       `${name} is not installed, so a server build for ${target ?? "this machine"} would have no LanceDB: run bun install --frozen-lockfile --os=${os} --cpu=${cpu} first`,
     );
   }
-}
-
-/** The `.node` file of the target's LanceDB native package in node_modules. */
-export function lanceNativeLibrary(root: string, target: string | undefined): string {
-  const lancedb = dirname(
-    Bun.resolveSync("@lancedb/lancedb/package.json", join(root, "packages/ts/search/lance")),
-  );
-  const pkg = dirname(Bun.resolveSync(`${lanceNativePackage(target)}/package.json`, lancedb));
-  const { main } = JSON.parse(readFileSync(join(pkg, "package.json"), "utf8")) as { main: string };
+  const manifest = join(pkg, "package.json");
+  let main: unknown;
+  try {
+    ({ main } = JSON.parse(readFileSync(manifest, "utf8")) as { main?: unknown });
+  } catch (error) {
+    throw new Error(`${manifest} does not parse: ${(error as Error).message}`);
+  }
+  if (typeof main !== "string" || main === "") {
+    throw new Error(`${manifest} names no library (no "main")`);
+  }
   return join(pkg, main);
 }
 
@@ -183,9 +199,11 @@ export function stripElf(input: Uint8Array): Uint8Array | undefined {
 /** Strips the target's LanceDB library where `bun install` put it, so the server build embeds
  * the stripped one (the bundler reads the package's `main`, and has no hook for swapping a
  * file in). The file is replaced by a rename, which leaves Bun's install cache, which
- * node_modules may hard-link, untouched; a stripped library loads the same, so later runs and
- * tests do not notice, and a second build finds nothing to strip. ELF only: macOS server
- * builds are for development and keep their library as it is. */
+ * node_modules may hard-link, untouched; a stripped library runs the same, so later runs and
+ * tests do not notice, and a second build finds nothing to strip. The cost: LanceDB's frames
+ * in a backtrace have no names; npm's unstripped file at the pinned version symbolizes them
+ * (docs/seshi/lancedb-search.md). ELF only: macOS server builds are for development and keep
+ * their library as it is. */
 export function stripLanceNative(root: string, target: string | undefined): void {
   const file = lanceNativeLibrary(root, target);
   const before = readFileSync(file);

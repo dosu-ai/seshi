@@ -718,7 +718,20 @@ architecture's ELF. Its output has the sections, segments and dynamic symbols of
 --strip-all`'s, within 24 bytes of its size (`strip` also trims the section-name table). The
 file is replaced where `bun install` put it, by a rename (Bun's cache, which node_modules may
 hard-link, is untouched); the bundler has no hook to embed a different file, and a stripped
-library loads the same, so a second build finds nothing to do.
+library runs the same, so a second build finds nothing to do.
+
+What stripping costs: **a backtrace from inside LanceDB has no function names.** `.dynsym`
+names only the N-API entry points LanceDB exports, so a Rust panic or a crash in the server
+build shows LanceDB's frames as `<unknown>`, `??`, or the nearest exported name, which is
+wrong. Nothing is kept to undo that, because nothing needs to be: the stripped file's loaded
+bytes are the published ones, so the unstripped library on npm, at the version `bun.lock`
+pins, is the symbol file. Take a frame's offset into the library (its address minus the
+library's load address in `/proc/<pid>/maps`; `RUST_BACKTRACE=full` prints addresses) and look
+it up there, for example `addr2line -f -C -e lancedb.linux-arm64-gnu.node <offset>`. Checked on
+both architectures: an offset the stripped file names wrongly or not at all resolves to
+LanceDB's Rust function in npm's file. The arm64 library also has a GNU build ID, which
+stripping keeps; the x64 one has none, so the version is how to find its file. A CI artifact
+of the unstripped library or a `.gnu_debuglink` would add a copy of what npm already keeps.
 
 The rest of the gap between the architectures is how LanceDB builds them (`npm-publish.yml` at
 0.41): linux-x64 with fat LTO and one codegen unit, linux-arm64 with thin LTO and 16, because

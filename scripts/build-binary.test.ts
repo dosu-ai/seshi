@@ -1,9 +1,15 @@
-import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { VERSION } from "@seshi/model";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { buildCommand, checkLanceNative, lanceNativePackage, stripElf } from "./build-binary";
+import {
+  buildCommand,
+  checkLanceNative,
+  lanceNativeLibrary,
+  lanceNativePackage,
+  stripElf,
+} from "./build-binary";
 
 const ROOT = resolve(import.meta.dirname, "..");
 
@@ -62,6 +68,55 @@ describe("the server build (F10.6)", () => {
     if (process.platform === "linux") {
       expect(() => checkLanceNative(ROOT, other)).toThrow(/--os=darwin/);
     }
+  });
+});
+
+describe("checkLanceNative, on a node_modules laid out by hand", () => {
+  const target = "bun-linux-x64-baseline";
+  const roots: string[] = [];
+  afterAll(() => {
+    for (const root of roots) rmSync(root, { recursive: true, force: true });
+  });
+  /** A fresh root each time: Bun's resolver caches the folders it has listed. Returns it and
+   * where the native package goes. */
+  const layout = (manifest: string | undefined, library = false) => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "seshi-lance-native-")));
+    roots.push(root);
+    const modules = join(root, "packages/ts/search/lance/node_modules/@lancedb");
+    mkdirSync(join(modules, "lancedb"), { recursive: true });
+    writeFileSync(join(modules, "lancedb/package.json"), '{"name":"@lancedb/lancedb"}');
+    const native = join(modules, "lancedb-linux-x64-gnu");
+    if (manifest !== undefined) {
+      mkdirSync(native);
+      writeFileSync(join(native, "package.json"), manifest);
+      if (library) writeFileSync(join(native, "lancedb.node"), "");
+    }
+    return { root, native };
+  };
+
+  it("finds the library the package names", () => {
+    const { root, native } = layout('{"main":"lancedb.node"}', true);
+    expect(lanceNativeLibrary(root, target)).toBe(join(native, "lancedb.node"));
+    expect(() => checkLanceNative(root, target)).not.toThrow();
+  });
+
+  it("says a package that is not there is not installed, and how to install it", () => {
+    const { root } = layout(undefined);
+    expect(() => checkLanceNative(root, target)).toThrow(
+      /lancedb-linux-x64-gnu is not installed.*--os=linux --cpu=x64/,
+    );
+  });
+
+  it("reports a broken package as it is, not as missing", () => {
+    const broken = layout("{ not json").root;
+    expect(() => checkLanceNative(broken, target)).toThrow(/package\.json does not parse: /);
+    expect(() => checkLanceNative(broken, target)).not.toThrow(/not installed/);
+    const noMain = layout('{"name":"@lancedb/lancedb-linux-x64-gnu"}').root;
+    expect(() => checkLanceNative(noMain, target)).toThrow(/names no library \(no "main"\)/);
+    const noFile = layout('{"main":"lancedb.node"}').root;
+    expect(() => checkLanceNative(noFile, target)).toThrow(
+      /lancedb\.node as its library, which is missing/,
+    );
   });
 });
 
