@@ -69,13 +69,13 @@ jobs:
           pip install --quiet awscli==1.46.3
           AWS_ACCESS_KEY_ID=rustfsadmin AWS_SECRET_ACCESS_KEY=rustfsadmin AWS_DEFAULT_REGION=us-east-1 \
             aws --endpoint-url http://127.0.0.1:9000 s3 mb s3://seshi-test
-      - name: S3 store test against a live endpoint
+      - name: S3 store test and the search index's conformance suite against a live endpoint
         env:
           SESHI_TEST_S3_ENDPOINT: http://127.0.0.1:9000
           SESHI_TEST_S3_BUCKET: seshi-test
           SESHI_TEST_S3_ACCESS_KEY: rustfsadmin
           SESHI_TEST_S3_SECRET_KEY: rustfsadmin
-        run: bun --bun vitest run tests/store/s3-live.test.ts
+        run: bun --bun vitest run tests/store/s3-live.test.ts packages/ts/search/src/conformance.test.ts
       - name: Azure Blob store test against Azurite
         env:
           SESHI_TEST_AZURE_ENDPOINT: http://127.0.0.1:10000/devstoreaccount1
