@@ -21,6 +21,9 @@ mkdirSync(elsewhere, { recursive: true });
 cpSync(join(index, "lance/events.lance"), join(index, "lance/scratch.lance"), { recursive: true });
 copyFileSync(join(index, "sqlite/search.db"), join(index, "sqlite/scratch.db"));
 
+// Local paths out of the output, before messages are cut short.
+const local = (s: string) =>
+  s.replaceAll(root, "<root>").replaceAll(extDir, "<ext>").replaceAll(process.cwd(), "<cwd>");
 const lit = (s: string) => `'${s.replaceAll("'", "''")}'`;
 const lance = (t: string) => lit(join(index, "lance", `${t}.lance`));
 const scope = "(visibility = 'org' OR owner IN ('alice'))";
@@ -54,9 +57,9 @@ async function run(c: Conn, sql: string): Promise<string> {
   try {
     const r = await c.runAndReadAll(sql);
     const rows = r.getRowObjectsJson();
-    return `ok: ${JSON.stringify(rows).slice(0, 140)}`;
+    return `ok: ${local(JSON.stringify(rows)).slice(0, 140)}`;
   } catch (e) {
-    return `refused: ${String(e).split("\n")[0].slice(0, 140)}`;
+    return `refused: ${local(String(e).split("\n")[0]).slice(0, 140)}`;
   }
 }
 

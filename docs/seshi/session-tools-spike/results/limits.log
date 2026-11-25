@@ -22,8 +22,8 @@ cross join interrupted at 500 ms: refused in 501 ms: Error: INTERRUPT Error: Int
 connection usable after interrupt: ok in 1 ms [{"x":42}]
 
 # memory_limit = 256MB
-distinct over 50M wide strings: refused in 13451 ms: Error: Out of Memory Error: could not allocate block of size 256.0 KiB (244.0 MiB/244.1 MiB used)
-string_agg of 50M rows: refused in 26 ms: Error: Out of Memory Error: failed to allocate data of size 128.0 MiB (144.1 MiB/244.1 MiB used)
+distinct over 50M wide strings: refused in 13309 ms: Error: Out of Memory Error: could not allocate block of size 256.0 KiB (244.0 MiB/244.1 MiB used)
+string_agg of 50M rows: refused in 29 ms: Error: Out of Memory Error: failed to allocate data of size 128.0 MiB (144.1 MiB/244.1 MiB used)
 
 # sqlite WAL with a writer
-50 reads during writes: 0 errors, counts 80000 → 109600, never went down: true, rows written: 30000
+50 reads during writes: 0 errors, counts 80000 → 110000, never went down: true, rows written: 30400

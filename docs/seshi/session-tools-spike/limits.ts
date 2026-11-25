@@ -8,6 +8,8 @@ import { DuckDBInstance } from "@duckdb/node-api";
 
 const extDir = process.argv[2];
 const root = process.argv[3];
+const local = (s: string) =>
+  s.replaceAll(root, "<root>").replaceAll(extDir, "<ext>").replaceAll(process.cwd(), "<cwd>");
 const lit = (s: string) => `'${s.replaceAll("'", "''")}'`;
 
 const db = await DuckDBInstance.create(":memory:", {
@@ -30,7 +32,7 @@ async function attempt(label: string, f: () => Promise<unknown>) {
     const v = await f();
     console.log(`${label}: ok in ${Math.round(performance.now() - t)} ms ${v === undefined ? "" : JSON.stringify(v).slice(0, 300)}`);
   } catch (e) {
-    console.log(`${label}: refused in ${Math.round(performance.now() - t)} ms: ${String(e).split("\n")[0].slice(0, 200)}`);
+    console.log(`${label}: refused in ${Math.round(performance.now() - t)} ms: ${local(String(e).split("\n")[0]).slice(0, 200)}`);
   }
 }
 const serialize = async (sql: string) => {

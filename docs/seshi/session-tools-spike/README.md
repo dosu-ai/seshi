@@ -32,7 +32,8 @@ bun limits.ts ext data
 bun leak.ts ext data
 ```
 
-`results/` holds the output of the runs below, with local paths replaced.
+`results/` holds the output of the last run, with local paths replaced by `<root>`, `<ext>`
+and `<cwd>`.
 
 ## Results
 
@@ -89,14 +90,14 @@ From [results/limits.log](results/limits.log):
   having, sample, qualify`.
 - **`prepare`** refuses two statements ("Cannot prepare multiple statements at once"), whatever
   the second is. `run` takes several.
-- **`interrupt()`** stopped a cross join of 10¹² rows 503 ms after it started, at the 500 ms
-  timer, and the connection answered the next query in 1 ms.
+- **`interrupt()`** stopped a cross join of 10¹² rows 501 to 503 ms after it started, at the
+  500 ms timer, and the connection answered the next query in 1 ms.
 - **`memory_limit = 256MB`** held: a `count(DISTINCT …)` over 50M strings failed with an
-  out-of-memory error after 15 s, and a 50M-row `string_agg` after 27 ms. External access was
+  out-of-memory error after 13 to 15 s, and a 50M-row `string_agg` after 27 to 29 ms. External access was
   off, so nothing spilled to disk.
 - **SQLite while written:** 50 reads of the attached index while another connection inserted
   200 rows every 5 ms in WAL mode: no errors, and the count never went down (80,000 to
-  113,600).
+  110,000 in the run in `results/`).
 
 ### No error quoted a row out of scope
 
