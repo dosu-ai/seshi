@@ -644,27 +644,57 @@ describe("LanceIndex", () => {
       expect((await s.search(LOCAL_VIEWER, { q: "leaked" })).total).toBe(1);
     });
 
-    /** A service whose index fails once before `crashAt`, after `arm()`. */
-    function service(location: string, crashAt?: CommitStep) {
+    /** A service whose index fails once before `crashAt`, in the `nth` commit after `arm()`
+     * (the first by default), reading `pageSize` entries a page and, while it builds, gathering
+     * pages into commits of `batch` records. It counts its commits. */
+    function service(
+      location: string,
+      crashAt?: CommitStep,
+      options: { nth?: number; pageSize?: number; batch?: number } = {},
+    ) {
       let armed = false;
+      let commit = 0;
+      const counted = { commits: 0, pages: [] as string[] };
+      const open = lanceIndex({
+        uri: location,
+        readConsistency: 0,
+        ...(options.batch !== undefined ? { buildBatchRecords: options.batch } : {}),
+        beforeStep: (step) => {
+          if (!armed) return;
+          if (step === "events") commit++;
+          if (step === crashAt && commit === (options.nth ?? 1)) {
+            armed = false;
+            throw new Error(`crash before ${step}`);
+          }
+        },
+      });
       const s = new SearchService({
         store,
         deployment: "d",
         settings: { events: EVENTS },
         feed: true,
-        open: lanceIndex({
-          uri: location,
-          readConsistency: 0,
-          beforeStep: (step) => {
-            if (armed && step === crashAt) {
-              armed = false;
-              throw new Error(`crash before ${step}`);
-            }
-          },
-        }),
+        ...(options.pageSize !== undefined ? { indexer: { pageSize: options.pageSize } } : {}),
+        open: async (o) => {
+          const index = await open(o);
+          const commitPage = index.commit.bind(index);
+          index.commit = (page) => {
+            counted.commits++;
+            const ids = page.updates.map((u) => u.session.session_id);
+            counted.pages.push(`${page.owner}:${ids.join(",")}${"-".repeat(page.removals.length)}`);
+            return commitPage(page);
+          };
+          return index;
+        },
       });
       services.push(s);
-      return { s, arm: () => (armed = crashAt !== undefined) };
+      return {
+        s,
+        counted,
+        arm: () => {
+          armed = crashAt !== undefined;
+          commit = 0;
+        },
+      };
     }
 
     /** What a search, the status and the feed copy show. */
@@ -735,6 +765,116 @@ describe("LanceIndex", () => {
       await s.catchUp();
       return snapshot(s);
     }
+
+    /** Every session of `scenario`, written before the index is first built, so that the
+     * build's pages name sessions again: a continuation, a replace and a tombstone. */
+    async function buildScenario({ s, arm }: ReturnType<typeof service>, crash: boolean) {
+      const first = await writer().ingest({
+        format: "trajectory",
+        session_id: "c1",
+        transcript: log("alpha start"),
+      });
+      for (const [id, text] of [
+        ["r1", "beta before"],
+        ["t1", "gamma doomed"],
+        ["x1", "zeta one"],
+        ["x2", "zeta two"],
+      ] as const) {
+        await writer().ingest({ format: "trajectory", session_id: id, transcript: log(text) });
+      }
+      await writer("bob").ingest({
+        format: "trajectory",
+        session_id: "b1",
+        transcript: log("delta bob"),
+      });
+      await writer().ingest({
+        format: "trajectory",
+        session_id: "c1",
+        transcript: line({
+          role: "user",
+          content: "epsilon continued",
+          timestamp: "2026-11-01T10:00:01Z",
+        }),
+        offset: first.bytes_total,
+      });
+      await writer().ingest({
+        format: "trajectory",
+        session_id: "r1",
+        transcript: log("beta rewritten epsilonic"),
+        replace: true,
+      });
+      await tombstone({ store, owner: "alice", format: "trajectory", session_id: "t1" });
+      await writer().ingest({
+        format: "trajectory",
+        session_id: "n1",
+        transcript: log("alpha new"),
+      });
+      if (crash) {
+        arm();
+        await expect(s.catchUp()).rejects.toThrow(/crash before/);
+      }
+      await s.catchUp();
+      return snapshot(s);
+    }
+
+    it("commits a build's pages gathered, and each page on its own once caught up", async () => {
+      const paged = service(join(dir, "paged"), undefined, { pageSize: 2, batch: 0 });
+      const clean = await buildScenario(paged, false);
+      const pagedCommits = paged.counted.commits;
+      for (const s of services.splice(0)) await s.close();
+      rmSync(join(dir, "bucket"), { recursive: true, force: true });
+      const gathered = service(join(dir, "gathered"), undefined, { pageSize: 2 });
+      expect(await buildScenario(gathered, false)).toEqual(clean);
+      // Alice's ten entries are five pages, and bob's one is one: a commit for each owner.
+      expect(pagedCommits).toBe(6);
+      expect(gathered.counted.commits).toBe(2);
+      // Caught up, each page is committed on its own, so it is searchable at once.
+      for (let i = 0; i < 4; i++) {
+        await writer().ingest({
+          format: "trajectory",
+          session_id: `later${i}`,
+          transcript: log(`theta ${i}`),
+        });
+      }
+      const before = gathered.counted.commits;
+      await gathered.s.catchUp();
+      expect(gathered.counted.commits - before).toBeGreaterThanOrEqual(2);
+      expect((await gathered.s.search(LOCAL_VIEWER, { q: "theta" })).total).toBe(4);
+    });
+
+    it("repairs a gathered build commit by reading its pages again, whichever step it stopped before", async () => {
+      // Pages of two entries. Gathered into one commit, alice's pages name c1, r1 and t1 twice;
+      // gathered into commits of six records or more (a session here is about three), the
+      // crash is in the second, after the first moved the cursor.
+      const layouts = [
+        { batch: 1000, nth: 1, commits: ["alice:c1,r1,x1,x2,n1-", "bob:b1"] },
+        { batch: 6, nth: 2, commits: ["alice:c1,r1", "alice:x1,x2,c1-", "alice:r1,n1-", "bob:b1"] },
+      ];
+      for (const { commits, ...options } of layouts) {
+        for (const s of services.splice(0)) await s.close();
+        rmSync(join(dir, "bucket"), { recursive: true, force: true });
+        const location = join(dir, `clean-${options.batch}`);
+        const built = service(location, undefined, { pageSize: 2, ...options });
+        const clean = await buildScenario(built, false);
+        expect(built.counted.pages).toEqual(commits);
+        expect(clean.found.gamma).toEqual([]);
+        expect(clean.found.alpha).toHaveLength(2);
+        expect(clean.found["epsil*"].length).toBeGreaterThan(0);
+        for (const step of COMMIT_STEPS) {
+          for (const s of services.splice(0)) await s.close();
+          rmSync(join(dir, "bucket"), { recursive: true, force: true });
+          const crashed = await buildScenario(
+            service(join(dir, `crash-${options.batch}-${step}`), step, { pageSize: 2, ...options }),
+            true,
+          );
+          expect({ batch: options.batch, step, ...crashed }).toEqual({
+            batch: options.batch,
+            step,
+            ...clean,
+          });
+        }
+      }
+    });
 
     it("is repaired by reading the page again, whichever step it stopped before", async () => {
       const clean = await scenario(service(join(dir, "clean")), false);
