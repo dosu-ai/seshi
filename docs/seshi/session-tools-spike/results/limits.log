@@ -1,0 +1,29 @@
+
+# json_serialize_sql
+SELECT 1; SELECT 2: ok in 1 ms {"statements":2,"from":{"type":"EMPTY","alias":"","sample":null,"query_location":18446744073709552000,"query_location_length":0}}
+COPY (SELECT 1) TO 'x.csv': ok in 0 ms {"error":"Only SELECT statements can be serialized to json!"}
+ATTACH 'x.db': ok in 0 ms {"error":"Only SELECT statements can be serialized to json!"}
+SET threads = 1: ok in 0 ms {"error":"Only SELECT statements can be serialized to json!"}
+PRAGMA version: ok in 0 ms {"error":"Only SELECT statements can be serialized to json!"}
+CREATE VIEW v AS SELECT 1: ok in 0 ms {"error":"Only SELECT statements can be serialized to json!"}
+SELECT * FROM 'x.lance': ok in 0 ms {"statements":1,"from":{"type":"BASE_TABLE","alias":"","sample":null,"query_location":14,"query_location_length":9,"schema_name":"","table_name":"x.lance","column_name_alias":[],"catalog_name":"","at_clause":null,"qualified_name":{"path":["x.lance"]}}}
+SELECT * FROM read_csv('x.csv'): ok in 0 ms {"statements":1,"from":{"type":"TABLE_FUNCTION","alias":"","sample":null,"query_location":14,"query_location_length":17,"function":{"class":"FUNCTION","type":"FUNCTION","alias":"","query_location":18446744073709552000,"query_location_length":0,"function_name":"read_csv","schema":"","filter":null,"or
+SELECT * FROM idx.sessions: ok in 0 ms {"statements":1,"from":{"type":"BASE_TABLE","alias":"","sample":null,"query_location":14,"query_location_length":12,"schema_name":"idx","table_name":"sessions","column_name_alias":[],"catalog_name":"","at_clause":null,"qualified_name":{"path":["idx","sessions"]}}}
+WITH x AS (SELECT * FROM events) SELECT count(*) FROM x: ok in 0 ms {"statements":1,"from":{"type":"BASE_TABLE","alias":"","sample":null,"query_location":54,"query_location_length":1,"schema_name":"","table_name":"x","column_name_alias":[],"catalog_name":"","at_clause":null,"qualified_name":{"path":["x"]}}}
+a full tree: 3163 bytes; node keys: type,modifiers,cte_map,select_list,from_table,where_clause,group_expressions,group_sets,aggregate_handling,having,sample,qualify
+
+# prepare
+prepare two statements: refused in 0 ms: Error: Invalid Input Error: Cannot prepare multiple statements at once!
+prepare a SELECT then DROP: refused in 0 ms: Error: Invalid Input Error: Cannot prepare multiple statements at once!
+prepare one SELECT: ok in 7 ms [{"n":"80000"}]
+
+# interrupt
+cross join interrupted at 500 ms: refused in 501 ms: Error: INTERRUPT Error: Interrupted!
+connection usable after interrupt: ok in 1 ms [{"x":42}]
+
+# memory_limit = 256MB
+distinct over 50M wide strings: refused in 13451 ms: Error: Out of Memory Error: could not allocate block of size 256.0 KiB (244.0 MiB/244.1 MiB used)
+string_agg of 50M rows: refused in 26 ms: Error: Out of Memory Error: failed to allocate data of size 128.0 MiB (144.1 MiB/244.1 MiB used)
+
+# sqlite WAL with a writer
+50 reads during writes: 0 errors, counts 80000 → 109600, never went down: true, rows written: 30000
