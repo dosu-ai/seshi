@@ -12,6 +12,7 @@ bun run typecheck
 bun run check
 bun run seshi -- <command>     # the binary, from source
 bun run build                  # the compiled binary, dist/seshi
+bun run build --server         # the server build, with LanceDB (what the image ships)
 ```
 
 The Python client (`packages/py/client`) needs [uv](https://docs.astral.sh/uv/); its tests

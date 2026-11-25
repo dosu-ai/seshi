@@ -17,6 +17,9 @@ export const FORBIDDEN: readonly (string | RegExp)[] = [
   "@seshi/instance",
   "@seshi/sources",
   "@seshi/search",
+  "@seshi/lance",
+  /^@lancedb\//,
+  "apache-arrow",
   "@seshi/pipeline",
   "@seshi/auth",
   "@seshi/store",
@@ -78,6 +81,8 @@ function workspacePackages(root: string): Map<string, { dir: string; exports: un
   };
   scan(join(root, "apps"));
   scan(join(root, "packages", "ts"));
+  // Packages nested in another's folder (ts/search/lance).
+  scan(join(root, "packages", "ts", "search"));
   scan(join(root, "integrations"));
   return found;
 }

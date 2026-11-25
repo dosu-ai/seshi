@@ -15,6 +15,8 @@ export const PACKAGE_LAYERS: Readonly<Record<string, number>> = {
   sources: 3,
   review: 3,
   search: 3,
+  // The LanceDB index (F10.6), nested under ts/search; only the server build's entry imports it.
+  "search/lance": 4,
   instance: 4,
   api: 5,
   capture: 5,
@@ -66,6 +68,10 @@ function declaredOf(manifest: Record<string, unknown>): Set<string> {
   return names;
 }
 
+function isPackage(dir: string): boolean {
+  return existsSync(join(dir, "package.json"));
+}
+
 function subdirs(dir: string): string[] {
   if (!existsSync(dir)) return [];
   return readdirSync(dir)
@@ -93,7 +99,14 @@ export function discoverUnits(root: string): { units: Unit[]; problems: string[]
       declared: declaredOf(manifest),
     });
   };
-  for (const name of subdirs(join(root, "packages", "ts"))) {
+  const packages = subdirs(join(root, "packages", "ts")).flatMap((name) => [
+    name,
+    // A package nested in another's folder (ts/search/lance) is a unit of its own.
+    ...subdirs(join(root, "packages", "ts", name))
+      .filter((sub) => sub !== "node_modules" && isPackage(join(root, "packages", "ts", name, sub)))
+      .map((sub) => `${name}/${sub}`),
+  ]);
+  for (const name of packages) {
     const layer = PACKAGE_LAYERS[name];
     if (layer === undefined) {
       problems.push(`packages/ts/${name}: has no layer; add it to scripts/check-layers.ts`);
@@ -116,14 +129,16 @@ export function discoverUnits(root: string): { units: Unit[]; problems: string[]
   return { units, problems };
 }
 
-function sourceFiles(dir: string): string[] {
+/** The unit's source files; `skip` are other units' folders inside it (a nested package). */
+function sourceFiles(dir: string, skip: ReadonlySet<string> = new Set()): string[] {
   const files: string[] = [];
   const walk = (at: string) => {
     for (const name of readdirSync(at).sort()) {
       if (name === "node_modules" || name === "testdata" || name.startsWith(".")) continue;
       const path = join(at, name);
-      if (statSync(path).isDirectory()) walk(path);
-      else if (/\.(ts|tsx|mts|cts)$/.test(name) && !name.endsWith(".d.ts")) files.push(path);
+      if (statSync(path).isDirectory()) {
+        if (!skip.has(path)) walk(path);
+      } else if (/\.(ts|tsx|mts|cts)$/.test(name) && !name.endsWith(".d.ts")) files.push(path);
     }
   };
   walk(dir);
@@ -134,8 +149,11 @@ export function importsOf(text: string): string[] {
   return ts.preProcessFile(text, true, true).importedFiles.map((ref) => ref.fileName);
 }
 
+/** The unit a path is in: the innermost, since a package may sit in another's folder. */
 function unitOfPath(units: readonly Unit[], path: string): Unit | undefined {
-  return units.find((unit) => path === unit.dir || path.startsWith(unit.dir + sep));
+  return units
+    .filter((unit) => path === unit.dir || path.startsWith(unit.dir + sep))
+    .sort((a, b) => b.dir.length - a.dir.length)[0];
 }
 
 function unitOfName(units: readonly Unit[], specifier: string): Unit | undefined {
@@ -176,8 +194,9 @@ export function checkLayers(root: string): CheckResult {
   const violations: Violation[] = [];
   let files = 0;
   let imports = 0;
+  const dirs = new Set(units.map((u) => u.dir));
   for (const unit of units) {
-    for (const file of sourceFiles(unit.dir)) {
+    for (const file of sourceFiles(unit.dir, dirs)) {
       files += 1;
       const shown = relative(absolute, file);
       for (const specifier of importsOf(readFileSync(file, "utf8"))) {

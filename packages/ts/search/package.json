@@ -7,16 +7,14 @@
     ".": {
       "bun": "./src/index.ts"
     },
-    "./lance": {
-      "bun": "./src/lance-open.ts"
+    "./backends": {
+      "bun": "./src/backends.ts"
     }
   },
   "dependencies": {
-    "@lancedb/lancedb": "0.41.0",
     "@seshi/auth": "workspace:*",
     "@seshi/model": "workspace:*",
-    "@seshi/store": "workspace:*",
-    "apache-arrow": "21.2.0"
+    "@seshi/store": "workspace:*"
   },
   "devDependencies": {
     "@seshi/formats": "workspace:*",

@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { buildCommand } from "../build-binary";
+import { buildCommand, checkLanceNative } from "../build-binary";
 import { checksumFile, readArchive, sha256, tarGz, zip } from "./archive";
 import { adhocSign } from "./macho-sign";
 import {
@@ -9,6 +9,7 @@ import {
   extensionAsset,
   hostTarget,
   INSTALL_SCRIPTS,
+  serverAsset,
   TARGETS,
   type Target,
   targetById,
@@ -29,7 +30,8 @@ export interface BuildReleaseOptions {
   targets?: readonly Target[];
   version?: string;
   mtime?: number;
-  compile?: (target: Target, outfile: string) => Promise<void>;
+  /** Compiles `target`; with `server`, the server build (`main-server.ts`, with LanceDB). */
+  compile?: (target: Target, outfile: string, server: boolean) => Promise<void>;
   /** Packages the Cursor extension into `outfile` (a .vsix). */
   packageExtension?: (outfile: string) => Promise<void>;
   log?: (line: string) => void;
@@ -61,8 +63,14 @@ export function finishBinary(target: Target, outfile: string): void {
   writeFileSync(outfile, adhocSign(readFileSync(outfile), "seshi"));
 }
 
-export async function compileTarget(target: Target, outfile: string, root = ROOT): Promise<void> {
-  const { argv } = buildCommand({ root, target: target.bun, outfile });
+export async function compileTarget(
+  target: Target,
+  outfile: string,
+  root = ROOT,
+  server = false,
+): Promise<void> {
+  if (server) checkLanceNative(root, target.bun);
+  const { argv } = buildCommand({ root, target: target.bun, outfile, server });
   mkdirSync(dirname(outfile), { recursive: true });
   const proc = Bun.spawn(argv, { cwd: root, stdout: "pipe", stderr: "pipe" });
   const [code, out, err] = await Promise.all([
@@ -94,30 +102,38 @@ export async function buildRelease(options: BuildReleaseOptions): Promise<Releas
   const targets = options.targets ?? TARGETS;
   const mtime = options.mtime ?? Date.now();
   const compile =
-    options.compile ?? ((t: Target, outfile: string) => compileTarget(t, outfile, root));
+    options.compile ??
+    ((t: Target, outfile: string, server: boolean) => compileTarget(t, outfile, root, server));
   const license = readFileSync(join(root, "LICENSE"));
   mkdirSync(options.out, { recursive: true });
 
   const files = new Map<string, Uint8Array>();
   const assets: ReleaseAsset[] = [];
-  for (const target of targets) {
-    const outfile = join(options.out, "bin", target.id, target.binary);
+  const builds = targets.flatMap((target) => {
+    const server = serverAsset(target);
+    return [
+      { target, asset: target.asset, dir: target.id, server: false },
+      ...(server ? [{ target, asset: server, dir: `${target.id}-server`, server: true }] : []),
+    ];
+  });
+  for (const { target, asset, dir, server } of builds) {
+    const outfile = join(options.out, "bin", dir, target.binary);
     rmSync(outfile, { force: true });
-    log(`compile ${target.id} (${target.bun})`);
-    await compile(target, outfile);
+    log(`compile ${dir} (${target.bun})`);
+    await compile(target, outfile, server);
     const binary = readFileSync(outfile);
     const archive = archiveFor(target, binary, license, mtime);
-    const back = readArchive(target.asset, archive).find((e) => e.name === target.binary);
+    const back = readArchive(asset, archive).find((e) => e.name === target.binary);
     if (!back || sha256(back.data) !== sha256(binary)) {
-      throw new Error(`${target.asset}: the archived binary differs from the compiled one`);
+      throw new Error(`${asset}: the archived binary differs from the compiled one`);
     }
-    writeFileSync(join(options.out, target.asset), archive);
-    files.set(target.asset, archive);
+    writeFileSync(join(options.out, asset), archive);
+    files.set(asset, archive);
     assets.push({
-      name: target.asset,
+      name: asset,
       sha256: sha256(archive),
       size: archive.byteLength,
-      target: target.id,
+      ...(server ? {} : { target: target.id }),
     });
     if (target.id === hostTargetId()) await checkRuns(outfile, version);
   }

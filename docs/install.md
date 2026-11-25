@@ -28,6 +28,13 @@ Each archive holds `seshi` (`seshi.exe` on Windows) and `LICENSE`. The x64 build
 x64 CPU, including older ones without AVX2 and Intel builds under Rosetta 2, though the install
 script picks the native build on Apple silicon.
 
+A server that keeps its search index in object storage (`search.backend = "lance"`,
+[search.md](search.md#a-shared-index-lancedb)) needs the **server build**, which carries
+LanceDB's native library: the container image, or `seshi-server-linux-x64.tar.gz` and
+`seshi-server-linux-arm64.tar.gz` from the release (about 340 MB and 550 MB unpacked, against
+about 120 MB). Everything else, the server with SQLite search included, runs on the archives
+above.
+
 Linux binaries need glibc. Alpine and other musl systems are not supported yet: the install
 script and the npm launcher say so rather than install a binary that cannot start. Run the
 Docker image there, or a glibc-based image.

@@ -17,7 +17,7 @@ import { EXIT } from "../cli/exit";
 import { Style, stripStyle } from "../cli/style";
 import { INTEGRATIONS } from "../integrations";
 import { main } from "../main";
-import { highlighted, searchLines, timeArg } from "./search";
+import { highlighted, searchLines, timeArg, waitForRebuild } from "./search";
 
 const formats = new FormatRegistry(BUILTIN_FORMATS);
 const line = (record: Record<string, unknown>) => `${JSON.stringify(record)}\n`;
@@ -166,6 +166,19 @@ describe("seshi search, in-process", () => {
     expect(JSON.parse(rebuilt.out)).toMatchObject({ ready: true, sessions: 1 });
     const after = await seshi(["--status", "--config", toml]);
     expect(after.out).toContain("1 sessions, 2 records indexed");
+    expect(JSON.parse((await seshi(["--status", "--config", toml, "--json"])).out)).toMatchObject({
+      backend: "sqlite",
+    });
+    // SQLite deletes text when it commits: there is nothing for --scrub to ask for.
+    const scrub = await seshi(["--scrub", "--config", toml, "--json"]);
+    expect(scrub.code).toBe(EXIT.ok);
+    expect(JSON.parse(scrub.out)).toEqual({ scrub: "not_needed" });
+  });
+
+  it("refuses backend = lance in a binary built without LanceDB, naming the one with it", async () => {
+    const result = await seshi(["--status", "--config", toml, "--set", "search.backend=lance"]);
+    expect(result.code).toBe(EXIT.config);
+    expect(result.err).toContain("needs the server build of seshi");
   });
 
   it("finds the server's config where serve would, and says when search is off", async () => {
@@ -186,6 +199,8 @@ describe("seshi search, in-process", () => {
     expect((await seshi(["x", "--nope"])).code).toBe(EXIT.usage);
     expect((await seshi(["x", "--status"])).code).toBe(EXIT.usage);
     expect((await seshi(["--status", "--rebuild"])).code).toBe(EXIT.usage);
+    expect((await seshi(["--rebuild", "--scrub"])).code).toBe(EXIT.usage);
+    expect((await seshi(["--status", "--wait"])).err).toContain("--wait goes with --rebuild");
     const json = await seshi(["--json"]);
     expect(JSON.parse(json.err)).toMatchObject({ error: { code: "usage" } });
   });
@@ -383,5 +398,113 @@ describe("the command's pieces", () => {
         index: { ready_at: "", sessions: 0 },
       }),
     ).toEqual(["Exploring: no more sessions match."]);
+  });
+
+  it("says at least N when the index stopped counting at its cap", () => {
+    const result = (session_id: string) => ({
+      owner: "alice",
+      format: "codex",
+      session_id,
+      archive_id: "0".repeat(64),
+      visibility: "org" as const,
+      updated_at: "2026-11-14T09:05:00.000Z",
+      score: 1,
+      hits: 1,
+      matches: [],
+    });
+    const index = { ready_at: "2026-11-14T00:00:00.000Z", sessions: 9 };
+    const paged = searchLines({
+      query: "x",
+      total: 40,
+      capped: true,
+      cursor: "1",
+      results: [result("a")],
+      index,
+    });
+    expect(paged.at(-1)).toBe("1 of at least 40 sessions shown; more with --cursor 1");
+    const one = searchLines({ query: "x", total: 1, capped: true, results: [result("a")], index });
+    expect(one.at(-1)).toBe("At least 1 sessions match.");
+  });
+
+  describe("waitForRebuild", () => {
+    const base = {
+      backend: "lance" as const,
+      location: "/i",
+      ready: true,
+      sessions: 1,
+      events: 1,
+    };
+    /** A clock and a status that walk through `steps`, one per poll (the last repeats). */
+    function fake(steps: Record<string, unknown>[]) {
+      let t = 0;
+      let i = 0;
+      return {
+        search: {
+          status: async () => ({ ...base, ...steps[Math.min(i++, steps.length - 1)] }) as never,
+        },
+        now: () => t,
+        sleep: async (ms: number) => {
+          t += ms;
+        },
+      };
+    }
+
+    it("follows the request, the build and the switch", async () => {
+      const f = fake([
+        { generation: "g1", requested: { rebuild: "t" } },
+        { generation: "g1", building: { generation: "g2" } },
+        { generation: "g1", building: { generation: "g2", read_through: "2026-11-01T00:00:00Z" } },
+        { generation: "g2" },
+      ]);
+      const lines: string[] = [];
+      const done = await waitForRebuild(f.search, "g1", {
+        pollMs: 1_000,
+        stallMs: 60_000,
+        workerAlive: async () => true,
+        progress: (l) => lines.push(l),
+        now: f.now,
+        sleep: f.sleep,
+      });
+      expect(done).toMatchObject({ status: { generation: "g2" } });
+      expect(lines).toEqual([
+        "building generation g2, read through the start",
+        "building generation g2, read through 2026-11-01 00:00",
+      ]);
+    });
+
+    it("gives up when nothing moves and no worker is running, and only says so while one is", async () => {
+      const stuck = () => fake([{ generation: "g1", requested: { rebuild: "t" } }]);
+      const lines: string[] = [];
+      const options = (alive: boolean, f: ReturnType<typeof stuck>) => ({
+        pollMs: 1_000,
+        stallMs: 5_000,
+        workerAlive: async () => alive,
+        progress: (l: string) => lines.push(l),
+        now: f.now,
+        sleep: f.sleep,
+      });
+      const none = stuck();
+      const gaveUp = await waitForRebuild(none.search, "g1", options(false, none));
+      expect(gaveUp).toEqual({
+        stalled: expect.stringContaining("no worker is running to carry out the rebuild"),
+      });
+      expect(lines[0]).toMatch(/^warning: no worker is running/);
+      expect((gaveUp as { stalled: string }).stalled).toContain("seshi sync search");
+      // With a worker, it waits on, saying once that nothing has moved.
+      lines.length = 0;
+      const running = stuck();
+      let polls = 0;
+      const status = running.search.status;
+      running.search.status = async () => {
+        if (++polls > 20) return { ...base, generation: "g2" } as never;
+        return status();
+      };
+      expect(await waitForRebuild(running.search, "g1", options(true, running))).toMatchObject({
+        status: { generation: "g2" },
+      });
+      expect(lines).toEqual([
+        "the rebuild has not moved for a while; the worker is running (building a large generation's indexes takes minutes)",
+      ]);
+    });
   });
 });

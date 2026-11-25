@@ -56,9 +56,13 @@ Where it searches:
   caught up, and a search reuses it when it caught up within twice `search.interval`; a change
   of scope or owner empties it and builds it again
   ([serverless.md](serverless.md#search)). `seshi search --status` says where the index file is and what it holds;
-  `seshi search --rebuild` drops it and builds it again.
+  `seshi search --rebuild` drops it and builds it again. With a server whose index is shared
+  (`search.backend = "lance"`, [below](#a-shared-index-lancedb)), the CLI only reads it, as an
+  API instance does: the worker keeps it current.
 
-The output is plain text; `--json` prints the API's `SearchResults`. Exit 0 also when nothing
+The output is plain text; `--json` prints the API's `SearchResults`. When the index stopped
+counting at its cap (LanceDB's `search.lance.max_scored_rows`), the total is a lower bound:
+`"capped": true` in the response, "at least N" in the text. Exit 0 also when nothing
 matches; 2 for a query with nothing to look for; 3 when nothing is configured or search is
 turned off; 5 when not signed in or not allowed (`--owner` naming someone else, with a credential that
 lacks the `search` scope); 7
@@ -114,3 +118,77 @@ never shown. Anyone else's sessions need the `search` scope: the org key, member
 tokens, static tokens, admins and service readers have it. Device tokens and writing services
 do not, so they search only their own owner's sessions (X5.10): the server sets the owner
 filter to theirs, and refuses (`403`) an `owner` naming anyone else.
+
+## A shared index (LanceDB)
+
+With `search.backend = "lance"`, a server keeps **one index for every instance**, in object
+storage, instead of an SQLite file on each (F10.6). The worker (X7.2) runs the `search-index`
+job and is the only writer; every API instance only reads, and sees what the worker committed
+within `search.lance.read_consistency` (5 s). Nothing else changes for people searching: the
+same queries, filters, read rules (F10.4) and `GET /v1/changes/all`, which every instance can
+serve because the feed's copy is in the shared index too. It is for teams that run more than one
+API instance, or do not want each one to read every feed and hold a full copy.
+
+```toml
+[search]
+backend = "lance"
+
+[search.lance]                      # all optional
+# uri = "s3://other-bucket/seshi-search"
+read_consistency = "5s"
+optimize = "1h"
+scrub = "24h"
+```
+
+- **Where it lives.** Under `search/<deployment>/` in the store's bucket, reached with
+  `[store]`'s keys, which LanceDB is given as options and never in the URL
+  ([spec/layout.md](../spec/layout.md)). `search.lance.uri` puts it in another bucket (with
+  keys of its own in `[search.lance]`) or a folder on a single host. It is derived data: it can
+  be deleted at any time and is rebuilt from the change feeds. It holds session text, so the
+  same people may read it as may read traces. On `gs://` it must be Google's own Cloud
+  Storage: LanceDB cannot reach a GCS emulator or another endpoint, so a `gs://` store with
+  one (or `STORAGE_EMULATOR_HOST`) needs `search.lance.uri` set to a folder or another
+  bucket.
+- **Which binary.** LanceDB's native library is about 200 MB (430 MB on Linux arm64), so it is
+  only in the **server build**: the container image (`ghcr.io/dosu-ai/seshi`) and the
+  `seshi-server-linux-x64` and `-arm64` release archives. The binaries laptops install (the
+  install scripts, npm) do not carry it, and a server started from one with `backend = "lance"`
+  refuses to start, saying so.
+- **Who writes.** Only an instance with the worker role indexes; give exactly one instance that
+  role (X7.2). API-only instances open the index read-only and never write it, not even its
+  bookkeeping. A deployment without a worker runs `seshi sync search` from cron instead, which
+  refuses while a worker is running. A second worker by mistake is
+  harmless (writes are idempotent), only wasteful.
+- **Serverless laptops** ignore `search.backend` and `[search.lance]` in the shared config:
+  each keeps its own SQLite index, limited to its scope (F11.9).
+- **The first build** answers `503 index_building` until the worker has read every feed once,
+  as with SQLite. Later rebuilds do not: `seshi search --rebuild` (with the server's config)
+  asks the worker to build a new generation **beside** the live one, which keeps answering
+  until the new one has caught up and takes its place (F10.11). It only records the request,
+  and returns at once: the worker starts the rebuild after its next pass, so it stays the one
+  writer. `--wait` follows the request and the build until the switch, and gives up, pointing
+  to `seshi workers status`, when nothing has moved for 15 minutes and no worker is running. Changing `search.events` to index more roles,
+  or a seshi upgrade that changes the index's layout, rebuilds the same way; indexing fewer
+  roles stops the old generation answering at once, since it holds records the new config
+  leaves out.
+- **Deleted text.** A retracted, deleted or redacted session leaves search results at the next
+  commit. Its text leaves the index's files when the worker next scrubs: at most once every
+  `search.lance.scrub` (a day), plus 15 minutes for readers still on the old files (F10.12).
+  That is weaker than SQLite, which removes it from its file at once. `seshi search --scrub`
+  asks the worker to scrub on its next pass.
+- **Upkeep.** After a pass that committed something, at most every `search.lance.optimize` (an
+  hour), the worker compacts the tables and adds new rows to their indexes. That rewrites the
+  indexes, so it takes longer as the index grows: about 1 minute at 1M records and 8 to 9 at
+  10M. The design fits up to roughly 10 to 30M records (about a year of a 50-person team);
+  `seshi doctor --config` warns past 20M
+  ([design](seshi/lancedb-search.md#risks)).
+- **Counts.** A relevance search scores at most `search.lance.max_scored_rows` records (10,000);
+  past it the total is a lower bound (`capped`, "at least N"). Results are the best-scored ones
+  either way.
+- **Prefixes** (`word*`) need at least 2 letters with LanceDB; SQLite takes one.
+
+`seshi search --status --config <seshi.toml>` shows the backend, the location (never its
+keys), the live generation, when it was ready and last caught up, and a rebuild in progress;
+`seshi workers status` and `GET /v1/admin/jobs` show the job's `building` flag.
+`seshi doctor --config <seshi.toml>` checks that the index can be read, that the worker's keys
+can write its location, that it caught up recently, and its size.

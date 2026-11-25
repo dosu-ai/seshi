@@ -4,7 +4,14 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { parseChecksums, readArchive, sha256 } from "./archive";
 import { binaryEnv, buildRelease, repositoryVersion, selectTargets } from "./build";
-import { CHECKSUMS, extensionAsset, hostTarget, INSTALL_SCRIPTS, TARGETS } from "./targets";
+import {
+  CHECKSUMS,
+  extensionAsset,
+  hostTarget,
+  INSTALL_SCRIPTS,
+  serverAsset,
+  TARGETS,
+} from "./targets";
 import { standInCompile } from "./testing";
 
 const packageExtension = async (outfile: string) => writeFileSync(outfile, "a vsix");
@@ -26,9 +33,12 @@ describe("buildRelease", () => {
         packageExtension,
         mtime: Date.UTC(2026, 10, 15),
       });
-      expect(compiled).toEqual(TARGETS.map((t) => t.id));
+      // Each Linux target also gets the server build, with LanceDB (F10.6); laptops' do not.
+      expect(compiled).toEqual(
+        TARGETS.flatMap((t) => (t.os === "linux" ? [t.id, `${t.id}-server`] : [t.id])),
+      );
       expect(assets.map((a) => a.name)).toEqual([
-        ...TARGETS.map((t) => t.asset),
+        ...TARGETS.flatMap((t) => [t.asset, ...(serverAsset(t) ? [serverAsset(t)] : [])]),
         ...INSTALL_SCRIPTS,
         extensionAsset(repositoryVersion()),
       ]);
@@ -49,6 +59,10 @@ describe("buildRelease", () => {
         expect(new TextDecoder().decode(entries[0]?.data)).toContain(`# ${target.id}`);
         expect(target.asset.endsWith(target.os === "windows" ? ".zip" : ".tar.gz")).toBe(true);
       }
+      expect(assets.filter((a) => a.name.startsWith("seshi-server-")).map((a) => a.name)).toEqual([
+        "seshi-server-linux-x64.tar.gz",
+        "seshi-server-linux-arm64.tar.gz",
+      ]);
       expect(readFileSync(join(out, "install.sh"), "utf8")).toContain("#!/bin/sh");
     },
   );

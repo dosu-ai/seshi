@@ -333,8 +333,9 @@ The bucket holds the team's settings, in the server config format:
 ```
 
 Paths in `config/seshi.toml` (`redaction.packs`, a review policy's `prompt_file`) are relative to
-`config/` and must stay inside it. Any server config key may be there. Laptops ignore `[store]` and `search.path` in it
-(they know where the bucket is, and where their own index goes), and `[[sources]]` (OTLP intake
+`config/` and must stay inside it. Any server config key may be there. Laptops ignore `[store]`, `search.path`,
+`search.backend` and `[search.lance]` in it (they know where the bucket is, and keep their own
+SQLite index, never a server's shared one: [search.md](search.md#a-shared-index-lancedb)), and `[[sources]]` (OTLP intake
 included), `[auth]`, `[server]` and `[worker]` wherever they are set, since those need a server; a bucket
 that switches modes may keep them. `doctor` lists what was ignored.
 

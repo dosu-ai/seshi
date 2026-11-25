@@ -10,6 +10,18 @@ import { BUILTIN_FORMATS, FormatRegistry } from "@seshi/formats";
 import type { EventRole, Trace } from "@seshi/model";
 import { StoreSeshi, tombstone } from "@seshi/pipeline";
 import {
+  type BackendQuery,
+  type IndexedSession,
+  type IndexOptions,
+  type IndexStore,
+  IndexUnavailable,
+  LOCAL_VIEWER,
+  parseQuery,
+  SearchQueryError,
+  SearchService,
+  type SessionUpdate,
+} from "@seshi/search";
+import {
   appendChange,
   archiveId,
   FsStore,
@@ -22,16 +34,8 @@ import {
 } from "@seshi/store";
 import { Field, Schema, Utf8 } from "apache-arrow";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-  type BackendQuery,
-  type IndexedSession,
-  type IndexOptions,
-  type IndexStore,
-  IndexUnavailable,
-  type SessionUpdate,
-} from "./backend";
+import { lanceIndex } from "./index";
 import { COMMIT_STEPS, type CommitStep, type LanceIndexOptions, openLanceIndex } from "./lance";
-import { lanceIndex } from "./lance-open";
 import {
   compileMatch,
   filterSql,
@@ -41,10 +45,7 @@ import {
   PREFIX_MAX,
   prefixesOf,
   sqlString,
-} from "./lance-query";
-import { parseQuery, SearchQueryError } from "./query";
-import { SearchService } from "./service";
-import { LOCAL_VIEWER } from "./viewer";
+} from "./query";
 
 const H = (n: number) => n.toString(16).padStart(64, "0");
 const EVENTS: readonly EventRole[] = ["user", "assistant", "tool_call"];
@@ -357,6 +358,92 @@ describe("LanceIndex", () => {
     expect(await names(reader, "shared")).toEqual(["s1"]);
     expect((await reader.state()).ready_at).toBeDefined();
     await reader.maintain(new AbortController().signal);
+  });
+
+  /** Set `meta` keys behind the index's back, as another process (or a bug) would. */
+  async function tamper(values: Record<string, string>) {
+    const db = await connect(uri);
+    const meta = await db.openTable("meta");
+    await meta
+      .mergeInsert("key")
+      .whenMatchedUpdateAll()
+      .whenNotMatchedInsertAll()
+      .execute(Object.entries(values).map(([key, value]) => ({ key, value })));
+    meta.close();
+  }
+
+  it("rebuilds on a read-only process's request, in the worker alone (F10.8)", async () => {
+    const worker = await open();
+    await commit(worker, [replace(1, ["old words"])]);
+    await pass(worker);
+    const live = (await worker.state()).generation;
+    const cli = await open({ readOnly: true });
+    await (cli as IndexStore & { requestRebuild(): Promise<void> }).requestRebuild();
+    // The request is all it wrote: no generation is being built yet.
+    expect(await worker.state()).toMatchObject({
+      generation: live,
+      requested: { rebuild: "2026-11-14T12:00:00.000Z" },
+    });
+    expect((await worker.state()).building).toBeUndefined();
+    await worker.maintain(new AbortController().signal);
+    const state = await worker.state();
+    expect(state.requested).toBeUndefined();
+    expect(state.generation).toBe(live);
+    const gen = state.building?.generation as string;
+    expect(gen).toBeDefined();
+    expect(await names(cli, "old")).toEqual(["s1"]);
+    await commit(worker, [replace(1, ["old words"])]);
+    expect(await pass(worker)).toBe(true);
+    expect((await cli.state()).generation).toBe(gen);
+    expect(await names(cli, "old")).toEqual(["s1"]);
+  });
+
+  it("never makes live a generation in the trash, nor drops the live one", async () => {
+    const index = await open({ grace: 0 });
+    await commit(index, [replace(1, ["kept words"])]);
+    await pass(index);
+    const live = (await index.state()).generation;
+    const gen = await index.reset();
+    await commit(index, [replace(2, ["other words"])]);
+    // Another writer (the race the request replaced) put both in the trash.
+    await tamper({
+      trash: JSON.stringify([
+        { gen, at: 0 },
+        { gen: live, at: 0 },
+      ]),
+    });
+    expect(await pass(index)).toBe(false);
+    expect((await index.state()).generation).toBe(live);
+    clock += 1;
+    await index.maintain(new AbortController().signal);
+    // The live generation was kept, and still answers; the trashed build is gone.
+    expect(await names(index, "kept")).toEqual(["s1"]);
+    expect(existsSync(join(uri, live))).toBe(true);
+    expect(filesHolding(uri, "other words")).toEqual([]);
+    expect(await index.state()).toMatchObject({ generation: live, ready_at: expect.any(String) });
+    expect((await index.state()).building).toBeUndefined();
+    expect(await index.generation()).toBe(live);
+  });
+
+  it("keeps a scrub request made while a scrub runs for the next pass", async () => {
+    const index = await open({ scrubEvery: 0, grace: 0 });
+    await commit(index, [replace(1, ["zebra words"])]);
+    await pass(index);
+    await (index as IndexStore & { requestScrub(): Promise<void> }).requestScrub();
+    // Another request lands while the scrub copies a table, after it read what asked for it.
+    const inner = index as unknown as { createTable: (...a: unknown[]) => Promise<unknown> };
+    const createTable = inner.createTable.bind(index);
+    let once = false;
+    inner.createTable = async (...args) => {
+      if (!once) {
+        once = true;
+        clock += 1_000;
+        await tamper({ scrub_requested: new Date(clock).toISOString() });
+      }
+      return createTable(...args);
+    };
+    await index.maintain(new AbortController().signal);
+    expect((await index.state()).requested).toEqual({ scrub: "2026-11-14T12:00:01.000Z" });
   });
 
   it("caps the records it scores, says so, and looks back from now for a recent page", async () => {

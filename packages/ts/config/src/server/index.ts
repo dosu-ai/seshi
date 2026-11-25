@@ -194,7 +194,13 @@ export {
   reviewPromptFiles,
   reviewSection,
 } from "./review";
-export { type SearchSection, searchSection } from "./search";
+export {
+  type LanceSection,
+  lanceSection,
+  SEARCH_BACKENDS,
+  type SearchSection,
+  searchSection,
+} from "./search";
 export {
   MIN_SEALING_KEY_LENGTH,
   type SecretsSection,

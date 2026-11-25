@@ -31,6 +31,7 @@ from any other branch, and nothing is published by hand.
    |---|---|
    | `seshi-<os>-<cpu>.tar.gz` | macOS and Linux: `seshi` and `LICENSE` |
    | `seshi-windows-<cpu>.zip` | Windows: `seshi.exe` and `LICENSE` |
+   | `seshi-server-linux-<cpu>.tar.gz` | The server build for Linux (x64, arm64): the same `seshi` with the LanceDB search backend (F10.6), what the image ships. Not on npm, and not what the install scripts fetch |
    | `install.sh`, `install.ps1` | The install scripts (stable at `…/releases/latest/download/`) |
    | `SHA256SUMS` | `sha256sum` format, over every asset above |
 
@@ -41,7 +42,7 @@ from any other branch, and nothing is published by hand.
    `npm i @dosu/seshi` never resolves a
    platform package that is not there yet. A version already on the registry is skipped, so
    the job can be re-run. Prereleases go under the `next` tag.
-4. **`image`** downloads the two Linux archives, checks them, and builds
+4. **`image`** downloads the two Linux server archives, checks them, and builds
    `ghcr.io/<repo>` for linux/amd64 and linux/arm64 from those binaries
    (`--build-arg BINARY=prebuilt`), tagged `X.Y.Z`, `X.Y` and `latest`.
 5. **`pypi`** builds the Python client from the release's tag and publishes it to PyPI as
@@ -55,6 +56,10 @@ from any other branch, and nothing is published by hand.
    which would install a launcher with no binary.
 
 ## Targets
+
+The release job installs with `bun install --cpu='*'`, so both Linux server builds find
+LanceDB's native package for their CPU (`scripts/build-binary.ts` refuses a server build whose
+package is missing, rather than ship one without it).
 
 `scripts/release/targets.ts` is the one list: darwin-arm64, darwin-x64, linux-x64, linux-arm64
 (glibc), windows-x64 and windows-arm64. x64 builds use Bun's `-baseline` target. The install

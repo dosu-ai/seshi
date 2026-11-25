@@ -82,6 +82,7 @@ import {
   same,
 } from "./reload";
 import type { RuntimeConfig } from "./runtime";
+import { searchOpener } from "./search-index";
 import { type InstanceStatus, instanceStatus } from "./status";
 
 export type Role = (typeof ROLES)[number];
@@ -141,6 +142,10 @@ export interface InstanceParts {
   jobs?: readonly JobFactory[];
   /** Session search (F10); built from `[search]` when omitted, none when null. */
   search?: SearchService | null;
+  /** With `search.backend = "lance"`: open the shared index as a writer even without the
+   * worker role (`seshi search --rebuild` and `--scrub`). Otherwise only the worker writes it
+   * and every other instance reads it (F10.8). */
+  searchWriter?: boolean;
   now?: () => Date;
   fetch?: typeof fetch;
   log?: Logger;
@@ -346,21 +351,7 @@ export class Instance {
     this.search =
       parts.search === null
         ? undefined
-        : (parts.search ??
-          (config.search.enabled
-            ? new SearchService({
-                store: this.store,
-                deployment: this.deployment,
-                settings: {
-                  ...(config.search.path ? { path: config.search.path } : {}),
-                  events: config.search.events,
-                },
-                aliases: this.auth.aliases,
-                now: this.now,
-                log: this.log,
-                feed: true,
-              })
-            : undefined));
+        : (parts.search ?? (config.search.enabled ? this.searchService(config, parts) : undefined));
 
     this.jobs = new JobRunner({
       worker: this.roles.includes("worker"),
@@ -403,6 +394,38 @@ export class Instance {
         },
       });
     }
+  }
+
+  /** Search over `[search]`'s backend: this instance's own SQLite file, or the shared LanceDB
+   * index, which only the worker writes (F10.8). */
+  private searchService(config: ServerConfig, parts: InstanceParts): SearchService {
+    const shared = config.search.backend === "lance";
+    const readOnly = shared && !this.roles.includes("worker") && parts.searchWriter !== true;
+    let open: ReturnType<typeof searchOpener>;
+    try {
+      open = searchOpener(config, {
+        deployment: this.deployment,
+        env: parts.env ?? process.env,
+        readOnly,
+      });
+    } catch (err) {
+      throw new InstanceError(message(err), { cause: err });
+    }
+    return new SearchService({
+      store: this.store,
+      deployment: this.deployment,
+      settings: {
+        ...(config.search.path && !shared ? { path: config.search.path } : {}),
+        events: config.search.events,
+      },
+      ...(open ? { open } : {}),
+      ...(shared ? { shared: true } : {}),
+      ...(readOnly ? { readOnly: true } : {}),
+      aliases: this.auth.aliases,
+      now: this.now,
+      log: this.log,
+      feed: true,
+    });
   }
 
   /** Read the bucket's runtime config and apply it when it changed. One at a time; a caller

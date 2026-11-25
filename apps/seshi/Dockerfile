@@ -1,14 +1,18 @@
 # The seshi server image, built from the one compiled binary (X2.2): the build stage compiles
 # `seshi` with Bun for the target platform, and the final image holds that binary and nothing
-# of Bun, Node or node_modules. Build from the repository root, since the app depends on the
+# of Bun, Node or node_modules. It is the server build (`build-binary.ts --server`,
+# apps/seshi/src/main-server.ts): the same seshi with the LanceDB search backend
+# (`[search] backend = "lance"`, F10.6), whose native library adds about 200 MB that laptops'
+# binaries do not carry. Build from the repository root, since the app depends on the
 # workspace packages beside it:
 #   docker build -f apps/seshi/Dockerfile -t seshi .
 # Multi-platform builds (linux/amd64, linux/arm64) cross-compile on the build machine, so no
 # emulation runs the build.
 #
-# Releases (ci.yml's image job) ship the GitHub release's own Linux binaries instead of compiling
-# again: they are unpacked to dist/docker/linux-<amd64|arm64>/seshi and the build is given
-# `--build-arg BINARY=prebuilt` (BuildKit skips the stage it does not use).
+# Releases (ci.yml's image job) ship the GitHub release's own Linux server binaries
+# (seshi-server-linux-*.tar.gz) instead of compiling again: they are unpacked to
+# dist/docker/linux-<amd64|arm64>/seshi and the build is given `--build-arg BINARY=prebuilt`
+# (BuildKit skips the stage it does not use).
 
 # Where the binary comes from: `build` (compile it here) or `prebuilt` (dist/docker/).
 ARG BINARY=build
@@ -24,14 +28,16 @@ COPY packages ./packages
 COPY integrations ./integrations
 COPY scripts/build-binary.ts ./scripts/
 COPY brand/glyph/seshi-glyph-badge.svg ./brand/glyph/
-RUN bun install --frozen-lockfile --production
-# x64 uses the baseline build, which runs on CPUs without AVX2 (and under emulation).
+# x64 uses the baseline build, which runs on CPUs without AVX2 (and under emulation). The
+# install takes LanceDB's native package for the target, not the build machine (--os, --cpu),
+# since the binary carries it.
 RUN case "$TARGETARCH" in \
-      amd64) target=bun-linux-x64-baseline ;; \
-      arm64) target=bun-linux-arm64 ;; \
+      amd64) target=bun-linux-x64-baseline cpu=x64 ;; \
+      arm64) target=bun-linux-arm64 cpu=arm64 ;; \
       *) echo "unsupported architecture: $TARGETARCH" >&2; exit 1 ;; \
     esac \
- && bun run scripts/build-binary.ts --target "$target" --outfile /out/seshi \
+ && bun install --frozen-lockfile --production --os=linux --cpu="$cpu" \
+ && bun run scripts/build-binary.ts --server --target "$target" --outfile /out/seshi \
  && if [ "$TARGETARCH" = "$(dpkg --print-architecture)" ]; then /out/seshi --version; fi
 
 FROM scratch AS prebuilt

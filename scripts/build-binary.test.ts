@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { VERSION } from "@seshi/model";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { buildCommand } from "./build-binary";
+import { buildCommand, checkLanceNative, lanceNativePackage } from "./build-binary";
 
 const ROOT = resolve(import.meta.dirname, "..");
 
@@ -33,6 +33,35 @@ describe("buildCommand", () => {
     expect(outfile).toBe("/repo/dist/seshi.exe");
     expect(argv).toContain("bun-windows-x64");
     expect(buildCommand({ root: "/repo", outfile: "out/x" }).outfile).toBe("/repo/out/x");
+  });
+});
+
+describe("the server build (F10.6)", () => {
+  it("starts from main-server.ts and leaves LanceDB's musl library out", () => {
+    const { argv } = buildCommand({
+      root: "/repo",
+      target: "bun-linux-x64-baseline",
+      server: true,
+    });
+    expect(argv[2]).toBe("/repo/apps/seshi/src/main-server.ts");
+    expect(argv.join(" ")).toContain("--external @lancedb/lancedb-*-musl");
+    expect(buildCommand({ root: "/repo" }).argv.join(" ")).not.toContain("lancedb");
+  });
+
+  it("names the target's LanceDB native package, and refuses one not installed", () => {
+    expect(lanceNativePackage("bun-linux-x64-baseline")).toBe("@lancedb/lancedb-linux-x64-gnu");
+    expect(lanceNativePackage("bun-linux-arm64")).toBe("@lancedb/lancedb-linux-arm64-gnu");
+    expect(lanceNativePackage("bun-darwin-arm64")).toBe("@lancedb/lancedb-darwin-arm64");
+    expect(lanceNativePackage(undefined, { platform: "linux", arch: "arm64" })).toBe(
+      "@lancedb/lancedb-linux-arm64-gnu",
+    );
+    expect(() => lanceNativePackage("bun-windows-x64")).toThrow(/Linux and macOS/);
+    // This machine's own package is what bun install put there.
+    if (process.platform !== "win32") expect(() => checkLanceNative(ROOT, undefined)).not.toThrow();
+    const other = process.arch === "arm64" ? "bun-darwin-x64" : "bun-darwin-arm64";
+    if (process.platform === "linux") {
+      expect(() => checkLanceNative(ROOT, other)).toThrow(/--os=darwin/);
+    }
   });
 });
 

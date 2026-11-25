@@ -103,6 +103,17 @@ export function assessWorker(
   return { worker: view, warnings };
 }
 
+/** Whether a worker is running against this bucket: its heartbeat is fresh (X7.5). */
+export async function workerRunning(instance: Instance): Promise<boolean> {
+  const found = await readHeartbeat(instance.store);
+  const { worker } = assessWorker(
+    found?.value ?? null,
+    instance.now(),
+    instance.config.worker.heartbeat_interval,
+  );
+  return worker.state === "running" || worker.state === "several";
+}
+
 export async function instanceStatus(instance: Instance): Promise<InstanceStatus> {
   const now = instance.now();
   const found = await readHeartbeat(instance.store);

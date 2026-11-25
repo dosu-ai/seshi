@@ -1,8 +1,10 @@
 # A shared search index on LanceDB: design
 
-Status: phases 1 and 2 are built (the seam, and `LanceIndex` behind it, not yet wired into
-config or the CLI); phase 3 is not. Where the build found this design wrong, the text says so
-and what was done instead ([prefixes](#query-semantics), [the binary](#config-and-deployment)).
+Status: phases 1 to 3 are built: the seam, `LanceIndex` behind it, and its deployment (config,
+the worker and read-only API instances, the server build, the CLI, `doctor`, docs). Where the
+build found this design wrong, the text says so and what was done instead
+([prefixes](#query-semantics), [the binary](#the-binary-the-server-build),
+[phase 3](#where-phase-3-departed)).
 It follows the scoping work in
 [dosu-ai/seshi#43](https://github.com/dosu-ai/seshi/pull/43), which compared ClickHouse, LanceDB
 and DuckLake with Moraine, and ran the probes this design relies on
@@ -81,8 +83,11 @@ then deployment. See the [plan](#plan).
   reading index metadata from the bucket.
 - `GET /v1/changes/all` is served from the index's copy of the feed, as today. Every instance
   can serve it, because the copy is in the shared index.
-- A deployment without a worker (cron-only, X7.1) runs the job from cron. Progress is in the
-  index's cursors, so a long first build spans several runs.
+- A deployment without a worker (cron-only, X7.1) runs the job from cron: `seshi sync search`,
+  one budgeted pass. It refuses while a worker's heartbeat is fresh, since `LanceIndex`
+  assumes one writer (concurrent commits conflict, and `meta.trash`'s read-modify-write would
+  lose entries). Progress is in the index's cursors, so a long first build spans several
+  runs.
 
 ## The seam
 
@@ -400,7 +405,7 @@ spike's prefix numbers above do not apply.
 - since and until: `coalesce(ts, session_updated)` in the range, as today.
 
 LanceDB takes the filter as SQL text, with no bound parameters. Every value goes through one
-`sqlString()` (`lance-query.ts`) that doubles quotes and refuses control characters, and `LIKE`
+`sqlString()` (`@seshi/lance`'s `query.ts`) that doubles quotes and refuses control characters, and `LIKE`
 values also escape `\`, `%` and `_` (with `ESCAPE '\'`). Backslashes are literal in LanceDB's
 SQL strings. Request values are checked before they get there (`checkRequest`), and the
 conformance suite searches with quotes, backslashes and `%` in every filter.
@@ -580,9 +585,22 @@ and how far it has read. The job's `backlog()` reports the same, so `seshi worke
 `GET /v1/admin/jobs` show it.
 
 **`seshi search --rebuild`**, with a server config: with SQLite it rebuilds this instance's
-file, as today. With LanceDB it writes `building_gen` and returns; the worker does the build,
-so there is never a second writer and the build survives the CLI exiting. `--wait` follows
-`--status` until the switch.
+file, as today. With LanceDB it writes one key, `rebuild_requested`, to `meta` and returns:
+the CLI opens the index read-only, and only the worker ever calls `reset()`, in `maintain()`
+after its next pass, so there is never a second writer and the build survives the CLI
+exiting. **`seshi search --scrub`** writes `scrub_requested` the same way. A worker clears a
+request only while it still holds the value it acted on, so one made while it works stays for
+the next pass. `--status` lists requests waiting. `--wait` follows the request, the build and
+the switch; when nothing has moved for 15 minutes (or 20 indexer intervals) and no worker's
+heartbeat is fresh, it gives up and points to `seshi workers status` and `seshi sync search`.
+
+A first draft of phase 3 had the CLI open a full writer and call `reset()` itself. Review
+found that this could delete the live index: `reset()` put the generation being built in the
+trash while the worker's `passDone()` was still building its text indexes (minutes, at scale),
+which then made that generation live, and the grace dropped it. Besides the request, two
+guards stay: `passDone()` reads `meta` again before it switches and never makes live a
+generation in the trash, and `emptyTrash()` never drops the live generation or a table `meta`
+names.
 
 ## Config and deployment
 
@@ -604,35 +622,121 @@ max_recent_rows = 100000        # sort = recent
 # secrets as { env } or { file }.
 ```
 
-- `backend` already exists as `z.enum(["sqlite"])` in `config/src/server/search.ts`. It gains
-  `"lance"`, and `searchSection` gains `lance`. `path` is ignored for LanceDB, and the config
-  check says so.
+- `backend` is `z.enum(["sqlite", "lance"])` in `config/src/server/search.ts`, and
+  `searchSection` has `lance` (`lanceSection`). `path` is ignored for LanceDB, and the config
+  check warns. `[search.lance]` refuses keys and endpoints without a `uri` (the default
+  location uses `[store]`'s), and keys of the wrong kind for the uri's scheme. The keys reach
+  LanceDB as `storageOptions` (`lanceLocation()` in `@seshi/instance`), with the same
+  environment fallbacks as the store (`S3_*`, `AWS_*`, `R2_*`, `AZURE_STORAGE_*`).
 - **Server-only.** In serverless mode, laptops ignore `search.backend` and `[search.lance]` in
   the shared config, as they ignore `search.path`. Each laptop's index is limited to its own
-  scope (F11.9), and laptops must not write a shared index.
+  scope (F11.9), and laptops must not write a shared index. (Serverless mode builds its own
+  SQLite `SearchService`, so it never reads `search.backend`.)
 - **Dependencies.** `@lancedb/lancedb` 0.41.0 and `apache-arrow` 21.2.0, pinned exactly, as
-  dependencies of `@seshi/search`, imported lazily by `lanceIndex()`. The hook's import check
-  (X3.3) keeps them off the capture path. The native library is 205 MB on linux-x64 with glibc
+  dependencies of **`@seshi/lance`** (`packages/ts/search/lance`, layer 4), the only package
+  that depends on them; `@seshi/search` does not. `lanceIndex()` imports them lazily, only the
+  server build's entry imports `@seshi/lance`, the layer check refuses it to anything below the
+  app, and the hook's import check (X3.3) keeps it and them off the capture path. The native library is 205 MB on linux-x64 with glibc
   and 171 MB with musl (250 MB on macOS arm64). DuckDB is not a dependency of this design.
-- **The binary.** The server image is the compiled `seshi` binary with no `node_modules`, and
-  `bun build --compile` bundles every module a dynamic import names, the native library
-  included: with `lanceIndex()` reachable from `main.ts`, the macOS arm64 binary went from 72
-  MB to 336 MB. Every release binary would carry it, laptops included. So phase 2 exports
-  `lanceIndex()` as `@seshi/search/lance`, which nothing in the app imports yet. Phase 3 must
-  choose: a server build that imports it (a second release binary, or only the image), or
-  loading LanceDB at run time from beside the binary, with the image installing its own
-  platform's package. Either way the image grows by about 205 MB.
-- **Installs.** `bun install` also installs LanceDB's optional embedding dependencies
-  (`@huggingface/transformers`, `onnxruntime-node`, `sharp`: about 330 MB on macOS arm64) in
-  the workspace. They are never imported, so no binary carries them; a server image that
-  installs LanceDB should leave them out (`--omit optional`, then add the platform package).
+- **The binary.** See [below](#the-binary-the-server-build): a server build carries LanceDB,
+  and laptops' binaries do not.
+- **Installs.** LanceDB lists optional embedding packages (`@huggingface/transformers` and
+  `openai`, and through transformers `onnxruntime-node`, `onnxruntime-web` and `sharp`: about
+  420 MB) that seshi never imports. The root `package.json`'s `overrides` point both at an
+  empty stand-in (`packages/ts/search/lance/no-embeddings`), so no install (laptops' checkouts,
+  CI, the image's build stage) fetches them. A Bun patch to LanceDB's `package.json` does not
+  work: Bun resolves dependencies from the registry's metadata in `bun.lock`, not from the
+  patched file. `--omit optional` does not either: LanceDB's native libraries are optional
+  dependencies too. No release channel installs the workspace, so users never fetched them;
+  this is for contributors, CI and the image build.
 - **Platforms.** The spike ran on linux-x64 under Bun 1.4.2, against GCS with the VM's metadata
-  credentials. Phase 2's conformance suite runs on a local folder in every CI run (linux-x64)
-  and on macOS arm64, and against S3 on rustfs 1.0.5 (CI's service, and locally); linux-arm64,
-  GCS from the suite, and Azure are not checked yet.
-- **`seshi doctor`** with a server config checks that the location is reachable and writable by
-  the worker, that `meta` names this deployment and schema, and how old `caught_up_at` is. It
-  warns when `events` holds more than 20M records ([risks](#risks)).
+  credentials. The conformance suite and the deploy test run on a local folder in every CI run
+  (linux-x64) and on macOS arm64, against S3 on rustfs 1.0.5 and against Azure on Azurite 3.38
+  (CI's services, and locally). The images and the Linux server binaries are checked on
+  linux-arm64 too.
+- **GCS.** LanceDB's GCS client has no endpoint option, and cannot write to fake-gcs-server
+  (1.49 to 1.56 all answer its uploads `400 invalid uploadType`; checked on 25 November 2026),
+  so the GCS variants of both suites run only against a real bucket (`SESHI_TEST_GCS_BUCKET`
+  with Application Default Credentials, no emulator), not in CI. A `gs://` index beside a
+  `[store] endpoint` that is not Google's, or `STORAGE_EMULATOR_HOST`, is refused, since the
+  index would otherwise go to Google while the store goes elsewhere. Without a key LanceDB
+  finds Application Default Credentials itself, as the store does; with
+  `service_account_key` it is passed on as `google_service_account_key`.
+- **Azure** reuses the store's own resolution (`resolveAzureAccess`): config, then
+  `AZURE_STORAGE_ACCOUNT`, `AZURE_STORAGE_KEY`, `AZURE_STORAGE_SAS_TOKEN` and the connection
+  string, then workload identity, whose variables are passed on for LanceDB's client to
+  exchange the federated token itself.
+- **`seshi doctor --config <seshi.toml>`** (a new mode: `doctor` was a laptop's check until
+  phase 3) checks that the index can be read (a `meta` naming another deployment fails here,
+  with LanceDB's error), that the worker's keys can write the location (a probe object written
+  and deleted through the store client with the same keys), whether the live generation was
+  written under another schema, and how old `caught_up_at` is. It warns when `events` holds
+  more than 20M records ([risks](#risks)).
+
+### The binary: the server build
+
+`bun build --compile` bundles every module an entry's imports name, LanceDB's native library
+included. Phase 2 kept `lanceIndex()` out of the app (as `@seshi/search/lance`). Phase 3 moved
+it to its own package, `@seshi/lance`, and chose a
+**server build**: `apps/seshi/src/main-server.ts` imports `@seshi/lance`, registers it
+(`provideLance()`), and runs the same `main()`. Nothing `main.ts` reaches imports it, so every
+binary built from `main.ts` is as before. `scripts/build-binary.ts --server` builds it, with
+`--external @lancedb/lancedb-*-musl`: LanceDB picks its library by libc at run time, which the
+bundler cannot decide, so it would otherwise carry the musl one too (172 MB more on x64).
+It also refuses to build when the target's native package is not installed (`bun install
+--os --cpu`), rather than ship a server with no LanceDB.
+
+It ships two ways, and the laptop channels (install scripts, npm) do not change:
+
+- **The image** (`apps/seshi/Dockerfile`): the build stage installs with `--os=linux
+  --cpu=<target>` and compiles with `--server`. A release's image takes the release's own
+  `seshi-server-linux-x64` and `-arm64` archives, checked against `SHA256SUMS`, as it took the
+  plain Linux archives before, so the image still ships exactly what the release published
+  (X2.2).
+- **The release** gains those two archives (`scripts/release/build.ts`, Linux only); the
+  release job installs with `--cpu='*'` so both find their native package.
+
+A binary without LanceDB refuses `backend = "lance"` when the instance is built
+(`LanceMissing`: "needs the server build of seshi…").
+
+The other option was loading LanceDB at run time from beside the binary (with
+`NAPI_RS_NATIVE_LIBRARY_PATH` for the native library, and `lance.ts` and `apache-arrow` as an
+external bundle). It keeps one binary, but splits the server across files the image must keep in
+step, and adds a load path no test of the compiled binary exercises; the server build is one
+more entry point through the existing build.
+
+Measured on 25 November 2026, macOS arm64 host, Bun 1.4.2 (what releases use) unless noted:
+
+| | macOS arm64 | linux-x64 | linux-arm64 |
+|---|---|---|---|
+| `seshi` (laptops; unchanged but for 50 KB of phase 3 code) | 71.9 MB | 91.0 MB (41.0 MB gz) | 90.9 MB (41.0 MB gz) |
+| `seshi` server build | 339.9 MB | 309.3 MB (119.6 MB gz) | 520.1 MB (166.2 MB gz) |
+| Image, before (plain binary) | | 203 MB | 225 MB |
+| Image, server build | | 421 MB | 654 MB |
+
+The images were built with `docker build` from the Dockerfile, whose `oven/bun:1.4-slim` stage
+was Bun 1.4.5 that day: its binaries are larger than 1.4.2's (118.4 MB plain, 336.6 MB and
+547.6 MB server). LanceDB's linux-arm64 native library is 426 MB, twice the x64 one (208 MB),
+so the arm64 image grows by 430 MB, not the 205 MB this design expected; stripping it is a
+possible follow-up. Both images were checked: `backend = "lance"` builds and serves an index
+on `/data`, and `seshi doctor --set search.backend=lance` passes, on arm64 natively and on
+amd64 under emulation.
+
+### Where phase 3 departed
+
+- **The image grows by 218 MB on amd64 and 430 MB on arm64** (above), not "about 205 MB".
+- **`doctor` had no server mode.** The design assumed `seshi doctor` with a server config;
+  `doctor` only checked a laptop's sessions. Phase 3 added `seshi doctor --config`.
+- **`seshi sync search`** is new: the design said a cron-only deployment "runs the job from
+  cron" but named no command.
+- **`--rebuild` and `--scrub` are requests the worker carries out** (`rebuild_requested`,
+  `scrub_requested` in `meta`), not writes from the CLI; see [rebuild](#rebuild) for the race
+  that a writer in the CLI caused.
+- **LanceDB is its own package**, `@seshi/lance` at `packages/ts/search/lance`, so
+  `@seshi/search` no longer depends on LanceDB or Arrow, and LanceDB's embedding packages are
+  overridden away (see Installs above).
+- **API responses** carry `capped: true` when the total is a lower bound, and the CLI prints
+  "at least N".
 
 **Tests.**
 
@@ -731,9 +835,8 @@ guess in the scoping PR.
 - **Cold reads from object storage.** On GCS the first query on a new connection took 1 to
   3 s, so instances keep their tables open. Each search reads from the bucket (100 to 250 ms
   for a rare word), and each read is a billed request.
-- **Image size.** About 205 MB more in the server image (linux-x64, glibc), and far more for
-  every release binary if phase 3 imports LanceDB from the shared build ([the
-  binary](#config-and-deployment)).
+- **Image size.** About 218 MB more in the amd64 image and 430 MB more in the arm64 one
+  ([the binary](#the-binary-the-server-build)); laptops' binaries carry none of it.
 - **SQL text in filters.** No bound parameters, so escaping is the only defence. One function
   does it, and the suite tests it with hostile values.
 
@@ -772,8 +875,8 @@ grouping searches is settled: [TypeScript](#duckdb-compared-in-the-spike).
 |---|---|---|
 | 0. Spike | Done, 24–25 November ([results](search-spike/README.md)): latency at 1M and 10M records on GCS, TypeScript against DuckDB for grouping, prefix checks, commit, `optimize()` and scrub times, and the image size. | Done |
 | 1. Seam | `IndexReader` and `IndexWriter`, `drain()` onto `commit()`, `MatchTree`, `state()`, `IndexUnavailable`, the `OpenIndex` factory, `SearchStatus.location`, `excerpt()`. SQLite only, with no change in behaviour; existing tests keep their assertions. | 4–6 days |
-| 2. Backend | Done: `LanceIndex` (`lance.ts`, `lance-query.ts`, `lanceIndex()` as `@seshi/search/lance`): tables and `meta`, `commit()`, the query compiler, filters and escaping, grouping, prefixes, `maintain()` with the scrub, generations. The conformance suite on SQLite, a folder and S3, and the crash tests. While a generation is being built, its tables are optimized every 100,000 committed rows, so the scalar indexes `mergeInsert`, `delete` and the lookups use keep up. Not done: gathering a first build's pages into 50,000-record commits (an `Indexer` change; see [ingest](#ingest)), so a first build still commits once per page. | 1.5 weeks |
-| 3. Deploy | The config schema (with `storageOptions` from `[store]`), `worker` placement for this backend and `readOnly` for API instances, how the binary carries LanceDB ([the binary](#config-and-deployment)), "at least N" from `capped`, `--status`, `--rebuild`, `--wait` and `--scrub` (`requestScrub()`), `doctor` checks, spec/layout.md's `search/` entry, and docs (`docs/search.md`, `docs/config.md`, F10.6–F10.12 in `design-decisions.html`). | 1 week |
+| 2. Backend | Done: `LanceIndex` (`lance.ts`, `lance-query.ts`, `lanceIndex()` as `@seshi/search/lance`; phase 3 moved them to `@seshi/lance`): tables and `meta`, `commit()`, the query compiler, filters and escaping, grouping, prefixes, `maintain()` with the scrub, generations. The conformance suite on SQLite, a folder and S3, and the crash tests. While a generation is being built, its tables are optimized every 100,000 committed rows, so the scalar indexes `mergeInsert`, `delete` and the lookups use keep up. Not done: gathering a first build's pages into 50,000-record commits (an `Indexer` change; see [ingest](#ingest)), so a first build still commits once per page. | 1.5 weeks |
+| 3. Deploy | Done: the config schema (`[search.lance]`, with `storageOptions` from `[store]` or its own keys), `worker` placement for this backend and `readOnly` for API instances, the server build ([the binary](#the-binary-the-server-build)), `capped` ("at least N"), `--status`, `--rebuild`, `--wait` and `--scrub`, `seshi sync search`, `seshi doctor --config`, spec/layout.md's `search/` entry, and docs. An end-to-end test runs a worker process from `main-server.ts` and a read-only API instance on a folder and on S3. Not done: gathering a first build's pages into 50,000-record commits (phase 2's note). | 1 week |
 | Later | `llm_calls` and DuckDB analytics; semantic search. | Separate decisions |
 
 Phase 1 is worth doing on its own: it makes the indexer's writes explicit and removes the

@@ -26,6 +26,8 @@ any other writer must follow the rules below.
     sources/<source_id>.json                              a source the admin API stored
     instances/<process>.json                              what one server process runs
   assembly/pending/<archive_id>                           a session with spans to assemble (X7.4)
+  search/<deployment>/                                    the shared search index (F10.9), with
+                                                          search.backend = "lance": derived
   owners/<owner>/
     .probe                                                a writer's write check
     sessions/<archive_id>/
@@ -44,6 +46,18 @@ The layout's own objects are exactly the keys named above; a reader ignores anyt
 under the prefix, and a writer never puts anything under these folders that is not. Readers
 of sessions need only `owners/`; the other folders are the server's working state, read
 through the API (X5.6).
+
+`search/` is a third kind, beside the store of record (`owners/`, `tokens/`, `seshi.json`) and
+the server's working state: **derived**. It holds the search index a server keeps there with
+`search.backend = "lance"` (F10.9): LanceDB tables (`meta.lance`, and per generation
+`<gen>/events.lance`, `sessions.lance`, `cursors.lance`, `seen.lance`, `changes.lance`), built
+from `owners/*/changes/` and the metadata and traces they name, and written only by the
+worker's indexer. Its layout is LanceDB's and the indexer's, not part of this contract: no
+reader outside seshi reads it, and it can be deleted at any time, at the cost of a rebuild
+during which search answers 503. It holds session text (redacted as stored, the
+retracted and redacted parts within `search.lance.scrub` of their removal), so the same people
+may read it as may read traces. `search.lance.uri` puts it elsewhere instead; with SQLite (the
+default) nothing is written here.
 
 ## Identifiers
 
@@ -520,10 +534,11 @@ bytes, and the sweep checks an object's age once more just before it deletes it.
   `continuation` to `head`; nothing once `status` is `redacted`). Indexing from the metadata
   rather than from the entry alone makes entries read twice, out of order, early, for a change
   that failed, or missing harmless.
-  The seshi server's search index is such a reader: an SQLite file on each instance's local
-  disk, never in the bucket, derived and rebuildable (X6.1). It also keeps a copy of the
-  entries it reads, from which the server serves every owner's feed as one (`GET
-  /v1/changes/all`); nothing about it is written to the bucket.
+  The seshi server's search index is such a reader, derived and rebuildable (X6.1): by
+  default an SQLite file on each instance's local disk, never in the bucket; with
+  `search.backend = "lance"`, one index under `search/` (above), written by the worker and read
+  by every API instance. It also keeps a copy of the entries it reads, from which the server
+  serves every owner's feed as one (`GET /v1/changes/all`).
 
 `seshi store check` (`checkStore` in `@seshi/store`) reads a prefix and reports where it breaks
 the rules on this page: the marker, every pointer against its schema, its key and its traces,

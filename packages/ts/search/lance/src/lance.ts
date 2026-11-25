@@ -1,6 +1,6 @@
 /** The search index on LanceDB (F10.6 to F10.12): one index for every API instance, in a folder
  * or a bucket, written by one indexer. docs/seshi/lancedb-search.md is the design. Imported only
- * through `lanceIndex()` (lance-open.ts), so LanceDB stays off every other path. */
+ * through `lanceIndex()` (index.ts), so LanceDB stays off every other path. */
 import {
   BooleanQuery,
   type Connection,
@@ -15,6 +15,26 @@ import {
   type Table,
 } from "@lancedb/lancedb";
 import type { ChangeEntry, EventRole, Labels, Visibility } from "@seshi/model";
+import {
+  type BackendHit,
+  type BackendMatch,
+  type BackendQuery,
+  type BackendResults,
+  type CommitResult,
+  excerpt,
+  type FeedPosition,
+  type FeedRow,
+  type IndexedSession,
+  type IndexOptions,
+  type IndexState,
+  type IndexStore,
+  IndexUnavailable,
+  indexText,
+  type LanceSettings,
+  type PageCommit,
+  SearchQueryError,
+  type SessionUpdate,
+} from "@seshi/search";
 import { changeStamp } from "@seshi/store";
 import {
   Table as ArrowTable,
@@ -29,22 +49,6 @@ import {
   Utf8,
 } from "apache-arrow";
 import {
-  type BackendHit,
-  type BackendMatch,
-  type BackendQuery,
-  type BackendResults,
-  type CommitResult,
-  type FeedPosition,
-  type FeedRow,
-  type IndexedSession,
-  type IndexOptions,
-  type IndexState,
-  type IndexStore,
-  IndexUnavailable,
-  type PageCommit,
-  type SessionUpdate,
-} from "./backend";
-import {
   compileMatch,
   type FtsQuery,
   filterSql,
@@ -54,9 +58,7 @@ import {
   sqlList,
   sqlString,
   sqlTime,
-} from "./lance-query";
-import { SearchQueryError } from "./query";
-import { excerpt, indexText } from "./snippet";
+} from "./query";
 
 /** The layout of the tables and `meta`: an index written under another is rebuilt beside it. */
 export const LANCE_SCHEMA = "seshi/search-lance/1";
@@ -73,33 +75,22 @@ export const COMMIT_STEPS = [
 ] as const;
 export type CommitStep = (typeof COMMIT_STEPS)[number];
 
-export interface LanceIndexOptions {
-  /** A folder, or a bucket URI LanceDB takes (`s3://`, `gs://`, `az://`). Never credentials:
-   * those go in `storageOptions`. */
-  uri: string;
-  storageOptions?: Record<string, string>;
-  /** How soon, in seconds, a reader sees another process's commit (5). 0 checks on every read. */
-  readConsistency?: number;
-  /** `optimize()` at most this often, in ms, and only after a commit (an hour). */
-  optimizeEvery?: number;
-  /** A due scrub at most this often, in ms (a day). */
-  scrubEvery?: number;
+export interface LanceIndexOptions extends LanceSettings {
   /** How long a replaced table or generation is kept for readers still on it, in ms (15
    * minutes). Also `optimize()`'s `cleanupOlderThan`. */
   grace?: number;
   /** While a generation is being built, `optimize()` its tables after this many rows are
    * committed (100,000), so their scalar indexes keep up. */
   buildOptimizeRows?: number;
-  /** Rows a relevance search scores at most (10,000). */
-  maxScoredRows?: number;
-  /** Rows a recent search reads at most (100,000). */
-  maxRecentRows?: number;
-  /** An API instance: it reads and never writes, not even `meta`. */
-  readOnly?: boolean;
   now?: () => number;
   /** Tests only: called before each step of `commit()`; a throw is a crash there. */
   beforeStep?: (step: CommitStep) => void | Promise<void>;
 }
+
+/** `meta` keys a process that does not write the index (the CLI) sets for the worker, which
+ * acts on them in `maintain()`: there is only ever one writer (F10.8). */
+const REBUILD_REQUESTED = "rebuild_requested";
+const SCRUB_REQUESTED = "scrub_requested";
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -268,6 +259,10 @@ interface Trash {
   /** One table of the generation; the whole generation when absent. */
   table?: string;
   at: number;
+}
+
+function trashed(meta: Map<string, string>): Trash[] {
+  return JSON.parse(meta.get("trash") ?? "[]") as Trash[];
 }
 
 function newGeneration(): string {
@@ -671,7 +666,20 @@ export class LanceIndex implements IndexStore {
     const readyAt = servable ? meta.get(gk(gen, "ready_at")) : undefined;
     const caughtUpAt = servable ? meta.get(gk(gen, "caught_up_at")) : undefined;
     const readThrough = building ? meta.get(gk(building, "feed_through")) : undefined;
+    const written = gen ? meta.get(gk(gen, "config")) : undefined;
+    const schema = written ? (JSON.parse(written) as GenConfig).schema : undefined;
+    const rebuild = meta.get(REBUILD_REQUESTED);
+    const scrub = meta.get(SCRUB_REQUESTED);
     return {
+      ...(rebuild !== undefined || scrub !== undefined
+        ? {
+            requested: {
+              ...(rebuild !== undefined ? { rebuild } : {}),
+              ...(scrub !== undefined ? { scrub } : {}),
+            },
+          }
+        : {}),
+      ...(schema !== undefined && schema !== LANCE_SCHEMA ? { stale_schema: schema } : {}),
       ...(readyAt !== undefined ? { ready_at: readyAt } : {}),
       ...(caughtUpAt !== undefined ? { caught_up_at: caughtUpAt } : {}),
       sessions: gen ? Number(meta.get(gk(gen, "sessions")) ?? 0) : 0,
@@ -1306,6 +1314,8 @@ export class LanceIndex implements IndexStore {
   async passDone(gen: string, at: string): Promise<boolean> {
     const meta = await this.meta(true);
     if (this.writing(meta) !== gen) return false;
+    // Never make live (or keep building) a generation already on its way out.
+    if (trashed(meta).some((t) => t.gen === gen && t.table === undefined)) return false;
     const values: Record<string, string> = { [gk(gen, "caught_up_at")]: at };
     if (meta.get(gk(gen, "ready_at")) === undefined) values[gk(gen, "ready_at")] = at;
     if (meta.get(gk(gen, "indexed")) === undefined) {
@@ -1317,15 +1327,22 @@ export class LanceIndex implements IndexStore {
     const sessions = await this.table(meta, gen, "sessions");
     values[gk(gen, "events")] = String(await events.countRows());
     values[gk(gen, "sessions")] = String(await sessions.countRows("removed = false"));
-    const old = this.live(meta);
-    if (this.building(meta) === gen) {
+    // Building the full-text indexes can take minutes: decide on `meta` as it is now.
+    const fresh = await this.meta(true);
+    if (
+      this.writing(fresh) !== gen ||
+      trashed(fresh).some((t) => t.gen === gen && t.table === undefined)
+    ) {
+      return false;
+    }
+    const old = this.live(fresh);
+    if (this.building(fresh) === gen) {
       // The rebuild has caught up: it goes live, and the old generation is kept a while for
       // readers still on it.
       values.active = gen;
       values.building = "";
       if (old !== undefined && old !== gen) {
-        const held = JSON.parse(meta.get("trash") ?? "[]") as Trash[];
-        values.trash = JSON.stringify([...held, { gen: old, at: this.now() }]);
+        values.trash = JSON.stringify([...trashed(fresh), { gen: old, at: this.now() }]);
       }
     }
     await this.setMeta(values);
@@ -1355,11 +1372,19 @@ export class LanceIndex implements IndexStore {
     await this.emptyTrash(meta, now - grace);
     if (signal.aborted) return;
     meta = await this.meta(true);
+    const rebuild = meta.get(REBUILD_REQUESTED);
+    if (rebuild !== undefined) {
+      // `seshi search --rebuild`: the worker starts it, so no second writer ever resets the
+      // index under a pass. The next pass builds the new generation.
+      await this.reset();
+      await this.clearRequests([[REBUILD_REQUESTED, rebuild]]);
+      return;
+    }
     const scrubbed = Date.parse(meta.get("scrubbed_at") ?? "") || 0;
-    const due = meta.get("scrub_due") !== undefined || meta.get("scrub_requested") !== undefined;
+    const due = meta.get("scrub_due") !== undefined || meta.get(SCRUB_REQUESTED) !== undefined;
     if (
       due &&
-      (meta.get("scrub_requested") !== undefined ||
+      (meta.get(SCRUB_REQUESTED) !== undefined ||
         now - scrubbed >= (this.options.scrubEvery ?? DAY))
     ) {
       await this.scrub(signal);
@@ -1405,9 +1430,47 @@ export class LanceIndex implements IndexStore {
     return out.join(",");
   }
 
-  /** Ask the indexer to scrub on its next pass (`seshi search --scrub`). */
+  /** Ask the worker to scrub on its next pass (`seshi search --scrub`). Works on a read-only
+   * index: it writes only the request. */
   async requestScrub(): Promise<void> {
-    await this.setMeta({ scrub_requested: new Date(this.now()).toISOString() });
+    await this.request(SCRUB_REQUESTED);
+  }
+
+  /** Ask the worker to start a rebuild beside the live generation on its next pass (`seshi
+   * search --rebuild`). Works on a read-only index: it writes only the request. */
+  async requestRebuild(): Promise<void> {
+    await this.request(REBUILD_REQUESTED);
+  }
+
+  private async request(key: string): Promise<void> {
+    if (this.metaTable === undefined) this.metaTable = await this.openMeta();
+    if (this.metaTable === undefined) {
+      throw new IndexUnavailable(
+        `there is no search index at ${this.location()} yet: the worker creates it on its first pass`,
+      );
+    }
+    await this.metaTable
+      .mergeInsert("key")
+      .whenMatchedUpdateAll()
+      .whenNotMatchedInsertAll()
+      .execute(
+        makeArrowTable([{ key, value: new Date(this.now()).toISOString() }], {
+          schema: SCHEMAS.meta,
+        }),
+      );
+    this.cached = undefined;
+  }
+
+  /** Delete these `meta` keys, each only while it still holds the value read: a request made
+   * while the work it asked for was running stays for the next pass. */
+  private async clearRequests(entries: [string, string | undefined][]): Promise<void> {
+    const held = entries.filter((e): e is [string, string] => e[1] !== undefined);
+    if (held.length === 0) return;
+    const where = held
+      .map(([key, value]) => `(key = ${sqlString(key)} AND value = ${sqlString(value)})`)
+      .join(" OR ");
+    await (this.metaTable as Table).delete(where);
+    this.cached = undefined;
   }
 
   /** Rewrite `events`, `sessions` and every other table that holds deleted rows, in the live
@@ -1416,6 +1479,12 @@ export class LanceIndex implements IndexStore {
    * versions, after the grace. */
   async scrub(signal: AbortSignal): Promise<void> {
     let meta = await this.meta(true);
+    // What asked for this scrub. A deletion or request that arrives while it runs leaves a
+    // new value, which stays for the next scrub.
+    const asked: [string, string | undefined][] = [
+      ["scrub_due", meta.get("scrub_due")],
+      [SCRUB_REQUESTED, meta.get(SCRUB_REQUESTED)],
+    ];
     const gens = [this.live(meta), this.building(meta)].filter((g): g is string => g !== undefined);
     for (const gen of gens) {
       for (const kind of KINDS) {
@@ -1454,15 +1523,32 @@ export class LanceIndex implements IndexStore {
       }
     }
     await this.setMeta({ scrubbed_at: new Date(this.now()).toISOString() });
-    await (this.metaTable as Table).delete("key IN ('scrub_due', 'scrub_requested')");
-    this.cached = undefined;
+    await this.clearRequests(asked);
   }
 
   private async emptyTrash(meta: Meta, before: number): Promise<void> {
-    const held = JSON.parse(meta.get("trash") ?? "[]") as Trash[];
+    const held = trashed(meta);
     const keep: Trash[] = [];
     let changed = false;
+    const live = this.live(meta);
+    const building = this.building(meta);
+    const values: Record<string, string> = {};
     for (const item of held) {
+      // Never drop what is served: the live generation, or a table `meta` names for the live
+      // generation or the one being built. Such an entry should not be here; it is forgotten.
+      const current =
+        item.table === undefined
+          ? item.gen === live
+          : (item.gen === live || item.gen === building) &&
+            KINDS.some((kind) => this.tableName(meta, item.gen, kind) === item.table);
+      if (current) {
+        changed = true;
+        continue;
+      }
+      // A generation being built that is in the trash is no longer built.
+      if (item.table === undefined && item.gen === building && item.at <= before) {
+        values.building = "";
+      }
       if (item.at > before) {
         keep.push(item);
         continue;
@@ -1485,7 +1571,7 @@ export class LanceIndex implements IndexStore {
       }
       changed = true;
     }
-    if (changed) await this.setMeta({ trash: JSON.stringify(keep) });
+    if (changed) await this.setMeta({ ...values, trash: JSON.stringify(keep) });
   }
 
   private forget(gen: string, name: string): void {
