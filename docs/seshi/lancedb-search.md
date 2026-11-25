@@ -53,7 +53,7 @@ then deployment. See the [plan](#plan).
 | F10.9 | The index lives under `search/` in the store's bucket by default, or at `search.lance.uri`. It is derived (X6.1), holds session text, and is written only by the indexer. spec/layout.md lists it. |
 | F10.10 | A feed page is written content tables first and the cursor last: for `events`, an indexed `mergeInsert` and then a `delete` of the old rows of replaced and removed sessions; for the others, one `mergeInsert` each. Writes are idempotent, so a crash part-way is repaired by reading the page again. |
 | F10.11 | A rebuild writes a new generation beside the live one and switches when it has caught up. Search keeps answering from the old one. Only the first build answers 503. |
-| F10.12 | Retracted and redacted text is hidden at the next commit, and leaves the bucket within `search.lance.scrub` (a day by default), when the worker rewrites tables that hold deleted rows. |
+| F10.12 | Retracted and redacted text is hidden at the next commit, and leaves the bucket within `search.lance.scrub` (a day by default), when the worker rewrites `events`, `sessions` and any other table that holds deleted rows. |
 
 ## How it runs
 
@@ -418,14 +418,20 @@ DuckDB for the same steps and kept TypeScript ([below](#duckdb-compared-in-the-s
    to 0.5 s; the recent page needs the larger one because its windows (step 3) fill from it.
 2. Records are grouped by session: `best` is the top `_score`, `hits` the number of records.
    `total` is the number of sessions. When the cap was reached, `total` is a lower bound:
-   `BackendResults.capped` says so, and phase 3 shows it in the response ("at least N"). Counts are not what search is mainly for, so this is
-   accepted.
+   `BackendResults.capped` says so, and phase 3 shows it in the response ("at least N").
+   Counts are not what search is mainly for, so this is accepted.
 3. Sessions are sorted by `best` or by `session_updated`, and `offset` and `limit` applied.
    Cursors stay offsets capped at `MAX_OFFSET`. The capped records are the best-scored ones,
    which is right for relevance but not for `sort = recent`. So when a recent search reaches
    the cap, it runs again with a window on `session_updated` going back from now (a day, a
-   week, a month, then everything), and stops at the first window that fills the page without
-   reaching the cap.
+   week, a month), and stops at the first window that fills the page without reaching the cap.
+   When none does, it takes the largest window that did not reach the cap and fills the page
+   from a search of the sessions before it; when even a day reaches the cap, that day. The
+   total is still a lower bound (`capped`). A continued session's earlier rows keep their
+   older `session_updated` (rewriting a long session's rows on every continuation would cost
+   too much), so it is placed by its newest matching row. Rows with no time of their own are
+   the exception: `since` and `until` read their session's time, as SQLite does, so a
+   continuation writes those again with the new one.
 4. One read of `sessions` for the page, and one read of `events` by `id` (which has a btree
    index; without it this read took 200 ms) for the best
    `matches` records of each session, with their text, role, tool name and time. `excerpt()`
@@ -525,10 +531,17 @@ tables in 12 minutes and built every index in 5.
   session (10 rows) from a 20,000-row table and ran `optimize()` twice: the deleted rows were
   still in the data file, hidden by a deletion file. LanceDB compacts a fragment only when
   enough of it is deleted, and 0.41.0's TypeScript API has no option to force it. So when a
-  page removes or replaces a session with `scrub: true`, the worker sets `scrub_due` in `meta`.
-  Once a day (`search.lance.scrub`), if a scrub is due, it rewrites each table that holds
-  deleted rows: it copies the live rows into a new table in the same generation, builds its
-  indexes, switches `meta` to it, and deletes the old table after the 15-minute grace. Indexing
+  page removes a session with `scrub: true`, or replaces one in a redaction backfill
+  (`SessionUpdate.scrub`, from the entry's `reason`), the worker sets `scrub_due` in `meta`.
+  The backfill needs the flag: it may rewrite a trace in place under the same hash, so the
+  page deletes nothing and `mergeInsert` updates the same rows, which leaves the old text in
+  a data file that only older table versions name, with no deleted rows to show for it. Once
+  a day (`search.lance.scrub`), if a scrub is due, the worker rewrites `events` and `sessions`
+  (always, for that reason) and any other table that holds deleted rows: it copies the live
+  rows into a new table in the same generation, builds its indexes once it is filled,
+  switches `meta` to it, and deletes the old table, with all its versions, after the
+  15-minute grace. A test checks the bytes: after the scrub and the grace, no file holds the
+  removed or redacted text. Indexing
   pauses during the scrub. On GCS the spike confirmed the problem (1,293 deleted rows before
   and after `optimize()`) and timed the scrub: 73 s at 1M records and 8 minutes at 10M, most
   of it the full-text indexes. The copy is fully indexed and compact, so a scrub also does what
@@ -552,8 +565,13 @@ needs it sooner runs `seshi search --scrub`, which asks the worker to scrub on i
    prefix is deleted after the grace.
 
 Every writer call names its generation, so a run that started before the reset writes only to
-the old one, and `commit()` returns `stale`. A new `INDEX_SCHEMA` or a change to
-`search.events` starts a rebuild the same way. A different `deployment` in `meta` is an error at
+the old one, and `commit()` returns `stale`. A new `INDEX_SCHEMA`, more `search.events` roles,
+or keeping the feed copy starts a rebuild the same way (the feed copy is served only from a
+generation that kept it). Fewer roles, or another scope, do not: the live generation holds
+records the new config leaves out (tool output after `tool_call` is dropped, say), so it stops
+answering at once. The new generation is made live from the start, searches wait for it as on
+a first build, and the old one is deleted after the grace. That is what SQLite does by wiping
+its file. A different `deployment` in `meta` is an error at
 start-up, and nothing is deleted: a shared location is not something to wipe on a config typo.
 
 **`seshi search --status`**, with a server config: the location (no credentials), the live
@@ -754,7 +772,7 @@ grouping searches is settled: [TypeScript](#duckdb-compared-in-the-spike).
 |---|---|---|
 | 0. Spike | Done, 24–25 November ([results](search-spike/README.md)): latency at 1M and 10M records on GCS, TypeScript against DuckDB for grouping, prefix checks, commit, `optimize()` and scrub times, and the image size. | Done |
 | 1. Seam | `IndexReader` and `IndexWriter`, `drain()` onto `commit()`, `MatchTree`, `state()`, `IndexUnavailable`, the `OpenIndex` factory, `SearchStatus.location`, `excerpt()`. SQLite only, with no change in behaviour; existing tests keep their assertions. | 4–6 days |
-| 2. Backend | Done: `LanceIndex` (`lance.ts`, `lance-query.ts`, `lanceIndex()` as `@seshi/search/lance`): tables and `meta`, `commit()`, the query compiler, filters and escaping, grouping, prefixes, `maintain()` with the scrub, generations. The conformance suite on SQLite, a folder and S3, and the crash tests. Not done: gathering a first build's pages into 50,000-record commits (an `Indexer` change; see [ingest](#ingest)). | 1.5 weeks |
+| 2. Backend | Done: `LanceIndex` (`lance.ts`, `lance-query.ts`, `lanceIndex()` as `@seshi/search/lance`): tables and `meta`, `commit()`, the query compiler, filters and escaping, grouping, prefixes, `maintain()` with the scrub, generations. The conformance suite on SQLite, a folder and S3, and the crash tests. While a generation is being built, its tables are optimized every 100,000 committed rows, so the scalar indexes `mergeInsert`, `delete` and the lookups use keep up. Not done: gathering a first build's pages into 50,000-record commits (an `Indexer` change; see [ingest](#ingest)), so a first build still commits once per page. | 1.5 weeks |
 | 3. Deploy | The config schema (with `storageOptions` from `[store]`), `worker` placement for this backend and `readOnly` for API instances, how the binary carries LanceDB ([the binary](#config-and-deployment)), "at least N" from `capped`, `--status`, `--rebuild`, `--wait` and `--scrub` (`requestScrub()`), `doctor` checks, spec/layout.md's `search/` entry, and docs (`docs/search.md`, `docs/config.md`, F10.6–F10.12 in `design-decisions.html`). | 1 week |
 | Later | `llm_calls` and DuckDB analytics; semantic search. | Separate decisions |
 

@@ -7,9 +7,19 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { connect, Index, MatchQuery, makeArrowTable, Operator } from "@lancedb/lancedb";
 import { BUILTIN_FORMATS, FormatRegistry } from "@seshi/formats";
-import type { EventRole } from "@seshi/model";
+import type { EventRole, Trace } from "@seshi/model";
 import { StoreSeshi, tombstone } from "@seshi/pipeline";
-import { FsStore, type Store } from "@seshi/store";
+import {
+  appendChange,
+  archiveId,
+  FsStore,
+  getBytes,
+  gunzipJson,
+  gzipJsonDeterministic,
+  keys,
+  readMetadata,
+  type Store,
+} from "@seshi/store";
 import { Field, Schema, Utf8 } from "apache-arrow";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
@@ -297,20 +307,44 @@ describe("LanceIndex", () => {
     expect(filesHolding(uri, "old words")).toEqual([]);
   });
 
-  it("rebuilds beside the live generation when the indexed roles change, and refuses another deployment", async () => {
+  it("rebuilds beside the live generation for a new role, and stops answering for a dropped one", async () => {
+    const reopen = async (events: readonly EventRole[]) => {
+      for (const index of opened.splice(0)) await index.close();
+      return open({}, { events });
+    };
     const first = await open();
     await commit(first, [replace(1, ["kept words"])]);
     await pass(first);
     const live = (await first.state()).generation;
+    // More roles: the live generation holds nothing it should not, and keeps answering.
+    const wider = await reopen([...EVENTS, "reasoning"]);
+    expect(await wider.state()).toMatchObject({ generation: live, building: {} });
+    expect(await names(wider, "kept")).toEqual(["s1"]);
+    // Fewer: it holds records no longer indexed, so searches wait for the new one, as for a
+    // first build, and the old one is dropped after the grace.
+    const narrower = await reopen(["user"]);
+    const state = await narrower.state();
+    expect(state.generation).not.toBe(live);
+    expect(state.ready_at).toBeUndefined();
+    expect(state.building).toBeUndefined();
+    expect(await names(narrower, "kept")).toEqual([]);
+    clock += 16 * 60_000;
+    await narrower.maintain(new AbortController().signal);
+    expect(filesHolding(uri, "kept words")).toEqual([]);
+    await expect(open({}, { deployment: "d2", events: ["user"] })).rejects.toThrow(
+      /belongs to deployment d1/,
+    );
+  });
+
+  it("starts answering from another scope only once it has caught up", async () => {
+    const first = await open({}, { scope: "alice" });
+    await commit(first, [replace(1, ["scoped words"])]);
+    await pass(first);
     await first.close();
     opened.length = 0;
-    const second = await open({}, { events: ["user"] });
-    const state = await second.state();
-    expect(state.generation).toBe(live);
-    expect(state.building?.generation).toBeDefined();
-    expect(await names(second, "kept")).toEqual(["s1"]);
-    await expect(open({}, { deployment: "d2" })).rejects.toThrow(/belongs to deployment d1/);
-    expect(await names(second, "kept")).toEqual(["s1"]);
+    const other = await open({}, { scope: "bob" });
+    expect((await other.state()).ready_at).toBeUndefined();
+    expect(await names(other, "scoped")).toEqual([]);
   });
 
   it("lets a read-only instance read, and never write", async () => {
@@ -345,8 +379,54 @@ describe("LanceIndex", () => {
       matches: 0,
     });
     expect(capped).toMatchObject({ total: 3, capped: true });
-    const recent = await names(index, "capword", { sort: "recent", limit: 2 });
-    expect(recent).toEqual(["s5", "s4"]);
+    const recent = await index.query({
+      match: tree("capword"),
+      viewer: LOCAL_VIEWER,
+      sort: "recent",
+      limit: 2,
+      offset: 0,
+      matches: 0,
+    });
+    expect(recent.hits.map((h) => h.session.session_id)).toEqual(["s5", "s4"]);
+    // The window's count stands in for a capped search: still a lower bound.
+    expect(recent).toMatchObject({ total: 2, capped: true });
+  });
+
+  it("fills a recent page from before the largest window that did not reach the cap", async () => {
+    const index = await open({ maxRecentRows: 3 });
+    const day = 86_400_000;
+    const ago = (ms: number) => new Date(clock - ms).toISOString();
+    await commit(index, [
+      replace(1, ["fillword"], { updated_at: ago(3600_000) }),
+      replace(2, ["fillword"], { updated_at: ago(3 * day) }),
+      // Older, and better scored: the capped search alone would hold only these.
+      replace(3, ["fillword fillword fillword"], { updated_at: ago(45 * day) }),
+      replace(4, ["fillword fillword fillword"], { updated_at: ago(50 * day) }),
+      replace(5, ["fillword fillword fillword"], { updated_at: ago(60 * day) }),
+      replace(6, ["fillword fillword fillword"], { updated_at: ago(70 * day) }),
+    ]);
+    await pass(index);
+    const page = await index.query({
+      match: tree("fillword"),
+      viewer: LOCAL_VIEWER,
+      sort: "recent",
+      limit: 4,
+      offset: 0,
+      matches: 0,
+    });
+    const found = page.hits.map((h) => h.session.session_id);
+    expect(found.slice(0, 2)).toEqual(["s1", "s2"]);
+    expect(found).toHaveLength(4);
+    expect(page.capped).toBe(true);
+  });
+
+  it("keeps a build's scalar indexes current before its text is indexed", async () => {
+    const index = await open({ buildOptimizeRows: 2 });
+    await commit(index, [replace(1, ["one"]), replace(2, ["two"]), replace(3, ["three"])]);
+    const events = await (await connect(join(uri, await index.generation()))).openTable("events");
+    expect((await events.indexStats("id_idx"))?.numUnindexedRows).toBe(0);
+    expect(await events.indexStats("text_idx")).toBeUndefined();
+    events.close();
   });
 
   it("scrubs removed text out of its files, and keeps answering", async () => {
@@ -361,6 +441,17 @@ describe("LanceIndex", () => {
     await index.maintain(new AbortController().signal);
     expect(await names(index, "zebra")).toEqual(["s2"]);
     expect(await names(index, "kee*")).toEqual(["s2"]);
+    // The copy is indexed as a whole, not row by row at the next optimize().
+    const db = await connect(join(uri, await index.generation()));
+    const copy = (await db.tableNames([])).find((n) => n.startsWith("events_")) as string;
+    const events = await db.openTable(copy);
+    for (const name of ["id_idx", "archive_id_idx", "text_idx", "text_prefix_idx"]) {
+      expect({ name, unindexed: (await events.indexStats(name))?.numUnindexedRows }).toEqual({
+        name,
+        unindexed: 0,
+      });
+    }
+    events.close();
     // The old tables go once the grace has passed.
     clock += 1;
     await index.maintain(new AbortController().signal);
@@ -399,7 +490,7 @@ describe("LanceIndex", () => {
     expect((await reader.state()).ready_at).toBeUndefined();
   });
 
-  describe("a crash part-way through a commit", () => {
+  describe("behind the indexer", () => {
     const formats = new FormatRegistry(BUILTIN_FORMATS);
     const line = (r: Record<string, unknown>) => `${JSON.stringify(r)}\n`;
     const PAD = ` ${"context ".repeat(260)}`;
@@ -417,6 +508,54 @@ describe("LanceIndex", () => {
       line({ role: "meta", source: "trajectory" }) +
       line({ role: "user", content: `${text}${PAD}`, timestamp: "2026-11-01T10:00:00Z" }) +
       line({ role: "assistant", content: "done", timestamp: "2026-11-01T10:00:00Z" });
+
+    it("scrubs the text a redaction backfill replaced out of its files", async () => {
+      await writer().ingest({
+        format: "trajectory",
+        session_id: "s1",
+        transcript: log("hunter2secret leaked"),
+      });
+      const location = join(dir, "redact");
+      const s = new SearchService({
+        store,
+        deployment: "d",
+        settings: { events: EVENTS },
+        open: lanceIndex({ uri: location, readConsistency: 0, scrubEvery: 0, grace: 0 }),
+      });
+      services.push(s);
+      await s.catchUp();
+      expect(filesHolding(location, "hunter2secret")).not.toEqual([]);
+      // The backfill rewrites the trace in place, under the same hash (F2.5): the index deletes
+      // nothing, it updates the same rows, and only the entry's reason says the old text must go.
+      const archive = archiveId("alice", "trajectory", "s1");
+      const hash = (await readMetadata(store, "alice", archive))?.head as string;
+      const key = keys.trace("alice", archive, hash);
+      const trace = gunzipJson<Trace>((await getBytes(store, key)) as Uint8Array);
+      trace.events = trace.events.map((e) =>
+        e.role === "user" ? { ...e, text: "[redacted] leaked" } : e,
+      );
+      await store.put(key, gzipJsonDeterministic(trace));
+      await appendChange(store, {
+        kind: "published",
+        at: new Date().toISOString(),
+        owner: "alice",
+        archive_id: archive,
+        session_id: "s1",
+        format: "trajectory",
+        content_hash: hash,
+        writer: { kind: "admin", principal: "admin", source_id: "redaction" },
+        owner_basis: "verified",
+        replace: true,
+        reason: "redacted",
+      });
+      await s.catchUp();
+      expect((await s.search(LOCAL_VIEWER, { q: "hunter2secret" })).total).toBe(0);
+      expect((await s.search(LOCAL_VIEWER, { q: "leaked" })).total).toBe(1);
+      // The pass after the scrub drops the tables it replaced.
+      await s.catchUp();
+      expect(filesHolding(location, "hunter2secret")).toEqual([]);
+      expect((await s.search(LOCAL_VIEWER, { q: "leaked" })).total).toBe(1);
+    });
 
     /** A service whose index fails once before `crashAt`, after `arm()`. */
     function service(location: string, crashAt?: CommitStep) {

@@ -169,6 +169,8 @@ interface ReadTrace {
 
 interface Replaced {
   content_hash: string;
+  /** The replace removed text that must leave the index's storage (a redaction backfill). */
+  scrub: boolean;
 }
 
 type Plan =
@@ -364,7 +366,9 @@ export class Indexer {
       const replaced = new Map<string, Replaced>();
       for (const e of named) {
         if (e.kind === "published" && e.replace === true && e.content_hash) {
-          replaced.set(e.archive_id, { content_hash: e.content_hash });
+          // A publish names a reason only for a redaction backfill (F2.5).
+          const scrub = e.reason !== undefined || replaced.get(e.archive_id)?.scrub === true;
+          replaced.set(e.archive_id, { content_hash: e.content_hash, scrub });
         }
       }
       const holds = await this.index.sessions(generation, owner, archives);
@@ -528,6 +532,7 @@ export class Indexer {
         replace: !extends_,
         ...(extends_ ? { base } : {}),
         read_at: readAt,
+        ...(replaced?.scrub ? { scrub: true } : {}),
       },
     };
   }

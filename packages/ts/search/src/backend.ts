@@ -61,6 +61,10 @@ export interface SessionUpdate {
    * several writers (API instances, a laptop in local mode) stamp it with clocks that
    * disagree. Omitted: 0, before any stamped read. */
   read_at?: number;
+  /** A replace whose earlier text must leave the index's storage, not only its results: a
+   * redaction backfill (F2.5). It may rewrite a trace in place under the same hash, so the
+   * index cannot tell from what it deletes. */
+  scrub?: boolean;
 }
 
 /** A query as the backend runs it: the match already parsed (each backend compiles the tree),
@@ -238,10 +242,12 @@ export interface IndexOptions {
   /** The deployment the index belongs to: one built for another is wiped. */
   deployment: string;
   /** Which event roles are indexed: an index built with others is wiped (it would miss some,
-   * or hold some it should not). */
+   * or hold some it should not). LanceDB keeps answering from an index built with fewer roles
+   * while it builds the new one beside it, and stops at once for one built with more. */
   events: readonly EventRole[];
   /** What the indexer admits, named (F11.9: a serverless laptop's search scope and owner): an
-   * index built under another scope is wiped, so it holds nothing this one would leave out. */
+   * index built under another scope is wiped (LanceDB: stops answering until the new one has
+   * caught up), so it holds nothing this one would leave out. */
   scope?: string;
   /** Keep a copy of every change entry read, for the cross-owner feed. An index built without
    * it is wiped when it is turned on, so the copy starts from every feed's start. */

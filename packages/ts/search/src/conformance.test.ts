@@ -282,6 +282,35 @@ describe.each(BACKENDS)("the search index on $name", (backend) => {
       expect((await query(index, "shared", { viewer: member("alice") })).total).toBe(1);
     });
 
+    it("filters a record with no time of its own by its session's time, as the session moves on", async () => {
+      const index = await open();
+      await indexed(index, replace(1, ["timeless words"]));
+      await page(index, [
+        {
+          session: session(1, {
+            traces: [H(101), H(201)],
+            updated_at: "2026-11-20T09:00:00.000Z",
+          }),
+          events: [
+            event("later words", {
+              content_hash: H(201),
+              timestamp: Date.parse("2026-11-20T09:00:00.000Z"),
+            }),
+          ],
+          replace: false,
+          base: [H(101)],
+          read_at: 2,
+        },
+      ]);
+      await indexed(index);
+      expect(
+        await names(index, "timeless", { since: Date.parse("2026-11-18T00:00:00.000Z") }),
+      ).toEqual(["s1"]);
+      expect(
+        await names(index, "timeless", { until: Date.parse("2026-11-15T00:00:00.000Z") }),
+      ).toEqual([]);
+    });
+
     it("refuses an update read before what it holds, and a continuation of other traces", async () => {
       const index = await open();
       await indexed(index, replace(1, ["newer words"], {}, 10));

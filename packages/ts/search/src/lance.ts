@@ -87,6 +87,9 @@ export interface LanceIndexOptions {
   /** How long a replaced table or generation is kept for readers still on it, in ms (15
    * minutes). Also `optimize()`'s `cleanupOlderThan`. */
   grace?: number;
+  /** While a generation is being built, `optimize()` its tables after this many rows are
+   * committed (100,000), so their scalar indexes keep up. */
+  buildOptimizeRows?: number;
   /** Rows a relevance search scores at most (10,000). */
   maxScoredRows?: number;
   /** Rows a recent search reads at most (100,000). */
@@ -114,6 +117,8 @@ const ms = (name: string, nullable = false) =>
 const i64 = (name: string) => new Field(name, new Int64(), false);
 
 type Kind = "events" | "sessions" | "cursors" | "seen" | "changes";
+/** The tables holding session text and metadata, which a scrub always rewrites. */
+const TEXT_KINDS: ReadonlySet<Kind> = new Set(["events", "sessions"]);
 const KINDS: readonly Kind[] = ["events", "sessions", "cursors", "seen", "changes"];
 
 const SCHEMAS: Record<Kind | "meta", Schema> = {
@@ -241,6 +246,17 @@ function configOf(options: IndexOptions): GenConfig {
 
 function sameConfig(a: string | undefined, b: GenConfig): boolean {
   return a === JSON.stringify(b);
+}
+
+/** Whether a generation built under `held` holds something `wanted` leaves out, so it must stop
+ * answering at once (as SQLite wipes its file), not only once a rebuild catches up: a role no
+ * longer indexed, or another scope (F11.9). */
+function narrows(held: GenConfig, wanted: GenConfig): boolean {
+  const roles = new Set(JSON.parse(wanted.events) as string[]);
+  return (
+    held.scope !== wanted.scope ||
+    (JSON.parse(held.events) as string[]).some((role) => !roles.has(role))
+  );
 }
 
 /** `meta`'s keys. Those of one generation are `<gen>.<key>`. */
@@ -451,6 +467,8 @@ export class LanceIndex implements IndexStore {
   private readonly gens = new Map<string, Promise<Connection>>();
   private readonly tables = new Map<string, Promise<Table>>();
   private cached: { meta: Meta; at: number } | undefined;
+  /** Rows committed to a generation being built since its tables were last optimized. */
+  private buildRows = 0;
 
   constructor(options: LanceIndexOptions, index: IndexOptions) {
     this.options = options;
@@ -501,13 +519,20 @@ export class LanceIndex implements IndexStore {
       if (building !== undefined) await this.drop(building, { building: "" });
       return;
     }
-    if (active === undefined) {
-      // The first build: it is live from the start, and searches wait for it.
+    const held = active === undefined ? undefined : meta.get(gk(active, "config"));
+    if (active === undefined || (held !== undefined && narrows(JSON.parse(held), this.expected))) {
+      // A first build, or a live generation holding what this config leaves out (a role no
+      // longer indexed, another scope): the new generation is live from the start, and
+      // searches wait for it. The old one is dropped after the grace.
       const gen = newGeneration();
       await this.createGeneration(gen);
-      await this.setMeta({ active: gen });
+      const old = [active, building]
+        .filter((g): g is string => g !== undefined)
+        .map((g) => ({ gen: g, at: this.now() }));
+      await this.trash(old, { active: gen, building: "" });
       return;
     }
+    // Otherwise the live generation keeps answering while the new one is built beside it.
     await this.reset();
   }
 
@@ -593,15 +618,25 @@ export class LanceIndex implements IndexStore {
     return table;
   }
 
-  private async createTable(gen: string, kind: Kind, name: string = kind): Promise<Table> {
+  /** A new table, with its scalar indexes unless they are to be built once it is filled. */
+  private async createTable(
+    gen: string,
+    kind: Kind,
+    name: string = kind,
+    indexed = true,
+  ): Promise<Table> {
     const db = await this.generationDb(gen);
     const table = await db.createEmptyTable(name, SCHEMAS[kind], { existOk: true });
+    if (indexed) await this.scalarIndexes(table, kind);
+    this.tables.set(`${gen}/${name}`, Promise.resolve(table));
+    return table;
+  }
+
+  private async scalarIndexes(table: Table, kind: Kind): Promise<void> {
     const have = new Set((await table.listIndices()).flatMap((i) => i.columns));
     for (const [column, config] of SCALAR_INDEXES[kind]) {
       if (!have.has(column)) await table.createIndex(column, { config: config() });
     }
-    this.tables.set(`${gen}/${name}`, Promise.resolve(table));
-    return table;
   }
 
   private async createGeneration(gen: string): Promise<void> {
@@ -691,8 +726,14 @@ export class LanceIndex implements IndexStore {
           ? (this.options.maxRecentRows ?? 100_000)
           : (this.options.maxScoredRows ?? 10_000);
       const want = q.offset + q.limit;
-      const search = async (window?: number) => {
-        const clauses = [where, window === undefined ? "" : `session_updated >= ${sqlTime(window)}`]
+      /** One search, its rows grouped: all of them, or those of sessions updated since `from`
+       * (or before `before`). */
+      const search = async (range: { from?: number; before?: number } = {}) => {
+        const clauses = [
+          where,
+          range.from === undefined ? "" : `session_updated >= ${sqlTime(range.from)}`,
+          range.before === undefined ? "" : `session_updated < ${sqlTime(range.before)}`,
+        ]
           .filter((c) => c !== "")
           .map((c) => `(${c})`);
         let query = events
@@ -713,14 +754,7 @@ export class LanceIndex implements IndexStore {
       };
       let found = await search();
       if (q.sort === "recent" && found.capped) {
-        // The capped rows are the best-scored, not the newest: look back from now instead.
-        for (const days of RECENT_WINDOWS) {
-          const windowed = await search(this.now() - days * DAY);
-          if (!windowed.capped && windowed.groups.size >= want) {
-            found = windowed;
-            break;
-          }
-        }
+        found = { ...(await this.recent(search, want)), capped: true };
       }
       const sorted = [...found.groups.values()].sort(
         q.sort === "recent"
@@ -731,6 +765,34 @@ export class LanceIndex implements IndexStore {
       const hits = await this.hitsOf(meta, gen, page, q);
       return { total: found.groups.size, hits, ...(found.capped ? { capped: true } : {}) };
     });
+  }
+
+  /** A recent search that reached the cap: its rows are the best-scored, not the newest. Look
+   * back from now a day, a week, then a month, and take the first window that holds the page
+   * without reaching the cap. When none does, take the largest window that did not reach it
+   * and fill the page from the sessions before it; when even a day reaches it, that day. The
+   * total is then a lower bound, as for any capped search. */
+  private async recent(
+    search: (range?: { from?: number; before?: number }) => Promise<{
+      groups: Map<string, Group>;
+      capped: boolean;
+    }>,
+    want: number,
+  ): Promise<{ groups: Map<string, Group> }> {
+    let whole: { groups: Map<string, Group>; from: number } | undefined;
+    for (const days of RECENT_WINDOWS) {
+      const from = this.now() - days * DAY;
+      const windowed = await search({ from });
+      if (windowed.capped) {
+        if (whole === undefined) return windowed;
+        break;
+      }
+      whole = { groups: windowed.groups, from };
+      if (windowed.groups.size >= want) return windowed;
+    }
+    const newest = whole as { groups: Map<string, Group>; from: number };
+    const older = await search({ before: newest.from });
+    return { groups: merged(newest.groups, older.groups) };
   }
 
   /** Group matching records by session: the best score, the count, and the best few. */
@@ -841,6 +903,9 @@ export class LanceIndex implements IndexStore {
       const gen = this.live(meta);
       const through = gen ? meta.get(gk(gen, "feed_through")) : undefined;
       if (gen === undefined || through === undefined) return null;
+      // A generation built without the copy answers nothing until one with it catches up.
+      const config = meta.get(gk(gen, "config"));
+      if (config === undefined || (JSON.parse(config) as GenConfig).feed !== true) return null;
       const last = sqlString(changeStamp(through));
       let where = `stamp <= ${last}`;
       if (after) {
@@ -1009,6 +1074,8 @@ export class LanceIndex implements IndexStore {
     /** Sessions whose earlier rows go: all of them, or all but these traces. */
     const doomed: { archive: string; keep: string[] }[] = [];
     const restamp: IndexedSession[] = [];
+    /** Continued sessions whose earlier rows without a time of their own take its new one. */
+    const retimed: IndexedSession[] = [];
     let removed = 0;
     let scrub = false;
     for (const update of page.updates) {
@@ -1028,6 +1095,9 @@ export class LanceIndex implements IndexStore {
       }
       const rows = this.eventRows(update);
       eventRows.push(...rows);
+      // A redaction backfill: the text it replaced, even rewritten in place under the same
+      // ids, stays in the files until a scrub.
+      if (update.scrub) scrub = true;
       if (update.replace || !existing || existing.removed) {
         doomed.push({
           archive: session.archive_id,
@@ -1035,6 +1105,8 @@ export class LanceIndex implements IndexStore {
         });
       } else if (copiedChanged(existing.session, session)) {
         restamp.push(session);
+      } else if (existing.session.updated_at !== session.updated_at) {
+        retimed.push(session);
       }
       const row = sessionRow(session, readAt);
       sessionRows.push(row);
@@ -1075,23 +1147,38 @@ export class LanceIndex implements IndexStore {
       sessions: await this.table(meta, gen, "sessions"),
     };
     // A continuation that changes a copied field (visibility, branch, labels, …) writes the
-    // session's earlier rows again with it.
+    // session's earlier rows again with it. One that only moves the session's time writes
+    // again only the rows that have no time of their own: `since` and `until` read their
+    // session's time, as SQLite does. The others keep their older `session_updated`, which
+    // only orders recent searches.
+    const fresh = new Set(eventRows.map((r) => r.id));
+    const again = (row: Record<string, unknown>, session: IndexedSession) => {
+      if (fresh.has(row.id)) return;
+      eventRows.push({
+        ...Object.fromEntries(SCHEMAS.events.fields.map((f) => [f.name, row[f.name]])),
+        ts: row.ts === null ? null : new Date(num(row.ts)),
+        models: list(row.models),
+        labels: list(row.labels),
+        ...copied(session),
+      });
+    };
     for (const session of restamp) {
       const earlier = await tables.events
         .query()
         .where(`owner = ${sqlString(owner)} AND archive_id = ${sqlString(session.archive_id)}`)
         .toArray();
-      const fields = copied(session);
-      const fresh = new Set(eventRows.map((r) => r.id));
-      for (const row of earlier) {
-        if (fresh.has(row.id)) continue;
-        eventRows.push({
-          ...Object.fromEntries(SCHEMAS.events.fields.map((f) => [f.name, row[f.name]])),
-          ts: row.ts === null ? null : new Date(num(row.ts)),
-          models: list(row.models),
-          labels: list(row.labels),
-          ...fields,
-        });
+      for (const row of earlier) again(row, session);
+    }
+    if (retimed.length > 0) {
+      const sessions = new Map(retimed.map((s) => [s.archive_id, s]));
+      const timeless = await tables.events
+        .query()
+        .where(
+          `owner = ${sqlString(owner)} AND archive_id IN (${sqlList([...sessions.keys()])}) AND ts IS NULL`,
+        )
+        .toArray();
+      for (const row of timeless) {
+        again(row, sessions.get(String(row.archive_id)) as IndexedSession);
       }
     }
     // 2. events: insert and update, through the btree on id.
@@ -1194,6 +1281,16 @@ export class LanceIndex implements IndexStore {
           .execute(makeArrowTable([{ owner, cursor: page.cursor }], { schema: SCHEMAS.cursors }));
       }
     }
+    // A generation still being built has only its scalar indexes, and maintain() runs only
+    // after a full pass, which a long first build may not finish for hours: without this, each
+    // page's mergeInsert, delete and lookups would scan every row written since the build began.
+    if (meta.get(gk(gen, "indexed")) === undefined) {
+      this.buildRows += eventRows.length + sessionRows.length + page.seen.length;
+      if (this.buildRows >= (this.options.buildOptimizeRows ?? 100_000)) {
+        this.buildRows = 0;
+        await this.optimize(meta, gen);
+      }
+    }
     return { stale: false, refused, removed };
   }
 
@@ -1268,23 +1365,37 @@ export class LanceIndex implements IndexStore {
       await this.scrub(signal);
       return;
     }
-    const gen = this.live(meta);
-    if (gen === undefined || meta.get(gk(gen, "indexed")) === undefined) return;
-    const optimized = Date.parse(meta.get(gk(gen, "optimized_at")) ?? "") || 0;
-    if (now - optimized < (this.options.optimizeEvery ?? HOUR)) return;
-    const versions = await this.versions(meta, gen);
-    if (meta.get(gk(gen, "optimized_versions")) === versions) return;
+    // The live generation, and one being built: a build's scalar indexes need it too.
+    const gens = [this.live(meta), this.building(meta)].filter((g): g is string => g !== undefined);
+    let optimized = false;
+    for (const gen of gens) {
+      const last = Date.parse(meta.get(gk(gen, "optimized_at")) ?? "") || 0;
+      if (now - last < (this.options.optimizeEvery ?? HOUR)) continue;
+      const versions = await this.versions(meta, gen);
+      if (meta.get(gk(gen, "optimized_versions")) === versions) continue;
+      if (!(await this.optimize(meta, gen, signal))) return;
+      await this.setMeta({
+        [gk(gen, "optimized_at")]: new Date(now).toISOString(),
+        [gk(gen, "optimized_versions")]: await this.versions(meta, gen),
+      });
+      optimized = true;
+    }
+    if (optimized) {
+      await (this.metaTable as Table).optimize({ cleanupOlderThan: new Date(now - grace) });
+    }
+  }
+
+  /** `optimize()` every table of `gen`: compaction, new rows into the indexes, old versions
+   * pruned. False when aborted part-way. */
+  private async optimize(meta: Meta, gen: string, signal?: AbortSignal): Promise<boolean> {
+    const grace = this.options.grace ?? 15 * MINUTE;
     for (const kind of KINDS) {
-      if (signal.aborted) return;
+      if (signal?.aborted) return false;
       await (await this.table(meta, gen, kind)).optimize({
-        cleanupOlderThan: new Date(now - grace),
+        cleanupOlderThan: new Date(this.now() - grace),
       });
     }
-    await (this.metaTable as Table).optimize({ cleanupOlderThan: new Date(now - grace) });
-    await this.setMeta({
-      [gk(gen, "optimized_at")]: new Date(now).toISOString(),
-      [gk(gen, "optimized_versions")]: await this.versions(meta, gen),
-    });
+    return true;
   }
 
   /** The tables' versions: what changes when anything was committed. */
@@ -1299,9 +1410,10 @@ export class LanceIndex implements IndexStore {
     await this.setMeta({ scrub_requested: new Date(this.now()).toISOString() });
   }
 
-  /** Rewrite every table that holds deleted rows, in the live generation and one being built,
-   * so deleted text leaves the storage (F10.12): copy the live rows into a new table, index
-   * it, switch `meta` to it, and drop the old one after the grace. */
+  /** Rewrite `events`, `sessions` and every other table that holds deleted rows, in the live
+   * generation and one being built, so deleted text leaves the storage (F10.12): copy the live
+   * rows into a new table, index it, switch `meta` to it, and drop the old one, with all its
+   * versions, after the grace. */
   async scrub(signal: AbortSignal): Promise<void> {
     let meta = await this.meta(true);
     const gens = [this.live(meta), this.building(meta)].filter((g): g is string => g !== undefined);
@@ -1310,9 +1422,14 @@ export class LanceIndex implements IndexStore {
         if (signal.aborted) return;
         meta = await this.meta(true);
         const old = await this.table(meta, gen, kind);
-        if ((await old.stats()).numDeletedRows === 0) continue;
+        // `events` and `sessions` hold session text and metadata: always rewritten, since an
+        // update by mergeInsert leaves the old text in a file only older versions name, with
+        // no deleted rows to show for it. The others only when they hold deleted rows.
+        if (!TEXT_KINDS.has(kind) && (await old.stats()).numDeletedRows === 0) continue;
         const name = `${kind}_${Date.now().toString(36)}${crypto.randomUUID().slice(0, 6)}`;
-        const copy = await this.createTable(gen, kind, name);
+        // Indexed once filled: indexes made on the empty table would leave every copied row
+        // unindexed until the next optimize().
+        const copy = await this.createTable(gen, kind, name, false);
         let batch: RecordBatch[] = [];
         let rows = 0;
         const flush = async () => {
@@ -1329,6 +1446,7 @@ export class LanceIndex implements IndexStore {
           if (rows >= COPY_BATCH) await flush();
         }
         await flush();
+        await this.scalarIndexes(copy, kind);
         if (meta.get(gk(gen, "indexed")) !== undefined) await this.textIndexes(copy, kind);
         await this.trash([{ gen, table: this.tableName(meta, gen, kind), at: this.now() }], {
           [gk(gen, `table.${kind}`)]: name,
@@ -1376,6 +1494,27 @@ export class LanceIndex implements IndexStore {
     this.tables.delete(key);
     table?.then((t) => t.close()).catch(() => undefined);
   }
+}
+
+/** Two searches' groups over disjoint rows, as one. */
+function merged(a: Map<string, Group>, b: Map<string, Group>): Map<string, Group> {
+  const out = new Map(a);
+  for (const [key, group] of b) {
+    const held = out.get(key);
+    out.set(
+      key,
+      held === undefined
+        ? group
+        : {
+            key,
+            best: Math.max(held.best, group.best),
+            hits: held.hits + group.hits,
+            updated: Math.max(held.updated, group.updated),
+            top: [...held.top, ...group.top],
+          },
+    );
+  }
+  return out;
 }
 
 /** The last row for each key: a page may write one session twice (an update, then a
