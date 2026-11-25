@@ -2,9 +2,9 @@
 # `seshi` with Bun for the target platform, and the final image holds that binary and nothing
 # of Bun, Node or node_modules. It is the server build (`build-binary.ts --server`,
 # apps/seshi/src/main-server.ts): the same seshi with the LanceDB search backend
-# (`[search] backend = "lance"`, F10.6), whose native library adds about 200 MB that laptops'
-# binaries do not carry. Build from the repository root, since the app depends on the
-# workspace packages beside it:
+# (`[search] backend = "lance"`, F10.6), whose native library (stripped by the build) adds
+# about 180 MB on amd64 and 280 MB on arm64 that laptops' binaries do not carry. Build from
+# the repository root, since the app depends on the workspace packages beside it:
 #   docker build -f apps/seshi/Dockerfile -t seshi .
 # Multi-platform builds (linux/amd64, linux/arm64) cross-compile on the build machine, so no
 # emulation runs the build.

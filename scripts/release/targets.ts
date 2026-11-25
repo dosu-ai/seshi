@@ -48,7 +48,7 @@ export const TARGETS: readonly Target[] = [
 ];
 
 /** The server build's archive for `target` (F10.6): the same seshi with the LanceDB search
- * backend, about 200 MB larger, which is why laptops' binaries do not carry it. Linux only:
+ * backend, 180 MB (x64) to 280 MB (arm64) larger, which is why laptops' binaries do not carry it. Linux only:
  * it is what the container image ships. Not an npm package, and not what the install scripts
  * fetch. */
 export function serverAsset(target: Target): string | undefined {

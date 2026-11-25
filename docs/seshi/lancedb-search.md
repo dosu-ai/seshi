@@ -705,26 +705,60 @@ external bundle). It keeps one binary, but splits the server across files the im
 step, and adds a load path no test of the compiled binary exercises; the server build is one
 more entry point through the existing build.
 
+**Stripping LanceDB's library.** LanceDB publishes its Linux libraries unstripped: on
+linux-arm64 the symbol table (`.symtab` and `.strtab`, which `dlopen` never reads; it uses
+`.dynsym`) is 145 of the library's 426 MB, on linux-x64 36 of 215 MB. The server build strips
+the target's library before compiling (`stripLanceNative` in `scripts/build-binary.ts`, which
+`--server` and `scripts/release/build.ts` both call), so the Dockerfile's build stage, the
+`binaries` job and the release job all embed the stripped one. It drops the symbol table, its
+strings and any `.debug*` section and copies every loaded segment byte for byte; it is a few
+lines of TypeScript rather than `strip`, because the release job builds the arm64 server on an
+x64 runner (and a developer may build both on a Mac), where no `strip` reads the other
+architecture's ELF. Its output has the sections, segments and dynamic symbols of `strip
+--strip-all`'s, within 24 bytes of its size (`strip` also trims the section-name table). The
+file is replaced where `bun install` put it, by a rename (Bun's cache, which node_modules may
+hard-link, is untouched); the bundler has no hook to embed a different file, and a stripped
+library loads the same, so a second build finds nothing to do.
+
+The rest of the gap between the architectures is how LanceDB builds them (`npm-publish.yml` at
+0.41): linux-x64 with fat LTO and one codegen unit, linux-arm64 with thin LTO and 16, because
+fat LTO ran out of memory on a 32 GiB runner. Stripped, the arm64 library is still 281 MB
+against 179 MB on x64 (443,759 functions in its symbol table against 143,487). Building it from
+source with fat LTO would likely bring it near x64's size, about 100 MB less again, but takes
+a runner with more than 32 GiB of memory and well over an hour per release, so it is a proposal,
+not done. Asking LanceDB to strip its release libraries (`strip = "symbols"`) would make the
+step above unnecessary.
+
+Two other ways were measured or ruled out. Bun cannot compress what `--compile` embeds (its
+only related flag, `--asset`, embeds files as they are). Shipping the library beside the binary
+(`NAPI_RS_NATIVE_LIBRARY_PATH`) moves the bytes to another layer without removing any, so it
+does not shrink the image, and it brings back the split the server build avoided.
+
 Measured on 25 November 2026, macOS arm64 host, Bun 1.4.2 (what releases use) unless noted:
 
 | | macOS arm64 | linux-x64 | linux-arm64 |
 |---|---|---|---|
 | `seshi` (laptops; unchanged but for 50 KB of phase 3 code) | 71.9 MB | 91.0 MB (41.0 MB gz) | 90.9 MB (41.0 MB gz) |
-| `seshi` server build | 339.9 MB | 309.3 MB (119.6 MB gz) | 520.1 MB (166.2 MB gz) |
+| `seshi` server build, LanceDB unstripped | 339.9 MB | 308.9 MB (119.4 MB gz) | 519.8 MB (166.0 MB gz) |
+| `seshi` server build, stripped | (not stripped) | 273.0 MB (114.9 MB gz) | 374.9 MB (147.4 MB gz) |
 | Image, before (plain binary) | | 203 MB | 225 MB |
-| Image, server build | | 421 MB | 654 MB |
+| Image, server build, unstripped | | 420 MB (181 MB gz) | 654 MB (230 MB gz) |
+| Image, server build, stripped | | 384 MB (176 MB gz) | 509 MB (208 MB gz) |
 
 The images were built with `docker build` from the Dockerfile, whose `oven/bun:1.4-slim` stage
-was Bun 1.4.5 that day: its binaries are larger than 1.4.2's (118.4 MB plain, 336.6 MB and
-547.6 MB server). LanceDB's linux-arm64 native library is 426 MB, twice the x64 one (208 MB),
-so the arm64 image grows by 430 MB, not the 205 MB this design expected; stripping it is a
-possible follow-up. Both images were checked: `backend = "lance"` builds and serves an index
-on `/data`, and `seshi doctor --set search.backend=lance` passes, on arm64 natively and on
-amd64 under emulation.
+was Bun 1.4.5 that day: its binaries are larger than 1.4.2's (118.4 MB plain; 336.3 MB and
+547.2 MB server unstripped, 300.3 MB and 402.3 MB stripped). An image's gz is `docker save`
+through `gzip -1`, about what a pull transfers. A symbol table compresses well, so stripping
+saves far more on disk than in a download: 36 and 145 MB on disk, 5 and 22 MB pulled. So the
+server build adds 181 MB to the amd64 image and 284 MB to the arm64 one. Both images were
+checked: `backend = "lance"` builds and serves an index on `/data`, and `seshi doctor --set
+search.backend=lance` passes, on arm64 natively and on amd64 under emulation; the stripped
+server binaries also indexed an uploaded session and found it with `seshi search`.
 
 ### Where phase 3 departed
 
-- **The image grows by 218 MB on amd64 and 430 MB on arm64** (above), not "about 205 MB".
+- **The image grows by 181 MB on amd64 and 284 MB on arm64** (above), not "about 205 MB": 218
+  and 430 MB until the server build stripped LanceDB's library.
 - **`doctor` had no server mode.** The design assumed `seshi doctor` with a server config;
   `doctor` only checked a laptop's sessions. Phase 3 added `seshi doctor --config`.
 - **`seshi sync search`** is new: the design said a cron-only deployment "runs the job from
@@ -835,8 +869,9 @@ guess in the scoping PR.
 - **Cold reads from object storage.** On GCS the first query on a new connection took 1 to
   3 s, so instances keep their tables open. Each search reads from the bucket (100 to 250 ms
   for a rare word), and each read is a billed request.
-- **Image size.** About 218 MB more in the amd64 image and 430 MB more in the arm64 one
-  ([the binary](#the-binary-the-server-build)); laptops' binaries carry none of it.
+- **Image size.** About 181 MB more in the amd64 image and 284 MB more in the arm64 one, with
+  LanceDB's library stripped ([the binary](#the-binary-the-server-build)); laptops' binaries
+  carry none of it. A fat-LTO arm64 build of LanceDB would likely save about 100 MB more.
 - **SQL text in filters.** No bound parameters, so escaping is the only defence. One function
   does it, and the suite tests it with hostile values.
 

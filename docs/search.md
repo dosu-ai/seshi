@@ -149,7 +149,7 @@ scrub = "24h"
   Storage: LanceDB cannot reach a GCS emulator or another endpoint, so a `gs://` store with
   one (or `STORAGE_EMULATOR_HOST`) needs `search.lance.uri` set to a folder or another
   bucket.
-- **Which binary.** LanceDB's native library is about 200 MB (430 MB on Linux arm64), so it is
+- **Which binary.** LanceDB's native library is about 180 MB (280 MB on Linux arm64), so it is
   only in the **server build**: the container image (`ghcr.io/dosu-ai/seshi`) and the
   `seshi-server-linux-x64` and `-arm64` release archives. The binaries laptops install (the
   install scripts, npm) do not carry it, and a server started from one with `backend = "lance"`
