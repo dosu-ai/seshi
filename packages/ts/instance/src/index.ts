@@ -77,4 +77,5 @@ export {
   type JobStatus,
   SERVERLESS_BUCKET_WARNING,
   type WorkerView,
+  workerRunning,
 } from "./status";

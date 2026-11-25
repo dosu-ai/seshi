@@ -285,10 +285,10 @@ describe.each(VARIANTS)("LanceDB search served from $name", (variant) => {
         return r && r.total >= 2 ? r : undefined;
       }, "searches from the new generation");
 
-      // A deployment that runs the worker's jobs from cron runs the same pass (X7.1).
-      const pass = await seshi(["sync", "search", "--config", configPath, "--json"], env);
-      expect(pass.code, pass.err).toBe(0);
-      expect(JSON.parse(pass.out)).toMatchObject({ more: false });
+      // A second indexer beside the running worker is refused: one writer (F10.8).
+      const refused = await seshi(["sync", "search", "--config", configPath, "--json"], env);
+      expect(refused.code).toBe(3);
+      expect(JSON.parse(refused.err)).toMatchObject({ error: { code: "worker_running" } });
 
       const doctor = await seshi(["doctor", "--config", configPath, "--json"], env);
       expect(doctor.code, doctor.out + doctor.err).toBe(0);
@@ -302,6 +302,29 @@ describe.each(VARIANTS)("LanceDB search served from $name", (variant) => {
         // The index is in the bucket, under search/<deployment>/ (F10.9).
         expect(readdirSync(join(dir, "bucket", "search"))).toEqual([api.deployment]);
       }
+
+      // With the worker gone, a deployment that runs its jobs from cron runs the same pass
+      // (X7.1), and carries out a rebuild asked for meanwhile.
+      worker.kill();
+      await worker.exited;
+      const live = JSON.parse(
+        (await seshi(["search", "--status", "--config", configPath, "--json"], env)).out,
+      ).generation;
+      const asked = await seshi(["search", "--rebuild", "--config", configPath, "--json"], env);
+      expect(JSON.parse(asked.out)).toMatchObject({ rebuild: "requested" });
+      const pass = await until(async () => {
+        const run = await seshi(["sync", "search", "--config", configPath, "--json"], env);
+        return run.code === 0 ? run : undefined;
+      }, "the worker's heartbeat to go stale");
+      expect(JSON.parse(pass.out)).toMatchObject({ caught_up: true });
+      // The pass took the request and started the rebuild; the next one finishes it.
+      await seshi(["sync", "search", "--config", configPath, "--json"], env);
+      const rebuiltByCron = JSON.parse(
+        (await seshi(["search", "--status", "--config", configPath, "--json"], env)).out,
+      );
+      expect(rebuiltByCron.generation).not.toBe(live);
+      expect(rebuiltByCron).toMatchObject({ ready: true });
+      expect(rebuiltByCron.requested).toBeUndefined();
     },
     120_000,
   );

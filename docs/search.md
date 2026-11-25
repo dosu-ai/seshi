@@ -153,15 +153,18 @@ scrub = "24h"
   refuses to start, saying so.
 - **Who writes.** Only an instance with the worker role indexes; give exactly one instance that
   role (X7.2). API-only instances open the index read-only and never write it, not even its
-  bookkeeping. A deployment without a worker has no index. A second worker by mistake is
+  bookkeeping. A deployment without a worker runs `seshi sync search` from cron instead, which
+  refuses while a worker is running. A second worker by mistake is
   harmless (writes are idempotent), only wasteful.
 - **Serverless laptops** ignore `search.backend` and `[search.lance]` in the shared config:
   each keeps its own SQLite index, limited to its scope (F11.9).
 - **The first build** answers `503 index_building` until the worker has read every feed once,
   as with SQLite. Later rebuilds do not: `seshi search --rebuild` (with the server's config)
   asks the worker to build a new generation **beside** the live one, which keeps answering
-  until the new one has caught up and takes its place (F10.11). It returns at once;
-  `--wait` follows the build until the switch. Changing `search.events` to index more roles,
+  until the new one has caught up and takes its place (F10.11). It only records the request,
+  and returns at once: the worker starts the rebuild after its next pass, so it stays the one
+  writer. `--wait` follows the request and the build until the switch, and gives up, pointing
+  to `seshi workers status`, when nothing has moved for 15 minutes and no worker is running. Changing `search.events` to index more roles,
   or a seshi upgrade that changes the index's layout, rebuilds the same way; indexing fewer
   roles stops the old generation answering at once, since it holds records the new config
   leaves out.

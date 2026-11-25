@@ -16,6 +16,7 @@ import {
   IndexUnavailable,
   LOCAL_VIEWER,
   SearchQueryError,
+  type SearchService,
   type SearchStatus,
   SearchUnavailable,
 } from "@seshi/search";
@@ -224,6 +225,14 @@ export function statusLines(status: SearchStatus): string[] {
           }; the live generation answers until it has caught up`,
         ]
       : []),
+    ...(status.requested?.rebuild
+      ? [
+          `rebuild asked for ${when(status.requested.rebuild)}: the worker starts it on its next pass`,
+        ]
+      : []),
+    ...(status.requested?.scrub
+      ? [`scrub asked for ${when(status.requested.scrub)}: the worker runs it on its next pass`]
+      : []),
   ];
 }
 
@@ -231,6 +240,82 @@ type Mode = "query" | "status" | "rebuild" | "scrub";
 
 /** How often `--rebuild --wait` reads the index's state. */
 export const WAIT_POLL_MS = 2_000;
+/** How long `--rebuild --wait` waits with nothing moving before it asks whether a worker is
+ * running (at least; 20 indexer intervals when that is longer). */
+export const STALL_MS = 15 * 60_000;
+
+export interface WaitOptions {
+  pollMs: number;
+  /** Nothing moved for this long: give up when no worker is running, else say so once. */
+  stallMs: number;
+  workerAlive: () => Promise<boolean>;
+  progress: (line: string) => void;
+  now?: () => number;
+  sleep?: (ms: number) => Promise<void>;
+}
+
+const NO_WORKER =
+  "no worker is running to carry out the rebuild: see seshi workers status, or, for a deployment that runs the worker's jobs from cron, run seshi sync search";
+
+/** Follow a requested rebuild of a shared index until a generation other than `from` is live
+ * and nothing more is being built or asked for. It gives up when nothing has moved (the
+ * request, the generation being built, how far it has read) for `stallMs` and no worker is
+ * running. */
+export async function waitForRebuild(
+  search: Pick<SearchService, "status">,
+  from: string,
+  options: WaitOptions,
+): Promise<{ status: SearchStatus } | { stalled: string }> {
+  const now = options.now ?? Date.now;
+  const sleep = options.sleep ?? ((ms: number) => Bun.sleep(ms));
+  if (!(await options.workerAlive())) options.progress(`warning: ${NO_WORKER}`);
+  let seen = "";
+  let moved = now();
+  let warned = false;
+  for (;;) {
+    const status = await search.status();
+    if (
+      status.generation !== undefined &&
+      status.generation !== from &&
+      status.ready &&
+      !status.building &&
+      !status.requested?.rebuild
+    ) {
+      return { status };
+    }
+    const at = JSON.stringify([
+      status.generation,
+      status.building?.generation,
+      status.building?.read_through,
+      status.requested?.rebuild,
+    ]);
+    if (at !== seen) {
+      if (seen !== "") {
+        options.progress(
+          status.building
+            ? `building generation ${status.building.generation}, read through ${when(status.building.read_through) || "the start"}`
+            : "the worker took the request",
+        );
+      }
+      seen = at;
+      moved = now();
+      warned = false;
+    } else if (now() - moved >= options.stallMs) {
+      if (!(await options.workerAlive())) {
+        return {
+          stalled: `the rebuild has not moved for ${Math.round((now() - moved) / 60_000)} min and ${NO_WORKER}`,
+        };
+      }
+      if (!warned) {
+        options.progress(
+          "the rebuild has not moved for a while; the worker is running (building a large generation's indexes takes minutes)",
+        );
+        warned = true;
+      }
+    }
+    await sleep(options.pollMs);
+  }
+}
 
 function serverConfigHere(ctx: CommandContext): boolean {
   if (ctx.env.SESHI_STORE__URL) return true;
@@ -286,36 +371,31 @@ async function inProcess(
     return EXIT.ok;
   }
   if (mode === "rebuild" && search.shared) {
-    const { generation } = await search.startRebuild();
+    // Only the worker writes a shared index (F10.8): this asks it to rebuild on its next pass.
+    const { from } = await search.requestRebuild();
     if (!wait) {
       const status = await search.status();
-      emit(ctx, json, { ...status, rebuilding: generation }, () => [
-        `Started a rebuild: the worker builds generation ${generation} beside the live one, which keeps answering until it has caught up.`,
+      emit(ctx, json, { ...status, rebuild: "requested" }, () => [
+        "Asked the worker to rebuild the search index: on its next pass it starts a new generation beside the live one, which keeps answering until the new one has caught up.",
         "Follow it with seshi search --status, or run with --wait.",
       ]);
       return EXIT.ok;
     }
-    if (!json) ctx.stderr(`seshi: the worker is building generation ${generation}…`);
-    let status = await search.status();
-    let last = "";
-    while (!(status.generation === generation && status.ready && !status.building)) {
-      if (status.generation !== generation && status.building?.generation !== generation) {
-        return fail(
-          ctx,
-          json,
-          EXIT.failure,
-          "rebuild_replaced",
-          `generation ${generation} is no longer being built (another rebuild, or a config change, replaced it); see seshi search --status`,
-        );
-      }
-      const read = status.building?.read_through ?? "";
-      if (!json && read !== last) ctx.stderr(`seshi: read through ${when(read)}`);
-      last = read;
-      await Bun.sleep(WAIT_POLL_MS);
-      status = await search.status();
+    const { workerRunning } = await import("@seshi/instance");
+    const outcome = await waitForRebuild(search, from, {
+      pollMs: WAIT_POLL_MS,
+      stallMs: Math.max(STALL_MS, 20 * instance.config.search.interval),
+      workerAlive: () => workerRunning(instance),
+      progress: (line) => {
+        if (!json) ctx.stderr(`seshi: ${line}`);
+      },
+    });
+    if ("stalled" in outcome) {
+      return fail(ctx, json, EXIT.unavailable, "rebuild_stalled", outcome.stalled);
     }
-    emit(ctx, json, { ...status, rebuilt: generation }, () => [
-      `Rebuilt the search index: generation ${generation} is live, ${status.sessions} sessions.`,
+    const status = outcome.status;
+    emit(ctx, json, { ...status, rebuilt: status.generation }, () => [
+      `Rebuilt the search index: generation ${status.generation} is live, ${status.sessions} sessions.`,
       `index ${status.location}`,
     ]);
     return EXIT.ok;
@@ -477,9 +557,6 @@ async function withServer(
       roles: [],
       probe: [],
       claimUnmarkedBucket: false,
-      // A shared index is written by the worker alone, except that --rebuild and --scrub
-      // record the request for it in the index (F10.8).
-      ...(mode === "rebuild" || mode === "scrub" ? { searchWriter: true } : {}),
     },
   );
   try {
