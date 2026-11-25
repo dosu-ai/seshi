@@ -522,8 +522,12 @@ The gathering is the indexer's, not the writer's. A writer that buffered pages w
 `commit()` before writing, so it could not say which updates it refused, and the indexer would
 plan the next page from `sessions()` that do not show the pages it holds. It stays within one
 owner: `cursors`, `seen` and the checks are per owner, and a build's time goes to the records,
-not to a commit per owner. A pass that gathers checks its budget only after a commit, so it
-reads at least one batch. A new generation's tables get their indexes once,
+not to a commit per owner. A batch also ends at a pass's budget of entries (5,000), so a feed
+that keeps naming a few long sessions, whose records a new plan replaces rather than adds to,
+still commits and lets the pass stop. A session planned again on a later page reads only the
+traces it has not read yet: during a build the index holds nothing of it, so without that every
+page naming it would read all of its traces again. A page that replaces a session drops what the
+batch read of it, because a redaction backfill rewrites a trace under the same hash. A new generation's tables get their indexes once,
 when the build has caught up, instead of after every batch: at 10M records the spike wrote the
 tables in 12 minutes and built every index in 5.
 

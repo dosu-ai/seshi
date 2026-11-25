@@ -103,7 +103,7 @@ function setup(options: { lagMs?: number; pageSize?: number; budget?: number } =
 
 /** An indexer reading pages of two entries, whose index asks for `records` per commit (0: one
  * page per commit), and the sessions each commit names, as `owner:sessions`. */
-function gathering(records: number, reading: Store = store) {
+function gathering(records: number, reading: Store = store, budget?: number) {
   const index = new SqliteIndex({ path: MEMORY_INDEX, deployment: "d", events: EVENTS });
   const commits: string[] = [];
   const writer = new Proxy(index, {
@@ -126,8 +126,52 @@ function gathering(records: number, reading: Store = store) {
     now: () => clock,
     ownerRefreshMs: 0,
     pageSize: 2,
+    ...(budget !== undefined ? { budget } : {}),
   });
   return { index, indexer, commits, find: finder(index) };
+}
+
+/** `store`, counting the reads of the keys in `counted`, and running `hook` before the `nth`
+ * listing of a change feed. */
+function watched(options: { counted?: Set<string>; nth?: number; hook?: () => Promise<void> }) {
+  const reads = { count: 0 };
+  let pages = 0;
+  const reading = new Proxy(store, {
+    get(target, prop) {
+      if (prop === "get") {
+        return (key: string) => {
+          if (options.counted?.has(key)) reads.count++;
+          return target.get(key);
+        };
+      }
+      if (prop === "list") {
+        return async (prefix: string, opts: Parameters<Store["list"]>[1]) => {
+          if (prefix.includes("/changes/") && ++pages === options.nth) await options.hook?.();
+          return target.list(prefix, opts);
+        };
+      }
+      const value = Reflect.get(target, prop);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  return { reading, reads };
+}
+
+/** Continues alice's session `s0` with `n` traces, one entry each. */
+async function continued(n: number): Promise<string> {
+  let at = (await db().ingest({ format: "trajectory", session_id: "s0", transcript: log("alpha") }))
+    .bytes_total;
+  for (let i = 0; i < n; i++) {
+    at = (
+      await db().ingest({
+        format: "trajectory",
+        session_id: "s0",
+        transcript: line({ role: "user", content: `part${i} continued`, timestamp: ts }),
+        offset: at,
+      })
+    ).bytes_total;
+  }
+  return archiveId("alice", "trajectory", "s0");
 }
 
 /** The sessions a search of `index` finds, as `owner/session_id`. */
@@ -858,24 +902,15 @@ describe("the indexer (F10.2)", () => {
       });
     }
     // s0 is continued while the indexer reads the second page: its entry is on the third.
-    let pages = 0;
-    const reading = new Proxy(store, {
-      get(target, prop) {
-        if (prop === "list") {
-          return async (prefix: string, options: Parameters<Store["list"]>[1]) => {
-            if (prefix.includes("/changes/") && ++pages === 2) {
-              await db().ingest({
-                format: "trajectory",
-                session_id: "s0",
-                transcript: line({ role: "user", content: "epsilon late", timestamp: ts }),
-                offset: first.bytes_total,
-              });
-            }
-            return target.list(prefix, options);
-          };
-        }
-        const value = Reflect.get(target, prop);
-        return typeof value === "function" ? value.bind(target) : value;
+    const { reading } = watched({
+      nth: 2,
+      hook: async () => {
+        await db().ingest({
+          format: "trajectory",
+          session_id: "s0",
+          transcript: line({ role: "user", content: "epsilon late", timestamp: ts }),
+          offset: first.bytes_total,
+        });
       },
     });
     const { indexer, commits, find } = gathering(1_000_000, reading);
@@ -883,6 +918,80 @@ describe("the indexer (F10.2)", () => {
     expect(commits).toEqual(["alice:4"]);
     expect(await find("epsilon")).toEqual(["alice/s0"]);
     expect(await indexer.run()).toMatchObject({ entries: 0, indexed: 0 });
+  });
+
+  it("reads each trace once in a gathered batch, however many of its pages name the session", async () => {
+    const archive = await continued(12);
+    const metadata = await readMetadata(store, "alice", archive);
+    const traces = new Set(
+      metadata?.traces.map((t) => keys.trace("alice", archive, t.content_hash)),
+    );
+    expect(traces.size).toBe(13);
+    // Seven pages name s0. Planned again on each from nothing (the index holds nothing of it
+    // during a build), it would read its 13 traces seven times.
+    const { reading, reads } = watched({ counted: traces });
+    const { indexer, commits, find } = gathering(1_000_000, reading);
+    expect(await indexer.run()).toMatchObject({ caught_up: true, entries: 13 });
+    expect(commits).toEqual(["alice:1"]);
+    expect(reads.count).toBe(13);
+    expect(await find("part11")).toEqual(["alice/s0"]);
+  });
+
+  it("reads a session's traces again in a gathered batch after a page replaces it", async () => {
+    await db().ingest({
+      format: "trajectory",
+      session_id: "s0",
+      transcript: log("hunter2secret leaked"),
+    });
+    for (let i = 1; i < 4; i++) {
+      await db().ingest({
+        format: "trajectory",
+        session_id: `s${i}`,
+        transcript: log(`topic${i}`),
+      });
+    }
+    const archive = archiveId("alice", "trajectory", "s0");
+    // A redaction backfill while the indexer reads the second page: the trace is rewritten in
+    // place, under the same hash, and the replacing entry lands on the third (F2.5).
+    const backfill = async () => {
+      const hash = (await readMetadata(store, "alice", archive))?.head as string;
+      const key = keys.trace("alice", archive, hash);
+      const trace = gunzipJson<Trace>((await getBytes(store, key)) as Uint8Array);
+      trace.events = trace.events.map((e) =>
+        e.role === "user" ? { ...e, text: "[redacted] leaked" } : e,
+      );
+      await store.put(key, gzipJsonDeterministic(trace));
+      await appendChange(store, {
+        kind: "published",
+        at: tick().toISOString(),
+        owner: "alice",
+        archive_id: archive,
+        session_id: "s0",
+        format: "trajectory",
+        content_hash: hash,
+        writer: { kind: "admin", principal: "admin", source_id: "redaction" },
+        owner_basis: "verified",
+        replace: true,
+        reason: "redacted",
+      });
+    };
+    const { reading } = watched({ nth: 2, hook: backfill });
+    const { indexer, commits, find } = gathering(1_000_000, reading);
+    expect(await indexer.run()).toMatchObject({ caught_up: true, entries: 5 });
+    expect(commits).toEqual(["alice:4"]);
+    expect(await find("hunter2secret")).toEqual([]);
+    expect(await find("leaked")).toEqual(["alice/s0"]);
+  });
+
+  it("commits a gathered batch at the pass's budget of entries, when its records stay few", async () => {
+    // Every entry names s0 again, so the batch's records stay at one session's however many
+    // pages it gathers.
+    await continued(9);
+    const { indexer, commits, find } = gathering(1_000_000, store, 4);
+    expect(await indexer.run()).toMatchObject({ more: true, entries: 4 });
+    expect(commits).toEqual(["alice:1"]);
+    expect((await indexer.catchUp()).caught_up).toBe(true);
+    expect(await find("part8")).toEqual(["alice/s0"]);
   });
 
   it("shares one run between callers", async () => {

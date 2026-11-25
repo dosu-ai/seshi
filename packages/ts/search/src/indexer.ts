@@ -162,8 +162,14 @@ function startsWith(list: readonly string[], prefix: readonly string[]): boolean
   return prefix.length <= list.length && prefix.every((h, i) => list[i] === h);
 }
 
+/** What a session's fields take from a trace. The rest of it (its records) is not kept, so a
+ * batch can hold the traces it read. */
+type TraceFacts = Pick<Trace, "started_at" | "ended_at" | "project" | "branch" | "source"> & {
+  metadata: Pick<Trace["metadata"], "git_branch" | "agent_version">;
+};
+
 interface ReadTrace {
-  trace: Trace;
+  trace: TraceFacts;
   events: IndexedEvent[];
 }
 
@@ -191,11 +197,32 @@ interface Batch {
   /** What the index held of the batch's sessions before it. */
   holds: Map<string, IndexedSession>;
   replaced: Map<string, Replaced>;
+  /** The traces read for the batch's plans, by archive, then hash: a session planned again on
+   * a later page reads only the traces it has not read yet. During a build the index holds
+   * nothing of it, so each plan is a whole read, not an extension of the last. */
+  traces: Map<string, Map<string, ReadTrace>>;
   records: number;
 }
 
+/** The traces `batch` has read of `archive`, by hash. */
+function tracesOf(batch: Batch, archive: string): Map<string, ReadTrace> {
+  let read = batch.traces.get(archive);
+  if (!read) {
+    read = new Map();
+    batch.traces.set(archive, read);
+  }
+  return read;
+}
+
 function newBatch(): Batch {
-  return { entries: [], plans: new Map(), holds: new Map(), replaced: new Map(), records: 0 };
+  return {
+    entries: [],
+    plans: new Map(),
+    holds: new Map(),
+    replaced: new Map(),
+    traces: new Map(),
+    records: 0,
+  };
 }
 
 export class Indexer {
@@ -360,8 +387,10 @@ export class Indexer {
   }
 
   /** Reads `owner`'s feed from its cursor, one page per commit, or pages gathered until they
-   * hold `gather` records. True when the pass should stop here: the budget is spent, or the
-   * index was reset. */
+   * hold `gather` records or the pass's budget of entries. The entry bound matters when pages
+   * keep naming a few long sessions: planning one again replaces its records rather than
+   * adding to them, so the records may never reach `gather`. True when the pass should stop
+   * here: the budget is spent, or the index was reset. */
   private async drain(
     owner: string,
     run: IndexerRun,
@@ -393,7 +422,7 @@ export class Indexer {
       const nextAt = next === undefined ? undefined : stampTime(next.slice(prefix.length));
       held = next;
       const end = !page.truncated || last === undefined;
-      if (end || batch.records >= gather) {
+      if (end || batch.records >= gather || batch.entries.length >= this.budget) {
         if (await this.flush(owner, generation, run, batch, prefix, next, nextAt)) return true;
         batch = newBatch();
         if (end) {
@@ -427,6 +456,8 @@ export class Indexer {
         // A publish names a reason only for a redaction backfill (F2.5).
         const scrub = e.reason !== undefined || batch.replaced.get(e.archive_id)?.scrub === true;
         batch.replaced.set(e.archive_id, { content_hash: e.content_hash, scrub });
+        // A redaction backfill rewrites a trace in place, under the same hash (F2.5).
+        batch.traces.delete(e.archive_id);
       }
     }
     const unread = archives.filter((a) => !batch.plans.has(a));
@@ -434,7 +465,7 @@ export class Indexer {
       batch.holds.set(a, session);
     }
     const plans = await mapLimit(archives, CONCURRENCY, (a) =>
-      this.plan(owner, a, batch.holds.get(a) ?? null, batch.replaced.get(a)),
+      this.plan(owner, a, batch.holds.get(a) ?? null, batch.replaced.get(a), tracesOf(batch, a)),
     );
     archives.forEach((a, i) => {
       const plan = plans[i] as Plan;
@@ -487,7 +518,7 @@ export class Indexer {
       // Another process got to these sessions first: plan them again from what it wrote.
       const again = await this.index.sessions(generation, owner, committed.refused);
       const retries = await mapLimit(committed.refused, CONCURRENCY, (a) =>
-        this.plan(owner, a, again.get(a) ?? null, batch.replaced.get(a)),
+        this.plan(owner, a, again.get(a) ?? null, batch.replaced.get(a), tracesOf(batch, a)),
       );
       const retried = await this.index.commit({
         generation,
@@ -556,12 +587,14 @@ export class Indexer {
     }
   }
 
-  /** What to do with a session, from its metadata now and what the index holds of it. */
+  /** What to do with a session, from its metadata now and what the index holds of it. Traces
+   * already in `cache` are not read again; those read are added to it. */
   private async plan(
     owner: string,
     archive: string,
     held: IndexedSession | null,
-    replaced?: Replaced,
+    replaced: Replaced | undefined,
+    cache: Map<string, ReadTrace>,
     attempt = 0,
   ): Promise<Plan> {
     const { readAt, metadata } = await this.stampedMetadata(owner, archive);
@@ -575,9 +608,16 @@ export class Indexer {
     const wanted = replaced ? tracesFrom(metadata, replaced.content_hash) : currentTraces(metadata);
     const extends_ = !replaced && held !== null && startsWith(wanted, held.traces);
     const toRead = extends_ ? wanted.slice((held as IndexedSession).traces.length) : wanted;
-    const traces = await mapLimit(toRead, 4, (hash) => this.traceOf(owner, archive, hash));
+    const traces = await mapLimit(toRead, 4, async (hash) => {
+      const known = cache.get(hash);
+      if (known) return known;
+      // A trace that could not be read is not remembered: the second attempt reads it again.
+      const read = await this.traceOf(owner, archive, hash);
+      if (read) cache.set(hash, read);
+      return read;
+    });
     if (traces.some((t) => t === null) && attempt === 0) {
-      return this.plan(owner, archive, held, replaced, 1);
+      return this.plan(owner, archive, held, replaced, cache, 1);
     }
     const read = toRead
       .map((hash, i) => ({ hash, read: traces[i] ?? null }))
@@ -639,7 +679,18 @@ export class Indexer {
       if (!Array.isArray(trace?.events) || !Array.isArray(trace.records)) {
         throw new Error("not a trace");
       }
-      return { trace, events: searchableEvents(hash, trace, this.roles) };
+      const facts: TraceFacts = {
+        started_at: trace.started_at,
+        ended_at: trace.ended_at,
+        project: trace.project,
+        branch: trace.branch,
+        source: trace.source,
+        metadata: {
+          git_branch: trace.metadata?.git_branch,
+          agent_version: trace.metadata?.agent_version,
+        },
+      };
+      return { trace: facts, events: searchableEvents(hash, trace, this.roles) };
     } catch {
       return null;
     }
@@ -648,7 +699,7 @@ export class Indexer {
   private sessionFields(
     owner: string,
     metadata: SessionMetadata,
-    read: readonly { trace: Trace }[],
+    read: readonly { trace: TraceFacts }[],
     held: IndexedSession | null,
   ): IndexedSession {
     const starts = read.map((t) => epoch(t.trace.started_at)).filter((n) => n !== undefined);
