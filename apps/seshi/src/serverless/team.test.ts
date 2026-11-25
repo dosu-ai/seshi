@@ -331,6 +331,25 @@ describe("shared settings (F11.6)", () => {
     ]);
   });
 
+  it("answers sql over its own index, ignoring the server's members setting (T11)", async () => {
+    await sharedConfig(
+      '[search]\nbackend = "lance"\n[search.sql]\nmembers = true\ntimeout = "5s"\n',
+    );
+    const alice = await laptop("alice", member("alice"));
+    expect(alice.bucket.ignored).toContain(
+      `search.sql.members in ${shared.url}/config/seshi.toml: a server setting`,
+    );
+    expect(alice.bucket.instance.sql?.settings).toMatchObject({ workers: 1, timeout: 5_000 });
+    await alice.bucket.instance.localSessions("alice", "claimed").ingest(upload("s1"));
+    // The transcript is from September: outside the default 30 days, inside 400.
+    const sql = "SELECT owner, agent FROM sessions";
+    expect((await alice.backend.sql({ sql })).rows).toEqual([]);
+    const answer = await alice.backend.sql({ sql, since: "400d" });
+    expect(answer.rows).toEqual([["alice", "claude-code"]]);
+    expect(answer.scope).toMatchObject({ as: "alice", role: "local" });
+    expect((await alice.backend.sqlSchema()).dialect).toBe("sqlite");
+  });
+
   it("holds writes when the bucket's copy fails its checks and there is no good one", async () => {
     await sharedConfig('default_visibility = "org"\nnot_a_setting = 1\n');
     await expect(laptop("alice", member("alice"))).rejects.toMatchObject({

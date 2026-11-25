@@ -47,7 +47,7 @@ import {
   type RuleSet,
 } from "@seshi/redact";
 import { ReviewSetupError, reviewerFromConfig } from "@seshi/review";
-import { SearchService } from "@seshi/search";
+import { SearchService, SqlService, type SqlSettings } from "@seshi/search";
 import { builtinConnectors, Sources } from "@seshi/sources";
 import {
   assertOwner,
@@ -146,6 +146,14 @@ export interface InstanceParts {
    * worker role (`seshi search --rebuild` and `--scrub`). Otherwise only the worker writes it
    * and every other instance reads it (F10.8). */
   searchWriter?: boolean;
+  /** `sql` over the search index (docs/seshi/session-tools.md); built from `[search.sql]` when
+   * omitted, none when null or without search. */
+  sql?: SqlService | null;
+  /** How to start a `sql` worker: `[seshi, "sql-worker"]`, which `seshi serve` and the serverless
+   * CLI pass. Without it, `worker-main.ts` under this Bun (tests). */
+  sqlWorker?: readonly string[];
+  /** `[search.sql] workers` when unset: 2 on a server, 1 on a serverless laptop. */
+  sqlWorkers?: number;
   now?: () => Date;
   fetch?: typeof fetch;
   log?: Logger;
@@ -156,6 +164,18 @@ export interface InstanceParts {
   /** The bucket's runtime config (`server.runtime_config = store`): synced every
    * `server.config_poll`, written by the admin API. */
   runtime?: RuntimeConfig;
+}
+
+/** `[search.sql]` as the sql service takes it. */
+export function sqlSettings(config: ServerConfig, workers: number): SqlSettings {
+  const sql = config.search.sql;
+  return {
+    workers: sql.workers ?? workers,
+    timeout: sql.timeout,
+    memory: sql.memory,
+    workerMemory: sql.worker_memory,
+    maxRows: sql.max_rows,
+  };
 }
 
 /** The job that reads the bucket's runtime config on every instance. */
@@ -190,6 +210,8 @@ export class Instance {
   readonly assembler: SpanAssembler;
   /** Session search over a local index (F10.3); undefined when `search.enabled` is false. */
   readonly search: SearchService | undefined;
+  /** `sql` over the search index; undefined without search. */
+  readonly sql: SqlService | undefined;
   readonly roles: readonly Role[];
   readonly id: string;
   readonly process: string;
@@ -352,6 +374,19 @@ export class Instance {
       parts.search === null
         ? undefined
         : (parts.search ?? (config.search.enabled ? this.searchService(config, parts) : undefined));
+    this.sql =
+      parts.sql === null
+        ? undefined
+        : (parts.sql ??
+          (this.search
+            ? new SqlService({
+                search: this.search,
+                settings: sqlSettings(config, parts.sqlWorkers ?? 2),
+                ...(parts.sqlWorker ? { command: parts.sqlWorker } : {}),
+                now: this.now,
+                log: (line) => this.log.warn(line),
+              })
+            : undefined));
 
     this.jobs = new JobRunner({
       worker: this.roles.includes("worker"),
@@ -699,6 +734,7 @@ export class Instance {
       await this.runtime.forget(this.process);
       this.runtime.close();
     }
+    await this.sql?.close();
     await this.search?.close();
     let timer: ReturnType<typeof setTimeout> | undefined;
     await Promise.race([

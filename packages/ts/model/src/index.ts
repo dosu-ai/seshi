@@ -194,4 +194,13 @@ export type {
   SpanTool,
   SpanValue,
 } from "./spans";
+export type {
+  SqlColumn,
+  SqlDialect,
+  SqlIndexInfo,
+  SqlRequest,
+  SqlResult,
+  SqlSchema,
+  SqlScope,
+} from "./sql";
 export { VERSION } from "./version";

@@ -74,6 +74,12 @@ import {
   IndexUnavailable,
   SearchQueryError,
   SearchUnavailable,
+  SqlBusy,
+  SqlFailed,
+  SqlRequestError,
+  type SqlService,
+  SqlUnavailable,
+  sqlCallerFor,
   viewerFor,
 } from "@seshi/search";
 import {
@@ -97,6 +103,9 @@ import { searchRequestOf } from "./search";
 export type { StorageView };
 
 const SEARCH_RETRY_AFTER_S = 5;
+/** `POST /v1/sql`'s body: a 16 KiB statement, escaped, and the other fields. */
+const SQL_BODY_BYTES = 128 * 1024;
+const SQL_FIELDS = new Set(["sql", "since", "until", "max_rows"]);
 
 type Handler = (ctx: Context) => Promise<Response> | Response;
 
@@ -875,6 +884,83 @@ export function createApp(instance: Instance) {
       }
       return search.search(viewerFor(principal, aliases), query);
     });
+  });
+
+  /** Run `fn` against `sql`, mapping its refusals to the codes docs/search.md lists. */
+  async function fromSql(
+    fn: (sql: SqlService) => Promise<unknown>,
+    bad: "bad_field" | "bad_query" = "bad_field",
+  ): Promise<Response> {
+    if (!instance.search || !instance.sql) {
+      throw new HttpError(404, "search_disabled", "search is turned off on this server");
+    }
+    try {
+      return json(await fn(instance.sql));
+    } catch (err) {
+      if (err instanceof SqlRequestError) throw new HttpError(400, bad, err.message);
+      if (err instanceof SqlFailed) {
+        if (err.kind === "internal") {
+          console.error(`[seshi] POST /v1/sql: ${err.message}`);
+          throw new HttpError(500, "internal", "the sql worker failed; try again");
+        }
+        return json(
+          {
+            error: {
+              code: err.code,
+              message: err.message,
+              ...(err.at !== undefined ? { at: err.at } : {}),
+            },
+          },
+          400,
+        );
+      }
+      if (err instanceof SqlBusy) {
+        return json({ error: { code: err.code, message: err.message } }, 429, {
+          "retry-after": "1",
+        });
+      }
+      if (err instanceof SqlUnavailable) throw new HttpError(501, err.code, err.message);
+      if (err instanceof SearchUnavailable || err instanceof IndexUnavailable) {
+        return json({ error: { code: "index_unavailable", message: err.message } }, 503, {
+          "retry-after": String(SEARCH_RETRY_AFTER_S),
+        });
+      }
+      throw err;
+    }
+  }
+
+  route("POST", "/v1/sql", async ({ request }) => {
+    const principal = await caller(request, "sql");
+    const body = await readJson(request, SQL_BODY_BYTES);
+    for (const key of Object.keys(body)) {
+      if (!SQL_FIELDS.has(key)) throw new HttpError(400, "bad_field", `unknown field ${key}`);
+    }
+    const sql = str(body, "sql", true) as string;
+    return fromSql((service) =>
+      service.query(sqlCallerFor(principal, aliases), {
+        sql,
+        since: str(body, "since") ?? null,
+        until: str(body, "until") ?? null,
+        ...(body.max_rows !== undefined ? { max_rows: body.max_rows as number } : {}),
+      }),
+    );
+  });
+
+  route("GET", "/v1/sql/schema", async ({ request, url }) => {
+    const principal = await caller(request, "sql");
+    for (const name of url.searchParams.keys()) {
+      if (name !== "since" && name !== "until") {
+        throw new HttpError(400, "bad_query", `unknown parameter ${name}`);
+      }
+    }
+    return fromSql(
+      (service) =>
+        service.schema(sqlCallerFor(principal, aliases), {
+          since: url.searchParams.get("since"),
+          until: url.searchParams.get("until"),
+        }),
+      "bad_query",
+    );
   });
 
   function tokenKind(value: unknown): TokenKind {

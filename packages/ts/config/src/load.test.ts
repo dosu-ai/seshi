@@ -142,6 +142,13 @@ describe("precedence (F1.1)", () => {
         max_scored_rows: 10_000,
         max_recent_rows: 100_000,
       },
+      sql: {
+        timeout: 15_000,
+        memory: 1024 ** 3,
+        worker_memory: 2 * 1024 ** 3,
+        max_rows: 1000,
+        members: false,
+      },
     });
     expect(config.worker).toEqual({ heartbeat_interval: 60_000, assembly_interval: 30_000 });
     expect(config.capture).toEqual({ allow_retract: true, exclude: [], redact_tool_calls: [] });

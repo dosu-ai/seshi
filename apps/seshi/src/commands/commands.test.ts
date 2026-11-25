@@ -126,6 +126,8 @@ describe("the command groups (F8.1)", () => {
         "serve",
         "sessions",
         "share",
+        "sql",
+        "sql-worker",
         "statusline",
         "store",
         "sync",

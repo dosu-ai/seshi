@@ -2437,6 +2437,80 @@
             }
           },
           "additionalProperties": false
+        },
+        "sql": {
+          "description": "sql: one read-only SELECT over the views sessions, events and llm_calls (POST /v1/sql, seshi sql). On a SQLite index it runs in SQLite itself, in worker processes over the index file.",
+          "default": {},
+          "type": "object",
+          "properties": {
+            "workers": {
+              "description": "Worker processes that run sql statements, one at a time each: 2 on a server, 1 on a serverless laptop when unset.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16
+            },
+            "timeout": {
+              "description": "How long a statement may run. On SQLite the worker is killed at this time (SQLite has no interrupt) and a new one started.",
+              "default": "15s",
+              "x-seshi-format": "duration",
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(\\d+)(ms|s|m|h|d|w)$"
+                },
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              ]
+            },
+            "memory": {
+              "description": "Memory a statement may use inside the engine: SQLite's hard_heap_limit, which Bun's own SQLite on Linux holds and macOS's system SQLite ignores.",
+              "default": "1GiB",
+              "x-seshi-format": "bytes",
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(\\d+)\\s*(B|KB|MB|GB|KiB|MiB|GiB)$"
+                },
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              ]
+            },
+            "worker_memory": {
+              "description": "The watchdog kills a worker whose resident memory passes this, answers its statement with sql_memory, and starts another.",
+              "default": "2GiB",
+              "x-seshi-format": "bytes",
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(\\d+)\\s*(B|KB|MB|GB|KiB|MiB|GiB)$"
+                },
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              ]
+            },
+            "max_rows": {
+              "default": 1000,
+              "description": "Rows an answer holds at most (a caller can ask for fewer); then it is truncated.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            },
+            "members": {
+              "default": false,
+              "description": "Give members the sql scope. Only with backend = \"lance\": sql on a SQLite index is for admins, service tokens and a laptop's own user, and is not for production use with members.",
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false

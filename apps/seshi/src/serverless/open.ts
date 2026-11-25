@@ -33,6 +33,7 @@ import type { SecretBackend } from "../account/secrets";
 import { writePrivateFile } from "../account/secrets";
 import { EXIT } from "../cli/exit";
 import { Refused } from "../cli/failures";
+import { sqlWorkerCommand } from "../cli/spawn";
 import { buildFormats } from "../integrations";
 import { bucketKeyCredentials, readBucketKey, readReviewKey } from "./keys";
 import { refusalOf } from "./refusal";
@@ -492,6 +493,8 @@ export async function openServerless(options: ServerlessOpenOptions): Promise<Se
       createLayout: false,
       reviewer: reviewer ?? { review: async () => ({ action: "allow" }) },
       ...(options.now ? { now: options.now } : {}),
+      sqlWorker: sqlWorkerCommand(),
+      sqlWorkers: 1,
       search: searchOn
         ? new SearchService({
             store,

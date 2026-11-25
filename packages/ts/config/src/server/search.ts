@@ -1,6 +1,6 @@
 import { DEFAULT_SEARCH_MAX_CHARS, MAX_SEARCH_CHARS } from "@seshi/model";
 import * as z from "zod";
-import { duration } from "../units";
+import { bytes, duration } from "../units";
 import { storeUrl } from "./common";
 import { bucketCredentials, credentialsMismatch } from "./store";
 
@@ -117,6 +117,54 @@ export const lanceSection = z
 
 export type LanceSection = z.output<typeof lanceSection>;
 
+export const sqlSection = z
+  .strictObject({
+    workers: z
+      .int()
+      .min(1)
+      .max(16)
+      .optional()
+      .describe(
+        "Worker processes that run sql statements, one at a time each: 2 on a server, 1 on a serverless laptop when unset.",
+      ),
+    timeout: duration()
+      .refine((ms) => ms >= 1000, "must be at least 1s")
+      .prefault("15s")
+      .describe(
+        "How long a statement may run. On SQLite the worker is killed at this time (SQLite has no interrupt) and a new one started.",
+      ),
+    memory: bytes()
+      .refine((n) => n >= 16 * 1024 ** 2, "must be at least 16MiB")
+      .prefault("1GiB")
+      .describe(
+        "Memory a statement may use inside the engine: SQLite's hard_heap_limit, which Bun's own SQLite on Linux holds and macOS's system SQLite ignores.",
+      ),
+    worker_memory: bytes()
+      .refine((n) => n >= 64 * 1024 ** 2, "must be at least 64MiB")
+      .prefault("2GiB")
+      .describe(
+        "The watchdog kills a worker whose resident memory passes this, answers its statement with sql_memory, and starts another.",
+      ),
+    max_rows: z
+      .int()
+      .min(1)
+      .max(1000)
+      .default(1000)
+      .describe("Rows an answer holds at most (a caller can ask for fewer); then it is truncated."),
+    members: z
+      .boolean()
+      .default(false)
+      .describe(
+        'Give members the sql scope. Only with backend = "lance": sql on a SQLite index is for admins, service tokens and a laptop\'s own user, and is not for production use with members.',
+      ),
+  })
+  .prefault({})
+  .describe(
+    "sql: one read-only SELECT over the views sessions, events and llm_calls (POST /v1/sql, seshi sql). On a SQLite index it runs in SQLite itself, in worker processes over the index file.",
+  );
+
+export type SqlSection = z.output<typeof sqlSection>;
+
 export const searchSection = z
   .strictObject({
     enabled: z
@@ -151,6 +199,17 @@ export const searchSection = z
       ),
     max_chars: maxCharsSection,
     lance: lanceSection,
+    sql: sqlSection,
+  })
+  .superRefine((section, ctx) => {
+    if (section.sql.members && section.backend !== "lance") {
+      ctx.addIssue({
+        code: "custom",
+        path: ["sql", "members"],
+        message:
+          'needs backend = "lance": sql on a SQLite index has no wall below its statement check and is not for production use with members (docs/search.md)',
+      });
+    }
   })
   .prefault({})
   .describe("Session search (F10).");

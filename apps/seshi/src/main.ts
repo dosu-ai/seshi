@@ -31,7 +31,9 @@ export function takeNoColor(argv: readonly string[]): { noColor: boolean; rest: 
 }
 
 function usage(commands: Readonly<Record<string, CommandSpec>>): string {
-  const names = Object.keys(commands).sort();
+  const names = Object.keys(commands)
+    .filter((name) => !commands[name]?.hidden)
+    .sort();
   const width = Math.max(...names.map((name) => name.length), "--version".length);
   const lines = names.map((name) => `  ${name.padEnd(width)}  ${commands[name].summary}`);
   return [

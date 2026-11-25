@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 export function isCompiled(
   argv: readonly string[] = process.argv,
@@ -18,6 +19,17 @@ export function selfCommand(
   execPath = process.execPath,
 ): string[] {
   return isCompiled(argv, execPath) ? [execPath] : [execPath, argv[1] as string];
+}
+
+/** How a `sql` worker is started: `seshi sql-worker` from a compiled binary, `main.ts
+ * sql-worker` under Bun otherwise (`bun run`, tests), whatever script this process started as. */
+export function sqlWorkerCommand(
+  argv: readonly string[] = process.argv,
+  execPath = process.execPath,
+): string[] {
+  return isCompiled(argv, execPath)
+    ? [execPath, "sql-worker"]
+    : [execPath, fileURLToPath(new URL("../main.ts", import.meta.url)), "sql-worker"];
 }
 
 export function hookCommand(

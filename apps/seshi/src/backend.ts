@@ -16,11 +16,14 @@ import {
   type SearchResults,
   type SessionMetadata,
   type SessionsPage,
+  type SqlRequest,
+  type SqlResult,
+  type SqlSchema,
   type StoredTrace,
   type Visibility,
 } from "@seshi/model";
 import type { StoreSeshi } from "@seshi/pipeline";
-import { LOCAL_VIEWER, type Viewer, viewerFor } from "@seshi/search";
+import { LOCAL_VIEWER, type SqlCaller, type Viewer, viewerFor } from "@seshi/search";
 import { type Account, accountCredential, serverOf } from "./account/account";
 import type { Purpose } from "./account/credential";
 import { NotSignedIn } from "./account/credential";
@@ -68,6 +71,10 @@ export interface Backend {
     options?: OwnerOption,
   ): Promise<ReviewDecision[] | null>;
   search(request: SearchRequest, hooks?: SearchHooks): Promise<SearchResults>;
+  /** One read-only SELECT over the index's views: the server's `POST /v1/sql`, or a local
+   * worker over a serverless laptop's own index. */
+  sql(request: SqlRequest, hooks?: SearchHooks): Promise<SqlResult>;
+  sqlSchema(window?: { since?: string; until?: string }, hooks?: SearchHooks): Promise<SqlSchema>;
   listTokens(filter: { owner?: string; kind?: TokenKind; all?: boolean }): Promise<TokenInfo[]>;
   createToken(request: TokenRequest): Promise<{ token: string; record: TokenInfo }>;
   revokeToken(id: string): Promise<TokenInfo | null>;
@@ -116,6 +123,12 @@ export class ServerBackend implements Backend {
   }
   search(request: SearchRequest): Promise<SearchResults> {
     return this.db.search(request);
+  }
+  sql(request: SqlRequest): Promise<SqlResult> {
+    return this.db.sql(request);
+  }
+  sqlSchema(window: { since?: string; until?: string } = {}): Promise<SqlSchema> {
+    return this.db.sqlSchema(window);
   }
   listTokens(filter: { owner?: string; kind?: TokenKind; all?: boolean }) {
     return this.db.listTokens(filter);
@@ -284,7 +297,8 @@ export class ServerlessBackend implements Backend {
     );
     return records as ReviewDecision[];
   }
-  async search(request: SearchRequest, hooks: SearchHooks = {}): Promise<SearchResults> {
+  /** The laptop's own index, caught up unless it caught up within two indexer intervals. */
+  private async freshSearch(hooks: SearchHooks) {
     const search = this.instance.search;
     if (!search) {
       throw new Refused(
@@ -300,7 +314,45 @@ export class ServerlessBackend implements Backend {
       caughtUp !== undefined &&
       Date.now() - Date.parse(caughtUp) < 2 * this.instance.config.search.interval;
     if (!fresh) await this.refused(() => search.catchUp());
+    return search;
+  }
+
+  async search(request: SearchRequest, hooks: SearchHooks = {}): Promise<SearchResults> {
+    const search = await this.freshSearch(hooks);
     return search.search(this.viewer(), request);
+  }
+
+  /** `sql` over the laptop's own index (T11): its views carry no owner condition, since the
+   * laptop's user can read everything the index holds; the window still applies. */
+  private sqlCaller(): SqlCaller {
+    return { viewer: LOCAL_VIEWER, as: this.owner, role: "local", key: this.owner };
+  }
+
+  private localSql() {
+    const sql = this.instance.sql;
+    if (!sql) {
+      throw new Refused(
+        EXIT.config,
+        "search_disabled",
+        "sql reads the search index, which is off on this machine: set [search] enabled = true in the CLI config",
+      );
+    }
+    return sql;
+  }
+
+  async sql(request: SqlRequest, hooks: SearchHooks = {}): Promise<SqlResult> {
+    const sql = this.localSql();
+    await this.freshSearch(hooks);
+    return sql.query(this.sqlCaller(), request);
+  }
+
+  async sqlSchema(
+    window: { since?: string; until?: string } = {},
+    hooks: SearchHooks = {},
+  ): Promise<SqlSchema> {
+    const sql = this.localSql();
+    await this.freshSearch(hooks);
+    return sql.schema(this.sqlCaller(), window);
   }
   private noTokens(): never {
     throw new Refused(

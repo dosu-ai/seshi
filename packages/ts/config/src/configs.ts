@@ -140,6 +140,14 @@ export function loadServerlessConfig(
         delete rest[key];
       }
     }
+    // Members' sql is the server's to give (LanceDB only); a laptop's own index answers its
+    // own user.
+    const sql = rest.sql;
+    if (sql && typeof sql === "object" && "members" in sql) {
+      ignored.push(`search.sql.members in ${base?.path}: a server setting`);
+      const { members: _, ...kept } = sql as Record<string, unknown>;
+      rest.sql = kept;
+    }
     (base as { tree: Record<string, unknown> }).tree.search = rest;
   }
   const file = options.file;

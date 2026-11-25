@@ -46,6 +46,8 @@ ROUTES: dict[str, Route] = {
     "sessionReviewsByArchive": Route("GET", f"{ARCHIVE}/reviews"),
     "changes": Route("GET", "/v1/changes", query=("owner", "after", "since", "limit")),
     "allChanges": Route("GET", "/v1/changes/all", query=("after", "since", "limit")),
+    "sql": Route("POST", "/v1/sql"),
+    "sqlSchema": Route("GET", "/v1/sql/schema", query=("since", "until")),
     "search": Route(
         "GET",
         "/v1/search",
