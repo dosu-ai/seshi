@@ -1,0 +1,56 @@
+Copying gs://seshi-search-spike-a8d43c/harness/addidx.ts to file://./addidx.ts
+Copying gs://seshi-search-spike-a8d43c/harness/bench.ts to file://./bench.ts
+  
+Copying gs://seshi-search-spike-a8d43c/harness/commit.ts to file://./commit.ts
+Copying gs://seshi-search-spike-a8d43c/harness/common.ts to file://./common.ts
+Copying gs://seshi-search-spike-a8d43c/harness/duck.ts to file://./duck.ts
+Copying gs://seshi-search-spike-a8d43c/harness/gen.ts to file://./gen.ts
+
+
+Average throughput: 477.1kiB/s
+load lance: 1744ms
+duck | admin, no filter       | zeppelinx          | first  3479ms | p50   543ms | p95   597ms | sessions 103
+duck | admin, no filter       | error              | first 16353ms | p50 15957ms | p95 16079ms | sessions 45368
+duck | admin, no filter       | rollback deployer  | first 15929ms | p50 15224ms | p95 15316ms | sessions 45289
+duck | admin, no filter       | the                | first 15747ms | p50 16023ms | p95 16183ms | sessions 45476
+duck | member u1 (org or own) | zeppelinx          | first   844ms | p50   555ms | p95   580ms | sessions 87
+duck | member u1 (org or own) | error              | first 16892ms | p50 17254ms | p95 17517ms | sessions 38642
+duck | member u1 (org or own) | rollback deployer  | first 17115ms | p50 16931ms | p95 17506ms | sessions 38641
+duck | member u1 (org or own) | the                | first 17524ms | p50 17298ms | p95 17707ms | sessions 38789
+runtime: bun 1.4.2, linux-x64
+	Command being timed: "bun duck.ts gs://seshi-search-spike-a8d43c/10m/events.lance 10 --no-shapes"
+	User time (seconds): 1250.77
+	System time (seconds): 717.65
+	Percent of CPU this job got: 178%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 18:23.02
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 1959176
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 563
+	Minor (reclaiming a frame) page faults: 5130772
+	Voluntary context switches: 31143524
+	Involuntary context switches: 96664
+	Swaps: 0
+	File system inputs: 725008
+	File system outputs: 48
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0
+page 0: 2230 records, split: mergeInsert 1022ms (inserted 2230, updated 0) + delete 522ms (deleted 507), sessions 504ms
+page 1: 2561 records, split: mergeInsert 590ms (inserted 2561, updated 0) + delete 286ms (deleted 200), sessions 378ms
+page 2: 1924 records, split: mergeInsert 451ms (inserted 1924, updated 0) + delete 286ms (deleted 317), sessions 292ms
+page 3: 1477 records, split: mergeInsert 445ms (inserted 1477, updated 0) + delete 324ms (deleted 613), sessions 308ms
+page 4: 2135 records, split: mergeInsert 449ms (inserted 2135, updated 0) + delete 340ms (deleted 229), sessions 261ms
+events commit p50 790ms max 1543ms; sessions p50 308ms
+page 0: 1924 records, events mergeInsert 9810ms (inserted 1924, updated 0, deleted 122), sessions 453ms
+page 1: 1439 records, events mergeInsert 8582ms (inserted 1439, updated 0, deleted 282), sessions 308ms
+page 2: 1508 records, events mergeInsert 8643ms (inserted 1508, updated 0, deleted 323), sessions 267ms
+page 3: 1730 records, events mergeInsert 8497ms (inserted 1730, updated 0, deleted 390), sessions 311ms
+page 4: 1260 records, events mergeInsert 8614ms (inserted 1260, updated 0, deleted 200), sessions 338ms
+events commit p50 8614ms max 9810ms; sessions p50 311ms
+exit 0

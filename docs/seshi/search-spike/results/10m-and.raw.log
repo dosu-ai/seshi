@@ -1,0 +1,22 @@
+Copying gs://seshi-search-spike-a8d43c/harness/addidx.ts to file://./addidx.ts
+Copying gs://seshi-search-spike-a8d43c/harness/and.ts to file://./and.ts
+  
+Copying gs://seshi-search-spike-a8d43c/harness/bench.ts to file://./bench.ts
+Copying gs://seshi-search-spike-a8d43c/harness/commit.ts to file://./commit.ts
+Copying gs://seshi-search-spike-a8d43c/harness/common.ts to file://./common.ts
+Copying gs://seshi-search-spike-a8d43c/harness/duck.ts to file://./duck.ts
+Copying gs://seshi-search-spike-a8d43c/harness/gen.ts to file://./gen.ts
+Copying gs://seshi-search-spike-a8d43c/harness/optimize.ts to file://./optimize.ts
+.
+
+Average throughput: 734.3kiB/s
+text_idx: {"numIndexedRows":10023304,"numUnindexedRows":0,"indexType":"FTS","numIndices":1}
+and | cap 10000 | BooleanQuery Must + Must               | p50  4658ms | rows 10000
+and | cap 10000 | MatchQuery Operator.And                | p50   520ms | rows 10000
+and | cap 10000 | BooleanQuery Must + Must (mid words)   | p50   498ms | rows 2059
+and | cap 10000 | MatchQuery Operator.And (mid words)    | p50   464ms | rows 2059
+and | cap 100000 | BooleanQuery Must + Must               | p50  5041ms | rows 100000
+and | cap 100000 | MatchQuery Operator.And                | p50  1584ms | rows 100000
+and | cap 100000 | BooleanQuery Must + Must (mid words)   | p50   511ms | rows 2059
+and | cap 100000 | MatchQuery Operator.And (mid words)    | p50   470ms | rows 2059
+exit 0
