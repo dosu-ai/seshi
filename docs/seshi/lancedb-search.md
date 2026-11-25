@@ -373,23 +373,52 @@ conformance suite searches with quotes, backslashes and `%` in every filter.
 `SearchService` still checks each result against the session's live metadata before it returns
 it (F10.4), so the filter only needs to be fast, not authoritative.
 
-**Grouping and paging** happen in TypeScript, without DuckDB:
+**Grouping and paging** happen in TypeScript by default. The spike compares DuckDB for the
+same steps ([below](#duckdb-compared-in-the-spike)).
 
 1. One search selects `owner`, `archive_id`, `id`, `session_updated` and `_score` for every
    matching record, up to `search.lance.max_scored_rows` (100,000 by default). LanceDB returns
    10 rows unless a limit is set, so the limit is always set.
 2. Records are grouped by session: `best` is the top `_score`, `hits` the number of records.
    `total` is the number of sessions. When the cap was reached, `total` is a lower bound and the
-   response says so.
+   response says so ("at least N"). Counts are not what search is mainly for, so this is
+   accepted.
 3. Sessions are sorted by `best` or by `session_updated`, and `offset` and `limit` applied.
-   Cursors stay offsets capped at `MAX_OFFSET`.
+   Cursors stay offsets capped at `MAX_OFFSET`. The capped records are the best-scored ones,
+   which is right for relevance but not for `sort = recent`. So when a recent search reaches
+   the cap, it runs again with a window on `session_updated` going back from now (a day, a
+   week, a month, then everything), and stops at the first window that fills the page without
+   reaching the cap.
 4. One read of `sessions` for the page, and one read of `events` by `id` for the best
    `matches` records of each session, with their text, role, tool name and time. `excerpt()`
    marks them.
 
-In the probe, counting 13,161 matches in 5,414 sessions this way took 15 ms at 100k records,
-and DuckDB's grouped search took about 90 ms at 1M. The spike measures step 1 at 1M records on
-real S3. DuckDB is not needed for search; it comes with analytics.
+### DuckDB, compared in the spike
+
+DuckDB's `lance` extension can do steps 1 to 3 in SQL: `lance_fts(path, 'text', query, k = …)`
+grouped by session, with `max(_score)`, `count(*)`, `ORDER BY` and `LIMIT … OFFSET`. The probes
+do not settle which is faster. TypeScript grouped 13,161 matches at 100k records in 15 ms;
+DuckDB grouped 110,069 matches at 1M records in about 90 ms from a folder and 138 to 332 ms from
+local S3. Those are different sizes, so the spike runs both on the same data.
+
+It measures, on Linux, against a real S3 bucket, at 1M and 10M records (10M is about four
+months of a 50-person team; see [sizes](#sizes)):
+
+- p50 and p95 for a relevance page and a recent page, for a rare word, two common words, a
+  phrase, a prefix and a `NOT`, each with and without visibility and label filters;
+- TypeScript reading the matches as Arrow (`toArrow()`, so no JavaScript object per row)
+  against DuckDB's `lance_fts` with the grouping in SQL;
+- whether `lance_fts` takes every query shape the `MatchTree` produces (phrases, `OR`, `NOT`).
+  If it takes only plain words, DuckDB can group only those queries;
+- whether the filter applies before the top `k` (`prefilter`), which visibility needs;
+- credentials: in the probe the extension read S3 credentials only from `AWS_*` variables,
+  which are the whole process's. The spike checks GCS and Azure, and an index whose
+  credentials differ from the store's;
+- memory per query, and DuckDB's size in the image (63 MB on macOS arm64).
+
+DuckDB groups searches if it is clearly faster, say twice as fast at p95, and handles every
+query shape and store. Otherwise TypeScript does, and DuckDB arrives later with analytics. The
+choice sits inside `LanceIndex.query()`, so the seam does not change either way.
 
 Searches include rows not yet in the index (LanceDB scans them), so a record is searchable as
 soon as its page is committed. `fastSearch()` is not used.
@@ -511,6 +540,7 @@ max_scored_rows = 100000
   dependencies of `@seshi/search`, imported lazily by `lanceIndex()`. The hook's import check
   (X3.3) keeps them off the capture path. The native binary is about 250 MB on macOS arm64;
   LanceDB's optional embedding dependencies (`onnxruntime-node`, 180 MB) are left out.
+  `@duckdb/node-api` joins them, the same way, only if the spike picks DuckDB for grouping.
 - **Platforms.** The probes ran on macOS arm64. The server image is Linux; the spike checks
   linux-x64 and linux-arm64 under Bun, and the image size.
 - **`seshi doctor`** with a server config checks that the location is reachable and writable by
@@ -613,14 +643,14 @@ guess in the scoping PR.
 
 ## Open questions
 
-1. **Is a lower bound on `total` acceptable** when `max_scored_rows` is reached, or should a
-   relevance sort fall back to recent order above it?
+1. **TypeScript or DuckDB for grouping searches?** The spike decides, by the measures and rule
+   in [DuckDB, compared in the spike](#duckdb-compared-in-the-spike).
 
 ## Plan
 
 | Phase | What | Size |
 |---|---|---|
-| 0. Spike | On Linux and a real S3 bucket, with about 1M real-shaped records: cold and warm latency for 10 representative queries, grouping in TypeScript, prefix checks, a page commit's time, `optimize()` and scrub times, and the image size. | 2–3 days |
+| 0. Spike | On Linux and a real S3 bucket, with about 1M real-shaped records: cold and warm latency for 10 representative queries, grouping in TypeScript against DuckDB's `lance` extension ([what it measures](#duckdb-compared-in-the-spike)), prefix checks, a page commit's time, `optimize()` and scrub times, and the image size. | 3–4 days |
 | 1. Seam | `IndexReader` and `IndexWriter`, `drain()` onto `commit()`, `MatchTree`, `state()`, `IndexUnavailable`, the `OpenIndex` factory, `SearchStatus.location`, `excerpt()`. SQLite only, with no change in behaviour; existing tests keep their assertions. | 4–6 days |
 | 2. Backend | `LanceIndex`: tables and `meta`, `commit()`, the query compiler, filters and escaping, grouping, prefixes, `maintain()` with the scrub, generations. The conformance suite on folder and S3, and the crash tests. | 1.5 weeks |
 | 3. Deploy | The config schema, `worker` placement for this backend, `--status`, `--rebuild`, `--wait` and `--scrub`, `doctor` checks, spec/layout.md's `search/` entry, and docs (`docs/search.md`, `docs/config.md`, F10.6–F10.12 in `design-decisions.html`). | 1 week |
