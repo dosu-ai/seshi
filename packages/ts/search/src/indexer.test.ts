@@ -1,8 +1,14 @@
+import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BUILTIN_FORMATS, FormatRegistry } from "@seshi/formats";
-import type { ChangeEntry, Trace } from "@seshi/model";
+import {
+  type ChangeEntry,
+  DEFAULT_SEARCH_MAX_CHARS,
+  type EventRole,
+  type Trace,
+} from "@seshi/model";
 import { StoreSeshi, setVisibility, tombstone } from "@seshi/pipeline";
 import {
   appendChange,
@@ -19,7 +25,7 @@ import {
 } from "@seshi/store";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PageCommit } from "./backend";
-import { currentTraces, Indexer, searchableEvents, tracesFrom } from "./indexer";
+import { currentTraces, Indexer, indexedCalls, searchableEvents, tracesFrom } from "./indexer";
 import { MEMORY_INDEX } from "./paths";
 import { parseQuery } from "./query";
 import { SqliteIndex } from "./sqlite";
@@ -27,6 +33,7 @@ import { LOCAL_VIEWER } from "./viewer";
 
 const formats = new FormatRegistry(BUILTIN_FORMATS);
 const EVENTS = ["user", "assistant", "tool_call"] as const;
+const ALL = Object.keys(DEFAULT_SEARCH_MAX_CHARS) as EventRole[];
 const line = (record: Record<string, unknown>) => `${JSON.stringify(record)}\n`;
 const ts = "2026-11-01T10:00:00Z";
 const PAD = ` ${"context ".repeat(260)}`;
@@ -275,6 +282,118 @@ describe("the indexer (F10.2)", () => {
     expect(await find("start")).toEqual(["alice/s1"]);
     expect(index.session("alice", archive)?.traces).toEqual(currentTraces(metadata as never));
     expect((await index.state()).events).toBe(4);
+  });
+
+  it("numbers events by their place in the session across its traces, as read_session does", async () => {
+    const archive = await continued(2);
+    const path = join(dir, "seq.sqlite");
+    const index = new SqliteIndex({ path, deployment: "d", events: ALL });
+    const indexer = new Indexer({ store, index, events: ALL, now: () => clock, ownerRefreshMs: 0 });
+    // The first trace, then the two continuations, each read on its own pass.
+    await indexer.run();
+    const metadata = await readMetadata(store, "alice", archive);
+    const traces = await Promise.all(
+      currentTraces(metadata as never).map(async (hash) => ({
+        hash,
+        trace: gunzipJson<Trace>(
+          (await getBytes(store, keys.trace("alice", archive, hash))) as Uint8Array,
+        ),
+      })),
+    );
+    expect(traces).toHaveLength(3);
+    const flat = traces.flatMap(({ hash, trace }) => trace.events.map((e) => ({ hash, e })));
+    const rows = new Database(path, { readonly: true })
+      .query(
+        `SELECT e.content_hash, e.event_index, e.seq, e.role, t.text
+         FROM events e JOIN events_text t ON t.rowid = e.id ORDER BY e.seq, e.role`,
+      )
+      .all() as { content_hash: string; event_index: number; seq: number; role: string }[];
+    expect(rows.length).toBeGreaterThan(3);
+    for (const row of rows) {
+      const at = flat[row.seq];
+      expect(at?.hash).toBe(row.content_hash);
+      // What the assistant said alongside tool calls takes its first call's place.
+      if (row.role !== "assistant" || at?.e.role === "assistant") {
+        expect([at?.e.index, at?.e.role]).toEqual([row.event_index, row.role]);
+      }
+    }
+    expect(index.session("alice", archive)?.event_count).toBe(flat.length);
+    await index.close();
+  });
+
+  it("cuts each role's text to its cap and keeps its full length, its tool call id and outcome", async () => {
+    await db().ingest({ format: "trajectory", session_id: "s1", transcript: log("cap me") });
+    const archive = archiveId("alice", "trajectory", "s1");
+    const metadata = await readMetadata(store, "alice", archive);
+    const key = keys.trace("alice", archive, metadata?.head as string);
+    const trace = gunzipJson<Trace>((await getBytes(store, key)) as Uint8Array);
+    const result = trace.events.findIndex((e) => e.role === "tool_result");
+    const long = `${"x".repeat(300)} TAILWORD`;
+    trace.events[result] = {
+      ...(trace.events[result] as Trace["events"][number]),
+      text: long,
+      ok: false,
+    };
+    trace.llm_calls = [
+      {
+        id: "call-1",
+        model: "opus",
+        provider: "anthropic",
+        started_at: "2026-11-01T10:00:01Z",
+        ended_at: "2026-11-01T10:00:04Z",
+        duration_ms: 3000,
+        usage: { input_tokens: 120, output_tokens: 30, cache_read_input_tokens: 4 },
+        stop_reason: "tool_use",
+      },
+      { id: "call-1", model: "repeated id" },
+    ];
+    await store.put(key, gzipJsonDeterministic(trace));
+    const path = join(dir, "caps.sqlite");
+    const maxChars = { ...DEFAULT_SEARCH_MAX_CHARS, tool_result: 256 };
+    const index = new SqliteIndex({ path, deployment: "d", events: ALL, max_chars: maxChars });
+    const indexer = new Indexer({ store, index, events: ALL, maxChars, now: () => clock });
+    await indexer.run();
+    const raw = new Database(path, { readonly: true });
+    expect(
+      raw
+        .query(
+          `SELECT e.role, e.tool_name, e.tool_call_id, e.ok, e.chars, length(t.text) AS kept
+           FROM events e JOIN events_text t ON t.rowid = e.id WHERE e.role = 'tool_result'`,
+        )
+        .get(),
+    ).toEqual({
+      role: "tool_result",
+      tool_name: "Bash",
+      tool_call_id: "c1",
+      ok: 0,
+      chars: long.length,
+      kept: 256,
+    });
+    expect(raw.query("SELECT tool_call_id FROM events WHERE role = 'tool_call'").get()).toEqual({
+      tool_call_id: "c1",
+    });
+    expect(raw.query("SELECT * FROM llm_calls").all()).toEqual([
+      expect.objectContaining({
+        content_hash: metadata?.head,
+        call_id: "call-1",
+        model: "opus",
+        provider: "anthropic",
+        started_at: Date.parse("2026-11-01T10:00:01Z"),
+        ended_at: Date.parse("2026-11-01T10:00:04Z"),
+        duration_ms: 3000,
+        input_tokens: 120,
+        output_tokens: 30,
+        cache_read_input_tokens: 4,
+        cache_creation_input_tokens: null,
+        total_tokens: null,
+        stop_reason: "tool_use",
+        error: null,
+      }),
+    ]);
+    // Past the cap is not searched.
+    expect(await finder(index)("TAILWORD")).toEqual([]);
+    expect(await finder(index)("cap")).toEqual(["alice/s1"]);
+    await index.close();
   });
 
   it("never puts back a session a slower run read before a faster run indexed it", async () => {
@@ -1059,14 +1178,46 @@ describe("searchableEvents", () => {
       ],
     };
     const all = searchableEvents("h", trace as never, new Set(EVENTS));
-    expect(all.map((e) => [e.role, e.event_index, e.text])).toEqual([
-      ["user", 0, "go"],
-      ["tool_call", 1, "Read {}"],
-      ["tool_call", 2, "Bash {}"],
-      ["assistant", 4, "All done."],
-      ["assistant", 1, "Running both."],
+    expect(all.map((e) => [e.role, e.event_index, e.seq, e.text])).toEqual([
+      ["user", 0, 0, "go"],
+      ["tool_call", 1, 1, "Read {}"],
+      ["tool_call", 2, 2, "Bash {}"],
+      ["assistant", 4, 4, "All done."],
+      ["assistant", 1, 1, "Running both."],
     ]);
     expect(all[3]?.timestamp).toBeUndefined();
     expect(searchableEvents("h", trace as never, new Set(["user"] as const))).toHaveLength(1);
+  });
+});
+
+describe("indexedCalls", () => {
+  it("flattens usage, reads times as epoch ms, and keeps the first of a repeated id", () => {
+    expect(
+      indexedCalls("h", [
+        {
+          id: "a",
+          model: "m",
+          started_at: "2026-11-01T10:00:00Z",
+          ended_at: "not a time",
+          usage: { input_tokens: 5, total_tokens: 9.7, reasoning_tokens: Number.NaN },
+          error: "overloaded",
+        },
+        { id: "a", model: "second" },
+        { id: "", model: "no id" },
+        { id: "b" },
+      ]),
+    ).toEqual([
+      {
+        content_hash: "h",
+        call_id: "a",
+        model: "m",
+        started_at: Date.parse("2026-11-01T10:00:00Z"),
+        input_tokens: 5,
+        total_tokens: 9,
+        error: "overloaded",
+      },
+      { content_hash: "h", call_id: "b" },
+    ]);
+    expect(indexedCalls("h", undefined)).toEqual([]);
   });
 });

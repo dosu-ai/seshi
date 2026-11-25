@@ -417,6 +417,7 @@ export class Instance {
       settings: {
         ...(config.search.path && !shared ? { path: config.search.path } : {}),
         events: config.search.events,
+        maxChars: config.search.max_chars,
       },
       ...(open ? { open } : {}),
       ...(shared ? { shared: true } : {}),

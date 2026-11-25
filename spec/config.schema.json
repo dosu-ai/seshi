@@ -2029,9 +2029,13 @@
           "default": [
             "user",
             "assistant",
-            "tool_call"
+            "tool_call",
+            "tool_result",
+            "system",
+            "observation",
+            "reasoning"
           ],
-          "description": "Which trace events are indexed, by role: prompts, assistant text, and tool calls (names and inputs, so file paths and commands) by default (F10.1).",
+          "description": "Which trace events are indexed, by role: every role by default (F10.1), each cut to its max_chars. Changing it rebuilds the index.",
           "minItems": 1,
           "type": "array",
           "items": {
@@ -2046,6 +2050,63 @@
               "reasoning"
             ]
           }
+        },
+        "max_chars": {
+          "description": "How much of each role's text is indexed, in characters (256 to 32768): the rest is not searched, and read_session reads it from the store. Tool output and observations 8192, the rest 32768. Changing one rebuilds the index.",
+          "default": {},
+          "type": "object",
+          "properties": {
+            "user": {
+              "default": 32768,
+              "description": "Characters of a user event indexed (32768).",
+              "type": "integer",
+              "minimum": 256,
+              "maximum": 32768
+            },
+            "assistant": {
+              "default": 32768,
+              "description": "Characters of a assistant event indexed (32768).",
+              "type": "integer",
+              "minimum": 256,
+              "maximum": 32768
+            },
+            "tool_call": {
+              "default": 32768,
+              "description": "Characters of a tool_call event indexed (32768).",
+              "type": "integer",
+              "minimum": 256,
+              "maximum": 32768
+            },
+            "tool_result": {
+              "default": 8192,
+              "description": "Characters of a tool_result event indexed (8192).",
+              "type": "integer",
+              "minimum": 256,
+              "maximum": 32768
+            },
+            "system": {
+              "default": 32768,
+              "description": "Characters of a system event indexed (32768).",
+              "type": "integer",
+              "minimum": 256,
+              "maximum": 32768
+            },
+            "observation": {
+              "default": 8192,
+              "description": "Characters of a observation event indexed (8192).",
+              "type": "integer",
+              "minimum": 256,
+              "maximum": 32768
+            },
+            "reasoning": {
+              "default": 32768,
+              "description": "Characters of a reasoning event indexed (32768).",
+              "type": "integer",
+              "minimum": 256,
+              "maximum": 32768
+            }
+          },
+          "additionalProperties": false
         },
         "lance": {
           "description": "The LanceDB index (backend = \"lance\"): one index in object storage, written by the worker and read by every API instance (F10.6–F10.12).",

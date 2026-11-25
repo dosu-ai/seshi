@@ -83,6 +83,7 @@ describe("SearchService", () => {
     expect(match).toMatchObject({
       role: "user",
       event_index: 0,
+      seq: 0,
       timestamp: ts.replace("Z", ".000Z"),
     });
     expect(match?.snippet.slice(...(match.highlights[0] as [number, number]))).toBe("kubernetes");
@@ -256,6 +257,7 @@ describe("checkRequest", () => {
       agent_version: "0.169.0",
       model: "gpt-9-codex",
       source: "upload",
+      role: ["tool_result", "observation", "tool_result"],
       since: "2026-11-01T00:00:00Z",
       until: "2026-11-02T00:00:00Z",
       sort: "recent",
@@ -270,6 +272,7 @@ describe("checkRequest", () => {
       harness: "codex",
       agent_version: "0.169.0",
       model: "gpt-9-codex",
+      roles: ["tool_result", "observation"],
       since: Date.parse("2026-11-01T00:00:00Z"),
       until: Date.parse("2026-11-02T00:00:00Z"),
       sort: "recent",
@@ -294,6 +297,8 @@ describe("checkRequest", () => {
       { q: "x", cursor: "99999999" },
       { q: "x", agent: "a".repeat(600) },
       { q: "x", repo: 5 },
+      { q: "x", role: ["tool_output"] },
+      { q: "x", role: [5] },
     ];
     for (const request of bad) {
       expect(() => checkRequest(request as never), JSON.stringify(request)).toThrow(

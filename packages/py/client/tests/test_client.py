@@ -342,6 +342,7 @@ class TestRequests:
         fake.client().search(
             "flaky test",
             repo="widget",
+            role=["tool_result", "observation"],
             sort="recent",
             limit=5,
             matches=0,
@@ -350,6 +351,7 @@ class TestRequests:
         assert dict(fake.last.url.params) == {
             "q": "flaky test",
             "repo": "widget",
+            "role": "tool_result,observation",
             "sort": "recent",
             "limit": "5",
             "matches": "0",

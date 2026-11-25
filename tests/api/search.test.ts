@@ -284,13 +284,30 @@ describe("GET /v1/search (F10)", () => {
     }
   });
 
+  it("searches only the roles asked for (role=a,b)", async () => {
+    await seed();
+    const admin = client(adminToken);
+    const all = ids(await admin.search({ q: "deploy" }));
+    expect(all.length).toBeGreaterThan(0);
+    expect(ids(await admin.search({ q: "deploy", role: ["user", "tool_result"] }))).toEqual(all);
+    expect(ids(await admin.search({ q: "deploy", role: ["assistant"] }))).toEqual([]);
+    expect(ids(await admin.search({ q: "on", role: ["assistant"] }))).toEqual(all);
+    const res = await app.fetch(
+      new Request("http://seshi.test/v1/search?q=deploy&role=user,tool_output", {
+        headers: { authorization: `Bearer ${adminToken}` },
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(await res.json())).toContain("role must be one or more of");
+  });
+
   it("points each match at its trace and event, with a snippet", async () => {
     await seed();
     const alice = client(orgKey, "alice");
     const [hit] = (await alice.search({ q: '"payments service"' })).results;
     const match = hit?.matches[0];
     if (!match) throw new Error("no match");
-    expect(match).toMatchObject({ role: "user", event_index: 0 });
+    expect(match).toMatchObject({ role: "user", event_index: 0, seq: 0 });
     const trace = await alice.getTrace("trajectory", "pay", match.content_hash);
     const event = (trace as { events: { index: number; text: string }[] }).events[
       match.event_index

@@ -95,7 +95,7 @@ describe("seshi search, in-process", () => {
     expect(first.code).toBe(EXIT.ok);
     expect(first.err).toContain("building the search index");
     expect(first.out).toContain("trajectory/s1  alice  github.com/acme/payments  2026-11-01 10:00");
-    expect(first.out).toContain("  user: restart the payments deployment context");
+    expect(first.out).toMatch(/ {2}#\d+ user: restart the payments deployment context/);
     expect(first.out).toContain("1 session match.");
     // Whoever holds the bucket keys reads everything, and tool calls are searchable.
     const again = await seshi(["kubectl", "rollout", "--config", toml]);
@@ -334,6 +334,7 @@ describe("the command's pieces", () => {
             {
               content_hash: "0".repeat(64),
               event_index: 0,
+              seq: 0,
               role: "user",
               snippet: "see \x1b]52;c;Zm9v\x07 here",
               highlights: [[0, 3]],
@@ -375,6 +376,7 @@ describe("the command's pieces", () => {
             {
               content_hash: "0".repeat(64),
               event_index: 2,
+              seq: 7,
               role: "tool_call",
               tool_name: "Bash",
               snippet: "git push\n--force",
@@ -386,7 +388,7 @@ describe("the command's pieces", () => {
     });
     expect(lines).toEqual([
       "claude-code/abc  alice  acme/widget @ main  2026-11-14 09:05  1 match",
-      "  tool_call Bash: git push --force",
+      "  #7 tool_call Bash: git push --force",
       "",
       "1 of 3 sessions shown; more with --cursor 1",
     ]);

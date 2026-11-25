@@ -7,7 +7,7 @@ error the pipeline would have raised (`seshi.errors`).
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Iterator, Mapping
+from collections.abc import AsyncIterator, Iterator, Mapping, Sequence
 from datetime import datetime
 from types import TracebackType
 from typing import Any, Literal, TypeVar, overload
@@ -33,6 +33,7 @@ def _search_request(
     model: str | None,
     labels: Mapping[str, str] | None,
     source: str | None,
+    role: Sequence[m.EventRole] | None,
     since: str | datetime | None,
     until: str | datetime | None,
     sort: m.SearchSort | None,
@@ -51,6 +52,7 @@ def _search_request(
         model=model,
         label=[f"{key}={value}" for key, value in labels.items()] if labels else None,
         source=source,
+        role=",".join(role) if role else None,
         since=calls.rfc3339(since) if isinstance(since, datetime) else since,
         until=calls.rfc3339(until) if isinstance(until, datetime) else until,
         sort=sort,
@@ -441,6 +443,7 @@ class SeshiClient(_Base):
         model: str | None = None,
         labels: Mapping[str, str] | None = None,
         source: str | None = None,
+        role: Sequence[m.EventRole] | None = None,
         since: str | datetime | None = None,
         until: str | datetime | None = None,
         sort: m.SearchSort | None = None,
@@ -461,6 +464,7 @@ class SeshiClient(_Base):
             agent_version=agent_version,
             model=model,
             source=source,
+            role=role,
             since=since,
             until=until,
             sort=sort,
@@ -946,6 +950,7 @@ class AsyncSeshiClient(_Base):
         model: str | None = None,
         labels: Mapping[str, str] | None = None,
         source: str | None = None,
+        role: Sequence[m.EventRole] | None = None,
         since: str | datetime | None = None,
         until: str | datetime | None = None,
         sort: m.SearchSort | None = None,
@@ -964,6 +969,7 @@ class AsyncSeshiClient(_Base):
             agent_version=agent_version,
             model=model,
             source=source,
+            role=role,
             since=since,
             until=until,
             sort=sort,

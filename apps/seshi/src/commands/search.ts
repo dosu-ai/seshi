@@ -4,6 +4,7 @@ import { HttpSeshi, ServerError } from "@seshi/client";
 import { findServerConfig, parseDuration } from "@seshi/config";
 import type { Instance } from "@seshi/instance";
 import {
+  type EventRole,
   Forbidden,
   labelPairs,
   type SearchRequest,
@@ -35,7 +36,7 @@ import { cwdConfigHint, openServer, serverFailure } from "./server-instance";
 
 const USAGE = [
   "usage: seshi search <words…> [--owner <id>] [--agent <a>] [--repo <r>] [--branch <b>] [--source <id>]",
-  "                    [--harness <h>] [--harness-version <v>] [--model <m>]",
+  "                    [--harness <h>] [--harness-version <v>] [--model <m>] [--role <r,…>]",
   "                    [--label key=value]…",
   "                    [--since <time|7d>] [--until <time|7d>] [--sort relevance|recent]",
   "                    [--limit <n>] [--matches <n>] [--cursor <c>]",
@@ -54,6 +55,7 @@ const OPTIONS = {
   model: { type: "string" },
   label: { type: "string", multiple: true },
   source: { type: "string" },
+  role: { type: "string" },
   since: { type: "string" },
   until: { type: "string" },
   sort: { type: "string" },
@@ -106,6 +108,16 @@ function labelArgs(given: readonly string[] | undefined): Record<string, string>
   return parsed.labels;
 }
 
+/** `--role tool_result,observation`: the server checks the roles. */
+function roleArg(value: string): EventRole[] {
+  const roles = value
+    .split(",")
+    .map((r) => r.trim())
+    .filter((r) => r !== "");
+  if (roles.length === 0) throw new UsageProblem("--role must name a role (tool_result, user, …)");
+  return roles as EventRole[];
+}
+
 export function requestOf(query: string, values: Values, now: Date): SearchRequest {
   const labels = labelArgs(values.label);
   return {
@@ -121,6 +133,7 @@ export function requestOf(query: string, values: Values, now: Date): SearchReque
     ...(values.model !== undefined ? { model: values.model } : {}),
     ...(labels ? { labels } : {}),
     ...(values.source !== undefined ? { source: values.source } : {}),
+    ...(values.role !== undefined ? { role: roleArg(values.role) } : {}),
     ...(values.since !== undefined ? { since: timeArg(values.since, "since", now) } : {}),
     ...(values.until !== undefined ? { until: timeArg(values.until, "until", now) } : {}),
     ...(values.sort !== undefined ? { sort: values.sort as SearchSort } : {}),
@@ -172,7 +185,13 @@ export function resultLines(result: SearchResult, style: Style = Style.plain()):
   ];
   const lines = [head.join("  ")];
   for (const match of result.matches) {
-    const label = printable(match.tool_name ? `${match.role} ${match.tool_name}` : match.role);
+    const label = printable(
+      [
+        ...(typeof match.seq === "number" ? [`#${match.seq}`] : []),
+        match.role,
+        ...(match.tool_name ? [match.tool_name] : []),
+      ].join(" "),
+    );
     lines.push(
       `  ${style.muted(`${label}:`)} ${highlighted(match.snippet, match.highlights, style)}`,
     );

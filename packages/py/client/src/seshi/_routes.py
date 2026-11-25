@@ -60,6 +60,7 @@ ROUTES: dict[str, Route] = {
             "model",
             "label",
             "source",
+            "role",
             "since",
             "until",
             "sort",

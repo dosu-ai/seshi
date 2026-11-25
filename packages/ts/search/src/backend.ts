@@ -1,4 +1,11 @@
-import type { ChangeEntry, EventRole, Labels, SearchSort, Visibility } from "@seshi/model";
+import {
+  type ChangeEntry,
+  DEFAULT_SEARCH_MAX_CHARS,
+  type EventRole,
+  type Labels,
+  type SearchSort,
+  type Visibility,
+} from "@seshi/model";
 import type { MatchTree } from "./query";
 import type { Viewer } from "./viewer";
 
@@ -33,16 +40,50 @@ export interface IndexedSession {
   updated_at: string;
   /** The traces indexed, in the session's order. */
   traces: string[];
+  /** How many events those traces hold, indexed or not: the `seq` the next trace's first event
+   * takes. */
+  event_count: number;
 }
 
 export interface IndexedEvent {
   content_hash: string;
   event_index: number;
+  /** The event's place in the session, from 0 across its indexed traces (`read_session`'s
+   * `seq`). What the assistant said alongside tool calls takes its first call's. */
+  seq: number;
   role: EventRole;
   tool_name?: string;
+  /** Pairs a tool call with its result. */
+  tool_call_id?: string;
+  /** Whether a tool result records success. */
+  ok?: boolean;
   /** Epoch ms, when the event's timestamp parses. */
   timestamp?: number;
+  /** The event's text, cut to its role's `max_chars`. */
   text: string;
+  /** The text's full length, before the cut. */
+  chars: number;
+}
+
+/** One model request a session's trace records (`Trace.llm_calls`), with its usage flattened. */
+export interface IndexedLlmCall {
+  content_hash: string;
+  /** The call's id, unique within its trace. */
+  call_id: string;
+  model?: string;
+  provider?: string;
+  /** Epoch ms. */
+  started_at?: number;
+  ended_at?: number;
+  duration_ms?: number;
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
+  reasoning_tokens?: number;
+  total_tokens?: number;
+  stop_reason?: string;
+  error?: string;
 }
 
 /** A change to one session. With `replace` the events it held go first (a replaced or
@@ -50,6 +91,8 @@ export interface IndexedEvent {
 export interface SessionUpdate {
   session: IndexedSession;
   events: IndexedEvent[];
+  /** The model calls of the same traces, written in the same commit; none when omitted. */
+  llm_calls?: IndexedLlmCall[];
   replace: boolean;
   /** For a continuation: the traces the index must hold for `events` to extend them. When it
    * holds others (another process got there first), the update is refused. */
@@ -83,6 +126,8 @@ export interface BackendQuery {
   /** Sessions carrying every one of these labels. */
   labels?: Labels;
   source?: string;
+  /** Only records of these roles. */
+  roles?: readonly EventRole[];
   since?: number;
   until?: number;
   sort: SearchSort;
@@ -94,6 +139,7 @@ export interface BackendQuery {
 export interface BackendMatch {
   content_hash: string;
   event_index: number;
+  seq: number;
   role: EventRole;
   tool_name?: string;
   timestamp?: number;
@@ -267,6 +313,9 @@ export interface IndexOptions {
    * or hold some it should not). LanceDB keeps answering from an index built with fewer roles
    * while it builds the new one beside it, and stops at once for one built with more. */
   events: readonly EventRole[];
+  /** How much of each role's text is kept (`DEFAULT_SEARCH_MAX_CHARS` when omitted): an index
+   * built with other caps is rebuilt (LanceDB: beside the live one, which keeps answering). */
+  max_chars?: Readonly<Record<EventRole, number>>;
   /** What the indexer admits, named (F11.9: a serverless laptop's search scope and owner): an
    * index built under another scope is wiped (LanceDB: stops answering until the new one has
    * caught up), so it holds nothing this one would leave out. */
@@ -274,6 +323,16 @@ export interface IndexOptions {
   /** Keep a copy of every change entry read, for the cross-owner feed. An index built without
    * it is wiped when it is turned on, so the copy starts from every feed's start. */
   feed?: boolean;
+}
+
+/** Each role's cap, as an index is built with it: every role, in one order. */
+export function maxCharsOf(options: Pick<IndexOptions, "max_chars">): Record<EventRole, number> {
+  const caps = options.max_chars ?? DEFAULT_SEARCH_MAX_CHARS;
+  return Object.fromEntries(
+    (Object.keys(DEFAULT_SEARCH_MAX_CHARS) as EventRole[])
+      .sort()
+      .map((role) => [role, caps[role] ?? DEFAULT_SEARCH_MAX_CHARS[role]]),
+  ) as Record<EventRole, number>;
 }
 
 /** Opens a backend's index: what `SearchService` calls instead of constructing one. */

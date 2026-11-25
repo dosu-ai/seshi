@@ -82,6 +82,10 @@ export function filterSql(
   const labels = Object.entries(q.labels ?? {}).map(([k, v]) => `${k}=${v}`);
   if (labels.length > 0) where.push(`array_has_all(labels, [${sqlList(labels)}])`);
   if (q.source !== undefined) where.push(`source_id = ${sqlString(q.source)}`);
+  if (q.roles !== undefined) {
+    if (q.roles.length === 0) return null;
+    where.push(`role IN (${sqlList(q.roles)})`);
+  }
   if (q.since !== undefined) where.push(`coalesce(ts, session_updated) >= ${sqlTime(q.since)}`);
   if (q.until !== undefined) where.push(`coalesce(ts, session_updated) <= ${sqlTime(q.until)}`);
   return where.join(" AND ");

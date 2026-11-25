@@ -1,7 +1,9 @@
 import {
   type ChangeEntry,
   canonicalText,
+  DEFAULT_SEARCH_MAX_CHARS,
   type EventRole,
+  type LlmCall,
   type SessionMetadata,
   type Trace,
 } from "@seshi/model";
@@ -18,7 +20,14 @@ import {
   type Store,
   stampTime,
 } from "@seshi/store";
-import type { IndexedEvent, IndexedSession, IndexWriter, Removal, SessionUpdate } from "./backend";
+import type {
+  IndexedEvent,
+  IndexedLlmCall,
+  IndexedSession,
+  IndexWriter,
+  Removal,
+  SessionUpdate,
+} from "./backend";
 
 export const FEED_LAG_MS = 5 * 60 * 1000;
 export const FEED_PAGE = 500;
@@ -36,6 +45,8 @@ export interface IndexerOptions {
   store: Store;
   index: IndexWriter;
   events: readonly EventRole[];
+  /** How much of each role's text is indexed (`DEFAULT_SEARCH_MAX_CHARS` when omitted). */
+  maxChars?: Readonly<Record<EventRole, number>>;
   now?: () => Date;
   log?: IndexerLogger;
   lagMs?: number;
@@ -96,24 +107,36 @@ export function currentTraces(metadata: SessionMetadata): string[] {
   return metadata.traces.slice(start).map((t) => t.content_hash);
 }
 
+/** A trace's events the index keeps: those of `roles` with text, each cut to its role's cap
+ * (`maxChars`) with its full length kept. `seq` counts from the trace's first event; the
+ * indexer adds where the trace starts in the session. */
 export function searchableEvents(
   hash: string,
   trace: Trace,
   roles: ReadonlySet<EventRole>,
+  maxChars: Readonly<Record<EventRole, number>> = DEFAULT_SEARCH_MAX_CHARS,
 ): IndexedEvent[] {
   const out: IndexedEvent[] = [];
-  for (const event of trace.events) {
-    if (!roles.has(event.role) || event.text === "") continue;
+  const cut = (role: EventRole, text: string) => {
+    const cap = maxChars[role];
+    return text.length > cap ? text.slice(0, cap) : text;
+  };
+  trace.events.forEach((event, seq) => {
+    if (!roles.has(event.role) || event.text === "") return;
     const timestamp = epoch(event.timestamp);
     out.push({
       content_hash: hash,
       event_index: event.index,
+      seq,
       role: event.role,
       ...(event.tool_name !== undefined ? { tool_name: event.tool_name } : {}),
+      ...(event.tool_call_id !== undefined ? { tool_call_id: event.tool_call_id } : {}),
+      ...(typeof event.ok === "boolean" ? { ok: event.ok } : {}),
       ...(timestamp !== undefined ? { timestamp } : {}),
-      text: event.text,
+      text: cut(event.role, event.text),
+      chars: event.text.length,
     });
-  }
+  });
   if (!roles.has("assistant")) return out;
   let next = 0;
   for (const record of trace.records.slice(1)) {
@@ -130,13 +153,54 @@ export function searchableEvents(
         out.push({
           content_hash: hash,
           event_index: next,
+          seq: next,
           role: "assistant",
           ...(timestamp !== undefined ? { timestamp } : {}),
-          text,
+          text: cut("assistant", text),
+          chars: text.length,
         });
       }
     }
     next += calls > 0 ? calls : record.content ? 1 : 0;
+  }
+  return out;
+}
+
+function count(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? Math.trunc(value) : undefined;
+}
+
+/** A trace's model calls as the index keeps them: `usage` flattened, times in epoch ms. */
+export function indexedCalls(
+  hash: string,
+  calls: readonly LlmCall[] | undefined,
+): IndexedLlmCall[] {
+  const out: IndexedLlmCall[] = [];
+  const seen = new Set<string>();
+  for (const call of calls ?? []) {
+    if (typeof call?.id !== "string" || call.id === "" || seen.has(call.id)) continue;
+    seen.add(call.id);
+    const usage = call.usage ?? {};
+    const fields: Omit<IndexedLlmCall, "content_hash" | "call_id"> = {
+      model: typeof call.model === "string" ? call.model : undefined,
+      provider: typeof call.provider === "string" ? call.provider : undefined,
+      started_at: epoch(call.started_at),
+      ended_at: epoch(call.ended_at),
+      duration_ms: count(call.duration_ms),
+      input_tokens: count(usage.input_tokens),
+      output_tokens: count(usage.output_tokens),
+      cache_read_input_tokens: count(usage.cache_read_input_tokens),
+      cache_creation_input_tokens: count(usage.cache_creation_input_tokens),
+      reasoning_tokens: count(usage.reasoning_tokens),
+      total_tokens: count(usage.total_tokens),
+      stop_reason: typeof call.stop_reason === "string" ? call.stop_reason : undefined,
+      error: typeof call.error === "string" ? call.error : undefined,
+    };
+    out.push({
+      content_hash: hash,
+      call_id: call.id,
+      ...Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined)),
+    });
   }
   return out;
 }
@@ -170,7 +234,11 @@ type TraceFacts = Pick<Trace, "started_at" | "ended_at" | "project" | "branch" |
 
 interface ReadTrace {
   trace: TraceFacts;
+  /** Its searchable events, `seq` counted from the trace's start. */
   events: IndexedEvent[];
+  /** How many events it holds, searchable or not. */
+  count: number;
+  llm_calls: IndexedLlmCall[];
 }
 
 interface Replaced {
@@ -229,6 +297,7 @@ export class Indexer {
   private readonly store: Store;
   private readonly index: IndexWriter;
   private readonly roles: ReadonlySet<EventRole>;
+  private readonly maxChars: Readonly<Record<EventRole, number>>;
   private readonly now: () => Date;
   private readonly log: IndexerLogger | undefined;
   private readonly lagMs: number;
@@ -253,6 +322,7 @@ export class Indexer {
     this.store = options.store;
     this.index = options.index;
     this.roles = new Set(options.events);
+    this.maxChars = options.maxChars ?? DEFAULT_SEARCH_MAX_CHARS;
     this.now = options.now ?? (() => new Date());
     this.log = options.log;
     this.lagMs = options.lagMs ?? FEED_LAG_MS;
@@ -631,13 +701,21 @@ export class Indexer {
     const base = extends_ ? (held as IndexedSession).traces : [];
     const session = this.sessionFields(owner, metadata, read, extends_ ? held : null);
     session.traces = [...base, ...read.map((t) => t.hash)];
-    const events = read.flatMap((t) => t.events);
+    // Each trace's events take their `seq`s after those of the traces before it.
+    let start = extends_ ? (held as IndexedSession).event_count : 0;
+    const events: IndexedEvent[] = [];
+    for (const t of read) {
+      for (const e of t.events) events.push({ ...e, seq: start + e.seq });
+      start += t.count;
+    }
+    session.event_count = start;
     return {
       kind: "apply",
       metadata,
       update: {
         session,
         events,
+        llm_calls: read.flatMap((t) => t.llm_calls),
         replace: !extends_,
         ...(extends_ ? { base } : {}),
         read_at: readAt,
@@ -690,7 +768,12 @@ export class Indexer {
           agent_version: trace.metadata?.agent_version,
         },
       };
-      return { trace: facts, events: searchableEvents(hash, trace, this.roles) };
+      return {
+        trace: facts,
+        events: searchableEvents(hash, trace, this.roles, this.maxChars),
+        count: trace.events.length,
+        llm_calls: indexedCalls(hash, trace.llm_calls),
+      };
     } catch {
       return null;
     }
@@ -736,6 +819,7 @@ export class Indexer {
       ...(ends.length > 0 ? { ended_at: Math.max(...ends) } : {}),
       updated_at: metadata.updated_at,
       traces: [],
+      event_count: 0,
     };
   }
 }

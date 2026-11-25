@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ChangeEntry } from "@seshi/model";
+import { type ChangeEntry, DEFAULT_SEARCH_MAX_CHARS } from "@seshi/model";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { BackendQuery, IndexedEvent, IndexedSession, PageCommit } from "./backend";
 import { MEMORY_INDEX } from "./paths";
@@ -70,12 +70,22 @@ function session(n: number, fields: Partial<IndexedSession> = {}): IndexedSessio
     visibility: "org",
     updated_at: "2026-11-14T09:00:00.000Z",
     traces: [H(100 + n)],
+    event_count: 0,
     ...fields,
   };
 }
 
 function event(text: string, fields: Partial<IndexedEvent> = {}): IndexedEvent {
-  return { content_hash: H(100), event_index: 0, role: "user", text, ...fields };
+  const index = fields.event_index ?? 0;
+  return {
+    content_hash: H(100),
+    event_index: index,
+    seq: index,
+    role: "user",
+    text,
+    chars: text.length,
+    ...fields,
+  };
 }
 
 const member = (owner: string): Viewer => ({
@@ -483,7 +493,7 @@ describe("SqliteIndex: the file", () => {
     await again.close();
   });
 
-  it("starts over for another deployment, other indexed roles, or another file format", async () => {
+  it("starts over for another deployment, other indexed roles or caps, or another file format", async () => {
     const path = join(dir, "i.sqlite");
     const fill = (deployment: string, events: readonly string[] = EVENTS) => {
       const index = new SqliteIndex({ path, deployment, events: events as typeof EVENTS });
@@ -502,7 +512,16 @@ describe("SqliteIndex: the file", () => {
     await b.close();
     const c = fill("d2", ["user"]);
     expect((await counts(c)).sessions).toBe(0);
+    c.apply({ session: session(1), events: [event("held")], replace: true });
     await c.close();
+    const capped = new SqliteIndex({
+      path,
+      deployment: "d2",
+      events: ["user"],
+      max_chars: { ...DEFAULT_SEARCH_MAX_CHARS, tool_result: 4096 },
+    });
+    expect((await counts(capped)).sessions).toBe(0);
+    await capped.close();
     const raw = new Database(path);
     raw.query("UPDATE meta SET value = 'seshi/search-index/0' WHERE key = 'schema'").run();
     await raw.close();

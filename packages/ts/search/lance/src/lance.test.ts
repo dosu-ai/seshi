@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { connect, Index, MatchQuery, makeArrowTable, Operator } from "@lancedb/lancedb";
 import { BUILTIN_FORMATS, FormatRegistry } from "@seshi/formats";
-import type { EventRole, Trace } from "@seshi/model";
+import { DEFAULT_SEARCH_MAX_CHARS, type EventRole, type Trace } from "@seshi/model";
 import { StoreSeshi, tombstone } from "@seshi/pipeline";
 import {
   type BackendQuery,
@@ -35,7 +35,13 @@ import {
 import { Field, Schema, Utf8 } from "apache-arrow";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { lanceIndex } from "./index";
-import { COMMIT_STEPS, type CommitStep, type LanceIndexOptions, openLanceIndex } from "./lance";
+import {
+  COMMIT_STEPS,
+  type CommitStep,
+  LANCE_SCHEMA,
+  type LanceIndexOptions,
+  openLanceIndex,
+} from "./lance";
 import {
   compileMatch,
   filterSql,
@@ -181,6 +187,7 @@ function session(n: number, fields: Partial<IndexedSession> = {}): IndexedSessio
     visibility: "org",
     updated_at: "2026-11-14T09:00:00.000Z",
     traces: [H(100 + n)],
+    event_count: 0,
     ...fields,
   };
 }
@@ -192,8 +199,10 @@ function replace(n: number, texts: string[], fields: Partial<IndexedSession> = {
     events: texts.map((text, i) => ({
       content_hash: s.traces[0] as string,
       event_index: i,
+      seq: i,
       role: "user",
       text,
+      chars: text.length,
     })),
     replace: true,
     read_at: 1,
@@ -335,6 +344,66 @@ describe("LanceIndex", () => {
     await expect(open({}, { deployment: "d2", events: ["user"] })).rejects.toThrow(
       /belongs to deployment d1/,
     );
+  });
+
+  it("rebuilds beside the live generation when a role's cap changes", async () => {
+    const first = await open();
+    await commit(first, [replace(1, ["capped words"])]);
+    await pass(first);
+    const live = (await first.state()).generation;
+    for (const index of opened.splice(0)) await index.close();
+    const recapped = await open(
+      {},
+      { max_chars: { ...DEFAULT_SEARCH_MAX_CHARS, tool_result: 4096 } },
+    );
+    expect(await recapped.state()).toMatchObject({ generation: live, building: {} });
+    expect(await names(recapped, "capped")).toEqual(["s1"]);
+  });
+
+  it("rebuilds a generation written under the first schema beside it, and keeps it tidy meanwhile", async () => {
+    const first = await open({ optimizeEvery: 0 });
+    await commit(first, [replace(1, ["schema one words"])]);
+    await pass(first);
+    const old = (await first.state()).generation;
+    for (const index of opened.splice(0)) await index.close();
+    // What seshi 0.29 wrote: no `llm_calls` table, and a config without caps.
+    const db = await connect(join(uri, old));
+    await db.dropTable("llm_calls");
+    db.close();
+    const root = await connect(uri);
+    const meta = await root.openTable("meta");
+    await meta
+      .mergeInsert("key")
+      .whenMatchedUpdateAll()
+      .whenNotMatchedInsertAll()
+      .execute([
+        {
+          key: `${old}.config`,
+          value: JSON.stringify({
+            schema: "seshi/search-lance/1",
+            events: JSON.stringify([...EVENTS].sort()),
+          }),
+        },
+      ]);
+    meta.close();
+    root.close();
+    const index = await open({ optimizeEvery: 0, scrubEvery: 0, grace: 0 });
+    const state = await index.state();
+    expect(state).toMatchObject({ generation: old, stale_schema: "seshi/search-lance/1" });
+    expect(state.ready_at).toBeUndefined();
+    const gen = state.building?.generation as string;
+    expect(gen).toBeDefined();
+    // The worker's housekeeping runs over both generations, the old one without `llm_calls`.
+    await commit(index, [replace(2, ["schema two words"])]);
+    await index.maintain(new AbortController().signal);
+    await commit(index, [], [{ archive: H(2), read_at: 9, scrub: true }]);
+    await index.maintain(new AbortController().signal);
+    await commit(index, [replace(3, ["schema two again"])]);
+    expect(await pass(index)).toBe(true);
+    expect(await index.state()).toMatchObject({ generation: gen, sessions: 1 });
+    expect((await index.state()).stale_schema).toBeUndefined();
+    expect(await names(index, "schema")).toEqual(["s3"]);
+    expect(LANCE_SCHEMA).toBe("seshi/search-lance/2");
   });
 
   it("starts answering from another scope only once it has caught up", async () => {
@@ -518,7 +587,13 @@ describe("LanceIndex", () => {
 
   it("scrubs removed text out of its files, and keeps answering", async () => {
     const index = await open({ scrubEvery: 0, grace: 0 });
-    await commit(index, [replace(1, ["zebrasecret leaked"]), replace(2, ["zebra keeper"])]);
+    await commit(index, [
+      {
+        ...replace(1, ["zebrasecret leaked"]),
+        llm_calls: [{ content_hash: H(101), call_id: "c", error: "zebrasecret in an error" }],
+      },
+      replace(2, ["zebra keeper"]),
+    ]);
     await pass(index);
     await commit(index, [], [{ archive: H(1), read_at: 5, scrub: true }]);
     await pass(index);

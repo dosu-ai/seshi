@@ -11,17 +11,21 @@ seshi search '"git push --force"' --repo widget --since 7d
 seshi search deploy NOT staging --owner alice@acme.com --sort recent --json
 ```
 
-`seshi search` finds sessions by what was said and done in them: prompts, assistant text, and
-tool calls (tool names and inputs, so file paths and commands). A record matches when all the
-words appear in it, in any order (a prompt, an answer, one tool call: words spread over two
-records of a session do not match); `"a phrase"` must appear as written; `word*` matches words
+`seshi search` finds sessions by what was said and done in them: prompts, assistant text and
+reasoning, tool calls (tool names and inputs, so file paths and commands), and what the tools
+gave back, each record cut to its role's [cap](#how-much-of-each-record-is-indexed) (the first
+8 KiB of tool output). A record matches when all the words appear in it, in any order (a prompt,
+an answer, one tool call, one tool's output: words spread over two records of a session do not
+match); `"a phrase"` must appear as written; `word*` matches words
 starting with it; `a OR b` matches either; `-word` (or `NOT word`) leaves out records with it
 (on the command line, write `NOT word`, or put `-word` after `--`: `seshi search deploy --
 -staging`, since a leading `-` reads as an option). Case and accents are ignored, and
 punctuation separates words, so `src/app.ts` finds those words in that order.
 
 Each result is a session (format and session id, owner, repository and branch, when it was last
-active, how many records matched) followed by its best matching records with a short excerpt.
+active, how many records matched) followed by its best matching records with a short excerpt,
+each led by `#<seq>`: the record's place in the session, counting its events from 0 across its
+traces, which is where to read around it.
 On a terminal the session and the matched words are in the search colour (lilac; magenta on a
 light background), plain with `NO_COLOR`, `--no-color` or `--json`. `seshi sessions show
 <format>/<session-id> --owner <owner>` opens one.
@@ -34,6 +38,7 @@ light background), plain with `NO_COLOR`, `--no-color` or `--json`. `seshi sessi
 | `--branch <name>`, `--source <id>` | Only this branch; only sessions written through this source (`upload`, `datadog-prod`) |
 | `--harness <name>`, `--harness-version <v>` | Only sessions run by this harness (the meta record's `source`: `claude-code`, `codex`, `cursor`); only those whose `agent_version` is this: the version the session started on (Cursor: at its latest upload) |
 | `--model <name>` | Only sessions that used this model, among every model they used |
+| `--role <role,…>` | Only records of these roles: `user`, `assistant`, `reasoning`, `tool_call`, `tool_result`, `system`, `observation` (`--role tool_result` searches tool output alone) |
 | `--label <key>=<value>` | Only sessions carrying this [label](config.md#labels), key and value exactly (`--label dosu.project=github.com/acme/app`); repeat it for more, and a session must carry every one |
 | `--since`, `--until` | Only records in this time range: a date (`2026-11-01`), an RFC 3339 time, or an age (`7d`, `12h`) |
 | `--sort relevance\|recent` | Best match first (the default), or most recently active first |
@@ -71,12 +76,28 @@ when the server or bucket cannot answer, or the server's index is still being bu
 ## How the index works
 
 `GET /v1/search` and `seshi search` find sessions by what was said and done in them (F10):
-prompts, assistant text, and tool calls (names and inputs, so file paths and commands); add
-`tool_result` to `search.events` to search tool output too. Results are sessions, best match
-first (bm25), each with its best matching records: the trace and event each is in, and a short
-excerpt with the matched words marked by offsets. Filters: owner, agent, repository, branch,
-labels, source and time. `GET /v1/search` takes each label as `label=key=value`, repeated for
-more; results carry the session's `labels`.
+every event of every role by default (`search.events`), each cut to its role's cap
+(`search.max_chars`, [below](#how-much-of-each-record-is-indexed)). Results are sessions, best
+match first (bm25), each with its best matching records: the trace and event each is in, its
+`seq` (its place in the session, from 0 across its traces), and a short excerpt with the
+matched words marked by offsets. Filters: owner, agent, repository, branch, labels, source,
+role and time. `GET /v1/search` takes each label as `label=key=value`, repeated for more, and
+roles comma-separated (`role=tool_result,observation`); results carry the session's `labels`.
+
+### How much of each record is indexed
+
+Tool output is most of a session's text, and its first few KiB hold what a search needs: the
+command's error, the file's head. So each role's text is cut before it is indexed:
+`tool_result` and `observation` to 8 KiB, every other role to 32 KiB (`search.max_chars`).
+Words past the cut are not found; the session itself keeps every event whole. Beside its text,
+the index keeps each event's full length, its tool call id and whether a tool reported success,
+and every model call the session's traces record (model, times, token counts, stop reason,
+error), for questions across sessions.
+
+8 KiB is measured: on Dosu's own sessions (5,036 of them, aggregates only), an index of every
+role at these caps is about 2.4 times one of prompts, answers and tool calls alone, the earlier
+default, against 2.0 times at 4 KiB and 1.8 times at 2 KiB. A quarter of tool results run past
+2,500 characters; 8 KiB keeps about three quarters of their text.
 
 Every instance that serves the API keeps its own index, an SQLite file on local disk
 (`search.path`, by default in the user cache folder; FTS5 through Bun's built-in SQLite, so
@@ -106,7 +127,8 @@ only on a server; a laptop's index keeps none.
 A new or wiped instance builds its index from the feeds before it answers: until then search
 answers `503 index_building` with `Retry-After`. The file survives restarts, and deleting it
 only costs a rebuild; so does `seshi search --rebuild` where the config is. Changing
-`search.events`, or pointing the instance at another deployment's bucket, rebuilds it too. The
+`search.events` or `search.max_chars`, a seshi upgrade that changes the index's layout, or
+pointing the instance at another deployment's bucket, rebuilds it too. The
 index holds session text (redacted, but the org's): the file is created readable by its owner
 only.
 
@@ -171,9 +193,11 @@ scrub = "24h"
   and returns at once: the worker starts the rebuild after its next pass, so it stays the one
   writer. `--wait` follows the request and the build until the switch, and gives up, pointing
   to `seshi workers status`, when nothing has moved for 15 minutes and no worker is running. Changing `search.events` to index more roles,
-  or a seshi upgrade that changes the index's layout, rebuilds the same way; indexing fewer
-  roles stops the old generation answering at once, since it holds records the new config
-  leaves out.
+  or `search.max_chars`, rebuilds the same way; indexing fewer roles stops the old generation
+  answering at once, since it holds records the new config leaves out. A seshi upgrade that
+  changes the index's layout (`seshi search --status` names the old one as `stale schema`)
+  also builds beside it, but the new code cannot read the old generation, so searches answer
+  `503 index_building` until the new one has caught up, as on a first build.
 - **Deleted text.** A retracted, deleted or redacted session leaves search results at the next
   commit. Its text leaves the index's files when the worker next scrubs: at most once every
   `search.lance.scrub` (a day), plus 15 minutes for readers still on the old files (F10.12).
