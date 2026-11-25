@@ -61,6 +61,12 @@ export interface SearchServiceOptions {
   /** Keep a copy of every owner's change feed in the index, which `changes()` serves (the
    * server; never an index limited by `indexer.owners` or `indexer.admit`). */
   feed?: boolean;
+  /** The index is shared by every instance and kept by the worker's search job (LanceDB,
+   * F10.8): a rebuild here only starts one, which the worker builds beside the live index. */
+  shared?: boolean;
+  /** This process only reads the index (an API instance, or the CLI, with a shared index): it
+   * never indexes. */
+  readOnly?: boolean;
   indexer?: {
     lagMs?: number;
     pageSize?: number;
@@ -72,13 +78,28 @@ export interface SearchServiceOptions {
 }
 
 export interface SearchStatus {
-  /** Where the index is: a file path, or a bucket URI. */
+  /** `sqlite`: this instance's own file. `lance`: one index every instance reads, kept by the
+   * worker. */
+  backend: "sqlite" | "lance";
+  /** Where the index is: a file path, or a bucket URI. Never credentials. */
   location: string;
   ready: boolean;
   ready_at?: string;
   caught_up_at?: string;
   sessions: number;
   events: number;
+  /** The live generation (LanceDB): it changes when a rebuild goes live. */
+  generation?: string;
+  /** A rebuild in progress beside the live generation, and how far it has read. */
+  building?: { generation: string; read_through?: string };
+  /** The live generation was written under another layout: it is not served until rebuilt. */
+  stale_schema?: string;
+}
+
+/** A rebuild of a shared index, started: the worker builds `generation`, and it goes live
+ * when it has caught up (F10.11). */
+export interface RebuildStarted {
+  generation: string;
 }
 
 interface Checked {
@@ -302,33 +323,72 @@ export class SearchService {
     }
   }
 
+  /** The index is shared by every instance and kept by the worker (LanceDB). */
+  get shared(): boolean {
+    return this.options.shared === true;
+  }
+
+  private writable(): void {
+    if (this.options.readOnly) {
+      throw new Error("this process reads the search index and never writes it: the worker does");
+    }
+  }
+
   async run(signal?: AbortSignal): Promise<IndexerRun> {
+    this.writable();
     return (await this.open()).indexer.run(signal);
   }
 
   async catchUp(signal?: AbortSignal): Promise<IndexerRun> {
+    this.writable();
     return (await this.open()).indexer.catchUp(signal);
   }
 
   /** Drop everything the index holds and build it again from the change feed (F10.2). Until
-   * it has caught up, queries here and in any process sharing the file are refused. */
+   * it has caught up, queries here and in any process sharing the file are refused. Not for a
+   * shared index: see `startRebuild()`. */
   async rebuild(signal?: AbortSignal): Promise<IndexerRun> {
+    this.writable();
+    if (this.shared) throw new Error("a shared index is rebuilt by the worker: startRebuild()");
     const { index, indexer } = await this.open();
     await index.reset();
     indexer.forgetOwners();
     return indexer.catchUp(signal);
   }
 
+  /** Start a rebuild of a shared index and return at once: the worker builds the new
+   * generation beside the live one, which keeps answering until it goes live (F10.11). */
+  async startRebuild(): Promise<RebuildStarted> {
+    this.writable();
+    if (!this.shared) throw new Error("this index is rebuilt in process: rebuild()");
+    const { index } = await this.open();
+    return { generation: await index.reset() };
+  }
+
+  /** Ask the worker to scrub on its next pass (F10.12, `seshi search --scrub`). False for a
+   * backend with nothing to scrub, which deletes text when it commits (SQLite). */
+  async requestScrub(): Promise<boolean> {
+    this.writable();
+    const { index } = await this.open();
+    if (index.requestScrub === undefined) return false;
+    await index.requestScrub();
+    return true;
+  }
+
   status(): Promise<SearchStatus> {
     return this.reading(async (index) => {
       const state = await index.state();
       return {
+        backend: this.shared ? "lance" : "sqlite",
         location: index.location(),
         ready: state.ready_at !== undefined,
         ...(state.ready_at !== undefined ? { ready_at: state.ready_at } : {}),
         ...(state.caught_up_at !== undefined ? { caught_up_at: state.caught_up_at } : {}),
         sessions: state.sessions,
         events: state.events,
+        ...(this.shared && state.generation !== "" ? { generation: state.generation } : {}),
+        ...(state.building ? { building: state.building } : {}),
+        ...(state.stale_schema ? { stale_schema: state.stale_schema } : {}),
       };
     });
   }
@@ -390,6 +450,7 @@ export class SearchService {
     return {
       query: checked.q,
       total: found.total,
+      ...(found.capped ? { capped: true as const } : {}),
       results: verified.map(resultOf),
       ...(next < found.total && next <= MAX_OFFSET ? { cursor: String(next) } : {}),
       index: {

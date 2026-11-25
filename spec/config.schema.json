@@ -1997,14 +1997,15 @@
         },
         "backend": {
           "default": "sqlite",
-          "description": "The index backend (F10.3).",
+          "description": "The index backend: \"sqlite\", a file on each API instance (F10.3), or \"lance\", one index in object storage that the worker writes and every API instance reads (F10.6). A server option: serverless laptops always use SQLite.",
           "type": "string",
           "enum": [
-            "sqlite"
+            "sqlite",
+            "lance"
           ]
         },
         "path": {
-          "description": "The index file on local disk; \":memory:\" keeps it in memory. Default: seshi/search/<deployment>.sqlite in the user cache folder.",
+          "description": "The SQLite index file on local disk; \":memory:\" keeps it in memory. Default: seshi/search/<deployment>.sqlite in the user cache folder. Not read with backend = \"lance\".",
           "type": "string",
           "minLength": 1
         },
@@ -2045,6 +2046,336 @@
               "reasoning"
             ]
           }
+        },
+        "lance": {
+          "description": "The LanceDB index (backend = \"lance\"): one index in object storage, written by the worker and read by every API instance (F10.6–F10.12).",
+          "default": {},
+          "type": "object",
+          "properties": {
+            "uri": {
+              "description": "Where the index lives, as a store URL (s3://, r2://, az://, gs://, file:///path). Default: search/<deployment>/ in the store's bucket, with [store]'s keys.",
+              "type": "string",
+              "pattern": "^(?:file:\\/\\/\\/?.*|\\/.*|(?:s3|r2|az|gs):\\/\\/[^/\\s]+(?:\\/.*)?)$"
+            },
+            "credentials": {
+              "description": "Keys for uri, when it is not in the store's bucket; the same fields as [store] credentials.",
+              "type": "object",
+              "properties": {
+                "access_key_id": {
+                  "description": "The access key id (s3://, r2://).",
+                  "x-seshi-secret": true,
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "env": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "the environment variable to read"
+                        }
+                      },
+                      "required": [
+                        "env"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "file": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "the file to read"
+                        }
+                      },
+                      "required": [
+                        "file"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "secret_access_key": {
+                  "description": "The secret access key (s3://, r2://).",
+                  "x-seshi-secret": true,
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "env": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "the environment variable to read"
+                        }
+                      },
+                      "required": [
+                        "env"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "file": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "the file to read"
+                        }
+                      },
+                      "required": [
+                        "file"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "session_token": {
+                  "description": "A session token, for temporary credentials (s3://, r2://).",
+                  "x-seshi-secret": true,
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "env": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "the environment variable to read"
+                        }
+                      },
+                      "required": [
+                        "env"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "file": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "the file to read"
+                        }
+                      },
+                      "required": [
+                        "file"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "account_key": {
+                  "description": "The storage account's shared key (az://).",
+                  "x-seshi-secret": true,
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "env": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "the environment variable to read"
+                        }
+                      },
+                      "required": [
+                        "env"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "file": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "the file to read"
+                        }
+                      },
+                      "required": [
+                        "file"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "sas_token": {
+                  "description": "A shared access signature for the container (az://), with or without its ?.",
+                  "x-seshi-secret": true,
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "env": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "the environment variable to read"
+                        }
+                      },
+                      "required": [
+                        "env"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "file": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "the file to read"
+                        }
+                      },
+                      "required": [
+                        "file"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "service_account_key": {
+                  "description": "A Google service account key (gs://): the JSON key file's contents, usually { file = \"/path/key.json\" }.",
+                  "x-seshi-secret": true,
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "env": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "the environment variable to read"
+                        }
+                      },
+                      "required": [
+                        "env"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "file": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "the file to read"
+                        }
+                      },
+                      "required": [
+                        "file"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            "region": {
+              "description": "uri's region (s3://).",
+              "type": "string",
+              "minLength": 1
+            },
+            "endpoint": {
+              "description": "uri's S3-compatible endpoint, or its Azure blob endpoint, as [store] endpoint.",
+              "type": "string",
+              "minLength": 1
+            },
+            "account_id": {
+              "description": "uri's Cloudflare account id (r2://).",
+              "type": "string",
+              "minLength": 1
+            },
+            "account_name": {
+              "description": "uri's Azure storage account (az://).",
+              "type": "string",
+              "minLength": 1
+            },
+            "read_consistency": {
+              "description": "How soon an API instance sees what the worker committed. 0 checks the bucket on every read.",
+              "default": "5s",
+              "x-seshi-format": "duration",
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(\\d+)(ms|s|m|h|d|w)$"
+                },
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              ]
+            },
+            "optimize": {
+              "description": "How often the worker compacts the tables and adds new rows to their indexes, and only after a commit.",
+              "default": "1h",
+              "x-seshi-format": "duration",
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(\\d+)(ms|s|m|h|d|w)$"
+                },
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              ]
+            },
+            "scrub": {
+              "description": "How often, at most, the worker rewrites the tables so that deleted, retracted and redacted text leaves the bucket (F10.12). seshi search --scrub asks for one sooner.",
+              "default": "24h",
+              "x-seshi-format": "duration",
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(\\d+)(ms|s|m|h|d|w)$"
+                },
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              ]
+            },
+            "max_scored_rows": {
+              "default": 10000,
+              "description": "Records a relevance search scores at most; past it the total is a lower bound (at least N).",
+              "type": "integer",
+              "minimum": 100,
+              "maximum": 9007199254740991
+            },
+            "max_recent_rows": {
+              "default": 100000,
+              "description": "Records a search sorted by recency reads at most.",
+              "type": "integer",
+              "minimum": 100,
+              "maximum": 9007199254740991
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false

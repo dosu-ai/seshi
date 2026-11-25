@@ -186,7 +186,7 @@ pre.tree .d { color: var(--accent); font-weight: 500; }
       <tr><td><span class="k">F7</span> Cursor Cloud sync</td><td>Poll, Cloud Agents API</td><td>Connector (Cursor key)</td><td>The source's service account</td><td>Settled; whether the 24 h stream window counts from a run's start or its finish</td></tr>
       <tr><td><span class="k">F8</span> Session CLI</td><td>Push, HTTP API</td><td>Person (IdP sign-in, or org key with a stated username)</td><td>The signed-in person</td><td>Settled</td></tr>
       <tr><td><span class="k">F9</span> Capture integrations</td><td>Push via hooks and spool</td><td>Device token, or the org key</td><td>The signed-in person</td><td>Settled; how the session toggle learns the session ID</td></tr>
-      <tr><td><span class="k">F10</span> Search</td><td>Reads the change feed</td><td>Person or service</td><td>Filtered by visibility</td><td>Settled; ClickHouse and semantic search later</td></tr>
+      <tr><td><span class="k">F10</span> Search</td><td>Reads the change feed</td><td>Person or service</td><td>Filtered by visibility</td><td>Settled: SQLite per instance, or one LanceDB index for a server; semantic search later</td></tr>
     </tbody>
   </table>
   </div>
@@ -1684,6 +1684,73 @@ pre.tree .d { color: var(--accent); font-weight: 500; }
         </dl>
       </div>
     </div>
+    <div class="dec">
+      <div class="id">F10.6<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>A shared index on LanceDB, for servers</h3>
+        <dl>
+          <dt>Decision</dt><dd class="rec"><code>[search] backend = "lance"</code> keeps one index for every instance, in object storage, with LanceDB. SQLite (F10.3) stays the default. It is a server option: serverless laptops ignore the shared config's <code>search.backend</code> and keep their own SQLite index, limited to their scope (F11.9, <code>docs/serverless.md</code>), and never write a shared one.</dd>
+          <dt>Why</dt><dd>Every API instance reading every feed into its own copy does not scale with instances. LanceDB is embedded like SQLite, with BM25 full-text search, and stores its tables on a folder, S3, R2, GCS or Azure, so no service is added. The spike found most searches answer in 0.2 to 1 s at 10M records on GCS. Design: <a href="lancedb-search.md">lancedb-search.md</a>.</dd>
+          <dt>The binary</dt><dd>LanceDB's native library is about 200 MB (430 MB on Linux arm64), so only the <b>server build</b> carries it: <code>apps/seshi/src/main-server.ts</code>, which registers <code>@seshi/search/lance</code> and runs the same seshi. It ships as the container image and the <code>seshi-server-linux-x64</code> and <code>-arm64</code> release archives; the binaries laptops install are unchanged (<a href="#runtime">X2.2</a> still holds: one program, and the image ships the release's own server archive). A binary without it refuses <code>backend = "lance"</code> at start-up, naming the build that has it.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F10.7<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>One seam for both backends</h3>
+        <dl>
+          <dt>Decision</dt><dd class="rec"><code>IndexStore</code> is an async <code>IndexReader</code> (queries, state, the cross-owner feed) and <code>IndexWriter</code> (the indexer). The indexer writes one feed page per <code>commit()</code>, every writer call names its generation, and queries take a parsed match tree each backend compiles. SQLite's behaviour did not change.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F10.8<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>With LanceDB, the worker writes and API instances read</h3>
+        <dl>
+          <dt>Decision</dt><dd class="rec">The <code>search-index</code> job runs on the worker (<a href="#worker">X7.2</a>), with or without the api role; with SQLite it runs on every API instance, as before. API instances open the index read-only and never write it, and see a commit within <code>search.lance.read_consistency</code> (5 s). <code>GET /v1/changes/all</code> is served by every instance from the index's copy of the feeds. <code>seshi search --rebuild</code> and <code>--scrub</code> record a request in the index for the worker; they do not index.</dd>
+          <dt>Second worker</dt><dd>Harmless (<a href="#worker">X7.3</a>): writes are idempotent, sessions are versioned by when they were read, and a refused continuation is planned again.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F10.9<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Where the index lives</h3>
+        <dl>
+          <dt>Decision</dt><dd class="rec">Under <code>search/&lt;deployment&gt;/</code> in the store's bucket by default, reached with <code>[store]</code>'s keys, which LanceDB is given as <code>storageOptions</code>, never in the URI; or at <code>search.lance.uri</code>, with keys of its own. It is derived (<a href="#storage">X6.1</a>), holds redacted session text, and is written only by the indexer. <code>spec/layout.md</code> lists <code>search/</code> as a third kind of folder beside the store of record and the server's working state.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F10.10<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>A page is written content first, cursor last</h3>
+        <dl>
+          <dt>Decision</dt><dd class="rec">For <code>events</code>, an indexed <code>mergeInsert</code> and then a <code>delete</code> of the old rows of replaced and removed sessions; then <code>sessions</code>, the feed copy, the processed keys, and the cursor. Writes are idempotent, so a crash part-way is repaired by reading the page again.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F10.11<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Rebuilds happen beside the live index</h3>
+        <dl>
+          <dt>Decision</dt><dd class="rec">A rebuild (<code>seshi search --rebuild</code>, a new index layout, more roles in <code>search.events</code>) writes a new generation beside the live one, which keeps answering, and switches when it has caught up. Only the first build answers <code>503</code>. Indexing fewer roles, or another scope, stops the old generation answering at once, since it holds what the new config leaves out. A <code>meta</code> naming another deployment is an error, and nothing is deleted.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="dec">
+      <div class="id">F10.12<span class="chip agreed">Agreed</span></div>
+      <div class="body">
+        <h3>Deleted text leaves the bucket within a day</h3>
+        <dl>
+          <dt>Decision</dt><dd class="rec">Retracted, deleted and redacted text is hidden at the next commit, and leaves the index's files within <code>search.lance.scrub</code> (a day) plus a 15-minute grace, when the worker rewrites <code>events</code>, <code>sessions</code> and any table holding deleted rows. LanceDB keeps deleted rows in its data files until a fragment is compacted, and its TypeScript API cannot force that. <code>seshi search --scrub</code> asks for a scrub on the worker's next pass.</dd>
+          <dt>Trade-off</dt><dd>Weaker than SQLite, which deletes in the commit; <code>docs/search.md</code> says so.</dd>
+        </dl>
+      </div>
+    </div>
   </div>
 </section>
 
@@ -1815,6 +1882,7 @@ pre.tree .d { color: var(--accent); font-weight: 500; }
 <section id="log">
   <h2>Change log</h2>
   <ul class="log">
+    <li><b>25 Nov 2026.</b> F10.6–F10.12 agreed: an optional shared search index on LanceDB for servers, written by the worker and read by every API instance, carried only by the server build (the image and the <code>seshi-server-linux-*</code> archives). SQLite stays the default and serverless always uses it.</li>
     <li><b>20 Nov 2026.</b> X5.10: being a session's owner is enough to read it, as to share it. A device token reads, lists, exports and searches its owner's own sessions without a read scope, and still nothing of anyone else's.</li>
     <li><b>15 Nov 2026.</b> After a security review: a repo&#39;s <code>.seshi/config.toml</code> can only narrow visibility, never widen it (X5.10, F9.5); a session&#39;s retraction hash is set only by the write that creates it (F9.7); only <code>seshi serve</code> reads <code>./seshi.toml</code> without <code>--config</code>.</li>
     <li><b>15 Nov 2026.</b> Ten questions left open by the build review decided: capture pause stops sessions where they are (F9.5); stale sessions are resent by the uploader with a <code>rebuild</code> flag (X4.9); a dropped first envelope leaves a content-free stub so the offset moves past it (F3.4 over F3.1); OTLP bodies capped at 64 MiB, 256 MiB inflated (F4.1); span history stored once (F4.4); an age-guarded sweep deletes orphaned trace objects (F2.5); change entries written before the pointer, with unique keys (X6.4); Windows CI runs the laptop packages&#39; tests (F8.4); the uploader stays up to 30 minutes while retries are pending (F9.1).</li>

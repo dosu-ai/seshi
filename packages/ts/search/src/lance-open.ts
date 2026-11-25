@@ -1,6 +1,7 @@
 import type { OpenIndex } from "./backend";
 import type { LanceIndexOptions } from "./lance";
 
+export { provideLance } from "./backends";
 export type { LanceIndexOptions } from "./lance";
 
 /** Opens the LanceDB index (F10.6): what `SearchService` is given in place of SQLite. LanceDB

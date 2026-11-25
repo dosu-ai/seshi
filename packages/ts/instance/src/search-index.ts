@@ -1,0 +1,201 @@
+import { fileURLToPath } from "node:url";
+import {
+  type BucketCredentials,
+  type RevealedBucketCredentials,
+  revealBucketCredentials,
+  type ServerConfig,
+} from "@seshi/config";
+import { lanceBackend, type OpenIndex } from "@seshi/search";
+
+/** Where the LanceDB index is and how it is reached: a URI LanceDB takes, with no credentials
+ * in it, and its `storageOptions` (F10.9). */
+export interface LanceLocation {
+  uri: string;
+  storageOptions: Record<string, string>;
+}
+
+/** What a bucket is reached with: `[store]`'s fields, or `[search.lance]`'s for its own uri. */
+interface Access {
+  region?: string;
+  endpoint?: string;
+  account_id?: string;
+  account_name?: string;
+  credentials?: BucketCredentials;
+}
+
+type Env = Readonly<Record<string, string | undefined>>;
+
+const SEARCH_PREFIX = "search";
+
+function under(url: string, ...parts: string[]): string {
+  return [url.replace(/\/+$/, ""), ...parts].join("/");
+}
+
+function bucketOf(url: string): string {
+  return url.replace(/^[a-z0-9]+:\/\//, "").split("/")[0] ?? "";
+}
+
+function schemeOf(url: string): string {
+  return url.startsWith("/") ? "file" : (url.match(/^([a-z0-9]+):\/\//)?.[1] ?? "");
+}
+
+/** What `search.lance.uri` is reached with: `[search.lance]`'s own keys and endpoint, or, for
+ * a uri in the store's bucket (another prefix) that names none, `[store]`'s. Without a uri,
+ * `[store]`'s. */
+function accessFor(config: ServerConfig): Access {
+  const lance = config.search.lance;
+  const store = config.store.url;
+  if (lance.uri === undefined) return config.store;
+  const own: Access = {
+    ...(lance.region ? { region: lance.region } : {}),
+    ...(lance.endpoint ? { endpoint: lance.endpoint } : {}),
+    ...(lance.account_id ? { account_id: lance.account_id } : {}),
+    ...(lance.account_name ? { account_name: lance.account_name } : {}),
+    ...(lance.credentials ? { credentials: lance.credentials } : {}),
+  };
+  const sameBucket =
+    schemeOf(lance.uri) === schemeOf(store) &&
+    schemeOf(store) !== "file" &&
+    bucketOf(lance.uri) === bucketOf(store);
+  return Object.keys(own).length === 0 && sameBucket ? config.store : own;
+}
+
+/** The index's location for `config` (F10.9): `search/<deployment>` in the store's bucket with
+ * `[store]`'s keys, or `search.lance.uri` (see `accessFor`). */
+export function lanceLocation(config: ServerConfig, deployment: string, env: Env): LanceLocation {
+  const url = config.search.lance.uri ?? under(config.store.url, SEARCH_PREFIX, deployment);
+  return lanceUri(url, accessFor(config), env);
+}
+
+/** `search.lance.uri`'s keys and endpoint as `openStore` takes them (`seshi doctor`'s write
+ * probe). */
+export function revealedAccess(config: ServerConfig): {
+  region?: string;
+  endpoint?: string;
+  accountId?: string;
+  accountName?: string;
+  credentials?: RevealedBucketCredentials;
+} {
+  const access = accessFor(config);
+  return {
+    ...(access.region ? { region: access.region } : {}),
+    ...(access.endpoint ? { endpoint: access.endpoint } : {}),
+    ...(access.account_id ? { accountId: access.account_id } : {}),
+    ...(access.account_name ? { accountName: access.account_name } : {}),
+    ...(access.credentials ? { credentials: revealBucketCredentials(access.credentials) } : {}),
+  };
+}
+
+/** A store URL as LanceDB takes it, and the `storageOptions` that reach it, from `access` and
+ * the same environment variables the store reads (`[store]`'s documented fallbacks). */
+export function lanceUri(url: string, access: Access, env: Env): LanceLocation {
+  const keys: RevealedBucketCredentials | undefined = access.credentials
+    ? revealBucketCredentials(access.credentials)
+    : undefined;
+  const options: Record<string, string> = {};
+  const set = (name: string, value: string | undefined) => {
+    if (value !== undefined && value !== "") options[name] = value;
+  };
+  const scheme = schemeOf(url);
+  if (scheme === "file") {
+    return {
+      uri: url.startsWith("/") ? url : fileURLToPath(url.replace(/^file:\/\/(?!\/)/, "file:///")),
+      storageOptions: {},
+    };
+  }
+  if (scheme === "s3" || scheme === "r2") {
+    const r2 = scheme === "r2";
+    const s3Keys = keys && "accessKeyId" in keys ? keys : undefined;
+    const fromR2Env =
+      r2 && env.R2_ACCESS_KEY_ID && env.R2_SECRET_ACCESS_KEY
+        ? { accessKeyId: env.R2_ACCESS_KEY_ID, secretAccessKey: env.R2_SECRET_ACCESS_KEY }
+        : undefined;
+    const given = s3Keys ?? fromR2Env;
+    set("aws_access_key_id", given?.accessKeyId ?? env.S3_ACCESS_KEY_ID ?? env.AWS_ACCESS_KEY_ID);
+    set(
+      "aws_secret_access_key",
+      given?.secretAccessKey ?? env.S3_SECRET_ACCESS_KEY ?? env.AWS_SECRET_ACCESS_KEY,
+    );
+    set(
+      "aws_session_token",
+      s3Keys ? s3Keys.sessionToken : (env.S3_SESSION_TOKEN ?? env.AWS_SESSION_TOKEN),
+    );
+    const accountId = access.account_id ?? (r2 ? env.R2_ACCOUNT_ID : undefined);
+    const endpoint =
+      access.endpoint ??
+      (r2 && accountId
+        ? `https://${accountId}.r2.cloudflarestorage.com`
+        : (env.S3_ENDPOINT ?? env.AWS_ENDPOINT));
+    set("aws_endpoint", endpoint);
+    set(
+      "aws_region",
+      access.region ?? (r2 ? "auto" : (env.S3_REGION ?? env.AWS_REGION ?? "us-east-1")),
+    );
+    if (endpoint?.startsWith("http://")) set("allow_http", "true");
+    return { uri: `s3://${url.slice(url.indexOf("://") + 3)}`, storageOptions: options };
+  }
+  if (scheme === "az") {
+    set("azure_storage_account_name", access.account_name ?? env.AZURE_STORAGE_ACCOUNT);
+    if (keys && "accountKey" in keys) set("azure_storage_account_key", keys.accountKey);
+    else if (keys && "sasToken" in keys) {
+      set("azure_storage_sas_token", keys.sasToken.replace(/^\?/, ""));
+    } else {
+      set("azure_storage_account_key", env.AZURE_STORAGE_KEY);
+      set("azure_storage_sas_token", env.AZURE_STORAGE_SAS_TOKEN?.replace(/^\?/, ""));
+    }
+    if (access.endpoint) {
+      set("azure_storage_endpoint", access.endpoint);
+      if (access.endpoint.startsWith("http://")) set("allow_http", "true");
+    }
+    return { uri: url, storageOptions: options };
+  }
+  if (scheme === "gs") {
+    if (keys && "serviceAccountKey" in keys) {
+      set("google_service_account_key", keys.serviceAccountKey);
+    }
+    return { uri: url, storageOptions: options };
+  }
+  throw new Error(`search.lance: ${url} is not a store URL LanceDB takes`);
+}
+
+export interface SearchOpenOptions {
+  deployment: string;
+  env: Env;
+  /** An API instance, or a CLI that only reads: never writes the index (F10.8). */
+  readOnly: boolean;
+}
+
+/** Thrown when `[search] backend = "lance"` meets a binary built without LanceDB. */
+export class LanceMissing extends Error {
+  constructor() {
+    super(
+      'search.backend = "lance" needs the server build of seshi, which carries LanceDB: the container image (ghcr.io/dosu-ai/seshi), or the seshi-server-linux-* release archives. This binary has SQLite only.',
+    );
+    this.name = "LanceMissing";
+  }
+}
+
+/** The index opener for `config`'s backend: undefined for SQLite (SearchService's own), the
+ * LanceDB opener otherwise. */
+export function searchOpener(
+  config: ServerConfig,
+  options: SearchOpenOptions,
+): OpenIndex | undefined {
+  if (config.search.backend !== "lance") return undefined;
+  const open = lanceBackend();
+  if (open === undefined) throw new LanceMissing();
+  const where = lanceLocation(config, options.deployment, options.env);
+  const lance = config.search.lance;
+  return open({
+    uri: where.uri,
+    ...(Object.keys(where.storageOptions).length > 0
+      ? { storageOptions: where.storageOptions }
+      : {}),
+    readConsistency: lance.read_consistency / 1000,
+    optimizeEvery: lance.optimize,
+    scrubEvery: lance.scrub,
+    maxScoredRows: lance.max_scored_rows,
+    maxRecentRows: lance.max_recent_rows,
+    readOnly: options.readOnly,
+  });
+}

@@ -139,6 +139,9 @@ export interface IndexState {
   /** A rebuild in progress beside the live generation: the one being built, and how far it has
    * read. Never for an index that empties itself to rebuild (SQLite). */
   building?: { generation: string; read_through?: string };
+  /** The layout the live generation was written under, when it is not this code's: it is not
+   * served, and the indexer rebuilds it (LanceDB). */
+  stale_schema?: string;
 }
 
 /** The API's side: what `SearchService.search`, `status` and `changes` call. It reads the live
@@ -193,6 +196,10 @@ export interface IndexWriter {
   reset(): Promise<string>;
   /** Housekeeping after a pass; nothing for SQLite. */
   maintain(signal: AbortSignal): Promise<void>;
+  /** Ask the indexer to scrub on its next pass, so deleted text leaves the storage now rather
+   * than at the next scheduled scrub (`seshi search --scrub`). Absent for a backend that
+   * deletes text when it commits (SQLite). */
+  requestScrub?(): Promise<void>;
 }
 
 /** A removal: a tombstone, or a session no longer admitted. */

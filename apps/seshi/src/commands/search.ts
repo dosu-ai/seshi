@@ -40,7 +40,7 @@ const USAGE = [
   "                    [--limit <n>] [--matches <n>] [--cursor <c>]",
   "                    [--server <url>] [--token <t> [--user <name>]] [--config <file>] [--set path=value]… [--json]",
   "                    [--include-private]   serverless mode: owner-only sessions too",
-  "       seshi search --status | --rebuild [--config <file>] [--set path=value]… [--json]",
+  "       seshi search --status | --rebuild [--wait] | --scrub [--config <file>] [--set path=value]… [--json]",
 ].join("\n");
 
 const OPTIONS = {
@@ -66,6 +66,8 @@ const OPTIONS = {
   set: { type: "string", multiple: true },
   status: { type: "boolean" },
   rebuild: { type: "boolean" },
+  wait: { type: "boolean" },
+  scrub: { type: "boolean" },
   "include-private": { type: "boolean" },
 } as const;
 
@@ -195,23 +197,40 @@ export function searchLines(results: SearchResults, style: Style = Style.plain()
     style.muted(
       `${
         results.cursor
-          ? `${shown} of ${results.total} sessions shown; more with --cursor ${results.cursor}`
-          : `${results.total} ${results.total === 1 ? "session" : "sessions"} match.`
+          ? `${shown} of ${results.capped ? "at least " : ""}${results.total} sessions shown; more with --cursor ${results.cursor}`
+          : `${results.capped ? "At least " : ""}${results.total} ${results.total === 1 && !results.capped ? "session" : "sessions"} match.`
       }${caughtUp ? ` Index caught up ${when(caughtUp)}.` : ""}`,
     ),
   );
   return lines;
 }
 
-function statusLines(status: SearchStatus): string[] {
+export function statusLines(status: SearchStatus): string[] {
+  const shared = status.backend === "lance";
   return [
-    `index ${status.location}`,
+    `index ${status.location}${shared ? " (LanceDB, kept by the worker)" : ""}`,
     status.ready
       ? `ready since ${when(status.ready_at)}; last caught up ${when(status.caught_up_at)}`
-      : "not built yet: the next search builds it from the change feed",
-    `${status.sessions} sessions, ${status.events} records indexed`,
+      : shared
+        ? "not built yet: the worker is building it from the change feed"
+        : "not built yet: the next search builds it from the change feed",
+    `${status.sessions} sessions, ${status.events} records indexed${
+      status.generation ? ` (generation ${status.generation})` : ""
+    }`,
+    ...(status.building
+      ? [
+          `rebuilding: generation ${status.building.generation}, read through ${
+            when(status.building.read_through) || "the start"
+          }; the live generation answers until it has caught up`,
+        ]
+      : []),
   ];
 }
+
+type Mode = "query" | "status" | "rebuild" | "scrub";
+
+/** How often `--rebuild --wait` reads the index's state. */
+export const WAIT_POLL_MS = 2_000;
 
 function serverConfigHere(ctx: CommandContext): boolean {
   if (ctx.env.SESHI_STORE__URL) return true;
@@ -225,9 +244,10 @@ async function inProcess(
   ctx: CommandContext,
   json: boolean,
   instance: Instance,
-  mode: "query" | "status" | "rebuild",
+  mode: Mode,
   request: SearchRequest | undefined,
   style: Style,
+  wait = false,
 ): Promise<number> {
   const search = instance.search;
   if (!search) {
@@ -240,10 +260,13 @@ async function inProcess(
     );
   }
   if (mode === "query") {
-    if (!json && !(await search.ready())) {
-      ctx.stderr("seshi: building the search index from the change feed (first use)…");
+    // A shared index is the worker's to keep current; this process only reads it.
+    if (!search.shared) {
+      if (!json && !(await search.ready())) {
+        ctx.stderr("seshi: building the search index from the change feed (first use)…");
+      }
+      await search.catchUp();
     }
-    await search.catchUp();
     const results = await search.search(LOCAL_VIEWER, request as SearchRequest);
     emit(ctx, json, results, () => searchLines(results, style));
     return EXIT.ok;
@@ -251,6 +274,50 @@ async function inProcess(
   if (mode === "status") {
     const status = await search.status();
     emit(ctx, json, status, () => statusLines(status));
+    return EXIT.ok;
+  }
+  if (mode === "scrub") {
+    const asked = await search.requestScrub();
+    emit(ctx, json, { scrub: asked ? "requested" : "not_needed" }, () => [
+      asked
+        ? "Asked the worker to scrub the search index on its next pass: deleted, retracted and redacted text leaves the bucket then."
+        : "Nothing to scrub: SQLite removes deleted text from its file when it commits.",
+    ]);
+    return EXIT.ok;
+  }
+  if (mode === "rebuild" && search.shared) {
+    const { generation } = await search.startRebuild();
+    if (!wait) {
+      const status = await search.status();
+      emit(ctx, json, { ...status, rebuilding: generation }, () => [
+        `Started a rebuild: the worker builds generation ${generation} beside the live one, which keeps answering until it has caught up.`,
+        "Follow it with seshi search --status, or run with --wait.",
+      ]);
+      return EXIT.ok;
+    }
+    if (!json) ctx.stderr(`seshi: the worker is building generation ${generation}…`);
+    let status = await search.status();
+    let last = "";
+    while (!(status.generation === generation && status.ready && !status.building)) {
+      if (status.generation !== generation && status.building?.generation !== generation) {
+        return fail(
+          ctx,
+          json,
+          EXIT.failure,
+          "rebuild_replaced",
+          `generation ${generation} is no longer being built (another rebuild, or a config change, replaced it); see seshi search --status`,
+        );
+      }
+      const read = status.building?.read_through ?? "";
+      if (!json && read !== last) ctx.stderr(`seshi: read through ${when(read)}`);
+      last = read;
+      await Bun.sleep(WAIT_POLL_MS);
+      status = await search.status();
+    }
+    emit(ctx, json, { ...status, rebuilt: generation }, () => [
+      `Rebuilt the search index: generation ${generation} is live, ${status.sessions} sessions.`,
+      `index ${status.location}`,
+    ]);
     return EXIT.ok;
   }
   if (mode === "rebuild") {
@@ -295,9 +362,18 @@ export async function run(ctx: CommandContext): Promise<number> {
   } catch (err) {
     return helpOrUsageError(ctx, json, (err as Error).message, USAGE);
   }
-  const mode = values.status ? "status" : values.rebuild ? "rebuild" : "query";
-  if (values.status && values.rebuild) {
-    return helpOrUsageError(ctx, json, "--status and --rebuild are separate runs", USAGE);
+  const modes = (["status", "rebuild", "scrub"] as const).filter((m) => values[m]);
+  if (modes.length > 1) {
+    return helpOrUsageError(
+      ctx,
+      json,
+      `${modes.map((m) => `--${m}`).join(" and ")} are separate runs`,
+      USAGE,
+    );
+  }
+  const mode: Mode = (modes[0] as Mode | undefined) ?? "query";
+  if (values.wait && mode !== "rebuild") {
+    return helpOrUsageError(ctx, json, "--wait goes with --rebuild", USAGE);
   }
   if (mode === "query" && positionals.length === 0) {
     return helpOrUsageError(ctx, json, "search needs words to look for", USAGE);
@@ -362,6 +438,7 @@ export async function run(ctx: CommandContext): Promise<number> {
         mode,
         request,
         style,
+        values.wait === true,
       );
     }
     if (serverConfigHere(ctx)) {
@@ -386,7 +463,7 @@ async function withServer(
   ctx: CommandContext,
   json: boolean,
   values: Values,
-  mode: "query" | "status" | "rebuild",
+  mode: Mode,
   request: SearchRequest | undefined,
   style: Style,
 ): Promise<number> {
@@ -396,10 +473,17 @@ async function withServer(
       ...(values.config !== undefined ? { config: values.config } : {}),
       ...(values.set ? { set: values.set } : {}),
     },
-    { roles: [], probe: [], claimUnmarkedBucket: false },
+    {
+      roles: [],
+      probe: [],
+      claimUnmarkedBucket: false,
+      // A shared index is written by the worker alone, except that --rebuild and --scrub
+      // record the request for it in the index (F10.8).
+      ...(mode === "rebuild" || mode === "scrub" ? { searchWriter: true } : {}),
+    },
   );
   try {
-    return await inProcess(ctx, json, instance, mode, request, style);
+    return await inProcess(ctx, json, instance, mode, request, style, values.wait === true);
   } finally {
     await instance.close();
   }

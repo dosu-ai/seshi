@@ -19,6 +19,7 @@ export {
   type Removal,
   type SessionUpdate,
 } from "./backend";
+export { type LanceOpener, lanceBackend, provideLance } from "./backends";
 export {
   decodeFeedCursor,
   encodeFeedCursor,
@@ -57,6 +58,7 @@ export {
   MAX_LIMIT,
   MAX_MATCHES,
   MAX_OFFSET,
+  type RebuildStarted,
   SearchService,
   type SearchServiceOptions,
   type SearchSettings,

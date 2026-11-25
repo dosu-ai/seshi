@@ -671,7 +671,10 @@ export class LanceIndex implements IndexStore {
     const readyAt = servable ? meta.get(gk(gen, "ready_at")) : undefined;
     const caughtUpAt = servable ? meta.get(gk(gen, "caught_up_at")) : undefined;
     const readThrough = building ? meta.get(gk(building, "feed_through")) : undefined;
+    const written = gen ? meta.get(gk(gen, "config")) : undefined;
+    const schema = written ? (JSON.parse(written) as GenConfig).schema : undefined;
     return {
+      ...(schema !== undefined && schema !== LANCE_SCHEMA ? { stale_schema: schema } : {}),
       ...(readyAt !== undefined ? { ready_at: readyAt } : {}),
       ...(caughtUpAt !== undefined ? { caught_up_at: caughtUpAt } : {}),
       sessions: gen ? Number(meta.get(gk(gen, "sessions")) ?? 0) : 0,

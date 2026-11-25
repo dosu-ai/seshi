@@ -100,11 +100,12 @@ The worker's jobs:
 | `assembler` | `worker.assembly_interval` (30s) | Publishes sessions whose spans (OTLP, F4; Datadog, F5) have been quiet for their source's `quiet_period`, from the pending markers (X7.4); its backlog is the sessions waiting |
 | `sweep` | 1d, and when the worker starts | Deletes trace objects no session's metadata names that are over an hour old: what a redaction backfill, replace or publish that stopped partway left behind (F2.5, [redaction.md](redaction.md#trying-and-applying-rules)) |
 
-One job runs on every instance with the `api` role instead, worker or not:
+One job runs on every instance with the `api` role instead, worker or not (with
+`search.backend = "lance"`, on the worker instead):
 
 | Job | Every | What it does |
 |---|---|---|
-| `search-index` | `search.interval` (15s) | Reads every owner's change feed into this instance's own search index ([search.md](search.md#how-the-index-works)), which also keeps the copy of the feeds `GET /v1/changes/all` serves |
+| `search-index` | `search.interval` (15s) | Reads every owner's change feed into the search index ([search.md](search.md#how-the-index-works)), which also keeps the copy of the feeds `GET /v1/changes/all` serves. With SQLite, each API instance's own; with `search.backend = "lance"`, the one shared index, and only on the worker ([search.md](search.md#a-shared-index-lancedb)) |
 
 A failed run is retried after 5 seconds, doubling per failure in a row up to the job's
 interval. A poll whose envelope failed transiently (the bucket) never saves its checkpoint
@@ -114,7 +115,9 @@ cron: `seshi sync run <id>` polls a source, `seshi sync assemble` runs the span 
 `seshi sync prune` runs retention, `seshi redact sweep` runs the sweep. A deployment with no
 worker needs all four: polling alone stores OTLP and Datadog spans but never publishes their
 sessions, without `prune` drop and failure records are never removed, and without `sweep` the
-trace objects a stopped write left stay in the bucket (no reader is served them).
+trace objects a stopped write left stay in the bucket (no reader is served them). With
+`search.backend = "lance"` it needs a fifth, `seshi sync search`, which indexes the shared
+search index (a long first build spans several runs).
 
 Where the config and bucket keys are:
 
@@ -196,18 +199,19 @@ keeps the labels it was first stored with.
 
 Every release is published as a container image, `ghcr.io/dosu-ai/seshi:<version>`, built
 from `apps/seshi/Dockerfile` in this repository (`docker build -f apps/seshi/Dockerfile .` from the
-root). The image is the compiled `seshi` binary (X2.2, `bun run build`) on a slim Debian base:
-a release's image holds the very Linux binaries attached to its GitHub release
-(`--build-arg BINARY=prebuilt`, [releasing.md](releasing.md)), while a build from a checkout
-compiles its own. Outside a container, install the same binary ([install.md](install.md)) and
+root). The image is the compiled `seshi` binary (X2.2) on a slim Debian base, in its server
+build (`bun run build --server`, `apps/seshi/src/main-server.ts`), which also carries the
+LanceDB search backend (F10.6): a release's image holds the very Linux server binaries attached
+to its GitHub release (`seshi-server-linux-*`, `--build-arg BINARY=prebuilt`,
+[releasing.md](releasing.md)), while a build from a checkout compiles its own. Outside a container, install the same binary ([install.md](install.md)) and
 run `seshi serve`. The image's entry point is `seshi` and its command `serve`. It listens on `server.listen` (default
 `:7200`), reports `/healthz` for liveness (the image's health check is `seshi healthcheck`),
 and needs only the settings above, from env or a mounted `/etc/seshi/seshi.toml`: there is no
 database, no volume (unless the store is `file://`), and no state outside the bucket. API
 instances scale to many alike; the worker role wants one instance that stays up (a minimum of
 one, not scaled to zero), or run its jobs from cron with `seshi sync run <id>` for each
-polled source, `seshi sync assemble` for OTLP and Datadog sessions and `seshi sync prune` for
-retention. Keep
+polled source, `seshi sync assemble` for OTLP and Datadog sessions, `seshi sync prune` for
+retention and, with a shared search index, `seshi sync search`. Keep
 the request timeout at 120 seconds or more; a large transcript can take that long to normalize
 and verify. Platforms that cap request bodies (Cloud Run's HTTP/1 limit is 32 MiB) are fine as
 long as clients send `Content-Encoding: gzip`, which every route accepts.

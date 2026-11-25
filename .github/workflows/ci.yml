@@ -69,13 +69,13 @@ jobs:
           pip install --quiet awscli==1.46.3
           AWS_ACCESS_KEY_ID=rustfsadmin AWS_SECRET_ACCESS_KEY=rustfsadmin AWS_DEFAULT_REGION=us-east-1 \
             aws --endpoint-url http://127.0.0.1:9000 s3 mb s3://seshi-test
-      - name: S3 store test and the search index's conformance suite against a live endpoint
+      - name: S3 store test, the search index's conformance suite, and LanceDB search deployed, against a live endpoint
         env:
           SESHI_TEST_S3_ENDPOINT: http://127.0.0.1:9000
           SESHI_TEST_S3_BUCKET: seshi-test
           SESHI_TEST_S3_ACCESS_KEY: rustfsadmin
           SESHI_TEST_S3_SECRET_KEY: rustfsadmin
-        run: bun --bun vitest run tests/store/s3-live.test.ts packages/ts/search/src/conformance.test.ts
+        run: bun --bun vitest run tests/store/s3-live.test.ts packages/ts/search/src/conformance.test.ts tests/search/lance-deploy.test.ts
       - name: Azure Blob store test against Azurite
         env:
           SESHI_TEST_AZURE_ENDPOINT: http://127.0.0.1:10000/devstoreaccount1
@@ -174,6 +174,25 @@ jobs:
           done
           docker logs seshi-smoke
           exit 1
+      # The image is the server build: `[search] backend = "lance"` loads LanceDB's native
+      # library from the binary, the worker builds the index in the bucket, and the API reads it.
+      - name: The LanceDB search backend in the image (F10.6)
+        run: |
+          docker run -d --name seshi-lance -p 7201:7200 \
+            -e SESHI_AUTH__TOKENS__CI=ci-token-0123456789abcdef -e SESHI_STORE__URL=file:///data \
+            -e SESHI_SEARCH__BACKEND=lance -e SESHI_SEARCH__INTERVAL=1s seshi-smoke
+          for i in $(seq 1 30); do
+            if docker exec seshi-lance seshi search --status --json 2>/dev/null | grep -q '"ready": true'; then
+              docker exec seshi-lance seshi search --status
+              docker exec seshi-lance seshi doctor --set search.backend=lance
+              curl -fsS -H 'authorization: Bearer ci-token-0123456789abcdef' \
+                'http://127.0.0.1:7201/v1/search?q=deploy' | grep -q '"total":0'
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs seshi-lance
+          exit 1
 
   # F8.4: the binary on every platform it ships for, built natively on that platform's runner.
   # Each one is put through scripts/release/smoke.ts: serve, admin init, login with the org key
@@ -214,6 +233,25 @@ jobs:
       # X3.3 on every platform, with the very binary this job ships: a real `seshi hook` (a
       # temporary home, a Stop payload, the spool written) under the 250 ms budget. The test job
       # times dist/seshi on Linux only; this is where a Windows or macOS hook is exercised.
+      # The Linux server build (seshi-server-linux-*, what the image ships) carries LanceDB:
+      # a server with `backend = "lance"` builds its index on a folder.
+      - name: The server build opens a LanceDB index (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          bin="$PWD/dist/site/latest/download/bin/${{ matrix.target }}-server/seshi"
+          dir=$(mktemp -d)
+          printf '[store]\nurl = "file://%s/bucket"\n[search]\nbackend = "lance"\ninterval = "1s"\n' "$dir" > "$dir/seshi.toml"
+          chmod 600 "$dir/seshi.toml"
+          "$bin" serve --config "$dir/seshi.toml" --listen 127.0.0.1:7299 > "$dir/serve.log" 2>&1 &
+          for i in $(seq 1 30); do
+            if "$bin" search --status --config "$dir/seshi.toml" --json 2>/dev/null | grep -q '"ready": true'; then
+              kill %1
+              exit 0
+            fi
+            sleep 1
+          done
+          cat "$dir/serve.log"
+          exit 1
       - name: Time seshi hook (this platform's binary)
         shell: bash
         run: |
@@ -349,7 +387,9 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
-      - run: bun install --frozen-lockfile
+      # Every Linux CPU's optional packages, so the server builds for both linux-x64 and
+      # linux-arm64 find LanceDB's native library for their target (scripts/build-binary.ts).
+      - run: bun install --frozen-lockfile --cpu='*'
       - id: release
         run: bunx semantic-release
         env:
@@ -369,19 +409,20 @@ jobs:
         with:
           ref: v${{ needs.release.outputs.version }}
           persist-credentials: false
-      # The image ships the release's own Linux binaries (X2.2: one binary, every channel),
-      # checked against SHA256SUMS, rather than compiling again.
-      - name: Fetch the release's Linux binaries
+      # The image ships the release's own Linux server binaries (X2.2: the server build of the
+      # same release, with LanceDB, F10.6), checked against SHA256SUMS, rather than compiling
+      # again.
+      - name: Fetch the release's Linux server binaries
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p dist/release
           gh release download "v${{ needs.release.outputs.version }}" --dir dist/release \
-            --pattern 'seshi-linux-*.tar.gz' --pattern SHA256SUMS
-          (cd dist/release && grep -E ' seshi-linux-(x64|arm64)\.tar\.gz$' SHA256SUMS | sha256sum -c -)
+            --pattern 'seshi-server-linux-*.tar.gz' --pattern SHA256SUMS
+          (cd dist/release && grep -E ' seshi-server-linux-(x64|arm64)\.tar\.gz$' SHA256SUMS | sha256sum -c -)
           for pair in amd64:x64 arm64:arm64; do
             mkdir -p "dist/docker/linux-${pair%%:*}"
-            tar -xzf "dist/release/seshi-linux-${pair##*:}.tar.gz" -C "dist/docker/linux-${pair%%:*}" seshi
+            tar -xzf "dist/release/seshi-server-linux-${pair##*:}.tar.gz" -C "dist/docker/linux-${pair%%:*}" seshi
           done
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
@@ -440,7 +481,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release download "v${{ needs.release.outputs.version }}" --dir dist/release \
-            --pattern 'seshi-*' --pattern SHA256SUMS
+            --pattern 'seshi-darwin-*' --pattern 'seshi-linux-*' --pattern 'seshi-windows-*' \
+            --pattern SHA256SUMS
       - run: bun run release:npm --version ${{ needs.release.outputs.version }} --from dist/release --out dist/npm
       - run: bun run release:publish-npm --provenance --dir dist/npm
         env:

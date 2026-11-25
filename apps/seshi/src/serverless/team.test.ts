@@ -317,6 +317,20 @@ describe("shared settings (F11.6)", () => {
     ]);
   });
 
+  it("keeps its own SQLite index when the server's shared config says lance (F10.6)", async () => {
+    // The server's keys for its index are secrets a laptop cannot resolve, and never needs.
+    await sharedConfig(
+      '[search]\nbackend = "lance"\n[search.lance]\nuri = "s3://index/x"\ncredentials = { access_key_id = { env = "NOT_HERE" }, secret_access_key = { env = "NOR_HERE" } }\n',
+    );
+    const alice = await laptop("alice", member("alice"));
+    expect(alice.bucket.instance.config.search.backend).toBe("sqlite");
+    expect(alice.bucket.instance.search?.shared).toBe(false);
+    expect(alice.bucket.ignored).toEqual([
+      `search.backend in ${shared.url}/config/seshi.toml: a server setting; this machine keeps its own SQLite index`,
+      `search.lance in ${shared.url}/config/seshi.toml: a server setting; this machine keeps its own SQLite index`,
+    ]);
+  });
+
   it("holds writes when the bucket's copy fails its checks and there is no good one", async () => {
     await sharedConfig('default_visibility = "org"\nnot_a_setting = 1\n');
     await expect(laptop("alice", member("alice"))).rejects.toMatchObject({

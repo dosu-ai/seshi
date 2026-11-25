@@ -3150,6 +3150,13 @@ components:
           description: |
             Sessions that match, as the index holds them. A page can hold fewer than it
             promises: a session deleted or made private since it was indexed is left out.
+        capped:
+          type: boolean
+          enum: [true]
+          description: |
+            The index stopped counting at its cap (the LanceDB backend's
+            `search.lance.max_scored_rows`): at least `total` sessions match. Absent when
+            `total` is exact.
         results:
           type: array
           items: { $ref: "#/components/schemas/SearchResult" }

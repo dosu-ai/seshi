@@ -20,14 +20,15 @@ import { openServer, SERVER_OPTIONS, serverFailure } from "./server-instance";
 const USAGE = `usage: seshi sync run <source> [--force] [--json]
        seshi sync assemble [--json]
        seshi sync prune [--json]
+       seshi sync search [--json]
        seshi sync status [<source>] [--days N] [--json]
        seshi sync failed <source> [--since <time>] [--limit N] [--json]
        seshi sync dropped <source> [--since <time>] [--limit N] [--json]
        (each also takes --config <file> and --set path=value;
         status, failed and dropped take --server <url> instead)`;
 
-const SUBCOMMANDS = ["run", "assemble", "prune", "status", "failed", "dropped"];
-const ONE_SHOTS = new Set(["assemble", "prune"]);
+const SUBCOMMANDS = ["run", "assemble", "prune", "search", "status", "failed", "dropped"];
+const ONE_SHOTS = new Set(["assemble", "prune", "search"]);
 
 const OPTIONS = {
   ...SERVER_OPTIONS,
@@ -114,6 +115,31 @@ async function assemble(ctx: CommandContext, json: boolean, instance: Instance) 
   const result = await instance.assemble();
   emit(ctx, json, result, () => assembleLines(result));
   return result.errors > 0 ? EXIT.failure : EXIT.ok;
+}
+
+/** One pass of the shared search index's indexer (LanceDB), for a deployment that runs the
+ * worker's jobs from cron (X7.1): it stops at its budget, and the next run carries on from the
+ * index's cursors. With SQLite each API instance indexes its own file, so there is nothing to
+ * run here. */
+async function searchPass(ctx: CommandContext, json: boolean, instance: Instance) {
+  const search = instance.search;
+  if (!search) {
+    return fail(ctx, json, EXIT.config, "search_disabled", "search is turned off in this config");
+  }
+  if (!search.shared) {
+    return fail(
+      ctx,
+      json,
+      EXIT.config,
+      "not_shared",
+      'sync search is for search.backend = "lance": with SQLite each API instance keeps its own index',
+    );
+  }
+  const run = await search.run();
+  emit(ctx, json, run, () => [
+    `search: ${run.entries} change entries read from ${run.owners} owners, ${run.indexed} sessions indexed, ${run.removed} removed${run.more ? "; more to read: run it again" : ""}`,
+  ]);
+  return EXIT.ok;
 }
 
 async function prune(ctx: CommandContext, json: boolean, instance: Instance) {
@@ -300,7 +326,9 @@ export async function run(ctx: CommandContext): Promise<number> {
       json,
       sub === "assemble"
         ? "sync assemble takes no source id: it publishes every source's quiet span sessions"
-        : "sync prune takes no source id: it prunes every source's old records",
+        : sub === "search"
+          ? "sync search takes no source id: it reads every owner's change feed"
+          : "sync prune takes no source id: it prunes every source's old records",
       USAGE,
     );
   }
@@ -317,7 +345,9 @@ export async function run(ctx: CommandContext): Promise<number> {
     }
     if (target.kind === "remote") {
       if (sub === "run" || ONE_SHOTS.has(sub)) {
-        const does = { run: "polls", assemble: "assembles", prune: "prunes" }[sub];
+        const does = { run: "polls", assemble: "assembles", prune: "prunes", search: "indexes" }[
+          sub
+        ];
         throw new UsageError(
           `sync ${sub} runs from where the server config is (X7.1); ${target.server}'s worker ${does} on its own`,
         );
@@ -336,11 +366,14 @@ export async function run(ctx: CommandContext): Promise<number> {
       roles: [],
       probe: [],
       claimUnmarkedBucket: sub === "run" || ONE_SHOTS.has(sub),
+      // The one writer of a shared search index is the worker's job, run here from cron.
+      ...(sub === "search" ? { searchWriter: true } : {}),
     });
     try {
       if (sub === "run") return await runSource(ctx, json, instance, id as string, values);
       if (sub === "assemble") return await assemble(ctx, json, instance);
       if (sub === "prune") return await prune(ctx, json, instance);
+      if (sub === "search") return await searchPass(ctx, json, instance);
       if (sub === "status") return await status(ctx, json, instance, id, values);
       return await records(ctx, json, instance, sub as "failed" | "dropped", id as string, values);
     } finally {

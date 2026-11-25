@@ -24,7 +24,8 @@ import { hostOf, pathsOf } from "./capture-host";
 import type { CommandContext } from "./index";
 
 const USAGE = `usage: seshi doctor [--session [<id>]] [--agent <agent>] [--since <duration>] [--deep]
-                    [--server <url>] [--json]`;
+                    [--server <url>] [--json]
+       seshi doctor --config <file> [--set path=value]… [--json]   a server's own checks`;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -34,6 +35,9 @@ interface Args {
   since?: string;
   deep?: boolean;
   server?: string;
+  /** A server config: check the server's side (its search index) instead of this machine. */
+  config?: string;
+  set?: string[];
 }
 
 export function parseDoctorArgs(argv: readonly string[]): Args | string {
@@ -55,15 +59,29 @@ export function parseDoctorArgs(argv: readonly string[]): Args | string {
         break;
       case "--agent":
       case "--since":
-      case "--server": {
+      case "--server":
+      case "--config": {
         const v = value();
         if (!v) return `${word} needs a value`;
-        args[word.slice(2) as "agent" | "since" | "server"] = v;
+        args[word.slice(2) as "agent" | "since" | "server" | "config"] = v;
+        break;
+      }
+      case "--set": {
+        const v = value();
+        if (!v) return "--set needs path=value";
+        args.set = [...(args.set ?? []), v];
         break;
       }
       default:
         return word.startsWith("-") ? `unknown option ${word}` : `unexpected ${word}`;
     }
+  }
+  const server = args.config !== undefined || args.set !== undefined;
+  if (
+    server &&
+    (args.session !== undefined || args.agent || args.since || args.deep || args.server)
+  ) {
+    return "--config checks a server; its other options are for this machine's sessions";
   }
   if (args.session !== undefined && args.since !== undefined) {
     return "--since is for checking every recent session; leave it out with --session";
@@ -237,6 +255,7 @@ export async function run(ctx: CommandContext): Promise<number> {
   const { json, rest } = takeJson(ctx.argv);
   const args = parseDoctorArgs(rest);
   if (typeof args === "string") return helpOrUsageError(ctx, json, args, USAGE);
+  if (args.config !== undefined || args.set !== undefined) return serverDoctor(ctx, json, args);
   const sinceMs = args.since === undefined ? DAY_MS : parseDuration(args.since);
   if (sinceMs === undefined) {
     return helpOrUsageError(
@@ -337,4 +356,36 @@ function exitCode(reports: SessionReport[], backendError: { exit?: number } | un
   if (codes.has("unavailable")) return EXIT.unavailable;
   const failed = reports.some((r) => r.checks.some((c) => c.status === "fail"));
   return failed ? EXIT.attention : EXIT.ok;
+}
+
+/** `seshi doctor --config`: the server's own checks, run where its config is (the search
+ * index: reachable, writable by the worker, current, and its size). */
+async function serverDoctor(ctx: CommandContext, json: boolean, args: Args): Promise<number> {
+  const { openServer, serverFailure } = await import("./server-instance");
+  const { searchServerChecks } = await import("../doctor/search");
+  let opened: Awaited<ReturnType<typeof openServer>>;
+  try {
+    opened = await openServer(
+      ctx,
+      {
+        ...(args.config !== undefined ? { config: args.config } : {}),
+        ...(args.set ? { set: args.set } : {}),
+      },
+      { roles: [], probe: [], claimUnmarkedBucket: false },
+    );
+  } catch (err) {
+    const code = serverFailure(ctx, json, err);
+    if (code !== undefined) return code;
+    throw err;
+  }
+  const { instance, loaded } = opened;
+  try {
+    const style = await styleFor(ctx, { json });
+    const checks = await searchServerChecks(instance, loaded.config, { env: ctx.env });
+    emit(ctx, json, { server: checks }, () => bucketLines(checks, style, "Server"));
+    const status = worst(checks.map((c) => c.status));
+    return status === "fail" ? EXIT.attention : EXIT.ok;
+  } finally {
+    await instance.close();
+  }
 }

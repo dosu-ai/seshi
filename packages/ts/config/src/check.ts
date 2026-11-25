@@ -47,6 +47,12 @@ export function checkServerConfig(config: ServerConfig): CheckReport {
     );
   }
 
+  if (config.search.backend === "lance" && config.search.path !== undefined) {
+    warnings.push(
+      'search.path is not read with search.backend = "lance": the index is in object storage (search.lance.uri)',
+    );
+  }
+
   for (const policy of config.review.policies) {
     const steps = resolveSteps(policy);
     for (const step of ["decision", "redactor"] as const) {

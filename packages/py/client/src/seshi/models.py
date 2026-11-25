@@ -981,6 +981,8 @@ class SearchIndexState(Response):
 class SearchResults(Response):
     query: str
     total: int
+    capped: bool | None = None
+    """True when the index stopped counting at its cap: at least `total` sessions match."""
     results: list[SearchResult]
     cursor: str | None = None
     """Pass as `cursor` for the next page; absent on the last."""
