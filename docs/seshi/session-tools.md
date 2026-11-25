@@ -7,14 +7,15 @@ native SQLite lock-downs were checked in a spike:
 
 ## Summary
 
-Three tools let an agent work over a team's sessions: `read_session` reads part of one
-session, `search` finds the events that mention something, and `sql` answers questions across
-sessions. They cover **session data only**: what seshi stores (sessions, their traces, events and
+Four tools let an agent work over a team's sessions: `list_sessions` lists sessions by who,
+where and when, `read_session` reads part of one session, `search` finds the events that
+mention something, and `sql` answers questions across sessions. They cover **session data only**: what seshi stores (sessions, their traces, events and
 model calls). Derived data such as issues, occurrences, interventions or findings is out of
 scope; seshi has none, and adding it is a separate decision.
 
 | Tool | What it gives an agent | Built on |
 |---|---|---|
+| `list_sessions` | Sessions the caller may see, filtered by owner, agent, repo, branch, model, labels and time, newest first, with no search words needed. | The search index's `sessions` table (SQLite or LanceDB). New endpoint. |
 | `read_session` | Any range of a session's events, condensed (tool output cut to 200 characters) or full, up to 30,000 characters per call. | The store: the session's traces, read as the trace API reads them. New endpoint. |
 | `search` | Full-text search over every event of every session the caller may see. | The search index (SQLite or LanceDB), with every event role indexed. Mostly exists (`GET /v1/search`). |
 | `sql` | One read-only `SELECT` over `sessions`, `events` and `llm_calls`. | A worker process over the search index: SQLite itself on a SQLite index, DuckDB over the Lance tables on LanceDB. New. |
@@ -23,8 +24,8 @@ Each tool is first an HTTP endpoint, so the CLI, the Python client and the tools
 permission check, and then an MCP tool in a new `seshi mcp` command (stdio) that calls those
 endpoints with the user's credentials. A server-side MCP endpoint can come later.
 
-The plan is six phases, about seven weeks of work, or about five running the phases that
-can go side by side ([plan](#plan)): `read_session` and `seshi mcp` first, then every event in the
+The plan is six phases, about seven and a half weeks of work, or about five running the phases
+that can go side by side ([plan](#plan)): `list_sessions`, `read_session` and `seshi mcp` first, then every event in the
 index with the columns `sql` needs, then `sql` on SQLite, `sql` on LanceDB with its image, and
 the MCP tool. On SQLite, `sql` runs in SQLite itself and needs nothing new in the binary, so it
 reaches laptops too; it is for admins and is not for production use with members (T11). On
@@ -48,6 +49,7 @@ Agreed on 25 November 2026.
 | T9 | DuckDB and its `lance` extension ship in a separate **`-sql` variant** of the server build and image, for LanceDB only. A LanceDB server without them answers `sql` with 501 and names the variant. |
 | T10 | Agents reach the tools through **`seshi mcp`**, a stdio command using the CLI's login. A server MCP endpoint with OAuth is a later, separate design. |
 | T11 | `sql` on SQLite reaches **every SQLite deployment**: `seshi serve` from the plain binary or the server build, and serverless laptops over their own index. It is for admins, service tokens and a laptop's own user, and the docs say it is **not for production use with members**: `bun:sqlite` has no authorizer, interrupt or attach limit, so its check rests on a JS parser. Production deployments that want members' `sql` use LanceDB. |
+| T12 | The MCP tools are **four general tools**: `list_sessions`, `read_session`, `search` and `sql`. There are no task-shaped shortcuts and no MCP resources or prompts at first ([tool shapes considered](#tool-shapes-considered)). |
 
 ## How an agent reaches the tools
 
@@ -55,6 +57,7 @@ Agreed on 25 November 2026.
 flowchart LR
     A["Agent (Claude Code, Cursor, Codex…)"] -->|MCP stdio| M["seshi mcp"]
     M -->|HTTP, user's token| API["seshi server API"]
+    API --> LS["list_sessions: index (sessions)"]
     API --> RS["read_session: store (traces)"]
     API --> S["search: search index"]
     API -->|NDJSON over pipes| W["sql worker"]
@@ -69,6 +72,27 @@ answer is.
 Serverless deployments (no server) get all three through the CLI's serverless backend, which
 already reads the bucket and keeps a SQLite index: `read_session` and `search` as today, and
 `sql` in a local worker over that index (T11).
+
+## list_sessions
+
+"What did I work on yesterday in this repo?" and "which sessions touched the deploy branch this
+week?" need no search words, and members do not have `sql`. `GET /v1/sessions` lists one
+owner's folder in key order with no other filters, so it does not answer them. `list_sessions`
+reads the search index's `sessions` table instead, which both backends already keep:
+
+```
+GET /v1/search/sessions
+    ?owner=…&agent=…&repo=…&branch=…&harness=…&model=…&label=key=value&source=…
+    &since=<ISO or 7d>&until=…        # sessions overlapping the window; default the last 7 days
+    &limit=<n>&after=<cursor>         # default 20, maximum 100
+```
+
+It needs the `search` scope and applies search's visibility rule (`viewerFor`): owner-only
+sessions of others never appear, and removed sessions never do. Each session is re-checked
+against live metadata before it is returned, as search hits are (`service.ts`). Results are
+newest first by `updated_at`, with each session's agent, repo, branch, start and end, models,
+labels, and its number of events and prompts when the index has them (phase 2's columns). On
+serverless laptops it reads the local index.
 
 ## read_session
 
@@ -667,12 +691,25 @@ claude mcp add seshi -- seshi mcp
   serverless profile it uses the serverless backend for `read_session` and `search`, and a
   local SQLite worker over the laptop's index for `sql` (T11). Nothing goes to stdout but
   protocol messages; logs go to stderr.
-- **Tools listed.** `read_session` and `search` always. `sql` on a laptop's own index always;
+- **Tools listed.** `list_sessions`, `read_session` and `search` always. `sql` on a laptop's own index always;
   against a server, only when `GET /v1/sql/schema` answers 200 at start-up: the caller has the scope and the server can run
   it. A failure to reach the server at start-up still starts the command, with every tool
   answering the error, so the agent can tell the user.
 
 ### Tools
+
+`list_sessions`:
+
+```json
+{"type": "object", "properties": {
+  "owner":  {"type": "string"}, "agent": {"type": "string"}, "repo": {"type": "string"},
+  "branch": {"type": "string"}, "model": {"type": "string"},
+  "labels": {"type": "object", "additionalProperties": {"type": "string"}},
+  "since":  {"type": "string", "default": "7d", "description": "ISO date or duration (7d, 24h)"},
+  "until":  {"type": "string"},
+  "limit":  {"type": "integer", "minimum": 1, "maximum": 100, "default": 20},
+  "after":  {"type": "string", "description": "the cursor from the last page"}}}
+```
 
 `read_session`:
 
@@ -740,6 +777,8 @@ Text content, written for a model to read, starting with one header line:
 now 2026-11-25T12:00:00Z · as alice (member: own + org) · window 2026-10-26 → now · index lance g1x… updated 40 s ago
 ```
 
+- **`list_sessions`:** one line per session (`owner/archive_id · agent · repo@branch ·
+  started → ended · models · labels`), newest first, then `after: <cursor>` or `end`.
 - **`read_session`:** the session's header, then one line per event as above, then
   `next: 240` or `end`.
 - **`search`:** one block per session (`owner/archive_id · agent · repo@branch · started ·
@@ -766,13 +805,41 @@ now 2026-11-25T12:00:00Z · as alice (member: own + org) · window 2026-10-26 �
    SQLite runs everywhere, including `seshi mcp` on a serverless profile over a folder store.
 3. **A real agent,** nightly and before a release: the `verify-seshi` skill's isolated seshi,
    with Claude Code in headless mode (`claude -p`, `--mcp-config` naming `seshi mcp`,
-   `--allowedTools 'mcp__seshi__*'`) given three tasks with known answers over the fixture
-   sessions: find the session where a given test failed and read the events around it; which
-   tool failed most last week; how many tokens a given person used per model. The check reads
+   `--allowedTools 'mcp__seshi__*'`) given four tasks with known answers over the fixture
+   sessions: what a given person worked on in a given repo yesterday; find the session where a
+   given test failed and read the events around it; which tool failed most last week; how many
+   tokens a given person used per model. The check reads
    the transcript for the tool calls and the answer. It needs a model key, so it is not in
    the PR checks.
 
 ## Alternatives considered
+
+### Tool shapes considered
+
+- **Only `sql`**, as Logfire's MCP is SQL-first: one tool and a schema. Not chosen. `sql` is
+  admin-only on SQLite and gated on LanceDB, so members would have no tools. The index cuts
+  text by role, so `sql` cannot stand in for reading a session. And neither engine ranks text
+  the way search does: DuckDB's `lance_fts` reads every query as words joined by OR, and the
+  SQLite views do not expose FTS5's `MATCH`.
+- **Task-shaped shortcuts**, as Dosu's ADX MCP has (`find_problems`, `get_session`,
+  `get_issue`): curated queries with bound parameters, safe for anyone. ADX's shortcuts work
+  over derived data (problems, issues, fixes), which seshi does not have (T1). Over raw session
+  data, the useful shortcut is the one `search` and `sql` cannot give a member: listing
+  sessions without search words. That became `list_sessions`. Others (failing tools, token use)
+  are a fixed `sql` query; they can become shortcuts later if agents keep asking for them.
+- **The DDL in a separate `describe_sql` tool** instead of the `sql` tool's description. It
+  would save about 3,000 characters of context in sessions that never use `sql`, but an agent
+  could write a statement without calling it first and invent columns, which is what the
+  generated DDL is there to prevent (ADX found the same). Many clients load MCP tool
+  descriptions only on demand now, so the cost is smaller than it looks.
+- **MCP resources** (`seshi://sessions/<owner>/<archive_id>`) for reading sessions. Clients
+  support resources unevenly, and agents rarely fetch them unprompted; a tool works everywhere.
+- **Splitting `read_session`** into `get_events` and `get_event`. One tool with a range or
+  `around`, and `event`/`offset` for one long event, keeps the list short.
+- **MCP prompts** for common tasks (look into a failure, weekly usage). Cheap to add later,
+  and not needed first.
+
+### Other alternatives
 
 - **SQL over a nightly Parquet export** (an admin downloads it, or the export lands in the
   bucket for BigQuery or their own DuckDB). No query runs on the server and no SQL is
@@ -806,7 +873,7 @@ now 2026-11-25T12:00:00Z · as alice (member: own + org) · window 2026-10-26 �
 
 | Phase | What | Size |
 |---|---|---|
-| 1. read_session and seshi mcp | The `events` endpoint, `seq` from the trace chain, condensed and full, the cap and `next`, `around`, `event` and `offset`, the trace cache; `seshi session read`; `seshi mcp` with `read_session` and `search`, results and headers as above, tests 1 and 2. | 1 week |
+| 1. read_session, list_sessions and seshi mcp | The `events` endpoint, `seq` from the trace chain, condensed and full, the cap and `next`, `around`, `event` and `offset`, the trace cache; `seshi session read`; `GET /v1/search/sessions` on both backends with the live re-check; `seshi mcp` with `list_sessions`, `read_session` and `search`, results and headers as above, tests 1 and 2. | 1.5 weeks |
 | 2. Every event and the index columns | Measure tool output on the production sample (aggregates) and pick the cap (T5); `[search] max_chars` by role and every role by default; the `role` filter and `seq` on matches; `seq`, `tool_call_id`, `ok`, `chars` and `llm_calls` on both backends under `seshi/search-lance/2` and `seshi/search-index/6`; rebuild timing on a 1M-record LanceDB index and the sample's SQLite. | 1.5 weeks |
 | 3. sql on SQLite | The worker (`seshi sql-worker`) and its protocol, the pool and watchdog; the JS parser (picked against the corpus) and the `EXPLAIN` check; `SQL_VIEWS` and `sqlViews` for SQLite, `TEMP` views and `query_only`; limits, and `hard_heap_limit` on Linux; the `sql` scope and `[search.sql]` settings (with `members` refused on SQLite); `POST /v1/sql`, `GET /v1/sql/schema`, `seshi sql` on servers and serverless laptops, the Python client; the hostile suite, its two corpus checks and the example conformance test; docs saying it is not for production use with members. | 1.5 weeks |
 | 4. sql on LanceDB | `@seshi/sql`: the DuckDB side of the worker, the `json_serialize_sql` check, `SQL_VIEWS` for DuckDB, the read-only credential (`[search.sql.storage]`); the suite and conformance test on the Lance fixture. | 1.5 weeks |
