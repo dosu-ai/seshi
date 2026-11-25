@@ -30,7 +30,8 @@ instance.** SQLite stays the default and the only backend in serverless mode.
 The spike ([results](search-spike/README.md)) found it works at 10M records on GCS, which is
 about four months of a 50-person team: most searches answer in 0.2 to 1 s, prefixes in 2 to
 5 s. Its limit is maintenance, which rewrites the whole index and takes 8 to 9 minutes at that
-size, so it fits a team up to roughly 10 to 30M records (see [risks](#risks)).
+size, so it fits a team up to roughly 10 to 30M records (see [risks](#risks)). The first
+version ships one table and revisits that when a team nears it ([past the limit](#past-the-limit)).
 
 What this does not include: analytics (tokens and spend), semantic search, and ClickHouse. The
 first two can build on this index later; see [later](#later-analytics-and-semantic-search).
@@ -675,10 +676,8 @@ guess in the scoping PR.
   that line, a year of a 50-person team ([sizes](#sizes), about 32M records) costs about half
   an hour per run, so an hourly `optimize()` would take half the worker's time; a 500-person
   team's year is out of reach. So this design fits an `events` table up to roughly 10 to 30M
-  records, and `seshi doctor` warns above 20M. Past that, `events` splits into one table per
-  month, so only the current month takes writes and `optimize()`, and older months change
-  only when a scrub is due; see [open questions](#open-questions). LanceDB adding incremental
-  index updates to its TypeScript API would also lift the limit.
+  records, and `seshi doctor` warns above 20M. The first version ships one `events` table, and
+  the limit is revisited when a deployment nears it; see [past the limit](#past-the-limit).
 - **Prefix queries are slow** at 10M records: 2 to 5 s ([query semantics](#query-semantics)).
   If that is too slow, raise the minimum length to 3, or limit prefixes to `sort = recent`,
   whose windows keep the candidates few (under 1 s in the spike).
@@ -689,17 +688,34 @@ guess in the scoping PR.
 - **SQL text in filters.** No bound parameters, so escaping is the only defence. One function
   does it, and the suite tests it with hostile values.
 
+## Past the limit
+
+The first version keeps one `events` table, and `seshi doctor` warns above 20M records. When a
+deployment nears that, these are the ways on, cheapest change first:
+
+- **Delta indexes.** Lance's Rust and Python layers can index only new rows without merging
+  them into the main index (`num_indices_to_merge`). LanceDB 0.41.0's TypeScript
+  `OptimizeOptions` has no such option, and whether full-text indexes support it, and how
+  searches across several deltas perform, is untested. If it works, the limit mostly goes
+  away with no change to the tables.
+- **Hot and cold tables.** A small `events_hot` holds about the last week and is optimized
+  hourly; a large `events_cold` is rebuilt nightly or weekly as rows move over, with the scrub
+  folded into that move. Changes to old sessions go to `events_hot` with a delete in
+  `events_cold`. Every search queries both and merges, so BM25 scores differ only between two
+  tables. The cold rebuild still grows with size but runs daily, not hourly.
+- **One table per month.** Only the current month takes writes and `optimize()`. A search then
+  runs once per month (12 queries for a year), each with its own cold-read and prefix cost,
+  and BM25 scores from different months are not quite comparable. The recent sort gains, as
+  it can stop after the newest months.
+- **Another engine** for large teams, behind the same [seam](#the-seam).
+
+Splitting by owner is ruled out: team searches span every owner. `LanceIndex` names its tables
+through one function, so a split changes the writer and the merge, not the query compiler.
+
 ## Open questions
 
-1. **Split `events` by month in the first version, or only when a team nears the limit?**
-   Monthly tables keep `optimize()` and the scrub bounded by a month's records, but a search
-   then runs once per month and merges the results, and BM25 scores from different tables are
-   not quite comparable (each table has its own word statistics). The proposal is to ship one
-   table, warn in `seshi doctor` above 20M records, and design the split when a deployment
-   needs it.
-
-TypeScript or DuckDB for grouping searches, the question this section held before the spike, is
-settled: [TypeScript](#duckdb-compared-in-the-spike).
+None. The month split moved to [past the limit](#past-the-limit), and TypeScript or DuckDB for
+grouping searches is settled: [TypeScript](#duckdb-compared-in-the-spike).
 
 ## Plan
 
