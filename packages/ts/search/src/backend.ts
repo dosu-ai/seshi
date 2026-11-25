@@ -182,8 +182,14 @@ export interface IndexWriter {
     owner: string,
     archives: readonly string[],
   ): Promise<Map<string, IndexedSession>>;
-  /** One feed page, written as a whole. Writing a page twice changes nothing. */
+  /** One feed page, or several of one owner's in a row, written as a whole. Writing it twice
+   * changes nothing. */
   commit(page: PageCommit): Promise<CommitResult>;
+  /** How many records (events and sessions) the indexer may gather from one owner's feed pages
+   * into one commit to `generation`; 0, or absent, to commit each page on its own. LanceDB
+   * gathers while a generation is being built, because each commit is a table version: a first
+   * build one page per commit takes hours. */
+  batchRecords?(generation: string): Promise<number>;
   /** Every owner's feed has been read after `through`, and an owner not listed then had
    * written nothing: the cross-owner feed may serve entries up to it. Never moves back. */
   readThrough(generation: string, through: string): Promise<void>;
@@ -213,7 +219,9 @@ export interface Removal {
   scrub: boolean;
 }
 
-/** One page of one owner's change feed, as the indexer planned it. */
+/** One page of one owner's change feed, or several in a row (`IndexWriter.batchRecords`), as the
+ * indexer planned it: each session once, from its metadata as read after the last page that
+ * names it was listed. */
 export interface PageCommit {
   generation: string;
   owner: string;

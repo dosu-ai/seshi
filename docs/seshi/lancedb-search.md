@@ -507,10 +507,23 @@ the rows up to it are written.
 Each commit makes a table version, so a page costs six or seven commits. At the default
 `search.interval` that is fine: a 50-person team adds about one record a second, and a split
 page commits about 2,500. A first build is different: a year of that team is about 32M
-records, which is three to four hours one page per commit. So during a build the indexer
-gathers pages until it holds 50,000 records and commits them together, the same steps over the
-union; plain `add()` of 100,000-row batches wrote 14,000 records a second in the spike. The
-cursor still moves only after the content. A new generation's tables get their indexes once,
+records, which is three to four hours one page per commit. So while a generation is being
+built, `IndexWriter.batchRecords` asks the indexer to gather one owner's pages until they hold
+50,000 records (events and session rows), and commit them as one `PageCommit`, the same steps
+over the union; plain `add()` of 100,000-row batches wrote 14,000 records a second in the spike.
+Each session is in a commit once: one named again on a later page is planned again from its
+metadata as read then, and both plans start from what the index held before the batch, which is
+what `commit()` checks them against. The cursor moves to the last page's end, still only after
+the content, so a crash part-way is repaired by reading the batch's pages again. Once the
+generation has caught up, each page is committed on its own, so it is searchable at once.
+SQLite never gathers: a transaction per page costs it nothing.
+
+The gathering is the indexer's, not the writer's. A writer that buffered pages would answer
+`commit()` before writing, so it could not say which updates it refused, and the indexer would
+plan the next page from `sessions()` that do not show the pages it holds. It stays within one
+owner: `cursors`, `seen` and the checks are per owner, and a build's time goes to the records,
+not to a commit per owner. A pass that gathers checks its budget only after a commit, so it
+reads at least one batch. A new generation's tables get their indexes once,
 when the build has caught up, instead of after every batch: at 10M records the spike wrote the
 tables in 12 minutes and built every index in 5.
 
@@ -839,8 +852,8 @@ grouping searches is settled: [TypeScript](#duckdb-compared-in-the-spike).
 |---|---|---|
 | 0. Spike | Done, 24–25 November ([results](search-spike/README.md)): latency at 1M and 10M records on GCS, TypeScript against DuckDB for grouping, prefix checks, commit, `optimize()` and scrub times, and the image size. | Done |
 | 1. Seam | `IndexReader` and `IndexWriter`, `drain()` onto `commit()`, `MatchTree`, `state()`, `IndexUnavailable`, the `OpenIndex` factory, `SearchStatus.location`, `excerpt()`. SQLite only, with no change in behaviour; existing tests keep their assertions. | 4–6 days |
-| 2. Backend | Done: `LanceIndex` (`lance.ts`, `lance-query.ts`, `lanceIndex()` as `@seshi/search/lance`): tables and `meta`, `commit()`, the query compiler, filters and escaping, grouping, prefixes, `maintain()` with the scrub, generations. The conformance suite on SQLite, a folder and S3, and the crash tests. While a generation is being built, its tables are optimized every 100,000 committed rows, so the scalar indexes `mergeInsert`, `delete` and the lookups use keep up. Not done: gathering a first build's pages into 50,000-record commits (an `Indexer` change; see [ingest](#ingest)), so a first build still commits once per page. | 1.5 weeks |
-| 3. Deploy | Done: the config schema (`[search.lance]`, with `storageOptions` from `[store]` or its own keys), `worker` placement for this backend and `readOnly` for API instances, the server build ([the binary](#the-binary-the-server-build)), `capped` ("at least N"), `--status`, `--rebuild`, `--wait` and `--scrub`, `seshi sync search`, `seshi doctor --config`, spec/layout.md's `search/` entry, and docs. An end-to-end test runs a worker process from `main-server.ts` and a read-only API instance on a folder and on S3. Not done: gathering a first build's pages into 50,000-record commits (phase 2's note). | 1 week |
+| 2. Backend | Done: `LanceIndex` (`lance.ts`, `lance-query.ts`, `lanceIndex()` as `@seshi/search/lance`): tables and `meta`, `commit()`, the query compiler, filters and escaping, grouping, prefixes, `maintain()` with the scrub, generations. The conformance suite on SQLite, a folder and S3, and the crash tests. While a generation is being built, its tables are optimized every 100,000 committed rows, so the scalar indexes `mergeInsert`, `delete` and the lookups use keep up. A build gathers each owner's pages into commits of 50,000 records (`IndexWriter.batchRecords`; see [ingest](#ingest)). | 1.5 weeks |
+| 3. Deploy | Done: the config schema (`[search.lance]`, with `storageOptions` from `[store]` or its own keys), `worker` placement for this backend and `readOnly` for API instances, the server build ([the binary](#the-binary-the-server-build)), `capped` ("at least N"), `--status`, `--rebuild`, `--wait` and `--scrub`, `seshi sync search`, `seshi doctor --config`, spec/layout.md's `search/` entry, and docs. An end-to-end test runs a worker process from `main-server.ts` and a read-only API instance on a folder and on S3. | 1 week |
 | Later | `llm_calls` and DuckDB analytics; semantic search. | Separate decisions |
 
 Phase 1 is worth doing on its own: it makes the indexer's writes explicit and removes the
