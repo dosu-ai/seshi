@@ -216,11 +216,17 @@ the request timeout at 120 seconds or more; a large transcript can take that lon
 and verify. Platforms that cap request bodies (Cloud Run's HTTP/1 limit is 32 MiB) are fine as
 long as clients send `Content-Encoding: gzip`, which every route accepts.
 
+On Kubernetes, the Helm chart `oci://ghcr.io/dosu-ai/charts/seshi`
+([dosu-ai/helm-charts](https://github.com/dosu-ai/helm-charts/tree/main/charts/seshi)) runs
+this image: one pod with both roles, or several API pods beside one worker pod. A Job it runs
+on install makes the first admin token and the org key and keeps them in a Secret. Its README
+also covers bucket keys and workload identity, and trying it on kind with a folder store.
+
 Each cloud's own object storage holds the bucket:
 
 | Cloud | `store.url` | Keys |
 |---|---|---|
-| AWS | `s3://bucket/prefix` with `store.region` | An IAM role for the pod or instance through the `AWS_*` variables, or `store.credentials` |
+| AWS | `s3://bucket/prefix` with `store.region` | An access key: `store.credentials`, or `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` (and `AWS_SESSION_TOKEN` for temporary keys). seshi does not fetch a role's keys itself: not from IRSA, EKS Pod Identity or the instance metadata service |
 | Google Cloud | `gs://bucket/prefix` | GKE Workload Identity: the pod's Kubernetes service account bound to a Google service account with **Storage Object User** on the bucket (seshi asks the metadata server for its token), or `store.credentials.service_account_key`, or `GOOGLE_APPLICATION_CREDENTIALS` |
 | Azure | `az://container/prefix` with `store.account_name` | Workload identity on AKS (`AZURE_FEDERATED_TOKEN_FILE`, `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, set by AKS for a service account that names a managed identity with **Storage Blob Data Contributor** on the container), or `store.credentials.account_key` / `sas_token` |
 
