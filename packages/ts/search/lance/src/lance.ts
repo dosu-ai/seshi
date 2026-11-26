@@ -1619,10 +1619,11 @@ export class LanceIndex implements IndexStore {
   }
 
   /** Copy `old`'s rows into a new table `name`, and index it. Its scalar indexes are built
-   * over the first part of the rows and extended by `optimize()` after each further part, as a
-   * build's are: built over the whole table at once, the btree on `events.id` sorts every id,
-   * which at 10M records outgrew LanceDB's memory pool (`Resources exhausted`). Its full-text
-   * indexes are built once it is filled. */
+   * over the first part of the rows and extended by `optimize()` after each further part, which
+   * sorts only the new rows: built over the whole table at once from a bucket, the btree on
+   * `events.id` outgrew LanceDB's memory pool at 10M records (`Resources exhausted`), and that
+   * pool is set only by the environment the worker starts in (docs/seshi/lancedb-search.md,
+   * "The scrub at 10M records"). Its full-text indexes are built once it is filled. */
   private async copyTable(
     old: Table,
     gen: string,
