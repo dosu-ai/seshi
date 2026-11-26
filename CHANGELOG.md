@@ -1,3 +1,10 @@
+# [0.30.0](https://github.com/dosu-ai/seshi/compare/v0.29.0...v0.30.0) (2026-11-26)
+
+
+### Features
+
+* **store:** sign S3 requests as the ECS task's or EC2 instance's role ([#90](https://github.com/dosu-ai/seshi/issues/90)) ([16bec84](https://github.com/dosu-ai/seshi/commit/16bec840398d9aadb0f9b832e4556ff2ffa6e7df))
+
 # [0.29.0](https://github.com/dosu-ai/seshi/compare/v0.28.0...v0.29.0) (2026-11-25)
 
 
