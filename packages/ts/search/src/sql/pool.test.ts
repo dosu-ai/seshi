@@ -140,6 +140,105 @@ describe("the sql workers (SqlPool)", () => {
     await Promise.all(held);
   });
 
+  it("keep a queue deeper than the workers waiting while they are busy", async () => {
+    // Each answer takes 300 ms, so the fourth waits about 900 ms: past startMs, which only
+    // counts while no worker is up.
+    const workers = pool({
+      command: fake(
+        "slow-answers",
+        `const id = request.id;
+         setTimeout(() => answer({ id, ok: true, columns: [], rows: [[request.sql]], truncated: false, elapsed_ms: 300 }), 300);`,
+      ),
+      startMs: 200,
+    });
+    const answers = await Promise.all(
+      ["a", "b", "c", "d"].map((who) => workers.run(who, request(who, 1_000))),
+    );
+    expect(answers.map((a) => (a.ok ? a.rows[0]?.[0] : a.error.message))).toEqual([
+      "a",
+      "b",
+      "c",
+      "d",
+    ]);
+  });
+
+  it("answer internal when no worker comes up within startMs", async () => {
+    const file = join(dir, "never-ready.ts");
+    writeFileSync(file, "await new Promise(() => setInterval(() => {}, 1_000));\n");
+    const workers = pool({ command: [process.execPath, file], startMs: 200 });
+    const started = Date.now();
+    expect(await workers.run("ops", request("SELECT 1", 5_000))).toMatchObject({
+      ok: false,
+      error: { kind: "internal", message: expect.stringContaining("could start") },
+    });
+    expect(Date.now() - started).toBeLessThan(2_000);
+  });
+
+  it("keep reading a worker's answers when handling one throws", async () => {
+    const logged: string[] = [];
+    const workers = pool({ log: (l) => logged.push(l) });
+    // Handling the first answer throws once, after settling it (as a write to a dead
+    // worker's pipe did, in the pump that follows).
+    const inside = workers as unknown as {
+      pump: () => void;
+      settle: (...args: unknown[]) => void;
+    };
+    const pump = inside.pump.bind(workers);
+    const settle = inside.settle.bind(workers);
+    let settled = false;
+    let thrown = false;
+    inside.settle = (...args) => {
+      settled = true;
+      settle(...args);
+    };
+    inside.pump = () => {
+      if (settled && !thrown) {
+        thrown = true;
+        throw new Error("EPIPE");
+      }
+      pump();
+    };
+    const first = workers.run("ops", request("SELECT 1"));
+    expect(await first).toMatchObject({ ok: true });
+    expect(thrown).toBe(true);
+    expect(logged.join("\n")).toContain("EPIPE");
+    // The same worker's next answer still arrives.
+    expect(await workers.run("ops", request("SELECT 2", 1_000))).toMatchObject({
+      ok: true,
+      rows: [[2]],
+    });
+    expect(workers.status().restarts).toBe(0);
+  });
+
+  it("hand a query to another worker when writing to one fails", async () => {
+    const logged: string[] = [];
+    const workers = pool({ workers: 2, log: (l) => logged.push(l) });
+    const inside = workers as unknown as { slots: { ready: boolean; proc: object }[] };
+    while (!inside.slots.every((s) => s.ready)) await Bun.sleep(20);
+    // The first worker's pipe is closed: writing to it throws.
+    const broken = inside.slots[0] as (typeof inside.slots)[number];
+    const closed = {
+      write: () => {
+        throw new Error("EPIPE");
+      },
+      flush: () => 0,
+    };
+    broken.proc = new Proxy(broken.proc, {
+      get(target, key) {
+        if (key === "stdin") return closed;
+        const value = Reflect.get(target, key);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    expect(await workers.run("ops", request("SELECT 3", 1_000))).toMatchObject({
+      ok: true,
+      rows: [[3]],
+    });
+    expect(logged.join("\n")).toMatch(/could not take a query \(EPIPE\); replacing it/);
+    while (workers.status().restarts === 0) await Bun.sleep(20);
+    expect(await workers.run("ops", request("SELECT 4", 1_000))).toMatchObject({ ok: true });
+  });
+
   it("give workers a built environment: no seshi settings, tokens or keys", async () => {
     process.env.SESHI_SQL_TEST_SECRET = "s3cr3t";
     try {

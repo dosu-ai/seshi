@@ -36,6 +36,7 @@ import { cwdConfigHint, openServer, serverFailure } from "./server-instance";
 const USAGE = [
   'usage: seshi sql "<statement>" [--since <time|30d>] [--until <time|age>] [--max-rows <n>]',
   "                 [--server <url>] [--token <t> [--user <name>]] [--config <file>] [--set path=value]… [--json]",
+  "                 [--include-private]   serverless mode: owner-only sessions too",
   "       seshi sql --schema [--since …] [--until …] [… the same connection options]",
   "",
   "One read-only SELECT over the views sessions, events and llm_calls (seshi sql --schema shows",
@@ -53,6 +54,7 @@ const OPTIONS = {
   user: { type: "string" },
   config: { type: "string" },
   set: { type: "string", multiple: true },
+  "include-private": { type: "boolean" },
 } as const;
 
 type Values = {
@@ -284,7 +286,9 @@ export async function run(ctx: CommandContext): Promise<number> {
       return await answer(ctx, json, backendRun(ctx, json, backend), values, statement, style);
     }
     if (isServerless(cli)) {
-      backend = await openBackend(ctx, account);
+      backend = await openBackend(ctx, account, {
+        includePrivate: values["include-private"] === true,
+      });
       return await answer(ctx, json, backendRun(ctx, json, backend), values, statement, style);
     }
     if (serverConfigHere(ctx)) {

@@ -322,10 +322,10 @@ export class ServerlessBackend implements Backend {
     return search.search(this.viewer(), request);
   }
 
-  /** `sql` over the laptop's own index (T11): its views carry no owner condition, since the
-   * laptop's user can read everything the index holds; the window still applies. */
+  /** `sql` over the laptop's own index (T11), with the visibility rule `search` follows: the
+   * user's own sessions and the org's, owner-only ones too with `--include-private`. */
   private sqlCaller(): SqlCaller {
-    return { viewer: LOCAL_VIEWER, as: this.owner, role: "local", key: this.owner };
+    return { viewer: this.viewer(), as: this.owner, role: "local", key: this.owner };
   }
 
   private localSql() {

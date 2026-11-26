@@ -422,8 +422,8 @@ and says how to turn it on. Turning it off does not delete the index file yet. S
 [search.md](search.md).
 
 `seshi sql` reads the same index, in a worker process this laptop starts for it
-(`search.sql.workers`, 1 by default), as its own user: the views hold everything the index
-holds, with no owner filter, since the laptop's keys can read it all already; the window
+(`search.sql.workers`, 1 by default), as its own user: the views hold what `seshi search`
+shows (your sessions and the org's, owner-only ones too with `--include-private`); the window
 (`--since`, `--until`, the last 30 days by default) still applies
 ([search.md](search.md#sql)). A shared config's `search.sql.members` is a server setting, and
 ignored here.

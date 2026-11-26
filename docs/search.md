@@ -131,9 +131,9 @@ it, and the API gives `at`, the character's offset.
 
 **Who may.** `sql` needs the `sql` scope. Admins have it; a service token can be given it
 (`seshi tokens create service --service reports --scope search --scope sql`); members do not.
-On a serverless laptop `seshi sql` reads the laptop's own index as its user, with no owner
-filter (the laptop's keys can already read everything the index holds) and the window still
-applied; the answer says `as <you> (local index)`. Other places are as for `seshi search`
+On a serverless laptop `seshi sql` reads the laptop's own index as its user, with the
+visibility rule `seshi search` follows (your sessions and the org's; `--include-private` for
+owner-only ones too) and the window still applied; the answer says `as <you> (local index)`. Other places are as for `seshi search`
 ([above](#searching)): a server (`--server`, `--token`), or in-process with its config
 (`--config`).
 

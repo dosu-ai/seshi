@@ -116,7 +116,7 @@ export function runSqliteQuery(request: SqlWorkerRequest): SqlWorkerResponse {
     let bytes = 2;
     for (const row of raw.slice(0, limits.max_rows)) {
       const values = row.map(jsonValue);
-      bytes += JSON.stringify(values).length + 1;
+      bytes += Buffer.byteLength(JSON.stringify(values), "utf8") + 1;
       if (bytes > limits.max_bytes) {
         truncated = true;
         break;
