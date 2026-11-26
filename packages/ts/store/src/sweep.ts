@@ -1,10 +1,10 @@
 import type { SessionMetadata } from "@seshi/model";
 import { isOwner, keys, PAST_FOLDER } from "./layout";
 import { listOwners } from "./owners";
-import { readMetadata } from "./publish";
+import { readMetadata, SWEEP_MIN_AGE_MS } from "./publish";
 import type { ListedKey, Store } from "./store";
 
-export const SWEEP_MIN_AGE_MS = 60 * 60 * 1000;
+export { SWEEP_MIN_AGE_MS };
 
 const TRACE_NAME = /^trace\.([0-9a-f]{64})\.json\.gz$/;
 

@@ -519,7 +519,8 @@ A trace object that no `metadata.json` names (in `traces` or as `head`) and that
 old by the store's listing is deleted by the server's sweep (F2.5): daily, after a redaction
 backfill and after a replace. So a writer names its object within the hour of writing it, or
 writes it again; a publish that finds its object already there writes it again with its own
-bytes, and the sweep checks an object's age once more just before it deletes it.
+bytes, unless the object is under half an hour old (it then stays under the hour long enough to
+be named), and the sweep checks an object's age once more just before it deletes it.
 
 ## Reading
 

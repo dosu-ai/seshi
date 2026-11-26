@@ -239,8 +239,28 @@ describe("publishObject", () => {
     expect(dec(await getBytes(store, "p"))).toBe("diff");
   });
 
+  it("verifies by the ETag when it is the body's MD5, without reading the object back", async () => {
+    const plain = new Counted(store);
+    expect(await publishObject(plain, "t", enc("trace"), "text/plain")).toBe("written");
+    expect(await publishObject(plain, "t", enc("trace"), "text/plain")).toBe("exists");
+    expect(await publishObject(plain, "r", enc("same"), "text/plain", "replace")).toBe("written");
+    expect(await publishObject(plain, "r", enc("same"), "text/plain", "replace")).toBe("exists");
+    expect(plain.reads).toBe(0);
+  });
+
+  it("does not write a young object it reuses again; an old one it does, for the sweep", async () => {
+    const counted = new Counted(store);
+    expect(await publishObject(counted, "t", enc("trace"), "text/plain")).toBe("written");
+    expect(await publishObject(counted, "t", enc("trace"), "text/plain")).toBe("exists");
+    expect(counted.puts).toBe(1);
+    const old = new Date(Date.now() - 31 * 60 * 1000);
+    utimesSync(join(dir, "t"), old, old);
+    expect(await publishObject(counted, "t", enc("trace"), "text/plain")).toBe("exists");
+    expect(counted.puts).toBe(2);
+  });
+
   it("verifies by reading back when the ETag looks like an MD5 but is not one (S3 SSE-KMS)", async () => {
-    const kms = new KmsEtags(store);
+    const kms = new Counted(store, { kmsEtags: true });
     expect(await publishObject(kms, "t", enc("trace"), "text/plain")).toBe("written");
     expect(kms.reads).toBe(1);
     expect(await publishObject(kms, "t", enc("trace"), "text/plain")).toBe("exists");
@@ -251,7 +271,7 @@ describe("publishObject", () => {
   });
 
   it("still fails a write whose bytes did not land, whatever the ETag", async () => {
-    const kms = new KmsEtags(store, { corrupt: true });
+    const kms = new Counted(store, { kmsEtags: true, corrupt: true });
     await expect(publishObject(kms, "t", enc("trace"), "text/plain")).rejects.toThrow(
       /verification failed after writing t/,
     );
@@ -263,21 +283,24 @@ describe("publishObject", () => {
   });
 });
 
-/** A store that reports ETags as S3 does for an object under SSE-KMS or SSE-C: 32 hex digits
- * that are not the MD5 of the body. `corrupt` stores a body with its last byte changed. */
-class KmsEtags implements Store {
+/** A store that counts reads and writes. `kmsEtags` reports ETags as S3 does for an object
+ * under SSE-KMS or SSE-C: 32 hex digits that are not the MD5 of the body. `corrupt` stores a
+ * body with its last byte changed. */
+class Counted implements Store {
   readonly url: string;
   reads = 0;
+  puts = 0;
   private readonly real = new Map<string, string>();
 
   constructor(
     private readonly inner: Store,
-    private readonly options: { corrupt?: boolean } = {},
+    private readonly options: { kmsEtags?: boolean; corrupt?: boolean } = {},
   ) {
     this.url = inner.url;
   }
 
   private fake(etag: string): string {
+    if (!this.options.kmsEtags) return etag;
     const kms = createHash("md5").update(`kms:${etag}`).digest("hex");
     this.real.set(kms, etag);
     return kms;
@@ -294,6 +317,7 @@ class KmsEtags implements Store {
   }
 
   async put(key: string, body: Uint8Array, options: PutOptions = {}) {
+    this.puts++;
     const stored = this.options.corrupt
       ? body.map((b, i) => (i === body.length - 1 ? b ^ 1 : b))
       : body;

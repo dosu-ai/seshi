@@ -30,6 +30,14 @@ export function sha256(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
+/** How old an unnamed trace object must be before the orphan sweep deletes it (F2.5): a
+ * publish may be in flight. Here, not in `sweep.ts`, so publish can use it without a cycle. */
+export const SWEEP_MIN_AGE_MS = 60 * 60 * 1000;
+
+/** A reused object younger than this is left as it is: it stays under the sweep's age for at
+ * least as long again, time enough for the publish to name it. Older, it is written again. */
+const REFRESH_AFTER_MS = SWEEP_MIN_AGE_MS / 2;
+
 export type PublishOutcome = "written" | "exists";
 
 /** How an occupied key is treated. `immutable` is for content-addressed keys (a trace): the first
@@ -54,7 +62,12 @@ export async function publishObject(
     const kept =
       mode === "immutable" ||
       (before.size === body.length && (await matches(store, key, before.etag, want, body)));
-    if (kept && (await makeYoungEnoughToKeep(store, key, contentType))) return "exists";
+    if (
+      kept &&
+      (youngEnough(before.modified) || (await makeYoungEnoughToKeep(store, key, contentType)))
+    ) {
+      return "exists";
+    }
   }
   if (mode === "immutable") {
     try {
@@ -75,6 +88,13 @@ export async function publishObject(
     throw new StoreError(`verification failed after writing ${key}`);
   }
   return "written";
+}
+
+/** Whether an object written at `modified` needs no refresh for the sweep to skip it. An
+ * unknown time is refreshed. */
+function youngEnough(modified: string | undefined): boolean {
+  const at = modified === undefined ? Number.NaN : Date.parse(modified);
+  return Number.isFinite(at) && Date.now() - at < REFRESH_AFTER_MS;
 }
 
 async function makeYoungEnoughToKeep(
