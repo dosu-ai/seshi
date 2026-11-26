@@ -1,4 +1,5 @@
 import type { Fetch } from "@seshi/model";
+import { type AwsCredentialSource, roleCredentials } from "./aws-credentials";
 import { FetchS3Client, S3HttpError } from "./s3-fetch";
 import {
   AccessDenied,
@@ -30,7 +31,8 @@ export interface S3StoreOptions {
   /** Explicit endpoint for S3-compatible stores; overrides `region` / `accountId` resolution. */
   endpoint?: string;
   /** Omit to read the standard variables from `env`: `S3_*` / `AWS_*`, and for `r2://`
-   * `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` first. */
+   * `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` first. Without those, an `s3://` store uses
+   * the role it runs as: an ECS task's (or EKS Pod Identity's), else the EC2 instance's. */
   credentials?: S3Credentials;
   scheme?: "s3" | "r2";
   fetch?: Fetch;
@@ -81,12 +83,21 @@ export class S3Store implements Store {
     const sessionToken =
       credentials.sessionToken ??
       (options.credentials ? undefined : (env.S3_SESSION_TOKEN ?? env.AWS_SESSION_TOKEN));
-    if (!accessKeyId || !secretAccessKey) {
-      throw new StoreError(
-        `${this.url} needs an access key id and secret (credentials, or ${
-          scheme === "r2" ? "R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY" : "AWS_* / S3_*"
-        } in the environment)`,
-      );
+    let signWith: AwsCredentialSource | S3Credentials;
+    if (accessKeyId && secretAccessKey) {
+      signWith = { accessKeyId, secretAccessKey, ...(sessionToken ? { sessionToken } : {}) };
+    } else {
+      const role = scheme === "s3" ? roleCredentials(env, { fetch: options.fetch }) : undefined;
+      if (!role) {
+        throw new StoreError(
+          `${this.url} needs an access key id and secret (credentials, or ${
+            scheme === "r2"
+              ? "R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY in the environment"
+              : "AWS_* / S3_* in the environment, or an ECS task role or EC2 instance role"
+          })`,
+        );
+      }
+      signWith = role;
     }
     const endpoint =
       options.endpoint ??
@@ -100,7 +111,7 @@ export class S3Store implements Store {
         options.region ??
         (scheme === "r2" ? "auto" : (env.S3_REGION ?? env.AWS_REGION ?? "us-east-1")),
       endpoint,
-      credentials: { accessKeyId, secretAccessKey, ...(sessionToken ? { sessionToken } : {}) },
+      credentials: signWith,
       fetch: options.fetch,
     });
   }

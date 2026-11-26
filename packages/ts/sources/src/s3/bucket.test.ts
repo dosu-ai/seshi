@@ -120,7 +120,7 @@ describe("an S3 source bucket", () => {
     const none = new S3SourceBucket({
       url: "s3://src",
       fetch: fake.fetch,
-      env: {},
+      env: { AWS_EC2_METADATA_DISABLED: "true" },
       now: () => NOW,
     });
     await expect(none.list("", { limit: 1 })).rejects.toThrow(/needs keys/);
@@ -132,6 +132,32 @@ describe("an S3 source bucket", () => {
       now: () => NOW,
     });
     await expect(noEndpoint.list("", { limit: 1 })).rejects.toThrow(/account_id or endpoint/);
+  });
+
+  it("reads as the ECS task's role when it has no keys, asking once while they last", async () => {
+    const fake = new FakeS3({ bucket: "src", accessKeyId: "ASIATASK" });
+    const asked: string[] = [];
+    const bucket = s3(fake, {
+      credentials: undefined,
+      fetch: async (input, init) => {
+        if (input.startsWith("http://169.254.170.2/")) {
+          asked.push(input);
+          return new Response(
+            JSON.stringify({
+              AccessKeyId: "ASIATASK",
+              SecretAccessKey: "s",
+              Token: "t",
+              Expiration: new Date(NOW.getTime() + 3_600_000).toISOString(),
+            }),
+          );
+        }
+        return fake.fetch(input, init);
+      },
+      env: { AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: "/v2/credentials/task-1" },
+    });
+    expect((await bucket.list("harness/", { limit: 1 })).objects).toEqual([]);
+    expect(await bucket.read("harness/none", { etag: "x" })).toBeNull();
+    expect(asked).toEqual(["http://169.254.170.2/v2/credentials/task-1"]);
   });
 
   it("assumes a role with its external id and keeps the keys until near expiry", async () => {

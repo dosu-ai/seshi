@@ -123,6 +123,103 @@ describe("S3Store over fetch", () => {
   });
 });
 
+describe("S3Store as the role it runs as", () => {
+  const ECS = "http://169.254.170.2/v2/credentials/task-1";
+  const roleKeys = (id: string, expiresInMs: number) =>
+    new Response(
+      JSON.stringify({
+        AccessKeyId: id,
+        SecretAccessKey: "secret",
+        Token: `token-${id}`,
+        Expiration: new Date(Date.now() + expiresInMs).toISOString(),
+      }),
+    );
+  const keyId = (seen: Seen) => /Credential=(\w+)\//.exec(seen.headers.authorization ?? "")?.[1];
+
+  it("signs with an ECS task role's keys when it is given none, and asks again when they are due", async () => {
+    let issued = 0;
+    // The first keys are already due for renewal; the second last an hour.
+    const { fetch, seen } = fakeFetch(({ url }) =>
+      url === ECS
+        ? roleKeys(`ASIA${++issued}`, issued === 1 ? 0 : 3_600_000)
+        : new Response(null, { status: 404 }),
+    );
+    const store = S3Store.fromUrl("s3://acme/archive", {
+      region: "us-east-2",
+      fetch,
+      env: { AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: "/v2/credentials/task-1" },
+    });
+    await store.get("a");
+    await store.get("b");
+    await store.get("c");
+    expect(seen.map((s) => (s.url === ECS ? "ecs" : "bucket"))).toEqual([
+      "ecs",
+      "bucket",
+      "ecs",
+      "bucket",
+      "bucket",
+    ]);
+    const toBucket = seen.filter((s) => s.url !== ECS);
+    expect(toBucket.map(keyId)).toEqual(["ASIA1", "ASIA2", "ASIA2"]);
+    expect(toBucket[0]?.headers["x-amz-security-token"]).toBe("token-ASIA1");
+    expect(toBucket[0]?.headers.authorization).toContain("/us-east-2/s3/aws4_request");
+  });
+
+  it("signs with the EC2 instance role's keys when there is no container URI", async () => {
+    const { fetch, seen } = fakeFetch(({ method, url }) => {
+      if (url.startsWith("http://169.254.169.254/")) {
+        if (method === "PUT") return new Response("session");
+        if (url.endsWith("/security-credentials/")) return new Response("seshi");
+        return roleKeys("ASIAEC2", 3_600_000);
+      }
+      return new Response(null, { status: 404 });
+    });
+    await S3Store.fromUrl("s3://acme", { region: "us-east-1", fetch, env: {} }).get("k");
+    const last = seen.at(-1);
+    expect(last && keyId(last)).toBe("ASIAEC2");
+  });
+
+  it("prefers keys in the environment to a role, as the AWS SDKs do", async () => {
+    const { fetch, seen } = fakeFetch(() => new Response(null, { status: 404 }));
+    await S3Store.fromUrl("s3://acme", {
+      fetch,
+      env: {
+        AWS_ACCESS_KEY_ID: "AKIAENV",
+        AWS_SECRET_ACCESS_KEY: "s",
+        AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: "/v2/credentials/task-1",
+      },
+    }).get("k");
+    expect(seen.map((s) => s.url)).toEqual(["https://acme.s3.us-east-1.amazonaws.com/k"]);
+    expect(seen[0] && keyId(seen[0])).toBe("AKIAENV");
+  });
+
+  it("reports a role it cannot get keys for as a store failure, not the bucket's answer", async () => {
+    const { fetch } = fakeFetch(() => new Response("no", { status: 500 }));
+    const err = await S3Store.fromUrl("s3://acme", {
+      fetch,
+      env: { AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: "/v2/credentials/task-1" },
+    })
+      .get("k")
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(StoreError);
+    expect(String((err as StoreError).cause)).toContain("task role's credentials (ECS): 500");
+  });
+
+  it("refuses to start with no keys and no role to ask, and never asks one for r2://", () => {
+    const fetch = async () => new Response();
+    expect(() =>
+      S3Store.fromUrl("s3://b", { fetch, env: { AWS_EC2_METADATA_DISABLED: "true" } }),
+    ).toThrow(/ECS task role or EC2 instance role/);
+    expect(() =>
+      S3Store.fromUrl("r2://b", {
+        accountId: "a",
+        fetch,
+        env: { AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: "/v2/credentials/task-1" },
+      }),
+    ).toThrow(/R2_ACCESS_KEY_ID/);
+  });
+});
+
 describe("S3Store conditional writes", () => {
   it("returns the etag with the object and from a PUT", async () => {
     const { fetch } = fakeFetch(({ method }) =>

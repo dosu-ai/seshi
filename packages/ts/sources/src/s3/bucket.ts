@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import type { Fetch } from "@seshi/model";
 import {
   type AssumedCredentials,
+  type AwsCredentialSource,
   type AzureKey,
   assumeRole,
   BucketHttpError,
@@ -18,6 +19,7 @@ import {
   parseS3Url,
   resolveAzureAccess,
   resolveGcsAccess,
+  roleCredentials,
 } from "@seshi/store";
 
 export type SourceObject = ListedObject;
@@ -76,7 +78,8 @@ export interface S3SourceOptions {
   region?: string;
   endpoint?: string;
   accountId?: string;
-  /** Static keys; else the standard variables in `env` (`AWS_*`, `S3_*`; `R2_*` for r2://). */
+  /** Static keys; else the standard variables in `env` (`AWS_*`, `S3_*`; `R2_*` for r2://);
+   * else, for s3://, the role seshi runs as (an ECS task's, or the EC2 instance's). */
   credentials?: SourceCredentials;
   role?: { arn: string; externalId?: string; sessionName: string };
   roleCache?: Map<string, AssumedCredentials>;
@@ -93,6 +96,8 @@ export class S3SourceBucket implements SourceBucket {
   private readonly scheme: "s3" | "r2";
   private readonly bucket: string;
   private client: FetchS3Client | undefined;
+  /** The role's credentials, kept so they are renewed rather than fetched on every connect. */
+  private role: AwsCredentialSource | undefined;
 
   constructor(private readonly options: S3SourceOptions) {
     const { scheme, bucket } = parseS3Url(options.url);
@@ -109,14 +114,14 @@ export class S3SourceBucket implements SourceBucket {
     const { options } = this;
     const env = options.env;
     const base = options.credentials ?? this.ambient();
-    let credentials: SourceCredentials = base;
+    let credentials: SourceCredentials | AwsCredentialSource = base;
     if (options.role) {
       if (this.scheme !== "s3") {
         throw new Error(
           `${this.url}: role applies to s3:// sources (AWS STS); R2 takes static keys`,
         );
       }
-      credentials = await this.assumed(base);
+      credentials = await this.assumed(typeof base === "function" ? await base() : base);
     } else if (this.client) {
       return this.client;
     }
@@ -140,7 +145,7 @@ export class S3SourceBucket implements SourceBucket {
     return this.client;
   }
 
-  private ambient(): SourceCredentials {
+  private ambient(): SourceCredentials | AwsCredentialSource {
     const env = this.options.env;
     const r2 =
       this.scheme === "r2" && env.R2_ACCESS_KEY_ID && env.R2_SECRET_ACCESS_KEY
@@ -150,10 +155,17 @@ export class S3SourceBucket implements SourceBucket {
     const secretAccessKey =
       r2?.secretAccessKey ?? env.S3_SECRET_ACCESS_KEY ?? env.AWS_SECRET_ACCESS_KEY;
     if (!accessKeyId || !secretAccessKey) {
+      this.role ??=
+        this.scheme === "s3"
+          ? roleCredentials(env, { fetch: this.options.fetch, now: this.options.now })
+          : undefined;
+      if (this.role) return this.role;
       throw new Error(
         `${this.url} needs keys: credentials in the source, or ${
-          this.scheme === "r2" ? "R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY" : "AWS_* / S3_*"
-        } in the environment`,
+          this.scheme === "r2"
+            ? "R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY in the environment"
+            : "AWS_* / S3_* in the environment, or an ECS task role or EC2 instance role"
+        }`,
       );
     }
     const sessionToken = r2 ? undefined : (env.S3_SESSION_TOKEN ?? env.AWS_SESSION_TOKEN);

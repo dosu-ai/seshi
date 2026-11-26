@@ -249,13 +249,39 @@ milliseconds. Sizes are `<n><unit>` with `B`, `KB`, `MB`, `GB`, `KiB`, `MiB` or 
 | Key | Default | |
 |---|---|---|
 | `url` | required | `s3://bucket/prefix`, `r2://bucket/prefix`, `az://container/prefix` (Azure Blob Storage), `gs://bucket/prefix` (Google Cloud Storage), or `file:///path` for one machine |
-| `credentials` | | Secrets. For `s3://` and `r2://`: `access_key_id`, `secret_access_key`, `session_token`; without them the bucket client falls back to the standard `AWS_*` / `S3_*` variables (`R2_*` for `r2://`), like any S3 tool. For `az://`: `account_key` (the storage account's shared key) or `sas_token` (a shared access signature); without them, the standard Azure variables, then workload identity ([Azure Blob Storage](#azure-blob-storage-az)). For `gs://`: `service_account_key` (a service account's JSON key); without it, Application Default Credentials ([Google Cloud Storage](#google-cloud-storage-gs)). Keys for another kind of bucket are refused |
+| `credentials` | | Secrets. For `s3://` and `r2://`: `access_key_id`, `secret_access_key`, `session_token`; without them the bucket client falls back to the standard `AWS_*` / `S3_*` variables (`R2_*` for `r2://`), like any S3 tool, then, for `s3://`, the role seshi runs as: an ECS task's or the EC2 instance's ([Amazon S3](#amazon-s3-s3)). For `az://`: `account_key` (the storage account's shared key) or `sas_token` (a shared access signature); without them, the standard Azure variables, then workload identity ([Azure Blob Storage](#azure-blob-storage-az)). For `gs://`: `service_account_key` (a service account's JSON key); without it, Application Default Credentials ([Google Cloud Storage](#google-cloud-storage-gs)). Keys for another kind of bucket are refused |
 | `region` | | `s3://`. Falls back to `AWS_REGION` |
 | `endpoint` | | S3-compatible services (MinIO, Backblaze, Wasabi). Falls back to `S3_ENDPOINT`. For `az://`, the blob endpoint when it is not `https://<account>.blob.core.windows.net`: a sovereign cloud, a private endpoint, or Azurite (`http://127.0.0.1:10000/devstoreaccount1`). For `gs://`, the JSON API root when it is not `https://storage.googleapis.com` (a private endpoint); falls back to `STORAGE_EMULATOR_HOST` |
 | `account_id` | | Cloudflare account for `r2://`. Falls back to `R2_ACCOUNT_ID` |
 | `account_name` | | Azure storage account for `az://`. Falls back to `AZURE_STORAGE_ACCOUNT`, then `AZURE_STORAGE_CONNECTION_STRING`'s `AccountName` |
 | `deployment_id` | generated | This deployment's id, recorded in the layout marker `seshi.json` the first time a server uses the bucket. A server whose `deployment_id` differs from the marker's refuses to start (X1.4). Without it, the first server generates one and later servers accept whatever the marker says |
 | `org` | | The organization the deployment serves (X1.1). Recorded in the marker the first time a config names it; a server naming another org refuses to start (X1.4) |
+
+#### Amazon S3 (`s3://`)
+
+`s3://<bucket>/<prefix>` stores sessions in an S3 bucket (or an S3-compatible service, with
+`endpoint`). The bucket must exist. seshi finds its keys the way the AWS SDKs do, first match
+wins:
+
+1. `credentials` in this table.
+2. `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY`, then `AWS_ACCESS_KEY_ID` /
+   `AWS_SECRET_ACCESS_KEY` (with `S3_SESSION_TOKEN` or `AWS_SESSION_TOKEN`).
+3. Container credentials: on ECS (Fargate or EC2), the task role's, from
+   `AWS_CONTAINER_CREDENTIALS_RELATIVE_URI`, which ECS sets; on EKS with Pod Identity, from
+   `AWS_CONTAINER_CREDENTIALS_FULL_URI` and `AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE`.
+4. EC2 instance metadata (IMDSv2): the instance profile's role.
+   `AWS_EC2_METADATA_DISABLED=true` turns it off; `AWS_EC2_METADATA_SERVICE_ENDPOINT` moves it.
+
+A role's keys are renewed before they expire. Give the role `s3:GetObject`, `s3:PutObject` and
+`s3:DeleteObject` on `arn:aws:s3:::<bucket>/<prefix>/*`, and `s3:ListBucket` on the bucket.
+Not supported yet: profiles in `~/.aws/config`, and EKS's IAM roles for service accounts
+(`AWS_WEB_IDENTITY_TOKEN_FILE`); give keys, or use Pod Identity.
+
+```toml
+[store]
+url = "s3://acme-seshi/prod"
+region = "us-east-2"   # no credentials: the task's or instance's role
+```
 
 #### Azure Blob Storage (`az://`)
 

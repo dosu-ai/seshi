@@ -1,4 +1,12 @@
 export {
+  type AwsCredentialOptions,
+  type AwsCredentialSource,
+  AwsCredentialsError,
+  containerCredentials,
+  instanceCredentials,
+  roleCredentials,
+} from "./aws-credentials";
+export {
   type AzureAccess,
   type AzureAccessOptions,
   type AzureKey,
