@@ -308,4 +308,15 @@ describe("a role's credentials", () => {
     expect(roleCredentials({})).toBeTypeOf("function");
     expect(roleCredentials({ AWS_EC2_METADATA_DISABLED: "true" })).toBeUndefined();
   });
+
+  it("refuse a web identity rather than fall through to the node's instance role", () => {
+    const irsa = {
+      AWS_WEB_IDENTITY_TOKEN_FILE: "/var/run/secrets/eks.amazonaws.com/serviceaccount/token",
+      AWS_ROLE_ARN: "arn:aws:iam::123456789012:role/seshi",
+    };
+    expect(() => roleCredentials(irsa)).toThrow(/AWS_WEB_IDENTITY_TOKEN_FILE.*not support/);
+    expect(() =>
+      roleCredentials({ ...irsa, AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: "/v2/x" }),
+    ).toThrow(/EKS Pod Identity/);
+  });
 });

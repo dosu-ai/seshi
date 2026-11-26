@@ -275,7 +275,9 @@ wins:
 A role's keys are renewed before they expire. Give the role `s3:GetObject`, `s3:PutObject` and
 `s3:DeleteObject` on `arn:aws:s3:::<bucket>/<prefix>/*`, and `s3:ListBucket` on the bucket.
 Not supported yet: profiles in `~/.aws/config`, and EKS's IAM roles for service accounts
-(`AWS_WEB_IDENTITY_TOKEN_FILE`); give keys, or use Pod Identity.
+(`AWS_WEB_IDENTITY_TOKEN_FILE`); give keys, or use Pod Identity. With
+`AWS_WEB_IDENTITY_TOKEN_FILE` set and no keys, seshi refuses to start rather than use the
+node's instance role.
 
 ```toml
 [store]

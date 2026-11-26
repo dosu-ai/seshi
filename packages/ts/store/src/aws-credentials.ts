@@ -215,10 +215,19 @@ export function instanceCredentials(
 /** Where the AWS SDKs find a role's keys when none are given as keys: an ECS task's (or EKS
  * Pod Identity's) container credentials, else EC2's instance metadata. Undefined when neither
  * applies (no container URI, and instance metadata turned off). Keys in `AWS_*` variables are
- * the caller's to check first, as the SDKs do. */
+ * the caller's to check first, as the SDKs do.
+ *
+ * A web identity (`AWS_WEB_IDENTITY_TOKEN_FILE`: EKS's IAM roles for service accounts) comes
+ * before both in the SDKs, and seshi cannot use one yet: it is refused rather than passed over,
+ * since what comes after it may be the node's instance role, another identity entirely. */
 export function roleCredentials(
   env: Env,
   options: AwsCredentialOptions = {},
 ): AwsCredentialSource | undefined {
+  if (env.AWS_WEB_IDENTITY_TOKEN_FILE) {
+    throw new StoreError(
+      "AWS_WEB_IDENTITY_TOKEN_FILE is set (EKS IAM roles for service accounts), which seshi does not support yet: give keys, or use EKS Pod Identity",
+    );
+  }
   return containerCredentials(env, options) ?? instanceCredentials(env, options);
 }
