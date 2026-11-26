@@ -284,6 +284,11 @@ service accounts (`AWS_WEB_IDENTITY_TOKEN_FILE`); give keys, or use Pod Identity
 variable set and no keys, seshi refuses to start rather than use the instance's role in their
 place.
 
+With SSE-KMS or SSE-C encryption (a bucket's default, or a KMS key of your own), S3's ETag is not
+the body's MD5, so seshi checks each object it writes by reading it back: one more GET per
+write, and one more KMS request. Turn on S3 Bucket Keys for the bucket to cut the KMS requests.
+SSE-S3 (`AES256`) needs no read-back.
+
 ```toml
 [store]
 url = "s3://acme-seshi/prod"
@@ -318,7 +323,8 @@ credentials = { sas_token = { env = "SESHI_SAS" } }   # or account_key; or neith
 
 A SAS token needs read, add, create, write, delete and list on the container (`sp=racwdl`), and
 must outlive the server's run: seshi does not renew it. Azure's ETags are not an MD5 of the
-body, so seshi checks each trace it writes by reading it back, which S3 spares it.
+body, so seshi checks each trace it writes by reading it back, which S3 spares it unless the
+object is encrypted with SSE-KMS or SSE-C ([Amazon S3](#amazon-s3-s3)).
 
 #### Google Cloud Storage (`gs://`)
 

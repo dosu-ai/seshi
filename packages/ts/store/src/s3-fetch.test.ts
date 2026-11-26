@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
+import { publishObject } from "./publish";
 import { S3Store } from "./s3";
 import { PreconditionFailed, StoreError, updateObject } from "./store";
 
@@ -341,5 +342,35 @@ describe("S3Store conditional writes", () => {
       ),
     );
     expect(dec((await store.get("n"))?.body)).toBe("8");
+  });
+});
+
+describe("publishObject on S3 under SSE-KMS", () => {
+  it("reads a write back when S3's ETag is 32 hex digits that are not the MD5", async () => {
+    // S3's answer for an object encrypted with a KMS key: its ETag is not the body's MD5.
+    const KMS_ETAG = "db00d9567d7828e49057b66a261a2807";
+    let stored: Uint8Array | undefined;
+    const kms = { "x-amz-server-side-encryption": "aws:kms", etag: `"${KMS_ETAG}"` };
+    const fetch = async (_input: string, init?: RequestInit) => {
+      const method = init?.method ?? "GET";
+      seen.push(method);
+      if (method === "PUT") {
+        stored = new Uint8Array(await new Response(init?.body as BodyInit).arrayBuffer());
+        return new Response(null, { headers: kms });
+      }
+      if (!stored) return new Response(null, { status: 404 });
+      if (method === "HEAD") {
+        return new Response(null, {
+          headers: { ...kms, "content-length": String(stored.length) },
+        });
+      }
+      return new Response(stored as BodyInit, { headers: kms });
+    };
+    const seen: string[] = [];
+    const store = S3Store.fromUrl("s3://b/p", { region: "us-east-1", credentials, fetch });
+    const body = new TextEncoder().encode("a trace");
+    expect(createHash("md5").update(body).digest("hex")).not.toBe(KMS_ETAG);
+    expect(await publishObject(store, "t.json.gz", body, "application/gzip")).toBe("written");
+    expect(seen).toEqual(["HEAD", "PUT", "HEAD", "GET"]);
   });
 });
