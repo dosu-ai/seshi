@@ -4,6 +4,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { loadConfig, serverConfigSchema } from "@seshi/config";
 import { BUILTIN_FORMATS, FormatRegistry } from "@seshi/formats";
 import { buildInstance, type Instance, SEARCH_JOB } from "@seshi/instance";
@@ -35,7 +36,7 @@ describe("the search checks and backlog, with LanceDB", () => {
           close: async () => {},
         }) as unknown as IndexStore,
     );
-    const toml = `[store]\nurl = "file://${join(dir, "bucket")}"\n[search]\nbackend = "lance"\n`;
+    const toml = `[store]\nurl = "${pathToFileURL(join(dir, "bucket")).href}"\n[search]\nbackend = "lance"\n`;
     const { config } = loadConfig(serverConfigSchema, {
       file: "seshi.toml",
       env: {},
