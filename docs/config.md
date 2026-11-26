@@ -266,18 +266,23 @@ wins:
 1. `credentials` in this table.
 2. `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY`, then `AWS_ACCESS_KEY_ID` /
    `AWS_SECRET_ACCESS_KEY` (with `S3_SESSION_TOKEN` or `AWS_SESSION_TOKEN`).
+Steps 3 and 4 apply only on AWS's own endpoints (no `endpoint`, or a host under
+`amazonaws.com`, such as a VPC endpoint): an S3-compatible service is never sent a role's keys.
+
 3. Container credentials: on ECS (Fargate or EC2), the task role's, from
    `AWS_CONTAINER_CREDENTIALS_RELATIVE_URI`, which ECS sets; on EKS with Pod Identity, from
    `AWS_CONTAINER_CREDENTIALS_FULL_URI` and `AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE`.
-4. EC2 instance metadata (IMDSv2): the instance profile's role.
-   `AWS_EC2_METADATA_DISABLED=true` turns it off; `AWS_EC2_METADATA_SERVICE_ENDPOINT` moves it.
+4. EC2 instance metadata (IMDSv2): the instance profile's role, waiting a second for it to
+   answer. `AWS_EC2_METADATA_DISABLED=true` turns it off; `AWS_EC2_METADATA_SERVICE_ENDPOINT`
+   moves it. In a container on EC2 (Docker's bridge network), the instance's metadata hop
+   limit must be 2 or more, or IMDSv2 never answers.
 
 A role's keys are renewed before they expire. Give the role `s3:GetObject`, `s3:PutObject` and
 `s3:DeleteObject` on `arn:aws:s3:::<bucket>/<prefix>/*`, and `s3:ListBucket` on the bucket.
-Not supported yet: profiles in `~/.aws/config`, and EKS's IAM roles for service accounts
-(`AWS_WEB_IDENTITY_TOKEN_FILE`); give keys, or use Pod Identity. With
-`AWS_WEB_IDENTITY_TOKEN_FILE` set and no keys, seshi refuses to start rather than use the
-node's instance role.
+Not supported yet: profiles in `~/.aws/config` (`AWS_PROFILE`), and EKS's IAM roles for
+service accounts (`AWS_WEB_IDENTITY_TOKEN_FILE`); give keys, or use Pod Identity. With either
+variable set and no keys, seshi refuses to start rather than use the instance's role in their
+place.
 
 ```toml
 [store]

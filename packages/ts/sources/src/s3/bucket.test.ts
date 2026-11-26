@@ -139,6 +139,8 @@ describe("an S3 source bucket", () => {
     const asked: string[] = [];
     const bucket = s3(fake, {
       credentials: undefined,
+      // AWS's own endpoint: a role's keys are never sent to another.
+      endpoint: undefined,
       fetch: async (input, init) => {
         if (input.startsWith("http://169.254.170.2/")) {
           asked.push(input);
@@ -158,6 +160,76 @@ describe("an S3 source bucket", () => {
     expect((await bucket.list("harness/", { limit: 1 })).objects).toEqual([]);
     expect(await bucket.read("harness/none", { etag: "x" })).toBeNull();
     expect(asked).toEqual(["http://169.254.170.2/v2/credentials/task-1"]);
+  });
+
+  it("does not send a role's keys to an S3-compatible endpoint", async () => {
+    const asked: string[] = [];
+    const bucket = s3(new FakeS3({ bucket: "src" }), {
+      credentials: undefined,
+      endpoint: "https://minio.internal",
+      fetch: async (input) => {
+        asked.push(input);
+        return new Response(null, { status: 500 });
+      },
+      env: { AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: "/v2/credentials/task-1" },
+    });
+    await expect(bucket.list("", { limit: 1 })).rejects.toThrow(
+      /not sent to https:\/\/minio\.internal/,
+    );
+    expect(asked).toEqual([]);
+  });
+
+  it("assumes a role with the task role's keys, asked for only when the role's are due", async () => {
+    let now = NOW;
+    let agentUp = true;
+    const sts = new FakeSts({
+      roleArn: "arn:aws:iam::1:role/read",
+      issued: { accessKeyId: "ASIAREAD", secretAccessKey: "tmp", sessionToken: "tok" },
+      now: () => now,
+    });
+    const fake = new FakeS3({ bucket: "src", accessKeyId: "ASIAREAD" });
+    const signedBy: string[] = [];
+    const cache = new Map<string, AssumedCredentials>();
+    const open = () =>
+      s3(fake, {
+        credentials: undefined,
+        endpoint: undefined,
+        role: { arn: "arn:aws:iam::1:role/read", sessionName: "seshi-evals" },
+        roleCache: cache,
+        stsEndpoint: "https://sts.test",
+        now: () => now,
+        env: { AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: "/v2/credentials/task-1" },
+        fetch: async (input, init) => {
+          if (input.startsWith("http://169.254.170.2/")) {
+            if (!agentUp) return new Response("down", { status: 503 });
+            // Already due: every connect would ask again if it asked first.
+            return new Response(
+              JSON.stringify({
+                AccessKeyId: "ASIATASK",
+                SecretAccessKey: "s",
+                Token: "t",
+                Expiration: now.toISOString(),
+              }),
+            );
+          }
+          if (input.startsWith("https://sts.test")) {
+            const auth = (init?.headers as Record<string, string> | undefined)?.authorization ?? "";
+            signedBy.push(/Credential=(\w+)\//.exec(auth)?.[1] ?? "");
+            return sts.fetch(input, init);
+          }
+          return fake.fetch(input, init);
+        },
+      });
+    await open().list("harness/", { limit: 1 });
+    expect(signedBy).toEqual(["ASIATASK"]);
+    expect(fake.requests.at(-1)?.headers.get("x-amz-security-token")).toBe("tok");
+    // The task role's agent is down, but the role's keys are still good: no need to ask it.
+    agentUp = false;
+    await open().list("harness/", { limit: 1 });
+    expect(sts.calls).toHaveLength(1);
+    // Once the role's keys are due, the base keys are needed, and the failure shows.
+    now = new Date(NOW.getTime() + 56 * 60 * 1000);
+    await expect(open().list("harness/", { limit: 1 })).rejects.toThrow(/503/);
   });
 
   it("assumes a role with its external id and keeps the keys until near expiry", async () => {

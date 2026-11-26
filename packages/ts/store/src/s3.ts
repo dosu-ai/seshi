@@ -1,5 +1,5 @@
 import type { Fetch } from "@seshi/model";
-import { type AwsCredentialSource, roleCredentials } from "./aws-credentials";
+import { type AwsCredentialSource, isAwsEndpoint, roleCredentials } from "./aws-credentials";
 import { FetchS3Client, S3HttpError } from "./s3-fetch";
 import {
   AccessDenied,
@@ -31,8 +31,9 @@ export interface S3StoreOptions {
   /** Explicit endpoint for S3-compatible stores; overrides `region` / `accountId` resolution. */
   endpoint?: string;
   /** Omit to read the standard variables from `env`: `S3_*` / `AWS_*`, and for `r2://`
-   * `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` first. Without those, an `s3://` store uses
-   * the role it runs as: an ECS task's (or EKS Pod Identity's), else the EC2 instance's. */
+   * `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` first. Without those, an `s3://` store on
+   * AWS's own endpoints uses the role it runs as: an ECS task's (or EKS Pod Identity's), else
+   * the EC2 instance's. */
   credentials?: S3Credentials;
   scheme?: "s3" | "r2";
   fetch?: Fetch;
@@ -83,27 +84,31 @@ export class S3Store implements Store {
     const sessionToken =
       credentials.sessionToken ??
       (options.credentials ? undefined : (env.S3_SESSION_TOKEN ?? env.AWS_SESSION_TOKEN));
-    let signWith: AwsCredentialSource | S3Credentials;
-    if (accessKeyId && secretAccessKey) {
-      signWith = { accessKeyId, secretAccessKey, ...(sessionToken ? { sessionToken } : {}) };
-    } else {
-      const role = scheme === "s3" ? roleCredentials(env, { fetch: options.fetch }) : undefined;
-      if (!role) {
-        throw new StoreError(
-          `${this.url} needs an access key id and secret (credentials, or ${
-            scheme === "r2"
-              ? "R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY in the environment"
-              : "AWS_* / S3_* in the environment, or an ECS task role or EC2 instance role"
-          })`,
-        );
-      }
-      signWith = role;
-    }
     const endpoint =
       options.endpoint ??
       (scheme === "r2" && options.accountId
         ? `https://${options.accountId}.r2.cloudflarestorage.com`
         : (env.S3_ENDPOINT ?? env.AWS_ENDPOINT));
+    let signWith: AwsCredentialSource | S3Credentials;
+    if (accessKeyId && secretAccessKey) {
+      signWith = { accessKeyId, secretAccessKey, ...(sessionToken ? { sessionToken } : {}) };
+    } else {
+      // A role's keys are for AWS: an S3-compatible service is never sent them.
+      const aws = scheme === "s3" && isAwsEndpoint(endpoint);
+      const role = aws ? roleCredentials(env, { fetch: options.fetch }) : undefined;
+      if (!role) {
+        throw new StoreError(
+          `${this.url} needs an access key id and secret (credentials, or ${
+            scheme === "r2"
+              ? "R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY in the environment"
+              : aws
+                ? "AWS_* / S3_* in the environment, or an ECS task role or EC2 instance role"
+                : `AWS_* / S3_* in the environment; a role's keys are not sent to ${endpoint}`
+          })`,
+        );
+      }
+      signWith = role;
+    }
     this.client = new FetchS3Client({
       bucket: this.bucket,
       // R2 signs with region `auto`.

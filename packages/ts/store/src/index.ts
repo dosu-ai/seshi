@@ -4,6 +4,7 @@ export {
   AwsCredentialsError,
   containerCredentials,
   instanceCredentials,
+  isAwsEndpoint,
   roleCredentials,
 } from "./aws-credentials";
 export {

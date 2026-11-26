@@ -3,6 +3,7 @@ import {
   AwsCredentialsError,
   containerCredentials,
   instanceCredentials,
+  isAwsEndpoint,
   roleCredentials,
 } from "./aws-credentials";
 import { StoreError } from "./store";
@@ -110,13 +111,23 @@ describe("an ECS task's credentials", () => {
     expect(seen).toHaveLength(2);
   });
 
-  it("say which endpoint did not answer", async () => {
-    const source = containerCredentials(ecs, {
+  it("say which endpoint did not answer in time, and why one could not be reached", async () => {
+    const hangs = containerCredentials(ecs, {
+      timeoutMs: 10,
+      fetch: (_url: string, init?: RequestInit) =>
+        new Promise<Response>((_, reject) =>
+          init?.signal?.addEventListener("abort", () => reject(init.signal?.reason)),
+        ),
+    });
+    await expect(hangs?.()).rejects.toThrow(/169\.254\.170\.2 did not answer within 0\.01 s/);
+    const refused = containerCredentials(ecs, {
       fetch: async () => {
-        throw new Error("connect ETIMEDOUT");
+        throw new Error("connect ECONNREFUSED");
       },
     });
-    await expect(source?.()).rejects.toThrow(/no answer from 169\.254\.170\.2 within 5 s/);
+    await expect(refused?.()).rejects.toThrow(
+      /could not reach 169\.254\.170\.2: connect ECONNREFUSED/,
+    );
   });
 
   it("refuse an answer without keys, or one that is not JSON", async () => {
@@ -201,7 +212,7 @@ describe("an EC2 instance's credentials (IMDSv2)", () => {
     let n = 0;
     return recorder(({ method, url }) => {
       if (method === "PUT" && url.endsWith("/latest/api/token")) {
-        return new Response(`session-${++n}`);
+        return new Response(`session-${++n}\n`);
       }
       if (url.endsWith("/security-credentials/")) {
         return role ? new Response(`${role}\n`) : new Response("", { status: 404 });
@@ -259,6 +270,31 @@ describe("an EC2 instance's credentials (IMDSv2)", () => {
     expect(seen.filter((s) => s.method === "PUT")).toHaveLength(2);
   });
 
+  it("ask for the role by the name IMDS lists, unencoded", async () => {
+    const { seen, fetch } = imds("seshi+prod=a,b@c");
+    await instanceCredentials({}, { fetch })?.();
+    expect(seen.at(-1)?.url).toBe(
+      "http://169.254.169.254/latest/meta-data/iam/security-credentials/seshi+prod=a,b@c",
+    );
+  });
+
+  it("wait a second, and say why IMDS may not have answered", async () => {
+    const source = instanceCredentials(
+      {},
+      {
+        fetch: (_url: string, init?: RequestInit) =>
+          new Promise<Response>((_, reject) =>
+            init?.signal?.addEventListener("abort", () => reject(init.signal?.reason)),
+          ),
+      },
+    );
+    const started = Date.now();
+    await expect(source?.()).rejects.toThrow(
+      /169\.254\.169\.254 did not answer within 1 s \(off EC2, give keys; in a container on EC2, the instance's metadata hop limit must be 2 or more\)/,
+    );
+    expect(Date.now() - started).toBeLessThan(3000);
+  });
+
   it("say so when the instance has no role", async () => {
     const { fetch } = imds("");
     await expect(instanceCredentials({}, { fetch })?.()).rejects.toThrow(/has no IAM role/);
@@ -309,6 +345,27 @@ describe("a role's credentials", () => {
     expect(roleCredentials({ AWS_EC2_METADATA_DISABLED: "true" })).toBeUndefined();
   });
 
+  it("name the keys that were missing when the instance role is the last place looked", async () => {
+    const source = roleCredentials(
+      {},
+      {
+        fetch: async () => {
+          throw new Error("connect EHOSTUNREACH");
+        },
+      },
+    );
+    await expect(source?.()).rejects.toThrow(
+      /^no keys \(credentials, or AWS_\* \/ S3_\* in the environment\) and no ECS task role, and the instance role's credentials \(EC2 instance metadata\): could not reach 169\.254\.169\.254/,
+    );
+  });
+
+  it("refuse a profile rather than use the instance's role in its place", () => {
+    expect(() => roleCredentials({ AWS_PROFILE: "readonly" })).toThrow(
+      /AWS_PROFILE is set \(readonly\).*does not read profiles/,
+    );
+    expect(() => roleCredentials({ AWS_DEFAULT_PROFILE: "x" })).toThrow(/AWS_PROFILE is set/);
+  });
+
   it("refuse a web identity rather than fall through to the node's instance role", () => {
     const irsa = {
       AWS_WEB_IDENTITY_TOKEN_FILE: "/var/run/secrets/eks.amazonaws.com/serviceaccount/token",
@@ -318,5 +375,29 @@ describe("a role's credentials", () => {
     expect(() =>
       roleCredentials({ ...irsa, AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: "/v2/x" }),
     ).toThrow(/EKS Pod Identity/);
+  });
+});
+
+describe("AWS's own endpoints", () => {
+  it("are the default one and hosts under amazonaws.com, and nothing else", () => {
+    for (const aws of [
+      undefined,
+      "https://s3.us-east-2.amazonaws.com",
+      "https://s3-fips.us-east-1.amazonaws.com",
+      "https://bucket.vpce-0a1b-2c3d.s3.us-east-1.vpce.amazonaws.com",
+      "https://s3.cn-north-1.amazonaws.com.cn",
+    ]) {
+      expect(isAwsEndpoint(aws)).toBe(true);
+    }
+    for (const other of [
+      "http://127.0.0.1:9000",
+      "https://minio.internal",
+      "https://acct.r2.cloudflarestorage.com",
+      "https://amazonaws.com.evil.example",
+      "https://notamazonaws.com",
+      "not a url",
+    ]) {
+      expect(isAwsEndpoint(other)).toBe(false);
+    }
   });
 });

@@ -205,6 +205,26 @@ describe("S3Store as the role it runs as", () => {
     expect(String((err as StoreError).cause)).toContain("task role's credentials (ECS): 500");
   });
 
+  it("does not send a role's keys to an S3-compatible endpoint, but does to a VPC endpoint", async () => {
+    const { fetch, seen } = fakeFetch(({ url }) =>
+      url === ECS ? roleKeys("ASIA1", 3_600_000) : new Response(null, { status: 404 }),
+    );
+    const env = { AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: "/v2/credentials/task-1" };
+    expect(() =>
+      S3Store.fromUrl("s3://b", { endpoint: "http://127.0.0.1:9000", fetch, env }),
+    ).toThrow(/a role's keys are not sent to http:\/\/127\.0\.0\.1:9000/);
+    expect(() =>
+      S3Store.fromUrl("s3://b", { fetch, env: { ...env, S3_ENDPOINT: "https://minio.internal" } }),
+    ).toThrow(/not sent to https:\/\/minio\.internal/);
+    expect(seen).toEqual([]);
+    await S3Store.fromUrl("s3://b", {
+      endpoint: "https://bucket.vpce-0a1b.s3.us-east-1.vpce.amazonaws.com",
+      fetch,
+      env,
+    }).get("k");
+    expect(seen.at(-1) && keyId(seen.at(-1) as Seen)).toBe("ASIA1");
+  });
+
   it("refuses to start with no keys and no role to ask, and never asks one for r2://", () => {
     const fetch = async () => new Response();
     expect(() =>
