@@ -1,3 +1,10 @@
+## [0.30.1](https://github.com/dosu-ai/seshi/compare/v0.30.0...v0.30.1) (2026-11-26)
+
+
+### Bug Fixes
+
+* **store:** read a write back instead of failing it when S3's ETag is not the MD5 ([#91](https://github.com/dosu-ai/seshi/issues/91)) ([da9fa4e](https://github.com/dosu-ai/seshi/commit/da9fa4e4a3e1f3a432fe76f0c6c9de75d2de115a))
+
 # [0.30.0](https://github.com/dosu-ai/seshi/compare/v0.29.0...v0.30.0) (2026-11-26)
 
 
