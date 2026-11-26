@@ -7,12 +7,13 @@ import type {
   SqlScope,
   Visibility,
 } from "@seshi/model";
+import { sqlBackend } from "../backends";
 import { MEMORY_INDEX } from "../paths";
 import { type SearchService, SearchUnavailable } from "../service";
 import type { Viewer } from "../viewer";
 import { MAX_SQL_BYTES } from "./check-sqlite";
 import { SqlPool, type SqlPoolStatus, scriptWorkerCommand } from "./pool";
-import type { SqlErrorKind, SqlWorkerResponse } from "./protocol";
+import type { SqlErrorKind, SqlJob, SqlTables, SqlWorkerResponse } from "./protocol";
 import { SQL_DIALECT_HINT, SQL_EXAMPLES, type SqlWindow, sqlSchema, sqlViews } from "./views";
 
 const DAY_MS = 86_400_000;
@@ -30,8 +31,11 @@ export interface SqlSettings {
   workers: number;
   /** A query's time, in ms (15 s): the watchdog kills the worker past it. */
   timeout: number;
-  /** SQLite's `hard_heap_limit` in bytes (1 GiB), where the SQLite build holds it. */
+  /** SQLite's `hard_heap_limit` in bytes (1 GiB), where the SQLite build holds it; DuckDB's
+   * `memory_limit`, with nothing spilled to disk. */
   memory: number;
+  /** DuckDB's threads per worker (2). */
+  threads: number;
   /** The watchdog kills a worker whose resident memory passes this (2 GiB). */
   workerMemory: number;
   /** Rows per answer, at most `SQL_MAX_ROWS` (1,000). */
@@ -44,7 +48,12 @@ export const DEFAULT_SQL_SETTINGS: SqlSettings = {
   memory: 1024 ** 3,
   workerMemory: 2 * 1024 ** 3,
   maxRows: SQL_MAX_ROWS,
+  threads: 2,
 };
+
+/** How long past its timeout the watchdog waits for a DuckDB query, which the worker
+ * interrupts itself at the timeout. SQLite has no interrupt: its worker is killed at once. */
+export const SQL_DUCKDB_GRACE_MS = 5_000;
 
 /** Who asks, as the views and the answer's header need it. */
 export interface SqlCaller {
@@ -82,6 +91,7 @@ const CODES: Record<SqlErrorKind, string> = {
   timeout: "sql_timeout",
   memory: "sql_memory",
   runtime: "sql_runtime",
+  unavailable: "sql_unavailable",
   internal: "internal",
 };
 
@@ -166,19 +176,30 @@ function maxRowsOf(value: unknown, cap: number): number {
 }
 
 export interface SqlServiceOptions {
-  /** The search index the views read. */
-  search: Pick<SearchService, "status">;
+  /** The search index the views read; `sqlTables` for a LanceDB index. */
+  search: Pick<SearchService, "status"> & Partial<Pick<SearchService, "sqlTables">>;
   settings?: Partial<SqlSettings>;
   /** How to start a worker: `[seshi, "sql-worker"]` from a binary (`scriptWorkerCommand()`
    * when omitted, for tests and `bun run`). */
   command?: readonly string[];
+  /** What the workers' environment holds besides `PATH`, `HOME` and `TMPDIR`: on LanceDB, the
+   * read-only storage credential (`[search.sql.storage]`) and where DuckDB's extensions are.
+   * Never the server's own settings or tokens. */
+  workerEnv?: Readonly<Record<string, string>>;
   now?: () => Date;
   log?: (line: string) => void;
 }
 
-/** `sql` on a SQLite index (docs/seshi/session-tools.md, phase 3): a statement run by a worker
- * process over the index file, in views built from the caller. LanceDB's engine is phase 4: on
- * a LanceDB index this answers `SqlUnavailable`. The workers start with the first query. */
+/** What a query runs against: a SQLite index's file, or a LanceDB index's tables. */
+type Target =
+  | { engine: "sqlite"; file: string; index: SqlIndexInfo }
+  | { engine: "duckdb"; tables: SqlTables; index: SqlIndexInfo };
+
+/** `sql` (docs/seshi/session-tools.md): a statement run by a worker process over the search
+ * index, in views built from the caller. On a SQLite index SQLite runs it over the index file;
+ * on a LanceDB index DuckDB runs it over the live generation's Lance tables, in a build that
+ * carries DuckDB (`provideSql`), and a build without it answers `SqlUnavailable`. The workers
+ * start with the first query. */
 export class SqlService {
   private readonly options: SqlServiceOptions;
   readonly settings: SqlSettings;
@@ -195,24 +216,50 @@ export class SqlService {
     return this.options.now?.() ?? new Date();
   }
 
-  private pool(): SqlPool {
+  private pool(engine: Target["engine"]): SqlPool {
     if (this.closed) throw new SqlUnavailable("sql is shut down");
     this.workers ??= new SqlPool({
       command: this.options.command ?? scriptWorkerCommand(),
       workers: this.settings.workers,
       workerMemory: this.settings.workerMemory,
+      graceMs: engine === "duckdb" ? SQL_DUCKDB_GRACE_MS : 0,
+      ...(this.options.workerEnv ? { env: this.options.workerEnv } : {}),
       ...(this.options.log ? { log: this.options.log } : {}),
     });
     return this.workers;
   }
 
-  /** The index file and what the answer says of it; refuses an index `sql` cannot read. */
-  private async target(): Promise<{ file: string; index: SqlIndexInfo }> {
+  /** The index a query reads and what the answer says of it; refuses an index `sql` cannot
+   * read. */
+  private async target(): Promise<Target> {
     const status = await this.options.search.status();
     if (status.backend === "lance") {
-      throw new SqlUnavailable(
-        "sql on a LanceDB index is not available yet: it comes with the seshi-server-sql image; a SQLite index answers it in any seshi binary",
-      );
+      if (sqlBackend() === undefined) {
+        throw new SqlUnavailable(
+          "sql on a LanceDB index needs DuckDB, which only the seshi-server-sql build carries (the seshi-server-sql image, or the seshi-server-sql-linux-* archives); this build answers search but not sql",
+        );
+      }
+      if (!status.ready) {
+        throw new SearchUnavailable(
+          "the search index is being built from the change feed; try again shortly",
+        );
+      }
+      const tables = await this.options.search.sqlTables?.();
+      if (tables === undefined) {
+        throw new SearchUnavailable(
+          "the search index has no live generation yet; try again shortly",
+        );
+      }
+      return {
+        engine: "duckdb",
+        tables,
+        index: {
+          backend: "lance",
+          dialect: "duckdb",
+          ...(status.generation !== undefined ? { generation: status.generation } : {}),
+          ...(status.caught_up_at !== undefined ? { updated_at: status.caught_up_at } : {}),
+        },
+      };
     }
     if (status.location === MEMORY_INDEX) {
       throw new SqlUnavailable(
@@ -225,6 +272,7 @@ export class SqlService {
       );
     }
     return {
+      engine: "sqlite",
       file: status.location,
       index: {
         backend: "sqlite",
@@ -243,30 +291,44 @@ export class SqlService {
     };
   }
 
-  /** Run `request` as `caller`. Throws `SqlRequestError`, `SqlUnavailable`,
+  /** Run `asked` as `caller`. Throws `SqlRequestError`, `SqlUnavailable`,
    * `SearchUnavailable` (the index is building), `SqlBusy` and `SqlFailed`. */
-  async query(caller: SqlCaller, request: SqlRequest): Promise<SqlResult> {
-    if (typeof request?.sql !== "string" || request.sql.trim() === "") {
+  async query(caller: SqlCaller, asked: SqlRequest): Promise<SqlResult> {
+    if (typeof asked?.sql !== "string" || asked.sql.trim() === "") {
       throw new SqlRequestError("sql is required: one SELECT over sessions, events and llm_calls");
     }
     const now = this.now();
-    const window = sqlWindow(request, now.getTime());
-    const maxRows = maxRowsOf(request.max_rows, this.settings.maxRows);
-    const { file, index } = await this.target();
-    const views = sqlViews("sqlite", caller.viewer, window);
-    const response: SqlWorkerResponse = await this.pool().run(caller.key, {
-      engine: "sqlite",
-      setup: { file, views },
-      sql: request.sql,
-      limits: {
-        timeout_ms: this.settings.timeout,
-        max_rows: maxRows,
-        max_bytes: SQL_MAX_BYTES,
-        memory_bytes: this.settings.memory,
-      },
-    });
+    const window = sqlWindow(asked, now.getTime());
+    const maxRows = maxRowsOf(asked.max_rows, this.settings.maxRows);
+    const target = await this.target();
+    const limits = {
+      timeout_ms: this.settings.timeout,
+      max_rows: maxRows,
+      max_bytes: SQL_MAX_BYTES,
+      memory_bytes: this.settings.memory,
+    };
+    const request: SqlJob =
+      target.engine === "sqlite"
+        ? {
+            engine: "sqlite",
+            setup: { file: target.file, views: sqlViews("sqlite", caller.viewer, window) },
+            sql: asked.sql,
+            limits,
+          }
+        : {
+            engine: "duckdb",
+            setup: {
+              tables: target.tables,
+              views: sqlViews("duckdb", caller.viewer, window, target.tables),
+            },
+            sql: asked.sql,
+            limits: { ...limits, threads: this.settings.threads },
+          };
+    const { index } = target;
+    const response: SqlWorkerResponse = await this.pool(target.engine).run(caller.key, request);
     if (!response.ok) {
       const { kind, message, at } = response.error;
+      if (kind === "unavailable") throw new SqlUnavailable(message);
       // A runtime error's message can quote a value; only callers who see everything get it.
       const shown =
         kind === "runtime" && !caller.viewer.everything
@@ -292,11 +354,12 @@ export class SqlService {
   ): Promise<SqlSchema> {
     const window = sqlWindow(request, this.now().getTime());
     const { index } = await this.target();
+    const { dialect } = index;
     return {
-      dialect: "sqlite",
-      hint: SQL_DIALECT_HINT.sqlite,
-      ddl: sqlSchema("sqlite"),
-      examples: [...SQL_EXAMPLES.sqlite],
+      dialect,
+      hint: SQL_DIALECT_HINT[dialect],
+      ddl: sqlSchema(dialect),
+      examples: [...SQL_EXAMPLES[dialect]],
       scope: this.scope(caller, window),
       index,
       limits: {

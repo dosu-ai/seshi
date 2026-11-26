@@ -9,6 +9,9 @@
     },
     "./backends": {
       "bun": "./src/backends.ts"
+    },
+    "./sql-testing": {
+      "bun": "./src/sql/testing.ts"
     }
   },
   "dependencies": {

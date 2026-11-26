@@ -17,9 +17,15 @@ export {
   scriptWorkerCommand,
 } from "./pool";
 export type {
+  DuckdbJob,
+  DuckdbRequest,
   SqlColumnInfo,
   SqlErrorKind,
+  SqliteJob,
+  SqliteRequest,
+  SqlJob,
   SqlLimits,
+  SqlTables,
   SqlWorkerError,
   SqlWorkerRequest,
   SqlWorkerResponse,
@@ -27,6 +33,7 @@ export type {
 export {
   DEFAULT_SQL_SETTINGS,
   SQL_DEFAULT_WINDOW_MS,
+  SQL_DUCKDB_GRACE_MS,
   SQL_MAX_BYTES,
   SQL_MAX_ROWS,
   SQL_MAX_WINDOW_MS,
@@ -53,4 +60,4 @@ export {
   sqlString,
   sqlViews,
 } from "./views";
-export { handleLine, runSqliteQuery, runSqlWorker } from "./worker";
+export { handleLine, protocolLine, runSqliteQuery, runSqlWorker } from "./worker";

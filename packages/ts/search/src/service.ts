@@ -20,6 +20,7 @@ import { Indexer, type IndexerLogger, type IndexerOptions, type IndexerRun } fro
 import { defaultIndexPath } from "./paths";
 import { parseQuery, SearchQueryError } from "./query";
 import { highlights } from "./snippet";
+import type { SqlTables } from "./sql/protocol";
 import { sqliteIndex } from "./sqlite";
 import type { Viewer } from "./viewer";
 
@@ -425,6 +426,12 @@ export class SearchService {
         ...(state.requested ? { requested: state.requested } : {}),
       };
     });
+  }
+
+  /** The live generation's tables for `sql`'s DuckDB views (LanceDB); undefined for SQLite, or
+   * before a generation is live. */
+  sqlTables(): Promise<SqlTables | undefined> {
+    return this.reading(async (index) => index.sqlTables?.());
   }
 
   ready(): Promise<boolean> {

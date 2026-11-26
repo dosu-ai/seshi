@@ -1,4 +1,5 @@
 import type { OpenIndex } from "./backend";
+import type { DuckdbRequest, SqlWorkerResponse } from "./sql/protocol";
 
 /** What the server configures the LanceDB index with (`[search.lance]`, F10.6). `@seshi/lance`'s
  * `LanceIndexOptions` adds what only its tests set. */
@@ -36,4 +37,32 @@ export function provideLance(open: LanceOpener): void {
 /** The LanceDB backend, when this build carries it. */
 export function lanceBackend(): LanceOpener | undefined {
   return lance;
+}
+
+/** `sql` on a LanceDB index (docs/seshi/session-tools.md, T9): DuckDB and its `lance`
+ * extension, run in the `sql` worker process. `duckdbSql` in `@seshi/sql`. */
+export interface SqlEngine {
+  /** Open, configure and warm the next query's database, while the worker is idle; nothing when
+   * one is warm already. A failure
+   * (the `lance` extension missing) is kept and answered to each query. */
+  warm(): Promise<void>;
+  /** Run one request in the database `warm()` made, then close it. */
+  run(request: DuckdbRequest): Promise<SqlWorkerResponse>;
+  /** A script that starts a worker with this engine under Bun, for a process run from source
+   * (`bun run`, tests): a compiled binary runs `seshi sql-worker` instead. */
+  script: string;
+}
+
+let sqlEngine: SqlEngine | undefined;
+
+/** Give this process DuckDB for `sql` on a LanceDB index. Only the `-sql` server build's entry
+ * point calls it (`apps/seshi/src/main-server-sql.ts`): `@seshi/sql` puts DuckDB and its
+ * extension's loader in the compiled binary, which no other build carries. */
+export function provideSql(engine: SqlEngine): void {
+  sqlEngine = engine;
+}
+
+/** DuckDB, when this build carries it. */
+export function sqlBackend(): SqlEngine | undefined {
+  return sqlEngine;
 }

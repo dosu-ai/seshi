@@ -12,7 +12,13 @@ import { BUILTIN_FORMATS, FormatRegistry } from "@seshi/formats";
 import { provideLance } from "@seshi/search";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildInstance, InstanceError } from "./instance";
-import { LanceMissing, lanceLocation, revealedAccess, searchOpener } from "./search-index";
+import {
+  LanceMissing,
+  lanceLocation,
+  revealedAccess,
+  searchOpener,
+  sqlWorkerEnv,
+} from "./search-index";
 import { SEARCH_JOB } from "./search-job";
 
 const formats = new FormatRegistry([...BUILTIN_FORMATS]);
@@ -26,6 +32,60 @@ function config(toml: string, env: Record<string, string> = {}): ServerConfig {
 }
 
 const LANCE = '[search]\nbackend = "lance"\n';
+
+describe("the sql workers' environment (sqlWorkerEnv)", () => {
+  it("holds nothing on SQLite", () => {
+    const sqlite = config(`[store]\nurl = "s3://acme"\n`);
+    expect(sqlWorkerEnv(sqlite, "d", { AWS_ACCESS_KEY_ID: "k" })).toBeUndefined();
+  });
+
+  it("gives the workers [search.sql.storage] as the index's storage options, and none of the server's keys", () => {
+    const c = config(
+      `[store]\nurl = "s3://acme/seshi/"\nendpoint = "http://127.0.0.1:9000"\nregion = "eu-west-1"\ncredentials = { access_key_id = "RW", secret_access_key = "RW-SECRET" }\n${LANCE}[search.sql]\nextensions = "/opt/seshi/duckdb"\n[search.sql.storage]\naccess_key_id = "RO"\nsecret_access_key = "RO-SECRET"\n`,
+    );
+    const worker = sqlWorkerEnv(c, "dep-1", {
+      AWS_SESSION_TOKEN: "server-token",
+      SESHI_TOKEN: "never",
+    });
+    expect(worker?.ownCredential).toBe(false);
+    expect(JSON.parse(worker?.env.SESHI_SQL_STORAGE as string)).toEqual({
+      aws_access_key_id: "RO",
+      aws_secret_access_key: "RO-SECRET",
+      aws_endpoint: "http://127.0.0.1:9000",
+      aws_region: "eu-west-1",
+      allow_http: "true",
+    });
+    expect(worker?.env.SESHI_DUCKDB_EXTENSIONS).toBe("/opt/seshi/duckdb");
+    expect(JSON.stringify(worker)).not.toContain("RW");
+    expect(JSON.stringify(worker)).not.toContain("server-token");
+    expect(JSON.stringify(worker)).not.toContain("never");
+  });
+
+  it("falls back to the index's own credential, and says it is not read-only", () => {
+    const gs = config(`[store]\nurl = "gs://b/p"\n${LANCE}`);
+    const worker = sqlWorkerEnv(gs, "d", { GOOGLE_APPLICATION_CREDENTIALS: "/k.json" });
+    expect(worker).toEqual({
+      env: { SESHI_SQL_STORAGE: "{}", GOOGLE_APPLICATION_CREDENTIALS: "/k.json" },
+      ownCredential: true,
+    });
+    const key = config(
+      `[store]\nurl = "gs://b/p"\n${LANCE}[search.sql.storage]\nservice_account_key = "{\\"ro\\": 1}"\n`,
+    );
+    expect(sqlWorkerEnv(key, "d", { GOOGLE_APPLICATION_CREDENTIALS: "/k.json" })).toEqual({
+      env: { SESHI_SQL_STORAGE: JSON.stringify({ google_service_account_key: '{"ro": 1}' }) },
+      ownCredential: false,
+    });
+    const folder = config(`[store]\nurl = "file:///srv/seshi"\n${LANCE}`);
+    expect(sqlWorkerEnv(folder, "d", {})?.ownCredential).toBe(false);
+  });
+
+  it("refuses a credential for another kind of bucket", () => {
+    const c = config(
+      `[store]\nurl = "s3://acme"\n${LANCE}[search.sql.storage]\nsas_token = "sv=1"\n`,
+    );
+    expect(() => sqlWorkerEnv(c, "d", {})).toThrow(/search\.sql\.storage/);
+  });
+});
 
 describe("lanceLocation (F10.9)", () => {
   it("puts the index under search/<deployment> in a folder store", () => {

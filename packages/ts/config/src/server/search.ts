@@ -137,8 +137,14 @@ export const sqlSection = z
       .refine((n) => n >= 16 * 1024 ** 2, "must be at least 16MiB")
       .prefault("1GiB")
       .describe(
-        "Memory a statement may use inside the engine: SQLite's hard_heap_limit, which Bun's own SQLite on Linux holds and macOS's system SQLite ignores.",
+        "Memory a statement may use inside the engine: on SQLite its hard_heap_limit, which Bun's own SQLite on Linux holds and macOS's system SQLite ignores; on LanceDB DuckDB's memory_limit, with nothing spilled to disk.",
       ),
+    threads: z
+      .int()
+      .min(1)
+      .max(64)
+      .default(2)
+      .describe("Threads DuckDB runs a statement on, per worker (LanceDB only; SQLite uses one)."),
     worker_memory: bytes()
       .refine((n) => n >= 64 * 1024 ** 2, "must be at least 64MiB")
       .prefault("2GiB")
@@ -151,6 +157,18 @@ export const sqlSection = z
       .max(1000)
       .default(1000)
       .describe("Rows an answer holds at most (a caller can ask for fewer); then it is truncated."),
+    extensions: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "The folder holding DuckDB's extensions (<folder>/<duckdb version>/<platform>/lance.duckdb_extension), for sql on a LanceDB index. Default: duckdb/ beside the seshi binary, where the seshi-server-sql archive and image put it.",
+      ),
+    storage: bucketCredentials
+      .optional()
+      .describe(
+        "A read-only credential for the LanceDB index, which only the sql workers hold (the same fields as [store] credentials): a Google service account key with storage.objectViewer on the index's prefix (gs://), an access key allowed GetObject and ListBucket on it (s3://, r2://), or a SAS token with read and list on it (az://). DuckDB's lance extension does not honour DuckDB's own lock-down, so this is what keeps a statement from reading or writing anything else. Without it the workers use the index's own credential.",
+      ),
     members: z
       .boolean()
       .default(false)
@@ -160,7 +178,7 @@ export const sqlSection = z
   })
   .prefault({})
   .describe(
-    "sql: one read-only SELECT over the views sessions, events and llm_calls (POST /v1/sql, seshi sql). On a SQLite index it runs in SQLite itself, in worker processes over the index file.",
+    "sql: one read-only SELECT over the views sessions, events and llm_calls (POST /v1/sql, seshi sql), in worker processes. On a SQLite index SQLite itself runs it over the index file; on a LanceDB index DuckDB runs it over the Lance tables, in the seshi-server-sql build only.",
   );
 
 export type SqlSection = z.output<typeof sqlSection>;
@@ -202,6 +220,13 @@ export const searchSection = z
     sql: sqlSection,
   })
   .superRefine((section, ctx) => {
+    if (section.sql.storage !== undefined && section.backend !== "lance") {
+      ctx.addIssue({
+        code: "custom",
+        path: ["sql", "storage"],
+        message: 'is for backend = "lance": sql on SQLite reads the index file on this disk',
+      });
+    }
     if (section.sql.members && section.backend !== "lance") {
       ctx.addIssue({
         code: "custom",

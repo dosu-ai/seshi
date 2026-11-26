@@ -7,6 +7,7 @@ import {
   type Visibility,
 } from "@seshi/model";
 import type { MatchTree } from "./query";
+import type { SqlTables } from "./sql/protocol";
 import type { Viewer } from "./viewer";
 
 export interface IndexedSession {
@@ -208,6 +209,10 @@ export interface IndexReader {
     after: FeedPosition | undefined,
     limit: number,
   ): Promise<{ entries: FeedRow[]; more: boolean; through: string } | null>;
+  /** Where the live generation's `sessions`, `events` and `llm_calls` tables are, for `sql`'s
+   * DuckDB views (LanceDB); undefined before there is one. Absent for SQLite, whose views read
+   * the file at `location()`. */
+  sqlTables?(): Promise<SqlTables | undefined>;
   close(): Promise<void>;
 }
 

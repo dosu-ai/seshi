@@ -13,13 +13,13 @@
 {"id": "statement-13", "family": "statement", "engines": ["sqlite", "duckdb"], "sql": "CALL pragma_version()", "expect": "refused"}
 {"id": "statement-14", "family": "statement", "engines": ["sqlite", "duckdb"], "sql": "CREATE VIEW x AS SELECT 1", "expect": "refused"}
 {"id": "statement-15", "family": "statement", "engines": ["sqlite", "duckdb"], "sql": "CREATE OR REPLACE VIEW events AS SELECT 1", "expect": "refused"}
-{"id": "statement-16", "family": "statement", "engines": ["sqlite", "duckdb"], "sql": "CREATE TABLE x (a)", "expect": "refused"}
+{"id": "statement-16", "family": "statement", "engines": ["sqlite", "duckdb"], "sql": "CREATE TABLE x (a)", "expect": "refused", "duckdb": {"expect": "error"}}
 {"id": "statement-17", "family": "statement", "engines": ["sqlite", "duckdb"], "sql": "CREATE MACRO m(a) AS a", "expect": "refused"}
 {"id": "statement-18", "family": "statement", "engines": ["sqlite", "duckdb"], "sql": "CREATE SECRET s (TYPE s3)", "expect": "refused"}
 {"id": "statement-19", "family": "statement", "engines": ["sqlite", "duckdb"], "sql": "CREATE TEMP VIEW x AS SELECT 1", "expect": "refused"}
-{"id": "statement-20", "family": "statement", "engines": ["sqlite", "duckdb"], "sql": "CREATE TEMP TABLE x (a)", "expect": "refused"}
+{"id": "statement-20", "family": "statement", "engines": ["sqlite", "duckdb"], "sql": "CREATE TEMP TABLE x (a)", "expect": "refused", "duckdb": {"expect": "error"}}
 {"id": "statement-21", "family": "statement", "engines": ["sqlite", "duckdb"], "sql": "INSERT INTO meta VALUES ('a', 'b')", "expect": "refused"}
-{"id": "statement-22", "family": "statement", "engines": ["sqlite", "duckdb"], "sql": "REPLACE INTO meta VALUES ('a', 'b')", "expect": "refused"}
+{"id": "statement-22", "family": "statement", "engines": ["sqlite", "duckdb"], "sql": "REPLACE INTO meta VALUES ('a', 'b')", "expect": "refused", "duckdb": {"expect": "error"}}
 {"id": "statement-23", "family": "statement", "engines": ["sqlite", "duckdb"], "sql": "UPDATE sessions SET owner = 'x'", "expect": "refused"}
 {"id": "statement-24", "family": "statement", "engines": ["sqlite", "duckdb"], "sql": "DELETE FROM sessions", "expect": "refused"}
 {"id": "statement-25", "family": "statement", "engines": ["sqlite", "duckdb"], "sql": "DROP VIEW events", "expect": "refused"}
@@ -27,15 +27,15 @@
 {"id": "statement-27", "family": "statement", "engines": ["sqlite", "duckdb"], "sql": "USE main", "expect": "refused"}
 {"id": "statement-28", "family": "statement", "engines": ["sqlite", "duckdb"], "sql": "CHECKPOINT", "expect": "refused"}
 {"id": "statement-29", "family": "statement", "engines": ["sqlite", "duckdb"], "sql": "VACUUM", "expect": "refused"}
-{"id": "statement-30", "family": "statement", "engines": ["sqlite", "duckdb"], "sql": "VACUUM INTO '/tmp/copy.sqlite'", "expect": "refused"}
-{"id": "statement-31", "family": "statement", "engines": ["sqlite", "duckdb"], "sql": "REINDEX", "expect": "refused"}
+{"id": "statement-30", "family": "statement", "engines": ["sqlite", "duckdb"], "sql": "VACUUM INTO '/tmp/copy.sqlite'", "expect": "refused", "duckdb": {"expect": "error"}}
+{"id": "statement-31", "family": "statement", "engines": ["sqlite", "duckdb"], "sql": "REINDEX", "expect": "refused", "duckdb": {"expect": "error"}}
 {"id": "statement-32", "family": "statement", "engines": ["sqlite", "duckdb"], "sql": "ANALYZE", "expect": "refused"}
 {"id": "statement-33", "family": "statement", "engines": ["sqlite", "duckdb"], "sql": "PREPARE p AS SELECT 1", "expect": "refused"}
 {"id": "statement-34", "family": "statement", "engines": ["sqlite", "duckdb"], "sql": "EXECUTE p", "expect": "refused"}
 {"id": "statement-35", "family": "statement", "engines": ["sqlite", "duckdb"], "sql": "BEGIN", "expect": "refused"}
-{"id": "statement-36", "family": "statement", "engines": ["sqlite", "duckdb"], "sql": "SAVEPOINT a", "expect": "refused"}
+{"id": "statement-36", "family": "statement", "engines": ["sqlite", "duckdb"], "sql": "SAVEPOINT a", "expect": "refused", "duckdb": {"expect": "error"}}
 {"id": "statement-37", "family": "statement", "engines": ["sqlite", "duckdb"], "sql": "EXPLAIN SELECT 1", "expect": "refused"}
-{"id": "statement-38", "family": "statement", "engines": ["sqlite", "duckdb"], "sql": "EXPLAIN QUERY PLAN SELECT * FROM events", "expect": "refused"}
+{"id": "statement-38", "family": "statement", "engines": ["sqlite", "duckdb"], "sql": "EXPLAIN QUERY PLAN SELECT * FROM events", "expect": "refused", "duckdb": {"expect": "error"}}
 {"id": "statement-39", "family": "statement", "engines": ["sqlite", "duckdb"], "sql": "WITH x AS (SELECT 1) DELETE FROM sessions", "expect": "refused"}
 {"id": "statement-40", "family": "statement", "engines": ["sqlite", "duckdb"], "sql": "WITH x AS (SELECT 1) INSERT INTO meta SELECT 'a', 'b'", "expect": "refused"}
 {"id": "multiple-1", "family": "multiple", "engines": ["sqlite", "duckdb"], "sql": "SELECT 1; DROP VIEW events", "expect": "refused"}
@@ -43,7 +43,7 @@
 {"id": "multiple-3", "family": "multiple", "engines": ["sqlite", "duckdb"], "sql": "SELECT 1 -- a comment\n; DROP VIEW events", "expect": "refused"}
 {"id": "multiple-4", "family": "multiple", "engines": ["sqlite", "duckdb"], "sql": "SELECT ';'; DROP VIEW events", "expect": "refused"}
 {"id": "multiple-5", "family": "multiple", "engines": ["sqlite", "duckdb"], "sql": "SELECT 1 /* ; */ ; PRAGMA query_only = 0", "expect": "refused"}
-{"id": "multiple-6", "family": "multiple", "engines": ["sqlite", "duckdb"], "sql": "SELECT 1\uff1b DROP VIEW events", "expect": "refused"}
+{"id": "multiple-6", "family": "multiple", "engines": ["sqlite", "duckdb"], "sql": "SELECT 1\uff1b DROP VIEW events", "expect": "refused", "duckdb": {"expect": "error"}}
 {"id": "multiple-7", "family": "multiple", "engines": ["sqlite", "duckdb"], "sql": "SELECT 1;\n\nATTACH '/tmp/decoy.sqlite' AS d", "expect": "refused"}
 {"id": "multiple-8", "family": "multiple", "engines": ["sqlite", "duckdb"], "sql": "SELECT 1\u0000; DROP VIEW events", "expect": "refused"}
 {"id": "multiple-9", "family": "multiple", "engines": ["sqlite", "duckdb"], "sql": "SELECT 1;", "expect": "ok", "rows": 1}
@@ -59,7 +59,7 @@
 {"id": "tables-8", "family": "tables", "engines": ["sqlite", "duckdb"], "sql": "SELECT * FROM main.events", "expect": "refused"}
 {"id": "tables-9", "family": "tables", "engines": ["sqlite", "duckdb"], "sql": "SELECT * FROM temp.events", "expect": "refused"}
 {"id": "tables-10", "family": "tables", "engines": ["sqlite", "duckdb"], "sql": "SELECT * FROM \"main\".\"events\"", "expect": "refused"}
-{"id": "tables-11", "family": "tables", "engines": ["sqlite", "duckdb"], "sql": "SELECT * FROM [main].[events]", "expect": "refused"}
+{"id": "tables-11", "family": "tables", "engines": ["sqlite", "duckdb"], "sql": "SELECT * FROM [main].[events]", "expect": "refused", "duckdb": {"expect": "error"}}
 {"id": "tables-12", "family": "tables", "engines": ["sqlite", "duckdb"], "sql": "SELECT * FROM `main`.`events`", "expect": "refused"}
 {"id": "tables-13", "family": "tables", "engines": ["sqlite", "duckdb"], "sql": "SELECT * FROM main . events", "expect": "refused"}
 {"id": "tables-14", "family": "tables", "engines": ["sqlite", "duckdb"], "sql": "SELECT * FROM memory.main.events", "expect": "refused"}
@@ -78,25 +78,25 @@
 {"id": "tables-27", "family": "tables", "engines": ["sqlite", "duckdb"], "sql": "SELECT * FROM feeds", "expect": "refused"}
 {"id": "tables-28", "family": "tables", "engines": ["sqlite", "duckdb"], "sql": "SELECT * FROM events_text", "expect": "refused"}
 {"id": "tables-29", "family": "tables", "engines": ["sqlite", "duckdb"], "sql": "SELECT * FROM events_text_content", "expect": "refused"}
-{"id": "tables-30", "family": "tables", "engines": ["sqlite", "duckdb"], "sql": "SELECT * FROM events_text WHERE events_text MATCH 'prompt'", "expect": "refused"}
+{"id": "tables-30", "family": "tables", "engines": ["sqlite", "duckdb"], "sql": "SELECT * FROM events_text WHERE events_text MATCH 'prompt'", "expect": "refused", "duckdb": {"expect": "error"}}
 {"id": "tables-31", "family": "tables", "engines": ["sqlite", "duckdb"], "sql": "SELECT (SELECT sql FROM sqlite_master LIMIT 1)", "expect": "refused"}
 {"id": "tables-32", "family": "tables", "engines": ["sqlite", "duckdb"], "sql": "SELECT * FROM events WHERE archive_id IN (SELECT archive_id FROM main.sessions)", "expect": "refused"}
-{"id": "tables-33", "family": "tables", "engines": ["sqlite", "duckdb"], "sql": "SELECT * FROM events WHERE 'a' IN meta", "expect": "refused"}
-{"id": "tables-34", "family": "tables", "engines": ["sqlite", "duckdb"], "sql": "SELECT 1 WHERE 'a' IN main.meta", "expect": "refused"}
+{"id": "tables-33", "family": "tables", "engines": ["sqlite", "duckdb"], "sql": "SELECT * FROM events WHERE 'a' IN meta", "expect": "refused", "duckdb": {"expect": "error"}}
+{"id": "tables-34", "family": "tables", "engines": ["sqlite", "duckdb"], "sql": "SELECT 1 WHERE 'a' IN main.meta", "expect": "refused", "duckdb": {"expect": "error"}}
 {"id": "tables-35", "family": "tables", "engines": ["sqlite", "duckdb"], "sql": "SELECT * FROM sessions UNION ALL SELECT * FROM main.sessions", "expect": "refused"}
 {"id": "tables-36", "family": "tables", "engines": ["sqlite", "duckdb"], "sql": "WITH events AS (SELECT * FROM main.events) SELECT * FROM events", "expect": "refused"}
 {"id": "tables-37", "family": "tables", "engines": ["sqlite", "duckdb"], "sql": "WITH events AS (SELECT * FROM 'x.lance') SELECT * FROM events", "expect": "refused"}
 {"id": "tables-38", "family": "tables", "engines": ["sqlite", "duckdb"], "sql": "WITH x AS (SELECT * FROM meta) SELECT * FROM x", "expect": "refused"}
 {"id": "tables-39", "family": "tables", "engines": ["sqlite", "duckdb"], "sql": "WITH a AS (SELECT * FROM b), b AS (SELECT 1) SELECT * FROM meta", "expect": "refused"}
-{"id": "tables-40", "family": "tables", "engines": ["sqlite", "duckdb"], "sql": "SELECT * FROM (WITH meta AS (SELECT 1) SELECT * FROM meta) JOIN meta", "expect": "refused"}
+{"id": "tables-40", "family": "tables", "engines": ["sqlite", "duckdb"], "sql": "SELECT * FROM (WITH meta AS (SELECT 1) SELECT * FROM meta) JOIN meta", "expect": "refused", "duckdb": {"expect": "error"}}
 {"id": "tables-41", "family": "tables", "engines": ["sqlite", "duckdb"], "sql": "SELECT * FROM (WITH q AS (SELECT 1) SELECT * FROM q), changes", "expect": "refused"}
-{"id": "tables-42", "family": "tables", "engines": ["sqlite", "duckdb"], "sql": "WITH changes AS (SELECT 1) SELECT * FROM changes", "expect": "refused"}
+{"id": "tables-42", "family": "tables", "engines": ["sqlite", "duckdb"], "sql": "WITH changes AS (SELECT 1) SELECT * FROM changes", "expect": "refused", "duckdb": {"expect": "ok", "value": 1}}
 {"id": "tables-43", "family": "tables", "engines": ["sqlite", "duckdb"], "sql": "SELECT * FROM events AT (VERSION => 1)", "expect": "refused"}
-{"id": "tables-44", "family": "tables", "engines": ["sqlite", "duckdb"], "sql": "SELECT * FROM events INDEXED BY events_by_session", "expect": "refused"}
-{"id": "tables-45", "family": "tables", "engines": ["sqlite", "duckdb"], "sql": "SELECT * FROM sessions NOT INDEXED", "expect": "refused"}
+{"id": "tables-44", "family": "tables", "engines": ["sqlite", "duckdb"], "sql": "SELECT * FROM events INDEXED BY events_by_session", "expect": "refused", "duckdb": {"expect": "error"}}
+{"id": "tables-45", "family": "tables", "engines": ["sqlite", "duckdb"], "sql": "SELECT * FROM sessions NOT INDEXED", "expect": "refused", "duckdb": {"expect": "error"}}
 {"id": "tables-46", "family": "tables", "engines": ["sqlite", "duckdb"], "sql": "SELECT * FROM nope", "expect": "refused"}
 {"id": "tables-47", "family": "tables", "engines": ["sqlite", "duckdb"], "sql": "SELECT count(*) FROM \"EVENTS\"", "expect": "ok", "rows": 1}
-{"id": "tables-48", "family": "tables", "engines": ["sqlite", "duckdb"], "sql": "SELECT count(*) FROM [sessions]", "expect": "ok", "rows": 1}
+{"id": "tables-48", "family": "tables", "engines": ["sqlite", "duckdb"], "sql": "SELECT count(*) FROM [sessions]", "expect": "ok", "rows": 1, "duckdb": {"expect": "error"}}
 {"id": "tables-49", "family": "tables", "engines": ["sqlite", "duckdb"], "sql": "SELECT count(*) FROM `llm_calls`", "expect": "ok", "rows": 1}
 {"id": "tables-50", "family": "tables", "engines": ["sqlite", "duckdb"], "sql": "SELECT count(*) FROM Events", "expect": "ok", "rows": 1}
 {"id": "tables-51", "family": "tables", "engines": ["sqlite", "duckdb"], "sql": "SELECT count(*) FROM LLM_CALLS", "expect": "ok", "rows": 1}
@@ -150,10 +150,10 @@
 {"id": "functions-21", "family": "functions", "engines": ["sqlite", "duckdb"], "sql": "SELECT last_insert_rowid()", "expect": "refused"}
 {"id": "functions-22", "family": "functions", "engines": ["sqlite", "duckdb"], "sql": "SELECT lower(text) FROM events WHERE unknown_fn(1) = 1", "expect": "refused"}
 {"id": "functions-23", "family": "functions", "engines": ["sqlite", "duckdb"], "sql": "SELECT * FROM events WHERE owner = ?", "expect": "refused"}
-{"id": "functions-24", "family": "functions", "engines": ["sqlite", "duckdb"], "sql": "SELECT * FROM events WHERE owner = :who", "expect": "refused"}
+{"id": "functions-24", "family": "functions", "engines": ["sqlite", "duckdb"], "sql": "SELECT * FROM events WHERE owner = :who", "expect": "refused", "duckdb": {"expect": "error"}}
 {"id": "functions-25", "family": "functions", "engines": ["sqlite", "duckdb"], "sql": "SELECT * FROM events WHERE owner = @who", "expect": "refused"}
 {"id": "functions-26", "family": "functions", "engines": ["sqlite", "duckdb"], "sql": "SELECT * FROM events WHERE owner = $who", "expect": "refused"}
-{"id": "functions-27", "family": "functions", "engines": ["sqlite", "duckdb"], "sql": "SELECT $$, (SELECT sql FROM sqlite_master LIMIT 1), $$", "expect": "refused"}
+{"id": "functions-27", "family": "functions", "engines": ["sqlite", "duckdb"], "sql": "SELECT $$, (SELECT sql FROM sqlite_master LIMIT 1), $$", "expect": "refused", "duckdb": {"expect": "ok", "rows": 1}}
 {"id": "functions-28", "family": "functions", "engines": ["sqlite"], "sql": "SELECT lower(owner), upper(role), length(text), substr(text, 1, 5), instr(text, 'a'), replace(text, 'a', 'b'), trim(text), printf('%d', chars) FROM events LIMIT 3", "expect": "ok"}
 {"id": "functions-29", "family": "functions", "engines": ["sqlite"], "sql": "SELECT strftime('%Y-%m', started_at), date(started_at), julianday(ended_at) - julianday(started_at), unixepoch(started_at) FROM sessions LIMIT 3", "expect": "ok"}
 {"id": "functions-30", "family": "functions", "engines": ["sqlite"], "sql": "SELECT labels ->> '$.team', labels -> '$.team', json_extract(labels, '$.team'), json_array_length(models), json_type(labels), json_valid(labels) FROM sessions LIMIT 3", "expect": "ok"}
@@ -189,10 +189,10 @@
 {"id": "errors-2", "family": "errors", "engines": ["sqlite", "duckdb"], "sql": "SELECT count(*) FROM events WHERE CASE WHEN archive_id = '0000000000000000000000000000000000000000000000000000000000000005' THEN CAST(text AS INTEGER) END = 1", "expect": "no_leak", "as": "member"}
 {"id": "errors-3", "family": "errors", "engines": ["sqlite"], "sql": "SELECT json_extract(text, '$') FROM events WHERE role = 'user'", "expect": "runtime", "as": "member"}
 {"id": "errors-4", "family": "errors", "engines": ["sqlite"], "sql": "SELECT json_extract(text, '$') FROM events WHERE role = 'user'", "expect": "runtime", "match": "malformed JSON", "as": "admin"}
-{"id": "errors-5", "family": "errors", "engines": ["sqlite", "duckdb"], "sql": "SELECT nope FROM events", "expect": "error", "match": "no such column"}
+{"id": "errors-5", "family": "errors", "engines": ["sqlite", "duckdb"], "sql": "SELECT nope FROM events", "expect": "error", "match": "no such column", "duckdb": {"match": "not found"}}
 {"id": "errors-6", "family": "errors", "engines": ["sqlite"], "sql": "SELECT * FROM events GROUP BY ALL", "expect": "error"}
 {"id": "errors-7", "family": "errors", "engines": ["sqlite"], "sql": "SELECT abs(-9223372036854775807 - 1)", "expect": "runtime", "match": "integer overflow", "as": "admin"}
-{"id": "resources-1", "family": "resources", "engines": ["sqlite", "duckdb"], "sql": "SELECT count(*) FROM events a, events b, events c, events d, events e", "expect": "timeout"}
+{"id": "resources-1", "family": "resources", "engines": ["sqlite", "duckdb"], "sql": "SELECT count(*) FROM events a, events b, events c, events d, events e", "expect": "timeout", "duckdb": {"expect": "no_leak"}}
 {"id": "resources-2", "family": "resources", "engines": ["sqlite", "duckdb"], "sql": "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n) SELECT count(*) FROM n", "expect": "timeout"}
 {"id": "resources-3", "family": "resources", "engines": ["sqlite", "duckdb"], "sql": "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 2000) SELECT i FROM n", "expect": "truncated", "rows": 1000}
 {"id": "resources-4", "family": "resources", "engines": ["sqlite", "duckdb"], "sql": "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 1000) SELECT printf('%04000d', i) FROM n", "expect": "truncated"}
@@ -211,3 +211,50 @@
 {"id": "lexing-12", "family": "lexing", "engines": ["sqlite"], "sql": "SELECT 'x' -- \r, (SELECT sql FROM sqlite_master LIMIT 1)", "expect": "ok", "rows": 1}
 {"id": "lexing-13", "family": "lexing", "engines": ["sqlite"], "sql": "SELECT 'x' -- \u2028, (SELECT sql FROM sqlite_master LIMIT 1)", "expect": "ok", "rows": 1}
 {"id": "lexing-14", "family": "lexing", "engines": ["sqlite"], "sql": "SELECT 1 /*! , (SELECT sql FROM sqlite_master LIMIT 1) */", "expect": "ok", "rows": 1}
+{"id": "tables-d1", "family": "tables", "engines": ["duckdb"], "sql": "WITH a AS (SELECT count(*) FROM duckdb_views), duckdb_views AS (SELECT 1 x) SELECT * FROM a", "expect": "refused"}
+{"id": "tables-d2", "family": "tables", "engines": ["duckdb"], "sql": "WITH RECURSIVE a AS (SELECT count(*) c FROM duckdb_views), duckdb_views AS (SELECT 1 x) SELECT * FROM a", "expect": "refused"}
+{"id": "tables-d3", "family": "tables", "engines": ["duckdb"], "sql": "SELECT * FROM (WITH x AS (SELECT 1) SELECT * FROM x), x", "expect": "refused"}
+{"id": "tables-d4", "family": "tables", "engines": ["duckdb"], "sql": "SELECT * FROM duckdb_tables", "expect": "refused"}
+{"id": "tables-d5", "family": "tables", "engines": ["duckdb"], "sql": "SELECT * FROM duckdb_views", "expect": "refused"}
+{"id": "tables-d6", "family": "tables", "engines": ["duckdb"], "sql": "SELECT * FROM pg_catalog.pg_tables", "expect": "refused"}
+{"id": "tables-d7", "family": "tables", "engines": ["duckdb"], "sql": "SELECT * FROM pg_tables", "expect": "refused"}
+{"id": "tables-d8", "family": "tables", "engines": ["duckdb"], "sql": "SELECT * FROM \"events.lance\"", "expect": "refused"}
+{"id": "tables-d9", "family": "tables", "engines": ["duckdb"], "sql": "SELECT * FROM 'decoy.lance'", "expect": "refused"}
+{"id": "tables-d10", "family": "tables", "engines": ["duckdb"], "sql": "SELECT * FROM events AT (TIMESTAMP => TIMESTAMP '2026-01-01')", "expect": "refused"}
+{"id": "tables-d11", "family": "tables", "engines": ["duckdb"], "sql": "FROM sessions SELECT count(*)", "expect": "ok", "value": 5}
+{"id": "tables-d12", "family": "tables", "engines": ["duckdb"], "sql": "SELECT count(*) FROM (FROM events)", "expect": "ok", "rows": 1}
+{"id": "tables-d13", "family": "tables", "engines": ["duckdb"], "sql": "SELECT count(*) FROM events USING SAMPLE 50%", "expect": "ok", "rows": 1}
+{"id": "tables-d14", "family": "tables", "engines": ["duckdb"], "sql": "SELECT count(*) FROM events e, LATERAL (SELECT e.seq + 1 AS next)", "expect": "ok", "rows": 1}
+{"id": "tables-d15", "family": "tables", "engines": ["duckdb"], "sql": "SELECT count(*) FROM (VALUES (1), (2)) v(x)", "expect": "ok", "value": 2}
+{"id": "tables-d16", "family": "tables", "engines": ["duckdb"], "sql": "SELECT * FROM unnest([1, 2])", "expect": "refused"}
+{"id": "tables-d17", "family": "tables", "engines": ["duckdb"], "sql": "PIVOT events ON role USING count(*)", "expect": "refused"}
+{"id": "tables-d18", "family": "tables", "engines": ["duckdb"], "sql": "SELECT * FROM (PIVOT events ON role USING count(*))", "expect": "refused"}
+{"id": "tables-d19", "family": "tables", "engines": ["duckdb"], "sql": "SELECT * FROM events UNPIVOT (v FOR k IN (role, text))", "expect": "refused"}
+{"id": "statement-d1", "family": "statement", "engines": ["duckdb"], "sql": "ATTACH 'x.lance' AS l (TYPE LANCE)", "expect": "refused"}
+{"id": "statement-d2", "family": "statement", "engines": ["duckdb"], "sql": "SET VARIABLE x = 1", "expect": "refused"}
+{"id": "statement-d3", "family": "statement", "engines": ["duckdb"], "sql": "DESCRIBE events", "expect": "refused"}
+{"id": "statement-d4", "family": "statement", "engines": ["duckdb"], "sql": "SUMMARIZE events", "expect": "refused"}
+{"id": "statement-d5", "family": "statement", "engines": ["duckdb"], "sql": "SHOW TABLES", "expect": "refused"}
+{"id": "statement-d6", "family": "statement", "engines": ["duckdb"], "sql": "CALL duckdb_settings()", "expect": "refused"}
+{"id": "statement-d7", "family": "statement", "engines": ["duckdb"], "sql": "CREATE SECRET (TYPE lance, PROVIDER config, SCOPE 'gs://b/')", "expect": "refused"}
+{"id": "statement-d8", "family": "statement", "engines": ["duckdb"], "sql": "UPDATE EXTENSIONS", "expect": "refused"}
+{"id": "table-functions-d1", "family": "table-functions", "engines": ["duckdb"], "sql": "SELECT * FROM read_csv_auto('decoy.csv')", "expect": "refused"}
+{"id": "table-functions-d2", "family": "table-functions", "engines": ["duckdb"], "sql": "SELECT * FROM __lance_namespace_scan('x')", "expect": "refused"}
+{"id": "table-functions-d3", "family": "table-functions", "engines": ["duckdb"], "sql": "SELECT * FROM __lance_compact_files('x')", "expect": "refused"}
+{"id": "table-functions-d4", "family": "table-functions", "engines": ["duckdb"], "sql": "SELECT * FROM json_execute_serialized_sql('{}')", "expect": "refused"}
+{"id": "table-functions-d5", "family": "table-functions", "engines": ["duckdb"], "sql": "SELECT * FROM sessions, read_text('/etc/passwd')", "expect": "refused"}
+{"id": "functions-d1", "family": "functions", "engines": ["duckdb"], "sql": "SELECT list_aggr([1, 2], 'count')", "expect": "refused"}
+{"id": "functions-d2", "family": "functions", "engines": ["duckdb"], "sql": "SELECT current_setting('allowed_directories')", "expect": "refused"}
+{"id": "functions-d3", "family": "functions", "engines": ["duckdb"], "sql": "SELECT system.main.lower('x')", "expect": "refused"}
+{"id": "functions-d4", "family": "functions", "engines": ["duckdb"], "sql": "SELECT nextval('s')", "expect": "refused"}
+{"id": "functions-d5", "family": "functions", "engines": ["duckdb"], "sql": "SELECT uuid()", "expect": "refused"}
+{"id": "functions-d6", "family": "functions", "engines": ["duckdb"], "sql": "SELECT owner, list_transform(models, lambda m: upper(m)) FROM sessions LIMIT 1", "expect": "ok", "rows": 1}
+{"id": "functions-d7", "family": "functions", "engines": ["duckdb"], "sql": "SELECT owner, list_transform(models, lambda m: getenv(m)) FROM sessions LIMIT 1", "expect": "refused"}
+{"id": "functions-d8", "family": "functions", "engines": ["duckdb"], "sql": "SELECT * EXCLUDE (text) FROM events LIMIT 2", "expect": "ok", "rows": 2}
+{"id": "functions-d9", "family": "functions", "engines": ["duckdb"], "sql": "SELECT COLUMNS('.*_at') FROM sessions LIMIT 1", "expect": "ok", "rows": 1}
+{"id": "functions-d10", "family": "functions", "engines": ["duckdb"], "sql": "SELECT labels ->> '$.team' AS team, count(*) FROM sessions GROUP BY ALL ORDER BY ALL", "expect": "ok", "rows": 2}
+{"id": "functions-d11", "family": "functions", "engines": ["duckdb"], "sql": "SELECT date_trunc('day', started_at), epoch_ms(started_at) > 0, started_at > now() - INTERVAL 30 DAY FROM sessions LIMIT 1", "expect": "ok", "rows": 1}
+{"id": "functions-d12", "family": "functions", "engines": ["duckdb"], "sql": "SELECT s.owner, count(*) FROM sessions s JOIN events e USING (owner, archive_id) GROUP BY s.owner QUALIFY row_number() OVER (ORDER BY count(*) DESC) = 1", "expect": "ok", "rows": 1}
+{"id": "functions-d13", "family": "functions", "engines": ["duckdb"], "sql": "SELECT owner, archive_id FROM sessions WHERE list_contains(models, 'claude-opus-5-5') LIMIT 2", "expect": "ok", "rows": 2}
+{"id": "resources-d1", "family": "resources", "engines": ["duckdb"], "sql": "SELECT sum(length(a.text || b.text)) FROM events a, events b, events c, events d, events e", "expect": "timeout"}
+{"id": "resources-d2", "family": "resources", "engines": ["duckdb"], "sql": "SELECT length(string_agg(a.text || b.text || c.text || d.text, ',')) FROM events a, events b, events c, events d", "expect": "memory"}

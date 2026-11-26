@@ -108,6 +108,25 @@ FROM llm_calls c JOIN sessions s USING (owner, archive_id)
 WHERE c.started_at > datetime('now', '-30 days') GROUP BY 1, 2 ORDER BY tokens DESC;
 ```
 
+On a LanceDB index it runs in DuckDB, reading the index's Lance tables in the bucket through
+DuckDB's `lance` extension, so it is written in DuckDB's dialect. It needs the
+`seshi-server-sql` build of the server, which carries DuckDB ([below](#sql-on-a-lancedb-index)).
+The columns are the same; their types are DuckDB's:
+
+- times are `TIMESTAMPTZ` in UTC: `started_at > now() - INTERVAL 30 DAY`,
+  `date_trunc('day', ts)`; answers write them as `2026-11-25 10:02:03+00`;
+- `models` is a `VARCHAR[]` and `labels` is `JSON`: `list_contains(models, 'claude-opus-5-5')`,
+  `labels ->> '$.team'`;
+- `ok` is a `BOOLEAN`, and `GROUP BY ALL`, `QUALIFY`, `FILTER`, `ASOF` and `LATERAL` joins,
+  `SELECT * EXCLUDE (…)` and `FROM sessions` without a `SELECT` all work.
+
+```sql
+-- Tokens per person and model, last 30 days
+SELECT s.owner, c.model, sum(c.input_tokens + c.output_tokens) AS tokens
+FROM llm_calls c JOIN sessions s USING (owner, archive_id)
+WHERE c.started_at > now() - INTERVAL 30 DAY GROUP BY ALL ORDER BY tokens DESC;
+```
+
 **The window.** The views hold the sessions that overlap `--since` and `--until` (`since` and
 `until` in the request): a date, an RFC 3339 time or an age (`7d`), the last 30 days by default,
 at most 400 days. A statement cannot widen it: the views are built for each statement, with the
@@ -120,12 +139,17 @@ three views and its own CTEs, by their plain names (`main.events` is refused), c
 window functions, text, time, JSON and numbers; not `load_extension`, `randomblob`, FTS5's
 `snippet` or anything that reads files or settings), and is at most 16 KiB. Anything else is
 refused before it runs, saying what and where: `seshi sql` prints the line with a caret under
-it, and the API gives `at`, the character's offset.
+it, and the API gives `at`, the character's offset. On DuckDB the same rules hold over
+[its own list](../packages/ts/search/sql/src/functions.ts): no table functions at all
+(`read_csv`, `glob`, `range`, `__lance_scan`, `duckdb_settings()`…), no quoted paths as tables
+(`FROM 'x.lance'`), no `AT (VERSION => …)`, no `PIVOT`, `DESCRIBE` or `SHOW`, no function
+named with a schema, and a CTE may read only the CTEs written before it, as DuckDB binds them.
 
 | Limit | Default | Setting |
 |---|---|---|
-| Time | 15 s: the worker running it is killed and replaced | `search.sql.timeout` |
-| Memory | 1 GiB inside SQLite (held on Linux, where Bun carries its own SQLite; macOS's system SQLite ignores it), and the worker is killed above 2 GiB resident | `search.sql.memory`, `search.sql.worker_memory` |
+| Time | 15 s. SQLite: the worker running it is killed and replaced. DuckDB: the statement is interrupted, and the worker killed 5 s later if it has not stopped | `search.sql.timeout` |
+| Memory | 1 GiB inside the engine (SQLite's `hard_heap_limit`, held on Linux, where Bun carries its own SQLite, ignored by macOS's system SQLite; DuckDB's `memory_limit`, with nothing spilled to disk), and the worker is killed above 2 GiB resident | `search.sql.memory`, `search.sql.worker_memory` |
+| Threads | DuckDB: 2 per worker. SQLite: 1 | `search.sql.threads` |
 | Rows | 1,000 and 1 MB of them, then `truncated` (`--max-rows` asks for fewer) | `search.sql.max_rows` |
 | Concurrency | 2 workers, 8 statements waiting, 2 running per caller; then `429 sql_busy` | `search.sql.workers` |
 
@@ -145,8 +169,8 @@ it opens must be one the views read, nothing written, every function on the list
 enough for admins and service tokens, who can read every session anyway; it is not a wall to
 put between members and each other's owner-only sessions. A SQLite server refuses to start with
 `[search.sql] members = true`, naming the LanceDB backend, where members' `sql` will come with
-DuckDB and its own gates ([design](seshi/session-tools.md#who-may-use-it)). On a LanceDB index
-`sql` answers `501 sql_unavailable` for now.
+DuckDB and its own gates ([design](seshi/session-tools.md#who-may-use-it)). On LanceDB, too,
+members do not have `sql` yet.
 
 **How it runs.** Each statement runs in a worker process, `seshi sql-worker`, which every seshi
 binary has: the server keeps `search.sql.workers` of them (2; 1 on a laptop), started with the
@@ -160,17 +184,67 @@ tokens or keys. A worker that dies mid-statement answers `500`, and the next sta
 new one. An index kept in memory (`search.path = ":memory:"`) has no file for a worker to read:
 `501 sql_unavailable`.
 
+### sql on a LanceDB index
+
+On a LanceDB index the workers run DuckDB, which reads the live generation's `sessions`,
+`events` and `llm_calls` tables straight from the bucket. DuckDB and its `lance` extension
+(about 400 MB on linux-x64) ship only in the `seshi-server-sql` build of the server: the plain
+server build answers search but `sql` with `501 sql_unavailable`, naming that build, and so does
+a `-sql` build whose workers cannot load the extension (`search.sql.extensions` names its folder;
+by default `duckdb/` beside the binary, where the archive and the image put it).
+
+For each statement a worker takes a fresh in-memory DuckDB database, which it opened and warmed
+while idle (`lance` loaded from the extension folder; autoloading, community and unsigned
+extensions off), creates the three views over the Lance tables with the caller's scope and the
+window written in, turns off DuckDB's external access with no folder allowed, locks the
+configuration, checks the statement with DuckDB's own parser (`json_serialize_sql`), prepares it
+(which refuses a second statement) and runs it. It never runs another statement in that database.
+
+**The read-only credential.** DuckDB's `lance` extension reads the bucket through Lance's own
+object store, which DuckDB's lock-down does not bind: a statement that named a path, or called
+the extension's table functions, could read any Lance table the worker's credential reaches,
+and its maintenance functions write. The statement check refuses both; the credential is the
+wall behind it. Give the workers one that can only read the index's prefix, in
+`[search.sql.storage]` (the same fields as `[store] credentials`):
+
+```toml
+[search.sql.storage]
+service_account_key = { file = "/secrets/seshi-sql-ro.json" }   # gs://
+# access_key_id = "…"                                            # s3://, r2://
+# secret_access_key = { env = "SESHI_SQL_RO_SECRET" }
+# sas_token = { env = "SESHI_SQL_RO_SAS" }                       # az://
+```
+
+- **Google Cloud Storage:** a service account with `roles/storage.objectViewer` on the bucket,
+  under an IAM condition `resource.name.startsWith("projects/_/buckets/<bucket>/objects/search/<deployment>/")`,
+  and a JSON key for it. On GKE or Cloud Run the metadata server answers for the whole service,
+  so the read-only identity has to be a key the config names.
+- **S3 and R2:** an access key whose policy allows `s3:GetObject` on `<bucket>/search/<deployment>/*`
+  and `s3:ListBucket` on the bucket with a `s3:prefix` condition on the same prefix.
+- **Azure:** a SAS token for the container with read and list only, ideally a user-delegation
+  SAS scoped to the index's directory.
+
+Only the workers' environment holds it, and only as the index's storage options: the server's
+own keys never reach them. Without `[search.sql.storage]` the workers read with the index's own
+credential, which can write, and the server warns at start-up.
+
+**Scope on LanceDB.** `events` and `llm_calls` hold the rows of the sessions `sessions` admits,
+and `events` also checks each row's own visibility, so a session turned owner-only leaves a
+member's view at the commit that carries it, whichever table the indexer wrote first. `sql`
+cannot re-check live metadata as search does, so a change the indexer has not committed yet is
+not seen.
+
 | `POST /v1/sql` answers | |
 |---|---|
 | `200` | `{now, scope: {as, role, since, until}, index: {backend, dialect, updated_at}, columns: [{name, type}], rows: [[…]], truncated, elapsed_ms}` |
 | `400 sql_refused` | The statement check refused it: `message` says what, `at` where |
-| `400 sql_error` | SQLite could not compile it: an unknown column, a syntax it does not take |
+| `400 sql_error` | The engine could not compile it: an unknown column, a syntax it does not take |
 | `400 sql_timeout`, `sql_memory` | A limit stopped it |
 | `400 sql_runtime` | It failed while running (malformed JSON, an integer overflow). A member would get no message, which could quote a row |
 | `400 bad_field` | The body: an unknown field, a window that is not one or longer than 400 days |
 | `403 forbidden` | No `sql` scope |
 | `429 sql_busy` | Two of the caller's statements are running, or eight are waiting |
-| `501 sql_unavailable` | A LanceDB index (for now), or a SQLite index in memory |
+| `501 sql_unavailable` | A LanceDB index on a server without DuckDB (not the `seshi-server-sql` build, or its `lance` extension missing), or a SQLite index in memory |
 | `503 index_unavailable` | The index has not caught up with the change feed yet |
 
 `seshi sql` exits 0 with an answer, 1 when the worker running it failed, 2 for a statement

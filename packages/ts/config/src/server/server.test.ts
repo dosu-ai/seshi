@@ -38,6 +38,7 @@ describe("search.sql", () => {
       memory: 1024 ** 3,
       worker_memory: 2 * 1024 ** 3,
       max_rows: 1000,
+      threads: 2,
       members: false,
     });
     expect(
@@ -52,6 +53,24 @@ describe("search.sql", () => {
     expect(ok({ search: { backend: "lance", sql: { members: true } } }).search.sql.members).toBe(
       true,
     );
+  });
+
+  it("takes a read-only storage credential and DuckDB's threads for a LanceDB index only", () => {
+    const lance = ok({
+      search: {
+        backend: "lance",
+        sql: { threads: 4, storage: { service_account_key: "{}" } },
+      },
+    }).search.sql;
+    expect(lance.threads).toBe(4);
+    expect(lance.storage?.service_account_key?.reveal()).toBe("{}");
+    expect(ok({}).search.sql.threads).toBe(2);
+    expect(messages({ search: { sql: { storage: { sas_token: "sv=1" } } } })).toEqual([
+      'search.sql.storage: is for backend = "lance": sql on SQLite reads the index file on this disk',
+    ]);
+    expect(
+      messages({ search: { backend: "lance", sql: { storage: { access_key_id: "a" } } } }),
+    ).toEqual(["search.sql.storage: access_key_id and secret_access_key go together"]);
   });
 
   it("refuses limits it cannot keep", () => {

@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { LOCAL_VIEWER } from "../viewer";
 import { buildFixture, FIXTURE_NOW } from "./fixture";
 import { sqlViews } from "./views";
-import { runSqliteQuery } from "./worker";
+import { handleLine, runSqliteQuery } from "./worker";
 
 let dir: string;
 let index: string;
@@ -37,5 +37,26 @@ describe("a worker's query (runSqliteQuery)", () => {
     expect(answer.truncated).toBe(true);
     expect(answer.rows).toHaveLength(3);
     expect(Buffer.byteLength(JSON.stringify(answer.rows), "utf8")).toBeLessThanOrEqual(10_000);
+  });
+});
+
+describe("a worker's request (handleLine)", () => {
+  it("answers a DuckDB request unavailable in a build without DuckDB, and a stray line internal", async () => {
+    const duckdb = await handleLine(
+      JSON.stringify({
+        id: "q2",
+        engine: "duckdb",
+        setup: { tables: {}, views: [] },
+        sql: "SELECT 1",
+        limits: { timeout_ms: 1_000, max_rows: 1, max_bytes: 1_000 },
+      }),
+    );
+    expect(duckdb).toMatchObject({ id: "q2", ok: false, error: { kind: "unavailable" } });
+    expect(await handleLine("{")).toMatchObject({ ok: false, error: { kind: "internal" } });
+    expect(await handleLine('{"id":"q3","engine":"postgres"}')).toMatchObject({
+      id: "q3",
+      ok: false,
+      error: { kind: "internal" },
+    });
   });
 });

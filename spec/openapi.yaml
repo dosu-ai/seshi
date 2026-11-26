@@ -1364,10 +1364,11 @@ paths:
       operationId: sql
       description: |
         Runs one statement over three views of the search index: `sessions`, `events` and
-        `llm_calls` (`GET /v1/sql/schema` gives their columns). On a SQLite index it runs in
-        SQLite itself, in the SQLite dialect, in a worker process over the index file. Needs
-        the `sql` scope: admins have it and service tokens can be given it; on SQLite it is not
-        for production use with members, and members never get it.
+        `llm_calls` (`GET /v1/sql/schema` gives their columns), in a worker process. On a
+        SQLite index it runs in SQLite itself, in the SQLite dialect, over the index file; on a
+        LanceDB index it runs in DuckDB, in DuckDB's dialect, over the Lance tables, on the
+        `seshi-server-sql` build only. Needs the `sql` scope: admins have it and service tokens
+        can be given it; members do not get it (on SQLite, never).
 
         The views are built for each statement from the caller and the window, never from the
         statement: sessions overlapping `[since, until)` (the last 30 days by default, at most
@@ -1423,8 +1424,9 @@ paths:
               schema: { $ref: "#/components/schemas/Error" }
         "501":
           description: |
-            `sql_unavailable`: this index cannot answer `sql`: a LanceDB index (until the
-            `seshi-server-sql` image), or a SQLite index kept in memory.
+            `sql_unavailable`: this index cannot answer `sql`: a LanceDB index on a server
+            without DuckDB (not the `seshi-server-sql` build, or its `lance` extension
+            missing), or a SQLite index kept in memory.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }

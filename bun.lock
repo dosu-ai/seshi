@@ -25,6 +25,7 @@
         "@seshi/review": "workspace:*",
         "@seshi/search": "workspace:*",
         "@seshi/sources": "workspace:*",
+        "@seshi/sql": "workspace:*",
         "@seshi/store": "workspace:*",
         "@types/bun": "1.4.2",
         "@types/fontkit": "2.0.8",
@@ -68,6 +69,7 @@
         "@seshi/review": "workspace:*",
         "@seshi/search": "workspace:*",
         "@seshi/sources": "workspace:*",
+        "@seshi/sql": "workspace:*",
         "@seshi/store": "workspace:*",
       },
     },
@@ -266,6 +268,21 @@
         "@seshi/pipeline": "workspace:*",
       },
     },
+    "packages/ts/search/sql": {
+      "name": "@seshi/sql",
+      "dependencies": {
+        "@duckdb/node-api": "2.0.1-r.1",
+        "@seshi/model": "workspace:*",
+        "@seshi/search": "workspace:*",
+      },
+      "devDependencies": {
+        "@lancedb/lancedb": "0.41.0",
+        "@seshi/formats": "workspace:*",
+        "@seshi/lance": "workspace:*",
+        "@seshi/pipeline": "workspace:*",
+        "@seshi/store": "workspace:*",
+      },
+    },
     "packages/ts/sources": {
       "name": "@seshi/sources",
       "dependencies": {
@@ -331,6 +348,26 @@
     "@biomejs/cli-win32-x64": ["@biomejs/cli-win32-x64@2.6.2", "", { "os": "win32", "cpu": "x64" }, "sha512-FVlWD+mDDz8nN5LWKRWUhhb7wKIK0VE3oXQvQBX7Fwwj00CvqMVhMyiz1iz8O5aZGmnkhFlKSwJPrUvMh5prQw=="],
 
     "@colors/colors": ["@colors/colors@1.5.0", "", {}, "sha512-ooWCrlZP11i8GImSjTHYHLkvFDP48nS4+204nGb1RiX/WXYHmJA2III9/e2DWVabCESdW7hBAEzHRqUn9OUVvQ=="],
+
+    "@duckdb/node-api": ["@duckdb/node-api@2.0.1-r.1", "", { "dependencies": { "@duckdb/node-bindings": "2.0.1-r.1" } }, "sha512-YAuAEZOgd511AZkXl0i3c7WFlTdIE6hEa5avih+fwJ+FYgkhgyis9IU7b++IEadT2+9tGRh8QZK9qALOtLwdXw=="],
+
+    "@duckdb/node-bindings": ["@duckdb/node-bindings@2.0.1-r.1", "", { "dependencies": { "detect-libc": "^2.1.2" }, "optionalDependencies": { "@duckdb/node-bindings-darwin-arm64": "2.0.1-r.1", "@duckdb/node-bindings-darwin-x64": "2.0.1-r.1", "@duckdb/node-bindings-linux-arm64": "2.0.1-r.1", "@duckdb/node-bindings-linux-arm64-musl": "2.0.1-r.1", "@duckdb/node-bindings-linux-x64": "2.0.1-r.1", "@duckdb/node-bindings-linux-x64-musl": "2.0.1-r.1", "@duckdb/node-bindings-win32-arm64": "2.0.1-r.1", "@duckdb/node-bindings-win32-x64": "2.0.1-r.1" } }, "sha512-Na56IXKC/Rz7wE41VtTyPyX5Q+MtjYWPKcqOdK3kB2TcirUHVRHJUivmspiBP2ImWCnkX5Ko/rp+j5hw+ohdng=="],
+
+    "@duckdb/node-bindings-darwin-arm64": ["@duckdb/node-bindings-darwin-arm64@2.0.1-r.1", "", { "os": "darwin", "cpu": "arm64" }, "sha512-QifZjrl3fev63wEIDpSNVdvClA0TdZ/4KAlBwmfdymdG57xPZihGak5PbHmT4IC4V7bgV6nzembJkz6qf/2gXQ=="],
+
+    "@duckdb/node-bindings-darwin-x64": ["@duckdb/node-bindings-darwin-x64@2.0.1-r.1", "", { "os": "darwin", "cpu": "x64" }, "sha512-aEHIDa/isgQLUzkxAbgOhsu4oE8IunLzBS+/90Jnxab892FQ1HJa+AcXTaoWrDZLPfhOA+HKniN68QK6ioZ1wA=="],
+
+    "@duckdb/node-bindings-linux-arm64": ["@duckdb/node-bindings-linux-arm64@2.0.1-r.1", "", { "os": "linux", "cpu": "arm64" }, "sha512-nJv2mDZo3BsGhEo/q+F4gh5Icc6ch3tYo8DvgNJNLPEiwiK8qvMds23uZG7i78uUV3n5VUxch1I0VqYsa/8ezQ=="],
+
+    "@duckdb/node-bindings-linux-arm64-musl": ["@duckdb/node-bindings-linux-arm64-musl@2.0.1-r.1", "", { "os": "linux", "cpu": "arm64" }, "sha512-b4Lo5+ioDQDq+SghRTusUzAZh8FP1yM60Boe61Re0ffibhFGsh7tuIWiTuoARTDAH7uof3Yy4NYD1GCw/dpjPw=="],
+
+    "@duckdb/node-bindings-linux-x64": ["@duckdb/node-bindings-linux-x64@2.0.1-r.1", "", { "os": "linux", "cpu": "x64" }, "sha512-BTVwKGQ1Np/CkOhNq5VNDJRJHKC6+XgVJ23wqjxviHDGdkeFmnfdCs6OzUADQ42BTKhnBzh+5bKQX1lB0gbo9A=="],
+
+    "@duckdb/node-bindings-linux-x64-musl": ["@duckdb/node-bindings-linux-x64-musl@2.0.1-r.1", "", { "os": "linux", "cpu": "x64" }, "sha512-PiEMFB3c3cH7Y1SwkTF749M/bOlzhBP/xlc/QwaHgKJPstNEfSWe8S3Q0XQrlbcYxokJJG83g3Q8EQVjnmbtkg=="],
+
+    "@duckdb/node-bindings-win32-arm64": ["@duckdb/node-bindings-win32-arm64@2.0.1-r.1", "", { "os": "win32", "cpu": "arm64" }, "sha512-v22ziq/h3+mYkqY29EU5ej56wEh3I/wyEBFbDne0L0NmX+JF2y+1NTeZfJP23uT/CmrMqj0ehb4rBjMH+DSo/Q=="],
+
+    "@duckdb/node-bindings-win32-x64": ["@duckdb/node-bindings-win32-x64@2.0.1-r.1", "", { "os": "win32", "cpu": "x64" }, "sha512-tIyo4NP52GhxRz5ReL9wy6JqcMNfsRr2mVOO40lsx9GB8jE1SRyXZEVFoIskQST8jTiSZV+ezLOPIof62Va/SA=="],
 
     "@guanmingchiu/sqlparser-ts": ["@guanmingchiu/sqlparser-ts@0.64.0", "", {}, "sha512-5o3FKIM0P7mG3UVnEGDBMPJRKtnBeSPRQeQY7ac6y9TNdAtTqCleXpJ/1TiYLZXmOrebtSBekZofKhkHTOFx4Q=="],
 
@@ -481,6 +518,8 @@
     "@seshi/search": ["@seshi/search@workspace:packages/ts/search"],
 
     "@seshi/sources": ["@seshi/sources@workspace:packages/ts/sources"],
+
+    "@seshi/sql": ["@seshi/sql@workspace:packages/ts/search/sql"],
 
     "@seshi/store": ["@seshi/store@workspace:packages/ts/store"],
 

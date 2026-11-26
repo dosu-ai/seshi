@@ -54,6 +54,7 @@
     "@seshi/review": "workspace:*",
     "@seshi/search": "workspace:*",
     "@seshi/sources": "workspace:*",
+    "@seshi/sql": "workspace:*",
     "@seshi/store": "workspace:*"
   }
 }

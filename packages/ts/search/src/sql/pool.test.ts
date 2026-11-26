@@ -5,7 +5,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { LOCAL_VIEWER } from "../viewer";
 import { buildFixture, FIXTURE_NOW } from "./fixture";
 import { residentBytes, SqlBusy, SqlPool, scriptWorkerCommand } from "./pool";
-import type { SqlWorkerRequest } from "./protocol";
+import type { SqliteJob } from "./protocol";
 import { sqlViews } from "./views";
 
 let dir: string;
@@ -58,7 +58,7 @@ function pool(options: Partial<ConstructorParameters<typeof SqlPool>[0]> = {}): 
   return made;
 }
 
-function request(sql: string, timeout = 2_000): Omit<SqlWorkerRequest, "id"> {
+function request(sql: string, timeout = 2_000): SqliteJob {
   return {
     engine: "sqlite",
     setup: {

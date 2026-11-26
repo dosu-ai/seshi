@@ -2439,7 +2439,7 @@
           "additionalProperties": false
         },
         "sql": {
-          "description": "sql: one read-only SELECT over the views sessions, events and llm_calls (POST /v1/sql, seshi sql). On a SQLite index it runs in SQLite itself, in worker processes over the index file.",
+          "description": "sql: one read-only SELECT over the views sessions, events and llm_calls (POST /v1/sql, seshi sql), in worker processes. On a SQLite index SQLite itself runs it over the index file; on a LanceDB index DuckDB runs it over the Lance tables, in the seshi-server-sql build only.",
           "default": {},
           "type": "object",
           "properties": {
@@ -2466,7 +2466,7 @@
               ]
             },
             "memory": {
-              "description": "Memory a statement may use inside the engine: SQLite's hard_heap_limit, which Bun's own SQLite on Linux holds and macOS's system SQLite ignores.",
+              "description": "Memory a statement may use inside the engine: on SQLite its hard_heap_limit, which Bun's own SQLite on Linux holds and macOS's system SQLite ignores; on LanceDB DuckDB's memory_limit, with nothing spilled to disk.",
               "default": "1GiB",
               "x-seshi-format": "bytes",
               "anyOf": [
@@ -2480,6 +2480,13 @@
                   "maximum": 9007199254740991
                 }
               ]
+            },
+            "threads": {
+              "default": 2,
+              "description": "Threads DuckDB runs a statement on, per worker (LanceDB only; SQLite uses one).",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 64
             },
             "worker_memory": {
               "description": "The watchdog kills a worker whose resident memory passes this, answers its statement with sql_memory, and starts another.",
@@ -2503,6 +2510,246 @@
               "type": "integer",
               "minimum": 1,
               "maximum": 1000
+            },
+            "extensions": {
+              "description": "The folder holding DuckDB's extensions (<folder>/<duckdb version>/<platform>/lance.duckdb_extension), for sql on a LanceDB index. Default: duckdb/ beside the seshi binary, where the seshi-server-sql archive and image put it.",
+              "type": "string",
+              "minLength": 1
+            },
+            "storage": {
+              "description": "A read-only credential for the LanceDB index, which only the sql workers hold (the same fields as [store] credentials): a Google service account key with storage.objectViewer on the index's prefix (gs://), an access key allowed GetObject and ListBucket on it (s3://, r2://), or a SAS token with read and list on it (az://). DuckDB's lance extension does not honour DuckDB's own lock-down, so this is what keeps a statement from reading or writing anything else. Without it the workers use the index's own credential.",
+              "type": "object",
+              "properties": {
+                "access_key_id": {
+                  "description": "The access key id (s3://, r2://).",
+                  "x-seshi-secret": true,
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "env": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "the environment variable to read"
+                        }
+                      },
+                      "required": [
+                        "env"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "file": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "the file to read"
+                        }
+                      },
+                      "required": [
+                        "file"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "secret_access_key": {
+                  "description": "The secret access key (s3://, r2://).",
+                  "x-seshi-secret": true,
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "env": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "the environment variable to read"
+                        }
+                      },
+                      "required": [
+                        "env"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "file": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "the file to read"
+                        }
+                      },
+                      "required": [
+                        "file"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "session_token": {
+                  "description": "A session token, for temporary credentials (s3://, r2://).",
+                  "x-seshi-secret": true,
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "env": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "the environment variable to read"
+                        }
+                      },
+                      "required": [
+                        "env"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "file": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "the file to read"
+                        }
+                      },
+                      "required": [
+                        "file"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "account_key": {
+                  "description": "The storage account's shared key (az://).",
+                  "x-seshi-secret": true,
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "env": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "the environment variable to read"
+                        }
+                      },
+                      "required": [
+                        "env"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "file": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "the file to read"
+                        }
+                      },
+                      "required": [
+                        "file"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "sas_token": {
+                  "description": "A shared access signature for the container (az://), with or without its ?.",
+                  "x-seshi-secret": true,
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "env": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "the environment variable to read"
+                        }
+                      },
+                      "required": [
+                        "env"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "file": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "the file to read"
+                        }
+                      },
+                      "required": [
+                        "file"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "service_account_key": {
+                  "description": "A Google service account key (gs://): the JSON key file's contents, usually { file = \"/path/key.json\" }.",
+                  "x-seshi-secret": true,
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "env": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "the environment variable to read"
+                        }
+                      },
+                      "required": [
+                        "env"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "file": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "the file to read"
+                        }
+                      },
+                      "required": [
+                        "file"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false
             },
             "members": {
               "default": false,

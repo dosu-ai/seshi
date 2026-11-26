@@ -9,6 +9,7 @@
     "apps/*",
     "packages/ts/*",
     "packages/ts/search/lance",
+    "packages/ts/search/sql",
     "integrations/*"
   ],
   "scripts": {
@@ -67,6 +68,7 @@
     "@seshi/review": "workspace:*",
     "@seshi/search": "workspace:*",
     "@seshi/sources": "workspace:*",
+    "@seshi/sql": "workspace:*",
     "@seshi/store": "workspace:*",
     "@types/bun": "1.4.2",
     "@types/fontkit": "2.0.8",

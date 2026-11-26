@@ -1,4 +1,5 @@
 import { Database } from "bun:sqlite";
+import { sqlBackend } from "../backends";
 import {
   checkExplain,
   checkSqlite,
@@ -9,6 +10,7 @@ import {
 import type {
   SqlColumnInfo,
   SqlErrorKind,
+  SqliteRequest,
   SqlWorkerReady,
   SqlWorkerRequest,
   SqlWorkerResponse,
@@ -55,7 +57,7 @@ function typeOf(
  * open the file read-only, create the caller's views as `TEMP` views, turn on `query_only`, check
  * the statement (the parser, then `EXPLAIN`), and read at most `max_rows` rows and `max_bytes` of
  * them. There is no interrupt: the watchdog kills this process at the timeout. */
-export function runSqliteQuery(request: SqlWorkerRequest): SqlWorkerResponse {
+export function runSqliteQuery(request: SqliteRequest): SqlWorkerResponse {
   const started = performance.now();
   const { id, limits } = request;
   let db: Database | undefined;
@@ -155,25 +157,40 @@ export function runSqliteQuery(request: SqlWorkerRequest): SqlWorkerResponse {
   }
 }
 
-/** One request, whatever arrives: a line that is not a request is answered `internal`. */
-export function handleLine(line: string): SqlWorkerResponse {
+/** One request, whatever arrives: a line that is not a request is answered `internal`, a
+ * DuckDB request in a build without DuckDB `unavailable`. */
+export async function handleLine(line: string): Promise<SqlWorkerResponse> {
   let request: SqlWorkerRequest;
   try {
     request = JSON.parse(line) as SqlWorkerRequest;
   } catch {
     return { id: "", ok: false, error: { kind: "internal", message: "the request is not JSON" } };
   }
-  if (request?.engine !== "sqlite") {
-    return {
-      id: String(request?.id ?? ""),
-      ok: false,
-      error: {
-        kind: "internal",
-        message: `this worker runs SQLite, not ${String(request?.engine)}`,
-      },
-    };
+  const id = String(request?.id ?? "");
+  if (request?.engine === "sqlite") return runSqliteQuery(request);
+  if (request?.engine === "duckdb") {
+    const duckdb = sqlBackend();
+    if (duckdb === undefined) {
+      return {
+        id,
+        ok: false,
+        error: {
+          kind: "unavailable",
+          message:
+            "sql on a LanceDB index needs DuckDB, which only the seshi-server-sql build carries",
+        },
+      };
+    }
+    return duckdb.run(request);
   }
-  return runSqliteQuery(request);
+  return {
+    id,
+    ok: false,
+    error: {
+      kind: "internal",
+      message: `no engine ${JSON.stringify((request as { engine?: unknown } | null)?.engine)}`,
+    },
+  };
 }
 
 /** The lines of `input`, split on `\n` only: JSON may hold U+2028 and U+2029 unescaped, which
@@ -200,8 +217,10 @@ export function protocolLine(value: unknown): string {
     .replace(/\u2029/g, "\\u2029");
 }
 
-/** `seshi sql-worker`: answer requests on stdin, one at a time, until stdin closes. The parser is
- * loaded before it says it is ready, so the first query does not pay for it. */
+/** `seshi sql-worker`: answer requests on stdin, one at a time, until stdin closes. The parser
+ * is loaded, and in a build with DuckDB the first database warmed, before it says it is ready,
+ * so the first query does not pay for them. A DuckDB database serves one query (a caller's
+ * statement could change its catalog), so after each the next is warmed while the worker waits. */
 export async function runSqlWorker(
   input: AsyncIterable<Uint8Array | string> = process.stdin,
   write: (line: string) => void = (line) => process.stdout.write(`${line}\n`),
@@ -211,10 +230,15 @@ export async function runSqlWorker(
   } catch {
     // Loading the parser failed: each query says so.
   }
+  const duckdb = sqlBackend();
+  await duckdb?.warm();
   const ready: SqlWorkerReady = { ready: true, pid: process.pid };
   write(protocolLine(ready));
   for await (const line of linesOf(input)) {
     if (line.trim() === "") continue;
-    write(protocolLine(handleLine(line)));
+    const response = await handleLine(line);
+    write(protocolLine(response));
+    // Nothing when the database is still warm (a SQLite query, or a refused line).
+    await duckdb?.warm();
   }
 }
