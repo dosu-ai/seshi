@@ -38,9 +38,9 @@ export type PublishOutcome = "written" | "exists";
  * record sent again): the same bytes are a no-op and different bytes replace. */
 export type PublishMode = "immutable" | "replace";
 
-/** Write `body` at `key` unless it is already there, and verify what landed: by ETag when the
- * backend reports a plain MD5 (single-part PUT on S3, R2, MinIO, and `fs`), else by reading the
- * object back and hashing it. */
+/** Write `body` at `key` unless it is already there, and verify what landed: by ETag when it is
+ * the body's MD5 (a single-part PUT on S3 without SSE-KMS or SSE-C, R2, MinIO, and `fs`), else
+ * by reading the object back and hashing it. */
 export async function publishObject(
   store: Store,
   key: string,
@@ -93,6 +93,9 @@ async function makeYoungEnoughToKeep(
   return true;
 }
 
+/** Whether the object at `key` holds `body`. An ETag equal to the body's MD5 says so; any other
+ * ETag says nothing, since an ETag that looks like an MD5 need not be one (S3's under SSE-KMS
+ * or SSE-C is 32 hex digits of something else), so the object is read back and compared. */
 async function matches(
   store: Store,
   key: string,
@@ -100,7 +103,7 @@ async function matches(
   wantMd5: string,
   body: Uint8Array,
 ): Promise<boolean> {
-  if (etag && /^[0-9a-f]{32}$/.test(etag)) return etag === wantMd5;
+  if (etag === wantMd5) return true;
   const got = await getBytes(store, key);
   return got !== null && sha256(got) === sha256(body);
 }

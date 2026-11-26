@@ -489,8 +489,10 @@ Deleting a session deletes its span records and marker too.
 1. Write the trace object with `If-None-Match: *`; skip if the key exists (a `412` means another
    writer published the same content first). A replace writes it over an object already there
    with different bytes (see `traces` above).
-2. Verify: compare the backend's ETag to the body's MD5 when the ETag is a plain MD5
-   (single-part PUT on S3, R2, MinIO, and the folder store); otherwise read it back.
+2. Verify: an ETag equal to the body's MD5 settles it (a single-part PUT on S3, R2, MinIO, and
+   the folder store); otherwise read the object back and compare. An ETag that only looks like
+   an MD5 is not trusted to say the write failed: S3's ETag for an object under SSE-KMS or SSE-C
+   is 32 hex digits that are not the body's MD5.
 3. Append the change entry, unless the pointer already lists the trace and its object was there
    (a duplicate: nothing changes).
 4. Update `metadata.json` with `If-Match` (retrying on `412` from a fresh read). If the
