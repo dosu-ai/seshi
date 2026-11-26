@@ -114,6 +114,18 @@ export async function searchServerChecks(
 
   checks.push(freshness(status, config, now, shared));
 
+  if (status.scrub_failed) {
+    const failed = status.scrub_failed;
+    checks.push({
+      id: "search-scrub",
+      title: "Search scrub",
+      status: "warn",
+      summary: `the scrub failed${failed.failures > 1 ? ` ${failed.failures} times in a row` : ""}, last ${ago(now.getTime() - Date.parse(failed.at))}: text deleted, retracted or redacted${failed.due_since ? ` since ${failed.due_since}` : ""} is still in the index's files`,
+      detail: [failed.error, `the worker tries again at ${failed.retry_at}`],
+      hint: 'seshi search --scrub retries it on the worker\'s next pass; see "Deleted text" in docs/search.md',
+    });
+  }
+
   if (shared && status.events > LANCE_EVENTS_WARN) {
     checks.push({
       id: "search-size",

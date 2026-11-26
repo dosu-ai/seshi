@@ -36,7 +36,13 @@ export function searchIndexJobs(host: JobHost): Job[] {
           ready: status.ready ? 1 : 0,
           sessions: status.sessions,
           events: status.events,
-          ...(shared ? { building: status.building ? 1 : 0 } : {}),
+          ...(shared
+            ? {
+                building: status.building ? 1 : 0,
+                // Failed scrubs in a row: deleted text is still in the bucket while above 0.
+                scrub_failures: status.scrub_failed?.failures ?? 0,
+              }
+            : {}),
           ...(Number.isFinite(caughtUp)
             ? { caught_up_age_ms: Math.max(0, host.now().getTime() - caughtUp) }
             : {}),

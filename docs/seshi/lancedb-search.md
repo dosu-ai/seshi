@@ -343,7 +343,8 @@ of each result, and the counts in `state()`.
 `changes (stamp, owner, name, entry)`, with `entry` as JSON. `meta (key, value)` sits outside
 the generations and holds the schema (`seshi/search-lance/1`), the deployment, `search.events`,
 the live and building generations, `ready_at`, `caught_up_at`, `feed_through`, the session and
-event counts, and `scrub_due`.
+event counts, and the scrub's state: `scrub_due`, `scrubbed_at`, `scrub_started_at` while one
+runs, and after one fails `scrub_failed_at`, `scrub_error` and `scrub_failures`.
 
 ## Query semantics
 
@@ -569,8 +570,22 @@ tables in 12 minutes and built every index in 5.
   of it the full-text indexes. The copy is fully indexed and compact, so a scrub also does what
   `optimize()` would, and the worker skips `optimize()` on a pass that scrubs.
 
+- **A failed scrub** must not leak storage or stop the worker. It drops the copy it was making,
+  records `scrub_failed_at`, `scrub_error` and `scrub_failures` in `meta`, and leaves
+  `scrub_due` set. The worker tries again an hour later, then two, four and so on, at most a
+  day apart (or on its next pass after `seshi search --scrub`, when the request is newer than
+  the failure); meanwhile every pass indexes and runs `optimize()` as usual. A scrub that
+  never returns, because the worker was killed part-way (out of memory, a deploy), cannot
+  record anything itself: it sets `scrub_started_at` before it starts, and the next pass that
+  finds it still set records the failure the same way. Each scrub, and each failure, first
+  drops any table of the live or building generation that `meta` neither names nor holds in
+  the trash, so a copy left by a killed scrub goes too. `state()` returns the failure as
+  `scrub_failed`; `seshi search --status`, `seshi doctor --config` (`search-scrub`, a warning)
+  and the job's backlog (`scrub_failures`) show it, since until a scrub finishes deleted text
+  is still in the bucket. A finished scrub clears it.
+
 The bound for deleted text is therefore `search.lance.scrub` plus the grace: a day and a quarter
-of an hour by default. That is weaker than SQLite, where the delete is in the transaction, and
+of an hour by default, while scrubs succeed. That is weaker than SQLite, where the delete is in the transaction, and
 `docs/search.md` says so, as it already says the SQLite file holds session text. An operator who
 needs it sooner runs `seshi search --scrub`, which asks the worker to scrub on its next pass.
 

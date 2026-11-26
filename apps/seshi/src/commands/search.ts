@@ -233,7 +233,15 @@ export function statusLines(status: SearchStatus): string[] {
     ...(status.requested?.scrub
       ? [`scrub asked for ${when(status.requested.scrub)}: the worker runs it on its next pass`]
       : []),
+    ...(status.scrub_failed ? [scrubFailedLine(status.scrub_failed)] : []),
   ];
+}
+
+/** A failed scrub (F10.12): deleted text is still in the bucket. */
+export function scrubFailedLine(failed: NonNullable<SearchStatus["scrub_failed"]>): string {
+  const times = failed.failures > 1 ? ` (${failed.failures} times in a row)` : "";
+  const since = failed.due_since ? ` since ${when(failed.due_since)}` : "";
+  return `scrub failed ${when(failed.at)}${times}: ${failed.error}. Text deleted, retracted or redacted${since} is still in the index's files; the worker tries again at ${when(failed.retry_at)}, or on its next pass after seshi search --scrub`;
 }
 
 type Mode = "query" | "status" | "rebuild" | "scrub";
