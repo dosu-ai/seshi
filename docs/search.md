@@ -215,10 +215,22 @@ service_account_key = { file = "/secrets/seshi-sql-ro.json" }   # gs://
 # sas_token = { env = "SESHI_SQL_RO_SAS" }                       # az://
 ```
 
-- **Google Cloud Storage:** a service account with `roles/storage.objectViewer` on the bucket,
-  under an IAM condition `resource.name.startsWith("projects/_/buckets/<bucket>/objects/search/<deployment>/")`,
-  and a JSON key for it. On GKE or Cloud Run the metadata server answers for the whole service,
-  so the read-only identity has to be a key the config names.
+- **Google Cloud Storage:** a service account with `roles/storage.objectViewer` on the bucket
+  under an IAM condition on the index's prefix, and a JSON key for it. Lance lists the prefix,
+  and a list request is checked against the bucket, not an object, so the condition needs both
+  halves:
+
+  ```
+  resource.name.startsWith("projects/_/buckets/<bucket>/objects/search/<deployment>/")
+    || api.getAttribute("storage.googleapis.com/objectListPrefix", "").startsWith("search/<deployment>/")
+  ```
+
+  (`gcloud storage buckets add-iam-policy-binding … --condition-from-file`: the expression's
+  commas break `--condition`). With it, checked on 26 November 2026, the `lance` extension read
+  the index, and was refused reading a Lance table elsewhere in the bucket, writing a table
+  inside or outside the prefix, compacting the index and cleaning up its old versions. On GKE
+  or Cloud Run the metadata server answers for the whole service, so the read-only identity has
+  to be a key the config names.
 - **S3 and R2:** an access key whose policy allows `s3:GetObject` on `<bucket>/search/<deployment>/*`
   and `s3:ListBucket` on the bucket with a `s3:prefix` condition on the same prefix.
 - **Azure:** a SAS token for the container with read and list only, ideally a user-delegation

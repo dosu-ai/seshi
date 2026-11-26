@@ -84,8 +84,15 @@ function session(n: number): { s: IndexedSession; events: IndexedEvent[]; calls:
   };
 }
 
+// `gen` writes with the machine's own credentials; `time` only reads, and its workers read with
+// SESHI_MEASURE_STORAGE (the read-only credential under test).
 const open = () =>
-  lanceIndex({ uri, readConsistency: 0, ...(Object.keys(storage).length ? { storageOptions: storage } : {}) })({
+  lanceIndex({
+    uri,
+    readConsistency: 0,
+    readOnly: cmd === "time",
+    ...(cmd === "time" && Object.keys(storage).length ? { storageOptions: storage } : {}),
+  })({
     deployment: "measure",
     events: ROLES,
   });

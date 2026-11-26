@@ -7,7 +7,9 @@
  *
  *   SESHI_TEST_S3_ENDPOINT, SESHI_TEST_S3_BUCKET, SESHI_TEST_S3_ACCESS_KEY, SESHI_TEST_S3_SECRET_KEY
  *   SESHI_TEST_AZURE_ENDPOINT, SESHI_TEST_AZURE_ACCOUNT, SESHI_TEST_AZURE_KEY
- *   SESHI_TEST_GCS_BUCKET (Application Default Credentials, or SESHI_TEST_GCS_KEY_FILE) */
+ *   SESHI_TEST_GCS_BUCKET, written with Application Default Credentials. The workers read it
+ *   with SESHI_TEST_GCS_KEY_FILE, a read-only key for SESHI_TEST_GCS_PREFIX in it, when given;
+ *   else with GOOGLE_APPLICATION_CREDENTIALS. */
 
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -55,12 +57,19 @@ const gcsBucket = process.env.SESHI_TEST_GCS_EMULATOR
   ? undefined
   : process.env.SESHI_TEST_GCS_BUCKET;
 const gcsKey = process.env.SESHI_TEST_GCS_KEY_FILE;
+const gcsPrefix = (process.env.SESHI_TEST_GCS_PREFIX ?? "").replace(/^\/+|\/+$/g, "");
 
 interface Where {
   name: string;
   skip: boolean;
-  /** A fresh bucket location and its storage options; none for a folder. */
-  bucket?: () => { uri: string; storageOptions: Record<string, string> };
+  /** A fresh bucket location, the storage options the fixture is written with, and what the
+   * workers' environment holds to read it (the same options, unless `worker` says); none for a
+   * folder. */
+  bucket?: () => {
+    uri: string;
+    storageOptions: Record<string, string>;
+    worker?: Record<string, string>;
+  };
 }
 
 const stamp = () => `sql-conformance-${Date.now().toString(36)}`;
@@ -98,10 +107,20 @@ const WHERE: Where[] = [
     name: "Google Cloud Storage",
     skip: gcsBucket === undefined,
     bucket: () => ({
-      uri: `gs://${gcsBucket}/${stamp()}`,
-      storageOptions: gcsKey
-        ? { google_service_account_key: readFileSync(gcsKey, "utf8") }
-        : ({} as Record<string, string>),
+      uri: `gs://${gcsBucket}/${gcsPrefix ? `${gcsPrefix}/` : ""}${stamp()}`,
+      storageOptions: {},
+      worker: gcsKey
+        ? {
+            [SQL_STORAGE_ENV]: JSON.stringify({
+              google_service_account_key: readFileSync(gcsKey, "utf8"),
+            }),
+          }
+        : {
+            [SQL_STORAGE_ENV]: "{}",
+            ...(process.env.GOOGLE_APPLICATION_CREDENTIALS
+              ? { GOOGLE_APPLICATION_CREDENTIALS: process.env.GOOGLE_APPLICATION_CREDENTIALS }
+              : {}),
+          },
     }),
   },
 ];
@@ -151,7 +170,9 @@ describe.each(WHERE)("sql on a LanceDB index on $name", (where) => {
       // What the worker reads the bucket with: only what its environment holds.
       workerEnv: {
         [DUCKDB_EXTENSIONS_ENV]: extensions,
-        ...(bucket ? { [SQL_STORAGE_ENV]: JSON.stringify(bucket.storageOptions) } : {}),
+        ...(bucket
+          ? (bucket.worker ?? { [SQL_STORAGE_ENV]: JSON.stringify(bucket.storageOptions) })
+          : {}),
       },
       settings: { workers: 1, timeout: 30_000 },
     });
