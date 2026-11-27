@@ -203,6 +203,109 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "502": { $ref: "#/components/responses/StorageError" }
 
+  /v1/owners/{owner}/sessions/{archive_id}/events:
+    parameters:
+      - $ref: "#/components/parameters/owner_folder"
+      - $ref: "#/components/parameters/archive_id"
+    get:
+      tags: [sessions]
+      summary: Part of the session's events, by owner and archive id.
+      operationId: getEventsByArchive
+      description: |
+        Part of the session's events, read from its stored traces (`read_session`). Events are
+        numbered by `seq`: their place in the session's current trace chain (its last whole
+        upload and the continuations after it), from 0 across its traces. A replace starts a
+        new chain, so `seq`s hold while the head does: every answer names it
+        (`session.head`), and `head` refuses a changed session. The session's header gives
+        its agent, repository, times, number of events, models and token totals. Read as the
+        trace routes are: anyone who may read the session.
+      parameters:
+        - name: from
+          in: query
+          description: The first `seq` of the range `[from, to)`; 0 by default.
+          schema: { type: integer, minimum: 0 }
+        - name: to
+          in: query
+          description: The `seq` after the range's last; the session's end by default.
+          schema: { type: integer, minimum: 0 }
+        - name: around
+          in: query
+          description: Or, instead of `from` and `to`, `context` events either side of this one.
+          schema: { type: integer, minimum: 0 }
+        - name: context
+          in: query
+          description: Events either side of `around`; larger values are capped at 50.
+          schema: { type: integer, minimum: 0, default: 5 }
+        - name: mode
+          in: query
+          description: "`condensed` cuts each tool result to its first 200 characters; `full` gives it as stored."
+          schema: { type: string, enum: [condensed, full], default: condensed }
+        - name: roles
+          in: query
+          description: Only events of these roles, comma-separated; the others are skipped.
+          schema: { type: string }
+        - name: max_chars
+          in: query
+          description: |
+            Characters of event text to give at most; larger values are capped at 30000. The
+            answer stops at an event boundary and gives `next`, or cuts an event that does not
+            fit when nothing is given yet or much room is left (`cut` says how much was left
+            out).
+          schema: { type: integer, minimum: 1000, default: 30000 }
+        - name: event
+          in: query
+          description: Read this one event's text in pieces, from `offset` (with `next_offset`).
+          schema: { type: integer, minimum: 0 }
+        - name: offset
+          in: query
+          description: With `event`, where in its text to start.
+          schema: { type: integer, minimum: 0, default: 0 }
+        - name: trace
+          in: query
+          description: |
+            Count `from`, `to`, `around` and `event` from the start of this trace of the
+            session's current chain (a content hash, or its first 8 or more characters): a
+            search match's `content_hash` and `event_index`. The answer gives `seq`s.
+          schema: { type: string, pattern: "^[0-9a-f]{8,64}$" }
+        - name: head
+          in: query
+          description: Refuse with `409 head_changed` when the session's head is no longer this one.
+          schema: { $ref: "#/components/schemas/Sha256" }
+      responses:
+        "200":
+          description: The session's header and the events read.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionEvents" }
+        "400":
+          description: |
+            `bad_query`: an unknown or repeated parameter, a value that is not one, `around`
+            with `from` or `to`, `event` with a range, a position past the session's events, a
+            `trace` that names more than one of its traces.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404":
+          description: |
+            `not_found`: no such session, or one the caller may not read. `no_trace`: the
+            session has no head, or a trace of its chain is missing. `not_in_chain`: `trace` is
+            not one of the session's current traces (a replace dropped it).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: "`head_changed`: the session's head is no longer `head`; its events may be numbered again."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "410":
+          description: The session was tombstoned; it has no events and will not again.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
   /v1/owners/{owner}/sessions/{archive_id}/trace:
     parameters:
       - $ref: "#/components/parameters/owner_folder"
@@ -641,6 +744,110 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "410":
           description: A retraction of a session already removed. `code` is `redacted`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
+  /v1/sessions/{format}/{session_id}/events:
+    parameters:
+      - $ref: "#/components/parameters/format"
+      - $ref: "#/components/parameters/session_id"
+      - $ref: "#/components/parameters/owner"
+    get:
+      tags: [sessions]
+      summary: Part of the session's events, numbered across its traces.
+      operationId: getEvents
+      description: |
+        Part of the session's events, read from its stored traces (`read_session`). Events are
+        numbered by `seq`: their place in the session's current trace chain (its last whole
+        upload and the continuations after it), from 0 across its traces. A replace starts a
+        new chain, so `seq`s hold while the head does: every answer names it
+        (`session.head`), and `head` refuses a changed session. The session's header gives
+        its agent, repository, times, number of events, models and token totals. Read as the
+        trace routes are: anyone who may read the session.
+      parameters:
+        - name: from
+          in: query
+          description: The first `seq` of the range `[from, to)`; 0 by default.
+          schema: { type: integer, minimum: 0 }
+        - name: to
+          in: query
+          description: The `seq` after the range's last; the session's end by default.
+          schema: { type: integer, minimum: 0 }
+        - name: around
+          in: query
+          description: Or, instead of `from` and `to`, `context` events either side of this one.
+          schema: { type: integer, minimum: 0 }
+        - name: context
+          in: query
+          description: Events either side of `around`; larger values are capped at 50.
+          schema: { type: integer, minimum: 0, default: 5 }
+        - name: mode
+          in: query
+          description: "`condensed` cuts each tool result to its first 200 characters; `full` gives it as stored."
+          schema: { type: string, enum: [condensed, full], default: condensed }
+        - name: roles
+          in: query
+          description: Only events of these roles, comma-separated; the others are skipped.
+          schema: { type: string }
+        - name: max_chars
+          in: query
+          description: |
+            Characters of event text to give at most; larger values are capped at 30000. The
+            answer stops at an event boundary and gives `next`, or cuts an event that does not
+            fit when nothing is given yet or much room is left (`cut` says how much was left
+            out).
+          schema: { type: integer, minimum: 1000, default: 30000 }
+        - name: event
+          in: query
+          description: Read this one event's text in pieces, from `offset` (with `next_offset`).
+          schema: { type: integer, minimum: 0 }
+        - name: offset
+          in: query
+          description: With `event`, where in its text to start.
+          schema: { type: integer, minimum: 0, default: 0 }
+        - name: trace
+          in: query
+          description: |
+            Count `from`, `to`, `around` and `event` from the start of this trace of the
+            session's current chain (a content hash, or its first 8 or more characters): a
+            search match's `content_hash` and `event_index`. The answer gives `seq`s.
+          schema: { type: string, pattern: "^[0-9a-f]{8,64}$" }
+        - name: head
+          in: query
+          description: Refuse with `409 head_changed` when the session's head is no longer this one.
+          schema: { $ref: "#/components/schemas/Sha256" }
+      responses:
+        "200":
+          description: The session's header and the events read.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionEvents" }
+        "400":
+          description: |
+            `bad_query`: an unknown or repeated parameter, a value that is not one, `around`
+            with `from` or `to`, `event` with a range, a position past the session's events, a
+            `trace` that names more than one of its traces.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404":
+          description: |
+            `not_found`: no such session, or one the caller may not read. `no_trace`: the
+            session has no head, or a trace of its chain is missing. `not_in_chain`: `trace` is
+            not one of the session's current traces (a replace dropped it).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: "`head_changed`: the session's head is no longer `head`; its events may be numbered again."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "410":
+          description: The session was tombstoned; it has no events and will not again.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -1348,6 +1555,104 @@ paths:
           description: |
             `index_building`: this instance's index has not caught up with the change feed yet
             (it was just started, or wiped). `Retry-After` says when to ask again.
+          headers:
+            Retry-After:
+              description: Seconds to wait.
+              schema: { type: integer }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /v1/search/sessions:
+    get:
+      tags: [search]
+      summary: Sessions by who, where and when, with no search words (`list_sessions`).
+      operationId: searchSessions
+      description: |
+        The sessions the caller may read that overlap a window (the last 7 days by default),
+        newest first by `updated_at`, from the search index's sessions. Who may see what is as
+        for `GET /v1/search`, and each session is checked against its current metadata before
+        it is returned. A session overlaps the window when it started (its earliest event, or
+        its last update) at or before `until` and ended (its latest event, or its last update)
+        at or after `since`.
+      parameters:
+        - name: owner
+          in: query
+          description: |
+            Only this owner's sessions (`[auth.owner_aliases]` folded in). Without the
+            `search` scope, only the caller's own owner (the default); any other is `403`.
+          schema: { $ref: "#/components/schemas/Owner" }
+        - name: agent
+          in: query
+          description: Only sessions filed under this format or run by this agent (`origin_agent`).
+          schema: { type: string, maxLength: 512 }
+        - name: repo
+          in: query
+          description: As for `GET /v1/search`.
+          schema: { type: string, maxLength: 512 }
+        - name: branch
+          in: query
+          schema: { type: string, maxLength: 512 }
+        - name: harness
+          in: query
+          schema: { type: string, maxLength: 512 }
+        - name: agent_version
+          in: query
+          schema: { type: string, maxLength: 512 }
+        - name: model
+          in: query
+          schema: { type: string, maxLength: 512 }
+        - name: label
+          in: query
+          description: A label as `key=value`; repeat it for more. A session must carry every one.
+          style: form
+          explode: true
+          schema:
+            type: array
+            maxItems: 32
+            items: { type: string, maxLength: 1024 }
+        - name: source
+          in: query
+          schema: { type: string, maxLength: 512 }
+        - name: since
+          in: query
+          description: The window's start, as a time or an age back from now (`7d`, `24h`); 7 days ago by default.
+          schema: { type: string }
+        - name: until
+          in: query
+          description: The window's end, as a time or an age; now by default.
+          schema: { type: string }
+        - name: limit
+          in: query
+          description: Sessions per page; larger values are capped at 100.
+          schema: { type: integer, minimum: 1, default: 20 }
+        - name: after
+          in: query
+          description: The previous page's `cursor`.
+          schema: { type: string }
+      responses:
+        "200":
+          description: The sessions, newest first.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionList" }
+        "400":
+          description: |
+            `bad_query`: an unknown or repeated parameter, a value that is not one (an owner id,
+            a time or age, a number), `since` after `until`, a cursor this server did not give.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: "`search_disabled`: this server has `search.enabled = false`."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "502": { $ref: "#/components/responses/StorageError" }
+        "503":
+          description: "`index_building`: as for `GET /v1/search`."
           headers:
             Retry-After:
               description: Seconds to wait.
@@ -3183,11 +3488,10 @@ components:
               description: When it last finished reading the change feed.
             sessions: { type: integer, minimum: 0 }
 
-    SearchResult:
+    SessionSummary:
       type: object
-      description: A session with records that match.
-      required:
-        [owner, format, session_id, archive_id, visibility, updated_at, score, hits, matches]
+      description: A session as the search index holds it.
+      required: [owner, format, session_id, archive_id, visibility, updated_at]
       properties:
         owner: { $ref: "#/components/schemas/Owner" }
         format: { type: string, description: The format the session is filed under. }
@@ -3210,16 +3514,125 @@ components:
         started_at: { type: string, format: date-time }
         ended_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
-        score:
-          type: number
-          description: How well it matched; higher is better, comparable within one answer only.
-        hits:
-          type: integer
-          minimum: 1
-          description: How many of its records matched.
-        matches:
+
+    SearchResult:
+      description: A session with records that match.
+      allOf:
+        - { $ref: "#/components/schemas/SessionSummary" }
+        - type: object
+          required: [score, hits, matches]
+          properties:
+            score:
+              type: number
+              description: How well it matched; higher is better, comparable within one answer only.
+            hits:
+              type: integer
+              minimum: 1
+              description: How many of its records matched.
+            matches:
+              type: array
+              items: { $ref: "#/components/schemas/SearchMatch" }
+
+    SessionList:
+      type: object
+      required: [sessions, window, index]
+      properties:
+        sessions:
           type: array
-          items: { $ref: "#/components/schemas/SearchMatch" }
+          items: { $ref: "#/components/schemas/SessionSummary" }
+        window:
+          type: object
+          description: The window the sessions overlap, as the server read it.
+          required: [since]
+          properties:
+            since: { type: string, format: date-time }
+            until: { type: string, format: date-time }
+        cursor:
+          type: string
+          description: Pass as `after` for the next page; absent on the last.
+        index:
+          type: object
+          required: [ready_at, sessions]
+          properties:
+            ready_at: { type: string, format: date-time }
+            caught_up_at: { type: string, format: date-time }
+            sessions: { type: integer, minimum: 0 }
+
+    SessionEvents:
+      type: object
+      required: [session, mode, from, to, events]
+      properties:
+        session: { $ref: "#/components/schemas/SessionHeader" }
+        mode: { type: string, enum: [condensed, full] }
+        from: { type: integer, minimum: 0, description: "The range read, `[from, to)`." }
+        to: { type: integer, minimum: 0 }
+        events:
+          type: array
+          items: { $ref: "#/components/schemas/SessionEvent" }
+        next:
+          type: integer
+          minimum: 0
+          description: The `seq` to read on from; absent at the session's end.
+        next_offset:
+          type: integer
+          minimum: 0
+          description: For a read of one event in pieces, the `offset` to read on from; absent at its end.
+
+    SessionEvent:
+      type: object
+      required: [seq, role, content_hash, event_index, text, chars]
+      properties:
+        seq: { type: integer, minimum: 0, description: Its place in the session's current trace chain. }
+        role:
+          type: string
+          enum: [user, assistant, tool_call, tool_result, system, observation, reasoning]
+        content_hash: { type: string, pattern: "^[0-9a-f]{64}$", description: The trace it is in. }
+        event_index: { type: integer, minimum: 0, description: Its index in that trace's events. }
+        timestamp: { type: string, format: date-time }
+        tool_name: { type: string }
+        tool_call_id: { type: string }
+        ok: { type: boolean, description: Tool results that record whether the call succeeded. }
+        text: { type: string }
+        chars: { type: integer, minimum: 0, description: "The text's full length, in UTF-16 code units." }
+        offset: { type: integer, minimum: 0, description: "Where `text` starts: only on a read of one event in pieces." }
+        cut: { type: integer, minimum: 1, description: Characters after `text` left out. }
+
+    SessionHeader:
+      type: object
+      required:
+        [owner, archive_id, format, session_id, visibility, updated_at, head, traces, events, models, llm_calls, tokens]
+      properties:
+        owner: { $ref: "#/components/schemas/Owner" }
+        archive_id: { type: string, pattern: "^[0-9a-f]{64}$" }
+        format: { type: string }
+        session_id: { type: string }
+        origin_agent: { type: string }
+        harness: { type: string }
+        project: { type: string }
+        repo: { type: string }
+        branch: { type: string }
+        labels: { $ref: "#/components/schemas/Labels" }
+        visibility: { type: string, enum: [org, owner] }
+        started_at: { type: string, format: date-time }
+        ended_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        head: { type: string, pattern: "^[0-9a-f]{64}$" }
+        traces: { type: integer, minimum: 1, description: Traces in the current chain. }
+        events: { type: integer, minimum: 0, description: Events across them. }
+        models: { type: array, items: { type: string } }
+        llm_calls: { type: integer, minimum: 0 }
+        tokens:
+          type: object
+          description: Token counts summed over the chain's model calls.
+          required:
+            [input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens, reasoning_tokens, total_tokens]
+          properties:
+            input_tokens: { type: integer, minimum: 0 }
+            output_tokens: { type: integer, minimum: 0 }
+            cache_read_input_tokens: { type: integer, minimum: 0 }
+            cache_creation_input_tokens: { type: integer, minimum: 0 }
+            reasoning_tokens: { type: integer, minimum: 0 }
+            total_tokens: { type: integer, minimum: 0 }
 
     SearchMatch:
       type: object

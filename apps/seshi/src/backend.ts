@@ -10,17 +10,31 @@ import {
 import type { Instance } from "@seshi/instance";
 import {
   type Identity,
+  isStub,
   localWriter,
   type RenderFormat,
   type SearchRequest,
   type SearchResults,
+  type SessionEvents,
+  type SessionEventsRequest,
+  type SessionList,
+  type SessionListRequest,
   type SessionMetadata,
   type SessionsPage,
   type StoredTrace,
   type Visibility,
 } from "@seshi/model";
 import type { StoreSeshi } from "@seshi/pipeline";
-import { LOCAL_VIEWER, type Viewer, viewerFor } from "@seshi/search";
+import {
+  LOCAL_VIEWER,
+  readSessionEvents,
+  type SearchService,
+  SessionReadError,
+  TraceCache,
+  type Viewer,
+  viewerFor,
+} from "@seshi/search";
+import { readMetadata } from "@seshi/store";
 import { type Account, accountCredential, serverOf } from "./account/account";
 import type { Purpose } from "./account/credential";
 import { NotSignedIn } from "./account/credential";
@@ -38,6 +52,60 @@ export interface TraceOptions extends OwnerOption {
 
 export interface SearchHooks {
   building?: () => void;
+}
+
+/** A session as a reader names it: by its format and id (with `owner`, another's), or by its
+ * owner and archive id, as search results and listings name it. */
+export type SessionRef =
+  | { format: string; sessionId: string; owner?: string }
+  | { owner: string; archiveId: string };
+
+const ARCHIVE = /^[0-9a-f]{64}$/;
+
+/** A session named in one string: `owner/archive_id`, `format/session_id`, or a server URL
+ * that ends in either (`…/v1/owners/<owner>/sessions/<archive_id>`,
+ * `…/v1/sessions/<format>/<session_id>`). Undefined for anything else. */
+export function parseSessionRef(text: string): SessionRef | undefined {
+  let path = text.trim();
+  if (/^https?:\/\//.test(path)) {
+    let url: URL;
+    try {
+      url = new URL(path);
+    } catch {
+      return undefined;
+    }
+    const parts = url.pathname
+      .split("/")
+      .filter((p) => p !== "")
+      .map(decodeURIComponent);
+    const owners = parts.lastIndexOf("owners");
+    if (owners >= 0 && parts[owners + 2] === "sessions" && parts[owners + 3] !== undefined) {
+      const [owner, archiveId] = [parts[owners + 1] as string, parts[owners + 3] as string];
+      return ARCHIVE.test(archiveId) ? { owner, archiveId } : undefined;
+    }
+    const sessions = parts.lastIndexOf("sessions");
+    if (sessions >= 0 && parts[sessions + 2] !== undefined) {
+      return {
+        format: parts[sessions + 1] as string,
+        sessionId: parts[sessions + 2] as string,
+        ...(url.searchParams.get("owner")
+          ? { owner: url.searchParams.get("owner") as string }
+          : {}),
+      };
+    }
+    return undefined;
+  }
+  const slash = path.indexOf("/");
+  if (slash <= 0 || slash === path.length - 1) return undefined;
+  const [first, rest] = [path.slice(0, slash), path.slice(slash + 1)];
+  if (ARCHIVE.test(rest)) return { owner: first, archiveId: rest };
+  path = rest;
+  return { format: first, sessionId: path };
+}
+
+/** How a reference is written back: `owner/archive_id` or `format/session_id`. */
+export function sessionRefText(ref: SessionRef): string {
+  return "archiveId" in ref ? `${ref.owner}/${ref.archiveId}` : `${ref.format}/${ref.sessionId}`;
 }
 
 export interface Backend {
@@ -68,6 +136,10 @@ export interface Backend {
     options?: OwnerOption,
   ): Promise<ReviewDecision[] | null>;
   search(request: SearchRequest, hooks?: SearchHooks): Promise<SearchResults>;
+  /** Sessions by who, where and when, from the search index (`list_sessions`). */
+  searchSessions(request: SessionListRequest, hooks?: SearchHooks): Promise<SessionList>;
+  /** Part of a session's events (`read_session`). */
+  sessionEvents(ref: SessionRef, request: SessionEventsRequest): Promise<SessionEvents>;
   listTokens(filter: { owner?: string; kind?: TokenKind; all?: boolean }): Promise<TokenInfo[]>;
   createToken(request: TokenRequest): Promise<{ token: string; record: TokenInfo }>;
   revokeToken(id: string): Promise<TokenInfo | null>;
@@ -116,6 +188,16 @@ export class ServerBackend implements Backend {
   }
   search(request: SearchRequest): Promise<SearchResults> {
     return this.db.search(request);
+  }
+  searchSessions(request: SessionListRequest): Promise<SessionList> {
+    return this.db.searchSessions(request);
+  }
+  sessionEvents(ref: SessionRef, request: SessionEventsRequest): Promise<SessionEvents> {
+    return "archiveId" in ref
+      ? this.db.sessionEventsByArchive(ref.owner, ref.archiveId, request)
+      : this.db.sessionEvents(ref.format, ref.sessionId, request, {
+          ...(ref.owner ? { owner: ref.owner } : {}),
+        });
   }
   listTokens(filter: { owner?: string; kind?: TokenKind; all?: boolean }) {
     return this.db.listTokens(filter);
@@ -284,7 +366,8 @@ export class ServerlessBackend implements Backend {
     );
     return records as ReviewDecision[];
   }
-  async search(request: SearchRequest, hooks: SearchHooks = {}): Promise<SearchResults> {
+  /** The local index, caught up when it has not been lately. */
+  private async index(hooks: SearchHooks): Promise<SearchService> {
     const search = this.instance.search;
     if (!search) {
       throw new Refused(
@@ -300,7 +383,40 @@ export class ServerlessBackend implements Backend {
       caughtUp !== undefined &&
       Date.now() - Date.parse(caughtUp) < 2 * this.instance.config.search.interval;
     if (!fresh) await this.refused(() => search.catchUp());
-    return search.search(this.viewer(), request);
+    return search;
+  }
+  async search(request: SearchRequest, hooks: SearchHooks = {}): Promise<SearchResults> {
+    return (await this.index(hooks)).search(this.viewer(), request);
+  }
+  async searchSessions(request: SessionListRequest, hooks: SearchHooks = {}): Promise<SessionList> {
+    return (await this.index(hooks)).listSessions(this.viewer(), request);
+  }
+  /** Decoded traces this process has read, for reads of one session a range at a time. */
+  private readonly traceCache = new TraceCache(8);
+  async sessionEvents(ref: SessionRef, request: SessionEventsRequest): Promise<SessionEvents> {
+    const located = await this.refused(async () => {
+      if ("archiveId" in ref) {
+        const metadata = this.readable(
+          await readMetadata(this.instance.store, ref.owner, ref.archiveId),
+        );
+        return metadata && !isStub(metadata) ? { folder: ref.owner, metadata } : null;
+      }
+      const metadata = this.readable(
+        await this.sessionsAs(ref.owner).getSession(ref.format, ref.sessionId),
+      );
+      return metadata && !isStub(metadata) ? { folder: ref.owner ?? this.owner, metadata } : null;
+    });
+    if (located === null) {
+      throw new SessionReadError(404, "not_found", `no session ${sessionRefText(ref)}`);
+    }
+    return this.refused(() =>
+      readSessionEvents({
+        store: this.instance.store,
+        ...located,
+        request,
+        cache: this.traceCache,
+      }),
+    );
   }
   private noTokens(): never {
     throw new Refused(

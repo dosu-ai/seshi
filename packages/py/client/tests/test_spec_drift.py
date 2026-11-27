@@ -68,6 +68,11 @@ MODELS: dict[str, type[BaseModel]] = {
     "SearchResults": m.SearchResults,
     "SearchResult": m.SearchResult,
     "SearchMatch": m.SearchMatch,
+    "SessionSummary": m.SessionSummary,
+    "SessionList": m.SessionList,
+    "SessionEvents": m.SessionEvents,
+    "SessionEvent": m.SessionEvent,
+    "SessionHeader": m.SessionHeader,
     "SourceStatus": m.SourceStatus,
     "SourceDetail": m.SourceDetail,
     "SourceRecord": m.SourceRecord,
@@ -139,13 +144,16 @@ RESPONSES: dict[str, dict[str, Reads]] = {
     "setVisibility": {"200": m.SessionMetadata},
     "tombstone": {"200": m.Removed},
     "getTrace": {"200": (m.Trace, m.LettaTrace, m.OtlpTrace, m.AtifDocument)},
+    "getEvents": {"200": m.SessionEvents},
     "sessionReviews": {"200": m.ReviewsPage},
     "getSessionByArchive": {"200": m.SessionMetadata},
     "getTraceByArchive": {"200": (m.Trace, m.LettaTrace, m.OtlpTrace, m.AtifDocument)},
+    "getEventsByArchive": {"200": m.SessionEvents},
     "sessionReviewsByArchive": {"200": m.ReviewsPage},
     "changes": {"200": m.ChangesPage},
     "allChanges": {"200": m.AllChangesPage},
     "search": {"200": m.SearchResults},
+    "searchSessions": {"200": m.SessionList},
     "redactionRules": {"200": m.RedactionRules, "304": None},
     "captureRules": {"200": m.CaptureRules, "304": None},
     "createToken": {"201": m.CreatedToken},
@@ -377,6 +385,19 @@ def test_each_route_is_where_the_spec_puts_it_with_its_parameters(operation_id: 
 
 def test_search_sends_every_filter_the_spec_takes() -> None:
     assert set(m.SearchRequest.model_fields) == set(ROUTES["search"].query)
+
+
+def _query_names(model: type[BaseModel]) -> set[str]:
+    return {info.alias or name for name, info in model.model_fields.items()}
+
+
+def test_search_sessions_sends_every_filter_the_spec_takes() -> None:
+    assert _query_names(m.SessionListRequest) == set(ROUTES["searchSessions"].query)
+
+
+def test_session_events_send_every_parameter_the_spec_takes() -> None:
+    assert _query_names(m.SessionEventsRequest) == set(ROUTES["getEventsByArchive"].query)
+    assert set(ROUTES["getEvents"].query) == {"owner", *ROUTES["getEventsByArchive"].query}
 
 
 @pytest.mark.parametrize("operation_id", sorted(ROUTES))

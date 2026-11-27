@@ -13,6 +13,20 @@ from dataclasses import dataclass
 
 SESSION = "/v1/sessions/{format}/{session_id}"
 ARCHIVE = "/v1/owners/{owner}/sessions/{archive_id}"
+EVENTS_QUERY = (
+    "from",
+    "to",
+    "around",
+    "context",
+    "mode",
+    "roles",
+    "max_chars",
+    "event",
+    "offset",
+    "trace",
+    "head",
+)
+"""The query of both routes that read a session's events."""
 
 
 @dataclass(frozen=True)
@@ -40,9 +54,11 @@ ROUTES: dict[str, Route] = {
     "setVisibility": Route("PATCH", SESSION, query=("owner",)),
     "tombstone": Route("DELETE", SESSION, query=("owner",), headers=("X-Seshi-Retract",)),
     "getTrace": Route("GET", f"{SESSION}/trace", query=("owner", "hash", "render")),
+    "getEvents": Route("GET", f"{SESSION}/events", query=("owner", *EVENTS_QUERY)),
     "sessionReviews": Route("GET", f"{SESSION}/reviews", query=("owner",)),
     "getSessionByArchive": Route("GET", ARCHIVE),
     "getTraceByArchive": Route("GET", f"{ARCHIVE}/trace", query=("hash", "render")),
+    "getEventsByArchive": Route("GET", f"{ARCHIVE}/events", query=EVENTS_QUERY),
     "sessionReviewsByArchive": Route("GET", f"{ARCHIVE}/reviews"),
     "changes": Route("GET", "/v1/changes", query=("owner", "after", "since", "limit")),
     "allChanges": Route("GET", "/v1/changes/all", query=("after", "since", "limit")),
@@ -67,6 +83,25 @@ ROUTES: dict[str, Route] = {
             "limit",
             "matches",
             "cursor",
+        ),
+    ),
+    "searchSessions": Route(
+        "GET",
+        "/v1/search/sessions",
+        query=(
+            "owner",
+            "agent",
+            "repo",
+            "branch",
+            "harness",
+            "agent_version",
+            "model",
+            "label",
+            "source",
+            "since",
+            "until",
+            "limit",
+            "after",
         ),
     ),
     "redactionRules": Route("GET", "/v1/redaction/rules", headers=("If-None-Match",)),
