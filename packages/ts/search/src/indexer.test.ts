@@ -25,7 +25,14 @@ import {
 } from "@seshi/store";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PageCommit } from "./backend";
-import { currentTraces, Indexer, indexedCalls, searchableEvents, tracesFrom } from "./indexer";
+import {
+  BEHIND_SKEW_MS,
+  currentTraces,
+  Indexer,
+  indexedCalls,
+  searchableEvents,
+  tracesFrom,
+} from "./indexer";
 import { MEMORY_INDEX } from "./paths";
 import { parseQuery } from "./query";
 import { SqliteIndex } from "./sqlite";
@@ -252,6 +259,25 @@ describe("the indexer (F10.2)", () => {
     expect(await indexer.behind("alice")).toBe(false);
     // An owner never read, with nothing written, is not behind.
     expect(await indexer.behind("carol")).toBe(false);
+  });
+
+  it("is not behind for entries a catch-up held back inside the lag window", async () => {
+    // An upload, then its deletion and a visibility flip, all within the lag window: the
+    // upload's and the first flip's entries no longer show, so the pass leaves them unread.
+    await db().ingest({ format: "trajectory", session_id: "s1", transcript: log("gone") });
+    await db().ingest({ format: "trajectory", session_id: "s2", transcript: log("flip") });
+    const base = { store, owner: "alice", format: "trajectory", now: () => tick() };
+    await tombstone({ ...base, session_id: "s1" });
+    await setVisibility({ ...base, session_id: "s2", visibility: "owner" });
+    await setVisibility({ ...base, session_id: "s2", visibility: "org" });
+    const { indexer } = setup();
+    tick(BEHIND_SKEW_MS + 1000);
+    await indexer.catchUp();
+    expect(await indexer.behind("alice")).toBe(false);
+    // One written after the catch-up still is.
+    tick();
+    await db().ingest({ format: "trajectory", session_id: "s3", transcript: log("new") });
+    expect(await indexer.behind("alice")).toBe(true);
   });
 
   it("finds an unread entry past a full page of read ones", async () => {
