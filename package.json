@@ -27,6 +27,7 @@
     "test:watch": "bun --bun vitest",
     "test:laptop": "bun --bun vitest run --config vitest.laptop.config.ts",
     "test:agent": "VERIFY_SESHI_AGENT=1 bun --bun vitest run tests/agent",
+    "test:sql-fuzz": "SESHI_SQL_FUZZ=1 bun --bun vitest run --no-file-parallelism packages/ts/search/src/sql/sql-fuzz.test.ts packages/ts/search/sql/src/sql-fuzz.test.ts",
     "scenarios:process": "bun run tests/tooling/scenario-proc/main.ts",
     "typecheck": "bunx tsc --noEmit && bunx tsc --noEmit -p integrations/cursor/extension",
     "lint": "bunx biome lint .",
