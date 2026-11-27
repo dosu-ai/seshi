@@ -74,7 +74,11 @@ export function skillFile(skillsDir: string): string {
 }
 
 /** Write the skill into `skillsDir` unless someone else's skill is there, and remove seshi's own
- * skill under its old name. */
+ * skill under its old name.
+ *
+ * A skills folder seshi cannot write (a read-only mount, such as the shared skills store Docker
+ * Sandboxes mounts at `~/.claude/skills`) only costs the skill: the hooks, written before this,
+ * capture without it, so the install goes on and says so in a note. */
 export function installSkill(
   skillsDir: string,
   command: readonly string[],
@@ -84,9 +88,25 @@ export function installSkill(
   if (existing !== undefined && !existing.includes(SKILL_MARKER)) {
     return { changed: [], notes: [`${path} is someone else's skill, so it was left as it is`] };
   }
-  writeFileAtomic(path, captureSkill(command));
+  try {
+    writeFileAtomic(path, captureSkill(command));
+  } catch (error) {
+    if (!isNotWritable(error)) throw error;
+    return {
+      changed: [],
+      notes: [
+        `${skillsDir} cannot be written, so the ${CAPTURE_COMMAND} skill was not added there; capture works without it`,
+      ],
+    };
+  }
   const old = removeOne(join(skillsDir, OLD_SKILL_NAME, "SKILL.md"));
   return { changed: [path], notes: old.map((p) => `removed ${p}, the skill's old name`) };
+}
+
+/** A file system error that means the folder cannot be written, as opposed to a real fault. */
+function isNotWritable(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code;
+  return code === "EROFS" || code === "EACCES" || code === "EPERM";
 }
 
 /** Remove the skill's folder from `skillsDir`, under its name and its old one, where the skill
