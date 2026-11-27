@@ -120,7 +120,7 @@ export async function searchServerChecks(
       id: "search-scrub",
       title: "Search scrub",
       status: "warn",
-      summary: `the scrub failed${failed.failures > 1 ? ` ${failed.failures} times in a row` : ""}, last ${ago(now.getTime() - Date.parse(failed.at))}: text deleted, retracted or redacted${failed.due_since ? ` since ${failed.due_since}` : ""} is still in the index's files`,
+      summary: `the scrub failed${failed.failures > 1 ? ` ${failed.failures} times in a row` : ""}, last ${ago(now.getTime() - Date.parse(failed.at))}${failed.due_since ? `: text deleted, retracted or redacted since ${failed.due_since} is still in the index's files` : ""}`,
       detail: [failed.error, `the worker tries again at ${failed.retry_at}`],
       hint: 'seshi search --scrub retries it on the worker\'s next pass; see "Deleted text" in docs/search.md',
     });

@@ -181,9 +181,11 @@ scrub = "24h"
   asks the worker to scrub on its next pass. A scrub that fails, or stops part-way (the worker
   killed out of memory, say), drops the copy it was making and is tried again an hour later,
   then two, four and so on, at most a day apart; meanwhile the worker indexes and optimizes as
-  usual. Until one finishes, `seshi search --status` and `seshi doctor --config` say that
-  deleted text is still in the index's files, and the job's backlog counts the failures
-  (`scrub_failures`). `seshi search --scrub` after a failure tries again on the next pass.
+  usual. The failure is in the worker's log and the search-index job's last error. Until a
+  scrub finishes, `seshi search --status` and `seshi doctor --config` say that deleted text is
+  still in the index's files, and the job's backlog counts the failures (`scrub_failures`).
+  `seshi search --scrub` after a failure tries again on the next pass. A graceful shutdown
+  part-way is not a failure.
 - **Upkeep.** After a pass that committed something, at most every `search.lance.optimize` (an
   hour), the worker compacts the tables and adds new rows to their indexes. That rewrites the
   indexes, so it takes longer as the index grows: about 1 minute at 1M records and 8 to 9 at

@@ -77,7 +77,12 @@ export const COMMIT_STEPS = [
 export type CommitStep = (typeof COMMIT_STEPS)[number];
 
 /** The steps of a scrub's copy of one table: what a failure test fails before. */
-export type ScrubStep = "copy" | "index" | "switch";
+export type ScrubStep = "copy" | "index" | "switch" | "switched";
+
+/** A running scrub: the beat that marks it alive, and throws once its signal aborts. */
+interface ScrubRun {
+  beat: () => Promise<void>;
+}
 
 export interface LanceIndexOptions extends LanceSettings {
   /** How long a replaced table or generation is kept for readers still on it, in ms (15
@@ -103,12 +108,26 @@ export interface LanceIndexOptions extends LanceSettings {
  * acts on them in `maintain()`: there is only ever one writer (F10.8). */
 const REBUILD_REQUESTED = "rebuild_requested";
 const SCRUB_REQUESTED = "scrub_requested";
-/** Set while a scrub runs: still set at the start of a pass, it stopped part-way. */
+/** Set while a scrub runs, with a beat it moves on as it goes. Still set at the start of a
+ * pass with a beat `SCRUB_STALE` old, it stopped part-way; with a newer beat it is another
+ * worker's, which a rolling deploy runs beside this one for a while. */
 const SCRUB_STARTED = "scrub_started_at";
+const SCRUB_BEAT = "scrub_beat_at";
+/** The `scrub_requested` a scrub started with ("" for none): a request other than it is new. */
+const SCRUB_TRIED = "scrub_tried_request";
 /** The last failure, its message, and how many in a row: cleared by a scrub that finishes. */
 const SCRUB_FAILED = "scrub_failed_at";
 const SCRUB_ERROR = "scrub_error";
 const SCRUB_FAILURES = "scrub_failures";
+/** Every key a scrub keeps while it runs or after it fails, cleared by one that finishes. */
+const SCRUB_KEYS = [
+  SCRUB_STARTED,
+  SCRUB_BEAT,
+  SCRUB_TRIED,
+  SCRUB_FAILED,
+  SCRUB_ERROR,
+  SCRUB_FAILURES,
+];
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -122,6 +141,14 @@ const SCRUB_PART_ROWS = 1_000_000;
  * meanwhile each pass indexes and runs `optimize()` as usual. */
 const SCRUB_RETRY = HOUR;
 const SCRUB_RETRY_MAX = DAY;
+/** A running scrub moves its beat on at most this often, and one whose beat is older than
+ * `SCRUB_STALE` stopped: longer than any one step, the full-text index of `events` at 10M
+ * records included (about 2 minutes). */
+const SCRUB_BEAT_EVERY = MINUTE;
+const SCRUB_STALE = 30 * MINUTE;
+
+/** A scrub stopped by its signal: not a failure. */
+class ScrubAborted extends Error {}
 /** Recent searches that reach the cap run again in these windows (days back from now). */
 const RECENT_WINDOWS = [1, 7, 30];
 
@@ -294,8 +321,9 @@ function trashed(meta: Map<string, string>): Trash[] {
 
 /** The last scrub failure `meta` records, and when the scrub is tried again. */
 function scrubFailure(meta: Meta): ScrubFailure | undefined {
+  // "" once a scrub finished, until the keys are deleted.
   const at = meta.get(SCRUB_FAILED);
-  if (at === undefined) return undefined;
+  if (!at) return undefined;
   const failures = Math.max(1, Number(meta.get(SCRUB_FAILURES) ?? 1) || 1);
   const wait = Math.min(SCRUB_RETRY * 2 ** Math.min(failures - 1, 20), SCRUB_RETRY_MAX);
   const due = meta.get("scrub_due");
@@ -1441,28 +1469,41 @@ export class LanceIndex implements IndexStore {
       await this.clearRequests([[REBUILD_REQUESTED, rebuild]]);
       return;
     }
-    const started = meta.get(SCRUB_STARTED);
+    // A scrub that failed: recorded for `state()`, its copy dropped, and thrown once this pass
+    // has optimized, so the job's run records it and its log has the whole error.
+    let failure: unknown;
+    const started = meta.get(SCRUB_STARTED) || undefined;
     if (started !== undefined) {
-      // Only this process writes, one pass at a time: a scrub still marked as running stopped
-      // part-way, killed out of memory perhaps. Without this, the next pass would start it
-      // again, and again, and never index or optimize.
-      await this.scrubFailed(
-        new Error(
-          `the scrub started at ${started} did not finish: the worker stopped part-way (out of memory, or restarted)`,
-        ),
+      const beat = Date.parse(meta.get(SCRUB_BEAT) || started) || 0;
+      // A beat this recent is another worker's scrub (X7.2 asks for one worker, but a rolling
+      // deploy runs two for a while): leave it, its copy and the upkeep to that worker.
+      if (now - beat < SCRUB_STALE) return;
+      // Stopped part-way, killed out of memory perhaps. Without this, the next pass would
+      // start it again, and again, and never index or optimize.
+      failure = new Error(
+        `the scrub started at ${started} did not finish: the worker stopped part-way (out of memory, or restarted)`,
       );
+      await this.scrubFailed(failure);
       meta = await this.meta(true);
     }
     if (this.scrubWanted(meta, now)) {
       try {
         await this.scrub(signal);
         return;
-      } catch {
-        // scrub() recorded it, for `state()`, and dropped its copy. Index and optimize as on
-        // any other pass until it is tried again.
+      } catch (err) {
+        // Index and optimize as on any other pass until it is tried again.
+        failure = err;
         meta = await this.meta(true);
       }
     }
+    await this.optimizeDue(meta, now, signal);
+    if (failure !== undefined) throw failure;
+  }
+
+  /** `optimize()` the live generation and one being built, each at most every
+   * `optimizeEvery` and only when something was committed since. */
+  private async optimizeDue(meta: Meta, now: number, signal: AbortSignal): Promise<void> {
+    const grace = this.options.grace ?? 15 * MINUTE;
     // The live generation, and one being built: a build's scalar indexes need it too.
     const gens = [this.live(meta), this.building(meta)].filter((g): g is string => g !== undefined);
     let optimized = false;
@@ -1505,13 +1546,14 @@ export class LanceIndex implements IndexStore {
 
   /** Whether this pass scrubs: something is due, and it is a `scrubEvery` since the last
    * scrub, or one was asked for. After a failure, not until its retry time, unless asked for
-   * since. */
+   * since: a request other than the one the failed scrub started with. Compared by value, not
+   * time, since the CLI that asks and the worker that failed read different clocks. */
   private scrubWanted(meta: Meta, now: number): boolean {
     const requested = meta.get(SCRUB_REQUESTED);
     if (meta.get("scrub_due") === undefined && requested === undefined) return false;
     const failed = scrubFailure(meta);
     if (failed !== undefined) {
-      if (requested !== undefined && Date.parse(requested) > Date.parse(failed.at)) return true;
+      if (requested !== undefined && requested !== (meta.get(SCRUB_TRIED) ?? "")) return true;
       return now >= Date.parse(failed.retry_at);
     }
     if (requested !== undefined) return true;
@@ -1572,7 +1614,8 @@ export class LanceIndex implements IndexStore {
    * generation and one being built, so deleted text leaves the storage (F10.12): copy the live
    * rows into a new table, index it, switch `meta` to it, and drop the old one, with all its
    * versions, after the grace. A failure drops the copy it was making, records itself for
-   * `state()`, and is thrown; `maintain()` then tries again later (`scrubWanted`). */
+   * `state()`, and is thrown; `maintain()` then tries again later (`scrubWanted`). Stopped by
+   * `signal`, it drops its copy and records nothing. */
   async scrub(signal: AbortSignal): Promise<void> {
     let meta = await this.meta(true);
     // What asked for this scrub. A deletion or request that arrives while it runs leaves a
@@ -1581,17 +1624,29 @@ export class LanceIndex implements IndexStore {
       ["scrub_due", meta.get("scrub_due")],
       [SCRUB_REQUESTED, meta.get(SCRUB_REQUESTED)],
     ];
+    const tried = meta.get(SCRUB_TRIED);
     const gens = [this.live(meta), this.building(meta)].filter((g): g is string => g !== undefined);
+    let lastBeat = this.now();
+    const run: ScrubRun = {
+      beat: async () => {
+        if (signal.aborted) throw new ScrubAborted();
+        if (this.now() - lastBeat < SCRUB_BEAT_EVERY) return;
+        lastBeat = this.now();
+        await this.setMeta({ [SCRUB_BEAT]: new Date(lastBeat).toISOString() });
+      },
+    };
     let copy: { gen: string; name: string } | undefined;
     try {
       await this.dropOrphans(meta);
-      await this.setMeta({ [SCRUB_STARTED]: new Date(this.now()).toISOString() });
+      const at = new Date(lastBeat).toISOString();
+      await this.setMeta({
+        [SCRUB_STARTED]: at,
+        [SCRUB_BEAT]: at,
+        [SCRUB_TRIED]: meta.get(SCRUB_REQUESTED) ?? "",
+      });
       for (const gen of gens) {
         for (const kind of KINDS) {
-          if (signal.aborted) {
-            await this.deleteMeta([SCRUB_STARTED]);
-            return;
-          }
+          await run.beat();
           meta = await this.meta(true);
           const old = await this.table(meta, gen, kind);
           // `events` and `sessions` hold session text and metadata: always rewritten, since an
@@ -1600,21 +1655,44 @@ export class LanceIndex implements IndexStore {
           if (!TEXT_KINDS.has(kind) && (await old.stats()).numDeletedRows === 0) continue;
           const name = `${kind}_${Date.now().toString(36)}${crypto.randomUUID().slice(0, 6)}`;
           copy = { gen, name };
-          await this.copyTable(old, gen, kind, name, meta.get(gk(gen, "indexed")) !== undefined);
+          await this.copyTable(
+            old,
+            gen,
+            kind,
+            name,
+            meta.get(gk(gen, "indexed")) !== undefined,
+            run,
+          );
           await this.options.beforeScrubStep?.("switch", kind);
           await this.trash([{ gen, table: this.tableName(meta, gen, kind), at: this.now() }], {
             [gk(gen, `table.${kind}`)]: name,
           });
+          await this.options.beforeScrubStep?.("switched", kind);
           copy = undefined;
         }
       }
     } catch (err) {
-      if (copy !== undefined) await this.dropTable(copy.gen, copy.name);
+      await this.dropCopy(copy);
+      if (err instanceof ScrubAborted) {
+        // Not a failure: what it asked for is still asked for, by the same request.
+        if (tried === undefined) {
+          await this.deleteMeta([SCRUB_STARTED, SCRUB_BEAT, SCRUB_TRIED]);
+        } else {
+          await this.deleteMeta([SCRUB_STARTED, SCRUB_BEAT]);
+          await this.setMeta({ [SCRUB_TRIED]: tried });
+        }
+        return;
+      }
       await this.scrubFailed(err);
       throw err;
     }
-    await this.setMeta({ scrubbed_at: new Date(this.now()).toISOString() });
-    await this.deleteMeta([SCRUB_STARTED, SCRUB_FAILED, SCRUB_ERROR, SCRUB_FAILURES]);
+    // One write marks it finished, so a worker killed after it never takes this scrub for one
+    // that stopped part-way. The keys it empties are then deleted.
+    await this.setMeta({
+      scrubbed_at: new Date(this.now()).toISOString(),
+      ...Object.fromEntries(SCRUB_KEYS.map((key) => [key, ""])),
+    });
+    await this.deleteMeta(SCRUB_KEYS);
     await this.clearRequests(asked);
   }
 
@@ -1630,6 +1708,7 @@ export class LanceIndex implements IndexStore {
     kind: Kind,
     name: string,
     text: boolean,
+    run: ScrubRun,
   ): Promise<void> {
     const step = (s: ScrubStep) => this.options.beforeScrubStep?.(s, kind);
     const part = this.options.scrubPartRows ?? SCRUB_PART_ROWS;
@@ -1639,6 +1718,7 @@ export class LanceIndex implements IndexStore {
     /** Rows added since the indexes were built or last extended. */
     let unindexed = 0;
     const index = async () => {
+      await run.beat();
       if (!indexed) {
         await step("index");
         await this.scalarIndexes(copy, kind);
@@ -1653,6 +1733,7 @@ export class LanceIndex implements IndexStore {
     let rows = 0;
     const flush = async () => {
       if (batch.length === 0) return;
+      await run.beat();
       await copy.add(joined(SCHEMAS[kind], batch));
       unindexed += rows;
       batch = [];
@@ -1668,7 +1749,25 @@ export class LanceIndex implements IndexStore {
     }
     await flush();
     await index();
-    if (text) await this.textIndexes(copy, kind);
+    if (text) {
+      await run.beat();
+      await this.textIndexes(copy, kind);
+    }
+  }
+
+  /** Drop the copy a scrub was making, unless `meta` already names it: a switch that wrote
+   * `meta` and then failed (a timeout after the write landed) made it the live table. */
+  private async dropCopy(copy: { gen: string; name: string } | undefined): Promise<void> {
+    if (copy === undefined) return;
+    let meta: Meta;
+    try {
+      meta = await this.meta(true);
+    } catch {
+      // Not knowing, keep it: the next scrub's `dropOrphans` drops it if nothing names it.
+      return;
+    }
+    if (KINDS.some((kind) => this.tableName(meta, copy.gen, kind) === copy.name)) return;
+    await this.dropTable(copy.gen, copy.name);
   }
 
   /** Record a failed scrub for `state()`, and drop whatever copy it left. */
@@ -1684,7 +1783,7 @@ export class LanceIndex implements IndexStore {
       [SCRUB_ERROR]: failureMessage(err),
       [SCRUB_FAILURES]: String((Number(meta.get(SCRUB_FAILURES)) || 0) + 1),
     });
-    await this.deleteMeta([SCRUB_STARTED]);
+    await this.deleteMeta([SCRUB_STARTED, SCRUB_BEAT]);
   }
 
   /** Drop the tables of the live generation and one being built that `meta` neither names nor

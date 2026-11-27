@@ -343,8 +343,9 @@ of each result, and the counts in `state()`.
 `changes (stamp, owner, name, entry)`, with `entry` as JSON. `meta (key, value)` sits outside
 the generations and holds the schema (`seshi/search-lance/1`), the deployment, `search.events`,
 the live and building generations, `ready_at`, `caught_up_at`, `feed_through`, the session and
-event counts, and the scrub's state: `scrub_due`, `scrubbed_at`, `scrub_started_at` while one
-runs, and after one fails `scrub_failed_at`, `scrub_error` and `scrub_failures`.
+event counts, and the scrub's state: `scrub_due`, `scrubbed_at`, `scrub_started_at` and
+`scrub_beat_at` while one runs, `scrub_tried_request` (the request it started with), and after
+one fails `scrub_failed_at`, `scrub_error` and `scrub_failures`.
 
 ## Query semantics
 
@@ -571,19 +572,31 @@ tables in 12 minutes and built every index in 5.
   and after `optimize()`) and timed the scrub: 73 s at 1M records and 8 minutes at 10M, most
   of it the full-text indexes. The copy is fully indexed and compact, so a scrub also does what
   `optimize()` would, and the worker skips `optimize()` on a pass that scrubs.
-- **A failed scrub** must not leak storage or stop the worker. It drops the copy it was making,
-  records `scrub_failed_at`, `scrub_error` and `scrub_failures` in `meta`, and leaves
-  `scrub_due` set. The worker tries again an hour later, then two, four and so on, at most a
-  day apart (or on its next pass after `seshi search --scrub`, when the request is newer than
-  the failure); meanwhile every pass indexes and runs `optimize()` as usual. A scrub that
-  never returns, because the worker was killed part-way (out of memory, a deploy), cannot
-  record anything itself: it sets `scrub_started_at` before it starts, and the next pass that
-  finds it still set records the failure the same way. Each scrub, and each failure, first
-  drops any table of the live or building generation that `meta` neither names nor holds in
-  the trash, so a copy left by a killed scrub goes too. `state()` returns the failure as
-  `scrub_failed`; `seshi search --status`, `seshi doctor --config` (`search-scrub`, a warning)
-  and the job's backlog (`scrub_failures`) show it, since until a scrub finishes deleted text
-  is still in the bucket. A finished scrub clears it.
+- **A failed scrub** must not leak storage or stop the worker. It drops the copy it was making
+  (unless `meta` already names it: a switch whose write landed before it failed), records
+  `scrub_failed_at`, `scrub_error` and `scrub_failures` in `meta`, and leaves `scrub_due` set.
+  `maintain()` then optimizes as on any other pass and throws the error, so the job's run
+  records it and the worker's log has all of it. The worker tries again an hour later, then
+  two, four and so on, at most a day apart, or on its next pass after `seshi search --scrub`:
+  a request other than the one the failed scrub started with (`scrub_tried_request`), compared
+  by value since the CLI and the worker read different clocks. Meanwhile every pass indexes and
+  runs `optimize()` as usual. A scrub stopped by its signal (a graceful shutdown) is not a
+  failure: it drops its copy and clears its keys.
+- **A scrub that stops part-way** (the worker killed out of memory, or a deploy) cannot record
+  anything itself. It sets `scrub_started_at` when it starts and moves `scrub_beat_at` on at
+  most once a minute as it goes. A pass that finds a beat older than 30 minutes, longer than
+  any one step, records the failure the same way. A newer beat is another worker's scrub:
+  seshi asks for one worker (X7.2) but does not enforce it, and a rolling deploy runs two for a
+  while, so that pass leaves the scrub, its copy and the upkeep alone. Each scrub, and each
+  failure, first drops any table of the live or building generation that `meta` neither names
+  nor holds in the trash, so a copy left by a killed scrub goes too. Two workers that start a
+  scrub on the same pass are not guarded against. A finished scrub empties every one of these
+  keys in the write that sets `scrubbed_at`, so a worker killed just after it is not taken for
+  one that stopped.
+- **Reporting.** `state()` returns a failure as `scrub_failed`. `seshi search --status`,
+  `seshi doctor --config` (`search-scrub`, a warning) and the job's backlog (`scrub_failures`)
+  show it, and while a deletion is due they say its text is still in the bucket. A finished
+  scrub clears it.
 
 The bound for deleted text is therefore `search.lance.scrub` plus the grace: a day and a quarter
 of an hour by default, while scrubs succeed. That is weaker than SQLite, where the delete is in

@@ -88,6 +88,21 @@ describe("the search checks and backlog, with LanceDB", () => {
     expect(backlog).toMatchObject({ scrub_failures: 2 });
   });
 
+  it("claims no deleted text when the scrub that failed was only asked for", async () => {
+    const { checks } = await worker({
+      ...live,
+      scrub_failed: {
+        at: "2026-11-14T11:00:00.000Z",
+        error: "Resources exhausted",
+        failures: 1,
+        retry_at: "2026-11-14T12:00:00.000Z",
+      },
+    });
+    expect(checks.find((c) => c.id === "search-scrub")?.summary).toBe(
+      "the scrub failed, last 1 h ago",
+    );
+  });
+
   it("says nothing of the scrub while it works", async () => {
     const { checks, backlog } = await worker(live);
     expect(checks.map((c) => [c.id, c.status])).toEqual([

@@ -17,7 +17,14 @@ import { EXIT } from "../cli/exit";
 import { Style, stripStyle } from "../cli/style";
 import { INTEGRATIONS } from "../integrations";
 import { main } from "../main";
-import { highlighted, searchLines, statusLines, timeArg, waitForRebuild } from "./search";
+import {
+  highlighted,
+  scrubFailedLine,
+  searchLines,
+  statusLines,
+  timeArg,
+  waitForRebuild,
+} from "./search";
 
 const formats = new FormatRegistry(BUILTIN_FORMATS);
 const line = (record: Record<string, unknown>) => `${JSON.stringify(record)}\n`;
@@ -419,7 +426,20 @@ describe("the command's pieces", () => {
       },
     });
     expect(lines.at(-1)).toBe(
-      "scrub failed 2026-11-14 11:00 (2 times in a row): Resources exhausted. Text deleted, retracted or redacted since 2026-11-14 09:30 is still in the index's files; the worker tries again at 2026-11-14 13:00, or on its next pass after seshi search --scrub",
+      "scrub failed 2026-11-14 11:00 (2 times in a row): Resources exhausted. Text deleted, retracted or redacted since 2026-11-14 09:30 is still in the index's files. The worker tries again at 2026-11-14 13:00, or on its next pass after seshi search --scrub",
+    );
+  });
+
+  it("claims no deleted text when the scrub that failed was only asked for", () => {
+    expect(
+      scrubFailedLine({
+        at: "2026-11-14T11:00:00.000Z",
+        error: "Resources exhausted",
+        failures: 1,
+        retry_at: "2026-11-14T12:00:00.000Z",
+      }),
+    ).toBe(
+      "scrub failed 2026-11-14 11:00: Resources exhausted. The worker tries again at 2026-11-14 12:00, or on its next pass after seshi search --scrub",
     );
   });
 

@@ -237,11 +237,15 @@ export function statusLines(status: SearchStatus): string[] {
   ];
 }
 
-/** A failed scrub (F10.12): deleted text is still in the bucket. */
+/** A failed scrub (F10.12): while one was due, deleted text is still in the bucket. */
 export function scrubFailedLine(failed: NonNullable<SearchStatus["scrub_failed"]>): string {
   const times = failed.failures > 1 ? ` (${failed.failures} times in a row)` : "";
-  const since = failed.due_since ? ` since ${when(failed.due_since)}` : "";
-  return `scrub failed ${when(failed.at)}${times}: ${failed.error}. Text deleted, retracted or redacted${since} is still in the index's files; the worker tries again at ${when(failed.retry_at)}, or on its next pass after seshi search --scrub`;
+  // Only a deletion, retraction or redaction makes one due: a scrub that was only asked for
+  // leaves nothing behind when it fails.
+  const left = failed.due_since
+    ? ` Text deleted, retracted or redacted since ${when(failed.due_since)} is still in the index's files.`
+    : "";
+  return `scrub failed ${when(failed.at)}${times}: ${failed.error}.${left} The worker tries again at ${when(failed.retry_at)}, or on its next pass after seshi search --scrub`;
 }
 
 type Mode = "query" | "status" | "rebuild" | "scrub";
