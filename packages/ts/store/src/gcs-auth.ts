@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Fetch } from "@seshi/model";
+import { type Renewable, renewAt, renewing } from "./renewing";
 import { StoreError } from "./store";
 
 /** Read and write objects: what the store and a source both ask for. A source only reads, but
@@ -10,8 +11,6 @@ import { StoreError } from "./store";
 export const GCS_SCOPE = "https://www.googleapis.com/auth/devstorage.read_write";
 
 const DEFAULT_TOKEN_URI = "https://oauth2.googleapis.com/token";
-/** Renew this long before the access token expires, or halfway through a shorter life. */
-const RENEW_BEFORE_MS = 5 * 60 * 1000;
 /** How long the metadata server has to answer: off Google Cloud its name may resolve to a host
  * that never does, and every request would wait for the connection to time out. */
 const METADATA_TIMEOUT_MS = 10_000;
@@ -96,34 +95,11 @@ export function serviceAccountAssertion(
   return `${unsigned}.${base64url(signature)}`;
 }
 
-interface Token {
-  token: string;
-  /** When to ask for a new one (ms since the epoch). */
-  renewAt: number;
-}
-
-/** A token source that calls `exchange` when it has no token or the one it has is about to
- * expire; concurrent callers share one exchange. */
-function cached(exchange: () => Promise<Token>, now: () => Date): () => Promise<string> {
-  let current: Token | undefined;
-  let pending: Promise<string> | undefined;
-  return () => {
-    if (current && current.renewAt > now().getTime()) {
-      return Promise.resolve(current.token);
-    }
-    pending ??= exchange()
-      .then((token) => {
-        current = token;
-        return token.token;
-      })
-      .finally(() => {
-        pending = undefined;
-      });
-    return pending;
-  };
-}
-
-async function tokenFrom(response: Response, what: string, now: () => Date): Promise<Token> {
+async function tokenFrom(
+  response: Response,
+  what: string,
+  now: () => Date,
+): Promise<Renewable<string>> {
   const text = await response.text().catch(() => "");
   if (!response.ok) {
     let detail = "";
@@ -144,10 +120,8 @@ async function tokenFrom(response: Response, what: string, now: () => Date): Pro
     throw new GcsAuthError(response.status, `${what}: no access_token in the answer`);
   }
   const lifetime = (typeof body.expires_in === "number" ? body.expires_in : 3600) * 1000;
-  // The metadata server hands out its cached token until about five minutes are left, so a
-  // token can come with less than RENEW_BEFORE_MS to live: it is kept for half its life.
-  const renewAt = now().getTime() + lifetime - Math.min(RENEW_BEFORE_MS, lifetime / 2);
-  return { token: body.access_token, renewAt };
+  // The metadata server hands out its cached token until about five minutes are left.
+  return { value: body.access_token, renewAt: renewAt(now().getTime(), lifetime) };
 }
 
 export interface TokenOptions {
@@ -172,7 +146,7 @@ export function credentialsFileToken(
   });
   if (file.type === "service_account") {
     const uri = file.token_uri ?? DEFAULT_TOKEN_URI;
-    return cached(
+    return renewing(
       async () =>
         tokenFrom(
           await fetchImpl(
@@ -188,7 +162,7 @@ export function credentialsFileToken(
       now,
     );
   }
-  return cached(
+  return renewing(
     async () =>
       tokenFrom(
         await fetchImpl(
@@ -219,7 +193,7 @@ export function metadataServerToken(
   const host = env.GCE_METADATA_HOST ?? env.GCE_METADATA_IP ?? "metadata.google.internal";
   const timeout = options.metadataTimeoutMs ?? METADATA_TIMEOUT_MS;
   const url = `http://${host}/computeMetadata/v1/instance/service-accounts/default/token?scopes=${encodeURIComponent(GCS_SCOPE)}`;
-  return cached(async () => {
+  return renewing(async () => {
     let response: Response;
     try {
       response = await fetchImpl(url, {
