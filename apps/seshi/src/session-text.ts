@@ -152,20 +152,15 @@ export function eventsLines(read: SessionEvents): string[] {
   return lines;
 }
 
-/** One result: its session's line, then each match as `#index@trace role tool: excerpt`, where
- * `trace` is the first 8 characters of the content hash (read_session's `trace`, with `around`
- * the index). */
+/** One result: its session's line, then each match as `#seq role tool: excerpt`, where `seq` is
+ * the event's place in the session (read_session's `around`). */
 export function searchResultLines(r: SearchResult): string[] {
   const lines = [
     `${summaryLine(r)} · score ${r.score} · ${r.hits} match${r.hits === 1 ? "" : "es"}`,
   ];
   for (const m of r.matches) {
     const label = m.tool_name === undefined ? m.role : `${m.role} ${m.tool_name}`;
-    lines.push(
-      printable(
-        `  #${m.event_index}@${m.content_hash.slice(0, 8)} ${label}: ${m.snippet.replace(/\s+/g, " ")}`,
-      ),
-    );
+    lines.push(printable(`  #${m.seq} ${label}: ${m.snippet.replace(/\s+/g, " ")}`));
   }
   return lines;
 }

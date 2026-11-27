@@ -4,6 +4,7 @@ import { ServerError } from "@seshi/client";
 import {
   DEFAULT_READ_CONTEXT,
   EVENT_ROLES,
+  Forbidden,
   type Identity,
   MAX_READ_CHARS,
   MAX_READ_CONTEXT,
@@ -14,16 +15,38 @@ import {
   type SearchRequest,
   type SessionEventsRequest,
   type SessionListRequest,
+  type SqlRequest,
+  type SqlSchema,
+  type SqlScope,
 } from "@seshi/model";
+import {
+  IndexUnavailable,
+  SearchUnavailable,
+  SqlBusy,
+  SqlFailed,
+  SqlRequestError,
+  SqlUnavailable,
+} from "@seshi/search";
 import type { Backend } from "../backend";
 import { parseSessionRef } from "../backend";
-import { classify } from "../cli/failures";
+import { classify, Refused } from "../cli/failures";
+import { caret } from "../commands/sql";
 import { eventsLines, listLines, searchLines, timeOrAge, utc } from "../session-text";
+import { sqlResultLines, sqlToolDescription } from "./sql";
 
 /** A result's text stops here, at a line boundary. */
 export const MAX_RESULT_CHARS = 30_000;
 
-export const TOOL_NAMES = ["list_sessions", "read_session", "search"] as const;
+/** The `sql` tool's statement, at most (the API counts 16 KiB of UTF-8; this is the schema's
+ * `maxLength`, in characters). */
+const SQL_MAX_CHARS = 16_384;
+/** Rows a `sql` answer holds unless the agent asks for more (the API's `max_rows` allows 1,000). */
+export const SQL_DEFAULT_ROWS = 200;
+/** How long `tools/list` waits for the `sql` schema before listing the tools without it; the
+ * schema still arriving later lists `sql` (`tools/list_changed`). */
+export const SQL_LIST_WAIT_MS = 5_000;
+
+export const TOOL_NAMES = ["list_sessions", "read_session", "search", "sql"] as const;
 export type ToolName = (typeof TOOL_NAMES)[number];
 
 type JsonSchema = Record<string, unknown>;
@@ -94,7 +117,7 @@ export const TOOLS: readonly ToolDefinition[] = [
   tool(
     "read_session",
     "Read a session",
-    "Read part of one session's events, as lines `#seq role tool ok time text`. `seq` numbers the session's events from 0. Read a range (from/to), the events around one (around, with context), or one long event in pieces (event, offset). Condensed mode (the default) cuts tool results to 200 characters; full gives them whole. A search match `#7@1a2b3c4d` is trace 1a2b3c4d, event 7: pass trace and around to read around it. Answers stop at max_chars and say `next: <seq>` to read on from.",
+    "Read part of one session's events, as lines `#seq role tool ok time text`. `seq` numbers the session's events from 0. Read a range (from/to), the events around one (around, with context), or one long event in pieces (event, offset). Condensed mode (the default) cuts tool results to 200 characters; full gives them whole. A search match `#213` is the event with seq 213: pass it as around to read around it. Answers stop at max_chars and say `next: <seq>` to read on from.",
     {
       session: str("owner/archive_id, format/session_id, or a seshi URL"),
       from: { type: "integer", minimum: 0 },
@@ -102,8 +125,7 @@ export const TOOLS: readonly ToolDefinition[] = [
       around: {
         type: "integer",
         minimum: 0,
-        description:
-          "a seq, or with trace a search match's event; reads context events either side",
+        description: "a seq, as search and sql give them; reads context events either side",
       },
       context: {
         type: "integer",
@@ -111,9 +133,6 @@ export const TOOLS: readonly ToolDefinition[] = [
         maximum: MAX_READ_CONTEXT,
         default: DEFAULT_READ_CONTEXT,
       },
-      trace: str(
-        "a search match's trace (8 or more characters of its hash): count from, to, around and event from its start",
-      ),
       mode: { enum: [...SESSION_READ_MODES], default: "condensed" },
       roles,
       event: {
@@ -135,7 +154,7 @@ export const TOOLS: readonly ToolDefinition[] = [
   tool(
     "search",
     "Search sessions",
-    "Full-text search over the sessions you may read: prompts, answers and tool calls. Each result is a session line, then its best matches as `#event@trace role tool: excerpt` (read them with read_session's trace and around).",
+    "Full-text search over the sessions you may read: prompts, answers and tool calls. Each result is a session line, then its best matches as `#seq role tool: excerpt` (read around one with read_session's around).",
     {
       query: str('words; "a phrase", a OR b, -word, prefix*'),
       ...filters,
@@ -148,7 +167,29 @@ export const TOOLS: readonly ToolDefinition[] = [
     },
     ["query"],
   ),
+  tool(
+    "sql",
+    "Query sessions with SQL",
+    // Replaced by the description written from the schema (`sqlToolDescription`): the tool is
+    // listed only once the schema is in.
+    "One read-only SELECT over the views sessions, events and llm_calls.",
+    {
+      sql: {
+        type: "string",
+        maxLength: SQL_MAX_CHARS,
+        description: "one SELECT over sessions, events and llm_calls, in the dialect above",
+      },
+      since: str(
+        "ISO date or duration (30d, 12h): the views hold the sessions overlapping since → until; 30 days by default, at most 400",
+      ),
+      until: str("ISO date or duration (30d, 12h); now by default"),
+      max_rows: { type: "integer", minimum: 1, maximum: 1000, default: SQL_DEFAULT_ROWS },
+    },
+    ["sql"],
+  ),
 ];
+
+const SQL_TOOL = TOOLS.find((t) => t.name === "sql") as ToolDefinition;
 
 /** A backend for one call, and anything the caller must know about how it reads (the login
  * could not be renewed, so it reads with the device token, which sees only its own sessions). */
@@ -163,6 +204,10 @@ export interface ToolHost {
    * answers that error. */
   backend(): Promise<HostBackend>;
   now(): Date;
+  /** The tools listed changed: `sql` came in after a `tools/list` that went without it. */
+  onListChanged?(): void;
+  /** How long `tools/list` waits for the `sql` schema (`SQL_LIST_WAIT_MS`). */
+  sqlListWaitMs?: number;
 }
 
 export interface ToolResult {
@@ -172,6 +217,44 @@ export interface ToolResult {
 }
 
 class BadArguments extends Error {}
+
+/** `sql` cannot be used by this caller here, and the agent should not try again. */
+class SqlNotListed extends Error {}
+
+/** Why `sql` is not listed, when that will not change while the command runs: the credential
+ * lacks the scope, the server has no `sql`, or the index is off. Anything else (the server
+ * down, the index still building) is asked again at the next `tools/list`. */
+function sqlRefusal(err: unknown): string | undefined {
+  if (err instanceof Forbidden) {
+    return "this credential has no sql scope (admins have it, and service tokens created with --scope sql)";
+  }
+  if (err instanceof ServerError) {
+    if (err.status === 403) {
+      return "this credential has no sql scope (admins have it, and service tokens created with --scope sql)";
+    }
+    if (err.status === 404 && err.code === "not_found") {
+      return "this server runs a seshi older than sql";
+    }
+    if (err.status === 404 || err.status === 501) return err.message;
+    return undefined;
+  }
+  if (err instanceof SqlUnavailable) return err.message;
+  if (err instanceof Refused && err.code === "search_disabled") return err.message;
+  return undefined;
+}
+
+/** Who a `sql` answer was answered as, as a result's header says it. */
+export function sqlScopeOf(scope: SqlScope): string {
+  if (scope.role === "local") return `as ${scope.as} (this machine's index: own + org)`;
+  if (scope.role === "admin" || scope.role === "service") {
+    return `as ${scope.as} (${scope.role}: every session)`;
+  }
+  return `as ${scope.as} (${scope.role}: own + org)`;
+}
+
+type SqlState =
+  | { listed: true; schema: SqlSchema; definition: ToolDefinition }
+  | { listed: false; reason: string };
 
 type Args = Record<string, unknown>;
 
@@ -196,8 +279,13 @@ function problemOf(name: string, value: unknown, schema: JsonSchema): string | u
       : `${name} must be one of ${(schema.enum as string[]).join(", ")}`;
   }
   switch (schema.type) {
-    case "string":
-      return typeof value === "string" ? undefined : `${name} must be a string`;
+    case "string": {
+      if (typeof value !== "string") return `${name} must be a string`;
+      const max = schema.maxLength as number | undefined;
+      return max !== undefined && value.length > max
+        ? `${name} must be at most ${max.toLocaleString("en-US")} characters`
+        : undefined;
+    }
     case "integer": {
       if (typeof value !== "number" || !Number.isSafeInteger(value)) {
         return `${name} must be a whole number`;
@@ -263,7 +351,7 @@ export function headerLine(
   now: Date,
   scope: string,
   window?: { since?: string; until?: string },
-  index?: SearchIndexState,
+  index?: Pick<SearchIndexState, "caught_up_at">,
 ): string {
   const parts = [`now ${utc(now.toISOString())}`, scope];
   if (window !== undefined) {
@@ -303,12 +391,42 @@ function text(t: string, isError = false): ToolResult {
   return { content: [{ type: "text", text: t }], ...(isError ? { isError: true } : {}) };
 }
 
-/** An error as a tool result: the API's code and message. */
-export function errorResult(err: unknown, header: string): ToolResult {
+/** Where a refused statement goes wrong, for the agent to correct it: the offset, then its line
+ * with a caret under the character. */
+function atLines(statement: string | undefined, at: number | undefined): string[] {
+  if (statement === undefined || at === undefined) return [];
+  return [`at character ${at} (from 0) of the statement:`, ...caret(statement, at)];
+}
+
+/** An error as a tool result: the API's code and message, and for a refused statement where it
+ * went wrong. `statement` is the `sql` call's. */
+export function errorResult(err: unknown, header: string, statement?: string): ToolResult {
   if (err instanceof BadArguments)
     return text(`${header}\nerror bad_arguments: ${err.message}`, true);
   if (err instanceof ServerError) {
-    return text(`${header}\nerror ${err.code} (HTTP ${err.status}): ${err.message}`, true);
+    return text(
+      [
+        `${header}\nerror ${err.code} (HTTP ${err.status}): ${err.message}`,
+        ...atLines(statement, err.at),
+      ].join("\n"),
+      true,
+    );
+  }
+  // `sql` on a serverless laptop runs here, and fails as the API's own errors do.
+  if (err instanceof SqlFailed) {
+    return text(
+      [`${header}\nerror ${err.code}: ${err.message}`, ...atLines(statement, err.at)].join("\n"),
+      true,
+    );
+  }
+  if (
+    err instanceof SqlRequestError ||
+    err instanceof SqlBusy ||
+    err instanceof SqlUnavailable ||
+    err instanceof IndexUnavailable ||
+    err instanceof SearchUnavailable
+  ) {
+    return text(`${header}\nerror ${err.code}: ${err.message}`, true);
   }
   const known = classify(err);
   if (known) return text(`${header}\nerror ${known.code}: ${known.message}`, true);
@@ -320,14 +438,80 @@ export class Tools {
   /** Who each backend reads as: a backend made afresh for a call (a renewed login, or the
    * device token after a failed renewal) is asked again. */
   private readonly identities = new WeakMap<Backend, Identity>();
+  /** Whether `sql` is listed, with the description written from the schema, once known. */
+  private sqlState: SqlState | undefined;
+  private sqlLoading: Promise<void> | undefined;
+  /** A `tools/list` went without `sql` while its schema was on the way. */
+  private sqlLate = false;
 
   constructor(
     private readonly host: ToolHost,
     readonly enabled: readonly ToolName[] = TOOL_NAMES,
   ) {}
 
-  list(): ToolDefinition[] {
-    return TOOLS.filter((t) => this.enabled.includes(t.name));
+  /** Ask for the `sql` schema, once at a time. Its answer lists `sql` (with a description written
+   * from it), a refusal that will not change keeps it unlisted, and anything else leaves it to be
+   * asked again. */
+  private loadSql(): Promise<void> {
+    if (this.sqlLoading !== undefined) return this.sqlLoading;
+    const loading = (async () => {
+      try {
+        const { backend } = await this.host.backend();
+        const schema = await backend.sqlSchema();
+        const definition = SQL_TOOL;
+        this.sqlState = {
+          listed: true,
+          schema,
+          definition: { ...definition, description: sqlToolDescription(schema) },
+        };
+        if (this.sqlLate) this.host.onListChanged?.();
+      } catch (err) {
+        const reason = sqlRefusal(err);
+        if (reason !== undefined) this.sqlState = { listed: false, reason };
+      } finally {
+        this.sqlLoading = undefined;
+      }
+    })();
+    this.sqlLoading = loading;
+    return loading;
+  }
+
+  /** The tools, `sql` among them once its schema is in: a server lists it to a caller with the
+   * `sql` scope whose server can run it, a laptop over its own index. The first list waits a
+   * little for the schema; one that comes later lists `sql` then (`onListChanged`). */
+  async list(): Promise<ToolDefinition[]> {
+    if (this.enabled.includes("sql") && this.sqlState === undefined) {
+      const loading = this.loadSql();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const waited = new Promise<"late">((resolve) => {
+        timer = setTimeout(() => resolve("late"), this.host.sqlListWaitMs ?? SQL_LIST_WAIT_MS);
+        (timer as { unref?: () => void }).unref?.();
+      });
+      if ((await Promise.race([loading, waited])) === "late") this.sqlLate = true;
+      clearTimeout(timer);
+    }
+    return TOOLS.flatMap((t) => {
+      if (!this.enabled.includes(t.name)) return [];
+      if (t.name !== "sql") return [t];
+      return this.sqlState?.listed ? [this.sqlState.definition] : [];
+    });
+  }
+
+  /** The tool called `name`, as listed: `sql` is asked for its schema first if it has not come. */
+  private async definitionOf(name: string): Promise<ToolDefinition> {
+    const tool = TOOLS.find((t) => t.name === name);
+    if (tool === undefined || !this.enabled.includes(tool.name)) {
+      throw new BadArguments(`no tool ${name}`);
+    }
+    if (tool.name !== "sql") return tool;
+    if (this.sqlState === undefined) await this.loadSql();
+    const state = this.sqlState;
+    if (state?.listed) return state.definition;
+    if (state !== undefined) throw new SqlNotListed(`sql is not available: ${state.reason}`);
+    // Asked again: the error itself is the answer.
+    const { backend } = await this.host.backend();
+    await backend.sqlSchema();
+    return SQL_TOOL;
   }
 
   private async scope({ backend, notice }: HostBackend): Promise<string> {
@@ -344,8 +528,7 @@ export class Tools {
     const now = this.host.now();
     let header = `now ${utc(now.toISOString())}`;
     try {
-      const definition = this.list().find((t) => t.name === name);
-      if (definition === undefined) throw new BadArguments(`no tool ${name}`);
+      const definition = await this.definitionOf(name);
       check(definition, args);
       const opened = await this.host.backend();
       const { backend } = opened;
@@ -358,10 +541,55 @@ export class Tools {
           return text(await this.readSession(backend, args, header));
         case "search":
           return text(await this.search(backend, args, now, scope));
+        case "sql":
+          return await this.sql(backend, args, now, opened.notice);
       }
     } catch (err) {
-      return errorResult(err, header);
+      if (err instanceof SqlNotListed) {
+        return text(`${header}\nerror sql_unavailable: ${err.message}`, true);
+      }
+      return errorResult(err, header, name === "sql" ? (args.sql as string) : undefined);
     }
+  }
+
+  /** One statement; its answer as a pipe table, the rows that fit in the text also in
+   * `structuredContent` for clients that read it. */
+  private async sql(
+    backend: Backend,
+    args: Args,
+    now: Date,
+    notice: string | undefined,
+  ): Promise<ToolResult> {
+    const since = when(args.since, "since", now);
+    const until = when(args.until, "until", now);
+    const request: SqlRequest = {
+      sql: args.sql as string,
+      max_rows: (args.max_rows as number | undefined) ?? SQL_DEFAULT_ROWS,
+      ...(since !== undefined ? { since } : {}),
+      ...(until !== undefined ? { until } : {}),
+    };
+    const result = await backend.sql(request);
+    const scope = sqlScopeOf(result.scope);
+    const header = headerLine(
+      now,
+      `${notice === undefined ? scope : `${scope} · warning: ${notice}`} · ${result.index.backend} index, ${result.index.dialect}`,
+      { since: result.scope.since, until: result.scope.until },
+      result.index.updated_at !== undefined ? { caught_up_at: result.index.updated_at } : undefined,
+    );
+    const lines = [header, ...sqlResultLines(result)];
+    const out = capped(lines);
+    // The header, the column names and the rule come first: row i is line 3 + i.
+    const kept = out.split("\n");
+    let rows = 0;
+    while (rows < result.rows.length && kept[3 + rows] === lines[3 + rows]) rows++;
+    return {
+      content: [{ type: "text", text: out }],
+      structuredContent: {
+        columns: result.columns,
+        rows: result.rows.slice(0, rows),
+        truncated: result.truncated || rows < result.rows.length,
+      },
+    };
   }
 
   private async listSessions(backend: Backend, args: Args, now: Date, scope: string) {
@@ -396,7 +624,6 @@ export class Tools {
       "to",
       "around",
       "context",
-      "trace",
       "mode",
       "roles",
       "event",

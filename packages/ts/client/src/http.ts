@@ -615,7 +615,6 @@ export class HttpSeshi implements Seshi {
         event: request.event,
         offset: request.offset,
         head: request.head,
-        trace: request.trace,
       },
     });
     if (status !== 200) refuse(status, body);

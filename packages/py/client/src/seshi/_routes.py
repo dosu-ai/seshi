@@ -23,7 +23,6 @@ EVENTS_QUERY = (
     "max_chars",
     "event",
     "offset",
-    "trace",
     "head",
 )
 """The query of both routes that read a session's events."""

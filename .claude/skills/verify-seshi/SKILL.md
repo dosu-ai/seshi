@@ -140,6 +140,9 @@ is gone but a process survived, `$C stop` can't find it: look for
 - `scripts/control-seshi`: the harness above. `$C help` prints its usage.
 - `scripts/idp.ts`: runs the stand-in IdP (`IdpServer` from `tests/tooling/cli.ts`) as a
   process, with its keys also served over https; `up --idp` starts it.
+- `scripts/mcp.ts`: an MCP client (the SDK's) that spawns the run's `seshi mcp` and lists its
+  tools or makes one call (`bun scripts/mcp.ts list|call <tool> '<json>' [-- <mcp args>]`), inside
+  `eval "$($C env)"`; see [features/mcp.md](features/mcp.md).
 - `scripts/transcript.ts`: appends synthetic Claude Code turns (`bun scripts/transcript.ts
   <path> <session-id> <cwd> [--turns N] [--secret]`); `agent` calls it.
 

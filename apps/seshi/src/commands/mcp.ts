@@ -1,5 +1,5 @@
-/** `seshi mcp`: a stdio MCP server whose tools (`list_sessions`, `read_session`, `search`) read
- * sessions with this machine's seshi login, or a token. Nothing but protocol messages goes to
+/** `seshi mcp`: a stdio MCP server whose tools (`list_sessions`, `read_session`, `search` and
+ * `sql`) read sessions with this machine's seshi login, or a token. Nothing but protocol messages goes to
  * stdout; everything else goes to stderr. docs/seshi/session-tools.md ("seshi mcp"). */
 import { parseArgs } from "node:util";
 import { HttpSeshi } from "@seshi/client";
@@ -30,7 +30,8 @@ const OPTIONS = {
 const INSTRUCTIONS = [
   "seshi holds your team's coding-agent sessions (Claude Code, Codex, Cursor and others): what was asked, what the agent did, which tools it ran and what they printed.",
   "list_sessions lists sessions by who, repo, branch and time (newest first); search finds the sessions whose prompts, answers or tool calls mention something; read_session reads part of one session.",
-  "Every answer starts with the current UTC time and whose sessions you see. Search matches read `#event@trace`: pass trace and around to read_session to read around one.",
+  "sql, when listed, answers questions across sessions (counts, token use, failing tools) with one read-only SELECT; its description gives the views, the dialect and examples.",
+  "Every answer starts with the current UTC time and whose sessions you see. Search matches and the events view give each event's seq: pass it to read_session as around to read around one.",
 ].join(" ");
 
 /** Where the tools' backend comes from: made once, or (with the login) afresh for each call, so
@@ -144,8 +145,14 @@ export async function run(ctx: CommandContext): Promise<number> {
       ctx.stderr(line);
     },
   };
+  // Set once the server is made: `sql` can come in after the first tools/list.
+  let listChanged = () => {};
   const tools = new Tools(
-    { backend: backendSource(quiet, values), now: () => new Date() },
+    {
+      backend: backendSource(quiet, values),
+      now: () => new Date(),
+      onListChanged: () => listChanged(),
+    },
     enabled,
   );
 
@@ -158,9 +165,10 @@ export async function run(ctx: CommandContext): Promise<number> {
   );
   const server = new Server(
     { name: "seshi", title: "seshi sessions", version: VERSION },
-    { capabilities: { tools: {} }, instructions: INSTRUCTIONS },
+    { capabilities: { tools: { listChanged: true } }, instructions: INSTRUCTIONS },
   );
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: tools.list() }));
+  listChanged = () => void server.sendToolListChanged().catch(() => {});
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: await tools.list() }));
   server.setRequestHandler(CallToolRequestSchema, async (request) =>
     tools.call(request.params.name, (request.params.arguments ?? {}) as Record<string, unknown>),
   );

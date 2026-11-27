@@ -179,7 +179,6 @@ interface Checked {
   roles: ReadonlySet<EventRole> | null;
   maxChars: number;
   head?: string;
-  trace?: string;
 }
 
 export function checkEventsRequest(request: SessionEventsRequest): Checked {
@@ -220,13 +219,6 @@ export function checkEventsRequest(request: SessionEventsRequest): Checked {
     }
     roles = new Set(request.roles);
   }
-  if (request.trace !== undefined && !/^[0-9a-f]{8,64}$/.test(request.trace)) {
-    throw new SessionReadError(
-      400,
-      "bad_query",
-      "trace is a content hash, or its first 8 or more characters",
-    );
-  }
   if (request.head !== undefined && !/^[0-9a-f]{64}$/.test(request.head)) {
     throw new SessionReadError(400, "bad_query", "head is a trace's 64-character content hash");
   }
@@ -244,7 +236,6 @@ export function checkEventsRequest(request: SessionEventsRequest): Checked {
     mode,
     roles,
     maxChars: Math.min(maxChars ?? MAX_READ_CHARS, MAX_READ_CHARS),
-    ...(request.trace !== undefined ? { trace: request.trace } : {}),
     ...(request.head !== undefined ? { head: request.head } : {}),
   };
 }
@@ -320,49 +311,6 @@ function eventOf(e: TraceEvent, seq: number, hash: string, text: string): Sessio
   };
 }
 
-/** Count `checked`'s positions from the start of the trace it names, as `seq`s. */
-function shift(
-  checked: Checked,
-  chain: readonly string[],
-  starts: readonly number[],
-  traces: readonly ReadTrace[],
-): void {
-  const prefix = checked.trace as string;
-  const found = chain.flatMap((hash, i) => (hash.startsWith(prefix) ? [i] : []));
-  if (found.length !== 1) {
-    throw new SessionReadError(
-      found.length === 0 ? 404 : 400,
-      found.length === 0 ? "not_in_chain" : "bad_query",
-      found.length === 0
-        ? `trace ${prefix} is not in the session's current traces: it was replaced since; search again`
-        : `trace ${prefix} names more than one of the session's traces: give more of its hash`,
-    );
-  }
-  const i = found[0] as number;
-  const base = starts[i] as number;
-  const length = (traces[i] as ReadTrace).events.length;
-  const inTrace = (n: number, name: string) => {
-    if (n >= length) {
-      throw new SessionReadError(
-        400,
-        "bad_query",
-        `${name} ${n} is past trace ${prefix}'s ${length} events`,
-      );
-    }
-    return base + n;
-  };
-  if (checked.piece !== null) {
-    checked.piece = { ...checked.piece, event: inTrace(checked.piece.event, "event") };
-  } else if (checked.range !== null && "around" in checked.range) {
-    checked.range = { ...checked.range, around: inTrace(checked.range.around, "around") };
-  } else if (checked.range !== null) {
-    checked.range = {
-      from: base + Math.min(checked.range.from, length),
-      ...(checked.range.to !== undefined ? { to: base + Math.min(checked.range.to, length) } : {}),
-    };
-  }
-}
-
 /** A part of the session's events. Throws `SessionReadError` for a request that cannot be
  * answered: a bad range (400), no trace (404), a changed head (409) or a redacted session
  * (410). The caller has already checked that the session may be read. */
@@ -408,7 +356,6 @@ export async function readSessionEvents(options: ReadSessionOptions): Promise<Se
     starts.push(n);
     n += t.events.length;
   }
-  if (checked.trace !== undefined) shift(checked, chain, starts, traces);
   const at = (seq: number): { event: TraceEvent; hash: string } => {
     let i = starts.length - 1;
     while (i > 0 && (starts[i] as number) > seq) i--;

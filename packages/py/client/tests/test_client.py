@@ -578,7 +578,6 @@ class TestSessionReads:
             mode="full",
             roles=["user", "tool_result"],
             max_chars=2000,
-            trace=SHA[:8],
             head=SHA,
         )
         assert dict(fake.last.url.params) == {
@@ -588,7 +587,6 @@ class TestSessionReads:
             "mode": "full",
             "roles": "user,tool_result",
             "max_chars": "2000",
-            "trace": SHA[:8],
             "head": SHA,
         }
         assert (answer.from_, answer.to, answer.next, answer.next_offset) == (10, 12, 12, None)

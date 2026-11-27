@@ -26,6 +26,7 @@
     "test": "bun --bun vitest run",
     "test:watch": "bun --bun vitest",
     "test:laptop": "bun --bun vitest run --config vitest.laptop.config.ts",
+    "test:agent": "VERIFY_SESHI_AGENT=1 bun --bun vitest run tests/agent",
     "scenarios:process": "bun run tests/tooling/scenario-proc/main.ts",
     "typecheck": "bunx tsc --noEmit && bunx tsc --noEmit -p integrations/cursor/extension",
     "lint": "bunx biome lint .",
