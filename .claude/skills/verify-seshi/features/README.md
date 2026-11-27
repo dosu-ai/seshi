@@ -54,6 +54,8 @@ behaviour. It then has exactly four H2 sections, in this order:
   seshi's pi extension and OpenCode plugin, with their status and `/session-capture`.
 - [Turn capture off, on or pause it](./toggle-pause.md): per-session toggles with retraction, and
   pause and resume.
+- [Agent tools](./mcp.md): `seshi mcp`'s tools over the protocol, `sql` among them, as a
+  member, an admin and a serverless laptop.
 - [Sessions and search](./sessions-search.md): list, show, export and visibility of stored
   sessions, and search over them.
 - [Redaction](./redaction.md): secrets in a transcript never reach the store, and `seshi redact
