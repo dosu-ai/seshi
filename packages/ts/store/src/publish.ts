@@ -30,6 +30,14 @@ export function sha256(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
+/** How old an unnamed trace object must be before the orphan sweep deletes it (F2.5): a
+ * publish may be in flight. Here, not in `sweep.ts`, so publish can use it without a cycle. */
+export const SWEEP_MIN_AGE_MS = 60 * 60 * 1000;
+
+/** A reused object younger than this is left as it is: it stays under the sweep's age for at
+ * least as long again, time enough for the publish to name it. Older, it is written again. */
+const REFRESH_AFTER_MS = SWEEP_MIN_AGE_MS / 2;
+
 export type PublishOutcome = "written" | "exists";
 
 /** How an occupied key is treated. `immutable` is for content-addressed keys (a trace): the first
@@ -38,9 +46,9 @@ export type PublishOutcome = "written" | "exists";
  * record sent again): the same bytes are a no-op and different bytes replace. */
 export type PublishMode = "immutable" | "replace";
 
-/** Write `body` at `key` unless it is already there, and verify what landed: by ETag when the
- * backend reports a plain MD5 (single-part PUT on S3, R2, MinIO, and `fs`), else by reading the
- * object back and hashing it. */
+/** Write `body` at `key` unless it is already there, and verify what landed: by ETag when it is
+ * the body's MD5 (a single-part PUT on S3 without SSE-KMS or SSE-C, R2, MinIO, and `fs`), else
+ * by reading the object back and hashing it. */
 export async function publishObject(
   store: Store,
   key: string,
@@ -54,7 +62,12 @@ export async function publishObject(
     const kept =
       mode === "immutable" ||
       (before.size === body.length && (await matches(store, key, before.etag, want, body)));
-    if (kept && (await makeYoungEnoughToKeep(store, key, contentType))) return "exists";
+    if (
+      kept &&
+      (youngEnough(before.modified) || (await makeYoungEnoughToKeep(store, key, contentType)))
+    ) {
+      return "exists";
+    }
   }
   if (mode === "immutable") {
     try {
@@ -77,6 +90,13 @@ export async function publishObject(
   return "written";
 }
 
+/** Whether an object written at `modified` needs no refresh for the sweep to skip it. An
+ * unknown time is refreshed. */
+function youngEnough(modified: string | undefined): boolean {
+  const at = modified === undefined ? Number.NaN : Date.parse(modified);
+  return Number.isFinite(at) && Date.now() - at < REFRESH_AFTER_MS;
+}
+
 async function makeYoungEnoughToKeep(
   store: Store,
   key: string,
@@ -93,6 +113,9 @@ async function makeYoungEnoughToKeep(
   return true;
 }
 
+/** Whether the object at `key` holds `body`. An ETag equal to the body's MD5 says so; any other
+ * ETag says nothing, since an ETag that looks like an MD5 need not be one (S3's under SSE-KMS
+ * or SSE-C is 32 hex digits of something else), so the object is read back and compared. */
 async function matches(
   store: Store,
   key: string,
@@ -100,7 +123,7 @@ async function matches(
   wantMd5: string,
   body: Uint8Array,
 ): Promise<boolean> {
-  if (etag && /^[0-9a-f]{32}$/.test(etag)) return etag === wantMd5;
+  if (etag === wantMd5) return true;
   const got = await getBytes(store, key);
   return got !== null && sha256(got) === sha256(body);
 }
