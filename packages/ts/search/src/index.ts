@@ -17,6 +17,7 @@ export {
   type OpenIndex,
   type PageCommit,
   type Removal,
+  type ScrubFailure,
   type SessionListPage,
   type SessionListQuery,
   type SessionPosition,

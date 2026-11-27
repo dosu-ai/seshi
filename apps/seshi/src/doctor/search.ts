@@ -7,8 +7,8 @@ import type { CheckResult } from "./types";
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 /** `events` past this, and maintenance outgrows the worker (docs/seshi/lancedb-search.md,
- * "Risks"). */
-export const LANCE_EVENTS_WARN = 20_000_000;
+ * "Risks"): at 10M records `optimize()` took 17 minutes and the scrub failed. */
+export const LANCE_EVENTS_WARN = 10_000_000;
 
 const MINUTE_MS = 60_000;
 
@@ -113,6 +113,18 @@ export async function searchServerChecks(
   }
 
   checks.push(freshness(status, config, now, shared));
+
+  if (status.scrub_failed) {
+    const failed = status.scrub_failed;
+    checks.push({
+      id: "search-scrub",
+      title: "Search scrub",
+      status: "warn",
+      summary: `the scrub failed${failed.failures > 1 ? ` ${failed.failures} times in a row` : ""}, last ${ago(now.getTime() - Date.parse(failed.at))}${failed.due_since ? `: text deleted, retracted or redacted since ${failed.due_since} is still in the index's files` : ""}`,
+      detail: [failed.error, `the worker tries again at ${failed.retry_at}`],
+      hint: 'seshi search --scrub retries it on the worker\'s next pass; see "Deleted text" in docs/search.md',
+    });
+  }
 
   if (shared && status.events > LANCE_EVENTS_WARN) {
     checks.push({

@@ -22,6 +22,7 @@ import type {
   IndexedSession,
   IndexStore,
   OpenIndex,
+  ScrubFailure,
   SessionListQuery,
   SessionPosition,
 } from "./backend";
@@ -107,6 +108,8 @@ export interface SearchStatus {
   stale_schema?: string;
   /** Requests waiting for the worker's next pass, with when each was made. */
   requested?: { rebuild?: string; scrub?: string };
+  /** The last scrub failed: deleted text is still in the bucket until one finishes. */
+  scrub_failed?: ScrubFailure;
 }
 
 /** A rebuild of a shared index, asked for: the worker starts it on its next pass, builds the
@@ -495,6 +498,7 @@ export class SearchService {
         ...(state.building ? { building: state.building } : {}),
         ...(state.stale_schema ? { stale_schema: state.stale_schema } : {}),
         ...(state.requested ? { requested: state.requested } : {}),
+        ...(state.scrub_failed ? { scrub_failed: state.scrub_failed } : {}),
       };
     });
   }
