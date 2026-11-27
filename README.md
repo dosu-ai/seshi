@@ -80,7 +80,7 @@ From then on each session is uploaded as it goes. Claude Code's status line says
 for the session you are in, and `/session-capture share` (or `unshare`) shares it with the team, in
 every agent below that captures live.
 
-To let a coding agent list, search and read those sessions itself, add seshi as an MCP server
+To let a coding agent list, search, read and query those sessions itself, add seshi as an MCP server
 ([docs/agents.md](docs/agents.md)): `claude mcp add seshi -- seshi mcp`.
 
 ### Run it for a team

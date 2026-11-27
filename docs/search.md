@@ -87,6 +87,9 @@ seshi sessions read claude-code/4b1a… --around 212 --context 3
 seshi sessions read alice@acme.com/9f3c…e1 --from 200 --full
 ```
 
+A search match (`seshi search`, the `search` tool) names its event's `seq`: pass it as
+`--around` (`around` in the API and the tool) to read the events around it.
+
 `seshi sessions recent` (`GET /v1/search/sessions`) lists the sessions you may read that
 overlap a window, newest first by when they were last written, from the index's sessions:
 the last 7 days unless `--since` and `--until` say otherwise (a date, an RFC 3339 time or an
@@ -130,7 +133,10 @@ records, with `seq`, `role`, `tool_name`, `tool_call_id`, `ok`, `chars` and `tex
 `llm_calls` (every model request, with its tokens). `seshi sql --schema` and `GET
 /v1/sql/schema` give their columns, with types and comments, the dialect and three examples.
 Use `search` to find words and `seshi sessions read` to read a session; `sql` is for counting,
-grouping and joining.
+grouping and joining. `seshi mcp` gives coding agents the same as its `sql` tool, described from
+`GET /v1/sql/schema` so the agent writes the right dialect over the right columns, and listed
+only to a caller who may use it ([agents.md](agents.md#sql)). The `events` view's `seq` is
+`seshi sessions read`'s, so a row leads to the events around it (`--around <seq>`).
 
 On a SQLite index the statement runs in SQLite itself, so it is written in SQLite's dialect:
 
