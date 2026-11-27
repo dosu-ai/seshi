@@ -7,6 +7,7 @@ spec/testdata
 tests
 scripts/*
 !scripts/build-binary.ts
+!scripts/duckdb-extensions.json
 docs
 brand
 # The explore page's favicon (apps/seshi/src/explore/page/index.html) is bundled into the binary.

@@ -359,10 +359,12 @@ function exitCode(reports: SessionReport[], backendError: { exit?: number } | un
 }
 
 /** `seshi doctor --config`: the server's own checks, run where its config is (the search
- * index: reachable, writable by the worker, current, and its size). */
+ * index: reachable, writable by the worker, current, and its size; sql: a statement runs, the
+ * workers' credential is read-only, and the workers that ran it). */
 async function serverDoctor(ctx: CommandContext, json: boolean, args: Args): Promise<number> {
   const { openServer, serverFailure } = await import("./server-instance");
   const { searchServerChecks } = await import("../doctor/search");
+  const { sqlServerChecks } = await import("../doctor/sql");
   let opened: Awaited<ReturnType<typeof openServer>>;
   try {
     opened = await openServer(
@@ -381,7 +383,10 @@ async function serverDoctor(ctx: CommandContext, json: boolean, args: Args): Pro
   const { instance, loaded } = opened;
   try {
     const style = await styleFor(ctx, { json });
-    const checks = await searchServerChecks(instance, loaded.config, { env: ctx.env });
+    const checks = [
+      ...(await searchServerChecks(instance, loaded.config, { env: ctx.env })),
+      ...(await sqlServerChecks(instance, loaded.config, { env: ctx.env })),
+    ];
     emit(ctx, json, { server: checks }, () => bucketLines(checks, style, "Server"));
     const status = worst(checks.map((c) => c.status));
     return status === "fail" ? EXIT.attention : EXIT.ok;

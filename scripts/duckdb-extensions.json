@@ -1,0 +1,19 @@
+{
+  "$comment": "DuckDB extensions the -sql server build ships (docs/search.md, sql on a LanceDB index), pinned per DuckDB version and platform: scripts/build-binary.ts downloads each, checks its SHA-256 and puts it in duckdb/<version>/<platform>/ beside the binary. An extension is built for one DuckDB version, so bumping @duckdb/node-api needs entries for the new version here, and the build refuses a version it has none for. osx_arm64 is for -sql builds on a Mac, for development. DuckDB checks each extension's signature when it loads it.",
+  "v2.0.1": {
+    "lance": {
+      "linux_amd64": {
+        "url": "https://extensions.duckdb.org/v2.0.1/linux_amd64/lance.duckdb_extension.gz",
+        "sha256": "0f5edd2fb2b0fdd63c9b6ed76ee678b1424d18e4a967c372e08166b54f7ede25"
+      },
+      "linux_arm64": {
+        "url": "https://extensions.duckdb.org/v2.0.1/linux_arm64/lance.duckdb_extension.gz",
+        "sha256": "6b8e2c56a135d4158c5062058f8e9ad395f75d91699f675243d601bd3f27f174"
+      },
+      "osx_arm64": {
+        "url": "https://extensions.duckdb.org/v2.0.1/osx_arm64/lance.duckdb_extension.gz",
+        "sha256": "0854e94d2ca2d7b047dfd99586c1477bd8c48ca415a08b7a8daa3fb079ef889b"
+      }
+    }
+  }
+}

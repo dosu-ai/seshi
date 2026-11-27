@@ -88,3 +88,32 @@ SESHI_MEASURE_STORAGE='{"google_service_account_key": "<read-only key JSON>"}' \
   bun docs/seshi/session-tools-measure/sql-views.ts time gs://<test bucket>/search/measure 3
 ```
 
+
+## Phase 5: the `-sql` image (27 November 2026)
+
+Each image was built from this branch with `docker buildx build --platform linux/<arch>`
+(`--build-arg VARIANT=sql` for the `-sql` one), the default one also from phase 4's branch to
+check it did not grow. Sizes are `docker image inspect`'s, and `docker save | gzip -1` for what
+a pull moves, in MB.
+
+| Image | amd64 | amd64, gzip | arm64 | arm64, gzip |
+|---|---|---|---|---|
+| Default, phase 4 | 389.4 | 177.7 | 513.7 | 210.2 |
+| Default, this branch | 389.8 | 177.7 | 516.6 | 210.2 |
+| `-sql` | 782.3 | 311.3 | 891.3 | 333.0 |
+
+The default image does not grow: its seshi layer is 0.9 MB smaller on both (304.4 against 305.3
+MB on amd64), and the totals differ by the `apt-get upgrade` layer, which takes Debian's fixes of
+the day. The `-sql` image adds about 390 MB (130 MB gzipped) on amd64 and 375 MB (123 MB) on
+arm64, against the plan's estimate of about 800 MB and 340 MB gzipped:
+
+| Part of the `-sql` image | amd64 | arm64 |
+|---|---|---|
+| The binary (the server build's, and DuckDB's 0.5 MB binding) | 305.8 | 407.9 |
+| `duckdb/lib/libduckdb.so`, stripped (96.5 and 100.1 MB as npm ships it) | 74.3 | 69.3 |
+| `duckdb/v2.0.1/<platform>/lance.duckdb_extension`, as published (signed) | 316.8 | 303.8 |
+
+`bun build --compile` embeds DuckDB's `duckdb.node` but not `libduckdb.so`, which the binding
+links from its own folder, so a compiled binary could not load DuckDB at all. The archive and
+the image put the library in `duckdb/lib/` beside the binary, and the worker loads it from there
+before the binding (`preloadLibduckdb` in `@seshi/sql`).

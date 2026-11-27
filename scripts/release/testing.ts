@@ -1,17 +1,42 @@
 import { chmodSync, cpSync, mkdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import type { Variant } from "./build";
 import { ROOT, repositoryVersion } from "./build";
 import type { Target } from "./targets";
 
 export function standInCompile(version = repositoryVersion(), body?: string) {
   const compiled: string[] = [];
-  const compile = async (target: Target, outfile: string, server = false) => {
-    compiled.push(server ? `${target.id}-server` : target.id);
+  const compile = async (target: Target, outfile: string, variant: Variant = "plain") => {
+    compiled.push(
+      variant === "plain"
+        ? target.id
+        : variant === "server"
+          ? `${target.id}-server`
+          : `${target.id}-server-sql`,
+    );
     mkdirSync(dirname(outfile), { recursive: true });
     writeFileSync(outfile, `#!/bin/sh\n${body ?? `echo "seshi ${version}"`}\n# ${target.id}\n`);
     chmodSync(outfile, 0o755);
   };
   return { compile, compiled };
+}
+
+/** DuckDB's files for a `-sql` build, as stand-ins: no library or extension is read or
+ * fetched. */
+export function standInDuckdb() {
+  const asked: string[] = [];
+  const duckdb = async (target: Target) => {
+    asked.push(target.id);
+    const platform = target.cpu === "x64" ? "linux_amd64" : "linux_arm64";
+    return [
+      { name: "duckdb/lib/libduckdb.so", data: new TextEncoder().encode(`lib ${target.id}`) },
+      {
+        name: `duckdb/v9.9.9/${platform}/lance.duckdb_extension`,
+        data: new TextEncoder().encode(`lance ${platform}`),
+      },
+    ];
+  };
+  return { duckdb, asked };
 }
 
 export function installPackages(dir: string, packages: { name: string; dir: string }[]): string {

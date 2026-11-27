@@ -377,7 +377,12 @@ async function inProcess(
   }
   if (mode === "status") {
     const status = await search.status();
-    emit(ctx, json, status, () => statusLines(status));
+    const { sqlStatus, sqlStatusLines } = await import("../doctor/sql");
+    const sql = sqlStatus(instance);
+    emit(ctx, json, { ...status, ...(sql ? { sql } : {}) }, () => [
+      ...statusLines(status),
+      ...(sql ? sqlStatusLines(sql) : []),
+    ]);
     return EXIT.ok;
   }
   if (mode === "scrub") {
