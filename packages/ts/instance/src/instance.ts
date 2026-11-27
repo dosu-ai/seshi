@@ -467,7 +467,8 @@ export class Instance {
     } catch (err) {
       throw new InstanceError(message(err), { cause: err });
     }
-    if (worker?.ownCredential && sqlBackend() !== undefined) {
+    // Only an API instance answers sql, so only it starts sql workers.
+    if (worker?.ownCredential && sqlBackend() !== undefined && this.roles.includes("api")) {
       this.log.warn(
         "sql: [search.sql.storage] is not set, so the sql workers read the LanceDB index with its own credential, which can write; give them a read-only one (docs/search.md)",
       );

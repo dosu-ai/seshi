@@ -2512,7 +2512,7 @@
               "maximum": 1000
             },
             "extensions": {
-              "description": "The folder holding DuckDB's extensions (<folder>/<duckdb version>/<platform>/lance.duckdb_extension), for sql on a LanceDB index. Default: duckdb/ beside the seshi binary, where the seshi-server-sql archive and image put it.",
+              "description": "The folder holding DuckDB's extensions (<folder>/<duckdb version>/<platform>/lance.duckdb_extension), an absolute path, for sql on a LanceDB index. Default: duckdb/ beside the seshi binary, where the seshi-server-sql archive and image put it.",
               "type": "string",
               "minLength": 1
             },

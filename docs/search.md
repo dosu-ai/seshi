@@ -238,7 +238,9 @@ service_account_key = { file = "/secrets/seshi-sql-ro.json" }   # gs://
 
 Only the workers' environment holds it, and only as the index's storage options: the server's
 own keys never reach them. Without `[search.sql.storage]` the workers read with the index's own
-credential, which can write, and the server warns at start-up.
+credential, which can write, and the server warns at start-up; where that credential is the
+machine's (Application Default Credentials, an instance role), the workers' secret is
+`PROVIDER credential_chain`, which leaves it to Lance's own object-store client.
 
 **Scope on LanceDB.** `events` and `llm_calls` hold the rows of the sessions `sessions` admits,
 and `events` also checks each row's own visibility, so a session turned owner-only leaves a

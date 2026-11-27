@@ -50,6 +50,14 @@ jobs:
         with:
           bun-version-file: .bun-version
       - run: bun install --frozen-lockfile
+      # DuckDB's lance extension (about 90 MB), which the sql tests install on first use: from
+      # the cache, so an outage at extensions.duckdb.org does not fail unrelated runs. The key
+      # follows the lockfile, which pins DuckDB.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: node_modules/.cache/seshi-duckdb
+          key: duckdb-extensions-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: duckdb-extensions-${{ runner.os }}-
       - run: bun run check
       - run: bun run typecheck
       - run: bun run test
