@@ -350,6 +350,59 @@ describe("seshi sessions against a server", () => {
     expect(JSON.parse(nowhere.err)).toMatchObject({ error: { code: "io" } });
   });
 
+  it("lists sessions from the index by when and where, and reads a session's events", async () => {
+    await server.instance.search?.catchUp();
+    const recent = await machine.seshi(["sessions", "recent", "--since", "400d"]);
+    expect(recent.code, recent.err).toBe(0);
+    expect(recent.out).toMatch(/^sessions overlapping /);
+    expect(recent.out).toContain("· claude-code/sess1 · github.com/acme/widget@main ·");
+    expect(recent.out).toContain("claude-code/sess2");
+    const labelled = await machine.seshi([
+      "sessions",
+      "recent",
+      "--since",
+      "400d",
+      "--label",
+      "team=platform",
+      "--json",
+    ]);
+    expect(
+      (JSON.parse(labelled.out) as { sessions: { session_id: string }[] }).sessions.map(
+        (x) => x.session_id,
+      ),
+    ).toEqual(["sess1"]);
+    // Its events ran in September: not in the last 7 days.
+    expect((await machine.seshi(["sessions", "recent"])).out).toContain("no sessions match");
+
+    const read = await machine.seshi(["sessions", "read", "claude-code/sess1"]);
+    expect(read.code, read.err).toBe(0);
+    expect(read.out).toMatch(/^session acme\/[0-9a-f]{64} · claude-code\/sess1/);
+    expect(read.out).toMatch(/^#0 user {8}\S+ {2}/m);
+    expect(read.out.trimEnd().split("\n").at(-1)).toBe("end");
+    const archive = archiveId("acme", "claude-code", "sess1");
+    const piece = await machine.seshi([
+      "sessions",
+      "read",
+      `acme/${archive}`,
+      "--full",
+      "--max-chars",
+      "1000",
+      "--json",
+    ]);
+    expect(piece.code, piece.err).toBe(0);
+    expect(JSON.parse(piece.out)).toMatchObject({ mode: "full", session: { archive_id: archive } });
+    const two = await machine.seshi(["sessions", "read", "claude-code", "sess1", "--around", "1"]);
+    expect(two.code, two.err).toBe(0);
+    expect(
+      (await machine.seshi(["sessions", "read", "claude-code/sess1", "--from", "x"])).code,
+    ).toBe(2);
+    expect((await machine.seshi(["sessions", "read", "claude-code/nope"])).code).toBe(4);
+    expect(
+      (await machine.seshi(["sessions", "read", "claude-code/sess1", "--head", "0".repeat(64)]))
+        .code,
+    ).toBe(6);
+  });
+
   it("names a logins file it cannot read instead of crashing", async () => {
     writeFileSync(join(machine.configDir, "logins.json"), "{ not json");
     const ls = await machine.seshi(["sessions", "ls"]);
@@ -561,6 +614,14 @@ describe("serverless mode, by its old name [local] (F11.1)", () => {
       expect(found.code, found.err).toBe(0);
       expect(found.err).toContain("building the search index");
       expect(found.out).toContain("claude-code/s1  me");
+      // The session tools read the same bucket and its index.
+      const recent = await local.seshi(["sessions", "recent", "--since", "400d"]);
+      expect(recent.code, recent.err).toBe(0);
+      expect(recent.out).toContain("claude-code/s1");
+      const read = await local.seshi(["sessions", "read", "claude-code/s1", "--roles", "user"]);
+      expect(read.code, read.err).toBe(0);
+      expect(read.out).toMatch(/^#0 user/m);
+      expect((await local.seshi(["sessions", "read", "claude-code/none"])).code).toBe(4);
       const atif = await local.seshi(["sessions", "export", "claude-code/s1", "--format", "atif"]);
       expect(JSON.parse(atif.out)).toMatchObject({ schema_version: "ATIF-v1.7" });
       const vis = await local.seshi(["sessions", "visibility", "claude-code/s1", "owner"]);

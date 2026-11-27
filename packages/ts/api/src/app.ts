@@ -72,14 +72,17 @@ import {
   FEED_DEFAULT_LIMIT,
   FEED_MAX_LIMIT,
   IndexUnavailable,
+  readSessionEvents,
   SearchQueryError,
   SearchUnavailable,
+  SessionReadError,
   SqlBusy,
   SqlFailed,
   SqlRequestError,
   type SqlService,
   SqlUnavailable,
   sqlCallerFor,
+  TraceCache,
   viewerFor,
 } from "@seshi/search";
 import {
@@ -98,7 +101,7 @@ import {
 } from "@seshi/store";
 import { inflateCapped, readCapped } from "./otlp/body";
 import { otlpTraces } from "./otlp/receiver";
-import { searchRequestOf } from "./search";
+import { eventsRequestOf, searchRequestOf, sessionListRequestOf } from "./search";
 
 export type { StorageView };
 
@@ -674,11 +677,34 @@ export function createApp(instance: Instance) {
     return json({ reviews: records.map(view) });
   }
 
+  /** Decoded traces `read_session` reads, by session, hash and rule set. */
+  const traceCache = new TraceCache();
+
+  async function eventsOf({ request, params, url }: Context): Promise<Response> {
+    const { folder, metadata } = await located(request, params, url);
+    try {
+      return json(
+        await readSessionEvents({
+          store,
+          folder,
+          metadata,
+          request: eventsRequestOf(url),
+          cache: traceCache,
+        }),
+      );
+    } catch (err) {
+      if (err instanceof SessionReadError) throw new HttpError(err.status, err.code, err.message);
+      throw err;
+    }
+  }
+
   route("GET", "/v1/sessions/:format/:session_id", sessionOf);
+  route("GET", "/v1/sessions/:format/:session_id/events", eventsOf);
   route("GET", "/v1/sessions/:format/:session_id/trace", traceOf);
   route("GET", "/v1/sessions/:format/:session_id/export", exportOf);
   route("GET", "/v1/sessions/:format/:session_id/reviews", reviewsOf);
   route("GET", "/v1/owners/:owner/sessions/:archive_id", sessionOf);
+  route("GET", "/v1/owners/:owner/sessions/:archive_id/events", eventsOf);
   route("GET", "/v1/owners/:owner/sessions/:archive_id/trace", traceOf);
   route("GET", "/v1/owners/:owner/sessions/:archive_id/export", exportOf);
   route("GET", "/v1/owners/:owner/sessions/:archive_id/reviews", reviewsOf);
@@ -961,6 +987,21 @@ export function createApp(instance: Instance) {
         }),
       "bad_query",
     );
+  });
+
+  route("GET", "/v1/search/sessions", async ({ request, url }) => {
+    // As search: a credential without `search` (a device token) lists its own sessions only.
+    const principal = await authenticate(request);
+    return fromSearch((search) => {
+      const query = sessionListRequestOf(url, now());
+      if (!principal.scopes.has("search")) {
+        const owner = query.owner ?? principal.owner;
+        if (!isOwner(owner)) throw new SearchQueryError("owner is not an owner id");
+        requireReadOwner(principal, owner, aliases, "search");
+        query.owner = owner;
+      }
+      return search.listSessions(viewerFor(principal, aliases), query);
+    });
   });
 
   function tokenKind(value: unknown): TokenKind {

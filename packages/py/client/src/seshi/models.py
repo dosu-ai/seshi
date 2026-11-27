@@ -68,6 +68,9 @@ EventRole = Literal[
 ]
 RecordKind = Literal["failed", "dropped"]
 SearchSort = Literal["relevance", "recent"]
+EventsMode = Literal["condensed", "full"]
+"""How a session's events are read: `condensed` cuts each tool result to its first 200
+characters; `full` gives it as stored."""
 
 _Known = TypeVar("_Known")
 
@@ -959,7 +962,9 @@ class SearchMatch(Response):
     """The matched words in `snippet`: `[start, end)` offsets in UTF-16 code units."""
 
 
-class SearchResult(Response):
+class SessionSummary(Response):
+    """A session as the search index holds it."""
+
     owner: str
     format: str = Field(validation_alias=AliasChoices("format", "agent"))
     session_id: str
@@ -978,6 +983,11 @@ class SearchResult(Response):
     started_at: str | None = None
     ended_at: str | None = None
     updated_at: str
+
+
+class SearchResult(SessionSummary):
+    """A session with records that match."""
+
     score: float
     hits: int
     matches: list[SearchMatch]
@@ -1071,6 +1081,153 @@ class SqlSchema(Response):
     scope: SqlScope
     index: SqlIndexInfo
     limits: SqlLimits
+
+
+class SessionListRequest(Request):
+    """Sessions by who, where and when (`GET /v1/search/sessions`). Every filter narrows; none
+    widens what the caller may read."""
+
+    owner: str | None = None
+    agent: str | None = None
+    """The format the session is filed under, or the agent that ran it (`origin_agent`)."""
+    repo: str | None = None
+    branch: str | None = None
+    harness: str | None = None
+    agent_version: str | None = None
+    model: str | None = None
+    label: list[str] | None = None
+    """Labels a session must carry, each `key=value` (`SeshiClient.search_sessions` takes a
+    dict)."""
+    source: str | None = None
+    since: str | None = None
+    """The window's start, as a time or an age back from now (`7d`, `24h`); 7 days ago by
+    default."""
+    until: str | None = None
+    """The window's end, as a time or an age; now by default."""
+    limit: int | None = None
+    """Sessions per page: 1 to 100, 20 by default."""
+    after: str | None = None
+    """The previous page's `cursor`."""
+
+
+class SessionWindow(Response):
+    """The window the sessions overlap, as the server read it."""
+
+    since: str
+    until: str | None = None
+
+
+class SessionList(Response):
+    """`GET /v1/search/sessions`: the sessions, newest first by `updated_at`."""
+
+    sessions: list[SessionSummary]
+    window: SessionWindow
+    cursor: str | None = None
+    """Pass as `after` for the next page; absent on the last."""
+    index: SearchIndexState
+
+
+# --- Session events -------------------------------------------------------------------------
+
+
+class SessionEventsRequest(Request):
+    """Which of a session's events to read (`GET …/events`). Events are numbered by `seq`, their
+    place in the session's current trace chain."""
+
+    from_: int | None = Field(default=None, alias="from")
+    """The first `seq` of the range `[from, to)`; 0 by default."""
+    to: int | None = None
+    """The `seq` after the range's last; the session's end by default."""
+    around: int | None = None
+    """Or, instead of `from` and `to`, `context` events either side of this one."""
+    context: int | None = None
+    mode: EventsMode | None = None
+    roles: str | None = None
+    """Only events of these roles, comma-separated (`SeshiClient.session_events` takes a
+    sequence)."""
+    max_chars: int | None = None
+    event: int | None = None
+    """Read this one event's text in pieces, from `offset`."""
+    offset: int | None = None
+    trace: str | None = None
+    """Count `from`, `to`, `around` and `event` in this trace of the chain (a content hash, or
+    its first 8 or more characters), as a search match's `content_hash` and `event_index` do."""
+    head: str | None = None
+    """Refuse (`ServerError` 409 `head_changed`) when the session's head is no longer this."""
+
+
+class TokenTotals(Response):
+    """Token counts summed over a session's model calls."""
+
+    input_tokens: int
+    output_tokens: int
+    cache_read_input_tokens: int
+    cache_creation_input_tokens: int
+    reasoning_tokens: int
+    total_tokens: int
+
+
+class SessionHeader(Response):
+    """A session's agent, repository, times, number of events, models and token totals."""
+
+    owner: str
+    archive_id: str
+    format: str
+    session_id: str
+    origin_agent: str | None = None
+    harness: str | None = None
+    project: str | None = None
+    repo: str | None = None
+    branch: str | None = None
+    labels: dict[str, str] | None = None
+    visibility: Open[Visibility]
+    started_at: str | None = None
+    ended_at: str | None = None
+    updated_at: str
+    head: str
+    """The head the `seq`s are numbered from; pass it as `head` to keep them."""
+    traces: int
+    """Traces in the current chain."""
+    events: int
+    """Events across them."""
+    models: list[str]
+    llm_calls: int
+    tokens: TokenTotals
+
+
+class SessionEvent(Response):
+    seq: int
+    """Its place in the session's current trace chain."""
+    role: Open[EventRole]
+    content_hash: str
+    """The trace it is in."""
+    event_index: int
+    """Its index in that trace's events."""
+    timestamp: str | None = None
+    tool_name: str | None = None
+    tool_call_id: str | None = None
+    ok: bool | None = None
+    text: str
+    chars: int
+    """The text's full length, in UTF-16 code units."""
+    offset: int | None = None
+    """Where `text` starts: only on a read of one event in pieces."""
+    cut: int | None = None
+    """Characters after `text` left out."""
+
+
+class SessionEvents(Response):
+    """`GET …/events`: the session's header and the events read, `[from, to)`."""
+
+    session: SessionHeader
+    mode: Open[EventsMode]
+    from_: int = Field(alias="from")
+    to: int
+    events: list[SessionEvent]
+    next: int | None = None
+    """The `seq` to read on from; absent at the session's end."""
+    next_offset: int | None = None
+    """For a read of one event in pieces, the `offset` to read on from; absent at its end."""
 
 
 # --- Admin (X7.5, X6.4, F1.5) ---------------------------------------------------------------

@@ -163,6 +163,41 @@ export interface BackendResults {
   capped?: boolean;
 }
 
+/** Where a listing of sessions is: the last session given, by the order listings use
+ * (`updated_ms` newest first, then the key `<owner>/<archive_id>` from last to first). */
+export interface SessionPosition {
+  updated: number;
+  key: string;
+}
+
+/** A listing of sessions with no search words (`list_sessions`): filters resolved as
+ * `BackendQuery`'s, and a window the sessions must overlap. */
+export interface SessionListQuery {
+  viewer: Viewer;
+  owners?: readonly string[];
+  agent?: string;
+  repo?: string;
+  branch?: string;
+  harness?: string;
+  agent_version?: string;
+  model?: string;
+  labels?: Labels;
+  source?: string;
+  /** Sessions that ended (their latest event, else their last update) at or after this, and
+   * started (their earliest event, else their last update) at or before `until`. Epoch ms. */
+  since?: number;
+  until?: number;
+  limit: number;
+  /** Sessions after this place in the order. */
+  after?: SessionPosition;
+}
+
+export interface SessionListPage {
+  sessions: IndexedSession[];
+  /** Sessions follow the last one given. */
+  more: boolean;
+}
+
 /** A place in the cross-owner feed: entries sort by stamp, then owner, then name (the key
  * under `changes/`, which starts with the stamp). */
 export interface FeedPosition {
@@ -201,6 +236,9 @@ export interface IndexReader {
   /** One read; the backend may cache it for a few seconds. */
   state(): Promise<IndexState>;
   query(query: BackendQuery): Promise<BackendResults>;
+  /** Sessions the viewer may see that match the filters, not removed, newest first by
+   * `updated_at`: at most `limit`, after `after`. */
+  listSessions(query: SessionListQuery): Promise<SessionListPage>;
   /** The kept change entries after `after` (in stamp, owner, name order), stamped no later than
    * `through`: at most `limit`, whether more follow, and the `through` used. `through` is the
    * time every owner's feed has been read up to (`IndexWriter.readThrough`); null before there

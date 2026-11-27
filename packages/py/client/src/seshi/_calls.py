@@ -308,6 +308,21 @@ def get_trace(
     )
 
 
+def _events_query(request: m.SessionEventsRequest) -> dict[str, QueryValue]:
+    return dict(request.model_dump(by_alias=True, exclude_none=True))
+
+
+def session_events(
+    format: str, session_id: str, request: m.SessionEventsRequest, owner: str | None
+) -> Call[m.SessionEvents]:
+    return Call(
+        "getEvents",
+        _model(m.SessionEvents),
+        path_params=_session(format, session_id),
+        query={"owner": owner, **_events_query(request)},
+    )
+
+
 def _archive(owner: str, archive_id: str) -> dict[str, str]:
     return {"owner": owner, "archive_id": archive_id}
 
@@ -328,6 +343,17 @@ def get_trace_by_archive(
         _or_none(_TRACES[render], 404, 410),
         path_params=_archive(owner, archive_id),
         query={"hash": hash, "render": render},
+    )
+
+
+def session_events_by_archive(
+    owner: str, archive_id: str, request: m.SessionEventsRequest
+) -> Call[m.SessionEvents]:
+    return Call(
+        "getEventsByArchive",
+        _model(m.SessionEvents),
+        path_params=_archive(owner, archive_id),
+        query=_events_query(request),
     )
 
 
@@ -423,6 +449,11 @@ def sql(request: m.SqlRequest) -> Call[m.SqlResult]:
 
 def sql_schema(since: str | None, until: str | None) -> Call[m.SqlSchema]:
     return Call("sqlSchema", _model(m.SqlSchema), query={"since": since, "until": until})
+
+
+def search_sessions(request: m.SessionListRequest) -> Call[m.SessionList]:
+    query: dict[str, QueryValue] = dict(request.model_dump(exclude_none=True))
+    return Call("searchSessions", _model(m.SessionList), query=query)
 
 
 def redaction_rules() -> Call[m.RedactionRules]:

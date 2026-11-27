@@ -118,6 +118,7 @@ describe("the command groups (F8.1)", () => {
         "init",
         "login",
         "logout",
+        "mcp",
         "normalize",
         "redact",
         "reprocess",
