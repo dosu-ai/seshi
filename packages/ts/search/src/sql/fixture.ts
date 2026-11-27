@@ -163,8 +163,12 @@ export function fixtureSession(s: FixtureSession, n: number): IndexedSession {
 
 /** Build the fixture index in `dir` (the index at `dir/index.sqlite`) with the decoys beside it:
  * a CSV, a SQLite file, a fake credentials file and a folder named like a Lance table. Returns
- * the index's path. */
-export async function buildFixture(dir: string): Promise<string> {
+ * the index's path. `only` keeps some sessions out (each keeps its place, so its rows are the
+ * same): the fuzzer's reference indexes hold only what one caller sees. */
+export async function buildFixture(
+  dir: string,
+  only: (s: FixtureSession) => boolean = () => true,
+): Promise<string> {
   mkdirSync(dir, { recursive: true });
   const path = join(dir, "index.sqlite");
   const index = new SqliteIndex({
@@ -173,6 +177,7 @@ export async function buildFixture(dir: string): Promise<string> {
     events: ["user", "assistant", "tool_call", "tool_result"],
   });
   FIXTURE_SESSIONS.forEach((s, i) => {
+    if (!only(s)) return;
     const n = i + 1;
     index.apply({
       session: fixtureSession(s, n),

@@ -101,6 +101,13 @@ runs [tests/scenarios-proc](tests/scenarios/README.md#process-mode) with a real 
 uploaders and hooks behind a TCP fault proxy, in about a minute. It is not part of `bun run
 test`; CI runs it nightly.
 
+`sql`'s statement check and views have a fuzzer too: `bun run test:sql-fuzz` mutates the hostile
+corpus and generates scope probes on SQLite and on DuckDB over a Lance index, and fails on any
+answer that shows something the caller may not see (docs/seshi/session-tools.md, "The fuzzer").
+It is not part of `bun run test`; CI runs it nightly with a fresh seed, which it prints. A finding
+is fixed in the check or the views, or written down as a corpus case with a `why` and listed in
+`FUZZ_KNOWN`.
+
 ## Verifying a change end to end
 
 Unit and integration tests run seshi in-process. To show a change working the way a user meets

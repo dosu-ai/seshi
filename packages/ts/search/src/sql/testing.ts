@@ -4,4 +4,5 @@
  * `@seshi/search/sql-testing`. Nothing else imports it, so no binary carries it. */
 export * from "./conformance";
 export * from "./fixture";
+export * from "./fuzz";
 export * from "./hostile";

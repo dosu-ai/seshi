@@ -672,9 +672,40 @@ conformance tests, which already run on both backends.
 
 Two checks run over the whole corpus as well: every statement the check accepts must also
 `prepare`, and for every accepted statement that returns `owner` and `archive_id`, each pair
-must be one the caller may see. A fuzzer (a new `test:sql-fuzz` script, nightly, not on every
-PR) mutates the corpus (swap a table for a path, wrap in a CTE, add a join, add a second
-statement) and applies the same two checks.
+must be one the caller may see.
+
+**The fuzzer.** `bun run test:sql-fuzz` (the `sql-fuzz` CI job, nightly and by hand, never on a
+pull request) runs `fuzz.ts` in `@seshi/search` on both engines. Half its statements mutate the
+corpus (a table swapped for a path, a hidden table or a table function; wrapped in a CTE or
+shadowed by one; a join, a second statement, a quoted, qualified or re-cased name, a comment, a
+`UNION` or `IN` probe added); half are generated to probe scope (joins, subqueries, set
+operations, window functions, `HAVING`, aggregates and errors over bob's owner-only session, the
+removed one and the one outside the window). Each runs as alice and as an admin and is held to
+the corpus's two checks (on SQLite only a parse error counts against the first: a mutation may
+fail to bind) and to a third: the answer must be the one an admin gets over a reference index
+built from only the sessions the caller sees, so a count, a sum, a `NOT IN` or a window that
+took a hidden row in would differ, and so would an error only a hidden row raises. A fresh seed
+each run (`SESHI_SQL_FUZZ_SEED` repeats one), `SESHI_SQL_FUZZ_COUNT` statements per half (5,000
+on SQLite, about 20 s; 1,000 on DuckDB, about 12 minutes), and every finding with its seed in the
+job's `sql-fuzz-report` artifact. What it found is written down in the corpus, each case with a
+`why`, and listed in `FUZZ_KNOWN`, which keeps a known finding from failing the run:
+
+- **SQLite lets an error from a hidden row reach a member** (`errors-8`). SQLite flattens the
+  views and may test the statement's `WHERE` before their scope, so
+  `CASE WHEN text LIKE '%SECRET%' THEN abs(-9223372036854775807 - 1) = 0 END` fails for alice
+  only because of bob's owner-only row: one bit per query, enough to spell out hidden text. The
+  message says nothing, but the failure is the leak. Members are refused on SQLite (T11), and
+  this is one more reason they stay so.
+- **The check accepts some statements SQLite cannot parse** (`errors-6`, `errors-9`,
+  `lexing-15`–`17`): `GROUP BY ALL`, a call's field (`json_each('[1]').models`), and a comment
+  just after `WINDOW name`, `OVER` or `FILTER`, where SQLite looks one token ahead, past
+  whitespace but not past a comment, to tell the keyword from an identifier. Each fails to
+  prepare, the safe way round, and the `EXPLAIN` check stands behind it.
+
+On DuckDB over a Lance index the first runs (3,400 statements, seeds 2 and 7, 27 November)
+found nothing: no error from a hidden row reached alice, and every answer was the reference's.
+A leak planted for the purpose (alice's reference index given bob's owner-only session) made
+215 findings in 600 statements on SQLite, so silence means something.
 
 ## seshi mcp
 
@@ -886,7 +917,7 @@ now 2026-11-25T12:00:00Z · as alice (member: own + org) · window 2026-10-26 �
 | 5. Shipping | `main-server-sql.ts`, `build-binary.ts --sql`, `duckdb-extensions.json` and the release job's fetch and check, the `-sql` tarballs and image, `seshi doctor` checks (extension, read-only credential); measured image sizes; the `lance` views against GCS with the read-only credential, cold and warm times of the three examples at 1M and 10M records. | 1 week |
 | 6. The sql tool | `sql` in `seshi mcp` (server and laptop) with the generated, per-dialect description, the DDL test, test 2 for `sql`, test 3 nightly, docs (`docs/search.md`, `docs/config.md`, a new `docs/agents.md`). | 3–4 days |
 | 7. Members on LanceDB (later) | Turn `members` on by default once the [gates](#who-may-use-it) hold. | Separate decision |
-| Later | A server MCP endpoint with OAuth; the fuzzer's findings; `PIVOT`; SQLite through `bun:ffi` for members. | Separate decisions |
+| Later | A server MCP endpoint with OAuth; `PIVOT`; SQLite through `bun:ffi` for members. | Separate decisions |
 
 Phases 1 and 2 can run side by side; 3 needs 2's columns; 4 needs 3's worker and endpoint; 5
 can run beside 4; 6 needs 3 (and 4 and 5 for LanceDB).

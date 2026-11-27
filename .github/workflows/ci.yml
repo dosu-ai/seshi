@@ -4,7 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
-  # The process-mode scenarios (scenarios-process below), nightly or by hand.
+  # The process-mode scenarios (scenarios-process below), the real-agent test (agent) and the
+  # sql fuzzer (sql-fuzz), nightly or by hand.
   schedule:
     - cron: "17 3 * * *"
   # By hand: the scenarios, and, with pypi_version, the pypi job for a release already cut
@@ -433,6 +434,42 @@ jobs:
             exit 0
           fi
           bun run test:agent
+
+  # The sql fuzzer (docs/seshi/session-tools.md, "The hostile-statement suite"): the corpus
+  # mutated and scope probes generated, on SQLite and on DuckDB over a Lance index, each answer
+  # held to what the caller may see. Nightly and by hand, never on pull requests: a fresh seed
+  # each run, printed and kept with every finding in the report so a run can be repeated
+  # (SESHI_SQL_FUZZ_SEED).
+  sql-fuzz:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+      - run: bun install --frozen-lockfile
+      # DuckDB's lance extension, as the test job keeps it.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: node_modules/.cache/seshi-duckdb
+          key: duckdb-extensions-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: duckdb-extensions-${{ runner.os }}-
+      - name: Fuzz sql on both engines
+        env:
+          SESHI_SQL_FUZZ_REPORT: ${{ runner.temp }}/sql-fuzz
+        run: bun run test:sql-fuzz
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sql-fuzz-report
+          path: ${{ runner.temp }}/sql-fuzz
+          if-no-files-found: ignore
 
   # Every push to main with a Conventional Commit since the last release is a release
   # (release.config.js): the version is chosen from the commits, every target is

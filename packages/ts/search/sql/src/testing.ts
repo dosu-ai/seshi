@@ -69,6 +69,7 @@ export interface LanceFixture {
 export async function buildLanceFixture(
   dir: string,
   bucket?: { uri: string; storageOptions: Record<string, string> },
+  only: (s: FixtureSession) => boolean = () => true,
 ): Promise<LanceFixture> {
   mkdirSync(dir, { recursive: true });
   const uri = bucket?.uri ?? join(dir, "index");
@@ -93,8 +94,9 @@ export async function buildLanceFixture(
     });
   for (const owner of ["alice", "bob"]) {
     const mine = FIXTURE_SESSIONS.map((s, i) => ({ s, n: i + 1 })).filter(
-      ({ s }) => s.owner === owner,
+      ({ s }) => s.owner === owner && only(s),
     );
+    if (mine.length === 0) continue;
     await commit(
       owner,
       mine.map(({ s, n }) => update(s, n, 1)),
