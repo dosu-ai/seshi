@@ -48,6 +48,13 @@ describe("residueOf", () => {
 describe("seshi doctor's flags", () => {
   it("takes --session with or without an id, and the rest", () => {
     expect(parseDoctorArgs([])).toEqual({});
+    // With --config, --server names the running server to ask for its sql workers.
+    expect(
+      parseDoctorArgs(["--config", "s.toml", "--server", "https://seshi.example.com/"]),
+    ).toEqual({ config: "s.toml", server: "https://seshi.example.com" });
+    expect(parseDoctorArgs(["--config", "s.toml", "--server", "seshi.example.com"])).toBe(
+      "'seshi.example.com' is not a server URL: not a URL",
+    );
     expect(parseDoctorArgs(["--session"])).toEqual({ session: true });
     expect(parseDoctorArgs(["--session", "abc", "--agent", "codex", "--deep"])).toEqual({
       session: "abc",

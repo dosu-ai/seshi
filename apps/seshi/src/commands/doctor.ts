@@ -1,6 +1,7 @@
 import { type CaptureState, readState, StateUnreadable } from "@seshi/capture";
 import { parseDuration } from "@seshi/config";
 import { type Account, openAccount } from "../account/account";
+import { BadServerUrl, normalizeServer } from "../account/logins";
 import { type Backend, openBackend, ServerlessBackend } from "../backend";
 import { allCaptureAgents } from "../capture-agents";
 import { EXIT, type ExitCode } from "../cli/exit";
@@ -82,6 +83,15 @@ export function parseDoctorArgs(argv: readonly string[]): Args | string {
   const server = args.config !== undefined || args.set !== undefined;
   if (server && (args.session !== undefined || args.agent || args.since || args.deep)) {
     return "--config checks a server; its other options are for this machine's sessions";
+  }
+  if (server && args.server !== undefined) {
+    // Asked after the server's own checks have run: a URL that cannot be one is refused first.
+    try {
+      args.server = normalizeServer(args.server);
+    } catch (err) {
+      if (err instanceof BadServerUrl) return err.message;
+      throw err;
+    }
   }
   if (args.session !== undefined && args.since !== undefined) {
     return "--since is for checking every recent session; leave it out with --session";
@@ -349,13 +359,13 @@ export async function run(ctx: CommandContext): Promise<number> {
   }
 }
 
-/** A running server's sql workers, asked with the stored login for it. */
-async function askServer(ctx: CommandContext, named: string): Promise<ServerPool> {
+/** A running server's sql workers, asked with the stored login for it. `server` is normalized
+ * (`parseDoctorArgs`). */
+async function askServer(ctx: CommandContext, server: string): Promise<ServerPool> {
   const { adminTarget } = await import("./admin-target");
-  const { normalizeServer } = await import("../account/logins");
-  return serverPool(normalizeServer(named), async () => {
-    const target = await adminTarget(ctx, { server: named });
-    if (target.kind !== "remote") throw new Error(`${named} is not a server`);
+  return serverPool(server, async () => {
+    const target = await adminTarget(ctx, { server });
+    if (target.kind !== "remote") throw new Error(`${server} is not a server`);
     return target.db.jobs();
   });
 }

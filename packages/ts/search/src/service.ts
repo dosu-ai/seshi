@@ -473,9 +473,11 @@ export class SearchService {
     return (await this.open()).indexer.catchUp(signal);
   }
 
-  /** Whether `owner`'s change feed holds an entry this index has not read (one listing). */
+  /** Whether `owner`'s change feed holds an entry written since the last catch-up that this
+   * index has not read (one listing). */
   async behind(owner: string): Promise<boolean> {
-    return (await this.open()).indexer.behind(owner);
+    const { index, indexer } = await this.open();
+    return indexer.behind(owner, (await index.state()).caught_up_at);
   }
 
   /** Drop everything the index holds and build it again from the change feed (F10.2). Until
