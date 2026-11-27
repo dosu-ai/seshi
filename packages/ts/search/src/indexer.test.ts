@@ -188,6 +188,11 @@ async function continued(n: number): Promise<string> {
   return archiveId("alice", "trajectory", "s0");
 }
 
+/** When `index` last caught up, as `behind()` takes it. */
+async function caughtUp(index: SqliteIndex): Promise<string | undefined> {
+  return (await index.state()).caught_up_at;
+}
+
 /** The sessions a search of `index` finds, as `owner/session_id`. */
 function finder(index: SqliteIndex) {
   return async (q: string) =>
@@ -246,19 +251,19 @@ describe("the indexer (F10.2)", () => {
   it("says an owner's feed is behind when it holds an entry the index has not read", async () => {
     await db("alice").ingest({ format: "trajectory", session_id: "s1", transcript: log("one") });
     await db("bob").ingest({ format: "trajectory", session_id: "s2", transcript: log("two") });
-    const { indexer } = setup();
-    expect(await indexer.behind("alice")).toBe(true);
+    const { index, indexer } = setup();
+    expect(await indexer.behind("alice", await caughtUp(index))).toBe(true);
     await indexer.catchUp();
     // Its entries are inside the lag window, so listed again, but read: not behind.
-    expect(await indexer.behind("alice")).toBe(false);
-    expect(await indexer.behind("bob")).toBe(false);
+    expect(await indexer.behind("alice", await caughtUp(index))).toBe(false);
+    expect(await indexer.behind("bob", await caughtUp(index))).toBe(false);
     await db("alice").ingest({ format: "trajectory", session_id: "s3", transcript: log("three") });
-    expect(await indexer.behind("alice")).toBe(true);
-    expect(await indexer.behind("bob")).toBe(false);
+    expect(await indexer.behind("alice", await caughtUp(index))).toBe(true);
+    expect(await indexer.behind("bob", await caughtUp(index))).toBe(false);
     await indexer.catchUp();
-    expect(await indexer.behind("alice")).toBe(false);
+    expect(await indexer.behind("alice", await caughtUp(index))).toBe(false);
     // An owner never read, with nothing written, is not behind.
-    expect(await indexer.behind("carol")).toBe(false);
+    expect(await indexer.behind("carol", await caughtUp(index))).toBe(false);
   });
 
   it("is not behind for entries a catch-up held back inside the lag window", async () => {
@@ -270,23 +275,23 @@ describe("the indexer (F10.2)", () => {
     await tombstone({ ...base, session_id: "s1" });
     await setVisibility({ ...base, session_id: "s2", visibility: "owner" });
     await setVisibility({ ...base, session_id: "s2", visibility: "org" });
-    const { indexer } = setup();
+    const { index, indexer } = setup();
     tick(BEHIND_SKEW_MS + 1000);
     await indexer.catchUp();
-    expect(await indexer.behind("alice")).toBe(false);
+    expect(await indexer.behind("alice", await caughtUp(index))).toBe(false);
     // One written after the catch-up still is.
     tick();
     await db().ingest({ format: "trajectory", session_id: "s3", transcript: log("new") });
-    expect(await indexer.behind("alice")).toBe(true);
+    expect(await indexer.behind("alice", await caughtUp(index))).toBe(true);
   });
 
   it("finds an unread entry past a full page of read ones", async () => {
     await continued(3);
-    const { indexer } = gathering(0);
+    const { index, indexer } = gathering(0);
     await indexer.catchUp();
-    expect(await indexer.behind("alice")).toBe(false);
+    expect(await indexer.behind("alice", await caughtUp(index))).toBe(false);
     await db().ingest({ format: "trajectory", session_id: "s9", transcript: log("late") });
-    expect(await indexer.behind("alice")).toBe(true);
+    expect(await indexer.behind("alice", await caughtUp(index))).toBe(true);
   });
 
   it("indexes where a session ran and with what: its repo, harness, version and models", async () => {

@@ -373,12 +373,12 @@ export class Indexer {
    * not read: its feed listed from the cursor (less the lag window), as a pass would list it.
    * A reader that caught up a moment ago asks this before answering, so a session uploaded
    * since is not missing for the indexer interval; it costs one listing, where a pass lists
-   * every owner's feed. An unread entry stamped before that catch-up (less `BEHIND_SKEW_MS`)
-   * is one the pass held back inside the lag window, as it does an upload deleted since: it
-   * does not count, or every call would catch up again until the lag passed. */
-  async behind(owner: string): Promise<boolean> {
+   * every owner's feed. An unread entry stamped before that catch-up (`caughtUp`, the index's
+   * `caught_up_at`, less `BEHIND_SKEW_MS`) is one the pass held back inside the lag window, as
+   * it does an upload deleted since: it does not count, or every call would catch up again
+   * until the lag passed. */
+  async behind(owner: string, caughtUp: string | undefined): Promise<boolean> {
     const generation = await this.index.generation();
-    const caughtUp = (await this.index.state()).caught_up_at;
     const since = caughtUp === undefined ? -Infinity : Date.parse(caughtUp) - BEHIND_SKEW_MS;
     const prefix = keys.changes(owner);
     const held = (await this.index.cursors(generation, [owner])).get(owner);
