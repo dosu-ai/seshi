@@ -1,0 +1,11 @@
+{
+  "name": "seshi-session-tools-spike",
+  "private": true,
+  "type": "module",
+  "description": "Spike for docs/seshi/session-tools.md: whether DuckDB's lock-down settings bind its lance and sqlite extensions. Throwaway scripts, outside the workspace.",
+  "dependencies": {
+    "@duckdb/node-api": "2.0.1-r.1",
+    "@lancedb/lancedb": "0.41.0",
+    "apache-arrow": "21.2.0"
+  }
+}
