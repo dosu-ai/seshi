@@ -117,3 +117,47 @@ arm64, against the plan's estimate of about 800 MB and 340 MB gzipped:
 links from its own folder, so a compiled binary could not load DuckDB at all. The archive and
 the image put the library in `duckdb/lib/` beside the binary, and the worker loads it from there
 before the binding (`preloadLibduckdb` in `@seshi/sql`).
+
+## Phase 5: sql on GCS from inside the region (27 November 2026)
+
+Synthetic data only, shaped as in phase 4 (each session 200 events and 20 model calls, across 20
+owners): 5,000 sessions (1M events, 100k calls) and 50,000 sessions (10M events, 1M calls). It
+ran on an e2-standard-8 VM in us-west1-a, against a bucket in us-west1, both in `dosu-staging`.
+`sql-views.ts gen` wrote each index with the VM's own service account: 4.6 min and 1.7 GB for
+1M, 66 min and 23.9 GB for 10M. `sql-views.ts time` then read it as the workers do, with only a
+read-only key in their environment: a service account holding `storage.objectViewer` under the
+prefix condition in [search.md](../../search.md#sql-on-a-lancedb-index).
+
+Each statement ran four times on a fresh worker, in two passes. Cold is the first run, which
+starts the worker (DuckDB and the `lance` extension load); the range covers both passes. Warm is
+the median of the other six. A worker opens a fresh database, and so the Lance tables, for every
+statement, warm or not. Times are in seconds, with a 30-day window.
+
+| Statement | As | 1M cold | 1M warm | 10M cold | 10M warm |
+|---|---|---|---|---|---|
+| `count(*)` from sessions | admin | 1.0–1.2 | 0.7 | 1.0–1.2 | 0.7 |
+| | member | 0.9–1.0 | 0.6 | 1.0 | 0.7 |
+| `count(*)` from events | admin | 1.3–1.5 | 1.1 | 2.6–3.2 | 2.4 |
+| | member | 1.6–1.7 | 1.2 | 3.4–3.5 | 3.0 |
+| Example 1 (tokens per person and model) | admin | 1.3–1.4 | 1.0 | 1.6–1.9 | 1.4 |
+| | member | 1.3–1.4 | 1.0 | 1.7–1.8 | 1.4 |
+| Example 2 (tools that fail most) | admin | 1.5–1.7 | 1.2 | 2.5–2.8 | 2.3 |
+| | member | 1.7 | 1.3 | 3.5–3.6 | 3.3 |
+| Example 3 (many prompts, few tool calls) | admin | 1.4–1.5 | 1.1 | 2.9 | 2.7 |
+| | member | 1.5 | 1.2 | 3.7–3.9 | 3.4 |
+
+- **In the region, opening the tables costs about 0.6 s, not 3 s.** A count of `sessions`
+  takes 0.7 s warm at both sizes, against 3 s from the laptop in phase 4.
+- **What grows with the index is reading `events`.** At 10M records, the statements that scan
+  it (the count, examples 2 and 3) take 2.3–3.4 s warm. Example 1 reads `llm_calls` and
+  `sessions` only and stays at 1.4 s.
+- **At 10M, members pay 0.6–1 s more on `events`** (0.1 s at 1M), for its semi-join with the
+  admitted sessions.
+- **A cold worker adds 0.2–0.5 s.** Keeping Lance's dataset cache across statements would save
+  the open, about 0.6 s a statement. It is not worth its care yet: a database must still never
+  be reused after a caller's statement.
+- Every statement fits well inside the 15 s default timeout, at 10M too.
+
+The job is `vm/job-sql.sh`, run by `docs/seshi/search-spike/vm/agent.sh`. Its result lines are in
+`vm/gcs-sql-results.log`. The VM, the bucket, the service account and its key were deleted after
+the run.
