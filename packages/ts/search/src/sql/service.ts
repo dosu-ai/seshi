@@ -13,7 +13,13 @@ import { type SearchService, SearchUnavailable } from "../service";
 import type { Viewer } from "../viewer";
 import { MAX_SQL_BYTES } from "./check-sqlite";
 import { SqlPool, type SqlPoolStatus, scriptWorkerCommand } from "./pool";
-import type { SqlErrorKind, SqlJob, SqlTables, SqlWorkerResponse } from "./protocol";
+import {
+  SQL_ENGINE_ENV,
+  type SqlErrorKind,
+  type SqlJob,
+  type SqlTables,
+  type SqlWorkerResponse,
+} from "./protocol";
 import { SQL_DIALECT_HINT, SQL_EXAMPLES, type SqlWindow, sqlSchema, sqlViews } from "./views";
 
 const DAY_MS = 86_400_000;
@@ -223,7 +229,15 @@ export class SqlService {
       workers: this.settings.workers,
       workerMemory: this.settings.workerMemory,
       graceMs: engine === "duckdb" ? SQL_DUCKDB_GRACE_MS : 0,
-      ...(this.options.workerEnv ? { env: this.options.workerEnv } : {}),
+      env: {
+        ...this.options.workerEnv,
+        ...(engine === "duckdb"
+          ? // DuckDB's bindings write TIMESTAMPTZ values in the process's time zone; Lance's
+            // times are UTC, and so is every answer. A SQLite worker keeps the server's zone
+            // ('localtime').
+            { [SQL_ENGINE_ENV]: "duckdb", TZ: "UTC" }
+          : {}),
+      },
       ...(this.options.log ? { log: this.options.log } : {}),
     });
     return this.workers;

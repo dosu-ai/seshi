@@ -76,7 +76,8 @@ describe("the sql workers' environment (sqlWorkerEnv)", () => {
       ownCredential: false,
     });
     const folder = config(`[store]\nurl = "file:///srv/seshi"\n${LANCE}`);
-    expect(sqlWorkerEnv(folder, "d", {})?.ownCredential).toBe(false);
+    // A folder needs no secret: the worker's environment names no storage at all.
+    expect(sqlWorkerEnv(folder, "d", {})).toEqual({ env: {}, ownCredential: false });
   });
 
   it("refuses a credential for another kind of bucket", () => {

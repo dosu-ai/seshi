@@ -7,13 +7,14 @@ import {
   SQL_VIEW_NAMES,
   SqlRefused,
 } from "./check-sqlite";
-import type {
-  SqlColumnInfo,
-  SqlErrorKind,
-  SqliteRequest,
-  SqlWorkerReady,
-  SqlWorkerRequest,
-  SqlWorkerResponse,
+import {
+  SQL_ENGINE_ENV,
+  type SqlColumnInfo,
+  type SqlErrorKind,
+  type SqliteRequest,
+  type SqlWorkerReady,
+  type SqlWorkerRequest,
+  type SqlWorkerResponse,
 } from "./protocol";
 
 class QueryFailed extends Error {
@@ -218,19 +219,21 @@ export function protocolLine(value: unknown): string {
 }
 
 /** `seshi sql-worker`: answer requests on stdin, one at a time, until stdin closes. The parser
- * is loaded, and in a build with DuckDB the first database warmed, before it says it is ready,
- * so the first query does not pay for them. A DuckDB database serves one query (a caller's
- * statement could change its catalog), so after each the next is warmed while the worker waits. */
+ * is loaded, and in a DuckDB pool (`SESHI_SQL_ENGINE=duckdb`, a build with DuckDB) the first
+ * database warmed, before it says it is ready, so the first query does not pay for them. A
+ * DuckDB database serves one query (a caller's statement could change its catalog), so after
+ * each the next is warmed while the worker waits. A SQLite pool's workers never load DuckDB. */
 export async function runSqlWorker(
   input: AsyncIterable<Uint8Array | string> = process.stdin,
   write: (line: string) => void = (line) => process.stdout.write(`${line}\n`),
+  env: NodeJS.ProcessEnv = process.env,
 ): Promise<void> {
   try {
     checkSqlite("SELECT 1");
   } catch {
     // Loading the parser failed: each query says so.
   }
-  const duckdb = sqlBackend();
+  const duckdb = env[SQL_ENGINE_ENV] === "duckdb" ? sqlBackend() : undefined;
   await duckdb?.warm();
   const ready: SqlWorkerReady = { ready: true, pid: process.pid };
   write(protocolLine(ready));
@@ -238,7 +241,7 @@ export async function runSqlWorker(
     if (line.trim() === "") continue;
     const response = await handleLine(line);
     write(protocolLine(response));
-    // Nothing when the database is still warm (a SQLite query, or a refused line).
+    // Nothing when the database is still warm (a refused line).
     await duckdb?.warm();
   }
 }

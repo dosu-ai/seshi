@@ -1,5 +1,14 @@
 import { dirname, join } from "node:path";
-import { type DuckDBConnection, DuckDBInstance, type DuckDBType } from "@duckdb/node-api";
+import {
+  DuckDBArrayType,
+  type DuckDBConnection,
+  DuckDBInstance,
+  DuckDBListType,
+  DuckDBMapType,
+  DuckDBStructType,
+  type DuckDBType,
+  DuckDBUnionType,
+} from "@duckdb/node-api";
 import {
   type DuckdbRequest,
   type SqlColumnInfo,
@@ -32,19 +41,28 @@ function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/** Lance storage options that are a credential: with none of them, the secret leaves the
+ * credential to the machine (Application Default Credentials, an instance role, IRSA). */
+const CREDENTIAL_OPTIONS =
+  /^(aws_(access_key_id|secret_access_key|session_token)|azure_storage_(account_key|sas_token)|azure_federated_token_file|google_service_account_key)$/;
+
 /** The storage options in the worker's environment, as a `TYPE lance` secret's `STORAGE_OPTIONS`
- * map, which the extension hands to Lance's object store as they are. Nothing for a folder
- * index, or one reached with the machine's own credentials (a GCS metadata server). */
-function storageSecret(raw: string | undefined): string | undefined {
+ * map, which the extension hands to Lance's object store as they are: `PROVIDER config` when
+ * they hold a credential, else `credential_chain`, which DuckDB's lance docs ask for on an
+ * object store whose credential comes from the machine. Nothing for a folder index (no
+ * `SESHI_SQL_STORAGE`). */
+export function storageSecret(raw: string | undefined): string | undefined {
   if (raw === undefined || raw === "") return undefined;
   const options = JSON.parse(raw) as Record<string, unknown>;
   const entries = Object.entries(options).filter(
     (e): e is [string, string] => typeof e[1] === "string",
   );
-  if (entries.length === 0) return undefined;
+  const provider = entries.some(([k]) => CREDENTIAL_OPTIONS.test(k))
+    ? "config"
+    : "credential_chain";
   const keys = entries.map(([k]) => sqlString(k)).join(", ");
   const values = entries.map(([, v]) => sqlString(v)).join(", ");
-  return `CREATE SECRET seshi_index (TYPE lance, PROVIDER config, STORAGE_OPTIONS map([${keys}], [${values}]))`;
+  return `CREATE SECRET seshi_index (TYPE lance, PROVIDER ${provider}, STORAGE_OPTIONS map([${keys}]::VARCHAR[], [${values}]::VARCHAR[]))`;
 }
 
 interface Warm {
@@ -53,8 +71,35 @@ interface Warm {
 }
 
 /** A value as JSON carries it: integers DuckDB gives as text (`BIGINT`, `HUGEINT`, sums) as
- * numbers when they fit, else text; `DECIMAL` as a number. */
-function jsonValue(value: unknown, type: DuckDBType): unknown {
+ * numbers when they fit, else text; `DECIMAL` as a number. The same inside lists, arrays,
+ * structs, maps and unions, by their child types. */
+export function jsonValue(value: unknown, type: DuckDBType): unknown {
+  if (value === null || value === undefined) return value;
+  if (type instanceof DuckDBListType || type instanceof DuckDBArrayType) {
+    return Array.isArray(value) ? value.map((v) => jsonValue(v, type.valueType)) : value;
+  }
+  if (type instanceof DuckDBMapType) {
+    if (!Array.isArray(value)) return value;
+    return value.map((entry: { key: unknown; value: unknown }) => ({
+      key: jsonValue(entry.key, type.keyType),
+      value: jsonValue(entry.value, type.valueType),
+    }));
+  }
+  if (type instanceof DuckDBStructType) {
+    if (typeof value !== "object") return value;
+    const fields = value as Record<string, unknown>;
+    return Object.fromEntries(
+      type.entryNames.map((name, i) => [
+        name,
+        jsonValue(fields[name], type.entryTypes[i] as DuckDBType),
+      ]),
+    );
+  }
+  if (type instanceof DuckDBUnionType) {
+    const { tag, value: member } = value as { tag: string; value: unknown };
+    const i = type.memberTags.indexOf(tag);
+    return { tag, value: i < 0 ? member : jsonValue(member, type.memberTypes[i] as DuckDBType) };
+  }
   if (typeof value !== "string") return value;
   const id = type.toString();
   if (/^(U?(BIG|HUGE|TINY|SMALL)?INT(EGER)?|DECIMAL.*)$/.test(id)) {

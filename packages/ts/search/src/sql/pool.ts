@@ -162,9 +162,6 @@ export class SqlPool {
   private env(): Record<string, string> {
     const env: Record<string, string> = {
       ...this.options.env,
-      // DuckDB's bindings write TIMESTAMPTZ values in the process's time zone; Lance's times
-      // are UTC, and so is every answer.
-      TZ: "UTC",
       HOME: this.home,
       TMPDIR: this.home,
       TMP: this.home,
